@@ -1,0 +1,33 @@
+import { Router, type Request, type Response } from 'express';
+import { broadcaster } from '../sse/emitter.js';
+import { getStats } from '../db/queries.js';
+import { config } from '../config.js';
+
+export const streamRouter = Router();
+
+// Periodic stats broadcaster
+let statsInterval: ReturnType<typeof setInterval> | null = null;
+
+export function startStatsBroadcast(): void {
+  if (statsInterval) return;
+  statsInterval = setInterval(() => {
+    if (broadcaster.clientCount === 0) return;
+    const stats = getStats();
+    broadcaster.broadcast('stats', stats as unknown as Record<string, unknown>);
+  }, config.statsIntervalMs);
+}
+
+export function stopStatsBroadcast(): void {
+  if (statsInterval) {
+    clearInterval(statsInterval);
+    statsInterval = null;
+  }
+}
+
+// GET /api/stream - SSE endpoint
+streamRouter.get('/', (req: Request, res: Response) => {
+  broadcaster.addClient(res, {
+    agentType: req.query.agent_type as string | undefined,
+    eventType: req.query.event_type as string | undefined,
+  });
+});

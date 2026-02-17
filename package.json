@@ -1,0 +1,37 @@
+{
+  "name": "agentstats",
+  "version": "0.1.0",
+  "description": "Real-time localhost dashboard for monitoring AI agent activity",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc && npx tailwindcss -i src/input.css -o public/css/output.css --minify",
+    "start": "node dist/server.js",
+    "css:build": "npx tailwindcss -i src/input.css -o public/css/output.css --minify",
+    "css:watch": "npx tailwindcss -i src/input.css -o public/css/output.css --watch",
+    "seed": "tsx scripts/seed.ts"
+  },
+  "keywords": ["ai", "agents", "monitoring", "dashboard"],
+  "license": "ISC",
+  "packageManager": "pnpm@10.29.3",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "express": "^5.2.1",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.3",
+    "tailwindcss": "^4.1.18",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

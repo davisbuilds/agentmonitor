@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+public/css/output.css
+*.db
+*.db-wal
+*.db-shm
+.env

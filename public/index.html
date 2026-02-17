@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentStats</title>
+  <link rel="stylesheet" href="/css/output.css">
+</head>
+<body class="h-full bg-gray-950 text-gray-100 font-mono antialiased">
+  <div class="min-h-full flex flex-col">
+
+    <!-- Header -->
+    <header class="border-b border-gray-800 px-6 py-3 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-6">
+        <h1 class="text-lg font-bold tracking-tight">AgentStats</h1>
+        <div id="stats-bar" class="flex items-center gap-5 text-sm text-gray-400">
+          <span>Events: <span id="stat-events" class="text-white font-medium">0</span></span>
+          <span>Sessions: <span id="stat-sessions" class="text-white font-medium">0</span></span>
+          <span>Agents: <span id="stat-agents" class="text-white font-medium">0</span></span>
+          <span>Tokens: <span id="stat-tokens-in" class="text-white font-medium">0</span> in / <span id="stat-tokens-out" class="text-white font-medium">0</span> out</span>
+        </div>
+      </div>
+      <div id="connection-status" class="flex items-center gap-2 text-sm text-gray-400">
+        <span id="connection-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+        <span id="connection-text">Connecting...</span>
+      </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 overflow-hidden flex flex-col p-6 gap-6">
+
+      <!-- Agent Cards Grid -->
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Active Agents</h2>
+          <span id="agent-card-count" class="text-xs text-gray-500">0 sessions</span>
+        </div>
+        <div id="agent-cards" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div id="no-agents-placeholder" class="col-span-full text-center py-12 text-gray-500">
+            No active agent sessions. Events will appear here as agents connect.
+          </div>
+        </div>
+      </section>
+
+      <!-- Global Event Feed -->
+      <section class="flex-1 min-h-0 flex flex-col">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">All Events</h2>
+          <div class="flex items-center gap-3">
+            <button id="new-events-badge" class="hidden text-xs bg-blue-600 text-white px-2 py-0.5 rounded-full cursor-pointer hover:bg-blue-500 transition-colors">
+              New events
+            </button>
+            <span id="event-count-label" class="text-xs text-gray-500">0 events</span>
+          </div>
+        </div>
+        <div id="event-feed" class="flex-1 overflow-y-auto rounded-lg border border-gray-800 bg-gray-900/50">
+          <div id="no-events-placeholder" class="text-center py-12 text-gray-500">
+            No events yet. POST to /api/events or run the seed script to see activity.
+          </div>
+          <div id="event-list" class="divide-y divide-gray-800/50"></div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="/js/components/stats-bar.js"></script>
+  <script src="/js/components/agent-cards.js"></script>
+  <script src="/js/components/event-feed.js"></script>
+  <script src="/js/sse-client.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>
