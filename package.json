@@ -6,13 +6,18 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && npx tailwindcss -i src/input.css -o public/css/output.css --minify",
+    "build": "tsc && pnpm run css:build",
     "start": "node dist/server.js",
-    "css:build": "npx tailwindcss -i src/input.css -o public/css/output.css --minify",
-    "css:watch": "npx tailwindcss -i src/input.css -o public/css/output.css --watch",
+    "css:build": "tailwindcss -i src/input.css -o public/css/output.css --minify",
+    "css:watch": "tailwindcss -i src/input.css -o public/css/output.css --watch",
     "seed": "tsx scripts/seed.ts"
   },
-  "keywords": ["ai", "agents", "monitoring", "dashboard"],
+  "keywords": [
+    "ai",
+    "agents",
+    "monitoring",
+    "dashboard"
+  ],
   "license": "ISC",
   "packageManager": "pnpm@10.29.3",
   "pnpm": {
@@ -27,6 +32,7 @@
     "uuid": "^13.0.0"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.1.18",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^25.2.3",
