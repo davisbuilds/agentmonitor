@@ -1,8 +1,32 @@
+# dependencies
 node_modules/
+
+# build artifacts
 dist/
-data/
 public/css/output.css
+*.tsbuildinfo
+
+# runtime data
+data/
 *.db
 *.db-wal
 *.db-shm
+
+# environment files
 .env
+.env.*
+!.env.example
+
+# logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# editor and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
