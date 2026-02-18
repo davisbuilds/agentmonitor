@@ -31,16 +31,18 @@ export function initSchema(): void {
       schema_version INTEGER NOT NULL DEFAULT 1,
       session_id TEXT NOT NULL,
       agent_type TEXT NOT NULL,
-      event_type TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK (event_type IN ('tool_use', 'session_start', 'session_end', 'response', 'error')),
       tool_name TEXT,
-      status TEXT DEFAULT 'success',
+      status TEXT NOT NULL DEFAULT 'success' CHECK (status IN ('success', 'error', 'timeout')),
       tokens_in INTEGER DEFAULT 0,
       tokens_out INTEGER DEFAULT 0,
       branch TEXT,
       project TEXT,
       duration_ms INTEGER,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      metadata TEXT DEFAULT '{}'
+      client_timestamp TEXT,
+      metadata TEXT DEFAULT '{}',
+      payload_truncated INTEGER NOT NULL DEFAULT 0 CHECK (payload_truncated IN (0, 1))
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
@@ -50,4 +52,18 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_events_agent_type ON events(agent_type);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `);
+
+  // Backward-compatible schema updates for existing local databases.
+  const eventColumns = new Set<string>(
+    (db.prepare(`PRAGMA table_info(events)`).all() as Array<{ name: string }>).map(col => col.name)
+  );
+
+  if (!eventColumns.has('client_timestamp')) {
+    db.exec('ALTER TABLE events ADD COLUMN client_timestamp TEXT');
+  }
+  if (!eventColumns.has('payload_truncated')) {
+    db.exec('ALTER TABLE events ADD COLUMN payload_truncated INTEGER NOT NULL DEFAULT 0');
+  }
+
+  db.exec('UPDATE events SET payload_truncated = 0 WHERE payload_truncated IS NULL');
 }

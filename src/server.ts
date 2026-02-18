@@ -1,29 +1,14 @@
-import express from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { config } from './config.js';
 import { initSchema } from './db/schema.js';
 import { updateIdleSessions } from './db/queries.js';
-import { apiRouter } from './api/router.js';
 import { startStatsBroadcast } from './api/stream.js';
 import { broadcaster } from './sse/emitter.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const publicDir = path.join(__dirname, '..', 'public');
+import { createApp } from './app.js';
 
 // Initialize database
 initSchema();
 
-const app = express();
-
-// Middleware
-app.use(express.json({ limit: '1mb' }));
-
-// API routes
-app.use('/api', apiRouter);
-
-// Static files
-app.use(express.static(publicDir));
+const app = createApp();
 
 // Start server
 const server = app.listen(config.port, config.host, () => {

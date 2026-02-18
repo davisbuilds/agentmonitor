@@ -1,5 +1,6 @@
 import { getDb } from './connection.js';
 import { config } from '../config.js';
+import type { EventStatus, EventType } from '../contracts/event-contract.js';
 
 // --- Agents ---
 
@@ -130,38 +131,130 @@ export interface EventRow {
   schema_version: number;
   session_id: string;
   agent_type: string;
-  event_type: string;
+  event_type: EventType;
   tool_name: string | null;
-  status: string;
+  status: EventStatus;
   tokens_in: number;
   tokens_out: number;
   branch: string | null;
   project: string | null;
   duration_ms: number | null;
   created_at: string;
+  client_timestamp: string | null;
   metadata: string;
+  payload_truncated: number;
 }
 
-function truncateMetadata(metadata: unknown): string {
-  const str = typeof metadata === 'string' ? metadata : JSON.stringify(metadata || {});
-  const maxBytes = config.maxPayloadKB * 1024;
-  if (str.length <= maxBytes) return str;
-  return str.slice(0, maxBytes);
+const METADATA_PRIORITY_KEYS = [
+  'command',
+  'file_path',
+  'query',
+  'pattern',
+  'error',
+  'message',
+  'tool_name',
+  'path',
+  'type',
+];
+
+function utf8SliceByBytes(input: string, maxBytes: number): string {
+  if (maxBytes <= 0) return '';
+
+  let currentBytes = 0;
+  let out = '';
+  for (const char of input) {
+    const charBytes = Buffer.byteLength(char, 'utf8');
+    if (currentBytes + charBytes > maxBytes) break;
+    out += char;
+    currentBytes += charBytes;
+  }
+  return out;
+}
+
+function safeJsonStringify(value: unknown): string {
+  const seen = new WeakSet<object>();
+  try {
+    return JSON.stringify(value ?? {}, (_key, val) => {
+      if (typeof val === 'object' && val !== null) {
+        if (seen.has(val)) return '[Circular]';
+        seen.add(val);
+      }
+      return val;
+    });
+  } catch {
+    return '{"_serialization_error":true}';
+  }
+}
+
+function buildTruncatedObjectSummary(
+  metadata: Record<string, unknown>,
+  originalBytes: number
+): string {
+  const summary: Record<string, unknown> = {
+    _truncated: true,
+    _original_bytes: originalBytes,
+  };
+
+  for (const key of METADATA_PRIORITY_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(metadata, key)) {
+      summary[key] = metadata[key];
+    }
+  }
+
+  return safeJsonStringify(summary);
+}
+
+function buildTruncatedGenericSummary(originalBytes: number): string {
+  return safeJsonStringify({
+    _truncated: true,
+    _original_bytes: originalBytes,
+  });
+}
+
+function truncateMetadata(metadata: unknown): { value: string; truncated: boolean } {
+  const maxBytes = Math.max(0, config.maxPayloadKB * 1024);
+
+  if (typeof metadata === 'string') {
+    const byteLength = Buffer.byteLength(metadata, 'utf8');
+    if (byteLength <= maxBytes) return { value: metadata, truncated: false };
+    return { value: utf8SliceByBytes(metadata, maxBytes), truncated: true };
+  }
+
+  const serialized = safeJsonStringify(metadata ?? {});
+  const byteLength = Buffer.byteLength(serialized, 'utf8');
+  if (byteLength <= maxBytes) {
+    return { value: serialized, truncated: false };
+  }
+
+  let summary = buildTruncatedGenericSummary(byteLength);
+  if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+    summary = buildTruncatedObjectSummary(metadata as Record<string, unknown>, byteLength);
+  }
+
+  if (Buffer.byteLength(summary, 'utf8') <= maxBytes) {
+    return { value: summary, truncated: true };
+  }
+
+  return {
+    value: utf8SliceByBytes(summary, maxBytes),
+    truncated: true,
+  };
 }
 
 export function insertEvent(event: {
   event_id?: string;
   session_id: string;
   agent_type: string;
-  event_type: string;
+  event_type: EventType;
   tool_name?: string;
-  status?: string;
-  tokens_in?: number;
-  tokens_out?: number;
+  status: EventStatus;
+  tokens_in: number;
+  tokens_out: number;
   branch?: string;
   project?: string;
   duration_ms?: number;
-  metadata?: unknown;
+  metadata: unknown;
+  client_timestamp?: string;
 }): EventRow | null {
   const db = getDb();
 
@@ -174,26 +267,28 @@ export function insertEvent(event: {
     endSession(event.session_id);
   }
 
-  const metadataStr = truncateMetadata(event.metadata);
+  const metadata = truncateMetadata(event.metadata);
 
   try {
     const result = db.prepare(`
       INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
-        tokens_in, tokens_out, branch, project, duration_ms, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp, metadata, payload_truncated)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
     `).run(
       event.event_id || null,
       event.session_id,
       event.agent_type,
       event.event_type,
       event.tool_name || null,
-      event.status || 'success',
-      event.tokens_in || 0,
-      event.tokens_out || 0,
+      event.status,
+      event.tokens_in,
+      event.tokens_out,
       event.branch || null,
       event.project || null,
       event.duration_ms || null,
-      metadataStr
+      event.client_timestamp || null,
+      metadata.value,
+      metadata.truncated ? 1 : 0
     );
 
     if (result.changes === 0) return null; // duplicate event_id

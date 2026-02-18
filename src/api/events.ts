@@ -1,43 +1,30 @@
 import { Router, type Request, type Response } from 'express';
 import { insertEvent, getEvents } from '../db/queries.js';
 import { broadcaster } from '../sse/emitter.js';
+import { normalizeIngestEvent } from '../contracts/event-contract.js';
 
 export const eventsRouter = Router();
 
 // POST /api/events - Ingest single event
 eventsRouter.post('/', (req: Request, res: Response) => {
-  const body = req.body;
-
-  if (!body.session_id || !body.agent_type || !body.event_type) {
+  const parsed = normalizeIngestEvent(req.body);
+  if (!parsed.ok) {
     res.status(400).json({
-      error: 'Missing required fields: session_id, agent_type, event_type',
+      error: 'Invalid event payload',
+      details: parsed.errors,
     });
     return;
   }
 
-  const event = insertEvent({
-    event_id: body.event_id,
-    session_id: body.session_id,
-    agent_type: body.agent_type,
-    event_type: body.event_type,
-    tool_name: body.tool_name,
-    status: body.status,
-    tokens_in: body.tokens_in,
-    tokens_out: body.tokens_out,
-    branch: body.branch,
-    project: body.project,
-    duration_ms: body.duration_ms,
-    metadata: body.metadata,
-  });
+  const event = insertEvent(parsed.event);
 
   if (!event) {
-    // Duplicate event_id, silently acknowledge
-    res.status(200).json({ received: 0, ids: [] });
+    res.status(200).json({ received: 0, ids: [], duplicates: 1 });
     return;
   }
 
   broadcaster.broadcast('event', event as unknown as Record<string, unknown>);
-  res.status(201).json({ received: 1, ids: [event.id] });
+  res.status(201).json({ received: 1, ids: [event.id], duplicates: 0 });
 });
 
 // POST /api/events/batch - Ingest multiple events
@@ -50,31 +37,34 @@ eventsRouter.post('/batch', (req: Request, res: Response) => {
   }
 
   const ids: number[] = [];
-  for (const body of events) {
-    if (!body.session_id || !body.agent_type || !body.event_type) continue;
+  let duplicates = 0;
+  const rejected: Array<{ index: number; errors: string[] }> = [];
 
-    const event = insertEvent({
-      event_id: body.event_id,
-      session_id: body.session_id,
-      agent_type: body.agent_type,
-      event_type: body.event_type,
-      tool_name: body.tool_name,
-      status: body.status,
-      tokens_in: body.tokens_in,
-      tokens_out: body.tokens_out,
-      branch: body.branch,
-      project: body.project,
-      duration_ms: body.duration_ms,
-      metadata: body.metadata,
-    });
+  for (let i = 0; i < events.length; i += 1) {
+    const parsed = normalizeIngestEvent(events[i]);
+    if (!parsed.ok) {
+      rejected.push({
+        index: i,
+        errors: parsed.errors.map(err => `${err.field}: ${err.message}`),
+      });
+      continue;
+    }
 
+    const event = insertEvent(parsed.event);
     if (event) {
       ids.push(event.id);
       broadcaster.broadcast('event', event as unknown as Record<string, unknown>);
+    } else {
+      duplicates += 1;
     }
   }
 
-  res.status(201).json({ received: ids.length, ids });
+  res.status(201).json({
+    received: ids.length,
+    ids,
+    duplicates,
+    rejected,
+  });
 });
 
 // GET /api/events - Query events
