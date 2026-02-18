@@ -1,4 +1,4 @@
-# PLAN Feedback Analysis and P0 Implementation Recommendations
+# MVP Feedback Analysis and P0 Implementation Recommendations
 
 This document evaluates external feedback against the current codebase and defines what to adopt now.
 

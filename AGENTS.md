@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Guidance for coding agents (Codex, Claude, or similar) working in this repository.
+Guidance for coding agents working in this repository.
 
 ## Project Snapshot
 
@@ -60,7 +60,3 @@ When code behavior changes, run:
 - `pnpm run build`
 - `pnpm run css:build` (if frontend styles touched)
 - Manual sanity check: `GET /api/health`
-
-## File Alias
-
-`CLAUDE.md` should remain a symlink to this file so both entrypoints stay identical.
