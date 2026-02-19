@@ -546,3 +546,165 @@ export function getFilterOptions(): FilterOptions {
 
   return { agent_types: agentTypes, event_types: eventTypes, tool_names: toolNames, models, projects, branches, sources };
 }
+
+// --- Tool Analytics ---
+
+export interface ToolAnalyticsRow {
+  tool_name: string;
+  total_calls: number;
+  error_count: number;
+  error_rate: number;
+  avg_duration_ms: number | null;
+  by_agent: Record<string, number>;
+}
+
+export function getToolAnalytics(filters?: { agentType?: string; since?: string }): ToolAnalyticsRow[] {
+  const db = getDb();
+  const conditions: string[] = ['tool_name IS NOT NULL'];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
+  const rows = db.prepare(`
+    SELECT
+      tool_name,
+      COUNT(*) as total_calls,
+      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
+      ROUND(CAST(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS REAL) / COUNT(*), 4) as error_rate,
+      ROUND(AVG(duration_ms)) as avg_duration_ms
+    FROM events ${where}
+    GROUP BY tool_name
+    ORDER BY total_calls DESC
+  `).all(...params) as Array<{
+    tool_name: string;
+    total_calls: number;
+    error_count: number;
+    error_rate: number;
+    avg_duration_ms: number | null;
+  }>;
+
+  // Get per-agent breakdown for each tool
+  const agentRows = db.prepare(`
+    SELECT tool_name, agent_type, COUNT(*) as count
+    FROM events ${where}
+    GROUP BY tool_name, agent_type
+    ORDER BY tool_name, count DESC
+  `).all(...params) as Array<{ tool_name: string; agent_type: string; count: number }>;
+
+  const agentMap = new Map<string, Record<string, number>>();
+  for (const r of agentRows) {
+    if (!agentMap.has(r.tool_name)) agentMap.set(r.tool_name, {});
+    agentMap.get(r.tool_name)![r.agent_type] = r.count;
+  }
+
+  return rows.map(r => ({
+    tool_name: r.tool_name,
+    total_calls: r.total_calls,
+    error_count: r.error_count,
+    error_rate: r.error_rate,
+    avg_duration_ms: r.avg_duration_ms,
+    by_agent: agentMap.get(r.tool_name) || {},
+  }));
+}
+
+// --- Cost over time (hourly buckets) ---
+
+export interface CostBucket {
+  bucket: string;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+  event_count: number;
+}
+
+export function getCostOverTime(filters?: { since?: string; agentType?: string }): CostBucket[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  return db.prepare(`
+    SELECT
+      strftime('%Y-%m-%dT%H:00:00Z', created_at) as bucket,
+      COALESCE(SUM(cost_usd), 0) as cost_usd,
+      COALESCE(SUM(tokens_in), 0) as tokens_in,
+      COALESCE(SUM(tokens_out), 0) as tokens_out,
+      COUNT(*) as event_count
+    FROM events ${where}
+    GROUP BY bucket
+    ORDER BY bucket ASC
+  `).all(...params) as CostBucket[];
+}
+
+// --- Cost by session (top sessions) ---
+
+export interface SessionCostRow {
+  session_id: string;
+  agent_type: string;
+  project: string | null;
+  cost_usd: number;
+  event_count: number;
+}
+
+export function getCostBySession(limit: number = 10): SessionCostRow[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      e.session_id,
+      e.agent_type,
+      s.project,
+      COALESCE(SUM(e.cost_usd), 0) as cost_usd,
+      COUNT(*) as event_count
+    FROM events e
+    LEFT JOIN sessions s ON s.id = e.session_id
+    WHERE e.cost_usd > 0
+    GROUP BY e.session_id
+    ORDER BY cost_usd DESC
+    LIMIT ?
+  `).all(limit) as SessionCostRow[];
+}
+
+// --- Cost by model ---
+
+export interface ModelCostRow {
+  model: string;
+  cost_usd: number;
+  event_count: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export function getCostByModel(): ModelCostRow[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT
+      model,
+      COALESCE(SUM(cost_usd), 0) as cost_usd,
+      COUNT(*) as event_count,
+      COALESCE(SUM(tokens_in), 0) as tokens_in,
+      COALESCE(SUM(tokens_out), 0) as tokens_out
+    FROM events
+    WHERE model IS NOT NULL AND cost_usd > 0
+    GROUP BY model
+    ORDER BY cost_usd DESC
+  `).all() as ModelCostRow[];
+}

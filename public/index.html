@@ -10,25 +10,37 @@
   <div class="min-h-full flex flex-col">
 
     <!-- Header -->
-    <header class="border-b border-gray-800 px-6 py-3 flex items-center justify-between shrink-0">
-      <div class="flex items-center gap-6">
+    <header class="border-b border-gray-800 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-4 sm:gap-6 flex-wrap">
         <h1 class="text-lg font-bold tracking-tight">AgentStats</h1>
-        <div id="stats-bar" class="flex items-center gap-5 text-sm text-gray-400">
+        <div id="stats-bar" class="flex items-center gap-3 sm:gap-5 text-sm text-gray-400 flex-wrap">
           <span>Events: <span id="stat-events" class="text-white font-medium">0</span></span>
           <span>Sessions: <span id="stat-sessions" class="text-white font-medium">0</span></span>
           <span>Agents: <span id="stat-agents" class="text-white font-medium">0</span></span>
           <span>Cost: <span id="stat-cost" class="text-white font-medium">$0.00</span></span>
-          <span>Tokens: <span id="stat-tokens-in" class="text-white font-medium">0</span> in / <span id="stat-tokens-out" class="text-white font-medium">0</span> out</span>
+          <span class="hidden sm:inline">Tokens: <span id="stat-tokens-in" class="text-white font-medium">0</span> in / <span id="stat-tokens-out" class="text-white font-medium">0</span> out</span>
         </div>
       </div>
-      <div id="connection-status" class="flex items-center gap-2 text-sm text-gray-400">
-        <span id="connection-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
-        <span id="connection-text">Connecting...</span>
+      <div class="flex items-center gap-3">
+        <button id="compact-toggle" class="hidden text-xs text-gray-500 hover:text-gray-300 transition-colors border border-gray-700 rounded px-2 py-0.5" title="Toggle compact mode">
+          Compact
+        </button>
+        <div id="connection-status" class="flex items-center gap-2 text-sm text-gray-400">
+          <span id="connection-dot" class="w-2 h-2 rounded-full bg-gray-600"></span>
+          <span id="connection-text">Connecting...</span>
+        </div>
       </div>
     </header>
 
+    <!-- Filter Bar -->
+    <div class="border-b border-gray-800 px-4 sm:px-6 py-2">
+      <div id="filter-bar" class="flex items-center gap-2 flex-wrap">
+        <!-- Populated by FilterBar.render() -->
+      </div>
+    </div>
+
     <!-- Main Content -->
-    <main class="flex-1 overflow-hidden flex flex-col p-6 gap-6">
+    <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6 gap-6">
 
       <!-- Agent Cards Grid -->
       <section>
@@ -43,6 +55,26 @@
         </div>
       </section>
 
+      <!-- Cost Dashboard -->
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Cost Overview</h2>
+        </div>
+        <div id="cost-dashboard">
+          <!-- Populated by CostDashboard.render() -->
+        </div>
+      </section>
+
+      <!-- Tool Analytics -->
+      <section>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Tool Analytics</h2>
+        </div>
+        <div id="tool-analytics" class="bg-gray-900 rounded-lg border border-gray-700 p-4">
+          <!-- Populated by ToolAnalytics.render() -->
+        </div>
+      </section>
+
       <!-- Global Event Feed -->
       <section class="flex-1 min-h-0 flex flex-col">
         <div class="flex items-center justify-between mb-3">
@@ -54,7 +86,7 @@
             <span id="event-count-label" class="text-xs text-gray-500">0 events</span>
           </div>
         </div>
-        <div id="event-feed" class="flex-1 overflow-y-auto rounded-lg border border-gray-800 bg-gray-900/50">
+        <div id="event-feed" class="flex-1 overflow-y-auto rounded-lg border border-gray-800 bg-gray-900/50 min-h-[200px]">
           <div id="no-events-placeholder" class="text-center py-12 text-gray-500">
             No events yet. POST to /api/events or run the seed script to see activity.
           </div>
@@ -65,9 +97,29 @@
     </main>
   </div>
 
+  <!-- Session Detail Slide-Over -->
+  <div id="session-detail-panel" class="hidden fixed inset-0 z-50 flex justify-end">
+    <!-- Backdrop -->
+    <div class="absolute inset-0 bg-black/50"></div>
+    <!-- Panel -->
+    <div class="relative w-full max-w-lg bg-gray-900 border-l border-gray-700 overflow-y-auto p-6">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Session Details</h2>
+        <button id="session-detail-close" class="text-gray-400 hover:text-white transition-colors text-lg">&times;</button>
+      </div>
+      <div id="session-detail-content">
+        <!-- Populated by SessionDetail.render() -->
+      </div>
+    </div>
+  </div>
+
   <script src="/js/components/stats-bar.js"></script>
   <script src="/js/components/agent-cards.js"></script>
   <script src="/js/components/event-feed.js"></script>
+  <script src="/js/components/filter-bar.js"></script>
+  <script src="/js/components/cost-dashboard.js"></script>
+  <script src="/js/components/tool-analytics.js"></script>
+  <script src="/js/components/session-detail.js"></script>
   <script src="/js/sse-client.js"></script>
   <script src="/js/app.js"></script>
 </body>
