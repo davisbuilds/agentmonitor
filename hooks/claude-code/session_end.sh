@@ -11,10 +11,10 @@ PROJECT="$(get_project)"
 
 send_event "$(cat <<EOF
 {
-  "session_id": "$SESSION_ID",
+  "session_id": "$(json_escape "$SESSION_ID")",
   "agent_type": "claude_code",
   "event_type": "session_end",
-  "project": "$PROJECT",
+  "project": "$(json_escape "$PROJECT")",
   "source": "hook"
 }
 EOF

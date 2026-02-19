@@ -13,13 +13,13 @@ SOURCE="$(extract_field source)"
 
 send_event "$(cat <<EOF
 {
-  "session_id": "$SESSION_ID",
+  "session_id": "$(json_escape "$SESSION_ID")",
   "agent_type": "claude_code",
   "event_type": "session_start",
-  "project": "$PROJECT",
-  "model": "$MODEL",
+  "project": "$(json_escape "$PROJECT")",
+  "model": "$(json_escape "$MODEL")",
   "source": "hook",
-  "metadata": {"hook_source": "$SOURCE"}
+  "metadata": {"hook_source": "$(json_escape "$SOURCE")"}
 }
 EOF
 )"

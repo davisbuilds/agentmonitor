@@ -121,8 +121,11 @@ function processFile(
   // Import events
   const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
 
-  // Record import state (unless dry run)
-  if (!options.dryRun && events.length > 0) {
+  // Record import state (unless dry run or date-scoped import).
+  // Date-scoped imports are partial — caching the hash would cause a later
+  // full import to skip the file, permanently losing the excluded events.
+  const isDateScoped = options.from !== undefined || options.to !== undefined;
+  if (!options.dryRun && !isDateScoped && events.length > 0) {
     const hash = hashFn(filePath);
     setImportState(filePath, hash, stat.size, source, imported);
   }

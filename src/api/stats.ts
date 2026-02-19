@@ -24,13 +24,14 @@ statsRouter.get('/tools', (req: Request, res: Response) => {
 
 // GET /api/stats/cost - Cost breakdowns
 statsRouter.get('/cost', (req: Request, res: Response) => {
+  const costFilters = {
+    agentType: req.query.agent_type as string | undefined,
+    since: req.query.since as string | undefined,
+  };
   const [timeline, bySession, byModel] = [
-    getCostOverTime({
-      agentType: req.query.agent_type as string | undefined,
-      since: req.query.since as string | undefined,
-    }),
-    getCostBySession(Number(req.query.limit) || 10),
-    getCostByModel(),
+    getCostOverTime(costFilters),
+    getCostBySession(Number(req.query.limit) || 10, costFilters),
+    getCostByModel(costFilters),
   ];
   res.json({ timeline, by_session: bySession, by_model: byModel });
 });

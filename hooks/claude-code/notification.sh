@@ -13,12 +13,12 @@ NOTIF_TYPE="$(extract_field notification_type)"
 
 send_event "$(cat <<EOF
 {
-  "session_id": "$SESSION_ID",
+  "session_id": "$(json_escape "$SESSION_ID")",
   "agent_type": "claude_code",
   "event_type": "response",
-  "project": "$PROJECT",
+  "project": "$(json_escape "$PROJECT")",
   "source": "hook",
-  "metadata": {"notification_type": "$NOTIF_TYPE", "message": "$MESSAGE"}
+  "metadata": {"notification_type": "$(json_escape "$NOTIF_TYPE")", "message": "$(json_escape "$MESSAGE")"}
 }
 EOF
 )"

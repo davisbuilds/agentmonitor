@@ -665,8 +665,22 @@ export interface SessionCostRow {
   event_count: number;
 }
 
-export function getCostBySession(limit: number = 10): SessionCostRow[] {
+export function getCostBySession(limit: number = 10, filters?: { agentType?: string; since?: string }): SessionCostRow[] {
   const db = getDb();
+  const conditions: string[] = ['e.cost_usd > 0'];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('e.agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('e.created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
   return db.prepare(`
     SELECT
       e.session_id,
@@ -676,11 +690,11 @@ export function getCostBySession(limit: number = 10): SessionCostRow[] {
       COUNT(*) as event_count
     FROM events e
     LEFT JOIN sessions s ON s.id = e.session_id
-    WHERE e.cost_usd > 0
+    ${where}
     GROUP BY e.session_id
     ORDER BY cost_usd DESC
     LIMIT ?
-  `).all(limit) as SessionCostRow[];
+  `).all(...params, limit) as SessionCostRow[];
 }
 
 // --- Cost by model ---
@@ -693,8 +707,22 @@ export interface ModelCostRow {
   tokens_out: number;
 }
 
-export function getCostByModel(): ModelCostRow[] {
+export function getCostByModel(filters?: { agentType?: string; since?: string }): ModelCostRow[] {
   const db = getDb();
+  const conditions: string[] = ['model IS NOT NULL', 'cost_usd > 0'];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
   return db.prepare(`
     SELECT
       model,
@@ -703,10 +731,10 @@ export function getCostByModel(): ModelCostRow[] {
       COALESCE(SUM(tokens_in), 0) as tokens_in,
       COALESCE(SUM(tokens_out), 0) as tokens_out
     FROM events
-    WHERE model IS NOT NULL AND cost_usd > 0
+    ${where}
     GROUP BY model
     ORDER BY cost_usd DESC
-  `).all() as ModelCostRow[];
+  `).all(...params) as ModelCostRow[];
 }
 
 // --- Session Transcript ---

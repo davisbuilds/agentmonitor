@@ -42,6 +42,18 @@ get_project() {
   fi
 }
 
+# Escape a string for safe embedding in a JSON value.
+# Handles backslashes, double quotes, newlines, tabs, and carriage returns.
+json_escape() {
+  local s="$1"
+  if command -v jq &>/dev/null; then
+    printf '%s' "$s" | jq -Rs '.' 2>/dev/null | sed 's/^"//;s/"$//'
+  else
+    # Manual escape: \, ", newline, tab, carriage return
+    printf '%s' "$s" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g'
+  fi
+}
+
 # POST an event payload to AgentStats. Fire-and-forget (backgrounded).
 send_event() {
   local payload="$1"
