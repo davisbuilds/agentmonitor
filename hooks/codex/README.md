@@ -1,14 +1,10 @@
 # AgentStats: Codex CLI Integration
 
-Codex CLI does not have a hooks system like Claude Code. Integration is via OpenTelemetry (OTLP), which requires the AgentStats OTLP receiver (Phase 2 of the roadmap).
+Codex CLI integrates with AgentStats via its native OpenTelemetry (OTLP) export. Events, token usage, and cost data flow directly into the AgentStats dashboard.
 
-## Current Status
+## Setup
 
-OTLP ingestion is not yet implemented. Once available, Codex will be supported via its native OTLP export.
-
-## Future Configuration
-
-When OTLP support lands, add this to `~/.codex/config.toml`:
+Add this to `~/.codex/config.toml`:
 
 ```toml
 [otel]
@@ -16,12 +12,45 @@ log_user_prompt = true
 exporter = { otlp-http = { endpoint = "http://localhost:3141/api/otel/v1/logs", protocol = "json" } }
 ```
 
+Start AgentStats (`pnpm dev`), then use Codex as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
+
+## What Gets Captured
+
+| Codex Activity | AgentStats Event |
+|---|---|
+| API request to model | `llm_request` |
+| API response | `llm_response` |
+| Tool execution (shell, file edit) | `tool_use` |
+| Session start/end | `session_start` / `session_end` |
+| Errors | `error` |
+
+All events are tagged with `source=otel` and `agent_type=codex`.
+
+## Filtering
+
+View only Codex events in the API:
+
+```bash
+# All Codex events
+curl http://localhost:3141/api/events?agent_type=codex
+
+# Only OTel-sourced events
+curl http://localhost:3141/api/events?source=otel
+
+# Combined filters
+curl http://localhost:3141/api/events?agent_type=codex&source=otel
+```
+
+## Notes
+
+- Only JSON OTLP format is supported. Set `protocol = "json"` in the config.
+- Codex uses the service name `codex_cli_rs` in its OTLP exports, which AgentStats maps to `agent_type=codex`.
+- Token usage and cost metrics are captured when Codex exports them via OTLP metrics.
+
 ## Alternative: Seed Script
 
-In the meantime, you can use the seed script to generate demo Codex events:
+To generate demo Codex events without a real Codex instance:
 
 ```bash
 pnpm run seed
 ```
-
-This creates a sample Codex session (`codex-session-001`) with realistic tool events.

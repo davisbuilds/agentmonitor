@@ -148,12 +148,43 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
 
 Replace `/path/to/agentstats` with the actual path to your AgentStats checkout.
 
+## Alternative: OpenTelemetry Mode
+
+Instead of hook scripts, you can use Claude Code's native OTel export. This sends telemetry directly to AgentStats without any hook configuration.
+
+Set these environment variables before launching Claude Code:
+
+```bash
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3141/api/otel
+```
+
+Or add them to your shell profile (`~/.bashrc`, `~/.zshrc`):
+
+```bash
+# AgentStats OTel integration
+export CLAUDE_CODE_ENABLE_TELEMETRY=1
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_LOGS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
+export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3141/api/otel
+```
+
+**OTel vs Hooks:** Both integration paths can run simultaneously. OTel captures richer data (token counts, model info, cost) automatically, while hooks give you safety checks (PreToolUse) and custom event shaping. Use both for full coverage.
+
+**Note:** Only JSON format is currently supported. Protobuf support is planned.
+
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `AGENTSTATS_URL` | `http://127.0.0.1:3141` | AgentStats server URL |
 | `AGENTSTATS_SAFETY` | `1` | Set to `0` to disable safety checks |
+| `CLAUDE_CODE_ENABLE_TELEMETRY` | (unset) | Set to `1` to enable OTel export |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset) | AgentStats OTLP endpoint base URL |
 
 ## Requirements
 

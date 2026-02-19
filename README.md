@@ -85,12 +85,16 @@ pnpm run bench:ingest -- --events=20000 --concurrency=40 --batch-size=50
 
 - `POST /api/events`: ingest one event.
 - `POST /api/events/batch`: ingest many events.
-- `GET /api/events`: query events with filters.
-- `GET /api/stats`: aggregate counters and breakdowns.
+- `GET /api/events`: query events with filters (`agent_type`, `event_type`, `tool_name`, `session_id`, `branch`, `model`, `source`, `since`, `until`).
+- `GET /api/stats`: aggregate counters and breakdowns (includes `total_cost_usd`, `model_breakdown`).
 - `GET /api/sessions`: list sessions.
 - `GET /api/sessions/:id`: session detail + recent events.
+- `GET /api/filter-options`: distinct values for all filterable fields.
 - `GET /api/stream`: SSE stream (`event`, `stats`, `session_update`), returns `503` when max client limit is reached.
 - `GET /api/health`: basic service health.
+- `POST /api/otel/v1/logs`: OTLP JSON log ingestion (Claude Code + Codex).
+- `POST /api/otel/v1/metrics`: OTLP JSON metric ingestion (token usage, cost).
+- `POST /api/otel/v1/traces`: OTLP traces (stub — accepted but not processed yet).
 
 Required fields for ingest payloads: `session_id`, `agent_type`, `event_type`.
 
