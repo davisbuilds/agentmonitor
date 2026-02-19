@@ -8,6 +8,7 @@ public/css/output.css
 
 # runtime data
 data/
+!src/pricing/data/
 *.db
 *.db-wal
 *.db-shm
@@ -23,6 +24,10 @@ npm-debug.log*
 pnpm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Python bytecode
+__pycache__/
+*.pyc
 
 # editor and OS
 .DS_Store

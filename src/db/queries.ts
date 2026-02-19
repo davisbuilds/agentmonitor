@@ -1,6 +1,7 @@
 import { getDb } from './connection.js';
 import { config } from '../config.js';
-import type { EventStatus, EventType } from '../contracts/event-contract.js';
+import { pricingRegistry } from '../pricing/index.js';
+import type { EventStatus, EventType, EventSource } from '../contracts/event-contract.js';
 
 // --- Agents ---
 
@@ -48,6 +49,7 @@ export interface SessionRow {
   event_count: number;
   tokens_in: number;
   tokens_out: number;
+  total_cost_usd: number;
 }
 
 export function getSessions(filters: {
@@ -75,7 +77,8 @@ export function getSessions(filters: {
     SELECT s.*,
       COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
       COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
-      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out
+      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd
     FROM sessions s
     ${where}
     ORDER BY
@@ -94,7 +97,8 @@ export function getSessionWithEvents(sessionId: string, eventLimit: number = 10)
     SELECT s.*,
       COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
       COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
-      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out
+      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd
     FROM sessions s WHERE s.id = ?
   `).get(sessionId) as SessionRow | undefined;
 
@@ -143,6 +147,11 @@ export interface EventRow {
   client_timestamp: string | null;
   metadata: string;
   payload_truncated: number;
+  model: string | null;
+  cost_usd: number | null;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  source: EventSource;
 }
 
 const METADATA_PRIORITY_KEYS = [
@@ -255,6 +264,11 @@ export function insertEvent(event: {
   duration_ms?: number;
   metadata: unknown;
   client_timestamp?: string;
+  model?: string;
+  cost_usd?: number | null;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+  source?: string;
 }): EventRow | null {
   const db = getDb();
 
@@ -267,13 +281,26 @@ export function insertEvent(event: {
     endSession(event.session_id);
   }
 
+  // Auto-calculate cost if model + tokens present but cost not provided
+  if (event.model && (event.tokens_in > 0 || event.tokens_out > 0)) {
+    if (event.cost_usd === undefined || event.cost_usd === null) {
+      event.cost_usd = pricingRegistry.calculate(event.model, {
+        input: event.tokens_in,
+        output: event.tokens_out,
+        cacheRead: event.cache_read_tokens,
+        cacheWrite: event.cache_write_tokens,
+      });
+    }
+  }
+
   const metadata = truncateMetadata(event.metadata);
 
   try {
     const result = db.prepare(`
       INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
-        tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp, metadata, payload_truncated)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
+        tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp,
+        metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       event.event_id || null,
       event.session_id,
@@ -288,7 +315,12 @@ export function insertEvent(event: {
       event.duration_ms || null,
       event.client_timestamp || null,
       metadata.value,
-      metadata.truncated ? 1 : 0
+      metadata.truncated ? 1 : 0,
+      event.model || null,
+      event.cost_usd ?? null,
+      event.cache_read_tokens ?? 0,
+      event.cache_write_tokens ?? 0,
+      event.source || 'api'
     );
 
     if (result.changes === 0) return null; // duplicate event_id
@@ -311,6 +343,8 @@ export function getEvents(filters: {
   toolName?: string;
   sessionId?: string;
   branch?: string;
+  model?: string;
+  source?: string;
   since?: string;
   until?: string;
 }): { events: EventRow[]; total: number } {
@@ -337,6 +371,14 @@ export function getEvents(filters: {
   if (filters.branch) {
     conditions.push('branch = ?');
     params.push(filters.branch);
+  }
+  if (filters.model) {
+    conditions.push('model = ?');
+    params.push(filters.model);
+  }
+  if (filters.source) {
+    conditions.push('source = ?');
+    params.push(filters.source);
   }
   if (filters.since) {
     conditions.push('created_at >= ?');
@@ -367,8 +409,10 @@ export interface Stats {
   total_sessions: number;
   total_tokens_in: number;
   total_tokens_out: number;
+  total_cost_usd: number;
   tool_breakdown: Record<string, number>;
   agent_breakdown: Record<string, number>;
+  model_breakdown: Record<string, number>;
   branches: string[];
 }
 
@@ -392,9 +436,10 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     SELECT
       COUNT(*) as total_events,
       COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-      COALESCE(SUM(tokens_out), 0) as total_tokens_out
+      COALESCE(SUM(tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(cost_usd), 0) as total_cost_usd
     FROM events ${where}
-  `).get(...params) as { total_events: number; total_tokens_in: number; total_tokens_out: number };
+  `).get(...params) as { total_events: number; total_tokens_in: number; total_tokens_out: number; total_cost_usd: number };
 
   const activeSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
@@ -426,6 +471,18 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     agentBreakdown[row.agent_type] = row.count;
   }
 
+  const modelRows = db.prepare(`
+    SELECT model, COUNT(*) as count FROM events
+    ${where.replace('WHERE', conditions.length ? 'WHERE' : '')}
+    ${conditions.length > 0 ? 'AND' : 'WHERE'} model IS NOT NULL
+    GROUP BY model ORDER BY count DESC
+  `).all(...params) as { model: string; count: number }[];
+
+  const modelBreakdown: Record<string, number> = {};
+  for (const row of modelRows) {
+    modelBreakdown[row.model] = row.count;
+  }
+
   const branchRows = db.prepare(`
     SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC
   `).all() as { branch: string }[];
@@ -436,8 +493,274 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     total_sessions: totalSessions,
     total_tokens_in: totals.total_tokens_in,
     total_tokens_out: totals.total_tokens_out,
+    total_cost_usd: totals.total_cost_usd,
     tool_breakdown: toolBreakdown,
     agent_breakdown: agentBreakdown,
+    model_breakdown: modelBreakdown,
     branches: branchRows.map(r => r.branch),
   };
+}
+
+// --- Filter Options ---
+
+export interface FilterOptions {
+  agent_types: string[];
+  event_types: string[];
+  tool_names: string[];
+  models: string[];
+  projects: string[];
+  branches: string[];
+  sources: string[];
+}
+
+export function getFilterOptions(): FilterOptions {
+  const db = getDb();
+
+  const agentTypes = (db.prepare(
+    'SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL ORDER BY agent_type'
+  ).all() as { agent_type: string }[]).map(r => r.agent_type);
+
+  const eventTypes = (db.prepare(
+    'SELECT DISTINCT event_type FROM events WHERE event_type IS NOT NULL ORDER BY event_type'
+  ).all() as { event_type: string }[]).map(r => r.event_type);
+
+  const toolNames = (db.prepare(
+    'SELECT DISTINCT tool_name FROM events WHERE tool_name IS NOT NULL ORDER BY tool_name'
+  ).all() as { tool_name: string }[]).map(r => r.tool_name);
+
+  const models = (db.prepare(
+    'SELECT DISTINCT model FROM events WHERE model IS NOT NULL ORDER BY model'
+  ).all() as { model: string }[]).map(r => r.model);
+
+  const projects = (db.prepare(
+    'SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL ORDER BY project'
+  ).all() as { project: string }[]).map(r => r.project);
+
+  const branches = (db.prepare(
+    'SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC'
+  ).all() as { branch: string }[]).map(r => r.branch);
+
+  const sources = (db.prepare(
+    'SELECT DISTINCT source FROM events WHERE source IS NOT NULL ORDER BY source'
+  ).all() as { source: string }[]).map(r => r.source);
+
+  return { agent_types: agentTypes, event_types: eventTypes, tool_names: toolNames, models, projects, branches, sources };
+}
+
+// --- Tool Analytics ---
+
+export interface ToolAnalyticsRow {
+  tool_name: string;
+  total_calls: number;
+  error_count: number;
+  error_rate: number;
+  avg_duration_ms: number | null;
+  by_agent: Record<string, number>;
+}
+
+export function getToolAnalytics(filters?: { agentType?: string; since?: string }): ToolAnalyticsRow[] {
+  const db = getDb();
+  const conditions: string[] = ['tool_name IS NOT NULL'];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
+  const rows = db.prepare(`
+    SELECT
+      tool_name,
+      COUNT(*) as total_calls,
+      SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
+      ROUND(CAST(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS REAL) / COUNT(*), 4) as error_rate,
+      ROUND(AVG(duration_ms)) as avg_duration_ms
+    FROM events ${where}
+    GROUP BY tool_name
+    ORDER BY total_calls DESC
+  `).all(...params) as Array<{
+    tool_name: string;
+    total_calls: number;
+    error_count: number;
+    error_rate: number;
+    avg_duration_ms: number | null;
+  }>;
+
+  // Get per-agent breakdown for each tool
+  const agentRows = db.prepare(`
+    SELECT tool_name, agent_type, COUNT(*) as count
+    FROM events ${where}
+    GROUP BY tool_name, agent_type
+    ORDER BY tool_name, count DESC
+  `).all(...params) as Array<{ tool_name: string; agent_type: string; count: number }>;
+
+  const agentMap = new Map<string, Record<string, number>>();
+  for (const r of agentRows) {
+    if (!agentMap.has(r.tool_name)) agentMap.set(r.tool_name, {});
+    agentMap.get(r.tool_name)![r.agent_type] = r.count;
+  }
+
+  return rows.map(r => ({
+    tool_name: r.tool_name,
+    total_calls: r.total_calls,
+    error_count: r.error_count,
+    error_rate: r.error_rate,
+    avg_duration_ms: r.avg_duration_ms,
+    by_agent: agentMap.get(r.tool_name) || {},
+  }));
+}
+
+// --- Cost over time (hourly buckets) ---
+
+export interface CostBucket {
+  bucket: string;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+  event_count: number;
+}
+
+export function getCostOverTime(filters?: { since?: string; agentType?: string }): CostBucket[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  return db.prepare(`
+    SELECT
+      strftime('%Y-%m-%dT%H:00:00Z', created_at) as bucket,
+      COALESCE(SUM(cost_usd), 0) as cost_usd,
+      COALESCE(SUM(tokens_in), 0) as tokens_in,
+      COALESCE(SUM(tokens_out), 0) as tokens_out,
+      COUNT(*) as event_count
+    FROM events ${where}
+    GROUP BY bucket
+    ORDER BY bucket ASC
+  `).all(...params) as CostBucket[];
+}
+
+// --- Cost by session (top sessions) ---
+
+export interface SessionCostRow {
+  session_id: string;
+  agent_type: string;
+  project: string | null;
+  cost_usd: number;
+  event_count: number;
+}
+
+export function getCostBySession(limit: number = 10, filters?: { agentType?: string; since?: string }): SessionCostRow[] {
+  const db = getDb();
+  const conditions: string[] = ['e.cost_usd > 0'];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('e.agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('e.created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
+  return db.prepare(`
+    SELECT
+      e.session_id,
+      e.agent_type,
+      s.project,
+      COALESCE(SUM(e.cost_usd), 0) as cost_usd,
+      COUNT(*) as event_count
+    FROM events e
+    LEFT JOIN sessions s ON s.id = e.session_id
+    ${where}
+    GROUP BY e.session_id
+    ORDER BY cost_usd DESC
+    LIMIT ?
+  `).all(...params, limit) as SessionCostRow[];
+}
+
+// --- Cost by model ---
+
+export interface ModelCostRow {
+  model: string;
+  cost_usd: number;
+  event_count: number;
+  tokens_in: number;
+  tokens_out: number;
+}
+
+export function getCostByModel(filters?: { agentType?: string; since?: string }): ModelCostRow[] {
+  const db = getDb();
+  const conditions: string[] = ['model IS NOT NULL', 'cost_usd > 0'];
+  const params: unknown[] = [];
+
+  if (filters?.agentType) {
+    conditions.push('agent_type = ?');
+    params.push(filters.agentType);
+  }
+  if (filters?.since) {
+    conditions.push('created_at >= ?');
+    params.push(filters.since);
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+
+  return db.prepare(`
+    SELECT
+      model,
+      COALESCE(SUM(cost_usd), 0) as cost_usd,
+      COUNT(*) as event_count,
+      COALESCE(SUM(tokens_in), 0) as tokens_in,
+      COALESCE(SUM(tokens_out), 0) as tokens_out
+    FROM events
+    ${where}
+    GROUP BY model
+    ORDER BY cost_usd DESC
+  `).all(...params) as ModelCostRow[];
+}
+
+// --- Session Transcript ---
+
+export interface TranscriptEvent {
+  id: number;
+  event_type: string;
+  tool_name: string | null;
+  status: string;
+  tokens_in: number;
+  tokens_out: number;
+  model: string | null;
+  cost_usd: number | null;
+  duration_ms: number | null;
+  created_at: string;
+  client_timestamp: string | null;
+  metadata: string;
+}
+
+export function getSessionTranscript(sessionId: string): TranscriptEvent[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT id, event_type, tool_name, status, tokens_in, tokens_out,
+           model, cost_usd, duration_ms, created_at, client_timestamp, metadata
+    FROM events
+    WHERE session_id = ?
+    ORDER BY created_at ASC, id ASC
+  `).all(sessionId) as TranscriptEvent[];
 }

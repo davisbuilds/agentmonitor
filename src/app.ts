@@ -13,6 +13,8 @@ const publicDir = path.join(__dirname, '..', 'public');
 export function createApp(options: CreateAppOptions = {}): Express {
   const app = express();
 
+  // OTLP payloads can be large — allow up to 5MB on those routes
+  app.use('/api/otel', express.json({ limit: '5mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use('/api', apiRouter);
 
