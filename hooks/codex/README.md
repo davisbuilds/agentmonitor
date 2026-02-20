@@ -9,7 +9,14 @@ Add this to `~/.codex/config.toml`:
 ```toml
 [otel]
 log_user_prompt = true
-exporter = { otlp-http = { endpoint = "http://localhost:3141/api/otel/v1/logs", protocol = "json" } }
+
+[otel.exporter.otlp-http]
+endpoint = "http://localhost:3141/api/otel/v1/logs"
+protocol = "json"
+
+[otel.metrics_exporter.otlp-http]
+endpoint = "http://localhost:3141/api/otel/v1/metrics"
+protocol = "json"
 ```
 
 Start AgentStats (`pnpm dev`), then use Codex as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.

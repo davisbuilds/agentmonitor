@@ -55,7 +55,6 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
     CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
     CREATE INDEX IF NOT EXISTS idx_events_agent_type ON events(agent_type);
-    CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `);
 
@@ -159,4 +158,7 @@ export function initSchema(): void {
       CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
     `);
   }
+
+  // Create index on model column after migrations ensure the column exists.
+  db.exec('CREATE INDEX IF NOT EXISTS idx_events_model ON events(model)');
 }

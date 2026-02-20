@@ -42,6 +42,7 @@ Open `http://127.0.0.1:3141`.
 - `pnpm run test`: run contract + API tests.
 - `pnpm run test:watch`: watch-mode test runner.
 - `pnpm start`: run compiled server from `dist/`.
+- `pnpm run import`: import historical sessions from Claude Code and Codex logs.
 - `pnpm run seed`: send demo events to the running server.
 - `pnpm run bench:ingest`: run ingest throughput benchmark.
 
@@ -53,7 +54,7 @@ Environment variables (all optional):
 - `AGENTSTATS_HOST` (default: `127.0.0.1`)
 - `AGENTSTATS_DB_PATH` (default: `./data/agentstats.db`)
 - `AGENTSTATS_MAX_PAYLOAD_KB` (default: `10`)
-- `AGENTSTATS_SESSION_TIMEOUT` (default: `30`)
+- `AGENTSTATS_SESSION_TIMEOUT` (default: `5`)
 - `AGENTSTATS_MAX_FEED` (default: `200`)
 - `AGENTSTATS_STATS_INTERVAL` (default: `5000`)
 - `AGENTSTATS_MAX_SSE_CLIENTS` (default: `50`)
@@ -80,6 +81,41 @@ Example benchmark command:
 ```bash
 pnpm run bench:ingest -- --events=20000 --concurrency=40 --batch-size=50
 ```
+
+## Agent Integration
+
+### Claude Code (hooks)
+
+```bash
+./hooks/claude-code/install.sh
+```
+
+Restart Claude Code after installing. Events flow via hooks on `SessionStart`, `Stop`, `PostToolUse`, and `PreToolUse`. See `hooks/claude-code/README.md` for options.
+
+To backfill historical sessions with token/cost data:
+
+```bash
+pnpm run import --source claude-code
+```
+
+### Codex CLI (OTEL)
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[otel]
+log_user_prompt = true
+
+[otel.exporter.otlp-http]
+endpoint = "http://localhost:3141/api/otel/v1/logs"
+protocol = "json"
+
+[otel.metrics_exporter.otlp-http]
+endpoint = "http://localhost:3141/api/otel/v1/metrics"
+protocol = "json"
+```
+
+See `hooks/codex/README.md` for details.
 
 ## API Summary
 

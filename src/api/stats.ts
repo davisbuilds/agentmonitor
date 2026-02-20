@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { getStats, getToolAnalytics, getCostOverTime, getCostBySession, getCostByModel } from '../db/queries.js';
+import { getStats, getToolAnalytics, getCostOverTime, getCostByProject, getCostByModel } from '../db/queries.js';
 
 export const statsRouter = Router();
 
@@ -28,10 +28,10 @@ statsRouter.get('/cost', (req: Request, res: Response) => {
     agentType: req.query.agent_type as string | undefined,
     since: req.query.since as string | undefined,
   };
-  const [timeline, bySession, byModel] = [
+  const [timeline, byProject, byModel] = [
     getCostOverTime(costFilters),
-    getCostBySession(Number(req.query.limit) || 10, costFilters),
+    getCostByProject(Number(req.query.limit) || 10, costFilters),
     getCostByModel(costFilters),
   ];
-  res.json({ timeline, by_session: bySession, by_model: byModel });
+  res.json({ timeline, by_project: byProject, by_model: byModel });
 });

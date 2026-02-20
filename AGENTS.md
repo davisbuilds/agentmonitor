@@ -18,6 +18,7 @@ Guidance for coding agents working in this repository.
 - CSS watch mode: `pnpm run css:watch`
 - Production build: `pnpm run build`
 - Production start: `pnpm start`
+- Import historical logs: `pnpm run import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
 - Seed local demo data (server must be running): `pnpm run seed`
 
 For UI work in dev, use two terminals:
@@ -34,6 +35,12 @@ For UI work in dev, use two terminals:
 - `src/sse/emitter.ts`: SSE client management and fan-out.
 - `public/index.html`: dashboard shell.
 - `public/js/`: dashboard client code/components.
+- `src/otel/parser.ts`: OTLP JSON log/metric parsing for Claude Code and Codex.
+- `src/import/`: historical log importers (Claude Code JSONL, Codex).
+- `src/pricing/`: per-model cost calculation with JSON pricing data.
+- `hooks/claude-code/`: hook scripts for real-time Claude Code integration.
+- `hooks/codex/`: Codex OTEL integration docs.
+- `scripts/import.ts`: CLI for historical log import.
 - `scripts/seed.ts`: sample traffic generator.
 
 ## API Contract Notes
@@ -44,8 +51,10 @@ For UI work in dev, use two terminals:
 - Required event fields: `session_id`, `agent_type`, `event_type`.
 - Optional `event_id` is used for deduplication (unique constraint).
 - `metadata` payload is capped by `AGENTSTATS_MAX_PAYLOAD_KB`.
+- OTEL endpoints: `POST /api/otel/v1/logs`, `POST /api/otel/v1/metrics` (JSON only, no protobuf).
 - SSE endpoint: `GET /api/stream`.
 - SSE event names used by clients: `event`, `stats`, `session_update`.
+- Session timeout: 5 min idle → `idle`, 10 min idle → auto `ended`.
 
 ## Implementation Guardrails
 

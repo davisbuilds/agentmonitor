@@ -62,6 +62,8 @@ const AgentCards = {
           event_count: 0,
           tokens_in: 0,
           tokens_out: 0,
+          files_edited: 0,
+          _editedFiles: new Set(),
         },
         events: [],
       });
@@ -83,8 +85,15 @@ const AgentCards = {
       entry.events.pop();
     }
 
+    // Track unique files edited
+    if (['Edit', 'Write', 'MultiEdit'].includes(event.tool_name) && event.metadata?.file_path) {
+      if (!entry.session._editedFiles) entry.session._editedFiles = new Set();
+      entry.session._editedFiles.add(event.metadata.file_path);
+      entry.session.files_edited = entry.session._editedFiles.size;
+    }
+
     if (event.event_type === 'session_end') {
-      entry.session.status = 'ended';
+      entry.session.status = 'idle';
     }
 
     this.renderAll();
@@ -223,7 +232,7 @@ const AgentCards = {
             ${session.project || 'unknown'} ${session.branch ? `/ <span class="text-gray-400">${session.branch}</span>` : ''}
           </div>
           <div class="text-xs text-gray-500 mt-0.5">
-            ${session.event_count || 0} events${session.total_cost_usd ? ` · ${this.formatCost(session.total_cost_usd)}` : ''} · ${this.formatDuration(session.started_at)}
+            ${session.event_count || 0} events${session.files_edited ? ` · ${session.files_edited} file${session.files_edited !== 1 ? 's' : ''} edited` : ''}${session.total_cost_usd ? ` · ${this.formatCost(session.total_cost_usd)}` : ''} · ${this.formatDuration(session.started_at)}
           </div>
         </div>
 

@@ -24,11 +24,12 @@ const CostDashboard = {
     const container = document.getElementById('cost-dashboard');
     if (!container || !this.data) return;
 
-    const { by_model, by_session, timeline } = this.data;
+    const { by_model, by_project, timeline } = this.data;
+    const by_project_list = by_project || [];
 
     const totalCost = by_model.reduce((sum, m) => sum + m.cost_usd, 0);
     const maxModelCost = Math.max(...by_model.map(m => m.cost_usd), 0.01);
-    const maxSessionCost = Math.max(...by_session.map(s => s.cost_usd), 0.01);
+    const maxProjectCost = Math.max(...by_project_list.map(p => p.cost_usd), 0.01);
 
     container.innerHTML = `
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -56,18 +57,18 @@ const CostDashboard = {
             `).join('')}
         </div>
 
-        <!-- By Session -->
+        <!-- By Project -->
         <div class="bg-gray-900 rounded-lg border border-gray-700 p-4">
-          <div class="text-xs text-gray-500 uppercase tracking-wider mb-2">Top Sessions by Cost</div>
-          ${by_session.length === 0 ? '<div class="text-xs text-gray-500">No cost data yet</div>' :
-            by_session.slice(0, 5).map(s => `
+          <div class="text-xs text-gray-500 uppercase tracking-wider mb-2">Top Projects by Cost</div>
+          ${by_project_list.length === 0 ? '<div class="text-xs text-gray-500">No cost data yet</div>' :
+            by_project_list.slice(0, 5).map(p => `
               <div class="mb-1.5">
                 <div class="flex justify-between text-xs mb-0.5">
-                  <span class="text-gray-300 truncate mr-2">${s.project || s.session_id.slice(0, 8)}</span>
-                  <span class="text-gray-400 shrink-0">${this.formatCost(s.cost_usd)}</span>
+                  <span class="text-gray-300 truncate mr-2">${p.project}</span>
+                  <span class="text-gray-400 shrink-0">${this.formatCost(p.cost_usd)} · ${p.session_count} session${p.session_count !== 1 ? 's' : ''}</span>
                 </div>
                 <div class="h-1.5 bg-gray-800 rounded-full overflow-hidden">
-                  <div class="h-full bg-purple-500 rounded-full" style="width:${Math.max(2, (s.cost_usd / maxSessionCost) * 100)}%"></div>
+                  <div class="h-full bg-purple-500 rounded-full" style="width:${Math.max(2, (p.cost_usd / maxProjectCost) * 100)}%"></div>
                 </div>
               </div>
             `).join('')}

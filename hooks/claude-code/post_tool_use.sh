@@ -9,6 +9,7 @@ read_hook_input
 SESSION_ID="$(extract_field session_id)"
 TOOL_NAME="$(extract_field tool_name)"
 PROJECT="$(get_project)"
+BRANCH="$(get_branch)"
 
 # Extract useful detail from tool_input depending on tool type
 COMMAND="$(extract_nested tool_input.command)"
@@ -21,6 +22,7 @@ URL="$(extract_nested tool_input.url)"
 SESSION_ID_ESC="$(json_escape "$SESSION_ID")"
 TOOL_NAME_ESC="$(json_escape "$TOOL_NAME")"
 PROJECT_ESC="$(json_escape "$PROJECT")"
+BRANCH_ESC="$(json_escape "$BRANCH")"
 
 # Build metadata object with escaped values
 TOOL_USE_ID_ESC="$(json_escape "$(extract_field tool_use_id)")"
@@ -39,6 +41,7 @@ send_event "$(cat <<EOF
   "event_type": "tool_use",
   "tool_name": "$TOOL_NAME_ESC",
   "project": "$PROJECT_ESC",
+  "branch": "$BRANCH_ESC",
   "source": "hook",
   "metadata": $META
 }

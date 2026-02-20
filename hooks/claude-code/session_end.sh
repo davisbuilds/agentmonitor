@@ -8,6 +8,7 @@ read_hook_input
 
 SESSION_ID="$(extract_field session_id)"
 PROJECT="$(get_project)"
+BRANCH="$(get_branch)"
 
 send_event "$(cat <<EOF
 {
@@ -15,6 +16,7 @@ send_event "$(cat <<EOF
   "agent_type": "claude_code",
   "event_type": "session_end",
   "project": "$(json_escape "$PROJECT")",
+  "branch": "$(json_escape "$BRANCH")",
   "source": "hook"
 }
 EOF
