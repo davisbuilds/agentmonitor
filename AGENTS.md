@@ -55,6 +55,8 @@ For UI work in dev, use two terminals:
 - SSE endpoint: `GET /api/stream`.
 - SSE event names used by clients: `event`, `stats`, `session_update`.
 - Session timeout: 5 min idle → `idle`, 10 min idle → auto `ended`.
+- Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
+- Codex OTEL logs carry no token/cost data; use `pnpm run import --source codex` for cost backfill.
 
 ## Implementation Guardrails
 

@@ -109,10 +109,14 @@ log_user_prompt = true
 [otel.exporter.otlp-http]
 endpoint = "http://localhost:3141/api/otel/v1/logs"
 protocol = "json"
+```
 
-[otel.metrics_exporter.otlp-http]
-endpoint = "http://localhost:3141/api/otel/v1/metrics"
-protocol = "json"
+Restart Codex after configuring. The dev server must be running before starting a Codex session (the OTEL exporter connects at startup and does not retry).
+
+**Note:** Codex OTEL logs do not include token/cost data. To backfill cost data from Codex session files:
+
+```bash
+pnpm run import --source codex
 ```
 
 See `hooks/codex/README.md` for details.
@@ -123,8 +127,9 @@ See `hooks/codex/README.md` for details.
 - `POST /api/events/batch`: ingest many events.
 - `GET /api/events`: query events with filters (`agent_type`, `event_type`, `tool_name`, `session_id`, `branch`, `model`, `source`, `since`, `until`).
 - `GET /api/stats`: aggregate counters and breakdowns (includes `total_cost_usd`, `model_breakdown`).
-- `GET /api/sessions`: list sessions.
+- `GET /api/sessions`: list sessions (supports `status`, `exclude_status`, `agent_type`, `limit`).
 - `GET /api/sessions/:id`: session detail + recent events.
+- `GET /api/stats/cost`: cost breakdowns by model, project, and timeline.
 - `GET /api/filter-options`: distinct values for all filterable fields.
 - `GET /api/stream`: SSE stream (`event`, `stats`, `session_update`), returns `503` when max client limit is reached.
 - `GET /api/health`: basic service health.
