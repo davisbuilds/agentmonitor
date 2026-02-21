@@ -23,6 +23,7 @@ export const config = {
   maxSseClients: parseEnvInt(process.env.AGENTSTATS_MAX_SSE_CLIENTS, 50, 1),
   sseHeartbeatMs: parseEnvInt(process.env.AGENTSTATS_SSE_HEARTBEAT_MS, 30000, 1000),
   autoImportIntervalMinutes: parseEnvInt(process.env.AGENTSTATS_AUTO_IMPORT_MINUTES, 10, 0),
+  projectsDir: process.env.AGENTSTATS_PROJECTS_DIR || '/Users/dg-mac-mini/Dev',
   // Usage monitor: per-agent-type limits (tokens or cost depending on agent)
   // Claude Code: token limits (AGENTSTATS_SESSION_TOKEN_LIMIT_CLAUDE_CODE)
   // Codex: cost limits in USD (AGENTSTATS_SESSION_COST_LIMIT_CODEX)

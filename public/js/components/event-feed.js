@@ -7,7 +7,7 @@ const EventFeed = {
 
   agentLabels: {
     claude_code: { text: 'Claude', class: 'text-orange-400' },
-    codex: { text: 'Codex', class: 'text-emerald-400' },
+    codex: { text: 'Codex', class: 'text-gray-400' },
   },
 
   init() {
@@ -84,7 +84,7 @@ const EventFeed = {
 
   eventTypeDisplay(event) {
     if (event.event_type === 'tool_use') {
-      return `<span class="text-gray-200 font-medium">${event.tool_name || 'tool'}</span>`;
+      return `<span class="text-emerald-400 font-medium">${event.tool_name || 'tool'}</span>`;
     }
     if (event.event_type === 'user_prompt') {
       return `<span class="text-violet-400 font-medium">prompt</span>`;

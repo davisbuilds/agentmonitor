@@ -249,7 +249,7 @@ const SessionDetail = {
 
     let typeDisplay;
     if (evt.event_type === 'tool_use') {
-      typeDisplay = `<span class="text-gray-200">${evt.tool_name || 'tool'}</span>`;
+      typeDisplay = `<span class="text-emerald-400">${evt.tool_name || 'tool'}</span>`;
     } else if (evt.event_type === 'user_prompt') {
       typeDisplay = '<span class="text-violet-400 font-medium">prompt</span>';
     } else if (evt.event_type === 'error') {

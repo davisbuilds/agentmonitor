@@ -5,7 +5,7 @@ const AgentCards = {
 
   agentColors: {
     claude_code: { label: 'Claude Code', border: 'border-l-orange-500', badge: 'bg-orange-500/20 text-orange-300', dot: 'text-orange-400' },
-    codex: { label: 'Codex', border: 'border-l-emerald-500', badge: 'bg-emerald-500/20 text-emerald-300', dot: 'text-emerald-400' },
+    codex: { label: 'Codex', border: 'border-l-gray-400', badge: 'bg-gray-500/20 text-gray-300', dot: 'text-gray-400' },
     default: { label: 'Agent', border: 'border-l-blue-500', badge: 'bg-blue-500/20 text-blue-300', dot: 'text-blue-400' },
   },
 
@@ -190,7 +190,7 @@ const AgentCards = {
 
   eventTypeBadge(event) {
     if (event.event_type === 'tool_use') {
-      return `<span class="text-gray-200">${event.tool_name || 'tool'}</span>`;
+      return `<span class="text-emerald-400">${event.tool_name || 'tool'}</span>`;
     }
     if (event.event_type === 'response') {
       return '<span class="text-blue-400">response</span>';

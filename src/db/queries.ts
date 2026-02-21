@@ -1,6 +1,7 @@
 import { getDb } from './connection.js';
 import { config, type UsageLimitType } from '../config.js';
 import { pricingRegistry } from '../pricing/index.js';
+import { resolveGitBranch } from '../util/git-branch.js';
 import type { EventStatus, EventType, EventSource } from '../contracts/event-contract.js';
 
 // --- Agents ---
@@ -311,6 +312,25 @@ export function insertEvent(event: {
   const agentId = `${event.agent_type}-default`;
   upsertAgent(agentId, event.agent_type);
   upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch);
+
+  // Backfill project/branch from session if missing on this event
+  if (!event.project || !event.branch) {
+    const session = db.prepare('SELECT project, branch FROM sessions WHERE id = ?').get(event.session_id) as { project: string | null; branch: string | null } | undefined;
+    if (session) {
+      if (!event.project && session.project) event.project = session.project;
+      if (!event.branch && session.branch) event.branch = session.branch;
+    }
+  }
+
+  // Resolve git branch from project directory if still missing
+  if (!event.branch && event.project) {
+    const gitBranch = resolveGitBranch(event.project);
+    if (gitBranch) {
+      event.branch = gitBranch;
+      // Update session so future events inherit it
+      db.prepare('UPDATE sessions SET branch = ? WHERE id = ? AND branch IS NULL').run(gitBranch, event.session_id);
+    }
+  }
 
   // Handle session lifecycle events
   if (event.event_type === 'session_end') {
