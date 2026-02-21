@@ -75,6 +75,9 @@ const AgentCards = {
       this._backfillSession(sessionId);
     }
 
+    // Parse metadata once (SSE payloads carry it as a JSON string from the DB row)
+    const meta = typeof event.metadata === 'string' ? (() => { try { return JSON.parse(event.metadata); } catch { return {}; } })() : (event.metadata || {});
+
     const entry = this.sessions.get(sessionId);
     entry.session.last_event_at = event.created_at;
     entry.session.status = 'active';
@@ -92,13 +95,13 @@ const AgentCards = {
     }
 
     // Track unique files edited (seed from server count on first incremental update)
-    if (['Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin'].includes(event.tool_name) && event.metadata?.file_path) {
+    if (['Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin'].includes(event.tool_name) && meta.file_path) {
       if (!entry.session._editedFiles) {
         entry.session._editedFiles = new Set();
         // Preserve server-side count as a baseline
         entry.session._filesEditedBaseline = entry.session.files_edited || 0;
       }
-      entry.session._editedFiles.add(event.metadata.file_path);
+      entry.session._editedFiles.add(meta.file_path);
       entry.session.files_edited = Math.max(
         entry.session._filesEditedBaseline || 0,
         entry.session._editedFiles.size,
@@ -106,7 +109,6 @@ const AgentCards = {
     }
 
     // Track lines added/removed from metadata
-    const meta = typeof event.metadata === 'string' ? (() => { try { return JSON.parse(event.metadata); } catch { return {}; } })() : (event.metadata || {});
     if (meta.lines_added) entry.session.lines_added = (entry.session.lines_added || 0) + meta.lines_added;
     if (meta.lines_removed) entry.session.lines_removed = (entry.session.lines_removed || 0) + meta.lines_removed;
 
