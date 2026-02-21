@@ -30,10 +30,11 @@ async function reloadData(filters) {
     const eventsParams = new URLSearchParams(filters);
     eventsParams.set('limit', '100');
 
-    // Build sessions query
+    // Build sessions query — exclude ended historical sessions
     const sessionsParams = new URLSearchParams();
     if (filters.agent_type) sessionsParams.set('agent_type', filters.agent_type);
     sessionsParams.set('limit', '20');
+    sessionsParams.set('exclude_status', 'ended');
 
     const [statsRes, eventsRes, sessionsRes] = await Promise.all([
       fetch(`/api/stats${qsSep}`),

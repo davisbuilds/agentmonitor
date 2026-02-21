@@ -50,10 +50,12 @@ export interface SessionRow {
   tokens_in: number;
   tokens_out: number;
   total_cost_usd: number;
+  files_edited: number;
 }
 
 export function getSessions(filters: {
   status?: string;
+  excludeStatus?: string;
   agentType?: string;
   limit?: number;
 }): SessionRow[] {
@@ -64,6 +66,10 @@ export function getSessions(filters: {
   if (filters.status) {
     conditions.push('s.status = ?');
     params.push(filters.status);
+  }
+  if (filters.excludeStatus) {
+    conditions.push('s.status != ?');
+    params.push(filters.excludeStatus);
   }
   if (filters.agentType) {
     conditions.push('s.agent_type = ?');
@@ -78,7 +84,8 @@ export function getSessions(filters: {
       COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
       COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
       COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
-      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited
     FROM sessions s
     ${where}
     ORDER BY
@@ -98,7 +105,8 @@ export function getSessionWithEvents(sessionId: string, eventLimit: number = 10)
       COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
       COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
       COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
-      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited
     FROM sessions s WHERE s.id = ?
   `).get(sessionId) as SessionRow | undefined;
 
@@ -111,12 +119,29 @@ export function getSessionWithEvents(sessionId: string, eventLimit: number = 10)
 
 export function updateIdleSessions(timeoutMinutes: number): number {
   const db = getDb();
-  const result = db.prepare(`
+  // Mark active sessions as idle after timeout
+  const idled = db.prepare(`
     UPDATE sessions SET status = 'idle'
     WHERE status = 'active'
     AND last_event_at < datetime('now', ? || ' minutes')
   `).run(`-${timeoutMinutes}`);
-  return result.changes;
+
+  // Auto-end idle sessions after 2x the timeout (no explicit session_end received)
+  db.prepare(`
+    UPDATE sessions SET status = 'ended', ended_at = datetime('now')
+    WHERE status = 'idle'
+    AND last_event_at < datetime('now', ? || ' minutes')
+  `).run(`-${timeoutMinutes * 2}`);
+
+  return idled.changes;
+}
+
+export function idleSession(sessionId: string): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE sessions SET status = 'idle'
+    WHERE id = ? AND status != 'ended'
+  `).run(sessionId);
 }
 
 export function endSession(sessionId: string): void {
@@ -278,7 +303,22 @@ export function insertEvent(event: {
 
   // Handle session lifecycle events
   if (event.event_type === 'session_end') {
-    endSession(event.session_id);
+    // Claude Code sessions go to 'idle' first so they linger on the dashboard
+    // for one timeout cycle before the periodic cleanup marks them 'ended'.
+    if (event.agent_type === 'claude_code') {
+      idleSession(event.session_id);
+    } else {
+      endSession(event.session_id);
+    }
+  }
+
+  // Imported sessions are historical — mark as ended unless already managed
+  if (event.source === 'import') {
+    const db2 = getDb();
+    db2.prepare(`
+      UPDATE sessions SET status = 'ended', ended_at = COALESCE(ended_at, datetime('now'))
+      WHERE id = ? AND status != 'ended'
+    `).run(event.session_id);
   }
 
   // Auto-calculate cost if model + tokens present but cost not provided
@@ -636,7 +676,7 @@ export function getCostOverTime(filters?: { since?: string; agentType?: string }
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('created_at >= ?');
+    conditions.push('COALESCE(client_timestamp, created_at) >= ?');
     params.push(filters.since);
   }
 
@@ -644,7 +684,7 @@ export function getCostOverTime(filters?: { since?: string; agentType?: string }
 
   return db.prepare(`
     SELECT
-      strftime('%Y-%m-%dT%H:00:00Z', created_at) as bucket,
+      strftime('%Y-%m-%dT%H:00:00Z', COALESCE(client_timestamp, created_at)) as bucket,
       COALESCE(SUM(cost_usd), 0) as cost_usd,
       COALESCE(SUM(tokens_in), 0) as tokens_in,
       COALESCE(SUM(tokens_out), 0) as tokens_out,
@@ -657,15 +697,14 @@ export function getCostOverTime(filters?: { since?: string; agentType?: string }
 
 // --- Cost by session (top sessions) ---
 
-export interface SessionCostRow {
-  session_id: string;
-  agent_type: string;
-  project: string | null;
+export interface ProjectCostRow {
+  project: string;
   cost_usd: number;
+  session_count: number;
   event_count: number;
 }
 
-export function getCostBySession(limit: number = 10, filters?: { agentType?: string; since?: string }): SessionCostRow[] {
+export function getCostByProject(limit: number = 10, filters?: { agentType?: string; since?: string }): ProjectCostRow[] {
   const db = getDb();
   const conditions: string[] = ['e.cost_usd > 0'];
   const params: unknown[] = [];
@@ -683,18 +722,17 @@ export function getCostBySession(limit: number = 10, filters?: { agentType?: str
 
   return db.prepare(`
     SELECT
-      e.session_id,
-      e.agent_type,
-      s.project,
+      COALESCE(s.project, 'unknown') as project,
       COALESCE(SUM(e.cost_usd), 0) as cost_usd,
+      COUNT(DISTINCT e.session_id) as session_count,
       COUNT(*) as event_count
     FROM events e
     LEFT JOIN sessions s ON s.id = e.session_id
     ${where}
-    GROUP BY e.session_id
+    GROUP BY s.project
     ORDER BY cost_usd DESC
     LIMIT ?
-  `).all(...params, limit) as SessionCostRow[];
+  `).all(...params, limit) as ProjectCostRow[];
 }
 
 // --- Cost by model ---

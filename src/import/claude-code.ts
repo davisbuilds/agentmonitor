@@ -13,18 +13,29 @@ interface ClaudeCodeUsage {
   cache_read_input_tokens?: number;
 }
 
+interface ClaudeCodeMessage {
+  model?: string;
+  usage?: ClaudeCodeUsage;
+  content?: unknown;
+  stop_reason?: string;
+}
+
 interface ClaudeCodeLogLine {
   type?: string;
   sessionId?: string;
   model?: string;
   costUSD?: number;
   usage?: ClaudeCodeUsage;
+  message?: ClaudeCodeMessage;  // assistant lines nest model/usage here
   timestamp?: string;
   name?: string;          // tool name for tool_use lines
   tool_name?: string;     // alternate field
   content?: unknown;
   duration_ms?: number;
+  durationMs?: number;
   error?: string | { message?: string };
+  cwd?: string;
+  gitBranch?: string;
   // tool_result fields
   is_error?: boolean;
   status?: string;
@@ -114,6 +125,11 @@ export function parseClaudeCodeFile(
     // Extract tool name
     const toolName = line.name ?? line.tool_name;
 
+    // Resolve model and usage — check top-level first, then nested message object
+    const msg = line.message;
+    const model = line.model ?? msg?.model;
+    const usage = line.usage ?? msg?.usage;
+
     // Compute delta cost from cumulative costUSD
     let costDelta: number | undefined;
     if (typeof line.costUSD === 'number' && line.costUSD > 0) {
@@ -123,10 +139,14 @@ export function parseClaudeCodeFile(
     }
 
     // Extract token counts
-    const tokensIn = line.usage?.input_tokens ?? 0;
-    const tokensOut = line.usage?.output_tokens ?? 0;
-    const cacheRead = line.usage?.cache_read_input_tokens ?? 0;
-    const cacheWrite = line.usage?.cache_creation_input_tokens ?? 0;
+    const tokensIn = usage?.input_tokens ?? 0;
+    const tokensOut = usage?.output_tokens ?? 0;
+    const cacheRead = usage?.cache_read_input_tokens ?? 0;
+    const cacheWrite = usage?.cache_creation_input_tokens ?? 0;
+
+    // Extract project (basename of cwd) and branch
+    const project = line.cwd ? path.basename(line.cwd) : undefined;
+    const branch = line.gitBranch;
 
     // Determine status
     let status: 'success' | 'error' | 'timeout' = 'success';
@@ -190,9 +210,11 @@ export function parseClaudeCodeFile(
       tokens_out: tokensOut,
       cache_read_tokens: cacheRead,
       cache_write_tokens: cacheWrite,
-      model: line.model,
+      model,
       cost_usd: costDelta && costDelta > 0 ? costDelta : undefined,
-      duration_ms: line.duration_ms,
+      duration_ms: line.duration_ms ?? line.durationMs,
+      project,
+      branch,
       client_timestamp: line.timestamp,
       metadata: Object.keys(metadataObj).length > 0 ? metadataObj : {},
       source: 'import',

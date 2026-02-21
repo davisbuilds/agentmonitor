@@ -42,6 +42,15 @@ get_project() {
   fi
 }
 
+# Derive git branch from cwd
+get_branch() {
+  local cwd
+  cwd="$(extract_field cwd)"
+  if [ -n "$cwd" ] && [ -d "$cwd/.git" ] || git -C "$cwd" rev-parse --git-dir &>/dev/null 2>&1; then
+    git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null
+  fi
+}
+
 # Escape a string for safe embedding in a JSON value.
 # Handles backslashes, double quotes, newlines, tabs, and carriage returns.
 json_escape() {

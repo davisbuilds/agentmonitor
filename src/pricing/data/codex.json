@@ -89,6 +89,14 @@
       "cacheReadCostPerMTok": 5,
       "cacheWriteCostPerMTok": 10,
       "deprecated": true
+    },
+    "gpt-5.3-codex": {
+      "aliases": [],
+      "inputCostPerMTok": 1.75,
+      "outputCostPerMTok": 14,
+      "cacheReadCostPerMTok": 0.875,
+      "cacheWriteCostPerMTok": 1.75,
+      "deprecated": false
     }
   }
 }

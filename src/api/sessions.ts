@@ -7,6 +7,7 @@ export const sessionsRouter = Router();
 sessionsRouter.get('/', (req: Request, res: Response) => {
   const sessions = getSessions({
     status: req.query.status as string | undefined,
+    excludeStatus: req.query.exclude_status as string | undefined,
     agentType: req.query.agent_type as string | undefined,
     limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,
   });

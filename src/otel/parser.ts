@@ -174,6 +174,7 @@ const CLAUDE_EVENT_MAP: Record<string, EventType> = {
 const CODEX_EVENT_MAP: Record<string, EventType> = {
   'codex.tool_result': 'tool_use',
   'codex.tool_use': 'tool_use',
+  'codex.tool_decision': 'tool_use',
   'codex.api_request': 'llm_request',
   'codex.api_response': 'llm_response',
   'codex.session_start': 'session_start',
@@ -183,22 +184,28 @@ const CODEX_EVENT_MAP: Record<string, EventType> = {
   'codex.response': 'response',
 };
 
+// High-frequency events to skip — these create noise without useful signal
+const SKIP_EVENTS = new Set([
+  'codex.sse_event',
+  'codex.websocket.event',
+]);
+
 // ─── Log parser ─────────────────────────────────────────────────────────
 
 function resolveServiceName(resourceAttrs: OtelKeyValue[] | undefined): string {
   const svc = getAttr(resourceAttrs, 'service.name') ?? '';
-  if (svc.includes('codex') || svc === 'codex_cli_rs') return 'codex';
-  if (svc.includes('claude') || svc === 'claude_code') return 'claude_code';
+  const sdk = getAttr(resourceAttrs, 'telemetry.sdk.name') ?? '';
+  const combined = `${svc} ${sdk}`.toLowerCase();
+  if (combined.includes('codex')) return 'codex';
+  if (combined.includes('claude')) return 'claude_code';
   return svc || 'unknown';
 }
 
 function resolveEventType(
   logRecord: OtelLogRecord,
   agentType: string,
-): EventType {
-  // Check event name from attributes
-  const eventName = getAttr(logRecord.attributes, 'event.name')
-    ?? getAttr(logRecord.attributes, 'name');
+  eventName: string | undefined,
+): EventType | null {
 
   if (eventName) {
     const map = agentType === 'codex' ? CODEX_EVENT_MAP : CLAUDE_EVENT_MAP;
@@ -217,7 +224,6 @@ function resolveEventType(
       git_commit: 'git_commit',
       plan_step: 'plan_step',
       error: 'error',
-      response: 'response',
     };
     if (EVENT_TYPE_SUFFIXES[suffix]) return EVENT_TYPE_SUFFIXES[suffix];
   }
@@ -225,30 +231,40 @@ function resolveEventType(
   // Fallback: check severity
   if (logRecord.severityText === 'ERROR') return 'error';
 
-  return 'response'; // default
+  // Unrecognized event — skip to avoid noise
+  return null;
 }
 
 function parseLogRecord(
   logRecord: OtelLogRecord,
   resourceAttrs: OtelKeyValue[] | undefined,
 ): NormalizedIngestEvent | null {
+  // Skip high-frequency noisy events
+  const eventName = getAttr(logRecord.attributes, 'event.name');
+  if (eventName && SKIP_EVENTS.has(eventName)) return null;
+
   const agentType = resolveServiceName(resourceAttrs);
 
   // Session ID: prefer log attribute, then resource attribute, then body
   const bodyJson = getBodyJson(logRecord.body);
   const sessionId =
     getAttr(logRecord.attributes, 'gen_ai.session.id')
+    ?? getAttr(logRecord.attributes, 'conversation.id')
     ?? getAttr(resourceAttrs, 'session.id')
     ?? getAttr(resourceAttrs, 'gen_ai.session.id')
+    ?? getAttr(resourceAttrs, 'conversation.id')
     ?? (bodyJson?.session_id as string | undefined);
 
   if (!sessionId) return null; // Cannot process without session_id
 
-  const eventType = resolveEventType(logRecord, agentType);
+  const resolvedEventName = eventName ?? getAttr(logRecord.attributes, 'name');
+  const eventType = resolveEventType(logRecord, agentType, resolvedEventName);
+  if (!eventType) return null; // Skip unrecognized events
 
   // Extract fields from attributes + body
   const toolName =
     getAttr(logRecord.attributes, 'gen_ai.tool.name')
+    ?? getAttr(logRecord.attributes, 'tool_name')
     ?? getAttr(logRecord.attributes, 'tool.name')
     ?? (bodyJson?.tool_name as string | undefined);
 
@@ -418,6 +434,7 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetricDelta
     const sessionId =
       getAttr(resourceAttrs, 'gen_ai.session.id')
       ?? getAttr(resourceAttrs, 'session.id')
+      ?? getAttr(resourceAttrs, 'conversation.id')
       ?? 'unknown';
 
     if (!rm.scopeMetrics) continue;

@@ -3,59 +3,63 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
+import { pricingRegistry } from '../pricing/index.js';
 
 // ─── Codex JSONL line types ─────────────────────────────────────────────
 
-interface CodexLogLine {
-  type?: string;
-  session_id?: string;
-  model?: string;
-  timestamp?: string;
-
-  // tool/execution fields
-  command?: string;
-  cwd?: string;
-  exitCode?: number;
-  exit_code?: number;
-  output?: string;
-  duration?: number;
-  duration_ms?: number;
-  status?: string;
-
-  // file change fields
-  path?: string;
-  diff?: string;
-
-  // turn fields
+interface CodexTokenUsage {
   input_tokens?: number;
+  cached_input_tokens?: number;
   output_tokens?: number;
+  reasoning_output_tokens?: number;
   total_tokens?: number;
-
-  // generic
-  tool?: string;
-  tool_name?: string;
-  name?: string;
-  error?: string | { message?: string };
-  content?: unknown;
 }
 
-// ─── Event type mapping ─────────────────────────────────────────────────
+interface CodexSessionMeta {
+  id: string;
+  timestamp: string;
+  cwd: string;
+  originator?: string;
+  cli_version?: string;
+  source?: string;
+  model_provider?: string;
+}
 
-const TYPE_MAP: Record<string, EventType> = {
-  'tool/execution': 'tool_use',
-  'tool/call': 'tool_use',
-  'mcpToolCall': 'tool_use',
-  'fileChange': 'file_change',
-  'file/diff': 'file_change',
-  'turn/started': 'session_start',
-  'turn/completed': 'response',
-  'turn/diff/updated': 'file_change',
-  'turn/plan/updated': 'plan_step',
-  'error': 'error',
-  'message': 'response',
-  'assistant': 'response',
-  'user': 'response',
-};
+interface CodexToolResult {
+  tool_name?: string;
+  call_id?: string;
+  arguments?: string;
+  duration_ms?: number;
+  success?: boolean;
+  output?: string;
+}
+
+interface CodexLogLine {
+  timestamp: string;
+  type: string;
+  payload: {
+    // session_meta
+    id?: string;
+    cwd?: string;
+    originator?: string;
+    timestamp?: string;
+
+    // event_msg
+    type?: string;
+    info?: {
+      total_token_usage?: CodexTokenUsage;
+      last_token_usage?: CodexTokenUsage;
+      model_context_window?: number;
+    };
+
+    // response_item
+    role?: string;
+    content?: Array<{ type: string; text?: string }>;
+
+    // generic fields from OTEL-style
+    [key: string]: unknown;
+  };
+}
 
 // ─── Discover JSONL files ──────────────────────────────────────────────
 
@@ -82,101 +86,206 @@ function walkDir(dir: string, files: string[]): void {
   }
 }
 
+// ─── Read model from config.toml ────────────────────────────────────────
+
+function readCodexModel(codexHome?: string): string | undefined {
+  const base = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+  const configPath = path.join(base, 'config.toml');
+  try {
+    const content = fs.readFileSync(configPath, 'utf-8');
+    // Simple parse for top-level model = "..."
+    const match = content.match(/^model\s*=\s*"([^"]+)"/m);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
 // ─── Parse a single JSONL file ──────────────────────────────────────────
 
 export function parseCodexFile(
   filePath: string,
-  options?: { from?: Date; to?: Date },
+  options?: { from?: Date; to?: Date; codexDir?: string },
 ): NormalizedIngestEvent[] {
   const events: NormalizedIngestEvent[] = [];
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
 
-  // Extract session ID from filename
-  const fileBasename = path.basename(filePath, '.jsonl');
+  const defaultModel = readCodexModel(options?.codexDir);
 
-  for (let i = 0; i < lines.length; i++) {
+  // First pass: extract session metadata
+  let sessionId: string | undefined;
+  let cwd: string | undefined;
+  let sessionTimestamp: string | undefined;
+
+  for (const rawLine of lines) {
     let line: CodexLogLine;
     try {
-      line = JSON.parse(lines[i]) as CodexLogLine;
+      line = JSON.parse(rawLine) as CodexLogLine;
     } catch {
       continue;
     }
 
-    if (!line.type) continue;
-
-    const sessionId = line.session_id ?? fileBasename;
-
-    // Apply date filter
-    if (line.timestamp && options?.from) {
-      const ts = new Date(line.timestamp);
-      if (ts < options.from) continue;
+    if (line.type === 'session_meta') {
+      sessionId = line.payload.id;
+      cwd = line.payload.cwd;
+      sessionTimestamp = line.payload.timestamp ?? line.timestamp;
+      break;
     }
-    if (line.timestamp && options?.to) {
-      const ts = new Date(line.timestamp);
-      if (ts > options.to) continue;
+  }
+
+  // Fall back to filename for session ID
+  if (!sessionId) {
+    const basename = path.basename(filePath, '.jsonl');
+    // Extract UUID from filename like "rollout-2026-02-18T20-10-57-019c7373-39f7..."
+    const uuidMatch = basename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+    sessionId = uuidMatch?.[1] ?? basename;
+  }
+
+  const project = cwd ? path.basename(cwd) : undefined;
+
+  // Apply date filter on session start time
+  if (sessionTimestamp && options?.from) {
+    const ts = new Date(sessionTimestamp);
+    if (ts < options.from) return events;
+  }
+  if (sessionTimestamp && options?.to) {
+    const ts = new Date(sessionTimestamp);
+    if (ts > options.to) return events;
+  }
+
+  // Second pass: extract events
+  let prevTokensIn = 0;
+  let prevTokensOut = 0;
+  let prevCacheRead = 0;
+  let eventIndex = 0;
+
+  for (const rawLine of lines) {
+    let line: CodexLogLine;
+    try {
+      line = JSON.parse(rawLine) as CodexLogLine;
+    } catch {
+      continue;
     }
 
-    const eventType = TYPE_MAP[line.type] ?? 'response';
+    // Generate session_start from session_meta
+    if (line.type === 'session_meta') {
+      const eventId = crypto
+        .createHash('sha256')
+        .update(`codex:${sessionId}:meta`)
+        .digest('hex')
+        .slice(0, 32);
 
-    // Extract tool name
-    const toolName = line.tool ?? line.tool_name ?? line.name
-      ?? (line.type === 'tool/execution' ? 'shell' : undefined);
-
-    // Determine status
-    let status: 'success' | 'error' | 'timeout' = 'success';
-    if (line.type === 'error' || line.status === 'error' || line.status === 'failed') {
-      status = 'error';
+      events.push({
+        event_id: `import-cdx-${eventId}`,
+        session_id: sessionId,
+        agent_type: 'codex',
+        event_type: 'session_start',
+        status: 'success',
+        tokens_in: 0,
+        tokens_out: 0,
+        model: defaultModel,
+        project,
+        client_timestamp: line.timestamp,
+        metadata: {
+          cli_version: line.payload.originator,
+          cwd,
+        },
+        source: 'import',
+      });
+      continue;
     }
-    if (line.exitCode !== undefined && line.exitCode !== 0) status = 'error';
-    if (line.exit_code !== undefined && line.exit_code !== 0) status = 'error';
 
-    // Duration
-    const durationMs = line.duration_ms
-      ?? (typeof line.duration === 'number' ? Math.round(line.duration * 1000) : undefined);
+    // Extract token deltas from token_count events
+    if (line.type === 'event_msg' && line.payload?.type === 'token_count') {
+      const usage = line.payload.info?.total_token_usage;
+      if (!usage) continue;
 
-    // Token counts
-    const tokensIn = line.input_tokens ?? 0;
-    const tokensOut = line.output_tokens ?? 0;
+      const totalIn = (usage.input_tokens ?? 0);
+      const totalOut = (usage.output_tokens ?? 0);
+      const totalCacheRead = (usage.cached_input_tokens ?? 0);
 
-    // Deterministic event_id
+      // Compute deltas
+      const deltaIn = totalIn - prevTokensIn;
+      const deltaOut = totalOut - prevTokensOut;
+      const deltaCacheRead = totalCacheRead - prevCacheRead;
+
+      prevTokensIn = totalIn;
+      prevTokensOut = totalOut;
+      prevCacheRead = totalCacheRead;
+
+      // Only emit if there's a meaningful delta
+      if (deltaIn <= 0 && deltaOut <= 0) continue;
+
+      const eventId = crypto
+        .createHash('sha256')
+        .update(`codex:${sessionId}:token:${eventIndex}`)
+        .digest('hex')
+        .slice(0, 32);
+
+      // Calculate cost from deltas
+      const costUsd = defaultModel
+        ? pricingRegistry.calculate(defaultModel, {
+            input: deltaIn,
+            output: deltaOut,
+            cacheRead: deltaCacheRead,
+          })
+        : undefined;
+
+      events.push({
+        event_id: `import-cdx-${eventId}`,
+        session_id: sessionId,
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        tokens_in: deltaIn,
+        tokens_out: deltaOut,
+        cache_read_tokens: deltaCacheRead,
+        model: defaultModel,
+        cost_usd: costUsd ?? undefined,
+        project,
+        client_timestamp: line.timestamp,
+        metadata: { _synthetic: true, _source: 'codex_session_jsonl' },
+        source: 'import',
+      });
+
+      eventIndex++;
+      continue;
+    }
+
+    // Skip other event types for now (response_item, etc.)
+  }
+
+  // Add session_end event
+  if (events.length > 0) {
+    const lastTimestamp = lines.length > 0
+      ? (() => { try { return (JSON.parse(lines[lines.length - 1]) as CodexLogLine).timestamp; } catch { return undefined; } })()
+      : undefined;
+
     const eventId = crypto
       .createHash('sha256')
-      .update(`codex:${sessionId}:${i}`)
+      .update(`codex:${sessionId}:end`)
       .digest('hex')
       .slice(0, 32);
 
-    // Build metadata with content for transcript enrichment
-    const metadataObj: Record<string, unknown> = {};
-    if (line.command) metadataObj.command = line.command;
-    if (line.cwd) metadataObj.cwd = line.cwd;
-    if (line.exitCode !== undefined) metadataObj.exit_code = line.exitCode;
-    if (line.exit_code !== undefined) metadataObj.exit_code = line.exit_code;
-    if (line.path) metadataObj.file_path = line.path;
-    if (line.diff) metadataObj.diff_preview = line.diff.slice(0, 500);
-    if (typeof line.error === 'string') metadataObj.error = line.error;
-    else if (line.error?.message) metadataObj.error = line.error.message;
-    // Capture output for transcript enrichment
-    if (line.output) metadataObj.content_preview = String(line.output).slice(0, 500);
-    if (typeof line.content === 'string') metadataObj.content_preview = line.content.slice(0, 500);
-
-    const event: NormalizedIngestEvent = {
+    events.push({
       event_id: `import-cdx-${eventId}`,
       session_id: sessionId,
       agent_type: 'codex',
-      event_type: eventType,
-      tool_name: eventType === 'tool_use' ? toolName : undefined,
-      status,
-      tokens_in: tokensIn,
-      tokens_out: tokensOut,
-      model: line.model,
-      duration_ms: durationMs,
-      client_timestamp: line.timestamp,
-      metadata: Object.keys(metadataObj).length > 0 ? metadataObj : {},
+      event_type: 'session_end',
+      status: 'success',
+      tokens_in: 0,
+      tokens_out: 0,
+      model: defaultModel,
+      project,
+      client_timestamp: lastTimestamp,
+      metadata: {
+        total_tokens_in: prevTokensIn,
+        total_tokens_out: prevTokensOut,
+        total_cache_read: prevCacheRead,
+      },
       source: 'import',
-    };
-
-    events.push(event);
+    });
   }
 
   return events;
