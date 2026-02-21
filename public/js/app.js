@@ -2,6 +2,7 @@
 (async function init() {
   EventFeed.init();
   SessionDetail.init();
+  UsageMonitor.init();
 
   // Load filter options and render filter bar
   await FilterBar.init();

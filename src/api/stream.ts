@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { broadcaster } from '../sse/emitter.js';
-import { getStats } from '../db/queries.js';
+import { getStats, getUsageMonitor } from '../db/queries.js';
 import { config } from '../config.js';
 
 export const streamRouter = Router();
@@ -13,7 +13,8 @@ export function startStatsBroadcast(): void {
   statsInterval = setInterval(() => {
     if (broadcaster.clientCount === 0) return;
     const stats = getStats();
-    broadcaster.broadcast('stats', stats as unknown as Record<string, unknown>);
+    const usage_monitor = getUsageMonitor();
+    broadcaster.broadcast('stats', { ...stats, usage_monitor } as unknown as Record<string, unknown>);
   }, config.statsIntervalMs);
 }
 

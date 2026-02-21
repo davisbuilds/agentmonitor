@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { getStats, getToolAnalytics, getCostOverTime, getCostByProject, getCostByModel } from '../db/queries.js';
+import { getStats, getToolAnalytics, getCostOverTime, getCostByProject, getCostByModel, getUsageMonitor } from '../db/queries.js';
 
 export const statsRouter = Router();
 
@@ -34,4 +34,9 @@ statsRouter.get('/cost', (req: Request, res: Response) => {
     getCostByModel(costFilters),
   ];
   res.json({ timeline, by_project: byProject, by_model: byModel });
+});
+
+// GET /api/stats/usage-monitor - Rolling window token usage
+statsRouter.get('/usage-monitor', (_req: Request, res: Response) => {
+  res.json(getUsageMonitor());
 });

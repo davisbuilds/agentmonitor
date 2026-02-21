@@ -552,6 +552,59 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   };
 }
 
+// --- Usage Monitor ---
+
+export interface AgentUsageData {
+  agent_type: string;
+  session: { used: number; limit: number; windowHours: number };
+  daily: { used: number; limit: number } | null;
+}
+
+export type UsageMonitorData = AgentUsageData[];
+
+export function getUsageMonitor(): UsageMonitorData {
+  const db = getDb();
+  const monitorConfig = config.usageMonitor;
+
+  // Get all agent types that have events
+  const agentTypes = (db.prepare(
+    'SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL'
+  ).all() as { agent_type: string }[]).map(r => r.agent_type);
+
+  const results: UsageMonitorData = [];
+
+  for (const agentType of agentTypes) {
+    const agentConfig = monitorConfig[agentType] || monitorConfig._default;
+
+    // Skip agents with no limits configured
+    if (agentConfig.sessionTokenLimit === 0 && agentConfig.dailyTokenLimit === 0) continue;
+
+    const sessionRow = db.prepare(`
+      SELECT COALESCE(SUM(tokens_in + tokens_out), 0) as used
+      FROM events
+      WHERE agent_type = ? AND created_at >= datetime('now', ? || ' hours')
+    `).get(agentType, `-${agentConfig.sessionWindowHours}`) as { used: number };
+
+    let daily: AgentUsageData['daily'] = null;
+    if (agentConfig.dailyTokenLimit > 0) {
+      const dailyRow = db.prepare(`
+        SELECT COALESCE(SUM(tokens_in + tokens_out), 0) as used
+        FROM events
+        WHERE agent_type = ? AND created_at >= datetime('now', '-24 hours')
+      `).get(agentType) as { used: number };
+      daily = { used: dailyRow.used, limit: agentConfig.dailyTokenLimit };
+    }
+
+    results.push({
+      agent_type: agentType,
+      session: { used: sessionRow.used, limit: agentConfig.sessionTokenLimit, windowHours: agentConfig.sessionWindowHours },
+      daily,
+    });
+  }
+
+  return results;
+}
+
 // --- Filter Options ---
 
 export interface FilterOptions {

@@ -53,6 +53,9 @@ const SSEClient = {
         break;
       case 'stats':
         StatsBar.update(msg.payload);
+        if (msg.payload.usage_monitor) {
+          UsageMonitor.update(msg.payload.usage_monitor);
+        }
         break;
       case 'session_update':
         AgentCards.handleSessionUpdate(msg.payload);

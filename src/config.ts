@@ -16,4 +16,42 @@ export const config = {
   maxSseClients: parseEnvInt(process.env.AGENTSTATS_MAX_SSE_CLIENTS, 50, 1),
   sseHeartbeatMs: parseEnvInt(process.env.AGENTSTATS_SSE_HEARTBEAT_MS, 30000, 1000),
   autoImportIntervalMinutes: parseEnvInt(process.env.AGENTSTATS_AUTO_IMPORT_MINUTES, 10, 0),
+  // Usage monitor: per-agent-type limits (env vars use agent type in uppercase)
+  // e.g. AGENTSTATS_SESSION_WINDOW_HOURS_CLAUDE_CODE=5, AGENTSTATS_SESSION_TOKEN_LIMIT_CODEX=50000
+  usageMonitor: parseUsageMonitorConfig(),
 };
+
+interface AgentUsageConfig {
+  sessionWindowHours: number;
+  sessionTokenLimit: number;
+  dailyTokenLimit: number;
+}
+
+function parseUsageMonitorConfig(): Record<string, AgentUsageConfig> {
+  const defaultWindowHours = parseEnvInt(process.env.AGENTSTATS_SESSION_WINDOW_HOURS, 5, 1);
+  const defaultSessionLimit = parseEnvInt(process.env.AGENTSTATS_SESSION_TOKEN_LIMIT, 44000, 0);
+  const defaultDailyLimit = parseEnvInt(process.env.AGENTSTATS_DAILY_TOKEN_LIMIT, 0, 0);
+
+  const defaults: AgentUsageConfig = {
+    sessionWindowHours: defaultWindowHours,
+    sessionTokenLimit: defaultSessionLimit,
+    dailyTokenLimit: defaultDailyLimit,
+  };
+
+  // Known agent types with sensible defaults
+  const agents: Record<string, AgentUsageConfig> = {
+    claude_code: {
+      sessionWindowHours: parseEnvInt(process.env.AGENTSTATS_SESSION_WINDOW_HOURS_CLAUDE_CODE, defaults.sessionWindowHours, 1),
+      sessionTokenLimit: parseEnvInt(process.env.AGENTSTATS_SESSION_TOKEN_LIMIT_CLAUDE_CODE, defaults.sessionTokenLimit, 0),
+      dailyTokenLimit: parseEnvInt(process.env.AGENTSTATS_DAILY_TOKEN_LIMIT_CLAUDE_CODE, defaults.dailyTokenLimit, 0),
+    },
+    codex: {
+      sessionWindowHours: parseEnvInt(process.env.AGENTSTATS_SESSION_WINDOW_HOURS_CODEX, defaults.sessionWindowHours, 1),
+      sessionTokenLimit: parseEnvInt(process.env.AGENTSTATS_SESSION_TOKEN_LIMIT_CODEX, defaults.sessionTokenLimit, 0),
+      dailyTokenLimit: parseEnvInt(process.env.AGENTSTATS_DAILY_TOKEN_LIMIT_CODEX, defaults.dailyTokenLimit, 0),
+    },
+    _default: defaults,
+  };
+
+  return agents;
+}
