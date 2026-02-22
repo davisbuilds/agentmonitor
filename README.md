@@ -174,7 +174,13 @@ Example event:
 }
 ```
 
-## Repo Notes
+## Documentation
 
-- Agent-focused workflow instructions live in `AGENTS.md`.
-- `CLAUDE.md` is a symlink to `AGENTS.md`.
+- Contributor workflow and PR expectations: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Agent implementation guidance: [AGENTS.md](AGENTS.md)
+- Architecture and code organization: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Feature and API reference: [docs/FEATURES.md](docs/FEATURES.md)
+- Runtime operations (env, scripts, hooks): [docs/OPERATIONS.md](docs/OPERATIONS.md)
+- Product roadmap snapshot: [docs/ROADMAP.md](docs/ROADMAP.md)
+- Event contract specification: [docs/event-contract.md](docs/event-contract.md)
+- Git history and branch policy: [docs/GIT_HISTORY_POLICY.md](docs/GIT_HISTORY_POLICY.md)

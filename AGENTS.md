@@ -14,16 +14,16 @@ Guidance for coding agents working in this repository.
 
 - Install: `pnpm install`
 - Dev server: `pnpm dev`
-- CSS one-off build: `pnpm run css:build`
-- CSS watch mode: `pnpm run css:watch`
-- Production build: `pnpm run build`
+- CSS one-off build: `pnpm css:build`
+- CSS watch mode: `pnpm css:watch`
+- Production build: `pnpm build`
 - Production start: `pnpm start`
-- Import historical logs: `pnpm run import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
-- Seed local demo data (server must be running): `pnpm run seed`
+- Import historical logs: `pnpm import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
+- Seed local demo data (server must be running): `pnpm seed`
 
 For UI work in dev, use two terminals:
 - Terminal 1: `pnpm dev`
-- Terminal 2: `pnpm run css:watch`
+- Terminal 2: `pnpm css:watch`
 
 ## Code Map
 
@@ -56,7 +56,7 @@ For UI work in dev, use two terminals:
 - SSE event names used by clients: `event`, `stats`, `session_update`.
 - Session timeout: 5 min idle → `idle`, 10 min idle → auto `ended`.
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
-- Codex OTEL logs carry no token/cost data; use `pnpm run import --source codex` for cost backfill.
+- Codex OTEL logs carry no token/cost data; use `pnpm import --source codex` for cost backfill.
 
 ## Implementation Guardrails
 
@@ -68,6 +68,6 @@ For UI work in dev, use two terminals:
 ## Validation Checklist
 
 When code behavior changes, run:
-- `pnpm run build`
-- `pnpm run css:build` (if frontend styles touched)
+- `pnpm build`
+- `pnpm css:build` (if frontend styles touched)
 - Manual sanity check: `GET /api/health`
