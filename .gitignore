@@ -36,3 +36,6 @@ __pycache__/
 .vscode/
 *.swp
 *.swo
+
+# docs
+**/archive/
