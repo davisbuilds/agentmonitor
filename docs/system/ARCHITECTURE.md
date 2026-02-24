@@ -59,7 +59,7 @@ SQLite via `better-sqlite3` with WAL mode.
 
 ## Event Contract
 
-Defined in `src/contracts/event-contract.ts` and documented in `docs/event-contract.md`:
+Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-contract.md`:
 
 - Required fields: `session_id`, `agent_type`, `event_type`.
 - Optional `event_id` for deduplication (unique constraint).

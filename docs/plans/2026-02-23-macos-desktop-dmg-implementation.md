@@ -55,7 +55,7 @@ Create a decision record that locks scope, architecture, and migration boundarie
 **Files**
 
 - Create: `docs/plans/adr/2026-02-23-desktop-architecture.md`
-- Modify: `docs/ARCHITECTURE.md`
+- Modify: `docs/system/ARCHITECTURE.md`
 - Modify: `docs/plans/2026-02-23-macos-desktop-dmg-implementation.md`
 
 **Dependencies**
@@ -71,7 +71,7 @@ None
 
 **Verification**
 
-- Run: `rg -n "Electron-first|Tauri|Rust rewrite|non-goal" docs/plans/adr/2026-02-23-desktop-architecture.md docs/ARCHITECTURE.md`
+- Run: `rg -n "Electron-first|Tauri|Rust rewrite|non-goal" docs/plans/adr/2026-02-23-desktop-architecture.md docs/system/ARCHITECTURE.md`
 - Expect: matches for architecture choice, alternatives, and constraints.
 
 **Done When**
@@ -199,7 +199,7 @@ Apply secure BrowserWindow defaults and explicit navigation controls.
 - Modify: `desktop/main.ts`
 - Create: `desktop/security.ts`
 - Test: `tests/desktop/security-config.test.ts`
-- Modify: `docs/ARCHITECTURE.md`
+- Modify: `docs/system/ARCHITECTURE.md`
 
 **Dependencies**
 
@@ -308,7 +308,7 @@ Automate signed and notarized artifact generation in CI with clear failure signa
 
 - Create: `.github/workflows/release-desktop-macos.yml`
 - Create: `scripts/release/notarize-verify.sh`
-- Modify: `docs/OPERATIONS.md`
+- Modify: `docs/system/OPERATIONS.md`
 - Modify: `README.md`
 - Test: `tests/release/notarize-script.test.ts`
 
@@ -384,7 +384,7 @@ Guarantee existing users can migrate to desktop data paths without losing histor
 - Create: `src/runtime/migration.ts`
 - Modify: `src/runtime/service.ts`
 - Test: `tests/runtime/data-migration.test.ts`
-- Modify: `docs/OPERATIONS.md`
+- Modify: `docs/system/OPERATIONS.md`
 
 **Dependencies**
 
@@ -420,8 +420,8 @@ Create a deterministic release checklist and operator documentation for desktop 
 
 - Create: `docs/release/macos-desktop-checklist.md`
 - Modify: `README.md`
-- Modify: `docs/OPERATIONS.md`
-- Modify: `docs/ARCHITECTURE.md`
+- Modify: `docs/system/OPERATIONS.md`
+- Modify: `docs/system/ARCHITECTURE.md`
 
 **Dependencies**
 
@@ -437,7 +437,7 @@ Create a deterministic release checklist and operator documentation for desktop 
 
 **Verification**
 
-- Run: `rg -n "desktop:dev|desktop:dist|notarization|Gatekeeper|migration" README.md docs/OPERATIONS.md docs/release/macos-desktop-checklist.md docs/ARCHITECTURE.md`
+- Run: `rg -n "desktop:dev|desktop:dist|notarization|Gatekeeper|migration" README.md docs/system/OPERATIONS.md docs/release/macos-desktop-checklist.md docs/system/ARCHITECTURE.md`
 - Expect: docs contain required desktop and release procedures.
 
 **Done When**

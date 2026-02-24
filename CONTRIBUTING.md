@@ -51,6 +51,6 @@ git branch --merged main | grep -v ' main$' | xargs -n 1 git branch -d
 
 ## Related Docs
 
-- Git history and branch hygiene config: `docs/GIT_HISTORY_POLICY.md`
+- Git history and branch hygiene config: `docs/project/GIT_HISTORY_POLICY.md`
 - Agent implementation guidance: `AGENTS.md`
 - Project onboarding: `README.md`

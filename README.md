@@ -140,7 +140,7 @@ See `hooks/codex/README.md` for details.
 
 Required fields for ingest payloads: `session_id`, `agent_type`, `event_type`.
 
-Canonical event contract: `docs/event-contract.md`.
+Canonical event contract: `docs/api/event-contract.md`.
 
 Batch ingest response includes:
 - `received`
@@ -179,10 +179,10 @@ Example event:
 
 - Contributor workflow and PR expectations: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Agent implementation guidance: [AGENTS.md](AGENTS.md)
-- Architecture and code organization: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Architecture and code organization: [docs/system/ARCHITECTURE.md](docs/system/ARCHITECTURE.md)
 - Architecture decisions: [docs/plans/adr/2026-02-24-rust-backend-spike-decision-record.md](docs/plans/adr/2026-02-24-rust-backend-spike-decision-record.md)
-- Feature and API reference: [docs/FEATURES.md](docs/FEATURES.md)
-- Runtime operations (env, scripts, hooks): [docs/OPERATIONS.md](docs/OPERATIONS.md)
-- Product roadmap snapshot: [docs/ROADMAP.md](docs/ROADMAP.md)
-- Event contract specification: [docs/event-contract.md](docs/event-contract.md)
-- Git history and branch policy: [docs/GIT_HISTORY_POLICY.md](docs/GIT_HISTORY_POLICY.md)
+- Feature and API reference: [docs/system/FEATURES.md](docs/system/FEATURES.md)
+- Runtime operations (env, scripts, hooks): [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
+- Product roadmap snapshot: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
+- Event contract specification: [docs/api/event-contract.md](docs/api/event-contract.md)
+- Git history and branch policy: [docs/project/GIT_HISTORY_POLICY.md](docs/project/GIT_HISTORY_POLICY.md)

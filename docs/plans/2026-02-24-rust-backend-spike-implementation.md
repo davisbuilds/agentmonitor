@@ -61,7 +61,7 @@ Define explicit success/failure criteria so the spike ends with a deterministic 
 **Files**
 
 - Create: `docs/plans/adr/2026-02-24-rust-backend-spike-decision-record.md`
-- Modify: `docs/ARCHITECTURE.md`
+- Modify: `docs/system/ARCHITECTURE.md`
 - Modify: `docs/plans/2026-02-24-rust-backend-spike-implementation.md`
 
 **Dependencies**
@@ -80,7 +80,7 @@ None
 
 **Verification**
 
-- Run: `rg -n "parity|soak|throughput|go/no-go|alternatives" docs/plans/adr/2026-02-24-rust-backend-spike-decision-record.md docs/ARCHITECTURE.md`
+- Run: `rg -n "parity|soak|throughput|go/no-go|alternatives" docs/plans/adr/2026-02-24-rust-backend-spike-decision-record.md docs/system/ARCHITECTURE.md`
 - Expect: all criteria and alternatives are explicitly documented.
 
 **Done When**
@@ -349,8 +349,8 @@ Close the spike with an explicit architecture recommendation and next implementa
 **Files**
 
 - Create: `docs/plans/2026-02-24-rust-backend-spike-decision.md`
-- Modify: `docs/ROADMAP.md`
-- Modify: `docs/ARCHITECTURE.md`
+- Modify: `docs/project/ROADMAP.md`
+- Modify: `docs/system/ARCHITECTURE.md`
 
 **Dependencies**
 
