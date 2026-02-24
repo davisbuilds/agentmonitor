@@ -8,6 +8,10 @@
 4. The vanilla JS dashboard renders agent cards, event feeds, cost breakdowns, and tool analytics in real time.
 5. Historical sessions can be backfilled via the import pipeline.
 
+## Active Decision Records
+
+- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](plans/adr/2026-02-24-rust-backend-spike-decision-record.md)
+
 ## API Layer
 
 Express route handlers in `src/api/`:
@@ -82,6 +86,12 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/event-contr
 
 `src/otel/parser.ts` converts OTLP JSON payloads (logs, metrics) into normalized events for the standard ingest pipeline.
 
+## Runtime Path Resolution
+
+- `AGENTMONITOR_PROJECTS_DIR` controls the workspace root used for git branch lookups.
+- If unset, config auto-detects the AgentMonitor repo root from `process.cwd()` ancestry and uses its parent directory.
+- If no repo root is detected, config falls back to the current working directory.
+
 ## Directory Map
 
 ```text
@@ -97,5 +107,5 @@ public/                   # Dashboard HTML, JS components, CSS
 hooks/claude-code/        # Claude Code integration hooks (bash + Python)
 hooks/codex/              # Codex OTEL integration docs
 scripts/                  # Seed, import, benchmark, cost recalculation
-tests/                    # Node test runner suite (7 files)
+tests/                    # Node test runner suite (8 files)
 ```

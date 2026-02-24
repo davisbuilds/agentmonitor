@@ -39,6 +39,7 @@ All optional with sensible defaults:
 | `AGENTMONITOR_STATS_INTERVAL` | `5000` | Stats broadcast interval (ms) |
 | `AGENTMONITOR_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
+| `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
 
 Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`, `AGENTMONITOR_BENCH_BATCH_SIZE`.
 
@@ -80,7 +81,7 @@ pnpm import --dry-run               # Preview without writing
 No CI pipeline. Quality gates are manual:
 
 - `pnpm build` (TypeScript compilation).
-- `pnpm test` (7 test files covering contracts, API, hooks, import, OTEL, pricing).
+- `pnpm test` (8 test files covering contracts, API, hooks, import, OTEL, pricing, config).
 - `pnpm css:build` (if frontend styles touched).
 - `GET /api/health` sanity check.
 

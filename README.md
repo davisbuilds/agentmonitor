@@ -59,6 +59,7 @@ Environment variables (all optional):
 - `AGENTMONITOR_STATS_INTERVAL` (default: `5000`)
 - `AGENTMONITOR_MAX_SSE_CLIENTS` (default: `50`)
 - `AGENTMONITOR_SSE_HEARTBEAT_MS` (default: `30000`)
+- `AGENTMONITOR_PROJECTS_DIR` (default: auto-detected from cwd ancestry; falls back to current working directory)
 
 Seed script target override:
 
@@ -179,6 +180,7 @@ Example event:
 - Contributor workflow and PR expectations: [CONTRIBUTING.md](CONTRIBUTING.md)
 - Agent implementation guidance: [AGENTS.md](AGENTS.md)
 - Architecture and code organization: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Architecture decisions: [docs/plans/adr/2026-02-24-rust-backend-spike-decision-record.md](docs/plans/adr/2026-02-24-rust-backend-spike-decision-record.md)
 - Feature and API reference: [docs/FEATURES.md](docs/FEATURES.md)
 - Runtime operations (env, scripts, hooks): [docs/OPERATIONS.md](docs/OPERATIONS.md)
 - Product roadmap snapshot: [docs/ROADMAP.md](docs/ROADMAP.md)
