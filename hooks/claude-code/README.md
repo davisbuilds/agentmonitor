@@ -1,17 +1,17 @@
-# AgentStats: Claude Code Hook Scripts
+# AgentMonitor: Claude Code Hook Scripts
 
-Drop-in hook scripts that connect Claude Code to AgentStats. Events flow from Claude Code into the dashboard in real-time with zero custom code.
+Drop-in hook scripts that connect Claude Code to AgentMonitor. Events flow from Claude Code into the dashboard in real-time with zero custom code.
 
 ## Quick Start
 
 ```bash
-# From the agentstats project root:
+# From the agentmonitor project root:
 ./hooks/claude-code/install.sh
 ```
 
 This registers hooks in `~/.claude/settings.json` that fire on:
 
-| Claude Code Event | AgentStats Event | Mode |
+| Claude Code Event | AgentMonitor Event | Mode |
 |---|---|---|
 | `SessionStart` | `session_start` | async (non-blocking) |
 | `Stop` | `session_end` | async |
@@ -19,7 +19,7 @@ This registers hooks in `~/.claude/settings.json` that fire on:
 | `PreToolUse` (Bash only) | safety check | sync (can block destructive commands) |
 | `UserPromptSubmit` | `user_prompt` | async (non-blocking) |
 
-Start AgentStats (`pnpm dev`), then use Claude Code as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
+Start AgentMonitor (`pnpm dev`), then use Claude Code as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
 
 ## Options
 
@@ -27,7 +27,7 @@ Start AgentStats (`pnpm dev`), then use Claude Code as normal. Events appear in 
 # Use Python scripts instead of shell
 ./hooks/claude-code/install.sh --python
 
-# Custom AgentStats URL
+# Custom AgentMonitor URL
 ./hooks/claude-code/install.sh --url http://localhost:9000
 
 # Remove hooks
@@ -39,7 +39,7 @@ Start AgentStats (`pnpm dev`), then use Claude Code as normal. Events appear in 
 ```
 Claude Code fires hook
   -> pipes JSON to stdin (session_id, tool_name, tool_input, cwd)
-  -> hook script reads stdin, maps fields to AgentStats contract
+  -> hook script reads stdin, maps fields to AgentMonitor contract
   -> curl POST to localhost:3141/api/events (fire-and-forget)
   -> event appears in dashboard via SSE
 ```
@@ -56,7 +56,7 @@ The `pre_tool_use` script includes optional safety checks:
 Safety checks are enabled by default. To disable:
 
 ```bash
-export AGENTSTATS_SAFETY=0
+export AGENTMONITOR_SAFETY=0
 ```
 
 ## Scripts
@@ -98,7 +98,7 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/agentstats/hooks/claude-code/session_start.sh",
+            "command": "/path/to/agentmonitor/hooks/claude-code/session_start.sh",
             "timeout": 10,
             "async": true
           }
@@ -110,7 +110,7 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/agentstats/hooks/claude-code/session_end.sh",
+            "command": "/path/to/agentmonitor/hooks/claude-code/session_end.sh",
             "timeout": 10,
             "async": true
           }
@@ -123,7 +123,7 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/agentstats/hooks/claude-code/post_tool_use.sh",
+            "command": "/path/to/agentmonitor/hooks/claude-code/post_tool_use.sh",
             "timeout": 10,
             "async": true
           }
@@ -136,10 +136,10 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/agentstats/hooks/claude-code/pre_tool_use.sh",
+            "command": "/path/to/agentmonitor/hooks/claude-code/pre_tool_use.sh",
             "timeout": 10,
             "async": false,
-            "statusMessage": "AgentStats: checking safety..."
+            "statusMessage": "AgentMonitor: checking safety..."
           }
         ]
       }
@@ -148,11 +148,11 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
 }
 ```
 
-Replace `/path/to/agentstats` with the actual path to your AgentStats checkout.
+Replace `/path/to/agentmonitor` with the actual path to your AgentMonitor checkout.
 
 ## Alternative: OpenTelemetry Mode
 
-Instead of hook scripts, you can use Claude Code's native OTel export. This sends telemetry directly to AgentStats without any hook configuration.
+Instead of hook scripts, you can use Claude Code's native OTel export. This sends telemetry directly to AgentMonitor without any hook configuration.
 
 Set these environment variables before launching Claude Code:
 
@@ -167,7 +167,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3141/api/otel
 Or add them to your shell profile (`~/.bashrc`, `~/.zshrc`):
 
 ```bash
-# AgentStats OTel integration
+# AgentMonitor OTel integration
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export OTEL_METRICS_EXPORTER=otlp
 export OTEL_LOGS_EXPORTER=otlp
@@ -183,10 +183,10 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3141/api/otel
 
 | Variable | Default | Description |
 |---|---|---|
-| `AGENTSTATS_URL` | `http://127.0.0.1:3141` | AgentStats server URL |
-| `AGENTSTATS_SAFETY` | `1` | Set to `0` to disable safety checks |
+| `AGENTMONITOR_URL` | `http://127.0.0.1:3141` | AgentMonitor server URL |
+| `AGENTMONITOR_SAFETY` | `1` | Set to `0` to disable safety checks |
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | (unset) | Set to `1` to enable OTel export |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset) | AgentStats OTLP endpoint base URL |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset) | AgentMonitor OTLP endpoint base URL |
 
 ## Requirements
 

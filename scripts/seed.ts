@@ -1,5 +1,5 @@
 // Seed script - generate realistic multi-agent events for development/demo
-const BASE_URL = process.env.AGENTSTATS_URL || 'http://127.0.0.1:3141';
+const BASE_URL = process.env.AGENTMONITOR_URL || 'http://127.0.0.1:3141';
 
 interface EventPayload {
   session_id: string;
@@ -186,7 +186,7 @@ async function seedSession(session: typeof sessions[0], delayBetweenEvents: numb
 }
 
 async function main() {
-  console.log(`Seeding AgentStats at ${BASE_URL}...\n`);
+  console.log(`Seeding AgentMonitor at ${BASE_URL}...\n`);
 
   // Check server health
   try {
@@ -194,7 +194,7 @@ async function main() {
     if (!health.ok) throw new Error(`Health check failed: ${health.status}`);
     console.log('Server is healthy.\n');
   } catch {
-    console.error(`Cannot connect to AgentStats at ${BASE_URL}. Is the server running?`);
+    console.error(`Cannot connect to AgentMonitor at ${BASE_URL}. Is the server running?`);
     process.exit(1);
   }
 

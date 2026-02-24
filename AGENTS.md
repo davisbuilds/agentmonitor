@@ -4,7 +4,7 @@ Guidance for coding agents working in this repository.
 
 ## Project Snapshot
 
-- App: `agentstats` real-time localhost dashboard for AI agent activity.
+- App: `agentmonitor` real-time localhost dashboard for AI agent activity.
 - Backend: Node.js + TypeScript + Express + SQLite (`better-sqlite3`).
 - Frontend: static HTML + vanilla JS + Tailwind-generated CSS.
 - Transport: HTTP ingestion + Server-Sent Events (SSE) for live updates.
@@ -50,7 +50,7 @@ For UI work in dev, use two terminals:
   - `POST /api/events/batch`
 - Required event fields: `session_id`, `agent_type`, `event_type`.
 - Optional `event_id` is used for deduplication (unique constraint).
-- `metadata` payload is capped by `AGENTSTATS_MAX_PAYLOAD_KB`.
+- `metadata` payload is capped by `AGENTMONITOR_MAX_PAYLOAD_KB`.
 - OTEL endpoints: `POST /api/otel/v1/logs`, `POST /api/otel/v1/metrics` (JSON only, no protobuf).
 - SSE endpoint: `GET /api/stream`.
 - SSE event names used by clients: `event`, `stats`, `session_update`.

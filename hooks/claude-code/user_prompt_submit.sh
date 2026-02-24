@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# user_prompt_submit.sh - Claude Code UserPromptSubmit hook -> AgentStats user_prompt event
+# user_prompt_submit.sh - Claude Code UserPromptSubmit hook -> AgentMonitor user_prompt event
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/send_event.sh"

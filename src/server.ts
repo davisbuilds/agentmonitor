@@ -13,7 +13,7 @@ const app = createApp();
 
 // Start server
 const server = app.listen(config.port, config.host, () => {
-  console.log(`AgentStats listening on http://${config.host}:${config.port}`);
+  console.log(`AgentMonitor listening on http://${config.host}:${config.port}`);
   console.log(`Dashboard: http://localhost:${config.port}`);
 });
 
@@ -55,7 +55,7 @@ if (config.autoImportIntervalMinutes > 0) {
 
 // Graceful shutdown
 function shutdown() {
-  console.log('\nShutting down AgentStats...');
+  console.log('\nShutting down AgentMonitor...');
   clearInterval(sessionChecker);
   if (autoImportTimer) clearInterval(autoImportTimer);
   server.close(() => {

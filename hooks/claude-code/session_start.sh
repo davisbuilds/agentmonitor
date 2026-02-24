@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# session_start.sh - Claude Code SessionStart hook -> AgentStats session_start event
+# session_start.sh - Claude Code SessionStart hook -> AgentMonitor session_start event
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/send_event.sh"

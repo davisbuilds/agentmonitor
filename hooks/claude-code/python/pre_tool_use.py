@@ -6,7 +6,7 @@ Safety behavior:
   - Logs security events for sensitive file access (.env, .pem, credentials)
   - Exit 0 = allow, Exit 2 = block
 
-Set AGENTSTATS_SAFETY=0 to disable safety checks (telemetry-only mode).
+Set AGENTMONITOR_SAFETY=0 to disable safety checks (telemetry-only mode).
 """
 
 import os
@@ -24,7 +24,7 @@ PROJECT = get_project()
 COMMAND = extract_nested("tool_input.command")
 FILE_PATH = extract_nested("tool_input.file_path")
 
-SAFETY_ENABLED = os.environ.get("AGENTSTATS_SAFETY", "1") == "1"
+SAFETY_ENABLED = os.environ.get("AGENTMONITOR_SAFETY", "1") == "1"
 
 # --- Safety checks (only for Bash commands) ---
 if SAFETY_ENABLED and TOOL_NAME == "Bash" and COMMAND:
@@ -47,7 +47,7 @@ if SAFETY_ENABLED and TOOL_NAME == "Bash" and COMMAND:
                 "command": COMMAND,
             },
         })
-        print(f"AgentStats: Blocked destructive command: {COMMAND}", file=sys.stderr)
+        print(f"AgentMonitor: Blocked destructive command: {COMMAND}", file=sys.stderr)
         sys.exit(2)
 
 # --- Security warnings (log but don't block) ---

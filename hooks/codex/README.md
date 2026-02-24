@@ -1,6 +1,6 @@
-# AgentStats: Codex CLI Integration
+# AgentMonitor: Codex CLI Integration
 
-Codex CLI integrates with AgentStats via its native OpenTelemetry (OTLP) export. Events, token usage, and cost data flow directly into the AgentStats dashboard.
+Codex CLI integrates with AgentMonitor via its native OpenTelemetry (OTLP) export. Events, token usage, and cost data flow directly into the AgentMonitor dashboard.
 
 ## Setup
 
@@ -19,11 +19,11 @@ endpoint = "http://localhost:3141/api/otel/v1/metrics"
 protocol = "json"
 ```
 
-Start AgentStats (`pnpm dev`), then use Codex as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
+Start AgentMonitor (`pnpm dev`), then use Codex as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
 
 ## What Gets Captured
 
-| Codex Activity | AgentStats Event |
+| Codex Activity | AgentMonitor Event |
 |---|---|
 | API request to model | `llm_request` |
 | API response | `llm_response` |
@@ -51,7 +51,7 @@ curl http://localhost:3141/api/events?agent_type=codex&source=otel
 ## Notes
 
 - Only JSON OTLP format is supported. Set `protocol = "json"` in the config.
-- Codex uses the service name `codex_cli_rs` in its OTLP exports, which AgentStats maps to `agent_type=codex`.
+- Codex uses the service name `codex_cli_rs` in its OTLP exports, which AgentMonitor maps to `agent_type=codex`.
 - Token usage and cost metrics are captured when Codex exports them via OTLP metrics.
 
 ## Alternative: Seed Script

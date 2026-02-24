@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# notification.sh - Claude Code Notification hook -> AgentStats response event
+# notification.sh - Claude Code Notification hook -> AgentMonitor response event
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/send_event.sh"

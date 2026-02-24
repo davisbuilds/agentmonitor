@@ -6,11 +6,11 @@ status: draft
 source: conversation
 ---
 
-# AgentStats macOS Desktop + DMG Implementation Plan
+# AgentMonitor macOS Desktop + DMG Implementation Plan
 
 ## Goal
 
-Ship AgentStats as a polished macOS desktop app with signed and notarized DMG distribution while preserving existing local-first ingest, SQLite persistence, and real-time dashboard behavior.
+Ship AgentMonitor as a polished macOS desktop app with signed and notarized DMG distribution while preserving existing local-first ingest, SQLite persistence, and real-time dashboard behavior.
 
 ## Scope
 
@@ -98,7 +98,7 @@ Refactor startup side effects in `src/server.ts` into a reusable lifecycle modul
 
 **Implementation Steps**
 
-1. Create `startAgentStatsService()` and `stopAgentStatsService()` APIs in `src/runtime/service.ts`.
+1. Create `startAgentMonitorService()` and `stopAgentMonitorService()` APIs in `src/runtime/service.ts`.
 2. Move timers, auto-import scheduling, and shutdown cleanup into lifecycle-managed code.
 3. Keep `src/server.ts` as CLI entrypoint delegating to runtime service.
 4. Add lifecycle tests for start, stop, and repeated start-stop cycles.
@@ -270,7 +270,7 @@ Produce installable macOS artifacts with configurable DMG presentation and relea
 
 - Create: `electron-builder.yml`
 - Modify: `package.json`
-- Create: `build/icons/agentstats.icns`
+- Create: `build/icons/agentmonitor.icns`
 - Create: `build/dmg-background.png`
 - Test: `tests/desktop/package-config.test.ts`
 
@@ -327,7 +327,7 @@ Automate signed and notarized artifact generation in CI with clear failure signa
 
 - Run: `pnpm run test -- tests/release/notarize-script.test.ts`
 - Expect: script validation tests pass.
-- Run: `AGENTSTATS_FAKE_NOTARIZE=1 bash scripts/release/notarize-verify.sh`
+- Run: `AGENTMONITOR_FAKE_NOTARIZE=1 bash scripts/release/notarize-verify.sh`
 - Expect: dry-run path succeeds through preflight checks.
 
 **Done When**

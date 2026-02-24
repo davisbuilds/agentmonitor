@@ -78,46 +78,46 @@ function parseArgMap(): Map<string, string> {
 
 function getOptions(): Options {
   const args = parseArgMap();
-  const mode = parseMode(args.get('mode') ?? process.env.AGENTSTATS_BENCH_MODE);
+  const mode = parseMode(args.get('mode') ?? process.env.AGENTMONITOR_BENCH_MODE);
   const totalEvents = parseInteger(
-    args.get('events') ?? process.env.AGENTSTATS_BENCH_EVENTS,
+    args.get('events') ?? process.env.AGENTMONITOR_BENCH_EVENTS,
     10000,
     1
   );
   const warmupEvents = parseInteger(
-    args.get('warmup') ?? process.env.AGENTSTATS_BENCH_WARMUP_EVENTS,
+    args.get('warmup') ?? process.env.AGENTMONITOR_BENCH_WARMUP_EVENTS,
     250,
     0
   );
   const concurrency = parseInteger(
-    args.get('concurrency') ?? process.env.AGENTSTATS_BENCH_CONCURRENCY,
+    args.get('concurrency') ?? process.env.AGENTMONITOR_BENCH_CONCURRENCY,
     20,
     1
   );
   const configuredBatch = parseInteger(
-    args.get('batch-size') ?? process.env.AGENTSTATS_BENCH_BATCH_SIZE,
+    args.get('batch-size') ?? process.env.AGENTMONITOR_BENCH_BATCH_SIZE,
     25,
     1
   );
   const batchSize = mode === 'single' ? 1 : configuredBatch;
   const sessionCardinality = parseInteger(
-    args.get('sessions') ?? process.env.AGENTSTATS_BENCH_SESSION_CARDINALITY,
+    args.get('sessions') ?? process.env.AGENTMONITOR_BENCH_SESSION_CARDINALITY,
     100,
     1
   );
   const timeoutMs = parseInteger(
-    args.get('timeout-ms') ?? process.env.AGENTSTATS_BENCH_TIMEOUT_MS,
+    args.get('timeout-ms') ?? process.env.AGENTMONITOR_BENCH_TIMEOUT_MS,
     15000,
     100
   );
   const duplicateRateRaw = parseNumber(
-    args.get('duplicate-rate') ?? process.env.AGENTSTATS_BENCH_DUPLICATE_RATE,
+    args.get('duplicate-rate') ?? process.env.AGENTMONITOR_BENCH_DUPLICATE_RATE,
     0
   );
   const duplicateRate = Math.max(0, Math.min(duplicateRateRaw, 0.95));
 
   return {
-    baseUrl: (args.get('url') ?? process.env.AGENTSTATS_BENCH_URL ?? 'http://127.0.0.1:3141').replace(/\/$/, ''),
+    baseUrl: (args.get('url') ?? process.env.AGENTMONITOR_BENCH_URL ?? 'http://127.0.0.1:3141').replace(/\/$/, ''),
     mode,
     totalEvents,
     warmupEvents,
@@ -126,11 +126,11 @@ function getOptions(): Options {
     sessionCardinality,
     duplicateRate,
     timeoutMs,
-    agentType: args.get('agent-type') ?? process.env.AGENTSTATS_BENCH_AGENT_TYPE ?? 'benchmark_agent',
-    eventType: args.get('event-type') ?? process.env.AGENTSTATS_BENCH_EVENT_TYPE ?? 'tool_use',
-    toolName: args.get('tool-name') ?? process.env.AGENTSTATS_BENCH_TOOL_NAME ?? 'benchmark',
-    project: args.get('project') ?? process.env.AGENTSTATS_BENCH_PROJECT ?? 'bench-project',
-    branch: args.get('branch') ?? process.env.AGENTSTATS_BENCH_BRANCH ?? 'bench/main',
+    agentType: args.get('agent-type') ?? process.env.AGENTMONITOR_BENCH_AGENT_TYPE ?? 'benchmark_agent',
+    eventType: args.get('event-type') ?? process.env.AGENTMONITOR_BENCH_EVENT_TYPE ?? 'tool_use',
+    toolName: args.get('tool-name') ?? process.env.AGENTMONITOR_BENCH_TOOL_NAME ?? 'benchmark',
+    project: args.get('project') ?? process.env.AGENTMONITOR_BENCH_PROJECT ?? 'bench-project',
+    branch: args.get('branch') ?? process.env.AGENTMONITOR_BENCH_BRANCH ?? 'bench/main',
   };
 }
 
@@ -181,7 +181,7 @@ async function ensureServerAvailable(baseUrl: string, timeoutMs: number): Promis
       throw new Error(`health check returned ${res.status}`);
     }
   } catch (cause) {
-    throw new Error(`Cannot reach ${baseUrl}. Ensure AgentStats is running.`, { cause });
+    throw new Error(`Cannot reach ${baseUrl}. Ensure AgentMonitor is running.`, { cause });
   } finally {
     clearTimeout(timeout);
   }
@@ -285,7 +285,7 @@ async function runStage(
 }
 
 function printConfig(options: Options): void {
-  console.log('AgentStats Ingest Benchmark');
+  console.log('AgentMonitor Ingest Benchmark');
   console.log('--------------------------');
   console.log(`Target URL:      ${options.baseUrl}`);
   console.log(`Mode:            ${options.mode}`);

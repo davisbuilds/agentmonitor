@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""post_tool_use.py - Claude Code PostToolUse hook -> AgentStats tool_use event."""
+"""post_tool_use.py - Claude Code PostToolUse hook -> AgentMonitor tool_use event."""
 
 import sys
 import os

@@ -1,4 +1,4 @@
-# AgentStats
+# AgentMonitor
 
 Real-time localhost dashboard for monitoring AI agent activity across sessions, tools, and projects.
 
@@ -50,31 +50,31 @@ Open `http://127.0.0.1:3141`.
 
 Environment variables (all optional):
 
-- `AGENTSTATS_PORT` (default: `3141`)
-- `AGENTSTATS_HOST` (default: `127.0.0.1`)
-- `AGENTSTATS_DB_PATH` (default: `./data/agentstats.db`)
-- `AGENTSTATS_MAX_PAYLOAD_KB` (default: `10`)
-- `AGENTSTATS_SESSION_TIMEOUT` (default: `5`)
-- `AGENTSTATS_MAX_FEED` (default: `200`)
-- `AGENTSTATS_STATS_INTERVAL` (default: `5000`)
-- `AGENTSTATS_MAX_SSE_CLIENTS` (default: `50`)
-- `AGENTSTATS_SSE_HEARTBEAT_MS` (default: `30000`)
+- `AGENTMONITOR_PORT` (default: `3141`)
+- `AGENTMONITOR_HOST` (default: `127.0.0.1`)
+- `AGENTMONITOR_DB_PATH` (default: `./data/agentmonitor.db`)
+- `AGENTMONITOR_MAX_PAYLOAD_KB` (default: `10`)
+- `AGENTMONITOR_SESSION_TIMEOUT` (default: `5`)
+- `AGENTMONITOR_MAX_FEED` (default: `200`)
+- `AGENTMONITOR_STATS_INTERVAL` (default: `5000`)
+- `AGENTMONITOR_MAX_SSE_CLIENTS` (default: `50`)
+- `AGENTMONITOR_SSE_HEARTBEAT_MS` (default: `30000`)
 
 Seed script target override:
 
-- `AGENTSTATS_URL` (default: `http://127.0.0.1:3141`)
+- `AGENTMONITOR_URL` (default: `http://127.0.0.1:3141`)
 
 Benchmark script environment overrides:
 
-- `AGENTSTATS_BENCH_URL` (default: `http://127.0.0.1:3141`)
-- `AGENTSTATS_BENCH_MODE` (`batch` or `single`, default: `batch`)
-- `AGENTSTATS_BENCH_EVENTS` (default: `10000`)
-- `AGENTSTATS_BENCH_WARMUP_EVENTS` (default: `250`)
-- `AGENTSTATS_BENCH_CONCURRENCY` (default: `20`)
-- `AGENTSTATS_BENCH_BATCH_SIZE` (default: `25`, ignored in `single` mode)
-- `AGENTSTATS_BENCH_SESSION_CARDINALITY` (default: `100`)
-- `AGENTSTATS_BENCH_DUPLICATE_RATE` (default: `0`)
-- `AGENTSTATS_BENCH_TIMEOUT_MS` (default: `15000`)
+- `AGENTMONITOR_BENCH_URL` (default: `http://127.0.0.1:3141`)
+- `AGENTMONITOR_BENCH_MODE` (`batch` or `single`, default: `batch`)
+- `AGENTMONITOR_BENCH_EVENTS` (default: `10000`)
+- `AGENTMONITOR_BENCH_WARMUP_EVENTS` (default: `250`)
+- `AGENTMONITOR_BENCH_CONCURRENCY` (default: `20`)
+- `AGENTMONITOR_BENCH_BATCH_SIZE` (default: `25`, ignored in `single` mode)
+- `AGENTMONITOR_BENCH_SESSION_CARDINALITY` (default: `100`)
+- `AGENTMONITOR_BENCH_DUPLICATE_RATE` (default: `0`)
+- `AGENTMONITOR_BENCH_TIMEOUT_MS` (default: `15000`)
 
 Example benchmark command:
 

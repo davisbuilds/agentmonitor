@@ -6,7 +6,7 @@
 #   - Logs security events for sensitive file access (.env, .pem, credentials)
 #   - Exit 0 = allow, Exit 2 = block
 #
-# Set AGENTSTATS_SAFETY=0 to disable safety checks (telemetry-only mode).
+# Set AGENTMONITOR_SAFETY=0 to disable safety checks (telemetry-only mode).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/send_event.sh"
@@ -19,7 +19,7 @@ PROJECT="$(get_project)"
 COMMAND="$(extract_nested tool_input.command)"
 FILE_PATH="$(extract_nested tool_input.file_path)"
 
-SAFETY_ENABLED="${AGENTSTATS_SAFETY:-1}"
+SAFETY_ENABLED="${AGENTMONITOR_SAFETY:-1}"
 
 # --- Safety checks (only for Bash commands) ---
 if [ "$SAFETY_ENABLED" = "1" ] && [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
@@ -39,7 +39,7 @@ if [ "$SAFETY_ENABLED" = "1" ] && [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]
 }
 EOF
 )"
-    echo "AgentStats: Blocked destructive command: $COMMAND" >&2
+    echo "AgentMonitor: Blocked destructive command: $COMMAND" >&2
     exit 2
   fi
 fi

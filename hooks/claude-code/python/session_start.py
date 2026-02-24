@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""session_start.py - Claude Code SessionStart hook -> AgentStats session_start event."""
+"""session_start.py - Claude Code SessionStart hook -> AgentMonitor session_start event."""
 
 import sys
 import os

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# install.sh - Register AgentStats hooks in Claude Code settings.
+# install.sh - Register AgentMonitor hooks in Claude Code settings.
 #
 # Usage:
 #   ./install.sh                      # Install shell hooks (default)
 #   ./install.sh --python             # Install Python hooks instead
-#   ./install.sh --url http://host:port  # Custom AgentStats URL
-#   ./install.sh --uninstall          # Remove AgentStats hooks
+#   ./install.sh --url http://host:port  # Custom AgentMonitor URL
+#   ./install.sh --uninstall          # Remove AgentMonitor hooks
 #
 # This script modifies ~/.claude/settings.json. A backup is created
 # before any changes are made.
@@ -14,21 +14,21 @@ set -euo pipefail
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 USE_PYTHON=false
-AGENTSTATS_URL="http://127.0.0.1:3141"
+AGENTMONITOR_URL="http://127.0.0.1:3141"
 UNINSTALL=false
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --python)  USE_PYTHON=true; shift ;;
-    --url)     AGENTSTATS_URL="$2"; shift 2 ;;
+    --url)     AGENTMONITOR_URL="$2"; shift 2 ;;
     --uninstall) UNINSTALL=true; shift ;;
     -h|--help)
       echo "Usage: ./install.sh [--python] [--url URL] [--uninstall]"
       echo ""
       echo "  --python     Use Python hook scripts instead of shell"
-      echo "  --url URL    AgentStats server URL (default: http://127.0.0.1:3141)"
-      echo "  --uninstall  Remove AgentStats hooks from settings"
+      echo "  --url URL    AgentMonitor server URL (default: http://127.0.0.1:3141)"
+      echo "  --uninstall  Remove AgentMonitor hooks from settings"
       exit 0
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -58,19 +58,19 @@ cp "$SETTINGS_FILE" "$BACKUP"
 echo "Backed up settings to $BACKUP"
 
 if [ "$UNINSTALL" = true ]; then
-  # Remove all AgentStats hook entries (identified by agentstats marker in command path)
+  # Remove all AgentMonitor hook entries (identified by agentmonitor marker in command path)
   jq '
     if .hooks then
       .hooks |= with_entries(
         .value |= map(
-          .hooks |= map(select(.command | test("agentstats|hooks/claude-code") | not))
+          .hooks |= map(select(.command | test("agentmonitor|hooks/claude-code") | not))
         ) | map(select(.hooks | length > 0))
       ) | if .hooks == {} then del(.hooks) else . end
     else . end
   ' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
 
   echo ""
-  echo "AgentStats hooks removed from $SETTINGS_FILE"
+  echo "AgentMonitor hooks removed from $SETTINGS_FILE"
   exit 0
 fi
 
@@ -97,7 +97,7 @@ jq --arg session_start "$SESSION_START" \
    --arg post_tool "$POST_TOOL" \
    --arg pre_tool "$PRE_TOOL" \
    --arg user_prompt "$USER_PROMPT" \
-   --arg url "$AGENTSTATS_URL" \
+   --arg url "$AGENTMONITOR_URL" \
    '
   .hooks = ((.hooks // {}) * {
     "SessionStart": [
@@ -106,7 +106,7 @@ jq --arg session_start "$SESSION_START" \
         "hooks": [
           {
             "type": "command",
-            "command": ("AGENTSTATS_URL=" + $url + " " + $session_start),
+            "command": ("AGENTMONITOR_URL=" + $url + " " + $session_start),
             "timeout": 10,
             "async": true
           }
@@ -118,7 +118,7 @@ jq --arg session_start "$SESSION_START" \
         "hooks": [
           {
             "type": "command",
-            "command": ("AGENTSTATS_URL=" + $url + " " + $session_end),
+            "command": ("AGENTMONITOR_URL=" + $url + " " + $session_end),
             "timeout": 10,
             "async": true
           }
@@ -131,7 +131,7 @@ jq --arg session_start "$SESSION_START" \
         "hooks": [
           {
             "type": "command",
-            "command": ("AGENTSTATS_URL=" + $url + " " + $post_tool),
+            "command": ("AGENTMONITOR_URL=" + $url + " " + $post_tool),
             "timeout": 10,
             "async": true
           }
@@ -144,10 +144,10 @@ jq --arg session_start "$SESSION_START" \
         "hooks": [
           {
             "type": "command",
-            "command": ("AGENTSTATS_URL=" + $url + " " + $pre_tool),
+            "command": ("AGENTMONITOR_URL=" + $url + " " + $pre_tool),
             "timeout": 10,
             "async": false,
-            "statusMessage": "AgentStats: checking safety..."
+            "statusMessage": "AgentMonitor: checking safety..."
           }
         ]
       }
@@ -158,7 +158,7 @@ jq --arg session_start "$SESSION_START" \
         "hooks": [
           {
             "type": "command",
-            "command": ("AGENTSTATS_URL=" + $url + " " + $user_prompt),
+            "command": ("AGENTMONITOR_URL=" + $url + " " + $user_prompt),
             "timeout": 10,
             "async": true
           }
@@ -169,10 +169,10 @@ jq --arg session_start "$SESSION_START" \
 ' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
 
 echo ""
-echo "AgentStats hooks installed ($LANG_LABEL scripts)"
+echo "AgentMonitor hooks installed ($LANG_LABEL scripts)"
 echo ""
 echo "  Settings:     $SETTINGS_FILE"
-echo "  Server URL:   $AGENTSTATS_URL"
+echo "  Server URL:   $AGENTMONITOR_URL"
 echo "  Hooks dir:    $HOOKS_DIR"
 echo ""
 echo "  SessionStart  -> session_start event (async)"
@@ -181,5 +181,5 @@ echo "  PostToolUse   -> tool_use event (async)"
 echo "  PreToolUse    -> safety checks on Bash (sync, blocks destructive commands)"
 echo "  UserPromptSubmit -> user_prompt event (async)"
 echo ""
-echo "Start AgentStats with 'pnpm dev' then use Claude Code as normal."
-echo "Events will appear in the dashboard at $AGENTSTATS_URL"
+echo "Start AgentMonitor with 'pnpm dev' then use Claude Code as normal."
+echo "Events will appear in the dashboard at $AGENTMONITOR_URL"

@@ -49,8 +49,8 @@ SQLite via `better-sqlite3` with WAL mode.
 `src/sse/emitter.ts` manages connected clients:
 
 - Fan-out of `event`, `stats`, and `session_update` messages.
-- Configurable max client limit (`AGENTSTATS_MAX_SSE_CLIENTS`).
-- Heartbeat keep-alive (`AGENTSTATS_SSE_HEARTBEAT_MS`).
+- Configurable max client limit (`AGENTMONITOR_MAX_SSE_CLIENTS`).
+- Heartbeat keep-alive (`AGENTMONITOR_SSE_HEARTBEAT_MS`).
 - Returns `503` when max client limit is reached.
 
 ## Event Contract
@@ -59,7 +59,7 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/event-contr
 
 - Required fields: `session_id`, `agent_type`, `event_type`.
 - Optional `event_id` for deduplication (unique constraint).
-- `metadata` payload capped by `AGENTSTATS_MAX_PAYLOAD_KB` with UTF-8 safe truncation.
+- `metadata` payload capped by `AGENTMONITOR_MAX_PAYLOAD_KB` with UTF-8 safe truncation.
 - `client_timestamp` for client-supplied timing; `created_at` is server receive time.
 
 ## Pricing Engine

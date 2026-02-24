@@ -36,10 +36,10 @@ async function getEvents(params = ''): Promise<{ events: Array<Record<string, un
 }
 
 before(async () => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-otel-test-'));
-  process.env.AGENTSTATS_DB_PATH = path.join(tempDir, 'agentstats-otel-test.db');
-  process.env.AGENTSTATS_MAX_PAYLOAD_KB = '64';
-  process.env.AGENTSTATS_MAX_SSE_CLIENTS = '0';
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-otel-test-'));
+  process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor-otel-test.db');
+  process.env.AGENTMONITOR_MAX_PAYLOAD_KB = '64';
+  process.env.AGENTMONITOR_MAX_SSE_CLIENTS = '0';
 
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');

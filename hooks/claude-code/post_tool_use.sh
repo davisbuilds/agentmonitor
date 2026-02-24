@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# post_tool_use.sh - Claude Code PostToolUse hook -> AgentStats tool_use event
+# post_tool_use.sh - Claude Code PostToolUse hook -> AgentMonitor tool_use event
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/send_event.sh"

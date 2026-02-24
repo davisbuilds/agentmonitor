@@ -10,8 +10,8 @@ const PYTHON_DIR = path.join(HOOKS_DIR, 'python');
 // Set a bogus URL so curl/urllib don't actually connect
 const ENV = {
   ...process.env,
-  AGENTSTATS_URL: 'http://127.0.0.1:0',
-  AGENTSTATS_SAFETY: '1',
+  AGENTMONITOR_URL: 'http://127.0.0.1:0',
+  AGENTMONITOR_SAFETY: '1',
 };
 
 function makeSessionStartInput(): string {
@@ -189,7 +189,7 @@ describe('Shell hook scripts', () => {
     try {
       execFileSync('bash', [path.join(HOOKS_DIR, 'pre_tool_use.sh')], {
         input: makePreToolUseInput('Bash', { command: 'rm -rf /' }),
-        env: { ...ENV, AGENTSTATS_SAFETY: '0' },
+        env: { ...ENV, AGENTMONITOR_SAFETY: '0' },
         timeout: 10000,
         encoding: 'utf-8',
       });

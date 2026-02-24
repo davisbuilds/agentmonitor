@@ -30,17 +30,17 @@ All optional with sensible defaults:
 
 | Variable | Default | Used For |
 |----------|---------|----------|
-| `AGENTSTATS_PORT` | `3141` | HTTP listen port |
-| `AGENTSTATS_HOST` | `127.0.0.1` | HTTP bind address |
-| `AGENTSTATS_DB_PATH` | `./data/agentstats.db` | SQLite database path |
-| `AGENTSTATS_MAX_PAYLOAD_KB` | `10` | Max metadata payload size |
-| `AGENTSTATS_SESSION_TIMEOUT` | `5` | Minutes before session goes idle |
-| `AGENTSTATS_MAX_FEED` | `200` | Max events in feed |
-| `AGENTSTATS_STATS_INTERVAL` | `5000` | Stats broadcast interval (ms) |
-| `AGENTSTATS_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
-| `AGENTSTATS_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
+| `AGENTMONITOR_PORT` | `3141` | HTTP listen port |
+| `AGENTMONITOR_HOST` | `127.0.0.1` | HTTP bind address |
+| `AGENTMONITOR_DB_PATH` | `./data/agentmonitor.db` | SQLite database path |
+| `AGENTMONITOR_MAX_PAYLOAD_KB` | `10` | Max metadata payload size |
+| `AGENTMONITOR_SESSION_TIMEOUT` | `5` | Minutes before session goes idle |
+| `AGENTMONITOR_MAX_FEED` | `200` | Max events in feed |
+| `AGENTMONITOR_STATS_INTERVAL` | `5000` | Stats broadcast interval (ms) |
+| `AGENTMONITOR_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
+| `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 
-Benchmark overrides: `AGENTSTATS_BENCH_URL`, `AGENTSTATS_BENCH_MODE`, `AGENTSTATS_BENCH_EVENTS`, `AGENTSTATS_BENCH_CONCURRENCY`, `AGENTSTATS_BENCH_BATCH_SIZE`.
+Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`, `AGENTMONITOR_BENCH_BATCH_SIZE`.
 
 ## Hook Installation
 

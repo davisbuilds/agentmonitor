@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Import historical logs from Claude Code and Codex into AgentStats.
+ * Import historical logs from Claude Code and Codex into AgentMonitor.
  *
  * Usage:
  *   pnpm run import                          # import all sources
@@ -68,7 +68,7 @@ function parseArgs(): {
       case '--help':
       case '-h':
         console.log(`
-AgentStats Historical Import
+AgentMonitor Historical Import
 
 Usage: pnpm run import [options]
 
@@ -95,7 +95,7 @@ Options:
 
 const opts = parseArgs();
 
-console.log(`AgentStats Historical Import`);
+console.log(`AgentMonitor Historical Import`);
 console.log(`  Source:   ${opts.source}`);
 if (opts.from) console.log(`  From:     ${opts.from.toISOString()}`);
 if (opts.to) console.log(`  To:       ${opts.to.toISOString()}`);

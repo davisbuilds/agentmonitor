@@ -52,7 +52,7 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
 
 ## Payload Truncation
 
-- Metadata is capped by `AGENTSTATS_MAX_PAYLOAD_KB` (default 10KB).
+- Metadata is capped by `AGENTMONITOR_MAX_PAYLOAD_KB` (default 10KB).
 - Truncation is UTF-8 byte-safe.
 - `payload_truncated` is stored on events (`0` or `1`).
 - For large object metadata, key fields (for example `command`, `file_path`) are preserved in a compact summary.

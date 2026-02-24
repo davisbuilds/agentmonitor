@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# send_event.sh - Shared helper for POSTing events to AgentStats.
+# send_event.sh - Shared helper for POSTing events to AgentMonitor.
 # Sourced by individual hook scripts. Not executed directly.
 #
 # Usage: source send_event.sh; send_event "$json_payload"
 
-AGENTSTATS_URL="${AGENTSTATS_URL:-http://127.0.0.1:3141}"
+AGENTMONITOR_URL="${AGENTMONITOR_URL:-http://127.0.0.1:3141}"
 
 # Read all of stdin into HOOK_INPUT (call once per hook invocation)
 read_hook_input() {
@@ -63,10 +63,10 @@ json_escape() {
   fi
 }
 
-# POST an event payload to AgentStats. Fire-and-forget (backgrounded).
+# POST an event payload to AgentMonitor. Fire-and-forget (backgrounded).
 send_event() {
   local payload="$1"
-  curl -s -X POST "${AGENTSTATS_URL}/api/events" \
+  curl -s -X POST "${AGENTMONITOR_URL}/api/events" \
     -H "Content-Type: application/json" \
     -d "$payload" \
     --connect-timeout 2 \

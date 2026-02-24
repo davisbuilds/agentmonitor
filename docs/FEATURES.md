@@ -1,6 +1,6 @@
 # Features
 
-Product-surface reference for AgentStats.
+Product-surface reference for AgentMonitor.
 
 ## Real-Time Dashboard
 

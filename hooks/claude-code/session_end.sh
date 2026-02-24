@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# session_end.sh - Claude Code Stop hook -> AgentStats session_end event
+# session_end.sh - Claude Code Stop hook -> AgentMonitor session_end event
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/send_event.sh"

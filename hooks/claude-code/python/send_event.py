@@ -1,4 +1,4 @@
-"""send_event.py - Shared helper for POSTing events to AgentStats.
+"""send_event.py - Shared helper for POSTing events to AgentMonitor.
 
 Imported by individual hook scripts. Uses only stdlib (no pip dependencies).
 
@@ -13,7 +13,7 @@ import urllib.request
 from pathlib import Path
 from threading import Thread
 
-AGENTSTATS_URL = os.environ.get("AGENTSTATS_URL", "http://127.0.0.1:3141")
+AGENTMONITOR_URL = os.environ.get("AGENTMONITOR_URL", "http://127.0.0.1:3141")
 
 _hook_input: dict = {}
 
@@ -59,12 +59,12 @@ def get_project() -> str:
 
 
 def send_event(payload: dict) -> None:
-    """POST an event payload to AgentStats. Fire-and-forget (threaded)."""
+    """POST an event payload to AgentMonitor. Fire-and-forget (threaded)."""
     def _post():
         try:
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
-                f"{AGENTSTATS_URL}/api/events",
+                f"{AGENTMONITOR_URL}/api/events",
                 data=data,
                 headers={"Content-Type": "application/json"},
                 method="POST",

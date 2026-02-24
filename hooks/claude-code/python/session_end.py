@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""session_end.py - Claude Code Stop hook -> AgentStats session_end event."""
+"""session_end.py - Claude Code Stop hook -> AgentMonitor session_end event."""
 
 import sys
 import os

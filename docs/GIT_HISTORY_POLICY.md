@@ -4,7 +4,7 @@ Last updated: February 22, 2026
 
 ## Repository Merge Settings
 
-Configured on GitHub repository `davisbuilds/agentstats`:
+Configured on GitHub repository `davisbuilds/agentmonitor`:
 
 - `allow_squash_merge`: `true`
 - `allow_merge_commit`: `false`

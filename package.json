@@ -1,5 +1,5 @@
 {
-  "name": "agentstats",
+  "name": "agentmonitor",
   "version": "0.1.0",
   "description": "Real-time localhost dashboard for monitoring AI agent activity",
   "type": "module",
