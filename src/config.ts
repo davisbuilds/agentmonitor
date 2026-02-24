@@ -72,7 +72,7 @@ function parseUsageMonitorConfig(env: EnvMap): Record<string, AgentUsageConfig> 
     codex: {
       limitType: 'cost',
       sessionWindowHours: parseEnvInt(env.AGENTMONITOR_SESSION_WINDOW_HOURS_CODEX, defaultWindowHours, 1),
-      sessionLimit: parseEnvFloat(env.AGENTMONITOR_SESSION_COST_LIMIT_CODEX, 100, 0),
+      sessionLimit: parseEnvFloat(env.AGENTMONITOR_SESSION_COST_LIMIT_CODEX, 500, 0),
       extendedWindowHours: parseEnvInt(env.AGENTMONITOR_EXTENDED_WINDOW_HOURS_CODEX, 168, 1),
       extendedLimit: parseEnvFloat(env.AGENTMONITOR_EXTENDED_COST_LIMIT_CODEX, 1500, 0),
     },

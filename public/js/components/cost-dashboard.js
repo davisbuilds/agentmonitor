@@ -151,7 +151,7 @@ const CostDashboard = {
 
     for (let m = new Date(firstMon); m.getTime() <= tEnd; m.setDate(m.getDate() + 7)) {
       const frac = (m.getTime() - tStart) / tRange;
-      if (frac > 0.02 && frac < 0.98) { // skip if too close to edges
+      if (frac > 0.10 && frac < 0.90) { // skip if too close to edge labels
         mondays.push({
           x: padding.left + frac * chartW,
           text: m.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
