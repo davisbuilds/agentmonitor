@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
+import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { parsePatchMeta } from '../otel/parser.js';
 
@@ -16,24 +16,6 @@ interface CodexTokenUsage {
   total_tokens?: number;
 }
 
-interface CodexSessionMeta {
-  id: string;
-  timestamp: string;
-  cwd: string;
-  originator?: string;
-  cli_version?: string;
-  source?: string;
-  model_provider?: string;
-}
-
-interface CodexToolResult {
-  tool_name?: string;
-  call_id?: string;
-  arguments?: string;
-  duration_ms?: number;
-  success?: boolean;
-  output?: string;
-}
 
 interface CodexLogLine {
   timestamp: string;

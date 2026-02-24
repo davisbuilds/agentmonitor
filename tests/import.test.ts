@@ -15,7 +15,7 @@ describe('Claude Code log parser', () => {
   let tmpDir: string;
 
   before(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-cc-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cc-test-'));
   });
 
   after(() => {
@@ -81,7 +81,7 @@ describe('Claude Code log parser', () => {
 
     const events = parseClaudeCodeFile(filePath);
     assert.equal(events.length, 1);
-    assert.equal(events[0].event_type, 'response');
+    assert.equal(events[0].event_type, 'llm_response');
     assert.equal(events[0].tokens_in, 5000);
     assert.equal(events[0].tokens_out, 1000);
     assert.ok(events[0].cost_usd !== undefined);
@@ -205,7 +205,7 @@ describe('Claude Code log discovery', () => {
   let tmpDir: string;
 
   before(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-disc-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-disc-test-'));
     // Create mock directory structure
     fs.mkdirSync(path.join(tmpDir, 'projects', 'project-a'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'projects', 'project-b'), { recursive: true });
@@ -242,7 +242,7 @@ describe('Codex log parser', () => {
   let tmpDir: string;
 
   before(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-cdx-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cdx-test-'));
   });
 
   after(() => {
@@ -255,100 +255,126 @@ describe('Codex log parser', () => {
     return filePath;
   }
 
-  test('parses tool/execution lines as tool_use events', () => {
+  test('parses session_meta as session_start event', () => {
     const filePath = writeJsonl('codex-1.jsonl', [
       {
-        type: 'tool/execution',
-        session_id: 'cdx-1',
-        command: 'ls -la',
-        cwd: '/home/user',
-        exitCode: 0,
-        duration_ms: 150,
-        model: 'o3',
+        type: 'session_meta',
         timestamp: '2026-02-01T10:00:00Z',
+        payload: {
+          id: 'cdx-1',
+          cwd: '/home/user/project',
+          originator: 'codex-cli/1.0',
+          timestamp: '2026-02-01T10:00:00Z',
+        },
       },
     ]);
 
     const events = parseCodexFile(filePath);
-    assert.equal(events.length, 1);
-    assert.equal(events[0].event_type, 'tool_use');
-    assert.equal(events[0].tool_name, 'shell');
-    assert.equal(events[0].model, 'o3');
-    assert.equal(events[0].duration_ms, 150);
+    // session_meta → session_start + session_end
+    assert.ok(events.length >= 1);
+    assert.equal(events[0].event_type, 'session_start');
+    assert.equal(events[0].session_id, 'cdx-1');
+    assert.equal(events[0].agent_type, 'codex');
     assert.equal(events[0].status, 'success');
     assert.equal(events[0].source, 'import');
-  });
-
-  test('marks failed executions as error status', () => {
-    const filePath = writeJsonl('codex-err.jsonl', [
-      {
-        type: 'tool/execution',
-        session_id: 'cdx-err',
-        command: 'cat missing',
-        exitCode: 1,
-        timestamp: '2026-02-01T10:00:00Z',
-      },
-    ]);
-
-    const events = parseCodexFile(filePath);
-    assert.equal(events[0].status, 'error');
-  });
-
-  test('parses fileChange lines as file_change events', () => {
-    const filePath = writeJsonl('codex-fc.jsonl', [
-      {
-        type: 'fileChange',
-        session_id: 'cdx-fc',
-        path: 'src/main.ts',
-        diff: '+added line\n-removed line',
-        timestamp: '2026-02-01T10:00:00Z',
-      },
-    ]);
-
-    const events = parseCodexFile(filePath);
-    assert.equal(events.length, 1);
-    assert.equal(events[0].event_type, 'file_change');
     const meta = events[0].metadata as Record<string, unknown>;
-    assert.equal(meta.file_path, 'src/main.ts');
+    assert.equal(meta.cli_version, 'codex-cli/1.0');
+    assert.equal(meta.cwd, '/home/user/project');
   });
 
-  test('parses turn/started as session_start', () => {
-    const filePath = writeJsonl('codex-turn.jsonl', [
-      { type: 'turn/started', session_id: 'cdx-turn', timestamp: '2026-02-01T10:00:00Z' },
-    ]);
-
-    const events = parseCodexFile(filePath);
-    assert.equal(events[0].event_type, 'session_start');
-  });
-
-  test('parses turn/plan/updated as plan_step', () => {
-    const filePath = writeJsonl('codex-plan.jsonl', [
-      { type: 'turn/plan/updated', session_id: 'cdx-plan', timestamp: '2026-02-01T10:00:00Z' },
-    ]);
-
-    const events = parseCodexFile(filePath);
-    assert.equal(events[0].event_type, 'plan_step');
-  });
-
-  test('extracts token counts from line fields', () => {
+  test('parses event_msg token_count as llm_response with delta tokens', () => {
     const filePath = writeJsonl('codex-tok.jsonl', [
       {
-        type: 'turn/completed',
-        session_id: 'cdx-tok',
-        input_tokens: 2500,
-        output_tokens: 600,
+        type: 'session_meta',
         timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-tok', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T10:01:00Z',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 2500,
+              output_tokens: 600,
+              cached_input_tokens: 100,
+            },
+          },
+        },
       },
     ]);
 
     const events = parseCodexFile(filePath);
-    assert.equal(events[0].tokens_in, 2500);
-    assert.equal(events[0].tokens_out, 600);
+    const tokenEvent = events.find(e => e.event_type === 'llm_response');
+    assert.ok(tokenEvent);
+    assert.equal(tokenEvent.tokens_in, 2500);
+    assert.equal(tokenEvent.tokens_out, 600);
+    assert.equal(tokenEvent.cache_read_tokens, 100);
+  });
+
+  test('computes token deltas across multiple token_count events', () => {
+    const filePath = writeJsonl('codex-delta.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-delta', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T10:01:00Z',
+        payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 1000, output_tokens: 200 } } },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T10:02:00Z',
+        payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 3000, output_tokens: 700 } } },
+      },
+    ]);
+
+    const events = parseCodexFile(filePath);
+    const tokenEvents = events.filter(e => e.event_type === 'llm_response');
+    assert.equal(tokenEvents.length, 2);
+    // First delta: 1000, 200
+    assert.equal(tokenEvents[0].tokens_in, 1000);
+    assert.equal(tokenEvents[0].tokens_out, 200);
+    // Second delta: 2000, 500
+    assert.equal(tokenEvents[1].tokens_in, 2000);
+    assert.equal(tokenEvents[1].tokens_out, 500);
+  });
+
+  test('parses response_item apply_patch as tool_use event', () => {
+    const filePath = writeJsonl('codex-patch.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-patch', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' },
+      },
+      {
+        type: 'response_item',
+        timestamp: '2026-02-01T10:01:00Z',
+        payload: {
+          name: 'apply_patch',
+          input: '*** Update File: src/main.ts\n+added line\n-removed line',
+        },
+      },
+    ]);
+
+    const events = parseCodexFile(filePath);
+    const patchEvent = events.find(e => e.event_type === 'tool_use' && e.tool_name === 'apply_patch');
+    assert.ok(patchEvent);
+    assert.equal(patchEvent.status, 'success');
+    const meta = patchEvent.metadata as Record<string, unknown>;
+    assert.equal(meta.file_path, 'src/main.ts');
   });
 
   test('generates deterministic event_id for dedup', () => {
     const filePath = writeJsonl('codex-dedup.jsonl', [
-      { type: 'tool/execution', session_id: 'cdx-dedup', command: 'ls', timestamp: '2026-02-01T10:00:00Z' },
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-dedup', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' },
+      },
     ]);
 
     const events1 = parseCodexFile(filePath);
@@ -357,41 +383,56 @@ describe('Codex log parser', () => {
     assert.ok(events1[0].event_id?.startsWith('import-cdx-'));
   });
 
-  test('uses filename as session_id fallback', () => {
+  test('uses filename as session_id fallback when no session_meta', () => {
     const filePath = writeJsonl('codex-session-xyz.jsonl', [
-      { type: 'message', timestamp: '2026-02-01T10:00:00Z' },
-    ]);
-
-    const events = parseCodexFile(filePath);
-    assert.equal(events[0].session_id, 'codex-session-xyz');
-  });
-
-  test('converts duration seconds to ms', () => {
-    const filePath = writeJsonl('codex-dur.jsonl', [
-      { type: 'tool/execution', session_id: 's', duration: 1.5, timestamp: '2026-02-01T10:00:00Z' },
-    ]);
-
-    const events = parseCodexFile(filePath);
-    assert.equal(events[0].duration_ms, 1500);
-  });
-
-  test('includes command and cwd in metadata', () => {
-    const filePath = writeJsonl('codex-meta.jsonl', [
       {
-        type: 'tool/execution',
-        session_id: 's',
-        command: 'npm test',
-        cwd: '/home/user/project',
-        exitCode: 0,
+        type: 'event_msg',
         timestamp: '2026-02-01T10:00:00Z',
+        payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 50 } } },
       },
     ]);
 
     const events = parseCodexFile(filePath);
-    const meta = events[0].metadata as Record<string, unknown>;
-    assert.equal(meta.command, 'npm test');
-    assert.equal(meta.cwd, '/home/user/project');
-    assert.equal(meta.exit_code, 0);
+    // Should use filename since there's no session_meta
+    const tokenEvent = events.find(e => e.event_type === 'llm_response');
+    assert.ok(tokenEvent);
+    assert.equal(tokenEvent.session_id, 'codex-session-xyz');
+  });
+
+  test('adds session_end event with total token counts', () => {
+    const filePath = writeJsonl('codex-end.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-end', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T10:01:00Z',
+        payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 1000, output_tokens: 200 } } },
+      },
+    ]);
+
+    const events = parseCodexFile(filePath);
+    const endEvent = events.find(e => e.event_type === 'session_end');
+    assert.ok(endEvent);
+    assert.equal(endEvent.session_id, 'cdx-end');
+    const meta = endEvent.metadata as Record<string, unknown>;
+    assert.equal(meta.total_tokens_in, 1000);
+    assert.equal(meta.total_tokens_out, 200);
+  });
+
+  test('extracts project name from cwd', () => {
+    const filePath = writeJsonl('codex-proj.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-proj', cwd: '/home/user/my-project', timestamp: '2026-02-01T10:00:00Z' },
+      },
+    ]);
+
+    const events = parseCodexFile(filePath);
+    assert.equal(events[0].project, 'my-project');
   });
 });
 
@@ -401,7 +442,7 @@ describe('Codex log discovery', () => {
   let tmpDir: string;
 
   before(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-cdx-disc-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cdx-disc-'));
     // Create mock ~/.codex/sessions/YYYY/MM/DD/ structure
     fs.mkdirSync(path.join(tmpDir, 'sessions', '2026', '01', '15'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'sessions', '2026', '02', '01'), { recursive: true });
@@ -435,10 +476,10 @@ let getDb: (() => { exec: (sql: string) => void; prepare: (sql: string) => { all
 let closeDb: (() => void) | null = null;
 
 before(async () => {
-  tempDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-import-integ-'));
-  process.env.AGENTSTATS_DB_PATH = path.join(tempDbDir, 'agentstats-import-test.db');
-  process.env.AGENTSTATS_MAX_PAYLOAD_KB = '64';
-  process.env.AGENTSTATS_MAX_SSE_CLIENTS = '0';
+  tempDbDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-import-integ-'));
+  process.env.AGENTMONITOR_DB_PATH = path.join(tempDbDir, 'agentmonitor-import-test.db');
+  process.env.AGENTMONITOR_MAX_PAYLOAD_KB = '64';
+  process.env.AGENTMONITOR_MAX_SSE_CLIENTS = '0';
 
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');
@@ -488,8 +529,8 @@ describe('Import orchestrator integration', () => {
   let codexDir: string;
 
   before(() => {
-    claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-orch-claude-'));
-    codexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-orch-codex-'));
+    claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-claude-'));
+    codexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-codex-'));
 
     // Mock Claude Code logs
     fs.mkdirSync(path.join(claudeDir, 'projects', 'my-project'), { recursive: true });
@@ -501,13 +542,13 @@ describe('Import orchestrator integration', () => {
       ].join('\n'),
     );
 
-    // Mock Codex logs
+    // Mock Codex logs (new format: session_meta + event_msg token_count)
     fs.mkdirSync(path.join(codexDir, 'sessions', '2026', '02', '01'), { recursive: true });
     fs.writeFileSync(
       path.join(codexDir, 'sessions', '2026', '02', '01', 'session-xyz.jsonl'),
       [
-        JSON.stringify({ type: 'tool/execution', session_id: 'session-xyz', command: 'npm test', exitCode: 0, model: 'o3', timestamp: '2026-02-01T11:00:00Z' }),
-        JSON.stringify({ type: 'fileChange', session_id: 'session-xyz', path: 'src/app.ts', diff: '+line', timestamp: '2026-02-01T11:01:00Z' }),
+        JSON.stringify({ type: 'session_meta', timestamp: '2026-02-01T11:00:00Z', payload: { id: 'session-xyz', cwd: '/home/user/project', timestamp: '2026-02-01T11:00:00Z' } }),
+        JSON.stringify({ type: 'event_msg', timestamp: '2026-02-01T11:01:00Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 500, output_tokens: 100 } } } }),
       ].join('\n'),
     );
   });
@@ -547,12 +588,12 @@ describe('Import orchestrator integration', () => {
     });
 
     assert.equal(result.totalFiles, 1);
-    assert.equal(result.totalEventsImported, 2);
+    assert.equal(result.totalEventsImported, 3); // session_start + llm_response + session_end
 
     // Verify events in DB
     const eventsRes = await fetch(`${baseUrl}/api/events?limit=10&source=import`);
     const body = await eventsRes.json() as { events: Array<Record<string, unknown>>; total: number };
-    assert.equal(body.total, 2);
+    assert.equal(body.total, 3);
     assert.ok(body.events.every(e => e.agent_type === 'codex'));
   });
 
@@ -567,7 +608,7 @@ describe('Import orchestrator integration', () => {
     });
 
     assert.equal(result.totalFiles, 2);
-    assert.equal(result.totalEventsImported, 4);
+    assert.equal(result.totalEventsImported, 5); // 2 claude + 3 codex
   });
 
   test('skips unchanged files on re-import', async () => {

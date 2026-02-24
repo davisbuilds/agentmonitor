@@ -34,11 +34,11 @@ async function getHealth(): Promise<{ sse_clients: number }> {
 }
 
 before(async () => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-test-'));
-  process.env.AGENTSTATS_DB_PATH = path.join(tempDir, 'agentstats-test.db');
-  process.env.AGENTSTATS_MAX_PAYLOAD_KB = '1';
-  process.env.AGENTSTATS_MAX_SSE_CLIENTS = '1';
-  process.env.AGENTSTATS_SSE_HEARTBEAT_MS = '1000';
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-test-'));
+  process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor-test.db');
+  process.env.AGENTMONITOR_MAX_PAYLOAD_KB = '1';
+  process.env.AGENTMONITOR_MAX_SSE_CLIENTS = '1';
+  process.env.AGENTMONITOR_SSE_HEARTBEAT_MS = '1000';
 
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');
@@ -215,7 +215,7 @@ test('POST /api/events stores byte-capped metadata and payload_truncated marker'
   assert.equal(metadata.command, 'pnpm test');
 });
 
-test('session_end remains terminal when later events arrive for the same session', async () => {
+test('session_end transitions to idle, subsequent events reactivate', async () => {
   const sessionId = 'session-ended-1';
 
   await postJson(`${baseUrl}/api/events`, {
@@ -241,7 +241,8 @@ test('session_end remains terminal when later events arrive for the same session
 
   const session = body.sessions.find(item => item.id === sessionId);
   assert.ok(session);
-  assert.equal(session.status, 'ended');
+  // session_end → idle, then tool_use reactivates to active
+  assert.equal(session.status, 'active');
 });
 
 test('SSE enforces max clients and cleans up disconnected clients', async () => {

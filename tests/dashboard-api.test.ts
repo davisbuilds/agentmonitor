@@ -22,10 +22,10 @@ async function postJson(url: string, body: unknown): Promise<Response> {
 }
 
 before(async () => {
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentstats-dash-test-'));
-  process.env.AGENTSTATS_DB_PATH = path.join(tempDir, 'agentstats-dash-test.db');
-  process.env.AGENTSTATS_MAX_PAYLOAD_KB = '64';
-  process.env.AGENTSTATS_MAX_SSE_CLIENTS = '0';
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-dash-test-'));
+  process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor-dash-test.db');
+  process.env.AGENTMONITOR_MAX_PAYLOAD_KB = '64';
+  process.env.AGENTMONITOR_MAX_SSE_CLIENTS = '0';
 
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');
@@ -127,7 +127,7 @@ describe('GET /api/stats/cost', () => {
 
     const body = await res.json() as {
       by_model: Array<Record<string, unknown>>;
-      by_session: Array<Record<string, unknown>>;
+      by_project: Array<Record<string, unknown>>;
       timeline: Array<Record<string, unknown>>;
     };
 
@@ -138,9 +138,8 @@ describe('GET /api/stats/cost', () => {
     assert.ok(sonnet);
     assert.ok((sonnet.cost_usd as number) > 0);
 
-    // by_session
-    assert.ok(Array.isArray(body.by_session));
-    assert.ok(body.by_session.length >= 2); // s1 and s2
+    // by_project
+    assert.ok(Array.isArray(body.by_project));
 
     // timeline
     assert.ok(Array.isArray(body.timeline));
@@ -153,11 +152,11 @@ describe('GET /api/stats/cost', () => {
     const res = await fetch(`${baseUrl}/api/stats/cost`);
     const body = await res.json() as {
       by_model: unknown[];
-      by_session: unknown[];
+      by_project: unknown[];
       timeline: unknown[];
     };
     assert.deepEqual(body.by_model, []);
-    assert.deepEqual(body.by_session, []);
+    assert.deepEqual(body.by_project, []);
     assert.deepEqual(body.timeline, []);
   });
 

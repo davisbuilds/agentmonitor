@@ -5,6 +5,7 @@ export const EVENT_TYPES = [
   'error',
   'llm_request',
   'llm_response',
+  'response',
   'file_change',
   'git_commit',
   'plan_step',
