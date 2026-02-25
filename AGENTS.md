@@ -65,10 +65,35 @@ For UI work in dev, use two terminals:
 - If API response shape changes, update `README.md` in the same change.
 - Do not commit local runtime artifacts (`data/`, `*.db`, generated CSS output).
 
+## Rust Backend (`rust-backend/`)
+
+The Rust service reimplements core ingest and live-stream behavior (axum + tokio + rusqlite). Spike complete with GO decision — phased migration in progress.
+
+### Working Commands
+
+- Dev server: `pnpm rust:dev` (binds `127.0.0.1:3142`)
+- Release build: `pnpm rust:build`
+- Run tests: `pnpm rust:test`
+- Parity tests (TS): `pnpm test:parity:ts` (needs TS server running on 3141)
+- Parity tests (Rust): `pnpm test:parity:rust` (needs Rust server running on 3142)
+- Benchmark comparison: `pnpm bench:compare`
+
+### Rust-Specific Gotchas
+
+- **`cargo` not in PATH**: Shell sessions from Claude Code don't inherit cargo. Prefix commands with `export PATH="$HOME/.cargo/bin:$PATH"` or use the `pnpm rust:*` scripts.
+- **Lib + bin crate structure**: Integration tests can't import from a binary crate. The crate is split into `src/lib.rs` (all modules + `build_router()`) and a thin `src/main.rs`. Always add new modules to `lib.rs`.
+- **`async_stream::stream!` capture semantics**: Variables must be **referenced inside** the stream block to be captured by the macro. A `let _guard = guard;` outside the block will drop immediately when the enclosing function returns, even if the stream is still alive. Move it inside.
+- **ManuallyDrop for types with Drop**: You can't destructure a struct that implements `Drop`. Use `ManuallyDrop::new(self)` + `ptr::read` to extract fields without running Drop, then manage cleanup via a separate guard type.
+- **`Path::new(":memory:")` in tests**: `db::initialize` expects `&Path`, not `&str`. Use `Path::new(":memory:")` for in-memory test databases.
+- **TS validates `agent_type` as required string only, not enum**: Parity tests must match the looser TypeScript behavior. Don't assert enum rejection for `agent_type` in shared parity tests.
+- **tsx-in-tsx spawn failure**: Spawning a child process that uses tsx from a parent tsx process fails silently (no output, no error). Use `/bin/sh -c 'exec node --import tsx ...'` with a clean environment instead.
+- **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start (~small number); `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
+
 ## Validation Checklist
 
 When code behavior changes, run:
 - `pnpm build`
 - `pnpm css:build` (if frontend styles touched)
 - `pnpm exec playwright test` for browser-based end-to-end UI testing
+- `pnpm rust:test` (if Rust code touched)
 - Manual sanity check: `GET /api/health`
