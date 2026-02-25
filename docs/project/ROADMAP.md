@@ -15,6 +15,10 @@ This is a lightweight snapshot, not a release contract.
 - Session transcript aggregation and detail views.
 - Ingest throughput benchmarking.
 
+## In Progress
+
+- **Rust backend migration**: Spike completed with GO decision. Phased migration underway — porting remaining endpoints, then Tauri desktop shell. See [spike decision](../plans/2026-02-24-rust-backend-spike-decision.md).
+
 ## Planned / Open Areas
 
 - See `docs/plans/` for active roadmap items and research.

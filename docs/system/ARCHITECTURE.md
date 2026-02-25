@@ -10,7 +10,17 @@
 
 ## Active Decision Records
 
-- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](plans/adr/2026-02-24-rust-backend-spike-decision-record.md)
+- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../plans/adr/2026-02-24-rust-backend-spike-decision-record.md) — **GO decision reached**. Proceeding with phased Rust migration and Tauri desktop shell. See [spike decision](../plans/2026-02-24-rust-backend-spike-decision.md).
+
+## Rust Backend (spike, in progress)
+
+An isolated Rust service (`rust-backend/`) reimplements core ingest and live-stream behavior using axum, tokio, and rusqlite. Currently covers:
+- `POST /api/events`, `POST /api/events/batch` — ingest with dedup and batch rejection
+- `GET /api/stats` — aggregate counters
+- `GET /api/stream` — SSE fan-out via tokio::broadcast
+- `GET /api/health` — service health with SSE client count
+
+Runs on port 3142 (spike default). 73 tests + 18 shared parity tests.
 
 ## API Layer
 
