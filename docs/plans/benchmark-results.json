@@ -1,0 +1,44 @@
+{
+  "timestamp": "2026-02-25T13:14:16.202Z",
+  "config": {
+    "events": 20000,
+    "concurrency": 40,
+    "batchSize": 50,
+    "warmup": 500,
+    "soakMinutes": 0
+  },
+  "platform": {
+    "os": "darwin",
+    "arch": "arm64",
+    "cpus": 10,
+    "totalMemMb": 32768
+  },
+  "typescript": {
+    "name": "TypeScript (Node.js)",
+    "startupMs": 171.06454199999996,
+    "idleRssKb": 109264,
+    "peakRssKb": 179168,
+    "throughputEventsPerSec": 10958.476278665832,
+    "latencyP50Ms": 92.03941699999996,
+    "latencyP95Ms": 712.627583,
+    "latencyP99Ms": 1801.380583,
+    "failedRequests": 0,
+    "runtimeSizeMb": 120,
+    "soakStable": null,
+    "soakRssSamples": []
+  },
+  "rust": {
+    "name": "Rust (axum + tokio)",
+    "startupMs": 416.8736250000002,
+    "idleRssKb": 8496,
+    "peakRssKb": 28480,
+    "throughputEventsPerSec": 8837.708407591814,
+    "latencyP50Ms": 218.2705420000002,
+    "latencyP95Ms": 277.67679099999987,
+    "latencyP99Ms": 286.67674999999963,
+    "failedRequests": 0,
+    "runtimeSizeMb": 3.5,
+    "soakStable": null,
+    "soakRssSamples": []
+  }
+}
