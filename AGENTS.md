@@ -70,4 +70,5 @@ For UI work in dev, use two terminals:
 When code behavior changes, run:
 - `pnpm build`
 - `pnpm css:build` (if frontend styles touched)
+- `pnpm exec playwright test` for browser-based end-to-end UI testing
 - Manual sanity check: `GET /api/health`
