@@ -1,19 +1,10 @@
-mod api;
-mod config;
-mod contracts;
-mod db;
-mod state;
-mod util;
-
 use std::sync::Arc;
 
-use axum::Router;
-use axum::routing::get;
-use tower_http::cors::CorsLayer;
 use tracing::info;
 
-use crate::config::Config;
-use crate::state::AppState;
+use agentmonitor_rs::config::Config;
+use agentmonitor_rs::db;
+use agentmonitor_rs::state::AppState;
 
 #[tokio::main]
 async fn main() {
@@ -30,10 +21,7 @@ async fn main() {
     let conn = db::initialize(&config.db_path).expect("Failed to initialize database");
     let state: Arc<AppState> = AppState::new(conn, config);
 
-    let app = Router::new()
-        .route("/api/health", get(api::health_handler))
-        .layer(CorsLayer::permissive())
-        .with_state(state);
+    let app = agentmonitor_rs::build_router(state);
 
     let listener = tokio::net::TcpListener::bind(&bind_addr)
         .await
