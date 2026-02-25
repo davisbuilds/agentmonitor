@@ -30,6 +30,9 @@ yarn-error.log*
 __pycache__/
 *.pyc
 
+# Rust build artifacts
+rust-backend/target/
+
 # editor and OS
 .DS_Store
 .idea/
