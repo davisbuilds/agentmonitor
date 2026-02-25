@@ -20,7 +20,9 @@
     "rust:dev": "cargo run --manifest-path rust-backend/Cargo.toml",
     "rust:build": "cargo build --manifest-path rust-backend/Cargo.toml --release",
     "rust:test": "cargo test --manifest-path rust-backend/Cargo.toml",
-    "rust:check": "cargo check --manifest-path rust-backend/Cargo.toml"
+    "rust:check": "cargo check --manifest-path rust-backend/Cargo.toml",
+    "test:parity:ts": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/**/*.test.ts",
+    "test:parity:rust": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3142 node --import tsx --test tests/parity/**/*.test.ts"
   },
   "keywords": [
     "ai",
