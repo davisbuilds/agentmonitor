@@ -40,6 +40,26 @@ Deliver a 5-7 day, decision-ready Rust backend spike that reproduces core AgentM
 - Rewriting frontend dashboard code.
 - Replacing the TypeScript service in default scripts during the spike window.
 
+## Technical Decisions
+
+These choices are locked for the spike to avoid decision churn during implementation.
+
+- **SQLite crate**: `rusqlite` (synchronous). SQLite is single-writer regardless of async wrapper, and `rusqlite` is simpler to operate than `sqlx` for this workload. Compile-time query checking is a nice-to-have but not worth the complexity for a spike.
+- **HTTP framework**: `axum` on `tokio` runtime. De facto standard for new Rust web services.
+- **SSE fan-out**: `tokio::sync::broadcast` channel for hub-to-client delivery. Simpler than manual `Vec<Sender>` management and handles slow-consumer drops automatically.
+- **HTTP API preserved**: The Rust service exposes the same HTTP endpoints on a different port (`3142`). This is required — Claude Code and Codex hooks depend on HTTP ingest. If this spike leads to Tauri, the HTTP API stays for hook compatibility; Tauri IPC would be additive, not a replacement.
+- **Serialization**: `serde` + `serde_json`. No alternatives worth considering.
+
+## Evaluation Criteria Beyond Parity
+
+The spike should capture these metrics in addition to contract parity:
+
+- **Memory footprint**: idle RSS and RSS under sustained ingest+SSE load, compared to Node baseline. This matters for a desktop tool that runs all day.
+- **Binary size**: release build size for the Rust service vs Node `node_modules` + runtime. Relevant to eventual Tauri packaging vs Electron.
+- **Startup time**: cold start to first successful `/api/health` response for both runtimes.
+
+These are not pass/fail criteria — they are evidence for the go/no-go decision and the Tauri vs Electron packaging choice.
+
 ## Assumptions And Constraints
 
 - Existing TypeScript service remains the source of truth during the spike.
@@ -325,8 +345,10 @@ Generate comparable runtime evidence to evaluate whether Rust improves key backe
 
 1. Run ingest benchmark for both runtimes using identical workload parameters.
 2. Capture throughput and latency distributions (including p95).
-3. Run 30-minute soak with continuous ingest + SSE client to surface leak/crash behavior.
-4. Document measured deltas and caveats (hardware, warmup, build profile).
+3. Capture memory footprint (idle RSS, peak RSS under load) and startup time for both runtimes.
+4. Measure release binary size for Rust vs `node_modules` + runtime size for TypeScript.
+5. Run 30-minute soak with continuous ingest + SSE client to surface leak/crash behavior, sampling RSS periodically to detect unbounded growth.
+6. Document measured deltas and caveats (hardware, warmup, build profile).
 
 **Verification**
 
@@ -337,8 +359,8 @@ Generate comparable runtime evidence to evaluate whether Rust improves key backe
 
 **Done When**
 
-- Benchmark document contains side-by-side metrics and methodology.
-- Stability soak result is clearly marked pass/fail.
+- Benchmark document contains side-by-side metrics (throughput, p95 latency, memory, binary size, startup time) and methodology.
+- Stability soak result is clearly marked pass/fail with RSS samples over time.
 
 ### Task 9: Produce Go/No-Go Decision Packet
 
@@ -401,6 +423,7 @@ Close the spike with an explicit architecture recommendation and next implementa
 | SSE behavior parity under limits | `cargo test --manifest-path rust-backend/Cargo.toml stream_api -- --nocapture` | Stream events, max-client `503`, and cleanup checks pass |
 | Same parity suite passes on both runtimes | `pnpm run test:parity:ts && pnpm run test:parity:rust` | No expectation changes between runtime targets |
 | Performance and stability evidence captured | `pnpm run bench:ingest -- --events=20000 --concurrency=40 --batch-size=50 && pnpm run rust:bench -- --events=20000 --concurrency=40 --batch-size=50` | Comparable benchmark and soak artifacts produced |
+| Runtime footprint comparison documented | Check `docs/plans/2026-02-24-rust-backend-spike-benchmark-results.md` | Memory (idle + peak RSS), binary size, and startup time for both runtimes |
 | Final architecture decision is explicit | `rg -n "Recommendation|Go|No-Go|Next milestone" docs/plans/2026-02-24-rust-backend-spike-decision.md` | Decision packet states path and immediate next milestone |
 
 ## Handoff

@@ -52,6 +52,17 @@ All criteria must be evaluated before deciding:
    - Pros: potentially smaller desktop footprint.
    - Cons: still requires backend parity work and adds packaging variability early.
 
+## Post-Spike Decision Paths
+
+The spike ends with one of three outcomes. Each maps to a concrete next step:
+
+1. **Go**: Rust parity suite passes, soak is stable, runtime footprint is favorable.
+   - Next step: Tauri desktop shell with Rust backend. HTTP API preserved for hook compatibility. Tauri IPC is additive for renderer communication, not a replacement for the ingest surface. The [Electron plan](../2026-02-23-macos-desktop-dmg-implementation.md) is archived.
+2. **No-Go**: Parity gaps, instability, or insufficient strategic advantage.
+   - Next step: Execute the [Electron + DMG plan](../2026-02-23-macos-desktop-dmg-implementation.md) as written. The black-box parity harness built during the spike transfers to the TypeScript runtime as contract regression coverage.
+3. **Inconclusive**: Evidence is mixed or the time-box expired before Task 8/9 completion.
+   - Next step: A second, narrower spike targeting the specific unresolved gap (e.g., SSE-only, or contract-only). Maximum one additional week. If still inconclusive, default to no-go path.
+
 ## Consequences
 
 - Near-term effort shifts from packaging work to architecture de-risking.

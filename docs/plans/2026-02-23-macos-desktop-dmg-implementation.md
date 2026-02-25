@@ -2,11 +2,13 @@
 date: 2026-02-23
 topic: macos-desktop-dmg
 stage: implementation-plan
-status: draft
+status: contingent-on-rust-no-go
 source: conversation
 ---
 
 # AgentMonitor macOS Desktop + DMG Implementation Plan
+
+> **Status note**: This plan executes only if the [Rust backend spike](2026-02-24-rust-backend-spike-implementation.md) results in a no-go decision. If the spike succeeds, desktop packaging shifts to Tauri with a Rust backend and this plan is archived. See [ADR](adr/2026-02-24-rust-backend-spike-decision-record.md) for decision paths.
 
 ## Goal
 
@@ -32,6 +34,7 @@ Ship AgentMonitor as a polished macOS desktop app with signed and notarized DMG 
 - Mac App Store packaging and review process.
 - Windows and Linux desktop packaging in this first implementation pass.
 - API contract redesign for existing ingest endpoints.
+- Auto-update mechanism (see Known Gaps below).
 
 ## Assumptions And Constraints
 
@@ -444,6 +447,13 @@ Create a deterministic release checklist and operator documentation for desktop 
 
 - Release process is executable from docs without tribal knowledge.
 - Migration guidance is clear for new and existing users.
+
+## Known Gaps
+
+These items are explicitly deferred from this plan but will need addressing before or shortly after first distribution:
+
+- **Auto-update**: This plan covers initial DMG distribution but not the ongoing update story. For a desktop app that monitors live agent sessions, the update mechanism shapes packaging decisions (electron-builder's `autoUpdater`, Sparkle, or manual re-download). Should be scoped as a follow-on task before first public release.
+- **Resource overhead as a monitoring tool**: Electron bundles Chromium, resulting in ~200MB+ disk footprint and ~150-300MB idle RAM. A monitoring tool that costs more resources than the agents it observes is an awkward trade-off. This is inherent to the Electron choice and is one reason the Rust/Tauri alternative is being evaluated first.
 
 ## Risks And Mitigations
 
