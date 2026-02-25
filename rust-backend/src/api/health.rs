@@ -23,6 +23,6 @@ pub async fn health_handler(State(state): State<Arc<AppState>>) -> Json<HealthRe
         status: "ok",
         uptime: state.start_time.elapsed().as_secs(),
         db_size_bytes: db_size,
-        sse_clients: 0, // placeholder until SSE hub is wired
+        sse_clients: state.sse_hub.client_count(),
     })
 }

@@ -2,6 +2,7 @@ pub mod api;
 pub mod config;
 pub mod contracts;
 pub mod db;
+pub mod sse;
 pub mod state;
 pub mod util;
 
@@ -19,6 +20,8 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/health", get(api::health_handler))
         .route("/api/events", post(api::ingest_single))
         .route("/api/events/batch", post(api::ingest_batch))
+        .route("/api/stats", get(api::stats_handler))
+        .route("/api/stream", get(api::stream_handler))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

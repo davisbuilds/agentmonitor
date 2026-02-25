@@ -95,7 +95,8 @@ pub async fn ingest_single(
             let db = state.db.lock().await;
             match queries::insert_event(&db, &params) {
                 Ok(Some(row)) => {
-                    // TODO: broadcast "event" + "session_update" to SSE hub (Task 6)
+                    let row_value = serde_json::to_value(&row).unwrap();
+                    state.sse_hub.broadcast("event", &row_value);
                     (StatusCode::CREATED, Json(Value::from(serde_json::to_value(
                         IngestResponse { received: 1, ids: vec![row.id], duplicates: 0 },
                     ).unwrap()))).into_response()
@@ -178,7 +179,8 @@ pub async fn ingest_batch(
 
                 match queries::insert_event(&db, &params) {
                     Ok(Some(row)) => {
-                        // TODO: broadcast "event" to SSE hub (Task 6)
+                        let row_value = serde_json::to_value(&row).unwrap();
+                        state.sse_hub.broadcast("event", &row_value);
                         ids.push(row.id);
                     }
                     Ok(None) => {
