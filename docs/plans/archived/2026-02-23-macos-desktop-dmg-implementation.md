@@ -8,7 +8,7 @@ source: conversation
 
 # AgentMonitor macOS Desktop + DMG Implementation Plan
 
-> **Status note**: This plan executes only if the [Rust backend spike](2026-02-24-rust-backend-spike-implementation.md) results in a no-go decision. If the spike succeeds, desktop packaging shifts to Tauri with a Rust backend and this plan is archived. See [ADR](adr/2026-02-24-rust-backend-spike-decision-record.md) for decision paths.
+> **Status note**: This plan executes only if the [Rust backend spike](../2026-02-24-rust-backend-spike-implementation.md) results in a no-go decision. If the spike succeeds, desktop packaging shifts to Tauri with a Rust backend and this plan is archived. See [ADR](../adr/2026-02-24-rust-backend-spike-decision-record.md) for decision paths.
 
 ## Goal
 

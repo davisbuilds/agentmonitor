@@ -57,9 +57,9 @@ All criteria must be evaluated before deciding:
 The spike ends with one of three outcomes. Each maps to a concrete next step:
 
 1. **Go**: Rust parity suite passes, soak is stable, runtime footprint is favorable.
-   - Next step: Tauri desktop shell with Rust backend. HTTP API preserved for hook compatibility. Tauri IPC is additive for renderer communication, not a replacement for the ingest surface. The [Electron plan](../2026-02-23-macos-desktop-dmg-implementation.md) is archived.
+   - Next step: Tauri desktop shell with Rust backend. HTTP API preserved for hook compatibility. Tauri IPC is additive for renderer communication, not a replacement for the ingest surface. The [Electron plan](../archived/2026-02-23-macos-desktop-dmg-implementation.md) is archived.
 2. **No-Go**: Parity gaps, instability, or insufficient strategic advantage.
-   - Next step: Execute the [Electron + DMG plan](../2026-02-23-macos-desktop-dmg-implementation.md) as written. The black-box parity harness built during the spike transfers to the TypeScript runtime as contract regression coverage.
+   - Next step: Execute the [Electron + DMG plan](../archived/2026-02-23-macos-desktop-dmg-implementation.md) as written. The black-box parity harness built during the spike transfers to the TypeScript runtime as contract regression coverage.
 3. **Inconclusive**: Evidence is mixed or the time-box expired before Task 8/9 completion.
    - Next step: A second, narrower spike targeting the specific unresolved gap (e.g., SSE-only, or contract-only). Maximum one additional week. If still inconclusive, default to no-go path.
 
@@ -72,4 +72,4 @@ The spike ends with one of three outcomes. Each maps to a concrete next step:
 ## Source Context
 
 - [Rust backend spike plan](../2026-02-24-rust-backend-spike-implementation.md)
-- [macOS desktop + DMG plan](../2026-02-23-macos-desktop-dmg-implementation.md)
+- [macOS desktop + DMG plan](../archived/2026-02-23-macos-desktop-dmg-implementation.md)

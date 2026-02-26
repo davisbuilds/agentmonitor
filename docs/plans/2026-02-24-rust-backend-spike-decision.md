@@ -108,4 +108,4 @@ These are expected — the spike scoped to core ingest + live-stream behavior pe
 
 ## Archived Path
 
-The [Electron + DMG plan](2026-02-23-macos-desktop-dmg-implementation.md) is archived. The parity test harness built during the spike transfers to the Rust runtime as ongoing contract regression coverage.
+The [Electron + DMG plan](archived/2026-02-23-macos-desktop-dmg-implementation.md) is archived. The parity test harness built during the spike transfers to the Rust runtime as ongoing contract regression coverage.
