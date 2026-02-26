@@ -6,6 +6,7 @@ use tracing::info;
 use agentmonitor_rs::auto_import::run_auto_import_once;
 use agentmonitor_rs::config::Config;
 use agentmonitor_rs::db;
+use agentmonitor_rs::runtime_tasks::{run_idle_check_once, run_stats_broadcast_once};
 use agentmonitor_rs::state::AppState;
 
 #[tokio::main]
@@ -20,11 +21,32 @@ async fn main() {
     let config = Config::from_env();
     let bind_addr = config.bind_addr();
     let auto_import_interval_minutes = config.auto_import_interval_minutes;
+    let stats_interval_ms = config.stats_interval_ms;
 
     let conn = db::initialize(&config.db_path).expect("Failed to initialize database");
     let state: Arc<AppState> = AppState::new(conn, config);
 
     let app = agentmonitor_rs::build_router(Arc::clone(&state));
+
+    {
+        let task_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_millis(stats_interval_ms)).await;
+                let _ = run_stats_broadcast_once(Arc::clone(&task_state)).await;
+            }
+        });
+    }
+
+    {
+        let task_state = Arc::clone(&state);
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(Duration::from_secs(60)).await;
+                let _ = run_idle_check_once(Arc::clone(&task_state)).await;
+            }
+        });
+    }
 
     if auto_import_interval_minutes > 0 {
         let task_state = Arc::clone(&state);
