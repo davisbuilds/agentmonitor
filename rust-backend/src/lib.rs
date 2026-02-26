@@ -3,6 +3,7 @@ pub mod config;
 pub mod contracts;
 pub mod db;
 pub mod otel;
+pub mod pricing;
 pub mod sse;
 pub mod state;
 pub mod util;

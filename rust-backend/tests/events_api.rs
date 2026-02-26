@@ -35,6 +35,15 @@ async fn post_json(app: &axum::Router, uri: &str, body: Value) -> (u16, Value) {
     (status, parsed)
 }
 
+async fn get_json(app: &axum::Router, uri: &str) -> (u16, Value) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let status = response.status().as_u16();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let parsed: Value = serde_json::from_slice(&bytes).unwrap();
+    (status, parsed)
+}
+
 fn valid_event() -> Value {
     json!({
         "session_id": "sess-1",
@@ -261,6 +270,84 @@ async fn oversized_metadata_gets_truncated() {
 
     assert_eq!(status, 201);
     assert_eq!(body["received"], 1);
+}
+
+#[tokio::test]
+async fn ingest_auto_calculates_cost_when_model_and_tokens_present() {
+    let app = test_app();
+    let session_id = "pricing-sess";
+
+    let (status, body) = post_json(
+        &app,
+        "/api/events",
+        json!({
+            "session_id": session_id,
+            "agent_type": "codex",
+            "event_type": "llm_response",
+            "model": "o3",
+            "tokens_in": 250000,
+            "tokens_out": 125000
+        }),
+    )
+    .await;
+
+    assert_eq!(status, 201);
+    assert_eq!(body["received"], 1);
+
+    let (tx_status, transcript) = get_json(&app, &format!("/api/sessions/{session_id}/transcript")).await;
+    assert_eq!(tx_status, 200);
+
+    let entries = transcript["entries"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    let entry = entries
+        .iter()
+        .find(|row| row["model"] == "o3")
+        .unwrap_or(&entries[0]);
+    assert_eq!(entry["model"], "o3");
+    assert!(
+        entry["cost_usd"].as_f64().unwrap_or(0.0) > 0.0,
+        "expected positive auto-calculated cost_usd, got {entry:?}"
+    );
+}
+
+#[tokio::test]
+async fn ingest_preserves_explicit_client_cost() {
+    let app = test_app();
+    let session_id = "pricing-sess-explicit";
+    let explicit_cost = 12.345;
+
+    let (status, body) = post_json(
+        &app,
+        "/api/events",
+        json!({
+            "session_id": session_id,
+            "agent_type": "codex",
+            "event_type": "llm_response",
+            "model": "o3",
+            "tokens_in": 250000,
+            "tokens_out": 125000,
+            "cost_usd": explicit_cost
+        }),
+    )
+    .await;
+
+    assert_eq!(status, 201);
+    assert_eq!(body["received"], 1);
+
+    let (tx_status, transcript) = get_json(&app, &format!("/api/sessions/{session_id}/transcript")).await;
+    assert_eq!(tx_status, 200);
+
+    let entries = transcript["entries"].as_array().unwrap();
+    assert!(!entries.is_empty());
+    let entry = entries
+        .iter()
+        .find(|row| row["model"] == "o3")
+        .unwrap_or(&entries[0]);
+    let cost = entry["cost_usd"].as_f64().unwrap_or_default();
+    assert!(
+        (cost - explicit_cost).abs() < 1e-10,
+        "expected explicit client cost to be preserved, got {entry:?}"
+    );
 }
 
 // --- Rejection error format ---

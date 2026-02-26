@@ -4,6 +4,7 @@ use rusqlite::{Connection, ToSql, params, params_from_iter, types::Value as SqlV
 use serde::Serialize;
 
 use crate::config::UsageMonitorConfig;
+use crate::pricing::{TokenCounts, calculate_cost};
 
 // --- Agents ---
 
@@ -192,6 +193,22 @@ pub fn insert_event(
         }
     }
 
+    let computed_cost = if p.cost_usd.is_none() && (p.tokens_in > 0 || p.tokens_out > 0) {
+        p.model.and_then(|model| {
+            calculate_cost(
+                model,
+                TokenCounts {
+                    input: p.tokens_in,
+                    output: p.tokens_out,
+                    cache_read: p.cache_read_tokens,
+                    cache_write: p.cache_write_tokens,
+                },
+            )
+        })
+    } else {
+        p.cost_usd
+    };
+
     let result = conn.execute(
         "INSERT INTO events (
             event_id, session_id, agent_type, event_type, tool_name, status,
@@ -220,7 +237,7 @@ pub fn insert_event(
             p.metadata,
             p.payload_truncated as i64,
             p.model,
-            p.cost_usd,
+            computed_cost,
             p.cache_read_tokens,
             p.cache_write_tokens,
             p.source,

@@ -46,6 +46,58 @@ test('POST /api/events with valid payload returns 201', async () => {
   assert.equal(body.duplicates, 0);
 });
 
+test('POST /api/events auto-calculates cost when model and tokens are provided', async () => {
+  const sessionId = uniqueSession();
+
+  const ingest = await postJson('/api/events', {
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'llm_response',
+    model: 'o3',
+    tokens_in: 250_000,
+    tokens_out: 125_000,
+  });
+  assert.equal(ingest.status, 201);
+
+  const transcriptRes = await getJson(`/api/sessions/${sessionId}/transcript`);
+  assert.equal(transcriptRes.status, 200);
+  const transcript = await transcriptRes.json();
+  assert.equal(Array.isArray(transcript.entries), true);
+  assert.ok(transcript.entries.length > 0);
+
+  const entry = transcript.entries.find((row: { model?: string }) => row.model === 'o3')
+    ?? transcript.entries[0];
+  assert.equal(entry.model, 'o3');
+  assert.ok(typeof entry.cost_usd === 'number');
+  assert.ok(entry.cost_usd > 0);
+});
+
+test('POST /api/events preserves explicit cost_usd from client', async () => {
+  const sessionId = uniqueSession();
+  const explicitCost = 12.345;
+
+  const ingest = await postJson('/api/events', {
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'llm_response',
+    model: 'o3',
+    tokens_in: 250_000,
+    tokens_out: 125_000,
+    cost_usd: explicitCost,
+  });
+  assert.equal(ingest.status, 201);
+
+  const transcriptRes = await getJson(`/api/sessions/${sessionId}/transcript`);
+  assert.equal(transcriptRes.status, 200);
+  const transcript = await transcriptRes.json();
+  const entry = transcript.entries.find((row: { model?: string }) => row.model === 'o3')
+    ?? transcript.entries[0];
+
+  assert.equal(entry.model, 'o3');
+  assert.equal(typeof entry.cost_usd, 'number');
+  assert.ok(Math.abs(entry.cost_usd - explicitCost) < 1e-10);
+});
+
 test('POST /api/events missing required fields returns 400', async () => {
   const res = await postJson('/api/events', {
     session_id: uniqueSession(),

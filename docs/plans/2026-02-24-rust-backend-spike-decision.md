@@ -90,8 +90,10 @@ These are expected — the spike scoped to core ingest + live-stream behavior pe
 
 1. ✅ 30-minute soak test with ingest + SSE (completed 2026-02-26).
 2. ✅ Ported sessions, filter-options, transcripts, and advanced stats endpoints.
-3. Port remaining endpoints: OTEL JSON logs/metrics.
-4. Port pricing engine and import pipeline.
+3. ✅ Ported remaining endpoints: OTEL JSON logs/metrics/traces stub (completed 2026-02-26).
+4. ⏳ Port pricing engine and import pipeline.
+   - ✅ Pricing auto-calculation parity on ingest path (completed 2026-02-26).
+   - ⏳ Import pipeline migration still pending.
 5. Achieve full parity on all API endpoints with extended parity test suite.
 
 **Phase 2: Tauri Desktop Shell** (target: 2 weeks after Phase 1)
