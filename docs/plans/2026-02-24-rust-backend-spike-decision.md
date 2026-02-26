@@ -41,9 +41,15 @@ Throughput gap is explained by `Mutex<Connection>` serialization in Rust vs lock
 
 ### Stability
 
-**Status: PARTIAL — soak test not run**
+**Status: PASS**
 
-Unit and integration tests are stable across multiple runs. A dedicated 30-minute soak was not executed in this iteration. The parity harness ran cleanly with zero failed requests under 40-concurrent-connection load. This is acceptable for a go decision with the soak scheduled as a follow-up validation before production cutover.
+Unit and integration tests are stable across multiple runs. Follow-up soak validation completed on **February 26, 2026** with a 30-minute continuous ingest + SSE run and passed:
+- `315,850` events sent / received
+- `0` failed requests
+- `0` health check failures
+- stable RSS trend (`rssGrowthRatio = 0.933`)
+
+See [soak results](2026-02-26-rust-backend-soak-results.md).
 
 ### Operability
 
@@ -59,21 +65,19 @@ Unit and integration tests are stable across multiple runs. A dedicated 30-minut
 | Criterion | Required | Result |
 |-----------|----------|--------|
 | Contract parity | Parity suite passes both runtimes, no forks | **PASS** — 18/18 |
-| Runtime stability | 30-min soak without crash/leak | **PARTIAL** — no soak, but clean under load |
+| Runtime stability | 30-min soak without crash/leak | **PASS** — completed on 2026-02-26 |
 | Performance | Throughput >= TS baseline, or justified gap | **PASS** — gap is justified, latency is better |
 | Operability | Reproducible local dev workflow | **PASS** |
 
 ## Risks
 
-1. **Soak test gap**: No 30-minute soak run completed. Mitigated by scheduling soak as first task in migration phase.
-2. **Scope incomplete**: Only 5 of 9+ endpoints implemented (health, events, events/batch, stats, stream). Full migration requires OTEL, sessions, filter-options, transcripts, cost endpoints.
-3. **Mutex throughput ceiling**: Under extreme concurrent writes, Rust's mutex approach will bottleneck before Node.js does. Mitigated by SQLite's inherent single-writer limitation making this theoretical at realistic workloads.
-4. **Startup time**: Rust binary starts slower than Node.js. Acceptable for a desktop app that starts once per session.
+1. **Scope incomplete**: OTEL endpoints and import/pricing pipelines are not ported yet.
+2. **Mutex throughput ceiling**: Under extreme concurrent writes, Rust's mutex approach will bottleneck before Node.js does. Mitigated by SQLite's inherent single-writer limitation making this theoretical at realistic workloads.
+3. **Startup time**: Rust binary starts slower than Node.js. Acceptable for a desktop app that starts once per session.
 
 ## Unresolved Gaps
 
 - OTEL JSON log/metric parsing not ported.
-- Session filtering, transcript aggregation, cost breakdown endpoints not implemented.
 - Import pipeline not ported.
 - Pricing engine not ported.
 - No Tauri shell or IPC integration yet.
@@ -84,10 +88,11 @@ These are expected — the spike scoped to core ingest + live-stream behavior pe
 
 **Phase 1: Complete Rust Backend Migration** (target: 2 weeks)
 
-1. Run 30-minute soak test with ingest + SSE.
-2. Port remaining endpoints: sessions, filter-options, transcripts, stats/cost, OTEL.
-3. Port pricing engine and import pipeline.
-4. Achieve full parity on all API endpoints with extended parity test suite.
+1. ✅ 30-minute soak test with ingest + SSE (completed 2026-02-26).
+2. ✅ Ported sessions, filter-options, transcripts, and advanced stats endpoints.
+3. Port remaining endpoints: OTEL JSON logs/metrics.
+4. Port pricing engine and import pipeline.
+5. Achieve full parity on all API endpoints with extended parity test suite.
 
 **Phase 2: Tauri Desktop Shell** (target: 2 weeks after Phase 1)
 
