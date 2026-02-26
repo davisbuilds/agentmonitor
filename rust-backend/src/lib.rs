@@ -2,6 +2,7 @@ pub mod api;
 pub mod config;
 pub mod contracts;
 pub mod db;
+pub mod otel;
 pub mod sse;
 pub mod state;
 pub mod util;
@@ -24,6 +25,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/stats/tools", get(api::stats_tools_handler))
         .route("/api/stats/cost", get(api::stats_cost_handler))
         .route("/api/stats/usage-monitor", get(api::usage_monitor_handler))
+        .route("/api/otel/v1/logs", post(api::otel_logs_handler))
+        .route("/api/otel/v1/metrics", post(api::otel_metrics_handler))
+        .route("/api/otel/v1/traces", post(api::otel_traces_handler))
         .route("/api/sessions", get(api::sessions_list_handler))
         .route(
             "/api/sessions/{id}/transcript",
