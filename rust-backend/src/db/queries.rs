@@ -1,4 +1,4 @@
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, ToSql, params, params_from_iter, types::Value as SqlValue};
 use serde::Serialize;
 
 // --- Agents ---
@@ -40,9 +40,7 @@ pub fn get_session_project_branch(
     conn: &Connection,
     session_id: &str,
 ) -> rusqlite::Result<Option<(Option<String>, Option<String>)>> {
-    let mut stmt = conn.prepare_cached(
-        "SELECT project, branch FROM sessions WHERE id = ?1",
-    )?;
+    let mut stmt = conn.prepare_cached("SELECT project, branch FROM sessions WHERE id = ?1")?;
     let mut rows = stmt.query(params![session_id])?;
     match rows.next()? {
         Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
@@ -166,10 +164,20 @@ pub struct InsertEventParams<'a> {
 }
 
 /// Insert an event. Returns the inserted row, or None if deduplicated (event_id conflict).
-pub fn insert_event(conn: &Connection, p: &InsertEventParams<'_>) -> rusqlite::Result<Option<EventRow>> {
+pub fn insert_event(
+    conn: &Connection,
+    p: &InsertEventParams<'_>,
+) -> rusqlite::Result<Option<EventRow>> {
     let agent_id = format!("{}-default", p.agent_type);
     upsert_agent(conn, &agent_id, p.agent_type)?;
-    upsert_session(conn, p.session_id, &agent_id, p.agent_type, p.project, p.branch)?;
+    upsert_session(
+        conn,
+        p.session_id,
+        &agent_id,
+        p.agent_type,
+        p.project,
+        p.branch,
+    )?;
 
     // Handle session lifecycle
     if p.event_type == "session_end" {
@@ -225,7 +233,9 @@ pub fn insert_event(conn: &Connection, p: &InsertEventParams<'_>) -> rusqlite::R
         }
         Err(e) => {
             // UNIQUE constraint violation on event_id = deduplicated
-            if e.to_string().contains("UNIQUE constraint failed: events.event_id") {
+            if e.to_string()
+                .contains("UNIQUE constraint failed: events.event_id")
+            {
                 Ok(None)
             } else {
                 Err(e)
@@ -271,11 +281,8 @@ pub fn get_stats(conn: &Connection) -> rusqlite::Result<Stats> {
         |row| row.get(0),
     )?;
 
-    let total_sessions: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM sessions",
-        [],
-        |row| row.get(0),
-    )?;
+    let total_sessions: i64 =
+        conn.query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))?;
 
     Ok(Stats {
         total_events,
@@ -285,4 +292,299 @@ pub fn get_stats(conn: &Connection) -> rusqlite::Result<Stats> {
         total_tokens_out,
         total_cost_usd,
     })
+}
+
+// --- Sessions API ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionRow {
+    pub id: String,
+    pub agent_id: String,
+    pub agent_type: String,
+    pub project: Option<String>,
+    pub branch: Option<String>,
+    pub status: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub last_event_at: String,
+    pub metadata: String,
+    pub event_count: i64,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    pub total_cost_usd: f64,
+    pub files_edited: i64,
+    pub lines_added: i64,
+    pub lines_removed: i64,
+}
+
+impl SessionRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            agent_id: row.get("agent_id")?,
+            agent_type: row.get("agent_type")?,
+            project: row.get("project")?,
+            branch: row.get("branch")?,
+            status: row.get("status")?,
+            started_at: row.get("started_at")?,
+            ended_at: row.get("ended_at")?,
+            last_event_at: row.get("last_event_at")?,
+            metadata: row.get("metadata")?,
+            event_count: row.get("event_count")?,
+            tokens_in: row.get("tokens_in")?,
+            tokens_out: row.get("tokens_out")?,
+            total_cost_usd: row.get("total_cost_usd")?,
+            files_edited: row.get("files_edited")?,
+            lines_added: row.get("lines_added")?,
+            lines_removed: row.get("lines_removed")?,
+        })
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct SessionFilters {
+    pub status: Option<String>,
+    pub exclude_status: Option<String>,
+    pub agent_type: Option<String>,
+    pub since: Option<String>,
+    pub limit: Option<i64>,
+}
+
+pub fn get_sessions(
+    conn: &Connection,
+    filters: &SessionFilters,
+) -> rusqlite::Result<Vec<SessionRow>> {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(status) = filters.status.as_deref() {
+        conditions.push("s.status = ?".to_string());
+        params.push(SqlValue::Text(status.to_string()));
+    }
+    if let Some(exclude_status) = filters.exclude_status.as_deref() {
+        conditions.push("s.status != ?".to_string());
+        params.push(SqlValue::Text(exclude_status.to_string()));
+    }
+    if let Some(agent_type) = filters.agent_type.as_deref() {
+        conditions.push("s.agent_type = ?".to_string());
+        params.push(SqlValue::Text(agent_type.to_string()));
+    }
+    if let Some(since) = filters.since.as_deref() {
+        conditions.push("s.last_event_at >= ?".to_string());
+        params.push(SqlValue::Text(since.to_string()));
+    }
+
+    let mut sql = String::from(
+        "SELECT s.*,
+            COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
+            COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
+            COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+            COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+            COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+            COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+            COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+         FROM sessions s",
+    );
+
+    if !conditions.is_empty() {
+        sql.push_str(" WHERE ");
+        sql.push_str(&conditions.join(" AND "));
+    }
+
+    sql.push_str(
+        " ORDER BY
+            CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
+            s.last_event_at DESC
+          LIMIT ?",
+    );
+
+    let limit = filters.limit.unwrap_or(50);
+    params.push(SqlValue::Integer(limit));
+
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_refs.as_slice(), SessionRow::from_row)?;
+    rows.collect()
+}
+
+pub fn get_session_with_events(
+    conn: &Connection,
+    session_id: &str,
+    event_limit: i64,
+) -> rusqlite::Result<(Option<SessionRow>, Vec<EventRow>)> {
+    let mut session_stmt = conn.prepare_cached(
+        "SELECT s.*,
+            COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
+            COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
+            COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+            COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+            COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+            COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+            COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+         FROM sessions s
+         WHERE s.id = ?1",
+    )?;
+
+    let session = match session_stmt.query_row(params![session_id], SessionRow::from_row) {
+        Ok(row) => Some(row),
+        Err(rusqlite::Error::QueryReturnedNoRows) => None,
+        Err(e) => return Err(e),
+    };
+
+    let mut event_stmt = conn.prepare_cached(
+        "SELECT * FROM events WHERE session_id = ?1 ORDER BY created_at DESC LIMIT ?2",
+    )?;
+    let event_rows = event_stmt.query_map(params![session_id, event_limit], EventRow::from_row)?;
+    let events: Vec<EventRow> = event_rows.collect::<Result<Vec<_>, _>>()?;
+
+    Ok((session, events))
+}
+
+// --- Filter options ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BranchOption {
+    pub value: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FilterOptions {
+    pub agent_types: Vec<String>,
+    pub event_types: Vec<String>,
+    pub tool_names: Vec<String>,
+    pub models: Vec<String>,
+    pub projects: Vec<String>,
+    pub branches: Vec<BranchOption>,
+    pub sources: Vec<String>,
+}
+
+pub fn get_filter_options(conn: &Connection) -> rusqlite::Result<FilterOptions> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL ORDER BY agent_type",
+    )?;
+    let agent_types = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT event_type FROM events WHERE event_type IS NOT NULL ORDER BY event_type",
+    )?;
+    let event_types = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT tool_name FROM events WHERE tool_name IS NOT NULL ORDER BY tool_name",
+    )?;
+    let tool_names = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT model FROM events WHERE model IS NOT NULL ORDER BY model",
+    )?;
+    let models = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL ORDER BY project",
+    )?;
+    let projects = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT branch, project, MAX(last_event_at) as latest
+         FROM sessions
+         WHERE branch IS NOT NULL AND branch != 'HEAD'
+         GROUP BY branch
+         ORDER BY latest DESC",
+    )?;
+    let branch_rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+    })?;
+    let mut branches: Vec<BranchOption> = Vec::new();
+    for row in branch_rows {
+        let (branch, project) = row?;
+        let label = match project {
+            Some(project_name) => format!("{project_name} / {branch}"),
+            None => branch.clone(),
+        };
+        branches.push(BranchOption {
+            value: branch,
+            label,
+        });
+    }
+
+    let mut stmt = conn.prepare_cached(
+        "SELECT DISTINCT source FROM events WHERE source IS NOT NULL ORDER BY source",
+    )?;
+    let sources = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(FilterOptions {
+        agent_types,
+        event_types,
+        tool_names,
+        models,
+        projects,
+        branches,
+        sources,
+    })
+}
+
+// --- Session transcript ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TranscriptEvent {
+    pub id: i64,
+    pub event_type: String,
+    pub tool_name: Option<String>,
+    pub status: String,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    pub model: Option<String>,
+    pub cost_usd: Option<f64>,
+    pub duration_ms: Option<i64>,
+    pub created_at: String,
+    pub client_timestamp: Option<String>,
+    pub metadata: String,
+}
+
+pub fn get_session_transcript(
+    conn: &Connection,
+    session_id: &str,
+) -> rusqlite::Result<Vec<TranscriptEvent>> {
+    let mut stmt = conn.prepare_cached(
+        "SELECT id, event_type, tool_name, status, tokens_in, tokens_out,
+                model, cost_usd, duration_ms, created_at, client_timestamp, metadata
+         FROM events
+         WHERE session_id = ?1
+         ORDER BY created_at ASC, id ASC",
+    )?;
+
+    let rows = stmt.query_map(
+        params_from_iter([SqlValue::Text(session_id.to_string())]),
+        |row| {
+            Ok(TranscriptEvent {
+                id: row.get("id")?,
+                event_type: row.get("event_type")?,
+                tool_name: row.get("tool_name")?,
+                status: row.get("status")?,
+                tokens_in: row.get("tokens_in")?,
+                tokens_out: row.get("tokens_out")?,
+                model: row.get("model")?,
+                cost_usd: row.get("cost_usd")?,
+                duration_ms: row.get("duration_ms")?,
+                created_at: row.get("created_at")?,
+                client_timestamp: row.get("client_timestamp")?,
+                metadata: row.get("metadata")?,
+            })
+        },
+    )?;
+
+    rows.collect()
 }

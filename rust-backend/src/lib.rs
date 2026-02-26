@@ -21,6 +21,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/events", post(api::ingest_single))
         .route("/api/events/batch", post(api::ingest_batch))
         .route("/api/stats", get(api::stats_handler))
+        .route("/api/sessions", get(api::sessions_list_handler))
+        .route(
+            "/api/sessions/{id}/transcript",
+            get(api::session_transcript_handler),
+        )
+        .route("/api/sessions/{id}", get(api::session_detail_handler))
+        .route("/api/filter-options", get(api::filter_options_handler))
         .route("/api/stream", get(api::stream_handler))
         .layer(CorsLayer::permissive())
         .with_state(state)
