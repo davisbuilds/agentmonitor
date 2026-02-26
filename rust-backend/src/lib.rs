@@ -6,6 +6,7 @@ pub mod db;
 pub mod importer;
 pub mod otel;
 pub mod pricing;
+pub mod runtime_host;
 pub mod runtime_tasks;
 pub mod sse;
 pub mod state;
