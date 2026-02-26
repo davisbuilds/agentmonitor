@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
 use rusqlite::{Connection, ToSql, params, params_from_iter, types::Value as SqlValue};
 use serde::Serialize;
+
+use crate::config::UsageMonitorConfig;
 
 // --- Agents ---
 
@@ -292,6 +296,371 @@ pub fn get_stats(conn: &Connection) -> rusqlite::Result<Stats> {
         total_tokens_out,
         total_cost_usd,
     })
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct AnalyticsFilters {
+    pub agent_type: Option<String>,
+    pub since: Option<String>,
+}
+
+// --- Advanced stats endpoints ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolAnalyticsRow {
+    pub tool_name: String,
+    pub total_calls: i64,
+    pub error_count: i64,
+    pub error_rate: f64,
+    pub avg_duration_ms: Option<f64>,
+    pub by_agent: HashMap<String, i64>,
+}
+
+pub fn get_tool_analytics(
+    conn: &Connection,
+    filters: &AnalyticsFilters,
+) -> rusqlite::Result<Vec<ToolAnalyticsRow>> {
+    let mut conditions = vec!["tool_name IS NOT NULL".to_string()];
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(agent_type) = filters.agent_type.as_deref() {
+        conditions.push("agent_type = ?".to_string());
+        params.push(SqlValue::Text(agent_type.to_string()));
+    }
+    if let Some(since) = filters.since.as_deref() {
+        conditions.push("created_at >= ?".to_string());
+        params.push(SqlValue::Text(since.to_string()));
+    }
+
+    let where_clause = format!("WHERE {}", conditions.join(" AND "));
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
+
+    let rows_sql = format!(
+        "SELECT
+            tool_name,
+            COUNT(*) as total_calls,
+            SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) as error_count,
+            ROUND(CAST(SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS REAL) / COUNT(*), 4) as error_rate,
+            ROUND(AVG(duration_ms)) as avg_duration_ms
+         FROM events
+         {}
+         GROUP BY tool_name
+         ORDER BY total_calls DESC",
+        where_clause
+    );
+
+    let mut stmt = conn.prepare(&rows_sql)?;
+    let summary_rows = stmt.query_map(params_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, f64>(3)?,
+            row.get::<_, Option<f64>>(4)?,
+        ))
+    })?;
+    let summary: Vec<(String, i64, i64, f64, Option<f64>)> =
+        summary_rows.collect::<Result<Vec<_>, _>>()?;
+
+    let agent_sql = format!(
+        "SELECT tool_name, agent_type, COUNT(*) as count
+         FROM events
+         {}
+         GROUP BY tool_name, agent_type
+         ORDER BY tool_name, count DESC",
+        where_clause
+    );
+    let mut agent_stmt = conn.prepare(&agent_sql)?;
+    let agent_rows = agent_stmt.query_map(params_refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+
+    let mut by_tool: HashMap<String, HashMap<String, i64>> = HashMap::new();
+    for row in agent_rows {
+        let (tool_name, agent_type, count) = row?;
+        by_tool
+            .entry(tool_name)
+            .or_default()
+            .insert(agent_type, count);
+    }
+
+    Ok(summary
+        .into_iter()
+        .map(
+            |(tool_name, total_calls, error_count, error_rate, avg_duration_ms)| ToolAnalyticsRow {
+                by_agent: by_tool.remove(&tool_name).unwrap_or_default(),
+                tool_name,
+                total_calls,
+                error_count,
+                error_rate,
+                avg_duration_ms,
+            },
+        )
+        .collect())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CostBucket {
+    pub bucket: String,
+    pub cost_usd: f64,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    pub event_count: i64,
+}
+
+pub fn get_cost_over_time(
+    conn: &Connection,
+    filters: &AnalyticsFilters,
+) -> rusqlite::Result<Vec<CostBucket>> {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(agent_type) = filters.agent_type.as_deref() {
+        conditions.push("agent_type = ?".to_string());
+        params.push(SqlValue::Text(agent_type.to_string()));
+    }
+    if let Some(since) = filters.since.as_deref() {
+        conditions.push("COALESCE(client_timestamp, created_at) >= ?".to_string());
+        params.push(SqlValue::Text(since.to_string()));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
+
+    let sql = format!(
+        "SELECT
+            strftime('%Y-%m-%dT%H:00:00Z', COALESCE(client_timestamp, created_at)) as bucket,
+            COALESCE(SUM(cost_usd), 0) as cost_usd,
+            COALESCE(SUM(tokens_in), 0) as tokens_in,
+            COALESCE(SUM(tokens_out), 0) as tokens_out,
+            COUNT(*) as event_count
+         FROM events
+         {}
+         GROUP BY bucket
+         ORDER BY bucket ASC",
+        where_clause
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_refs.as_slice(), |row| {
+        Ok(CostBucket {
+            bucket: row.get(0)?,
+            cost_usd: row.get(1)?,
+            tokens_in: row.get(2)?,
+            tokens_out: row.get(3)?,
+            event_count: row.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProjectCostRow {
+    pub project: String,
+    pub cost_usd: f64,
+    pub session_count: i64,
+    pub event_count: i64,
+}
+
+pub fn get_cost_by_project(
+    conn: &Connection,
+    limit: i64,
+    filters: &AnalyticsFilters,
+) -> rusqlite::Result<Vec<ProjectCostRow>> {
+    let mut conditions = vec!["e.cost_usd > 0".to_string()];
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(agent_type) = filters.agent_type.as_deref() {
+        conditions.push("e.agent_type = ?".to_string());
+        params.push(SqlValue::Text(agent_type.to_string()));
+    }
+    if let Some(since) = filters.since.as_deref() {
+        conditions.push("e.created_at >= ?".to_string());
+        params.push(SqlValue::Text(since.to_string()));
+    }
+
+    let where_clause = format!("WHERE {}", conditions.join(" AND "));
+    params.push(SqlValue::Integer(limit));
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
+
+    let sql = format!(
+        "SELECT
+            COALESCE(s.project, 'unknown') as project,
+            COALESCE(SUM(e.cost_usd), 0) as cost_usd,
+            COUNT(DISTINCT e.session_id) as session_count,
+            COUNT(*) as event_count
+         FROM events e
+         LEFT JOIN sessions s ON s.id = e.session_id
+         {}
+         GROUP BY s.project
+         ORDER BY cost_usd DESC
+         LIMIT ?",
+        where_clause
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_refs.as_slice(), |row| {
+        Ok(ProjectCostRow {
+            project: row.get(0)?,
+            cost_usd: row.get(1)?,
+            session_count: row.get(2)?,
+            event_count: row.get(3)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ModelCostRow {
+    pub model: String,
+    pub cost_usd: f64,
+    pub event_count: i64,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+}
+
+pub fn get_cost_by_model(
+    conn: &Connection,
+    filters: &AnalyticsFilters,
+) -> rusqlite::Result<Vec<ModelCostRow>> {
+    let mut conditions = vec!["model IS NOT NULL".to_string(), "cost_usd > 0".to_string()];
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(agent_type) = filters.agent_type.as_deref() {
+        conditions.push("agent_type = ?".to_string());
+        params.push(SqlValue::Text(agent_type.to_string()));
+    }
+    if let Some(since) = filters.since.as_deref() {
+        conditions.push("created_at >= ?".to_string());
+        params.push(SqlValue::Text(since.to_string()));
+    }
+
+    let where_clause = format!("WHERE {}", conditions.join(" AND "));
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
+
+    let sql = format!(
+        "SELECT
+            model,
+            COALESCE(SUM(cost_usd), 0) as cost_usd,
+            COUNT(*) as event_count,
+            COALESCE(SUM(tokens_in), 0) as tokens_in,
+            COALESCE(SUM(tokens_out), 0) as tokens_out
+         FROM events
+         {}
+         GROUP BY model
+         ORDER BY cost_usd DESC",
+        where_clause
+    );
+
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(params_refs.as_slice(), |row| {
+        Ok(ModelCostRow {
+            model: row.get(0)?,
+            cost_usd: row.get(1)?,
+            event_count: row.get(2)?,
+            tokens_in: row.get(3)?,
+            tokens_out: row.get(4)?,
+        })
+    })?;
+    rows.collect()
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageWindow {
+    pub used: f64,
+    pub limit: f64,
+    #[serde(rename = "windowHours")]
+    pub window_hours: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentUsageData {
+    pub agent_type: String,
+    #[serde(rename = "limitType")]
+    pub limit_type: String,
+    pub session: UsageWindow,
+    pub extended: Option<UsageWindow>,
+}
+
+pub fn get_usage_monitor(
+    conn: &Connection,
+    usage_config: &UsageMonitorConfig,
+) -> rusqlite::Result<Vec<AgentUsageData>> {
+    let mut stmt =
+        conn.prepare_cached("SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL")?;
+    let agent_types = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let mut results: Vec<AgentUsageData> = Vec::new();
+
+    for agent_type in agent_types {
+        let cfg = usage_config.for_agent(&agent_type);
+
+        if cfg.session_limit <= 0.0 && cfg.extended_limit <= 0.0 {
+            continue;
+        }
+
+        let sum_expr = match cfg.limit_type {
+            crate::config::UsageLimitType::Cost => "COALESCE(SUM(cost_usd), 0)",
+            crate::config::UsageLimitType::Tokens => "COALESCE(SUM(tokens_in + tokens_out), 0)",
+        };
+
+        let session_sql = format!(
+            "SELECT {} as used
+             FROM events
+             WHERE agent_type = ?1 AND created_at >= datetime('now', ?2 || ' hours')",
+            sum_expr
+        );
+        let session_used: f64 = conn.query_row(
+            &session_sql,
+            params![agent_type, format!("-{}", cfg.session_window_hours)],
+            |row| row.get(0),
+        )?;
+
+        let extended = if cfg.extended_limit > 0.0 {
+            let ext_sql = format!(
+                "SELECT {} as used
+                 FROM events
+                 WHERE agent_type = ?1 AND created_at >= datetime('now', ?2 || ' hours')",
+                sum_expr
+            );
+            let ext_used: f64 = conn.query_row(
+                &ext_sql,
+                params![agent_type, format!("-{}", cfg.extended_window_hours)],
+                |row| row.get(0),
+            )?;
+
+            Some(UsageWindow {
+                used: ext_used,
+                limit: cfg.extended_limit,
+                window_hours: cfg.extended_window_hours,
+            })
+        } else {
+            None
+        };
+
+        results.push(AgentUsageData {
+            limit_type: cfg.limit_type.as_str().to_string(),
+            agent_type,
+            session: UsageWindow {
+                used: session_used,
+                limit: cfg.session_limit,
+                window_hours: cfg.session_window_hours,
+            },
+            extended,
+        });
+    }
+
+    Ok(results)
 }
 
 // --- Sessions API ---

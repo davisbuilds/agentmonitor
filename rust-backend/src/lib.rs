@@ -21,6 +21,9 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/events", post(api::ingest_single))
         .route("/api/events/batch", post(api::ingest_batch))
         .route("/api/stats", get(api::stats_handler))
+        .route("/api/stats/tools", get(api::stats_tools_handler))
+        .route("/api/stats/cost", get(api::stats_cost_handler))
+        .route("/api/stats/usage-monitor", get(api::usage_monitor_handler))
         .route("/api/sessions", get(api::sessions_list_handler))
         .route(
             "/api/sessions/{id}/transcript",
