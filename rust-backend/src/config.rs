@@ -53,6 +53,7 @@ pub struct Config {
     pub stats_interval_ms: u64,
     pub max_sse_clients: usize,
     pub sse_heartbeat_ms: u64,
+    pub auto_import_interval_minutes: u64,
     pub usage_monitor: UsageMonitorConfig,
 }
 
@@ -72,6 +73,7 @@ impl Config {
             stats_interval_ms: parse_env("AGENTMONITOR_STATS_INTERVAL", 5000),
             max_sse_clients: parse_env("AGENTMONITOR_MAX_SSE_CLIENTS", 50),
             sse_heartbeat_ms: parse_env("AGENTMONITOR_SSE_HEARTBEAT_MS", 30000),
+            auto_import_interval_minutes: parse_env("AGENTMONITOR_AUTO_IMPORT_MINUTES", 10),
             usage_monitor: UsageMonitorConfig {
                 claude_code: AgentUsageConfig {
                     limit_type: UsageLimitType::Tokens,

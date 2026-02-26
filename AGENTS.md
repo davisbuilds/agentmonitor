@@ -89,6 +89,12 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **TS validates `agent_type` as required string only, not enum**: Parity tests must match the looser TypeScript behavior. Don't assert enum rejection for `agent_type` in shared parity tests.
 - **tsx-in-tsx spawn failure**: Spawning a child process that uses tsx from a parent tsx process fails silently (no output, no error). Use `/bin/sh -c 'exec node --import tsx ...'` with a clean environment instead.
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start (~small number); `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
+- **`pnpm rust:import` already includes Cargo `--` separator**: Pass flags directly (`pnpm rust:import --help`, `pnpm rust:import --source codex`). Do not add an extra `--`.
+- **Multiple Rust binaries require explicit `--bin` for `cargo run`**: After adding helper CLIs (for example `import`), plain `cargo run` becomes ambiguous. Keep `pnpm rust:dev` pinned to `--bin agentmonitor-rs`.
+- **Keep importer metadata as `serde_json::Value` until insert**: `truncate_metadata` accepts `&Value`; converting metadata to `String` too early causes type mismatches and extra parse/serialize churn.
+- **`Option<String>` + helper signature mismatch**: If helper takes `&str`, call `.as_deref().and_then(helper)` instead of `.and_then(helper)`.
+- **Rust move semantics in struct literals**: Don't read a moved `String` field later in the same initializer; compute derived booleans before moving or clone intentionally.
+- **Import parity requires historical session finalization**: For events with `source = "import"`, mark sessions as `ended` to match TypeScript behavior and keep imported sessions out of active lists.
 
 ## Validation Checklist
 

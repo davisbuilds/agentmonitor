@@ -1,4 +1,5 @@
 pub mod api;
+pub mod auto_import;
 pub mod config;
 pub mod contracts;
 pub mod db;

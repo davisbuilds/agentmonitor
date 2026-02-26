@@ -94,7 +94,7 @@ These are expected — the spike scoped to core ingest + live-stream behavior pe
 4. ⏳ Port pricing engine and import pipeline.
    - ✅ Pricing auto-calculation parity on ingest path (completed 2026-02-26).
    - ✅ Import pipeline core migrated (Claude + Codex file import, `import_state`, CLI) (completed 2026-02-26).
-   - ⏳ Runtime auto-import scheduler parity in Rust server still pending.
+   - ✅ Runtime auto-import scheduler parity in Rust server (startup + interval + SSE session_update broadcast) (completed 2026-02-26).
 5. Achieve full parity on all API endpoints with extended parity test suite.
 
 **Phase 2: Tauri Desktop Shell** (target: 2 weeks after Phase 1)

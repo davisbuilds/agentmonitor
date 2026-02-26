@@ -18,7 +18,7 @@
     "recalculate-costs": "tsx scripts/recalculate-costs.ts",
     "import": "tsx scripts/import.ts",
     "rust:import": "cargo run --manifest-path rust-backend/Cargo.toml --bin import --",
-    "rust:dev": "cargo run --manifest-path rust-backend/Cargo.toml",
+    "rust:dev": "cargo run --manifest-path rust-backend/Cargo.toml --bin agentmonitor-rs",
     "rust:build": "cargo build --manifest-path rust-backend/Cargo.toml --release",
     "rust:test": "cargo test --manifest-path rust-backend/Cargo.toml",
     "rust:check": "cargo check --manifest-path rust-backend/Cargo.toml",
