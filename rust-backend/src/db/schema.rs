@@ -76,4 +76,13 @@ CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
 CREATE INDEX IF NOT EXISTS idx_events_agent_type ON events(agent_type);
 CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
 CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
+
+CREATE TABLE IF NOT EXISTS import_state (
+    file_path TEXT PRIMARY KEY,
+    file_hash TEXT NOT NULL,
+    file_size INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    events_imported INTEGER NOT NULL DEFAULT 0,
+    imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 "#;

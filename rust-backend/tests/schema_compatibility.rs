@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use rusqlite::Connection;
 
 fn init_db() -> Connection {
-    let path = PathBuf::from(":memory:");
+    let _path = PathBuf::from(":memory:");
     // Can't use initialize with :memory: since it takes a Path, so replicate inline
     let conn = Connection::open_in_memory().unwrap();
     conn.pragma_update(None, "journal_mode", "WAL").unwrap();
@@ -25,9 +25,7 @@ fn get_table_names(conn: &Connection) -> HashSet<String> {
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
         .unwrap();
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap();
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
     rows.map(|r| r.unwrap()).collect()
 }
 
@@ -35,9 +33,7 @@ fn get_column_names(conn: &Connection, table: &str) -> HashSet<String> {
     let mut stmt = conn
         .prepare(&format!("PRAGMA table_info({})", table))
         .unwrap();
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(1))
-        .unwrap();
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1)).unwrap();
     rows.map(|r| r.unwrap()).collect()
 }
 
@@ -45,9 +41,7 @@ fn get_index_names(conn: &Connection) -> HashSet<String> {
     let mut stmt = conn
         .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'")
         .unwrap();
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .unwrap();
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).unwrap();
     rows.map(|r| r.unwrap()).collect()
 }
 
@@ -55,12 +49,30 @@ fn get_index_names(conn: &Connection) -> HashSet<String> {
 fn required_tables_exist() {
     let conn = init_db();
     let tables = get_table_names(&conn);
-    for required in ["agents", "sessions", "events"] {
+    for required in ["agents", "sessions", "events", "import_state"] {
         assert!(
             tables.contains(required),
             "Missing required table: {required}"
         );
     }
+}
+
+#[test]
+fn import_state_columns_match_typescript() {
+    let conn = init_db();
+    let cols = get_column_names(&conn, "import_state");
+    let expected: HashSet<String> = [
+        "file_path",
+        "file_hash",
+        "file_size",
+        "source",
+        "events_imported",
+        "imported_at",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(cols, expected, "import_state columns mismatch");
 }
 
 #[test]
@@ -144,10 +156,7 @@ fn required_indexes_exist() {
         "idx_sessions_status",
     ];
     for idx in required {
-        assert!(
-            indexes.contains(idx),
-            "Missing required index: {idx}"
-        );
+        assert!(indexes.contains(idx), "Missing required index: {idx}");
     }
 }
 
@@ -184,7 +193,10 @@ fn status_check_constraint_enforced() {
          VALUES ('sess-1', 'claude_code', 'tool_use', 'invalid_status')",
         [],
     );
-    assert!(result.is_err(), "Invalid status should be rejected by CHECK constraint");
+    assert!(
+        result.is_err(),
+        "Invalid status should be rejected by CHECK constraint"
+    );
 }
 
 #[test]
@@ -195,10 +207,7 @@ fn payload_truncated_check_constraint_enforced() {
          VALUES ('sess-1', 'claude_code', 'tool_use', 'success', 2)",
         [],
     );
-    assert!(
-        result.is_err(),
-        "payload_truncated must be 0 or 1"
-    );
+    assert!(result.is_err(), "payload_truncated must be 0 or 1");
 }
 
 #[test]

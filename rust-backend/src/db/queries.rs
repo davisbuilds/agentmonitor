@@ -193,6 +193,17 @@ pub fn insert_event(
         }
     }
 
+    // Imported sessions are historical and should not appear active.
+    if p.source == "import" {
+        conn.execute(
+            "UPDATE sessions
+             SET status = 'ended',
+                 ended_at = COALESCE(ended_at, datetime('now'))
+             WHERE id = ?1 AND status != 'ended'",
+            params![p.session_id],
+        )?;
+    }
+
     let computed_cost = if p.cost_usd.is_none() && (p.tokens_in > 0 || p.tokens_out > 0) {
         p.model.and_then(|model| {
             calculate_cost(

@@ -74,6 +74,7 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - Dev server: `pnpm rust:dev` (binds `127.0.0.1:3142`)
 - Release build: `pnpm rust:build`
 - Run tests: `pnpm rust:test`
+- Import historical logs via Rust: `pnpm rust:import --source all` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`, `--claude-dir`, `--codex-dir`)
 - Parity tests (TS): `pnpm test:parity:ts` (needs TS server running on 3141)
 - Parity tests (Rust): `pnpm test:parity:rust` (needs Rust server running on 3142)
 - Benchmark comparison: `pnpm bench:compare`
