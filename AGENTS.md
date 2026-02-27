@@ -118,6 +118,7 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **Use `AGENTMONITOR_DESKTOP_PORT` for Tauri-only overrides**: If you need `pnpm rust:dev` and `pnpm tauri:dev` simultaneously, prefer `AGENTMONITOR_DESKTOP_PORT` so standalone Rust defaults stay unchanged.
 - **Keep runtime boundary tests in `src-tauri/tests/runtime_boundary.rs`**: Add new desktop startup contract assertions there, not in ad-hoc manual checks, so boundary regressions fail fast.
 - **Do not call `shutdown_blocking()` inside async tokio tests**: It uses `tauri::async_runtime::block_on`, which panics with nested runtime errors. Use `EmbeddedBackendState::shutdown_async().await` in async tests.
+- **Keep Tauri command wrappers thin and test helper functions directly**: `#[tauri::command]` functions that take `tauri::State<'_, T>` are awkward to test in isolation. Put logic in plain helpers (for example `runtime_status_from_state`, `desktop_health_from_state`) and keep command functions as thin adapters.
 
 ## Validation Checklist
 
