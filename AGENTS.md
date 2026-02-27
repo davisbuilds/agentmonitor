@@ -84,9 +84,12 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 
 ### Phase 2 Runtime Model (Internal-First)
 
-- Tauri starts an embedded Rust runtime host in-process, then navigates the main window to `http://127.0.0.1:3142` (or configured Rust bind).
+- Tauri starts an embedded Rust runtime through `rust-backend`'s `runtime_contract` API (not `runtime_host` internals), then navigates the main window to the contract-provided base URL.
 - Rust serves both API routes and dashboard static assets from the same origin (`/api/*`, `/`, `/js/*`, `/css/*`) in desktop mode.
 - HTTP ingest/SSE remains the adapter boundary for hooks and parity safety; Tauri IPC is additive and not required for core ingest flow.
+- Desktop bind precedence is deterministic: `AGENTMONITOR_DESKTOP_HOST` / `AGENTMONITOR_DESKTOP_PORT` override backend env bind values; otherwise runtime falls back to `AGENTMONITOR_HOST` / `AGENTMONITOR_RUST_PORT` defaults.
+- Startup orchestration lives in `src-tauri/src/runtime_coordinator.rs`; keep `src-tauri/src/lib.rs` as composition glue only.
+- IPC is scaffolded in `src-tauri/src/ipc/mod.rs` as a typed seam; no ingest/data flow should depend on IPC yet.
 
 ### Rust-Specific Gotchas
 
@@ -112,6 +115,8 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **Embedded-backend tests need unique SQLite paths**: Reusing the same temp DB file across tests causes intermittent `database is locked`. Generate a unique temp DB path per test case.
 - **Bind-collision tests should reserve a free port first**: Hardcoded test ports are flaky if already in use. Bind `127.0.0.1:0`, capture the assigned port, release listener, then run collision checks against that port.
 - **`pnpm rust:dev` and `pnpm tauri:dev` both target Rust port 3142 by default**: Running both at once is an expected startup collision. Shut down one or set a different `AGENTMONITOR_RUST_PORT` for one process.
+- **Use `AGENTMONITOR_DESKTOP_PORT` for Tauri-only overrides**: If you need `pnpm rust:dev` and `pnpm tauri:dev` simultaneously, prefer `AGENTMONITOR_DESKTOP_PORT` so standalone Rust defaults stay unchanged.
+- **Keep runtime boundary tests in `src-tauri/tests/runtime_boundary.rs`**: Add new desktop startup contract assertions there, not in ad-hoc manual checks, so boundary regressions fail fast.
 
 ## Validation Checklist
 

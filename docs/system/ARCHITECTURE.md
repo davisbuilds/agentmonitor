@@ -30,14 +30,19 @@ Runs on port 3142 by default. Current verification includes full Rust test suite
 ## Tauri Desktop Runtime (phase 2 in progress)
 
 Current desktop runtime is internal-first:
-- Tauri app setup starts the embedded Rust runtime host via shared lifecycle APIs.
+- Tauri app setup starts the embedded Rust runtime via `rust-backend/src/runtime_contract.rs`.
+- `runtime_contract` is the public boundary for startup/shutdown and endpoint metadata (`base_url`, `local_addr`).
+- Tauri startup/shutdown orchestration is centralized in `src-tauri/src/runtime_coordinator.rs`.
 - Startup includes readiness gate (`/api/health`) before window navigation.
-- Tauri main window navigates to backend origin (`http://127.0.0.1:3142` by default).
+- Tauri main window navigates using the contract-provided backend origin (`http://127.0.0.1:3142` by default).
+- Desktop bind policy is deterministic: desktop overrides (`AGENTMONITOR_DESKTOP_HOST`, `AGENTMONITOR_DESKTOP_PORT`) take precedence over backend env bind config.
 - Rust backend serves dashboard static assets as router fallback, so UI and API share the same origin in desktop mode.
 - HTTP ingest/SSE remains available on localhost as adapter boundary for hooks and parity coverage.
+- IPC is scaffolded as a typed seam in `src-tauri/src/ipc/mod.rs` (`desktop_runtime_status` command), but ingest/state traffic remains HTTP-first.
 
 Guardrail coverage:
 - `rust-backend/tests/desktop_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.
+- `src-tauri/tests/runtime_boundary.rs` validates runtime boundary contracts (endpoint metadata, restart after shutdown, desktop bind precedence).
 
 ## API Layer
 

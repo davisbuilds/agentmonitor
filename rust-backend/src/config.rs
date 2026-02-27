@@ -1,6 +1,9 @@
 use std::env;
 use std::path::PathBuf;
 
+pub const DEFAULT_BIND_HOST: &str = "127.0.0.1";
+pub const DEFAULT_RUST_PORT: u16 = 3142;
+
 #[derive(Clone)]
 pub enum UsageLimitType {
     Tokens,
@@ -63,8 +66,8 @@ impl Config {
         let default_window_hours = parse_env_i64_min("AGENTMONITOR_SESSION_WINDOW_HOURS", 5, 1);
 
         Self {
-            port: parse_env_u16("AGENTMONITOR_RUST_PORT", 3142),
-            host: env::var("AGENTMONITOR_HOST").unwrap_or_else(|_| "127.0.0.1".into()),
+            port: parse_env_u16("AGENTMONITOR_RUST_PORT", DEFAULT_RUST_PORT),
+            host: env::var("AGENTMONITOR_HOST").unwrap_or_else(|_| DEFAULT_BIND_HOST.into()),
             db_path: env::var("AGENTMONITOR_RUST_DB_PATH")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("./data/agentmonitor-rs.db")),
@@ -138,6 +141,16 @@ impl Config {
 
     pub fn bind_addr(&self) -> String {
         format!("{}:{}", self.host, self.port)
+    }
+
+    pub fn apply_bind_override(mut self, host: Option<String>, port: Option<u16>) -> Self {
+        if let Some(host) = host {
+            self.host = host;
+        }
+        if let Some(port) = port {
+            self.port = port;
+        }
+        self
     }
 }
 

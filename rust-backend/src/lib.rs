@@ -6,6 +6,7 @@ pub mod db;
 pub mod importer;
 pub mod otel;
 pub mod pricing;
+pub mod runtime_contract;
 pub mod runtime_host;
 pub mod runtime_tasks;
 pub mod sse;
@@ -16,8 +17,8 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::routing::{get, get_service, post};
-use tower_http::services::ServeDir;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 
 use crate::state::AppState;
 
