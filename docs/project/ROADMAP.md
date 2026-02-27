@@ -18,8 +18,8 @@ This is a lightweight snapshot, not a release contract.
 ## In Progress
 
 - **Rust + Tauri migration**: Phase 1 backend migration is complete (parity/soak/import/pricing/OTEL). Phase 2 desktop shell is in progress with internal-first sequencing.
-  - Completed in Phase 2 so far: Tauri scaffold, embedded Rust lifecycle host, backend readiness gate, Rust-served dashboard assets, architectural cleanup (runtime contract boundary, deterministic desktop bind policy, runtime coordinator extraction, boundary regression tests), and first functional IPC handlers (`desktop_runtime_status`, `desktop_health`).
-  - Next in Phase 2: packaging/signing path and incremental IPC adoption in renderer flows (still additive to HTTP adapter path).
+  - Completed in Phase 2 so far: Tauri scaffold, embedded Rust lifecycle host, backend readiness gate, Rust-served dashboard assets, architectural cleanup (runtime contract boundary, deterministic desktop bind policy, runtime coordinator extraction, boundary regression tests), first functional IPC handlers (`desktop_runtime_status`, `desktop_health`), and macOS release preflight workflow for unsigned/signed/notarized builds.
+  - Next in Phase 2: wire IPC handlers into renderer flows and harden signing/notarization verification automation.
   - See [spike decision](../plans/2026-02-24-rust-backend-spike-decision.md), [Phase 2 implementation plan](../plans/2026-02-26-tauri-internal-first-shell-implementation.md), and [architectural cleanup plan](../plans/2026-02-27-tauri-internal-first-shell-implementation.md).
 
 ## Planned / Open Areas

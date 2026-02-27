@@ -45,6 +45,11 @@ Open `http://127.0.0.1:3141`.
 - `pnpm run import`: import historical sessions from Claude Code and Codex logs.
 - `pnpm run seed`: send demo events to the running server.
 - `pnpm run bench:ingest`: run ingest throughput benchmark.
+- `pnpm run tauri:dev`: run Tauri desktop shell in dev mode.
+- `pnpm run tauri:build`: build desktop app with Tauri defaults.
+- `pnpm run tauri:release:mac:unsigned`: unsigned macOS app + dmg bundles.
+- `pnpm run tauri:release:mac:signed`: signed macOS bundles (requires `APPLE_SIGNING_IDENTITY`).
+- `pnpm run tauri:release:mac:notarized`: signed + notarization-ready preflight and build.
 
 ## Configuration
 

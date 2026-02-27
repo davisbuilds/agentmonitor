@@ -24,6 +24,27 @@ pnpm bench:ingest       # Ingest throughput benchmark
 pnpm recalculate-costs  # Recalculate costs from pricing data
 ```
 
+## Tauri macOS Release
+
+```bash
+pnpm tauri:release:mac:unsigned                     # unsigned app + dmg bundles
+pnpm tauri:release:mac:signed                       # requires APPLE_SIGNING_IDENTITY
+pnpm tauri:release:mac:notarized                    # requires signing + notarization env vars
+pnpm tauri:release:mac -- --mode signed --dry-run  # preflight only (no build)
+pnpm tauri:build --no-bundle                        # non-GUI release sanity check
+```
+
+Note: DMG bundling uses AppleScript via `create-dmg` and may hang in headless or restricted GUI sessions. Run `--dry-run` first when validating env setup.
+
+Signed/notarized preflight environment:
+
+| Variable | Required For | Notes |
+|----------|--------------|-------|
+| `APPLE_SIGNING_IDENTITY` | `signed`, `signed-notarized` | Developer ID Application identity |
+| `APPLE_API_KEY` | `signed-notarized` | App Store Connect API key id |
+| `APPLE_API_ISSUER` | `signed-notarized` | App Store Connect issuer UUID |
+| `APPLE_API_KEY_PATH` | `signed-notarized` | Absolute path to `.p8` key file; file must exist |
+
 ## Environment Variables
 
 All optional with sensible defaults:

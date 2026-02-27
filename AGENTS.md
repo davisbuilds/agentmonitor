@@ -81,6 +81,9 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - Benchmark comparison: `pnpm bench:compare`
 - Tauri desktop dev shell: `pnpm tauri:dev`
 - Tauri desktop build: `pnpm tauri:build`
+- Tauri macOS release (unsigned): `pnpm tauri:release:mac:unsigned`
+- Tauri macOS release (signed preflight + build): `pnpm tauri:release:mac:signed`
+- Tauri macOS release (signed + notarization preflight + build): `pnpm tauri:release:mac:notarized`
 
 ### Phase 2 Runtime Model (Internal-First)
 
@@ -119,6 +122,9 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **Keep runtime boundary tests in `src-tauri/tests/runtime_boundary.rs`**: Add new desktop startup contract assertions there, not in ad-hoc manual checks, so boundary regressions fail fast.
 - **Do not call `shutdown_blocking()` inside async tokio tests**: It uses `tauri::async_runtime::block_on`, which panics with nested runtime errors. Use `EmbeddedBackendState::shutdown_async().await` in async tests.
 - **Keep Tauri command wrappers thin and test helper functions directly**: `#[tauri::command]` functions that take `tauri::State<'_, T>` are awkward to test in isolation. Put logic in plain helpers (for example `runtime_status_from_state`, `desktop_health_from_state`) and keep command functions as thin adapters.
+- **Use `pnpm tauri:release:mac -- --dry-run` before release builds**: The release script validates signing/notarization env upfront and fails fast before expensive bundle builds.
+- **Notarized mode requires a real API key file path**: `APPLE_API_KEY_PATH` must point to an existing `.p8`; preflight intentionally fails on missing files.
+- **DMG bundling runs AppleScript (`create-dmg`) and can stall in headless or restricted GUI sessions**: Use release script `--dry-run` for preflight checks and `pnpm tauri:build --no-bundle` for non-GUI verification.
 
 ## Validation Checklist
 
