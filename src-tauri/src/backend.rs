@@ -16,6 +16,12 @@ pub struct EmbeddedBackend {
     base_url: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedBackendSnapshot {
+    pub local_addr: SocketAddr,
+    pub base_url: String,
+}
+
 impl EmbeddedBackend {
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
@@ -34,6 +40,13 @@ impl EmbeddedBackend {
         }
         Ok(())
     }
+
+    fn snapshot(&self) -> EmbeddedBackendSnapshot {
+        EmbeddedBackendSnapshot {
+            local_addr: self.local_addr,
+            base_url: self.base_url.clone(),
+        }
+    }
 }
 
 pub struct EmbeddedBackendState {
@@ -48,6 +61,10 @@ impl EmbeddedBackendState {
     }
 
     pub fn shutdown_blocking(&self) -> Result<(), BackendStartupError> {
+        tauri::async_runtime::block_on(self.shutdown_async())
+    }
+
+    pub async fn shutdown_async(&self) -> Result<(), BackendStartupError> {
         let backend = self
             .backend
             .lock()
@@ -57,10 +74,21 @@ impl EmbeddedBackendState {
             .take();
 
         if let Some(backend) = backend {
-            tauri::async_runtime::block_on(backend.shutdown())?;
+            backend.shutdown().await?;
         }
 
         Ok(())
+    }
+
+    pub fn snapshot(&self) -> Result<EmbeddedBackendSnapshot, String> {
+        let guard = self
+            .backend
+            .lock()
+            .map_err(|_| "embedded backend state lock poisoned".to_string())?;
+        let backend = guard
+            .as_ref()
+            .ok_or_else(|| "embedded backend not available".to_string())?;
+        Ok(backend.snapshot())
     }
 }
 

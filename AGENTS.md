@@ -89,7 +89,7 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - HTTP ingest/SSE remains the adapter boundary for hooks and parity safety; Tauri IPC is additive and not required for core ingest flow.
 - Desktop bind precedence is deterministic: `AGENTMONITOR_DESKTOP_HOST` / `AGENTMONITOR_DESKTOP_PORT` override backend env bind values; otherwise runtime falls back to `AGENTMONITOR_HOST` / `AGENTMONITOR_RUST_PORT` defaults.
 - Startup orchestration lives in `src-tauri/src/runtime_coordinator.rs`; keep `src-tauri/src/lib.rs` as composition glue only.
-- IPC is scaffolded in `src-tauri/src/ipc/mod.rs` as a typed seam; no ingest/data flow should depend on IPC yet.
+- IPC command surface in `src-tauri/src/ipc/mod.rs` is additive (`desktop_runtime_status`, `desktop_health`); ingest/data flow remains HTTP-first.
 
 ### Rust-Specific Gotchas
 
@@ -117,6 +117,7 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **`pnpm rust:dev` and `pnpm tauri:dev` both target Rust port 3142 by default**: Running both at once is an expected startup collision. Shut down one or set a different `AGENTMONITOR_RUST_PORT` for one process.
 - **Use `AGENTMONITOR_DESKTOP_PORT` for Tauri-only overrides**: If you need `pnpm rust:dev` and `pnpm tauri:dev` simultaneously, prefer `AGENTMONITOR_DESKTOP_PORT` so standalone Rust defaults stay unchanged.
 - **Keep runtime boundary tests in `src-tauri/tests/runtime_boundary.rs`**: Add new desktop startup contract assertions there, not in ad-hoc manual checks, so boundary regressions fail fast.
+- **Do not call `shutdown_blocking()` inside async tokio tests**: It uses `tauri::async_runtime::block_on`, which panics with nested runtime errors. Use `EmbeddedBackendState::shutdown_async().await` in async tests.
 
 ## Validation Checklist
 

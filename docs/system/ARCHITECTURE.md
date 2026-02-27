@@ -38,7 +38,7 @@ Current desktop runtime is internal-first:
 - Desktop bind policy is deterministic: desktop overrides (`AGENTMONITOR_DESKTOP_HOST`, `AGENTMONITOR_DESKTOP_PORT`) take precedence over backend env bind config.
 - Rust backend serves dashboard static assets as router fallback, so UI and API share the same origin in desktop mode.
 - HTTP ingest/SSE remains available on localhost as adapter boundary for hooks and parity coverage.
-- IPC is scaffolded as a typed seam in `src-tauri/src/ipc/mod.rs` (`desktop_runtime_status` command), but ingest/state traffic remains HTTP-first.
+- IPC is additive and now includes first functional handlers in `src-tauri/src/ipc/mod.rs` (`desktop_runtime_status`, `desktop_health`), while ingest/state traffic remains HTTP-first.
 
 Guardrail coverage:
 - `rust-backend/tests/desktop_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.

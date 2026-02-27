@@ -5,7 +5,10 @@ pub mod runtime_coordinator;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = match tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![ipc::desktop_runtime_status])
+        .invoke_handler(tauri::generate_handler![
+            ipc::desktop_runtime_status,
+            ipc::desktop_health
+        ])
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
