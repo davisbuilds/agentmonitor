@@ -77,12 +77,11 @@ See [soak results](2026-02-26-rust-backend-soak-results.md).
 
 ## Unresolved Gaps
 
-- OTEL JSON log/metric parsing not ported.
-- Import pipeline not ported.
-- Pricing engine not ported.
-- No Tauri shell or IPC integration yet.
+- Full desktop packaging/signing/notarization flow not completed.
+- Tauri IPC layer not added yet (HTTP adapter remains primary integration boundary).
+- Final architectural cleanup pass for desktop-oriented module boundaries pending.
 
-These are expected — the spike scoped to core ingest + live-stream behavior per the implementation plan.
+These are expected follow-on items after the spike and Phase 1 completion.
 
 ## Next Milestone
 
@@ -99,10 +98,12 @@ These are expected — the spike scoped to core ingest + live-stream behavior pe
 
 **Phase 2: Tauri Desktop Shell** (target: 2 weeks after Phase 1)
 
-1. Tauri project scaffold with Rust backend embedded.
-2. HTTP API preserved on localhost for hook compatibility.
-3. Tauri IPC added for renderer communication (additive, not replacement).
-4. DMG packaging, signing, notarization.
+1. ✅ Tauri project scaffold with Rust backend embedded (completed 2026-02-27).
+2. ✅ HTTP API preserved on localhost for hook compatibility; dashboard served from Rust backend origin in desktop runtime (completed 2026-02-27).
+3. ⏳ Tauri IPC added for renderer communication (additive, not replacement).
+4. ⏳ DMG packaging, signing, notarization.
+
+Implementation path is tracked in [2026-02-26-tauri-internal-first-shell-implementation.md](2026-02-26-tauri-internal-first-shell-implementation.md).
 
 **Decision cutoff**: If Phase 1 is not complete within 2 weeks, re-evaluate scope or fall back to Electron path.
 

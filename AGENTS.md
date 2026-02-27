@@ -74,10 +74,19 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - Dev server: `pnpm rust:dev` (binds `127.0.0.1:3142`)
 - Release build: `pnpm rust:build`
 - Run tests: `pnpm rust:test`
+- Desktop invariants only: `pnpm rust:test:desktop-invariants`
 - Import historical logs via Rust: `pnpm rust:import --source all` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`, `--claude-dir`, `--codex-dir`)
 - Parity tests (TS): `pnpm test:parity:ts` (needs TS server running on 3141)
 - Parity tests (Rust): `pnpm test:parity:rust` (needs Rust server running on 3142)
 - Benchmark comparison: `pnpm bench:compare`
+- Tauri desktop dev shell: `pnpm tauri:dev`
+- Tauri desktop build: `pnpm tauri:build`
+
+### Phase 2 Runtime Model (Internal-First)
+
+- Tauri starts an embedded Rust runtime host in-process, then navigates the main window to `http://127.0.0.1:3142` (or configured Rust bind).
+- Rust serves both API routes and dashboard static assets from the same origin (`/api/*`, `/`, `/js/*`, `/css/*`) in desktop mode.
+- HTTP ingest/SSE remains the adapter boundary for hooks and parity safety; Tauri IPC is additive and not required for core ingest flow.
 
 ### Rust-Specific Gotchas
 

@@ -11,16 +11,33 @@
 ## Active Decision Records
 
 - `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../plans/adr/2026-02-24-rust-backend-spike-decision-record.md) — **GO decision reached**. Proceeding with phased Rust migration and Tauri desktop shell. See [spike decision](../plans/2026-02-24-rust-backend-spike-decision.md).
+- `2026-02-26`: [Tauri Internal-First Shell](../plans/2026-02-26-tauri-internal-first-shell-plan.md) with [implementation plan](../plans/2026-02-26-tauri-internal-first-shell-implementation.md) — Phase 2 execution path.
 
-## Rust Backend (spike, in progress)
+## Rust Backend (phase 1 complete)
 
-An isolated Rust service (`rust-backend/`) reimplements core ingest and live-stream behavior using axum, tokio, and rusqlite. Currently covers:
+An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream behavior using axum, tokio, and rusqlite. Phase 1 parity work is complete and includes:
 - `POST /api/events`, `POST /api/events/batch` — ingest with dedup and batch rejection
-- `GET /api/stats` — aggregate counters
+- `GET /api/stats`, `GET /api/stats/tools`, `GET /api/stats/cost`, `GET /api/stats/usage-monitor` — aggregate and analytics counters
+- `GET /api/sessions`, `GET /api/sessions/:id`, `GET /api/sessions/:id/transcript`, `GET /api/filter-options`
+- `POST /api/otel/v1/logs`, `/api/otel/v1/metrics`, `/api/otel/v1/traces`
 - `GET /api/stream` — SSE fan-out via tokio::broadcast
 - `GET /api/health` — service health with SSE client count
+- Import pipeline + runtime auto-import scheduling parity
+- Pricing auto-cost parity on ingest
 
-Runs on port 3142 (spike default). 73 tests + 18 shared parity tests.
+Runs on port 3142 by default. Current verification includes full Rust test suite + shared parity tests.
+
+## Tauri Desktop Runtime (phase 2 in progress)
+
+Current desktop runtime is internal-first:
+- Tauri app setup starts the embedded Rust runtime host via shared lifecycle APIs.
+- Startup includes readiness gate (`/api/health`) before window navigation.
+- Tauri main window navigates to backend origin (`http://127.0.0.1:3142` by default).
+- Rust backend serves dashboard static assets as router fallback, so UI and API share the same origin in desktop mode.
+- HTTP ingest/SSE remains available on localhost as adapter boundary for hooks and parity coverage.
+
+Guardrail coverage:
+- `rust-backend/tests/desktop_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.
 
 ## API Layer
 
