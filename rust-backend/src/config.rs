@@ -47,6 +47,7 @@ pub struct Config {
     pub port: u16,
     pub host: String,
     pub db_path: PathBuf,
+    pub ui_dir: PathBuf,
     pub max_payload_kb: usize,
     pub session_timeout_minutes: u64,
     pub max_feed: usize,
@@ -67,6 +68,9 @@ impl Config {
             db_path: env::var("AGENTMONITOR_RUST_DB_PATH")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| PathBuf::from("./data/agentmonitor-rs.db")),
+            ui_dir: env::var("AGENTMONITOR_UI_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| default_ui_dir()),
             max_payload_kb: parse_env("AGENTMONITOR_MAX_PAYLOAD_KB", 10),
             session_timeout_minutes: parse_env("AGENTMONITOR_SESSION_TIMEOUT", 5),
             max_feed: parse_env("AGENTMONITOR_MAX_FEED", 200),
@@ -162,4 +166,13 @@ fn parse_env_f64_min(key: &str, default: f64, min: f64) -> f64 {
         .and_then(|v| v.parse::<f64>().ok())
         .filter(|v| *v >= min)
         .unwrap_or(default)
+}
+
+fn default_ui_dir() -> PathBuf {
+    // CARGO_MANIFEST_DIR points to rust-backend/ at compile time.
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .map(|repo_root| repo_root.join("public"))
+        .unwrap_or_else(|| PathBuf::from("./public"))
 }

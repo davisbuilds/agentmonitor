@@ -96,6 +96,14 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **Rust move semantics in struct literals**: Don't read a moved `String` field later in the same initializer; compute derived booleans before moving or clone intentionally.
 - **Import parity requires historical session finalization**: For events with `source = "import"`, mark sessions as `ended` to match TypeScript behavior and keep imported sessions out of active lists.
 
+### Tauri Embedding Gotchas
+
+- **Do not block inside async backend readiness checks**: Calling `std::thread::sleep` or sync `std::net::TcpStream` I/O inside async startup checks can starve the runtime and make health waits hang. Use `tokio::time::sleep` + `tokio::net::TcpStream` for readiness probes.
+- **Tauri setup failures can explode into macOS panic backtraces**: Returning setup-hook errors from deep startup paths can trigger noisy `panic in a function that cannot unwind` output in `tauri dev`. For bind-collision startup failures, emit a clear message and `std::process::exit(1)` in setup instead of relying on panic surfaces.
+- **Embedded-backend tests need unique SQLite paths**: Reusing the same temp DB file across tests causes intermittent `database is locked`. Generate a unique temp DB path per test case.
+- **Bind-collision tests should reserve a free port first**: Hardcoded test ports are flaky if already in use. Bind `127.0.0.1:0`, capture the assigned port, release listener, then run collision checks against that port.
+- **`pnpm rust:dev` and `pnpm tauri:dev` both target Rust port 3142 by default**: Running both at once is an expected startup collision. Shut down one or set a different `AGENTMONITOR_RUST_PORT` for one process.
+
 ## Validation Checklist
 
 When code behavior changes, run:

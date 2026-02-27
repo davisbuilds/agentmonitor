@@ -15,13 +15,16 @@ pub mod util;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::routing::{get, post};
+use axum::routing::{get, get_service, post};
+use tower_http::services::ServeDir;
 use tower_http::cors::CorsLayer;
 
 use crate::state::AppState;
 
 /// Build the application router with all routes wired.
 pub fn build_router(state: Arc<AppState>) -> Router {
+    let ui_dir = state.config.ui_dir.clone();
+
     Router::new()
         .route("/api/health", get(api::health_handler))
         .route("/api/events", post(api::ingest_single))
@@ -41,6 +44,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/sessions/{id}", get(api::session_detail_handler))
         .route("/api/filter-options", get(api::filter_options_handler))
         .route("/api/stream", get(api::stream_handler))
+        .fallback_service(get_service(
+            ServeDir::new(ui_dir)
+                .append_index_html_on_directories(true)
+                .precompressed_br()
+                .precompressed_gzip(),
+        ))
         .layer(CorsLayer::permissive())
         .with_state(state)
 }

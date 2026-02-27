@@ -21,7 +21,29 @@ pub fn run() {
           std::process::exit(1);
         }
       };
-      log::info!("embedded backend listening on {}", backend.local_addr());
+      let backend_url = format!("http://{}", backend.local_addr());
+      let parsed_url = match tauri::Url::parse(&backend_url) {
+        Ok(url) => url,
+        Err(err) => {
+          eprintln!("Failed to parse embedded backend URL ({backend_url}): {err}");
+          std::process::exit(1);
+        }
+      };
+
+      let window = match app.get_webview_window("main") {
+        Some(window) => window,
+        None => {
+          eprintln!("Failed to locate Tauri main window during setup");
+          std::process::exit(1);
+        }
+      };
+
+      if let Err(err) = window.navigate(parsed_url) {
+        eprintln!("Failed to navigate Tauri window to embedded backend: {err}");
+        std::process::exit(1);
+      }
+
+      log::info!("embedded backend listening on {backend_url}");
       app.manage(backend::EmbeddedBackendState::new(backend));
       Ok(())
     })
