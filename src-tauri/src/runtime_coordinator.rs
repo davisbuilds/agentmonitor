@@ -26,7 +26,10 @@ impl fmt::Display for RuntimeCoordinatorError {
 impl std::error::Error for RuntimeCoordinatorError {}
 
 pub fn initialize(app: &tauri::App) -> Result<(), RuntimeCoordinatorError> {
-    let backend = tauri::async_runtime::block_on(backend::start_embedded_backend())
+    let app_data_dir = app.path().app_data_dir().ok();
+    let backend = tauri::async_runtime::block_on(backend::start_embedded_backend_with_app_data_dir(
+        app_data_dir,
+    ))
         .map_err(|err| RuntimeCoordinatorError::BackendStart(err.to_string()))?;
     let backend_url = backend.base_url().to_string();
 

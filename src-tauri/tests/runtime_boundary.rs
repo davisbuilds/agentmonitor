@@ -1,6 +1,7 @@
 use agentmonitor_rs::config::Config;
 use agentmonitor_tauri_lib::backend::{
-    apply_desktop_bind_overrides, start_embedded_backend_with_config, DesktopBindOverrides,
+    apply_desktop_bind_overrides, apply_desktop_runtime_overrides, start_embedded_backend_with_config,
+    DesktopBindOverrides,
 };
 
 fn test_config() -> Config {
@@ -24,6 +25,16 @@ fn free_port() -> u16 {
     let port = listener.local_addr().expect("local addr").port();
     drop(listener);
     port
+}
+
+fn unique_temp_dir(name: &str) -> std::path::PathBuf {
+    static COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let suffix = COUNTER.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    std::env::temp_dir().join(format!(
+        "agentmonitor-tauri-runtime-boundary-{name}-{}-{}",
+        std::process::id(),
+        suffix
+    ))
 }
 
 #[test]
@@ -53,6 +64,30 @@ fn desktop_bind_policy_falls_back_to_base_config_without_overrides() {
     let resolved = apply_desktop_bind_overrides(base, DesktopBindOverrides::default());
     assert_eq!(resolved.host, "0.0.0.0");
     assert_eq!(resolved.port, 4848);
+}
+
+#[test]
+fn desktop_db_path_is_resolved_against_app_data_dir_when_relative() {
+    let mut base = test_config();
+    base.db_path = std::path::PathBuf::from("./data/agentmonitor-rs.db");
+    let app_data_dir = unique_temp_dir("app-data");
+
+    let resolved = apply_desktop_runtime_overrides(
+        base,
+        DesktopBindOverrides::default(),
+        Some(app_data_dir.as_path()),
+    )
+    .expect("desktop runtime overrides should resolve");
+
+    assert_eq!(resolved.db_path, app_data_dir.join("./data/agentmonitor-rs.db"));
+    assert!(
+        resolved
+            .db_path
+            .parent()
+            .expect("db path parent")
+            .exists(),
+        "db parent directory should be created during desktop config resolution"
+    );
 }
 
 #[tokio::test]

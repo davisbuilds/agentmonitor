@@ -125,6 +125,7 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **Use `pnpm tauri:release:mac -- --dry-run` before release builds**: The release script validates signing/notarization env upfront and fails fast before expensive bundle builds.
 - **Notarized mode requires a real API key file path**: `APPLE_API_KEY_PATH` must point to an existing `.p8`; preflight intentionally fails on missing files.
 - **DMG bundling runs AppleScript (`create-dmg`) and can stall in headless or restricted GUI sessions**: Use release script `--dry-run` for preflight checks and `pnpm tauri:build --no-bundle` for non-GUI verification.
+- **Finder launch differs from terminal cwd**: Relative backend paths (like `./data/agentmonitor-rs.db`) can fail when launched from Finder because cwd is not the repo root. In desktop startup, resolve relative DB paths against Tauri `app_data_dir`.
 
 ## Validation Checklist
 

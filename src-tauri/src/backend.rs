@@ -1,5 +1,6 @@
 use std::fmt;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -136,14 +137,45 @@ pub fn apply_desktop_bind_overrides(config: Config, overrides: DesktopBindOverri
     config.apply_bind_override(overrides.host, overrides.port)
 }
 
-fn desktop_runtime_config_from_env() -> Config {
+pub fn apply_desktop_runtime_overrides(
+    mut config: Config,
+    bind_overrides: DesktopBindOverrides,
+    app_data_dir: Option<&Path>,
+) -> Result<Config, BackendStartupError> {
+    config = apply_desktop_bind_overrides(config, bind_overrides);
+
+    if let Some(app_data_dir) = app_data_dir {
+        if config.db_path.is_relative() {
+            config.db_path = app_data_dir.join(&config.db_path);
+        }
+        if let Some(parent) = config.db_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                BackendStartupError::Start(format!(
+                    "Failed to prepare embedded backend database directory ({}): {err}",
+                    parent.display()
+                ))
+            })?;
+        }
+    }
+
+    Ok(config)
+}
+
+fn desktop_runtime_config_from_env(app_data_dir: Option<&Path>) -> Result<Config, BackendStartupError> {
     let base = Config::from_env();
     let overrides = DesktopBindOverrides::from_env();
-    apply_desktop_bind_overrides(base, overrides)
+    apply_desktop_runtime_overrides(base, overrides, app_data_dir)
 }
 
 pub async fn start_embedded_backend() -> Result<EmbeddedBackend, BackendStartupError> {
-    start_embedded_backend_with_config(desktop_runtime_config_from_env()).await
+    start_embedded_backend_with_app_data_dir(None).await
+}
+
+pub async fn start_embedded_backend_with_app_data_dir(
+    app_data_dir: Option<PathBuf>,
+) -> Result<EmbeddedBackend, BackendStartupError> {
+    let config = desktop_runtime_config_from_env(app_data_dir.as_deref())?;
+    start_embedded_backend_with_config(config).await
 }
 
 pub async fn start_embedded_backend_with_config(
