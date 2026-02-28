@@ -6,6 +6,7 @@ pub mod db;
 pub mod importer;
 pub mod otel;
 pub mod pricing;
+pub mod runtime_contract;
 pub mod runtime_host;
 pub mod runtime_tasks;
 pub mod sse;
@@ -16,8 +17,8 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::routing::{get, get_service, post};
-use tower_http::services::ServeDir;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 
 use crate::state::AppState;
 
@@ -27,7 +28,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/api/health", get(api::health_handler))
-        .route("/api/events", post(api::ingest_single))
+        .route(
+            "/api/events",
+            get(api::list_events).post(api::ingest_single),
+        )
         .route("/api/events/batch", post(api::ingest_batch))
         .route("/api/stats", get(api::stats_handler))
         .route("/api/stats/tools", get(api::stats_tools_handler))

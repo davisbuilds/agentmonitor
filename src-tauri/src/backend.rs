@@ -1,16 +1,26 @@
 use std::fmt;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use agentmonitor_rs::config::Config;
-use agentmonitor_rs::runtime_host::{RuntimeHost, RuntimeHostError, start_with_config};
+use agentmonitor_rs::runtime_contract::{
+    start_with_config as start_runtime_with_config, RuntimeContract, RuntimeContractError,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
 pub struct EmbeddedBackend {
-    runtime: Option<RuntimeHost>,
+    runtime: Option<RuntimeContract>,
     local_addr: SocketAddr,
+    base_url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EmbeddedBackendSnapshot {
+    pub local_addr: SocketAddr,
+    pub base_url: String,
 }
 
 impl EmbeddedBackend {
@@ -18,14 +28,25 @@ impl EmbeddedBackend {
         self.local_addr
     }
 
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
     pub async fn shutdown(mut self) -> Result<(), BackendStartupError> {
         if let Some(runtime) = self.runtime.take() {
             runtime
-                .stop()
+                .shutdown()
                 .await
                 .map_err(|err| BackendStartupError::Shutdown(format!("{err}")))?;
         }
         Ok(())
+    }
+
+    fn snapshot(&self) -> EmbeddedBackendSnapshot {
+        EmbeddedBackendSnapshot {
+            local_addr: self.local_addr,
+            base_url: self.base_url.clone(),
+        }
     }
 }
 
@@ -41,17 +62,34 @@ impl EmbeddedBackendState {
     }
 
     pub fn shutdown_blocking(&self) -> Result<(), BackendStartupError> {
+        tauri::async_runtime::block_on(self.shutdown_async())
+    }
+
+    pub async fn shutdown_async(&self) -> Result<(), BackendStartupError> {
         let backend = self
             .backend
             .lock()
-            .map_err(|_| BackendStartupError::Shutdown("embedded backend state lock poisoned".into()))?
+            .map_err(|_| {
+                BackendStartupError::Shutdown("embedded backend state lock poisoned".into())
+            })?
             .take();
 
         if let Some(backend) = backend {
-            tauri::async_runtime::block_on(backend.shutdown())?;
+            backend.shutdown().await?;
         }
 
         Ok(())
+    }
+
+    pub fn snapshot(&self) -> Result<EmbeddedBackendSnapshot, String> {
+        let guard = self
+            .backend
+            .lock()
+            .map_err(|_| "embedded backend state lock poisoned".to_string())?;
+        let backend = guard
+            .as_ref()
+            .ok_or_else(|| "embedded backend not available".to_string())?;
+        Ok(backend.snapshot())
     }
 }
 
@@ -76,31 +114,95 @@ impl fmt::Display for BackendStartupError {
 
 impl std::error::Error for BackendStartupError {}
 
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct DesktopBindOverrides {
+    pub host: Option<String>,
+    pub port: Option<u16>,
+}
+
+impl DesktopBindOverrides {
+    pub fn from_env() -> Self {
+        let host = std::env::var("AGENTMONITOR_DESKTOP_HOST")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let port = std::env::var("AGENTMONITOR_DESKTOP_PORT")
+            .ok()
+            .and_then(|value| value.parse::<u16>().ok());
+        Self { host, port }
+    }
+}
+
+pub fn apply_desktop_bind_overrides(config: Config, overrides: DesktopBindOverrides) -> Config {
+    config.apply_bind_override(overrides.host, overrides.port)
+}
+
+pub fn apply_desktop_runtime_overrides(
+    mut config: Config,
+    bind_overrides: DesktopBindOverrides,
+    app_data_dir: Option<&Path>,
+) -> Result<Config, BackendStartupError> {
+    config = apply_desktop_bind_overrides(config, bind_overrides);
+
+    if let Some(app_data_dir) = app_data_dir {
+        if config.db_path.is_relative() {
+            config.db_path = app_data_dir.join(&config.db_path);
+        }
+        if let Some(parent) = config.db_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|err| {
+                BackendStartupError::Start(format!(
+                    "Failed to prepare embedded backend database directory ({}): {err}",
+                    parent.display()
+                ))
+            })?;
+        }
+    }
+
+    Ok(config)
+}
+
+fn desktop_runtime_config_from_env(app_data_dir: Option<&Path>) -> Result<Config, BackendStartupError> {
+    let base = Config::from_env();
+    let overrides = DesktopBindOverrides::from_env();
+    apply_desktop_runtime_overrides(base, overrides, app_data_dir)
+}
+
 pub async fn start_embedded_backend() -> Result<EmbeddedBackend, BackendStartupError> {
-    start_embedded_backend_with_config(Config::from_env()).await
+    start_embedded_backend_with_app_data_dir(None).await
+}
+
+pub async fn start_embedded_backend_with_app_data_dir(
+    app_data_dir: Option<PathBuf>,
+) -> Result<EmbeddedBackend, BackendStartupError> {
+    let config = desktop_runtime_config_from_env(app_data_dir.as_deref())?;
+    start_embedded_backend_with_config(config).await
 }
 
 pub async fn start_embedded_backend_with_config(
     config: Config,
 ) -> Result<EmbeddedBackend, BackendStartupError> {
-    let runtime = start_with_config(config).await.map_err(map_start_error)?;
+    let runtime = start_runtime_with_config(config)
+        .await
+        .map_err(map_start_error)?;
     let local_addr = runtime.local_addr();
+    let base_url = runtime.base_url().to_string();
 
     if let Err(err) = wait_for_health(local_addr, Duration::from_secs(2)).await {
         // Ensure partially-started runtime does not leak on readiness failure.
-        let _ = runtime.stop().await;
+        let _ = runtime.shutdown().await;
         return Err(err);
     }
 
     Ok(EmbeddedBackend {
         runtime: Some(runtime),
         local_addr,
+        base_url,
     })
 }
 
-fn map_start_error(err: RuntimeHostError) -> BackendStartupError {
+fn map_start_error(err: RuntimeContractError) -> BackendStartupError {
     match err {
-        RuntimeHostError::Bind(inner) => {
+        RuntimeContractError::Bind(inner) => {
             BackendStartupError::Bind(format!("Failed to bind embedded backend: {inner}"))
         }
         other => BackendStartupError::Start(format!("Failed to start embedded backend: {other}")),

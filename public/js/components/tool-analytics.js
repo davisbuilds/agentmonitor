@@ -12,7 +12,13 @@ const ToolAnalytics = {
     try {
       const qs = new URLSearchParams(filters || {}).toString();
       const res = await fetch(`/api/stats/tools${qs ? '?' + qs : ''}`);
-      this.data = await res.json();
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
+      this.data = {
+        tools: Array.isArray(body?.tools) ? body.tools : [],
+      };
       this.render();
     } catch (err) {
       console.error('Failed to load tool analytics:', err);

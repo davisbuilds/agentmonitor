@@ -1,7 +1,7 @@
 use tracing::info;
 
 use agentmonitor_rs::config::Config;
-use agentmonitor_rs::runtime_host::start_with_config;
+use agentmonitor_rs::runtime_contract::start_with_config;
 
 #[tokio::main]
 async fn main() {
@@ -16,7 +16,7 @@ async fn main() {
     let runtime = start_with_config(config)
         .await
         .expect("Failed to start runtime host");
-    info!("agentmonitor-rs listening on {}", runtime.local_addr());
+    info!("agentmonitor-rs listening on {}", runtime.base_url());
 
     tokio::signal::ctrl_c()
         .await
@@ -24,7 +24,7 @@ async fn main() {
     info!("Shutdown signal received, stopping runtime host");
 
     runtime
-        .stop()
+        .shutdown()
         .await
         .expect("Runtime host shutdown failed");
 }

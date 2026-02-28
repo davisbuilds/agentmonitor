@@ -146,6 +146,96 @@ impl EventRow {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+pub struct EventsFilters {
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+    pub agent_type: Option<String>,
+    pub event_type: Option<String>,
+    pub tool_name: Option<String>,
+    pub session_id: Option<String>,
+    pub branch: Option<String>,
+    pub model: Option<String>,
+    pub source: Option<String>,
+    pub since: Option<String>,
+    pub until: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EventsPage {
+    pub events: Vec<EventRow>,
+    pub total: i64,
+}
+
+pub fn get_events(conn: &Connection, filters: &EventsFilters) -> rusqlite::Result<EventsPage> {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut params: Vec<SqlValue> = Vec::new();
+
+    if let Some(agent_type) = filters.agent_type.as_deref() {
+        conditions.push("agent_type = ?".to_string());
+        params.push(SqlValue::Text(agent_type.to_string()));
+    }
+    if let Some(event_type) = filters.event_type.as_deref() {
+        conditions.push("event_type = ?".to_string());
+        params.push(SqlValue::Text(event_type.to_string()));
+    }
+    if let Some(tool_name) = filters.tool_name.as_deref() {
+        conditions.push("tool_name = ?".to_string());
+        params.push(SqlValue::Text(tool_name.to_string()));
+    }
+    if let Some(session_id) = filters.session_id.as_deref() {
+        conditions.push("session_id = ?".to_string());
+        params.push(SqlValue::Text(session_id.to_string()));
+    }
+    if let Some(branch) = filters.branch.as_deref() {
+        conditions.push("branch = ?".to_string());
+        params.push(SqlValue::Text(branch.to_string()));
+    }
+    if let Some(model) = filters.model.as_deref() {
+        conditions.push("model = ?".to_string());
+        params.push(SqlValue::Text(model.to_string()));
+    }
+    if let Some(source) = filters.source.as_deref() {
+        conditions.push("source = ?".to_string());
+        params.push(SqlValue::Text(source.to_string()));
+    }
+    if let Some(since) = filters.since.as_deref() {
+        conditions.push("created_at >= datetime(?)".to_string());
+        params.push(SqlValue::Text(since.to_string()));
+    }
+    if let Some(until) = filters.until.as_deref() {
+        conditions.push("created_at <= datetime(?)".to_string());
+        params.push(SqlValue::Text(until.to_string()));
+    }
+
+    let where_clause = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+
+    let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
+
+    let total_sql = format!("SELECT COUNT(*) FROM events {where_clause}");
+    let total: i64 = conn.query_row(&total_sql, params_refs.as_slice(), |row| row.get(0))?;
+
+    let limit = filters.limit.unwrap_or(50);
+    let offset = filters.offset.unwrap_or(0);
+
+    let events_sql =
+        format!("SELECT * FROM events {where_clause} ORDER BY created_at DESC LIMIT ? OFFSET ?");
+    let mut event_params = params;
+    event_params.push(SqlValue::Integer(limit));
+    event_params.push(SqlValue::Integer(offset));
+    let event_params_refs: Vec<&dyn ToSql> = event_params.iter().map(|v| v as &dyn ToSql).collect();
+
+    let mut stmt = conn.prepare(&events_sql)?;
+    let rows = stmt.query_map(event_params_refs.as_slice(), EventRow::from_row)?;
+    let events = rows.collect::<Result<Vec<_>, _>>()?;
+
+    Ok(EventsPage { events, total })
+}
+
 pub struct InsertEventParams<'a> {
     pub event_id: Option<&'a str>,
     pub session_id: &'a str,
@@ -356,7 +446,7 @@ pub fn get_tool_analytics(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("created_at >= ?".to_string());
+        conditions.push("created_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -452,7 +542,8 @@ pub fn get_cost_over_time(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("COALESCE(client_timestamp, created_at) >= ?".to_string());
+        conditions
+            .push("datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -511,7 +602,7 @@ pub fn get_cost_by_project(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("e.created_at >= ?".to_string());
+        conditions.push("e.created_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -567,7 +658,7 @@ pub fn get_cost_by_model(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("created_at >= ?".to_string());
+        conditions.push("created_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -767,7 +858,7 @@ pub fn get_sessions(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("s.last_event_at >= ?".to_string());
+        conditions.push("s.last_event_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -791,12 +882,14 @@ pub fn get_sessions(
     sql.push_str(
         " ORDER BY
             CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
-            s.last_event_at DESC
-          LIMIT ?",
+            s.last_event_at DESC",
     );
 
     let limit = filters.limit.unwrap_or(50);
-    params.push(SqlValue::Integer(limit));
+    if limit > 0 {
+        sql.push_str(" LIMIT ?");
+        params.push(SqlValue::Integer(limit));
+    }
 
     let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
     let mut stmt = conn.prepare(&sql)?;

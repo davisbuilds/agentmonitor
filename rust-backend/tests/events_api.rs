@@ -370,3 +370,42 @@ async fn batch_rejection_errors_use_field_colon_message_format() {
         assert!(s.contains(": "), "expected 'field: message' format, got: {s}");
     }
 }
+
+#[tokio::test]
+async fn list_events_returns_rows_and_total_with_filters() {
+    let app = test_app();
+
+    let _ = post_json(
+        &app,
+        "/api/events",
+        json!({
+            "session_id": "events-list-a",
+            "agent_type": "claude_code",
+            "event_type": "tool_use",
+            "tool_name": "Read"
+        }),
+    ).await;
+
+    let _ = post_json(
+        &app,
+        "/api/events",
+        json!({
+            "session_id": "events-list-b",
+            "agent_type": "codex",
+            "event_type": "llm_response",
+            "model": "gpt-5.3-codex",
+            "cost_usd": 1.23
+        }),
+    ).await;
+
+    let (status, body) = get_json(&app, "/api/events?agent_type=codex&limit=10&offset=0").await;
+    assert_eq!(status, 200);
+    assert!(body["events"].is_array());
+    assert!(body["total"].is_number());
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["agent_type"], "codex");
+    assert_eq!(events[0]["event_type"], "llm_response");
+    assert_eq!(body["total"], 1);
+}

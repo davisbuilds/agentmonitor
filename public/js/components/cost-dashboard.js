@@ -21,7 +21,15 @@ const CostDashboard = {
       }
       const qs = params.toString();
       const res = await fetch(`/api/stats/cost${qs ? '?' + qs : ''}`);
-      this.data = await res.json();
+      const body = await res.json();
+      if (!res.ok) {
+        throw new Error(body?.error || `HTTP ${res.status}`);
+      }
+      this.data = {
+        by_model: Array.isArray(body?.by_model) ? body.by_model : [],
+        by_project: Array.isArray(body?.by_project) ? body.by_project : [],
+        timeline: Array.isArray(body?.timeline) ? body.timeline : [],
+      };
       this.render();
     } catch (err) {
       console.error('Failed to load cost data:', err);

@@ -245,6 +245,27 @@ test('session_end transitions to idle, subsequent events reactivate', async () =
   assert.equal(session.status, 'active');
 });
 
+test('GET /api/sessions supports limit=0 as unbounded', async () => {
+  for (let i = 0; i < 3; i += 1) {
+    const response = await postJson(`${baseUrl}/api/events`, {
+      session_id: `session-unbounded-${i}`,
+      agent_type: 'claude_code',
+      event_type: 'tool_use',
+    });
+    assert.equal(response.status, 201);
+  }
+
+  const limitedRes = await fetch(`${baseUrl}/api/sessions?exclude_status=ended&limit=1`);
+  assert.equal(limitedRes.status, 200);
+  const limitedBody = await limitedRes.json() as { sessions: Array<{ id: string }> };
+  assert.equal(limitedBody.sessions.length, 1);
+
+  const unboundedRes = await fetch(`${baseUrl}/api/sessions?exclude_status=ended&limit=0`);
+  assert.equal(unboundedRes.status, 200);
+  const unboundedBody = await unboundedRes.json() as { sessions: Array<{ id: string }> };
+  assert.equal(unboundedBody.sessions.length, 3);
+});
+
 test('SSE enforces max clients and cleans up disconnected clients', async () => {
   const sseController = new AbortController();
   const first = await fetch(`${baseUrl}/api/stream`, {

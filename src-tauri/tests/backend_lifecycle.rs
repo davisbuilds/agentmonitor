@@ -52,6 +52,10 @@ async fn start_embedded_backend_with_config_serves_health() {
     let backend = start_embedded_backend_with_config(test_config())
         .await
         .expect("embedded backend should start");
+    assert!(
+        backend.base_url().starts_with("http://"),
+        "embedded backend should expose an absolute base URL"
+    );
     let status = health_status(backend.local_addr()).await;
     assert_eq!(status, Some(200));
     backend

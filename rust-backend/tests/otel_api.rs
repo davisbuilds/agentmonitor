@@ -56,6 +56,14 @@ async fn get_json(app: &axum::Router, uri: &str) -> (u16, Value) {
     (status, parsed)
 }
 
+fn parse_event_metadata(event: &Value) -> Value {
+    if let Some(raw) = event.get("metadata").and_then(|v| v.as_str()) {
+        serde_json::from_str::<Value>(raw).unwrap_or_else(|_| json!({}))
+    } else {
+        event.get("metadata").cloned().unwrap_or_else(|| json!({}))
+    }
+}
+
 #[tokio::test]
 async fn otel_logs_rejects_protobuf() {
     let app = test_app();
@@ -108,6 +116,85 @@ async fn otel_logs_ingests_mapped_event() {
     assert!(events.iter().any(|e| {
         e["event_type"] == "tool_use" && e["tool_name"] == "Bash" && e["source"] == "otel"
     }));
+}
+
+#[tokio::test]
+async fn otel_logs_user_prompt_extracts_message_from_attributes() {
+    let app = test_app();
+    let session_id = "otel-codex-prompt-attrs";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.user_prompt" } },
+              { "key": "gen_ai.prompt", "value": { "stringValue": "Explain this diff" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) =
+        get_json(&app, "/api/events?session_id=otel-codex-prompt-attrs&event_type=user_prompt")
+            .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["message"], "Explain this diff");
+}
+
+#[tokio::test]
+async fn otel_logs_user_prompt_keeps_existing_message() {
+    let app = test_app();
+    let session_id = "otel-codex-prompt-existing";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"message\":\"Keep this\",\"kind\":\"body\"}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.user_prompt" } },
+              { "key": "gen_ai.prompt", "value": { "stringValue": "Do not overwrite" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) =
+        get_json(&app, "/api/events?session_id=otel-codex-prompt-existing&event_type=user_prompt")
+            .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["message"], "Keep this");
+    assert_eq!(metadata["kind"], "body");
 }
 
 #[tokio::test]
