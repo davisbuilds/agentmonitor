@@ -85,7 +85,9 @@ export function getSessions(filters: {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const limit = filters.limit || 50;
+  const requestedLimit = Number.isFinite(filters.limit) ? Math.trunc(filters.limit as number) : 50;
+  const applyLimit = requestedLimit > 0;
+  const queryParams = applyLimit ? [...params, requestedLimit] : params;
 
   return db.prepare(`
     SELECT s.*,
@@ -101,8 +103,8 @@ export function getSessions(filters: {
     ORDER BY
       CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
       s.last_event_at DESC
-    LIMIT ?
-  `).all(...params, limit) as SessionRow[];
+    ${applyLimit ? 'LIMIT ?' : ''}
+  `).all(...queryParams) as SessionRow[];
 }
 
 export function getSessionWithEvents(sessionId: string, eventLimit: number = 10): {

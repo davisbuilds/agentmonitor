@@ -882,12 +882,14 @@ pub fn get_sessions(
     sql.push_str(
         " ORDER BY
             CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
-            s.last_event_at DESC
-          LIMIT ?",
+            s.last_event_at DESC",
     );
 
     let limit = filters.limit.unwrap_or(50);
-    params.push(SqlValue::Integer(limit));
+    if limit > 0 {
+        sql.push_str(" LIMIT ?");
+        params.push(SqlValue::Integer(limit));
+    }
 
     let params_refs: Vec<&dyn ToSql> = params.iter().map(|v| v as &dyn ToSql).collect();
     let mut stmt = conn.prepare(&sql)?;

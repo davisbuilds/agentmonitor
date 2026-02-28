@@ -30,17 +30,18 @@ async function reloadData(filters) {
   const eventsParams = new URLSearchParams(filters);
   eventsParams.set('limit', '100');
 
-  // Build sessions queries: active/idle + recently ended (last 30min)
+  // Build sessions queries: active/idle + recently ended (last 6h)
   const activeParams = new URLSearchParams();
   if (filters.agent_type) activeParams.set('agent_type', filters.agent_type);
-  activeParams.set('limit', '20');
+  // limit=0 means "no cap" so active sessions are not dropped on reload.
+  activeParams.set('limit', '0');
   activeParams.set('exclude_status', 'ended');
 
   const recentParams = new URLSearchParams();
   if (filters.agent_type) recentParams.set('agent_type', filters.agent_type);
-  recentParams.set('limit', '10');
+  recentParams.set('limit', '50');
   recentParams.set('status', 'ended');
-  recentParams.set('since', new Date(Date.now() - 60 * 60000).toISOString());
+  recentParams.set('since', new Date(Date.now() - 6 * 60 * 60000).toISOString());
 
   try {
     const [statsRes, eventsRes, activeRes, recentRes] = await Promise.all([

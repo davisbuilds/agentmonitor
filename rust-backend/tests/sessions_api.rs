@@ -81,6 +81,34 @@ async fn sessions_list_supports_agent_type_filter() {
 }
 
 #[tokio::test]
+async fn sessions_list_supports_limit_zero_as_unbounded() {
+    let app = test_app();
+
+    for idx in 0..3 {
+        let session_id = format!("sess-unbounded-{idx}");
+        let (insert_status, _) = post_json(
+            &app,
+            "/api/events",
+            json!({
+                "session_id": session_id,
+                "agent_type": "claude_code",
+                "event_type": "tool_use"
+            }),
+        )
+        .await;
+        assert_eq!(insert_status, 201);
+    }
+
+    let (limited_status, limited_body) = get_json(&app, "/api/sessions?exclude_status=ended&limit=1").await;
+    assert_eq!(limited_status, 200);
+    assert_eq!(limited_body["sessions"].as_array().unwrap().len(), 1);
+
+    let (status, body) = get_json(&app, "/api/sessions?exclude_status=ended&limit=0").await;
+    assert_eq!(status, 200);
+    assert_eq!(body["sessions"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
 async fn session_detail_returns_404_for_unknown_session() {
     let app = test_app();
     let (status, body) = get_json(&app, "/api/sessions/missing-session").await;

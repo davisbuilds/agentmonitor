@@ -123,7 +123,8 @@ const AgentCards = {
   async handleSessionUpdate() {
     // Re-fetch active/idle sessions from the server to get accurate aggregates
     try {
-      const activeParams = new URLSearchParams({ limit: '20', exclude_status: 'ended' });
+      // limit=0 means "no cap" so the refresh does not evict still-active sessions.
+      const activeParams = new URLSearchParams({ limit: '0', exclude_status: 'ended' });
       const res = await fetch(`/api/sessions?${activeParams}`);
       if (!res.ok) return;
       const data = await res.json();
