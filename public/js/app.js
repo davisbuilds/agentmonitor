@@ -23,32 +23,38 @@
 })();
 
 async function reloadData(filters) {
+  const qs = new URLSearchParams(filters).toString();
+  const qsSep = qs ? '?' + qs : '';
+
+  // Build events query with filters
+  const eventsParams = new URLSearchParams(filters);
+  eventsParams.set('limit', '100');
+
+  // Build sessions queries: active/idle + recently ended (last 30min)
+  const activeParams = new URLSearchParams();
+  if (filters.agent_type) activeParams.set('agent_type', filters.agent_type);
+  activeParams.set('limit', '20');
+  activeParams.set('exclude_status', 'ended');
+
+  const recentParams = new URLSearchParams();
+  if (filters.agent_type) recentParams.set('agent_type', filters.agent_type);
+  recentParams.set('limit', '10');
+  recentParams.set('status', 'ended');
+  recentParams.set('since', new Date(Date.now() - 60 * 60000).toISOString());
+
   try {
-    const qs = new URLSearchParams(filters).toString();
-    const qsSep = qs ? '?' + qs : '';
-
-    // Build events query with filters
-    const eventsParams = new URLSearchParams(filters);
-    eventsParams.set('limit', '100');
-
-    // Build sessions queries: active/idle + recently ended (last 30min)
-    const activeParams = new URLSearchParams();
-    if (filters.agent_type) activeParams.set('agent_type', filters.agent_type);
-    activeParams.set('limit', '20');
-    activeParams.set('exclude_status', 'ended');
-
-    const recentParams = new URLSearchParams();
-    if (filters.agent_type) recentParams.set('agent_type', filters.agent_type);
-    recentParams.set('limit', '10');
-    recentParams.set('status', 'ended');
-    recentParams.set('since', new Date(Date.now() - 60 * 60000).toISOString());
-
     const [statsRes, eventsRes, activeRes, recentRes] = await Promise.all([
       fetch(`/api/stats${qsSep}`),
       fetch(`/api/events?${eventsParams}`),
       fetch(`/api/sessions?${activeParams}`),
       fetch(`/api/sessions?${recentParams}`),
     ]);
+
+    if (!statsRes.ok || !eventsRes.ok || !activeRes.ok || !recentRes.ok) {
+      throw new Error(
+        `core fetch failed: stats=${statsRes.status} events=${eventsRes.status} active=${activeRes.status} recent=${recentRes.status}`
+      );
+    }
 
     const [stats, eventsData, activeData, recentData] = await Promise.all([
       statsRes.json(),
@@ -69,14 +75,19 @@ async function reloadData(filters) {
     EventFeed.initFromData(eventsData.events || []);
     AgentCards.initFromData(allSessions, eventsData.events || []);
 
-    // Load cost and tool analytics in parallel
-    await Promise.all([
-      CostDashboard.load(filters),
-      ToolAnalytics.load(filters),
-    ]);
-
   } catch (err) {
     console.error('Failed to fetch data:', err);
+  }
+
+  // Keep analytics loading independent from core list/session bootstrap.
+  const analyticsResults = await Promise.allSettled([
+    CostDashboard.load(filters),
+    ToolAnalytics.load(filters),
+  ]);
+  for (const result of analyticsResults) {
+    if (result.status === 'rejected') {
+      console.error('Failed to load analytics section:', result.reason);
+    }
   }
 }
 

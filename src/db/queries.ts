@@ -80,7 +80,7 @@ export function getSessions(filters: {
     params.push(filters.agentType);
   }
   if (filters.since) {
-    conditions.push('s.last_event_at >= ?');
+    conditions.push('s.last_event_at >= datetime(?)');
     params.push(filters.since);
   }
 
@@ -453,11 +453,11 @@ export function getEvents(filters: {
     params.push(filters.source);
   }
   if (filters.since) {
-    conditions.push('created_at >= ?');
+    conditions.push('created_at >= datetime(?)');
     params.push(filters.since);
   }
   if (filters.until) {
-    conditions.push('created_at <= ?');
+    conditions.push('created_at <= datetime(?)');
     params.push(filters.until);
   }
 
@@ -498,7 +498,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('created_at >= ?');
+    conditions.push('created_at >= datetime(?)');
     params.push(filters.since);
   }
 
@@ -707,7 +707,7 @@ export function getToolAnalytics(filters?: { agentType?: string; since?: string 
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('created_at >= ?');
+    conditions.push('created_at >= datetime(?)');
     params.push(filters.since);
   }
 
@@ -775,7 +775,7 @@ export function getCostOverTime(filters?: { since?: string; agentType?: string }
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('COALESCE(client_timestamp, created_at) >= ?');
+    conditions.push('datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)');
     params.push(filters.since);
   }
 
@@ -813,7 +813,7 @@ export function getCostByProject(limit: number = 10, filters?: { agentType?: str
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('e.created_at >= ?');
+    conditions.push('e.created_at >= datetime(?)');
     params.push(filters.since);
   }
 
@@ -854,7 +854,7 @@ export function getCostByModel(filters?: { agentType?: string; since?: string })
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('created_at >= ?');
+    conditions.push('created_at >= datetime(?)');
     params.push(filters.since);
   }
 

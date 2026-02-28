@@ -200,11 +200,11 @@ pub fn get_events(conn: &Connection, filters: &EventsFilters) -> rusqlite::Resul
         params.push(SqlValue::Text(source.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("created_at >= ?".to_string());
+        conditions.push("created_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
     if let Some(until) = filters.until.as_deref() {
-        conditions.push("created_at <= ?".to_string());
+        conditions.push("created_at <= datetime(?)".to_string());
         params.push(SqlValue::Text(until.to_string()));
     }
 
@@ -446,7 +446,7 @@ pub fn get_tool_analytics(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("created_at >= ?".to_string());
+        conditions.push("created_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -542,7 +542,8 @@ pub fn get_cost_over_time(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("COALESCE(client_timestamp, created_at) >= ?".to_string());
+        conditions
+            .push("datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -601,7 +602,7 @@ pub fn get_cost_by_project(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("e.created_at >= ?".to_string());
+        conditions.push("e.created_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -657,7 +658,7 @@ pub fn get_cost_by_model(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("created_at >= ?".to_string());
+        conditions.push("created_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 
@@ -857,7 +858,7 @@ pub fn get_sessions(
         params.push(SqlValue::Text(agent_type.to_string()));
     }
     if let Some(since) = filters.since.as_deref() {
-        conditions.push("s.last_event_at >= ?".to_string());
+        conditions.push("s.last_event_at >= datetime(?)".to_string());
         params.push(SqlValue::Text(since.to_string()));
     }
 

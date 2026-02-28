@@ -160,3 +160,79 @@ async fn usage_monitor_returns_claude_and_codex_shapes() {
     assert!(codex.is_some());
     assert_eq!(codex.unwrap()["limitType"], "cost");
 }
+
+#[tokio::test]
+async fn stats_tools_since_filter_accepts_iso_same_day_timestamp() {
+    let app = test_app();
+
+    post_json(
+        &app,
+        "/api/events",
+        json!({
+            "session_id": "tools-since-sess",
+            "agent_type": "codex",
+            "event_type": "tool_use",
+            "tool_name": "IsoSinceTool",
+            "status": "success"
+        }),
+    )
+    .await;
+
+    let start_of_day = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let uri = format!("/api/stats/tools?since={start_of_day}");
+    let (status, body) = get_json(&app, &uri).await;
+    assert_eq!(status, 200);
+
+    let tools = body["tools"].as_array().unwrap();
+    assert!(tools.iter().any(|row| row["tool_name"] == "IsoSinceTool"));
+}
+
+#[tokio::test]
+async fn stats_cost_since_filter_accepts_iso_same_day_timestamp() {
+    let app = test_app();
+
+    post_json(
+        &app,
+        "/api/events",
+        json!({
+            "session_id": "cost-since-sess",
+            "agent_type": "codex",
+            "event_type": "llm_response",
+            "project": "iso-since-project",
+            "model": "iso-since-model",
+            "tokens_in": 42,
+            "tokens_out": 7,
+            "cost_usd": 0.123
+        }),
+    )
+    .await;
+
+    let start_of_day = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_utc()
+        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    let uri = format!("/api/stats/cost?since={start_of_day}");
+    let (status, body) = get_json(&app, &uri).await;
+    assert_eq!(status, 200);
+    assert!(
+        body["by_model"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["model"] == "iso-since-model")
+    );
+    assert!(
+        body["by_project"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["project"] == "iso-since-project")
+    );
+}

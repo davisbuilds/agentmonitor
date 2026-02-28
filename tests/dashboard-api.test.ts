@@ -114,6 +114,21 @@ describe('GET /api/stats/tools', () => {
     const body = await res.json() as { tools: Array<Record<string, unknown>> };
     assert.deepEqual(body.tools, []);
   });
+
+  test('since filter accepts ISO timestamps for same-day rows', async () => {
+    await seedTestData();
+
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const since = encodeURIComponent(startOfDay.toISOString());
+
+    const res = await fetch(`${baseUrl}/api/stats/tools?since=${since}`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { tools: Array<Record<string, unknown>> };
+
+    assert.ok(body.tools.length > 0);
+    assert.ok(body.tools.some(t => t.tool_name === 'Bash'));
+  });
 });
 
 // ─── Cost API ───────────────────────────────────────────────────────────
@@ -171,6 +186,25 @@ describe('GET /api/stats/cost', () => {
     // Codex events total: 0.015 + 0.01 = 0.025
     assert.ok(totalCost > 0);
     assert.ok(totalCost < 0.03); // Should not include claude events
+  });
+
+  test('since filter accepts ISO timestamps for same-day rows', async () => {
+    await seedTestData();
+
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    const since = encodeURIComponent(startOfDay.toISOString());
+
+    const res = await fetch(`${baseUrl}/api/stats/cost?since=${since}`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      by_model: Array<Record<string, unknown>>;
+      by_project: Array<Record<string, unknown>>;
+      timeline: Array<Record<string, unknown>>;
+    };
+    assert.ok(body.timeline.length > 0);
+    assert.ok(body.by_model.length > 0);
   });
 });
 
