@@ -5,7 +5,7 @@ const UsageMonitor = {
   countdownTimer: null,
 
   AGENT_LABELS: {
-    claude_code: 'Claude Code',
+    claude_code: 'Claude',
     codex: 'Codex',
   },
 
@@ -36,7 +36,7 @@ const UsageMonitor = {
     if (!this.container || !this.data) return;
 
     // Filter to agents that have limits
-    const agents = this.data.filter(a => a.session.limit > 0 || (a.extended && a.extended.limit > 0));
+    const agents = this.data.filter(a => a.session.limit > 0 || (a.extended && a.extended.limit > 0) || (a.weekly && a.weekly.limit > 0));
 
     if (agents.length === 0) {
       this.container.classList.add('hidden');
@@ -57,7 +57,7 @@ const UsageMonitor = {
           agent.session.limit,
           agent.session.windowHours,
           `session-${agent.agent_type}`,
-          `${agent.session.windowHours}h window`,
+          `${agent.session.windowHours}h`,
           fmt
         );
       }
@@ -70,6 +70,18 @@ const UsageMonitor = {
           agent.extended.windowHours,
           `extended-${agent.agent_type}`,
           this.formatWindowLabel(agent.extended.windowHours),
+          fmt
+        );
+      }
+
+      if (agent.weekly && agent.weekly.limit > 0) {
+        html += this.renderBar(
+          `${label}`,
+          agent.weekly.used,
+          agent.weekly.limit,
+          agent.weekly.windowHours,
+          `weekly-${agent.agent_type}`,
+          this.formatWindowLabel(agent.weekly.windowHours),
           fmt
         );
       }
@@ -103,9 +115,9 @@ const UsageMonitor = {
   },
 
   formatWindowLabel(hours) {
-    if (hours >= 168 && hours % 168 === 0) return `${hours / 168}w window`;
-    if (hours >= 24 && hours % 24 === 0) return `${hours / 24}d window`;
-    return `${hours}h window`;
+    if (hours >= 168 && hours % 168 === 0) return `${hours / 168}w`;
+    if (hours >= 24 && hours % 24 === 0) return `${hours / 24}d`;
+    return `${hours}h`;
   },
 
   formatTokens(n) {

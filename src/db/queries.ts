@@ -619,6 +619,7 @@ export interface AgentUsageData {
   limitType: UsageLimitType;
   session: { used: number; limit: number; windowHours: number };
   extended: { used: number; limit: number; windowHours: number } | null;
+  weekly: { used: number; limit: number; windowHours: number } | null;
 }
 
 export type UsageMonitorData = AgentUsageData[];
@@ -638,7 +639,7 @@ export function getUsageMonitor(): UsageMonitorData {
     const agentConfig = monitorConfig[agentType] || monitorConfig._default;
 
     // Skip agents with no limits configured
-    if (agentConfig.sessionLimit === 0 && agentConfig.extendedLimit === 0) continue;
+    if (agentConfig.sessionLimit === 0 && agentConfig.extendedLimit === 0 && agentConfig.weeklyLimit === 0) continue;
 
     const sumExpr = agentConfig.limitType === 'cost'
       ? 'COALESCE(SUM(cost_usd), 0)'
@@ -660,11 +661,22 @@ export function getUsageMonitor(): UsageMonitorData {
       extended = { used: extRow.used, limit: agentConfig.extendedLimit, windowHours: agentConfig.extendedWindowHours };
     }
 
+    let weekly: AgentUsageData['weekly'] = null;
+    if (agentConfig.weeklyLimit > 0) {
+      const weeklyRow = db.prepare(`
+        SELECT ${sumExpr} as used
+        FROM events
+        WHERE agent_type = ? AND created_at >= datetime('now', ? || ' hours')
+      `).get(agentType, `-${agentConfig.weeklyWindowHours}`) as { used: number };
+      weekly = { used: weeklyRow.used, limit: agentConfig.weeklyLimit, windowHours: agentConfig.weeklyWindowHours };
+    }
+
     results.push({
       agent_type: agentType,
       limitType: agentConfig.limitType,
       session: { used: sessionRow.used, limit: agentConfig.sessionLimit, windowHours: agentConfig.sessionWindowHours },
       extended,
+      weekly,
     });
   }
 

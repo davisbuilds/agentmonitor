@@ -25,6 +25,8 @@ interface AgentUsageConfig {
   sessionLimit: number;
   extendedWindowHours: number;
   extendedLimit: number;
+  weeklyWindowHours: number;
+  weeklyLimit: number;
 }
 
 function isAgentMonitorRepo(dir: string): boolean {
@@ -68,6 +70,8 @@ function parseUsageMonitorConfig(env: EnvMap): Record<string, AgentUsageConfig> 
       sessionLimit: parseEnvInt(env.AGENTMONITOR_SESSION_TOKEN_LIMIT_CLAUDE_CODE, 44000, 0),
       extendedWindowHours: parseEnvInt(env.AGENTMONITOR_EXTENDED_WINDOW_HOURS_CLAUDE_CODE, 24, 1),
       extendedLimit: parseEnvInt(env.AGENTMONITOR_EXTENDED_TOKEN_LIMIT_CLAUDE_CODE, 0, 0),
+      weeklyWindowHours: parseEnvInt(env.AGENTMONITOR_WEEKLY_WINDOW_HOURS_CLAUDE_CODE, 168, 1),
+      weeklyLimit: parseEnvInt(env.AGENTMONITOR_WEEKLY_TOKEN_LIMIT_CLAUDE_CODE, 293000, 0),
     },
     codex: {
       limitType: 'cost',
@@ -75,6 +79,8 @@ function parseUsageMonitorConfig(env: EnvMap): Record<string, AgentUsageConfig> 
       sessionLimit: parseEnvFloat(env.AGENTMONITOR_SESSION_COST_LIMIT_CODEX, 500, 0),
       extendedWindowHours: parseEnvInt(env.AGENTMONITOR_EXTENDED_WINDOW_HOURS_CODEX, 168, 1),
       extendedLimit: parseEnvFloat(env.AGENTMONITOR_EXTENDED_COST_LIMIT_CODEX, 1500, 0),
+      weeklyWindowHours: 168,
+      weeklyLimit: 0,
     },
     _default: {
       limitType: 'tokens',
@@ -82,6 +88,8 @@ function parseUsageMonitorConfig(env: EnvMap): Record<string, AgentUsageConfig> 
       sessionLimit: 0,
       extendedWindowHours: 24,
       extendedLimit: 0,
+      weeklyWindowHours: 168,
+      weeklyLimit: 0,
     },
   };
 
