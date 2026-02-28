@@ -60,5 +60,5 @@ curl http://localhost:3141/api/events?agent_type=codex&source=otel
 To generate demo Codex events without a real Codex instance:
 
 ```bash
-pnpm run seed
+pnpm seed
 ```

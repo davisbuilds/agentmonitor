@@ -19,7 +19,7 @@ pnpm test               # Run test suite (node test runner)
 pnpm test:watch         # Watch-mode test runner
 pnpm lint               # ESLint
 pnpm seed               # Send demo events (server must be running)
-pnpm import             # Import historical sessions
+pnpm run import         # Import historical sessions
 pnpm bench:ingest       # Ingest throughput benchmark
 pnpm recalculate-costs  # Recalculate costs from pricing data
 ```
@@ -92,9 +92,9 @@ The dev server must be running before starting a Codex session.
 ## Historical Import
 
 ```bash
-pnpm import --source claude-code    # Claude Code JSONL logs
-pnpm import --source codex          # Codex session files
-pnpm import --dry-run               # Preview without writing
+pnpm run import --source claude-code    # Claude Code JSONL logs
+pnpm run import --source codex          # Codex session files
+pnpm run import --dry-run               # Preview without writing
 ```
 
 ## CI
