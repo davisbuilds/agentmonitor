@@ -28,7 +28,10 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 
     Router::new()
         .route("/api/health", get(api::health_handler))
-        .route("/api/events", post(api::ingest_single))
+        .route(
+            "/api/events",
+            get(api::list_events).post(api::ingest_single),
+        )
         .route("/api/events/batch", post(api::ingest_batch))
         .route("/api/stats", get(api::stats_handler))
         .route("/api/stats/tools", get(api::stats_tools_handler))

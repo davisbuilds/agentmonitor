@@ -7,7 +7,7 @@ mod stats;
 mod stream;
 mod transcripts;
 
-pub use events::{ingest_batch, ingest_single};
+pub use events::{ingest_batch, ingest_single, list_events};
 pub use filter_options::filter_options_handler;
 pub use health::health_handler;
 pub use otel::{otel_logs_handler, otel_metrics_handler, otel_traces_handler};

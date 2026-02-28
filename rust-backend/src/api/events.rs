@@ -1,16 +1,17 @@
 use std::sync::Arc;
 
 use axum::Json;
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use tracing::warn;
 
 use crate::contracts::validation::normalize_from_value;
 use crate::contracts::event::{NormalizeResult, ValidationError};
-use crate::db::queries::{self, InsertEventParams};
+use crate::db::queries::{self, EventsFilters, InsertEventParams};
 use crate::state::AppState;
 use crate::util::truncate::truncate_metadata;
 
@@ -48,7 +49,53 @@ struct BatchFormatError {
     error: &'static str,
 }
 
+#[derive(Debug, Deserialize, Default)]
+pub struct EventsQuery {
+    limit: Option<String>,
+    offset: Option<String>,
+    agent_type: Option<String>,
+    event_type: Option<String>,
+    tool_name: Option<String>,
+    session_id: Option<String>,
+    branch: Option<String>,
+    model: Option<String>,
+    source: Option<String>,
+    since: Option<String>,
+    until: Option<String>,
+}
+
 // --- Handlers ---
+
+/// GET /api/events — list events with optional filters.
+pub async fn list_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<EventsQuery>,
+) -> impl IntoResponse {
+    let filters = EventsFilters {
+        limit: query.limit.and_then(|s| s.parse::<i64>().ok()),
+        offset: query.offset.and_then(|s| s.parse::<i64>().ok()),
+        agent_type: query.agent_type,
+        event_type: query.event_type,
+        tool_name: query.tool_name,
+        session_id: query.session_id,
+        branch: query.branch,
+        model: query.model,
+        source: query.source,
+        since: query.since,
+        until: query.until,
+    };
+
+    let db = state.db.lock().await;
+    match queries::get_events(&db, &filters) {
+        Ok(page) => (StatusCode::OK, Json(Value::from(serde_json::to_value(page).unwrap()))).into_response(),
+        Err(e) => {
+            warn!("get_events error: {e}");
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(Value::from(
+                serde_json::json!({"error": "internal server error"}),
+            ))).into_response()
+        }
+    }
+}
 
 /// POST /api/events — single event ingest.
 pub async fn ingest_single(

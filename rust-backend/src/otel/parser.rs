@@ -412,7 +412,7 @@ fn parse_log_record(
 
     let client_timestamp = nano_to_iso(log_record.get("timeUnixNano").and_then(|v| v.as_str()));
 
-    let metadata = if let Some(mut body_map) = body_obj {
+    let mut metadata = if let Some(mut body_map) = body_obj {
         let extracted = HashSet::from([
             "session_id",
             "tool_name",
@@ -442,6 +442,35 @@ fn parse_log_record(
     } else {
         Value::Object(Map::new())
     };
+
+    // For user_prompt events, backfill prompt text from OTEL attributes when body metadata
+    // does not already include a message. This matches TypeScript OTEL parser behavior.
+    if event_type == "user_prompt" {
+        let has_message = metadata
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false);
+
+        if !has_message {
+            let prompt_text = get_attr_string(log_attrs, "gen_ai.prompt")
+                .or_else(|| get_attr_string(log_attrs, "message"))
+                .or_else(|| get_attr_string(log_attrs, "prompt"))
+                .or_else(|| get_attr_string(log_attrs, "codex.prompt"))
+                .or_else(|| get_attr_string(log_attrs, "gen_ai.content.prompt"));
+
+            if let Some(prompt_text) = prompt_text {
+                match &mut metadata {
+                    Value::Object(map) => {
+                        map.insert("message".to_string(), Value::String(prompt_text));
+                    }
+                    _ => {
+                        metadata = json!({ "message": prompt_text });
+                    }
+                }
+            }
+        }
+    }
 
     Some(ParsedOtelLogEvent {
         session_id,
