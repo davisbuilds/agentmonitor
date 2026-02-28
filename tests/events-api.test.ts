@@ -409,6 +409,35 @@ test('GET /api/sessions ignores malformed JSON metadata rows', async () => {
   assert.equal(detailBody.session.id, sessionId);
 });
 
+test('initSchema preserves legacy invalid metadata by JSON-encoding full raw value', async () => {
+  const sessionId = 'session-migration-preserve-invalid-json';
+  const legacyRawMetadata = 'legacy metadata text not json {foo:bar';
+  const ingestRes = await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'claude_code',
+    event_type: 'tool_use',
+    tool_name: 'Edit',
+    metadata: { command: 'echo hi' },
+  });
+  assert.equal(ingestRes.status, 201);
+
+  if (!getDb) throw new Error('Database not initialized');
+  getDb().exec(`
+    UPDATE events
+    SET metadata = '${legacyRawMetadata}', payload_truncated = 0
+    WHERE session_id = '${sessionId}'
+  `);
+
+  const { initSchema } = await import('../src/db/schema.js');
+  initSchema();
+
+  const events = await getEvents();
+  const migrated = events.events.find(evt => evt.session_id === sessionId) as Record<string, unknown> | undefined;
+  assert.ok(migrated);
+  assert.equal(migrated.payload_truncated, 0);
+  assert.equal(JSON.parse(String(migrated.metadata)), legacyRawMetadata);
+});
+
 test('recent import events remain visible as live sessions', async () => {
   const sessionId = 'session-recent-import-live';
   const nowIso = new Date().toISOString();
