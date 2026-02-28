@@ -1,6 +1,7 @@
 import { Router, type Request, type Response } from 'express';
 import { insertEvent } from '../db/queries.js';
 import { broadcaster } from '../sse/emitter.js';
+import { coerceJsonLikeBody } from './json-body.js';
 import {
   parseOtelLogs,
   parseOtelMetrics,
@@ -27,8 +28,12 @@ function requireJson(req: Request, res: Response): boolean {
 otelRouter.post('/v1/logs', (req: Request, res: Response) => {
   if (!requireJson(req, res)) return;
 
-  const payload = req.body as OtelLogsPayload;
-  const events = parseOtelLogs(payload);
+  const payload = coerceJsonLikeBody(req.body);
+  if (!payload || typeof payload !== 'object') {
+    res.status(400).json({ error: 'Invalid OTEL JSON payload' });
+    return;
+  }
+  const events = parseOtelLogs(payload as OtelLogsPayload);
 
   for (const event of events) {
     const row = insertEvent(event);
@@ -45,8 +50,12 @@ otelRouter.post('/v1/logs', (req: Request, res: Response) => {
 otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
   if (!requireJson(req, res)) return;
 
-  const payload = req.body as OtelMetricsPayload;
-  const deltas = parseOtelMetrics(payload);
+  const payload = coerceJsonLikeBody(req.body);
+  if (!payload || typeof payload !== 'object') {
+    res.status(400).json({ error: 'Invalid OTEL JSON payload' });
+    return;
+  }
+  const deltas = parseOtelMetrics(payload as OtelMetricsPayload);
 
   for (const delta of deltas) {
     // Emit a synthetic llm_response event carrying the metric delta values.
@@ -83,6 +92,11 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
 // POST /api/otel/v1/traces — stub for future implementation
 otelRouter.post('/v1/traces', (req: Request, res: Response) => {
   if (!requireJson(req, res)) return;
+  const payload = coerceJsonLikeBody(req.body);
+  if (!payload || typeof payload !== 'object') {
+    res.status(400).json({ error: 'Invalid OTEL JSON payload' });
+    return;
+  }
 
   // Accept and acknowledge traces but don't process them yet
   res.status(200).json({});

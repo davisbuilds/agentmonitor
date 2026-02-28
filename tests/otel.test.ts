@@ -21,6 +21,14 @@ async function postJson(url: string, body: unknown, headers?: Record<string, str
   });
 }
 
+async function postRawJson(url: string, body: string): Promise<Response> {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+}
+
 async function postProtobuf(url: string): Promise<Response> {
   return fetch(url, {
     method: 'POST',
@@ -181,6 +189,28 @@ describe('POST /api/otel/v1/logs', () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.deepEqual(body, {});
+  });
+
+  test('accepts double-encoded OTEL logs payload', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      logRecords: [{
+        eventName: 'codex.tool_result',
+        body: {
+          stringValue: JSON.stringify({
+            session_id: 'otel-double-encoded',
+            tool_name: 'shell',
+          }),
+        },
+      }],
+    });
+
+    const res = await postRawJson(`${baseUrl}/api/otel/v1/logs`, JSON.stringify(JSON.stringify(payload)));
+    assert.equal(res.status, 200);
+
+    const events = await getEvents('source=otel&session_id=otel-double-encoded');
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].session_id, 'otel-double-encoded');
   });
 
   test('ingests Claude Code tool_use log record', async () => {

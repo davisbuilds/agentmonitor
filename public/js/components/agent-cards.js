@@ -30,6 +30,8 @@ const AgentCards = {
   },
 
   initFromData(sessions, events) {
+    this.sessions.clear();
+
     // Group events by session
     const eventsBySession = new Map();
     for (const evt of events) {
@@ -146,7 +148,7 @@ const AgentCards = {
       // Mark sessions that are no longer active/idle as ended
       for (const [id, entry] of this.sessions) {
         if (!freshIds.has(id) && entry.session.status !== 'ended') {
-          entry.session.status = 'ended';
+          this.sessions.delete(id);
         }
       }
     } catch (err) {
@@ -337,8 +339,9 @@ const AgentCards = {
     const container = document.getElementById('agent-cards');
     const placeholder = document.getElementById('no-agents-placeholder');
     const countLabel = document.getElementById('agent-card-count');
+    const liveEntries = [...this.sessions.entries()].filter(([, entry]) => entry.session.status !== 'ended');
 
-    if (this.sessions.size === 0) {
+    if (liveEntries.length === 0) {
       placeholder.classList.remove('hidden');
       countLabel.textContent = '0 sessions';
       // Clear cards but keep placeholder
@@ -350,7 +353,7 @@ const AgentCards = {
     placeholder.classList.add('hidden');
 
     // Sort: active first, then idle, then ended; within each group by last_event_at desc
-    const sorted = [...this.sessions.entries()].sort(([, a], [, b]) => {
+    const sorted = liveEntries.sort(([, a], [, b]) => {
       const statusOrder = { active: 0, idle: 1, ended: 2 };
       const aOrder = statusOrder[a.session.status] ?? 1;
       const bOrder = statusOrder[b.session.status] ?? 1;
@@ -364,6 +367,6 @@ const AgentCards = {
     existingCards.forEach(c => c.remove());
     container.insertAdjacentHTML('beforeend', html);
 
-    countLabel.textContent = `${this.sessions.size} session${this.sessions.size !== 1 ? 's' : ''}`;
+    countLabel.textContent = `${liveEntries.length} session${liveEntries.length !== 1 ? 's' : ''}`;
   },
 };

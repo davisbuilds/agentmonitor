@@ -30,51 +30,36 @@ async function reloadData(filters) {
   const eventsParams = new URLSearchParams(filters);
   eventsParams.set('limit', '100');
 
-  // Build sessions queries: active/idle + recently ended (last 6h)
+  // Build sessions query: live sessions only (active + idle)
   const activeParams = new URLSearchParams();
   if (filters.agent_type) activeParams.set('agent_type', filters.agent_type);
   // limit=0 means "no cap" so active sessions are not dropped on reload.
   activeParams.set('limit', '0');
   activeParams.set('exclude_status', 'ended');
 
-  const recentParams = new URLSearchParams();
-  if (filters.agent_type) recentParams.set('agent_type', filters.agent_type);
-  recentParams.set('limit', '50');
-  recentParams.set('status', 'ended');
-  recentParams.set('since', new Date(Date.now() - 6 * 60 * 60000).toISOString());
-
   try {
-    const [statsRes, eventsRes, activeRes, recentRes] = await Promise.all([
+    const [statsRes, eventsRes, activeRes] = await Promise.all([
       fetch(`/api/stats${qsSep}`),
       fetch(`/api/events?${eventsParams}`),
       fetch(`/api/sessions?${activeParams}`),
-      fetch(`/api/sessions?${recentParams}`),
     ]);
 
-    if (!statsRes.ok || !eventsRes.ok || !activeRes.ok || !recentRes.ok) {
+    if (!statsRes.ok || !eventsRes.ok || !activeRes.ok) {
       throw new Error(
-        `core fetch failed: stats=${statsRes.status} events=${eventsRes.status} active=${activeRes.status} recent=${recentRes.status}`
+        `core fetch failed: stats=${statsRes.status} events=${eventsRes.status} active=${activeRes.status}`
       );
     }
 
-    const [stats, eventsData, activeData, recentData] = await Promise.all([
+    const [stats, eventsData, activeData] = await Promise.all([
       statsRes.json(),
       eventsRes.json(),
       activeRes.json(),
-      recentRes.json(),
     ]);
-
-    // Merge active/idle + recently ended, deduplicate by id
-    const seen = new Set();
-    const allSessions = [];
-    for (const s of [...(activeData.sessions || []), ...(recentData.sessions || [])]) {
-      if (!seen.has(s.id)) { seen.add(s.id); allSessions.push(s); }
-    }
 
     // Update core components
     StatsBar.update(stats);
     EventFeed.initFromData(eventsData.events || []);
-    AgentCards.initFromData(allSessions, eventsData.events || []);
+    AgentCards.initFromData(activeData.sessions || [], eventsData.events || []);
 
   } catch (err) {
     console.error('Failed to fetch data:', err);

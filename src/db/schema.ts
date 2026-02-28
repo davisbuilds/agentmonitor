@@ -98,6 +98,17 @@ export function initSchema(): void {
   }
 
   db.exec('UPDATE events SET payload_truncated = 0 WHERE payload_truncated IS NULL');
+  db.exec(`
+    UPDATE events
+    SET metadata = json_object(
+      '_truncated', 1,
+      '_invalid_json_recovered', 1,
+      '_original_bytes', length(metadata),
+      '_raw_preview', substr(metadata, 1, 512)
+    ),
+    payload_truncated = 1
+    WHERE metadata IS NOT NULL AND json_valid(metadata) = 0
+  `);
 
   // Remove restrictive CHECK constraint on event_type if present on existing databases.
   // SQLite does not support ALTER CONSTRAINT, so we recreate the table.

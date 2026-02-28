@@ -21,6 +21,14 @@ async function postJson(url: string, body: unknown): Promise<Response> {
   });
 }
 
+async function postRawJson(url: string, body: string): Promise<Response> {
+  return fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body,
+  });
+}
+
 async function getEvents(): Promise<{ events: Array<Record<string, unknown>>; total: number }> {
   const response = await fetch(`${baseUrl}/api/events?limit=20`);
   assert.equal(response.status, 200);
@@ -98,6 +106,28 @@ test('POST /api/events rejects invalid enum values', async () => {
   assert.ok(body.details.some(detail => detail.field === 'event_type'));
 });
 
+test('POST /api/events accepts double-encoded JSON object payloads', async () => {
+  const nested = JSON.stringify({
+    session_id: 'session-double-encoded',
+    agent_type: 'codex',
+    event_type: 'tool_use',
+    tool_name: 'exec_command',
+  });
+  const response = await postRawJson(`${baseUrl}/api/events`, JSON.stringify(nested));
+  assert.equal(response.status, 201);
+
+  const events = await getEvents();
+  assert.equal(events.total, 1);
+  assert.equal(events.events[0].session_id, 'session-double-encoded');
+});
+
+test('POST /api/events routes malformed double-quoted bodies through validation', async () => {
+  const response = await postRawJson(`${baseUrl}/api/events`, '""just a string""');
+  assert.equal(response.status, 400);
+  const body = await response.json() as { error: string };
+  assert.equal(body.error, 'Invalid event payload');
+});
+
 test('POST /api/events deduplicates by event_id', async () => {
   const payload = {
     event_id: 'evt-duplicate-1',
@@ -121,6 +151,40 @@ test('POST /api/events deduplicates by event_id', async () => {
 
   const events = await getEvents();
   assert.equal(events.total, 1);
+});
+
+test('duplicate event_id does not refresh existing session activity', async () => {
+  const sessionId = 'session-dup-no-refresh';
+  const payload = {
+    event_id: 'evt-duplicate-no-refresh',
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'tool_use',
+    tool_name: 'Read',
+  };
+
+  const first = await postJson(`${baseUrl}/api/events`, payload);
+  assert.equal(first.status, 201);
+
+  if (!getDb) throw new Error('Database not initialized');
+  getDb().exec(`
+    UPDATE sessions
+    SET status = 'idle',
+        last_event_at = '2000-01-01 00:00:00',
+        ended_at = NULL
+    WHERE id = '${sessionId}'
+  `);
+
+  const second = await postJson(`${baseUrl}/api/events`, payload);
+  assert.equal(second.status, 200);
+  const secondBody = await second.json() as { duplicates: number };
+  assert.equal(secondBody.duplicates, 1);
+
+  const detailRes = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
+  assert.equal(detailRes.status, 200);
+  const detail = await detailRes.json() as { session: { status: string; last_event_at: string } };
+  assert.equal(detail.session.status, 'idle');
+  assert.equal(detail.session.last_event_at, '2000-01-01 00:00:00');
 });
 
 test('POST /api/events/batch reports received, duplicates, and rejected items', async () => {
@@ -245,6 +309,36 @@ test('session_end transitions to idle, subsequent events reactivate', async () =
   assert.equal(session.status, 'active');
 });
 
+test('stale idle sessions are finalized to ended on read even with ended_at already set', async () => {
+  const sessionId = 'session-stale-idle';
+  await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'claude_code',
+    event_type: 'tool_use',
+  });
+
+  if (!getDb) throw new Error('Database not initialized');
+  getDb().exec(`
+    UPDATE sessions
+    SET status = 'idle',
+        last_event_at = '2000-01-01 00:00:00',
+        ended_at = '2020-01-01 00:00:00'
+    WHERE id = '${sessionId}'
+  `);
+
+  const liveRes = await fetch(`${baseUrl}/api/sessions?exclude_status=ended&limit=0`);
+  assert.equal(liveRes.status, 200);
+  const liveBody = await liveRes.json() as { sessions: Array<{ id: string }> };
+  assert.ok(!liveBody.sessions.some(s => s.id === sessionId));
+
+  const allRes = await fetch(`${baseUrl}/api/sessions?limit=0`);
+  assert.equal(allRes.status, 200);
+  const allBody = await allRes.json() as { sessions: Array<{ id: string; status: string }> };
+  const session = allBody.sessions.find(s => s.id === sessionId);
+  assert.ok(session);
+  assert.equal(session.status, 'ended');
+});
+
 test('GET /api/sessions supports limit=0 as unbounded', async () => {
   for (let i = 0; i < 3; i += 1) {
     const response = await postJson(`${baseUrl}/api/events`, {
@@ -264,6 +358,134 @@ test('GET /api/sessions supports limit=0 as unbounded', async () => {
   assert.equal(unboundedRes.status, 200);
   const unboundedBody = await unboundedRes.json() as { sessions: Array<{ id: string }> };
   assert.equal(unboundedBody.sessions.length, 3);
+});
+
+test('GET /api/sessions ignores malformed JSON metadata rows', async () => {
+  const sessionId = 'session-malformed-json';
+  const ingestRes = await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'claude_code',
+    event_type: 'tool_use',
+    tool_name: 'Edit',
+    metadata: { file_path: 'src/file.ts', lines_added: 3, lines_removed: 1 },
+  });
+  assert.equal(ingestRes.status, 201);
+
+  if (!getDb) throw new Error('Database not initialized');
+  getDb().exec(`UPDATE events SET metadata = '{"broken":' WHERE session_id = '${sessionId}'`);
+
+  const sessionsRes = await fetch(`${baseUrl}/api/sessions?limit=10`);
+  assert.equal(sessionsRes.status, 200);
+  const sessionsBody = await sessionsRes.json() as { sessions: Array<{ id: string }> };
+  assert.ok(sessionsBody.sessions.some(session => session.id === sessionId));
+
+  const detailRes = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
+  assert.equal(detailRes.status, 200);
+  const detailBody = await detailRes.json() as { session: { id: string } };
+  assert.equal(detailBody.session.id, sessionId);
+});
+
+test('recent import events remain visible as live sessions', async () => {
+  const sessionId = 'session-recent-import-live';
+  const nowIso = new Date().toISOString();
+  const response = await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'llm_response',
+    source: 'import',
+    client_timestamp: nowIso,
+  });
+  assert.equal(response.status, 201);
+
+  const sessionsRes = await fetch(`${baseUrl}/api/sessions?exclude_status=ended&limit=0`);
+  assert.equal(sessionsRes.status, 200);
+  const sessionsBody = await sessionsRes.json() as { sessions: Array<{ id: string; status: string }> };
+  const session = sessionsBody.sessions.find(s => s.id === sessionId);
+  assert.ok(session);
+  assert.notEqual(session.status, 'ended');
+});
+
+test('historical import events are finalized as ended', async () => {
+  const sessionId = 'session-old-import-ended';
+  const oldIso = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+  const response = await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'llm_response',
+    source: 'import',
+    client_timestamp: oldIso,
+  });
+  assert.equal(response.status, 201);
+
+  const allRes = await fetch(`${baseUrl}/api/sessions?limit=0`);
+  assert.equal(allRes.status, 200);
+  const allBody = await allRes.json() as { sessions: Array<{ id: string; status: string }> };
+  const session = allBody.sessions.find(s => s.id === sessionId);
+  assert.ok(session);
+  assert.equal(session.status, 'ended');
+
+  const liveRes = await fetch(`${baseUrl}/api/sessions?exclude_status=ended&limit=0`);
+  assert.equal(liveRes.status, 200);
+  const liveBody = await liveRes.json() as { sessions: Array<{ id: string }> };
+  assert.ok(!liveBody.sessions.some(s => s.id === sessionId));
+});
+
+test('recent import session_end does not force session to ended', async () => {
+  const sessionId = 'session-import-recent-end';
+  const nowIso = new Date().toISOString();
+  const response = await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'session_end',
+    source: 'import',
+    client_timestamp: nowIso,
+  });
+  assert.equal(response.status, 201);
+
+  const liveRes = await fetch(`${baseUrl}/api/sessions?exclude_status=ended&limit=0`);
+  assert.equal(liveRes.status, 200);
+  const liveBody = await liveRes.json() as { sessions: Array<{ id: string; status: string }> };
+  const session = liveBody.sessions.find(s => s.id === sessionId);
+  assert.ok(session);
+  assert.notEqual(session.status, 'ended');
+});
+
+test('duplicate session_end does not re-end an active session', async () => {
+  const sessionId = 'session-dup-session-end';
+  const endEventId = 'evt-dup-session-end-1';
+
+  const firstEndRes = await postJson(`${baseUrl}/api/events`, {
+    event_id: endEventId,
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'session_end',
+  });
+  assert.equal(firstEndRes.status, 201);
+
+  const reactivateRes = await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'tool_use',
+    tool_name: 'Read',
+  });
+  assert.equal(reactivateRes.status, 201);
+
+  const duplicateEndRes = await postJson(`${baseUrl}/api/events`, {
+    event_id: endEventId,
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'session_end',
+  });
+  assert.equal(duplicateEndRes.status, 200);
+  const duplicateBody = await duplicateEndRes.json() as { duplicates: number };
+  assert.equal(duplicateBody.duplicates, 1);
+
+  const allRes = await fetch(`${baseUrl}/api/sessions?limit=0`);
+  assert.equal(allRes.status, 200);
+  const allBody = await allRes.json() as { sessions: Array<{ id: string; status: string }> };
+  const session = allBody.sessions.find(s => s.id === sessionId);
+  assert.ok(session);
+  assert.equal(session.status, 'active');
 });
 
 test('SSE enforces max clients and cleans up disconnected clients', async () => {
