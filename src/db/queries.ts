@@ -324,6 +324,7 @@ export function insertEvent(event: {
   source?: string;
 }): EventRow | null {
   const db = getDb();
+  const isHistoricalImport = isHistoricalImportedEvent(event);
   if (event.event_id) {
     const existing = db.prepare('SELECT id FROM events WHERE event_id = ?').get(event.event_id) as { id: number } | undefined;
     if (existing) return null;
@@ -342,13 +343,20 @@ export function insertEvent(event: {
     }
   }
 
-  // Resolve git branch from project directory if still missing
-  if (!event.branch && event.project) {
+  // Resolve git branch from project directory and keep session branch fresh.
+  // Recent live imports can carry stale branch metadata from session start, so
+  // refresh the session-level branch from current repo HEAD when possible.
+  if (event.project && (event.source !== 'import' || !isHistoricalImport)) {
     const gitBranch = resolveGitBranch(event.project);
     if (gitBranch) {
-      event.branch = gitBranch;
-      // Update session so future events inherit it
-      db.prepare('UPDATE sessions SET branch = ? WHERE id = ? AND branch IS NULL').run(gitBranch, event.session_id);
+      if (!event.branch) {
+        event.branch = gitBranch;
+      }
+      db.prepare(`
+        UPDATE sessions
+        SET branch = ?
+        WHERE id = ? AND (branch IS NULL OR branch != ?)
+      `).run(gitBranch, event.session_id, gitBranch);
     }
   }
 
@@ -395,8 +403,6 @@ export function insertEvent(event: {
     );
 
     if (result.changes === 0) return null; // duplicate event_id
-
-    const isHistoricalImport = isHistoricalImportedEvent(event);
 
     // Handle session lifecycle for successful inserts only.
     // Recent import session_end events are often synthetic snapshots, so they

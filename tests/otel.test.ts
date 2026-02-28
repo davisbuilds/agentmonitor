@@ -786,6 +786,91 @@ describe('Codex OTLP integration', () => {
     assert.equal(events.events[0].model, 'o3');
   });
 
+  test('maps codex.user_message logs to user_prompt events', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-user-message-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.user_message',
+        body: {
+          stringValue: JSON.stringify({
+            session_id: 'codex-user-message-1',
+            message: 'Show me recent failing tests',
+          }),
+        },
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'user_prompt');
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as { message?: string };
+    assert.equal(meta.message, 'Show me recent failing tests');
+  });
+
+  test('maps codex.response user_message payloads to user_prompt events', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-user-message-2' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.response',
+        body: {
+          stringValue: JSON.stringify({
+            session_id: 'codex-user-message-2',
+            type: 'event_msg',
+            payload: {
+              type: 'user_message',
+              message: 'Please continue with the fix',
+            },
+          }),
+        },
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'user_prompt');
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as { message?: string };
+    assert.equal(meta.message, 'Please continue with the fix');
+  });
+
+  test('still skips codex.response noise that is not a user prompt', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-response-noise' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.response',
+        body: {
+          stringValue: JSON.stringify({
+            session_id: 'codex-response-noise',
+            type: 'event_msg',
+            payload: {
+              type: 'agent_message',
+              message: 'Thinking...',
+            },
+          }),
+        },
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 0);
+  });
+
   test('codex metrics use codex_cli_rs metric names', async () => {
     const payload = buildMetricsPayload({
       serviceName: 'codex_cli_rs',

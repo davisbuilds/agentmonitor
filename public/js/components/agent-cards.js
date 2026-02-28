@@ -256,7 +256,8 @@ const AgentCards = {
 
   eventTypeBadge(event) {
     if (event.event_type === 'tool_use') {
-      return `<span class="text-emerald-400">${event.tool_name || 'tool'}</span>`;
+      const toolName = event.tool_name || 'tool';
+      return `<span class="block truncate text-emerald-400" title="${toolName}">${toolName}</span>`;
     }
     if (event.event_type === 'response') {
       return '<span class="text-blue-400">response</span>';
@@ -297,8 +298,8 @@ const AgentCards = {
       return `
         <div class="flex items-center gap-2 text-xs py-0.5">
           <span class="text-gray-500 w-10 shrink-0">${this.formatTime(evt.created_at)}</span>
-          <span class="w-16 shrink-0">${this.eventTypeBadge(evt)}</span>
-          <span class="text-gray-400 truncate flex-1">${detail}</span>
+          <span class="w-16 min-w-0 shrink-0">${this.eventTypeBadge(evt)}</span>
+          <span class="text-gray-400 truncate flex-1 min-w-0">${detail}</span>
           <span class="shrink-0">${this.eventStatusIcon(evt)}</span>
         </div>`;
     }).join('');

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -250,6 +251,29 @@ test('POST /api/events stores client_timestamp while keeping server created_at',
   const createdAtDate = new Date(createdAt.endsWith('Z') ? createdAt : `${createdAt}Z`);
   assert.ok(!Number.isNaN(createdAtDate.getTime()));
   assert.notEqual(event.created_at, event.client_timestamp);
+});
+
+test('session branch refreshes from current git head when incoming branch is stale', async () => {
+  const sessionId = 'session-branch-refresh';
+  const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    cwd: process.cwd(),
+    encoding: 'utf-8',
+  }).trim();
+
+  const response = await postJson(`${baseUrl}/api/events`, {
+    session_id: sessionId,
+    agent_type: 'codex',
+    event_type: 'tool_use',
+    tool_name: 'exec_command',
+    project: 'agentmonitor',
+    branch: 'feature/tauri-arch-cleanup',
+  });
+  assert.equal(response.status, 201);
+
+  const detailRes = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
+  assert.equal(detailRes.status, 200);
+  const detail = await detailRes.json() as { session: { branch: string | null } };
+  assert.equal(detail.session.branch, currentBranch);
 });
 
 test('POST /api/events stores byte-capped metadata and payload_truncated marker', async () => {

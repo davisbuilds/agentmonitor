@@ -11,11 +11,11 @@ Add this to `~/.codex/config.toml`:
 log_user_prompt = true
 
 [otel.exporter.otlp-http]
-endpoint = "http://localhost:3141/api/otel/v1/logs"
+endpoint = "http://127.0.0.1:3141/api/otel/v1/logs"
 protocol = "json"
 
 [otel.metrics_exporter.otlp-http]
-endpoint = "http://localhost:3141/api/otel/v1/metrics"
+endpoint = "http://127.0.0.1:3141/api/otel/v1/metrics"
 protocol = "json"
 ```
 
@@ -53,6 +53,7 @@ curl http://localhost:3141/api/events?agent_type=codex&source=otel
 - Only JSON OTLP format is supported. Set `protocol = "json"` in the config.
 - Codex uses the service name `codex_cli_rs` in its OTLP exports, which AgentMonitor maps to `agent_type=codex`.
 - Token usage and cost metrics are captured when Codex exports them via OTLP metrics.
+- After editing `~/.codex/config.toml`, restart all running Codex sessions. Existing sessions keep the old OTEL endpoint until restarted.
 
 ## Alternative: Seed Script
 
