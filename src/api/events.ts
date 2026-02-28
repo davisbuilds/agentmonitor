@@ -2,12 +2,13 @@ import { Router, type Request, type Response } from 'express';
 import { insertEvent, getEvents } from '../db/queries.js';
 import { broadcaster } from '../sse/emitter.js';
 import { normalizeIngestEvent } from '../contracts/event-contract.js';
+import { coerceJsonLikeBody } from './json-body.js';
 
 export const eventsRouter = Router();
 
 // POST /api/events - Ingest single event
 eventsRouter.post('/', (req: Request, res: Response) => {
-  const parsed = normalizeIngestEvent(req.body);
+  const parsed = normalizeIngestEvent(coerceJsonLikeBody(req.body));
   if (!parsed.ok) {
     res.status(400).json({
       error: 'Invalid event payload',
@@ -29,7 +30,8 @@ eventsRouter.post('/', (req: Request, res: Response) => {
 
 // POST /api/events/batch - Ingest multiple events
 eventsRouter.post('/batch', (req: Request, res: Response) => {
-  const { events } = req.body;
+  const body = coerceJsonLikeBody(req.body);
+  const { events } = (body && typeof body === 'object') ? body as { events?: unknown } : {};
 
   if (!Array.isArray(events)) {
     res.status(400).json({ error: 'Expected { events: [...] }' });

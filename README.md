@@ -28,7 +28,7 @@ Run in development:
 pnpm dev
 
 # terminal 2 (for live css rebuilds)
-pnpm run css:watch
+pnpm css:watch
 ```
 
 Open `http://127.0.0.1:3141`.
@@ -36,20 +36,20 @@ Open `http://127.0.0.1:3141`.
 ## Useful Scripts
 
 - `pnpm dev`: run server in watch mode (`tsx watch`).
-- `pnpm run css:build`: one-off Tailwind build to `public/css/output.css`.
-- `pnpm run css:watch`: Tailwind watch mode.
-- `pnpm run build`: TypeScript build + CSS build.
-- `pnpm run test`: run contract + API tests.
-- `pnpm run test:watch`: watch-mode test runner.
+- `pnpm css:build`: one-off Tailwind build to `public/css/output.css`.
+- `pnpm css:watch`: Tailwind watch mode.
+- `pnpm build`: TypeScript build + CSS build.
+- `pnpm test`: run contract + API tests.
+- `pnpm test:watch`: watch-mode test runner.
 - `pnpm start`: run compiled server from `dist/`.
 - `pnpm run import`: import historical sessions from Claude Code and Codex logs.
-- `pnpm run seed`: send demo events to the running server.
-- `pnpm run bench:ingest`: run ingest throughput benchmark.
-- `pnpm run tauri:dev`: run Tauri desktop shell in dev mode.
-- `pnpm run tauri:build`: build desktop app with Tauri defaults.
-- `pnpm run tauri:release:mac:unsigned`: unsigned macOS app + dmg bundles.
-- `pnpm run tauri:release:mac:signed`: signed macOS bundles (requires `APPLE_SIGNING_IDENTITY`).
-- `pnpm run tauri:release:mac:notarized`: signed + notarization-ready preflight and build.
+- `pnpm seed`: send demo events to the running server.
+- `pnpm bench:ingest`: run ingest throughput benchmark.
+- `pnpm tauri:dev`: run Tauri desktop shell in dev mode.
+- `pnpm tauri:build`: build desktop app with Tauri defaults.
+- `pnpm tauri:release:mac:unsigned`: unsigned macOS app + dmg bundles.
+- `pnpm tauri:release:mac:signed`: signed macOS bundles (requires `APPLE_SIGNING_IDENTITY`).
+- `pnpm tauri:release:mac:notarized`: signed + notarization-ready preflight and build.
 
 ## Configuration
 
@@ -85,7 +85,7 @@ Benchmark script environment overrides:
 Example benchmark command:
 
 ```bash
-pnpm run bench:ingest -- --events=20000 --concurrency=40 --batch-size=50
+pnpm bench:ingest -- --events=20000 --concurrency=40 --batch-size=50
 ```
 
 ## Agent Integration

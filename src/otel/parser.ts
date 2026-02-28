@@ -81,6 +81,11 @@ export interface OtelMetricsPayload {
   resourceMetrics?: OtelResourceMetrics[];
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
 // ─── Attribute helpers ──────────────────────────────────────────────────
 
 function getAttr(attrs: OtelKeyValue[] | undefined, key: string): string | undefined {
@@ -209,6 +214,7 @@ const CODEX_EVENT_MAP: Record<string, EventType> = {
   'codex.file_change': 'file_change',
   'codex.error': 'error',
   'codex.user_prompt': 'user_prompt',
+  'codex.user_message': 'user_prompt',
 };
 
 // High-frequency events to skip — these create noise without useful signal
@@ -216,7 +222,6 @@ const SKIP_EVENTS = new Set([
   'codex.sse_event',
   'codex.websocket.event',
   'claude_code.response',
-  'codex.response',
 ]);
 
 // ─── Log parser ─────────────────────────────────────────────────────────
@@ -234,11 +239,23 @@ function resolveEventType(
   logRecord: OtelLogRecord,
   agentType: string,
   eventName: string | undefined,
+  bodyJson: Record<string, unknown> | undefined,
 ): EventType | null {
 
   if (eventName) {
     const map = agentType === 'codex' ? CODEX_EVENT_MAP : CLAUDE_EVENT_MAP;
     if (map[eventName]) return map[eventName];
+
+    if (agentType === 'codex') {
+      const bodyType = typeof bodyJson?.type === 'string' ? bodyJson.type : undefined;
+      const payload = asRecord(bodyJson?.payload);
+      const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
+      const codexMessageType = payloadType ?? bodyType;
+      if ((eventName === 'codex.response' || eventName === 'codex.event_msg')
+        && (codexMessageType === 'user_message' || codexMessageType === 'user_prompt')) {
+        return 'user_prompt';
+      }
+    }
 
     // Try generic suffix matching (e.g. "tool_use" from "some_prefix.tool_use")
     const suffix = eventName.split('.').pop() ?? '';
@@ -255,8 +272,18 @@ function resolveEventType(
       error: 'error',
       user_prompt: 'user_prompt',
       user_prompt_submit: 'user_prompt',
+      user_message: 'user_prompt',
     };
     if (EVENT_TYPE_SUFFIXES[suffix]) return EVENT_TYPE_SUFFIXES[suffix];
+  }
+
+  if (agentType === 'codex') {
+    const bodyType = typeof bodyJson?.type === 'string' ? bodyJson.type : undefined;
+    const payload = asRecord(bodyJson?.payload);
+    const payloadType = typeof payload?.type === 'string' ? payload.type : undefined;
+    if (bodyType === 'user_message' || payloadType === 'user_message') {
+      return 'user_prompt';
+    }
   }
 
   // Fallback: check severity
@@ -270,6 +297,8 @@ function parseLogRecord(
   logRecord: OtelLogRecord,
   resourceAttrs: OtelKeyValue[] | undefined,
 ): NormalizedIngestEvent | null {
+  const bodyJson = getBodyJson(logRecord.body);
+
   // Skip high-frequency noisy events
   const eventName = getAttr(logRecord.attributes, 'event.name');
   if (eventName && SKIP_EVENTS.has(eventName)) return null;
@@ -277,7 +306,6 @@ function parseLogRecord(
   const agentType = resolveServiceName(resourceAttrs);
 
   // Session ID: prefer log attribute, then resource attribute, then body
-  const bodyJson = getBodyJson(logRecord.body);
   const sessionId =
     getAttr(logRecord.attributes, 'gen_ai.session.id')
     ?? getAttr(logRecord.attributes, 'conversation.id')
@@ -289,7 +317,7 @@ function parseLogRecord(
   if (!sessionId) return null; // Cannot process without session_id
 
   const resolvedEventName = eventName ?? getAttr(logRecord.attributes, 'name');
-  const eventType = resolveEventType(logRecord, agentType, resolvedEventName);
+  const eventType = resolveEventType(logRecord, agentType, resolvedEventName, bodyJson);
   if (!eventType) return null; // Skip unrecognized events
 
   // Extract fields from attributes + body
@@ -367,9 +395,14 @@ function parseLogRecord(
   if (eventType === 'user_prompt') {
     const meta = (typeof metadata === 'object' && metadata !== null) ? metadata as Record<string, unknown> : {};
     if (!meta.message) {
+      const payload = asRecord(bodyJson?.payload);
+      const bodyPromptText =
+        (typeof bodyJson?.message === 'string' ? bodyJson.message : undefined)
+        ?? (typeof payload?.message === 'string' ? payload.message : undefined);
       // Try attributes: gen_ai.prompt, message, prompt, codex.prompt
       const promptText =
-        getAttr(logRecord.attributes, 'gen_ai.prompt')
+        bodyPromptText
+        ?? getAttr(logRecord.attributes, 'gen_ai.prompt')
         ?? getAttr(logRecord.attributes, 'message')
         ?? getAttr(logRecord.attributes, 'prompt')
         ?? getAttr(logRecord.attributes, 'codex.prompt')

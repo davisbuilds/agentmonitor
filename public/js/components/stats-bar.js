@@ -3,6 +3,8 @@ const StatsBar = {
   state: {
     total_events: 0,
     active_sessions: 0,
+    live_sessions: 0,
+    active_agents: 0,
     total_tokens_in: 0,
     total_tokens_out: 0,
     total_cost_usd: 0,
@@ -36,9 +38,13 @@ const StatsBar = {
 
   render() {
     const s = this.state;
+    const sessions = Number.isFinite(s.live_sessions) ? s.live_sessions : s.active_sessions;
+    const agents = Number.isFinite(s.active_agents)
+      ? s.active_agents
+      : (Object.keys(s.agent_breakdown || {}).length || 0);
     document.getElementById('stat-events').textContent = this.formatNumber(s.total_events);
-    document.getElementById('stat-sessions').textContent = s.active_sessions;
-    document.getElementById('stat-agents').textContent = Object.keys(s.agent_breakdown || {}).length || 0;
+    document.getElementById('stat-sessions').textContent = sessions;
+    document.getElementById('stat-agents').textContent = agents;
     document.getElementById('stat-tokens-in').textContent = this.formatNumber(s.total_tokens_in);
     document.getElementById('stat-tokens-out').textContent = this.formatNumber(s.total_tokens_out);
     document.getElementById('stat-cost').textContent = this.formatCost(s.total_cost_usd);

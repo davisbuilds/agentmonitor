@@ -30,6 +30,8 @@ const AgentCards = {
   },
 
   initFromData(sessions, events) {
+    this.sessions.clear();
+
     // Group events by session
     const eventsBySession = new Map();
     for (const evt of events) {
@@ -146,7 +148,7 @@ const AgentCards = {
       // Mark sessions that are no longer active/idle as ended
       for (const [id, entry] of this.sessions) {
         if (!freshIds.has(id) && entry.session.status !== 'ended') {
-          entry.session.status = 'ended';
+          this.sessions.delete(id);
         }
       }
     } catch (err) {
@@ -254,7 +256,8 @@ const AgentCards = {
 
   eventTypeBadge(event) {
     if (event.event_type === 'tool_use') {
-      return `<span class="text-emerald-400">${event.tool_name || 'tool'}</span>`;
+      const toolName = event.tool_name || 'tool';
+      return `<span class="block truncate text-emerald-400" title="${toolName}">${toolName}</span>`;
     }
     if (event.event_type === 'response') {
       return '<span class="text-blue-400">response</span>';
@@ -295,8 +298,8 @@ const AgentCards = {
       return `
         <div class="flex items-center gap-2 text-xs py-0.5">
           <span class="text-gray-500 w-10 shrink-0">${this.formatTime(evt.created_at)}</span>
-          <span class="w-16 shrink-0">${this.eventTypeBadge(evt)}</span>
-          <span class="text-gray-400 truncate flex-1">${detail}</span>
+          <span class="w-16 min-w-0 shrink-0">${this.eventTypeBadge(evt)}</span>
+          <span class="text-gray-400 truncate flex-1 min-w-0">${detail}</span>
           <span class="shrink-0">${this.eventStatusIcon(evt)}</span>
         </div>`;
     }).join('');
@@ -337,8 +340,9 @@ const AgentCards = {
     const container = document.getElementById('agent-cards');
     const placeholder = document.getElementById('no-agents-placeholder');
     const countLabel = document.getElementById('agent-card-count');
+    const liveEntries = [...this.sessions.entries()].filter(([, entry]) => entry.session.status !== 'ended');
 
-    if (this.sessions.size === 0) {
+    if (liveEntries.length === 0) {
       placeholder.classList.remove('hidden');
       countLabel.textContent = '0 sessions';
       // Clear cards but keep placeholder
@@ -350,7 +354,7 @@ const AgentCards = {
     placeholder.classList.add('hidden');
 
     // Sort: active first, then idle, then ended; within each group by last_event_at desc
-    const sorted = [...this.sessions.entries()].sort(([, a], [, b]) => {
+    const sorted = liveEntries.sort(([, a], [, b]) => {
       const statusOrder = { active: 0, idle: 1, ended: 2 };
       const aOrder = statusOrder[a.session.status] ?? 1;
       const bOrder = statusOrder[b.session.status] ?? 1;
@@ -364,6 +368,6 @@ const AgentCards = {
     existingCards.forEach(c => c.remove());
     container.insertAdjacentHTML('beforeend', html);
 
-    countLabel.textContent = `${this.sessions.size} session${this.sessions.size !== 1 ? 's' : ''}`;
+    countLabel.textContent = `${liveEntries.length} session${liveEntries.length !== 1 ? 's' : ''}`;
   },
 };

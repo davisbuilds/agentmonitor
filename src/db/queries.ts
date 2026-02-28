@@ -31,6 +31,7 @@ export function upsertSession(
     ON CONFLICT(id) DO UPDATE SET
       last_event_at = datetime('now'),
       status = 'active',
+      ended_at = NULL,
       project = COALESCE(excluded.project, sessions.project),
       branch = COALESCE(excluded.branch, sessions.branch)
   `).run(id, agentId, agentType, project || null, branch || null);
@@ -64,6 +65,7 @@ export function getSessions(filters: {
   limit?: number;
 }): SessionRow[] {
   const db = getDb();
+  updateIdleSessions(config.sessionTimeoutMinutes);
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -95,9 +97,9 @@ export function getSessions(filters: {
       COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
       COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
       COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
-      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
-      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
-      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
     FROM sessions s
     ${where}
     ORDER BY
@@ -118,9 +120,9 @@ export function getSessionWithEvents(sessionId: string, eventLimit: number = 10)
       COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
       COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
       COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
-      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
-      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
-      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
     FROM sessions s WHERE s.id = ?
   `).get(sessionId) as SessionRow | undefined;
 
@@ -140,11 +142,10 @@ export function updateIdleSessions(timeoutMinutes: number): number {
     AND last_event_at < datetime('now', ? || ' minutes')
   `).run(`-${timeoutMinutes}`);
 
-  // Auto-end idle sessions that timed out from inactivity (no explicit session_end)
-  // Sessions explicitly idled via session_end (ended_at set) stay idle until reactivated
+  // Auto-end idle sessions that remain inactive for an additional timeout window.
   db.prepare(`
     UPDATE sessions SET status = 'ended', ended_at = datetime('now')
-    WHERE status = 'idle' AND ended_at IS NULL
+    WHERE status = 'idle'
     AND last_event_at < datetime('now', ? || ' minutes')
   `).run(`-${timeoutMinutes * 2}`);
 
@@ -154,7 +155,7 @@ export function updateIdleSessions(timeoutMinutes: number): number {
 export function idleSession(sessionId: string): void {
   const db = getDb();
   db.prepare(`
-    UPDATE sessions SET status = 'idle', ended_at = datetime('now')
+    UPDATE sessions SET status = 'idle', ended_at = NULL
     WHERE id = ? AND status != 'ended'
   `).run(sessionId);
 }
@@ -194,6 +195,25 @@ export interface EventRow {
   source: EventSource;
 }
 
+function isHistoricalImportedEvent(event: {
+  source?: string;
+  client_timestamp?: string;
+}): boolean {
+  if (event.source !== 'import') return false;
+  if (!event.client_timestamp) return true;
+
+  const clientMs = Date.parse(event.client_timestamp);
+  if (Number.isNaN(clientMs)) return true;
+
+  const minutesWindow = Math.max(
+    30,
+    config.autoImportIntervalMinutes > 0
+      ? config.autoImportIntervalMinutes * 3
+      : config.sessionTimeoutMinutes * 6,
+  );
+  return Date.now() - clientMs > minutesWindow * 60_000;
+}
+
 const METADATA_PRIORITY_KEYS = [
   'command',
   'file_path',
@@ -205,20 +225,6 @@ const METADATA_PRIORITY_KEYS = [
   'path',
   'type',
 ];
-
-function utf8SliceByBytes(input: string, maxBytes: number): string {
-  if (maxBytes <= 0) return '';
-
-  let currentBytes = 0;
-  let out = '';
-  for (const char of input) {
-    const charBytes = Buffer.byteLength(char, 'utf8');
-    if (currentBytes + charBytes > maxBytes) break;
-    out += char;
-    currentBytes += charBytes;
-  }
-  return out;
-}
 
 function safeJsonStringify(value: unknown): string {
   const seen = new WeakSet<object>();
@@ -262,30 +268,37 @@ function buildTruncatedGenericSummary(originalBytes: number): string {
 
 function truncateMetadata(metadata: unknown): { value: string; truncated: boolean } {
   const maxBytes = Math.max(0, config.maxPayloadKB * 1024);
-
-  if (typeof metadata === 'string') {
-    const byteLength = Buffer.byteLength(metadata, 'utf8');
-    if (byteLength <= maxBytes) return { value: metadata, truncated: false };
-    return { value: utf8SliceByBytes(metadata, maxBytes), truncated: true };
+  const minJson = '{}';
+  const minJsonBytes = Buffer.byteLength(minJson, 'utf8');
+  if (maxBytes < minJsonBytes) {
+    return { value: minJson, truncated: true };
   }
 
   const serialized = safeJsonStringify(metadata ?? {});
-  const byteLength = Buffer.byteLength(serialized, 'utf8');
-  if (byteLength <= maxBytes) {
+  const serializedBytes = Buffer.byteLength(serialized, 'utf8');
+  if (serializedBytes <= maxBytes) {
     return { value: serialized, truncated: false };
   }
 
-  let summary = buildTruncatedGenericSummary(byteLength);
+  let summary = buildTruncatedGenericSummary(serializedBytes);
   if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
-    summary = buildTruncatedObjectSummary(metadata as Record<string, unknown>, byteLength);
+    summary = buildTruncatedObjectSummary(metadata as Record<string, unknown>, serializedBytes);
   }
 
   if (Buffer.byteLength(summary, 'utf8') <= maxBytes) {
     return { value: summary, truncated: true };
   }
 
+  const compactSummary = safeJsonStringify({
+    _truncated: true,
+    _original_bytes: serializedBytes,
+  });
+  if (Buffer.byteLength(compactSummary, 'utf8') <= maxBytes) {
+    return { value: compactSummary, truncated: true };
+  }
+
   return {
-    value: utf8SliceByBytes(summary, maxBytes),
+    value: minJson,
     truncated: true,
   };
 }
@@ -311,6 +324,11 @@ export function insertEvent(event: {
   source?: string;
 }): EventRow | null {
   const db = getDb();
+  const isHistoricalImport = isHistoricalImportedEvent(event);
+  if (event.event_id) {
+    const existing = db.prepare('SELECT id FROM events WHERE event_id = ?').get(event.event_id) as { id: number } | undefined;
+    if (existing) return null;
+  }
 
   const agentId = `${event.agent_type}-default`;
   upsertAgent(agentId, event.agent_type);
@@ -325,34 +343,21 @@ export function insertEvent(event: {
     }
   }
 
-  // Resolve git branch from project directory if still missing
-  if (!event.branch && event.project) {
+  // Resolve git branch from project directory and keep session branch fresh.
+  // Recent live imports can carry stale branch metadata from session start, so
+  // refresh the session-level branch from current repo HEAD when possible.
+  if (event.project && (event.source !== 'import' || !isHistoricalImport)) {
     const gitBranch = resolveGitBranch(event.project);
     if (gitBranch) {
-      event.branch = gitBranch;
-      // Update session so future events inherit it
-      db.prepare('UPDATE sessions SET branch = ? WHERE id = ? AND branch IS NULL').run(gitBranch, event.session_id);
+      if (!event.branch) {
+        event.branch = gitBranch;
+      }
+      db.prepare(`
+        UPDATE sessions
+        SET branch = ?
+        WHERE id = ? AND (branch IS NULL OR branch != ?)
+      `).run(gitBranch, event.session_id, gitBranch);
     }
-  }
-
-  // Handle session lifecycle events
-  if (event.event_type === 'session_end') {
-    // Claude Code sessions go to 'idle' first so they linger on the dashboard
-    // for one timeout cycle before the periodic cleanup marks them 'ended'.
-    if (event.agent_type === 'claude_code') {
-      idleSession(event.session_id);
-    } else {
-      endSession(event.session_id);
-    }
-  }
-
-  // Imported sessions are historical — mark as ended unless already managed
-  if (event.source === 'import') {
-    const db2 = getDb();
-    db2.prepare(`
-      UPDATE sessions SET status = 'ended', ended_at = COALESCE(ended_at, datetime('now'))
-      WHERE id = ? AND status != 'ended'
-    `).run(event.session_id);
   }
 
   // Auto-calculate cost if model + tokens present but cost not provided
@@ -398,6 +403,27 @@ export function insertEvent(event: {
     );
 
     if (result.changes === 0) return null; // duplicate event_id
+
+    // Handle session lifecycle for successful inserts only.
+    // Recent import session_end events are often synthetic snapshots, so they
+    // should not force a live session to ended.
+    if (event.event_type === 'session_end' && (event.source !== 'import' || isHistoricalImport)) {
+      // Claude Code sessions go to 'idle' first so they linger on the dashboard
+      // for one timeout cycle before the periodic cleanup marks them 'ended'.
+      if (event.agent_type === 'claude_code') {
+        idleSession(event.session_id);
+      } else {
+        endSession(event.session_id);
+      }
+    }
+
+    // Keep clearly historical imports out of active lists.
+    if (isHistoricalImport) {
+      db.prepare(`
+        UPDATE sessions SET status = 'ended', ended_at = COALESCE(ended_at, datetime('now'))
+        WHERE id = ? AND status != 'ended'
+      `).run(event.session_id);
+    }
 
     return db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid) as EventRow;
   } catch (err: unknown) {
@@ -481,6 +507,8 @@ export interface Stats {
   total_events: number;
   active_sessions: number;
   total_sessions: number;
+  live_sessions: number;
+  active_agents: number;
   total_tokens_in: number;
   total_tokens_out: number;
   total_cost_usd: number;
@@ -492,6 +520,7 @@ export interface Stats {
 
 export function getStats(filters?: { agentType?: string; since?: string }): Stats {
   const db = getDb();
+  updateIdleSessions(config.sessionTimeoutMinutes);
   const conditions: string[] = [];
   const params: unknown[] = [];
 
@@ -521,6 +550,12 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
 
   const totalSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions`
+  ).get() as { count: number }).count;
+  const liveSessions = (db.prepare(
+    `SELECT COUNT(*) as count FROM sessions WHERE status != 'ended'`
+  ).get() as { count: number }).count;
+  const activeAgents = (db.prepare(
+    `SELECT COUNT(DISTINCT agent_type) as count FROM sessions WHERE status != 'ended'`
   ).get() as { count: number }).count;
 
   const toolRows = db.prepare(`
@@ -565,6 +600,8 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     total_events: totals.total_events,
     active_sessions: activeSessions,
     total_sessions: totalSessions,
+    live_sessions: liveSessions,
+    active_agents: activeAgents,
     total_tokens_in: totals.total_tokens_in,
     total_tokens_out: totals.total_tokens_out,
     total_cost_usd: totals.total_cost_usd,

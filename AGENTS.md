@@ -18,7 +18,7 @@ Guidance for coding agents working in this repository.
 - CSS watch mode: `pnpm css:watch`
 - Production build: `pnpm build`
 - Production start: `pnpm start`
-- Import historical logs: `pnpm import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
+- Import historical logs: `pnpm run import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
 - Seed local demo data (server must be running): `pnpm seed`
 
 For UI work in dev, use two terminals:
@@ -56,7 +56,8 @@ For UI work in dev, use two terminals:
 - SSE event names used by clients: `event`, `stats`, `session_update`.
 - Session timeout: 5 min idle → `idle`, 10 min idle → auto `ended`.
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
-- Codex OTEL logs carry no token/cost data; use `pnpm import --source codex` for cost backfill.
+- Codex OTEL logs carry no token/cost data; use `pnpm run import --source codex` for cost backfill.
+- If Codex terminal activity is visible but `source=otel` stops updating, verify sessions are not still exporting to `127.0.0.1:3142` from older runtime config.
 
 ## Implementation Guardrails
 
