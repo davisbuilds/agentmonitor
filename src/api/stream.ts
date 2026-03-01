@@ -18,7 +18,7 @@ export function startStatsBroadcast(): void {
   }, config.statsIntervalMs);
 }
 
-export function stopStatsBroadcast(): void {
+function stopStatsBroadcast(): void {
   if (statsInterval) {
     clearInterval(statsInterval);
     statsInterval = null;

@@ -6,7 +6,7 @@ import type { EventStatus, EventType, EventSource } from '../contracts/event-con
 
 // --- Agents ---
 
-export function upsertAgent(id: string, agentType: string, name?: string): void {
+function upsertAgent(id: string, agentType: string, name?: string): void {
   const db = getDb();
   db.prepare(`
     INSERT INTO agents (id, agent_type, name)
@@ -17,7 +17,7 @@ export function upsertAgent(id: string, agentType: string, name?: string): void 
 
 // --- Sessions ---
 
-export function upsertSession(
+function upsertSession(
   id: string,
   agentId: string,
   agentType: string,
@@ -152,7 +152,7 @@ export function updateIdleSessions(timeoutMinutes: number): number {
   return idled.changes;
 }
 
-export function idleSession(sessionId: string): void {
+function idleSession(sessionId: string): void {
   const db = getDb();
   db.prepare(`
     UPDATE sessions SET status = 'idle', ended_at = NULL
@@ -160,7 +160,7 @@ export function idleSession(sessionId: string): void {
   `).run(sessionId);
 }
 
-export function endSession(sessionId: string): void {
+function endSession(sessionId: string): void {
   const db = getDb();
   db.prepare(`
     UPDATE sessions SET status = 'ended', ended_at = datetime('now')

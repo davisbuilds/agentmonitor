@@ -1,4 +1,4 @@
-export const EVENT_TYPES = [
+const EVENT_TYPES = [
   'tool_use',
   'session_start',
   'session_end',
@@ -12,13 +12,13 @@ export const EVENT_TYPES = [
   'user_prompt',
 ] as const;
 
-export const EVENT_STATUSES = [
+const EVENT_STATUSES = [
   'success',
   'error',
   'timeout',
 ] as const;
 
-export const EVENT_SOURCES = [
+const EVENT_SOURCES = [
   'api',
   'hook',
   'otel',

@@ -11,6 +11,7 @@
     "start": "node dist/server.js",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts' 'scripts/**/*.ts'",
     "test": "node --import tsx --test tests/**/*.test.ts",
+    "test:dead-code": "node --import tsx --test tests/codebase/dead-code.test.ts",
     "test:watch": "node --import tsx --test --watch tests/**/*.test.ts",
     "css:build": "tailwindcss -i src/input.css -o public/css/output.css --minify",
     "css:watch": "tailwindcss -i src/input.css -o public/css/output.css --watch",
