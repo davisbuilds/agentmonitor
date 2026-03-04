@@ -22,6 +22,13 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.deprecated, false);
     });
 
+    test('finds Claude Sonnet 4.6 by canonical name', () => {
+      const pricing = registry.lookup('claude-sonnet-4-6');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.deprecated, false);
+    });
+
     test('finds Claude Sonnet 4.5 by alias', () => {
       const pricing = registry.lookup('claude-sonnet-4-5');
       assert.ok(pricing);
@@ -40,8 +47,20 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.provider, 'openai');
     });
 
+    test('finds OpenAI GPT-5.2 Codex model', () => {
+      const pricing = registry.lookup('gpt-5.2-codex');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'openai');
+    });
+
     test('finds Gemini model', () => {
       const pricing = registry.lookup('gemini-2.5-pro');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'google');
+    });
+
+    test('finds Gemini 3 model', () => {
+      const pricing = registry.lookup('gemini-3-flash-preview');
       assert.ok(pricing);
       assert.equal(pricing.provider, 'google');
     });
@@ -74,10 +93,9 @@ describe('PricingRegistry', () => {
       assert.equal(pricing, null);
     });
 
-    test('identifies deprecated models', () => {
+    test('returns null for pruned deprecated model', () => {
       const pricing = registry.lookup('claude-3-opus-20240229');
-      assert.ok(pricing);
-      assert.equal(pricing.deprecated, true);
+      assert.equal(pricing, null);
     });
   });
 
@@ -117,6 +135,19 @@ describe('PricingRegistry', () => {
       assert.ok(cost !== null);
       // 500K * $2/MTok + 200K * $8/MTok = $1.00 + $1.60 = $2.60
       const expected = 1.0 + 1.6;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
+    test('does not charge cache write for OpenAI models', () => {
+      const cost = registry.calculate('gpt-5.2-codex', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 400_000,
+        cacheWrite: 999_999,
+      });
+      assert.ok(cost !== null);
+      // 100K * $1.75/MTok + 50K * $14/MTok + 400K * $0.175/MTok + cache_write ignored ($0)
+      const expected = 0.175 + 0.7 + 0.07;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 

@@ -1,46 +1,62 @@
 {
   "provider": "google",
-  "lastUpdated": "2026-02-19T00:00:00Z",
+  "lastUpdated": "2026-03-04T00:00:00Z",
   "models": {
+    "gemini-3.1-pro-preview": {
+      "aliases": [
+        "gemini-3.1-pro-preview-customtools"
+      ],
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 12,
+      "cacheReadCostPerMTok": 0.2,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gemini-3.1-flash-lite-preview": {
+      "aliases": [],
+      "inputCostPerMTok": 0.25,
+      "outputCostPerMTok": 1.5,
+      "cacheReadCostPerMTok": 0.025,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gemini-3-flash-preview": {
+      "aliases": [],
+      "inputCostPerMTok": 0.5,
+      "outputCostPerMTok": 3,
+      "cacheReadCostPerMTok": 0.05,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
     "gemini-2.5-pro": {
-      "aliases": ["gemini-2.5-pro-preview-05-06"],
+      "aliases": [
+        "gemini-2.5-pro-preview-05-06"
+      ],
       "inputCostPerMTok": 1.25,
       "outputCostPerMTok": 10,
-      "cacheReadCostPerMTok": 0.31,
-      "cacheWriteCostPerMTok": 1.25,
+      "cacheReadCostPerMTok": 0.125,
+      "cacheWriteCostPerMTok": 0,
       "deprecated": false
     },
     "gemini-2.5-flash": {
-      "aliases": ["gemini-2.5-flash-preview-04-17"],
+      "aliases": [
+        "gemini-2.5-flash-preview-04-17"
+      ],
       "inputCostPerMTok": 0.15,
       "outputCostPerMTok": 0.6,
-      "cacheReadCostPerMTok": 0.0375,
-      "cacheWriteCostPerMTok": 0.15,
+      "cacheReadCostPerMTok": 0.03,
+      "cacheWriteCostPerMTok": 0,
       "deprecated": false
     },
     "gemini-2.0-flash": {
-      "aliases": ["gemini-2.0-flash-001"],
+      "aliases": [
+        "gemini-2.0-flash-001"
+      ],
       "inputCostPerMTok": 0.1,
       "outputCostPerMTok": 0.4,
       "cacheReadCostPerMTok": 0.025,
-      "cacheWriteCostPerMTok": 0.1,
+      "cacheWriteCostPerMTok": 0,
       "deprecated": false
-    },
-    "gemini-1.5-pro": {
-      "aliases": ["gemini-1.5-pro-001", "gemini-1.5-pro-002"],
-      "inputCostPerMTok": 1.25,
-      "outputCostPerMTok": 5,
-      "cacheReadCostPerMTok": 0.31,
-      "cacheWriteCostPerMTok": 1.25,
-      "deprecated": true
-    },
-    "gemini-1.5-flash": {
-      "aliases": ["gemini-1.5-flash-001", "gemini-1.5-flash-002"],
-      "inputCostPerMTok": 0.075,
-      "outputCostPerMTok": 0.3,
-      "cacheReadCostPerMTok": 0.01875,
-      "cacheWriteCostPerMTok": 0.075,
-      "deprecated": true
     }
   }
 }

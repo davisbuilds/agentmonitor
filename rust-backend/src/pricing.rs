@@ -123,22 +123,23 @@ mod tests {
     #[test]
     fn calculates_cost_for_known_model() {
         let cost = calculate_cost(
-            "o3",
+            "gpt-5.2-codex",
             TokenCounts {
-                input: 1_000_000,
-                output: 500_000,
-                cache_read: 0,
-                cache_write: 0,
+                input: 100_000,
+                output: 50_000,
+                cache_read: 400_000,
+                cache_write: 999_999,
             },
         );
         let value = cost.expect("known model should return cost");
-        assert!((value - 6.0).abs() < 1e-10);
+        // 100K * $1.75/MTok + 50K * $14/MTok + 400K * $0.175/MTok + cache write * $0
+        assert!((value - 0.945).abs() < 1e-10);
     }
 
     #[test]
     fn supports_aliases_and_provider_prefixes() {
         let cost = calculate_cost(
-            "openai/o3-2025-04-16",
+            "openai/gpt-5.2-chat-latest",
             TokenCounts {
                 input: 1_000_000,
                 output: 0,
@@ -147,7 +148,22 @@ mod tests {
             },
         );
         let value = cost.expect("alias should resolve");
-        assert!((value - 2.0).abs() < 1e-10);
+        assert!((value - 1.75).abs() < 1e-10);
+    }
+
+    #[test]
+    fn resolves_new_gemini_model() {
+        let cost = calculate_cost(
+            "google/gemini-3-flash-preview",
+            TokenCounts {
+                input: 1_000_000,
+                output: 0,
+                cache_read: 0,
+                cache_write: 0,
+            },
+        );
+        let value = cost.expect("gemini model should resolve");
+        assert!((value - 0.5).abs() < 1e-10);
     }
 
     #[test]
