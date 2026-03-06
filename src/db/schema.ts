@@ -166,4 +166,108 @@ export function initSchema(): void {
 
   // Create index on model column after migrations ensure the column exists.
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_model ON events(model)');
+
+  // --- V2 tables: session browser, messages, tool calls, FTS ---
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS browsing_sessions (
+      id TEXT PRIMARY KEY,
+      project TEXT,
+      agent TEXT NOT NULL,
+      first_message TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      user_message_count INTEGER NOT NULL DEFAULT 0,
+      parent_session_id TEXT,
+      relationship_type TEXT,
+      file_path TEXT,
+      file_size INTEGER,
+      file_hash TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_bs_ended_at ON browsing_sessions(ended_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_bs_project ON browsing_sessions(project);
+    CREATE INDEX IF NOT EXISTS idx_bs_agent ON browsing_sessions(agent);
+    CREATE INDEX IF NOT EXISTS idx_bs_started_at ON browsing_sessions(started_at);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      timestamp TEXT,
+      has_thinking INTEGER NOT NULL DEFAULT 0,
+      has_tool_use INTEGER NOT NULL DEFAULT 0,
+      content_length INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_messages_session_ordinal ON messages(session_id, ordinal);
+    CREATE INDEX IF NOT EXISTS idx_messages_session_role ON messages(session_id, role);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tool_calls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_id INTEGER NOT NULL,
+      session_id TEXT NOT NULL,
+      tool_name TEXT NOT NULL,
+      category TEXT,
+      tool_use_id TEXT,
+      input_json TEXT,
+      result_content TEXT,
+      result_content_length INTEGER,
+      subagent_session_id TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tc_session_id ON tool_calls(session_id);
+    CREATE INDEX IF NOT EXISTS idx_tc_category ON tool_calls(category);
+    CREATE INDEX IF NOT EXISTS idx_tc_tool_name ON tool_calls(tool_name);
+  `);
+
+  // FTS5 full-text search on message content
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+      content,
+      content=messages,
+      content_rowid=id,
+      tokenize='porter unicode61'
+    );
+  `);
+
+  // Triggers to keep FTS index in sync with messages table
+  const ftsTriggersExist = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='trigger' AND name='messages_fts_insert'"
+  ).get();
+
+  if (!ftsTriggersExist) {
+    db.exec(`
+      CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+      END;
+
+      CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+      END;
+
+      CREATE TRIGGER messages_fts_update AFTER UPDATE OF content ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
+        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
+      END;
+    `);
+  }
+
+  // File-watcher state tracking
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS watched_files (
+      file_path TEXT PRIMARY KEY,
+      file_hash TEXT NOT NULL,
+      file_mtime TEXT,
+      status TEXT NOT NULL DEFAULT 'parsed',
+      last_parsed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
 }
