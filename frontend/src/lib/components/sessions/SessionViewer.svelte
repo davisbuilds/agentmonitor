@@ -7,7 +7,7 @@
     type BrowsingSession,
     type Message,
   } from '../../api/client';
-  import { timeAgo, agentColor } from '../../format';
+  import { timeAgo, agentHexColor } from '../../format';
   import MessageBlock from './MessageBlock.svelte';
 
   interface Props {
@@ -21,6 +21,7 @@
   let children = $state<BrowsingSession[]>([]);
   let totalMessages = $state(0);
   let loading = $state(true);
+  let error = $state<string | null>(null);
   let loadingMore = $state(false);
   let hasMore = $state(false);
 
@@ -41,6 +42,7 @@
       hasMore = msgs.data.length < msgs.total;
     } catch (err) {
       console.error('Failed to load session:', err);
+      error = 'Failed to load session.';
     } finally {
       loading = false;
     }
@@ -82,7 +84,7 @@
       <div class="flex items-center gap-2 min-w-0 flex-1">
         <span
           class="inline-block w-2 h-2 rounded-full shrink-0"
-          style="background-color: {agentColor(session.agent)}"
+          style="background-color: {agentHexColor(session.agent)}"
         ></span>
         <span class="text-sm text-gray-200 truncate font-medium">
           {session.first_message || session.id.slice(0, 12)}
@@ -116,6 +118,11 @@
   <div class="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-4">
     {#if loading}
       <div class="text-center py-16 text-gray-500 text-sm">Loading messages...</div>
+    {:else if error}
+      <div class="text-center py-16 text-red-400">
+        <p class="text-sm">{error}</p>
+        <button class="text-xs mt-2 text-blue-400 hover:text-blue-300" onclick={load}>Retry</button>
+      </div>
     {:else if messages.length === 0}
       <div class="text-center py-16 text-gray-500 text-sm">No messages in this session.</div>
     {:else}

@@ -4,10 +4,12 @@ Guidance for coding agents working in this repository.
 
 ## Project Snapshot
 
-- App: `agentmonitor` real-time localhost dashboard for AI agent activity.
+- App: `agentmonitor` real-time localhost dashboard + session browser for AI agent activity.
 - Backend: Node.js + TypeScript + Express + SQLite (`better-sqlite3`).
-- Frontend: static HTML + vanilla JS + Tailwind-generated CSS.
+- Legacy frontend: static HTML + vanilla JS + Tailwind-generated CSS (at `/`).
+- Svelte 5 frontend: Vite SPA served at `/app/` with Monitor, Sessions, Search, Analytics tabs.
 - Transport: HTTP ingestion + Server-Sent Events (SSE) for live updates.
+- Session ingestion: chokidar file-watcher discovers `~/.claude/projects/**/*.jsonl` automatically.
 - Default bind: `127.0.0.1:3141`.
 
 ## Working Commands
@@ -21,9 +23,13 @@ Guidance for coding agents working in this repository.
 - Import historical logs: `pnpm run import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
 - Seed local demo data (server must be running): `pnpm seed`
 
-For UI work in dev, use two terminals:
+For legacy UI work in dev, use two terminals:
 - Terminal 1: `pnpm dev`
 - Terminal 2: `pnpm css:watch`
+
+For Svelte frontend:
+- Build: `pnpm frontend:build` (output at `frontend/dist/`, served at `/app/`)
+- Dev: `pnpm frontend:dev` (Vite dev server at `:5173` with API proxy to `:3141`)
 
 ## Code Map
 
@@ -33,8 +39,19 @@ For UI work in dev, use two terminals:
 - `src/db/schema.ts`: schema and indexes.
 - `src/db/queries.ts`: all DB reads/writes and stats aggregation.
 - `src/sse/emitter.ts`: SSE client management and fan-out.
-- `public/index.html`: dashboard shell.
-- `public/js/`: dashboard client code/components.
+- `public/index.html`: legacy dashboard shell.
+- `public/js/`: legacy dashboard client code/components.
+- `frontend/`: Svelte 5 + Vite SPA (served at `/app/`).
+- `frontend/src/lib/components/monitor/`: Monitor tab (real-time dashboard).
+- `frontend/src/lib/components/sessions/`: Sessions tab (session browser + message viewer).
+- `frontend/src/lib/components/search/`: Search tab (FTS5 full-text search).
+- `frontend/src/lib/components/analytics/`: Analytics tab (charts, project/tool breakdowns).
+- `frontend/src/lib/api/client.ts`: typed API client for v1 and v2 endpoints.
+- `frontend/src/lib/stores/`: Svelte 5 reactive state (runes).
+- `src/api/v2/`: v2 REST API (session browser, search, analytics).
+- `src/db/v2-queries.ts`: all v2 SQL queries.
+- `src/parser/claude-code.ts`: JSONL parser for Claude Code session files.
+- `src/watcher/`: chokidar file-watcher for auto-discovering session files.
 - `src/otel/parser.ts`: OTLP JSON log/metric parsing for Claude Code and Codex.
 - `src/import/`: historical log importers (Claude Code JSONL, Codex).
 - `src/pricing/`: per-model cost calculation with JSON pricing data.
@@ -58,11 +75,22 @@ For UI work in dev, use two terminals:
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
 - Codex OTEL logs carry no token/cost data; use `pnpm run import --source codex` for cost backfill.
 - If Codex terminal activity is visible but `source=otel` stops updating, verify sessions are not still exporting to `127.0.0.1:3142` from older runtime config.
+- V2 API (session browser): all endpoints under `/api/v2/`.
+  - `GET /api/v2/sessions`: list browsing sessions (cursor pagination, project/agent filters).
+  - `GET /api/v2/sessions/:id`: single session detail.
+  - `GET /api/v2/sessions/:id/messages`: messages with offset pagination.
+  - `GET /api/v2/sessions/:id/children`: sub-sessions.
+  - `GET /api/v2/search?q=`: FTS5 full-text search with snippet highlighting.
+  - `GET /api/v2/analytics/summary|activity|projects|tools`: analytics endpoints.
+  - `GET /api/v2/projects`, `GET /api/v2/agents`: filter option lists.
+- V2 DB tables: `browsing_sessions`, `messages`, `tool_calls`, `messages_fts` (FTS5), `watched_files`.
+- File-watcher auto-discovers `~/.claude/projects/**/*.jsonl`, parses messages/tool_calls, deduplicates by file hash.
 
 ## Implementation Guardrails
 
 - Keep TypeScript ESM import style consistent (existing `.js` extension pattern in TS imports).
-- Keep SQL in `src/db/queries.ts` (avoid ad-hoc DB logic in route handlers).
+- Keep v1 SQL in `src/db/queries.ts`, v2 SQL in `src/db/v2-queries.ts`.
+- Keep v2 route handlers in `src/api/v2/router.ts`.
 - If API response shape changes, update `README.md` in the same change.
 - Do not commit local runtime artifacts (`data/`, `*.db`, generated CSS output).
 

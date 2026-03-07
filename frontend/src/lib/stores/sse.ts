@@ -17,11 +17,16 @@ export function connectSSE(): void {
   };
 
   source.onmessage = (e) => {
+    let msg: { type: string; payload: unknown };
     try {
-      const msg = JSON.parse(e.data) as { type: string; payload: unknown };
-      dispatch(msg);
+      msg = JSON.parse(e.data);
     } catch {
-      // ignore parse errors
+      return;
+    }
+    try {
+      dispatch(msg);
+    } catch (err) {
+      console.error('[SSE] Dispatch error:', err);
     }
   };
 

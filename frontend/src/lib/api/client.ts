@@ -169,103 +169,109 @@ function qs(params: Record<string, string | number | undefined>): string {
   return '?' + new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString();
 }
 
+async function checkedJson<T>(res: Response, context: string): Promise<T> {
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new Error(`${context} failed (${res.status}): ${body}`);
+  }
+  return res.json();
+}
+
 // V1 endpoints (Monitor tab)
 
 export async function fetchStats(filters: Filters = {}): Promise<Stats> {
   const res = await fetch(`/api/stats${qs(filters)}`);
-  return res.json();
+  return checkedJson(res, 'fetchStats');
 }
 
 export async function fetchEvents(filters: Filters = {}, limit = 100): Promise<{ events: AgentEvent[]; total: number }> {
   const res = await fetch(`/api/events${qs({ ...filters, limit })}`);
-  return res.json();
+  return checkedJson(res, 'fetchEvents');
 }
 
 export async function fetchSessions(filters: Filters = {}): Promise<{ sessions: Session[]; total: number }> {
   const res = await fetch(`/api/sessions${qs(filters)}`);
-  return res.json();
+  return checkedJson(res, 'fetchSessions');
 }
 
 export async function fetchFilterOptions(): Promise<FilterOptions> {
   const res = await fetch('/api/filter-options');
-  return res.json();
+  return checkedJson(res, 'fetchFilterOptions');
 }
 
 export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
   const res = await fetch(`/api/stats/cost${qs(filters)}`);
-  return res.json();
+  return checkedJson(res, 'fetchCostData');
 }
 
 export async function fetchToolStats(filters: Filters = {}): Promise<ToolStats> {
   const res = await fetch(`/api/stats/tools${qs(filters)}`);
-  return res.json();
+  return checkedJson(res, 'fetchToolStats');
 }
 
 export async function fetchSessionDetail(id: string, eventLimit = 10): Promise<{ session: Session; events: AgentEvent[] }> {
   const res = await fetch(`/api/sessions/${id}?event_limit=${eventLimit}`);
-  return res.json();
+  return checkedJson(res, 'fetchSessionDetail');
 }
 
 export async function fetchTranscript(id: string): Promise<{ transcript: Array<{ role: string; content: string; timestamp?: string }> }> {
   const res = await fetch(`/api/sessions/${id}/transcript`);
-  return res.json();
+  return checkedJson(res, 'fetchTranscript');
 }
 
 // V2 endpoints (Session browser)
 
 export async function fetchBrowsingSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: BrowsingSession[]; total: number; cursor?: string }> {
   const res = await fetch(`/api/v2/sessions${qs(params)}`);
-  return res.json();
+  return checkedJson(res, 'fetchBrowsingSessions');
 }
 
 export async function fetchBrowsingSession(id: string): Promise<BrowsingSession> {
   const res = await fetch(`/api/v2/sessions/${id}`);
-  if (!res.ok) throw new Error(`Session not found: ${id}`);
-  return res.json();
+  return checkedJson(res, 'fetchBrowsingSession');
 }
 
 export async function fetchMessages(sessionId: string, params: { offset?: number; limit?: number } = {}): Promise<{ data: Message[]; total: number }> {
   const res = await fetch(`/api/v2/sessions/${sessionId}/messages${qs(params)}`);
-  if (!res.ok) throw new Error(`Messages not found for session: ${sessionId}`);
-  return res.json();
+  return checkedJson(res, 'fetchMessages');
 }
 
 export async function fetchSessionChildren(id: string): Promise<{ data: BrowsingSession[] }> {
   const res = await fetch(`/api/v2/sessions/${id}/children`);
-  return res.json();
+  return checkedJson(res, 'fetchSessionChildren');
 }
 
 export async function searchMessages(params: { q: string; project?: string; agent?: string; limit?: number; cursor?: string }): Promise<{ data: SearchResult[]; total: number; cursor?: string }> {
   const res = await fetch(`/api/v2/search${qs(params)}`);
-  return res.json();
+  return checkedJson(res, 'searchMessages');
 }
 
 export async function fetchAnalyticsSummary(params: Record<string, string | undefined> = {}): Promise<AnalyticsSummary> {
   const res = await fetch(`/api/v2/analytics/summary${qs(params)}`);
-  return res.json();
+  return checkedJson(res, 'fetchAnalyticsSummary');
 }
 
 export async function fetchAnalyticsActivity(params: Record<string, string | undefined> = {}): Promise<{ data: ActivityDataPoint[] }> {
   const res = await fetch(`/api/v2/analytics/activity${qs(params)}`);
-  return res.json();
+  return checkedJson(res, 'fetchAnalyticsActivity');
 }
 
 export async function fetchAnalyticsProjects(params: Record<string, string | undefined> = {}): Promise<{ data: ProjectBreakdown[] }> {
   const res = await fetch(`/api/v2/analytics/projects${qs(params)}`);
-  return res.json();
+  return checkedJson(res, 'fetchAnalyticsProjects');
 }
 
 export async function fetchAnalyticsTools(params: Record<string, string | undefined> = {}): Promise<{ data: ToolUsageStat[] }> {
   const res = await fetch(`/api/v2/analytics/tools${qs(params)}`);
-  return res.json();
+  return checkedJson(res, 'fetchAnalyticsTools');
 }
 
 export async function fetchV2Projects(): Promise<{ data: string[] }> {
   const res = await fetch('/api/v2/projects');
-  return res.json();
+  return checkedJson(res, 'fetchV2Projects');
 }
 
 export async function fetchV2Agents(): Promise<{ data: string[] }> {
   const res = await fetch('/api/v2/agents');
-  return res.json();
+  return checkedJson(res, 'fetchV2Agents');
 }

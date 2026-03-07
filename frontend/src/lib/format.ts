@@ -36,6 +36,14 @@ export function agentColor(agentType: string): string {
   }
 }
 
+export function agentHexColor(agentType: string): string {
+  switch (agentType) {
+    case 'claude_code': return '#fb923c';
+    case 'codex': return '#d1d5db';
+    default: return '#60a5fa';
+  }
+}
+
 export function statusColor(status: string): string {
   switch (status) {
     case 'active': return 'bg-green-400';

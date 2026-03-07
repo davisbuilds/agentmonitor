@@ -7,10 +7,22 @@
   } from '../../api/client';
   import { setTab } from '../../stores/router.svelte';
 
+  function sanitizeSnippet(html: string): string {
+    return html
+      .replace(/<mark>/g, '\x00MARK_OPEN\x00')
+      .replace(/<\/mark>/g, '\x00MARK_CLOSE\x00')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/\x00MARK_OPEN\x00/g, '<mark>')
+      .replace(/\x00MARK_CLOSE\x00/g, '</mark>');
+  }
+
   let query = $state('');
   let results = $state<SearchResult[]>([]);
   let total = $state(0);
   let loading = $state(false);
+  let error = $state<string | null>(null);
   let searched = $state(false);
   let cursor = $state<string | undefined>();
   let hasMore = $state(false);
@@ -38,6 +50,7 @@
     if (!query.trim()) return;
     loading = true;
     searched = true;
+    error = null;
     try {
       const params: { q: string; project?: string; agent?: string; limit?: number; cursor?: string } = {
         q: query.trim(),
@@ -58,6 +71,7 @@
       hasMore = !!res.cursor && res.data.length === PAGE_SIZE;
     } catch (err) {
       console.error('Search failed:', err);
+      error = err instanceof Error && err.message.includes('400') ? 'Invalid search syntax. Avoid special characters like quotes or parentheses.' : 'Search failed. Check that the server is running.';
     } finally {
       loading = false;
     }
@@ -137,12 +151,14 @@
           <span>msg #{result.message_ordinal}</span>
         </div>
         <div class="text-sm text-gray-300 line-clamp-2">
-          {@html result.snippet}
+          {@html sanitizeSnippet(result.snippet)}
         </div>
       </button>
     {/each}
 
-    {#if searched && !loading && results.length === 0}
+    {#if error}
+      <div class="text-center py-8 text-red-400 text-sm">{error}</div>
+    {:else if searched && !loading && results.length === 0}
       <div class="text-center py-16 text-gray-500 text-sm">
         No results found for "{query}".
       </div>

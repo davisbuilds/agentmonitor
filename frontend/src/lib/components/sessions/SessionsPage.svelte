@@ -6,12 +6,13 @@
     fetchV2Agents,
     type BrowsingSession,
   } from '../../api/client';
-  import { timeAgo, agentColor } from '../../format';
+  import { timeAgo, agentHexColor } from '../../format';
   import SessionViewer from './SessionViewer.svelte';
 
   let sessions = $state<BrowsingSession[]>([]);
   let total = $state(0);
   let loading = $state(true);
+  let error = $state<string | null>(null);
   let cursor = $state<string | undefined>();
   let hasMore = $state(false);
 
@@ -28,6 +29,7 @@
 
   async function loadSessions(append = false) {
     loading = true;
+    error = null;
     try {
       const params: Record<string, string | number> = { limit: PAGE_SIZE };
       if (filterProject) params.project = filterProject;
@@ -45,6 +47,7 @@
       hasMore = !!res.cursor && res.data.length === PAGE_SIZE;
     } catch (err) {
       console.error('Failed to load sessions:', err);
+      error = 'Failed to load sessions. Check that the server is running.';
     } finally {
       loading = false;
     }
@@ -117,7 +120,7 @@
             <div class="flex items-center gap-2 min-w-0 flex-1">
               <span
                 class="inline-block w-2 h-2 rounded-full shrink-0"
-                style="background-color: {agentColor(session.agent)}"
+                style="background-color: {agentHexColor(session.agent)}"
               ></span>
               <span class="text-sm text-gray-300 truncate">
                 {session.first_message || session.id.slice(0, 12)}
@@ -138,6 +141,11 @@
 
       {#if loading}
         <div class="text-center py-8 text-gray-500 text-sm">Loading sessions...</div>
+      {:else if error}
+        <div class="text-center py-16 text-red-400">
+          <p class="text-sm">{error}</p>
+          <button class="text-xs mt-2 text-blue-400 hover:text-blue-300" onclick={() => loadSessions()}>Retry</button>
+        </div>
       {:else if sessions.length === 0}
         <div class="text-center py-16 text-gray-500">
           <p class="text-sm">No sessions found.</p>

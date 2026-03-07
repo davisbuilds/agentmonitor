@@ -53,16 +53,19 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     conditions.push('message_count <= ?');
     values.push(params.max_messages);
   }
+  const filterWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const filterValues = [...values];
+
+  const total = (db.prepare(
+    `SELECT COUNT(*) as c FROM browsing_sessions ${filterWhere}`
+  ).get(...filterValues) as { c: number }).c;
+
   if (params.cursor) {
     conditions.push('started_at < ?');
     values.push(params.cursor);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  const total = (db.prepare(
-    `SELECT COUNT(*) as c FROM browsing_sessions ${where}`
-  ).get(...values) as { c: number }).c;
 
   values.push(limit);
   const data = db.prepare(

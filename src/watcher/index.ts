@@ -86,8 +86,8 @@ export function syncSessionFile(db: Database.Database, filePath: string): SyncRe
     `).run(filePath, fileHash, stat.mtime.toISOString());
 
     return 'parsed';
-  } catch {
-    // Record error state but don't crash
+  } catch (err) {
+    console.error(`[watcher] Failed to sync ${filePath}:`, err);
     try {
       db.prepare(`
         INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
@@ -96,8 +96,8 @@ export function syncSessionFile(db: Database.Database, filePath: string): SyncRe
           status = 'error',
           last_parsed_at = datetime('now')
       `).run(filePath, 'error', '');
-    } catch {
-      // Ignore DB errors during error recording
+    } catch (dbErr) {
+      console.error(`[watcher] Failed to record error state for ${filePath}:`, dbErr);
     }
     return 'error';
   }

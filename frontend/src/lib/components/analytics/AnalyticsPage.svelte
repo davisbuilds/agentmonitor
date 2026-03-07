@@ -17,6 +17,7 @@
   let projectBreakdowns = $state<ProjectBreakdown[]>([]);
   let toolUsage = $state<ToolUsageStat[]>([]);
   let loading = $state(true);
+  let error = $state<string | null>(null);
 
   // Compute max values for bar chart scaling
   let maxMessages = $derived(Math.max(...activity.map(a => a.messages), 1));
@@ -37,6 +38,7 @@
       toolUsage = t.data;
     } catch (err) {
       console.error('Failed to load analytics:', err);
+      error = 'Failed to load analytics. Check that the server is running.';
     } finally {
       loading = false;
     }
@@ -46,6 +48,8 @@
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
   {#if loading}
     <div class="text-center py-24 text-gray-500 text-sm">Loading analytics...</div>
+  {:else if error}
+    <div class="text-center py-24 text-red-400 text-sm">{error}</div>
   {:else}
     <!-- Summary Cards -->
     {#if summary}
