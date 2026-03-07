@@ -172,6 +172,38 @@ describe('GET /api/v2/sessions', () => {
     }
   });
 
+  test('filters by max_messages', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions?max_messages=6`);
+    const body = await res.json() as { data: Array<{ message_count: number }> };
+    assert.ok(body.data.length > 0, 'should have results');
+    for (const s of body.data) {
+      assert.ok(s.message_count <= 6, `expected <= 6 messages, got ${s.message_count}`);
+    }
+  });
+
+  test('handles invalid limit gracefully', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions?limit=notanumber`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: unknown[] };
+    assert.ok(body.data.length > 0, 'should fall back to default limit');
+  });
+
+  test('handles invalid min_messages gracefully', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions?min_messages=abc`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: unknown[] };
+    assert.ok(body.data.length > 0, 'should ignore invalid min_messages');
+  });
+
+  test('filters by agent', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions?agent=claude`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ agent: string }> };
+    for (const s of body.data) {
+      assert.equal(s.agent, 'claude');
+    }
+  });
+
   test('returns sessions ordered by started_at DESC', async () => {
     const res = await fetch(`${baseUrl}/api/v2/sessions`);
     const body = await res.json() as { data: Array<{ started_at: string }> };
@@ -276,6 +308,35 @@ describe('GET /api/v2/search', () => {
       assert.ok(body.data[0].snippet, 'should include snippet');
     }
   });
+
+  test('returns 400 for invalid FTS5 syntax', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/search?q=${encodeURIComponent('"unclosed')}`);
+    assert.equal(res.status, 400);
+    const body = await res.json() as { error: string };
+    assert.ok(body.error.includes('syntax'), 'error should mention syntax');
+  });
+
+  test('cursor pagination returns next page without overlap', async () => {
+    const res1 = await fetch(`${baseUrl}/api/v2/search?q=message&limit=3`);
+    const body1 = await res1.json() as { data: Array<{ message_id: number }>; cursor?: string };
+
+    if (body1.cursor) {
+      const res2 = await fetch(`${baseUrl}/api/v2/search?q=message&limit=3&cursor=${body1.cursor}`);
+      const body2 = await res2.json() as { data: Array<{ message_id: number }> };
+
+      const ids1 = new Set(body1.data.map(r => r.message_id));
+      for (const r of body2.data) {
+        assert.ok(!ids1.has(r.message_id), `message_id ${r.message_id} should not appear in both pages`);
+      }
+    }
+  });
+
+  test('filters search by agent', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/search?q=message&agent=claude`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: unknown[] };
+    assert.ok(Array.isArray(body.data));
+  });
 });
 
 // --- Analytics endpoints ---
@@ -284,9 +345,29 @@ describe('GET /api/v2/analytics/summary', () => {
   test('returns correct totals', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/summary`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { total_sessions: number; total_messages: number };
+    const body = await res.json() as { total_sessions: number; total_messages: number; daily_average_sessions: number; date_range: { earliest: string | null; latest: string | null } };
     assert.ok(body.total_sessions >= 6, `expected >= 6 sessions, got ${body.total_sessions}`);
     assert.ok(body.total_messages > 0);
+    assert.ok(typeof body.daily_average_sessions === 'number');
+    assert.ok(body.date_range.earliest);
+    assert.ok(body.date_range.latest);
+  });
+
+  test('filters summary by project', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/summary?project=alpha`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { total_sessions: number };
+    // Alpha has 2 sessions + 1 child = 3
+    assert.ok(body.total_sessions >= 2 && body.total_sessions <= 4, `expected 2-4 alpha sessions, got ${body.total_sessions}`);
+  });
+
+  test('filters summary by date range', async () => {
+    const all = await fetch(`${baseUrl}/api/v2/analytics/summary`);
+    const allBody = await all.json() as { total_sessions: number };
+
+    const filtered = await fetch(`${baseUrl}/api/v2/analytics/summary?date_from=2026-03-04`);
+    const filteredBody = await filtered.json() as { total_sessions: number };
+    assert.ok(filteredBody.total_sessions < allBody.total_sessions, 'filtered should have fewer sessions');
   });
 });
 

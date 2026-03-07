@@ -143,6 +143,30 @@ describe('syncSessionFile', () => {
     // Should mark as skipped (no messages to parse)
     assert.ok(result === 'skipped' || result === 'parsed');
   });
+
+  test('records error state for missing files', () => {
+    const db = getDb();
+    const fakePath = path.join(watchDir, 'nonexistent-file.jsonl');
+    const result = syncSessionFile(db, fakePath);
+    assert.equal(result, 'error');
+
+    // Should record error in watched_files
+    const watched = db.prepare('SELECT status FROM watched_files WHERE file_path = ?').get(fakePath) as { status: string } | undefined;
+    assert.ok(watched, 'should record error in watched_files');
+    assert.equal(watched!.status, 'error');
+  });
+
+  test('empty-messages file is recorded as skipped in watched_files', () => {
+    const db = getDb();
+    // File with only non-message lines
+    const content = JSON.stringify({ type: 'progress', sessionId: 'skip-only', data: {} }) + '\n';
+    const filePath = writeSessionFile('skip-only-sess', content);
+    const result = syncSessionFile(db, filePath);
+    assert.equal(result, 'skipped');
+
+    const watched = db.prepare('SELECT status FROM watched_files WHERE file_path = ?').get(filePath) as { status: string };
+    assert.equal(watched.status, 'skipped');
+  });
 });
 
 describe('discoverSessionFiles', () => {
