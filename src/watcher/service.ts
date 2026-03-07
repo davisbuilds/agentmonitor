@@ -2,7 +2,7 @@ import path from 'path';
 import os from 'os';
 import { watch, type FSWatcher } from 'chokidar';
 import { getDb } from '../db/connection.js';
-import { syncSessionFile, syncAllFiles, discoverSessionFiles } from './index.js';
+import { syncSessionFile, syncAllFiles } from './index.js';
 import { broadcaster } from '../sse/emitter.js';
 
 let watcher: FSWatcher | undefined;

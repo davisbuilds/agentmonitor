@@ -43,6 +43,10 @@ rust-backend/target/
 # docs
 **/archive/
 
+# Svelte frontend build
+frontend/dist/
+frontend/node_modules/
+
 # Playwright
 /test-results/
 /playwright-report/

@@ -155,7 +155,7 @@ export function parseSessionMessages(
   let startedAt: string | null = null;
   let endedAt: string | null = null;
   let userMessageCount = 0;
-  let parentSessionId: string | null = null;
+  const parentSessionId: string | null = null;
 
   const lines = jsonlContent.split('\n');
 
@@ -180,7 +180,7 @@ export function parseSessionMessages(
     if (!msg || !msg.role) continue;
 
     // Extract content blocks
-    let rawContent = msg.content;
+    const rawContent = msg.content;
     if (rawContent == null) continue;
 
     // Normalize content to array of blocks

@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
-import crypto from 'node:crypto';
-
 let tempDir = '';
 let dbDir = '';
 let watchDir = '';
+/* eslint-disable @typescript-eslint/consistent-type-imports */
 let getDb: typeof import('../src/db/connection.js').getDb;
 let closeDb: typeof import('../src/db/connection.js').closeDb;
+/* eslint-enable @typescript-eslint/consistent-type-imports */
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-watcher-'));
@@ -65,6 +65,7 @@ const makeSession = (sessionId: string) => sampleJsonl([
 ]);
 
 describe('syncSessionFile', () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let syncSessionFile: typeof import('../src/watcher/index.js').syncSessionFile;
 
   before(async () => {
@@ -145,6 +146,7 @@ describe('syncSessionFile', () => {
 });
 
 describe('discoverSessionFiles', () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let discoverSessionFiles: typeof import('../src/watcher/index.js').discoverSessionFiles;
 
   before(async () => {
@@ -175,6 +177,7 @@ describe('discoverSessionFiles', () => {
 });
 
 describe('syncAllFiles', () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let syncAllFiles: typeof import('../src/watcher/index.js').syncAllFiles;
 
   before(async () => {

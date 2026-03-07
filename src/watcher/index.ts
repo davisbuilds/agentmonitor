@@ -86,7 +86,7 @@ export function syncSessionFile(db: Database.Database, filePath: string): SyncRe
     `).run(filePath, fileHash, stat.mtime.toISOString());
 
     return 'parsed';
-  } catch (err) {
+  } catch {
     // Record error state but don't crash
     try {
       db.prepare(`

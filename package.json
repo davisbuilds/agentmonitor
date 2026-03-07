@@ -13,6 +13,8 @@
     "test": "node --import tsx --test tests/**/*.test.ts",
     "test:dead-code": "node --import tsx --test tests/codebase/dead-code.test.ts",
     "test:watch": "node --import tsx --test --watch tests/**/*.test.ts",
+    "frontend:build": "pnpm --dir frontend build",
+    "frontend:dev": "pnpm --dir frontend dev",
     "css:build": "tailwindcss -i src/input.css -o public/css/output.css --minify",
     "css:watch": "tailwindcss -i src/input.css -o public/css/output.css --watch",
     "seed": "tsx scripts/seed.ts",

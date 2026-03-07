@@ -39,5 +39,12 @@ export function createApp(options: CreateAppOptions = {}): Express {
     app.use(express.static(publicDir));
   }
 
+  // Serve Svelte SPA at /app (frontend/dist)
+  const svelteDir = path.join(__dirname, '..', 'frontend', 'dist');
+  app.use('/app', express.static(svelteDir));
+  app.get('/app/{*path}', (_req: Request, res: Response) => {
+    res.sendFile(path.join(svelteDir, 'index.html'));
+  });
+
   return app;
 }

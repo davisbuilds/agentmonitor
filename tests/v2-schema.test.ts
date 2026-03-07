@@ -5,9 +5,11 @@ import path from 'node:path';
 import test, { before, after } from 'node:test';
 
 let tempDir = '';
+/* eslint-disable @typescript-eslint/consistent-type-imports */
 let getDb: typeof import('../src/db/connection.js').getDb;
 let closeDb: typeof import('../src/db/connection.js').closeDb;
 let initSchema: typeof import('../src/db/schema.js').initSchema;
+/* eslint-enable @typescript-eslint/consistent-type-imports */
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-schema-'));

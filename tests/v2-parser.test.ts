@@ -5,8 +5,10 @@ import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
 
 let tempDir = '';
+/* eslint-disable @typescript-eslint/consistent-type-imports */
 let getDb: typeof import('../src/db/connection.js').getDb;
 let closeDb: typeof import('../src/db/connection.js').closeDb;
+/* eslint-enable @typescript-eslint/consistent-type-imports */
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-parser-'));
@@ -180,6 +182,7 @@ const SESSION_WITH_PROGRESS = sampleJsonl([
 // --- Parser tests ---
 
 describe('parseSessionMessages', () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let parseSessionMessages: typeof import('../src/parser/claude-code.js').parseSessionMessages;
 
   before(async () => {
@@ -336,6 +339,7 @@ describe('parseSessionMessages', () => {
 // --- Category normalization tests ---
 
 describe('categorizeToolName', () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let categorizeToolName: typeof import('../src/parser/claude-code.js').categorizeToolName;
 
   before(async () => {
@@ -381,8 +385,10 @@ describe('categorizeToolName', () => {
 // --- DB insertion integration tests ---
 
 describe('insertParsedSession', () => {
+  /* eslint-disable @typescript-eslint/consistent-type-imports */
   let parseSessionMessages: typeof import('../src/parser/claude-code.js').parseSessionMessages;
   let insertParsedSession: typeof import('../src/parser/claude-code.js').insertParsedSession;
+  /* eslint-enable @typescript-eslint/consistent-type-imports */
 
   before(async () => {
     const mod = await import('../src/parser/claude-code.js');

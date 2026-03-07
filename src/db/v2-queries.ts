@@ -2,7 +2,6 @@ import { getDb } from './connection.js';
 import type {
   BrowsingSessionRow,
   MessageRow,
-  ToolCallRow,
   SessionsListParams,
   MessagesListParams,
   SearchParams,
@@ -11,7 +10,6 @@ import type {
   ActivityDataPoint,
   ProjectBreakdown,
   ToolUsageStat,
-  SearchResult,
 } from '../api/v2/types.js';
 
 // --- Sessions ---
