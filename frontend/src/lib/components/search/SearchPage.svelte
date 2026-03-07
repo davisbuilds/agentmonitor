@@ -5,7 +5,7 @@
     fetchV2Agents,
     type SearchResult,
   } from '../../api/client';
-  import { setTab } from '../../stores/router.svelte';
+  import { navigateToSession } from '../../stores/router.svelte';
 
   function sanitizeSnippet(html: string): string {
     return html
@@ -83,9 +83,8 @@
     search();
   }
 
-  function navigateToSession(sessionId: string) {
-    // Switch to sessions tab - the session viewer will need to handle this
-    setTab('sessions');
+  function handleNavigateToSession(sessionId: string) {
+    navigateToSession(sessionId);
   }
 </script>
 
@@ -139,7 +138,7 @@
     {#each results as result (result.message_id)}
       <button
         class="w-full text-left px-3 py-2 rounded bg-gray-900/40 hover:bg-gray-800/60 border border-gray-800 hover:border-gray-700 transition-colors"
-        onclick={() => navigateToSession(result.session_id)}
+        onclick={() => handleNavigateToSession(result.session_id)}
       >
         <div class="flex items-center gap-2 mb-1 text-xs text-gray-500">
           <span class="{result.message_role === 'user' ? 'text-blue-400' : 'text-green-400'}">

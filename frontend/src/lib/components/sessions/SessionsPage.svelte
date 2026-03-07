@@ -7,6 +7,7 @@
     type BrowsingSession,
   } from '../../api/client';
   import { timeAgo, agentHexColor } from '../../format';
+  import { consumePendingSession } from '../../stores/router.svelte';
   import SessionViewer from './SessionViewer.svelte';
 
   let sessions = $state<BrowsingSession[]>([]);
@@ -67,6 +68,11 @@
   }
 
   onMount(async () => {
+    const pending = consumePendingSession();
+    if (pending) {
+      selectedSessionId = pending;
+    }
+
     const [projectsRes, agentsRes] = await Promise.all([
       fetchV2Projects().catch(() => ({ data: [] })),
       fetchV2Agents().catch(() => ({ data: [] })),

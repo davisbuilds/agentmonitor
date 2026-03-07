@@ -108,7 +108,8 @@ v2Router.get('/search', (req: Request, res: Response) => {
     const result = searchMessages(params);
     res.json(result);
   } catch (err) {
-    if (err instanceof Error && err.message.includes('fts5')) {
+    const sqliteErr = err as { code?: string };
+    if (sqliteErr.code === 'SQLITE_ERROR') {
       res.status(400).json({ error: 'Invalid search query syntax' });
       return;
     }
