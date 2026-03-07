@@ -1,7 +1,7 @@
 ---
 date: 2026-03-06
 topic: agentsview-integration
-stage: plan
+stage: complete
 ---
 
 # AgentsView Integration into AgentMonitor

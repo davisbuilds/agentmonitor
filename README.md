@@ -1,13 +1,15 @@
 # AgentMonitor
 
-Real-time localhost dashboard for monitoring AI agent activity across sessions, tools, and projects.
+Real-time localhost dashboard + session browser for monitoring AI agent activity across sessions, tools, and projects.
 
 ## Stack
 
 - Node.js + TypeScript + Express
-- SQLite (`better-sqlite3`)
-- Vanilla JS frontend + Tailwind CSS
+- SQLite (`better-sqlite3`) with FTS5
+- Svelte 5 + Vite frontend (at `/app/`) — Monitor, Sessions, Search, Analytics tabs
+- Legacy vanilla JS frontend + Tailwind CSS (at `/`)
 - SSE for live updates
+- chokidar file-watcher for automatic session discovery
 
 ## Quick Start
 
@@ -31,7 +33,7 @@ pnpm dev
 pnpm css:watch
 ```
 
-Open `http://127.0.0.1:3141`.
+Open `http://127.0.0.1:3141` (legacy dashboard) or `http://127.0.0.1:3141/app/` (Svelte SPA).
 
 ## Useful Scripts
 
@@ -39,6 +41,8 @@ Open `http://127.0.0.1:3141`.
 - `pnpm css:build`: one-off Tailwind build to `public/css/output.css`.
 - `pnpm css:watch`: Tailwind watch mode.
 - `pnpm build`: TypeScript build + CSS build.
+- `pnpm frontend:build`: build Svelte SPA to `frontend/dist/`.
+- `pnpm frontend:dev`: Svelte Vite dev server at `:5173` with API proxy.
 - `pnpm test`: run contract + API tests.
 - `pnpm test:watch`: watch-mode test runner.
 - `pnpm start`: run compiled server from `dist/`.
@@ -142,6 +146,17 @@ See `hooks/codex/README.md` for details.
 - `POST /api/otel/v1/logs`: OTLP JSON log ingestion (Claude Code + Codex).
 - `POST /api/otel/v1/metrics`: OTLP JSON metric ingestion (token usage, cost).
 - `POST /api/otel/v1/traces`: OTLP traces (stub — accepted but not processed yet).
+- `GET /api/v2/sessions`: browsing sessions (cursor pagination, project/agent filters).
+- `GET /api/v2/sessions/:id`: session detail.
+- `GET /api/v2/sessions/:id/messages`: session messages (offset pagination).
+- `GET /api/v2/sessions/:id/children`: sub-sessions.
+- `GET /api/v2/search?q=`: FTS5 full-text search with snippet highlighting.
+- `GET /api/v2/analytics/summary`: aggregate analytics.
+- `GET /api/v2/analytics/activity`: daily activity data points.
+- `GET /api/v2/analytics/projects`: project breakdowns.
+- `GET /api/v2/analytics/tools`: tool usage stats.
+- `GET /api/v2/projects`: distinct project names.
+- `GET /api/v2/agents`: distinct agent types.
 
 Required fields for ingest payloads: `session_id`, `agent_type`, `event_type`.
 
