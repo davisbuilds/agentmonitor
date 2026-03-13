@@ -34,6 +34,7 @@ Use descriptive prefixes:
 - Ensure quality checks pass before merge:
   - `pnpm build`
   - `pnpm test`
+  - `pnpm test:parity:ts` when changing shared HTTP/API behavior
 
 ## Local Branch Cleanup
 

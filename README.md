@@ -29,11 +29,16 @@ Run in development:
 # terminal 1
 pnpm dev
 
-# terminal 2 (for live css rebuilds)
+# terminal 2 (shared Tailwind CSS for `/` and `/app/`)
 pnpm css:watch
+
+# terminal 3 (for live Svelte SPA changes at /app/)
+pnpm frontend:dev
 ```
 
-Open `http://127.0.0.1:3141` (legacy dashboard) or `http://127.0.0.1:3141/app/` (Svelte SPA).
+Open `http://127.0.0.1:3141` (legacy dashboard) or `http://127.0.0.1:5173/app/` for live Svelte development.
+If you want the Express-served `/app/` at `http://127.0.0.1:3141/app/`, run `pnpm frontend:build` after frontend changes.
+For continuous rebuilds of the Express-served `/app/`, run `pnpm frontend:watch`.
 
 ## Useful Scripts
 
@@ -43,8 +48,11 @@ Open `http://127.0.0.1:3141` (legacy dashboard) or `http://127.0.0.1:3141/app/` 
 - `pnpm build`: TypeScript build + CSS build.
 - `pnpm frontend:build`: build Svelte SPA to `frontend/dist/`.
 - `pnpm frontend:dev`: Svelte Vite dev server at `:5173` with API proxy.
-- `pnpm test`: run contract + API tests.
+- `pnpm frontend:watch`: continuously rebuild Svelte SPA to `frontend/dist/` for the Express-served `/app/`.
+- `pnpm test`: run the self-contained TypeScript test suite (excludes parity tests).
 - `pnpm test:watch`: watch-mode test runner.
+- `pnpm test:parity:ts`: run black-box parity tests against a running TypeScript server on `:3141`.
+- `pnpm test:parity:rust`: run black-box parity tests against a running Rust server on `:3142`.
 - `pnpm start`: run compiled server from `dist/`.
 - `pnpm run import`: import historical sessions from Claude Code and Codex logs.
 - `pnpm seed`: send demo events to the running server.
