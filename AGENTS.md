@@ -23,6 +23,8 @@ Guidance for coding agents working in this repository.
 - Import historical logs: `pnpm run import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
 - Seed local demo data (server must be running): `pnpm seed`
 
+`pnpm install` at the repo root uses a workspace and installs both the backend package and the Svelte frontend package under `frontend/`.
+
 For legacy UI work in dev, use two terminals:
 - Terminal 1: `pnpm dev`
 - Terminal 2: `pnpm css:watch`

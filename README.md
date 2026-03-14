@@ -23,6 +23,8 @@ Install dependencies:
 pnpm install
 ```
 
+The root install uses a pnpm workspace and also installs the Svelte frontend dependencies in `frontend/`.
+
 Run in development:
 
 ```bash
