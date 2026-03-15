@@ -6,6 +6,7 @@ import { initSchema } from '../src/db/schema.js';
 import { getDb, closeDb } from '../src/db/connection.js';
 import { syncAllFiles } from '../src/watcher/index.js';
 
+// eslint-disable-next-line no-control-regex
 const ANSI_ESCAPE_RE = /\u001b\[[0-9;]*m/g;
 
 function parseArgs(): { claudeDir: string } {
