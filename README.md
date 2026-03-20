@@ -68,6 +68,8 @@ For continuous rebuilds of the Express-served `/app/`, run `pnpm frontend:watch`
 
 ## Configuration
 
+All runtime environment variables with defaults are in `.env.example` (canonical source: `src/config.ts`).
+
 Environment variables (all optional):
 
 - `AGENTMONITOR_PORT` (default: `3141`)

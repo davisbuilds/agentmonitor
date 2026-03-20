@@ -2,6 +2,8 @@
 
 Guidance for coding agents working in this repository.
 
+Real-time localhost dashboard and session browser for monitoring AI agent activity across Claude Code and Codex.
+
 ## Project Snapshot
 
 - App: `agentmonitor` real-time localhost dashboard + session browser for AI agent activity.
@@ -36,6 +38,8 @@ For Svelte frontend:
 ## Code Map
 
 - `src/server.ts`: app bootstrap, middleware, route mounting, graceful shutdown.
+- `src/config.ts`: environment-driven runtime config (all `AGENTMONITOR_*` env vars with defaults).
+- `.env.example`: environment variable template with all runtime vars and defaults.
 - `src/config.ts`: environment-driven runtime config.
 - `src/api/`: HTTP route handlers.
 - `src/db/schema.ts`: schema and indexes.
@@ -130,17 +134,13 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 
 - **`cargo` not in PATH**: Shell sessions from Claude Code don't inherit cargo. Prefix commands with `export PATH="$HOME/.cargo/bin:$PATH"` or use the `pnpm rust:*` scripts.
 - **Lib + bin crate structure**: Integration tests can't import from a binary crate. The crate is split into `src/lib.rs` (all modules + `build_router()`) and a thin `src/main.rs`. Always add new modules to `lib.rs`.
-- **`async_stream::stream!` capture semantics**: Variables must be **referenced inside** the stream block to be captured by the macro. A `let _guard = guard;` outside the block will drop immediately when the enclosing function returns, even if the stream is still alive. Move it inside.
-- **ManuallyDrop for types with Drop**: You can't destructure a struct that implements `Drop`. Use `ManuallyDrop::new(self)` + `ptr::read` to extract fields without running Drop, then manage cleanup via a separate guard type.
 - **`Path::new(":memory:")` in tests**: `db::initialize` expects `&Path`, not `&str`. Use `Path::new(":memory:")` for in-memory test databases.
 - **TS validates `agent_type` as required string only, not enum**: Parity tests must match the looser TypeScript behavior. Don't assert enum rejection for `agent_type` in shared parity tests.
-- **tsx-in-tsx spawn failure**: Spawning a child process that uses tsx from a parent tsx process fails silently (no output, no error). Use `/bin/sh -c 'exec node --import tsx ...'` with a clean environment instead.
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start (~small number); `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
 - **`pnpm rust:import` already includes Cargo `--` separator**: Pass flags directly (`pnpm rust:import --help`, `pnpm rust:import --source codex`). Do not add an extra `--`.
 - **Multiple Rust binaries require explicit `--bin` for `cargo run`**: After adding helper CLIs (for example `import`), plain `cargo run` becomes ambiguous. Keep `pnpm rust:dev` pinned to `--bin agentmonitor-rs`.
 - **Keep importer metadata as `serde_json::Value` until insert**: `truncate_metadata` accepts `&Value`; converting metadata to `String` too early causes type mismatches and extra parse/serialize churn.
 - **`Option<String>` + helper signature mismatch**: If helper takes `&str`, call `.as_deref().and_then(helper)` instead of `.and_then(helper)`.
-- **Rust move semantics in struct literals**: Don't read a moved `String` field later in the same initializer; compute derived booleans before moving or clone intentionally.
 - **Import parity requires historical session finalization**: For events with `source = "import"`, mark sessions as `ended` to match TypeScript behavior and keep imported sessions out of active lists.
 
 ### Tauri Embedding Gotchas
@@ -160,11 +160,12 @@ The Rust service reimplements core ingest and live-stream behavior (axum + tokio
 - **Finder launch differs from terminal cwd**: Relative backend paths (like `./data/agentmonitor-rs.db`) can fail when launched from Finder because cwd is not the repo root. In desktop startup, resolve relative DB paths against Tauri `app_data_dir`.
 - **Dashboard bootstrap hard-depends on `GET /api/events`**: `public/js/app.js` parses stats, events, and sessions together before loading cost/tool sections. If `GET /api/events` returns non-JSON (for example 405 HTML), `reloadData()` throws and cost/tool panels stay blank even when `/api/stats/cost` has data.
 
-## Validation Checklist
+## Testing
 
-When code behavior changes, run:
-- `pnpm build`
-- `pnpm css:build` (if frontend styles touched)
+**Pre-push check**: Before pushing updates to the remote, run `pnpm build`, `pnpm css:build` (if frontend styles touched), and `pnpm rust:test` (if Rust code touched).
+
+**TDD**: Use red/green TDD for new features and major changes.
+
+**Key patterns**:
 - `pnpm exec playwright test` for browser-based end-to-end UI testing
-- `pnpm rust:test` (if Rust code touched)
 - Manual sanity check: `GET /api/health`
