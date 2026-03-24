@@ -190,7 +190,7 @@ export function getSessionItems(sessionId: string, params: LiveItemsListParams =
     values.push(...params.kinds);
   }
   if (params.cursor) {
-    conditions.push('id < ?');
+    conditions.push('id > ?');
     values.push(Number(params.cursor));
   }
 
@@ -201,7 +201,7 @@ export function getSessionItems(sessionId: string, params: LiveItemsListParams =
 
   values.push(limit);
   const data = db.prepare(
-    `SELECT * FROM session_items ${where} ORDER BY id DESC LIMIT ?`
+    `SELECT * FROM session_items ${where} ORDER BY id ASC LIMIT ?`
   ).all(...values) as LiveItemRow[];
 
   let cursor: string | undefined;

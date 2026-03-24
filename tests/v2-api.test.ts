@@ -73,6 +73,7 @@ before(async () => {
 
   // Seed test data via parser
   const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
+  const { syncClaudeLiveSession } = await import('../src/live/claude-adapter.js');
   const db = dbModule.getDb();
 
   // Create 5 sessions across 3 projects with varying sizes
@@ -89,6 +90,7 @@ before(async () => {
     const filePath = `/fake/projects/-Users-dev-Dev-${s.project}/${s.id}.jsonl`;
     const parsed = parseSessionMessages(jsonl, s.id, filePath);
     insertParsedSession(db, parsed, filePath, 1024, `hash_${s.id}`);
+    syncClaudeLiveSession(db, parsed);
   }
 
   // Add a child session for relationship testing
@@ -98,6 +100,7 @@ before(async () => {
   childParsed.metadata.parent_session_id = 'api-sess-001';
   childParsed.metadata.relationship_type = 'subagent';
   insertParsedSession(db, childParsed, '/fake/api-sess-006.jsonl', 512, 'hash_006');
+  syncClaudeLiveSession(db, childParsed);
 
   // Start server
   const { createApp } = await import('../src/app.js');
@@ -108,6 +111,8 @@ before(async () => {
 });
 
 after(() => {
+  server.closeIdleConnections?.();
+  server.closeAllConnections?.();
   server.close();
   if (closeDb) closeDb();
   fs.rmSync(tempDir, { recursive: true, force: true });
@@ -268,6 +273,95 @@ describe('GET /api/v2/sessions/:id/children', () => {
     const res = await fetch(`${baseUrl}/api/v2/sessions/api-sess-004/children`);
     const body = await res.json() as { data: unknown[] };
     assert.equal(body.data.length, 0);
+  });
+});
+
+// --- Live endpoints ---
+
+describe('GET /api/v2/live/sessions', () => {
+  test('returns live sessions with fidelity metadata', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ id: string; integration_mode: string | null; fidelity: string | null }>; total: number };
+    assert.ok(body.data.length >= 6);
+    assert.ok(body.total >= 6);
+    assert.ok(body.data.some(session => session.integration_mode === 'claude-jsonl'));
+    assert.ok(body.data.some(session => session.fidelity === 'full'));
+  });
+
+  test('filters live sessions by agent and live_status', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions?agent=claude&live_status=ended`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ agent: string; live_status: string | null }> };
+    assert.ok(body.data.length > 0);
+    for (const session of body.data) {
+      assert.equal(session.agent, 'claude');
+      assert.equal(session.live_status, 'ended');
+    }
+  });
+});
+
+describe('GET /api/v2/live/sessions/:id', () => {
+  test('returns live session detail', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-001`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { id: string; integration_mode: string | null; fidelity: string | null };
+    assert.equal(body.id, 'api-sess-001');
+    assert.equal(body.integration_mode, 'claude-jsonl');
+    assert.equal(body.fidelity, 'full');
+  });
+
+  test('returns 404 for missing live session', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/missing-live-session`);
+    assert.equal(res.status, 404);
+  });
+});
+
+describe('GET /api/v2/live/sessions/:id/turns', () => {
+  test('returns live turns for a session', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-001/turns`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ session_id: string; source_turn_id: string }> };
+    assert.ok(body.data.length > 0);
+    assert.equal(body.data[0].session_id, 'api-sess-001');
+    assert.ok(body.data[0].source_turn_id.startsWith('claude-message:'));
+  });
+});
+
+describe('GET /api/v2/live/sessions/:id/items', () => {
+  test('returns live items in ascending id order', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-001/items`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ id: number; kind: string }>; total: number };
+    assert.ok(body.data.length > 0);
+    assert.ok(body.total >= body.data.length);
+    for (let i = 1; i < body.data.length; i++) {
+      assert.ok(body.data[i].id > body.data[i - 1].id);
+    }
+  });
+
+  test('filters live items by kind', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?kinds=reasoning`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ kind: string }> };
+    assert.ok(body.data.length > 0);
+    for (const item of body.data) {
+      assert.equal(item.kind, 'reasoning');
+    }
+  });
+
+  test('supports cursor pagination for live items', async () => {
+    const first = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?limit=2`);
+    assert.equal(first.status, 200);
+    const firstBody = await first.json() as { data: Array<{ id: number }>; cursor?: string };
+    assert.equal(firstBody.data.length, 2);
+    assert.ok(firstBody.cursor);
+
+    const second = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?limit=2&cursor=${firstBody.cursor}`);
+    assert.equal(second.status, 200);
+    const secondBody = await second.json() as { data: Array<{ id: number }> };
+    assert.ok(secondBody.data.length > 0);
+    assert.ok(secondBody.data[0].id > firstBody.data[firstBody.data.length - 1].id);
   });
 });
 

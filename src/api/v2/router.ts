@@ -4,6 +4,10 @@ import {
   getBrowsingSession,
   getSessionChildren,
   getSessionMessages,
+  listLiveSessions,
+  getLiveSession,
+  getSessionTurns,
+  getSessionItems,
   searchMessages,
   getAnalyticsSummary,
   getAnalyticsActivity,
@@ -12,8 +16,10 @@ import {
   getDistinctProjects,
   getDistinctAgents,
 } from '../../db/v2-queries.js';
+import { liveStreamRouter } from './live-stream.js';
 
 export const v2Router = Router();
+v2Router.use('/live/stream', liveStreamRouter);
 
 function safeInt(value: string | undefined): number | undefined {
   if (value == null) return undefined;
@@ -89,6 +95,81 @@ v2Router.get('/sessions/:id/children', (req: Request, res: Response) => {
 });
 
 // --- Search ---
+
+// --- Live ---
+
+function splitKinds(value: string | undefined): string[] | undefined {
+  if (!value) return undefined;
+  const kinds = value.split(',').map(part => part.trim()).filter(Boolean);
+  return kinds.length > 0 ? kinds : undefined;
+}
+
+v2Router.get('/live/sessions', (req: Request, res: Response) => {
+  try {
+    const params = {
+      limit: safeInt(req.query.limit as string),
+      cursor: req.query.cursor as string | undefined,
+      project: req.query.project as string | undefined,
+      agent: req.query.agent as string | undefined,
+      live_status: req.query.live_status as string | undefined,
+      fidelity: req.query.fidelity as string | undefined,
+      active_only: req.query.active_only === 'true',
+    };
+    res.json(listLiveSessions(params));
+  } catch (err) {
+    console.error('[v2/live/sessions] Error:', err);
+    res.status(500).json({ error: 'Failed to list live sessions' });
+  }
+});
+
+v2Router.get('/live/sessions/:id', (req: Request, res: Response) => {
+  try {
+    const session = getLiveSession(req.params['id'] as string);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json(session);
+  } catch (err) {
+    console.error('[v2/live/sessions/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to get live session' });
+  }
+});
+
+v2Router.get('/live/sessions/:id/turns', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params['id'] as string;
+    const session = getLiveSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json({ data: getSessionTurns(sessionId) });
+  } catch (err) {
+    console.error('[v2/live/sessions/:id/turns] Error:', err);
+    res.status(500).json({ error: 'Failed to get live turns' });
+  }
+});
+
+v2Router.get('/live/sessions/:id/items', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params['id'] as string;
+    const session = getLiveSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    const params = {
+      cursor: req.query.cursor as string | undefined,
+      limit: safeInt(req.query.limit as string),
+      kinds: splitKinds(req.query.kinds as string | undefined),
+    };
+    res.json(getSessionItems(sessionId, params));
+  } catch (err) {
+    console.error('[v2/live/sessions/:id/items] Error:', err);
+    res.status(500).json({ error: 'Failed to get live items' });
+  }
+});
 
 v2Router.get('/search', (req: Request, res: Response) => {
   const q = req.query.q as string | undefined;

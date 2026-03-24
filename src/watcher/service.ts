@@ -4,6 +4,7 @@ import { watch, type FSWatcher } from 'chokidar';
 import { getDb } from '../db/connection.js';
 import { syncSessionFileDetailed, syncAllFiles } from './index.js';
 import { broadcaster } from '../sse/emitter.js';
+import { liveBroadcaster } from '../api/v2/live-stream.js';
 
 let watcher: FSWatcher | undefined;
 let resyncTimer: ReturnType<typeof setInterval> | undefined;
@@ -36,6 +37,23 @@ function handleFileChange(filePath: string): void {
           session_id: sessionId,
         });
         if (outcome.live) {
+          liveBroadcaster.broadcast('session_presence', {
+            session_id: sessionId,
+            live_status: outcome.live.live_status,
+            integration_mode: 'claude-jsonl',
+            fidelity: 'full',
+            last_item_at: outcome.live.last_item_at,
+          });
+          liveBroadcaster.broadcast('turn_update', {
+            session_id: sessionId,
+            inserted_turns: outcome.live.inserted_turns,
+            reset: outcome.live.reset,
+          });
+          liveBroadcaster.broadcast('item_delta', {
+            session_id: sessionId,
+            inserted_items: outcome.live.inserted_items,
+            last_item_at: outcome.live.last_item_at,
+          });
           broadcaster.broadcast('session_update', {
             type: 'session_presence',
             session_id: sessionId,
