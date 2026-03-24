@@ -10,7 +10,7 @@ source: conversation
 
 ## Goal
 
-Add a read-only `Live` tab to the Svelte app that brings `claude-esp`-style live session visibility into AgentMonitor for Claude first and Codex in an enhanced mode, without regressing the existing Monitor, Sessions, Search, and Analytics flows.
+Add a read-only `Live` tab to the Svelte app that brings `claude-esp`-style live session visibility into AgentMonitor for Claude first and Codex in a passive-observability model, without regressing the existing Monitor, Sessions, Search, and Analytics flows.
 
 ## Scope
 
@@ -19,10 +19,10 @@ Add a read-only `Live` tab to the Svelte app that brings `claude-esp`-style live
 - New `Live` tab in the Svelte SPA with a session tree, active session list, and per-session live item stream.
 - Cross-agent live data model that can represent reasoning, tool calls, tool results, command execution, file changes, plan updates, and diff snapshots.
 - Claude live ingestion from the existing JSONL watcher path, upgraded to emit hierarchy and item deltas.
-- Codex enhanced ingestion path for deep live visibility using a richer source than OTEL alone.
+- Codex passive summary ingestion via OTEL, with an optional future rich exporter/sidecar path for deeper visibility.
 - Read-only v2 API and SSE endpoints for live sessions, turns, and items.
 - Privacy/config controls for prompt, reasoning, tool-argument, and diff capture.
-- Documentation updates describing fidelity differences between Claude, Codex OTEL-only, and Codex enhanced mode.
+- Documentation updates describing fidelity differences between Claude, Codex OTEL-only, and any future optional Codex rich-exporter mode.
 
 ### Out of Scope
 
@@ -37,7 +37,7 @@ Add a read-only `Live` tab to the Svelte app that brings `claude-esp`-style live
 - The current Svelte shell is tab-driven and straightforward to extend, but the current `Sessions` flow is retrospective, paginated, and Claude-file-backed, not a generic live control plane.
 - Claude already provides high-value raw material through `~/.claude/projects/**/*.jsonl`, including message blocks for `thinking`, `tool_use`, and `tool_result`, so Claude is the lowest-risk first integration.
 - Current Claude parsing does not yet populate parent/child session links reliably, so hierarchy correctness must be treated as real implementation work rather than assumed-existing behavior.
-- Current Codex OTEL support is useful for summary observability, but not sufficient for `claude-esp`-style plan/diff/reasoning fidelity. The enhanced Codex path must use a richer source and degrade gracefully when unavailable.
+- Current Codex OTEL support is useful for passive summary observability, but not sufficient for `claude-esp`-style plan/diff/reasoning fidelity. Any deeper Codex path must come from an explicitly installed external exporter or sidecar, not from AgentMonitor taking ownership of Codex session execution.
 - Existing OTEL traces are accepted but not processed; this plan does not depend on turning OTEL traces into the primary live data source.
 - Repository guardrails apply: keep v2 route handlers in `src/api/v2/router.ts`, keep v2 SQL in `src/db/v2-queries.ts`, keep TypeScript ESM import style consistent, and update `README.md` when API surface changes.
 - The first implementation should remain read-only. That keeps the product boundary clear and avoids coupling UI delivery to agent-control semantics that only Codex can plausibly support.
@@ -68,7 +68,7 @@ None
 1. Add additive tables for live detail, centered on `browsing_sessions` as the session root:
    - `session_turns`: one row per live or replayable turn, with `session_id`, `source_turn_id`, `status`, `title`, `started_at`, `ended_at`, and `agent_type`.
    - `session_items`: ordered items inside a turn, with `kind`, `payload_json`, `status`, `created_at`, and `source_item_id`.
-2. Extend `browsing_sessions` with live-oriented metadata such as `live_status`, `last_item_at`, `integration_mode`, and `fidelity` so the UI can distinguish Claude live, Codex OTEL-only, and Codex enhanced sessions.
+2. Extend `browsing_sessions` with live-oriented metadata such as `live_status`, `last_item_at`, `integration_mode`, and `fidelity` so the UI can distinguish Claude live, Codex OTEL-only, and any future Codex rich-exporter sessions.
 3. Keep large plan and diff bodies in `payload_json` for MVP rather than introducing a third artifact table. Defer artifact extraction until real payload sizes justify it.
 4. Add a single normalization layer in `src/live/normalize.ts` that maps source-specific records into a small canonical vocabulary:
    - `user_message`
@@ -150,16 +150,15 @@ Turn the existing Claude JSONL watcher into a true live adapter that emits norma
 - Claude sessions appear in the live model with stable hierarchy and ordered live items.
 - File changes add only new turns/items instead of forcing the UI to fully reload a session.
 
-### Task 3: Add Codex Enhanced Mode For Deep Live Visibility
+### Task 3: Add Codex Passive Summary Mode And Define A Rich Exporter Contract
 
 **Objective**
 
-Provide a Codex ingestion path with enough fidelity for plan, diff, command, and reasoning visibility, while keeping OTEL as the summary/fallback path.
+Make the Codex story consistent with passive observability: OTEL remains the supported passive source for summary visibility, and any future deeper Codex visibility is defined as an optional external exporter contract rather than an AgentMonitor-managed execution path.
 
 **Files**
 
 - Create: `src/live/codex-adapter.ts`
-- Create: `src/live/codex-enhanced.ts`
 - Modify: `src/import/codex.ts`
 - Modify: `src/api/otel.ts`
 - Modify: `src/config.ts`
@@ -172,25 +171,19 @@ Provide a Codex ingestion path with enough fidelity for plan, diff, command, and
 
 **Implementation Steps**
 
-1. Define two Codex fidelity modes in config:
-   - `otel-only`: current behavior for Monitor-style summary data
-   - `enhanced`: richer live ingestion for the new tab
+1. Define passive Codex fidelity modes in config:
+   - `otel-only`: supported passive summary visibility for the `Live` tab and Monitor
+   - `exporter`: reserved for a future external Codex exporter/sidecar that pushes richer live items into AgentMonitor
 2. Keep OTEL logs and metrics feeding the existing `events` path for counters, session presence, and cost/token rollups. Do not overload OTEL into pretending it is a full turn/item stream.
-3. Implement a Codex enhanced adapter that normalizes richer records into turns/items for:
-   - plan updates
-   - diff updates
-   - command execution
-   - file changes
-   - MCP tool activity
-   - reasoning or response items when available
-4. Persist fidelity markers on the session so the UI can display clear labels such as `summary-only` or `full`.
-5. Extend the historical Codex importer only enough to backfill the same normalized live tables from saved session data where feasible, so the live tab can reopen recent Codex sessions with partial continuity.
-6. Explicitly document that OTEL alone remains insufficient for full `claude-esp` parity and that enhanced mode is the supported path for deeper Codex visibility.
+3. Implement or refine the Codex OTEL adapter so summary-only Codex sessions appear in the live model with explicit fidelity markers and stable empty-state behavior.
+4. Define a canonical external-export contract for future richer Codex records, centered on normalized turn/item ingestion rather than AgentMonitor launching Codex itself.
+5. Extend the historical Codex importer only enough to backfill summary continuity into the same live tables where feasible, without implying parity with Claude live sessions.
+6. Explicitly document that OTEL alone remains insufficient for full `claude-esp` parity and that any deeper Codex visibility requires an optional external exporter/sidecar installed by the user.
 
 **Verification**
 
 - Run: `node --import tsx --test src/live/codex-adapter.test.ts`
-- Expect: fixture-based normalization tests pass for plan, diff, command, and file-change records.
+- Expect: fixture-based normalization tests pass for supported Codex summary records and for the reserved rich-export contract shapes.
 - Run: `pnpm build`
 - Expect: config, API, and import paths compile with the new Codex mode.
 - Run: manual dev check with Codex in `otel-only` mode
@@ -198,8 +191,8 @@ Provide a Codex ingestion path with enough fidelity for plan, diff, command, and
 
 **Done When**
 
-- Codex sessions can participate in the live tab with an explicit fidelity level.
-- The product no longer implies that OTEL-only Codex sessions have the same depth as Claude or Codex enhanced sessions.
+- Codex sessions can participate in the live tab with an explicit fidelity level while remaining fully passive to observe.
+- The product no longer implies that OTEL-only Codex sessions have the same depth as Claude live sessions or any future exporter-backed Codex sessions.
 
 ### Task 4: Add Read-Only Live APIs And A Dedicated Live SSE Stream
 
@@ -232,7 +225,7 @@ Expose the new live model through stable v2 endpoints and a dedicated streaming 
 4. Keep `/api/stream` unchanged for existing Monitor consumers. Do not mix live-item payloads into the current top-level event stream.
 5. Ensure live endpoints degrade gracefully:
    - summary-only Codex sessions still list
-   - missing enhanced details return an empty items list plus fidelity metadata, not a server error
+   - missing exporter-backed details return an empty items list plus fidelity metadata, not a server error
 6. Add response shapes that make frontend rendering simple, including a compact session tree view and a stream-friendly item delta payload.
 
 **Verification**
@@ -324,17 +317,17 @@ Make the new live surface safe to enable, operationally understandable, and accu
 
 1. Add config flags for:
    - enabling the live tab
-   - Codex enhanced mode
+   - reserved Codex exporter mode
    - prompt capture
    - reasoning capture
    - diff retention window or payload cap
 2. Add UI and API-visible metadata so users can tell when sensitive capture is enabled.
-3. Resolve the current Codex documentation ambiguity by stating exactly what OTEL-only mode provides and what requires enhanced mode.
-4. Document setup and troubleshooting for Claude live mode and Codex enhanced mode, including degraded behavior when only OTEL is configured.
+3. Resolve the current Codex documentation ambiguity by stating exactly what OTEL-only mode provides and what would require a future exporter mode.
+4. Document setup and troubleshooting for Claude live mode and Codex passive OTEL mode, including degraded behavior when only OTEL is configured.
 5. Add a final manual verification checklist covering:
    - Claude active session
    - Codex OTEL-only session
-   - Codex enhanced session
+   - reserved exporter-backed Codex session
    - empty-state behavior
    - reconnect behavior after SSE disconnect
 
@@ -350,12 +343,12 @@ Make the new live surface safe to enable, operationally understandable, and accu
 **Done When**
 
 - Users can understand the fidelity and privacy implications of the live tab from docs and the UI itself.
-- README and system docs describe the live surface and Codex mode differences accurately.
+- README and system docs describe the live surface and Codex passive-versus-rich-exporter mode differences accurately.
 
 ## Risks And Mitigations
 
-- Risk: Codex enhanced mode depends on a richer source whose shape may evolve.
-  Mitigation: isolate it behind a source adapter, use fixture-based tests, and keep OTEL-only mode as a supported fallback.
+- Risk: A future Codex rich exporter depends on an external source contract whose shape may evolve.
+  Mitigation: isolate it behind a source adapter, define a narrow exporter contract, use fixture-based tests, and keep OTEL-only mode as the supported passive fallback.
 - Risk: Reasoning, diffs, and tool inputs can create large payloads and SQLite growth.
   Mitigation: use payload caps, collapse large bodies by default in the UI, and keep retention/config knobs explicit.
 - Risk: The live tab drifts into an orchestration/control-plane feature before the observability layer is stable.
@@ -373,7 +366,7 @@ Make the new live surface safe to enable, operationally understandable, and accu
 | --- | --- | --- |
 | Live schema supports cross-agent turns and items | `node --import tsx --test src/live/normalize.test.ts` | Canonical item and turn normalization tests pass |
 | Claude live ingestion emits hierarchy-aware deltas | `node --import tsx --test src/parser/claude-code.test.ts src/live/claude-adapter.test.ts` | Parser and delta tests pass, including parent/child cases |
-| Codex enhanced adapter produces plan/diff/command items | `node --import tsx --test src/live/codex-adapter.test.ts` | Fixture-driven Codex adapter tests pass |
+| Codex passive adapter and reserved exporter contract remain coherent | `node --import tsx --test src/live/codex-adapter.test.ts` | Fixture-driven Codex adapter tests pass for OTEL summary and reserved exporter shapes |
 | Live v2 endpoints are stable and read-only | `node --import tsx --test src/api/v2/live.test.ts` | Endpoint tests pass for sessions, turns, items, and degraded summary-only behavior |
 | Svelte app renders the new Live tab | `pnpm build` | Backend and frontend build complete without errors |
 | Live UI handles real-time deltas | `pnpm exec playwright test tests/live-tab.spec.ts` | Browser test passes for render, selection, and streamed updates |
