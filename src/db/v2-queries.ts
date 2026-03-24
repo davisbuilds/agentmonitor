@@ -1,10 +1,15 @@
 import { getDb } from './connection.js';
 import type {
   BrowsingSessionRow,
+  LiveSessionRow,
+  LiveTurnRow,
+  LiveItemRow,
   MessageRow,
   CountResult,
   SessionsListParams,
   MessagesListParams,
+  LiveSessionsListParams,
+  LiveItemsListParams,
   SearchParams,
   AnalyticsParams,
   AnalyticsSummary,
@@ -92,6 +97,119 @@ export function getSessionChildren(parentId: string): BrowsingSessionRow[] {
   return db.prepare(
     'SELECT * FROM browsing_sessions WHERE parent_session_id = ? ORDER BY started_at'
   ).all(parentId) as BrowsingSessionRow[];
+}
+
+// --- Live sessions ---
+
+interface LiveSessionsResult {
+  data: LiveSessionRow[];
+  total: number;
+  cursor?: string;
+}
+
+export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessionsResult {
+  const db = getDb();
+  const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.project) {
+    conditions.push('project = ?');
+    values.push(params.project);
+  }
+  if (params.agent) {
+    conditions.push('agent = ?');
+    values.push(params.agent);
+  }
+  if (params.live_status) {
+    conditions.push('live_status = ?');
+    values.push(params.live_status);
+  }
+  if (params.fidelity) {
+    conditions.push('fidelity = ?');
+    values.push(params.fidelity);
+  }
+  if (params.active_only) {
+    conditions.push("COALESCE(live_status, '') IN ('live', 'active')");
+  }
+
+  const filterWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const filterValues = [...values];
+  const total = (db.prepare(
+    `SELECT COUNT(*) as c FROM browsing_sessions ${filterWhere}`
+  ).get(...filterValues) as CountResult).c;
+
+  if (params.cursor) {
+    conditions.push('COALESCE(last_item_at, started_at, "") < ?');
+    values.push(params.cursor);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  values.push(limit);
+  const data = db.prepare(
+    `SELECT * FROM browsing_sessions
+     ${where}
+     ORDER BY COALESCE(last_item_at, started_at) DESC, id DESC
+     LIMIT ?`
+  ).all(...values) as LiveSessionRow[];
+
+  let cursor: string | undefined;
+  if (data.length === limit && data.length > 0) {
+    cursor = data[data.length - 1].last_item_at ?? data[data.length - 1].started_at ?? undefined;
+  }
+
+  return { data, total, cursor };
+}
+
+export function getLiveSession(id: string): LiveSessionRow | undefined {
+  const db = getDb();
+  return db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(id) as LiveSessionRow | undefined;
+}
+
+export function getSessionTurns(sessionId: string): LiveTurnRow[] {
+  const db = getDb();
+  return db.prepare(
+    'SELECT * FROM session_turns WHERE session_id = ? ORDER BY COALESCE(started_at, created_at), id'
+  ).all(sessionId) as LiveTurnRow[];
+}
+
+interface LiveItemsResult {
+  data: LiveItemRow[];
+  total: number;
+  cursor?: string;
+}
+
+export function getSessionItems(sessionId: string, params: LiveItemsListParams = {}): LiveItemsResult {
+  const db = getDb();
+  const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
+  const conditions = ['session_id = ?'];
+  const values: unknown[] = [sessionId];
+
+  if (params.kinds && params.kinds.length > 0) {
+    conditions.push(`kind IN (${params.kinds.map(() => '?').join(', ')})`);
+    values.push(...params.kinds);
+  }
+  if (params.cursor) {
+    conditions.push('id < ?');
+    values.push(Number(params.cursor));
+  }
+
+  const where = `WHERE ${conditions.join(' AND ')}`;
+  const total = (db.prepare(
+    `SELECT COUNT(*) as c FROM session_items WHERE session_id = ?`
+  ).get(sessionId) as CountResult).c;
+
+  values.push(limit);
+  const data = db.prepare(
+    `SELECT * FROM session_items ${where} ORDER BY id DESC LIMIT ?`
+  ).all(...values) as LiveItemRow[];
+
+  let cursor: string | undefined;
+  if (data.length === limit && data.length > 0) {
+    cursor = String(data[data.length - 1].id);
+  }
+
+  return { data, total, cursor };
 }
 
 // --- Messages ---

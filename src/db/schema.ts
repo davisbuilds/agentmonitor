@@ -181,6 +181,10 @@ export function initSchema(): void {
       user_message_count INTEGER NOT NULL DEFAULT 0,
       parent_session_id TEXT,
       relationship_type TEXT,
+      live_status TEXT,
+      last_item_at TEXT,
+      integration_mode TEXT,
+      fidelity TEXT,
       file_path TEXT,
       file_size INTEGER,
       file_hash TEXT
@@ -190,7 +194,29 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_bs_project ON browsing_sessions(project);
     CREATE INDEX IF NOT EXISTS idx_bs_agent ON browsing_sessions(agent);
     CREATE INDEX IF NOT EXISTS idx_bs_started_at ON browsing_sessions(started_at);
+    CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_bs_live_status ON browsing_sessions(live_status);
   `);
+
+  const browsingSessionColumns = new Set<string>(
+    (db.prepare(`PRAGMA table_info(browsing_sessions)`).all() as Array<{ name: string }>).map(col => col.name)
+  );
+
+  if (!browsingSessionColumns.has('live_status')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN live_status TEXT');
+  }
+  if (!browsingSessionColumns.has('last_item_at')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN last_item_at TEXT');
+  }
+  if (!browsingSessionColumns.has('integration_mode')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN integration_mode TEXT');
+  }
+  if (!browsingSessionColumns.has('fidelity')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN fidelity TEXT');
+  }
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bs_live_status ON browsing_sessions(live_status)');
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS messages (
@@ -226,6 +252,42 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_tc_session_id ON tool_calls(session_id);
     CREATE INDEX IF NOT EXISTS idx_tc_category ON tool_calls(category);
     CREATE INDEX IF NOT EXISTS idx_tc_tool_name ON tool_calls(tool_name);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_turns (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      agent_type TEXT NOT NULL,
+      source_turn_id TEXT,
+      status TEXT,
+      title TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_st_session_started_at ON session_turns(session_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_st_source_turn_id ON session_turns(source_turn_id);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      turn_id INTEGER,
+      ordinal INTEGER NOT NULL DEFAULT 0,
+      source_item_id TEXT,
+      kind TEXT NOT NULL,
+      status TEXT,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT,
+      FOREIGN KEY(turn_id) REFERENCES session_turns(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_si_session_created_at ON session_items(session_id, created_at, id);
+    CREATE INDEX IF NOT EXISTS idx_si_turn_ordinal ON session_items(turn_id, ordinal);
+    CREATE INDEX IF NOT EXISTS idx_si_source_item_id ON session_items(source_item_id);
   `);
 
   // FTS5 full-text search on message content

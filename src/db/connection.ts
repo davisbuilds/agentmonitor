@@ -3,7 +3,7 @@ import path from 'path';
 import fs from 'fs';
 import { config } from '../config.js';
 
-let db: Database.Database;
+let db: Database.Database | undefined;
 
 export function getDb(): Database.Database {
   if (!db) {
@@ -24,5 +24,6 @@ export function getDb(): Database.Database {
 export function closeDb(): void {
   if (db) {
     db.close();
+    db = undefined;
   }
 }

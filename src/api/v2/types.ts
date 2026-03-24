@@ -11,9 +11,50 @@ export interface BrowsingSessionRow {
   user_message_count: number;
   parent_session_id: string | null;
   relationship_type: string | null;
+  live_status: string | null;
+  last_item_at: string | null;
+  integration_mode: string | null;
+  fidelity: string | null;
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;
+}
+
+export interface LiveSessionRow extends BrowsingSessionRow {}
+
+export interface LiveTurnRow {
+  id: number;
+  session_id: string;
+  agent_type: string;
+  source_turn_id: string | null;
+  status: string | null;
+  title: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+}
+
+export interface LiveItemRow {
+  id: number;
+  session_id: string;
+  turn_id: number | null;
+  ordinal: number;
+  source_item_id: string | null;
+  kind: string;
+  status: string | null;
+  payload_json: string;
+  created_at: string | null;
+}
+
+export interface LivePlanStep {
+  id?: string;
+  label: string;
+  status?: string;
+}
+
+export interface LivePlanState {
+  summary?: string;
+  steps: LivePlanStep[];
 }
 
 export interface MessageRow {
@@ -95,6 +136,22 @@ export interface SessionsListParams {
 export interface MessagesListParams {
   offset?: number;
   limit?: number;
+}
+
+export interface LiveSessionsListParams {
+  limit?: number;
+  cursor?: string;
+  project?: string;
+  agent?: string;
+  live_status?: string;
+  fidelity?: string;
+  active_only?: boolean;
+}
+
+export interface LiveItemsListParams {
+  cursor?: string;
+  limit?: number;
+  kinds?: string[];
 }
 
 export interface SearchParams {
