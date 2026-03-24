@@ -3,12 +3,16 @@ import { handleLiveEvent, setLiveConnectionStatus } from './live.svelte';
 let source: EventSource | null = null;
 let reconnectDelay = 1000;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let lastEventId: string | null = null;
 
 export function connectLiveSSE(): void {
   if (source) source.close();
 
   setLiveConnectionStatus('connecting');
-  source = new EventSource('/api/v2/live/stream');
+  const params = new URLSearchParams();
+  if (lastEventId) params.set('since', lastEventId);
+  const url = params.size > 0 ? `/api/v2/live/stream?${params.toString()}` : '/api/v2/live/stream';
+  source = new EventSource(url);
 
   source.onopen = () => {
     reconnectDelay = 1000;
@@ -21,6 +25,9 @@ export function connectLiveSSE(): void {
       message = JSON.parse(event.data);
     } catch {
       return;
+    }
+    if (event.lastEventId) {
+      lastEventId = event.lastEventId;
     }
 
     try {
@@ -51,5 +58,6 @@ export function disconnectLiveSSE(): void {
   reconnectTimer = null;
   source?.close();
   source = null;
+  lastEventId = null;
   setLiveConnectionStatus('disconnected');
 }
