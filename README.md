@@ -83,6 +83,12 @@ Environment variables (all optional):
 - `AGENTMONITOR_SSE_HEARTBEAT_MS` (default: `30000`)
 - `AGENTMONITOR_AUTO_IMPORT_MINUTES` (default: `10`) — interval for automatic session import scheduling; `0` disables
 - `AGENTMONITOR_PROJECTS_DIR` (default: auto-detected from cwd ancestry; falls back to current working directory)
+- `AGENTMONITOR_ENABLE_LIVE_TAB` (default: `true`) — shows the Svelte `Live` tab and exposes live settings metadata
+- `AGENTMONITOR_CODEX_LIVE_MODE` (default: `otel-only`) — `otel-only` today, reserved `enhanced` mode for deeper Codex live ingestion
+- `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` (default: `true`) — when `false`, live prompt payloads are redacted
+- `AGENTMONITOR_LIVE_CAPTURE_REASONING` (default: `true`) — when `false`, live reasoning payloads are redacted
+- `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` (default: `true`) — when `false`, live tool call inputs are redacted
+- `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` (default: `32768`) — cap used for future diff-style live payloads
 
 ### Usage Monitor
 
@@ -153,7 +159,9 @@ protocol = "json"
 
 Restart Codex after configuring. The dev server must be running before starting a Codex session (the OTEL exporter connects at startup and does not retry).
 
-**Note:** Codex OTEL logs do not include token/cost data. To backfill cost data from Codex session files:
+**Note:** Codex OTEL mode is summary-oriented. It can drive Monitor counters and basic session presence, but it does not provide `claude-esp`-style plan, diff, command, or reasoning fidelity. The `AGENTMONITOR_CODEX_LIVE_MODE=enhanced` setting is reserved for a richer Codex ingestion path and is not implemented yet.
+
+**Also note:** Codex OTEL logs do not include token/cost data. To backfill cost data from Codex session files:
 
 ```bash
 pnpm run import --source codex
@@ -181,6 +189,7 @@ See `hooks/codex/README.md` for details.
 - `GET /api/v2/sessions/:id/messages`: session messages (offset pagination).
 - `GET /api/v2/sessions/:id/children`: sub-sessions.
 - `GET /api/v2/live/sessions`: live session index (project/agent/status/fidelity filters).
+- `GET /api/v2/live/settings`: live-tab enablement, Codex mode, and capture/redaction settings.
 - `GET /api/v2/live/sessions/:id`: live session detail.
 - `GET /api/v2/live/sessions/:id/turns`: normalized turn list for a live session.
 - `GET /api/v2/live/sessions/:id/items`: normalized live items stream (cursor pagination, kind filters).
@@ -241,3 +250,9 @@ Example event:
 - Product roadmap snapshot: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
 - Event contract specification: [docs/api/event-contract.md](docs/api/event-contract.md)
 - Git history and branch policy: [docs/project/GIT_HISTORY_POLICY.md](docs/project/GIT_HISTORY_POLICY.md)
+
+## Live Tab Notes
+
+- Claude live sessions currently have the highest fidelity because they come from the JSONL watcher path.
+- Codex in `otel-only` mode should be treated as summary-only, not feature-parity with Claude live sessions.
+- The Live tab surfaces the current capture settings so operators can tell when prompts, reasoning, or tool arguments are being redacted.

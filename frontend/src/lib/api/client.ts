@@ -139,6 +139,17 @@ export interface LiveItem {
   created_at: string | null;
 }
 
+export interface LiveSettings {
+  enabled: boolean;
+  codex_mode: 'otel-only' | 'enhanced';
+  capture: {
+    prompts: boolean;
+    reasoning: boolean;
+    tool_arguments: boolean;
+  };
+  diff_payload_max_bytes: number;
+}
+
 export interface Message {
   id: number;
   session_id: string;
@@ -309,6 +320,11 @@ export async function fetchSessionChildren(id: string): Promise<{ data: Browsing
 export async function fetchLiveSessions(params: Record<string, string | number | boolean | undefined> = {}): Promise<{ data: LiveSession[]; total: number; cursor?: string }> {
   const res = await fetch(`/api/v2/live/sessions${qs(params)}`);
   return checkedJson(res, 'fetchLiveSessions');
+}
+
+export async function fetchLiveSettings(): Promise<LiveSettings> {
+  const res = await fetch('/api/v2/live/settings');
+  return checkedJson(res, 'fetchLiveSettings');
 }
 
 export async function fetchLiveSession(id: string): Promise<LiveSession> {

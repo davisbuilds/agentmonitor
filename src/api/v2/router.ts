@@ -17,6 +17,7 @@ import {
   getDistinctAgents,
 } from '../../db/v2-queries.js';
 import { liveStreamRouter } from './live-stream.js';
+import { config } from '../../config.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -103,6 +104,19 @@ function splitKinds(value: string | undefined): string[] | undefined {
   const kinds = value.split(',').map(part => part.trim()).filter(Boolean);
   return kinds.length > 0 ? kinds : undefined;
 }
+
+v2Router.get('/live/settings', (_req: Request, res: Response) => {
+  res.json({
+    enabled: config.live.enabled,
+    codex_mode: config.live.codexMode,
+    capture: {
+      prompts: config.live.capture.prompts,
+      reasoning: config.live.capture.reasoning,
+      tool_arguments: config.live.capture.toolArguments,
+    },
+    diff_payload_max_bytes: config.live.diffPayloadMaxBytes,
+  });
+});
 
 v2Router.get('/live/sessions', (req: Request, res: Response) => {
   try {

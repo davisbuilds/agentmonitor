@@ -41,9 +41,83 @@ export interface CanonicalLivePlanState {
   steps: LivePlanStep[];
 }
 
+export interface LivePrivacyPolicy {
+  capturePrompts: boolean;
+  captureReasoning: boolean;
+  captureToolArguments: boolean;
+  diffPayloadMaxBytes: number;
+}
+
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
+}
+
+function utf8Size(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+function truncateUtf8(value: string, maxBytes: number): string {
+  if (maxBytes <= 0) return '';
+  let end = value.length;
+  while (end > 0 && utf8Size(value.slice(0, end)) > maxBytes) {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
+export function applyLivePrivacyPolicy(
+  item: CanonicalLiveItem,
+  policy: LivePrivacyPolicy,
+): CanonicalLiveItem {
+  if (item.kind === 'user_message' && !policy.capturePrompts) {
+    return {
+      ...item,
+      payload: {
+        redacted: true,
+        reason: 'prompt_capture_disabled',
+      },
+    };
+  }
+
+  if (item.kind === 'reasoning' && !policy.captureReasoning) {
+    return {
+      ...item,
+      payload: {
+        redacted: true,
+        reason: 'reasoning_capture_disabled',
+      },
+    };
+  }
+
+  if (item.kind === 'tool_call' && !policy.captureToolArguments) {
+    return {
+      ...item,
+      payload: {
+        ...item.payload,
+        input: { redacted: true },
+        input_redacted: true,
+      },
+    };
+  }
+
+  if (item.kind === 'diff_snapshot' && policy.diffPayloadMaxBytes > 0) {
+    const encoded = JSON.stringify(item.payload);
+    if (utf8Size(encoded) <= policy.diffPayloadMaxBytes) return item;
+
+    const preview = truncateUtf8(encoded, policy.diffPayloadMaxBytes);
+    return {
+      ...item,
+      payload: {
+        truncated: true,
+        reason: 'diff_payload_cap_exceeded',
+        original_size_bytes: utf8Size(encoded),
+        preview_json: preview,
+      },
+    };
+  }
+
+  return item;
 }
 
 export function normalizeClaudeBlock(
@@ -207,4 +281,3 @@ export function normalizePlanState(value: unknown): CanonicalLivePlanState {
     steps,
   };
 }
-

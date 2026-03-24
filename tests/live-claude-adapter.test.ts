@@ -128,3 +128,56 @@ test('syncClaudeLiveSession appends only new messages on re-sync', () => {
   assert.equal(turnCount, 3);
   assert.equal(itemCount, 3);
 });
+
+test('syncClaudeLiveSession redacts prompt, reasoning, and tool arguments when capture is disabled', () => {
+  const db = getDb();
+  const jsonl = makeSession('live-claude-redacted', [
+    {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Secret prompt' }] },
+      timestamp: '2026-03-24T11:00:00.000Z',
+    },
+    {
+      type: 'assistant',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'Sensitive reasoning' },
+          { type: 'tool_use', id: 'toolu_live_redacted', name: 'Bash', input: { command: 'cat ~/.ssh/config' } },
+        ],
+      },
+      timestamp: '2026-03-24T11:00:04.000Z',
+    },
+  ]);
+
+  const parsed = parseSessionMessages(jsonl, 'live-claude-redacted', '/tmp/live-claude-redacted.jsonl');
+  insertParsedSession(db, parsed, '/tmp/live-claude-redacted.jsonl', 512, 'hash-redacted-1');
+  syncClaudeLiveSession(db, parsed, {
+    privacyPolicy: {
+      capturePrompts: false,
+      captureReasoning: false,
+      captureToolArguments: false,
+      diffPayloadMaxBytes: 1024,
+    },
+  });
+
+  const items = db.prepare('SELECT kind, payload_json FROM session_items WHERE session_id = ? ORDER BY id').all('live-claude-redacted') as Array<{ kind: string; payload_json: string }>;
+
+  assert.equal(items.length, 3);
+
+  const promptPayload = JSON.parse(items[0].payload_json) as { redacted?: boolean; reason?: string };
+  const reasoningPayload = JSON.parse(items[1].payload_json) as { redacted?: boolean; reason?: string };
+  const toolPayload = JSON.parse(items[2].payload_json) as { input?: unknown; input_redacted?: boolean };
+
+  assert.equal(items[0].kind, 'user_message');
+  assert.equal(promptPayload.redacted, true);
+  assert.equal(promptPayload.reason, 'prompt_capture_disabled');
+
+  assert.equal(items[1].kind, 'reasoning');
+  assert.equal(reasoningPayload.redacted, true);
+  assert.equal(reasoningPayload.reason, 'reasoning_capture_disabled');
+
+  assert.equal(items[2].kind, 'tool_call');
+  assert.deepEqual(toolPayload.input, { redacted: true });
+  assert.equal(toolPayload.input_redacted, true);
+});

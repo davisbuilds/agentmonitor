@@ -278,6 +278,25 @@ describe('GET /api/v2/sessions/:id/children', () => {
 
 // --- Live endpoints ---
 
+describe('GET /api/v2/live/settings', () => {
+  test('returns live settings and capture metadata', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/settings`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      enabled: boolean;
+      codex_mode: string;
+      capture: { prompts: boolean; reasoning: boolean; tool_arguments: boolean };
+      diff_payload_max_bytes: number;
+    };
+    assert.equal(typeof body.enabled, 'boolean');
+    assert.equal(body.codex_mode, 'otel-only');
+    assert.equal(typeof body.capture.prompts, 'boolean');
+    assert.equal(typeof body.capture.reasoning, 'boolean');
+    assert.equal(typeof body.capture.tool_arguments, 'boolean');
+    assert.equal(typeof body.diff_payload_max_bytes, 'number');
+  });
+});
+
 describe('GET /api/v2/live/sessions', () => {
   test('returns live sessions with fidelity metadata', async () => {
     const res = await fetch(`${baseUrl}/api/v2/live/sessions`);

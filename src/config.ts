@@ -17,7 +17,16 @@ function parseEnvFloat(value: string | undefined, fallback: number, min: number 
   return parsed;
 }
 
+function parseEnvBool(value: string | undefined, fallback: boolean): boolean {
+  if (value == null || value === '') return fallback;
+  const normalized = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return fallback;
+}
+
 export type UsageLimitType = 'tokens' | 'cost';
+export type CodexLiveMode = 'otel-only' | 'enhanced';
 
 interface AgentUsageConfig {
   limitType: UsageLimitType;
@@ -27,6 +36,17 @@ interface AgentUsageConfig {
   extendedLimit: number;
   weeklyWindowHours: number;
   weeklyLimit: number;
+}
+
+interface LiveConfig {
+  enabled: boolean;
+  codexMode: CodexLiveMode;
+  capture: {
+    prompts: boolean;
+    reasoning: boolean;
+    toolArguments: boolean;
+  };
+  diffPayloadMaxBytes: number;
 }
 
 function isAgentMonitorRepo(dir: string): boolean {
@@ -96,6 +116,23 @@ function parseUsageMonitorConfig(env: EnvMap): Record<string, AgentUsageConfig> 
   return agents;
 }
 
+function parseCodexLiveMode(value: string | undefined): CodexLiveMode {
+  return value === 'enhanced' ? 'enhanced' : 'otel-only';
+}
+
+function parseLiveConfig(env: EnvMap): LiveConfig {
+  return {
+    enabled: parseEnvBool(env.AGENTMONITOR_ENABLE_LIVE_TAB, true),
+    codexMode: parseCodexLiveMode(env.AGENTMONITOR_CODEX_LIVE_MODE),
+    capture: {
+      prompts: parseEnvBool(env.AGENTMONITOR_LIVE_CAPTURE_PROMPTS, true),
+      reasoning: parseEnvBool(env.AGENTMONITOR_LIVE_CAPTURE_REASONING, true),
+      toolArguments: parseEnvBool(env.AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS, true),
+    },
+    diffPayloadMaxBytes: parseEnvInt(env.AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES, 32768, 0),
+  };
+}
+
 export function createConfig(env: EnvMap = process.env, cwd: string = process.cwd()) {
   return {
     port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1),
@@ -113,6 +150,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     // Claude Code: token limits (AGENTMONITOR_SESSION_TOKEN_LIMIT_CLAUDE_CODE)
     // Codex: cost limits in USD (AGENTMONITOR_SESSION_COST_LIMIT_CODEX)
     usageMonitor: parseUsageMonitorConfig(env),
+    live: parseLiveConfig(env),
   };
 }
 

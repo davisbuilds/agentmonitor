@@ -5,10 +5,11 @@
 ```bash
 pnpm install
 pnpm dev          # terminal 1: server in watch mode
-pnpm css:watch    # terminal 2: Tailwind CSS watch
+pnpm frontend:dev # terminal 2: Svelte app at :5173 with API proxy
+pnpm css:watch    # optional terminal 3: shared Tailwind output for legacy / and built /app/
 ```
 
-Open `http://127.0.0.1:3141`.
+Open `http://127.0.0.1:3141` or `http://127.0.0.1:5173/app/`.
 
 ## Useful Commands
 
@@ -64,6 +65,12 @@ All optional with sensible defaults:
 | `AGENTMONITOR_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
+| `AGENTMONITOR_ENABLE_LIVE_TAB` | `true` | Shows the Svelte `Live` tab |
+| `AGENTMONITOR_CODEX_LIVE_MODE` | `otel-only` | Codex live fidelity mode (`otel-only`, reserved `enhanced`) |
+| `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` | `true` | Capture or redact live prompt payloads |
+| `AGENTMONITOR_LIVE_CAPTURE_REASONING` | `true` | Capture or redact live reasoning payloads |
+| `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` | `true` | Capture or redact tool-call input arguments |
+| `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` | `32768` | Payload cap for diff-style live records |
 
 Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`, `AGENTMONITOR_BENCH_BATCH_SIZE`.
 
@@ -91,6 +98,12 @@ protocol = "json"
 ```
 
 The dev server must be running before starting a Codex session.
+
+Current runtime note:
+
+- `AGENTMONITOR_CODEX_LIVE_MODE=otel-only` is the only implemented Codex mode today.
+- OTEL-only Codex data is suitable for summary observability, not `claude-esp`-style plan/diff/reasoning playback.
+- The `enhanced` mode name is reserved for a future richer Codex source.
 
 ## Historical Import
 
@@ -120,3 +133,12 @@ Parity tests are available for manual/shared-runtime verification but are not pa
 ## Runtime Artifacts
 
 Do not commit: `data/`, `*.db`, generated CSS output in `public/css/output.css`.
+
+## Manual Live Verification
+
+1. Start the server with `pnpm dev` and the Svelte app with `pnpm frontend:dev`.
+2. Open `/app/` and confirm the `Live` tab appears when `AGENTMONITOR_ENABLE_LIVE_TAB=true`.
+3. Confirm the live settings banner matches your env for prompt, reasoning, and tool-argument capture.
+4. Start a Claude session and verify new items appear without a full page reload.
+5. If prompts or reasoning are disabled, confirm the inspector shows redacted payloads rather than raw content.
+6. For Codex, treat `otel-only` sessions as summary-only until the richer enhanced path exists.

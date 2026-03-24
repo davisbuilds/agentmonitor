@@ -14,6 +14,7 @@
     getLiveSessionsError,
     getLiveSessionsHasMore,
     getLiveSessionsLoading,
+    getLiveSettings,
     getLiveSessionsTotal,
     getLiveTurns,
     getSelectedLiveItem,
@@ -65,6 +66,7 @@
   const selectedItemId = $derived(getSelectedLiveItemId());
   const selectedItem = $derived(getSelectedLiveItem());
   const connectionStatus = $derived(getLiveConnectionStatus());
+  const liveSettings = $derived(getLiveSettings());
 
   const sessionTree = $derived.by(() => buildSessionTree(sessions));
 
@@ -118,7 +120,9 @@
 
   onMount(() => {
     void initializeLivePage().then(() => {
-      connectLiveSSE();
+      if (getLiveSettings().enabled) {
+        connectLiveSSE();
+      }
     });
 
     return () => {
@@ -129,6 +133,16 @@
 </script>
 
 <main class="flex-1 overflow-hidden bg-gray-950">
+  {#if !liveSettings.enabled}
+    <div class="flex h-full items-center justify-center px-6">
+      <div class="max-w-xl rounded-2xl border border-gray-800 bg-gray-900/70 p-6 text-center">
+        <h2 class="text-lg font-semibold text-gray-100">Live tab disabled</h2>
+        <p class="mt-2 text-sm text-gray-400">
+          Enable `AGENTMONITOR_ENABLE_LIVE_TAB` to expose the live operator view and its dedicated v2 live APIs.
+        </p>
+      </div>
+    </div>
+  {:else}
   <div class="grid h-full grid-cols-1 xl:grid-cols-[19rem,minmax(0,1fr),22rem]">
     <section class="border-b border-gray-800 xl:border-b-0 xl:border-r overflow-hidden flex flex-col">
       <div class="border-b border-gray-800 px-4 py-3 shrink-0">
@@ -192,6 +206,21 @@
           <input type="checkbox" bind:checked={activeOnly} onchange={applyFilters} />
           Active sessions first view
         </label>
+
+        <div class="mt-3 rounded-xl border border-gray-800 bg-gray-950/70 px-3 py-3 text-xs text-gray-400">
+          <div class="flex items-center justify-between gap-3">
+            <span class="uppercase tracking-wide text-gray-500">Capture</span>
+            <span class="uppercase tracking-wide text-gray-500">Codex: {liveSettings.codex_mode}</span>
+          </div>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.prompts ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Prompts {liveSettings.capture.prompts ? 'on' : 'off'}</span>
+            <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.reasoning ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Reasoning {liveSettings.capture.reasoning ? 'on' : 'off'}</span>
+            <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.tool_arguments ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Tool args {liveSettings.capture.tool_arguments ? 'on' : 'off'}</span>
+          </div>
+          <div class="mt-2 text-[11px] text-gray-500">
+            Diff payload cap: {liveSettings.diff_payload_max_bytes.toLocaleString()} bytes
+          </div>
+        </div>
       </div>
 
       <div class="min-h-0 flex-1 px-3 py-3">
@@ -228,4 +257,5 @@
       <InspectorPanel session={selectedSession} {turns} item={selectedItem} />
     </section>
   </div>
+  {/if}
 </main>

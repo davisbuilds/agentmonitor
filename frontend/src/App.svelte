@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { getTab, setTab, type Tab } from './lib/stores/router.svelte';
   import { setFilterOptions } from './lib/stores/monitor.svelte';
+  import { getLiveSettings, initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
   import { fetchFilterOptions } from './lib/api/client';
   import StatsBar from './lib/components/monitor/StatsBar.svelte';
@@ -15,16 +16,22 @@
   import AnalyticsPage from './lib/components/analytics/AnalyticsPage.svelte';
 
   const tab = $derived(getTab());
+  const liveSettings = $derived(getLiveSettings());
 
   let monitorPage = $state<MonitorPage>();
 
-  const tabs: Array<{ id: Tab; label: string }> = [
-    { id: 'monitor', label: 'Monitor' },
-    { id: 'live', label: 'Live' },
-    { id: 'sessions', label: 'Sessions' },
-    { id: 'analytics', label: 'Analytics' },
-    { id: 'search', label: 'Search' },
-  ];
+  const tabs = $derived.by(() => {
+    const next: Array<{ id: Tab; label: string }> = [
+      { id: 'monitor', label: 'Monitor' },
+      { id: 'sessions', label: 'Sessions' },
+      { id: 'analytics', label: 'Analytics' },
+      { id: 'search', label: 'Search' },
+    ];
+    if (liveSettings.enabled) {
+      next.splice(1, 0, { id: 'live', label: 'Live' });
+    }
+    return next;
+  });
 
   async function handleFilterChange(filters: Record<string, string>) {
     if (monitorPage) {
@@ -39,6 +46,11 @@
       setFilterOptions(options);
     } catch {
       // Filter options may not be available
+    }
+
+    await initializeLiveSettings();
+    if (!getLiveSettings().enabled && getTab() === 'live') {
+      setTab('monitor');
     }
 
     // Connect SSE

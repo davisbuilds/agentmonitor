@@ -1,6 +1,7 @@
+import { config } from '../config.js';
 import type Database from 'better-sqlite3';
 import type { ContentBlock, ParsedMessage, ParsedSession } from '../parser/claude-code.js';
-import { normalizeClaudeBlock } from './normalize.js';
+import { applyLivePrivacyPolicy, normalizeClaudeBlock, type LivePrivacyPolicy } from './normalize.js';
 
 export interface ClaudeLiveSyncResult {
   inserted_turns: number;
@@ -35,6 +36,7 @@ function resetLiveSession(db: Database.Database, sessionId: string): void {
 export function syncClaudeLiveSession(
   db: Database.Database,
   parsed: ParsedSession,
+  options: { privacyPolicy?: LivePrivacyPolicy } = {},
 ): ClaudeLiveSyncResult {
   const sessionId = parsed.metadata.session_id;
   const existingTurnCount = (
@@ -63,6 +65,12 @@ export function syncClaudeLiveSession(
 
   let insertedTurns = 0;
   let insertedItems = 0;
+  const privacyPolicy = options.privacyPolicy ?? {
+    capturePrompts: config.live.capture.prompts,
+    captureReasoning: config.live.capture.reasoning,
+    captureToolArguments: config.live.capture.toolArguments,
+    diffPayloadMaxBytes: config.live.diffPayloadMaxBytes,
+  };
 
   for (const message of parsed.messages.slice(startOrdinal)) {
     const sourceTurnId = `claude-message:${message.ordinal}`;
@@ -83,12 +91,13 @@ export function syncClaudeLiveSession(
 
     let itemOrdinal = 0;
     for (const block of blocks) {
-      const normalized = normalizeClaudeBlock(
+      const normalizedItem = normalizeClaudeBlock(
         message.role === 'user' ? 'user' : 'assistant',
         block,
         message.timestamp ?? undefined,
       );
-      if (!normalized) continue;
+      if (!normalizedItem) continue;
+      const normalized = applyLivePrivacyPolicy(normalizedItem, privacyPolicy);
 
       insertItem.run(
         sessionId,
@@ -123,4 +132,3 @@ export function syncClaudeLiveSession(
     last_item_at: parsed.metadata.ended_at,
   };
 }
-

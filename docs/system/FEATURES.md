@@ -18,6 +18,15 @@ Product-surface reference for AgentMonitor.
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
 - Filter sessions by status, agent type, and project.
 
+## Live Ops Tab
+
+- Svelte `Live` tab with a dedicated session tree, live item stream, and inspector panel.
+- Live item model supports message, reasoning, tool call, and tool result records today.
+- Dedicated live SSE stream at `/api/v2/live/stream` separate from the Monitor SSE contract.
+- Live settings endpoint at `/api/v2/live/settings` exposes whether the tab is enabled, the current Codex mode, and capture/redaction settings.
+- Claude live mode is full-fidelity relative to current AgentMonitor sources because it is driven by Claude JSONL session files.
+- Codex `otel-only` mode is summary-only and should not be treated as equivalent to Claude live fidelity.
+
 ## Multi-Agent Support
 
 | Agent | Integration | Token/Cost Data |
@@ -25,6 +34,14 @@ Product-surface reference for AgentMonitor.
 | Claude Code | Shell/Python hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`) | Yes (via hooks) |
 | Codex | OTEL JSON exporter (`logs`, `metrics`) | Via import backfill |
 | Generic | HTTP API (`POST /api/events`) | If provided in payload |
+
+## Privacy And Capture Controls
+
+- `AGENTMONITOR_ENABLE_LIVE_TAB` controls whether the `Live` tab is exposed in the Svelte app.
+- `AGENTMONITOR_LIVE_CAPTURE_PROMPTS=false` redacts live user-message payloads.
+- `AGENTMONITOR_LIVE_CAPTURE_REASONING=false` redacts live reasoning payloads.
+- `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS=false` redacts tool-call input arguments while retaining the tool name.
+- `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` is the payload cap for diff-style live records as richer agents are added.
 
 ## Cost Tracking
 
@@ -52,6 +69,11 @@ Product-surface reference for AgentMonitor.
 | `/api/sessions` | GET | List sessions with filters |
 | `/api/sessions/:id` | GET | Session detail + transcript |
 | `/api/stream` | GET | SSE stream (event, stats, session_update) |
+| `/api/v2/live/settings` | GET | Live-tab enablement and capture metadata |
+| `/api/v2/live/sessions` | GET | Live session index with fidelity/status fields |
+| `/api/v2/live/sessions/:id/turns` | GET | Normalized live turns |
+| `/api/v2/live/sessions/:id/items` | GET | Normalized live items |
+| `/api/v2/live/stream` | GET | Dedicated live SSE stream |
 | `/api/health` | GET | Service health check |
 | `/api/filter-options` | GET | Distinct filterable field values |
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |

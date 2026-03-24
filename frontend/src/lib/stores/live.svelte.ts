@@ -2,11 +2,13 @@ import {
   fetchLiveItems,
   fetchLiveSession,
   fetchLiveSessions,
+  fetchLiveSettings,
   fetchLiveTurns,
   fetchV2Agents,
   fetchV2Projects,
   type LiveItem,
   type LiveSession,
+  type LiveSettings,
   type LiveTurn,
 } from '../api/client';
 
@@ -49,6 +51,16 @@ let selectedItemId = $state<number | null>(null);
 let selectedKinds = $state<string[]>([]);
 
 let connectionStatus = $state<'connected' | 'connecting' | 'disconnected'>('connecting');
+let settings = $state<LiveSettings>({
+  enabled: true,
+  codex_mode: 'otel-only',
+  capture: {
+    prompts: true,
+    reasoning: true,
+    tool_arguments: true,
+  },
+  diff_payload_max_bytes: 32768,
+});
 
 let sessionsRequestToken = 0;
 let selectedRequestToken = 0;
@@ -130,15 +142,26 @@ async function loadSelectedItems(sessionId: string, append = false): Promise<voi
 }
 
 export async function initializeLivePage(): Promise<void> {
-  const [projectsRes, agentsRes] = await Promise.all([
+  const [settingsRes, projectsRes, agentsRes] = await Promise.all([
+    fetchLiveSettings().catch(() => settings),
     fetchV2Projects().catch(() => ({ data: [] })),
     fetchV2Agents().catch(() => ({ data: [] })),
   ]);
 
+  settings = settingsRes;
   projects = projectsRes.data;
   agents = agentsRes.data;
 
+  if (!settings.enabled) return;
   await loadLiveSessions();
+}
+
+export async function initializeLiveSettings(): Promise<void> {
+  try {
+    settings = await fetchLiveSettings();
+  } catch (err) {
+    console.error('Failed to load live settings:', err);
+  }
 }
 
 export async function loadLiveSessions(append = false): Promise<void> {
@@ -319,6 +342,16 @@ export function resetLiveState(): void {
   selectedItemId = null;
   selectedKinds = [];
   connectionStatus = 'connecting';
+  settings = {
+    enabled: true,
+    codex_mode: 'otel-only',
+    capture: {
+      prompts: true,
+      reasoning: true,
+      tool_arguments: true,
+    },
+    diff_payload_max_bytes: 32768,
+  };
 }
 
 export function getLiveSessions(): LiveSession[] { return sessions; }
@@ -344,3 +377,4 @@ export function getSelectedLiveItem(): LiveItem | null {
   return items.find(item => item.id === selectedItemId) ?? null;
 }
 export function getLiveConnectionStatus(): 'connected' | 'connecting' | 'disconnected' { return connectionStatus; }
+export function getLiveSettings(): LiveSettings { return settings; }
