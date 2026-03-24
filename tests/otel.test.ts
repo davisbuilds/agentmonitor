@@ -43,6 +43,18 @@ async function getEvents(params = ''): Promise<{ events: Array<Record<string, un
   return response.json() as Promise<{ events: Array<Record<string, unknown>>; total: number }>;
 }
 
+async function getLiveSessions(params = ''): Promise<{ data: Array<Record<string, unknown>>; total: number; cursor?: string | null }> {
+  const response = await fetch(`${baseUrl}/api/v2/live/sessions?limit=50${params ? '&' + params : ''}`);
+  assert.equal(response.status, 200);
+  return response.json() as Promise<{ data: Array<Record<string, unknown>>; total: number; cursor?: string | null }>;
+}
+
+async function getLiveItems(sessionId: string): Promise<{ data: Array<Record<string, unknown>>; total: number; cursor?: string | null }> {
+  const response = await fetch(`${baseUrl}/api/v2/live/sessions/${sessionId}/items?limit=50`);
+  assert.equal(response.status, 200);
+  return response.json() as Promise<{ data: Array<Record<string, unknown>>; total: number; cursor?: string | null }>;
+}
+
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-otel-test-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor-otel-test.db');
@@ -70,6 +82,9 @@ before(async () => {
 beforeEach(() => {
   if (!getDb) throw new Error('Database not initialized');
   getDb().exec(`
+    DELETE FROM session_items;
+    DELETE FROM session_turns;
+    DELETE FROM browsing_sessions;
     DELETE FROM events;
     DELETE FROM sessions;
     DELETE FROM agents;
@@ -811,6 +826,40 @@ describe('Codex OTLP integration', () => {
 
     const meta = JSON.parse(String(events.events[0].metadata)) as { message?: string };
     assert.equal(meta.message, 'Show me recent failing tests');
+  });
+
+  test('populates live summary sessions and items for Codex OTEL prompts', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-live-summary-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.user_message',
+        body: {
+          stringValue: JSON.stringify({
+            session_id: 'codex-live-summary-1',
+            message: 'Show me recent failing tests',
+          }),
+        },
+      }],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal(res.status, 200);
+
+    const sessions = await getLiveSessions('agent=codex');
+    assert.equal(sessions.total, 1);
+    assert.equal(sessions.data[0].id, 'codex-live-summary-1');
+    assert.equal(sessions.data[0].integration_mode, 'codex-otel');
+    assert.equal(sessions.data[0].fidelity, 'summary');
+
+    const items = await getLiveItems('codex-live-summary-1');
+    assert.equal(items.total, 1);
+    assert.equal(items.data[0].kind, 'user_message');
+
+    const payloadJson = JSON.parse(String(items.data[0].payload_json)) as { text?: string };
+    assert.equal(payloadJson.text, 'Show me recent failing tests');
   });
 
   test('maps codex.response user_message payloads to user_prompt events', async () => {

@@ -141,7 +141,7 @@ export interface LiveItem {
 
 export interface LiveSettings {
   enabled: boolean;
-  codex_mode: 'otel-only' | 'enhanced';
+  codex_mode: 'otel-only' | 'exporter';
   capture: {
     prompts: boolean;
     reasoning: boolean;

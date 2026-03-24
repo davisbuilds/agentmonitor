@@ -26,7 +26,7 @@ function parseEnvBool(value: string | undefined, fallback: boolean): boolean {
 }
 
 export type UsageLimitType = 'tokens' | 'cost';
-export type CodexLiveMode = 'otel-only' | 'enhanced';
+export type CodexLiveMode = 'otel-only' | 'exporter';
 
 interface AgentUsageConfig {
   limitType: UsageLimitType;
@@ -117,7 +117,7 @@ function parseUsageMonitorConfig(env: EnvMap): Record<string, AgentUsageConfig> 
 }
 
 function parseCodexLiveMode(value: string | undefined): CodexLiveMode {
-  return value === 'enhanced' ? 'enhanced' : 'otel-only';
+  return value === 'exporter' ? 'exporter' : 'otel-only';
 }
 
 function parseLiveConfig(env: EnvMap): LiveConfig {

@@ -84,7 +84,7 @@ Environment variables (all optional):
 - `AGENTMONITOR_AUTO_IMPORT_MINUTES` (default: `10`) — interval for automatic session import scheduling; `0` disables
 - `AGENTMONITOR_PROJECTS_DIR` (default: auto-detected from cwd ancestry; falls back to current working directory)
 - `AGENTMONITOR_ENABLE_LIVE_TAB` (default: `true`) — shows the Svelte `Live` tab and exposes live settings metadata
-- `AGENTMONITOR_CODEX_LIVE_MODE` (default: `otel-only`) — `otel-only` today, reserved `enhanced` mode for deeper Codex live ingestion
+- `AGENTMONITOR_CODEX_LIVE_MODE` (default: `otel-only`) — `otel-only` today, reserved `exporter` mode for an optional richer Codex-side exporter
 - `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` (default: `true`) — when `false`, live prompt payloads are redacted
 - `AGENTMONITOR_LIVE_CAPTURE_REASONING` (default: `true`) — when `false`, live reasoning payloads are redacted
 - `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` (default: `true`) — when `false`, live tool call inputs are redacted
@@ -159,7 +159,7 @@ protocol = "json"
 
 Restart Codex after configuring. The dev server must be running before starting a Codex session (the OTEL exporter connects at startup and does not retry).
 
-**Note:** Codex OTEL mode is summary-oriented. It can drive Monitor counters and basic session presence, but it does not provide `claude-esp`-style plan, diff, command, or reasoning fidelity. The `AGENTMONITOR_CODEX_LIVE_MODE=enhanced` setting is reserved for a richer Codex ingestion path and is not implemented yet.
+**Note:** Codex OTEL mode is summary-oriented. It can drive Monitor counters and basic session presence, but it does not provide `claude-esp`-style plan, diff, command, or reasoning fidelity. The `AGENTMONITOR_CODEX_LIVE_MODE=exporter` setting is reserved for a future optional Codex-side exporter and is not implemented yet.
 
 **Also note:** Codex OTEL logs do not include token/cost data. To backfill cost data from Codex session files:
 

@@ -30,7 +30,7 @@ test('createConfig resolves AGENTMONITOR_PROJECTS_DIR relative to cwd', () => {
 test('createConfig parses live tab and privacy settings', () => {
   const config = createConfig({
     AGENTMONITOR_ENABLE_LIVE_TAB: 'false',
-    AGENTMONITOR_CODEX_LIVE_MODE: 'enhanced',
+    AGENTMONITOR_CODEX_LIVE_MODE: 'exporter',
     AGENTMONITOR_LIVE_CAPTURE_PROMPTS: '0',
     AGENTMONITOR_LIVE_CAPTURE_REASONING: 'no',
     AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS: 'off',
@@ -38,7 +38,7 @@ test('createConfig parses live tab and privacy settings', () => {
   }, repoRoot);
 
   assert.equal(config.live.enabled, false);
-  assert.equal(config.live.codexMode, 'enhanced');
+  assert.equal(config.live.codexMode, 'exporter');
   assert.equal(config.live.capture.prompts, false);
   assert.equal(config.live.capture.reasoning, false);
   assert.equal(config.live.capture.toolArguments, false);

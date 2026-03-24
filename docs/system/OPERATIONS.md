@@ -66,7 +66,7 @@ All optional with sensible defaults:
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
 | `AGENTMONITOR_ENABLE_LIVE_TAB` | `true` | Shows the Svelte `Live` tab |
-| `AGENTMONITOR_CODEX_LIVE_MODE` | `otel-only` | Codex live fidelity mode (`otel-only`, reserved `enhanced`) |
+| `AGENTMONITOR_CODEX_LIVE_MODE` | `otel-only` | Codex live fidelity mode (`otel-only`, reserved `exporter`) |
 | `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` | `true` | Capture or redact live prompt payloads |
 | `AGENTMONITOR_LIVE_CAPTURE_REASONING` | `true` | Capture or redact live reasoning payloads |
 | `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` | `true` | Capture or redact tool-call input arguments |
@@ -103,7 +103,7 @@ Current runtime note:
 
 - `AGENTMONITOR_CODEX_LIVE_MODE=otel-only` is the only implemented Codex mode today.
 - OTEL-only Codex data is suitable for summary observability, not `claude-esp`-style plan/diff/reasoning playback.
-- The `enhanced` mode name is reserved for a future richer Codex source.
+- The `exporter` mode name is reserved for a future richer Codex-side exporter.
 
 ## Historical Import
 
@@ -141,4 +141,4 @@ Do not commit: `data/`, `*.db`, generated CSS output in `public/css/output.css`.
 3. Confirm the live settings banner matches your env for prompt, reasoning, and tool-argument capture.
 4. Start a Claude session and verify new items appear without a full page reload.
 5. If prompts or reasoning are disabled, confirm the inspector shows redacted payloads rather than raw content.
-6. For Codex, treat `otel-only` sessions as summary-only until the richer enhanced path exists.
+6. For Codex, treat `otel-only` sessions as summary-only until a richer exporter-backed path exists.

@@ -1,5 +1,6 @@
 import { getDb } from './connection.js';
 import { config, type UsageLimitType } from '../config.js';
+import { syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { resolveGitBranch } from '../util/git-branch.js';
 import type { EventStatus, EventType, EventSource } from '../contracts/event-contract.js';
@@ -425,7 +426,13 @@ export function insertEvent(event: {
       `).run(event.session_id);
     }
 
-    return db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid) as EventRow;
+    const row = db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid) as EventRow;
+
+    if (row.agent_type === 'codex') {
+      syncCodexSummaryLiveEvent(db, row);
+    }
+
+    return row;
   } catch (err: unknown) {
     // UNIQUE constraint violation = duplicate event_id, silently skip
     if (err instanceof Error && err.message.includes('UNIQUE constraint failed: events.event_id')) {
