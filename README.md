@@ -6,7 +6,7 @@ Real-time localhost dashboard + session browser for monitoring AI agent activity
 
 - Node.js + TypeScript + Express
 - SQLite (`better-sqlite3`) with FTS5
-- Svelte 5 + Vite frontend (at `/app/`) — Monitor, Sessions, Search, Analytics tabs
+- Svelte 5 + Vite frontend (at `/app/`) — Monitor, Live, Sessions, Search, Analytics tabs
 - Legacy vanilla JS frontend + Tailwind CSS (at `/`)
 - SSE for live updates
 - chokidar file-watcher for automatic session discovery
@@ -180,6 +180,11 @@ See `hooks/codex/README.md` for details.
 - `GET /api/v2/sessions/:id`: session detail.
 - `GET /api/v2/sessions/:id/messages`: session messages (offset pagination).
 - `GET /api/v2/sessions/:id/children`: sub-sessions.
+- `GET /api/v2/live/sessions`: live session index (project/agent/status/fidelity filters).
+- `GET /api/v2/live/sessions/:id`: live session detail.
+- `GET /api/v2/live/sessions/:id/turns`: normalized turn list for a live session.
+- `GET /api/v2/live/sessions/:id/items`: normalized live items stream (cursor pagination, kind filters).
+- `GET /api/v2/live/stream`: dedicated SSE stream for live session deltas (`session_presence`, `turn_update`, `item_delta`).
 - `GET /api/v2/search?q=`: FTS5 full-text search with snippet highlighting.
 - `GET /api/v2/analytics/summary`: aggregate analytics.
 - `GET /api/v2/analytics/activity`: daily activity data points.

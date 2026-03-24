@@ -9,6 +9,7 @@
   import FilterBar from './lib/components/monitor/FilterBar.svelte';
   import UsageMonitor from './lib/components/monitor/UsageMonitor.svelte';
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
+  import LivePage from './lib/components/live/LivePage.svelte';
   import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
   import SearchPage from './lib/components/search/SearchPage.svelte';
   import AnalyticsPage from './lib/components/analytics/AnalyticsPage.svelte';
@@ -19,6 +20,7 @@
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'monitor', label: 'Monitor' },
+    { id: 'live', label: 'Live' },
     { id: 'sessions', label: 'Sessions' },
     { id: 'analytics', label: 'Analytics' },
     { id: 'search', label: 'Search' },
@@ -85,6 +87,8 @@
   <!-- Tab Content -->
   {#if tab === 'monitor'}
     <MonitorPage bind:this={monitorPage} onfilterchange={handleFilterChange} />
+  {:else if tab === 'live'}
+    <LivePage />
   {:else if tab === 'sessions'}
     <SessionsPage />
   {:else if tab === 'analytics'}

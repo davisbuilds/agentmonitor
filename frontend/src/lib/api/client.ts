@@ -105,6 +105,40 @@ export interface BrowsingSession {
   relationship_type: string | null;
 }
 
+export interface LiveSession extends BrowsingSession {
+  live_status: string | null;
+  last_item_at: string | null;
+  integration_mode: string | null;
+  fidelity: string | null;
+  file_path: string | null;
+  file_size: number | null;
+  file_hash: string | null;
+}
+
+export interface LiveTurn {
+  id: number;
+  session_id: string;
+  agent_type: string;
+  source_turn_id: string | null;
+  status: string | null;
+  title: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  created_at: string;
+}
+
+export interface LiveItem {
+  id: number;
+  session_id: string;
+  turn_id: number | null;
+  ordinal: number;
+  source_item_id: string | null;
+  kind: string;
+  status: string | null;
+  payload_json: string;
+  created_at: string | null;
+}
+
 export interface Message {
   id: number;
   session_id: string;
@@ -270,6 +304,26 @@ export async function fetchMessages(sessionId: string, params: { offset?: number
 export async function fetchSessionChildren(id: string): Promise<{ data: BrowsingSession[] }> {
   const res = await fetch(`/api/v2/sessions/${id}/children`);
   return checkedJson(res, 'fetchSessionChildren');
+}
+
+export async function fetchLiveSessions(params: Record<string, string | number | boolean | undefined> = {}): Promise<{ data: LiveSession[]; total: number; cursor?: string }> {
+  const res = await fetch(`/api/v2/live/sessions${qs(params)}`);
+  return checkedJson(res, 'fetchLiveSessions');
+}
+
+export async function fetchLiveSession(id: string): Promise<LiveSession> {
+  const res = await fetch(`/api/v2/live/sessions/${id}`);
+  return checkedJson(res, 'fetchLiveSession');
+}
+
+export async function fetchLiveTurns(sessionId: string): Promise<{ data: LiveTurn[] }> {
+  const res = await fetch(`/api/v2/live/sessions/${sessionId}/turns`);
+  return checkedJson(res, 'fetchLiveTurns');
+}
+
+export async function fetchLiveItems(sessionId: string, params: { cursor?: string; limit?: number; kinds?: string } = {}): Promise<{ data: LiveItem[]; total: number; cursor?: string }> {
+  const res = await fetch(`/api/v2/live/sessions/${sessionId}/items${qs(params)}`);
+  return checkedJson(res, 'fetchLiveItems');
 }
 
 export async function searchMessages(params: { q: string; project?: string; agent?: string; limit?: number; cursor?: string }): Promise<{ data: SearchResult[]; total: number; cursor?: string }> {
