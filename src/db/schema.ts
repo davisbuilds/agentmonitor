@@ -194,8 +194,6 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_bs_project ON browsing_sessions(project);
     CREATE INDEX IF NOT EXISTS idx_bs_agent ON browsing_sessions(agent);
     CREATE INDEX IF NOT EXISTS idx_bs_started_at ON browsing_sessions(started_at);
-    CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_bs_live_status ON browsing_sessions(live_status);
   `);
 
   const browsingSessionColumns = new Set<string>(

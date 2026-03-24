@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 import test, { after, before } from 'node:test';
 import Database from 'better-sqlite3';
 
@@ -144,6 +145,52 @@ test('legacy browsing_sessions databases receive live metadata columns', async (
   const columns = db.prepare("PRAGMA table_info(browsing_sessions)").all() as Array<{ name: string }>;
   const colNames = columns.map(c => c.name);
 
+  assert.ok(colNames.includes('live_status'));
+  assert.ok(colNames.includes('last_item_at'));
+  assert.ok(colNames.includes('integration_mode'));
+  assert.ok(colNames.includes('fidelity'));
+});
+
+test('initSchema succeeds against a legacy browsing_sessions database on process startup', () => {
+  const startupDbPath = path.join(tempDir, 'legacy-startup.db');
+  const startupDb = new Database(startupDbPath);
+  startupDb.exec(`
+    CREATE TABLE browsing_sessions (
+      id TEXT PRIMARY KEY,
+      project TEXT,
+      agent TEXT NOT NULL,
+      first_message TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      user_message_count INTEGER NOT NULL DEFAULT 0,
+      parent_session_id TEXT,
+      relationship_type TEXT,
+      file_path TEXT,
+      file_size INTEGER,
+      file_hash TEXT
+    );
+  `);
+  startupDb.close();
+
+  execFileSync('node', [
+    '--import', 'tsx',
+    '--eval',
+    "const schema = await import('./src/db/schema.ts'); schema.initSchema();",
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      AGENTMONITOR_DB_PATH: startupDbPath,
+    },
+    stdio: 'pipe',
+  });
+
+  const verified = new Database(startupDbPath);
+  const columns = verified.prepare("PRAGMA table_info(browsing_sessions)").all() as Array<{ name: string }>;
+  verified.close();
+
+  const colNames = columns.map(c => c.name);
   assert.ok(colNames.includes('live_status'));
   assert.ok(colNames.includes('last_item_at'));
   assert.ok(colNames.includes('integration_mode'));
