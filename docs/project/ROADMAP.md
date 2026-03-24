@@ -18,8 +18,8 @@ This is a lightweight snapshot, not a release contract.
 ## In Progress
 
 - **Live Ops tab**: Claude-first live operator surface is shipped in the Svelte app with dedicated live APIs, SSE, and privacy/capture settings.
-  - Completed so far: live schema, Claude live ingestion, live v2 endpoints, Svelte `Live` tab, and live capture/redaction controls.
-  - Next: Codex passive summary participation and exporter-contract hardening, plus noisy-session performance improvements.
+  - Completed so far: live schema, Claude live ingestion, Codex passive summary participation, live v2 endpoints, Svelte `Live` tab, and live capture/redaction controls.
+  - Next: exporter-contract hardening and noisy-session performance improvements.
 - **Rust + Tauri migration**: Phase 1 backend migration is complete (parity/soak/import/pricing/OTEL). Phase 2 desktop shell is in progress with internal-first sequencing.
   - Completed in Phase 2 so far: Tauri scaffold, embedded Rust lifecycle host, backend readiness gate, Rust-served dashboard assets, architectural cleanup (runtime contract boundary, deterministic desktop bind policy, runtime coordinator extraction, boundary regression tests), first functional IPC handlers (`desktop_runtime_status`, `desktop_health`), and macOS release preflight workflow for unsigned/signed/notarized builds.
   - Next in Phase 2: wire IPC handlers into renderer flows and harden signing/notarization verification automation.

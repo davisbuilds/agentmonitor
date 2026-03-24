@@ -43,6 +43,15 @@ Add a read-only `Live` tab to the Svelte app that brings `claude-esp`-style live
 - The first implementation should remain read-only. That keeps the product boundary clear and avoids coupling UI delivery to agent-control semantics that only Codex can plausibly support.
 - Feature rollout should be controlled by explicit config so existing users can stay on the current surfaces until the live tab is stable.
 
+## Status Update
+
+As of March 24, 2026, the shipped work covers the `Live` tab, live schema, Claude live ingestion, passive Codex summary support, live v2 APIs/SSE, privacy controls, and browser coverage.
+
+Remaining follow-up from this plan is limited to future-facing hardening:
+
+- optional exporter-contract expansion for richer passive Codex sources
+- noisy-session UI performance work based on real traffic
+
 ## Task Breakdown
 
 ### Task 1: Define The Live Data Model And Schema
@@ -159,11 +168,10 @@ Make the Codex story consistent with passive observability: OTEL remains the sup
 **Files**
 
 - Create: `src/live/codex-adapter.ts`
-- Modify: `src/import/codex.ts`
-- Modify: `src/api/otel.ts`
+- Modify: `src/db/queries.ts`
 - Modify: `src/config.ts`
 - Modify: `.env.example`
-- Test: `src/live/codex-adapter.test.ts`
+- Test: `tests/codex-adapter.test.ts`
 
 **Dependencies**
 
@@ -182,8 +190,10 @@ Make the Codex story consistent with passive observability: OTEL remains the sup
 
 **Verification**
 
-- Run: `node --import tsx --test src/live/codex-adapter.test.ts`
+- Run: `node --import tsx --test tests/codex-adapter.test.ts`
 - Expect: fixture-based normalization tests pass for supported Codex summary records and for the reserved rich-export contract shapes.
+- Run: `node --import tsx --test tests/otel.test.ts`
+- Expect: OTEL-backed Codex sessions appear in `/api/v2/live/*` with `fidelity='summary'`.
 - Run: `pnpm build`
 - Expect: config, API, and import paths compile with the new Codex mode.
 - Run: manual dev check with Codex in `otel-only` mode
@@ -205,7 +215,8 @@ Expose the new live model through stable v2 endpoints and a dedicated streaming 
 - Modify: `src/api/v2/router.ts`
 - Modify: `src/db/v2-queries.ts`
 - Create: `src/api/v2/live-stream.ts`
-- Test: `src/api/v2/live.test.ts`
+- Test: `tests/v2-api.test.ts`
+- Test: `tests/v2-live-stream.test.ts`
 
 **Dependencies**
 
@@ -230,8 +241,8 @@ Expose the new live model through stable v2 endpoints and a dedicated streaming 
 
 **Verification**
 
-- Run: `node --import tsx --test src/api/v2/live.test.ts`
-- Expect: endpoint contract tests pass for sessions, items, and degraded summary-only cases.
+- Run: `node --import tsx --test tests/v2-api.test.ts tests/v2-live-stream.test.ts`
+- Expect: endpoint contract tests pass for sessions, items, replay, and degraded summary-only cases.
 - Run: `pnpm build`
 - Expect: API changes compile and the server starts normally.
 - Run: `curl -sf http://127.0.0.1:3141/api/v2/live/sessions`
@@ -259,7 +270,7 @@ Add a new Svelte surface optimized for live operator awareness rather than retro
 - Create: `frontend/src/lib/components/live/SessionTree.svelte`
 - Create: `frontend/src/lib/components/live/ItemStream.svelte`
 - Create: `frontend/src/lib/components/live/InspectorPanel.svelte`
-- Test: `tests/live-tab.spec.ts`
+- Test: `e2e/live-tab.spec.ts`
 
 **Dependencies**
 
@@ -286,7 +297,7 @@ Add a new Svelte surface optimized for live operator awareness rather than retro
 
 - Run: `pnpm build`
 - Expect: frontend build includes the new tab with no type or bundling errors.
-- Run: `pnpm exec playwright test tests/live-tab.spec.ts`
+- Run: `pnpm exec playwright test e2e/live-tab.spec.ts --project=chromium`
 - Expect: the live tab renders, loads session data, and reacts to simulated live item deltas.
 
 **Done When**
@@ -364,12 +375,12 @@ Make the new live surface safe to enable, operationally understandable, and accu
 
 | Requirement | Proof command | Expected signal |
 | --- | --- | --- |
-| Live schema supports cross-agent turns and items | `node --import tsx --test src/live/normalize.test.ts` | Canonical item and turn normalization tests pass |
-| Claude live ingestion emits hierarchy-aware deltas | `node --import tsx --test src/parser/claude-code.test.ts src/live/claude-adapter.test.ts` | Parser and delta tests pass, including parent/child cases |
-| Codex passive adapter and reserved exporter contract remain coherent | `node --import tsx --test src/live/codex-adapter.test.ts` | Fixture-driven Codex adapter tests pass for OTEL summary and reserved exporter shapes |
-| Live v2 endpoints are stable and read-only | `node --import tsx --test src/api/v2/live.test.ts` | Endpoint tests pass for sessions, turns, items, and degraded summary-only behavior |
+| Live schema supports cross-agent turns and items | `node --import tsx --test tests/live-normalize.test.ts tests/v2-live-schema.test.ts` | Canonical item normalization and live schema tests pass |
+| Claude live ingestion emits hierarchy-aware deltas | `node --import tsx --test tests/v2-parser.test.ts tests/live-claude-adapter.test.ts tests/v2-watcher.test.ts` | Parser and delta tests pass, including parent/child cases |
+| Codex passive adapter and reserved exporter contract remain coherent | `node --import tsx --test tests/codex-adapter.test.ts tests/otel.test.ts` | Fixture-driven Codex adapter tests pass for OTEL summary and reserved exporter shapes |
+| Live v2 endpoints are stable and read-only | `node --import tsx --test tests/v2-api.test.ts tests/v2-live-stream.test.ts` | Endpoint tests pass for sessions, turns, items, replay, and degraded summary-only behavior |
 | Svelte app renders the new Live tab | `pnpm build` | Backend and frontend build complete without errors |
-| Live UI handles real-time deltas | `pnpm exec playwright test tests/live-tab.spec.ts` | Browser test passes for render, selection, and streamed updates |
+| Live UI handles real-time deltas | `pnpm exec playwright test e2e/live-tab.spec.ts --project=chromium` | Browser test passes for render, selection, and streamed updates |
 | Existing app health remains intact after enabling the feature | `curl -sf http://127.0.0.1:3141/api/health` | HTTP 200 response |
 | Existing regression suite stays green | `pnpm run test` | Test suite exits successfully |
 
