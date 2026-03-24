@@ -150,6 +150,46 @@ const TOOL_HEAVY_SESSION = sampleJsonl([
   },
 ]);
 
+const SUBAGENT_SESSION = sampleJsonl([
+  {
+    parentUuid: null,
+    isSidechain: false,
+    sessionId: 'parent-sess',
+    cwd: '/Users/dev/agentmonitor',
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [
+        {
+          type: 'tool_use',
+          id: 'toolu_agent',
+          name: 'Agent',
+          input: {
+            task: 'Ask a helper to inspect the tests',
+            session_id: 'agent-helper-001',
+          },
+        },
+      ],
+    },
+    timestamp: '2026-03-06T11:30:00.000Z',
+  },
+]);
+
+const SIDECHAIN_SESSION = sampleJsonl([
+  {
+    parentUuid: 'uuid-parent',
+    isSidechain: true,
+    sessionId: 'agent-helper-001',
+    cwd: '/Users/dev/agentmonitor',
+    type: 'user',
+    message: {
+      role: 'user',
+      content: [{ type: 'text', text: 'Investigate the test failures' }],
+    },
+    timestamp: '2026-03-06T11:31:00.000Z',
+  },
+]);
+
 const SESSION_WITH_PROGRESS = sampleJsonl([
   {
     type: 'progress',
@@ -379,6 +419,18 @@ describe('parseSessionMessages', () => {
     const input = JSON.parse(readCall!.input_json!);
     assert.ok(input.file_path, 'input should have file_path');
   });
+
+  test('extracts subagent session ids from Agent tool input', () => {
+    const result = parseSessionMessages(SUBAGENT_SESSION, 'parent-sess');
+    assert.equal(result.toolCalls.length, 1);
+    assert.equal(result.toolCalls[0].tool_name, 'Agent');
+    assert.equal(result.toolCalls[0].subagent_session_id, 'agent-helper-001');
+  });
+
+  test('marks sidechain sessions with a relationship type', () => {
+    const result = parseSessionMessages(SIDECHAIN_SESSION, 'agent-helper-001');
+    assert.equal(result.metadata.relationship_type, 'subagent');
+  });
 });
 
 // --- Category normalization tests ---
@@ -489,5 +541,23 @@ describe('insertParsedSession', () => {
 
     const session = db.prepare('SELECT file_hash FROM browsing_sessions WHERE id = ?').get('sess-db-002') as { file_hash: string };
     assert.equal(session.file_hash, 'hash_second', 'hash should be updated');
+  });
+
+  test('linkParsedSessionRelationships links a child session to its Agent parent', () => {
+    const db = getDb();
+    const parentParsed = parseSessionMessages(SUBAGENT_SESSION, 'parent-link-001');
+    const childParsed = parseSessionMessages(SIDECHAIN_SESSION, 'agent-helper-001');
+
+    insertParsedSession(db, parentParsed, '/path/to/parent-link-001.jsonl', 256, 'hash_parent_link');
+    insertParsedSession(db, childParsed, '/path/to/agent-helper-001.jsonl', 256, 'hash_child_link');
+
+    const child = db.prepare(`
+      SELECT parent_session_id, relationship_type
+      FROM browsing_sessions
+      WHERE id = ?
+    `).get('agent-helper-001') as { parent_session_id: string | null; relationship_type: string | null };
+
+    assert.equal(child.parent_session_id, 'parent-link-001');
+    assert.equal(child.relationship_type, 'subagent');
   });
 });

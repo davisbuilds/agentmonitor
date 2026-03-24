@@ -3,6 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import type Database from 'better-sqlite3';
 import { parseSessionMessages, insertParsedSession } from '../parser/claude-code.js';
+import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 
 // --- File hashing ---
 
@@ -41,7 +42,17 @@ interface SyncOptions {
   force?: boolean;
 }
 
-export function syncSessionFile(db: Database.Database, filePath: string, options: SyncOptions = {}): SyncResult {
+export interface SyncSessionOutcome {
+  result: SyncResult;
+  live?: ClaudeLiveSyncResult;
+  session_id?: string;
+}
+
+export function syncSessionFileDetailed(
+  db: Database.Database,
+  filePath: string,
+  options: SyncOptions = {},
+): SyncSessionOutcome {
   try {
     const stat = fs.statSync(filePath);
     const fileHash = hashFile(filePath);
@@ -52,7 +63,7 @@ export function syncSessionFile(db: Database.Database, filePath: string, options
     ).get(filePath) as { file_hash: string } | undefined;
 
     if (!options.force && existing && existing.file_hash === fileHash) {
-      return 'skipped';
+      return { result: 'skipped' };
     }
 
     // Read and parse the file
@@ -72,11 +83,12 @@ export function syncSessionFile(db: Database.Database, filePath: string, options
           status = 'skipped',
           last_parsed_at = datetime('now')
       `).run(filePath, fileHash, stat.mtime.toISOString());
-      return 'skipped';
+      return { result: 'skipped', session_id: sessionId };
     }
 
     // Insert parsed data
     insertParsedSession(db, parsed, filePath, stat.size, fileHash);
+    const live = syncClaudeLiveSession(db, parsed);
 
     // Update watched_files
     db.prepare(`
@@ -89,7 +101,7 @@ export function syncSessionFile(db: Database.Database, filePath: string, options
         last_parsed_at = datetime('now')
     `).run(filePath, fileHash, stat.mtime.toISOString());
 
-    return 'parsed';
+    return { result: 'parsed', live, session_id: sessionId };
   } catch (err) {
     console.error(`[watcher] Failed to sync ${filePath}:`, err);
     try {
@@ -103,8 +115,12 @@ export function syncSessionFile(db: Database.Database, filePath: string, options
     } catch (dbErr) {
       console.error(`[watcher] Failed to record error state for ${filePath}:`, dbErr);
     }
-    return 'error';
+    return { result: 'error' };
   }
+}
+
+export function syncSessionFile(db: Database.Database, filePath: string, options: SyncOptions = {}): SyncResult {
+  return syncSessionFileDetailed(db, filePath, options).result;
 }
 
 // --- Sync all discovered files ---

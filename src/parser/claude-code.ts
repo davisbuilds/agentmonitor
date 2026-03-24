@@ -75,6 +75,7 @@ export interface ParsedToolCall {
   category: string;
   tool_use_id: string | null;
   input_json: string | null;
+  subagent_session_id: string | null;
   message_ordinal: number; // used to link to message after insert
 }
 
@@ -161,6 +162,85 @@ function projectFromPath(filePath: string): string | null {
   return null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function extractSubagentSessionId(input: unknown): string | null {
+  const visited = new Set<unknown>();
+  const queue: unknown[] = [input];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (current == null) continue;
+    if (typeof current === 'string') {
+      const trimmed = current.trim();
+      if (/^agent-[A-Za-z0-9._-]+$/.test(trimmed)) {
+        return trimmed;
+      }
+      continue;
+    }
+    if (typeof current !== 'object') continue;
+    if (visited.has(current)) continue;
+    visited.add(current);
+
+    if (Array.isArray(current)) {
+      queue.push(...current);
+      continue;
+    }
+
+    const record = asRecord(current);
+    if (!record) continue;
+    for (const [key, value] of Object.entries(record)) {
+      if ((key === 'session_id' || key === 'sessionId' || key === 'subagent_id')
+        && typeof value === 'string'
+        && /^agent-[A-Za-z0-9._-]+$/.test(value.trim())) {
+        return value.trim();
+      }
+      queue.push(value);
+    }
+  }
+
+  return null;
+}
+
+function linkParsedSessionRelationships(
+  db: Database.Database,
+  sessionId: string,
+  subagentSessionIds: string[],
+): void {
+  if (subagentSessionIds.length > 0) {
+    const updateChild = db.prepare(`
+      UPDATE browsing_sessions
+      SET parent_session_id = ?,
+          relationship_type = 'subagent'
+      WHERE id = ?
+    `);
+
+    for (const childId of subagentSessionIds) {
+      updateChild.run(sessionId, childId);
+    }
+  }
+
+  const parent = db.prepare(`
+    SELECT session_id
+    FROM tool_calls
+    WHERE subagent_session_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(sessionId) as { session_id: string } | undefined;
+
+  if (parent) {
+    db.prepare(`
+      UPDATE browsing_sessions
+      SET parent_session_id = ?,
+          relationship_type = 'subagent'
+      WHERE id = ?
+    `).run(parent.session_id, sessionId);
+  }
+}
+
 // --- Parse JSONL content into structured messages ---
 
 export function parseSessionMessages(
@@ -175,6 +255,8 @@ export function parseSessionMessages(
   let endedAt: string | null = null;
   let userMessageCount = 0;
   const parentSessionId: string | null = null;
+  let relationshipType: string | null = null;
+  let sawSidechain = false;
 
   const lines = jsonlContent.split('\n');
 
@@ -191,6 +273,10 @@ export function parseSessionMessages(
 
     const lineType = line.type;
     if (!lineType) continue;
+
+    if (line.isSidechain) {
+      sawSidechain = true;
+    }
 
     // Only process user and assistant message lines
     if (lineType !== 'user' && lineType !== 'assistant') continue;
@@ -245,6 +331,7 @@ export function parseSessionMessages(
               category: categorizeToolName(block.name),
               tool_use_id: block.id ?? null,
               input_json: block.input != null ? JSON.stringify(block.input) : null,
+              subagent_session_id: extractSubagentSessionId(block.input),
               message_ordinal: messages.length, // current message index
             });
           }
@@ -294,6 +381,11 @@ export function parseSessionMessages(
   }
 
   const project = filePath ? projectFromPath(filePath) : null;
+  if (sessionId.startsWith('agent-')) {
+    relationshipType = 'subagent';
+  } else if (sawSidechain) {
+    relationshipType = 'sidechain';
+  }
 
   return {
     messages,
@@ -308,7 +400,7 @@ export function parseSessionMessages(
       message_count: messages.length,
       user_message_count: userMessageCount,
       parent_session_id: parentSessionId,
-      relationship_type: null,
+      relationship_type: relationshipType,
     },
   };
 }
@@ -373,10 +465,11 @@ export function insertParsedSession(
 
     // Insert tool calls linked to their messages
     const insertTc = db.prepare(`
-      INSERT INTO tool_calls (message_id, session_id, tool_name, category, tool_use_id, input_json)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO tool_calls (message_id, session_id, tool_name, category, tool_use_id, input_json, subagent_session_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
+    const subagentSessionIds = new Set<string>();
     for (const tc of toolCalls) {
       const messageId = messageIds[tc.message_ordinal];
       if (messageId != null) {
@@ -387,9 +480,15 @@ export function insertParsedSession(
           tc.category,
           tc.tool_use_id,
           tc.input_json,
+          tc.subagent_session_id,
         );
+        if (tc.subagent_session_id) {
+          subagentSessionIds.add(tc.subagent_session_id);
+        }
       }
     }
+
+    linkParsedSessionRelationships(db, metadata.session_id, [...subagentSessionIds]);
   });
 
   txn();

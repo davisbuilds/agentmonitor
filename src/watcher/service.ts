@@ -2,7 +2,7 @@ import path from 'path';
 import os from 'os';
 import { watch, type FSWatcher } from 'chokidar';
 import { getDb } from '../db/connection.js';
-import { syncSessionFile, syncAllFiles } from './index.js';
+import { syncSessionFileDetailed, syncAllFiles } from './index.js';
 import { broadcaster } from '../sse/emitter.js';
 
 let watcher: FSWatcher | undefined;
@@ -25,9 +25,9 @@ function handleFileChange(filePath: string): void {
     debounceMap.delete(filePath);
 
     const db = getDb();
-    const result = syncSessionFile(db, filePath);
+    const outcome = syncSessionFileDetailed(db, filePath);
 
-    if (result === 'parsed') {
+    if (outcome.result === 'parsed') {
       const sessionId = path.basename(filePath, '.jsonl');
       console.log(`[watcher] Parsed session: ${sessionId}`);
       if (broadcaster.clientCount > 0) {
@@ -35,6 +35,27 @@ function handleFileChange(filePath: string): void {
           type: 'session_parsed',
           session_id: sessionId,
         });
+        if (outcome.live) {
+          broadcaster.broadcast('session_update', {
+            type: 'session_presence',
+            session_id: sessionId,
+            live_status: outcome.live.live_status,
+            integration_mode: 'claude-jsonl',
+            fidelity: 'full',
+          });
+          broadcaster.broadcast('session_update', {
+            type: 'turn_update',
+            session_id: sessionId,
+            inserted_turns: outcome.live.inserted_turns,
+            reset: outcome.live.reset,
+          });
+          broadcaster.broadcast('session_update', {
+            type: 'item_delta',
+            session_id: sessionId,
+            inserted_items: outcome.live.inserted_items,
+            last_item_at: outcome.live.last_item_at,
+          });
+        }
       }
     }
   }, DEBOUNCE_MS));

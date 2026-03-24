@@ -67,10 +67,12 @@ const makeSession = (sessionId: string) => sampleJsonl([
 describe('syncSessionFile', () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let syncSessionFile: typeof import('../src/watcher/index.js').syncSessionFile;
+  let syncSessionFileDetailed: typeof import('../src/watcher/index.js').syncSessionFileDetailed;
 
   before(async () => {
     const mod = await import('../src/watcher/index.js');
     syncSessionFile = mod.syncSessionFile;
+    syncSessionFileDetailed = mod.syncSessionFileDetailed;
   });
 
   test('parses and inserts a new session file', () => {
@@ -93,6 +95,24 @@ describe('syncSessionFile', () => {
     const watched = db.prepare('SELECT * FROM watched_files WHERE file_path = ?').get(filePath) as Record<string, unknown>;
     assert.ok(watched, 'watched_files record should exist');
     assert.equal(watched.status, 'parsed');
+  });
+
+  test('detailed sync populates live tables and returns delta counts', () => {
+    const db = getDb();
+    const sessionId = 'live-detailed-001';
+    const filePath = writeSessionFile(sessionId, makeSession(sessionId));
+
+    const outcome = syncSessionFileDetailed(db, filePath);
+    assert.equal(outcome.result, 'parsed');
+    assert.equal(outcome.session_id, sessionId);
+    assert.ok(outcome.live, 'should include live sync metadata');
+    assert.equal(outcome.live!.inserted_turns, 2);
+    assert.ok(outcome.live!.inserted_items >= 2);
+
+    const turns = (db.prepare('SELECT COUNT(*) as c FROM session_turns WHERE session_id = ?').get(sessionId) as { c: number }).c;
+    const items = (db.prepare('SELECT COUNT(*) as c FROM session_items WHERE session_id = ?').get(sessionId) as { c: number }).c;
+    assert.equal(turns, 2);
+    assert.ok(items >= 2);
   });
 
   test('skips file with unchanged hash', () => {
