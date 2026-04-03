@@ -20,7 +20,7 @@ export interface BrowsingSessionRow {
   file_hash: string | null;
 }
 
-export interface LiveSessionRow extends BrowsingSessionRow {}
+export type LiveSessionRow = BrowsingSessionRow;
 
 export interface LiveTurnRow {
   id: number;

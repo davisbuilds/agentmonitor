@@ -3,13 +3,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
+import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connection.js';
+import type {
+  syncSessionFile as syncSessionFileFn,
+  syncSessionFileDetailed as syncSessionFileDetailedFn,
+} from '../src/watcher/index.js';
+
 let tempDir = '';
 let dbDir = '';
 let watchDir = '';
-/* eslint-disable @typescript-eslint/consistent-type-imports */
-let getDb: typeof import('../src/db/connection.js').getDb;
-let closeDb: typeof import('../src/db/connection.js').closeDb;
-/* eslint-enable @typescript-eslint/consistent-type-imports */
+let getDb: typeof getDbFn;
+let closeDb: typeof closeDbFn;
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-watcher-'));
@@ -65,9 +69,8 @@ const makeSession = (sessionId: string) => sampleJsonl([
 ]);
 
 describe('syncSessionFile', () => {
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-  let syncSessionFile: typeof import('../src/watcher/index.js').syncSessionFile;
-  let syncSessionFileDetailed: typeof import('../src/watcher/index.js').syncSessionFileDetailed;
+  let syncSessionFile: typeof syncSessionFileFn;
+  let syncSessionFileDetailed: typeof syncSessionFileDetailedFn;
 
   before(async () => {
     const mod = await import('../src/watcher/index.js');
