@@ -5,6 +5,7 @@ node_modules/
 dist/
 public/css/output.css
 *.tsbuildinfo
+*.pnpm-store/
 
 # runtime data
 data/

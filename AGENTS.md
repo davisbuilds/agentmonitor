@@ -1,7 +1,5 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
-
 Real-time localhost dashboard and session browser for monitoring AI agent activity across Claude Code and Codex.
 
 ## Project Snapshot
@@ -10,9 +8,19 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - Backend: Node.js + TypeScript + Express + SQLite (`better-sqlite3`).
 - Legacy frontend: static HTML + vanilla JS + Tailwind-generated CSS (at `/`).
 - Svelte 5 frontend: Vite SPA served at `/app/` with Monitor, Sessions, Search, Analytics tabs.
+- Rust backend: axum + tokio + rusqlite reimplementation (phased migration in progress).
+- Tauri desktop shell: native macOS app embedding the Rust backend.
 - Transport: HTTP ingestion + Server-Sent Events (SSE) for live updates.
 - Session ingestion: chokidar file-watcher discovers `~/.claude/projects/**/*.jsonl` automatically.
-- Default bind: `127.0.0.1:3141`.
+- Default bind: `127.0.0.1:3141` (TS), `127.0.0.1:3142` (Rust).
+
+## Nested Guidance
+
+Subdirectories have their own `AGENTS.md` (with `CLAUDE.md` symlinks) for domain-specific commands, code maps, and gotchas:
+
+- `rust-backend/AGENTS.md` — Rust backend commands, gotchas, parity tests.
+- `src-tauri/AGENTS.md` — Tauri desktop runtime model, embedding gotchas, release commands.
+- `frontend/AGENTS.md` — Svelte frontend code map, dev workflow, API consumption.
 
 ## Working Commands
 
@@ -31,40 +39,15 @@ For legacy UI work in dev, use two terminals:
 - Terminal 1: `pnpm dev`
 - Terminal 2: `pnpm css:watch`
 
-For Svelte frontend:
-- Build: `pnpm frontend:build` (output at `frontend/dist/`, served at `/app/`)
-- Dev: `pnpm frontend:dev` (Vite dev server at `:5173` with API proxy to `:3141`)
-
 ## Code Map
 
-- `src/server.ts`: app bootstrap, middleware, route mounting, graceful shutdown.
-- `src/config.ts`: environment-driven runtime config (all `AGENTMONITOR_*` env vars with defaults).
-- `.env.example`: environment variable template with all runtime vars and defaults.
-- `src/config.ts`: environment-driven runtime config.
-- `src/api/`: HTTP route handlers.
-- `src/db/schema.ts`: schema and indexes.
-- `src/db/queries.ts`: all DB reads/writes and stats aggregation.
-- `src/sse/emitter.ts`: SSE client management and fan-out.
-- `public/index.html`: legacy dashboard shell.
-- `public/js/`: legacy dashboard client code/components.
-- `frontend/`: Svelte 5 + Vite SPA (served at `/app/`).
-- `frontend/src/lib/components/monitor/`: Monitor tab (real-time dashboard).
-- `frontend/src/lib/components/sessions/`: Sessions tab (session browser + message viewer).
-- `frontend/src/lib/components/search/`: Search tab (FTS5 full-text search).
-- `frontend/src/lib/components/analytics/`: Analytics tab (charts, project/tool breakdowns).
-- `frontend/src/lib/api/client.ts`: typed API client for v1 and v2 endpoints.
-- `frontend/src/lib/stores/`: Svelte 5 reactive state (runes).
-- `src/api/v2/`: v2 REST API (session browser, search, analytics).
-- `src/db/v2-queries.ts`: all v2 SQL queries.
-- `src/parser/claude-code.ts`: JSONL parser for Claude Code session files.
-- `src/watcher/`: chokidar file-watcher for auto-discovering session files.
-- `src/otel/parser.ts`: OTLP JSON log/metric parsing for Claude Code and Codex.
-- `src/import/`: historical log importers (Claude Code JSONL, Codex).
-- `src/pricing/`: per-model cost calculation with JSON pricing data.
-- `hooks/claude-code/`: hook scripts for real-time Claude Code integration.
-- `hooks/codex/`: Codex OTEL integration docs.
-- `scripts/import.ts`: CLI for historical log import.
-- `scripts/seed.ts`: sample traffic generator.
+- `src/` — TS backend (Express, SQLite, SSE, JSONL parser, OTEL, importers, pricing).
+- `rust-backend/` — Rust backend reimplementation (axum, tokio, rusqlite).
+- `src-tauri/` — Tauri desktop shell (embedded Rust runtime, IPC).
+- `frontend/` — Svelte 5 SPA (Monitor, Sessions, Search, Analytics tabs).
+- `public/` — Legacy dashboard (static HTML + vanilla JS).
+- `hooks/` — Claude Code hook scripts and Codex OTEL integration docs.
+- `scripts/` — CLI utilities (import, seed).
 
 ## API Contract Notes
 
@@ -99,65 +82,7 @@ For Svelte frontend:
 - Keep v2 route handlers in `src/api/v2/router.ts`.
 - If API response shape changes, update `README.md` in the same change.
 - Do not commit local runtime artifacts (`data/`, `*.db`, generated CSS output).
-
-## Rust Backend (`rust-backend/`)
-
-The Rust service reimplements core ingest and live-stream behavior (axum + tokio + rusqlite). Spike complete with GO decision — phased migration in progress.
-
-### Working Commands
-
-- Dev server: `pnpm rust:dev` (binds `127.0.0.1:3142`)
-- Release build: `pnpm rust:build`
-- Run tests: `pnpm rust:test`
-- Desktop invariants only: `pnpm rust:test:desktop-invariants`
-- Import historical logs via Rust: `pnpm rust:import --source all` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`, `--claude-dir`, `--codex-dir`)
-- Parity tests (TS): `pnpm test:parity:ts` (isolated temp server + temp DB; does not touch normal monitor data)
-- Parity tests (TS live): `pnpm test:parity:ts:live` (needs TS server running on 3141)
-- Parity tests (Rust): `pnpm test:parity:rust` (needs Rust server running on 3142)
-- Benchmark comparison: `pnpm bench:compare`
-- Tauri desktop dev shell: `pnpm tauri:dev`
-- Tauri desktop build: `pnpm tauri:build`
-- Tauri macOS release (unsigned): `pnpm tauri:release:mac:unsigned`
-- Tauri macOS release (signed preflight + build): `pnpm tauri:release:mac:signed`
-- Tauri macOS release (signed + notarization preflight + build): `pnpm tauri:release:mac:notarized`
-
-### Phase 2 Runtime Model (Internal-First)
-
-- Tauri starts an embedded Rust runtime through `rust-backend`'s `runtime_contract` API (not `runtime_host` internals), then navigates the main window to the contract-provided base URL.
-- Rust serves both API routes and dashboard static assets from the same origin (`/api/*`, `/`, `/js/*`, `/css/*`) in desktop mode.
-- HTTP ingest/SSE remains the adapter boundary for hooks and parity safety; Tauri IPC is additive and not required for core ingest flow.
-- Desktop bind precedence is deterministic: `AGENTMONITOR_DESKTOP_HOST` / `AGENTMONITOR_DESKTOP_PORT` override backend env bind values; otherwise runtime falls back to `AGENTMONITOR_HOST` / `AGENTMONITOR_RUST_PORT` defaults.
-- Startup orchestration lives in `src-tauri/src/runtime_coordinator.rs`; keep `src-tauri/src/lib.rs` as composition glue only.
-- IPC command surface in `src-tauri/src/ipc/mod.rs` is additive (`desktop_runtime_status`, `desktop_health`); ingest/data flow remains HTTP-first.
-
-### Rust-Specific Gotchas
-
-- **`cargo` not in PATH**: Shell sessions from Claude Code don't inherit cargo. Prefix commands with `export PATH="$HOME/.cargo/bin:$PATH"` or use the `pnpm rust:*` scripts.
-- **Lib + bin crate structure**: Integration tests can't import from a binary crate. The crate is split into `src/lib.rs` (all modules + `build_router()`) and a thin `src/main.rs`. Always add new modules to `lib.rs`.
-- **`Path::new(":memory:")` in tests**: `db::initialize` expects `&Path`, not `&str`. Use `Path::new(":memory:")` for in-memory test databases.
-- **TS validates `agent_type` as required string only, not enum**: Parity tests must match the looser TypeScript behavior. Don't assert enum rejection for `agent_type` in shared parity tests.
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start (~small number); `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
-- **`pnpm rust:import` already includes Cargo `--` separator**: Pass flags directly (`pnpm rust:import --help`, `pnpm rust:import --source codex`). Do not add an extra `--`.
-- **Multiple Rust binaries require explicit `--bin` for `cargo run`**: After adding helper CLIs (for example `import`), plain `cargo run` becomes ambiguous. Keep `pnpm rust:dev` pinned to `--bin agentmonitor-rs`.
-- **Keep importer metadata as `serde_json::Value` until insert**: `truncate_metadata` accepts `&Value`; converting metadata to `String` too early causes type mismatches and extra parse/serialize churn.
-- **`Option<String>` + helper signature mismatch**: If helper takes `&str`, call `.as_deref().and_then(helper)` instead of `.and_then(helper)`.
-- **Import parity requires historical session finalization**: For events with `source = "import"`, mark sessions as `ended` to match TypeScript behavior and keep imported sessions out of active lists.
-
-### Tauri Embedding Gotchas
-
-- **Do not block inside async backend readiness checks**: Calling `std::thread::sleep` or sync `std::net::TcpStream` I/O inside async startup checks can starve the runtime and make health waits hang. Use `tokio::time::sleep` + `tokio::net::TcpStream` for readiness probes.
-- **Tauri setup failures can explode into macOS panic backtraces**: Returning setup-hook errors from deep startup paths can trigger noisy `panic in a function that cannot unwind` output in `tauri dev`. For bind-collision startup failures, emit a clear message and `std::process::exit(1)` in setup instead of relying on panic surfaces.
-- **Embedded-backend tests need unique SQLite paths**: Reusing the same temp DB file across tests causes intermittent `database is locked`. Generate a unique temp DB path per test case.
-- **Bind-collision tests should reserve a free port first**: Hardcoded test ports are flaky if already in use. Bind `127.0.0.1:0`, capture the assigned port, release listener, then run collision checks against that port.
-- **`pnpm rust:dev` and `pnpm tauri:dev` both target Rust port 3142 by default**: Running both at once is an expected startup collision. Shut down one or set a different `AGENTMONITOR_RUST_PORT` for one process.
-- **Use `AGENTMONITOR_DESKTOP_PORT` for Tauri-only overrides**: If you need `pnpm rust:dev` and `pnpm tauri:dev` simultaneously, prefer `AGENTMONITOR_DESKTOP_PORT` so standalone Rust defaults stay unchanged.
-- **Keep runtime boundary tests in `src-tauri/tests/runtime_boundary.rs`**: Add new desktop startup contract assertions there, not in ad-hoc manual checks, so boundary regressions fail fast.
-- **Do not call `shutdown_blocking()` inside async tokio tests**: It uses `tauri::async_runtime::block_on`, which panics with nested runtime errors. Use `EmbeddedBackendState::shutdown_async().await` in async tests.
-- **Keep Tauri command wrappers thin and test helper functions directly**: `#[tauri::command]` functions that take `tauri::State<'_, T>` are awkward to test in isolation. Put logic in plain helpers (for example `runtime_status_from_state`, `desktop_health_from_state`) and keep command functions as thin adapters.
-- **Use `pnpm tauri:release:mac -- --dry-run` before release builds**: The release script validates signing/notarization env upfront and fails fast before expensive bundle builds.
-- **Notarized mode requires a real API key file path**: `APPLE_API_KEY_PATH` must point to an existing `.p8`; preflight intentionally fails on missing files.
-- **DMG bundling runs AppleScript (`create-dmg`) and can stall in headless or restricted GUI sessions**: Use release script `--dry-run` for preflight checks and `pnpm tauri:build --no-bundle` for non-GUI verification.
-- **Finder launch differs from terminal cwd**: Relative backend paths (like `./data/agentmonitor-rs.db`) can fail when launched from Finder because cwd is not the repo root. In desktop startup, resolve relative DB paths against Tauri `app_data_dir`.
 - **Dashboard bootstrap hard-depends on `GET /api/events`**: `public/js/app.js` parses stats, events, and sessions together before loading cost/tool sections. If `GET /api/events` returns non-JSON (for example 405 HTML), `reloadData()` throws and cost/tool panels stay blank even when `/api/stats/cost` has data.
 
 ## Testing
