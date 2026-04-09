@@ -348,7 +348,11 @@ export function syncCodexSummaryLiveEvent(
       project = COALESCE(excluded.project, browsing_sessions.project),
       first_message = COALESCE(browsing_sessions.first_message, excluded.first_message),
       started_at = COALESCE(browsing_sessions.started_at, excluded.started_at),
-      ended_at = COALESCE(excluded.ended_at, browsing_sessions.ended_at),
+      ended_at = CASE
+        WHEN excluded.ended_at IS NOT NULL THEN excluded.ended_at
+        WHEN excluded.live_status IN ('live', 'active', 'available') THEN NULL
+        ELSE browsing_sessions.ended_at
+      END,
       message_count = browsing_sessions.message_count + excluded.message_count,
       user_message_count = browsing_sessions.user_message_count + excluded.user_message_count,
       live_status = excluded.live_status,

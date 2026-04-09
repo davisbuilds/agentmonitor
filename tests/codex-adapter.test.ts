@@ -207,6 +207,53 @@ test('syncCodexSummaryLiveEvent materializes assistant messages for codex respon
   assert.equal(payload.item_type, 'message_from_assistant');
 });
 
+test('syncCodexSummaryLiveEvent clears stale ended_at when live OTEL activity resumes', () => {
+  const db = getDb();
+  const importedRow = makeEventRow({
+    id: 5,
+    session_id: 'codex-summary-005',
+    event_type: 'response',
+    source: 'import',
+    created_at: '2026-03-24 12:00:00',
+    client_timestamp: '2026-03-24T12:00:00.000Z',
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.response',
+      response_item_type: 'message_from_assistant',
+      content_preview: 'Imported historical response',
+    }),
+  });
+  const liveRow = makeEventRow({
+    id: 6,
+    session_id: 'codex-summary-005',
+    event_type: 'tool_use',
+    source: 'otel',
+    tool_name: 'exec_command',
+    created_at: '2026-03-24 12:01:00',
+    client_timestamp: new Date().toISOString(),
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.tool_decision',
+      arguments: { cmd: 'pwd' },
+    }),
+  });
+
+  syncCodexSummaryLiveEvent(db, importedRow);
+  syncCodexSummaryLiveEvent(db, liveRow);
+
+  const session = db.prepare(`
+    SELECT ended_at, live_status, integration_mode
+    FROM browsing_sessions
+    WHERE id = ?
+  `).get('codex-summary-005') as {
+    ended_at: string | null;
+    live_status: string;
+    integration_mode: string;
+  };
+
+  assert.equal(session.ended_at, null);
+  assert.equal(session.live_status, 'live');
+  assert.equal(session.integration_mode, 'codex-otel');
+});
+
 test('normalizeCodexExporterRecord preserves reserved richer item kinds for future exporters', () => {
   const planItem = normalizeCodexExporterRecord({
     type: 'turn/plan/updated',
