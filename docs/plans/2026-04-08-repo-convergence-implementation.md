@@ -34,8 +34,9 @@ Converge AgentMonitor around one canonical product path: the Svelte app plus v2 
 
 - The Svelte app is the product surface making the most forward progress and should become the primary UX.
 - The Rust backend and Tauri shell are strategic, but they are not yet the canonical product path because they still serve legacy assets and a smaller API surface.
-- Current v2 data is source-skewed: Claude file-watcher paths populate historical/session-browser tables deeply, while Codex OTEL paths mostly populate summary/live tables.
+- Current v2 data is source-skewed: Claude file-watcher paths populate historical/session-browser tables deeply, while the current AgentMonitor Codex OTEL integration mostly populates summary/live tables.
 - The right target is not "make Codex look identical by faking data." The right target is one projection contract with explicit capability/fidelity markers and source-appropriate population.
+- Current AgentMonitor behavior should not be treated as the same thing as Codex source capability. Official Codex OTEL and app-server sources indicate richer Codex event models than the repo currently parses or projects.
 - Durable behavior from the localhost stack should be preserved when it improves operator reliability:
   - SSE client limits, heartbeat, and backpressure cleanup
   - resilient reconnect/status behavior
@@ -46,6 +47,23 @@ Converge AgentMonitor around one canonical product path: the Svelte app plus v2 
 - Brittle coupling from the legacy dashboard should not be preserved just because it exists today.
 - API and runtime changes must update `README.md`, and relevant system docs should stay aligned with the chosen canonical path.
 - The repository is now pinned to Node `24.13.0`; all TypeScript verification in this plan assumes that runtime.
+
+## Research Update: Codex Telemetry
+
+Web research on 2026-04-09 materially changed one planning assumption: AgentMonitor is probably not making full use of Codex data today, but the main limitation appears to be the current parser/projector scope rather than Codex OTEL being inherently summary-only.
+
+- Official Codex OTEL documentation describes `SessionTelemetry` as the path for rich session and business events, not just traces and counters.
+- Official Codex `SessionTelemetry` source emits richer business events than AgentMonitor currently projects, including user prompts, tool decisions, tool results, API requests, websocket and SSE events, and conversation-start events.
+- Official Codex app-server documentation and OpenAI's App Server write-up show a higher-fidelity Thread/Turn/Item event model for rich Codex interfaces.
+- Planning implication: expand and validate the current Codex OTEL capture before freezing Codex fidelity boundaries, and treat app-server as a future high-fidelity integration path rather than assuming OTEL is the hard ceiling.
+
+Sources:
+
+- [Codex OTEL README](https://github.com/openai/codex/blob/2f9090be62723ab15e3e8821c846eed1ebf9149c/codex-rs/otel/README.md)
+- [Codex SessionTelemetry source](https://github.com/openai/codex/blob/2f9090be62723ab15e3e8821c846eed1ebf9149c/codex-rs/otel/src/events/session_telemetry.rs)
+- [Codex app-server README](https://github.com/openai/codex/blob/2f9090be62723ab15e3e8821c846eed1ebf9149c/codex-rs/app-server/README.md)
+- [Codex state extraction source](https://github.com/openai/codex/blob/2f9090be62723ab15e3e8821c846eed1ebf9149c/codex-rs/state/src/extract.rs)
+- [OpenAI: Unlocking the Codex harness: how we built the App Server](https://openai.com/news/how-we-built-app-server-for-codex/)
 
 ## Useful V1 Carry-Forward Inventory
 
@@ -84,11 +102,12 @@ The legacy localhost path is not the right long-term architecture, but several b
 This work should be executed as a convergence program, not as unrelated cleanup.
 
 1. Canonicalize the docs and runtime contract.
-2. Introduce the shared v2 projection contract.
-3. Carry forward durable v1 localhost behavior into the canonical path.
-4. Move Rust and Tauri onto the same UI and API surface.
-5. Harden discovery, pagination, and parity coverage.
-6. Retire the legacy dashboard only after the cutover gates are met.
+2. Audit current Codex telemetry intake against current official Codex surfaces.
+3. Introduce the shared v2 projection contract.
+4. Carry forward durable v1 localhost behavior into the canonical path.
+5. Move Rust and Tauri onto the same UI and API surface.
+6. Harden discovery, pagination, and parity coverage.
+7. Retire the legacy dashboard only after the cutover gates are met.
 
 ## Task Breakdown
 
@@ -131,6 +150,51 @@ None
 - A zero-context engineer can tell which UI/API surface is canonical.
 - The docs no longer imply that Rust/Tauri and TypeScript are equally current product paths.
 
+### Task 2A: Audit And Expand Codex Telemetry Intake
+
+**Objective**
+
+Validate the real Codex telemetry ceiling before the shared projector hardens around current limitations, and widen AgentMonitor's Codex OTEL intake where current official Codex events already provide useful structure.
+
+**Files**
+
+- Modify: `src/otel/parser.ts`
+- Modify: `src/api/otel.ts`
+- Modify: `src/live/codex-adapter.ts`
+- Test: `tests/otel-parser.test.ts`
+- Test: `tests/codex-adapter.test.ts`
+- Reference: `docs/plans/2026-04-08-repo-convergence-implementation.md`
+
+**Dependencies**
+
+- Task 1
+
+**Implementation Steps**
+
+1. Inventory the Codex event names and payload shapes AgentMonitor currently accepts and projects.
+2. Compare that inventory against current official Codex OTEL and app-server sources, and write down the capability matrix the repo should target.
+3. Expand `src/otel/parser.ts` to preserve richer Codex business-event metadata already available in the current OTEL stream where it maps cleanly into the event contract:
+   - tool decisions and tool results
+   - prompt text and conversation-start context
+   - API request and response metadata
+   - useful websocket or SSE lifecycle fields if they carry latency, completion, or token signals
+   - richer response-item typing when payloads expose it
+4. Keep noisy transport events suppressible, but stop assuming every websocket or SSE event is disposable until the payloads are inspected.
+5. Update the Codex live adapter so richer parsed metadata can flow forward without falsely implying Claude-style transcript parity.
+6. Record the remaining gaps that OTEL still cannot close cleanly and mark those as app-server or local-state follow-up work rather than projection-contract bugs.
+
+**Verification**
+
+- Run: `pnpm test -- --test-name-pattern "OTEL|Codex"`
+- Expect: Codex OTEL parsing and live-adapter tests cover the richer event taxonomy and continue to pass.
+- Run: `pnpm build`
+- Expect: parser and adapter changes compile cleanly.
+
+**Done When**
+
+- The repo has an explicit, current understanding of which Codex capabilities come from today's OTEL stream versus a future richer integration path.
+- Codex is no longer artificially capped to summary fidelity just because the current parser ignores richer official events.
+
 ### Task 2: Introduce A Shared Projection Contract For V2 Data
 
 **Objective**
@@ -154,6 +218,7 @@ Replace source-specific v2 population with one projection contract that can repr
 **Dependencies**
 
 - Task 1
+- Task 2A
 
 **Implementation Steps**
 
@@ -163,11 +228,12 @@ Replace source-specific v2 population with one projection contract that can repr
    - tool-analytics-capable sessions
    - summary-only live sessions
 3. Route Claude watcher data through the shared projector instead of directly populating historical tables as a special case.
-4. Route Codex summary/live OTEL events through the same projector, preserving summary fidelity rather than pretending they are full transcript sessions.
+4. Route Codex OTEL events through the same projector using the richer event inventory from Task 2A, preserving honest capability boundaries rather than blindly forcing summary-only treatment.
 5. Decide how search and analytics handle partial-fidelity sessions:
    - either populate comparable documents/tool rows from the canonical model
    - or expose explicit capability metadata and filter unsupported sessions out of those queries
-6. Keep the projector additive and testable so Rust can later target the same semantics.
+6. Leave any still-missing Codex high-fidelity surfaces explicitly marked as future app-server or local-state follow-up work.
+7. Keep the projector additive and testable so Rust can later target the same semantics.
 
 **Verification**
 
@@ -402,6 +468,9 @@ Remove the legacy dashboard as a source of product drift only after the canonica
 - Risk: Codex data is over-normalized into fake transcript/search/tool rows that imply unsupported fidelity.
   Mitigation: add explicit fidelity/capability fields and only populate richer surfaces where the source can support them.
 
+- Risk: the plan hardens around the current Codex parser instead of the actual Codex telemetry surface, which would lock in unnecessary feature skew.
+  Mitigation: complete the Codex telemetry audit and parser-expansion step before finalizing shared projection boundaries.
+
 - Risk: Rust/Tauri fall further behind while TypeScript continues to evolve.
   Mitigation: give Rust/Tauri a dedicated convergence task before deprecating legacy assets.
 
@@ -416,6 +485,7 @@ Remove the legacy dashboard as a source of product drift only after the canonica
 | Requirement | Proof command | Expected signal |
 | --- | --- | --- |
 | Canonical product path is documented | `rg -n "canonical|maintenance-only|legacy dashboard" README.md AGENTS.md docs/system/ARCHITECTURE.md docs/system/FEATURES.md docs/project/ROADMAP.md` | docs consistently describe Svelte/v2 as primary |
+| Codex telemetry intake matches current official understanding | `pnpm test -- --test-name-pattern "OTEL|Codex"` | Codex parser and live-adapter coverage reflect the current supported event taxonomy |
 | Shared projection contract behaves for both agents | `pnpm test -- --test-name-pattern "Codex|Claude|v2"` | projection and v2 tests pass |
 | Durable v1 operator behavior is preserved intentionally | `pnpm test -- --test-name-pattern "SSE|stats|cost|tools|live stream"` | SSE and analytics tests pass with hardened behavior |
 | Rust/Tauri serve the canonical surface | `pnpm rust:test && pnpm tauri:build --no-bundle` | Rust tests and Tauri compile succeed |
