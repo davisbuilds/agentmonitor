@@ -130,6 +130,23 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 
 `src/otel/parser.ts` converts OTLP JSON payloads (logs, metrics) into normalized events for the standard ingest pipeline.
 
+### Codex Telemetry Capability Matrix
+
+Codex should be thought of as having multiple telemetry surfaces, not one monolithic "OTEL only" story.
+
+| Surface | Upstream source | Current AgentMonitor status | Notes |
+|---------|------------------|-----------------------------|-------|
+| Session bootstrap metadata | `codex.conversation_starts` OTEL event | Captured | Startup metadata such as provider, reasoning effort, sandbox policy, and MCP server list can now flow into normalized events. |
+| User prompts | `codex.user_prompt`, `codex.user_message`, `codex.response` user items | Captured | Prompt text is retained when present and projected into live summary sessions. |
+| Tool decisions and tool results | `codex.tool_decision`, `codex.tool_result` OTEL events | Captured | Tool call metadata, call ids, parsed arguments, outputs, success state, and MCP origin metadata are now preserved and projected more honestly. |
+| Response completion usage | `codex.sse_event` with `event.kind=response.completed` | Captured | Response-complete token usage and related metadata can populate `llm_response` rows without waiting for backfill. |
+| Response item typing | `codex.response`, `codex.event_msg` payload types | Partially captured | Assistant messages, reasoning, shell-call style responses, and tool-result style outputs can be projected when the OTEL payload includes enough structure. |
+| Websocket request and response lifecycle | `codex.websocket_request`, `codex.websocket_event` | Partially captured | Request/error/response classification is available, but this is still not full transcript-grade data. |
+| Full Thread/Turn/Item lifecycle | `codex app-server` JSON-RPC | Not integrated yet | This is the richer path for true Codex-native parity, including item start/completion and streaming deltas. |
+| Persisted local rollout state | Codex local session/state files | Import-only today | Local Codex session import exists, but the live v2 path still centers on OTEL rather than direct local-state projection. |
+
+Planning implication: current AgentMonitor Codex fidelity limits should be treated as implementation limits of the current parser/projector, not as the hard ceiling of Codex telemetry itself.
+
 ## Runtime Path Resolution
 
 - `AGENTMONITOR_PROJECTS_DIR` controls the workspace root used for git branch lookups.
