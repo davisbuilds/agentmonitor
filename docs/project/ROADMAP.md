@@ -17,6 +17,9 @@ This is a lightweight snapshot, not a release contract.
 
 ## In Progress
 
+- **Repo convergence**: establish the Svelte app at `/app/` and `/api/v2/*` as the canonical product path, pull forward durable localhost behavior from v1, converge Rust/Tauri on the same surface, and retire the legacy `/` dashboard behind parity gates.
+  - Completed so far: convergence plan documented in `docs/plans/2026-04-08-repo-convergence-implementation.md`, Node runtime pinned to `24.13.0`, and canonical-path docs cleanup started.
+  - Next: shared cross-agent v2 projection, v1 behavior carry-forward into the Svelte/live path, Rust/Tauri convergence on `/app` + `/api/v2`, and legacy cutover criteria.
 - **Live Ops tab**: Claude-first live operator surface is shipped in the Svelte app with dedicated live APIs, SSE, and privacy/capture settings.
   - Completed so far: live schema, Claude live ingestion, Codex passive summary participation, live v2 endpoints, Svelte `Live` tab, and live capture/redaction controls.
   - Next: exporter-contract hardening and noisy-session performance improvements.

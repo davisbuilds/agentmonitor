@@ -2,8 +2,16 @@
 
 Product-surface reference for AgentMonitor.
 
+## Canonical Surface
+
+- Canonical product surface: Svelte app at `/app/`.
+- Canonical application contract: `/api/v2/*`.
+- Transitional compatibility surface: legacy dashboard at `/`.
+
 ## Real-Time Dashboard
 
+- The Svelte `Monitor` tab is the canonical real-time operator surface.
+- The legacy dashboard at `/` remains available for compatibility, but should not define new product behavior.
 - Agent cards showing active sessions, tool usage, and token counts.
 - Live event feed with filtering by agent type, event type, tool name, model, and branch.
 - Stats bar with aggregate counters and cost totals.
@@ -78,6 +86,8 @@ Product-surface reference for AgentMonitor.
 | `/api/filter-options` | GET | Distinct filterable field values |
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |
 | `/api/otel/v1/metrics` | POST | OTLP JSON metric ingestion |
+
+V1 endpoints remain active for compatibility and current monitor behavior, but the long-term product contract is `/api/v2/*`.
 
 ## SSE Event Types
 

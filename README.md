@@ -6,10 +6,16 @@ Real-time localhost dashboard + session browser for monitoring AI agent activity
 
 - Node.js + TypeScript + Express
 - SQLite (`better-sqlite3`) with FTS5
-- Svelte 5 + Vite frontend (at `/app/`) — Monitor, Live, Sessions, Search, Analytics tabs
-- Legacy vanilla JS frontend + Tailwind CSS (at `/`)
+- Svelte 5 + Vite frontend (at `/app/`) — canonical product surface with Monitor, Live, Sessions, Search, Analytics tabs
+- Legacy vanilla JS frontend + Tailwind CSS (at `/`) — transitional compatibility surface
 - SSE for live updates
 - chokidar file-watcher for automatic session discovery
+
+## Product Status
+
+- Canonical UI and product contract: `/app/` + `/api/v2/*`
+- Transitional compatibility surface: `/`
+- Rust backend and Tauri desktop are converging on the same canonical Svelte + v2 surface
 
 ## Quick Start
 
@@ -39,9 +45,10 @@ pnpm css:watch
 pnpm frontend:dev
 ```
 
-Open `http://127.0.0.1:3141` (legacy dashboard) or `http://127.0.0.1:5173/app/` for live Svelte development.
-If you want the Express-served `/app/` at `http://127.0.0.1:3141/app/`, run `pnpm frontend:build` after frontend changes.
+Open `http://127.0.0.1:5173/app/` for live Svelte development or `http://127.0.0.1:3141/` for the legacy compatibility dashboard.
+For the canonical Express-served app at `http://127.0.0.1:3141/app/`, run `pnpm frontend:build` after frontend changes.
 For continuous rebuilds of the Express-served `/app/`, run `pnpm frontend:watch`.
+Use `http://127.0.0.1:3141/` only for legacy compatibility work.
 
 ## Useful Scripts
 

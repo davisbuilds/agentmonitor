@@ -4,6 +4,7 @@ Wraps the agentmonitor Rust backend into a native macOS desktop app via Tauri v2
 
 See root `AGENTS.md` for project overview, API contract, and shared conventions.
 See `rust-backend/AGENTS.md` for Rust-specific gotchas and commands.
+Desktop convergence target is the same canonical Svelte `/app/` + `/api/v2/*` surface as the TS runtime. The current legacy-asset path is transitional.
 
 ## Working Commands
 

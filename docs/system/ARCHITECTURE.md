@@ -5,8 +5,16 @@
 1. Agent hooks (Claude Code) or OTEL exporters (Codex) send events via HTTP to the ingest API.
 2. Events are validated, normalized, and stored in SQLite.
 3. The SSE emitter broadcasts new events and stats to connected dashboard clients.
-4. The vanilla JS dashboard renders agent cards, event feeds, cost breakdowns, and tool analytics in real time.
-5. Historical sessions can be backfilled via the import pipeline.
+4. The canonical Svelte app at `/app/` consumes the live and session APIs, with `/api/v2/*` as the target steady-state contract and some current Monitor dependencies still reading v1 endpoints.
+5. The legacy vanilla JS dashboard at `/` remains a transitional compatibility surface.
+6. Historical sessions can be backfilled via the import pipeline.
+
+## Canonical Surface
+
+- Canonical frontend: Svelte SPA served at `/app/`.
+- Canonical application contract: `/api/v2/*`.
+- Transitional compatibility surface: legacy dashboard at `/`.
+- New product work should prefer Svelte + v2, and carry forward durable v1 localhost behavior only where it still adds operator value.
 
 ## Active Decision Records
 
@@ -26,6 +34,7 @@ An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream b
 - Pricing auto-cost parity on ingest
 
 Runs on port 3142 by default. Current verification includes full Rust test suite + shared parity tests.
+The current Rust runtime does not yet represent the canonical product surface end-to-end because desktop/runtime delivery still centers on the legacy dashboard asset path rather than the full Svelte `/app` + `/api/v2` contract.
 
 ## Tauri Desktop Runtime (phase 2 in progress)
 
@@ -39,6 +48,8 @@ Current desktop runtime is internal-first:
 - Rust backend serves dashboard static assets as router fallback, so UI and API share the same origin in desktop mode.
 - HTTP ingest/SSE remains available on localhost as adapter boundary for hooks and parity coverage.
 - IPC is additive and now includes first functional handlers in `src-tauri/src/ipc/mod.rs` (`desktop_runtime_status`, `desktop_health`), while ingest/state traffic remains HTTP-first.
+
+Current limitation: desktop still defaults to the legacy asset path and has not yet converged on the canonical Svelte `/app` + `/api/v2` experience.
 
 Guardrail coverage:
 - `rust-backend/tests/desktop_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.
@@ -60,6 +71,7 @@ Express route handlers in `src/api/`:
 | `transcripts.ts` | `GET /api/sessions/:id` (transcript) | Session transcript aggregation |
 
 Routes are composed in `src/api/router.ts`.
+V1 routes remain important for compatibility and current monitor behavior, but `/api/v2/*` is the canonical contract for the long-term app surface.
 
 ## Database Layer
 
@@ -135,6 +147,7 @@ src/otel/                 # OTLP JSON parser
 src/pricing/              # Cost calculation + JSON pricing data
 src/sse/                  # SSE client management and fan-out
 src/util/                 # Utilities (git branch detection)
+frontend/dist/            # Built Svelte SPA served at /app by the TS runtime
 public/                   # Dashboard HTML, JS components, CSS
 hooks/claude-code/        # Claude Code integration hooks (bash + Python)
 hooks/codex/              # Codex OTEL integration docs

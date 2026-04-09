@@ -3,6 +3,7 @@
 Reimplements core ingest and live-stream behavior using axum + tokio + rusqlite. Spike complete with GO decision — phased migration in progress.
 
 See root `AGENTS.md` for project overview, API contract, and shared conventions.
+The convergence target is the canonical Svelte `/app/` experience backed by the `/api/v2/*` contract. Do not extend the legacy `/` dashboard path as a separate product.
 
 ## Working Commands
 

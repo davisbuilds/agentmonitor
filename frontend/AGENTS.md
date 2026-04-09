@@ -1,6 +1,7 @@
 # Svelte 5 Frontend
 
 Vite SPA served at `/app/` with Monitor, Sessions, Search, and Analytics tabs.
+This is the canonical product surface for AgentMonitor.
 
 See root `AGENTS.md` for project overview, API contract (V2 endpoints this app consumes), and shared conventions.
 
@@ -20,7 +21,7 @@ See root `AGENTS.md` for project overview, API contract (V2 endpoints this app c
 
 ## API Consumption
 
-This app consumes the V2 REST API defined in the root `AGENTS.md` API Contract Notes section. Key endpoints:
+This app consumes the canonical V2 REST API defined in the root `AGENTS.md` API Contract Notes section. Some `Monitor` behaviors still depend on v1 endpoints today, but new product-contract work should prefer v2. Key endpoints:
 
 - `GET /api/v2/sessions` — session list with cursor pagination
 - `GET /api/v2/sessions/:id/messages` — message viewer data
