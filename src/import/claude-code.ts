@@ -3,6 +3,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
+import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 
 // ─── Claude Code JSONL line types ──────────────────────────────────────
 
@@ -61,23 +62,7 @@ const TYPE_MAP: Record<string, EventType> = {
 export function discoverClaudeCodeLogs(baseDir?: string): string[] {
   const claudeDir = baseDir ?? path.join(os.homedir(), '.claude');
   const projectsDir = path.join(claudeDir, 'projects');
-  const files: string[] = [];
-
-  if (!fs.existsSync(projectsDir)) return files;
-
-  // Walk ~/.claude/projects/<encoded-dir>/<session-uuid>.jsonl
-  for (const projectEntry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
-    if (!projectEntry.isDirectory()) continue;
-    const projectPath = path.join(projectsDir, projectEntry.name);
-
-    for (const fileEntry of fs.readdirSync(projectPath, { withFileTypes: true })) {
-      if (fileEntry.isFile() && fileEntry.name.endsWith('.jsonl')) {
-        files.push(path.join(projectPath, fileEntry.name));
-      }
-    }
-  }
-
-  return files.sort();
+  return discoverJsonlFilesRecursive(projectsDir);
 }
 
 // ─── Parse a single JSONL file ──────────────────────────────────────────

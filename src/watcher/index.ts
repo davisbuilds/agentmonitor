@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import type Database from 'better-sqlite3';
 import { parseSessionMessages, insertParsedSession } from '../parser/claude-code.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
+import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 
 // --- File hashing ---
 
@@ -16,22 +17,7 @@ function hashFile(filePath: string): string {
 
 export function discoverSessionFiles(claudeDir: string): string[] {
   const projectsDir = path.join(claudeDir, 'projects');
-  const files: string[] = [];
-
-  if (!fs.existsSync(projectsDir)) return files;
-
-  for (const projectEntry of fs.readdirSync(projectsDir, { withFileTypes: true })) {
-    if (!projectEntry.isDirectory()) continue;
-    const projectPath = path.join(projectsDir, projectEntry.name);
-
-    for (const fileEntry of fs.readdirSync(projectPath, { withFileTypes: true })) {
-      if (fileEntry.isFile() && fileEntry.name.endsWith('.jsonl')) {
-        files.push(path.join(projectPath, fileEntry.name));
-      }
-    }
-  }
-
-  return files.sort();
+  return discoverJsonlFilesRecursive(projectsDir);
 }
 
 // --- Sync a single session file ---

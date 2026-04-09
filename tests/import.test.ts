@@ -209,9 +209,11 @@ describe('Claude Code log discovery', () => {
     // Create mock directory structure
     fs.mkdirSync(path.join(tmpDir, 'projects', 'project-a'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'projects', 'project-b'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'projects', 'project-b', 'nested', 'deeper'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'projects', 'project-a', 'sess-1.jsonl'), '');
     fs.writeFileSync(path.join(tmpDir, 'projects', 'project-a', 'sess-2.jsonl'), '');
     fs.writeFileSync(path.join(tmpDir, 'projects', 'project-b', 'sess-3.jsonl'), '');
+    fs.writeFileSync(path.join(tmpDir, 'projects', 'project-b', 'nested', 'deeper', 'sess-4.jsonl'), '');
     fs.writeFileSync(path.join(tmpDir, 'projects', 'project-a', 'other.txt'), '');
   });
 
@@ -221,8 +223,13 @@ describe('Claude Code log discovery', () => {
 
   test('discovers all .jsonl files across project directories', () => {
     const files = discoverClaudeCodeLogs(tmpDir);
-    assert.equal(files.length, 3);
+    assert.equal(files.length, 4);
     assert.ok(files.every(f => f.endsWith('.jsonl')));
+  });
+
+  test('discovers nested .jsonl files recursively', () => {
+    const files = discoverClaudeCodeLogs(tmpDir);
+    assert.ok(files.some(f => f.endsWith(path.join('project-b', 'nested', 'deeper', 'sess-4.jsonl'))));
   });
 
   test('ignores non-jsonl files', () => {

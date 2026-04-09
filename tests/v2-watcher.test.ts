@@ -205,12 +205,16 @@ describe('discoverSessionFiles', () => {
     // Write some session files
     writeSessionFile('discover-001', makeSession('discover-001'));
     writeSessionFile('discover-002', makeSession('discover-002'));
+    const nestedDir = path.join(watchDir, 'nested', 'branch');
+    fs.mkdirSync(nestedDir, { recursive: true });
+    fs.writeFileSync(path.join(nestedDir, 'discover-003.jsonl'), makeSession('discover-003'));
 
     const parentDir = path.join(tempDir, 'watch');
     const files = discoverSessionFiles(parentDir);
-    assert.ok(files.length >= 2, `expected >= 2 files, got ${files.length}`);
+    assert.ok(files.length >= 3, `expected >= 3 files, got ${files.length}`);
     assert.ok(files.some(f => f.endsWith('discover-001.jsonl')));
     assert.ok(files.some(f => f.endsWith('discover-002.jsonl')));
+    assert.ok(files.some(f => f.endsWith(path.join('nested', 'branch', 'discover-003.jsonl'))));
   });
 
   test('ignores non-JSONL files', () => {
@@ -247,9 +251,15 @@ describe('syncAllFiles', () => {
       path.join(syncDir, 'sync-002.jsonl'),
       makeSession('sync-002'),
     );
+    const nestedSyncDir = path.join(syncDir, 'nested', 'deeper');
+    fs.mkdirSync(nestedSyncDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(nestedSyncDir, 'sync-003.jsonl'),
+      makeSession('sync-003'),
+    );
 
     const stats = syncAllFiles(db, parentDir);
-    assert.ok(stats.parsed >= 2, `expected >= 2 parsed, got ${stats.parsed}`);
+    assert.ok(stats.parsed >= 3, `expected >= 3 parsed, got ${stats.parsed}`);
     assert.ok(typeof stats.skipped === 'number');
     assert.ok(typeof stats.errors === 'number');
   });
