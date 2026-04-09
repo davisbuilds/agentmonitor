@@ -142,6 +142,71 @@ test('syncCodexSummaryLiveEvent redacts tool arguments when capture is disabled'
   assert.equal(payload.input_redacted, true);
 });
 
+test('syncCodexSummaryLiveEvent materializes tool_result items for codex.tool_result metadata', () => {
+  const db = getDb();
+  const row = makeEventRow({
+    id: 3,
+    session_id: 'codex-summary-003',
+    event_type: 'tool_use',
+    tool_name: 'shell',
+    status: 'error',
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.tool_result',
+      call_id: 'call-xyz',
+      output: 'permission denied',
+      success: false,
+    }),
+  });
+
+  const result = syncCodexSummaryLiveEvent(db, row);
+  assert.equal(result.inserted_items, 1);
+
+  const item = db.prepare('SELECT kind, payload_json FROM session_items WHERE session_id = ?').get('codex-summary-003') as {
+    kind: string;
+    payload_json: string;
+  };
+  const payload = JSON.parse(item.payload_json) as {
+    tool_name?: string;
+    output?: string;
+    success?: boolean;
+  };
+
+  assert.equal(item.kind, 'tool_result');
+  assert.equal(payload.tool_name, 'shell');
+  assert.equal(payload.output, 'permission denied');
+  assert.equal(payload.success, false);
+});
+
+test('syncCodexSummaryLiveEvent materializes assistant messages for codex response items', () => {
+  const db = getDb();
+  const row = makeEventRow({
+    id: 4,
+    session_id: 'codex-summary-004',
+    event_type: 'response',
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.response',
+      response_item_type: 'message_from_assistant',
+      content_preview: 'Pinned the Node runtime and updated the docs.',
+    }),
+  });
+
+  const result = syncCodexSummaryLiveEvent(db, row);
+  assert.equal(result.inserted_items, 1);
+
+  const item = db.prepare('SELECT kind, payload_json FROM session_items WHERE session_id = ?').get('codex-summary-004') as {
+    kind: string;
+    payload_json: string;
+  };
+  const payload = JSON.parse(item.payload_json) as {
+    text?: string;
+    item_type?: string;
+  };
+
+  assert.equal(item.kind, 'assistant_message');
+  assert.equal(payload.text, 'Pinned the Node runtime and updated the docs.');
+  assert.equal(payload.item_type, 'message_from_assistant');
+});
+
 test('normalizeCodexExporterRecord preserves reserved richer item kinds for future exporters', () => {
   const planItem = normalizeCodexExporterRecord({
     type: 'turn/plan/updated',

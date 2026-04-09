@@ -29,6 +29,37 @@ function parseMetadata(row: EventRow): Record<string, unknown> {
   }
 }
 
+function getString(metadata: Record<string, unknown>, key: string): string | undefined {
+  const value = metadata[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function getBoolean(metadata: Record<string, unknown>, key: string): boolean | undefined {
+  const value = metadata[key];
+  return typeof value === 'boolean' ? value : undefined;
+}
+
+function getCodexText(metadata: Record<string, unknown>): string | undefined {
+  return getString(metadata, 'text')
+    ?? getString(metadata, 'message')
+    ?? getString(metadata, 'content_preview')
+    ?? getString(metadata, 'output');
+}
+
+function getResponseItemType(metadata: Record<string, unknown>): string | undefined {
+  return getString(metadata, 'response_item_type');
+}
+
+function getOtelEventName(metadata: Record<string, unknown>): string | undefined {
+  return getString(metadata, 'otel_event_name');
+}
+
+function getSourceItemId(row: EventRow, metadata: Record<string, unknown>, suffix?: string): string {
+  const callId = getString(metadata, 'call_id');
+  if (callId && suffix) return `${callId}:${suffix}`;
+  return row.event_id ?? `codex-event:${row.id}`;
+}
+
 function deriveTimestamp(row: EventRow): string {
   return row.client_timestamp ?? row.created_at;
 }
@@ -58,8 +89,17 @@ function titleFor(row: EventRow, metadata: Record<string, unknown>): string {
   if (row.event_type === 'user_prompt' && typeof metadata.message === 'string' && metadata.message.trim()) {
     return metadata.message.trim().slice(0, 120);
   }
+  if (row.event_type === 'response') {
+    const responseText = getCodexText(metadata);
+    const responseItemType = getResponseItemType(metadata);
+    if (responseText?.trim()) return responseText.trim().slice(0, 120);
+    if (responseItemType) return responseItemType.replace(/_/g, ' ');
+    return 'Response item';
+  }
   if (row.event_type === 'tool_use' && row.tool_name) {
-    return `Tool ${row.tool_name}`;
+    return getOtelEventName(metadata) === 'codex.tool_result'
+      ? `Tool result ${row.tool_name}`
+      : `Tool ${row.tool_name}`;
   }
   if (row.event_type === 'file_change' && typeof metadata.file_path === 'string') {
     return `Changed ${metadata.file_path}`;
@@ -71,6 +111,134 @@ function titleFor(row: EventRow, metadata: Record<string, unknown>): string {
   if (row.event_type === 'session_end') return 'Session ended';
   if (row.event_type === 'error') return 'Error';
   return row.event_type.replace(/_/g, ' ');
+}
+
+function buildCodexToolItem(row: EventRow, metadata: Record<string, unknown>, createdAt: string): CanonicalLiveItem {
+  const otelEventName = getOtelEventName(metadata);
+
+  if (otelEventName === 'codex.tool_result') {
+    return normalizeCodexItem({
+      type: 'tool_result',
+      id: getSourceItemId(row, metadata, 'result'),
+      created_at: createdAt,
+      status: row.status,
+      payload: {
+        tool_name: row.tool_name ?? 'unknown',
+        call_id: getString(metadata, 'call_id'),
+        output: getString(metadata, 'output') ?? getString(metadata, 'content_preview') ?? '',
+        success: getBoolean(metadata, 'success'),
+        mcp_server: getString(metadata, 'mcp_server'),
+        mcp_server_origin: getString(metadata, 'mcp_server_origin'),
+      },
+    })!;
+  }
+
+  return normalizeCodexItem({
+    type: 'mcpToolCall',
+    id: getSourceItemId(row, metadata, otelEventName === 'codex.tool_decision' ? 'decision' : undefined),
+    created_at: createdAt,
+    status: row.status,
+    payload: {
+      tool_name: row.tool_name ?? 'unknown',
+      input: metadata.arguments ?? metadata.input ?? null,
+      ...metadata,
+    },
+  })!;
+}
+
+function buildCodexResponseItem(row: EventRow, metadata: Record<string, unknown>, createdAt: string): CanonicalLiveItem | null {
+  const responseItemType = getResponseItemType(metadata);
+  const text = getCodexText(metadata);
+  const baseId = row.event_id ?? `codex-event:${row.id}`;
+
+  switch (responseItemType) {
+    case 'message_from_user':
+      return normalizeCodexItem({
+        type: 'user_message',
+        id: baseId,
+        created_at: createdAt,
+        status: row.status,
+        payload: { text: text ?? '' },
+      });
+    case 'assistant_message':
+    case 'agent_message':
+    case 'message_from_assistant':
+      return normalizeCodexItem({
+        type: 'assistant_message',
+        id: baseId,
+        created_at: createdAt,
+        status: row.status,
+        payload: { text: text ?? '', item_type: responseItemType },
+      });
+    case 'reasoning':
+    case 'reasoning_summary_delta':
+    case 'reasoning_content_delta':
+    case 'reasoning_summary_part_added':
+      return normalizeCodexItem({
+        type: 'reasoning',
+        id: baseId,
+        created_at: createdAt,
+        status: row.status,
+        payload: { text: text ?? '', item_type: responseItemType },
+      });
+    case 'local_shell_call':
+      return normalizeCodexItem({
+        type: 'commandExecution',
+        id: baseId,
+        created_at: createdAt,
+        status: row.status,
+        payload: {
+          command: metadata.arguments ?? metadata.input ?? text ?? '',
+          item_type: responseItemType,
+          ...metadata,
+        },
+      });
+    case 'function_call':
+    case 'tool_search_call':
+    case 'custom_tool_call':
+    case 'web_search_call':
+    case 'image_generation_call':
+      return normalizeCodexItem({
+        type: 'mcpToolCall',
+        id: baseId,
+        created_at: createdAt,
+        status: row.status,
+        payload: {
+          tool_name: row.tool_name ?? responseItemType,
+          input: metadata.arguments ?? metadata.input ?? null,
+          item_type: responseItemType,
+          ...metadata,
+        },
+      });
+    case 'function_call_output':
+    case 'tool_search_output':
+    case 'custom_tool_call_output':
+      return normalizeCodexItem({
+        type: 'tool_result',
+        id: baseId,
+        created_at: createdAt,
+        status: row.status,
+        payload: {
+          tool_name: row.tool_name ?? responseItemType,
+          content: text ?? '',
+          item_type: responseItemType,
+        },
+      });
+    default:
+      if (text) {
+        return normalizeCodexItem({
+          type: 'assistant_message',
+          id: baseId,
+          created_at: createdAt,
+          status: row.status,
+          payload: {
+            text,
+            item_type: responseItemType ?? 'response',
+          },
+        });
+      }
+      return null;
+  }
 }
 
 function buildCodexSummaryLiveItem(row: EventRow, metadata: Record<string, unknown>): CanonicalLiveItem | null {
@@ -88,16 +256,9 @@ function buildCodexSummaryLiveItem(row: EventRow, metadata: Record<string, unkno
         },
       });
     case 'tool_use':
-      return normalizeCodexItem({
-        type: 'mcpToolCall',
-        id: row.event_id ?? `codex-event:${row.id}`,
-        created_at: createdAt,
-        status: row.status,
-        payload: {
-          tool_name: row.tool_name ?? 'unknown',
-          ...metadata,
-        },
-      });
+      return buildCodexToolItem(row, metadata, createdAt);
+    case 'response':
+      return buildCodexResponseItem(row, metadata, createdAt);
     case 'file_change':
       return normalizeCodexItem({
         type: 'fileChange',
@@ -115,11 +276,14 @@ function buildCodexSummaryLiveItem(row: EventRow, metadata: Record<string, unkno
         payload: {
           summary: 'Model response',
           model: row.model,
+          event_kind: getString(metadata, 'event_kind'),
           tokens_in: row.tokens_in,
           tokens_out: row.tokens_out,
           cache_read_tokens: row.cache_read_tokens,
           cache_write_tokens: row.cache_write_tokens,
           cost_usd: row.cost_usd,
+          reasoning_token_count: metadata.reasoning_token_count,
+          tool_token_count: metadata.tool_token_count,
         },
       });
     case 'session_start':

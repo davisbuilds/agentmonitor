@@ -198,6 +198,14 @@ export function normalizeCodexItem(input: {
         source_item_id: input.id,
         payload,
       };
+    case 'tool_result':
+      return {
+        kind: 'tool_result',
+        status: input.status,
+        created_at: input.created_at,
+        source_item_id: input.id,
+        payload,
+      };
     case 'plan':
     case 'turn/plan/updated':
       return {

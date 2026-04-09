@@ -113,7 +113,7 @@ function buildLogPayload(opts: {
   resourceAttrs?: Array<{ key: string; value: { stringValue?: string } }>;
   logRecords: Array<{
     eventName?: string;
-    attributes?: Array<{ key: string; value: { stringValue?: string; intValue?: string | number } }>;
+    attributes?: Array<{ key: string; value: { stringValue?: string; intValue?: string | number; boolValue?: boolean; doubleValue?: number } }>;
     body?: unknown;
     timeUnixNano?: string;
   }>;
@@ -801,6 +801,44 @@ describe('Codex OTLP integration', () => {
     assert.equal(events.events[0].model, 'o3');
   });
 
+  test('maps codex.conversation_starts to session_start and preserves startup metadata', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-conversation-start-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.conversation_starts',
+        attributes: [
+          { key: 'provider_name', value: { stringValue: 'openai' } },
+          { key: 'reasoning_effort', value: { stringValue: 'high' } },
+          { key: 'reasoning_summary', value: { stringValue: 'auto' } },
+          { key: 'context_window', value: { intValue: 200000 } },
+          { key: 'approval_policy', value: { stringValue: 'never' } },
+          { key: 'sandbox_policy', value: { stringValue: 'workspace-write' } },
+          { key: 'mcp_servers', value: { stringValue: 'github, slack' } },
+        ],
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'session_start');
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as {
+      provider_name?: string;
+      reasoning_effort?: string;
+      sandbox_policy?: string;
+      mcp_servers?: string[];
+    };
+    assert.equal(meta.provider_name, 'openai');
+    assert.equal(meta.reasoning_effort, 'high');
+    assert.equal(meta.sandbox_policy, 'workspace-write');
+    assert.deepEqual(meta.mcp_servers, ['github', 'slack']);
+  });
+
   test('maps codex.user_message logs to user_prompt events', async () => {
     const payload = buildLogPayload({
       serviceName: 'codex_cli_rs',
@@ -893,7 +931,49 @@ describe('Codex OTLP integration', () => {
     assert.equal(meta.message, 'Please continue with the fix');
   });
 
-  test('still skips codex.response noise that is not a user prompt', async () => {
+  test('maps codex.response assistant payloads to response events and assistant live items', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-response-assistant-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.response',
+        body: {
+          stringValue: JSON.stringify({
+            session_id: 'codex-response-assistant-1',
+            type: 'response_item',
+            payload: {
+              type: 'message_from_assistant',
+              content: [{ type: 'output_text', text: 'Patched the flaky test and updated the assertion.' }],
+            },
+          }),
+        },
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'response');
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as {
+      response_item_type?: string;
+      content_preview?: string;
+    };
+    assert.equal(meta.response_item_type, 'message_from_assistant');
+    assert.equal(meta.content_preview, 'Patched the flaky test and updated the assertion.');
+
+    const items = await getLiveItems('codex-response-assistant-1');
+    assert.equal(items.total, 1);
+    assert.equal(items.data[0].kind, 'assistant_message');
+
+    const payloadJson = JSON.parse(String(items.data[0].payload_json)) as { text?: string };
+    assert.equal(payloadJson.text, 'Patched the flaky test and updated the assertion.');
+  });
+
+  test('captures codex.response assistant noise as response items instead of dropping it', async () => {
     const payload = buildLogPayload({
       serviceName: 'codex_cli_rs',
       resourceAttrs: [
@@ -917,7 +997,93 @@ describe('Codex OTLP integration', () => {
     await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
 
     const events = await getEvents();
-    assert.equal(events.total, 0);
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'response');
+  });
+
+  test('maps codex.sse_event response.completed to llm_response with usage metadata', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-sse-completed-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.sse_event',
+        attributes: [
+          { key: 'event.kind', value: { stringValue: 'response.completed' } },
+          { key: 'input_token_count', value: { intValue: 1200 } },
+          { key: 'output_token_count', value: { intValue: 320 } },
+          { key: 'cached_token_count', value: { intValue: 180 } },
+          { key: 'reasoning_token_count', value: { intValue: 44 } },
+          { key: 'tool_token_count', value: { intValue: 12 } },
+        ],
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'llm_response');
+    assert.equal(events.events[0].tokens_in, 1200);
+    assert.equal(events.events[0].tokens_out, 320);
+    assert.equal(events.events[0].cache_read_tokens, 180);
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as {
+      event_kind?: string;
+      reasoning_token_count?: number;
+      tool_token_count?: number;
+    };
+    assert.equal(meta.event_kind, 'response.completed');
+    assert.equal(meta.reasoning_token_count, 44);
+    assert.equal(meta.tool_token_count, 12);
+  });
+
+  test('preserves codex.tool_result metadata and materializes tool_result live items', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-tool-result-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.tool_result',
+        attributes: [
+          { key: 'gen_ai.tool.name', value: { stringValue: 'shell' } },
+          { key: 'call_id', value: { stringValue: 'call-123' } },
+          { key: 'arguments', value: { stringValue: '{"cmd":"ls -la"}' } },
+          { key: 'output', value: { stringValue: 'total 42' } },
+          { key: 'success', value: { boolValue: false } },
+        ],
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'tool_use');
+    assert.equal(events.events[0].status, 'error');
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as {
+      otel_event_name?: string;
+      call_id?: string;
+      arguments?: { cmd?: string };
+      output?: string;
+      success?: boolean;
+    };
+    assert.equal(meta.otel_event_name, 'codex.tool_result');
+    assert.equal(meta.call_id, 'call-123');
+    assert.deepEqual(meta.arguments, { cmd: 'ls -la' });
+    assert.equal(meta.output, 'total 42');
+    assert.equal(meta.success, false);
+
+    const items = await getLiveItems('codex-tool-result-1');
+    assert.equal(items.total, 1);
+    assert.equal(items.data[0].kind, 'tool_result');
+
+    const payloadJson = JSON.parse(String(items.data[0].payload_json)) as { output?: string; tool_name?: string };
+    assert.equal(payloadJson.tool_name, 'shell');
+    assert.equal(payloadJson.output, 'total 42');
   });
 
   test('codex metrics use codex_cli_rs metric names', async () => {
