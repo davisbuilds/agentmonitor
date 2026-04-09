@@ -14,12 +14,13 @@ Real-time localhost dashboard + session browser for monitoring AI agent activity
 ## Quick Start
 
 Requirements:
-- Node.js 20+
+- Node.js 24.13.0
 - `pnpm` 10+
 
 Install dependencies:
 
 ```bash
+nvm use
 pnpm install
 ```
 
