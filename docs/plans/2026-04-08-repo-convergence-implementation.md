@@ -195,6 +195,16 @@ Validate the real Codex telemetry ceiling before the shared projector hardens ar
 - The repo has an explicit, current understanding of which Codex capabilities come from today's OTEL stream versus a future richer integration path.
 - Codex is no longer artificially capped to summary fidelity just because the current parser ignores richer official events.
 
+**Live Validation Update**
+
+On April 9, 2026, a live validation pass against active local Codex sessions confirmed that Task 2A should now be treated as mostly complete for the current OTEL surface:
+
+- The current parser/projector improvements do pay off immediately for prompts, tool decisions, tool results, and response-complete usage summaries.
+- The real local OTEL stream is still dominated by websocket lifecycle events, especially `response.output_text.delta`.
+- In that live sample, websocket rows did not expose transcript text, response item typing, or client timestamps that would support honest transcript reconstruction from OTEL alone.
+- The remaining gap is therefore not "AgentMonitor is still dropping obviously available Codex transcript data"; it is that the current OTEL export does not appear to carry enough detail for transcript-grade parity in the general case.
+- Task 2 should preserve explicit fidelity boundaries, and future Codex parity work should likely branch into app-server or richer local-state ingestion rather than trying to coerce websocket lifecycle events into a fake transcript.
+
 ### Task 2: Introduce A Shared Projection Contract For V2 Data
 
 **Objective**
