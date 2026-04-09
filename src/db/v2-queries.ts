@@ -26,6 +26,30 @@ interface SessionsResult {
   cursor?: string;
 }
 
+interface TimeCursor {
+  sort_at: string;
+  id: string;
+}
+
+function encodeTimeCursor(cursor: TimeCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf-8').toString('base64url');
+}
+
+function decodeTimeCursor(cursor: string | undefined): TimeCursor | null {
+  if (!cursor) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf-8')) as Partial<TimeCursor>;
+    if (typeof parsed.sort_at === 'string' && typeof parsed.id === 'string') {
+      return { sort_at: parsed.sort_at, id: parsed.id };
+    }
+  } catch {
+    // Fall back to legacy timestamp-only cursors below.
+  }
+
+  return { sort_at: cursor, id: '\uffff' };
+}
+
 export function listBrowsingSessions(params: SessionsListParams = {}): SessionsResult {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
@@ -66,25 +90,29 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     `SELECT COUNT(*) as c FROM browsing_sessions ${filterWhere}`
   ).get(...filterValues) as CountResult).c;
 
-  if (params.cursor) {
-    conditions.push('started_at < ?');
-    values.push(params.cursor);
+  const cursor = decodeTimeCursor(params.cursor);
+  if (cursor) {
+    conditions.push('(started_at < ? OR (started_at = ? AND id < ?))');
+    values.push(cursor.sort_at, cursor.sort_at, cursor.id);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   values.push(limit);
   const data = db.prepare(
-    `SELECT * FROM browsing_sessions ${where} ORDER BY started_at DESC LIMIT ?`
+    `SELECT * FROM browsing_sessions ${where} ORDER BY started_at DESC, id DESC LIMIT ?`
   ).all(...values) as BrowsingSessionRow[];
 
   // Build cursor from last item
-  let cursor: string | undefined;
+  let nextCursor: string | undefined;
   if (data.length === limit && data.length > 0) {
-    cursor = data[data.length - 1].started_at ?? undefined;
+    const last = data[data.length - 1];
+    if (last.started_at) {
+      nextCursor = encodeTimeCursor({ sort_at: last.started_at, id: last.id });
+    }
   }
 
-  return { data, total, cursor };
+  return { data, total, cursor: nextCursor };
 }
 
 export function getBrowsingSession(id: string): BrowsingSessionRow | undefined {
@@ -139,9 +167,13 @@ export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessi
     `SELECT COUNT(*) as c FROM browsing_sessions ${filterWhere}`
   ).get(...filterValues) as CountResult).c;
 
-  if (params.cursor) {
-    conditions.push('COALESCE(last_item_at, started_at, "") < ?');
-    values.push(params.cursor);
+  const cursor = decodeTimeCursor(params.cursor);
+  if (cursor) {
+    conditions.push(`(
+      COALESCE(last_item_at, started_at, '') < ?
+      OR (COALESCE(last_item_at, started_at, '') = ? AND id < ?)
+    )`);
+    values.push(cursor.sort_at, cursor.sort_at, cursor.id);
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -153,12 +185,16 @@ export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessi
      LIMIT ?`
   ).all(...values) as LiveSessionRow[];
 
-  let cursor: string | undefined;
+  let nextCursor: string | undefined;
   if (data.length === limit && data.length > 0) {
-    cursor = data[data.length - 1].last_item_at ?? data[data.length - 1].started_at ?? undefined;
+    const last = data[data.length - 1];
+    const sortAt = last.last_item_at ?? last.started_at;
+    if (sortAt) {
+      nextCursor = encodeTimeCursor({ sort_at: sortAt, id: last.id });
+    }
   }
 
-  return { data, total, cursor };
+  return { data, total, cursor: nextCursor };
 }
 
 export function getLiveSession(id: string): LiveSessionRow | undefined {

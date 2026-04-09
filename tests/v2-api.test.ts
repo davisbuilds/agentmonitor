@@ -83,6 +83,9 @@ before(async () => {
     { id: 'api-sess-003', project: 'beta', msgs: 20, date: '2026-03-03T09:00:00Z' },
     { id: 'api-sess-004', project: 'gamma', msgs: 4, date: '2026-03-04T16:00:00Z' },
     { id: 'api-sess-005', project: 'beta', msgs: 8, date: '2026-03-05T11:00:00Z' },
+    { id: 'api-tie-001', project: 'tie', msgs: 4, date: '2026-03-06T09:00:00Z' },
+    { id: 'api-tie-002', project: 'tie', msgs: 4, date: '2026-03-06T09:00:00Z' },
+    { id: 'api-tie-003', project: 'tie', msgs: 4, date: '2026-03-06T09:00:00Z' },
   ];
 
   for (const s of sessions) {
@@ -148,6 +151,19 @@ describe('GET /api/v2/sessions', () => {
     for (const s of body2.data) {
       assert.ok(!ids1.has(s.id), `session ${s.id} should not appear in both pages`);
     }
+  });
+
+  test('cursor pagination remains stable when sessions share the same started_at', async () => {
+    const res1 = await fetch(`${baseUrl}/api/v2/sessions?project=tie&limit=2`);
+    assert.equal(res1.status, 200);
+    const body1 = await res1.json() as { data: Array<{ id: string }>; cursor?: string };
+    assert.deepEqual(body1.data.map(session => session.id), ['api-tie-003', 'api-tie-002']);
+    assert.ok(body1.cursor);
+
+    const res2 = await fetch(`${baseUrl}/api/v2/sessions?project=tie&limit=2&cursor=${body1.cursor}`);
+    assert.equal(res2.status, 200);
+    const body2 = await res2.json() as { data: Array<{ id: string }> };
+    assert.deepEqual(body2.data.map(session => session.id), ['api-tie-001']);
   });
 
   test('filters by project', async () => {
@@ -317,6 +333,19 @@ describe('GET /api/v2/live/sessions', () => {
       assert.equal(session.agent, 'claude');
       assert.equal(session.live_status, 'ended');
     }
+  });
+
+  test('live session pagination remains stable when sessions share the same sort timestamp', async () => {
+    const res1 = await fetch(`${baseUrl}/api/v2/live/sessions?project=tie&limit=2`);
+    assert.equal(res1.status, 200);
+    const body1 = await res1.json() as { data: Array<{ id: string }>; cursor?: string };
+    assert.deepEqual(body1.data.map(session => session.id), ['api-tie-003', 'api-tie-002']);
+    assert.ok(body1.cursor);
+
+    const res2 = await fetch(`${baseUrl}/api/v2/live/sessions?project=tie&limit=2&cursor=${body1.cursor}`);
+    assert.equal(res2.status, 200);
+    const body2 = await res2.json() as { data: Array<{ id: string }> };
+    assert.deepEqual(body2.data.map(session => session.id), ['api-tie-001']);
   });
 });
 
