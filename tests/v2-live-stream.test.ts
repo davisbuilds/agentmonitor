@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -18,6 +19,8 @@ let createApp: typeof import('../src/app.js').createApp;
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-live-stream-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
+  process.env.AGENTMONITOR_MAX_SSE_CLIENTS = '1';
+  process.env.AGENTMONITOR_SSE_HEARTBEAT_MS = '1000';
 
   ({ initSchema } = await import('../src/db/schema.js'));
   ({ closeDb } = await import('../src/db/connection.js'));
@@ -84,6 +87,89 @@ async function readSseEvents(url: string, expectedCount: number): Promise<Array<
   return events;
 }
 
+async function openSseStream(url: string): Promise<{
+  controller: AbortController;
+  response: Response;
+  reader: ReadableStreamDefaultReader<Uint8Array>;
+}> {
+  const controller = new AbortController();
+  const response = await fetch(url, {
+    signal: controller.signal,
+    headers: { Accept: 'text/event-stream' },
+  });
+  assert.equal(response.status, 200);
+  assert.ok(response.body);
+  return {
+    controller,
+    response,
+    reader: response.body.getReader(),
+  };
+}
+
+async function readWithTimeout(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  timeoutMs: number,
+): Promise<ReadableStreamReadResult<Uint8Array>> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms waiting for SSE data`)), timeoutMs);
+    reader.read().then(
+      result => {
+        clearTimeout(timeout);
+        resolve(result);
+      },
+      err => {
+        clearTimeout(timeout);
+        reject(err);
+      },
+    );
+  });
+}
+
+async function readUntilPattern(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  pattern: string,
+  timeoutMs: number,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  const deadline = Date.now() + timeoutMs;
+  let buffer = '';
+
+  while (Date.now() < deadline) {
+    const remaining = Math.max(1, deadline - Date.now());
+    const { value, done } = await readWithTimeout(reader, remaining);
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    if (buffer.includes(pattern)) return buffer;
+  }
+
+  throw new Error(`Timed out waiting for SSE pattern: ${pattern}`);
+}
+
+function createMockLiveResponse(): Response & { writes: string[]; emit: EventEmitter['emit'] } {
+  const res = new EventEmitter() as EventEmitter & {
+    writes: string[];
+    writableEnded: boolean;
+    destroyed: boolean;
+    writeHead: () => void;
+    write: (chunk: string) => boolean;
+    end: () => void;
+  };
+
+  res.writes = [];
+  res.writableEnded = false;
+  res.destroyed = false;
+  res.writeHead = () => {};
+  res.write = (chunk: string) => {
+    res.writes.push(chunk);
+    return true;
+  };
+  res.end = () => {
+    res.writableEnded = true;
+  };
+
+  return res as unknown as Response & { writes: string[]; emit: EventEmitter['emit'] };
+}
+
 test('live stream replays buffered events after the provided since id', async () => {
   liveBroadcaster.resetForTests();
   liveBroadcaster.broadcast('session_presence', {
@@ -125,4 +211,55 @@ test('live stream replay respects session filters', async () => {
   assert.equal(replayed.type, 'item_delta');
   assert.equal(replayed.payload?.session_id, 'session-b');
   assert.equal(connected.payload?.replayed, 1);
+});
+
+test('live stream schedules heartbeat writes for connected clients', async () => {
+  liveBroadcaster.resetForTests();
+
+  const res = createMockLiveResponse();
+  try {
+    const accepted = liveBroadcaster.addClient(res, {});
+    assert.equal(accepted, true);
+
+    await new Promise(resolve => setTimeout(resolve, 1200));
+    assert.ok(res.writes.some(chunk => chunk.includes(': heartbeat')));
+  } finally {
+    res.emit('close');
+    liveBroadcaster.resetForTests();
+  }
+});
+
+test('live stream enforces max clients and recovers after disconnect', async () => {
+  liveBroadcaster.resetForTests();
+
+  const first = await openSseStream(`${baseUrl}/api/v2/live/stream`);
+  try {
+    await readUntilPattern(first.reader, '"type":"connected"', 1000);
+
+    const blocked = await fetch(`${baseUrl}/api/v2/live/stream`, {
+      headers: { Accept: 'text/event-stream' },
+    });
+    assert.equal(blocked.status, 503);
+    const blockedBody = await blocked.json() as { error: string; max_clients: number };
+    assert.equal(blockedBody.error, 'SSE client limit reached');
+    assert.equal(blockedBody.max_clients, 1);
+  } finally {
+    first.controller.abort();
+    await first.reader.cancel().catch(() => undefined);
+  }
+
+  let reopened: Response | null = null;
+  for (let i = 0; i < 20; i += 1) {
+    const candidate = await fetch(`${baseUrl}/api/v2/live/stream`, {
+      headers: { Accept: 'text/event-stream' },
+    });
+    if (candidate.status === 200) {
+      reopened = candidate;
+      break;
+    }
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+
+  assert.ok(reopened);
+  await reopened.body?.cancel().catch(() => undefined);
 });
