@@ -41,7 +41,7 @@ export interface AgentEvent {
   duration_ms?: number;
   created_at: string;
   client_timestamp?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | string;
   source?: string;
 }
 
@@ -55,7 +55,14 @@ export interface Session {
   started_at: string;
   ended_at?: string;
   last_event_at: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | string;
+  event_count?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  total_cost_usd?: number;
+  files_edited?: number;
+  lines_added?: number;
+  lines_removed?: number;
 }
 
 export interface CostData {
