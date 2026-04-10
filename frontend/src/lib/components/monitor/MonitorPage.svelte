@@ -5,7 +5,7 @@
   import CostDashboard from './CostDashboard.svelte';
   import ToolAnalytics from './ToolAnalytics.svelte';
   import SessionDetail from './SessionDetail.svelte';
-  import { setEvents, setSessions, setStats, setCostData, setToolStats, getFilters, getCostWindow } from '../../stores/monitor.svelte';
+  import { setEvents, setSessions, setStats, setCostData, setToolStats, setUsageMonitor, getFilters, getCostWindow } from '../../stores/monitor.svelte';
   import { fetchStats, fetchEvents, fetchSessions, fetchCostData, fetchToolStats } from '../../api/client';
   import { buildCostFilters } from '../../monitor-analytics';
 
@@ -37,6 +37,7 @@
         fetchSessions(sessionsParams),
       ]);
       setStats(statsData);
+      setUsageMonitor(statsData.usage_monitor || []);
       setEvents(eventsData.events || []);
       setSessions(sessionsData.sessions || []);
     } catch (err) {

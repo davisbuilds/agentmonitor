@@ -69,6 +69,26 @@ async function seedTestData() {
   assert.ok(res.status >= 200 && res.status < 300, `batch ingest failed: ${res.status}`);
 }
 
+// ─── Stats API ──────────────────────────────────────────────────────────
+
+describe('GET /api/stats', () => {
+  test('includes usage monitor data on initial load', async () => {
+    await seedTestData();
+
+    const res = await fetch(`${baseUrl}/api/stats`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      usage_monitor?: Array<Record<string, unknown>>;
+    };
+
+    assert.ok(Array.isArray(body.usage_monitor));
+    assert.ok(body.usage_monitor.length >= 1);
+    const codex = body.usage_monitor.find((row) => row.agent_type === 'codex');
+    assert.ok(codex);
+  });
+});
+
 // ─── Tool Analytics API ─────────────────────────────────────────────────
 
 describe('GET /api/stats/tools', () => {

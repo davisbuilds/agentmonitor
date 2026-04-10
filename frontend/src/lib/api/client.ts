@@ -18,10 +18,10 @@ export interface Stats {
 
 export interface UsageMonitorData {
   agent_type: string;
-  limitType: string;
-  session: { tokens: number; limit: number; percent: number };
-  extended: { tokens: number; limit: number; percent: number };
-  weekly: { tokens: number; limit: number; percent: number };
+  limitType: 'tokens' | 'cost';
+  session: { used: number; limit: number; windowHours: number };
+  extended: { used: number; limit: number; windowHours: number } | null;
+  weekly: { used: number; limit: number; windowHours: number } | null;
 }
 
 export interface AgentEvent {
@@ -67,7 +67,7 @@ export interface Session {
 
 export interface CostData {
   timeline: Array<{ date: string; cost: number }>;
-  by_project: Array<{ project: string; cost: number }>;
+  by_project: Array<{ project: string; cost: number; session_count: number; event_count: number }>;
   by_model: Array<{ model: string; cost: number }>;
 }
 
@@ -232,7 +232,7 @@ type Filters = Record<string, string>;
 
 interface RawCostData {
   timeline?: Array<{ bucket: string; cost_usd: number }>;
-  by_project?: Array<{ project: string; cost_usd: number }>;
+  by_project?: Array<{ project: string; cost_usd: number; session_count?: number; event_count?: number }>;
   by_model?: Array<{ model: string; cost_usd: number }>;
 }
 
@@ -286,6 +286,8 @@ export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
       ? data.by_project.map((item) => ({
           project: item.project,
           cost: item.cost_usd,
+          session_count: item.session_count ?? 0,
+          event_count: item.event_count ?? 0,
         }))
       : [],
     by_model: Array.isArray(data.by_model)

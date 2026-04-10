@@ -9,8 +9,9 @@ statsRouter.get('/', (req: Request, res: Response) => {
     agentType: req.query.agent_type as string | undefined,
     since: req.query.since as string | undefined,
   });
+  const usage_monitor = getUsageMonitor();
 
-  res.json(stats);
+  res.json({ ...stats, usage_monitor });
 });
 
 // GET /api/stats/tools - Tool analytics

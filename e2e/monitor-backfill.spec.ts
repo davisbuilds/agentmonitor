@@ -95,6 +95,15 @@ test('monitor backfills aggregate session metrics for newly reactivated sessions
   await expect(page.getByRole('heading', { name: 'Active Agents' })).toBeVisible();
   await expect(page.getByRole('button', { name: '30d' })).toBeVisible();
   await expect(page.getByRole('button', { name: '60d' })).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: 'Codex 5h usage' })).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: 'Codex 1w usage' })).toBeVisible();
+  await expect(page.getByText('$0.00/$500.00')).toBeVisible();
+  await expect(page.getByText('$0.75/$1500.00')).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'Frequency' })).toBeVisible();
+  await expect(page.getByRole('progressbar', { name: 'Write frequency' })).toBeVisible();
+  await expect(
+    page.locator('section').filter({ hasText: 'Cost Overview' }).getByText('1 session')
+  ).toBeVisible();
 
   const response = await fetch(`${baseUrl}/api/events`, {
     method: 'POST',

@@ -96,6 +96,9 @@
               <div class="mt-1 h-1.5 rounded-full bg-gray-800 overflow-hidden">
                 <div class="h-full rounded-full bg-violet-500/70" style={`width: ${Math.max(2, (item.cost / maxProjectCost) * 100)}%`}></div>
               </div>
+              <div class="mt-1 text-[11px] text-gray-500">
+                {item.session_count} session{item.session_count === 1 ? '' : 's'}
+              </div>
             </div>
           {/each}
         </div>

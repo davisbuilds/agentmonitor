@@ -263,6 +263,17 @@ Replace source-specific v2 population with one projection contract that can repr
 
 Preserve the parts of the current localhost stack that improve operator experience and runtime resilience, while leaving behind the brittle legacy dashboard coupling.
 
+**Implementation Update (2026-04-10)**
+
+Completed on `arch/codex-telemetry-convergence`:
+
+- v1 SSE durability and monitor backfill behaviors are now carried into the canonical Svelte path.
+- The Svelte monitor now hydrates usage-monitor data on initial load, not only from live stats ticks.
+- Usage monitor windows now honor the real backend contract, including Codex cost-based windows and extended ranges.
+- Tool Analytics restored the compact frequency visualization from the legacy dashboard.
+- Cost Overview once again shows per-project session counts instead of discarding them in the frontend mapping.
+- Browser coverage now asserts the carried-forward monitor affordances directly.
+
 **Files**
 
 - Modify: `src/api/stream.ts`
