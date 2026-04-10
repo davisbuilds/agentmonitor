@@ -266,7 +266,7 @@ test('session branch refreshes from current git head when incoming branch is sta
     event_type: 'tool_use',
     tool_name: 'exec_command',
     project: 'agentmonitor',
-    branch: 'feature/tauri-arch-cleanup',
+    branch: 'feature/stale-branch-test',
   });
   assert.equal(response.status, 201);
 

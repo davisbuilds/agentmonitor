@@ -225,8 +225,8 @@ async fn invariant_event_persistence_and_dedup() {
     let runtime = TestRuntime::start().await;
 
     let event = json!({
-        "event_id": "desktop-invariant-dedup-1",
-        "session_id": "desktop-invariant-session-1",
+        "event_id": "runtime-invariant-dedup-1",
+        "session_id": "runtime-invariant-session-1",
         "agent_type": "codex",
         "event_type": "llm_request",
         "tokens_in": 12,
@@ -256,12 +256,12 @@ async fn invariant_session_end_lifecycle() {
     let runtime = TestRuntime::start().await;
 
     let claude_end = json!({
-        "session_id": "desktop-invariant-claude",
+        "session_id": "runtime-invariant-claude",
         "agent_type": "claude_code",
         "event_type": "session_end"
     });
     let codex_end = json!({
-        "session_id": "desktop-invariant-codex",
+        "session_id": "runtime-invariant-codex",
         "agent_type": "codex",
         "event_type": "session_end"
     });
@@ -277,11 +277,11 @@ async fn invariant_session_end_lifecycle() {
 
     let claude = list
         .iter()
-        .find(|s| s["id"] == "desktop-invariant-claude")
+        .find(|s| s["id"] == "runtime-invariant-claude")
         .expect("claude session should exist");
     let codex = list
         .iter()
-        .find(|s| s["id"] == "desktop-invariant-codex")
+        .find(|s| s["id"] == "runtime-invariant-codex")
         .expect("codex session should exist");
 
     assert_eq!(claude["status"], "idle");
@@ -302,7 +302,7 @@ async fn invariant_sse_delivery_and_client_count() {
     wait_for_sse_clients(runtime.addr, 1, 2_000).await;
 
     let event = json!({
-        "session_id": "desktop-invariant-sse",
+        "session_id": "runtime-invariant-sse",
         "agent_type": "claude_code",
         "event_type": "tool_use"
     });
@@ -314,7 +314,7 @@ async fn invariant_sse_delivery_and_client_count() {
     assert_eq!(broadcast_json["type"], "event");
     assert_eq!(
         broadcast_json["payload"]["session_id"],
-        "desktop-invariant-sse"
+        "runtime-invariant-sse"
     );
 
     drop(sse_stream);

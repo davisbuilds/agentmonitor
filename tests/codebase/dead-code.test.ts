@@ -19,7 +19,6 @@ const SKIP_DIRS = new Set([
   'docs',
   'public',
   'data',
-  'src-tauri',
   'rust-backend',
 ]);
 
