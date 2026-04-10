@@ -92,6 +92,15 @@ export interface FilterOptions {
 
 // --- V2 API types (Session browser) ---
 
+export type SessionCapabilityLevel = 'none' | 'summary' | 'full';
+
+export interface SessionCapabilities {
+  history: SessionCapabilityLevel;
+  search: SessionCapabilityLevel;
+  tool_analytics: SessionCapabilityLevel;
+  live_items: SessionCapabilityLevel;
+}
+
 export interface BrowsingSession {
   id: string;
   project: string | null;
@@ -103,6 +112,7 @@ export interface BrowsingSession {
   user_message_count: number;
   parent_session_id: string | null;
   relationship_type: string | null;
+  capabilities: SessionCapabilities | null;
 }
 
 export interface LiveSession extends BrowsingSession {

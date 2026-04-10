@@ -7,6 +7,12 @@ import {
   type CanonicalLiveItem,
   type LivePrivacyPolicy,
 } from './normalize.js';
+import {
+  ensureProjectedItem,
+  ensureProjectedTurn,
+  SUMMARY_LIVE_PROJECTION_CAPABILITIES,
+  upsertProjectedSessionIncrement,
+} from './projector.js';
 
 export interface CodexSummaryLiveSyncResult {
   inserted_turns: number;
@@ -338,89 +344,48 @@ export function syncCodexSummaryLiveEvent(
     : null;
   const messageCount = item && (item.kind === 'user_message' || item.kind === 'assistant_message') ? 1 : 0;
   const userMessageCount = item?.kind === 'user_message' ? 1 : 0;
+  upsertProjectedSessionIncrement(db, {
+    id: row.session_id,
+    agent: 'codex',
+    project: row.project,
+    first_message: firstMessage,
+    started_at: timestamp,
+    ended_at: endedAt,
+    message_count_delta: messageCount,
+    user_message_count_delta: userMessageCount,
+    live_status: liveStatus,
+    last_item_at: timestamp,
+  }, {
+    integration_mode: integrationMode,
+    fidelity: 'summary',
+    capabilities: SUMMARY_LIVE_PROJECTION_CAPABILITIES,
+  }, {
+    clearEndedAtOnActive: true,
+  });
 
-  db.prepare(`
-    INSERT INTO browsing_sessions (
-      id, project, agent, first_message, started_at, ended_at, message_count, user_message_count,
-      live_status, last_item_at, integration_mode, fidelity
-    ) VALUES (?, ?, 'codex', ?, ?, ?, ?, ?, ?, ?, ?, 'summary')
-    ON CONFLICT(id) DO UPDATE SET
-      project = COALESCE(excluded.project, browsing_sessions.project),
-      first_message = COALESCE(browsing_sessions.first_message, excluded.first_message),
-      started_at = COALESCE(browsing_sessions.started_at, excluded.started_at),
-      ended_at = CASE
-        WHEN excluded.ended_at IS NOT NULL THEN excluded.ended_at
-        WHEN excluded.live_status IN ('live', 'active', 'available') THEN NULL
-        ELSE browsing_sessions.ended_at
-      END,
-      message_count = browsing_sessions.message_count + excluded.message_count,
-      user_message_count = browsing_sessions.user_message_count + excluded.user_message_count,
-      live_status = excluded.live_status,
-      last_item_at = excluded.last_item_at,
-      integration_mode = excluded.integration_mode,
-      fidelity = excluded.fidelity
-  `).run(
-    row.session_id,
-    row.project,
-    firstMessage,
-    timestamp,
-    endedAt,
-    messageCount,
-    userMessageCount,
-    liveStatus,
-    timestamp,
-    integrationMode,
-  );
-
-  let insertedTurns = 0;
   let insertedItems = 0;
   const sourceTurnId = row.event_id ?? `codex-event:${row.id}`;
-  const existingTurn = db.prepare(
-    'SELECT id FROM session_turns WHERE session_id = ? AND source_turn_id = ?'
-  ).get(row.session_id, sourceTurnId) as { id: number } | undefined;
-
-  let turnId = existingTurn?.id;
-  if (!turnId) {
-    const result = db.prepare(`
-      INSERT INTO session_turns (
-        session_id, agent_type, source_turn_id, status, title, started_at, ended_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      row.session_id,
-      row.agent_type,
-      sourceTurnId,
-      row.status,
-      titleFor(row, metadata),
-      timestamp,
-      endedAt ?? timestamp,
-    );
-    turnId = Number(result.lastInsertRowid);
-    insertedTurns = 1;
-  }
+  const ensuredTurn = ensureProjectedTurn(db, row.session_id, {
+    agent_type: row.agent_type,
+    source_turn_id: sourceTurnId,
+    status: row.status,
+    title: titleFor(row, metadata),
+    started_at: timestamp,
+    ended_at: endedAt ?? timestamp,
+  });
+  const turnId = ensuredTurn.id;
+  const insertedTurns = ensuredTurn.inserted ? 1 : 0;
 
   if (item) {
     const sourceItemId = item.source_item_id ?? sourceTurnId;
-    const existingItem = db.prepare(
-      'SELECT id FROM session_items WHERE session_id = ? AND source_item_id = ?'
-    ).get(row.session_id, sourceItemId) as { id: number } | undefined;
-
-    if (!existingItem) {
-      db.prepare(`
-        INSERT INTO session_items (
-          session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        row.session_id,
-        turnId,
-        0,
-        sourceItemId,
-        item.kind,
-        item.status ?? row.status,
-        JSON.stringify(item.payload),
-        item.created_at ?? timestamp,
-      );
-      insertedItems = 1;
-    }
+    insertedItems = ensureProjectedItem(db, row.session_id, turnId, {
+      ordinal: 0,
+      source_item_id: sourceItemId,
+      kind: item.kind,
+      status: item.status ?? row.status,
+      payload: item.payload,
+      created_at: item.created_at ?? timestamp,
+    }) ? 1 : 0;
   }
 
   return {

@@ -76,12 +76,13 @@ test('syncCodexSummaryLiveEvent creates summary session, turn, and user item for
   assert.equal(result.integration_mode, 'codex-otel');
 
   const session = db.prepare(`
-    SELECT first_message, integration_mode, fidelity, message_count, user_message_count
+    SELECT first_message, integration_mode, fidelity, capabilities_json, message_count, user_message_count
     FROM browsing_sessions WHERE id = ?
   `).get('codex-summary-001') as {
     first_message: string;
     integration_mode: string;
     fidelity: string;
+    capabilities_json: string | null;
     message_count: number;
     user_message_count: number;
   };
@@ -97,6 +98,12 @@ test('syncCodexSummaryLiveEvent creates summary session, turn, and user item for
   assert.equal(session.first_message, 'Summarize the flaky test failures');
   assert.equal(session.integration_mode, 'codex-otel');
   assert.equal(session.fidelity, 'summary');
+  assert.deepEqual(JSON.parse(session.capabilities_json ?? '{}'), {
+    history: 'none',
+    search: 'none',
+    tool_analytics: 'none',
+    live_items: 'summary',
+  });
   assert.equal(session.message_count, 1);
   assert.equal(session.user_message_count, 1);
   assert.equal(turn.source_turn_id, 'evt-1');

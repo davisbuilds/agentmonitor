@@ -1,3 +1,5 @@
+import type { ProjectionCapabilities } from '../../live/projector.js';
+
 // --- Database row types (also used as API response shapes) ---
 
 export interface BrowsingSessionRow {
@@ -15,9 +17,14 @@ export interface BrowsingSessionRow {
   last_item_at: string | null;
   integration_mode: string | null;
   fidelity: string | null;
+  capabilities: ProjectionCapabilities | null;
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;
+}
+
+export interface BrowsingSessionDbRow extends Omit<BrowsingSessionRow, 'capabilities'> {
+  capabilities_json: string | null;
 }
 
 export type LiveSessionRow = BrowsingSessionRow;

@@ -1,6 +1,7 @@
 import { getDb } from './connection.js';
 import type {
   BrowsingSessionRow,
+  BrowsingSessionDbRow,
   LiveSessionRow,
   LiveTurnRow,
   LiveItemRow,
@@ -17,6 +18,34 @@ import type {
   ProjectBreakdown,
   ToolUsageStat,
 } from '../api/v2/types.js';
+import { inferProjectionCapabilities } from '../live/projector.js';
+
+function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
+  return {
+    id: row.id,
+    project: row.project,
+    agent: row.agent,
+    first_message: row.first_message,
+    started_at: row.started_at,
+    ended_at: row.ended_at,
+    message_count: row.message_count,
+    user_message_count: row.user_message_count,
+    parent_session_id: row.parent_session_id,
+    relationship_type: row.relationship_type,
+    live_status: row.live_status,
+    last_item_at: row.last_item_at,
+    integration_mode: row.integration_mode,
+    fidelity: row.fidelity,
+    capabilities: inferProjectionCapabilities({
+      capabilities_json: row.capabilities_json,
+      fidelity: row.fidelity,
+      integration_mode: row.integration_mode,
+    }),
+    file_path: row.file_path,
+    file_size: row.file_size,
+    file_hash: row.file_hash,
+  };
+}
 
 // --- Sessions ---
 
@@ -99,9 +128,9 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   values.push(limit);
-  const data = db.prepare(
+  const data = (db.prepare(
     `SELECT * FROM browsing_sessions ${where} ORDER BY started_at DESC, id DESC LIMIT ?`
-  ).all(...values) as BrowsingSessionRow[];
+  ).all(...values) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 
   // Build cursor from last item
   let nextCursor: string | undefined;
@@ -117,14 +146,15 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
 
 export function getBrowsingSession(id: string): BrowsingSessionRow | undefined {
   const db = getDb();
-  return db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(id) as BrowsingSessionRow | undefined;
+  const row = db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(id) as BrowsingSessionDbRow | undefined;
+  return row ? mapBrowsingSessionRow(row) : undefined;
 }
 
 export function getSessionChildren(parentId: string): BrowsingSessionRow[] {
   const db = getDb();
-  return db.prepare(
+  return (db.prepare(
     'SELECT * FROM browsing_sessions WHERE parent_session_id = ? ORDER BY started_at'
-  ).all(parentId) as BrowsingSessionRow[];
+  ).all(parentId) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 }
 
 // --- Live sessions ---
@@ -178,12 +208,12 @@ export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessi
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   values.push(limit);
-  const data = db.prepare(
+  const data = (db.prepare(
     `SELECT * FROM browsing_sessions
      ${where}
      ORDER BY COALESCE(last_item_at, started_at) DESC, id DESC
      LIMIT ?`
-  ).all(...values) as LiveSessionRow[];
+  ).all(...values) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 
   let nextCursor: string | undefined;
   if (data.length === limit && data.length > 0) {
@@ -199,7 +229,8 @@ export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessi
 
 export function getLiveSession(id: string): LiveSessionRow | undefined {
   const db = getDb();
-  return db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(id) as LiveSessionRow | undefined;
+  const row = db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(id) as BrowsingSessionDbRow | undefined;
+  return row ? mapBrowsingSessionRow(row) : undefined;
 }
 
 export function getSessionTurns(sessionId: string): LiveTurnRow[] {

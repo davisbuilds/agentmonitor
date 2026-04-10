@@ -210,6 +210,8 @@ See `hooks/codex/README.md` for details.
 - `GET /api/v2/projects`: distinct project names.
 - `GET /api/v2/agents`: distinct agent types.
 
+Session responses from `GET /api/v2/sessions`, `GET /api/v2/sessions/:id`, `GET /api/v2/live/sessions`, and `GET /api/v2/live/sessions/:id` include a `capabilities` object. That object reports current fidelity by surface (`history`, `search`, `tool_analytics`, `live_items`) using `none`, `summary`, or `full`, so summary-only Codex sessions no longer imply Claude-style parity by omission.
+
 Required fields for ingest payloads: `session_id`, `agent_type`, `event_type`.
 
 Canonical event contract: `docs/api/event-contract.md`.

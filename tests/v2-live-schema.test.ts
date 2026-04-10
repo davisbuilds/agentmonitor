@@ -40,6 +40,7 @@ test('browsing_sessions includes live metadata columns', () => {
   assert.ok(colNames.includes('last_item_at'));
   assert.ok(colNames.includes('integration_mode'));
   assert.ok(colNames.includes('fidelity'));
+  assert.ok(colNames.includes('capabilities_json'));
 });
 
 test('session_turns table exists with expected columns', () => {
@@ -149,6 +150,7 @@ test('legacy browsing_sessions databases receive live metadata columns', async (
   assert.ok(colNames.includes('last_item_at'));
   assert.ok(colNames.includes('integration_mode'));
   assert.ok(colNames.includes('fidelity'));
+  assert.ok(colNames.includes('capabilities_json'));
 });
 
 test('initSchema succeeds against a legacy browsing_sessions database on process startup', () => {
@@ -195,4 +197,5 @@ test('initSchema succeeds against a legacy browsing_sessions database on process
   assert.ok(colNames.includes('last_item_at'));
   assert.ok(colNames.includes('integration_mode'));
   assert.ok(colNames.includes('fidelity'));
+  assert.ok(colNames.includes('capabilities_json'));
 });

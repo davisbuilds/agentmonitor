@@ -72,12 +72,26 @@ test('syncClaudeLiveSession inserts one turn per new message and normalized item
 
   const turns = db.prepare('SELECT * FROM session_turns WHERE session_id = ? ORDER BY id').all('live-claude-001') as Array<{ source_turn_id: string }>;
   const items = db.prepare('SELECT kind FROM session_items WHERE session_id = ? ORDER BY id').all('live-claude-001') as Array<{ kind: string }>;
-  const session = db.prepare('SELECT integration_mode, fidelity FROM browsing_sessions WHERE id = ?').get('live-claude-001') as { integration_mode: string | null; fidelity: string | null };
+  const session = db.prepare('SELECT integration_mode, fidelity, capabilities_json FROM browsing_sessions WHERE id = ?').get('live-claude-001') as {
+    integration_mode: string | null;
+    fidelity: string | null;
+    capabilities_json: string | null;
+  };
+  const capabilities = JSON.parse(session.capabilities_json ?? '{}') as {
+    history?: string;
+    search?: string;
+    tool_analytics?: string;
+    live_items?: string;
+  };
 
   assert.deepEqual(turns.map(turn => turn.source_turn_id), ['claude-message:0', 'claude-message:1']);
   assert.deepEqual(items.map(item => item.kind), ['user_message', 'reasoning', 'assistant_message', 'tool_call']);
   assert.equal(session.integration_mode, 'claude-jsonl');
   assert.equal(session.fidelity, 'full');
+  assert.equal(capabilities.history, 'full');
+  assert.equal(capabilities.search, 'full');
+  assert.equal(capabilities.tool_analytics, 'full');
+  assert.equal(capabilities.live_items, 'full');
 });
 
 test('syncClaudeLiveSession appends only new messages on re-sync', () => {
