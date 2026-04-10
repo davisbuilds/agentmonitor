@@ -116,6 +116,7 @@ test('monitor backfills aggregate session metrics for newly reactivated sessions
       tokens_in: 1,
       tokens_out: 3,
       cost_usd: 0.05,
+      client_timestamp: '2026-04-10T18:00:00Z',
       project: 'agentmonitor',
       branch: 'arch/codex-telemetry-convergence',
       metadata: { content_preview: 'Backfilled monitor session' },
@@ -133,4 +134,8 @@ test('monitor backfills aggregate session metrics for newly reactivated sessions
   await expect(card).toContainText('+12');
   await expect(card).toContainText('$0.80');
   await expect(card).not.toContainText('-14400s ago');
+  await page.getByRole('button', { name: '30d' }).click();
+  await expect(
+    page.locator('svg[preserveAspectRatio="none"]')
+  ).toBeVisible();
 });

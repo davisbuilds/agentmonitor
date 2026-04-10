@@ -116,7 +116,7 @@
           {costData.timeline[0]?.date} to {costData.timeline[costData.timeline.length - 1]?.date}
         </div>
       </div>
-      <svg viewBox="0 0 100 100" class="h-28 w-full overflow-visible">
+      <svg viewBox="0 0 100 100" preserveAspectRatio="none" class="h-28 w-full overflow-visible">
         <polyline
           fill="none"
           stroke="rgb(96 165 250)"
