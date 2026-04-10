@@ -30,3 +30,20 @@ export function uniqueSession(): string {
 export function uniqueEventId(): string {
   return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
+
+export async function waitFor<T>(
+  probe: () => Promise<T | null | undefined | false>,
+  options: { timeoutMs?: number; intervalMs?: number; message?: string } = {},
+): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? 10_000;
+  const intervalMs = options.intervalMs ?? 100;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const value = await probe();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve, intervalMs));
+  }
+
+  throw new Error(options.message ?? `Condition not met within ${timeoutMs}ms`);
+}

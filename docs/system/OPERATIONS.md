@@ -19,6 +19,7 @@ pnpm start              # Run compiled server from dist/
 pnpm test               # Run self-contained TypeScript tests (excludes parity)
 pnpm test:watch         # Watch-mode self-contained test runner
 pnpm test:parity:ts     # Run isolated TypeScript parity tests (temp server + temp DB)
+pnpm test:v2:contract:ts # Run isolated black-box tests for the canonical TS /api/v2 contract
 pnpm test:parity:ts:live # Run parity tests against a running TS server on :3141
 pnpm test:parity:rust   # Run parity tests against a running Rust server on :3142
 pnpm lint               # ESLint

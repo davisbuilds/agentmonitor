@@ -41,6 +41,7 @@ That workflow runs:
 Manual/non-required checks:
 
 - `pnpm test:parity:ts` for isolated TypeScript parity coverage when changing shared HTTP/API behavior
+- `pnpm test:v2:contract:ts` when changing the canonical Svelte/v2 API contract on the TypeScript runtime
 - `pnpm test:parity:rust` when validating Rust parity explicitly
 
 ## Recommended Ongoing Hygiene

@@ -35,7 +35,8 @@
     "tauri:release:mac:unsigned": "bash scripts/release/macos-release.sh --mode unsigned",
     "tauri:release:mac:signed": "bash scripts/release/macos-release.sh --mode signed",
     "tauri:release:mac:notarized": "bash scripts/release/macos-release.sh --mode signed-notarized",
-    "test:parity:ts": "bash scripts/test/run-parity-ts.sh",
+    "test:parity:ts": "TEST_GLOB='tests/parity/*.test.ts' bash scripts/test/run-parity-ts.sh",
+    "test:v2:contract:ts": "TEST_GLOB='tests/parity/v2/**/*.test.ts' TEST_SETUP_CMD='node scripts/test/seed-v2-contract-fixture.mjs' bash scripts/test/run-parity-ts.sh",
     "test:parity:ts:live": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/*.test.ts",
     "test:parity:rust": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3142 node --import tsx --test tests/parity/*.test.ts",
     "bench:compare": "tsx scripts/bench/compare-ts-vs-rust.ts"
