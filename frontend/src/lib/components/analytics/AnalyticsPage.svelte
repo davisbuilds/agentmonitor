@@ -18,6 +18,10 @@
   let toolUsage = $state<ToolUsageStat[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  const analyticsNotice = {
+    title: 'Analytics mixes session-level and history-level coverage.',
+    body: 'Summary, activity, and project totals come from projected session aggregates. Tool usage still depends on tool-analytics-capable sessions, so summary-only live sources remain intentionally absent there.',
+  };
 
   // Compute max values for bar chart scaling
   let maxMessages = $derived(Math.max(...activity.map(a => a.messages), 1));
@@ -51,6 +55,11 @@
   {:else if error}
     <div class="text-center py-24 text-red-400 text-sm">{error}</div>
   {:else}
+    <div class="rounded-xl border border-sky-500/30 bg-sky-500/10 px-4 py-3 text-sm text-sky-200">
+      <div class="font-medium">{analyticsNotice.title}</div>
+      <p class="mt-1 text-xs text-gray-300">{analyticsNotice.body}</p>
+    </div>
+
     <!-- Summary Cards -->
     {#if summary}
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -128,6 +137,9 @@
       {#if toolUsage.length > 0}
         <section>
           <h3 class="text-sm font-semibold text-gray-300 mb-3">Tool Usage</h3>
+          <div class="mb-3 rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            Tool usage reflects only sessions whose projection contract exposes tool analytics.
+          </div>
           <div class="bg-gray-900/50 border border-gray-800 rounded p-3 space-y-2">
             {#each toolUsage.slice(0, 15) as tool}
               <div>
