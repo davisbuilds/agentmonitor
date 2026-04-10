@@ -15,7 +15,8 @@ Real-time localhost dashboard + session browser for monitoring AI agent activity
 
 - Canonical UI and product contract: `/app/` + `/api/v2/*`
 - Transitional compatibility surface: `/`
-- Rust backend and Tauri desktop are converging on the same canonical Svelte + v2 surface
+- No desktop shell: Tauri has been retired
+- Rust backend remains an optional alternate runtime under evaluation and is not the canonical product path today
 
 ## Quick Start
 
@@ -64,15 +65,13 @@ Use `http://127.0.0.1:3141/` only for legacy compatibility work.
 - `pnpm test:parity:ts`: run black-box parity tests against an isolated temporary TypeScript server and temp DB.
 - `pnpm test:parity:ts:live`: run parity tests against a TypeScript server already running on `:3141`.
 - `pnpm test:parity:rust`: run black-box parity tests against a running Rust server on `:3142`.
+- `pnpm rust:dev`: run the Rust backend directly on `:3142`.
+- `pnpm rust:test`: run the Rust backend test suite.
+- `pnpm rust:test:runtime-invariants`: run the Rust runtime-host invariant suite.
 - `pnpm start`: run compiled server from `dist/`.
 - `pnpm run import`: import historical sessions from Claude Code and Codex logs.
 - `pnpm seed`: send demo events to the running server.
 - `pnpm bench:ingest`: run ingest throughput benchmark.
-- `pnpm tauri:dev`: run Tauri desktop shell in dev mode.
-- `pnpm tauri:build`: build desktop app with Tauri defaults.
-- `pnpm tauri:release:mac:unsigned`: unsigned macOS app + dmg bundles.
-- `pnpm tauri:release:mac:signed`: signed macOS bundles (requires `APPLE_SIGNING_IDENTITY`).
-- `pnpm tauri:release:mac:notarized`: signed + notarization-ready preflight and build.
 
 ## Configuration
 
