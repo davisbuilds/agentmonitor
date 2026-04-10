@@ -10,6 +10,7 @@
   import { getSessionPreviewText } from '../../session-text';
   import { consumePendingSession } from '../../stores/router.svelte';
   import SessionViewer from './SessionViewer.svelte';
+  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
 
   let sessions = $state<BrowsingSession[]>([]);
   let total = $state(0);
@@ -137,6 +138,7 @@
               {#if session.project}
                 <span class="bg-gray-800 px-1.5 py-0.5 rounded">{session.project}</span>
               {/if}
+              <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
               <span>{session.message_count} msgs</span>
               {#if session.started_at}
                 <span>{timeAgo(session.started_at)}</span>

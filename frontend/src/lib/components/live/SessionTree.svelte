@@ -2,6 +2,7 @@
   import type { LiveSession } from '../../api/client';
   import { agentHexColor, timeAgo } from '../../format';
   import { getSessionPreviewText } from '../../session-text';
+  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
 
   interface SessionTreeNode {
     session: LiveSession;
@@ -82,9 +83,7 @@
             <span class={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusClasses(session.live_status)}`}>
               {session.live_status || 'unknown'}
             </span>
-            <span class="rounded border border-gray-700 px-1.5 py-0.5 text-[10px] text-gray-400 uppercase tracking-wide">
-              {session.fidelity || 'n/a'}
-            </span>
+            <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
           </div>
         </div>
       </button>

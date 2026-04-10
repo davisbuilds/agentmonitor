@@ -113,13 +113,13 @@ export interface BrowsingSession {
   parent_session_id: string | null;
   relationship_type: string | null;
   capabilities: SessionCapabilities | null;
+  integration_mode: string | null;
+  fidelity: string | null;
 }
 
 export interface LiveSession extends BrowsingSession {
   live_status: string | null;
   last_item_at: string | null;
-  integration_mode: string | null;
-  fidelity: string | null;
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;

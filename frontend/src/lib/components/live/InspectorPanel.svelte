@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
   import { timeAgo } from '../../format';
+  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
 
   interface Props {
     session: LiveSession | null;
@@ -89,6 +90,10 @@
           <div class="flex items-center justify-between gap-3">
             <span class="text-gray-500">Fidelity</span>
             <span>{session.fidelity || 'n/a'}</span>
+          </div>
+          <div class="pt-1">
+            <div class="mb-2 text-xs uppercase tracking-wide text-gray-500">Capabilities</div>
+            <ProjectionCapabilities capabilities={session.capabilities} />
           </div>
           {#if session.last_item_at}
             <div class="flex items-center justify-between gap-3">

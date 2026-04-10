@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
   import { timeAgo } from '../../format';
+  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import { hasSessionCapability } from '../../session-capabilities';
 
   interface Props {
     session: LiveSession | null;
@@ -118,10 +120,16 @@
           <div class="mt-1 flex items-center gap-2 flex-wrap text-xs text-gray-500">
             <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.integration_mode || 'unknown source'}</span>
             <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.fidelity || 'n/a'} fidelity</span>
+            <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
             <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.live_status || 'unknown'}</span>
             <span>{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
             <span>{items.length} item{items.length === 1 ? '' : 's'}</span>
           </div>
+          {#if !hasSessionCapability(session.capabilities, 'history')}
+            <p class="mt-2 text-[11px] text-amber-300/90">
+              Transcript history is not available for this source yet. Use the live stream as the primary view.
+            </p>
+          {/if}
         </div>
         <button class="shrink-0 text-sm text-blue-400 hover:text-blue-300" onclick={onopenhistory}>
           Open in Sessions
