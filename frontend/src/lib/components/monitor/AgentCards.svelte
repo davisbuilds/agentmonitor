@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getSessions, getEvents, setSelectedSessionId } from '../../stores/monitor.svelte';
-  import { formatCost, formatNumber, timeAgo, statusColor, agentColor } from '../../format';
+  import { formatCost, formatNumber, timeAgo, statusColor, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
 
   const sessions = $derived(getSessions());
@@ -24,7 +24,7 @@
       const sa = statusOrder[a.status] ?? 2;
       const sb = statusOrder[b.status] ?? 2;
       if (sa !== sb) return sa - sb;
-      return new Date(b.last_event_at).getTime() - new Date(a.last_event_at).getTime();
+      return parseTimestamp(b.last_event_at).getTime() - parseTimestamp(a.last_event_at).getTime();
     });
   });
 

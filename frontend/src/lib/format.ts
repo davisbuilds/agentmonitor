@@ -1,3 +1,21 @@
+function hasExplicitTimezone(value: string): boolean {
+  return /[zZ]$|[+-]\d{2}:\d{2}$/.test(value);
+}
+
+function normalizeTimestampInput(value: string): string {
+  if (value.includes(' ') && !value.includes('T')) {
+    return `${value.replace(' ', 'T')}Z`;
+  }
+  if (value.includes('T') && !hasExplicitTimezone(value)) {
+    return `${value}Z`;
+  }
+  return value;
+}
+
+export function parseTimestamp(value: string): Date {
+  return new Date(normalizeTimestampInput(value));
+}
+
 export function formatCost(n: number | null | undefined): string {
   if (n == null || n === 0) return '$0.00';
   if (n < 0.01) return '<$0.01';
@@ -11,7 +29,7 @@ export function formatNumber(n: number): string {
 }
 
 export function timeAgo(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const diff = Math.max(0, Date.now() - parseTimestamp(dateStr).getTime());
   const seconds = Math.floor(diff / 1000);
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
@@ -20,6 +38,10 @@ export function timeAgo(dateStr: string): string {
   if (hours < 24) return `${hours}h ago`;
   const days = Math.floor(hours / 24);
   return `${days}d ago`;
+}
+
+export function formatTimeOfDay(dateStr: string): string {
+  return parseTimestamp(dateStr).toLocaleTimeString();
 }
 
 export function formatDuration(ms: number | null | undefined): string {

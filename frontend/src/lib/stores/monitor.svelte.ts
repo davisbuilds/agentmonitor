@@ -1,5 +1,6 @@
 import { fetchSessionDetail, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type UsageMonitorData } from '../api/client';
 import type { CostWindow } from '../monitor-analytics';
+import { parseTimestamp } from '../format';
 
 // --- Stats ---
 let stats = $state<Stats>({
@@ -47,7 +48,7 @@ export function handleSessionUpdate(update: Record<string, unknown>): void {
   if (update.type === 'idle_check') {
     sessions = sessions.map(s => {
       if (s.status === 'active') {
-        const idle = Date.now() - new Date(s.last_event_at).getTime() > 5 * 60_000;
+        const idle = Date.now() - parseTimestamp(s.last_event_at).getTime() > 5 * 60_000;
         return idle ? { ...s, status: 'idle' } : s;
       }
       return s;

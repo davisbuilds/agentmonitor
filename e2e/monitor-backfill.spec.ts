@@ -123,4 +123,5 @@ test('monitor backfills aggregate session metrics for newly reactivated sessions
   await expect(card).toContainText('1 file');
   await expect(card).toContainText('+12');
   await expect(card).toContainText('$0.80');
+  await expect(card).not.toContainText('-14400s ago');
 });
