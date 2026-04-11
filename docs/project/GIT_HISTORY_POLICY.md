@@ -33,9 +33,11 @@ Reasoning:
 
 GitHub Actions workflow: `.github/workflows/ci.yml`
 
-Required check before merge on `main`:
+Required merge gates on `main`:
 
 - `Lint, Build, Test`
+- review conversations must be resolved
+- approving review count: `0`
 
 That workflow runs:
 
