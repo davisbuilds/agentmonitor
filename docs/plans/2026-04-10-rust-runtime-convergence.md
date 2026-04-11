@@ -104,14 +104,14 @@ Rust currently provides:
   - `watched_files`
   - `session_turns`
   - `session_items`
+- Codex JSONL historical import population into the same v2 tables (`codex-jsonl` / `summary`)
 - live SSE replay/filter/max-client behavior for the canonical live stream
 - auto-import fanout into the Rust live SSE hub
 
 Rust currently does not provide:
 
-- TS/Rust canonical parity coverage beyond focused route/runtime smokes
 - a Rust-native live watcher beyond auto-import-driven live updates
-- richer Codex live/session projection beyond the current honest capability boundary
+- Codex OTEL real-time v2 projection (insufficient data fidelity from OTEL telemetry)
 
 ## Recommendation
 
@@ -324,9 +324,12 @@ New coverage should prefer black-box contract tests over implementation-specific
 
 Yes.
 
-Phases 1–4 are complete. The canonical parity safety net is in place: the same `contract.test.ts` suite runs against both TS and Rust, and browser smokes cover all five Svelte tabs against the Rust runtime. Next considerations:
+Phases 1–4 are complete. The canonical parity safety net covers both Claude and Codex JSONL sessions: the same 6 contract tests (3 Claude + 3 Codex) run against both TS and Rust, and browser smokes cover all five Svelte tabs against the Rust runtime.
 
-- Codex OTEL contract parity (the current contract tests only cover Claude JSONL-sourced sessions)
+Codex JSONL sessions are now projected into the v2 surface on both runtimes with `integration_mode: 'codex-jsonl'`, `fidelity: 'summary'`. Codex OTEL (real-time telemetry) does not have enough data fidelity for v2 projection.
+
+Next considerations:
+
 - Rust-native live file watcher (currently live updates depend on auto-import timer, not realtime chokidar equivalent)
 - TS frontend cleanup to reduce Monitor's v1 dependency
 - Tauri desktop shell integration
