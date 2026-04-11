@@ -1,8 +1,8 @@
 ---
 date: 2026-04-10
 topic: rust-runtime-convergence
-stage: implementation-plan
-status: draft
+stage: implementation
+status: in_progress
 source: conversation
 ---
 
@@ -86,17 +86,22 @@ Rust currently provides:
 - OTEL endpoints
 - v1 SSE at `GET /api/stream`
 - static fallback from `public/`
-
-Rust currently does not provide:
-
-- `/app` static serving from `frontend/dist`
-- any canonical v2 endpoints
-- any v2 schema tables such as:
+- Svelte app serving at `/app`
+- `GET /api/v2/live/settings`
+- historical v2 read routes for Sessions, Search, Analytics, Projects, and Agents
+- historical v2 schema/query support in Rust-backed SQLite
+- Claude historical import population for:
   - `browsing_sessions`
   - `messages`
   - `tool_calls`
   - `messages_fts`
   - `watched_files`
+
+Rust currently does not provide:
+
+- canonical live v2 endpoints beyond `/api/v2/live/settings`
+- live v2 stream parity
+- live projection population for:
   - `session_turns`
   - `session_items`
 
@@ -116,6 +121,8 @@ This keeps the runtime-convergence work scoped to runtime parity, not simultaneo
 ## Phases
 
 ### Phase 1: Svelte Shell Boot On Rust
+
+Status: complete
 
 **Objective**
 
@@ -154,6 +161,8 @@ Serve the built Svelte SPA from Rust at `/app` and satisfy the minimum bootstrap
 
 ### Phase 2: Canonical Read-Only Session/Search/Analytics Surface
 
+Status: complete
+
 **Objective**
 
 Implement the non-live v2 read APIs needed for Sessions, Search, and Analytics.
@@ -176,16 +185,17 @@ Implement the non-live v2 read APIs needed for Sessions, Search, and Analytics.
 
 Rust needs the historical v2 tables and indexes before these routes are meaningful.
 
-**Files**
+**Implemented**
 
-- Modify: `rust-backend/src/db/schema.rs`
-- Create: `rust-backend/src/db/v2_queries.rs`
-- Create: `rust-backend/src/api/v2/router.rs`
-- Create: `rust-backend/src/api/v2/sessions.rs`
-- Create: `rust-backend/src/api/v2/search.rs`
-- Create: `rust-backend/src/api/v2/analytics.rs`
-- Create: `rust-backend/src/api/v2/metadata.rs`
-- Test: new Rust v2 API tests
+- `rust-backend/src/db/schema.rs`
+- `rust-backend/src/db/v2_queries.rs`
+- `rust-backend/src/importer/claude_history.rs`
+- `rust-backend/src/api/v2/mod.rs`
+- `rust-backend/src/api/v2/history.rs`
+- `rust-backend/tests/v2_queries.rs`
+- `rust-backend/tests/import_pipeline.rs`
+- `rust-backend/tests/v2_history_api.rs`
+- `e2e/rust-v2-readonly.spec.ts`
 
 **Done When**
 
@@ -193,6 +203,8 @@ Rust needs the historical v2 tables and indexes before these routes are meaningf
 - Rust route shapes and pagination semantics match the TypeScript contract closely enough for shared black-box testing.
 
 ### Phase 3: Canonical Live V2 Surface
+
+Status: next
 
 **Objective**
 
@@ -264,13 +276,22 @@ During implementation, keep verification concrete:
 
 New coverage should prefer black-box contract tests over implementation-specific unit assertions whenever the route shape is what matters.
 
-## Ready For Implementation
+## Current Verification Baseline
+
+- `pnpm build`
+- `pnpm rust:test`
+- `pnpm exec playwright test e2e/rust-monitor-boot.spec.ts e2e/rust-v2-readonly.spec.ts --project=chromium`
+
+## Ready For Next Stage
 
 Yes.
 
-The immediate implementation slice is Phase 1:
+The immediate implementation slice is Phase 3:
 
-- serve `frontend/dist` at `/app`
-- keep legacy `/` behavior unchanged
-- add `GET /api/v2/live/settings`
-- prove that the Svelte app shell and default Monitor tab boot against Rust without frontend changes
+- add Rust live-session query and handler support for:
+  - `GET /api/v2/live/sessions`
+  - `GET /api/v2/live/sessions/:id`
+  - `GET /api/v2/live/sessions/:id/turns`
+  - `GET /api/v2/live/sessions/:id/items`
+- decide whether Rust live state should be built first from Claude history replay, live watcher sync, or both
+- add Rust-side canonical live contract coverage before attempting broader TS/Rust parity assertions
