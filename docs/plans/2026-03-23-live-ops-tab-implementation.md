@@ -27,7 +27,7 @@ Add a read-only `Live` tab to the Svelte app that brings `claude-esp`-style live
 ### Out of Scope
 
 - Agent control actions such as interrupt, resume, or steer.
-- Rust backend and Tauri desktop parity in the same implementation pass.
+- Rust backend parity in the same implementation pass.
 - Generic OTEL trace visualization for arbitrary agents.
 - Replacing the current Monitor tab or collapsing historical Sessions into the new surface.
 - Multi-user auth, remote deployment, or cloud sync.

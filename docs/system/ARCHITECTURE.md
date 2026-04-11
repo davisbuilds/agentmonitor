@@ -19,8 +19,6 @@
 ## Active Decision Records
 
 - `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../archive/adr/2026-02-24-rust-backend-spike-decision-record.md) — **GO decision reached** for continued Rust backend evaluation. See [spike decision](../archive/plans/rust-spike/2026-02-24-rust-backend-spike-decision.md).
-- `2026-04-10`: Tauri desktop shell retired. Historical desktop-packaging plans remain archived, but the active product path is web-first.
-
 ## Rust Backend (phase 1 complete)
 
 An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream behavior using axum, tokio, and rusqlite. Phase 1 parity work is complete and includes:
@@ -35,10 +33,6 @@ An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream b
 
 Runs on port 3142 by default. Current verification includes full Rust test suite + shared parity tests.
 The current Rust runtime does not yet represent the canonical product surface end-to-end because it still centers on the legacy dashboard asset path rather than the full Svelte `/app` + `/api/v2` contract.
-
-## Desktop Packaging
-
-There is no active desktop shell in the repo. Tauri was retired on April 10, 2026 so the canonical delivery path is the web app served by the TypeScript runtime.
 
 Guardrail coverage for the Rust runtime host remains:
 - `rust-backend/tests/runtime_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.

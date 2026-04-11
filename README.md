@@ -15,7 +15,6 @@ Real-time localhost dashboard + session browser for monitoring AI agent activity
 
 - Canonical UI and product contract: `/app/` + `/api/v2/*`
 - Transitional compatibility surface: `/`
-- No desktop shell: Tauri has been retired
 - Rust backend remains an optional alternate runtime under evaluation and is not the canonical product path today
 
 ## Quick Start

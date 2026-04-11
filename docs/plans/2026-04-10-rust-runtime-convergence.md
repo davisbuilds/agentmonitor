@@ -332,4 +332,3 @@ Next considerations:
 
 - Rust-native live file watcher (currently live updates depend on auto-import timer, not realtime chokidar equivalent)
 - TS frontend cleanup to reduce Monitor's v1 dependency
-- Tauri desktop shell integration
