@@ -15,6 +15,9 @@ use crate::util::truncate::truncate_metadata;
 #[path = "importer/claude_history.rs"]
 mod claude_history;
 
+#[path = "importer/codex_history.rs"]
+mod codex_history;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportSource {
     ClaudeCode,
@@ -172,6 +175,9 @@ fn process_file(
 
         if source == "claude-code" {
             let _ = claude_history::sync_claude_history_file(conn, file_path, file_size, &hash);
+        }
+        if source == "codex" {
+            let _ = codex_history::sync_codex_history_file(conn, file_path, file_size, &hash);
         }
 
         if !events.is_empty() {
