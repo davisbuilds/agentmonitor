@@ -1,0 +1,205 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use axum::body::Body;
+use http_body_util::BodyExt;
+use hyper::Request;
+use serde_json::{Value, json};
+use tempfile::TempDir;
+use tower::ServiceExt;
+
+use agentmonitor_rs::config::Config;
+use agentmonitor_rs::db;
+use agentmonitor_rs::importer::{ImportOptions, ImportSource, run_import};
+use agentmonitor_rs::state::AppState;
+
+fn setup_db() -> rusqlite::Connection {
+    db::initialize(Path::new(":memory:")).expect("in-memory DB")
+}
+
+fn make_options(claude_dir: PathBuf) -> ImportOptions {
+    ImportOptions {
+        source: ImportSource::ClaudeCode,
+        from: None,
+        to: None,
+        dry_run: false,
+        force: false,
+        claude_dir: Some(claude_dir),
+        codex_dir: None,
+        max_payload_kb: 64,
+    }
+}
+
+fn write_jsonl(path: &Path, lines: &[Value]) {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).expect("create parent dirs");
+    }
+    let payload = lines
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    fs::write(path, payload).expect("write jsonl");
+}
+
+fn seed_claude_history(root: &Path) {
+    let parent_path = root
+        .join("projects")
+        .join("-Users-dg-mac-mini-Dev-project-alpha")
+        .join("parity-v2-parent.jsonl");
+    let child_path = root
+        .join("projects")
+        .join("-Users-dg-mac-mini-Dev-project-alpha")
+        .join("agent-child-1.jsonl");
+
+    write_jsonl(
+        &parent_path,
+        &[
+            json!({
+                "type": "user",
+                "sessionId": "parity-v2-parent",
+                "timestamp": "2026-04-09T10:00:00Z",
+                "message": { "role": "user", "content": "NeedleRustApi parent" }
+            }),
+            json!({
+                "type": "assistant",
+                "sessionId": "parity-v2-parent",
+                "timestamp": "2026-04-09T10:01:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "thinking", "thinking": "delegate" },
+                        { "type": "tool_use", "id": "tool-1", "name": "Agent", "input": { "session_id": "agent-child-1" } },
+                        { "type": "tool_result", "tool_use_id": "tool-1", "content": "NeedleRustApi delegated", "is_error": false }
+                    ]
+                }
+            }),
+            json!({
+                "type": "assistant",
+                "sessionId": "parity-v2-parent",
+                "timestamp": "2026-04-09T10:02:00Z",
+                "message": { "role": "assistant", "content": "NeedleRustApi complete" }
+            }),
+        ],
+    );
+
+    write_jsonl(
+        &child_path,
+        &[
+            json!({
+                "type": "user",
+                "sessionId": "agent-child-1",
+                "timestamp": "2026-04-09T10:01:30Z",
+                "message": { "role": "user", "content": "Child prompt" }
+            }),
+            json!({
+                "type": "assistant",
+                "sessionId": "agent-child-1",
+                "timestamp": "2026-04-09T10:01:45Z",
+                "message": { "role": "assistant", "content": "Child answer" }
+            }),
+        ],
+    );
+}
+
+fn test_app() -> axum::Router {
+    let conn = setup_db();
+    let temp = TempDir::new().expect("temp dir");
+    seed_claude_history(temp.path());
+    run_import(&conn, &make_options(temp.path().to_path_buf()));
+
+    let config = Config::from_env();
+    let state: Arc<AppState> = AppState::new(conn, config);
+    agentmonitor_rs::build_router(state)
+}
+
+async fn get_json(app: &axum::Router, uri: &str) -> (u16, Value) {
+    let req = Request::builder().uri(uri).body(Body::empty()).unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let status = response.status().as_u16();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let parsed = serde_json::from_slice(&bytes).expect("json response");
+    (status, parsed)
+}
+
+#[tokio::test]
+async fn v2_sessions_routes_return_imported_history() {
+    let app = test_app();
+
+    let (status, sessions) =
+        get_json(&app, "/api/v2/sessions?project=project-alpha&agent=claude").await;
+    assert_eq!(status, 200);
+    assert_eq!(sessions["total"], 2);
+    assert!(sessions["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["id"] == "parity-v2-parent" && row["integration_mode"] == "claude-jsonl"));
+
+    let (detail_status, detail) = get_json(&app, "/api/v2/sessions/parity-v2-parent").await;
+    assert_eq!(detail_status, 200);
+    assert_eq!(detail["message_count"], 3);
+    assert_eq!(detail["capabilities"]["history"], "full");
+
+    let (messages_status, messages) =
+        get_json(&app, "/api/v2/sessions/parity-v2-parent/messages").await;
+    assert_eq!(messages_status, 200);
+    assert_eq!(messages["total"], 3);
+    assert_eq!(messages["data"].as_array().unwrap()[0]["role"], "user");
+
+    let (children_status, children) =
+        get_json(&app, "/api/v2/sessions/parity-v2-parent/children").await;
+    assert_eq!(children_status, 200);
+    assert_eq!(children["data"].as_array().unwrap().len(), 1);
+    assert_eq!(children["data"].as_array().unwrap()[0]["id"], "agent-child-1");
+}
+
+#[tokio::test]
+async fn v2_search_analytics_and_metadata_routes_match_contract() {
+    let app = test_app();
+
+    let (search_status, search) =
+        get_json(&app, "/api/v2/search?q=NeedleRustApi&project=project-alpha").await;
+    assert_eq!(search_status, 200);
+    assert!(search["total"].as_i64().unwrap() >= 1);
+    assert!(search["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["snippet"].as_str().unwrap_or_default().contains("<mark>")));
+
+    let (summary_status, summary) = get_json(
+        &app,
+        "/api/v2/analytics/summary?project=project-alpha&agent=claude",
+    )
+    .await;
+    assert_eq!(summary_status, 200);
+    assert_eq!(summary["total_sessions"], 2);
+    assert_eq!(summary["total_messages"], 5);
+
+    let (tools_status, tools) =
+        get_json(&app, "/api/v2/analytics/tools?project=project-alpha").await;
+    assert_eq!(tools_status, 200);
+    assert!(tools["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|row| row["tool_name"] == "Agent"));
+
+    let (projects_status, projects) = get_json(&app, "/api/v2/projects").await;
+    assert_eq!(projects_status, 200);
+    assert_eq!(projects["data"].as_array().unwrap(), &[Value::String("project-alpha".into())]);
+
+    let (agents_status, agents) = get_json(&app, "/api/v2/agents").await;
+    assert_eq!(agents_status, 200);
+    assert_eq!(agents["data"].as_array().unwrap(), &[Value::String("claude".into())]);
+}
+
+#[tokio::test]
+async fn v2_search_requires_query_text() {
+    let app = test_app();
+    let (status, body) = get_json(&app, "/api/v2/search").await;
+    assert_eq!(status, 400);
+    assert_eq!(body["error"], "Query parameter \"q\" is required");
+}

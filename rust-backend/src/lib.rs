@@ -50,7 +50,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/sessions/{id}", get(api::session_detail_handler))
         .route("/api/filter-options", get(api::filter_options_handler))
         .route("/api/stream", get(api::stream_handler))
-        .route("/api/v2/live/settings", get(api::v2::live::live_settings_handler))
+        .nest("/api/v2", api::v2::router())
         .nest_service(
             "/app",
             get_service(
