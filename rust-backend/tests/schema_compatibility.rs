@@ -1,24 +1,11 @@
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::Path;
 
+use agentmonitor_rs::db;
 use rusqlite::Connection;
 
 fn init_db() -> Connection {
-    let _path = PathBuf::from(":memory:");
-    // Can't use initialize with :memory: since it takes a Path, so replicate inline
-    let conn = Connection::open_in_memory().unwrap();
-    conn.pragma_update(None, "journal_mode", "WAL").unwrap();
-    conn.pragma_update(None, "busy_timeout", 5000).unwrap();
-
-    // Load schema from the actual module via file-based init
-    // For in-memory, we execute the schema SQL directly
-    let schema_sql = include_str!("../src/db/schema.rs");
-    // Extract the SQL between r#" and "#
-    let start = schema_sql.find("r#\"\n").unwrap() + 4;
-    let end = schema_sql.rfind("\"#;").unwrap();
-    let sql = &schema_sql[start..end];
-    conn.execute_batch(sql).unwrap();
-    conn
+    db::initialize(Path::new(":memory:")).unwrap()
 }
 
 fn get_table_names(conn: &Connection) -> HashSet<String> {
@@ -49,7 +36,19 @@ fn get_index_names(conn: &Connection) -> HashSet<String> {
 fn required_tables_exist() {
     let conn = init_db();
     let tables = get_table_names(&conn);
-    for required in ["agents", "sessions", "events", "import_state"] {
+    for required in [
+        "agents",
+        "sessions",
+        "events",
+        "import_state",
+        "browsing_sessions",
+        "messages",
+        "tool_calls",
+        "session_turns",
+        "session_items",
+        "messages_fts",
+        "watched_files",
+    ] {
         assert!(
             tables.contains(required),
             "Missing required table: {required}"
@@ -154,10 +153,56 @@ fn required_indexes_exist() {
         "idx_events_agent_type",
         "idx_events_model",
         "idx_sessions_status",
+        "idx_bs_ended_at",
+        "idx_bs_project",
+        "idx_bs_agent",
+        "idx_bs_started_at",
+        "idx_bs_last_item_at",
+        "idx_bs_live_status",
+        "idx_messages_session_ordinal",
+        "idx_messages_session_role",
+        "idx_tc_session_id",
+        "idx_tc_category",
+        "idx_tc_tool_name",
+        "idx_st_session_started_at",
+        "idx_st_source_turn_id",
+        "idx_si_session_created_at",
+        "idx_si_turn_ordinal",
+        "idx_si_source_item_id",
     ];
     for idx in required {
         assert!(indexes.contains(idx), "Missing required index: {idx}");
     }
+}
+
+#[test]
+fn browsing_sessions_columns_match_typescript() {
+    let conn = init_db();
+    let cols = get_column_names(&conn, "browsing_sessions");
+    let expected: HashSet<String> = [
+        "id",
+        "project",
+        "agent",
+        "first_message",
+        "started_at",
+        "ended_at",
+        "message_count",
+        "user_message_count",
+        "parent_session_id",
+        "relationship_type",
+        "live_status",
+        "last_item_at",
+        "integration_mode",
+        "fidelity",
+        "capabilities_json",
+        "file_path",
+        "file_size",
+        "file_hash",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(cols, expected, "browsing_sessions columns mismatch");
 }
 
 #[test]
