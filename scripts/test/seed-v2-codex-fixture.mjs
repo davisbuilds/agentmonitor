@@ -56,7 +56,6 @@ const contents = sampleJsonl([
     timestamp: isoOffset(-85_000),
     type: 'response_item',
     payload: {
-      role: 'assistant',
       name: 'apply_patch',
       input: `*** Begin Patch\n*** Update File: src/test.ts\n@@\n-  expect(result).toBe(false);\n+  expect(result).toBe(true);\n*** End Patch`,
     },

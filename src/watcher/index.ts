@@ -1,9 +1,12 @@
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import crypto from 'crypto';
 import type Database from 'better-sqlite3';
 import { parseSessionMessages, insertParsedSession } from '../parser/claude-code.js';
+import { parseCodexSessionMessages } from '../parser/codex-sessions.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
+import { syncCodexLiveSession } from '../live/codex-adapter.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 
 // --- File hashing ---
@@ -124,6 +127,91 @@ export function syncAllFiles(db: Database.Database, claudeDir: string, options: 
 
   for (const filePath of files) {
     const result = syncSessionFile(db, filePath, options);
+    stats[result === 'parsed' ? 'parsed' : result === 'skipped' ? 'skipped' : 'errors']++;
+  }
+
+  return stats;
+}
+
+// --- Codex session file support ---
+
+export function discoverCodexSessionFiles(codexHome?: string): string[] {
+  const base = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
+  const sessionsDir = path.join(base, 'sessions');
+  return discoverJsonlFilesRecursive(sessionsDir);
+}
+
+export function syncCodexSessionFileDetailed(
+  db: Database.Database,
+  filePath: string,
+  options: SyncOptions = {},
+): SyncSessionOutcome {
+  try {
+    const stat = fs.statSync(filePath);
+    const fileHash = hashFile(filePath);
+
+    const existing = db.prepare(
+      'SELECT file_hash FROM watched_files WHERE file_path = ?'
+    ).get(filePath) as { file_hash: string } | undefined;
+
+    if (!options.force && existing && existing.file_hash === fileHash) {
+      return { result: 'skipped' };
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const sessionId = path.basename(filePath, '.jsonl');
+    const parsed = parseCodexSessionMessages(content, sessionId, filePath);
+
+    if (parsed.messages.length === 0) {
+      db.prepare(`
+        INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
+        VALUES (?, ?, ?, 'skipped', datetime('now'))
+        ON CONFLICT(file_path) DO UPDATE SET
+          file_hash = excluded.file_hash,
+          file_mtime = excluded.file_mtime,
+          status = 'skipped',
+          last_parsed_at = datetime('now')
+      `).run(filePath, fileHash, stat.mtime.toISOString());
+      return { result: 'skipped', session_id: sessionId };
+    }
+
+    insertParsedSession(db, parsed, filePath, stat.size, fileHash);
+    const live = syncCodexLiveSession(db, parsed);
+
+    db.prepare(`
+      INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
+      VALUES (?, ?, ?, 'parsed', datetime('now'))
+      ON CONFLICT(file_path) DO UPDATE SET
+        file_hash = excluded.file_hash,
+        file_mtime = excluded.file_mtime,
+        status = 'parsed',
+        last_parsed_at = datetime('now')
+    `).run(filePath, fileHash, stat.mtime.toISOString());
+
+    return { result: 'parsed', live, session_id: sessionId };
+  } catch (err) {
+    console.error(`[watcher] Failed to sync Codex ${filePath}:`, err);
+    try {
+      db.prepare(`
+        INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
+        VALUES (?, ?, ?, 'error', datetime('now'))
+        ON CONFLICT(file_path) DO UPDATE SET
+          status = 'error',
+          last_parsed_at = datetime('now')
+      `).run(filePath, 'error', '');
+    } catch (dbErr) {
+      console.error(`[watcher] Failed to record error state for ${filePath}:`, dbErr);
+    }
+    return { result: 'error' };
+  }
+}
+
+export function syncAllCodexFiles(db: Database.Database, codexHome?: string, options: SyncOptions = {}): SyncStats {
+  const files = discoverCodexSessionFiles(codexHome);
+  const stats: SyncStats = { parsed: 0, skipped: 0, errors: 0, total: files.length };
+
+  for (const filePath of files) {
+    const result = syncCodexSessionFileDetailed(db, filePath, options).result;
     stats[result === 'parsed' ? 'parsed' : result === 'skipped' ? 'skipped' : 'errors']++;
   }
 

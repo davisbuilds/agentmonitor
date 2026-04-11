@@ -2,7 +2,7 @@ import path from 'path';
 import os from 'os';
 import { watch, type FSWatcher } from 'chokidar';
 import { getDb } from '../db/connection.js';
-import { syncSessionFileDetailed, syncAllFiles } from './index.js';
+import { syncSessionFileDetailed, syncAllFiles, syncAllCodexFiles } from './index.js';
 import { broadcaster } from '../sse/emitter.js';
 import { liveBroadcaster } from '../api/v2/live-stream.js';
 
@@ -91,6 +91,12 @@ export function startWatcher(): void {
   console.log('[watcher] Starting initial sync...');
   const stats = syncAllFiles(db, claudeDir);
   console.log(`[watcher] Initial sync complete: ${stats.parsed} parsed, ${stats.skipped} skipped, ${stats.errors} errors (${stats.total} total files)`);
+
+  // Sync Codex session files
+  const codexStats = syncAllCodexFiles(db);
+  if (codexStats.total > 0) {
+    console.log(`[watcher] Codex sync: ${codexStats.parsed} parsed, ${codexStats.skipped} skipped, ${codexStats.errors} errors (${codexStats.total} total files)`);
+  }
 
   // Start chokidar watcher
   watcher = watch(path.join(projectsDir, '**/*.jsonl'), {
