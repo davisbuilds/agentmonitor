@@ -295,17 +295,7 @@ pub fn discover_claude_code_logs(base_dir: Option<&Path>) -> Vec<PathBuf> {
         if !project.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
             continue;
         }
-        let Ok(entries) = fs::read_dir(project.path()) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if entry.file_type().map(|ft| ft.is_file()).unwrap_or(false)
-                && path.extension().and_then(|s| s.to_str()) == Some("jsonl")
-            {
-                files.push(path);
-            }
-        }
+        walk_jsonl_files(&project.path(), &mut files);
     }
     files.sort();
     files

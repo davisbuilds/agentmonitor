@@ -257,6 +257,8 @@ Rust needs:
 
 ### Phase 4: Canonical Parity Safety Net
 
+Status: complete
+
 **Objective**
 
 Promote the canonical Svelte contract to first-class TS/Rust parity coverage.
@@ -274,6 +276,21 @@ Promote the canonical Svelte contract to first-class TS/Rust parity coverage.
 **Done When**
 
 - runtime parity is measured against the canonical app contract, not just the older localhost endpoints
+
+**Implemented**
+
+- `rust-backend/tests/static_assets_api.rs` — 6 tests for `/app` static serving, SPA fallback, asset paths, API precedence
+- `tests/parity/v2/contract.test.ts` — 3 black-box contract tests covering sessions, search, analytics, and live endpoints
+- `scripts/test/run-v2-contract-rust.sh` — self-contained runner: seeds JSONL fixture, runs Rust import, starts Rust server, executes contract tests
+- `pnpm test:v2:contract:rust` — npm script for Rust contract parity
+- `pnpm test:v2:contract:ts` — npm script for TS contract parity (existing)
+- `e2e/rust-monitor-boot.spec.ts` — browser smoke for app shell + Monitor tab
+- `e2e/rust-v2-readonly.spec.ts` — browser smoke for Sessions, Search, Analytics tabs
+- `e2e/rust-live-tab.spec.ts` — browser smoke for Live tab
+
+**Bug fix during Phase 4**
+
+- `rust-backend/src/importer.rs`: `discover_claude_code_logs` now walks project directories recursively using `walk_jsonl_files` instead of scanning one level deep, matching the TS chokidar `**/*.jsonl` discovery behavior
 
 ## Implementation Order
 
@@ -299,14 +316,17 @@ New coverage should prefer black-box contract tests over implementation-specific
 
 - `pnpm build`
 - `pnpm rust:test`
+- `pnpm test:v2:contract:ts`
+- `pnpm test:v2:contract:rust`
 - `pnpm exec playwright test e2e/rust-monitor-boot.spec.ts e2e/rust-v2-readonly.spec.ts e2e/rust-live-tab.spec.ts --project=chromium`
 
 ## Ready For Next Stage
 
 Yes.
 
-The immediate implementation slice is Phase 4:
+Phases 1–4 are complete. The canonical parity safety net is in place: the same `contract.test.ts` suite runs against both TS and Rust, and browser smokes cover all five Svelte tabs against the Rust runtime. Next considerations:
 
-- expand the canonical parity safety net around `/app` and the shared Svelte contract
-- decide which parity checks should be black-box TS vs Rust comparisons versus Rust-only runtime smokes
-- keep Codex live/search/analytics broadening deferred until richer data exists on both runtimes
+- Codex OTEL contract parity (the current contract tests only cover Claude JSONL-sourced sessions)
+- Rust-native live file watcher (currently live updates depend on auto-import timer, not realtime chokidar equivalent)
+- TS frontend cleanup to reduce Monitor's v1 dependency
+- Tauri desktop shell integration

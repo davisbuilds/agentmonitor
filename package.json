@@ -30,7 +30,8 @@
     "rust:test:runtime-invariants": "cargo test --manifest-path rust-backend/Cargo.toml --test runtime_invariants",
     "rust:check": "cargo check --manifest-path rust-backend/Cargo.toml",
     "test:parity:ts": "TEST_GLOB='tests/parity/*.test.ts' bash scripts/test/run-parity-ts.sh",
-    "test:v2:contract:ts": "TEST_GLOB='tests/parity/v2/**/*.test.ts' TEST_SETUP_CMD='node scripts/test/seed-v2-contract-fixture.mjs' bash scripts/test/run-parity-ts.sh",
+    "test:v2:contract:ts": "TEST_GLOB='tests/parity/v2/**/*.test.ts' TEST_SETUP_CMD='node scripts/test/seed-v2-contract-fixture.mjs && node scripts/test/seed-v2-codex-fixture.mjs' bash scripts/test/run-parity-ts.sh",
+    "test:v2:contract:rust": "bash scripts/test/run-v2-contract-rust.sh",
     "test:parity:ts:live": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/*.test.ts",
     "test:parity:rust": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3142 node --import tsx --test tests/parity/*.test.ts",
     "bench:compare": "tsx scripts/bench/compare-ts-vs-rust.ts"
