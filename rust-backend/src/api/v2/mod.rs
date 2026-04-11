@@ -11,6 +11,17 @@ pub mod live;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/live/settings", get(live::live_settings_handler))
+        .route("/live/stream", get(live::live_stream_handler))
+        .route("/live/sessions", get(live::live_sessions_handler))
+        .route("/live/sessions/{id}", get(live::live_session_detail_handler))
+        .route(
+            "/live/sessions/{id}/turns",
+            get(live::live_session_turns_handler),
+        )
+        .route(
+            "/live/sessions/{id}/items",
+            get(live::live_session_items_handler),
+        )
         .route("/sessions", get(history::list_sessions_handler))
         .route("/sessions/{id}", get(history::session_detail_handler))
         .route(
