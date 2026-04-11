@@ -12,6 +12,9 @@ use crate::db::queries::{self, InsertEventParams};
 use crate::pricing::{TokenCounts, calculate_cost};
 use crate::util::truncate::truncate_metadata;
 
+#[path = "importer/claude_history.rs"]
+mod claude_history;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImportSource {
     ClaudeCode,
@@ -163,10 +166,15 @@ fn process_file(
     let is_date_scoped = options.from.is_some() || options.to.is_some();
     if !options.dry_run
         && !is_date_scoped
-        && !events.is_empty()
         && let Ok(hash) = hash_file(file_path)
     {
         let file_size = fs::metadata(file_path).map(|m| m.len() as i64).unwrap_or(0);
+
+        if source == "claude-code" {
+            let _ = claude_history::sync_claude_history_file(conn, file_path, file_size, &hash);
+        }
+
+        if !events.is_empty() {
         set_import_state(
             conn,
             file_path,
@@ -175,6 +183,7 @@ fn process_file(
             source,
             events_imported as i64,
         );
+        }
     }
 
     ImportFileResult {
