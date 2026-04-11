@@ -18,8 +18,8 @@
 
 ## Active Decision Records
 
-- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../archive/adr/2026-02-24-rust-backend-spike-decision-record.md) — **GO decision reached**. Proceeding with phased Rust migration and Tauri desktop shell. See [spike decision](../archive/plans/rust-spike/2026-02-24-rust-backend-spike-decision.md).
-- `2026-02-26`: [Tauri Internal-First Shell](../archive/plans/tauri-shell/2026-02-26-tauri-internal-first-shell-plan.md) with [implementation plan](../archive/plans/tauri-shell/2026-02-26-tauri-internal-first-shell-implementation.md) — Phase 2 execution path.
+- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../archive/adr/2026-02-24-rust-backend-spike-decision-record.md) — **GO decision reached** for continued Rust backend evaluation. See [spike decision](../archive/plans/rust-spike/2026-02-24-rust-backend-spike-decision.md).
+- `2026-04-10`: Tauri desktop shell retired. Historical desktop-packaging plans remain archived, but the active product path is web-first.
 
 ## Rust Backend (phase 1 complete)
 
@@ -34,26 +34,14 @@ An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream b
 - Pricing auto-cost parity on ingest
 
 Runs on port 3142 by default. Current verification includes full Rust test suite + shared parity tests.
-The current Rust runtime does not yet represent the canonical product surface end-to-end because desktop/runtime delivery still centers on the legacy dashboard asset path rather than the full Svelte `/app` + `/api/v2` contract.
+The current Rust runtime does not yet represent the canonical product surface end-to-end because it still centers on the legacy dashboard asset path rather than the full Svelte `/app` + `/api/v2` contract.
 
-## Tauri Desktop Runtime (phase 2 in progress)
+## Desktop Packaging
 
-Current desktop runtime is internal-first:
-- Tauri app setup starts the embedded Rust runtime via `rust-backend/src/runtime_contract.rs`.
-- `runtime_contract` is the public boundary for startup/shutdown and endpoint metadata (`base_url`, `local_addr`).
-- Tauri startup/shutdown orchestration is centralized in `src-tauri/src/runtime_coordinator.rs`.
-- Startup includes readiness gate (`/api/health`) before window navigation.
-- Tauri main window navigates using the contract-provided backend origin (`http://127.0.0.1:3142` by default).
-- Desktop bind policy is deterministic: desktop overrides (`AGENTMONITOR_DESKTOP_HOST`, `AGENTMONITOR_DESKTOP_PORT`) take precedence over backend env bind config.
-- Rust backend serves dashboard static assets as router fallback, so UI and API share the same origin in desktop mode.
-- HTTP ingest/SSE remains available on localhost as adapter boundary for hooks and parity coverage.
-- IPC is additive and now includes first functional handlers in `src-tauri/src/ipc/mod.rs` (`desktop_runtime_status`, `desktop_health`), while ingest/state traffic remains HTTP-first.
+There is no active desktop shell in the repo. Tauri was retired on April 10, 2026 so the canonical delivery path is the web app served by the TypeScript runtime.
 
-Current limitation: desktop still defaults to the legacy asset path and has not yet converged on the canonical Svelte `/app` + `/api/v2` experience.
-
-Guardrail coverage:
-- `rust-backend/tests/desktop_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.
-- `src-tauri/tests/runtime_boundary.rs` validates runtime boundary contracts (endpoint metadata, restart after shutdown, desktop bind precedence).
+Guardrail coverage for the Rust runtime host remains:
+- `rust-backend/tests/runtime_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.
 
 ## API Layer
 
@@ -129,6 +117,33 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 ## OTEL Parser
 
 `src/otel/parser.ts` converts OTLP JSON payloads (logs, metrics) into normalized events for the standard ingest pipeline.
+
+### Codex Telemetry Capability Matrix
+
+Codex should be thought of as having multiple telemetry surfaces, not one monolithic "OTEL only" story.
+
+| Surface | Upstream source | Current AgentMonitor status | Notes |
+|---------|------------------|-----------------------------|-------|
+| Session bootstrap metadata | `codex.conversation_starts` OTEL event | Captured | Startup metadata such as provider, reasoning effort, sandbox policy, and MCP server list can now flow into normalized events. |
+| User prompts | `codex.user_prompt`, `codex.user_message`, `codex.response` user items | Captured | Prompt text is retained when present and projected into live summary sessions. |
+| Tool decisions and tool results | `codex.tool_decision`, `codex.tool_result` OTEL events | Captured | Tool call metadata, call ids, parsed arguments, outputs, success state, and MCP origin metadata are now preserved and projected more honestly. |
+| Response completion usage | `codex.sse_event` with `event.kind=response.completed` | Captured | Response-complete token usage and related metadata can populate `llm_response` rows without waiting for backfill. |
+| Response item typing | `codex.response`, `codex.event_msg` payload types | Partially captured | Assistant messages, reasoning, shell-call style responses, and tool-result style outputs can be projected when the OTEL payload includes enough structure. |
+| Websocket request and response lifecycle | `codex.websocket_request`, `codex.websocket_event` | Partially captured | Request/error/response classification is available, but this is still not full transcript-grade data. |
+| Full Thread/Turn/Item lifecycle | `codex app-server` JSON-RPC | Not integrated yet | This is the richer path for true Codex-native parity, including item start/completion and streaming deltas. |
+| Persisted local rollout state | Codex local session/state files | Import-only today | Local Codex session import exists, but the live v2 path still centers on OTEL rather than direct local-state projection. |
+
+Planning implication: current AgentMonitor Codex fidelity limits should be treated as implementation limits of the current parser/projector, not as the hard ceiling of Codex telemetry itself.
+
+### Codex Live Validation Notes
+
+On April 9, 2026, AgentMonitor was pointed at active local Codex sessions exporting to `/api/otel/v1/logs` on the TypeScript runtime. That live validation pass changed the practical assessment of the current OTEL path:
+
+- The current OTEL stream is materially useful for `codex.user_prompt`, `codex.tool_decision`, `codex.tool_result`, `codex.sse_event`, and `codex.websocket_request`.
+- The dominant live volume is still `codex.websocket_event`, especially `response.output_text.delta` and related response lifecycle events.
+- In the sampled local stream, websocket delta rows did not carry transcript text, response item typing, or client timestamps that would let AgentMonitor reconstruct a reliable Thread/Turn/Item transcript from OTEL alone.
+- The widened parser/live adapter is therefore still worthwhile because it improves prompt, tool, and completion-summary fidelity, but the remaining transcript ceiling is now a source-data ceiling for the current OTEL export, not just a parser omission.
+- The practical follow-up for transcript-grade Codex parity is app-server or richer local-state integration, not continued stretching of the current websocket-event summary path.
 
 ## Runtime Path Resolution
 

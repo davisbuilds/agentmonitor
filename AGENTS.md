@@ -8,8 +8,7 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - Backend: Node.js + TypeScript + Express + SQLite (`better-sqlite3`).
 - Svelte 5 frontend: Vite SPA served at `/app/` with Monitor, Sessions, Search, Analytics tabs. This is the canonical product surface.
 - Legacy frontend: static HTML + vanilla JS + Tailwind-generated CSS (at `/`). Treat this as transitional compatibility surface only.
-- Rust backend: axum + tokio + rusqlite reimplementation (phased migration in progress toward the same `/app` + `/api/v2` surface).
-- Tauri desktop shell: native macOS app embedding the Rust backend. Desktop should converge on the same canonical Svelte + v2 surface.
+- Rust backend: axum + tokio + rusqlite alternate runtime under evaluation for the same `/app` + `/api/v2` surface.
 - Transport: HTTP ingestion + Server-Sent Events (SSE) for live updates.
 - Session ingestion: chokidar file-watcher discovers `~/.claude/projects/**/*.jsonl` automatically.
 - Default bind: `127.0.0.1:3141` (TS), `127.0.0.1:3142` (Rust).
@@ -19,7 +18,6 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 Subdirectories have their own `AGENTS.md` (with `CLAUDE.md` symlinks) for domain-specific commands, code maps, and gotchas:
 
 - `rust-backend/AGENTS.md` — Rust backend commands, gotchas, parity tests.
-- `src-tauri/AGENTS.md` — Tauri desktop runtime model, embedding gotchas, release commands.
 - `frontend/AGENTS.md` — Svelte frontend code map, dev workflow, API consumption.
 
 ## Working Commands
@@ -48,7 +46,6 @@ For legacy compatibility work on `/`, use two terminals:
 
 - `src/` — TS backend (Express, SQLite, SSE, JSONL parser, OTEL, importers, pricing).
 - `rust-backend/` — Rust backend reimplementation (axum, tokio, rusqlite).
-- `src-tauri/` — Tauri desktop shell (embedded Rust runtime, IPC).
 - `frontend/` — Svelte 5 SPA (Monitor, Sessions, Search, Analytics tabs).
 - `public/` — Legacy dashboard (static HTML + vanilla JS).
 - `hooks/` — Claude Code hook scripts and Codex OTEL integration docs.
@@ -87,6 +84,7 @@ For legacy compatibility work on `/`, use two terminals:
 - Keep v1 SQL in `src/db/queries.ts`, v2 SQL in `src/db/v2-queries.ts`.
 - Keep v2 route handlers in `src/api/v2/router.ts`.
 - Prefer extending the Svelte `/app/` product path and v2 contracts over adding new behavior to the legacy `/` dashboard.
+- Preserve logical commit history on feature branches. For PR merges, prefer merge commits and do not squash branch history.
 - If API response shape changes, update `README.md` in the same change.
 - Do not commit local runtime artifacts (`data/`, `*.db`, generated CSS output).
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start (~small number); `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.

@@ -2,6 +2,13 @@ import { config } from '../config.js';
 import type Database from 'better-sqlite3';
 import type { ContentBlock, ParsedMessage, ParsedSession } from '../parser/claude-code.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock, type LivePrivacyPolicy } from './normalize.js';
+import {
+  clearProjectedSessionStream,
+  FULL_PROJECTION_CAPABILITIES,
+  insertProjectedItem,
+  insertProjectedTurn,
+  upsertProjectedSessionSnapshot,
+} from './projector.js';
 
 export interface ClaudeLiveSyncResult {
   inserted_turns: number;
@@ -29,8 +36,7 @@ function deriveLiveStatus(lastItemAt: string | null): string {
 }
 
 function resetLiveSession(db: Database.Database, sessionId: string): void {
-  db.prepare('DELETE FROM session_items WHERE session_id = ?').run(sessionId);
-  db.prepare('DELETE FROM session_turns WHERE session_id = ?').run(sessionId);
+  clearProjectedSessionStream(db, sessionId);
 }
 
 export function syncClaudeLiveSession(
@@ -52,17 +58,6 @@ export function syncClaudeLiveSession(
     startOrdinal = 0;
   }
 
-  const insertTurn = db.prepare(`
-    INSERT INTO session_turns (
-      session_id, agent_type, source_turn_id, status, title, started_at, ended_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insertItem = db.prepare(`
-    INSERT INTO session_items (
-      session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-
   let insertedTurns = 0;
   let insertedItems = 0;
   const privacyPolicy = options.privacyPolicy ?? {
@@ -78,15 +73,14 @@ export function syncClaudeLiveSession(
     const titleBlock = blocks.find(block => block.type === 'text' && typeof block.text === 'string' && block.text.trim());
     const title = titleBlock?.text?.trim().slice(0, 120) || `${message.role} message ${message.ordinal + 1}`;
 
-    const turnResult = insertTurn.run(
-      sessionId,
-      parsed.metadata.agent,
-      sourceTurnId,
-      'completed',
+    const turnId = insertProjectedTurn(db, sessionId, {
+      agent_type: parsed.metadata.agent,
+      source_turn_id: sourceTurnId,
+      status: 'completed',
       title,
-      message.timestamp,
-      message.timestamp,
-    );
+      started_at: message.timestamp,
+      ended_at: message.timestamp,
+    });
     insertedTurns++;
 
     let itemOrdinal = 0;
@@ -99,30 +93,36 @@ export function syncClaudeLiveSession(
       if (!normalizedItem) continue;
       const normalized = applyLivePrivacyPolicy(normalizedItem, privacyPolicy);
 
-      insertItem.run(
-        sessionId,
-        Number(turnResult.lastInsertRowid),
-        itemOrdinal,
-        normalized.source_item_id ?? `${sourceTurnId}:item:${itemOrdinal}`,
-        normalized.kind,
-        normalized.status ?? 'success',
-        JSON.stringify(normalized.payload),
-        normalized.created_at ?? message.timestamp,
-      );
+      insertProjectedItem(db, sessionId, turnId, {
+        ordinal: itemOrdinal,
+        source_item_id: normalized.source_item_id ?? `${sourceTurnId}:item:${itemOrdinal}`,
+        kind: normalized.kind,
+        status: normalized.status ?? 'success',
+        payload: normalized.payload,
+        created_at: normalized.created_at ?? message.timestamp,
+      });
       insertedItems++;
       itemOrdinal++;
     }
   }
 
   const liveStatus = deriveLiveStatus(parsed.metadata.ended_at);
-  db.prepare(`
-    UPDATE browsing_sessions
-    SET integration_mode = 'claude-jsonl',
-        fidelity = 'full',
-        last_item_at = ?,
-        live_status = ?
-    WHERE id = ?
-  `).run(parsed.metadata.ended_at, liveStatus, sessionId);
+  upsertProjectedSessionSnapshot(db, {
+    id: sessionId,
+    agent: parsed.metadata.agent,
+    project: parsed.metadata.project,
+    first_message: parsed.metadata.first_message,
+    started_at: parsed.metadata.started_at,
+    ended_at: parsed.metadata.ended_at,
+    message_count: parsed.metadata.message_count,
+    user_message_count: parsed.metadata.user_message_count,
+    live_status: liveStatus,
+    last_item_at: parsed.metadata.ended_at,
+  }, {
+    integration_mode: 'claude-jsonl',
+    fidelity: 'full',
+    capabilities: FULL_PROJECTION_CAPABILITIES,
+  });
 
   return {
     inserted_turns: insertedTurns,

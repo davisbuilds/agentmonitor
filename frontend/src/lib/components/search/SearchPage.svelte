@@ -34,6 +34,21 @@
   let filterAgent = $state('');
 
   const PAGE_SIZE = 25;
+  const searchNotice = $derived.by(() => {
+    if (filterAgent === 'codex') {
+      return {
+        tone: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+        title: 'Codex search is partial.',
+        body: 'This tab indexes transcript-backed history only. Summary-only Codex OTEL live sessions are intentionally excluded until richer Codex ingestion exists.',
+      };
+    }
+
+    return {
+      tone: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
+      title: 'Search is capability-aware.',
+      body: 'Only sessions with searchable history appear here. Summary-only live sessions do not contribute to full-text results.',
+    };
+  });
 
   // Load filter options
   import { onMount } from 'svelte';
@@ -89,6 +104,11 @@
 </script>
 
 <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
+  <div class={`mb-4 rounded-xl border px-4 py-3 text-sm ${searchNotice.tone}`}>
+    <div class="font-medium">{searchNotice.title}</div>
+    <p class="mt-1 text-xs text-gray-300">{searchNotice.body}</p>
+  </div>
+
   <!-- Search bar -->
   <form class="flex items-center gap-3 mb-4 flex-wrap" onsubmit={handleSubmit}>
     <div class="flex-1 min-w-[200px]">

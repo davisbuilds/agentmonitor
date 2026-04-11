@@ -317,11 +317,26 @@ describe('GET /api/v2/live/sessions', () => {
   test('returns live sessions with fidelity metadata', async () => {
     const res = await fetch(`${baseUrl}/api/v2/live/sessions`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { data: Array<{ id: string; integration_mode: string | null; fidelity: string | null }>; total: number };
+    const body = await res.json() as {
+      data: Array<{
+        id: string;
+        integration_mode: string | null;
+        fidelity: string | null;
+        capabilities: { history: string; search: string; tool_analytics: string; live_items: string } | null;
+      }>;
+      total: number;
+    };
     assert.ok(body.data.length >= 6);
     assert.ok(body.total >= 6);
     assert.ok(body.data.some(session => session.integration_mode === 'claude-jsonl'));
     assert.ok(body.data.some(session => session.fidelity === 'full'));
+    const claudeSession = body.data.find(session => session.integration_mode === 'claude-jsonl');
+    assert.deepEqual(claudeSession?.capabilities, {
+      history: 'full',
+      search: 'full',
+      tool_analytics: 'full',
+      live_items: 'full',
+    });
   });
 
   test('filters live sessions by agent and live_status', async () => {
@@ -353,10 +368,21 @@ describe('GET /api/v2/live/sessions/:id', () => {
   test('returns live session detail', async () => {
     const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-001`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { id: string; integration_mode: string | null; fidelity: string | null };
+    const body = await res.json() as {
+      id: string;
+      integration_mode: string | null;
+      fidelity: string | null;
+      capabilities: { history: string; search: string; tool_analytics: string; live_items: string } | null;
+    };
     assert.equal(body.id, 'api-sess-001');
     assert.equal(body.integration_mode, 'claude-jsonl');
     assert.equal(body.fidelity, 'full');
+    assert.deepEqual(body.capabilities, {
+      history: 'full',
+      search: 'full',
+      tool_analytics: 'full',
+      live_items: 'full',
+    });
   });
 
   test('returns 404 for missing live session', async () => {

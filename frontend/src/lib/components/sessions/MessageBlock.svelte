@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Message, ContentBlock } from '../../api/client';
+  import { formatTimeOfDay } from '../../format';
   import { parseSessionText } from '../../session-text';
 
   interface Props {
@@ -32,7 +33,7 @@
   <div class="flex items-center gap-2 mb-1">
     <span class="text-xs font-medium {roleColor}">{roleLabel}</span>
     {#if message.timestamp}
-      <span class="text-xs text-gray-600">{new Date(message.timestamp).toLocaleTimeString()}</span>
+      <span class="text-xs text-gray-600">{formatTimeOfDay(message.timestamp)}</span>
     {/if}
     {#if message.has_thinking}
       <span class="text-xs bg-purple-900/30 text-purple-400 px-1 rounded">thinking</span>

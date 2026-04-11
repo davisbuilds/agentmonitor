@@ -18,10 +18,10 @@ export interface Stats {
 
 export interface UsageMonitorData {
   agent_type: string;
-  limitType: string;
-  session: { tokens: number; limit: number; percent: number };
-  extended: { tokens: number; limit: number; percent: number };
-  weekly: { tokens: number; limit: number; percent: number };
+  limitType: 'tokens' | 'cost';
+  session: { used: number; limit: number; windowHours: number };
+  extended: { used: number; limit: number; windowHours: number } | null;
+  weekly: { used: number; limit: number; windowHours: number } | null;
 }
 
 export interface AgentEvent {
@@ -41,7 +41,7 @@ export interface AgentEvent {
   duration_ms?: number;
   created_at: string;
   client_timestamp?: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | string;
   source?: string;
 }
 
@@ -55,12 +55,19 @@ export interface Session {
   started_at: string;
   ended_at?: string;
   last_event_at: string;
-  metadata?: Record<string, unknown>;
+  metadata?: Record<string, unknown> | string;
+  event_count?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  total_cost_usd?: number;
+  files_edited?: number;
+  lines_added?: number;
+  lines_removed?: number;
 }
 
 export interface CostData {
   timeline: Array<{ date: string; cost: number }>;
-  by_project: Array<{ project: string; cost: number }>;
+  by_project: Array<{ project: string; cost: number; session_count: number; event_count: number }>;
   by_model: Array<{ model: string; cost: number }>;
 }
 
@@ -92,6 +99,15 @@ export interface FilterOptions {
 
 // --- V2 API types (Session browser) ---
 
+export type SessionCapabilityLevel = 'none' | 'summary' | 'full';
+
+export interface SessionCapabilities {
+  history: SessionCapabilityLevel;
+  search: SessionCapabilityLevel;
+  tool_analytics: SessionCapabilityLevel;
+  live_items: SessionCapabilityLevel;
+}
+
 export interface BrowsingSession {
   id: string;
   project: string | null;
@@ -103,13 +119,14 @@ export interface BrowsingSession {
   user_message_count: number;
   parent_session_id: string | null;
   relationship_type: string | null;
+  capabilities: SessionCapabilities | null;
+  integration_mode: string | null;
+  fidelity: string | null;
 }
 
 export interface LiveSession extends BrowsingSession {
   live_status: string | null;
   last_item_at: string | null;
-  integration_mode: string | null;
-  fidelity: string | null;
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;
@@ -215,7 +232,7 @@ type Filters = Record<string, string>;
 
 interface RawCostData {
   timeline?: Array<{ bucket: string; cost_usd: number }>;
-  by_project?: Array<{ project: string; cost_usd: number }>;
+  by_project?: Array<{ project: string; cost_usd: number; session_count?: number; event_count?: number }>;
   by_model?: Array<{ model: string; cost_usd: number }>;
 }
 
@@ -269,6 +286,8 @@ export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
       ? data.by_project.map((item) => ({
           project: item.project,
           cost: item.cost_usd,
+          session_count: item.session_count ?? 0,
+          event_count: item.event_count ?? 0,
         }))
       : [],
     by_model: Array.isArray(data.by_model)

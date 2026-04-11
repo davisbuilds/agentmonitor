@@ -1,6 +1,6 @@
 <script lang="ts">
   import { getSessions, getEvents, setSelectedSessionId } from '../../stores/monitor.svelte';
-  import { formatCost, formatNumber, timeAgo, statusColor, agentColor } from '../../format';
+  import { formatCost, formatNumber, timeAgo, statusColor, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
 
   const sessions = $derived(getSessions());
@@ -24,20 +24,9 @@
       const sa = statusOrder[a.status] ?? 2;
       const sb = statusOrder[b.status] ?? 2;
       if (sa !== sb) return sa - sb;
-      return new Date(b.last_event_at).getTime() - new Date(a.last_event_at).getTime();
+      return parseTimestamp(b.last_event_at).getTime() - parseTimestamp(a.last_event_at).getTime();
     });
   });
-
-  function sessionTokens(session: Session): { tokensIn: number; tokensOut: number; cost: number } {
-    const sessionEvents = eventsBySession.get(session.id) || [];
-    let tokensIn = 0, tokensOut = 0, cost = 0;
-    for (const e of sessionEvents) {
-      tokensIn += e.tokens_in || 0;
-      tokensOut += e.tokens_out || 0;
-      cost += e.cost_usd || 0;
-    }
-    return { tokensIn, tokensOut, cost };
-  }
 
   function eventLabel(e: AgentEvent): string {
     if (e.event_type === 'tool_use' && e.tool_name) return e.tool_name;
@@ -64,7 +53,6 @@
     </div>
   {:else}
     {#each sorted as session (session.id)}
-      {@const { tokensIn, tokensOut, cost } = sessionTokens(session)}
       {@const recentEvents = eventsBySession.get(session.id) || []}
       <button
         class="bg-gray-900 rounded-lg border border-gray-700 p-4 text-left hover:border-gray-500 transition-colors cursor-pointer w-full"
@@ -89,9 +77,21 @@
 
         <!-- Metrics -->
         <div class="flex items-center gap-4 text-xs text-gray-500 mb-3">
-          <span>{formatNumber(tokensIn)} in</span>
-          <span>{formatNumber(tokensOut)} out</span>
-          {#if cost > 0}<span>{formatCost(cost)}</span>{/if}
+          <span>{session.event_count || 0} events</span>
+          <span>{formatNumber(session.tokens_in || 0)} in</span>
+          <span>{formatNumber(session.tokens_out || 0)} out</span>
+          {#if session.files_edited}
+            <span>{session.files_edited} file{session.files_edited === 1 ? '' : 's'}</span>
+          {/if}
+          {#if session.lines_added}
+            <span class="text-emerald-400">+{formatNumber(session.lines_added)}</span>
+          {/if}
+          {#if session.lines_removed}
+            <span class="text-red-400">-{formatNumber(session.lines_removed)}</span>
+          {/if}
+          {#if (session.total_cost_usd || 0) > 0}
+            <span>{formatCost(session.total_cost_usd || 0)}</span>
+          {/if}
         </div>
 
         <!-- Mini event feed -->

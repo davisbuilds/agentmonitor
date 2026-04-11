@@ -6,6 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agentmonitor-parity-ts.XXXXXX")"
 SERVER_LOG="$TMP_DIR/server.log"
 SERVER_PID=""
+TEST_GLOB="${TEST_GLOB:-tests/parity/**/*.test.ts}"
+TEST_SETUP_CMD="${TEST_SETUP_CMD:-}"
 
 cleanup() {
   local exit_code=$?
@@ -24,8 +26,17 @@ PORT="$(
 )"
 
 mkdir -p "$TMP_DIR/home"
+mkdir -p "$TMP_DIR/home/.claude/projects"
+mkdir -p "$TMP_DIR/home/.codex"
 
 cd "$ROOT_DIR"
+
+if [[ -n "$TEST_SETUP_CMD" ]]; then
+  env \
+    HOME="$TMP_DIR/home" \
+    CODEX_HOME="$TMP_DIR/home/.codex" \
+    bash -c "$TEST_SETUP_CMD"
+fi
 
 env \
   HOME="$TMP_DIR/home" \
@@ -39,8 +50,10 @@ SERVER_PID="$!"
 
 for _ in $(seq 1 30); do
   if curl -sf "http://127.0.0.1:$PORT/api/health" >/dev/null; then
+    HOME="$TMP_DIR/home" \
+    CODEX_HOME="$TMP_DIR/home/.codex" \
     AGENTMONITOR_BASE_URL="http://127.0.0.1:$PORT" \
-      node --import tsx --test tests/parity/**/*.test.ts
+      node --import tsx --test "$TEST_GLOB"
     exit 0
   fi
   sleep 1

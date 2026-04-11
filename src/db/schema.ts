@@ -185,6 +185,7 @@ export function initSchema(): void {
       last_item_at TEXT,
       integration_mode TEXT,
       fidelity TEXT,
+      capabilities_json TEXT,
       file_path TEXT,
       file_size INTEGER,
       file_hash TEXT
@@ -211,6 +212,9 @@ export function initSchema(): void {
   }
   if (!browsingSessionColumns.has('fidelity')) {
     db.exec('ALTER TABLE browsing_sessions ADD COLUMN fidelity TEXT');
+  }
+  if (!browsingSessionColumns.has('capabilities_json')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN capabilities_json TEXT');
   }
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');

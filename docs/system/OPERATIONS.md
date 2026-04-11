@@ -19,35 +19,18 @@ pnpm start              # Run compiled server from dist/
 pnpm test               # Run self-contained TypeScript tests (excludes parity)
 pnpm test:watch         # Watch-mode self-contained test runner
 pnpm test:parity:ts     # Run isolated TypeScript parity tests (temp server + temp DB)
+pnpm test:v2:contract:ts # Run isolated black-box tests for the canonical TS /api/v2 contract
 pnpm test:parity:ts:live # Run parity tests against a running TS server on :3141
 pnpm test:parity:rust   # Run parity tests against a running Rust server on :3142
+pnpm rust:dev           # Run the Rust backend directly on :3142
+pnpm rust:test          # Run the Rust backend test suite
+pnpm rust:test:runtime-invariants # Run Rust runtime-host invariants
 pnpm lint               # ESLint
 pnpm seed               # Send demo events (server must be running)
 pnpm run import         # Import historical sessions
 pnpm bench:ingest       # Ingest throughput benchmark
 pnpm recalculate-costs  # Recalculate costs from pricing data
 ```
-
-## Tauri macOS Release
-
-```bash
-pnpm tauri:release:mac:unsigned                     # unsigned app + dmg bundles
-pnpm tauri:release:mac:signed                       # requires APPLE_SIGNING_IDENTITY
-pnpm tauri:release:mac:notarized                    # requires signing + notarization env vars
-pnpm tauri:release:mac -- --mode signed --dry-run  # preflight only (no build)
-pnpm tauri:build --no-bundle                        # non-GUI release sanity check
-```
-
-Note: DMG bundling uses AppleScript via `create-dmg` and may hang in headless or restricted GUI sessions. Run `--dry-run` first when validating env setup.
-
-Signed/notarized preflight environment:
-
-| Variable | Required For | Notes |
-|----------|--------------|-------|
-| `APPLE_SIGNING_IDENTITY` | `signed`, `signed-notarized` | Developer ID Application identity |
-| `APPLE_API_KEY` | `signed-notarized` | App Store Connect API key id |
-| `APPLE_API_ISSUER` | `signed-notarized` | App Store Connect issuer UUID |
-| `APPLE_API_KEY_PATH` | `signed-notarized` | Absolute path to `.p8` key file; file must exist |
 
 ## Environment Variables
 

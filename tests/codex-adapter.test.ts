@@ -76,12 +76,13 @@ test('syncCodexSummaryLiveEvent creates summary session, turn, and user item for
   assert.equal(result.integration_mode, 'codex-otel');
 
   const session = db.prepare(`
-    SELECT first_message, integration_mode, fidelity, message_count, user_message_count
+    SELECT first_message, integration_mode, fidelity, capabilities_json, message_count, user_message_count
     FROM browsing_sessions WHERE id = ?
   `).get('codex-summary-001') as {
     first_message: string;
     integration_mode: string;
     fidelity: string;
+    capabilities_json: string | null;
     message_count: number;
     user_message_count: number;
   };
@@ -97,6 +98,12 @@ test('syncCodexSummaryLiveEvent creates summary session, turn, and user item for
   assert.equal(session.first_message, 'Summarize the flaky test failures');
   assert.equal(session.integration_mode, 'codex-otel');
   assert.equal(session.fidelity, 'summary');
+  assert.deepEqual(JSON.parse(session.capabilities_json ?? '{}'), {
+    history: 'none',
+    search: 'none',
+    tool_analytics: 'none',
+    live_items: 'summary',
+  });
   assert.equal(session.message_count, 1);
   assert.equal(session.user_message_count, 1);
   assert.equal(turn.source_turn_id, 'evt-1');
@@ -140,6 +147,118 @@ test('syncCodexSummaryLiveEvent redacts tool arguments when capture is disabled'
   assert.equal(payload.tool_name, 'shell');
   assert.deepEqual(payload.input, { redacted: true });
   assert.equal(payload.input_redacted, true);
+});
+
+test('syncCodexSummaryLiveEvent materializes tool_result items for codex.tool_result metadata', () => {
+  const db = getDb();
+  const row = makeEventRow({
+    id: 3,
+    session_id: 'codex-summary-003',
+    event_type: 'tool_use',
+    tool_name: 'shell',
+    status: 'error',
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.tool_result',
+      call_id: 'call-xyz',
+      output: 'permission denied',
+      success: false,
+    }),
+  });
+
+  const result = syncCodexSummaryLiveEvent(db, row);
+  assert.equal(result.inserted_items, 1);
+
+  const item = db.prepare('SELECT kind, payload_json FROM session_items WHERE session_id = ?').get('codex-summary-003') as {
+    kind: string;
+    payload_json: string;
+  };
+  const payload = JSON.parse(item.payload_json) as {
+    tool_name?: string;
+    output?: string;
+    success?: boolean;
+  };
+
+  assert.equal(item.kind, 'tool_result');
+  assert.equal(payload.tool_name, 'shell');
+  assert.equal(payload.output, 'permission denied');
+  assert.equal(payload.success, false);
+});
+
+test('syncCodexSummaryLiveEvent materializes assistant messages for codex response items', () => {
+  const db = getDb();
+  const row = makeEventRow({
+    id: 4,
+    session_id: 'codex-summary-004',
+    event_type: 'response',
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.response',
+      response_item_type: 'message_from_assistant',
+      content_preview: 'Pinned the Node runtime and updated the docs.',
+    }),
+  });
+
+  const result = syncCodexSummaryLiveEvent(db, row);
+  assert.equal(result.inserted_items, 1);
+
+  const item = db.prepare('SELECT kind, payload_json FROM session_items WHERE session_id = ?').get('codex-summary-004') as {
+    kind: string;
+    payload_json: string;
+  };
+  const payload = JSON.parse(item.payload_json) as {
+    text?: string;
+    item_type?: string;
+  };
+
+  assert.equal(item.kind, 'assistant_message');
+  assert.equal(payload.text, 'Pinned the Node runtime and updated the docs.');
+  assert.equal(payload.item_type, 'message_from_assistant');
+});
+
+test('syncCodexSummaryLiveEvent clears stale ended_at when live OTEL activity resumes', () => {
+  const db = getDb();
+  const importedRow = makeEventRow({
+    id: 5,
+    session_id: 'codex-summary-005',
+    event_type: 'response',
+    source: 'import',
+    created_at: '2026-03-24 12:00:00',
+    client_timestamp: '2026-03-24T12:00:00.000Z',
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.response',
+      response_item_type: 'message_from_assistant',
+      content_preview: 'Imported historical response',
+    }),
+  });
+  const liveRow = makeEventRow({
+    id: 6,
+    session_id: 'codex-summary-005',
+    event_type: 'tool_use',
+    source: 'otel',
+    tool_name: 'exec_command',
+    created_at: '2026-03-24 12:01:00',
+    client_timestamp: new Date().toISOString(),
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.tool_decision',
+      arguments: { cmd: 'pwd' },
+    }),
+  });
+
+  syncCodexSummaryLiveEvent(db, importedRow);
+  syncCodexSummaryLiveEvent(db, liveRow);
+
+  const session = db.prepare(`
+    SELECT ended_at, live_status, integration_mode
+    FROM browsing_sessions
+    WHERE id = ?
+  `).get('codex-summary-005') as {
+    ended_at: string | null;
+    live_status: string;
+    integration_mode: string;
+  };
+
+  assert.equal(session.ended_at, null);
+  assert.equal(session.live_status, 'live');
+  assert.equal(session.integration_mode, 'codex-otel');
 });
 
 test('normalizeCodexExporterRecord preserves reserved richer item kinds for future exporters', () => {

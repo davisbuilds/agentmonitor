@@ -5,13 +5,26 @@
   import CostDashboard from './CostDashboard.svelte';
   import ToolAnalytics from './ToolAnalytics.svelte';
   import SessionDetail from './SessionDetail.svelte';
-  import { setEvents, setSessions, setStats, setCostData, setToolStats, getFilters } from '../../stores/monitor.svelte';
+  import { setEvents, setSessions, setStats, setCostData, setToolStats, setUsageMonitor, getFilters, getCostWindow } from '../../stores/monitor.svelte';
   import { fetchStats, fetchEvents, fetchSessions, fetchCostData, fetchToolStats } from '../../api/client';
+  import { buildCostFilters } from '../../monitor-analytics';
 
   interface Props {
     onfilterchange: (filters: Record<string, string>) => void;
   }
   let { onfilterchange }: Props = $props();
+
+  async function loadAnalytics(filters: Record<string, string> = {}) {
+    const analyticsResults = await Promise.allSettled([
+      fetchCostData(buildCostFilters(filters, getCostWindow())).then(setCostData),
+      fetchToolStats(filters).then(setToolStats),
+    ]);
+    for (const result of analyticsResults) {
+      if (result.status === 'rejected') {
+        console.error('Failed to load monitor analytics:', result.reason);
+      }
+    }
+  }
 
   export async function reload(filters: Record<string, string> = {}) {
     const sessionsParams: Record<string, string> = { limit: '0', exclude_status: 'ended' };
@@ -24,22 +37,14 @@
         fetchSessions(sessionsParams),
       ]);
       setStats(statsData);
+      setUsageMonitor(statsData.usage_monitor || []);
       setEvents(eventsData.events || []);
       setSessions(sessionsData.sessions || []);
     } catch (err) {
       console.error('Failed to load monitor data:', err);
     }
 
-    // Load analytics independently
-    const analyticsResults = await Promise.allSettled([
-      fetchCostData(filters).then(setCostData),
-      fetchToolStats(filters).then(setToolStats),
-    ]);
-    for (const result of analyticsResults) {
-      if (result.status === 'rejected') {
-        console.error('Failed to load monitor analytics:', result.reason);
-      }
-    }
+    await loadAnalytics(filters);
   }
 
   onMount(() => {
@@ -53,7 +58,7 @@
   </section>
 
   <section>
-    <CostDashboard />
+    <CostDashboard onwindowchange={() => void loadAnalytics(getFilters())} />
   </section>
 
   <section>

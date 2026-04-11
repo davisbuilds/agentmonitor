@@ -9,6 +9,8 @@
   } from '../../api/client';
   import { timeAgo, agentHexColor } from '../../format';
   import { getMessagePreviewText, getSessionPreviewText } from '../../session-text';
+  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import { hasSessionCapability } from '../../session-capabilities';
   import MessageBlock from './MessageBlock.svelte';
 
   interface Props {
@@ -103,6 +105,12 @@
         {#if session.project}
           <span class="bg-gray-800 px-1.5 py-0.5 rounded">{session.project}</span>
         {/if}
+        {#if session.integration_mode}
+          <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.integration_mode}</span>
+        {/if}
+        {#if session.fidelity}
+          <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.fidelity} fidelity</span>
+        {/if}
         <span>{session.message_count} messages</span>
         {#if session.started_at}
           <span>{timeAgo(session.started_at)}</span>
@@ -110,6 +118,15 @@
       </div>
     {/if}
   </div>
+
+  {#if session}
+    <div class="border-b border-gray-800 px-4 sm:px-6 py-2 space-y-2 text-xs text-gray-500">
+      <div class="flex items-center gap-2 flex-wrap">
+        <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
+      </div>
+      <ProjectionCapabilities capabilities={session.capabilities} />
+    </div>
+  {/if}
 
   <!-- Children -->
   {#if children.length > 0}
@@ -133,7 +150,19 @@
         <button class="text-xs mt-2 text-blue-400 hover:text-blue-300" onclick={load}>Retry</button>
       </div>
     {:else if messages.length === 0}
-      <div class="text-center py-16 text-gray-500 text-sm">No messages in this session.</div>
+      {#if session && !hasSessionCapability(session.capabilities, 'history')}
+        <div class="text-center py-16 text-gray-500">
+          <p class="text-sm text-gray-300">Transcript history unavailable.</p>
+          <p class="mt-2 text-xs text-gray-500">
+            {session.integration_mode || session.agent} currently projects this session without transcript history.
+          </p>
+          <p class="mt-1 text-xs text-gray-600">
+            Search and tool analytics are limited by this session&apos;s reported capability contract.
+          </p>
+        </div>
+      {:else}
+        <div class="text-center py-16 text-gray-500 text-sm">No messages in this session.</div>
+      {/if}
     {:else}
       {#each messages as message (message.id)}
         <MessageBlock {message} />

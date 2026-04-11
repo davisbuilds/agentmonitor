@@ -10,7 +10,7 @@ The convergence target is the canonical Svelte `/app/` experience backed by the 
 - Dev server: `pnpm rust:dev` (binds `127.0.0.1:3142`)
 - Release build: `pnpm rust:build`
 - Run tests: `pnpm rust:test`
-- Desktop invariants only: `pnpm rust:test:desktop-invariants`
+- Runtime invariants only: `pnpm rust:test:runtime-invariants`
 - Import historical logs: `pnpm rust:import --source all` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`, `--claude-dir`, `--codex-dir`)
 - Parity tests (TS): `pnpm test:parity:ts` (isolated temp server + temp DB; does not touch normal monitor data)
 - Parity tests (TS live): `pnpm test:parity:ts:live` (needs TS server running on 3141)

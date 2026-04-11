@@ -10,7 +10,7 @@ source: conversation
 
 ## Goal
 
-Converge AgentMonitor around one canonical product path: the Svelte app plus v2 API contract, backed by a shared cross-agent projection model, with Rust/Tauri moving onto the same surface and only durable v1 localhost behavior carried forward.
+Converge AgentMonitor around one canonical product path: the Svelte app plus v2 API contract, backed by a shared cross-agent projection model, with only durable v1 localhost behavior carried forward and the Rust backend either converging on that surface or being kept explicitly experimental.
 
 ## Scope
 
@@ -19,7 +19,7 @@ Converge AgentMonitor around one canonical product path: the Svelte app plus v2 
 - Declare the Svelte `/app` plus v2 API as the canonical UI and data contract.
 - Introduce a single projection model for Claude and Codex so search, analytics, sessions, and live views stop drifting by source.
 - Carry forward useful operator behavior from the current localhost stack without preserving the legacy UI architecture itself.
-- Move Rust and Tauri toward serving the same UI and API surface rather than the current legacy dashboard path.
+- Decide whether the Rust backend converges on the same UI and API surface or remains explicitly experimental.
 - Harden discovery, pagination, SSE, and parity coverage so convergence work has a reliable safety net.
 
 ### Out of Scope
@@ -33,7 +33,7 @@ Converge AgentMonitor around one canonical product path: the Svelte app plus v2 
 ## Assumptions And Constraints
 
 - The Svelte app is the product surface making the most forward progress and should become the primary UX.
-- The Rust backend and Tauri shell are strategic, but they are not yet the canonical product path because they still serve legacy assets and a smaller API surface.
+- Tauri has been retired. The remaining runtime question is Rust-only: either it converges on the canonical web contract or it is kept clearly non-canonical.
 - Current v2 data is source-skewed: Claude file-watcher paths populate historical/session-browser tables deeply, while the current AgentMonitor Codex OTEL integration mostly populates summary/live tables.
 - The right target is not "make Codex look identical by faking data." The right target is one projection contract with explicit capability/fidelity markers and source-appropriate population.
 - Current AgentMonitor behavior should not be treated as the same thing as Codex source capability. Official Codex OTEL and app-server sources indicate richer Codex event models than the repo currently parses or projects.
@@ -105,7 +105,7 @@ This work should be executed as a convergence program, not as unrelated cleanup.
 2. Audit current Codex telemetry intake against current official Codex surfaces.
 3. Introduce the shared v2 projection contract.
 4. Carry forward durable v1 localhost behavior into the canonical path.
-5. Move Rust and Tauri onto the same UI and API surface.
+5. Decide Rust runtime scope and canonical-surface alignment.
 6. Harden discovery, pagination, and parity coverage.
 7. Retire the legacy dashboard only after the cutover gates are met.
 
@@ -115,7 +115,7 @@ This work should be executed as a convergence program, not as unrelated cleanup.
 
 **Objective**
 
-Make the intended product path unambiguous before implementation continues: Svelte plus v2 is canonical, legacy `/` is maintenance-only until retirement, and Rust/Tauri are expected to converge onto that contract.
+Make the intended product path unambiguous before implementation continues: Svelte plus v2 is canonical, legacy `/` is maintenance-only until retirement, and any non-TS runtime must either converge onto that contract or be clearly marked non-canonical.
 
 **Files**
 
@@ -135,8 +135,8 @@ None
 2. Mark the legacy localhost dashboard at `/` as maintenance-only and define the retirement condition.
 3. Document the current runtime split explicitly:
    - TypeScript serves `/` and `/app`
-   - Rust/Tauri currently serve legacy assets
-   - convergence requires Rust/Tauri to adopt the Svelte/v2 surface
+   - Rust currently serves legacy assets
+   - any maintained alternate runtime must adopt the Svelte/v2 surface
 4. Define the expected fidelity model for Claude and Codex so future work does not imply unsupported parity.
 5. Add a short "legacy carry-forward inventory" note so useful v1 behavior is preserved intentionally rather than accidentally.
 
@@ -148,7 +148,7 @@ None
 **Done When**
 
 - A zero-context engineer can tell which UI/API surface is canonical.
-- The docs no longer imply that Rust/Tauri and TypeScript are equally current product paths.
+- The docs no longer imply that alternate runtimes and TypeScript are equally current product paths.
 
 ### Task 2A: Audit And Expand Codex Telemetry Intake
 
@@ -194,6 +194,16 @@ Validate the real Codex telemetry ceiling before the shared projector hardens ar
 
 - The repo has an explicit, current understanding of which Codex capabilities come from today's OTEL stream versus a future richer integration path.
 - Codex is no longer artificially capped to summary fidelity just because the current parser ignores richer official events.
+
+**Live Validation Update**
+
+On April 9, 2026, a live validation pass against active local Codex sessions confirmed that Task 2A should now be treated as mostly complete for the current OTEL surface:
+
+- The current parser/projector improvements do pay off immediately for prompts, tool decisions, tool results, and response-complete usage summaries.
+- The real local OTEL stream is still dominated by websocket lifecycle events, especially `response.output_text.delta`.
+- In that live sample, websocket rows did not expose transcript text, response item typing, or client timestamps that would support honest transcript reconstruction from OTEL alone.
+- The remaining gap is therefore not "AgentMonitor is still dropping obviously available Codex transcript data"; it is that the current OTEL export does not appear to carry enough detail for transcript-grade parity in the general case.
+- Task 2 should preserve explicit fidelity boundaries, and future Codex parity work should likely branch into app-server or richer local-state ingestion rather than trying to coerce websocket lifecycle events into a fake transcript.
 
 ### Task 2: Introduce A Shared Projection Contract For V2 Data
 
@@ -253,6 +263,17 @@ Replace source-specific v2 population with one projection contract that can repr
 
 Preserve the parts of the current localhost stack that improve operator experience and runtime resilience, while leaving behind the brittle legacy dashboard coupling.
 
+**Implementation Update (2026-04-10)**
+
+Completed on `arch/codex-telemetry-convergence`:
+
+- v1 SSE durability and monitor backfill behaviors are now carried into the canonical Svelte path.
+- The Svelte monitor now hydrates usage-monitor data on initial load, not only from live stats ticks.
+- Usage monitor windows now honor the real backend contract, including Codex cost-based windows and extended ranges.
+- Tool Analytics restored the compact frequency visualization from the legacy dashboard.
+- Cost Overview once again shows per-project session counts instead of discarding them in the frontend mapping.
+- Browser coverage now asserts the carried-forward monitor affordances directly.
+
 **Files**
 
 - Modify: `src/api/stream.ts`
@@ -308,11 +329,11 @@ Preserve the parts of the current localhost stack that improve operator experien
 - The Svelte app has the reliability and operator affordances worth preserving from v1.
 - The new surfaces do not inherit the legacy dashboard's all-or-nothing bootstrap coupling.
 
-### Task 4: Move Rust And Tauri Onto The Canonical UI And API Surface
+### Task 4: Decide Rust Runtime Scope And Canonical Surface Alignment
 
 **Objective**
 
-Stop treating Rust/Tauri as a separate product by making them serve the same Svelte and v2 surface the TypeScript path treats as canonical.
+Resolve the remaining runtime ambiguity now that the desktop shell has been retired: either bring the Rust backend up to the canonical Svelte + v2 surface, or freeze it explicitly as experimental so it stops competing with the product path.
 
 **Files**
 
@@ -322,13 +343,10 @@ Stop treating Rust/Tauri as a separate product by making them serve the same Sve
 - Modify: `rust-backend/src/api/mod.rs`
 - Modify: `rust-backend/src/runtime_host.rs`
 - Modify: `rust-backend/src/state.rs`
-- Modify: `src-tauri/src/backend.rs`
-- Modify: `src-tauri/src/runtime_coordinator.rs`
-- Modify: `src-tauri/AGENTS.md`
 - Modify: `rust-backend/AGENTS.md`
 - Test: `rust-backend/tests/static_assets_api.rs`
 - Test: `rust-backend/tests/runtime_host.rs`
-- Test: `src-tauri/tests/runtime_boundary.rs`
+- Test: `rust-backend/tests/runtime_invariants.rs`
 
 **Dependencies**
 
@@ -337,25 +355,24 @@ Stop treating Rust/Tauri as a separate product by making them serve the same Sve
 
 **Implementation Steps**
 
-1. Change Rust asset serving so the embedded runtime can serve the Svelte build, not only `public/`.
-2. Decide and document the routing strategy:
+1. Decide whether Rust remains a maintained alternate runtime or becomes explicitly experimental/frozen.
+2. If maintained, change Rust asset serving so the runtime can serve the Svelte build, not only `public/`.
+3. Decide and document the routing strategy:
    - temporary `/` redirect to `/app`
    - or Svelte takeover of `/` once parity is reached
-3. Add the missing v2 endpoints and live contracts required for the Svelte app to run against Rust.
-4. Ensure Tauri startup and runtime metadata reflect the canonical surface and static asset location.
-5. Keep Rust/Tauri tests focused on contract parity and startup boundary guarantees.
+4. Add the missing v2 endpoints and live contracts required for the Svelte app to run against Rust.
+5. If Rust is frozen instead, document the freeze boundary clearly and stop implying near-term parity work.
+6. Keep Rust runtime tests focused on contract parity and startup boundary guarantees.
 
 **Verification**
 
 - Run: `pnpm rust:test`
-- Expect: Rust backend and desktop invariant tests pass.
-- Run: `pnpm tauri:build --no-bundle`
-- Expect: Tauri compiles against the updated runtime surface.
+- Expect: Rust backend and runtime-host invariant tests pass.
 
 **Done When**
 
-- Rust can serve the same frontend and API contract the TypeScript runtime presents.
-- Tauri is no longer coupled to the legacy dashboard as its default product experience.
+- There is no ambiguity about whether Rust is a maintained alternate runtime or an experimental side path.
+- If maintained, Rust can serve the same frontend and API contract the TypeScript runtime presents.
 
 ### Task 5: Harden Discovery, Pagination, And Parity Coverage
 
@@ -440,7 +457,7 @@ Remove the legacy dashboard as a source of product drift only after the canonica
 
 1. Define explicit cutover gates:
    - Svelte monitor covers required operator workflows
-   - Rust/Tauri serve the same canonical surface
+   - Rust runtime strategy is explicit
    - v2 tests and smoke coverage are green
 2. Change root routing to the canonical frontend once the cutover gates are satisfied.
 3. Remove legacy assets and update docs to reflect the new steady state.
@@ -458,7 +475,7 @@ Remove the legacy dashboard as a source of product drift only after the canonica
 **Done When**
 
 - The repo no longer contains two competing UI products.
-- Root routing and desktop behavior both point at the same canonical frontend.
+- Root routing points at the same canonical frontend intentionally.
 
 ## Risks And Mitigations
 
@@ -471,8 +488,8 @@ Remove the legacy dashboard as a source of product drift only after the canonica
 - Risk: the plan hardens around the current Codex parser instead of the actual Codex telemetry surface, which would lock in unnecessary feature skew.
   Mitigation: complete the Codex telemetry audit and parser-expansion step before finalizing shared projection boundaries.
 
-- Risk: Rust/Tauri fall further behind while TypeScript continues to evolve.
-  Mitigation: give Rust/Tauri a dedicated convergence task before deprecating legacy assets.
+- Risk: Rust falls further behind while TypeScript continues to evolve, creating a permanent second-class runtime.
+  Mitigation: give Rust a dedicated convergence-or-freeze decision before deprecating legacy assets.
 
 - Risk: useful localhost operator behavior gets lost during UI migration.
   Mitigation: complete the v1 carry-forward task as an explicit phase with named source references.
@@ -488,7 +505,7 @@ Remove the legacy dashboard as a source of product drift only after the canonica
 | Codex telemetry intake matches current official understanding | `pnpm test -- --test-name-pattern "OTEL|Codex"` | Codex parser and live-adapter coverage reflect the current supported event taxonomy |
 | Shared projection contract behaves for both agents | `pnpm test -- --test-name-pattern "Codex|Claude|v2"` | projection and v2 tests pass |
 | Durable v1 operator behavior is preserved intentionally | `pnpm test -- --test-name-pattern "SSE|stats|cost|tools|live stream"` | SSE and analytics tests pass with hardened behavior |
-| Rust/Tauri serve the canonical surface | `pnpm rust:test && pnpm tauri:build --no-bundle` | Rust tests and Tauri compile succeed |
+| Rust runtime strategy is explicit | `pnpm rust:test` | Rust tests pass and docs describe whether Rust is maintained or experimental |
 | Discovery and cursor hardening are complete | `pnpm test && pnpm rust:test` | TS and Rust suites pass with recursive discovery and stable pagination coverage |
 | Canonical frontend is browser-usable | `pnpm exec playwright test` | Svelte smoke tests pass |
 | Legacy cutover is safe | `pnpm build && curl -I http://127.0.0.1:3141/` | production build passes and root serves or redirects intentionally |
