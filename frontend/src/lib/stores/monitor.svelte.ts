@@ -1,6 +1,7 @@
 import { fetchSessionDetail, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type UsageMonitorData } from '../api/client';
 import type { CostWindow } from '../monitor-analytics';
 import { parseTimestamp } from '../format';
+import { mergeSessionAggregates } from '../monitor-session-merge';
 
 // --- Stats ---
 let stats = $state<Stats>({
@@ -98,25 +99,6 @@ function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
   }
 
   return next;
-}
-
-function mergeSessionAggregates(current: Session, incoming: Session): Session {
-  return {
-    ...current,
-    ...incoming,
-    status: current.status === 'active' ? 'active' : incoming.status,
-    project: current.project || incoming.project,
-    branch: current.branch || incoming.branch,
-    started_at: incoming.started_at || current.started_at,
-    last_event_at: current.last_event_at || incoming.last_event_at,
-    event_count: Math.max(current.event_count || 0, incoming.event_count || 0),
-    tokens_in: Math.max(current.tokens_in || 0, incoming.tokens_in || 0),
-    tokens_out: Math.max(current.tokens_out || 0, incoming.tokens_out || 0),
-    total_cost_usd: Math.max(current.total_cost_usd || 0, incoming.total_cost_usd || 0),
-    files_edited: Math.max(current.files_edited || 0, incoming.files_edited || 0),
-    lines_added: Math.max(current.lines_added || 0, incoming.lines_added || 0),
-    lines_removed: Math.max(current.lines_removed || 0, incoming.lines_removed || 0),
-  };
 }
 
 async function backfillSession(sessionId: string): Promise<void> {

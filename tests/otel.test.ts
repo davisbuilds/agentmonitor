@@ -1086,6 +1086,49 @@ describe('Codex OTLP integration', () => {
     assert.equal(payloadJson.output, 'total 42');
   });
 
+  test('skips apply_patch metadata extraction when arguments decode to an object', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-apply-patch-object-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.tool_result',
+        attributes: [
+          { key: 'gen_ai.tool.name', value: { stringValue: 'apply_patch' } },
+          {
+            key: 'arguments',
+            value: {
+              stringValue: JSON.stringify({
+                patch: '*** Begin Patch\n*** Update File: src/example.ts\n+const added = true;\n*** End Patch',
+              }),
+            },
+          },
+        ],
+      }],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal(res.status, 200);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tool_name, 'apply_patch');
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as {
+      arguments?: { patch?: string };
+      file_path?: string;
+      lines_added?: number;
+      lines_removed?: number;
+    };
+    assert.deepEqual(meta.arguments, {
+      patch: '*** Begin Patch\n*** Update File: src/example.ts\n+const added = true;\n*** End Patch',
+    });
+    assert.equal(meta.file_path, undefined);
+    assert.equal(meta.lines_added, undefined);
+    assert.equal(meta.lines_removed, undefined);
+  });
+
   test('codex metrics use codex_cli_rs metric names', async () => {
     const payload = buildMetricsPayload({
       serviceName: 'codex_cli_rs',

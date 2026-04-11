@@ -725,9 +725,13 @@ function parseLogRecord(
   // For apply_patch tool events, extract file path and line counts from patch input
   if (toolName === 'apply_patch') {
     const meta = (typeof metadata === 'object' && metadata !== null) ? metadata as Record<string, unknown> : {};
-    const patchInput = (meta.input as string | undefined)
-      ?? (meta.arguments as string | undefined)
-      ?? (bodyJson?.input as string | undefined);
+    const patchInput = typeof meta.input === 'string'
+      ? meta.input
+      : typeof meta.arguments === 'string'
+        ? meta.arguments
+        : typeof bodyJson?.input === 'string'
+          ? bodyJson.input
+          : undefined;
     if (patchInput) {
       const patchMeta = parsePatchMeta(patchInput);
       if (patchMeta) {
