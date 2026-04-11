@@ -18,6 +18,11 @@ struct TestUiDirs {
     app_ui_dir: std::path::PathBuf,
 }
 
+struct TestApp {
+    _ui_dirs: TestUiDirs,
+    app: axum::Router,
+}
+
 fn make_test_ui_dirs() -> TestUiDirs {
     let tmp = tempfile::tempdir().expect("temp dir");
     let legacy_ui_dir = tmp.path().join("public");
@@ -35,7 +40,7 @@ fn make_test_ui_dirs() -> TestUiDirs {
     }
 }
 
-fn test_app() -> axum::Router {
+fn test_app() -> TestApp {
     let ui_dirs = make_test_ui_dirs();
     let conn = db::initialize(Path::new(":memory:")).expect("in-memory DB");
     let mut config = Config::from_env();
@@ -52,19 +57,20 @@ fn test_app() -> axum::Router {
         diff_payload_max_bytes: 4096,
     };
     let state: Arc<AppState> = AppState::new(conn, config);
-    let app = agentmonitor_rs::build_router(state);
-    std::mem::forget(ui_dirs);
-    app
+    TestApp {
+        _ui_dirs: ui_dirs,
+        app: agentmonitor_rs::build_router(state),
+    }
 }
 
 #[tokio::test]
 async fn live_settings_matches_runtime_config() {
-    let app = test_app();
+    let test_app = test_app();
     let req = Request::builder()
         .uri("/api/v2/live/settings")
         .body(Body::empty())
         .unwrap();
-    let response = app.oneshot(req).await.unwrap();
+    let response = test_app.app.oneshot(req).await.unwrap();
     assert_eq!(response.status().as_u16(), 200);
 
     let bytes = response.into_body().collect().await.unwrap().to_bytes();
