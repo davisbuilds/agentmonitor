@@ -84,6 +84,7 @@ For legacy compatibility work on `/`, use two terminals:
 - Keep v1 SQL in `src/db/queries.ts`, v2 SQL in `src/db/v2-queries.ts`.
 - Keep v2 route handlers in `src/api/v2/router.ts`.
 - Prefer extending the Svelte `/app/` product path and v2 contracts over adding new behavior to the legacy `/` dashboard.
+- Preserve logical commit history on feature branches. For PR merges, prefer merge commits and do not squash branch history.
 - If API response shape changes, update `README.md` in the same change.
 - Do not commit local runtime artifacts (`data/`, `*.db`, generated CSS output).
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start (~small number); `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.

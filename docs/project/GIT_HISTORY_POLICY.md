@@ -1,27 +1,33 @@
 # Git History and Branch Hygiene
 
-Last updated: March 13, 2026
+Last updated: April 10, 2026
 
 ## Repository Merge Settings
 
 Configured on GitHub repository `davisbuilds/agentmonitor`:
 
-- `allow_squash_merge`: `true`
-- `allow_merge_commit`: `false`
+- `allow_squash_merge`: `false`
+- `allow_merge_commit`: `true`
 - `allow_rebase_merge`: `false`
 - `delete_branch_on_merge`: `true`
-- `squash_merge_commit_title`: `PR_TITLE`
-- `squash_merge_commit_message`: `PR_BODY`
+- `merge_commit_title`: `MERGE_MESSAGE`
+- `merge_commit_message`: `PR_TITLE`
 
 Result:
 
 - PR branches can contain multiple commits.
-- `main` receives one squashed commit per merged PR.
+- `main` preserves the branch's logical commit history via merge commits.
 - Merged remote branches are auto-deleted.
 
 ## Merge Strategy
 
-Squash-merge only. All other merge strategies are disabled at the repository level.
+Merge-commit only. Squash and rebase merges are disabled at the repository level.
+
+Reasoning:
+
+- This repo is using focused, staged commits to track architectural work and regressions.
+- Merge commits preserve that intermediate history for later archaeology, bisecting, and rollback.
+- Squashing hides those logical boundaries and makes long-running convergence work harder to audit.
 
 ## CI Gates
 
@@ -48,7 +54,7 @@ Manual/non-required checks:
 
 1. Create short-lived feature branches from `main`.
 2. Open PRs early; keep them focused.
-3. Merge only with **Squash and merge** after the required GitHub check passes.
+3. Merge only with **Create a merge commit** after the required GitHub check passes.
 4. Periodically prune local branches:
 
 ```bash
