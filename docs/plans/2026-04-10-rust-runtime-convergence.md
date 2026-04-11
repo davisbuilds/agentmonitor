@@ -88,6 +88,12 @@ Rust currently provides:
 - static fallback from `public/`
 - Svelte app serving at `/app`
 - `GET /api/v2/live/settings`
+- canonical live v2 endpoints for:
+  - `GET /api/v2/live/sessions`
+  - `GET /api/v2/live/sessions/:id`
+  - `GET /api/v2/live/sessions/:id/turns`
+  - `GET /api/v2/live/sessions/:id/items`
+  - `GET /api/v2/live/stream`
 - historical v2 read routes for Sessions, Search, Analytics, Projects, and Agents
 - historical v2 schema/query support in Rust-backed SQLite
 - Claude historical import population for:
@@ -96,14 +102,16 @@ Rust currently provides:
   - `tool_calls`
   - `messages_fts`
   - `watched_files`
+  - `session_turns`
+  - `session_items`
+- live SSE replay/filter/max-client behavior for the canonical live stream
+- auto-import fanout into the Rust live SSE hub
 
 Rust currently does not provide:
 
-- canonical live v2 endpoints beyond `/api/v2/live/settings`
-- live v2 stream parity
-- live projection population for:
-  - `session_turns`
-  - `session_items`
+- TS/Rust canonical parity coverage beyond focused route/runtime smokes
+- a Rust-native live watcher beyond auto-import-driven live updates
+- richer Codex live/session projection beyond the current honest capability boundary
 
 ## Recommendation
 
@@ -204,7 +212,7 @@ Rust needs the historical v2 tables and indexes before these routes are meaningf
 
 ### Phase 3: Canonical Live V2 Surface
 
-Status: next
+Status: complete
 
 **Objective**
 
@@ -235,6 +243,17 @@ Rust needs:
   - client cleanup
   - filtered streaming
   - stable item ordering and cursor behavior
+
+**Implemented**
+
+- `rust-backend/src/api/v2/live.rs`
+- `rust-backend/src/api/v2/mod.rs`
+- `rust-backend/src/sse/live.rs`
+- `rust-backend/src/state.rs`
+- `rust-backend/src/auto_import.rs`
+- `rust-backend/tests/v2_live_api.rs`
+- `rust-backend/tests/v2_live_stream_api.rs`
+- `e2e/rust-live-tab.spec.ts`
 
 ### Phase 4: Canonical Parity Safety Net
 
@@ -280,18 +299,14 @@ New coverage should prefer black-box contract tests over implementation-specific
 
 - `pnpm build`
 - `pnpm rust:test`
-- `pnpm exec playwright test e2e/rust-monitor-boot.spec.ts e2e/rust-v2-readonly.spec.ts --project=chromium`
+- `pnpm exec playwright test e2e/rust-monitor-boot.spec.ts e2e/rust-v2-readonly.spec.ts e2e/rust-live-tab.spec.ts --project=chromium`
 
 ## Ready For Next Stage
 
 Yes.
 
-The immediate implementation slice is Phase 3:
+The immediate implementation slice is Phase 4:
 
-- add Rust live-session query and handler support for:
-  - `GET /api/v2/live/sessions`
-  - `GET /api/v2/live/sessions/:id`
-  - `GET /api/v2/live/sessions/:id/turns`
-  - `GET /api/v2/live/sessions/:id/items`
-- decide whether Rust live state should be built first from Claude history replay, live watcher sync, or both
-- add Rust-side canonical live contract coverage before attempting broader TS/Rust parity assertions
+- expand the canonical parity safety net around `/app` and the shared Svelte contract
+- decide which parity checks should be black-box TS vs Rust comparisons versus Rust-only runtime smokes
+- keep Codex live/search/analytics broadening deferred until richer data exists on both runtimes
