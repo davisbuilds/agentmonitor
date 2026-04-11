@@ -2,9 +2,11 @@ use std::path::Path;
 
 use agentmonitor_rs::db;
 use agentmonitor_rs::db::v2_queries::{
-    AnalyticsParams, MessagesListParams, SearchParams, SessionsListParams, get_analytics_summary,
-    get_analytics_tools, get_browsing_session, get_distinct_agents, get_distinct_projects,
-    get_session_children, get_session_messages, list_browsing_sessions, search_messages,
+    AnalyticsParams, LiveItemsListParams, LiveSessionsListParams, MessagesListParams, SearchParams,
+    SessionsListParams, get_analytics_summary, get_analytics_tools, get_browsing_session,
+    get_distinct_agents, get_distinct_projects, get_live_session, get_session_children,
+    get_session_items, get_session_messages, get_session_turns, list_browsing_sessions,
+    list_live_sessions, search_messages,
 };
 
 fn setup_db() -> rusqlite::Connection {
@@ -58,6 +60,28 @@ fn seed_historical_v2(conn: &rusqlite::Connection) {
         ) VALUES (
             2, 'sess-a', 'Read', 'Read', 'tool-1', '{\"file_path\":\"README.md\"}', NULL, NULL, 'sess-child'
         )",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session_turns (
+            id, session_id, agent_type, source_turn_id, status, title, started_at, ended_at, created_at
+        ) VALUES
+        (1, 'sess-a', 'claude', 'claude-message:0', 'completed', 'Needle question', '2026-04-09T10:00:00Z', '2026-04-09T10:00:00Z', '2026-04-09T10:00:00Z'),
+        (2, 'sess-a', 'claude', 'claude-message:1', 'completed', 'Read file', '2026-04-09T10:01:00Z', '2026-04-09T10:01:00Z', '2026-04-09T10:01:00Z'),
+        (3, 'sess-child', 'claude', 'claude-message:0', 'completed', 'Child turn', '2026-04-09T10:02:00Z', '2026-04-09T10:02:00Z', '2026-04-09T10:02:00Z')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO session_items (
+            id, session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at
+        ) VALUES
+        (1, 'sess-a', 1, 0, 'item-1', 'user_message', 'success', '{\"text\":\"Needle question\"}', '2026-04-09T10:00:00Z'),
+        (2, 'sess-a', 2, 0, 'item-2', 'reasoning', 'success', '{\"text\":\"plan\"}', '2026-04-09T10:01:00Z'),
+        (3, 'sess-a', 2, 1, 'tool-1', 'tool_call', 'success', '{\"tool_name\":\"Read\"}', '2026-04-09T10:01:00Z'),
+        (4, 'sess-a', 2, 2, 'tool-1', 'tool_result', 'success', '{\"content\":\"done\"}', '2026-04-09T10:01:01Z'),
+        (5, 'sess-child', 3, 0, 'item-child', 'assistant_message', 'success', '{\"text\":\"child\"}', '2026-04-09T10:02:00Z')",
         [],
     )
     .unwrap();
@@ -172,4 +196,45 @@ fn analytics_queries_reflect_historical_projection() {
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].tool_name, "Read");
     assert_eq!(tools[0].count, 1);
+}
+
+#[test]
+fn live_queries_return_sessions_turns_and_items() {
+    let conn = setup_db();
+    seed_historical_v2(&conn);
+
+    let sessions = list_live_sessions(
+        &conn,
+        &LiveSessionsListParams {
+            project: Some("project-alpha".into()),
+            agent: Some("claude".into()),
+            fidelity: Some("full".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(sessions.total, 2);
+    assert_eq!(sessions.data[0].id, "sess-a");
+
+    let live_session = get_live_session(&conn, "sess-a")
+        .unwrap()
+        .expect("live session");
+    assert_eq!(live_session.live_status.as_deref(), Some("ended"));
+
+    let turns = get_session_turns(&conn, "sess-a").unwrap();
+    assert_eq!(turns.len(), 2);
+    assert_eq!(turns[0].source_turn_id.as_deref(), Some("claude-message:0"));
+
+    let items = get_session_items(
+        &conn,
+        "sess-a",
+        &LiveItemsListParams {
+            kinds: vec!["reasoning".into(), "tool_call".into()],
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(items.total, 4);
+    assert_eq!(items.data.len(), 2);
+    assert!(items.data.iter().all(|item| matches!(item.kind.as_str(), "reasoning" | "tool_call")));
 }

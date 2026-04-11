@@ -361,6 +361,30 @@ fn imports_claude_history_into_v2_projection_tables() {
         .unwrap();
     assert_eq!(tool_count, 1);
 
+    let turn_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM session_turns WHERE session_id = 'parity-v2-history'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(turn_count, 4);
+
+    let item_kinds: Vec<String> = conn
+        .prepare(
+            "SELECT kind FROM session_items WHERE session_id = 'parity-v2-history' ORDER BY id",
+        )
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(item_kinds.contains(&"user_message".to_string()));
+    assert!(item_kinds.contains(&"assistant_message".to_string()));
+    assert!(item_kinds.contains(&"reasoning".to_string()));
+    assert!(item_kinds.contains(&"tool_call".to_string()));
+    assert!(item_kinds.contains(&"tool_result".to_string()));
+
     let watched_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM watched_files WHERE file_hash IS NOT NULL",

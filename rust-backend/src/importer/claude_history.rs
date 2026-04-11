@@ -16,6 +16,7 @@ struct ParsedMessage {
     ordinal: i64,
     role: String,
     content: String,
+    blocks: Vec<Value>,
     timestamp: Option<String>,
     has_thinking: i64,
     has_tool_use: i64,
@@ -218,6 +219,7 @@ fn parse_session_messages(jsonl_content: &str, session_id: &str, file_path: &Pat
             session_id: session_id.to_string(),
             ordinal: messages.len() as i64,
             role: role.to_string(),
+            blocks: normalized_blocks,
             content_length: content.len() as i64,
             content,
             timestamp,
@@ -274,6 +276,8 @@ fn insert_parsed_session(
 
     let result = (|| -> rusqlite::Result<()> {
         let metadata = &parsed.metadata;
+        conn.execute("DELETE FROM session_items WHERE session_id = ?1", [&metadata.session_id])?;
+        conn.execute("DELETE FROM session_turns WHERE session_id = ?1", [&metadata.session_id])?;
         conn.execute("DELETE FROM tool_calls WHERE session_id = ?1", [&metadata.session_id])?;
         conn.execute("DELETE FROM messages WHERE session_id = ?1", [&metadata.session_id])?;
         conn.execute(
@@ -332,6 +336,8 @@ fn insert_parsed_session(
             message_ids.push(conn.last_insert_rowid());
         }
 
+        insert_live_projection(conn, parsed)?;
+
         let mut subagent_session_ids = HashSet::new();
         for tool_call in &parsed.tool_calls {
             let Some(message_id) = message_ids.get(tool_call.message_ordinal).copied() else {
@@ -371,6 +377,137 @@ fn insert_parsed_session(
             Err(err)
         }
     }
+}
+
+fn insert_live_projection(conn: &Connection, parsed: &ParsedSession) -> rusqlite::Result<()> {
+    for message in &parsed.messages {
+        let source_turn_id = format!("claude-message:{}", message.ordinal);
+        let title = turn_title_for(message);
+        conn.execute(
+            "INSERT INTO session_turns (
+                session_id, agent_type, source_turn_id, status, title, started_at, ended_at
+            ) VALUES (?1, ?2, ?3, 'completed', ?4, ?5, ?6)",
+            params![
+                parsed.metadata.session_id,
+                parsed.metadata.agent,
+                source_turn_id,
+                title,
+                message.timestamp,
+                message.timestamp,
+            ],
+        )?;
+        let turn_id = conn.last_insert_rowid();
+
+        for (item_ordinal, block) in message.blocks.iter().enumerate() {
+            let Some(item) = normalize_live_item(&message.role, block, message.timestamp.as_deref()) else {
+                continue;
+            };
+            conn.execute(
+                "INSERT INTO session_items (
+                    session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    parsed.metadata.session_id,
+                    turn_id,
+                    item_ordinal as i64,
+                    item.source_item_id.unwrap_or_else(|| format!("{source_turn_id}:item:{item_ordinal}")),
+                    item.kind,
+                    item.status,
+                    item.payload_json,
+                    item.created_at,
+                ],
+            )?;
+        }
+    }
+
+    Ok(())
+}
+
+struct LiveProjectionItem {
+    kind: String,
+    status: String,
+    payload_json: String,
+    created_at: Option<String>,
+    source_item_id: Option<String>,
+}
+
+fn normalize_live_item(
+    role: &str,
+    block: &Value,
+    created_at: Option<&str>,
+) -> Option<LiveProjectionItem> {
+    let block_type = block.get("type").and_then(Value::as_str)?;
+
+    match block_type {
+        "text" => Some(LiveProjectionItem {
+            kind: if role == "user" {
+                "user_message".to_string()
+            } else {
+                "assistant_message".to_string()
+            },
+            status: "success".to_string(),
+            payload_json: json!({
+                "text": block.get("text").and_then(Value::as_str).unwrap_or_default(),
+            })
+            .to_string(),
+            created_at: created_at.map(ToString::to_string),
+            source_item_id: None,
+        }),
+        "thinking" => Some(LiveProjectionItem {
+            kind: "reasoning".to_string(),
+            status: "success".to_string(),
+            payload_json: json!({
+                "text": block.get("text").and_then(Value::as_str).unwrap_or_default(),
+            })
+            .to_string(),
+            created_at: created_at.map(ToString::to_string),
+            source_item_id: None,
+        }),
+        "tool_use" => Some(LiveProjectionItem {
+            kind: "tool_call".to_string(),
+            status: "success".to_string(),
+            payload_json: json!({
+                "tool_name": block.get("name").and_then(Value::as_str).unwrap_or("unknown"),
+                "input": block.get("input").cloned().unwrap_or(Value::Null),
+            })
+            .to_string(),
+            created_at: created_at.map(ToString::to_string),
+            source_item_id: block.get("id").and_then(Value::as_str).map(ToString::to_string),
+        }),
+        "tool_result" => {
+            let is_error = block.get("is_error").and_then(Value::as_bool).unwrap_or(false);
+            Some(LiveProjectionItem {
+                kind: "tool_result".to_string(),
+                status: if is_error { "error" } else { "success" }.to_string(),
+                payload_json: json!({
+                    "content": block.get("content").cloned().unwrap_or(Value::Null),
+                    "is_error": is_error,
+                })
+                .to_string(),
+                created_at: created_at.map(ToString::to_string),
+                source_item_id: block
+                    .get("tool_use_id")
+                    .and_then(Value::as_str)
+                    .map(ToString::to_string),
+            })
+        }
+        _ => None,
+    }
+}
+
+fn turn_title_for(message: &ParsedMessage) -> String {
+    let title = message.blocks.iter().find_map(|block| {
+        if block.get("type").and_then(Value::as_str) != Some("text") {
+            return None;
+        }
+        block.get("text")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(|text| slice_chars(text, 120))
+    });
+
+    title.unwrap_or_else(|| format!("{} message {}", message.role, message.ordinal + 1))
 }
 
 fn derive_live_status(last_item_at: Option<&str>) -> String {

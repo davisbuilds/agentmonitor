@@ -98,6 +98,64 @@ pub struct MessageRow {
     pub content_length: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct LiveTurnRow {
+    pub id: i64,
+    pub session_id: String,
+    pub agent_type: String,
+    pub source_turn_id: Option<String>,
+    pub status: Option<String>,
+    pub title: Option<String>,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub created_at: String,
+}
+
+impl LiveTurnRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            session_id: row.get("session_id")?,
+            agent_type: row.get("agent_type")?,
+            source_turn_id: row.get("source_turn_id")?,
+            status: row.get("status")?,
+            title: row.get("title")?,
+            started_at: row.get("started_at")?,
+            ended_at: row.get("ended_at")?,
+            created_at: row.get("created_at")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LiveItemRow {
+    pub id: i64,
+    pub session_id: String,
+    pub turn_id: Option<i64>,
+    pub ordinal: i64,
+    pub source_item_id: Option<String>,
+    pub kind: String,
+    pub status: Option<String>,
+    pub payload_json: String,
+    pub created_at: Option<String>,
+}
+
+impl LiveItemRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            session_id: row.get("session_id")?,
+            turn_id: row.get("turn_id")?,
+            ordinal: row.get("ordinal")?,
+            source_item_id: row.get("source_item_id")?,
+            kind: row.get("kind")?,
+            status: row.get("status")?,
+            payload_json: row.get("payload_json")?,
+            created_at: row.get("created_at")?,
+        })
+    }
+}
+
 impl MessageRow {
     fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
         Ok(Self {
@@ -221,6 +279,24 @@ pub struct MessagesListParams {
 }
 
 #[derive(Debug, Default, Clone)]
+pub struct LiveSessionsListParams {
+    pub limit: Option<i64>,
+    pub cursor: Option<String>,
+    pub project: Option<String>,
+    pub agent: Option<String>,
+    pub live_status: Option<String>,
+    pub fidelity: Option<String>,
+    pub active_only: bool,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct LiveItemsListParams {
+    pub cursor: Option<String>,
+    pub limit: Option<i64>,
+    pub kinds: Vec<String>,
+}
+
+#[derive(Debug, Default, Clone)]
 pub struct SearchParams {
     pub q: String,
     pub project: Option<String>,
@@ -248,6 +324,15 @@ pub struct SessionsResult {
 pub struct MessagesResult {
     pub data: Vec<MessageRow>,
     pub total: i64,
+}
+
+pub type LiveSessionsResult = SessionsResult;
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LiveItemsResult {
+    pub data: Vec<LiveItemRow>,
+    pub total: i64,
+    pub cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -373,6 +458,144 @@ pub fn get_session_messages(
     let data = rows.collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(MessagesResult { data, total })
+}
+
+pub fn list_live_sessions(
+    conn: &Connection,
+    params: &LiveSessionsListParams,
+) -> rusqlite::Result<LiveSessionsResult> {
+    let limit = params.limit.unwrap_or(200).clamp(1, 500);
+    let mut conditions: Vec<String> = Vec::new();
+    let mut values: Vec<SqlValue> = Vec::new();
+
+    if let Some(project) = params.project.as_deref() {
+        conditions.push("project = ?".into());
+        values.push(SqlValue::Text(project.to_string()));
+    }
+    if let Some(agent) = params.agent.as_deref() {
+        conditions.push("agent = ?".into());
+        values.push(SqlValue::Text(agent.to_string()));
+    }
+    if let Some(live_status) = params.live_status.as_deref() {
+        conditions.push("live_status = ?".into());
+        values.push(SqlValue::Text(live_status.to_string()));
+    }
+    if let Some(fidelity) = params.fidelity.as_deref() {
+        conditions.push("fidelity = ?".into());
+        values.push(SqlValue::Text(fidelity.to_string()));
+    }
+    if params.active_only {
+        conditions.push("COALESCE(live_status, '') IN ('live', 'active')".into());
+    }
+
+    let filter_where = where_clause(&conditions);
+    let filter_refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let total_sql = format!("SELECT COUNT(*) FROM browsing_sessions {filter_where}");
+    let total: i64 = conn.query_row(&total_sql, filter_refs.as_slice(), |row| row.get(0))?;
+
+    if let Some(cursor) = decode_time_cursor(params.cursor.as_deref()) {
+        conditions.push(
+            "(COALESCE(last_item_at, started_at, '') < ? OR (COALESCE(last_item_at, started_at, '') = ? AND id < ?))"
+                .into(),
+        );
+        values.push(SqlValue::Text(cursor.sort_at.clone()));
+        values.push(SqlValue::Text(cursor.sort_at));
+        values.push(SqlValue::Text(cursor.id));
+    }
+
+    let sql = format!(
+        "SELECT * FROM browsing_sessions {} ORDER BY COALESCE(last_item_at, started_at) DESC, id DESC LIMIT ?",
+        where_clause(&conditions)
+    );
+    values.push(SqlValue::Integer(limit));
+    let data = query_browsing_sessions(conn, &sql, &values)?;
+    let cursor = data
+        .last()
+        .and_then(|last| {
+            last.last_item_at
+                .as_ref()
+                .or(last.started_at.as_ref())
+                .map(|sort_at| encode_time_cursor(TimeCursor {
+                    sort_at: sort_at.clone(),
+                    id: last.id.clone(),
+                }))
+        })
+        .filter(|_| data.len() as i64 == limit);
+
+    Ok(SessionsResult {
+        data,
+        total,
+        cursor,
+    })
+}
+
+pub fn get_live_session(
+    conn: &Connection,
+    id: &str,
+) -> rusqlite::Result<Option<BrowsingSessionRow>> {
+    get_browsing_session(conn, id)
+}
+
+pub fn get_session_turns(
+    conn: &Connection,
+    session_id: &str,
+) -> rusqlite::Result<Vec<LiveTurnRow>> {
+    let mut stmt = conn.prepare(
+        "SELECT * FROM session_turns
+         WHERE session_id = ?1
+         ORDER BY COALESCE(started_at, created_at), id",
+    )?;
+    let rows = stmt.query_map([session_id], LiveTurnRow::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+pub fn get_session_items(
+    conn: &Connection,
+    session_id: &str,
+    params: &LiveItemsListParams,
+) -> rusqlite::Result<LiveItemsResult> {
+    let limit = params.limit.unwrap_or(200).clamp(1, 500);
+    let mut conditions = vec!["session_id = ?".to_string()];
+    let mut values = vec![SqlValue::Text(session_id.to_string())];
+
+    if !params.kinds.is_empty() {
+        conditions.push(format!(
+            "kind IN ({})",
+            params.kinds.iter().map(|_| "?").collect::<Vec<_>>().join(", ")
+        ));
+        values.extend(params.kinds.iter().cloned().map(SqlValue::Text));
+    }
+
+    if let Some(cursor) = params.cursor.as_deref().and_then(|raw| raw.parse::<i64>().ok()) {
+        conditions.push("id > ?".into());
+        values.push(SqlValue::Integer(cursor));
+    }
+
+    let total: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM session_items WHERE session_id = ?1",
+        [session_id],
+        |row| row.get(0),
+    )?;
+
+    let sql = format!(
+        "SELECT * FROM session_items {} ORDER BY id ASC LIMIT ?",
+        where_clause(&conditions)
+    );
+    values.push(SqlValue::Integer(limit));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), LiveItemRow::from_row)?;
+    let data = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let cursor = data
+        .last()
+        .map(|item| item.id.to_string())
+        .filter(|_| data.len() as i64 == limit);
+
+    Ok(LiveItemsResult {
+        data,
+        total,
+        cursor,
+    })
 }
 
 pub fn search_messages(
