@@ -1,5 +1,5 @@
 import path from 'path';
-import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall, ParsedSessionMetadata } from './claude-code.js';
+import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
 
 // --- Codex JSONL line types ---
 
@@ -158,8 +158,6 @@ export function parseCodexSessionMessages(
   };
 }
 
-function projectFromCodexPath(filePath: string): string | null {
-  // Codex session files don't encode project in path.
-  // Project comes from cwd in session_meta.
+function projectFromCodexPath(_filePath: string): string | null {
   return null;
 }
