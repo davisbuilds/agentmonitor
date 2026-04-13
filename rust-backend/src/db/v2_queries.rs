@@ -633,14 +633,15 @@ pub fn search_messages(
     );
     let total: i64 = conn.query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))?;
 
-    let offset_condition = if params.cursor.is_some() {
+    let cursor_value = params.cursor.as_deref().and_then(|raw| raw.parse::<i64>().ok());
+    let offset_condition = if cursor_value.is_some() {
         " AND m.id < ?"
     } else {
         ""
     };
     let mut query_params = vec![SqlValue::Text(params.q.clone())];
     query_params.extend(values);
-    if let Some(cursor) = params.cursor.as_deref().and_then(|raw| raw.parse::<i64>().ok()) {
+    if let Some(cursor) = cursor_value {
         query_params.push(SqlValue::Integer(cursor));
     }
     query_params.push(SqlValue::Integer(limit));

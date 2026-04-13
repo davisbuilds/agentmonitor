@@ -80,7 +80,7 @@ async fn broadcast_live_import_updates(state: Arc<AppState>, result: &ImportResu
     let session_ids = result
         .files
         .iter()
-        .filter(|file| file.source == "claude-code" && !file.skipped_unchanged)
+        .filter(|file| !file.skipped_unchanged)
         .filter_map(|file| {
             let path = PathBuf::from(&file.path);
             path.file_stem()
