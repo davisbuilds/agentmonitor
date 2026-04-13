@@ -33,7 +33,7 @@ Converge AgentMonitor around one canonical product path: the Svelte app plus v2 
 ## Assumptions And Constraints
 
 - The Svelte app is the product surface making the most forward progress and should become the primary UX.
-- Tauri has been retired. The remaining runtime question is Rust-only: either it converges on the canonical web contract or it is kept clearly non-canonical.
+- The remaining runtime question is Rust-only: either it converges on the canonical web contract or it is kept clearly non-canonical.
 - Current v2 data is source-skewed: Claude file-watcher paths populate historical/session-browser tables deeply, while the current AgentMonitor Codex OTEL integration mostly populates summary/live tables.
 - The right target is not "make Codex look identical by faking data." The right target is one projection contract with explicit capability/fidelity markers and source-appropriate population.
 - Current AgentMonitor behavior should not be treated as the same thing as Codex source capability. Official Codex OTEL and app-server sources indicate richer Codex event models than the repo currently parses or projects.
@@ -333,7 +333,7 @@ Completed on `arch/codex-telemetry-convergence`:
 
 **Objective**
 
-Resolve the remaining runtime ambiguity now that the desktop shell has been retired: either bring the Rust backend up to the canonical Svelte + v2 surface, or freeze it explicitly as experimental so it stops competing with the product path.
+Resolve the remaining runtime ambiguity: either bring the Rust backend up to the canonical Svelte + v2 surface, or freeze it explicitly as experimental so it stops competing with the product path.
 
 **Files**
 

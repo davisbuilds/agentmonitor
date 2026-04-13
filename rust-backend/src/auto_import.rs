@@ -4,6 +4,7 @@ use std::sync::Arc;
 use serde_json::json;
 use tracing::{error, info};
 
+use crate::db::v2_queries::get_live_session;
 use crate::importer::{ImportOptions, ImportResult, ImportSource, run_import};
 use crate::state::AppState;
 
@@ -70,5 +71,68 @@ pub async fn run_auto_import_once_with_dirs(
         }
     }
 
+    broadcast_live_import_updates(Arc::clone(&state), &result).await;
+
     result
+}
+
+async fn broadcast_live_import_updates(state: Arc<AppState>, result: &ImportResult) {
+    let session_ids = result
+        .files
+        .iter()
+        .filter(|file| !file.skipped_unchanged)
+        .filter_map(|file| {
+            let path = PathBuf::from(&file.path);
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(ToString::to_string)
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+
+    if session_ids.is_empty() {
+        return;
+    }
+
+    let db = state.db.lock().await;
+    let mut payloads = Vec::new();
+    for session_id in session_ids {
+        let Ok(Some(session)) = get_live_session(&db, &session_id) else {
+            continue;
+        };
+        payloads.push((
+            json!({
+                "session_id": session.id,
+                "live_status": session.live_status,
+                "integration_mode": session.integration_mode,
+                "fidelity": session.fidelity,
+                "last_item_at": session.last_item_at,
+            }),
+            json!({
+                "session_id": session.id,
+                "inserted_turns": 0,
+                "reset": false,
+            }),
+            json!({
+                "session_id": session.id,
+                "inserted_items": 0,
+                "last_item_at": session.last_item_at,
+            }),
+        ));
+    }
+    drop(db);
+
+    for (session_presence, turn_update, item_delta) in payloads {
+        state
+            .live_sse_hub
+            .broadcast("session_presence", session_presence)
+            .await;
+        state
+            .live_sse_hub
+            .broadcast("turn_update", turn_update)
+            .await;
+        state
+            .live_sse_hub
+            .broadcast("item_delta", item_delta)
+            .await;
+    }
 }

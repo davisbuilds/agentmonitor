@@ -32,7 +32,7 @@ The result is a unified localhost tool for both watching agents work in real-tim
 
 ## Constraints
 
-- Localhost TypeScript only -- no Rust/Tauri concerns
+- Localhost TypeScript only
 - No regressions to existing real-time monitoring functionality
 - SQLite (better-sqlite3) remains the database
 - Express.js backend continues serving API + embedded SPA

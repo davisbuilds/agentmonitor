@@ -20,6 +20,36 @@ impl UsageLimitType {
 }
 
 #[derive(Clone)]
+pub enum CodexLiveMode {
+    OtelOnly,
+    Exporter,
+}
+
+impl CodexLiveMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OtelOnly => "otel-only",
+            Self::Exporter => "exporter",
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct LiveCaptureConfig {
+    pub prompts: bool,
+    pub reasoning: bool,
+    pub tool_arguments: bool,
+}
+
+#[derive(Clone)]
+pub struct LiveConfig {
+    pub enabled: bool,
+    pub codex_mode: CodexLiveMode,
+    pub capture: LiveCaptureConfig,
+    pub diff_payload_max_bytes: usize,
+}
+
+#[derive(Clone)]
 pub struct AgentUsageConfig {
     pub limit_type: UsageLimitType,
     pub session_window_hours: i64,
@@ -51,6 +81,7 @@ pub struct Config {
     pub host: String,
     pub db_path: PathBuf,
     pub ui_dir: PathBuf,
+    pub app_ui_dir: PathBuf,
     pub max_payload_kb: usize,
     pub session_timeout_minutes: u64,
     pub max_feed: usize,
@@ -59,6 +90,7 @@ pub struct Config {
     pub sse_heartbeat_ms: u64,
     pub auto_import_interval_minutes: u64,
     pub usage_monitor: UsageMonitorConfig,
+    pub live: LiveConfig,
 }
 
 impl Config {
@@ -74,6 +106,9 @@ impl Config {
             ui_dir: env::var("AGENTMONITOR_UI_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|_| default_ui_dir()),
+            app_ui_dir: env::var("AGENTMONITOR_APP_UI_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| default_app_ui_dir()),
             max_payload_kb: parse_env("AGENTMONITOR_MAX_PAYLOAD_KB", 10),
             session_timeout_minutes: parse_env("AGENTMONITOR_SESSION_TIMEOUT", 5),
             max_feed: parse_env("AGENTMONITOR_MAX_FEED", 200),
@@ -136,6 +171,19 @@ impl Config {
                     extended_limit: 0.0,
                 },
             },
+            live: LiveConfig {
+                enabled: parse_env_bool("AGENTMONITOR_ENABLE_LIVE_TAB", true),
+                codex_mode: parse_codex_live_mode(env::var("AGENTMONITOR_CODEX_LIVE_MODE").ok()),
+                capture: LiveCaptureConfig {
+                    prompts: parse_env_bool("AGENTMONITOR_LIVE_CAPTURE_PROMPTS", true),
+                    reasoning: parse_env_bool("AGENTMONITOR_LIVE_CAPTURE_REASONING", true),
+                    tool_arguments: parse_env_bool(
+                        "AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS",
+                        true,
+                    ),
+                },
+                diff_payload_max_bytes: parse_env("AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES", 32768),
+            },
         }
     }
 
@@ -181,6 +229,24 @@ fn parse_env_f64_min(key: &str, default: f64, min: f64) -> f64 {
         .unwrap_or(default)
 }
 
+fn parse_env_bool(key: &str, default: bool) -> bool {
+    match env::var(key) {
+        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => true,
+            "0" | "false" | "no" | "off" => false,
+            _ => default,
+        },
+        Err(_) => default,
+    }
+}
+
+fn parse_codex_live_mode(value: Option<String>) -> CodexLiveMode {
+    match value.as_deref() {
+        Some("exporter") => CodexLiveMode::Exporter,
+        _ => CodexLiveMode::OtelOnly,
+    }
+}
+
 fn default_ui_dir() -> PathBuf {
     // CARGO_MANIFEST_DIR points to rust-backend/ at compile time.
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -188,4 +254,12 @@ fn default_ui_dir() -> PathBuf {
         .parent()
         .map(|repo_root| repo_root.join("public"))
         .unwrap_or_else(|| PathBuf::from("./public"))
+}
+
+fn default_app_ui_dir() -> PathBuf {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .map(|repo_root| repo_root.join("frontend").join("dist"))
+        .unwrap_or_else(|| PathBuf::from("./frontend/dist"))
 }

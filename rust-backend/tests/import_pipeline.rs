@@ -107,6 +107,59 @@ fn create_codex_fixture(root: &Path) -> PathBuf {
     file_path
 }
 
+fn create_claude_history_fixture(root: &Path) -> PathBuf {
+    let file_path = root
+        .join("projects")
+        .join("-Users-dg-mac-mini-Dev-project-alpha")
+        .join("parity-v2-history.jsonl");
+    write_jsonl(
+        &file_path,
+        &[
+            json!({
+                "type": "user",
+                "sessionId": "parity-v2-history",
+                "timestamp": "2026-04-09T10:00:00Z",
+                "message": {
+                    "role": "user",
+                    "content": "NeedleRustHistory"
+                }
+            }),
+            json!({
+                "type": "assistant",
+                "sessionId": "parity-v2-history",
+                "timestamp": "2026-04-09T10:01:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": [
+                        { "type": "thinking", "thinking": "plan" },
+                        { "type": "tool_use", "id": "tool-1", "name": "Read", "input": { "file_path": "README.md" } },
+                        { "type": "tool_result", "tool_use_id": "tool-1", "content": "NeedleRustHistory result", "is_error": false }
+                    ]
+                }
+            }),
+            json!({
+                "type": "user",
+                "sessionId": "parity-v2-history",
+                "timestamp": "2026-04-09T10:02:00Z",
+                "message": {
+                    "role": "user",
+                    "content": "NeedleRustHistory followup"
+                }
+            }),
+            json!({
+                "type": "assistant",
+                "sessionId": "parity-v2-history",
+                "timestamp": "2026-04-09T10:03:00Z",
+                "message": {
+                    "role": "assistant",
+                    "content": "NeedleRustHistory answer"
+                }
+            }),
+        ],
+    );
+    file_path
+}
+
 #[test]
 fn imports_claude_logs_and_tracks_import_state() {
     let conn = setup_db();
@@ -253,4 +306,100 @@ fn date_filters_limit_imported_events() {
     );
     let result = run_import(&conn, &options);
     assert_eq!(result.total_events_imported, 1);
+}
+
+#[test]
+fn imports_claude_history_into_v2_projection_tables() {
+    let conn = setup_db();
+    let temp = TempDir::new().expect("temp dir");
+    create_claude_history_fixture(temp.path());
+
+    let mut options = make_options(ImportSource::ClaudeCode);
+    options.claude_dir = Some(temp.path().to_path_buf());
+    let result = run_import(&conn, &options);
+
+    assert_eq!(result.total_files, 1);
+    assert_eq!(result.total_events_imported, 4);
+
+    let session: (String, String, String, String, String) = conn
+        .query_row(
+            "SELECT project, agent, integration_mode, fidelity, live_status
+             FROM browsing_sessions WHERE id = 'parity-v2-history'",
+            [],
+            |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                ))
+            },
+        )
+        .unwrap();
+    assert_eq!(session.0, "project-alpha");
+    assert_eq!(session.1, "claude");
+    assert_eq!(session.2, "claude-jsonl");
+    assert_eq!(session.3, "full");
+    assert_eq!(session.4, "ended");
+
+    let message_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM messages WHERE session_id = 'parity-v2-history'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(message_count, 4);
+
+    let tool_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM tool_calls WHERE session_id = 'parity-v2-history' AND tool_name = 'Read'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(tool_count, 1);
+
+    let turn_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM session_turns WHERE session_id = 'parity-v2-history'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(turn_count, 4);
+
+    let item_kinds: Vec<String> = conn
+        .prepare(
+            "SELECT kind FROM session_items WHERE session_id = 'parity-v2-history' ORDER BY id",
+        )
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert!(item_kinds.contains(&"user_message".to_string()));
+    assert!(item_kinds.contains(&"assistant_message".to_string()));
+    assert!(item_kinds.contains(&"reasoning".to_string()));
+    assert!(item_kinds.contains(&"tool_call".to_string()));
+    assert!(item_kinds.contains(&"tool_result".to_string()));
+
+    let watched_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM watched_files WHERE file_hash IS NOT NULL",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(watched_count, 1);
+
+    let fts_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH 'NeedleRustHistory'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(fts_count >= 1);
 }

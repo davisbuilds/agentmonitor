@@ -6,6 +6,7 @@ use rusqlite::Connection;
 use tokio::sync::Mutex;
 
 use crate::config::Config;
+use crate::sse::live::LiveSseHub;
 use crate::sse::hub::SseHub;
 
 /// Shared application state accessible from all route handlers.
@@ -15,17 +16,20 @@ pub struct AppState {
     pub config: Config,
     pub start_time: Instant,
     pub sse_hub: SseHub,
+    pub live_sse_hub: LiveSseHub,
 }
 
 impl AppState {
     pub fn new(db: Connection, config: Config) -> Arc<Self> {
         let sse_hub = SseHub::new(config.max_sse_clients);
+        let live_sse_hub = LiveSseHub::new(config.max_sse_clients);
         Arc::new(Self {
             db: Mutex::new(db),
             otel_cumulative_state: Mutex::new(HashMap::new()),
             config,
             start_time: Instant::now(),
             sse_hub,
+            live_sse_hub,
         })
     }
 }

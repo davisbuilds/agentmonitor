@@ -1,0 +1,299 @@
+use std::sync::Arc;
+
+use axum::Json;
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use serde::Deserialize;
+
+use crate::db::v2_queries::{
+    AnalyticsParams, MessagesListParams, SearchParams, SessionsListParams, get_analytics_activity,
+    get_analytics_projects, get_analytics_summary, get_analytics_tools, get_browsing_session,
+    get_distinct_agents, get_distinct_projects, get_session_children, get_session_messages,
+    list_browsing_sessions, search_messages,
+};
+use crate::state::AppState;
+
+#[derive(Debug, Deserialize)]
+pub struct SessionsQuery {
+    limit: Option<String>,
+    cursor: Option<String>,
+    project: Option<String>,
+    agent: Option<String>,
+    date_from: Option<String>,
+    date_to: Option<String>,
+    min_messages: Option<String>,
+    max_messages: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MessagesQuery {
+    offset: Option<String>,
+    limit: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SearchQuery {
+    q: Option<String>,
+    project: Option<String>,
+    agent: Option<String>,
+    limit: Option<String>,
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnalyticsQuery {
+    date_from: Option<String>,
+    date_to: Option<String>,
+    project: Option<String>,
+    agent: Option<String>,
+}
+
+fn parse_i64(input: Option<&str>) -> Option<i64> {
+    input.and_then(|raw| raw.parse::<i64>().ok())
+}
+
+fn as_sessions_params(query: &SessionsQuery) -> SessionsListParams {
+    SessionsListParams {
+        limit: parse_i64(query.limit.as_deref()),
+        cursor: query.cursor.clone(),
+        project: query.project.clone(),
+        agent: query.agent.clone(),
+        date_from: query.date_from.clone(),
+        date_to: query.date_to.clone(),
+        min_messages: parse_i64(query.min_messages.as_deref()),
+        max_messages: parse_i64(query.max_messages.as_deref()),
+    }
+}
+
+fn as_analytics_params(query: &AnalyticsQuery) -> AnalyticsParams {
+    AnalyticsParams {
+        date_from: query.date_from.clone(),
+        date_to: query.date_to.clone(),
+        project: query.project.clone(),
+        agent: query.agent.clone(),
+    }
+}
+
+pub async fn list_sessions_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SessionsQuery>,
+) -> impl IntoResponse {
+    let params = as_sessions_params(&query);
+    let db = state.db.lock().await;
+    match list_browsing_sessions(&db, &params) {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to list sessions" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn session_detail_handler(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_browsing_session(&db, &session_id) {
+        Ok(Some(session)) => (StatusCode::OK, Json(session)).into_response(),
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Session not found" })),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get session" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn session_messages_handler(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+    Query(query): Query<MessagesQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_browsing_session(&db, &session_id) {
+        Ok(None) => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({ "error": "Session not found" })),
+        )
+            .into_response(),
+        Ok(Some(_)) => match get_session_messages(
+            &db,
+            &session_id,
+            &MessagesListParams {
+                offset: parse_i64(query.offset.as_deref()),
+                limit: parse_i64(query.limit.as_deref()),
+            },
+        ) {
+            Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get messages" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get session" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn session_children_handler(
+    State(state): State<Arc<AppState>>,
+    Path(session_id): Path<String>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_session_children(&db, &session_id) {
+        Ok(children) => (StatusCode::OK, Json(serde_json::json!({ "data": children }))).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get children" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn search_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<SearchQuery>,
+) -> impl IntoResponse {
+    let Some(raw_q) = query.q.as_deref() else {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Query parameter \"q\" is required" })),
+        )
+            .into_response();
+    };
+    let q = raw_q.trim();
+    if q.is_empty() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Query parameter \"q\" is required" })),
+        )
+            .into_response();
+    }
+
+    let db = state.db.lock().await;
+    match search_messages(
+        &db,
+        &SearchParams {
+            q: q.to_string(),
+            project: query.project.clone(),
+            agent: query.agent.clone(),
+            limit: parse_i64(query.limit.as_deref()),
+            cursor: query.cursor.clone(),
+        },
+    ) {
+        Ok(result) => (StatusCode::OK, Json(result)).into_response(),
+        Err(err) if is_invalid_search_query(&err) => (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({ "error": "Invalid search query syntax" })),
+        )
+            .into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Search failed" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_summary_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_analytics_summary(&db, &as_analytics_params(&query)) {
+        Ok(summary) => (StatusCode::OK, Json(summary)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get analytics summary" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_activity_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_analytics_activity(&db, &as_analytics_params(&query)) {
+        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get activity data" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_projects_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_analytics_projects(&db, &as_analytics_params(&query)) {
+        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get project data" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_tools_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_analytics_tools(&db, &as_analytics_params(&query)) {
+        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get tool data" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn projects_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_distinct_projects(&db) {
+        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get projects" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn agents_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_distinct_agents(&db) {
+        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get agents" })),
+        )
+            .into_response(),
+    }
+}
+
+fn is_invalid_search_query(err: &rusqlite::Error) -> bool {
+    let message = err.to_string().to_ascii_lowercase();
+    message.contains("fts5")
+        || message.contains("match")
+        || message.contains("syntax error")
+        || message.contains("malformed")
+}

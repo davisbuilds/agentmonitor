@@ -6,6 +6,7 @@ mod sessions;
 mod stats;
 mod stream;
 mod transcripts;
+pub mod v2;
 
 pub use events::{ingest_batch, ingest_single, list_events};
 pub use filter_options::filter_options_handler;

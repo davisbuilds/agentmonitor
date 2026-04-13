@@ -18,13 +18,15 @@ use std::sync::Arc;
 use axum::Router;
 use axum::routing::{get, get_service, post};
 use tower_http::cors::CorsLayer;
-use tower_http::services::ServeDir;
+use tower_http::services::{ServeDir, ServeFile};
 
 use crate::state::AppState;
 
 /// Build the application router with all routes wired.
 pub fn build_router(state: Arc<AppState>) -> Router {
     let ui_dir = state.config.ui_dir.clone();
+    let app_ui_dir = state.config.app_ui_dir.clone();
+    let app_index = app_ui_dir.join("index.html");
 
     Router::new()
         .route("/api/health", get(api::health_handler))
@@ -48,6 +50,17 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/sessions/{id}", get(api::session_detail_handler))
         .route("/api/filter-options", get(api::filter_options_handler))
         .route("/api/stream", get(api::stream_handler))
+        .nest("/api/v2", api::v2::router())
+        .nest_service(
+            "/app",
+            get_service(
+                ServeDir::new(app_ui_dir)
+                    .append_index_html_on_directories(true)
+                    .precompressed_br()
+                    .precompressed_gzip()
+                    .fallback(ServeFile::new(app_index)),
+            ),
+        )
         .fallback_service(get_service(
             ServeDir::new(ui_dir)
                 .append_index_html_on_directories(true)
