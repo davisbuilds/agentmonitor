@@ -1,32 +1,37 @@
 # Roadmap
 
-This is a lightweight snapshot, not a release contract.
+Directional roadmap for AgentMonitor. This is a planning snapshot, not a release contract or detailed implementation log.
 
-## Completed Highlights
+## Now
 
-- Real-time dashboard with agent cards, event feed, stats bar, cost dashboard, and tool analytics.
-- Multi-agent ingest: Claude Code hooks (bash + Python) and Codex OTEL integration.
-- SSE broadcasting with filters, backpressure, and heartbeat.
-- Per-model cost tracking with JSON pricing data for Claude, Codex, and Gemini families.
-- Historical import pipeline for Claude Code JSONL and Codex session files.
-- Event contract with validation, normalization, deduplication, and payload truncation.
-- Usage monitoring with per-agent token/cost limits and rolling windows.
-- OTLP JSON parser for logs, metrics, and traces.
-- Session transcript aggregation and detail views.
-- Ingest throughput benchmarking.
+- Establish the Svelte app at `/app/` and `/api/v2/*` as the clear product center.
+- Keep carrying forward durable localhost-monitoring behavior from the older v1 surface where it still adds operator value.
+- Converge the Rust backend onto the same canonical web contract instead of letting it evolve as a separate product shape.
+- Improve the Live surface, especially around fidelity boundaries, session noise, and operator clarity when data is summary-only.
 
-## In Progress
+## Next
 
-- **Repo convergence**: establish the Svelte app at `/app/` and `/api/v2/*` as the canonical product path, pull forward durable localhost behavior from v1, converge the Rust backend onto that same surface as an alternate runtime, and retire the legacy `/` dashboard behind parity gates.
-  - Completed so far: convergence plan documented in `docs/plans/2026-04-08-repo-convergence-implementation.md`, Node runtime pinned to `24.13.0`, canonical-path docs cleanup started, Task 2 shared projection work landed, Task 3 localhost carry-forward work landed, and the Rust alternate-runtime direction is now chosen.
-  - Next: execute the Rust alternate-runtime convergence plan, then define legacy cutover criteria.
-- **Live Ops tab**: Claude-first live operator surface is shipped in the Svelte app with dedicated live APIs, SSE, and privacy/capture settings.
-  - Completed so far: live schema, Claude live ingestion, Codex passive summary participation, live v2 endpoints, Svelte `Live` tab, and live capture/redaction controls.
-  - Next: exporter-contract hardening and noisy-session performance improvements.
-- **Rust runtime evaluation**: Phase 1 backend migration is complete (parity/soak/import/pricing/OTEL). The remaining question is whether Rust becomes a maintained alternate runtime for the canonical web contract.
-  - Completed so far: Rust ingest/live parity work, import/pricing/OTEL support, and runtime-host invariant coverage.
-  - Next: execute the Rust alternate-runtime convergence plan in `docs/plans/2026-04-10-rust-runtime-convergence.md`, starting with `/app` static serving and the minimum bootstrap contract for the Svelte app.
+- Define and verify parity gates for retiring or sharply reducing reliance on the legacy `/` dashboard.
+- Tighten v2 contract coverage and runtime parity testing across the TypeScript and Rust backends.
+- Keep improving session browsing, search, analytics, and live inspection where real operator workflows expose gaps.
+- Make integration behavior and capture/redaction settings easier to understand from the product surface and docs.
 
-## Planned / Open Areas
+## Later
 
-- See `docs/plans/` for active roadmap items and research.
+- Support richer Codex-native live fidelity beyond the current OTEL summary path.
+- Revisit packaging or alternate runtime distribution work once the canonical web contract is stable.
+- Expand multi-agent support where new integrations can map cleanly onto the existing monitor, history, and live models.
+
+## Working Principles
+
+- Prefer extending `/app/` and `/api/v2/*` over adding new behavior to the legacy `/` surface.
+- Treat Rust as a runtime convergence effort, not a forked product direction.
+- Keep fidelity honest in both product UI and API responses, especially when Claude and Codex capabilities differ.
+- Favor docs and plans that age well: roadmap for direction, plan docs for implementation detail, architecture docs for system shape.
+
+## Active References
+
+- Repo convergence plan: [../plans/2026-04-08-repo-convergence-implementation.md](../plans/2026-04-08-repo-convergence-implementation.md)
+- Rust runtime convergence plan: [../plans/2026-04-10-rust-runtime-convergence.md](../plans/2026-04-10-rust-runtime-convergence.md)
+- Architecture overview: [../system/ARCHITECTURE.md](../system/ARCHITECTURE.md)
+- Product surface reference: [../system/FEATURES.md](../system/FEATURES.md)

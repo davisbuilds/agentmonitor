@@ -1,5 +1,16 @@
 # Operations
 
+This document owns local development, runtime commands, environment variables, and testing workflow.
+
+Related docs:
+
+- Root overview and fastest setup: [../../README.md](../../README.md)
+- Product/capability reference: [FEATURES.md](FEATURES.md)
+- Architecture and code map: [ARCHITECTURE.md](ARCHITECTURE.md)
+- API navigation: [../api/README.md](../api/README.md)
+- Claude Code integration details: [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md)
+- Codex integration details: [../../hooks/codex/README.md](../../hooks/codex/README.md)
+
 ## Local Development
 
 ```bash
@@ -65,7 +76,7 @@ Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENT
 ./hooks/claude-code/install.sh
 ```
 
-Restart Claude Code after installing. See `hooks/claude-code/README.md` for details.
+Restart Claude Code after installing. See [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) for details.
 
 ### Codex
 
@@ -87,6 +98,8 @@ Current runtime note:
 - `AGENTMONITOR_CODEX_LIVE_MODE=otel-only` is the only implemented Codex mode today.
 - OTEL-only Codex data is suitable for summary observability, not `claude-esp`-style plan/diff/reasoning playback.
 - The `exporter` mode name is reserved for a future richer Codex-side exporter.
+
+For full setup and behavior notes, use [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) and [../../hooks/codex/README.md](../../hooks/codex/README.md).
 
 ## Historical Import
 

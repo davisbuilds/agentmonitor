@@ -1,266 +1,83 @@
 # AgentMonitor
 
-Real-time localhost dashboard + session browser for monitoring AI agent activity across sessions, tools, and projects.
+Local dashboard and session browser for observing AI coding agents across live telemetry, tool activity, costs, and session history.
 
-## Stack
+## What It Does
 
-- Node.js + TypeScript + Express
-- SQLite (`better-sqlite3`) with FTS5
-- Svelte 5 + Vite frontend (at `/app/`) — canonical product surface with Monitor, Live, Sessions, Search, Analytics tabs
-- Legacy vanilla JS frontend + Tailwind CSS (at `/`) — transitional compatibility surface
-- SSE for live updates
-- chokidar file-watcher for automatic session discovery
+- Serves the canonical Svelte app at `/app/` for Monitor, Live, Sessions, Search, and Analytics.
+- Accepts live ingest from Claude Code hooks, Codex OTEL export, or generic HTTP event producers.
+- Watches local Claude session files and imports historical Claude Code and Codex sessions into SQLite.
+- Streams live updates over SSE for dashboards and operator views.
 
-## Product Status
+## Current Product Shape
 
-- Canonical UI and product contract: `/app/` + `/api/v2/*`
-- Transitional compatibility surface: `/`
-- Rust backend remains an optional alternate runtime under evaluation and is not the canonical product path today
+- Canonical UI and app contract: `/app/` + `/api/v2/*`
+- Transitional compatibility surface: legacy dashboard at `/`
+- Alternate runtime under evaluation: `rust-backend/`
 
 ## Quick Start
 
 Requirements:
-- Node.js 24.13.0
-- `pnpm` 10+
 
-Install dependencies:
+- Node.js `24.13.0`
+- `pnpm` `10.29.3+`
+
+Install and run the canonical dev flow:
 
 ```bash
 nvm use
 pnpm install
-```
 
-The root install uses a pnpm workspace and also installs the Svelte frontend dependencies in `frontend/`.
-
-Run in development:
-
-```bash
 # terminal 1
 pnpm dev
 
-# terminal 2 (shared Tailwind CSS for `/` and `/app/`)
-pnpm css:watch
-
-# terminal 3 (for live Svelte SPA changes at /app/)
+# terminal 2
 pnpm frontend:dev
+
+# terminal 3 if you are touching shared Tailwind output or the legacy dashboard
+pnpm css:watch
 ```
 
-Open `http://127.0.0.1:5173/app/` for live Svelte development or `http://127.0.0.1:3141/` for the legacy compatibility dashboard.
-For the canonical Express-served app at `http://127.0.0.1:3141/app/`, run `pnpm frontend:build` after frontend changes.
-For continuous rebuilds of the Express-served `/app/`, run `pnpm frontend:watch`.
-Use `http://127.0.0.1:3141/` only for legacy compatibility work.
+Open:
 
-## Useful Scripts
+- `http://127.0.0.1:5173/app/` for Vite-powered frontend development
+- `http://127.0.0.1:3141/app/` for the Express-served canonical app
+- `http://127.0.0.1:3141/` only for legacy compatibility work
 
-- `pnpm dev`: run server in watch mode (`tsx watch`).
-- `pnpm css:build`: one-off Tailwind build to `public/css/output.css`.
-- `pnpm css:watch`: Tailwind watch mode.
-- `pnpm build`: TypeScript build + CSS build.
-- `pnpm frontend:build`: build Svelte SPA to `frontend/dist/`.
-- `pnpm frontend:dev`: Svelte Vite dev server at `:5173` with API proxy.
-- `pnpm frontend:watch`: continuously rebuild Svelte SPA to `frontend/dist/` for the Express-served `/app/`.
-- `pnpm test`: run the self-contained TypeScript test suite (excludes parity tests).
-- `pnpm test:watch`: watch-mode test runner.
-- `pnpm test:parity:ts`: run black-box parity tests against an isolated temporary TypeScript server and temp DB.
-- `pnpm test:parity:ts:live`: run parity tests against a TypeScript server already running on `:3141`.
-- `pnpm test:parity:rust`: run black-box parity tests against a running Rust server on `:3142`.
-- `pnpm rust:dev`: run the Rust backend directly on `:3142`.
-- `pnpm rust:test`: run the Rust backend test suite.
-- `pnpm rust:test:runtime-invariants`: run the Rust runtime-host invariant suite.
-- `pnpm start`: run compiled server from `dist/`.
-- `pnpm run import`: import historical sessions from Claude Code and Codex logs.
-- `pnpm seed`: send demo events to the running server.
-- `pnpm bench:ingest`: run ingest throughput benchmark.
+If you want the Express-served `/app/` to refresh as you edit frontend code, run `pnpm frontend:watch`.
 
-## Configuration
-
-All runtime environment variables with defaults are in `.env.example` (canonical source: `src/config.ts`).
-
-Environment variables (all optional):
-
-- `AGENTMONITOR_PORT` (default: `3141`)
-- `AGENTMONITOR_HOST` (default: `127.0.0.1`)
-- `AGENTMONITOR_DB_PATH` (default: `./data/agentmonitor.db`)
-- `AGENTMONITOR_MAX_PAYLOAD_KB` (default: `10`)
-- `AGENTMONITOR_SESSION_TIMEOUT` (default: `5`)
-- `AGENTMONITOR_MAX_FEED` (default: `200`)
-- `AGENTMONITOR_STATS_INTERVAL` (default: `5000`)
-- `AGENTMONITOR_MAX_SSE_CLIENTS` (default: `50`)
-- `AGENTMONITOR_SSE_HEARTBEAT_MS` (default: `30000`)
-- `AGENTMONITOR_AUTO_IMPORT_MINUTES` (default: `10`) — interval for automatic session import scheduling; `0` disables
-- `AGENTMONITOR_PROJECTS_DIR` (default: auto-detected from cwd ancestry; falls back to current working directory)
-- `AGENTMONITOR_ENABLE_LIVE_TAB` (default: `true`) — shows the Svelte `Live` tab and exposes live settings metadata
-- `AGENTMONITOR_CODEX_LIVE_MODE` (default: `otel-only`) — `otel-only` today, reserved `exporter` mode for an optional richer Codex-side exporter
-- `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` (default: `true`) — when `false`, live prompt payloads are redacted
-- `AGENTMONITOR_LIVE_CAPTURE_REASONING` (default: `true`) — when `false`, live reasoning payloads are redacted
-- `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` (default: `true`) — when `false`, live tool call inputs are redacted
-- `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` (default: `32768`) — cap used for future diff-style live payloads
-
-### Usage Monitor
-
-Per-agent-type usage limits. Claude Code uses token limits; Codex uses cost limits (USD cents).
-
-- `AGENTMONITOR_SESSION_WINDOW_HOURS` (default: `5`) — base session window for all agents
-- `AGENTMONITOR_SESSION_WINDOW_HOURS_CLAUDE_CODE` (default: inherits base)
-- `AGENTMONITOR_SESSION_TOKEN_LIMIT_CLAUDE_CODE` (default: `44000`)
-- `AGENTMONITOR_EXTENDED_WINDOW_HOURS_CLAUDE_CODE` (default: `24`)
-- `AGENTMONITOR_EXTENDED_TOKEN_LIMIT_CLAUDE_CODE` (default: `0` — disabled)
-- `AGENTMONITOR_WEEKLY_WINDOW_HOURS_CLAUDE_CODE` (default: `168`)
-- `AGENTMONITOR_WEEKLY_TOKEN_LIMIT_CLAUDE_CODE` (default: `293000`)
-- `AGENTMONITOR_SESSION_WINDOW_HOURS_CODEX` (default: inherits base)
-- `AGENTMONITOR_SESSION_COST_LIMIT_CODEX` (default: `500`)
-- `AGENTMONITOR_EXTENDED_WINDOW_HOURS_CODEX` (default: `168`)
-- `AGENTMONITOR_EXTENDED_COST_LIMIT_CODEX` (default: `1500`)
-
-Seed script target override:
-
-- `AGENTMONITOR_URL` (default: `http://127.0.0.1:3141`)
-
-Benchmark script environment overrides:
-
-- `AGENTMONITOR_BENCH_URL` (default: `http://127.0.0.1:3141`)
-- `AGENTMONITOR_BENCH_MODE` (`batch` or `single`, default: `batch`)
-- `AGENTMONITOR_BENCH_EVENTS` (default: `10000`)
-- `AGENTMONITOR_BENCH_WARMUP_EVENTS` (default: `250`)
-- `AGENTMONITOR_BENCH_CONCURRENCY` (default: `20`)
-- `AGENTMONITOR_BENCH_BATCH_SIZE` (default: `25`, ignored in `single` mode)
-- `AGENTMONITOR_BENCH_SESSION_CARDINALITY` (default: `100`)
-- `AGENTMONITOR_BENCH_DUPLICATE_RATE` (default: `0`)
-- `AGENTMONITOR_BENCH_TIMEOUT_MS` (default: `15000`)
-
-Example benchmark command:
+## Common Commands
 
 ```bash
-pnpm bench:ingest -- --events=20000 --concurrency=40 --batch-size=50
-```
-
-## Agent Integration
-
-### Claude Code (hooks)
-
-```bash
-./hooks/claude-code/install.sh
-```
-
-Restart Claude Code after installing. Events flow via hooks on `SessionStart`, `Stop`, `PostToolUse`, and `PreToolUse`. See `hooks/claude-code/README.md` for options.
-
-To backfill historical sessions with token/cost data:
-
-```bash
+pnpm build
+pnpm test
 pnpm run import --source claude-code
-```
-
-### Codex CLI (OTEL)
-
-Add to `~/.codex/config.toml`:
-
-```toml
-[otel]
-log_user_prompt = true
-
-[otel.exporter.otlp-http]
-endpoint = "http://localhost:3141/api/otel/v1/logs"
-protocol = "json"
-```
-
-Restart Codex after configuring. The dev server must be running before starting a Codex session (the OTEL exporter connects at startup and does not retry).
-
-**Note:** Codex OTEL mode is summary-oriented. It can drive Monitor counters and basic session presence, but it does not provide `claude-esp`-style plan, diff, command, or reasoning fidelity. The `AGENTMONITOR_CODEX_LIVE_MODE=exporter` setting is reserved for a future optional Codex-side exporter and is not implemented yet.
-
-**Also note:** Codex OTEL logs do not include token/cost data. To backfill cost data from Codex session files:
-
-```bash
 pnpm run import --source codex
 ```
 
-See `hooks/codex/README.md` for details.
+Full command, config, and runtime notes live in [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md).
 
-## API Summary
+## Integrations
 
-- `POST /api/events`: ingest one event.
-- `POST /api/events/batch`: ingest many events.
-- `GET /api/events`: query events with filters (`agent_type`, `event_type`, `tool_name`, `session_id`, `branch`, `model`, `source`, `since`, `until`).
-- `GET /api/stats`: aggregate counters and breakdowns (includes `total_cost_usd`, `model_breakdown`).
-- `GET /api/sessions`: list sessions (supports `status`, `exclude_status`, `agent_type`, `limit`).
-- `GET /api/sessions/:id`: session detail + recent events.
-- `GET /api/stats/cost`: cost breakdowns by model, project, and timeline.
-- `GET /api/filter-options`: distinct values for all filterable fields.
-- `GET /api/stream`: SSE stream (`event`, `stats`, `session_update`), returns `503` when max client limit is reached.
-- `GET /api/health`: basic service health.
-- `POST /api/otel/v1/logs`: OTLP JSON log ingestion (Claude Code + Codex).
-- `POST /api/otel/v1/metrics`: OTLP JSON metric ingestion (token usage, cost).
-- `POST /api/otel/v1/traces`: OTLP traces (stub — accepted but not processed yet).
-- `GET /api/v2/sessions`: browsing sessions (cursor pagination, project/agent filters).
-- `GET /api/v2/sessions/:id`: session detail.
-- `GET /api/v2/sessions/:id/messages`: session messages (offset pagination).
-- `GET /api/v2/sessions/:id/children`: sub-sessions.
-- `GET /api/v2/live/sessions`: live session index (project/agent/status/fidelity filters).
-- `GET /api/v2/live/settings`: live-tab enablement, Codex mode, and capture/redaction settings.
-- `GET /api/v2/live/sessions/:id`: live session detail.
-- `GET /api/v2/live/sessions/:id/turns`: normalized turn list for a live session.
-- `GET /api/v2/live/sessions/:id/items`: normalized live items stream (cursor pagination, kind filters).
-- `GET /api/v2/live/stream`: dedicated SSE stream for live session deltas (`session_presence`, `turn_update`, `item_delta`).
-- `GET /api/v2/search?q=`: FTS5 full-text search with snippet highlighting.
-- `GET /api/v2/analytics/summary`: aggregate analytics.
-- `GET /api/v2/analytics/activity`: daily activity data points.
-- `GET /api/v2/analytics/projects`: project breakdowns.
-- `GET /api/v2/analytics/tools`: tool usage stats.
-- `GET /api/v2/projects`: distinct project names.
-- `GET /api/v2/agents`: distinct agent types.
-
-Session responses from `GET /api/v2/sessions`, `GET /api/v2/sessions/:id`, `GET /api/v2/live/sessions`, and `GET /api/v2/live/sessions/:id` include a `capabilities` object. That object reports current fidelity by surface (`history`, `search`, `tool_analytics`, `live_items`) using `none`, `summary`, or `full`, so summary-only Codex sessions no longer imply Claude-style parity by omission.
-
-Required fields for ingest payloads: `session_id`, `agent_type`, `event_type`.
-
-Canonical event contract: `docs/api/event-contract.md`.
-
-Batch ingest response includes:
-- `received`
-- `ids`
-- `duplicates`
-- `rejected` (with source index + validation errors)
-
-Timestamp and truncation notes:
-- `created_at` is server receive timestamp.
-- `client_timestamp` is optional client-supplied timestamp.
-- `payload_truncated` is `1` when metadata exceeded byte cap.
-
-Example event:
-
-```json
-{
-  "event_id": "b968f88c-bf3d-48ea-9f65-59db7e0fd035",
-  "session_id": "claude-session-001",
-  "agent_type": "claude_code",
-  "event_type": "tool_use",
-  "tool_name": "Bash",
-  "status": "success",
-  "tokens_in": 120,
-  "tokens_out": 640,
-  "client_timestamp": "2026-02-18T18:06:41.231Z",
-  "branch": "feature/auth",
-  "project": "myapp",
-  "duration_ms": 950,
-  "metadata": {
-    "command": "npm test"
-  }
-}
-```
+- Claude Code hooks: [hooks/claude-code/README.md](hooks/claude-code/README.md)
+- Codex OTEL setup: [hooks/codex/README.md](hooks/codex/README.md)
+- Generic ingest contract: [docs/api/event-contract.md](docs/api/event-contract.md)
+- Historical import and runtime behavior: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
 
 ## Documentation
 
-- Contributor workflow and PR expectations: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Agent implementation guidance: [AGENTS.md](AGENTS.md)
+Start with [docs/README.md](docs/README.md) for the full docs map.
+
+- Product and capability overview: [docs/system/FEATURES.md](docs/system/FEATURES.md)
+- Local development and runtime operations: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
 - Architecture and code organization: [docs/system/ARCHITECTURE.md](docs/system/ARCHITECTURE.md)
-- Architecture decisions: [docs/archive/adr/2026-02-24-rust-backend-spike-decision-record.md](docs/archive/adr/2026-02-24-rust-backend-spike-decision-record.md)
-- Feature and API reference: [docs/system/FEATURES.md](docs/system/FEATURES.md)
-- Runtime operations (env, scripts, hooks): [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
-- Product roadmap snapshot: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
-- Event contract specification: [docs/api/event-contract.md](docs/api/event-contract.md)
-- Git history and branch policy: [docs/project/GIT_HISTORY_POLICY.md](docs/project/GIT_HISTORY_POLICY.md)
+- API docs and contracts: [docs/api/README.md](docs/api/README.md)
+- Roadmap and project direction: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
+- Contributor workflow: [CONTRIBUTING.md](CONTRIBUTING.md)
+- Agent implementation guidance: [AGENTS.md](AGENTS.md)
 
-## Live Tab Notes
+## Notes
 
-- Claude live sessions currently have the highest fidelity because they come from the JSONL watcher path.
-- Codex in `otel-only` mode should be treated as summary-only, not feature-parity with Claude live sessions.
-- The Live tab surfaces the current capture settings so operators can tell when prompts, reasoning, or tool arguments are being redacted.
+- The Svelte app is the product surface to extend. The legacy `/` dashboard is still served, but should not define new behavior.
+- Some Monitor features still read v1 endpoints today, while Sessions, Search, Analytics, and Live center on `/api/v2/*`.
+- The Rust backend is real and tested, but it is still converging on the same canonical `/app/` + `/api/v2/*` surface.
