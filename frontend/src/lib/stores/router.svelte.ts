@@ -9,7 +9,9 @@ export function getTab(): Tab {
 
 export function setTab(tab: Tab): void {
   currentTab = tab;
-  window.location.hash = tab === 'monitor' ? '' : tab;
+  if (typeof window !== 'undefined') {
+    window.location.hash = tab === 'monitor' ? '' : tab;
+  }
 }
 
 export function navigateToSession(sessionId: string): void {
@@ -25,11 +27,14 @@ export function consumePendingSession(): string | null {
 
 // Initialize from URL hash
 function initFromHash(): void {
-  const hash = window.location.hash.slice(1);
+  if (typeof window === 'undefined') return;
+  const hash = window.location.hash.slice(1).split('?')[0];
   if (hash === 'live' || hash === 'sessions' || hash === 'analytics' || hash === 'search') {
     currentTab = hash;
   }
 }
 
-initFromHash();
-window.addEventListener('hashchange', initFromHash);
+if (typeof window !== 'undefined') {
+  initFromHash();
+  window.addEventListener('hashchange', initFromHash);
+}

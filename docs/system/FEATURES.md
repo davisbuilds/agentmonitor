@@ -64,6 +64,7 @@ Product-surface reference for AgentMonitor.
 - Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
 - Tool analytics remain capability-aware and intentionally exclude sessions whose projection contract does not expose tool analytics.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
+- The Svelte `Analytics` tab now supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
 
 ## Historical Import
 
