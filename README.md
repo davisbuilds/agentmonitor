@@ -8,6 +8,7 @@ Local dashboard and session browser for observing AI coding agents across live t
 - Accepts live ingest from Claude Code hooks, Codex OTEL export, or generic HTTP event producers.
 - Watches local Claude session files and imports historical Claude Code and Codex sessions into SQLite.
 - Streams live updates over SSE for dashboards and operator views.
+- Exposes capability-aware analytics under `/api/v2/analytics/*`, including summary, activity, project, tool, hour-of-week, top-session, velocity, and per-agent views.
 
 ## Current Product Shape
 
@@ -80,4 +81,5 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 
 - The Svelte app is the product surface to extend. The legacy `/` dashboard is still served, but should not define new behavior.
 - Some Monitor features still read v1 endpoints today, while Sessions, Search, Analytics, and Live center on `/api/v2/*`.
+- Analytics responses now include coverage metadata so the UI can distinguish “all matching sessions” from capability-limited slices like tool analytics.
 - The Rust backend is real and tested, but it is still converging on the same canonical `/app/` + `/api/v2/*` surface.

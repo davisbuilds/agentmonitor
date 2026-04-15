@@ -11,6 +11,11 @@ import {
   searchMessages,
   getAnalyticsSummary,
   getAnalyticsActivity,
+  getAnalyticsCoverage,
+  getAnalyticsHourOfWeek,
+  getAnalyticsTopSessions,
+  getAnalyticsVelocity,
+  getAnalyticsAgents,
   getAnalyticsProjects,
   getAnalyticsTools,
   getDistinctProjects,
@@ -215,14 +220,25 @@ v2Router.get('/search', (req: Request, res: Response) => {
 
 // --- Analytics ---
 
+function readAnalyticsParams(req: Request): {
+  project?: string;
+  agent?: string;
+  date_from?: string;
+  date_to?: string;
+  limit?: number;
+} {
+  return {
+    project: req.query.project as string | undefined,
+    agent: req.query.agent as string | undefined,
+    date_from: req.query.date_from as string | undefined,
+    date_to: req.query.date_to as string | undefined,
+    limit: safeInt(req.query.limit as string),
+  };
+}
+
 v2Router.get('/analytics/summary', (req: Request, res: Response) => {
   try {
-    const params = {
-      project: req.query.project as string | undefined,
-      agent: req.query.agent as string | undefined,
-      date_from: req.query.date_from as string | undefined,
-      date_to: req.query.date_to as string | undefined,
-    };
+    const params = readAnalyticsParams(req);
     res.json(getAnalyticsSummary(params));
   } catch (err) {
     console.error('[v2/analytics/summary] Error:', err);
@@ -232,13 +248,11 @@ v2Router.get('/analytics/summary', (req: Request, res: Response) => {
 
 v2Router.get('/analytics/activity', (req: Request, res: Response) => {
   try {
-    const params = {
-      project: req.query.project as string | undefined,
-      agent: req.query.agent as string | undefined,
-      date_from: req.query.date_from as string | undefined,
-      date_to: req.query.date_to as string | undefined,
-    };
-    res.json({ data: getAnalyticsActivity(params) });
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getAnalyticsActivity(params),
+      coverage: getAnalyticsCoverage(params, 'all_sessions'),
+    });
   } catch (err) {
     console.error('[v2/analytics/activity] Error:', err);
     res.status(500).json({ error: 'Failed to get activity data' });
@@ -247,11 +261,11 @@ v2Router.get('/analytics/activity', (req: Request, res: Response) => {
 
 v2Router.get('/analytics/projects', (req: Request, res: Response) => {
   try {
-    const params = {
-      date_from: req.query.date_from as string | undefined,
-      date_to: req.query.date_to as string | undefined,
-    };
-    res.json({ data: getAnalyticsProjects(params) });
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getAnalyticsProjects(params),
+      coverage: getAnalyticsCoverage(params, 'all_sessions'),
+    });
   } catch (err) {
     console.error('[v2/analytics/projects] Error:', err);
     res.status(500).json({ error: 'Failed to get project data' });
@@ -260,15 +274,63 @@ v2Router.get('/analytics/projects', (req: Request, res: Response) => {
 
 v2Router.get('/analytics/tools', (req: Request, res: Response) => {
   try {
-    const params = {
-      project: req.query.project as string | undefined,
-      date_from: req.query.date_from as string | undefined,
-      date_to: req.query.date_to as string | undefined,
-    };
-    res.json({ data: getAnalyticsTools(params) });
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getAnalyticsTools(params),
+      coverage: getAnalyticsCoverage(params, 'tool_analytics_capable'),
+    });
   } catch (err) {
     console.error('[v2/analytics/tools] Error:', err);
     res.status(500).json({ error: 'Failed to get tool data' });
+  }
+});
+
+v2Router.get('/analytics/hour-of-week', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getAnalyticsHourOfWeek(params),
+      coverage: getAnalyticsCoverage(params, 'all_sessions'),
+    });
+  } catch (err) {
+    console.error('[v2/analytics/hour-of-week] Error:', err);
+    res.status(500).json({ error: 'Failed to get hour-of-week analytics' });
+  }
+});
+
+v2Router.get('/analytics/top-sessions', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getAnalyticsTopSessions(params),
+      coverage: getAnalyticsCoverage(params, 'all_sessions'),
+    });
+  } catch (err) {
+    console.error('[v2/analytics/top-sessions] Error:', err);
+    res.status(500).json({ error: 'Failed to get top sessions analytics' });
+  }
+});
+
+v2Router.get('/analytics/velocity', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getAnalyticsVelocity(params));
+  } catch (err) {
+    console.error('[v2/analytics/velocity] Error:', err);
+    res.status(500).json({ error: 'Failed to get velocity analytics' });
+  }
+});
+
+v2Router.get('/analytics/agents', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getAnalyticsAgents(params),
+      coverage: getAnalyticsCoverage(params, 'all_sessions'),
+    });
+  } catch (err) {
+    console.error('[v2/analytics/agents] Error:', err);
+    res.status(500).json({ error: 'Failed to get agent analytics' });
   }
 });
 

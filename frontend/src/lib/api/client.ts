@@ -206,24 +206,101 @@ export interface AnalyticsSummary {
   daily_average_sessions: number;
   daily_average_messages: number;
   date_range: { earliest: string | null; latest: string | null };
+  coverage: AnalyticsCoverage;
 }
 
 export interface ActivityDataPoint {
   date: string;
   sessions: number;
   messages: number;
+  user_messages: number;
 }
 
 export interface ProjectBreakdown {
   project: string;
   session_count: number;
   message_count: number;
+  user_message_count: number;
 }
 
 export interface ToolUsageStat {
   tool_name: string;
   category: string | null;
   count: number;
+}
+
+export interface AnalyticsCapabilityBreakdown {
+  full: number;
+  summary: number;
+  none: number;
+  unknown: number;
+}
+
+export interface AnalyticsCoverage {
+  metric_scope: 'all_sessions' | 'tool_analytics_capable';
+  matching_sessions: number;
+  included_sessions: number;
+  excluded_sessions: number;
+  fidelity_breakdown: {
+    full: number;
+    summary: number;
+    unknown: number;
+  };
+  capability_breakdown: {
+    history: AnalyticsCapabilityBreakdown;
+    search: AnalyticsCapabilityBreakdown;
+    tool_analytics: AnalyticsCapabilityBreakdown;
+    live_items: AnalyticsCapabilityBreakdown;
+  };
+  note: string;
+}
+
+export interface HourOfWeekDataPoint {
+  day_of_week: number;
+  hour_of_day: number;
+  session_count: number;
+  message_count: number;
+  user_message_count: number;
+}
+
+export interface TopSessionStat {
+  id: string;
+  project: string | null;
+  agent: string;
+  started_at: string | null;
+  ended_at: string | null;
+  message_count: number;
+  user_message_count: number;
+  tool_call_count: number;
+  fidelity: string | null;
+}
+
+export interface VelocityMetrics {
+  total_sessions: number;
+  total_messages: number;
+  total_user_messages: number;
+  active_days: number;
+  span_days: number;
+  sessions_per_active_day: number;
+  messages_per_active_day: number;
+  sessions_per_calendar_day: number;
+  messages_per_calendar_day: number;
+  average_messages_per_session: number;
+  average_user_messages_per_session: number;
+  coverage: AnalyticsCoverage;
+}
+
+export interface AgentComparisonRow {
+  agent: string;
+  session_count: number;
+  message_count: number;
+  user_message_count: number;
+  average_messages_per_session: number;
+  full_fidelity_sessions: number;
+  summary_fidelity_sessions: number;
+  tool_analytics_capable_sessions: number;
+  first_started_at: string | null;
+  last_started_at: string | null;
 }
 
 // --- API client ---
@@ -371,19 +448,39 @@ export async function fetchAnalyticsSummary(params: Record<string, string | unde
   return checkedJson(res, 'fetchAnalyticsSummary');
 }
 
-export async function fetchAnalyticsActivity(params: Record<string, string | undefined> = {}): Promise<{ data: ActivityDataPoint[] }> {
+export async function fetchAnalyticsActivity(params: Record<string, string | number | undefined> = {}): Promise<{ data: ActivityDataPoint[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/activity${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsActivity');
 }
 
-export async function fetchAnalyticsProjects(params: Record<string, string | undefined> = {}): Promise<{ data: ProjectBreakdown[] }> {
+export async function fetchAnalyticsProjects(params: Record<string, string | number | undefined> = {}): Promise<{ data: ProjectBreakdown[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/projects${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsProjects');
 }
 
-export async function fetchAnalyticsTools(params: Record<string, string | undefined> = {}): Promise<{ data: ToolUsageStat[] }> {
+export async function fetchAnalyticsTools(params: Record<string, string | number | undefined> = {}): Promise<{ data: ToolUsageStat[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/tools${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsTools');
+}
+
+export async function fetchAnalyticsHourOfWeek(params: Record<string, string | number | undefined> = {}): Promise<{ data: HourOfWeekDataPoint[]; coverage: AnalyticsCoverage }> {
+  const res = await fetch(`/api/v2/analytics/hour-of-week${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsHourOfWeek');
+}
+
+export async function fetchAnalyticsTopSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: TopSessionStat[]; coverage: AnalyticsCoverage }> {
+  const res = await fetch(`/api/v2/analytics/top-sessions${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsTopSessions');
+}
+
+export async function fetchAnalyticsVelocity(params: Record<string, string | number | undefined> = {}): Promise<VelocityMetrics> {
+  const res = await fetch(`/api/v2/analytics/velocity${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsVelocity');
+}
+
+export async function fetchAnalyticsAgents(params: Record<string, string | number | undefined> = {}): Promise<{ data: AgentComparisonRow[]; coverage: AnalyticsCoverage }> {
+  const res = await fetch(`/api/v2/analytics/agents${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsAgents');
 }
 
 export async function fetchV2Projects(): Promise<{ data: string[] }> {

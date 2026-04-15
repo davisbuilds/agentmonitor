@@ -58,6 +58,13 @@ Product-surface reference for AgentMonitor.
 - Cost breakdowns by model, project, and time period.
 - Historical cost recalculation via `pnpm recalculate-costs`.
 
+## Analytics
+
+- Historical analytics live under `/api/v2/analytics/*` and are intended for the canonical Svelte app.
+- Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
+- Tool analytics remain capability-aware and intentionally exclude sessions whose projection contract does not expose tool analytics.
+- Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
+
 ## Historical Import
 
 - Claude Code JSONL conversation log import.
@@ -82,6 +89,14 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/live/sessions/:id/turns` | GET | Normalized live turns |
 | `/api/v2/live/sessions/:id/items` | GET | Normalized live items |
 | `/api/v2/live/stream` | GET | Dedicated live SSE stream |
+| `/api/v2/analytics/summary` | GET | Capability-aware summary totals and coverage |
+| `/api/v2/analytics/activity` | GET | Daily activity series plus coverage metadata |
+| `/api/v2/analytics/projects` | GET | Per-project message/session breakdowns |
+| `/api/v2/analytics/tools` | GET | Tool-analytics-capable tool usage breakdowns |
+| `/api/v2/analytics/hour-of-week` | GET | 7x24 historical activity heatmap data |
+| `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
+| `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |
+| `/api/v2/analytics/agents` | GET | Per-agent comparison rows for analytics UI |
 | `/api/health` | GET | Service health check |
 | `/api/filter-options` | GET | Distinct filterable field values |
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |
