@@ -347,6 +347,19 @@ export interface UsageTopSessionRow {
   browsing_session_available: boolean;
 }
 
+export interface SearchResultRow {
+  session_id: string;
+  message_id: number;
+  message_ordinal: number;
+  message_role: string;
+  snippet: string;
+  session_project: string | null;
+  session_agent: string;
+  session_started_at: string | null;
+  session_ended_at: string | null;
+  session_first_message: string | null;
+}
+
 // --- API request params ---
 
 export interface SessionsListParams {
@@ -385,6 +398,7 @@ export interface SearchParams {
   q: string;
   project?: string;
   agent?: string;
+  sort?: 'recent' | 'relevance';
   limit?: number;
   cursor?: string;
 }

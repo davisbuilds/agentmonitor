@@ -5,12 +5,13 @@ import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type Database from 'better-sqlite3';
 
 let server: Server;
 let baseUrl = '';
 let tempDir = '';
 let closeDb: (() => void) | null = null;
-let db: import('better-sqlite3').Database;
+let db: Database;
 
 // Sample session data to seed into the DB
 function sampleJsonl(lines: object[]): string {
@@ -127,6 +128,36 @@ before(async () => {
     fidelity: 'summary',
     capabilities: SUMMARY_LIVE_PROJECTION_CAPABILITIES,
   });
+
+  const searchRankFixtures = [
+    {
+      id: 'api-search-rank-001',
+      text: 'rankmagic rankmagic rankmagic rankmagic dense transcript match',
+      timestamp: '2026-03-08T09:00:00Z',
+    },
+    {
+      id: 'api-search-rank-002',
+      text: 'rankmagic sparse transcript match',
+      timestamp: '2026-03-08T10:00:00Z',
+    },
+  ];
+
+  for (const fixture of searchRankFixtures) {
+    const jsonl = sampleJsonl([
+      {
+        type: 'user',
+        parentUuid: null,
+        sessionId: fixture.id,
+        cwd: '/Users/dev/search-rank',
+        message: { role: 'user', content: [{ type: 'text', text: fixture.text }] },
+        timestamp: fixture.timestamp,
+      },
+    ]);
+    const filePath = `/fake/projects/-Users-dev-Dev-search-rank/${fixture.id}.jsonl`;
+    const parsed = parseSessionMessages(jsonl, fixture.id, filePath);
+    insertParsedSession(db, parsed, filePath, 256, `hash_${fixture.id}`);
+    syncClaudeLiveSession(db, parsed);
+  }
 
   // Start server
   const { createApp } = await import('../src/app.js');
@@ -596,8 +627,17 @@ describe('GET /api/v2/search', () => {
   test('returns matching results for FTS query', async () => {
     const res = await fetch(`${baseUrl}/api/v2/search?q=alpha`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { data: Array<{ session_id: string; snippet: string }> };
+    const body = await res.json() as {
+      data: Array<{
+        session_id: string;
+        snippet: string;
+        session_agent: string;
+        session_project: string | null;
+        session_started_at: string | null;
+      }>;
+    };
     assert.ok(body.data.length > 0, 'should find results for "alpha"');
+    assert.ok(body.data[0]?.session_agent, 'search results should include session agent context');
   });
 
   test('returns 400 without query parameter', async () => {
@@ -655,6 +695,14 @@ describe('GET /api/v2/search', () => {
     assert.equal(res.status, 200);
     const body = await res.json() as { data: unknown[] };
     assert.ok(Array.isArray(body.data));
+  });
+
+  test('supports relevance sorting for denser transcript matches', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/search?q=rankmagic&sort=relevance&limit=2`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ session_id: string }>; cursor?: string };
+    assert.equal(body.data[0]?.session_id, 'api-search-rank-001');
+    assert.ok(body.cursor, 'relevance search should return a cursor when the page is full');
   });
 });
 

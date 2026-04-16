@@ -233,7 +233,14 @@ export interface SearchResult {
   message_ordinal: number;
   message_role: string;
   snippet: string;
+  session_project: string | null;
+  session_agent: string;
+  session_started_at: string | null;
+  session_ended_at: string | null;
+  session_first_message: string | null;
 }
+
+export type SearchSort = 'recent' | 'relevance';
 
 export interface AnalyticsSummary {
   total_sessions: number;
@@ -610,7 +617,7 @@ export async function fetchLiveItems(sessionId: string, params: { cursor?: strin
   return checkedJson(res, 'fetchLiveItems');
 }
 
-export async function searchMessages(params: { q: string; project?: string; agent?: string; limit?: number; cursor?: string }): Promise<{ data: SearchResult[]; total: number; cursor?: string }> {
+export async function searchMessages(params: { q: string; project?: string; agent?: string; sort?: SearchSort; limit?: number; cursor?: string }): Promise<{ data: SearchResult[]; total: number; cursor?: string }> {
   const res = await fetch(`/api/v2/search${qs(params)}`);
   return checkedJson(res, 'searchMessages');
 }

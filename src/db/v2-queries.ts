@@ -34,6 +34,7 @@ import type {
   UsageModelBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
+  SearchResultRow,
   PinsListParams,
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
@@ -531,20 +532,48 @@ export function unpinMessage(sessionId: string, messageId: number): { removed: b
 // --- Search ---
 
 interface FtsSearchResult {
-  data: Array<{
-    session_id: string;
-    message_id: number;
-    message_ordinal: number;
-    message_role: string;
-    snippet: string;
-  }>;
+  data: SearchResultRow[];
   total: number;
   cursor?: string;
+}
+
+type FtsSearchBaseRow = FtsSearchResult['data'][number];
+
+type FtsSearchRow = FtsSearchBaseRow & {
+  search_rank?: number;
+};
+
+interface RelevanceCursor {
+  rank: number;
+  message_id: number;
+}
+
+function decodeRelevanceCursor(cursor: string | undefined): RelevanceCursor | null {
+  if (!cursor) return null;
+
+  try {
+    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf-8')) as Partial<RelevanceCursor>;
+    if (typeof parsed.rank === 'number' && typeof parsed.message_id === 'number') {
+      return {
+        rank: parsed.rank,
+        message_id: parsed.message_id,
+      };
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+function encodeRelevanceCursor(cursor: RelevanceCursor): string {
+  return Buffer.from(JSON.stringify(cursor), 'utf-8').toString('base64url');
 }
 
 export function searchMessages(params: SearchParams): FtsSearchResult {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
+  const sort = params.sort === 'relevance' ? 'relevance' : 'recent';
 
   const conditions: string[] = [];
   const values: unknown[] = [];
@@ -570,9 +599,64 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   `;
   const total = (db.prepare(countSql).get(params.q, ...values) as CountResult).c;
 
-  // Fetch results with snippets
-  const offsetCondition = params.cursor ? `AND m.id < ?` : '';
-  const offsetValues = params.cursor ? [parseInt(params.cursor, 10)] : [];
+  if (sort === 'relevance') {
+    const cursorState = decodeRelevanceCursor(params.cursor);
+    const offsetCondition = cursorState
+      ? `AND (
+          bm25(messages_fts) > ?
+          OR (bm25(messages_fts) = ? AND m.id < ?)
+        )`
+      : '';
+    const offsetValues = cursorState
+      ? [cursorState.rank, cursorState.rank, cursorState.message_id]
+      : [];
+
+    const searchSql = `
+      SELECT
+        m.session_id,
+        m.id as message_id,
+        m.ordinal as message_ordinal,
+        m.role as message_role,
+        snippet(messages_fts, 0, '<mark>', '</mark>', '...', 20) as snippet,
+        bs.project as session_project,
+        bs.agent as session_agent,
+        bs.started_at as session_started_at,
+        bs.ended_at as session_ended_at,
+        bs.first_message as session_first_message,
+        bm25(messages_fts) as search_rank
+      FROM messages_fts
+      JOIN messages m ON m.rowid = messages_fts.rowid
+      JOIN browsing_sessions bs ON bs.id = m.session_id
+      WHERE messages_fts MATCH ? ${joinFilter} ${offsetCondition}
+      ORDER BY search_rank ASC, m.id DESC
+      LIMIT ?
+    `;
+
+    const rows = db.prepare(searchSql).all(
+      params.q, ...values, ...offsetValues, limit,
+    ) as FtsSearchRow[];
+
+    let cursor: string | undefined;
+    if (rows.length === limit && rows.length > 0) {
+      const last = rows[rows.length - 1];
+      if (typeof last?.search_rank === 'number') {
+        cursor = encodeRelevanceCursor({
+          rank: last.search_rank,
+          message_id: last.message_id,
+        });
+      }
+    }
+
+    return {
+      data: rows.map(({ search_rank: _searchRank, ...row }) => row as FtsSearchBaseRow),
+      total,
+      cursor,
+    };
+  }
+
+  const recentCursor = params.cursor ? parseInt(params.cursor, 10) : null;
+  const offsetCondition = Number.isFinite(recentCursor) ? `AND m.id < ?` : '';
+  const offsetValues = Number.isFinite(recentCursor) ? [recentCursor] : [];
 
   const searchSql = `
     SELECT
@@ -580,7 +664,12 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
       m.id as message_id,
       m.ordinal as message_ordinal,
       m.role as message_role,
-      snippet(messages_fts, 0, '<mark>', '</mark>', '...', 20) as snippet
+      snippet(messages_fts, 0, '<mark>', '</mark>', '...', 20) as snippet,
+      bs.project as session_project,
+      bs.agent as session_agent,
+      bs.started_at as session_started_at,
+      bs.ended_at as session_ended_at,
+      bs.first_message as session_first_message
     FROM messages_fts
     JOIN messages m ON m.rowid = messages_fts.rowid
     JOIN browsing_sessions bs ON bs.id = m.session_id
@@ -590,7 +679,7 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   `;
 
   const data = db.prepare(searchSql).all(
-    params.q, ...values, ...offsetValues, limit
+    params.q, ...values, ...offsetValues, limit,
   ) as FtsSearchResult['data'];
 
   let cursor: string | undefined;

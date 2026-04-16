@@ -302,10 +302,12 @@ v2Router.get('/search', (req: Request, res: Response) => {
   }
 
   try {
+    const sort: 'recent' | 'relevance' = req.query.sort === 'relevance' ? 'relevance' : 'recent';
     const params = {
       q: q.trim(),
       project: req.query.project as string | undefined,
       agent: req.query.agent as string | undefined,
+      sort,
       limit: safeInt(req.query.limit as string),
       cursor: req.query.cursor as string | undefined,
     };
