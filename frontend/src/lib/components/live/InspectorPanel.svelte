@@ -58,7 +58,7 @@
   }
 </script>
 
-<aside class="flex h-full flex-col overflow-hidden border-l border-gray-800 bg-gray-950/60">
+<aside class="flex flex-col xl:h-full xl:overflow-hidden">
   <div class="border-b border-gray-800 px-4 py-3 shrink-0">
     <h3 class="text-sm font-semibold text-gray-100">Inspector</h3>
     <p class="mt-1 text-xs text-gray-500">
@@ -70,7 +70,7 @@
     </p>
   </div>
 
-  <div class="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+  <div class="px-4 py-4 space-y-5 xl:flex-1 xl:overflow-y-auto">
     {#if session}
       <section>
         <h4 class="text-xs font-semibold uppercase tracking-wide text-gray-500">Session</h4>
