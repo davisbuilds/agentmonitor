@@ -75,6 +75,13 @@ Product-surface reference for AgentMonitor.
 - Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
 - The Svelte `Usage` tab supports date ranges, project and agent filters, session drill-in when transcript history exists, and CSV export.
 
+## Search And Navigation
+
+- Historical search lives under `/api/v2/search` and now supports both recency and relevance sort modes.
+- Search responses include session agent/project/timestamp context in addition to the transcript snippet and ordinal target.
+- The Svelte `Search` tab debounces queries, falls back to recent sessions when the query is empty, and keeps ordinal-based session navigation intact.
+- The Svelte app exposes a global command palette on `Cmd/Ctrl+K` for jumping into recent sessions or transcript matches from any tab.
+
 ## Historical Import
 
 - Claude Code JSONL conversation log import.
@@ -104,6 +111,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/sessions/:id/messages/:messageId/pin` | POST | Pin a transcript message using ordinal-stable persistence |
 | `/api/v2/sessions/:id/messages/:messageId/pin` | DELETE | Remove a saved transcript pin |
 | `/api/v2/sessions/:id/activity` | GET | Bucketed transcript activity for session-viewer minimap navigation |
+| `/api/v2/search` | GET | FTS search with recency/relevance sort and session-context metadata |
 | `/api/v2/analytics/summary` | GET | Capability-aware summary totals and coverage |
 | `/api/v2/analytics/activity` | GET | Daily activity series plus coverage metadata |
 | `/api/v2/analytics/projects` | GET | Per-project message/session breakdowns |
