@@ -8,7 +8,7 @@
   }
 </script>
 
-<section class="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+<section class="flex h-full flex-col rounded-xl border border-gray-800 bg-gray-950/60 p-4 xl:max-h-[34rem]">
   <div class="flex items-start justify-between gap-3">
     <div>
       <h2 class="text-sm font-semibold text-white">Top Sessions</h2>
@@ -17,7 +17,7 @@
   </div>
 
   {#if usage.loading.topSessions}
-    <div class="mt-4 space-y-3">
+    <div class="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
       {#each Array.from({ length: 5 }) as _}
         <div class="h-14 animate-pulse rounded-lg bg-gray-900"></div>
       {/each}
@@ -27,11 +27,12 @@
       {usage.errors.topSessions}
     </div>
   {:else if usage.topSessions.length === 0}
-    <div class="mt-4 rounded-lg border border-dashed border-gray-800 px-4 py-10 text-center text-sm text-gray-500">
+    <div class="mt-4 flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-800 px-4 py-10 text-center text-sm text-gray-500">
       No usage-bearing sessions in this range.
     </div>
   {:else}
-    <div class="mt-4 space-y-2">
+    <div class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+      <div class="space-y-2">
       {#each usage.topSessions as row}
         <div class="rounded-lg border border-gray-800 bg-gray-900/40 px-3 py-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
@@ -79,6 +80,7 @@
           </div>
         </div>
       {/each}
+      </div>
     </div>
   {/if}
 </section>

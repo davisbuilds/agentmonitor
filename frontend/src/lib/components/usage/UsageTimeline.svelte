@@ -11,7 +11,7 @@
   });
 </script>
 
-<section class="rounded-xl border border-gray-800 bg-gray-950/60 p-4">
+<section class="flex h-full flex-col rounded-xl border border-gray-800 bg-gray-950/60 p-4 xl:max-h-[34rem]">
   <div class="flex items-center justify-between gap-3">
     <div>
       <h2 class="text-sm font-semibold text-white">Daily Usage</h2>
@@ -20,7 +20,7 @@
   </div>
 
   {#if usage.loading.daily}
-    <div class="mt-4 space-y-3">
+    <div class="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
       {#each Array.from({ length: 6 }) as _}
         <div class="space-y-2">
           <div class="h-3 w-20 animate-pulse rounded bg-gray-800"></div>
@@ -33,14 +33,15 @@
       {usage.errors.daily}
     </div>
   {:else if usage.daily.length === 0}
-    <div class="mt-4 rounded-lg border border-dashed border-gray-800 px-4 py-10 text-center text-sm text-gray-500">
+    <div class="mt-4 flex flex-1 items-center justify-center rounded-lg border border-dashed border-gray-800 px-4 py-10 text-center text-sm text-gray-500">
       No usage data for this range.
     </div>
   {:else}
-    <div class="mt-4 space-y-3">
+    <div class="mt-4 min-h-0 flex-1 overflow-y-auto pr-1">
+      <div class="space-y-2">
       {#each usage.daily as row}
         <button
-          class="block w-full rounded-lg border border-transparent px-3 py-3 text-left transition hover:border-gray-700 hover:bg-gray-900/60"
+          class="block w-full rounded-lg border border-transparent px-3 py-2.5 text-left transition hover:border-gray-700 hover:bg-gray-900/60"
           onclick={() => usage.setDateRange(row.date, row.date)}
         >
           <div class="flex items-center justify-between gap-3 text-sm">
@@ -60,6 +61,7 @@
           </div>
         </button>
       {/each}
+      </div>
     </div>
   {/if}
 </section>

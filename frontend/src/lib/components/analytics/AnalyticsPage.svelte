@@ -97,28 +97,16 @@
   <SummaryCards />
 
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-12">
-    <div class="xl:col-span-7">
+    <div class="space-y-4 xl:col-span-7">
       <ActivityTimeline />
-    </div>
-    <div class="xl:col-span-5">
-      <TopSessions />
-    </div>
-
-    <div class="xl:col-span-7">
       <ProjectBreakdown />
-    </div>
-    <div class="xl:col-span-5">
-      <ToolUsage />
-    </div>
-
-    <div class="xl:col-span-6">
       <HourOfWeekHeatmap />
-    </div>
-    <div class="xl:col-span-6">
       <VelocityMetrics />
     </div>
 
-    <div class="xl:col-span-12">
+    <div class="space-y-4 xl:col-span-5">
+      <TopSessions />
+      <ToolUsage />
       <AgentComparison />
     </div>
   </div>

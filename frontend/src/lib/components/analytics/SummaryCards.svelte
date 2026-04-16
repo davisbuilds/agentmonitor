@@ -30,7 +30,7 @@
   </div>
 
   {#if analytics.loading.summary}
-    <div class="grid grid-cols-2 gap-3 lg:grid-cols-6">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
       {#each Array.from({ length: 6 }) as _}
         <div class="rounded-xl border border-gray-800 bg-gray-900/50 p-3">
           <div class="h-5 w-16 animate-pulse rounded bg-gray-800"></div>
@@ -39,9 +39,9 @@
       {/each}
     </div>
   {:else if analytics.summary}
-    <div class="grid grid-cols-2 gap-3 lg:grid-cols-6">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
       {#each cards as card}
-        <div class="rounded-xl border border-gray-800 bg-gray-900/50 p-3">
+        <div class="h-full rounded-xl border border-gray-800 bg-gray-900/50 p-3">
           <div class="text-lg font-bold text-gray-100">{card.value}</div>
           <div class="mt-1 text-xs text-gray-500">{card.label}</div>
         </div>

@@ -31,9 +31,9 @@
   {:else if analytics.errors.velocity}
     <div class="py-12 text-center text-sm text-red-300">{analytics.errors.velocity}</div>
   {:else if analytics.velocity}
-    <div class="grid grid-cols-2 gap-3 xl:grid-cols-3">
+    <div class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
       {#each cards as card}
-        <div class="rounded-lg border border-gray-800 bg-gray-950/50 p-3">
+        <div class="h-full rounded-lg border border-gray-800 bg-gray-950/50 p-3">
           <div class="text-lg font-semibold text-gray-100">{card.value}</div>
           <div class="mt-1 text-xs text-gray-500">{card.label}</div>
         </div>
