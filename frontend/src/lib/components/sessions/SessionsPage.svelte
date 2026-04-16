@@ -96,7 +96,9 @@
 </script>
 
 {#if selectedSessionId}
-  <SessionViewer sessionId={selectedSessionId} initialMessageOrdinal={selectedMessageOrdinal} onclose={closeViewer} />
+  {#key selectedSessionId}
+    <SessionViewer sessionId={selectedSessionId} initialMessageOrdinal={selectedMessageOrdinal} onclose={closeViewer} />
+  {/key}
 {:else}
   <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
     <!-- Filters -->

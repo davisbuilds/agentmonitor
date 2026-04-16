@@ -456,6 +456,49 @@ describe('GET/POST/DELETE /api/v2 pins', () => {
     assert.equal(pinsBody.data[0]?.role, 'user');
     assert.ok(pinsBody.data[0]?.content, 're-linked pin should still expose current message content');
   });
+
+  test('pins keep a removable message id even when the joined transcript row is absent', async () => {
+    const messagesRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?limit=1`);
+    assert.equal(messagesRes.status, 200);
+    const messagesBody = await messagesRes.json() as { data: Array<{ id: number; ordinal: number }> };
+    const messageId = messagesBody.data[0]?.id;
+    assert.ok(messageId, 'expected a message id to pin');
+
+    const pinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages/${messageId}/pin`, {
+      method: 'POST',
+    });
+    assert.equal(pinRes.status, 201);
+
+    db.prepare(`
+      DELETE FROM messages
+      WHERE session_id = ? AND ordinal = ?
+    `).run('api-sess-003', 0);
+
+    const pinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/pins`);
+    assert.equal(pinsRes.status, 200);
+    const pinsBody = await pinsRes.json() as {
+      data: Array<{
+        message_id: number | null;
+        message_ordinal: number;
+        role: string | null;
+        content: string | null;
+      }>;
+    };
+
+    assert.equal(pinsBody.data.length, 1);
+    assert.equal(pinsBody.data[0]?.message_id, messageId);
+    assert.equal(pinsBody.data[0]?.message_ordinal, 0);
+    assert.equal(pinsBody.data[0]?.role, null);
+    assert.equal(pinsBody.data[0]?.content, null);
+
+    const unpinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages/${messageId}/pin`, {
+      method: 'DELETE',
+    });
+    assert.equal(unpinRes.status, 200);
+    const unpinBody = await unpinRes.json() as { removed: boolean; message_ordinal: number | null };
+    assert.equal(unpinBody.removed, true);
+    assert.equal(unpinBody.message_ordinal, 0);
+  });
 });
 
 describe('GET /api/v2/sessions/:id/children', () => {

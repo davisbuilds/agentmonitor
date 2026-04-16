@@ -446,7 +446,7 @@ export function listPinnedMessages(params: PinsListParams & { session_id?: strin
     SELECT
       p.id,
       p.session_id,
-      m.id as message_id,
+      COALESCE(m.id, p.message_id) as message_id,
       p.message_ordinal,
       m.role,
       m.content,
@@ -522,11 +522,17 @@ export function unpinMessage(sessionId: string, messageId: number): { removed: b
     return { removed: result.changes > 0, message_ordinal: message.ordinal };
   }
 
+  const storedPin = db.prepare(`
+    SELECT message_ordinal
+    FROM pinned_messages
+    WHERE session_id = ? AND message_id = ?
+  `).get(sessionId, messageId) as { message_ordinal: number } | undefined;
+
   const result = db.prepare(`
     DELETE FROM pinned_messages
     WHERE session_id = ? AND message_id = ?
   `).run(sessionId, messageId);
-  return { removed: result.changes > 0, message_ordinal: null };
+  return { removed: result.changes > 0, message_ordinal: storedPin?.message_ordinal ?? null };
 }
 
 // --- Search ---
