@@ -303,6 +303,113 @@ export interface AgentComparisonRow {
   last_started_at: string | null;
 }
 
+export interface UsageSourceBreakdown {
+  source: string;
+  event_count: number;
+  usage_event_count: number;
+  session_count: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+export interface UsageCoverage {
+  metric_scope: 'event_usage';
+  matching_events: number;
+  usage_events: number;
+  missing_usage_events: number;
+  matching_sessions: number;
+  usage_sessions: number;
+  sources_with_usage: number;
+  source_breakdown: UsageSourceBreakdown[];
+  note: string;
+}
+
+export interface UsageSummary {
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_usage_events: number;
+  total_sessions: number;
+  active_days: number;
+  span_days: number;
+  average_cost_per_active_day: number;
+  average_cost_per_session: number;
+  peak_day: {
+    date: string | null;
+    cost_usd: number;
+  };
+  coverage: UsageCoverage;
+}
+
+export interface UsageDailyPoint {
+  date: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageProjectBreakdown {
+  project: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageModelBreakdown {
+  model: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageAgentBreakdown {
+  agent: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageTopSessionRow {
+  id: string;
+  project: string | null;
+  agent: string;
+  started_at: string | null;
+  ended_at: string | null;
+  last_activity_at: string | null;
+  message_count: number | null;
+  user_message_count: number | null;
+  fidelity: string | null;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  event_count: number;
+  usage_events: number;
+  browsing_session_available: boolean;
+}
+
 // --- API client ---
 
 type Filters = Record<string, string>;
@@ -481,6 +588,36 @@ export async function fetchAnalyticsVelocity(params: Record<string, string | num
 export async function fetchAnalyticsAgents(params: Record<string, string | number | undefined> = {}): Promise<{ data: AgentComparisonRow[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/agents${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsAgents');
+}
+
+export async function fetchUsageSummary(params: Record<string, string | number | undefined> = {}): Promise<UsageSummary> {
+  const res = await fetch(`/api/v2/usage/summary${qs(params)}`);
+  return checkedJson(res, 'fetchUsageSummary');
+}
+
+export async function fetchUsageDaily(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageDailyPoint[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/daily${qs(params)}`);
+  return checkedJson(res, 'fetchUsageDaily');
+}
+
+export async function fetchUsageProjects(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageProjectBreakdown[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/projects${qs(params)}`);
+  return checkedJson(res, 'fetchUsageProjects');
+}
+
+export async function fetchUsageModels(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageModelBreakdown[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/models${qs(params)}`);
+  return checkedJson(res, 'fetchUsageModels');
+}
+
+export async function fetchUsageAgents(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageAgentBreakdown[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/agents${qs(params)}`);
+  return checkedJson(res, 'fetchUsageAgents');
+}
+
+export async function fetchUsageTopSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageTopSessionRow[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/top-sessions${qs(params)}`);
+  return checkedJson(res, 'fetchUsageTopSessions');
 }
 
 export async function fetchV2Projects(): Promise<{ data: string[] }> {

@@ -14,6 +14,7 @@
   import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
   import SearchPage from './lib/components/search/SearchPage.svelte';
   import AnalyticsPage from './lib/components/analytics/AnalyticsPage.svelte';
+  import UsagePage from './lib/components/usage/UsagePage.svelte';
 
   const tab = $derived(getTab());
   const liveSettings = $derived(getLiveSettings());
@@ -25,6 +26,7 @@
       { id: 'monitor', label: 'Monitor' },
       { id: 'sessions', label: 'Sessions' },
       { id: 'analytics', label: 'Analytics' },
+      { id: 'usage', label: 'Usage' },
       { id: 'search', label: 'Search' },
     ];
     if (liveSettings.enabled) {
@@ -105,6 +107,8 @@
     <SessionsPage />
   {:else if tab === 'analytics'}
     <AnalyticsPage />
+  {:else if tab === 'usage'}
+    <UsagePage />
   {:else if tab === 'search'}
     <SearchPage />
   {/if}
