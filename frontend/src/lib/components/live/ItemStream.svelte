@@ -111,7 +111,7 @@
   }
 </script>
 
-<div class="flex h-full flex-col overflow-hidden">
+<div class="flex flex-col xl:h-full xl:overflow-hidden">
   <div class="border-b border-gray-800 px-4 py-3 shrink-0">
     {#if session}
       <div class="flex items-start justify-between gap-3">
@@ -151,7 +151,7 @@
     </div>
   </div>
 
-  <div class="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+  <div class="px-4 py-4 space-y-3 xl:flex-1 xl:overflow-y-auto">
     {#if loading && items.length === 0}
       <div class="py-12 text-center text-sm text-gray-500">Loading live items...</div>
     {:else if error}

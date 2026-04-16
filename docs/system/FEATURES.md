@@ -23,6 +23,8 @@ Product-surface reference for AgentMonitor.
 
 - Session lifecycle: `active` → `idle` (5 min) → `ended` (10 min).
 - Session detail view with event timeline and transcript.
+- The Svelte `Sessions` viewer includes a transcript activity minimap that can jump into long conversations without requiring the full transcript to be preloaded.
+- Messages can be pinned for later review, and the Svelte `Pinned` tab reopens them at the corresponding transcript ordinal.
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
 - Filter sessions by status, agent type, and project.
 
@@ -58,6 +60,28 @@ Product-surface reference for AgentMonitor.
 - Cost breakdowns by model, project, and time period.
 - Historical cost recalculation via `pnpm recalculate-costs`.
 
+## Analytics
+
+- Historical analytics live under `/api/v2/analytics/*` and are intended for the canonical Svelte app.
+- Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
+- Tool analytics remain capability-aware and intentionally exclude sessions whose projection contract does not expose tool analytics.
+- Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
+- The Svelte `Analytics` tab now supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
+
+## Usage
+
+- Historical usage lives under `/api/v2/usage/*` and is event-derived rather than transcript-derived.
+- Summary totals, daily series, project/model/agent attribution, and top-session views all use cost/token-bearing event rows as their source of truth.
+- Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
+- The Svelte `Usage` tab supports date ranges, project and agent filters, session drill-in when transcript history exists, and CSV export.
+
+## Search And Navigation
+
+- Historical search lives under `/api/v2/search` and now supports both recency and relevance sort modes.
+- Search responses include session agent/project/timestamp context in addition to the transcript snippet and ordinal target.
+- The Svelte `Search` tab debounces queries, falls back to recent sessions when the query is empty, and keeps ordinal-based session navigation intact.
+- The Svelte app exposes a global command palette on `Cmd/Ctrl+K` for jumping into recent sessions or transcript matches from any tab.
+
 ## Historical Import
 
 - Claude Code JSONL conversation log import.
@@ -82,6 +106,26 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/live/sessions/:id/turns` | GET | Normalized live turns |
 | `/api/v2/live/sessions/:id/items` | GET | Normalized live items |
 | `/api/v2/live/stream` | GET | Dedicated live SSE stream |
+| `/api/v2/pins` | GET | List pinned transcript moments, optionally filtered by project |
+| `/api/v2/sessions/:id/pins` | GET | List pinned messages for a specific session |
+| `/api/v2/sessions/:id/messages/:messageId/pin` | POST | Pin a transcript message using ordinal-stable persistence |
+| `/api/v2/sessions/:id/messages/:messageId/pin` | DELETE | Remove a saved transcript pin |
+| `/api/v2/sessions/:id/activity` | GET | Bucketed transcript activity for session-viewer minimap navigation |
+| `/api/v2/search` | GET | FTS search with recency/relevance sort and session-context metadata |
+| `/api/v2/analytics/summary` | GET | Capability-aware summary totals and coverage |
+| `/api/v2/analytics/activity` | GET | Daily activity series plus coverage metadata |
+| `/api/v2/analytics/projects` | GET | Per-project message/session breakdowns |
+| `/api/v2/analytics/tools` | GET | Tool-analytics-capable tool usage breakdowns |
+| `/api/v2/analytics/hour-of-week` | GET | 7x24 historical activity heatmap data |
+| `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
+| `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |
+| `/api/v2/analytics/agents` | GET | Per-agent comparison rows for analytics UI |
+| `/api/v2/usage/summary` | GET | Event-derived usage totals plus coverage metadata |
+| `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |
+| `/api/v2/usage/projects` | GET | Usage attribution grouped by project |
+| `/api/v2/usage/models` | GET | Usage attribution grouped by model |
+| `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
+| `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
 | `/api/health` | GET | Service health check |
 | `/api/filter-options` | GET | Distinct filterable field values |
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |

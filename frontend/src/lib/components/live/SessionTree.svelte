@@ -41,7 +41,7 @@
   }
 </script>
 
-<div class="flex-1 overflow-y-auto space-y-2">
+<div class="space-y-2 xl:flex-1 xl:overflow-y-auto">
   {#if loading && sessions.length === 0}
     <div class="text-sm text-gray-500 py-8 text-center">Loading live sessions...</div>
   {:else if error}

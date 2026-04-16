@@ -5,8 +5,20 @@
 
   interface Props {
     message: Message;
+    highlighted?: boolean;
+    pinned?: boolean;
+    pinning?: boolean;
+    onpin?: (() => void) | undefined;
+    onunpin?: (() => void) | undefined;
   }
-  let { message }: Props = $props();
+  let {
+    message,
+    highlighted = false,
+    pinned = false,
+    pinning = false,
+    onpin,
+    onunpin,
+  }: Props = $props();
 
   let blocks = $derived.by<ContentBlock[]>(() => {
     try {
@@ -26,9 +38,25 @@
   const roleLabel = $derived(message.role === 'user' ? 'You' : 'Assistant');
   const roleColor = $derived(message.role === 'user' ? 'text-blue-400' : 'text-green-400');
   const borderColor = $derived(message.role === 'user' ? 'border-blue-500/20' : 'border-green-500/20');
+
+  function togglePin() {
+    if (pinning) return;
+    if (pinned) {
+      onunpin?.();
+      return;
+    }
+    onpin?.();
+  }
 </script>
 
-<div class="border-l-2 {borderColor} pl-3">
+<div
+  class={`rounded-r-lg border-l-2 px-3 py-2 transition ${
+    borderColor
+  } ${
+    highlighted ? 'bg-blue-500/5 ring-1 ring-blue-400/20' : ''
+  }`}
+  data-message-ordinal={message.ordinal}
+>
   <!-- Role header -->
   <div class="flex items-center gap-2 mb-1">
     <span class="text-xs font-medium {roleColor}">{roleLabel}</span>
@@ -40,6 +68,20 @@
     {/if}
     {#if message.has_tool_use}
       <span class="text-xs bg-amber-900/30 text-amber-400 px-1 rounded">tools</span>
+    {/if}
+    {#if onpin || onunpin}
+      <button
+        type="button"
+        class={`ml-auto rounded border px-2 py-0.5 text-[11px] transition ${
+          pinned
+            ? 'border-amber-500/40 bg-amber-500/10 text-amber-200 hover:border-amber-400'
+            : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+        } ${pinning ? 'cursor-wait opacity-70' : ''}`}
+        disabled={pinning}
+        onclick={togglePin}
+      >
+        {pinning ? 'Saving...' : pinned ? 'Pinned' : 'Pin'}
+      </button>
     {/if}
   </div>
 

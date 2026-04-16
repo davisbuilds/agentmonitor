@@ -1,7 +1,10 @@
-export type Tab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search';
+export type Tab = 'monitor' | 'live' | 'sessions' | 'pinned' | 'analytics' | 'usage' | 'search';
 
 let currentTab = $state<Tab>('monitor');
 let pendingSessionId = $state<string | null>(null);
+let pendingMessageOrdinal = $state<number | null>(null);
+let pendingSessionNavigationVersion = $state(0);
+let commandPaletteOpen = $state(false);
 
 export function getTab(): Tab {
   return currentTab;
@@ -9,27 +12,64 @@ export function getTab(): Tab {
 
 export function setTab(tab: Tab): void {
   currentTab = tab;
-  window.location.hash = tab === 'monitor' ? '' : tab;
+  commandPaletteOpen = false;
+  if (typeof window !== 'undefined') {
+    window.location.hash = tab === 'monitor' ? '' : tab;
+  }
+}
+
+export function isCommandPaletteOpen(): boolean {
+  return commandPaletteOpen;
+}
+
+export function openCommandPalette(): void {
+  commandPaletteOpen = true;
+}
+
+export function closeCommandPalette(): void {
+  commandPaletteOpen = false;
+}
+
+export function toggleCommandPalette(): void {
+  commandPaletteOpen = !commandPaletteOpen;
 }
 
 export function navigateToSession(sessionId: string): void {
   pendingSessionId = sessionId;
+  pendingMessageOrdinal = null;
+  pendingSessionNavigationVersion += 1;
   setTab('sessions');
 }
 
-export function consumePendingSession(): string | null {
-  const id = pendingSessionId;
+export function navigateToSessionMessage(sessionId: string, messageOrdinal: number): void {
+  pendingSessionId = sessionId;
+  pendingMessageOrdinal = messageOrdinal;
+  pendingSessionNavigationVersion += 1;
+  setTab('sessions');
+}
+
+export function getPendingSessionNavigationVersion(): number {
+  return pendingSessionNavigationVersion;
+}
+
+export function consumePendingSessionNavigation(): { sessionId: string | null; messageOrdinal: number | null } {
+  const sessionId = pendingSessionId;
+  const messageOrdinal = pendingMessageOrdinal;
   pendingSessionId = null;
-  return id;
+  pendingMessageOrdinal = null;
+  return { sessionId, messageOrdinal };
 }
 
 // Initialize from URL hash
 function initFromHash(): void {
-  const hash = window.location.hash.slice(1);
-  if (hash === 'live' || hash === 'sessions' || hash === 'analytics' || hash === 'search') {
+  if (typeof window === 'undefined') return;
+  const hash = window.location.hash.slice(1).split('?')[0];
+  if (hash === 'live' || hash === 'sessions' || hash === 'pinned' || hash === 'analytics' || hash === 'usage' || hash === 'search') {
     currentTab = hash;
   }
 }
 
-initFromHash();
-window.addEventListener('hashchange', initFromHash);
+if (typeof window !== 'undefined') {
+  initFromHash();
+  window.addEventListener('hashchange', initFromHash);
+}

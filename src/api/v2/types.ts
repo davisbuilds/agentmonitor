@@ -89,6 +89,42 @@ export interface ToolCallRow {
   subagent_session_id: string | null;
 }
 
+export interface SessionActivityBucket {
+  bucket_index: number;
+  start_ordinal: number | null;
+  end_ordinal: number | null;
+  message_count: number;
+  user_message_count: number;
+  assistant_message_count: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+}
+
+export interface SessionActivity {
+  bucket_count: number;
+  total_messages: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  timestamped_messages: number;
+  untimestamped_messages: number;
+  navigation_basis: 'timestamp' | 'ordinal' | 'mixed';
+  data: SessionActivityBucket[];
+}
+
+export interface PinnedMessageRow {
+  id: number;
+  session_id: string;
+  message_id: number | null;
+  message_ordinal: number;
+  role: string | null;
+  content: string | null;
+  message_timestamp: string | null;
+  created_at: string;
+  session_project: string | null;
+  session_agent: string | null;
+  session_first_message: string | null;
+}
+
 // --- Aggregate query result ---
 
 export interface CountResult {
@@ -107,24 +143,221 @@ export interface AnalyticsSummary {
     earliest: string | null;
     latest: string | null;
   };
+  coverage: AnalyticsCoverage;
 }
 
 export interface ActivityDataPoint {
   date: string;
   sessions: number;
   messages: number;
+  user_messages: number;
 }
 
 export interface ProjectBreakdown {
   project: string;
   session_count: number;
   message_count: number;
+  user_message_count: number;
 }
 
 export interface ToolUsageStat {
   tool_name: string;
   category: string | null;
   count: number;
+}
+
+export interface AnalyticsCapabilityBreakdown {
+  full: number;
+  summary: number;
+  none: number;
+  unknown: number;
+}
+
+export interface AnalyticsCoverage {
+  metric_scope: 'all_sessions' | 'tool_analytics_capable';
+  matching_sessions: number;
+  included_sessions: number;
+  excluded_sessions: number;
+  fidelity_breakdown: {
+    full: number;
+    summary: number;
+    unknown: number;
+  };
+  capability_breakdown: {
+    history: AnalyticsCapabilityBreakdown;
+    search: AnalyticsCapabilityBreakdown;
+    tool_analytics: AnalyticsCapabilityBreakdown;
+    live_items: AnalyticsCapabilityBreakdown;
+  };
+  note: string;
+}
+
+export interface HourOfWeekDataPoint {
+  day_of_week: number;
+  hour_of_day: number;
+  session_count: number;
+  message_count: number;
+  user_message_count: number;
+}
+
+export interface TopSessionStat {
+  id: string;
+  project: string | null;
+  agent: string;
+  started_at: string | null;
+  ended_at: string | null;
+  message_count: number;
+  user_message_count: number;
+  tool_call_count: number;
+  fidelity: string | null;
+}
+
+export interface VelocityMetrics {
+  total_sessions: number;
+  total_messages: number;
+  total_user_messages: number;
+  active_days: number;
+  span_days: number;
+  sessions_per_active_day: number;
+  messages_per_active_day: number;
+  sessions_per_calendar_day: number;
+  messages_per_calendar_day: number;
+  average_messages_per_session: number;
+  average_user_messages_per_session: number;
+  coverage: AnalyticsCoverage;
+}
+
+export interface AgentComparisonRow {
+  agent: string;
+  session_count: number;
+  message_count: number;
+  user_message_count: number;
+  average_messages_per_session: number;
+  full_fidelity_sessions: number;
+  summary_fidelity_sessions: number;
+  tool_analytics_capable_sessions: number;
+  first_started_at: string | null;
+  last_started_at: string | null;
+}
+
+export interface UsageSourceBreakdown {
+  source: string;
+  event_count: number;
+  usage_event_count: number;
+  session_count: number;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+export interface UsageCoverage {
+  metric_scope: 'event_usage';
+  matching_events: number;
+  usage_events: number;
+  missing_usage_events: number;
+  matching_sessions: number;
+  usage_sessions: number;
+  sources_with_usage: number;
+  source_breakdown: UsageSourceBreakdown[];
+  note: string;
+}
+
+export interface UsageSummary {
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_usage_events: number;
+  total_sessions: number;
+  active_days: number;
+  span_days: number;
+  average_cost_per_active_day: number;
+  average_cost_per_session: number;
+  peak_day: {
+    date: string | null;
+    cost_usd: number;
+  };
+  coverage: UsageCoverage;
+}
+
+export interface UsageDailyPoint {
+  date: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageProjectBreakdown {
+  project: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageModelBreakdown {
+  model: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageAgentBreakdown {
+  agent: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+}
+
+export interface UsageTopSessionRow {
+  id: string;
+  project: string | null;
+  agent: string;
+  started_at: string | null;
+  ended_at: string | null;
+  last_activity_at: string | null;
+  message_count: number | null;
+  user_message_count: number | null;
+  fidelity: string | null;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  event_count: number;
+  usage_events: number;
+  browsing_session_available: boolean;
+}
+
+export interface SearchResultRow {
+  session_id: string;
+  message_id: number;
+  message_ordinal: number;
+  message_role: string;
+  snippet: string;
+  session_project: string | null;
+  session_agent: string;
+  session_started_at: string | null;
+  session_ended_at: string | null;
+  session_first_message: string | null;
 }
 
 // --- API request params ---
@@ -165,6 +398,7 @@ export interface SearchParams {
   q: string;
   project?: string;
   agent?: string;
+  sort?: 'recent' | 'relevance';
   limit?: number;
   cursor?: string;
 }
@@ -174,4 +408,17 @@ export interface AnalyticsParams {
   date_to?: string;
   project?: string;
   agent?: string;
+  limit?: number;
+}
+
+export interface UsageParams {
+  date_from?: string;
+  date_to?: string;
+  project?: string;
+  agent?: string;
+  limit?: number;
+}
+
+export interface PinsListParams {
+  project?: string;
 }

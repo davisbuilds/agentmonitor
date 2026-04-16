@@ -5,11 +5,13 @@ import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import type Database from 'better-sqlite3';
 
 let server: Server;
 let baseUrl = '';
 let tempDir = '';
 let closeDb: (() => void) | null = null;
+let db: Database;
 
 // Sample session data to seed into the DB
 function sampleJsonl(lines: object[]): string {
@@ -74,7 +76,11 @@ before(async () => {
   // Seed test data via parser
   const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
   const { syncClaudeLiveSession } = await import('../src/live/claude-adapter.js');
-  const db = dbModule.getDb();
+  const {
+    SUMMARY_LIVE_PROJECTION_CAPABILITIES,
+    upsertProjectedSessionSnapshot,
+  } = await import('../src/live/projector.js');
+  db = dbModule.getDb();
 
   // Create 5 sessions across 3 projects with varying sizes
   const sessions = [
@@ -104,6 +110,54 @@ before(async () => {
   childParsed.metadata.relationship_type = 'subagent';
   insertParsedSession(db, childParsed, '/fake/api-sess-006.jsonl', 512, 'hash_006');
   syncClaudeLiveSession(db, childParsed);
+
+  // Seed one summary-only projected session to exercise capability-aware analytics coverage.
+  upsertProjectedSessionSnapshot(db, {
+    id: 'api-codex-summary-001',
+    agent: 'codex',
+    project: 'delta',
+    first_message: 'Summarized Codex prompt',
+    started_at: '2026-03-07T10:00:00Z',
+    ended_at: '2026-03-07T10:05:00Z',
+    message_count: 2,
+    user_message_count: 1,
+    live_status: 'ended',
+    last_item_at: '2026-03-07T10:05:00Z',
+  }, {
+    integration_mode: 'codex-summary',
+    fidelity: 'summary',
+    capabilities: SUMMARY_LIVE_PROJECTION_CAPABILITIES,
+  });
+
+  const searchRankFixtures = [
+    {
+      id: 'api-search-rank-001',
+      text: 'rankmagic rankmagic rankmagic rankmagic dense transcript match',
+      timestamp: '2026-03-08T09:00:00Z',
+    },
+    {
+      id: 'api-search-rank-002',
+      text: 'rankmagic sparse transcript match',
+      timestamp: '2026-03-08T10:00:00Z',
+    },
+  ];
+
+  for (const fixture of searchRankFixtures) {
+    const jsonl = sampleJsonl([
+      {
+        type: 'user',
+        parentUuid: null,
+        sessionId: fixture.id,
+        cwd: '/Users/dev/search-rank',
+        message: { role: 'user', content: [{ type: 'text', text: fixture.text }] },
+        timestamp: fixture.timestamp,
+      },
+    ]);
+    const filePath = `/fake/projects/-Users-dev-Dev-search-rank/${fixture.id}.jsonl`;
+    const parsed = parseSessionMessages(jsonl, fixture.id, filePath);
+    insertParsedSession(db, parsed, filePath, 256, `hash_${fixture.id}`);
+    syncClaudeLiveSession(db, parsed);
+  }
 
   // Start server
   const { createApp } = await import('../src/app.js');
@@ -276,6 +330,177 @@ describe('GET /api/v2/sessions/:id/messages', () => {
   });
 });
 
+describe('GET /api/v2/sessions/:id/activity', () => {
+  test('returns bucketed session activity coverage across the transcript', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/activity`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      bucket_count: number;
+      total_messages: number;
+      first_timestamp: string | null;
+      last_timestamp: string | null;
+      timestamped_messages: number;
+      untimestamped_messages: number;
+      navigation_basis: string;
+      data: Array<{
+        bucket_index: number;
+        start_ordinal: number | null;
+        end_ordinal: number | null;
+        message_count: number;
+      }>;
+    };
+
+    assert.equal(body.total_messages, 20);
+    assert.equal(body.timestamped_messages, 20);
+    assert.equal(body.untimestamped_messages, 0);
+    assert.equal(body.navigation_basis, 'timestamp');
+    assert.ok(body.bucket_count >= 8);
+    assert.equal(body.data.length, body.bucket_count);
+    assert.equal(body.data[0]?.start_ordinal, 0);
+    assert.equal(body.data.at(-1)?.end_ordinal, 19);
+    assert.equal(body.data.reduce((sum, bucket) => sum + bucket.message_count, 0), 20);
+  });
+
+  test('returns 404 for missing session activity', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions/nonexistent/activity`);
+    assert.equal(res.status, 404);
+  });
+});
+
+describe('GET/POST/DELETE /api/v2 pins', () => {
+  test('pins, lists, and unpins a message', async () => {
+    const messagesRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages?limit=1`);
+    assert.equal(messagesRes.status, 200);
+    const messagesBody = await messagesRes.json() as { data: Array<{ id: number; ordinal: number }> };
+    const messageId = messagesBody.data[0]?.id;
+    assert.ok(messageId, 'expected a message id to pin');
+
+    const pinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/${messageId}/pin`, {
+      method: 'POST',
+    });
+    assert.equal(pinRes.status, 201);
+    const pinBody = await pinRes.json() as {
+      session_id: string;
+      message_id: number | null;
+      message_ordinal: number;
+      session_project: string | null;
+    };
+    assert.equal(pinBody.session_id, 'api-sess-001');
+    assert.equal(pinBody.message_id, messageId);
+    assert.equal(pinBody.message_ordinal, 0);
+    assert.equal(pinBody.session_project, 'alpha');
+
+    const sessionPinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/pins`);
+    assert.equal(sessionPinsRes.status, 200);
+    const sessionPinsBody = await sessionPinsRes.json() as {
+      data: Array<{ session_id: string; message_ordinal: number }>;
+    };
+    assert.equal(sessionPinsBody.data.length, 1);
+    assert.equal(sessionPinsBody.data[0]?.message_ordinal, 0);
+
+    const allPinsRes = await fetch(`${baseUrl}/api/v2/pins?project=alpha`);
+    assert.equal(allPinsRes.status, 200);
+    const allPinsBody = await allPinsRes.json() as {
+      data: Array<{ session_id: string }>;
+    };
+    assert.ok(allPinsBody.data.some((pin) => pin.session_id === 'api-sess-001'));
+
+    const unpinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/${messageId}/pin`, {
+      method: 'DELETE',
+    });
+    assert.equal(unpinRes.status, 200);
+    const unpinBody = await unpinRes.json() as { removed: boolean; message_ordinal: number | null };
+    assert.equal(unpinBody.removed, true);
+    assert.equal(unpinBody.message_ordinal, 0);
+
+    const emptyPinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/pins`);
+    assert.equal(emptyPinsRes.status, 200);
+    const emptyPinsBody = await emptyPinsRes.json() as { data: unknown[] };
+    assert.equal(emptyPinsBody.data.length, 0);
+  });
+
+  test('pins survive message row replacement because they are keyed by ordinal', async () => {
+    const messagesRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-002/messages?limit=1`);
+    assert.equal(messagesRes.status, 200);
+    const messagesBody = await messagesRes.json() as { data: Array<{ id: number }> };
+    const originalMessageId = messagesBody.data[0]?.id;
+    assert.ok(originalMessageId, 'expected original message id');
+
+    const pinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-002/messages/${originalMessageId}/pin`, {
+      method: 'POST',
+    });
+    assert.equal(pinRes.status, 201);
+
+    const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
+    const filePath = '/fake/projects/-Users-dev-Dev-alpha/api-sess-002.jsonl';
+    const parsed = parseSessionMessages(
+      makeSession('api-sess-002', 'alpha', 6, '2026-03-02T14:00:00Z'),
+      'api-sess-002',
+      filePath,
+    );
+    insertParsedSession(db, parsed, filePath, 1024, 'hash_api_sess_002_reparse');
+
+    const pinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-002/pins`);
+    assert.equal(pinsRes.status, 200);
+    const pinsBody = await pinsRes.json() as {
+      data: Array<{
+        message_id: number | null;
+        message_ordinal: number;
+        role: string | null;
+        content: string | null;
+      }>;
+    };
+    assert.equal(pinsBody.data.length, 1);
+    assert.equal(pinsBody.data[0]?.message_ordinal, 0);
+    assert.notEqual(pinsBody.data[0]?.message_id, originalMessageId);
+    assert.equal(pinsBody.data[0]?.role, 'user');
+    assert.ok(pinsBody.data[0]?.content, 're-linked pin should still expose current message content');
+  });
+
+  test('pins keep a removable message id even when the joined transcript row is absent', async () => {
+    const messagesRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?limit=1`);
+    assert.equal(messagesRes.status, 200);
+    const messagesBody = await messagesRes.json() as { data: Array<{ id: number; ordinal: number }> };
+    const messageId = messagesBody.data[0]?.id;
+    assert.ok(messageId, 'expected a message id to pin');
+
+    const pinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages/${messageId}/pin`, {
+      method: 'POST',
+    });
+    assert.equal(pinRes.status, 201);
+
+    db.prepare(`
+      DELETE FROM messages
+      WHERE session_id = ? AND ordinal = ?
+    `).run('api-sess-003', 0);
+
+    const pinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/pins`);
+    assert.equal(pinsRes.status, 200);
+    const pinsBody = await pinsRes.json() as {
+      data: Array<{
+        message_id: number | null;
+        message_ordinal: number;
+        role: string | null;
+        content: string | null;
+      }>;
+    };
+
+    assert.equal(pinsBody.data.length, 1);
+    assert.equal(pinsBody.data[0]?.message_id, messageId);
+    assert.equal(pinsBody.data[0]?.message_ordinal, 0);
+    assert.equal(pinsBody.data[0]?.role, null);
+    assert.equal(pinsBody.data[0]?.content, null);
+
+    const unpinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages/${messageId}/pin`, {
+      method: 'DELETE',
+    });
+    assert.equal(unpinRes.status, 200);
+    const unpinBody = await unpinRes.json() as { removed: boolean; message_ordinal: number | null };
+    assert.equal(unpinBody.removed, true);
+    assert.equal(unpinBody.message_ordinal, 0);
+  });
+});
+
 describe('GET /api/v2/sessions/:id/children', () => {
   test('returns child sessions', async () => {
     const res = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/children`);
@@ -445,8 +670,17 @@ describe('GET /api/v2/search', () => {
   test('returns matching results for FTS query', async () => {
     const res = await fetch(`${baseUrl}/api/v2/search?q=alpha`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { data: Array<{ session_id: string; snippet: string }> };
+    const body = await res.json() as {
+      data: Array<{
+        session_id: string;
+        snippet: string;
+        session_agent: string;
+        session_project: string | null;
+        session_started_at: string | null;
+      }>;
+    };
     assert.ok(body.data.length > 0, 'should find results for "alpha"');
+    assert.ok(body.data[0]?.session_agent, 'search results should include session agent context');
   });
 
   test('returns 400 without query parameter', async () => {
@@ -505,6 +739,14 @@ describe('GET /api/v2/search', () => {
     const body = await res.json() as { data: unknown[] };
     assert.ok(Array.isArray(body.data));
   });
+
+  test('supports relevance sorting for denser transcript matches', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/search?q=rankmagic&sort=relevance&limit=2`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { data: Array<{ session_id: string }>; cursor?: string };
+    assert.equal(body.data[0]?.session_id, 'api-search-rank-001');
+    assert.ok(body.cursor, 'relevance search should return a cursor when the page is full');
+  });
 });
 
 // --- Analytics endpoints ---
@@ -513,12 +755,28 @@ describe('GET /api/v2/analytics/summary', () => {
   test('returns correct totals', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/summary`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { total_sessions: number; total_messages: number; daily_average_sessions: number; date_range: { earliest: string | null; latest: string | null } };
-    assert.ok(body.total_sessions >= 6, `expected >= 6 sessions, got ${body.total_sessions}`);
+    const body = await res.json() as {
+      total_sessions: number;
+      total_messages: number;
+      daily_average_sessions: number;
+      date_range: { earliest: string | null; latest: string | null };
+      coverage: {
+        metric_scope: string;
+        matching_sessions: number;
+        included_sessions: number;
+        excluded_sessions: number;
+        fidelity_breakdown: { full: number; summary: number; unknown: number };
+      };
+    };
+    assert.ok(body.total_sessions >= 7, `expected >= 7 sessions, got ${body.total_sessions}`);
     assert.ok(body.total_messages > 0);
     assert.ok(typeof body.daily_average_sessions === 'number');
     assert.ok(body.date_range.earliest);
     assert.ok(body.date_range.latest);
+    assert.equal(body.coverage.metric_scope, 'all_sessions');
+    assert.equal(body.coverage.included_sessions, body.coverage.matching_sessions);
+    assert.equal(body.coverage.excluded_sessions, 0);
+    assert.ok(body.coverage.fidelity_breakdown.summary >= 1);
   });
 
   test('filters summary by project', async () => {
@@ -586,10 +844,130 @@ describe('GET /api/v2/analytics/tools', () => {
   test('returns tool usage stats', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/tools`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { data: Array<{ tool_name: string; category: string; count: number }> };
+    const body = await res.json() as {
+      data: Array<{ tool_name: string; category: string; count: number }>;
+      coverage: {
+        metric_scope: string;
+        matching_sessions: number;
+        included_sessions: number;
+        excluded_sessions: number;
+      };
+    };
     assert.ok(body.data.length > 0, 'should have tool usage data');
     // We know Read and Bash were inserted
     assert.ok(body.data.some(t => t.tool_name === 'Read'));
+    assert.equal(body.coverage.metric_scope, 'tool_analytics_capable');
+    assert.ok(body.coverage.excluded_sessions >= 1, 'expected summary-only sessions to be excluded from tool analytics');
+  });
+
+  test('respects agent filter and reports excluded capability-limited sessions', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/tools?agent=codex`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      data: Array<{ tool_name: string; count: number }>;
+      coverage: {
+        matching_sessions: number;
+        included_sessions: number;
+        excluded_sessions: number;
+      };
+    };
+    assert.equal(body.coverage.matching_sessions, 1);
+    assert.equal(body.coverage.included_sessions, 0);
+    assert.equal(body.coverage.excluded_sessions, 1);
+    assert.deepEqual(body.data, []);
+  });
+});
+
+describe('GET /api/v2/analytics/hour-of-week', () => {
+  test('returns a full 7x24 heatmap grid with session/message counts', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/hour-of-week`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      data: Array<{
+        day_of_week: number;
+        hour_of_day: number;
+        session_count: number;
+        message_count: number;
+      }>;
+      coverage: { metric_scope: string };
+    };
+    assert.equal(body.coverage.metric_scope, 'all_sessions');
+    assert.equal(body.data.length, 168);
+    const sundayTen = body.data.find(point => point.day_of_week === 6 && point.hour_of_day === 10);
+    assert.ok(sundayTen);
+    assert.ok((sundayTen?.session_count ?? 0) >= 1);
+    assert.ok((sundayTen?.message_count ?? 0) >= 10);
+  });
+});
+
+describe('GET /api/v2/analytics/top-sessions', () => {
+  test('returns the highest-volume sessions in descending order', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/top-sessions?limit=3`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      data: Array<{
+        id: string;
+        project: string | null;
+        agent: string;
+        message_count: number;
+        user_message_count: number;
+      }>;
+      coverage: { metric_scope: string };
+    };
+    assert.equal(body.coverage.metric_scope, 'all_sessions');
+    assert.equal(body.data.length, 3);
+    assert.equal(body.data[0]?.id, 'api-sess-003');
+    assert.equal(body.data[0]?.message_count, 20);
+    assert.ok((body.data[0]?.message_count ?? 0) >= (body.data[1]?.message_count ?? 0));
+  });
+});
+
+describe('GET /api/v2/analytics/velocity', () => {
+  test('returns aggregate pace metrics for the filtered session set', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/velocity?project=beta`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      total_sessions: number;
+      total_messages: number;
+      active_days: number;
+      span_days: number;
+      sessions_per_active_day: number;
+      messages_per_active_day: number;
+      sessions_per_calendar_day: number;
+      average_messages_per_session: number;
+      coverage: { matching_sessions: number; included_sessions: number };
+    };
+    assert.equal(body.total_sessions, 2);
+    assert.equal(body.total_messages, 28);
+    assert.equal(body.active_days, 2);
+    assert.equal(body.span_days, 3);
+    assert.equal(body.coverage.matching_sessions, 2);
+    assert.equal(body.coverage.included_sessions, 2);
+    assert.ok(body.sessions_per_active_day > 0);
+    assert.ok(body.messages_per_active_day > 0);
+    assert.ok(body.sessions_per_calendar_day > 0);
+    assert.ok(body.average_messages_per_session >= 14);
+  });
+});
+
+describe('GET /api/v2/analytics/agents', () => {
+  test('returns per-agent comparison rows and preserves summary-only agents in all-session metrics', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/agents`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      data: Array<{
+        agent: string;
+        session_count: number;
+        message_count: number;
+        average_messages_per_session: number;
+        full_fidelity_sessions: number;
+        summary_fidelity_sessions: number;
+      }>;
+      coverage: { metric_scope: string };
+    };
+    assert.equal(body.coverage.metric_scope, 'all_sessions');
+    assert.ok(body.data.some(row => row.agent === 'claude' && row.session_count >= 8));
+    assert.ok(body.data.some(row => row.agent === 'codex' && row.session_count === 1 && row.summary_fidelity_sessions === 1));
   });
 });
 

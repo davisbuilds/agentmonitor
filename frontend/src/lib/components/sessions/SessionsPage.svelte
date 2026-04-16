@@ -8,7 +8,10 @@
   } from '../../api/client';
   import { timeAgo, agentHexColor } from '../../format';
   import { getSessionPreviewText } from '../../session-text';
-  import { consumePendingSession } from '../../stores/router.svelte';
+  import {
+    consumePendingSessionNavigation,
+    getPendingSessionNavigationVersion,
+  } from '../../stores/router.svelte';
   import SessionViewer from './SessionViewer.svelte';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
 
@@ -27,8 +30,10 @@
 
   // Selected session
   let selectedSessionId = $state<string | null>(null);
+  let selectedMessageOrdinal = $state<number | null>(null);
 
   const PAGE_SIZE = 25;
+  const pendingNavigationVersion = $derived(getPendingSessionNavigationVersion());
 
   async function loadSessions(append = false) {
     loading = true;
@@ -63,18 +68,23 @@
 
   function selectSession(id: string) {
     selectedSessionId = id;
+    selectedMessageOrdinal = null;
   }
 
   function closeViewer() {
     selectedSessionId = null;
+    selectedMessageOrdinal = null;
   }
 
-  onMount(async () => {
-    const pending = consumePendingSession();
-    if (pending) {
-      selectedSessionId = pending;
-    }
+  $effect(() => {
+    pendingNavigationVersion;
+    const pending = consumePendingSessionNavigation();
+    if (!pending.sessionId) return;
+    selectedSessionId = pending.sessionId;
+    selectedMessageOrdinal = pending.messageOrdinal;
+  });
 
+  onMount(async () => {
     const [projectsRes, agentsRes] = await Promise.all([
       fetchV2Projects().catch(() => ({ data: [] })),
       fetchV2Agents().catch(() => ({ data: [] })),
@@ -86,7 +96,9 @@
 </script>
 
 {#if selectedSessionId}
-  <SessionViewer sessionId={selectedSessionId} onclose={closeViewer} />
+  {#key selectedSessionId}
+    <SessionViewer sessionId={selectedSessionId} initialMessageOrdinal={selectedMessageOrdinal} onclose={closeViewer} />
+  {/key}
 {:else}
   <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
     <!-- Filters -->

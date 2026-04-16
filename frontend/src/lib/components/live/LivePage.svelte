@@ -132,7 +132,7 @@
   });
 </script>
 
-<main class="flex-1 overflow-hidden bg-gray-950">
+<main class="flex-1 overflow-y-auto bg-gray-950 p-4 sm:p-6">
   {#if !liveSettings.enabled}
     <div class="flex h-full items-center justify-center px-6">
       <div class="max-w-xl rounded-2xl border border-gray-800 bg-gray-900/70 p-6 text-center">
@@ -143,22 +143,27 @@
       </div>
     </div>
   {:else}
-  <div class="grid h-full grid-cols-1 xl:grid-cols-[19rem,minmax(0,1fr),22rem]">
-    <section class="border-b border-gray-800 xl:border-b-0 xl:border-r overflow-hidden flex flex-col">
-      <div class="border-b border-gray-800 px-4 py-3 shrink-0">
-        <div class="flex items-center justify-between gap-3">
+  <div class="space-y-4">
+    <section class="rounded-2xl border border-gray-800 bg-gray-900/40">
+      <div class="px-4 py-4 sm:px-5">
+        <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 class="text-base font-semibold text-gray-100">Live</h2>
-            <p class="mt-1 text-xs text-gray-500">{sessionsTotal} tracked session{sessionsTotal === 1 ? '' : 's'}</p>
+            <h2 class="text-lg font-semibold text-gray-100">Live</h2>
+            <p class="mt-1 text-sm text-gray-500">
+              Operator-focused stream for active and recently updated sessions.
+            </p>
           </div>
-          <span class="rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide {connectionStatus === 'connected' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : connectionStatus === 'connecting' ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-red-500/30 bg-red-500/10 text-red-300'}">
-            {connectionStatus}
-          </span>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-500">{sessionsTotal} tracked session{sessionsTotal === 1 ? '' : 's'}</span>
+            <span class="rounded-full border px-2 py-1 text-[10px] uppercase tracking-wide {connectionStatus === 'connected' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : connectionStatus === 'connecting' ? 'border-amber-500/30 bg-amber-500/10 text-amber-300' : 'border-red-500/30 bg-red-500/10 text-red-300'}">
+              {connectionStatus}
+            </span>
+          </div>
         </div>
 
-        <div class="mt-4 grid grid-cols-2 gap-2">
+        <div class="mt-4 grid grid-cols-1 gap-2 md:grid-cols-2">
           <select
-            class="rounded border border-gray-700 bg-gray-900 px-2 py-2 text-sm text-gray-300"
+            class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2.5 text-sm text-gray-300"
             bind:value={filterProject}
             onchange={applyFilters}
           >
@@ -169,7 +174,7 @@
           </select>
 
           <select
-            class="rounded border border-gray-700 bg-gray-900 px-2 py-2 text-sm text-gray-300"
+            class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2.5 text-sm text-gray-300"
             bind:value={filterAgent}
             onchange={applyFilters}
           >
@@ -180,7 +185,7 @@
           </select>
 
           <select
-            class="rounded border border-gray-700 bg-gray-900 px-2 py-2 text-sm text-gray-300"
+            class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2.5 text-sm text-gray-300"
             bind:value={filterStatus}
             onchange={applyFilters}
           >
@@ -192,7 +197,7 @@
           </select>
 
           <select
-            class="rounded border border-gray-700 bg-gray-900 px-2 py-2 text-sm text-gray-300"
+            class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2.5 text-sm text-gray-300"
             bind:value={filterFidelity}
             onchange={applyFilters}
           >
@@ -202,28 +207,40 @@
           </select>
         </div>
 
-        <label class="mt-3 flex items-center gap-2 text-xs text-gray-400">
-          <input type="checkbox" bind:checked={activeOnly} onchange={applyFilters} />
-          Active sessions first view
-        </label>
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <label class="flex items-center gap-2 text-xs text-gray-400">
+            <input type="checkbox" bind:checked={activeOnly} onchange={applyFilters} />
+            Active sessions first view
+          </label>
 
-        <div class="mt-3 rounded-xl border border-gray-800 bg-gray-950/70 px-3 py-3 text-xs text-gray-400">
-          <div class="flex items-center justify-between gap-3">
-            <span class="uppercase tracking-wide text-gray-500">Capture</span>
-            <span class="uppercase tracking-wide text-gray-500">Codex: {liveSettings.codex_mode}</span>
-          </div>
-          <div class="mt-2 flex flex-wrap gap-2">
-            <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.prompts ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Prompts {liveSettings.capture.prompts ? 'on' : 'off'}</span>
-            <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.reasoning ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Reasoning {liveSettings.capture.reasoning ? 'on' : 'off'}</span>
-            <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.tool_arguments ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Tool args {liveSettings.capture.tool_arguments ? 'on' : 'off'}</span>
-          </div>
-          <div class="mt-2 text-[11px] text-gray-500">
-            Diff payload cap: {liveSettings.diff_payload_max_bytes.toLocaleString()} bytes
+          <div class="rounded-xl border border-gray-800 bg-gray-950/70 px-3 py-3 text-xs text-gray-400">
+            <div class="flex items-center justify-between gap-3">
+              <span class="uppercase tracking-wide text-gray-500">Capture</span>
+              <span class="uppercase tracking-wide text-gray-500">Codex: {liveSettings.codex_mode}</span>
+            </div>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.prompts ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Prompts {liveSettings.capture.prompts ? 'on' : 'off'}</span>
+              <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.reasoning ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Reasoning {liveSettings.capture.reasoning ? 'on' : 'off'}</span>
+              <span class="rounded border px-1.5 py-0.5 {liveSettings.capture.tool_arguments ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300' : 'border-gray-700 text-gray-500'}">Tool args {liveSettings.capture.tool_arguments ? 'on' : 'off'}</span>
+            </div>
+            <div class="mt-2 text-[11px] text-gray-500">
+              Diff payload cap: {liveSettings.diff_payload_max_bytes.toLocaleString()} bytes
+            </div>
           </div>
         </div>
       </div>
+    </section>
 
-      <div class="min-h-0 flex-1 px-3 py-3">
+    <div class="grid grid-cols-1 gap-4 xl:min-h-[calc(100vh-19rem)] xl:grid-cols-[19rem,minmax(0,1fr),22rem]">
+      <section class="flex min-h-[20rem] flex-col rounded-2xl border border-gray-800 bg-gray-900/40 xl:min-h-0 xl:overflow-hidden">
+        <div class="border-b border-gray-800 px-4 py-3">
+          <h3 class="text-sm font-semibold text-gray-100">Sessions</h3>
+          <p class="mt-1 text-xs text-gray-500">
+            Filtered live and recent sessions. Select one to inspect its stream.
+          </p>
+        </div>
+
+        <div class="px-3 py-3 xl:min-h-0 xl:flex-1">
         <SessionTree
           sessions={sessionTree}
           {selectedSessionId}
@@ -233,29 +250,30 @@
           onselect={(sessionId) => void selectLiveSession(sessionId)}
           onloadmore={() => void loadMoreLiveSessions()}
         />
-      </div>
-    </section>
+        </div>
+      </section>
 
-    <section class="min-h-0 overflow-hidden">
-      <ItemStream
-        session={selectedSession}
-        {turns}
-        {items}
-        {selectedItemId}
-        loading={itemsLoading}
-        error={itemsError}
-        hasMore={itemsHasMore}
-        {selectedKinds}
-        onselect={setSelectedLiveItem}
-        ontogglekind={toggleLiveItemKind}
-        onloadmore={() => void loadMoreLiveItems()}
-        onopenhistory={handleOpenHistory}
-      />
-    </section>
+      <section class="min-h-[24rem] rounded-2xl border border-gray-800 bg-gray-900/40 xl:min-h-0 xl:overflow-hidden">
+        <ItemStream
+          session={selectedSession}
+          {turns}
+          {items}
+          {selectedItemId}
+          loading={itemsLoading}
+          error={itemsError}
+          hasMore={itemsHasMore}
+          {selectedKinds}
+          onselect={setSelectedLiveItem}
+          ontogglekind={toggleLiveItemKind}
+          onloadmore={() => void loadMoreLiveItems()}
+          onopenhistory={handleOpenHistory}
+        />
+      </section>
 
-    <section class="min-h-0">
-      <InspectorPanel session={selectedSession} {turns} item={selectedItem} />
-    </section>
+      <section class="min-h-[20rem] rounded-2xl border border-gray-800 bg-gray-900/40 xl:min-h-0 xl:overflow-hidden">
+        <InspectorPanel session={selectedSession} {turns} item={selectedItem} />
+      </section>
+    </div>
   </div>
   {/if}
 </main>
