@@ -23,6 +23,8 @@ Product-surface reference for AgentMonitor.
 
 - Session lifecycle: `active` → `idle` (5 min) → `ended` (10 min).
 - Session detail view with event timeline and transcript.
+- The Svelte `Sessions` viewer includes a transcript activity minimap that can jump into long conversations without requiring the full transcript to be preloaded.
+- Messages can be pinned for later review, and the Svelte `Pinned` tab reopens them at the corresponding transcript ordinal.
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
 - Filter sessions by status, agent type, and project.
 
@@ -97,6 +99,11 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/live/sessions/:id/turns` | GET | Normalized live turns |
 | `/api/v2/live/sessions/:id/items` | GET | Normalized live items |
 | `/api/v2/live/stream` | GET | Dedicated live SSE stream |
+| `/api/v2/pins` | GET | List pinned transcript moments, optionally filtered by project |
+| `/api/v2/sessions/:id/pins` | GET | List pinned messages for a specific session |
+| `/api/v2/sessions/:id/messages/:messageId/pin` | POST | Pin a transcript message using ordinal-stable persistence |
+| `/api/v2/sessions/:id/messages/:messageId/pin` | DELETE | Remove a saved transcript pin |
+| `/api/v2/sessions/:id/activity` | GET | Bucketed transcript activity for session-viewer minimap navigation |
 | `/api/v2/analytics/summary` | GET | Capability-aware summary totals and coverage |
 | `/api/v2/analytics/activity` | GET | Daily activity series plus coverage metadata |
 | `/api/v2/analytics/projects` | GET | Per-project message/session breakdowns |

@@ -118,6 +118,44 @@ test('messages indexes exist', () => {
   assert.ok(indexNames.some(n => n.includes('session_role')), 'should have session_id+role compound index');
 });
 
+// --- pinned_messages table ---
+
+test('pinned_messages table exists with correct columns', () => {
+  const db = getDb();
+  const columns = db.prepare("PRAGMA table_info(pinned_messages)").all() as Array<{ name: string }>;
+  const colNames = columns.map(c => c.name);
+
+  assert.ok(colNames.includes('id'), 'should have id column');
+  assert.ok(colNames.includes('session_id'), 'should have session_id column');
+  assert.ok(colNames.includes('message_id'), 'should have message_id column');
+  assert.ok(colNames.includes('message_ordinal'), 'should have message_ordinal column');
+  assert.ok(colNames.includes('created_at'), 'should have created_at column');
+});
+
+test('pinned_messages enforce one pin per session ordinal', () => {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO pinned_messages (session_id, message_id, message_ordinal)
+    VALUES (?, ?, ?)
+  `).run('sess-pinned', 101, 2);
+
+  assert.throws(() => {
+    db.prepare(`
+      INSERT INTO pinned_messages (session_id, message_id, message_ordinal)
+      VALUES (?, ?, ?)
+    `).run('sess-pinned', 202, 2);
+  });
+});
+
+test('pinned_messages indexes exist', () => {
+  const db = getDb();
+  const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='pinned_messages'").all() as Array<{ name: string }>;
+  const indexNames = indexes.map(i => i.name);
+
+  assert.ok(indexNames.some(n => n.includes('session_ordinal')), 'should have session/ordinal index');
+  assert.ok(indexNames.some(n => n.includes('created_at')), 'should have created_at index');
+});
+
 // --- tool_calls table ---
 
 test('tool_calls table exists with correct columns', () => {

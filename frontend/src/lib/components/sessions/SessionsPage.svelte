@@ -8,7 +8,7 @@
   } from '../../api/client';
   import { timeAgo, agentHexColor } from '../../format';
   import { getSessionPreviewText } from '../../session-text';
-  import { consumePendingSession } from '../../stores/router.svelte';
+  import { consumePendingSessionNavigation } from '../../stores/router.svelte';
   import SessionViewer from './SessionViewer.svelte';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
 
@@ -27,6 +27,7 @@
 
   // Selected session
   let selectedSessionId = $state<string | null>(null);
+  let selectedMessageOrdinal = $state<number | null>(null);
 
   const PAGE_SIZE = 25;
 
@@ -63,16 +64,19 @@
 
   function selectSession(id: string) {
     selectedSessionId = id;
+    selectedMessageOrdinal = null;
   }
 
   function closeViewer() {
     selectedSessionId = null;
+    selectedMessageOrdinal = null;
   }
 
   onMount(async () => {
-    const pending = consumePendingSession();
-    if (pending) {
-      selectedSessionId = pending;
+    const pending = consumePendingSessionNavigation();
+    if (pending.sessionId) {
+      selectedSessionId = pending.sessionId;
+      selectedMessageOrdinal = pending.messageOrdinal;
     }
 
     const [projectsRes, agentsRes] = await Promise.all([
@@ -86,7 +90,7 @@
 </script>
 
 {#if selectedSessionId}
-  <SessionViewer sessionId={selectedSessionId} onclose={closeViewer} />
+  <SessionViewer sessionId={selectedSessionId} initialMessageOrdinal={selectedMessageOrdinal} onclose={closeViewer} />
 {:else}
   <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
     <!-- Filters -->

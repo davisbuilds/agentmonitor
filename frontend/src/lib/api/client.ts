@@ -179,6 +179,42 @@ export interface Message {
   content_length: number;
 }
 
+export interface SessionActivityBucket {
+  bucket_index: number;
+  start_ordinal: number | null;
+  end_ordinal: number | null;
+  message_count: number;
+  user_message_count: number;
+  assistant_message_count: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+}
+
+export interface SessionActivity {
+  bucket_count: number;
+  total_messages: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  timestamped_messages: number;
+  untimestamped_messages: number;
+  navigation_basis: 'timestamp' | 'ordinal' | 'mixed';
+  data: SessionActivityBucket[];
+}
+
+export interface PinnedMessage {
+  id: number;
+  session_id: string;
+  message_id: number | null;
+  message_ordinal: number;
+  role: string | null;
+  content: string | null;
+  message_timestamp: string | null;
+  created_at: string;
+  session_project: string | null;
+  session_agent: string | null;
+  session_first_message: string | null;
+}
+
 export interface ContentBlock {
   type: string;
   text?: string;
@@ -515,9 +551,38 @@ export async function fetchMessages(sessionId: string, params: { offset?: number
   return checkedJson(res, 'fetchMessages');
 }
 
+export async function fetchSessionActivity(sessionId: string): Promise<SessionActivity> {
+  const res = await fetch(`/api/v2/sessions/${sessionId}/activity`);
+  return checkedJson(res, 'fetchSessionActivity');
+}
+
 export async function fetchSessionChildren(id: string): Promise<{ data: BrowsingSession[] }> {
   const res = await fetch(`/api/v2/sessions/${id}/children`);
   return checkedJson(res, 'fetchSessionChildren');
+}
+
+export async function fetchPins(params: { project?: string } = {}): Promise<{ data: PinnedMessage[] }> {
+  const res = await fetch(`/api/v2/pins${qs(params)}`);
+  return checkedJson(res, 'fetchPins');
+}
+
+export async function fetchSessionPins(sessionId: string): Promise<{ data: PinnedMessage[] }> {
+  const res = await fetch(`/api/v2/sessions/${sessionId}/pins`);
+  return checkedJson(res, 'fetchSessionPins');
+}
+
+export async function pinSessionMessage(sessionId: string, messageId: number): Promise<PinnedMessage> {
+  const res = await fetch(`/api/v2/sessions/${sessionId}/messages/${messageId}/pin`, {
+    method: 'POST',
+  });
+  return checkedJson(res, 'pinSessionMessage');
+}
+
+export async function unpinSessionMessage(sessionId: string, messageId: number): Promise<{ removed: boolean; message_ordinal: number | null }> {
+  const res = await fetch(`/api/v2/sessions/${sessionId}/messages/${messageId}/pin`, {
+    method: 'DELETE',
+  });
+  return checkedJson(res, 'unpinSessionMessage');
 }
 
 export async function fetchLiveSessions(params: Record<string, string | number | boolean | undefined> = {}): Promise<{ data: LiveSession[]; total: number; cursor?: string }> {

@@ -6,6 +6,9 @@ import type {
   LiveTurnRow,
   LiveItemRow,
   MessageRow,
+  SessionActivity,
+  SessionActivityBucket,
+  PinnedMessageRow,
   CountResult,
   SessionsListParams,
   MessagesListParams,
@@ -31,6 +34,7 @@ import type {
   UsageModelBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
+  PinsListParams,
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
 
@@ -314,6 +318,214 @@ export function getSessionMessages(sessionId: string, params: MessagesListParams
   ).all(sessionId, limit, offset) as MessageRow[];
 
   return { data, total };
+}
+
+export function getSessionActivity(sessionId: string): SessionActivity {
+  const db = getDb();
+  const summary = db.prepare(`
+    SELECT
+      COUNT(*) as total_messages,
+      COUNT(timestamp) as timestamped_messages,
+      MIN(timestamp) as first_timestamp,
+      MAX(timestamp) as last_timestamp
+    FROM messages
+    WHERE session_id = ?
+  `).get(sessionId) as {
+    total_messages: number;
+    timestamped_messages: number;
+    first_timestamp: string | null;
+    last_timestamp: string | null;
+  };
+
+  if (summary.total_messages === 0) {
+    return {
+      bucket_count: 0,
+      total_messages: 0,
+      first_timestamp: null,
+      last_timestamp: null,
+      timestamped_messages: 0,
+      untimestamped_messages: 0,
+      navigation_basis: 'ordinal',
+      data: [],
+    };
+  }
+
+  const bucketCount = Math.min(40, Math.max(8, summary.total_messages));
+  const rows = db.prepare(`
+    WITH ordered AS (
+      SELECT
+        ordinal,
+        role,
+        timestamp,
+        ROW_NUMBER() OVER (ORDER BY ordinal) - 1 as seq,
+        COUNT(*) OVER () as total_count
+      FROM messages
+      WHERE session_id = ?
+    ),
+    bucketed AS (
+      SELECT
+        MIN(CAST((seq * ?) / total_count AS INTEGER), ? - 1) as bucket_index,
+        ordinal,
+        role,
+        timestamp
+      FROM ordered
+    )
+    SELECT
+      bucket_index,
+      MIN(ordinal) as start_ordinal,
+      MAX(ordinal) as end_ordinal,
+      COUNT(*) as message_count,
+      COALESCE(SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END), 0) as user_message_count,
+      COALESCE(SUM(CASE WHEN role != 'user' THEN 1 ELSE 0 END), 0) as assistant_message_count,
+      MIN(timestamp) as first_timestamp,
+      MAX(timestamp) as last_timestamp
+    FROM bucketed
+    GROUP BY bucket_index
+    ORDER BY bucket_index
+  `).all(sessionId, bucketCount, bucketCount) as SessionActivityBucket[];
+
+  const rowByIndex = new Map(rows.map(row => [row.bucket_index, row]));
+  const data: SessionActivityBucket[] = [];
+  for (let bucketIndex = 0; bucketIndex < bucketCount; bucketIndex++) {
+    data.push(rowByIndex.get(bucketIndex) ?? {
+      bucket_index: bucketIndex,
+      start_ordinal: null,
+      end_ordinal: null,
+      message_count: 0,
+      user_message_count: 0,
+      assistant_message_count: 0,
+      first_timestamp: null,
+      last_timestamp: null,
+    });
+  }
+
+  const untimestampedMessages = Math.max(0, summary.total_messages - summary.timestamped_messages);
+  const navigationBasis = summary.timestamped_messages === 0
+    ? 'ordinal'
+    : untimestampedMessages === 0
+      ? 'timestamp'
+      : 'mixed';
+
+  return {
+    bucket_count: bucketCount,
+    total_messages: summary.total_messages,
+    first_timestamp: summary.first_timestamp,
+    last_timestamp: summary.last_timestamp,
+    timestamped_messages: summary.timestamped_messages,
+    untimestamped_messages: untimestampedMessages,
+    navigation_basis: navigationBasis,
+    data,
+  };
+}
+
+interface PinnedMessageRecord extends PinnedMessageRow {
+  message_ordinal: number;
+}
+
+interface PinMessageLookup {
+  id: number;
+  ordinal: number;
+}
+
+export function listPinnedMessages(params: PinsListParams & { session_id?: string } = {}): PinnedMessageRow[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.session_id) {
+    conditions.push('p.session_id = ?');
+    values.push(params.session_id);
+  } else if (params.project) {
+    conditions.push('bs.project = ?');
+    values.push(params.project);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  return db.prepare(`
+    SELECT
+      p.id,
+      p.session_id,
+      m.id as message_id,
+      p.message_ordinal,
+      m.role,
+      m.content,
+      m.timestamp as message_timestamp,
+      p.created_at,
+      bs.project as session_project,
+      bs.agent as session_agent,
+      bs.first_message as session_first_message
+    FROM pinned_messages p
+    LEFT JOIN messages m
+      ON m.session_id = p.session_id
+     AND m.ordinal = p.message_ordinal
+    LEFT JOIN browsing_sessions bs
+      ON bs.id = p.session_id
+    ${where}
+    ORDER BY p.created_at DESC, p.id DESC
+  `).all(...values) as PinnedMessageRecord[];
+}
+
+function getPinMessageLookup(sessionId: string, messageId: number): PinMessageLookup | undefined {
+  const db = getDb();
+  return db.prepare(`
+    SELECT id, ordinal
+    FROM messages
+    WHERE session_id = ? AND id = ?
+  `).get(sessionId, messageId) as PinMessageLookup | undefined;
+}
+
+export function pinMessage(sessionId: string, messageId: number): PinnedMessageRow | undefined {
+  const db = getDb();
+  const message = getPinMessageLookup(sessionId, messageId);
+  if (!message) return undefined;
+
+  db.prepare(`
+    INSERT INTO pinned_messages (session_id, message_id, message_ordinal)
+    VALUES (?, ?, ?)
+    ON CONFLICT(session_id, message_ordinal)
+    DO UPDATE SET message_id = excluded.message_id
+  `).run(sessionId, message.id, message.ordinal);
+
+  return db.prepare(`
+    SELECT
+      p.id,
+      p.session_id,
+      m.id as message_id,
+      p.message_ordinal,
+      m.role,
+      m.content,
+      m.timestamp as message_timestamp,
+      p.created_at,
+      bs.project as session_project,
+      bs.agent as session_agent,
+      bs.first_message as session_first_message
+    FROM pinned_messages p
+    LEFT JOIN messages m
+      ON m.session_id = p.session_id
+     AND m.ordinal = p.message_ordinal
+    LEFT JOIN browsing_sessions bs
+      ON bs.id = p.session_id
+    WHERE p.session_id = ? AND p.message_ordinal = ?
+  `).get(sessionId, message.ordinal) as PinnedMessageRecord | undefined;
+}
+
+export function unpinMessage(sessionId: string, messageId: number): { removed: boolean; message_ordinal: number | null } {
+  const db = getDb();
+  const message = getPinMessageLookup(sessionId, messageId);
+
+  if (message) {
+    const result = db.prepare(`
+      DELETE FROM pinned_messages
+      WHERE session_id = ? AND message_ordinal = ?
+    `).run(sessionId, message.ordinal);
+    return { removed: result.changes > 0, message_ordinal: message.ordinal };
+  }
+
+  const result = db.prepare(`
+    DELETE FROM pinned_messages
+    WHERE session_id = ? AND message_id = ?
+  `).run(sessionId, messageId);
+  return { removed: result.changes > 0, message_ordinal: null };
 }
 
 // --- Search ---

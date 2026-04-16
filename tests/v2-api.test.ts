@@ -10,6 +10,7 @@ let server: Server;
 let baseUrl = '';
 let tempDir = '';
 let closeDb: (() => void) | null = null;
+let db: import('better-sqlite3').Database;
 
 // Sample session data to seed into the DB
 function sampleJsonl(lines: object[]): string {
@@ -78,7 +79,7 @@ before(async () => {
     SUMMARY_LIVE_PROJECTION_CAPABILITIES,
     upsertProjectedSessionSnapshot,
   } = await import('../src/live/projector.js');
-  const db = dbModule.getDb();
+  db = dbModule.getDb();
 
   // Create 5 sessions across 3 projects with varying sizes
   const sessions = [
@@ -295,6 +296,134 @@ describe('GET /api/v2/sessions/:id/messages', () => {
   test('returns 404 for missing session', async () => {
     const res = await fetch(`${baseUrl}/api/v2/sessions/nonexistent/messages`);
     assert.equal(res.status, 404);
+  });
+});
+
+describe('GET /api/v2/sessions/:id/activity', () => {
+  test('returns bucketed session activity coverage across the transcript', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/activity`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      bucket_count: number;
+      total_messages: number;
+      first_timestamp: string | null;
+      last_timestamp: string | null;
+      timestamped_messages: number;
+      untimestamped_messages: number;
+      navigation_basis: string;
+      data: Array<{
+        bucket_index: number;
+        start_ordinal: number | null;
+        end_ordinal: number | null;
+        message_count: number;
+      }>;
+    };
+
+    assert.equal(body.total_messages, 20);
+    assert.equal(body.timestamped_messages, 20);
+    assert.equal(body.untimestamped_messages, 0);
+    assert.equal(body.navigation_basis, 'timestamp');
+    assert.ok(body.bucket_count >= 8);
+    assert.equal(body.data.length, body.bucket_count);
+    assert.equal(body.data[0]?.start_ordinal, 0);
+    assert.equal(body.data.at(-1)?.end_ordinal, 19);
+    assert.equal(body.data.reduce((sum, bucket) => sum + bucket.message_count, 0), 20);
+  });
+
+  test('returns 404 for missing session activity', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions/nonexistent/activity`);
+    assert.equal(res.status, 404);
+  });
+});
+
+describe('GET/POST/DELETE /api/v2 pins', () => {
+  test('pins, lists, and unpins a message', async () => {
+    const messagesRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages?limit=1`);
+    assert.equal(messagesRes.status, 200);
+    const messagesBody = await messagesRes.json() as { data: Array<{ id: number; ordinal: number }> };
+    const messageId = messagesBody.data[0]?.id;
+    assert.ok(messageId, 'expected a message id to pin');
+
+    const pinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/${messageId}/pin`, {
+      method: 'POST',
+    });
+    assert.equal(pinRes.status, 201);
+    const pinBody = await pinRes.json() as {
+      session_id: string;
+      message_id: number | null;
+      message_ordinal: number;
+      session_project: string | null;
+    };
+    assert.equal(pinBody.session_id, 'api-sess-001');
+    assert.equal(pinBody.message_id, messageId);
+    assert.equal(pinBody.message_ordinal, 0);
+    assert.equal(pinBody.session_project, 'alpha');
+
+    const sessionPinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/pins`);
+    assert.equal(sessionPinsRes.status, 200);
+    const sessionPinsBody = await sessionPinsRes.json() as {
+      data: Array<{ session_id: string; message_ordinal: number }>;
+    };
+    assert.equal(sessionPinsBody.data.length, 1);
+    assert.equal(sessionPinsBody.data[0]?.message_ordinal, 0);
+
+    const allPinsRes = await fetch(`${baseUrl}/api/v2/pins?project=alpha`);
+    assert.equal(allPinsRes.status, 200);
+    const allPinsBody = await allPinsRes.json() as {
+      data: Array<{ session_id: string }>;
+    };
+    assert.ok(allPinsBody.data.some((pin) => pin.session_id === 'api-sess-001'));
+
+    const unpinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/${messageId}/pin`, {
+      method: 'DELETE',
+    });
+    assert.equal(unpinRes.status, 200);
+    const unpinBody = await unpinRes.json() as { removed: boolean; message_ordinal: number | null };
+    assert.equal(unpinBody.removed, true);
+    assert.equal(unpinBody.message_ordinal, 0);
+
+    const emptyPinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/pins`);
+    assert.equal(emptyPinsRes.status, 200);
+    const emptyPinsBody = await emptyPinsRes.json() as { data: unknown[] };
+    assert.equal(emptyPinsBody.data.length, 0);
+  });
+
+  test('pins survive message row replacement because they are keyed by ordinal', async () => {
+    const messagesRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-002/messages?limit=1`);
+    assert.equal(messagesRes.status, 200);
+    const messagesBody = await messagesRes.json() as { data: Array<{ id: number }> };
+    const originalMessageId = messagesBody.data[0]?.id;
+    assert.ok(originalMessageId, 'expected original message id');
+
+    const pinRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-002/messages/${originalMessageId}/pin`, {
+      method: 'POST',
+    });
+    assert.equal(pinRes.status, 201);
+
+    const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
+    const filePath = '/fake/projects/-Users-dev-Dev-alpha/api-sess-002.jsonl';
+    const parsed = parseSessionMessages(
+      makeSession('api-sess-002', 'alpha', 6, '2026-03-02T14:00:00Z'),
+      'api-sess-002',
+      filePath,
+    );
+    insertParsedSession(db, parsed, filePath, 1024, 'hash_api_sess_002_reparse');
+
+    const pinsRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-002/pins`);
+    assert.equal(pinsRes.status, 200);
+    const pinsBody = await pinsRes.json() as {
+      data: Array<{
+        message_id: number | null;
+        message_ordinal: number;
+        role: string | null;
+        content: string | null;
+      }>;
+    };
+    assert.equal(pinsBody.data.length, 1);
+    assert.equal(pinsBody.data[0]?.message_ordinal, 0);
+    assert.notEqual(pinsBody.data[0]?.message_id, originalMessageId);
+    assert.equal(pinsBody.data[0]?.role, 'user');
+    assert.ok(pinsBody.data[0]?.content, 're-linked pin should still expose current message content');
   });
 });
 

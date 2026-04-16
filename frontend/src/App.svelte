@@ -12,6 +12,7 @@
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
   import LivePage from './lib/components/live/LivePage.svelte';
   import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
+  import PinnedPage from './lib/components/pinned/PinnedPage.svelte';
   import SearchPage from './lib/components/search/SearchPage.svelte';
   import AnalyticsPage from './lib/components/analytics/AnalyticsPage.svelte';
   import UsagePage from './lib/components/usage/UsagePage.svelte';
@@ -25,6 +26,7 @@
     const next: Array<{ id: Tab; label: string }> = [
       { id: 'monitor', label: 'Monitor' },
       { id: 'sessions', label: 'Sessions' },
+      { id: 'pinned', label: 'Pinned' },
       { id: 'analytics', label: 'Analytics' },
       { id: 'usage', label: 'Usage' },
       { id: 'search', label: 'Search' },
@@ -105,6 +107,8 @@
     <LivePage />
   {:else if tab === 'sessions'}
     <SessionsPage />
+  {:else if tab === 'pinned'}
+    <PinnedPage />
   {:else if tab === 'analytics'}
     <AnalyticsPage />
   {:else if tab === 'usage'}

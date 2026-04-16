@@ -4,6 +4,10 @@ import {
   getBrowsingSession,
   getSessionChildren,
   getSessionMessages,
+  getSessionActivity,
+  listPinnedMessages,
+  pinMessage,
+  unpinMessage,
   listLiveSessions,
   getLiveSession,
   getSessionTurns,
@@ -97,6 +101,90 @@ v2Router.get('/sessions/:id/messages', (req: Request, res: Response) => {
   }
 });
 
+v2Router.get('/sessions/:id/activity', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params['id'] as string;
+    const session = getBrowsingSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json(getSessionActivity(sessionId));
+  } catch (err) {
+    console.error('[v2/sessions/:id/activity] Error:', err);
+    res.status(500).json({ error: 'Failed to get session activity' });
+  }
+});
+
+v2Router.get('/sessions/:id/pins', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params['id'] as string;
+    const session = getBrowsingSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json({ data: listPinnedMessages({ session_id: sessionId }) });
+  } catch (err) {
+    console.error('[v2/sessions/:id/pins] Error:', err);
+    res.status(500).json({ error: 'Failed to list session pins' });
+  }
+});
+
+v2Router.post('/sessions/:id/messages/:messageId/pin', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params['id'] as string;
+    const session = getBrowsingSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    const messageId = safeInt(req.params['messageId'] as string | undefined);
+    if (!messageId) {
+      res.status(400).json({ error: 'Invalid message id' });
+      return;
+    }
+
+    const pinned = pinMessage(sessionId, messageId);
+    if (!pinned) {
+      res.status(404).json({ error: 'Message not found' });
+      return;
+    }
+    res.status(201).json(pinned);
+  } catch (err) {
+    console.error('[v2/sessions/:id/messages/:messageId/pin POST] Error:', err);
+    res.status(500).json({ error: 'Failed to pin message' });
+  }
+});
+
+v2Router.delete('/sessions/:id/messages/:messageId/pin', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params['id'] as string;
+    const session = getBrowsingSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+
+    const messageId = safeInt(req.params['messageId'] as string | undefined);
+    if (!messageId) {
+      res.status(400).json({ error: 'Invalid message id' });
+      return;
+    }
+
+    const result = unpinMessage(sessionId, messageId);
+    if (!result.removed) {
+      res.status(404).json({ error: 'Pin not found' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[v2/sessions/:id/messages/:messageId/pin DELETE] Error:', err);
+    res.status(500).json({ error: 'Failed to unpin message' });
+  }
+});
+
 v2Router.get('/sessions/:id/children', (req: Request, res: Response) => {
   try {
     const children = getSessionChildren(req.params['id'] as string);
@@ -108,6 +196,15 @@ v2Router.get('/sessions/:id/children', (req: Request, res: Response) => {
 });
 
 // --- Search ---
+
+v2Router.get('/pins', (req: Request, res: Response) => {
+  try {
+    res.json({ data: listPinnedMessages({ project: req.query.project as string | undefined }) });
+  } catch (err) {
+    console.error('[v2/pins] Error:', err);
+    res.status(500).json({ error: 'Failed to list pins' });
+  }
+});
 
 // --- Live ---
 

@@ -89,6 +89,42 @@ export interface ToolCallRow {
   subagent_session_id: string | null;
 }
 
+export interface SessionActivityBucket {
+  bucket_index: number;
+  start_ordinal: number | null;
+  end_ordinal: number | null;
+  message_count: number;
+  user_message_count: number;
+  assistant_message_count: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+}
+
+export interface SessionActivity {
+  bucket_count: number;
+  total_messages: number;
+  first_timestamp: string | null;
+  last_timestamp: string | null;
+  timestamped_messages: number;
+  untimestamped_messages: number;
+  navigation_basis: 'timestamp' | 'ordinal' | 'mixed';
+  data: SessionActivityBucket[];
+}
+
+export interface PinnedMessageRow {
+  id: number;
+  session_id: string;
+  message_id: number | null;
+  message_ordinal: number;
+  role: string | null;
+  content: string | null;
+  message_timestamp: string | null;
+  created_at: string;
+  session_project: string | null;
+  session_agent: string | null;
+  session_first_message: string | null;
+}
+
 // --- Aggregate query result ---
 
 export interface CountResult {
@@ -367,4 +403,8 @@ export interface UsageParams {
   project?: string;
   agent?: string;
   limit?: number;
+}
+
+export interface PinsListParams {
+  project?: string;
 }

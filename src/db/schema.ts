@@ -238,6 +238,20 @@ export function initSchema(): void {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS pinned_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      message_id INTEGER,
+      message_ordinal INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(session_id, message_ordinal)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pm_session_ordinal ON pinned_messages(session_id, message_ordinal);
+    CREATE INDEX IF NOT EXISTS idx_pm_created_at ON pinned_messages(created_at DESC);
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS tool_calls (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       message_id INTEGER NOT NULL,

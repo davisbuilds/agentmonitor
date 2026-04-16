@@ -5,7 +5,7 @@
     fetchV2Agents,
     type SearchResult,
   } from '../../api/client';
-  import { navigateToSession } from '../../stores/router.svelte';
+  import { navigateToSessionMessage } from '../../stores/router.svelte';
 
   function sanitizeSnippet(html: string): string {
     return html
@@ -98,8 +98,8 @@
     search();
   }
 
-  function handleNavigateToSession(sessionId: string) {
-    navigateToSession(sessionId);
+  function handleNavigateToSession(result: SearchResult) {
+    navigateToSessionMessage(result.session_id, result.message_ordinal);
   }
 </script>
 
@@ -158,7 +158,7 @@
     {#each results as result (result.message_id)}
       <button
         class="w-full text-left px-3 py-2 rounded bg-gray-900/40 hover:bg-gray-800/60 border border-gray-800 hover:border-gray-700 transition-colors"
-        onclick={() => handleNavigateToSession(result.session_id)}
+        onclick={() => handleNavigateToSession(result)}
       >
         <div class="flex items-center gap-2 mb-1 text-xs text-gray-500">
           <span class="{result.message_role === 'user' ? 'text-blue-400' : 'text-green-400'}">
