@@ -22,6 +22,15 @@ import type {
   TopSessionStat,
   VelocityMetrics,
   AgentComparisonRow,
+  UsageParams,
+  UsageCoverage,
+  UsageSourceBreakdown,
+  UsageSummary,
+  UsageDailyPoint,
+  UsageProjectBreakdown,
+  UsageModelBreakdown,
+  UsageAgentBreakdown,
+  UsageTopSessionRow,
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
 
@@ -466,6 +475,20 @@ function inclusiveDateSpanDays(earliest: string | null, latest: string | null): 
   ) + 1);
 }
 
+function enumerateDateRange(from: string, to: string): string[] {
+  const start = new Date(`${from}T00:00:00.000Z`);
+  const end = new Date(`${to}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    return [];
+  }
+
+  const dates: string[] = [];
+  for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 86_400_000) {
+    dates.push(new Date(cursor).toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
 export function getAnalyticsCoverage(
   params: AnalyticsParams = {},
   scope: AnalyticsCoverageScope = 'all_sessions',
@@ -774,6 +797,349 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
     GROUP BY agent
     ORDER BY message_count DESC, session_count DESC, agent ASC
   `).all(...filter.values) as AgentComparisonRow[];
+}
+
+// --- Usage ---
+
+interface UsageFilterState {
+  conditions: string[];
+  values: unknown[];
+  where: string;
+}
+
+function usageTimestampExpr(alias = 'e'): string {
+  return `COALESCE(${qualifyColumn(alias, 'client_timestamp')}, ${qualifyColumn(alias, 'created_at')})`;
+}
+
+function usageProjectExpr(alias = 'e'): string {
+  return `COALESCE(NULLIF(${qualifyColumn(alias, 'project')}, ''), 'unknown')`;
+}
+
+function usageAgentExpr(alias = 'e'): string {
+  return qualifyColumn(alias, 'agent_type');
+}
+
+function usageModelExpr(alias = 'e'): string {
+  return `COALESCE(NULLIF(${qualifyColumn(alias, 'model')}, ''), 'unknown')`;
+}
+
+function usageMetricsCondition(alias = 'e'): string {
+  return `(
+    COALESCE(${qualifyColumn(alias, 'cost_usd')}, 0) > 0
+    OR COALESCE(${qualifyColumn(alias, 'tokens_in')}, 0) > 0
+    OR COALESCE(${qualifyColumn(alias, 'tokens_out')}, 0) > 0
+    OR COALESCE(${qualifyColumn(alias, 'cache_read_tokens')}, 0) > 0
+    OR COALESCE(${qualifyColumn(alias, 'cache_write_tokens')}, 0) > 0
+  )`;
+}
+
+function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilterState {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  const timestampExpr = usageTimestampExpr(alias);
+
+  if (params.project) {
+    conditions.push(`${usageProjectExpr(alias)} = ?`);
+    values.push(params.project);
+  }
+  if (params.agent) {
+    conditions.push(`${usageAgentExpr(alias)} = ?`);
+    values.push(params.agent);
+  }
+  if (params.date_from) {
+    conditions.push(`datetime(${timestampExpr}) >= datetime(?)`);
+    values.push(params.date_from);
+  }
+  if (params.date_to) {
+    conditions.push(`datetime(${timestampExpr}) < datetime(?, '+1 day')`);
+    values.push(params.date_to);
+  }
+
+  return {
+    conditions,
+    values,
+    where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+  };
+}
+
+function resolveUsageDateBounds(
+  params: UsageParams,
+  earliest: string | null,
+  latest: string | null,
+): { from: string | null; to: string | null } {
+  const from = params.date_from ?? earliest?.slice(0, 10) ?? null;
+  const to = params.date_to ?? latest?.slice(0, 10) ?? null;
+  if (!from || !to || from > to) {
+    return { from: null, to: null };
+  }
+  return { from, to };
+}
+
+export function getUsageCoverage(params: UsageParams = {}): UsageCoverage {
+  const db = getDb();
+  const filter = buildUsageFilterState(params);
+  const metricsCondition = usageMetricsCondition('e');
+
+  const summary = db.prepare(`
+    SELECT
+      COUNT(*) as matching_events,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) as usage_events,
+      COUNT(DISTINCT e.session_id) as matching_sessions,
+      COUNT(DISTINCT CASE WHEN ${metricsCondition} THEN e.session_id END) as usage_sessions
+    FROM events e
+    ${filter.where}
+  `).get(...filter.values) as {
+    matching_events: number;
+    usage_events: number;
+    matching_sessions: number;
+    usage_sessions: number;
+  };
+
+  const sourceBreakdown = db.prepare(`
+    SELECT
+      COALESCE(NULLIF(e.source, ''), 'api') as source,
+      COUNT(*) as event_count,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) as usage_event_count,
+      COUNT(DISTINCT CASE WHEN ${metricsCondition} THEN e.session_id END) as session_count,
+      ROUND(COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cost_usd ELSE 0 END), 0), 6) as cost_usd,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_in ELSE 0 END), 0) as input_tokens,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_out ELSE 0 END), 0) as output_tokens,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_read_tokens ELSE 0 END), 0) as cache_read_tokens,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_write_tokens ELSE 0 END), 0) as cache_write_tokens
+    FROM events e
+    ${filter.where}
+    GROUP BY source
+    ORDER BY source ASC
+  `).all(...filter.values) as UsageSourceBreakdown[];
+
+  return {
+    metric_scope: 'event_usage',
+    matching_events: summary.matching_events,
+    usage_events: summary.usage_events,
+    missing_usage_events: Math.max(0, summary.matching_events - summary.usage_events),
+    matching_sessions: summary.matching_sessions,
+    usage_sessions: summary.usage_sessions,
+    sources_with_usage: sourceBreakdown.filter(row => row.usage_event_count > 0).length,
+    source_breakdown: sourceBreakdown,
+    note: 'Usage is derived from ingested events with cost or token data. Sessions without usage-bearing events are excluded from totals but still reflected in coverage.',
+  };
+}
+
+export function getUsageSummary(params: UsageParams = {}): UsageSummary {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+  const timestampExpr = usageTimestampExpr('e');
+
+  const row = db.prepare(`
+    SELECT
+      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as total_cost_usd,
+      COALESCE(SUM(e.tokens_in), 0) as total_input_tokens,
+      COALESCE(SUM(e.tokens_out), 0) as total_output_tokens,
+      COALESCE(SUM(e.cache_read_tokens), 0) as total_cache_read_tokens,
+      COALESCE(SUM(e.cache_write_tokens), 0) as total_cache_write_tokens,
+      COUNT(*) as total_usage_events,
+      COUNT(DISTINCT e.session_id) as total_sessions,
+      COUNT(DISTINCT date(${timestampExpr})) as active_days,
+      MIN(${timestampExpr}) as earliest,
+      MAX(${timestampExpr}) as latest
+    FROM events e
+    WHERE ${usageWhere}
+  `).get(...filter.values) as {
+    total_cost_usd: number;
+    total_input_tokens: number;
+    total_output_tokens: number;
+    total_cache_read_tokens: number;
+    total_cache_write_tokens: number;
+    total_usage_events: number;
+    total_sessions: number;
+    active_days: number;
+    earliest: string | null;
+    latest: string | null;
+  };
+
+  const peakDay = db.prepare(`
+    SELECT
+      date(${timestampExpr}) as date,
+      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd
+    FROM events e
+    WHERE ${usageWhere}
+    GROUP BY date(${timestampExpr})
+    ORDER BY cost_usd DESC, date DESC
+    LIMIT 1
+  `).get(...filter.values) as { date: string; cost_usd: number } | undefined;
+
+  const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
+  const safeActiveDays = Math.max(row.active_days, 1);
+  const safeSessions = Math.max(row.total_sessions, 1);
+
+  return {
+    total_cost_usd: row.total_cost_usd,
+    total_input_tokens: row.total_input_tokens,
+    total_output_tokens: row.total_output_tokens,
+    total_cache_read_tokens: row.total_cache_read_tokens,
+    total_cache_write_tokens: row.total_cache_write_tokens,
+    total_usage_events: row.total_usage_events,
+    total_sessions: row.total_sessions,
+    active_days: row.total_usage_events > 0 ? row.active_days : 0,
+    span_days: spanDays,
+    average_cost_per_active_day: row.total_usage_events > 0 ? roundMetric(row.total_cost_usd / safeActiveDays) : 0,
+    average_cost_per_session: row.total_sessions > 0 ? roundMetric(row.total_cost_usd / safeSessions) : 0,
+    peak_day: peakDay ?? { date: null, cost_usd: 0 },
+    coverage: getUsageCoverage(params),
+  };
+}
+
+export function getUsageDaily(params: UsageParams = {}): UsageDailyPoint[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+  const timestampExpr = usageTimestampExpr('e');
+
+  const rows = db.prepare(`
+    SELECT
+      date(${timestampExpr}) as date,
+      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+      COUNT(*) as usage_events,
+      COUNT(DISTINCT e.session_id) as session_count
+    FROM events e
+    WHERE ${usageWhere}
+    GROUP BY date(${timestampExpr})
+    ORDER BY date ASC
+  `).all(...filter.values) as UsageDailyPoint[];
+
+  const bounds = resolveUsageDateBounds(
+    params,
+    rows[0]?.date ?? null,
+    rows.length > 0 ? rows[rows.length - 1]?.date ?? null : null,
+  );
+  if (!bounds.from || !bounds.to) {
+    return rows;
+  }
+
+  const byDate = new Map(rows.map(row => [row.date, row]));
+  return enumerateDateRange(bounds.from, bounds.to).map(date => byDate.get(date) ?? {
+    date,
+    cost_usd: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    usage_events: 0,
+    session_count: 0,
+  });
+}
+
+export function getUsageProjects(params: UsageParams = {}): UsageProjectBreakdown[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const where = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+
+  return db.prepare(`
+    SELECT
+      ${usageProjectExpr('e')} as project,
+      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+      COUNT(*) as usage_events,
+      COUNT(DISTINCT e.session_id) as session_count
+    FROM events e
+    WHERE ${where}
+    GROUP BY project
+    ORDER BY cost_usd DESC, input_tokens DESC, project ASC
+  `).all(...filter.values) as UsageProjectBreakdown[];
+}
+
+export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const where = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+
+  return db.prepare(`
+    SELECT
+      ${usageModelExpr('e')} as model,
+      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+      COUNT(*) as usage_events,
+      COUNT(DISTINCT e.session_id) as session_count
+    FROM events e
+    WHERE ${where}
+    GROUP BY model
+    ORDER BY cost_usd DESC, input_tokens DESC, model ASC
+  `).all(...filter.values) as UsageModelBreakdown[];
+}
+
+export function getUsageAgents(params: UsageParams = {}): UsageAgentBreakdown[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const where = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+
+  return db.prepare(`
+    SELECT
+      ${usageAgentExpr('e')} as agent,
+      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+      COUNT(*) as usage_events,
+      COUNT(DISTINCT e.session_id) as session_count
+    FROM events e
+    WHERE ${where}
+    GROUP BY agent
+    ORDER BY cost_usd DESC, input_tokens DESC, agent ASC
+  `).all(...filter.values) as UsageAgentBreakdown[];
+}
+
+export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRow[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const metricsCondition = usageMetricsCondition('e');
+  const timestampExpr = usageTimestampExpr('e');
+  const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
+
+  const rows = db.prepare(`
+    SELECT
+      e.session_id as id,
+      COALESCE(MAX(NULLIF(e.project, '')), MAX(bs.project), MAX(s.project)) as project,
+      COALESCE(MAX(e.agent_type), MAX(s.agent_type), MAX(bs.agent)) as agent,
+      COALESCE(MAX(bs.started_at), MAX(s.started_at), MIN(${timestampExpr})) as started_at,
+      COALESCE(MAX(bs.ended_at), MAX(s.ended_at), MAX(${timestampExpr})) as ended_at,
+      MAX(${timestampExpr}) as last_activity_at,
+      MAX(bs.message_count) as message_count,
+      MAX(bs.user_message_count) as user_message_count,
+      MAX(bs.fidelity) as fidelity,
+      ROUND(COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cost_usd ELSE 0 END), 0), 6) as cost_usd,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_in ELSE 0 END), 0) as input_tokens,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_out ELSE 0 END), 0) as output_tokens,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_read_tokens ELSE 0 END), 0) as cache_read_tokens,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_write_tokens ELSE 0 END), 0) as cache_write_tokens,
+      COUNT(*) as event_count,
+      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) as usage_events,
+      CASE WHEN MAX(bs.id) IS NULL THEN 0 ELSE 1 END as browsing_session_available
+    FROM events e
+    LEFT JOIN sessions s ON s.id = e.session_id
+    LEFT JOIN browsing_sessions bs ON bs.id = e.session_id
+    ${filter.where}
+    GROUP BY e.session_id
+    HAVING COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) > 0
+    ORDER BY cost_usd DESC, last_activity_at DESC, e.session_id DESC
+    LIMIT ?
+  `).all(...filter.values, limit) as Array<Omit<UsageTopSessionRow, 'browsing_session_available'> & { browsing_session_available: number }>;
+
+  return rows.map(row => ({
+    ...row,
+    browsing_session_available: row.browsing_session_available === 1,
+  }));
 }
 
 // --- Metadata ---

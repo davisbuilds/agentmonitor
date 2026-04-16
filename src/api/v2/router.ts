@@ -18,6 +18,13 @@ import {
   getAnalyticsAgents,
   getAnalyticsProjects,
   getAnalyticsTools,
+  getUsageSummary,
+  getUsageCoverage,
+  getUsageDaily,
+  getUsageProjects,
+  getUsageModels,
+  getUsageAgents,
+  getUsageTopSessions,
   getDistinctProjects,
   getDistinctAgents,
 } from '../../db/v2-queries.js';
@@ -331,6 +338,83 @@ v2Router.get('/analytics/agents', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/agents] Error:', err);
     res.status(500).json({ error: 'Failed to get agent analytics' });
+  }
+});
+
+// --- Usage ---
+
+v2Router.get('/usage/summary', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getUsageSummary(params));
+  } catch (err) {
+    console.error('[v2/usage/summary] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage summary' });
+  }
+});
+
+v2Router.get('/usage/daily', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getUsageDaily(params),
+      coverage: getUsageCoverage(params),
+    });
+  } catch (err) {
+    console.error('[v2/usage/daily] Error:', err);
+    res.status(500).json({ error: 'Failed to get daily usage' });
+  }
+});
+
+v2Router.get('/usage/projects', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getUsageProjects(params),
+      coverage: getUsageCoverage(params),
+    });
+  } catch (err) {
+    console.error('[v2/usage/projects] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage by project' });
+  }
+});
+
+v2Router.get('/usage/models', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getUsageModels(params),
+      coverage: getUsageCoverage(params),
+    });
+  } catch (err) {
+    console.error('[v2/usage/models] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage by model' });
+  }
+});
+
+v2Router.get('/usage/agents', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getUsageAgents(params),
+      coverage: getUsageCoverage(params),
+    });
+  } catch (err) {
+    console.error('[v2/usage/agents] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage by agent' });
+  }
+});
+
+v2Router.get('/usage/top-sessions', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getUsageTopSessions(params),
+      coverage: getUsageCoverage(params),
+    });
+  } catch (err) {
+    console.error('[v2/usage/top-sessions] Error:', err);
+    res.status(500).json({ error: 'Failed to get top usage sessions' });
   }
 });
 
