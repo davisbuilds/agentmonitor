@@ -66,6 +66,13 @@ Product-surface reference for AgentMonitor.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
 - The Svelte `Analytics` tab now supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
 
+## Usage
+
+- Historical usage lives under `/api/v2/usage/*` and is event-derived rather than transcript-derived.
+- Summary totals, daily series, project/model/agent attribution, and top-session views all use cost/token-bearing event rows as their source of truth.
+- Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
+- The Svelte `Usage` tab supports date ranges, project and agent filters, session drill-in when transcript history exists, and CSV export.
+
 ## Historical Import
 
 - Claude Code JSONL conversation log import.
@@ -98,6 +105,12 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
 | `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |
 | `/api/v2/analytics/agents` | GET | Per-agent comparison rows for analytics UI |
+| `/api/v2/usage/summary` | GET | Event-derived usage totals plus coverage metadata |
+| `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |
+| `/api/v2/usage/projects` | GET | Usage attribution grouped by project |
+| `/api/v2/usage/models` | GET | Usage attribution grouped by model |
+| `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
+| `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
 | `/api/health` | GET | Service health check |
 | `/api/filter-options` | GET | Distinct filterable field values |
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |
