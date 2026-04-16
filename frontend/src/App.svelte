@@ -1,6 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { getTab, setTab, type Tab } from './lib/stores/router.svelte';
+  import {
+    getTab,
+    setTab,
+    isCommandPaletteOpen,
+    closeCommandPalette,
+    toggleCommandPalette,
+    openCommandPalette,
+    type Tab,
+  } from './lib/stores/router.svelte';
   import { setFilterOptions } from './lib/stores/monitor.svelte';
   import { getLiveSettings, initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
@@ -14,10 +22,12 @@
   import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
   import PinnedPage from './lib/components/pinned/PinnedPage.svelte';
   import SearchPage from './lib/components/search/SearchPage.svelte';
+  import CommandPalette from './lib/components/command-palette/CommandPalette.svelte';
   import AnalyticsPage from './lib/components/analytics/AnalyticsPage.svelte';
   import UsagePage from './lib/components/usage/UsagePage.svelte';
 
   const tab = $derived(getTab());
+  const commandPaletteOpen = $derived(isCommandPaletteOpen());
   const liveSettings = $derived(getLiveSettings());
 
   let monitorPage = $state<MonitorPage>();
@@ -43,7 +53,21 @@
     }
   }
 
+  function handleGlobalKeydown(event: KeyboardEvent): void {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      toggleCommandPalette();
+      return;
+    }
+
+    if (event.key === 'Escape' && isCommandPaletteOpen()) {
+      closeCommandPalette();
+    }
+  }
+
   onMount(async () => {
+    window.addEventListener('keydown', handleGlobalKeydown);
+
     // Load filter options
     try {
       const options = await fetchFilterOptions();
@@ -61,6 +85,7 @@
     connectSSE();
 
     return () => {
+      window.removeEventListener('keydown', handleGlobalKeydown);
       disconnectSSE();
     };
   });
@@ -76,7 +101,17 @@
       <h1 class="text-lg font-bold tracking-tight">AgentMonitor</h1>
       <StatsBar />
     </div>
-    <ConnectionStatus />
+    <div class="flex items-center gap-3">
+      <button
+        type="button"
+        class="hidden rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-left text-sm text-gray-300 transition hover:border-gray-600 hover:text-gray-100 sm:flex sm:min-w-[220px] sm:items-center sm:justify-between"
+        onclick={() => openCommandPalette()}
+      >
+        <span>Jump to session or transcript...</span>
+        <span class="text-xs text-gray-500">Cmd/Ctrl+K</span>
+      </button>
+      <ConnectionStatus />
+    </div>
   </header>
 
   <!-- Tab Bar -->
@@ -115,5 +150,9 @@
     <UsagePage />
   {:else if tab === 'search'}
     <SearchPage />
+  {/if}
+
+  {#if commandPaletteOpen}
+    <CommandPalette />
   {/if}
 </div>

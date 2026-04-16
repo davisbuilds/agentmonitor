@@ -8,7 +8,10 @@
   } from '../../api/client';
   import { timeAgo, agentHexColor } from '../../format';
   import { getSessionPreviewText } from '../../session-text';
-  import { consumePendingSessionNavigation } from '../../stores/router.svelte';
+  import {
+    consumePendingSessionNavigation,
+    getPendingSessionNavigationVersion,
+  } from '../../stores/router.svelte';
   import SessionViewer from './SessionViewer.svelte';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
 
@@ -30,6 +33,7 @@
   let selectedMessageOrdinal = $state<number | null>(null);
 
   const PAGE_SIZE = 25;
+  const pendingNavigationVersion = $derived(getPendingSessionNavigationVersion());
 
   async function loadSessions(append = false) {
     loading = true;
@@ -72,13 +76,15 @@
     selectedMessageOrdinal = null;
   }
 
-  onMount(async () => {
+  $effect(() => {
+    pendingNavigationVersion;
     const pending = consumePendingSessionNavigation();
-    if (pending.sessionId) {
-      selectedSessionId = pending.sessionId;
-      selectedMessageOrdinal = pending.messageOrdinal;
-    }
+    if (!pending.sessionId) return;
+    selectedSessionId = pending.sessionId;
+    selectedMessageOrdinal = pending.messageOrdinal;
+  });
 
+  onMount(async () => {
     const [projectsRes, agentsRes] = await Promise.all([
       fetchV2Projects().catch(() => ({ data: [] })),
       fetchV2Agents().catch(() => ({ data: [] })),

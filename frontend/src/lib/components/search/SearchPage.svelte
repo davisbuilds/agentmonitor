@@ -1,11 +1,9 @@
 <script lang="ts">
-  import {
-    searchMessages,
-    fetchV2Projects,
-    fetchV2Agents,
-    type SearchResult,
-  } from '../../api/client';
-  import { navigateToSessionMessage } from '../../stores/router.svelte';
+  import { onMount } from 'svelte';
+  import { agentHexColor, timeAgo } from '../../format';
+  import { getSessionPreviewText } from '../../session-text';
+  import { openCommandPalette } from '../../stores/router.svelte';
+  import { search } from '../../stores/search.svelte';
 
   function sanitizeSnippet(html: string): string {
     return html
@@ -18,28 +16,17 @@
       .replace(/\x00MARK_CLOSE\x00/g, '</mark>');
   }
 
-  let query = $state('');
-  let results = $state<SearchResult[]>([]);
-  let total = $state(0);
-  let loading = $state(false);
-  let error = $state<string | null>(null);
-  let searched = $state(false);
-  let cursor = $state<string | undefined>();
-  let hasMore = $state(false);
+  function sessionPreview(session: { first_message: string | null; message_count: number; id: string }): string {
+    return getSessionPreviewText(session.first_message)
+      || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12));
+  }
 
-  // Filters
-  let projects = $state<string[]>([]);
-  let agents = $state<string[]>([]);
-  let filterProject = $state('');
-  let filterAgent = $state('');
-
-  const PAGE_SIZE = 25;
   const searchNotice = $derived.by(() => {
-    if (filterAgent === 'codex') {
+    if (search.agent === 'codex') {
       return {
         tone: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
         title: 'Codex search is partial.',
-        body: 'This tab indexes transcript-backed history only. Summary-only Codex OTEL live sessions are intentionally excluded until richer Codex ingestion exists.',
+        body: 'This tab indexes transcript-backed history only. Summary-only Codex live sessions remain intentionally excluded until richer Codex transcript ingestion exists.',
       };
     }
 
@@ -50,57 +37,10 @@
     };
   });
 
-  // Load filter options
-  import { onMount } from 'svelte';
-  onMount(async () => {
-    const [p, a] = await Promise.all([
-      fetchV2Projects().catch(() => ({ data: [] })),
-      fetchV2Agents().catch(() => ({ data: [] })),
-    ]);
-    projects = p.data;
-    agents = a.data;
+  onMount(() => {
+    void search.initialize();
+    return () => search.cancelPending();
   });
-
-  async function search(append = false) {
-    if (!query.trim()) return;
-    loading = true;
-    searched = true;
-    error = null;
-    try {
-      const params: { q: string; project?: string; agent?: string; limit?: number; cursor?: string } = {
-        q: query.trim(),
-        limit: PAGE_SIZE,
-      };
-      if (filterProject) params.project = filterProject;
-      if (filterAgent) params.agent = filterAgent;
-      if (append && cursor) params.cursor = cursor;
-
-      const res = await searchMessages(params);
-      if (append) {
-        results = [...results, ...res.data];
-      } else {
-        results = res.data;
-      }
-      total = res.total;
-      cursor = res.cursor;
-      hasMore = !!res.cursor && res.data.length === PAGE_SIZE;
-    } catch (err) {
-      console.error('Search failed:', err);
-      error = err instanceof Error && err.message.includes('400') ? 'Invalid search syntax. Avoid special characters like quotes or parentheses.' : 'Search failed. Check that the server is running.';
-    } finally {
-      loading = false;
-    }
-  }
-
-  function handleSubmit(e: Event) {
-    e.preventDefault();
-    cursor = undefined;
-    search();
-  }
-
-  function handleNavigateToSession(result: SearchResult) {
-    navigateToSessionMessage(result.session_id, result.message_ordinal);
-  }
 </script>
 
 <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
@@ -109,88 +49,173 @@
     <p class="mt-1 text-xs text-gray-300">{searchNotice.body}</p>
   </div>
 
-  <!-- Search bar -->
-  <form class="flex items-center gap-3 mb-4 flex-wrap" onsubmit={handleSubmit}>
-    <div class="flex-1 min-w-[200px]">
+  <div class="mb-4 flex flex-wrap items-start gap-3">
+    <div class="min-w-[260px] flex-1">
       <input
         type="text"
-        placeholder="Search across all conversations..."
-        class="w-full bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded px-3 py-2 focus:outline-none focus:border-blue-500"
-        bind:value={query}
+        placeholder="Search across transcript history..."
+        class="w-full rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-200 focus:border-blue-500 focus:outline-none"
+        value={search.query}
+        oninput={(event) => search.setQuery((event.currentTarget as HTMLInputElement).value)}
+        onkeydown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            void search.searchNow(false);
+          }
+        }}
       />
+      <p class="mt-2 text-xs text-gray-500">Results update automatically after a short pause. Press Enter to run immediately.</p>
     </div>
 
+    <button
+      type="button"
+      class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300 transition hover:border-gray-600 hover:text-gray-100"
+      onclick={() => openCommandPalette()}
+    >
+      Command Palette
+    </button>
+
     <select
-      class="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded px-2 py-2"
-      bind:value={filterProject}
+      class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300"
+      value={search.sort}
+      onchange={(event) => search.setSort((event.currentTarget as HTMLSelectElement).value as 'recent' | 'relevance')}
+    >
+      <option value="recent">Newest First</option>
+      <option value="relevance">Best Match</option>
+    </select>
+
+    <select
+      class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300"
+      value={search.project}
+      onchange={(event) => search.setProject((event.currentTarget as HTMLSelectElement).value)}
     >
       <option value="">All Projects</option>
-      {#each projects as p}
-        <option value={p}>{p}</option>
+      {#each search.projectOptions as project}
+        <option value={project}>{project}</option>
       {/each}
     </select>
 
     <select
-      class="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded px-2 py-2"
-      bind:value={filterAgent}
+      class="rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-sm text-gray-300"
+      value={search.agent}
+      onchange={(event) => search.setAgent((event.currentTarget as HTMLSelectElement).value)}
     >
       <option value="">All Agents</option>
-      {#each agents as a}
-        <option value={a}>{a}</option>
+      {#each search.agentOptions as agent}
+        <option value={agent}>{agent}</option>
       {/each}
     </select>
+  </div>
 
-    <button
-      type="submit"
-      class="bg-blue-600 hover:bg-blue-500 text-white text-sm px-4 py-2 rounded transition-colors"
-      disabled={loading || !query.trim()}
-    >
-      {loading ? 'Searching...' : 'Search'}
-    </button>
-  </form>
-
-  {#if searched}
-    <div class="text-xs text-gray-500 mb-3">{total} result{total !== 1 ? 's' : ''}</div>
+  {#if search.hasQuery}
+    <div class="mb-3 flex items-center justify-between gap-3 text-xs text-gray-500">
+      <span>{search.total} result{search.total === 1 ? '' : 's'}</span>
+      <span>{search.sort === 'relevance' ? 'Sorted by best match' : 'Sorted by newest match'}</span>
+    </div>
+  {:else}
+    <div class="mb-3 flex items-center justify-between gap-3 text-xs text-gray-500">
+      <span>Recent sessions</span>
+      <span>{search.project || search.agent ? 'Filtered by current selectors' : 'No query yet'}</span>
+    </div>
   {/if}
 
-  <!-- Results -->
-  <div class="flex-1 overflow-y-auto space-y-2">
-    {#each results as result (result.message_id)}
-      <button
-        class="w-full text-left px-3 py-2 rounded bg-gray-900/40 hover:bg-gray-800/60 border border-gray-800 hover:border-gray-700 transition-colors"
-        onclick={() => handleNavigateToSession(result)}
-      >
-        <div class="flex items-center gap-2 mb-1 text-xs text-gray-500">
-          <span class="{result.message_role === 'user' ? 'text-blue-400' : 'text-green-400'}">
-            {result.message_role}
-          </span>
-          <span>·</span>
-          <span class="font-mono">{result.session_id.slice(0, 8)}</span>
-          <span>·</span>
-          <span>msg #{result.message_ordinal}</span>
-        </div>
-        <div class="text-sm text-gray-300 line-clamp-2">
-          {@html sanitizeSnippet(result.snippet)}
-        </div>
-      </button>
-    {/each}
+  <div class="flex-1 overflow-y-auto">
+    {#if search.hasQuery}
+      <div class="space-y-2">
+        {#each search.results as result (result.message_id)}
+          <button
+            class="w-full rounded-xl border border-gray-800 bg-gray-900/40 px-3 py-3 text-left transition-colors hover:border-gray-700 hover:bg-gray-800/60"
+            onclick={() => search.openResult(result)}
+          >
+            <div class="mb-1 flex items-center justify-between gap-3 text-xs text-gray-500">
+              <div class="min-w-0 flex items-center gap-2">
+                <span
+                  class="inline-block h-2 w-2 shrink-0 rounded-full"
+                  style={`background-color:${agentHexColor(result.session_agent)}`}
+                ></span>
+                <span class="truncate">{result.session_project || result.session_agent}</span>
+                <span>·</span>
+                <span class={result.message_role === 'user' ? 'text-blue-400' : 'text-green-400'}>
+                  {result.message_role}
+                </span>
+                <span>·</span>
+                <span>msg #{result.message_ordinal}</span>
+              </div>
+              <div class="shrink-0">
+                {#if result.session_started_at}
+                  {timeAgo(result.session_started_at)}
+                {:else}
+                  <span class="font-mono">{result.session_id.slice(0, 8)}</span>
+                {/if}
+              </div>
+            </div>
+            <div class="text-sm text-gray-300 line-clamp-2">
+              {@html sanitizeSnippet(result.snippet)}
+            </div>
+            {#if result.session_first_message}
+              <div class="mt-2 truncate text-xs text-gray-500">
+                {getSessionPreviewText(result.session_first_message)}
+              </div>
+            {/if}
+          </button>
+        {/each}
 
-    {#if error}
-      <div class="text-center py-8 text-red-400 text-sm">{error}</div>
-    {:else if searched && !loading && results.length === 0}
-      <div class="text-center py-16 text-gray-500 text-sm">
-        No results found for "{query}".
+        {#if search.loading && search.results.length === 0}
+          <div class="py-16 text-center text-sm text-gray-500">Searching transcript history...</div>
+        {:else if search.error}
+          <div class="py-10 text-center text-sm text-red-300">{search.error}</div>
+        {:else if search.searched && !search.loading && search.results.length === 0}
+          <div class="py-16 text-center text-sm text-gray-500">
+            No transcript matches found for "{search.query}".
+          </div>
+        {/if}
+
+        {#if search.hasMore && !search.loading}
+          <div class="py-3 text-center">
+            <button
+              class="text-sm text-blue-400 transition hover:text-blue-300"
+              onclick={() => search.loadMore()}
+            >
+              Load more results
+            </button>
+          </div>
+        {/if}
       </div>
-    {/if}
+    {:else}
+      <div class="space-y-2">
+        {#each search.recentSessions as session (session.id)}
+          <button
+            class="w-full rounded-xl border border-gray-800 bg-gray-900/40 px-3 py-3 text-left transition-colors hover:border-gray-700 hover:bg-gray-800/60"
+            onclick={() => search.openSession(session.id)}
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0 flex items-center gap-2">
+                <span
+                  class="inline-block h-2 w-2 shrink-0 rounded-full"
+                  style={`background-color:${agentHexColor(session.agent)}`}
+                ></span>
+                <span class="truncate text-sm text-gray-200">{sessionPreview(session)}</span>
+              </div>
+              <div class="flex shrink-0 items-center gap-3 text-xs text-gray-500">
+                {#if session.project}
+                  <span>{session.project}</span>
+                {/if}
+                <span>{session.message_count} msgs</span>
+                {#if session.started_at}
+                  <span>{timeAgo(session.started_at)}</span>
+                {/if}
+              </div>
+            </div>
+          </button>
+        {/each}
 
-    {#if hasMore && !loading}
-      <div class="text-center py-3">
-        <button
-          class="text-sm text-blue-400 hover:text-blue-300"
-          onclick={() => search(true)}
-        >
-          Load more results
-        </button>
+        {#if search.recentLoading}
+          <div class="py-16 text-center text-sm text-gray-500">Loading recent sessions...</div>
+        {:else if search.recentError}
+          <div class="py-10 text-center text-sm text-red-300">{search.recentError}</div>
+        {:else if search.recentSessions.length === 0}
+          <div class="py-16 text-center text-sm text-gray-500">No sessions match the current filters.</div>
+        {/if}
       </div>
     {/if}
   </div>
