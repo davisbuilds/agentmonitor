@@ -453,6 +453,52 @@ export interface UsageTopSessionRow {
   browsing_session_available: boolean;
 }
 
+export type InsightKind = 'overview' | 'workflow' | 'usage';
+export type InsightProvider = 'openai' | 'anthropic' | 'gemini';
+
+export interface InsightInputSnapshot {
+  analytics_activity: ActivityDataPoint[];
+  analytics_projects: ProjectBreakdown[];
+  analytics_tools: ToolUsageStat[];
+  analytics_hour_of_week: HourOfWeekDataPoint[];
+  analytics_top_sessions: TopSessionStat[];
+  analytics_velocity: VelocityMetrics;
+  analytics_agents: AgentComparisonRow[];
+  usage_daily: UsageDailyPoint[];
+  usage_projects: UsageProjectBreakdown[];
+  usage_models: UsageModelBreakdown[];
+  usage_agents: UsageAgentBreakdown[];
+  usage_top_sessions: UsageTopSessionRow[];
+}
+
+export interface Insight {
+  id: number;
+  kind: InsightKind;
+  title: string;
+  prompt: string | null;
+  content: string;
+  date_from: string;
+  date_to: string;
+  project: string | null;
+  agent: string | null;
+  provider: string;
+  model: string;
+  analytics_summary: AnalyticsSummary;
+  analytics_coverage: AnalyticsCoverage;
+  usage_summary: UsageSummary;
+  usage_coverage: UsageCoverage;
+  input_snapshot: InsightInputSnapshot;
+  created_at: string;
+}
+
+export interface InsightGenerationStatus {
+  default_provider: InsightProvider;
+  providers: Record<InsightProvider, {
+    configured: boolean;
+    default_model: string;
+  }>;
+}
+
 // --- API client ---
 
 type Filters = Record<string, string>;
@@ -690,6 +736,43 @@ export async function fetchUsageAgents(params: Record<string, string | number | 
 export async function fetchUsageTopSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageTopSessionRow[]; coverage: UsageCoverage }> {
   const res = await fetch(`/api/v2/usage/top-sessions${qs(params)}`);
   return checkedJson(res, 'fetchUsageTopSessions');
+}
+
+export async function fetchInsights(params: Record<string, string | number | undefined> = {}): Promise<{ data: Insight[]; generation: InsightGenerationStatus }> {
+  const res = await fetch(`/api/v2/insights${qs(params)}`);
+  return checkedJson(res, 'fetchInsights');
+}
+
+export async function fetchInsight(id: number): Promise<Insight> {
+  const res = await fetch(`/api/v2/insights/${id}`);
+  return checkedJson(res, 'fetchInsight');
+}
+
+export async function generateInsight(params: {
+  kind: InsightKind;
+  date_from: string;
+  date_to: string;
+  project?: string;
+  agent?: string;
+  prompt?: string;
+  provider?: InsightProvider;
+  model?: string;
+}): Promise<Insight> {
+  const res = await fetch('/api/v2/insights/generate', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  return checkedJson(res, 'generateInsight');
+}
+
+export async function deleteInsight(id: number): Promise<{ removed: boolean }> {
+  const res = await fetch(`/api/v2/insights/${id}`, {
+    method: 'DELETE',
+  });
+  return checkedJson(res, 'deleteInsight');
 }
 
 export async function fetchV2Projects(): Promise<{ data: string[] }> {

@@ -25,6 +25,7 @@
   import CommandPalette from './lib/components/command-palette/CommandPalette.svelte';
   import AnalyticsPage from './lib/components/analytics/AnalyticsPage.svelte';
   import UsagePage from './lib/components/usage/UsagePage.svelte';
+  import InsightsPage from './lib/components/insights/InsightsPage.svelte';
 
   const tab = $derived(getTab());
   const commandPaletteOpen = $derived(isCommandPaletteOpen());
@@ -39,6 +40,7 @@
       { id: 'pinned', label: 'Pinned' },
       { id: 'analytics', label: 'Analytics' },
       { id: 'usage', label: 'Usage' },
+      { id: 'insights', label: 'Insights' },
       { id: 'search', label: 'Search' },
     ];
     if (liveSettings.enabled) {
@@ -148,6 +150,8 @@
     <AnalyticsPage />
   {:else if tab === 'usage'}
     <UsagePage />
+  {:else if tab === 'insights'}
+    <InsightsPage />
   {:else if tab === 'search'}
     <SearchPage />
   {/if}
