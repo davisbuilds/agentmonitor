@@ -75,6 +75,15 @@ Product-surface reference for AgentMonitor.
 - Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
 - The Svelte `Usage` tab supports date ranges, project and agent filters, session drill-in when transcript history exists, and CSV export.
 
+## Insights
+
+- Historical insights live under `/api/v2/insights/*` and persist generated outputs rather than recalculating them on page load.
+- Each saved insight carries its generation scope: kind, date range, project filter, and agent filter.
+- Each saved insight also persists the analytics summary, usage summary, and both coverage contracts used to generate it.
+- The Svelte `Insights` tab supports date, project, agent, provider, model, and insight-kind targeting plus optional prompt steering.
+- New insight generation supports OpenAI, Anthropic, and Gemini providers with provider-specific API keys and model overrides.
+- The UI keeps scope and coverage visible so generated text is never detached from the underlying data limits.
+
 ## Search And Navigation
 
 - Historical search lives under `/api/v2/search` and now supports both recency and relevance sort modes.
@@ -126,6 +135,10 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/usage/models` | GET | Usage attribution grouped by model |
 | `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
+| `/api/v2/insights` | GET | List persisted insights for the current historical slice |
+| `/api/v2/insights/:id` | GET | Fetch a single persisted insight |
+| `/api/v2/insights/generate` | POST | Generate and persist a new insight from analytics + usage data |
+| `/api/v2/insights/:id` | DELETE | Remove a persisted insight |
 | `/api/health` | GET | Service health check |
 | `/api/filter-options` | GET | Distinct filterable field values |
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |
