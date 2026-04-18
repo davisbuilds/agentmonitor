@@ -9,6 +9,11 @@ import {
   type InsightKind,
   type InsightProvider,
 } from '../api/client';
+import {
+  insightMatchesListFilters,
+  sameInsightListFilters,
+  type InsightListFilters,
+} from '../insights-state';
 
 function localDateStr(date: Date): string {
   const year = date.getFullYear();
@@ -67,14 +72,25 @@ class InsightsStore {
   }
 
   get queryParams(): Record<string, string> {
+    const filters = this.listFilters;
     const params: Record<string, string> = {
-      date_from: this.from,
-      date_to: this.to,
+      date_from: filters.from,
+      date_to: filters.to,
+      kind: filters.kind,
+    };
+    if (filters.project) params.project = filters.project;
+    if (filters.agent) params.agent = filters.agent;
+    return params;
+  }
+
+  get listFilters(): InsightListFilters {
+    return {
+      from: this.from,
+      to: this.to,
+      project: this.project,
+      agent: this.agent,
       kind: this.kind,
     };
-    if (this.project) params.project = this.project;
-    if (this.agent) params.agent = this.agent;
-    return params;
   }
 
   async initialize(): Promise<void> {
@@ -179,6 +195,7 @@ class InsightsStore {
   }
 
   async generate(): Promise<void> {
+    const requestFilters = this.listFilters;
     this.generating = true;
     this.error = null;
 
@@ -193,8 +210,13 @@ class InsightsStore {
         provider: this.provider,
         model: this.model.trim() || undefined,
       });
-      this.items = [created, ...this.items.filter(item => item.id !== created.id)];
-      this.selectedId = created.id;
+      if (
+        sameInsightListFilters(requestFilters, this.listFilters)
+        && insightMatchesListFilters(created, this.listFilters)
+      ) {
+        this.items = [created, ...this.items.filter(item => item.id !== created.id)];
+        this.selectedId = created.id;
+      }
     } catch (err) {
       console.error('Failed to generate insight:', err);
       this.error = err instanceof Error ? err.message : 'Failed to generate insight.';
