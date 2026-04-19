@@ -64,19 +64,36 @@ function kindLabel(kind: InsightKind): string {
   }
 }
 
+function normalizeAnalyticsAgent(agent: string | undefined): string | undefined {
+  if (!agent) return undefined;
+  return agent === 'claude_code' ? 'claude' : agent;
+}
+
+function normalizeUsageAgent(agent: string | undefined): string | undefined {
+  if (!agent) return undefined;
+  return agent === 'claude' ? 'claude_code' : agent;
+}
+
 function buildInsightDataset(params: GenerateInsightParams): InsightDatasetPacket {
   const analyticsParams = {
     date_from: params.date_from,
     date_to: params.date_to,
     project: params.project,
-    agent: params.agent,
+    agent: normalizeAnalyticsAgent(params.agent),
+  };
+
+  const usageParams = {
+    date_from: params.date_from,
+    date_to: params.date_to,
+    project: params.project,
+    agent: normalizeUsageAgent(params.agent),
   };
 
   return {
     analytics_summary: getAnalyticsSummary(analyticsParams),
     analytics_coverage: getAnalyticsCoverage(analyticsParams, 'all_sessions'),
-    usage_summary: getUsageSummary(analyticsParams),
-    usage_coverage: getUsageCoverage(analyticsParams),
+    usage_summary: getUsageSummary(usageParams),
+    usage_coverage: getUsageCoverage(usageParams),
     input_snapshot: {
       analytics_activity: getAnalyticsActivity(analyticsParams).slice(-MAX_ACTIVITY_POINTS),
       analytics_projects: getAnalyticsProjects(analyticsParams).slice(0, MAX_BREAKDOWN_ROWS),
@@ -85,11 +102,11 @@ function buildInsightDataset(params: GenerateInsightParams): InsightDatasetPacke
       analytics_top_sessions: getAnalyticsTopSessions({ ...analyticsParams, limit: MAX_TOP_SESSIONS }),
       analytics_velocity: getAnalyticsVelocity(analyticsParams),
       analytics_agents: getAnalyticsAgents(analyticsParams).slice(0, MAX_BREAKDOWN_ROWS),
-      usage_daily: getUsageDaily(analyticsParams).slice(-MAX_ACTIVITY_POINTS),
-      usage_projects: getUsageProjects(analyticsParams).slice(0, MAX_BREAKDOWN_ROWS),
-      usage_models: getUsageModels(analyticsParams).slice(0, MAX_BREAKDOWN_ROWS),
-      usage_agents: getUsageAgents(analyticsParams).slice(0, MAX_BREAKDOWN_ROWS),
-      usage_top_sessions: getUsageTopSessions({ ...analyticsParams, limit: MAX_TOP_SESSIONS }),
+      usage_daily: getUsageDaily(usageParams).slice(-MAX_ACTIVITY_POINTS),
+      usage_projects: getUsageProjects(usageParams).slice(0, MAX_BREAKDOWN_ROWS),
+      usage_models: getUsageModels(usageParams).slice(0, MAX_BREAKDOWN_ROWS),
+      usage_agents: getUsageAgents(usageParams).slice(0, MAX_BREAKDOWN_ROWS),
+      usage_top_sessions: getUsageTopSessions({ ...usageParams, limit: MAX_TOP_SESSIONS }),
     },
   };
 }

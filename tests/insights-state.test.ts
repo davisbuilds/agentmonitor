@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  clampInsightDateRange,
   insightMatchesListFilters,
   sameInsightListFilters,
   type InsightListFilters,
@@ -154,4 +155,21 @@ test('insightMatchesListFilters only matches the active insight slice', () => {
   assert.equal(insightMatchesListFilters(baseInsight, { ...baseFilters, agent: 'codex' }), false);
   assert.equal(insightMatchesListFilters(baseInsight, { ...baseFilters, kind: 'usage' }), false);
   assert.equal(insightMatchesListFilters(baseInsight, { ...baseFilters, from: '2026-04-01', to: '2026-04-30' }), false);
+});
+
+test('clampInsightDateRange keeps the range valid when one side crosses the other', () => {
+  assert.deepEqual(
+    clampInsightDateRange('2026-04-20', '2026-04-10', 'from'),
+    { from: '2026-04-20', to: '2026-04-20' },
+  );
+
+  assert.deepEqual(
+    clampInsightDateRange('2026-04-20', '2026-04-10', 'to'),
+    { from: '2026-04-10', to: '2026-04-10' },
+  );
+
+  assert.deepEqual(
+    clampInsightDateRange('2026-04-10', '2026-04-20', 'from'),
+    { from: '2026-04-10', to: '2026-04-20' },
+  );
 });

@@ -10,6 +10,7 @@ import {
   type InsightProvider,
 } from '../api/client';
 import {
+  clampInsightDateRange,
   insightMatchesListFilters,
   sameInsightListFilters,
   type InsightListFilters,
@@ -140,8 +141,9 @@ class InsightsStore {
   }
 
   async setDateRange(from: string, to: string): Promise<void> {
-    this.from = from;
-    this.to = to;
+    const next = clampInsightDateRange(from, to, from !== this.from ? 'from' : 'to');
+    this.from = next.from;
+    this.to = next.to;
     await this.load();
   }
 

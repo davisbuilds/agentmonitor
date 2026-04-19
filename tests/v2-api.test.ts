@@ -86,6 +86,7 @@ before(async () => {
 
   // Seed test data via parser
   const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
+  const { insertEvent } = await import('../src/db/queries.js');
   const { syncClaudeLiveSession } = await import('../src/live/claude-adapter.js');
   const {
     SUMMARY_LIVE_PROJECTION_CAPABILITIES,
@@ -169,6 +170,21 @@ before(async () => {
     insertParsedSession(db, parsed, filePath, 256, `hash_${fixture.id}`);
     syncClaudeLiveSession(db, parsed);
   }
+
+  insertEvent({
+    event_id: 'api-insight-usage-001',
+    session_id: 'api-sess-001',
+    agent_type: 'claude_code',
+    event_type: 'assistant',
+    status: 'success',
+    project: 'alpha',
+    model: 'claude-sonnet-4-5-20250929',
+    tokens_in: 1200,
+    tokens_out: 300,
+    cost_usd: 0.02,
+    client_timestamp: '2026-03-01T10:15:00Z',
+    source: 'import',
+  });
 
   // Start server
   const { createApp } = await import('../src/app.js');
@@ -1038,7 +1054,7 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
     assert.equal(generated.provider, 'anthropic');
     assert.equal(generated.model, 'claude-sonnet-4-5');
     assert.ok(generated.analytics_summary.total_sessions >= 1);
-    assert.ok(generated.usage_summary.total_usage_events >= 0);
+    assert.equal(generated.usage_summary.total_usage_events, 1);
 
     const listRes = await fetch(`${baseUrl}/api/v2/insights?project=alpha&kind=workflow`);
     assert.equal(listRes.status, 200);
