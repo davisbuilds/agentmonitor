@@ -2,11 +2,44 @@
 date: 2026-04-14
 topic: agentsview-gap-closure
 stage: implementation-plan
-status: draft
+status: in-progress
 source: conversation
 ---
 
 # AgentsView Gap Closure Implementation Plan
+
+## Current Status
+
+As of 2026-04-16, PR 1 for this plan has been merged.
+
+Completed and merged:
+
+- Task 1: Expand The Analytics Contract
+- Task 2: Build A Real Analytics Store And UI
+- Task 3: Add A Dedicated Usage Surface
+- Task 4: Add Session Activity Minimap
+- Task 5: Add Pins And Saved Review Affordances
+- Task 6: Improve Search And Global Navigation
+
+Completed on branch, pending follow-on PR:
+
+- Task 7: Add Insights On Top Of Analytics And Usage
+
+Follow-on work still remaining:
+
+- Task 8: Selectively Backport Sync And Parser Maturity
+
+Merged scope notes:
+
+- historical analytics contract and store-driven Analytics UI are in place
+- dedicated Usage APIs and UI are in place
+- session activity minimap and pinned review workflows are in place
+- Search now supports richer result context, relevance sorting, and a global command palette
+- post-merge follow-up fixes already landed for session-viewer remount behavior and orphaned pin removal
+
+Recommended continuation point for the next session:
+
+1. Task 8
 
 ## Goal
 
@@ -59,6 +92,10 @@ The target outcome is not feature parity for its own sake. The target is a stron
 
 ### Task 1: Expand The Analytics Contract
 
+**Status**
+
+- Completed and merged in PR 1.
+
 **Objective**
 
 Grow `agentmonitor`'s analytics backend from the current minimal four-endpoint shape into a richer capability-aware analytics contract that can support modern `agentsview`-style analytics panels.
@@ -103,6 +140,10 @@ Grow `agentmonitor`'s analytics backend from the current minimal four-endpoint s
 - The API contract makes it clear when metrics are capability-limited.
 
 ### Task 2: Build A Real Analytics Store And UI
+
+**Status**
+
+- Completed and merged in PR 1.
 
 **Objective**
 
@@ -152,6 +193,10 @@ Replace the current one-shot analytics page with a stateful analytics subsystem 
 
 ### Task 3: Add A Dedicated Usage Surface
 
+**Status**
+
+- Completed and merged in PR 1.
+
 **Objective**
 
 Introduce a historical `Usage` tab in `agentmonitor` for cost and token analysis over time, using `agentmonitor`'s data model rather than copying `agentsview` blindly.
@@ -200,6 +245,10 @@ Introduce a historical `Usage` tab in `agentmonitor` for cost and token analysis
 
 ### Task 4: Add Session Activity Minimap
 
+**Status**
+
+- Completed and merged in PR 1.
+
 **Objective**
 
 Bring the `agentsview` session activity minimap concept into `agentmonitor`'s session viewer to improve transcript navigation for long sessions.
@@ -242,6 +291,10 @@ Bring the `agentsview` session activity minimap concept into `agentmonitor`'s se
 - Sessions without timestamp data degrade cleanly.
 
 ### Task 5: Add Pins And Saved Review Affordances
+
+**Status**
+
+- Completed and merged in PR 1.
 
 **Objective**
 
@@ -289,6 +342,10 @@ Make `agentmonitor` sessions reviewable over time by adding pinned messages and,
 
 ### Task 6: Improve Search And Global Navigation
 
+**Status**
+
+- Completed and merged in PR 1.
+
 **Objective**
 
 Upgrade `agentmonitor` search ergonomics with debounced search, richer ranking/sorting, and a command palette for fast session/message navigation.
@@ -331,6 +388,10 @@ Upgrade `agentmonitor` search ergonomics with debounced search, richer ranking/s
 - Users can jump across the app quickly without context loss.
 
 ### Task 7: Add Insights On Top Of Analytics And Usage
+
+**Status**
+
+- Completed on branch, pending PR.
 
 **Objective**
 
@@ -377,6 +438,10 @@ Add AI-generated insights only after the analytics and usage substrate is strong
 - The UI communicates scope and limitations clearly.
 
 ### Task 8: Selectively Backport Sync And Parser Maturity
+
+**Status**
+
+- Remaining.
 
 **Objective**
 
@@ -451,16 +516,12 @@ Adopt only the parts of `agentsview`'s sync/parser maturity that improve `agentm
 
 ## Handoff
 
-Recommended execution order:
+Recommended execution order from the current state:
 
-1. Task 1 and Task 2
-2. Task 3
-3. Task 4 and Task 5
-4. Task 6
-5. Task 7
-6. Task 8
+1. Task 7
+2. Task 8
 
-This order front-loads the highest product value while keeping the lower-level architecture honest.
+Tasks 1 through 6 are already merged. The remaining order keeps the product-facing insights work ahead of lower-level sync/parser maturity work.
 
 Plan complete and saved to `docs/plans/2026-04-14-agentsview-gap-closure-implementation.md`.
 

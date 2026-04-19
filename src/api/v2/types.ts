@@ -347,6 +347,55 @@ export interface UsageTopSessionRow {
   browsing_session_available: boolean;
 }
 
+export type InsightKind = 'overview' | 'workflow' | 'usage';
+export type InsightProvider = 'openai' | 'anthropic' | 'gemini';
+
+export interface InsightInputSnapshot {
+  analytics_activity: ActivityDataPoint[];
+  analytics_projects: ProjectBreakdown[];
+  analytics_tools: ToolUsageStat[];
+  analytics_hour_of_week: HourOfWeekDataPoint[];
+  analytics_top_sessions: TopSessionStat[];
+  analytics_velocity: VelocityMetrics;
+  analytics_agents: AgentComparisonRow[];
+  usage_daily: UsageDailyPoint[];
+  usage_projects: UsageProjectBreakdown[];
+  usage_models: UsageModelBreakdown[];
+  usage_agents: UsageAgentBreakdown[];
+  usage_top_sessions: UsageTopSessionRow[];
+}
+
+export interface InsightRow {
+  id: number;
+  kind: InsightKind;
+  title: string;
+  prompt: string | null;
+  content: string;
+  date_from: string;
+  date_to: string;
+  project: string | null;
+  agent: string | null;
+  provider: string;
+  model: string;
+  analytics_summary: AnalyticsSummary;
+  analytics_coverage: AnalyticsCoverage;
+  usage_summary: UsageSummary;
+  usage_coverage: UsageCoverage;
+  input_snapshot: InsightInputSnapshot;
+  created_at: string;
+}
+
+export interface InsightDbRow extends Omit<
+  InsightRow,
+  'analytics_summary' | 'analytics_coverage' | 'usage_summary' | 'usage_coverage' | 'input_snapshot'
+> {
+  analytics_summary_json: string;
+  analytics_coverage_json: string;
+  usage_summary_json: string;
+  usage_coverage_json: string;
+  input_json: string;
+}
+
 export interface SearchResultRow {
   session_id: string;
   message_id: number;
@@ -421,4 +470,24 @@ export interface UsageParams {
 
 export interface PinsListParams {
   project?: string;
+}
+
+export interface InsightsListParams {
+  date_from?: string;
+  date_to?: string;
+  project?: string;
+  agent?: string;
+  kind?: InsightKind;
+  limit?: number;
+}
+
+export interface GenerateInsightParams {
+  date_from: string;
+  date_to: string;
+  kind: InsightKind;
+  project?: string;
+  agent?: string;
+  prompt?: string;
+  provider?: InsightProvider;
+  model?: string;
 }

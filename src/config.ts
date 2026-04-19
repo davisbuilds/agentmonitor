@@ -27,6 +27,7 @@ function parseEnvBool(value: string | undefined, fallback: boolean): boolean {
 
 export type UsageLimitType = 'tokens' | 'cost';
 export type CodexLiveMode = 'otel-only' | 'exporter';
+export type InsightsProvider = 'openai' | 'anthropic' | 'gemini';
 
 interface AgentUsageConfig {
   limitType: UsageLimitType;
@@ -47,6 +48,17 @@ interface LiveConfig {
     toolArguments: boolean;
   };
   diffPayloadMaxBytes: number;
+}
+
+interface InsightProviderConfig {
+  apiKey: string | null;
+  model: string;
+  baseUrl: string;
+}
+
+interface InsightsConfig {
+  provider: InsightsProvider;
+  providers: Record<InsightsProvider, InsightProviderConfig>;
 }
 
 function isAgentMonitorRepo(dir: string): boolean {
@@ -133,6 +145,44 @@ function parseLiveConfig(env: EnvMap): LiveConfig {
   };
 }
 
+function parseInsightsConfig(env: EnvMap): InsightsConfig {
+  const provider = ((): InsightsProvider => {
+    const raw = env.AGENTMONITOR_INSIGHTS_PROVIDER?.trim().toLowerCase();
+    return raw === 'anthropic' || raw === 'gemini' ? raw : 'openai';
+  })();
+
+  return {
+    provider,
+    providers: {
+      openai: {
+        apiKey: env.AGENTMONITOR_OPENAI_API_KEY?.trim() || env.OPENAI_API_KEY?.trim() || null,
+        model: env.AGENTMONITOR_OPENAI_INSIGHTS_MODEL?.trim()
+          || env.AGENTMONITOR_INSIGHTS_OPENAI_MODEL?.trim()
+          || env.AGENTMONITOR_INSIGHTS_MODEL?.trim()
+          || 'gpt-5-mini',
+        baseUrl: (env.AGENTMONITOR_OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1').replace(/\/+$/, ''),
+      },
+      anthropic: {
+        apiKey: env.AGENTMONITOR_ANTHROPIC_API_KEY?.trim() || env.ANTHROPIC_API_KEY?.trim() || null,
+        model: env.AGENTMONITOR_ANTHROPIC_INSIGHTS_MODEL?.trim()
+          || env.AGENTMONITOR_INSIGHTS_ANTHROPIC_MODEL?.trim()
+          || 'claude-sonnet-4-5',
+        baseUrl: (env.AGENTMONITOR_ANTHROPIC_BASE_URL?.trim() || 'https://api.anthropic.com/v1').replace(/\/+$/, ''),
+      },
+      gemini: {
+        apiKey: env.AGENTMONITOR_GEMINI_API_KEY?.trim()
+          || env.GEMINI_API_KEY?.trim()
+          || env.GOOGLE_API_KEY?.trim()
+          || null,
+        model: env.AGENTMONITOR_GEMINI_INSIGHTS_MODEL?.trim()
+          || env.AGENTMONITOR_INSIGHTS_GEMINI_MODEL?.trim()
+          || 'gemini-2.5-flash',
+        baseUrl: (env.AGENTMONITOR_GEMINI_BASE_URL?.trim() || 'https://generativelanguage.googleapis.com/v1beta').replace(/\/+$/, ''),
+      },
+    },
+  };
+}
+
 export function createConfig(env: EnvMap = process.env, cwd: string = process.cwd()) {
   return {
     port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1),
@@ -151,6 +201,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     // Codex: cost limits in USD (AGENTMONITOR_SESSION_COST_LIMIT_CODEX)
     usageMonitor: parseUsageMonitorConfig(env),
     live: parseLiveConfig(env),
+    insights: parseInsightsConfig(env),
   };
 }
 

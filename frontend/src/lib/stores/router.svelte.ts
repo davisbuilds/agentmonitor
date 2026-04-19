@@ -1,4 +1,4 @@
-export type Tab = 'monitor' | 'live' | 'sessions' | 'pinned' | 'analytics' | 'usage' | 'search';
+export type Tab = 'monitor' | 'live' | 'sessions' | 'pinned' | 'analytics' | 'usage' | 'insights' | 'search';
 
 let currentTab = $state<Tab>('monitor');
 let pendingSessionId = $state<string | null>(null);
@@ -64,7 +64,7 @@ export function consumePendingSessionNavigation(): { sessionId: string | null; m
 function initFromHash(): void {
   if (typeof window === 'undefined') return;
   const hash = window.location.hash.slice(1).split('?')[0];
-  if (hash === 'live' || hash === 'sessions' || hash === 'pinned' || hash === 'analytics' || hash === 'usage' || hash === 'search') {
+  if (hash === 'live' || hash === 'sessions' || hash === 'pinned' || hash === 'analytics' || hash === 'usage' || hash === 'insights' || hash === 'search') {
     currentTab = hash;
   }
 }

@@ -29,11 +29,15 @@ import {
   getUsageModels,
   getUsageAgents,
   getUsageTopSessions,
+  listInsights,
+  getInsight,
+  deleteInsight,
   getDistinctProjects,
   getDistinctAgents,
 } from '../../db/v2-queries.js';
 import { liveStreamRouter } from './live-stream.js';
 import { config } from '../../config.js';
+import { generateInsight } from '../../insights/service.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -42,6 +46,10 @@ function safeInt(value: string | undefined): number | undefined {
   if (value == null) return undefined;
   const n = parseInt(value, 10);
   return isNaN(n) ? undefined : n;
+}
+
+function safeString(value: string | string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : undefined;
 }
 
 // --- Sessions ---
@@ -342,6 +350,14 @@ function readAnalyticsParams(req: Request): {
   };
 }
 
+function isInsightKind(value: unknown): value is 'overview' | 'workflow' | 'usage' {
+  return value === 'overview' || value === 'workflow' || value === 'usage';
+}
+
+function isInsightProvider(value: unknown): value is 'openai' | 'anthropic' | 'gemini' {
+  return value === 'openai' || value === 'anthropic' || value === 'gemini';
+}
+
 v2Router.get('/analytics/summary', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
@@ -514,6 +530,154 @@ v2Router.get('/usage/top-sessions', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/usage/top-sessions] Error:', err);
     res.status(500).json({ error: 'Failed to get top usage sessions' });
+  }
+});
+
+// --- Insights ---
+
+v2Router.get('/insights', (req: Request, res: Response) => {
+  try {
+    const kindQuery = safeString(req.query.kind as string | string[] | undefined);
+    let kind: 'overview' | 'workflow' | 'usage' | undefined;
+    if (kindQuery) {
+      if (!isInsightKind(kindQuery)) {
+        res.status(400).json({ error: 'Invalid insight kind' });
+        return;
+      }
+      kind = kindQuery;
+    }
+
+    res.json({
+      data: listInsights({
+        date_from: req.query.date_from as string | undefined,
+        date_to: req.query.date_to as string | undefined,
+        project: req.query.project as string | undefined,
+        agent: req.query.agent as string | undefined,
+        kind,
+        limit: safeInt(req.query.limit as string),
+      }),
+      generation: {
+        default_provider: config.insights.provider,
+        providers: {
+          openai: {
+            configured: config.insights.providers.openai.apiKey != null,
+            default_model: config.insights.providers.openai.model,
+          },
+          anthropic: {
+            configured: config.insights.providers.anthropic.apiKey != null,
+            default_model: config.insights.providers.anthropic.model,
+          },
+          gemini: {
+            configured: config.insights.providers.gemini.apiKey != null,
+            default_model: config.insights.providers.gemini.model,
+          },
+        },
+      },
+    });
+  } catch (err) {
+    console.error('[v2/insights] Error:', err);
+    res.status(500).json({ error: 'Failed to list insights' });
+  }
+});
+
+v2Router.get('/insights/:id', (req: Request, res: Response) => {
+  try {
+    const id = safeInt(safeString(req.params['id']));
+    if (id == null) {
+      res.status(400).json({ error: 'Invalid insight id' });
+      return;
+    }
+
+    const insight = getInsight(id);
+    if (!insight) {
+      res.status(404).json({ error: 'Insight not found' });
+      return;
+    }
+
+    res.json(insight);
+  } catch (err) {
+    console.error('[v2/insights/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to get insight' });
+  }
+});
+
+v2Router.post('/insights/generate', async (req: Request, res: Response) => {
+  try {
+    const body = req.body as Record<string, unknown> | null;
+    const kind = body?.['kind'];
+    const dateFrom = body?.['date_from'];
+    const dateTo = body?.['date_to'];
+    const project = body?.['project'];
+    const agent = body?.['agent'];
+    const prompt = body?.['prompt'];
+    const provider = body?.['provider'];
+    const model = body?.['model'];
+
+    if (!isInsightKind(kind)) {
+      res.status(400).json({ error: 'kind must be one of overview, workflow, or usage' });
+      return;
+    }
+    if (typeof dateFrom !== 'string' || typeof dateTo !== 'string') {
+      res.status(400).json({ error: 'date_from and date_to are required' });
+      return;
+    }
+    if (project != null && typeof project !== 'string') {
+      res.status(400).json({ error: 'project must be a string' });
+      return;
+    }
+    if (agent != null && typeof agent !== 'string') {
+      res.status(400).json({ error: 'agent must be a string' });
+      return;
+    }
+    if (prompt != null && typeof prompt !== 'string') {
+      res.status(400).json({ error: 'prompt must be a string' });
+      return;
+    }
+    if (provider != null && !isInsightProvider(provider)) {
+      res.status(400).json({ error: 'provider must be one of openai, anthropic, or gemini' });
+      return;
+    }
+    if (model != null && typeof model !== 'string') {
+      res.status(400).json({ error: 'model must be a string' });
+      return;
+    }
+
+    const insight = await generateInsight({
+      kind,
+      date_from: dateFrom,
+      date_to: dateTo,
+      project: project?.trim() || undefined,
+      agent: agent?.trim() || undefined,
+      prompt: prompt?.trim() || undefined,
+      provider: provider ?? undefined,
+      model: model?.trim() || undefined,
+    });
+    res.status(201).json(insight);
+  } catch (err) {
+    console.error('[v2/insights/generate] Error:', err);
+    const message = err instanceof Error ? err.message : 'Failed to generate insight';
+    res.status(message.includes('required') || message.includes('must be') ? 400 : 500).json({ error: message });
+  }
+});
+
+v2Router.delete('/insights/:id', (req: Request, res: Response) => {
+  try {
+    const id = safeInt(safeString(req.params['id']));
+    if (id == null) {
+      res.status(400).json({ error: 'Invalid insight id' });
+      return;
+    }
+
+    const removed = deleteInsight(id);
+    if (!removed) {
+      res.status(404).json({ error: 'Insight not found' });
+      return;
+    }
+
+    res.json({ removed: true });
+  } catch (err) {
+    console.error('[v2/insights/:id DELETE] Error:', err);
+    res.status(500).json({ error: 'Failed to delete insight' });
   }
 });
 

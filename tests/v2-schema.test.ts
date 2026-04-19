@@ -156,6 +156,72 @@ test('pinned_messages indexes exist', () => {
   assert.ok(indexNames.some(n => n.includes('created_at')), 'should have created_at index');
 });
 
+// --- insights table ---
+
+test('insights table exists with correct columns', () => {
+  const db = getDb();
+  const columns = db.prepare("PRAGMA table_info(insights)").all() as Array<{ name: string }>;
+  const colNames = columns.map(c => c.name);
+
+  assert.ok(colNames.includes('id'), 'should have id column');
+  assert.ok(colNames.includes('kind'), 'should have kind column');
+  assert.ok(colNames.includes('title'), 'should have title column');
+  assert.ok(colNames.includes('prompt'), 'should have prompt column');
+  assert.ok(colNames.includes('content'), 'should have content column');
+  assert.ok(colNames.includes('date_from'), 'should have date_from column');
+  assert.ok(colNames.includes('date_to'), 'should have date_to column');
+  assert.ok(colNames.includes('project'), 'should have project column');
+  assert.ok(colNames.includes('agent'), 'should have agent column');
+  assert.ok(colNames.includes('provider'), 'should have provider column');
+  assert.ok(colNames.includes('model'), 'should have model column');
+  assert.ok(colNames.includes('analytics_summary_json'), 'should have analytics_summary_json column');
+  assert.ok(colNames.includes('analytics_coverage_json'), 'should have analytics_coverage_json column');
+  assert.ok(colNames.includes('usage_summary_json'), 'should have usage_summary_json column');
+  assert.ok(colNames.includes('usage_coverage_json'), 'should have usage_coverage_json column');
+  assert.ok(colNames.includes('input_json'), 'should have input_json column');
+  assert.ok(colNames.includes('created_at'), 'should have created_at column');
+});
+
+test('insights insert and query', () => {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO insights (
+      kind, title, prompt, content, date_from, date_to, project, agent, provider, model,
+      analytics_summary_json, analytics_coverage_json, usage_summary_json, usage_coverage_json, input_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'overview',
+    'Weekly Insight',
+    'Focus on delivery.',
+    '# Weekly Insight\n\nContent',
+    '2026-03-01',
+    '2026-03-07',
+    'alpha',
+    'claude',
+    'openai',
+    'gpt-5-mini',
+    JSON.stringify({ total_sessions: 1 }),
+    JSON.stringify({ matching_sessions: 1 }),
+    JSON.stringify({ total_cost_usd: 1.23 }),
+    JSON.stringify({ matching_events: 2 }),
+    JSON.stringify({ analytics_activity: [] }),
+  );
+
+  const row = db.prepare('SELECT * FROM insights WHERE title = ?').get('Weekly Insight') as Record<string, unknown>;
+  assert.equal(row.kind, 'overview');
+  assert.equal(row.project, 'alpha');
+  assert.equal(row.model, 'gpt-5-mini');
+});
+
+test('insights indexes exist', () => {
+  const db = getDb();
+  const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='insights'").all() as Array<{ name: string }>;
+  const indexNames = indexes.map(i => i.name);
+
+  assert.ok(indexNames.some(n => n.includes('created_at')), 'should have created_at index');
+  assert.ok(indexNames.some(n => n.includes('scope')), 'should have scope index');
+});
+
 // --- tool_calls table ---
 
 test('tool_calls table exists with correct columns', () => {

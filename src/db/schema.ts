@@ -252,6 +252,31 @@ export function initSchema(): void {
   `);
 
   db.exec(`
+    CREATE TABLE IF NOT EXISTS insights (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      title TEXT NOT NULL,
+      prompt TEXT,
+      content TEXT NOT NULL,
+      date_from TEXT NOT NULL,
+      date_to TEXT NOT NULL,
+      project TEXT,
+      agent TEXT,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      analytics_summary_json TEXT NOT NULL,
+      analytics_coverage_json TEXT NOT NULL,
+      usage_summary_json TEXT NOT NULL,
+      usage_coverage_json TEXT NOT NULL,
+      input_json TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_insights_created_at ON insights(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_insights_scope ON insights(kind, date_from, date_to, project, agent);
+  `);
+
+  db.exec(`
     CREATE TABLE IF NOT EXISTS tool_calls (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       message_id INTEGER NOT NULL,

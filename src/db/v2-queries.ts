@@ -34,6 +34,11 @@ import type {
   UsageModelBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
+  InsightRow,
+  InsightDbRow,
+  InsightInputSnapshot,
+  InsightsListParams,
+  GenerateInsightParams,
   SearchResultRow,
   PinsListParams,
 } from '../api/v2/types.js';
@@ -1447,6 +1452,154 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
     ...row,
     browsing_session_available: row.browsing_session_available === 1,
   }));
+}
+
+// --- Insights ---
+
+function parseInsightRow(row: InsightDbRow): InsightRow {
+  return {
+    id: row.id,
+    kind: row.kind,
+    title: row.title,
+    prompt: row.prompt,
+    content: row.content,
+    date_from: row.date_from,
+    date_to: row.date_to,
+    project: row.project,
+    agent: row.agent,
+    provider: row.provider,
+    model: row.model,
+    analytics_summary: JSON.parse(row.analytics_summary_json) as InsightRow['analytics_summary'],
+    analytics_coverage: JSON.parse(row.analytics_coverage_json) as InsightRow['analytics_coverage'],
+    usage_summary: JSON.parse(row.usage_summary_json) as InsightRow['usage_summary'],
+    usage_coverage: JSON.parse(row.usage_coverage_json) as InsightRow['usage_coverage'],
+    input_snapshot: JSON.parse(row.input_json) as InsightInputSnapshot,
+    created_at: row.created_at,
+  };
+}
+
+function buildInsightsFilterState(params: InsightsListParams = {}): {
+  conditions: string[];
+  values: unknown[];
+  where: string;
+} {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.kind) {
+    conditions.push('kind = ?');
+    values.push(params.kind);
+  }
+  if (params.project) {
+    conditions.push('project = ?');
+    values.push(params.project);
+  }
+  if (params.agent) {
+    conditions.push('agent = ?');
+    values.push(params.agent);
+  }
+  if (params.date_from) {
+    conditions.push('date_to >= ?');
+    values.push(params.date_from);
+  }
+  if (params.date_to) {
+    conditions.push('date_from <= ?');
+    values.push(params.date_to);
+  }
+
+  return {
+    conditions,
+    values,
+    where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+  };
+}
+
+export function listInsights(params: InsightsListParams = {}): InsightRow[] {
+  const db = getDb();
+  const filter = buildInsightsFilterState(params);
+  const limit = Math.min(Math.max(params.limit ?? 50, 1), 200);
+
+  return (db.prepare(`
+    SELECT *
+    FROM insights
+    ${filter.where}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ?
+  `).all(...filter.values, limit) as InsightDbRow[]).map(parseInsightRow);
+}
+
+export function getInsight(id: number): InsightRow | undefined {
+  const db = getDb();
+  const row = db.prepare('SELECT * FROM insights WHERE id = ?').get(id) as InsightDbRow | undefined;
+  return row ? parseInsightRow(row) : undefined;
+}
+
+export function createInsight(input: {
+  kind: GenerateInsightParams['kind'];
+  title: string;
+  prompt: string | null;
+  content: string;
+  date_from: string;
+  date_to: string;
+  project: string | null;
+  agent: string | null;
+  provider: string;
+  model: string;
+  analytics_summary: InsightRow['analytics_summary'];
+  analytics_coverage: InsightRow['analytics_coverage'];
+  usage_summary: InsightRow['usage_summary'];
+  usage_coverage: InsightRow['usage_coverage'];
+  input_snapshot: InsightInputSnapshot;
+}): InsightRow {
+  const db = getDb();
+
+  const result = db.prepare(`
+    INSERT INTO insights (
+      kind,
+      title,
+      prompt,
+      content,
+      date_from,
+      date_to,
+      project,
+      agent,
+      provider,
+      model,
+      analytics_summary_json,
+      analytics_coverage_json,
+      usage_summary_json,
+      usage_coverage_json,
+      input_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.kind,
+    input.title,
+    input.prompt,
+    input.content,
+    input.date_from,
+    input.date_to,
+    input.project,
+    input.agent,
+    input.provider,
+    input.model,
+    JSON.stringify(input.analytics_summary),
+    JSON.stringify(input.analytics_coverage),
+    JSON.stringify(input.usage_summary),
+    JSON.stringify(input.usage_coverage),
+    JSON.stringify(input.input_snapshot),
+  );
+
+  const created = getInsight(Number(result.lastInsertRowid));
+  if (!created) {
+    throw new Error('Failed to load created insight');
+  }
+  return created;
+}
+
+export function deleteInsight(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM insights WHERE id = ?').run(id);
+  return result.changes > 0;
 }
 
 // --- Metadata ---

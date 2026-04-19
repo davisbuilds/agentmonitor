@@ -12,6 +12,9 @@ let baseUrl = '';
 let tempDir = '';
 let closeDb: (() => void) | null = null;
 let db: Database;
+/* eslint-disable @typescript-eslint/consistent-type-imports */
+let setInsightGeneratorForTests: typeof import('../src/insights/service.js').setInsightGeneratorForTests;
+/* eslint-enable @typescript-eslint/consistent-type-imports */
 
 // Sample session data to seed into the DB
 function sampleJsonl(lines: object[]): string {
@@ -72,9 +75,18 @@ before(async () => {
   const dbModule = await import('../src/db/connection.js');
   closeDb = dbModule.closeDb;
   initSchema();
+  ({ setInsightGeneratorForTests } = await import('../src/insights/service.js'));
+  setInsightGeneratorForTests(async (params) => ({
+    title: `${params.kind} generated insight`,
+    content: `# ${params.kind} generated insight\n\nGenerated for ${params.date_from} to ${params.date_to}.`,
+    prompt: 'stub prompt',
+    provider: params.provider ?? 'openai',
+    model: params.model ?? 'gpt-5-mini',
+  }));
 
   // Seed test data via parser
   const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
+  const { insertEvent } = await import('../src/db/queries.js');
   const { syncClaudeLiveSession } = await import('../src/live/claude-adapter.js');
   const {
     SUMMARY_LIVE_PROJECTION_CAPABILITIES,
@@ -159,6 +171,21 @@ before(async () => {
     syncClaudeLiveSession(db, parsed);
   }
 
+  insertEvent({
+    event_id: 'api-insight-usage-001',
+    session_id: 'api-sess-001',
+    agent_type: 'claude_code',
+    event_type: 'assistant',
+    status: 'success',
+    project: 'alpha',
+    model: 'claude-sonnet-4-5-20250929',
+    tokens_in: 1200,
+    tokens_out: 300,
+    cost_usd: 0.02,
+    client_timestamp: '2026-03-01T10:15:00Z',
+    source: 'import',
+  });
+
   // Start server
   const { createApp } = await import('../src/app.js');
   const app = createApp({ serveStatic: false });
@@ -171,6 +198,7 @@ after(() => {
   server.closeIdleConnections?.();
   server.closeAllConnections?.();
   server.close();
+  setInsightGeneratorForTests(null);
   if (closeDb) closeDb();
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
@@ -968,6 +996,116 @@ describe('GET /api/v2/analytics/agents', () => {
     assert.equal(body.coverage.metric_scope, 'all_sessions');
     assert.ok(body.data.some(row => row.agent === 'claude' && row.session_count >= 8));
     assert.ok(body.data.some(row => row.agent === 'codex' && row.session_count === 1 && row.summary_fidelity_sessions === 1));
+  });
+});
+
+describe('GET/POST/DELETE /api/v2/insights', () => {
+  test('lists empty insights and exposes generation config status', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/insights`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      data: unknown[];
+      generation: {
+        default_provider: string;
+        providers: Record<string, { configured: boolean; default_model: string }>;
+      };
+    };
+
+    assert.deepEqual(body.data, []);
+    assert.equal(body.generation.default_provider, 'openai');
+    assert.equal(body.generation.providers.openai.default_model, 'gpt-5-mini');
+    assert.equal(body.generation.providers.anthropic.default_model, 'claude-sonnet-4-5');
+    assert.equal(body.generation.providers.gemini.default_model, 'gemini-2.5-flash');
+    assert.equal(typeof body.generation.providers.openai.configured, 'boolean');
+  });
+
+  test('generates, filters, fetches, and deletes persisted insights', async () => {
+    const generateRes = await fetch(`${baseUrl}/api/v2/insights/generate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'workflow',
+        date_from: '2026-03-01',
+        date_to: '2026-03-05',
+        project: 'alpha',
+        agent: 'claude',
+        prompt: 'Focus on review bottlenecks.',
+        provider: 'anthropic',
+        model: 'claude-sonnet-4-5',
+      }),
+    });
+    assert.equal(generateRes.status, 201);
+    const generated = await generateRes.json() as {
+      id: number;
+      kind: string;
+      title: string;
+      project: string | null;
+      agent: string | null;
+      prompt: string | null;
+      provider: string;
+      model: string;
+      analytics_summary: { total_sessions: number };
+      usage_summary: { total_usage_events: number };
+    };
+    assert.equal(generated.kind, 'workflow');
+    assert.equal(generated.project, 'alpha');
+    assert.equal(generated.agent, 'claude');
+    assert.equal(generated.prompt, 'Focus on review bottlenecks.');
+    assert.equal(generated.provider, 'anthropic');
+    assert.equal(generated.model, 'claude-sonnet-4-5');
+    assert.ok(generated.analytics_summary.total_sessions >= 1);
+    assert.equal(generated.usage_summary.total_usage_events, 1);
+
+    const listRes = await fetch(`${baseUrl}/api/v2/insights?project=alpha&kind=workflow`);
+    assert.equal(listRes.status, 200);
+    const listBody = await listRes.json() as {
+      data: Array<{ id: number; title: string; content: string }>;
+    };
+    assert.equal(listBody.data.length, 1);
+    assert.equal(listBody.data[0]?.id, generated.id);
+    assert.match(listBody.data[0]?.content ?? '', /^# workflow generated insight/m);
+
+    const getRes = await fetch(`${baseUrl}/api/v2/insights/${generated.id}`);
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json() as { id: number; input_snapshot: { analytics_top_sessions: unknown[] } };
+    assert.equal(getBody.id, generated.id);
+    assert.ok(Array.isArray(getBody.input_snapshot.analytics_top_sessions));
+
+    const deleteRes = await fetch(`${baseUrl}/api/v2/insights/${generated.id}`, {
+      method: 'DELETE',
+    });
+    assert.equal(deleteRes.status, 200);
+    const deleteBody = await deleteRes.json() as { removed: boolean };
+    assert.equal(deleteBody.removed, true);
+
+    const missingRes = await fetch(`${baseUrl}/api/v2/insights/${generated.id}`);
+    assert.equal(missingRes.status, 404);
+  });
+
+  test('returns generator config error when no API key is available and no test override is installed', async () => {
+    setInsightGeneratorForTests(null);
+    try {
+      const res = await fetch(`${baseUrl}/api/v2/insights/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          kind: 'overview',
+          date_from: '2026-03-01',
+          date_to: '2026-03-01',
+        }),
+      });
+      assert.equal(res.status, 500);
+      const body = await res.json() as { error: string };
+      assert.match(body.error, /OPENAI_API_KEY/);
+    } finally {
+      setInsightGeneratorForTests(async (params) => ({
+        title: `${params.kind} generated insight`,
+        content: `# ${params.kind} generated insight\n\nGenerated for ${params.date_from} to ${params.date_to}.`,
+        prompt: 'stub prompt',
+        provider: params.provider ?? 'openai',
+        model: params.model ?? 'gpt-5-mini',
+      }));
+    }
   });
 });
 
