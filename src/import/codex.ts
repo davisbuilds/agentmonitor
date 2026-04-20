@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { parsePatchMeta } from '../otel/parser.js';
+import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 
 // ─── Codex JSONL line types ─────────────────────────────────────────────
 
@@ -46,27 +47,13 @@ interface CodexLogLine {
 
 // ─── Discover JSONL files ──────────────────────────────────────────────
 
-export function discoverCodexLogs(baseDir?: string): string[] {
+export function discoverCodexLogs(
+  baseDir?: string,
+  options: { excludePatterns?: string[] } = {},
+): string[] {
   const codexHome = baseDir ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   const sessionsDir = path.join(codexHome, 'sessions');
-  const files: string[] = [];
-
-  if (!fs.existsSync(sessionsDir)) return files;
-
-  // Walk ~/.codex/sessions/YYYY/MM/DD/<session-id>.jsonl
-  walkDir(sessionsDir, files);
-  return files.sort();
-}
-
-function walkDir(dir: string, files: string[]): void {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      walkDir(fullPath, files);
-    } else if (entry.isFile() && entry.name.endsWith('.jsonl')) {
-      files.push(fullPath);
-    }
-  }
+  return discoverJsonlFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
 }
 
 // ─── Read model from config.toml ────────────────────────────────────────

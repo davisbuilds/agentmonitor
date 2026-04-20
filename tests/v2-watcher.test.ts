@@ -5,6 +5,8 @@ import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
 import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connection.js';
 import type {
+  syncCodexSessionFile as syncCodexSessionFileFn,
+  syncCodexSessionFileDetailed as syncCodexSessionFileDetailedFn,
   syncSessionFile as syncSessionFileFn,
   syncSessionFileDetailed as syncSessionFileDetailedFn,
 } from '../src/watcher/index.js';
@@ -12,6 +14,7 @@ import type {
 let tempDir = '';
 let dbDir = '';
 let watchDir = '';
+let codexWatchDir = '';
 let getDb: typeof getDbFn;
 let closeDb: typeof closeDbFn;
 
@@ -19,8 +22,10 @@ before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-watcher-'));
   dbDir = path.join(tempDir, 'db');
   watchDir = path.join(tempDir, 'watch', 'projects', '-Users-dev-Dev-testproject');
+  codexWatchDir = path.join(tempDir, 'codex', 'sessions', '2026', '03', '06');
   fs.mkdirSync(dbDir, { recursive: true });
   fs.mkdirSync(watchDir, { recursive: true });
+  fs.mkdirSync(codexWatchDir, { recursive: true });
 
   process.env.AGENTMONITOR_DB_PATH = path.join(dbDir, 'test.db');
 
@@ -46,6 +51,12 @@ function writeSessionFile(sessionId: string, content: string): string {
   return filePath;
 }
 
+function writeCodexSessionFile(sessionId: string, content: string): string {
+  const filePath = path.join(codexWatchDir, `${sessionId}.jsonl`);
+  fs.writeFileSync(filePath, content);
+  return filePath;
+}
+
 const makeSession = (sessionId: string) => sampleJsonl([
   {
     type: 'user',
@@ -65,6 +76,34 @@ const makeSession = (sessionId: string) => sampleJsonl([
       content: [{ type: 'text', text: 'Hi there! How can I help?' }],
     },
     timestamp: '2026-03-06T10:00:05.000Z',
+  },
+]);
+
+const makeCodexSession = (sessionId: string) => sampleJsonl([
+  {
+    type: 'session_meta',
+    timestamp: '2026-03-06T10:00:00.000Z',
+    payload: {
+      id: sessionId,
+      cwd: '/Users/dev/Dev/testproject',
+      timestamp: '2026-03-06T10:00:00.000Z',
+    },
+  },
+  {
+    type: 'response_item',
+    timestamp: '2026-03-06T10:00:05.000Z',
+    payload: {
+      role: 'user',
+      content: [{ type: 'text', text: `Hello from codex session ${sessionId}` }],
+    },
+  },
+  {
+    type: 'response_item',
+    timestamp: '2026-03-06T10:00:10.000Z',
+    payload: {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Codex can help here.' }],
+    },
   },
 ]);
 
@@ -192,6 +231,63 @@ describe('syncSessionFile', () => {
   });
 });
 
+describe('syncCodexSessionFile', () => {
+  let syncCodexSessionFile: typeof syncCodexSessionFileFn;
+  let syncCodexSessionFileDetailed: typeof syncCodexSessionFileDetailedFn;
+
+  before(async () => {
+    const mod = await import('../src/watcher/index.js');
+    syncCodexSessionFile = mod.syncCodexSessionFile;
+    syncCodexSessionFileDetailed = mod.syncCodexSessionFileDetailed;
+  });
+
+  test('parses and inserts a new Codex session file', () => {
+    const db = getDb();
+    const sessionId = 'codex-sess-001';
+    const filePath = writeCodexSessionFile(sessionId, makeCodexSession(sessionId));
+
+    const result = syncCodexSessionFile(db, filePath);
+    assert.equal(result, 'parsed');
+
+    const session = db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(sessionId) as Record<string, unknown>;
+    assert.ok(session, 'session should exist');
+    assert.equal(session.agent, 'codex');
+    assert.equal(session.message_count, 2);
+
+    const snapshot = db.prepare(
+      'SELECT integration_mode, fidelity FROM browsing_sessions WHERE id = ?',
+    ).get(sessionId) as { integration_mode: string; fidelity: string } | undefined;
+    assert.ok(snapshot, 'live snapshot should exist');
+    assert.equal(snapshot?.integration_mode, 'codex-jsonl');
+    assert.equal(snapshot?.fidelity, 'summary');
+  });
+
+  test('detailed Codex sync populates live tables and returns delta counts', () => {
+    const db = getDb();
+    const sessionId = 'codex-live-001';
+    const filePath = writeCodexSessionFile(sessionId, makeCodexSession(sessionId));
+
+    const outcome = syncCodexSessionFileDetailed(db, filePath);
+    assert.equal(outcome.result, 'parsed');
+    assert.equal(outcome.session_id, sessionId);
+    assert.ok(outcome.live, 'should include live sync metadata');
+    assert.equal(outcome.live!.inserted_turns, 2);
+    assert.ok(outcome.live!.inserted_items >= 2);
+  });
+
+  test('skips unchanged Codex file with matching hash', () => {
+    const db = getDb();
+    const sessionId = 'codex-skip-001';
+    const filePath = writeCodexSessionFile(sessionId, makeCodexSession(sessionId));
+
+    const result1 = syncCodexSessionFile(db, filePath);
+    assert.equal(result1, 'parsed');
+
+    const result2 = syncCodexSessionFile(db, filePath);
+    assert.equal(result2, 'skipped');
+  });
+});
+
 describe('discoverSessionFiles', () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let discoverSessionFiles: typeof import('../src/watcher/index.js').discoverSessionFiles;
@@ -224,6 +320,16 @@ describe('discoverSessionFiles', () => {
     const parentDir = path.join(tempDir, 'watch');
     const files = discoverSessionFiles(parentDir);
     assert.ok(!files.some(f => f.endsWith('.txt')), 'should not include .txt files');
+  });
+
+  test('supports exclude patterns during watcher discovery', () => {
+    const excludedDir = path.join(watchDir, 'vercel-plugin');
+    fs.mkdirSync(excludedDir, { recursive: true });
+    fs.writeFileSync(path.join(excludedDir, 'skill-injections.jsonl'), '{}\n');
+
+    const parentDir = path.join(tempDir, 'watch');
+    const files = discoverSessionFiles(parentDir, { excludePatterns: ['vercel-plugin'] });
+    assert.ok(!files.some(f => f.endsWith(path.join('vercel-plugin', 'skill-injections.jsonl'))));
   });
 });
 
@@ -262,5 +368,22 @@ describe('syncAllFiles', () => {
     assert.ok(stats.parsed >= 3, `expected >= 3 parsed, got ${stats.parsed}`);
     assert.ok(typeof stats.skipped === 'number');
     assert.ok(typeof stats.errors === 'number');
+  });
+
+  test('syncAllFiles excludes matching paths before syncing', () => {
+    const db = getDb();
+    const parentDir = path.join(tempDir, 'watch');
+    const excludedPattern = 'exclude-syncall-test';
+    const excludedDir = path.join(watchDir, excludedPattern);
+    fs.mkdirSync(excludedDir, { recursive: true });
+    fs.writeFileSync(path.join(excludedDir, 'skill-injections.jsonl'), '{}\n');
+
+    const stats = syncAllFiles(db, parentDir, { excludePatterns: [excludedPattern] });
+    const excludedRecord = db.prepare(
+      'SELECT * FROM watched_files WHERE file_path = ?',
+    ).get(path.join(excludedDir, 'skill-injections.jsonl'));
+
+    assert.equal(excludedRecord, undefined);
+    assert.ok(stats.total >= 0);
   });
 });

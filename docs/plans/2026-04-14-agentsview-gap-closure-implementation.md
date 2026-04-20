@@ -10,7 +10,7 @@ source: conversation
 
 ## Current Status
 
-As of 2026-04-16, PR 1 for this plan has been merged.
+As of 2026-04-19, PR 1 and PR 2 for this plan have been merged, and Task 8 is complete on `feat/sync-parser-maturity` pending its own PR.
 
 Completed and merged:
 
@@ -20,14 +20,19 @@ Completed and merged:
 - Task 4: Add Session Activity Minimap
 - Task 5: Add Pins And Saved Review Affordances
 - Task 6: Improve Search And Global Navigation
-
-Completed on branch, pending follow-on PR:
-
 - Task 7: Add Insights On Top Of Analytics And Usage
 
-Follow-on work still remaining:
+Completed on a follow-on branch and ready for review:
 
 - Task 8: Selectively Backport Sync And Parser Maturity
+
+Task 8 delivered:
+
+- full historical imports now cache unchanged zero-event files instead of reparsing them every run
+- the session-browser watcher now covers ongoing Codex local session changes and includes Codex in periodic resync
+- configurable sync exclude patterns now apply consistently to discovery, historical import, and watcher/resync flows
+- low-value Codex websocket lifecycle markers are now filtered at OTEL ingest instead of being stored as generic `response` noise
+- sync architecture and operations docs are being updated alongside the implementation
 
 Merged scope notes:
 
@@ -39,7 +44,7 @@ Merged scope notes:
 
 Recommended continuation point for the next session:
 
-1. Task 8
+1. Rust backend parity planning and execution for the expanded `/api/v2` contract
 
 ## Goal
 
@@ -441,7 +446,7 @@ Add AI-generated insights only after the analytics and usage substrate is strong
 
 **Status**
 
-- Remaining.
+- Completed on `feat/sync-parser-maturity`; pending PR/merge.
 
 **Objective**
 
@@ -518,10 +523,10 @@ Adopt only the parts of `agentsview`'s sync/parser maturity that improve `agentm
 
 Recommended execution order from the current state:
 
-1. Task 7
-2. Task 8
+1. Land the Task 8 PR.
+2. Start a dedicated Rust parity plan/PR sequence against the expanded TypeScript `/api/v2` contract.
 
-Tasks 1 through 6 are already merged. The remaining order keeps the product-facing insights work ahead of lower-level sync/parser maturity work.
+Tasks 1 through 8 are now implemented. The next meaningful workstream is Rust runtime parity, not additional work on this plan.
 
 Plan complete and saved to `docs/plans/2026-04-14-agentsview-gap-closure-implementation.md`.
 

@@ -44,3 +44,11 @@ test('createConfig parses live tab and privacy settings', () => {
   assert.equal(config.live.capture.toolArguments, false);
   assert.equal(config.live.diffPayloadMaxBytes, 4096);
 });
+
+test('createConfig parses sync exclude patterns', () => {
+  const config = createConfig({
+    AGENTMONITOR_SYNC_EXCLUDE_PATTERNS: ' vercel-plugin, nested/sessions , vercel-plugin ,, ',
+  }, repoRoot);
+
+  assert.deepEqual(config.sync.excludePatterns, ['vercel-plugin', path.join('nested', 'sessions')]);
+});
