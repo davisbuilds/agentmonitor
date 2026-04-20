@@ -10,7 +10,7 @@ source: conversation
 
 ## Current Status
 
-As of 2026-04-16, PR 1 for this plan has been merged.
+As of 2026-04-18, PR 1 and PR 2 for this plan have been merged.
 
 Completed and merged:
 
@@ -21,13 +21,16 @@ Completed and merged:
 - Task 5: Add Pins And Saved Review Affordances
 - Task 6: Improve Search And Global Navigation
 
-Completed on branch, pending follow-on PR:
-
-- Task 7: Add Insights On Top Of Analytics And Usage
-
 Follow-on work still remaining:
 
 - Task 8: Selectively Backport Sync And Parser Maturity
+
+Task 8 is currently in progress on `feat/sync-parser-maturity`:
+
+- full historical imports now cache unchanged zero-event files instead of reparsing them every run
+- the session-browser watcher now covers ongoing Codex local session changes and includes Codex in periodic resync
+- configurable sync exclude patterns now apply consistently to discovery, historical import, and watcher/resync flows
+- sync architecture and operations docs are being updated alongside the implementation
 
 Merged scope notes:
 

@@ -65,6 +65,7 @@ All optional with sensible defaults:
 | `AGENTMONITOR_LIVE_CAPTURE_REASONING` | `true` | Capture or redact live reasoning payloads |
 | `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` | `true` | Capture or redact tool-call input arguments |
 | `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` | `32768` | Payload cap for diff-style live records |
+| `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` | unset | Comma-separated path patterns to ignore during historical discovery, import, and watcher resync |
 
 Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`, `AGENTMONITOR_BENCH_BATCH_SIZE`.
 
@@ -98,6 +99,9 @@ Current runtime note:
 - `AGENTMONITOR_CODEX_LIVE_MODE=otel-only` is the only implemented Codex mode today.
 - OTEL-only Codex data is suitable for summary observability, not `claude-esp`-style plan/diff/reasoning playback.
 - The `exporter` mode name is reserved for a future richer Codex-side exporter.
+- The session-browser watcher separately follows local Claude JSONL history under `~/.claude/projects` and local Codex history under `~/.codex/sessions`.
+- The watcher and full historical import both maintain file-hash skip caches, so unchanged files that previously parsed to zero messages/events are not retried on every restart or periodic sync.
+- `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` uses root-relative glob-style patterns. Bare names such as `vercel-plugin` match any path segment; path patterns such as `nested/sessions` match that subtree relative to the watched root.
 
 For full setup and behavior notes, use [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) and [../../hooks/codex/README.md](../../hooks/codex/README.md).
 
@@ -108,6 +112,12 @@ pnpm run import --source claude-code    # Claude Code JSONL logs
 pnpm run import --source codex          # Codex session files
 pnpm run import --dry-run               # Preview without writing
 ```
+
+Operational notes:
+
+- Full imports update `import_state` even when a file produced zero events, so unchanged unsupported/non-interactive files are skipped on later full imports.
+- Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
+- Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
 
 ## CI
 

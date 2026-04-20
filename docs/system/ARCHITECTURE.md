@@ -67,6 +67,7 @@ SQLite via `better-sqlite3` with WAL mode.
 | `sessions` | Session lifecycle (active → idle → ended) with metadata |
 | `events` | Individual tool use, prompt, and lifecycle events with cost data |
 | `import_state` | Tracks imported files to prevent duplicate backfills |
+| `watched_files` | Tracks session-browser sync state for parsed, skipped, and erroring JSONL files |
 
 ### Key Patterns
 
@@ -106,7 +107,19 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 
 - `claude-code.ts`: Parses Claude Code JSONL conversation logs.
 - `codex.ts`: Parses Codex session JSON files.
-- `import_state` table tracks file hashes to prevent re-import.
+- `import_state` tracks full-file hashes for completed imports, including files that produced zero events, so unchanged non-importable files are skipped on later full imports.
+- Date-scoped imports intentionally do not update `import_state`, because they only represent a partial view of the file.
+- Import discovery can exclude configured path patterns before hashing or parsing, so known junk subtrees never enter the historical backfill pipeline.
+
+## Session Sync
+
+`src/watcher/` maintains the v2 session browser from local JSONL history:
+
+- Startup sync scans both `~/.claude/projects/**/*.jsonl` and `~/.codex/sessions/**/*.jsonl`.
+- Chokidar watches both roots for ongoing file additions and changes.
+- The same exclude-pattern matcher is applied to discovery, watcher events, and periodic resync so ignored paths behave consistently.
+- `watched_files` caches parsed, skipped, and error states by file hash so unchanged files are not reparsed on every periodic resync.
+- Periodic resync still runs as a safety net for missed file-system events and now covers both Claude and Codex history roots.
 
 ## OTEL Parser
 

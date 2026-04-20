@@ -25,6 +25,16 @@ function parseEnvBool(value: string | undefined, fallback: boolean): boolean {
   return fallback;
 }
 
+function parseEnvList(value: string | undefined): string[] {
+  if (!value) return [];
+  const items = value
+    .split(',')
+    .map(item => item.trim())
+    .filter(Boolean);
+
+  return [...new Set(items)];
+}
+
 export type UsageLimitType = 'tokens' | 'cost';
 export type CodexLiveMode = 'otel-only' | 'exporter';
 export type InsightsProvider = 'openai' | 'anthropic' | 'gemini';
@@ -48,6 +58,10 @@ interface LiveConfig {
     toolArguments: boolean;
   };
   diffPayloadMaxBytes: number;
+}
+
+interface SyncConfig {
+  excludePatterns: string[];
 }
 
 interface InsightProviderConfig {
@@ -183,6 +197,12 @@ function parseInsightsConfig(env: EnvMap): InsightsConfig {
   };
 }
 
+function parseSyncConfig(env: EnvMap): SyncConfig {
+  return {
+    excludePatterns: parseEnvList(env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS),
+  };
+}
+
 export function createConfig(env: EnvMap = process.env, cwd: string = process.cwd()) {
   return {
     port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1),
@@ -201,6 +221,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     // Codex: cost limits in USD (AGENTMONITOR_SESSION_COST_LIMIT_CODEX)
     usageMonitor: parseUsageMonitorConfig(env),
     live: parseLiveConfig(env),
+    sync: parseSyncConfig(env),
     insights: parseInsightsConfig(env),
   };
 }
