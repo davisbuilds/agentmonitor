@@ -1039,6 +1039,79 @@ describe('Codex OTLP integration', () => {
     assert.equal(meta.tool_token_count, 12);
   });
 
+  test('drops noisy codex websocket lifecycle markers without creating events or live items', async () => {
+    const ignoredKinds = [
+      'response.custom_tool_call_input.delta',
+      'response.function_call_arguments.delta',
+      'response.output_text.delta',
+      'response.created',
+      'response.in_progress',
+      'response.output_item.added',
+      'response.output_item.done',
+      'response.content_part.added',
+      'response.content_part.done',
+      'response.output_text.done',
+      'responsesapi.websocket_timing',
+    ];
+
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      logRecords: ignoredKinds.map((eventKind, index) => ({
+        eventName: 'codex.websocket_event',
+        attributes: [
+          { key: 'event.kind', value: { stringValue: eventKind } },
+        ],
+        body: {
+          stringValue: JSON.stringify({
+            session_id: `codex-websocket-noise-${index}`,
+            event_kind: eventKind,
+            success: true,
+          }),
+        },
+      })),
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 0);
+
+    const sessions = await getLiveSessions('agent=codex');
+    assert.equal(sessions.total, 0);
+  });
+
+  test('maps codex.websocket_event response.failed to error events', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [
+        { key: 'session.id', value: { stringValue: 'codex-websocket-error-1' } },
+      ],
+      logRecords: [{
+        eventName: 'codex.websocket_event',
+        attributes: [
+          { key: 'event.kind', value: { stringValue: 'response.failed' } },
+          { key: 'error.message', value: { stringValue: 'Websocket stream failed' } },
+          { key: 'success', value: { boolValue: false } },
+        ],
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].event_type, 'error');
+
+    const meta = JSON.parse(String(events.events[0].metadata)) as {
+      event_kind?: string;
+      error?: string;
+      success?: boolean;
+    };
+    assert.equal(meta.event_kind, 'response.failed');
+    assert.equal(meta.error, 'Websocket stream failed');
+    assert.equal(meta.success, false);
+  });
+
   test('preserves codex.tool_result metadata and materializes tool_result live items', async () => {
     const payload = buildLogPayload({
       serviceName: 'codex_cli_rs',

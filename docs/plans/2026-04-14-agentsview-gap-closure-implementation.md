@@ -30,6 +30,7 @@ Task 8 is currently in progress on `feat/sync-parser-maturity`:
 - full historical imports now cache unchanged zero-event files instead of reparsing them every run
 - the session-browser watcher now covers ongoing Codex local session changes and includes Codex in periodic resync
 - configurable sync exclude patterns now apply consistently to discovery, historical import, and watcher/resync flows
+- low-value Codex websocket lifecycle markers are now filtered at OTEL ingest instead of being stored as generic `response` noise
 - sync architecture and operations docs are being updated alongside the implementation
 
 Merged scope notes:
