@@ -1,10 +1,12 @@
-use std::env;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 pub const DEFAULT_BIND_HOST: &str = "127.0.0.1";
 pub const DEFAULT_RUST_PORT: u16 = 3142;
 
-#[derive(Clone)]
+type EnvMap = HashMap<String, String>;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum UsageLimitType {
     Tokens,
     Cost,
@@ -19,7 +21,7 @@ impl UsageLimitType {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CodexLiveMode {
     OtelOnly,
     Exporter,
@@ -34,14 +36,31 @@ impl CodexLiveMode {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum InsightsProvider {
+    OpenAi,
+    Anthropic,
+    Gemini,
+}
+
+impl InsightsProvider {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::OpenAi => "openai",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveCaptureConfig {
     pub prompts: bool,
     pub reasoning: bool,
     pub tool_arguments: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LiveConfig {
     pub enabled: bool,
     pub codex_mode: CodexLiveMode,
@@ -49,7 +68,7 @@ pub struct LiveConfig {
     pub diff_payload_max_bytes: usize,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AgentUsageConfig {
     pub limit_type: UsageLimitType,
     pub session_window_hours: i64,
@@ -58,7 +77,7 @@ pub struct AgentUsageConfig {
     pub extended_limit: f64,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UsageMonitorConfig {
     pub claude_code: AgentUsageConfig,
     pub codex: AgentUsageConfig,
@@ -71,6 +90,41 @@ impl UsageMonitorConfig {
             "claude_code" => &self.claude_code,
             "codex" => &self.codex,
             _ => &self.default,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SyncConfig {
+    pub exclude_patterns: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InsightProviderConfig {
+    pub api_key: Option<String>,
+    pub model: String,
+    pub base_url: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InsightsProviderConfigs {
+    pub openai: InsightProviderConfig,
+    pub anthropic: InsightProviderConfig,
+    pub gemini: InsightProviderConfig,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InsightsConfig {
+    pub provider: InsightsProvider,
+    pub providers: InsightsProviderConfigs,
+}
+
+impl InsightsConfig {
+    pub fn active_provider(&self) -> &InsightProviderConfig {
+        match self.provider {
+            InsightsProvider::OpenAi => &self.providers.openai,
+            InsightsProvider::Anthropic => &self.providers.anthropic,
+            InsightsProvider::Gemini => &self.providers.gemini,
         }
     }
 }
@@ -91,50 +145,62 @@ pub struct Config {
     pub auto_import_interval_minutes: u64,
     pub usage_monitor: UsageMonitorConfig,
     pub live: LiveConfig,
+    pub sync: SyncConfig,
+    pub insights: InsightsConfig,
 }
 
 impl Config {
     pub fn from_env() -> Self {
-        let default_window_hours = parse_env_i64_min("AGENTMONITOR_SESSION_WINDOW_HOURS", 5, 1);
+        Self::from_env_map(&std::env::vars().collect())
+    }
+
+    pub fn from_env_map(env: &HashMap<String, String>) -> Self {
+        let default_window_hours =
+            parse_env_i64_min(env, "AGENTMONITOR_SESSION_WINDOW_HOURS", 5, 1);
 
         Self {
-            port: parse_env_u16("AGENTMONITOR_RUST_PORT", DEFAULT_RUST_PORT),
-            host: env::var("AGENTMONITOR_HOST").unwrap_or_else(|_| DEFAULT_BIND_HOST.into()),
-            db_path: env::var("AGENTMONITOR_RUST_DB_PATH")
+            port: parse_env_u16(env, "AGENTMONITOR_RUST_PORT", DEFAULT_RUST_PORT),
+            host: env_trimmed(env, "AGENTMONITOR_HOST")
+                .unwrap_or_else(|| DEFAULT_BIND_HOST.to_string()),
+            db_path: env_trimmed(env, "AGENTMONITOR_RUST_DB_PATH")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| PathBuf::from("./data/agentmonitor-rs.db")),
-            ui_dir: env::var("AGENTMONITOR_UI_DIR")
+                .unwrap_or_else(|| PathBuf::from("./data/agentmonitor-rs.db")),
+            ui_dir: env_trimmed(env, "AGENTMONITOR_UI_DIR")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| default_ui_dir()),
-            app_ui_dir: env::var("AGENTMONITOR_APP_UI_DIR")
+                .unwrap_or_else(default_ui_dir),
+            app_ui_dir: env_trimmed(env, "AGENTMONITOR_APP_UI_DIR")
                 .map(PathBuf::from)
-                .unwrap_or_else(|_| default_app_ui_dir()),
-            max_payload_kb: parse_env("AGENTMONITOR_MAX_PAYLOAD_KB", 10),
-            session_timeout_minutes: parse_env("AGENTMONITOR_SESSION_TIMEOUT", 5),
-            max_feed: parse_env("AGENTMONITOR_MAX_FEED", 200),
-            stats_interval_ms: parse_env("AGENTMONITOR_STATS_INTERVAL", 5000),
-            max_sse_clients: parse_env("AGENTMONITOR_MAX_SSE_CLIENTS", 50),
-            sse_heartbeat_ms: parse_env("AGENTMONITOR_SSE_HEARTBEAT_MS", 30000),
-            auto_import_interval_minutes: parse_env("AGENTMONITOR_AUTO_IMPORT_MINUTES", 10),
+                .unwrap_or_else(default_app_ui_dir),
+            max_payload_kb: parse_env(env, "AGENTMONITOR_MAX_PAYLOAD_KB", 10),
+            session_timeout_minutes: parse_env(env, "AGENTMONITOR_SESSION_TIMEOUT", 5),
+            max_feed: parse_env(env, "AGENTMONITOR_MAX_FEED", 200),
+            stats_interval_ms: parse_env(env, "AGENTMONITOR_STATS_INTERVAL", 5000),
+            max_sse_clients: parse_env(env, "AGENTMONITOR_MAX_SSE_CLIENTS", 50),
+            sse_heartbeat_ms: parse_env(env, "AGENTMONITOR_SSE_HEARTBEAT_MS", 30000),
+            auto_import_interval_minutes: parse_env(env, "AGENTMONITOR_AUTO_IMPORT_MINUTES", 10),
             usage_monitor: UsageMonitorConfig {
                 claude_code: AgentUsageConfig {
                     limit_type: UsageLimitType::Tokens,
                     session_window_hours: parse_env_i64_min(
+                        env,
                         "AGENTMONITOR_SESSION_WINDOW_HOURS_CLAUDE_CODE",
                         default_window_hours,
                         1,
                     ),
                     session_limit: parse_env_f64_min(
+                        env,
                         "AGENTMONITOR_SESSION_TOKEN_LIMIT_CLAUDE_CODE",
                         44000.0,
                         0.0,
                     ),
                     extended_window_hours: parse_env_i64_min(
+                        env,
                         "AGENTMONITOR_EXTENDED_WINDOW_HOURS_CLAUDE_CODE",
                         24,
                         1,
                     ),
                     extended_limit: parse_env_f64_min(
+                        env,
                         "AGENTMONITOR_EXTENDED_TOKEN_LIMIT_CLAUDE_CODE",
                         0.0,
                         0.0,
@@ -143,21 +209,25 @@ impl Config {
                 codex: AgentUsageConfig {
                     limit_type: UsageLimitType::Cost,
                     session_window_hours: parse_env_i64_min(
+                        env,
                         "AGENTMONITOR_SESSION_WINDOW_HOURS_CODEX",
                         default_window_hours,
                         1,
                     ),
                     session_limit: parse_env_f64_min(
+                        env,
                         "AGENTMONITOR_SESSION_COST_LIMIT_CODEX",
                         500.0,
                         0.0,
                     ),
                     extended_window_hours: parse_env_i64_min(
+                        env,
                         "AGENTMONITOR_EXTENDED_WINDOW_HOURS_CODEX",
                         168,
                         1,
                     ),
                     extended_limit: parse_env_f64_min(
+                        env,
                         "AGENTMONITOR_EXTENDED_COST_LIMIT_CODEX",
                         1500.0,
                         0.0,
@@ -172,17 +242,92 @@ impl Config {
                 },
             },
             live: LiveConfig {
-                enabled: parse_env_bool("AGENTMONITOR_ENABLE_LIVE_TAB", true),
-                codex_mode: parse_codex_live_mode(env::var("AGENTMONITOR_CODEX_LIVE_MODE").ok()),
+                enabled: parse_env_bool(env, "AGENTMONITOR_ENABLE_LIVE_TAB", true),
+                codex_mode: parse_codex_live_mode(env_trimmed(env, "AGENTMONITOR_CODEX_LIVE_MODE")),
                 capture: LiveCaptureConfig {
-                    prompts: parse_env_bool("AGENTMONITOR_LIVE_CAPTURE_PROMPTS", true),
-                    reasoning: parse_env_bool("AGENTMONITOR_LIVE_CAPTURE_REASONING", true),
+                    prompts: parse_env_bool(env, "AGENTMONITOR_LIVE_CAPTURE_PROMPTS", true),
+                    reasoning: parse_env_bool(env, "AGENTMONITOR_LIVE_CAPTURE_REASONING", true),
                     tool_arguments: parse_env_bool(
+                        env,
                         "AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS",
                         true,
                     ),
                 },
-                diff_payload_max_bytes: parse_env("AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES", 32768),
+                diff_payload_max_bytes: parse_env(
+                    env,
+                    "AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES",
+                    32768,
+                ),
+            },
+            sync: SyncConfig {
+                exclude_patterns: parse_env_list(env, "AGENTMONITOR_SYNC_EXCLUDE_PATTERNS"),
+            },
+            insights: InsightsConfig {
+                provider: parse_insights_provider(env_trimmed(
+                    env,
+                    "AGENTMONITOR_INSIGHTS_PROVIDER",
+                )),
+                providers: InsightsProviderConfigs {
+                    openai: InsightProviderConfig {
+                        api_key: env_trimmed(env, "AGENTMONITOR_OPENAI_API_KEY")
+                            .or_else(|| env_trimmed(env, "OPENAI_API_KEY")),
+                        model: first_present(
+                            env,
+                            &[
+                                "AGENTMONITOR_OPENAI_INSIGHTS_MODEL",
+                                "AGENTMONITOR_INSIGHTS_OPENAI_MODEL",
+                                "AGENTMONITOR_INSIGHTS_MODEL",
+                            ],
+                            "gpt-5-mini",
+                        ),
+                        base_url: first_present(
+                            env,
+                            &["AGENTMONITOR_OPENAI_BASE_URL"],
+                            "https://api.openai.com/v1",
+                        )
+                        .trim_end_matches('/')
+                        .to_string(),
+                    },
+                    anthropic: InsightProviderConfig {
+                        api_key: env_trimmed(env, "AGENTMONITOR_ANTHROPIC_API_KEY")
+                            .or_else(|| env_trimmed(env, "ANTHROPIC_API_KEY")),
+                        model: first_present(
+                            env,
+                            &[
+                                "AGENTMONITOR_ANTHROPIC_INSIGHTS_MODEL",
+                                "AGENTMONITOR_INSIGHTS_ANTHROPIC_MODEL",
+                            ],
+                            "claude-sonnet-4-5",
+                        ),
+                        base_url: first_present(
+                            env,
+                            &["AGENTMONITOR_ANTHROPIC_BASE_URL"],
+                            "https://api.anthropic.com/v1",
+                        )
+                        .trim_end_matches('/')
+                        .to_string(),
+                    },
+                    gemini: InsightProviderConfig {
+                        api_key: env_trimmed(env, "AGENTMONITOR_GEMINI_API_KEY")
+                            .or_else(|| env_trimmed(env, "GEMINI_API_KEY"))
+                            .or_else(|| env_trimmed(env, "GOOGLE_API_KEY")),
+                        model: first_present(
+                            env,
+                            &[
+                                "AGENTMONITOR_GEMINI_INSIGHTS_MODEL",
+                                "AGENTMONITOR_INSIGHTS_GEMINI_MODEL",
+                            ],
+                            "gemini-2.5-flash",
+                        ),
+                        base_url: first_present(
+                            env,
+                            &["AGENTMONITOR_GEMINI_BASE_URL"],
+                            "https://generativelanguage.googleapis.com/v1beta",
+                        )
+                        .trim_end_matches('/')
+                        .to_string(),
+                    },
+                },
             },
         }
     }
@@ -202,42 +347,60 @@ impl Config {
     }
 }
 
-fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
+fn parse_env<T: std::str::FromStr>(env: &EnvMap, key: &str, default: T) -> T {
+    env_trimmed(env, key)
+        .and_then(|value| value.parse().ok())
         .unwrap_or(default)
 }
 
-fn parse_env_u16(key: &str, default: u16) -> u16 {
-    parse_env(key, default)
+fn parse_env_u16(env: &EnvMap, key: &str, default: u16) -> u16 {
+    parse_env(env, key, default)
 }
 
-fn parse_env_i64_min(key: &str, default: i64, min: i64) -> i64 {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<i64>().ok())
-        .filter(|v| *v >= min)
+fn parse_env_i64_min(env: &EnvMap, key: &str, default: i64, min: i64) -> i64 {
+    env_trimmed(env, key)
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value >= min)
         .unwrap_or(default)
 }
 
-fn parse_env_f64_min(key: &str, default: f64, min: f64) -> f64 {
-    env::var(key)
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .filter(|v| *v >= min)
+fn parse_env_f64_min(env: &EnvMap, key: &str, default: f64, min: f64) -> f64 {
+    env_trimmed(env, key)
+        .and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| *value >= min)
         .unwrap_or(default)
 }
 
-fn parse_env_bool(key: &str, default: bool) -> bool {
-    match env::var(key) {
-        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
+fn parse_env_bool(env: &EnvMap, key: &str, default: bool) -> bool {
+    match env_trimmed(env, key) {
+        Some(value) => match value.to_ascii_lowercase().as_str() {
             "1" | "true" | "yes" | "on" => true,
             "0" | "false" | "no" | "off" => false,
             _ => default,
         },
-        Err(_) => default,
+        None => default,
     }
+}
+
+fn parse_env_list(env: &EnvMap, key: &str) -> Vec<String> {
+    let Some(value) = env_trimmed(env, key) else {
+        return Vec::new();
+    };
+
+    let mut seen = HashSet::new();
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .filter_map(|item| {
+            let item = item.to_string();
+            if seen.insert(item.clone()) {
+                Some(item)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn parse_codex_live_mode(value: Option<String>) -> CodexLiveMode {
@@ -245,6 +408,30 @@ fn parse_codex_live_mode(value: Option<String>) -> CodexLiveMode {
         Some("exporter") => CodexLiveMode::Exporter,
         _ => CodexLiveMode::OtelOnly,
     }
+}
+
+fn parse_insights_provider(value: Option<String>) -> InsightsProvider {
+    match value
+        .as_deref()
+        .map(|item| item.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("anthropic") => InsightsProvider::Anthropic,
+        Some("gemini") => InsightsProvider::Gemini,
+        _ => InsightsProvider::OpenAi,
+    }
+}
+
+fn first_present(env: &EnvMap, keys: &[&str], fallback: &str) -> String {
+    keys.iter()
+        .find_map(|key| env_trimmed(env, key))
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn env_trimmed(env: &EnvMap, key: &str) -> Option<String> {
+    env.get(key)
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 fn default_ui_dir() -> PathBuf {

@@ -43,6 +43,8 @@ fn required_tables_exist() {
         "import_state",
         "browsing_sessions",
         "messages",
+        "pinned_messages",
+        "insights",
         "tool_calls",
         "session_turns",
         "session_items",
@@ -161,6 +163,10 @@ fn required_indexes_exist() {
         "idx_bs_live_status",
         "idx_messages_session_ordinal",
         "idx_messages_session_role",
+        "idx_pm_session_ordinal",
+        "idx_pm_created_at",
+        "idx_insights_created_at",
+        "idx_insights_scope",
         "idx_tc_session_id",
         "idx_tc_category",
         "idx_tc_tool_name",
@@ -203,6 +209,52 @@ fn browsing_sessions_columns_match_typescript() {
     .map(|s| s.to_string())
     .collect();
     assert_eq!(cols, expected, "browsing_sessions columns mismatch");
+}
+
+#[test]
+fn pinned_messages_columns_match_typescript() {
+    let conn = init_db();
+    let cols = get_column_names(&conn, "pinned_messages");
+    let expected: HashSet<String> = [
+        "id",
+        "session_id",
+        "message_id",
+        "message_ordinal",
+        "created_at",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(cols, expected, "pinned_messages columns mismatch");
+}
+
+#[test]
+fn insights_columns_match_typescript() {
+    let conn = init_db();
+    let cols = get_column_names(&conn, "insights");
+    let expected: HashSet<String> = [
+        "id",
+        "kind",
+        "title",
+        "prompt",
+        "content",
+        "date_from",
+        "date_to",
+        "project",
+        "agent",
+        "provider",
+        "model",
+        "analytics_summary_json",
+        "analytics_coverage_json",
+        "usage_summary_json",
+        "usage_coverage_json",
+        "input_json",
+        "created_at",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    assert_eq!(cols, expected, "insights columns mismatch");
 }
 
 #[test]
@@ -296,4 +348,22 @@ fn default_values_match_typescript() {
     assert_eq!(payload_truncated, 0);
     assert_eq!(source, "api");
     assert_eq!(schema_version, 1);
+}
+
+#[test]
+fn pinned_messages_unique_session_ordinal_constraint_enforced() {
+    let conn = init_db();
+    conn.execute(
+        "INSERT INTO pinned_messages (session_id, message_id, message_ordinal)
+         VALUES ('sess-1', 1, 4)",
+        [],
+    )
+    .unwrap();
+
+    let result = conn.execute(
+        "INSERT INTO pinned_messages (session_id, message_id, message_ordinal)
+         VALUES ('sess-1', 2, 4)",
+        [],
+    );
+    assert!(result.is_err(), "Duplicate pin ordinal should be rejected");
 }

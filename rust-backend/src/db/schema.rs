@@ -128,6 +128,41 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_session_ordinal ON messages(session_id, ordinal);
 CREATE INDEX IF NOT EXISTS idx_messages_session_role ON messages(session_id, role);
 
+CREATE TABLE IF NOT EXISTS pinned_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    message_id INTEGER,
+    message_ordinal INTEGER NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(session_id, message_ordinal)
+);
+
+CREATE INDEX IF NOT EXISTS idx_pm_session_ordinal ON pinned_messages(session_id, message_ordinal);
+CREATE INDEX IF NOT EXISTS idx_pm_created_at ON pinned_messages(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS insights (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    prompt TEXT,
+    content TEXT NOT NULL,
+    date_from TEXT NOT NULL,
+    date_to TEXT NOT NULL,
+    project TEXT,
+    agent TEXT,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL,
+    analytics_summary_json TEXT NOT NULL,
+    analytics_coverage_json TEXT NOT NULL,
+    usage_summary_json TEXT NOT NULL,
+    usage_coverage_json TEXT NOT NULL,
+    input_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_insights_created_at ON insights(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_insights_scope ON insights(kind, date_from, date_to, project, agent);
+
 CREATE TABLE IF NOT EXISTS tool_calls (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     message_id INTEGER NOT NULL,
@@ -221,7 +256,10 @@ fn apply_post_schema_migrations(conn: &Connection) -> Result<()> {
     )?;
 
     if fts_rebuild_needed(conn)? {
-        conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')", [])?;
+        conn.execute(
+            "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+            [],
+        )?;
     }
 
     Ok(())
@@ -244,11 +282,13 @@ fn ensure_column(conn: &Connection, table: &str, column: &str, definition: &str)
 }
 
 fn fts_rebuild_needed(conn: &Connection) -> Result<bool> {
-    let messages_count: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?;
+    let messages_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?;
     if messages_count == 0 {
         return Ok(false);
     }
 
-    let fts_count: i64 = conn.query_row("SELECT COUNT(*) FROM messages_fts", [], |row| row.get(0))?;
+    let fts_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM messages_fts", [], |row| row.get(0))?;
     Ok(fts_count == 0)
 }
