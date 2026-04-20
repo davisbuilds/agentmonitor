@@ -123,6 +123,32 @@ async fn get_json(app: &axum::Router, uri: &str) -> (u16, Value) {
     (status, parsed)
 }
 
+async fn post_empty(app: &axum::Router, uri: &str) -> (u16, Value) {
+    let req = Request::builder()
+        .method("POST")
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let status = response.status().as_u16();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let parsed = serde_json::from_slice(&bytes).expect("json response");
+    (status, parsed)
+}
+
+async fn delete_empty(app: &axum::Router, uri: &str) -> (u16, Value) {
+    let req = Request::builder()
+        .method("DELETE")
+        .uri(uri)
+        .body(Body::empty())
+        .unwrap();
+    let response = app.clone().oneshot(req).await.unwrap();
+    let status = response.status().as_u16();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let parsed = serde_json::from_slice(&bytes).expect("json response");
+    (status, parsed)
+}
+
 #[tokio::test]
 async fn v2_sessions_routes_return_imported_history() {
     let app = test_app();
@@ -148,11 +174,21 @@ async fn v2_sessions_routes_return_imported_history() {
     assert_eq!(messages["total"], 3);
     assert_eq!(messages["data"].as_array().unwrap()[0]["role"], "user");
 
+    let (activity_status, activity) =
+        get_json(&app, "/api/v2/sessions/parity-v2-parent/activity").await;
+    assert_eq!(activity_status, 200);
+    assert_eq!(activity["total_messages"], 3);
+    assert_eq!(activity["bucket_count"], 8);
+    assert_eq!(activity["data"].as_array().unwrap().len(), 8);
+
     let (children_status, children) =
         get_json(&app, "/api/v2/sessions/parity-v2-parent/children").await;
     assert_eq!(children_status, 200);
     assert_eq!(children["data"].as_array().unwrap().len(), 1);
-    assert_eq!(children["data"].as_array().unwrap()[0]["id"], "agent-child-1");
+    assert_eq!(
+        children["data"].as_array().unwrap()[0]["id"],
+        "agent-child-1"
+    );
 }
 
 #[tokio::test]
@@ -163,11 +199,29 @@ async fn v2_search_analytics_and_metadata_routes_match_contract() {
         get_json(&app, "/api/v2/search?q=NeedleRustApi&project=project-alpha").await;
     assert_eq!(search_status, 200);
     assert!(search["total"].as_i64().unwrap() >= 1);
-    assert!(search["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["snippet"].as_str().unwrap_or_default().contains("<mark>")));
+    assert!(search["data"].as_array().unwrap().iter().any(|row| {
+        row["snippet"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("<mark>")
+    }));
+    assert!(
+        search["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(
+                |row| row["session_project"] == "project-alpha" && row["session_agent"] == "claude"
+            )
+    );
+
+    let (relevance_status, relevance) = get_json(
+        &app,
+        "/api/v2/search?q=NeedleRustApi&project=project-alpha&sort=relevance",
+    )
+    .await;
+    assert_eq!(relevance_status, 200);
+    assert!(relevance["total"].as_i64().unwrap() >= 1);
 
     let (summary_status, summary) = get_json(
         &app,
@@ -181,19 +235,67 @@ async fn v2_search_analytics_and_metadata_routes_match_contract() {
     let (tools_status, tools) =
         get_json(&app, "/api/v2/analytics/tools?project=project-alpha").await;
     assert_eq!(tools_status, 200);
-    assert!(tools["data"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|row| row["tool_name"] == "Agent"));
+    assert!(
+        tools["data"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["tool_name"] == "Agent")
+    );
 
     let (projects_status, projects) = get_json(&app, "/api/v2/projects").await;
     assert_eq!(projects_status, 200);
-    assert_eq!(projects["data"].as_array().unwrap(), &[Value::String("project-alpha".into())]);
+    assert_eq!(
+        projects["data"].as_array().unwrap(),
+        &[Value::String("project-alpha".into())]
+    );
 
     let (agents_status, agents) = get_json(&app, "/api/v2/agents").await;
     assert_eq!(agents_status, 200);
-    assert_eq!(agents["data"].as_array().unwrap(), &[Value::String("claude".into())]);
+    assert_eq!(
+        agents["data"].as_array().unwrap(),
+        &[Value::String("claude".into())]
+    );
+}
+
+#[tokio::test]
+async fn v2_pin_routes_round_trip_messages() {
+    let app = test_app();
+
+    let (messages_status, messages) =
+        get_json(&app, "/api/v2/sessions/parity-v2-parent/messages?limit=1").await;
+    assert_eq!(messages_status, 200);
+    let message_id = messages["data"].as_array().unwrap()[0]["id"]
+        .as_i64()
+        .expect("message id");
+
+    let (pin_status, pin) = post_empty(
+        &app,
+        &format!("/api/v2/sessions/parity-v2-parent/messages/{message_id}/pin"),
+    )
+    .await;
+    assert_eq!(pin_status, 201);
+    assert_eq!(pin["session_id"], "parity-v2-parent");
+    assert_eq!(pin["message_ordinal"], 0);
+    assert_eq!(pin["session_project"], "project-alpha");
+
+    let (session_pins_status, session_pins) =
+        get_json(&app, "/api/v2/sessions/parity-v2-parent/pins").await;
+    assert_eq!(session_pins_status, 200);
+    assert_eq!(session_pins["data"].as_array().unwrap().len(), 1);
+
+    let (all_pins_status, all_pins) = get_json(&app, "/api/v2/pins?project=project-alpha").await;
+    assert_eq!(all_pins_status, 200);
+    assert_eq!(all_pins["data"].as_array().unwrap().len(), 1);
+
+    let (unpin_status, unpin) = delete_empty(
+        &app,
+        &format!("/api/v2/sessions/parity-v2-parent/messages/{message_id}/pin"),
+    )
+    .await;
+    assert_eq!(unpin_status, 200);
+    assert_eq!(unpin["removed"], true);
+    assert_eq!(unpin["message_ordinal"], 0);
 }
 
 #[tokio::test]

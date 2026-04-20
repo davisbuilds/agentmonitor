@@ -99,6 +99,45 @@ pub struct MessageRow {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct SessionActivityBucket {
+    pub bucket_index: i64,
+    pub start_ordinal: Option<i64>,
+    pub end_ordinal: Option<i64>,
+    pub message_count: i64,
+    pub user_message_count: i64,
+    pub assistant_message_count: i64,
+    pub first_timestamp: Option<String>,
+    pub last_timestamp: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SessionActivity {
+    pub bucket_count: i64,
+    pub total_messages: i64,
+    pub first_timestamp: Option<String>,
+    pub last_timestamp: Option<String>,
+    pub timestamped_messages: i64,
+    pub untimestamped_messages: i64,
+    pub navigation_basis: String,
+    pub data: Vec<SessionActivityBucket>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PinnedMessageRow {
+    pub id: i64,
+    pub session_id: String,
+    pub message_id: Option<i64>,
+    pub message_ordinal: i64,
+    pub role: Option<String>,
+    pub content: Option<String>,
+    pub message_timestamp: Option<String>,
+    pub created_at: String,
+    pub session_project: Option<String>,
+    pub session_agent: Option<String>,
+    pub session_first_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct LiveTurnRow {
     pub id: i64,
     pub session_id: String,
@@ -172,6 +211,39 @@ impl MessageRow {
     }
 }
 
+impl SessionActivityBucket {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            bucket_index: row.get("bucket_index")?,
+            start_ordinal: row.get("start_ordinal")?,
+            end_ordinal: row.get("end_ordinal")?,
+            message_count: row.get("message_count")?,
+            user_message_count: row.get("user_message_count")?,
+            assistant_message_count: row.get("assistant_message_count")?,
+            first_timestamp: row.get("first_timestamp")?,
+            last_timestamp: row.get("last_timestamp")?,
+        })
+    }
+}
+
+impl PinnedMessageRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            session_id: row.get("session_id")?,
+            message_id: row.get("message_id")?,
+            message_ordinal: row.get("message_ordinal")?,
+            role: row.get("role")?,
+            content: row.get("content")?,
+            message_timestamp: row.get("message_timestamp")?,
+            created_at: row.get("created_at")?,
+            session_project: row.get("session_project")?,
+            session_agent: row.get("session_agent")?,
+            session_first_message: row.get("session_first_message")?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchResultRow {
     pub session_id: String,
@@ -179,6 +251,11 @@ pub struct SearchResultRow {
     pub message_ordinal: i64,
     pub message_role: String,
     pub snippet: String,
+    pub session_project: Option<String>,
+    pub session_agent: String,
+    pub session_started_at: Option<String>,
+    pub session_ended_at: Option<String>,
+    pub session_first_message: Option<String>,
 }
 
 impl SearchResultRow {
@@ -189,6 +266,11 @@ impl SearchResultRow {
             message_ordinal: row.get("message_ordinal")?,
             message_role: row.get("message_role")?,
             snippet: row.get("snippet")?,
+            session_project: row.get("session_project")?,
+            session_agent: row.get("session_agent")?,
+            session_started_at: row.get("session_started_at")?,
+            session_ended_at: row.get("session_ended_at")?,
+            session_first_message: row.get("session_first_message")?,
         })
     }
 }
@@ -301,6 +383,7 @@ pub struct SearchParams {
     pub q: String,
     pub project: Option<String>,
     pub agent: Option<String>,
+    pub sort: Option<String>,
     pub limit: Option<i64>,
     pub cursor: Option<String>,
 }
@@ -311,6 +394,12 @@ pub struct AnalyticsParams {
     pub date_to: Option<String>,
     pub project: Option<String>,
     pub agent: Option<String>,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct PinsListParams {
+    pub project: Option<String>,
+    pub session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -346,6 +435,12 @@ pub struct SearchResultPage {
 struct TimeCursor {
     sort_at: String,
     id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RelevanceCursor {
+    rank: f64,
+    message_id: i64,
 }
 
 pub fn list_browsing_sessions(
@@ -402,10 +497,14 @@ pub fn list_browsing_sessions(
 
     let cursor = data
         .last()
-        .and_then(|last| last.started_at.as_ref().map(|started_at| encode_time_cursor(TimeCursor {
-            sort_at: started_at.clone(),
-            id: last.id.clone(),
-        })))
+        .and_then(|last| {
+            last.started_at.as_ref().map(|started_at| {
+                encode_time_cursor(TimeCursor {
+                    sort_at: started_at.clone(),
+                    id: last.id.clone(),
+                })
+            })
+        })
         .filter(|_| data.len() as i64 == limit);
 
     Ok(SessionsResult {
@@ -422,7 +521,9 @@ pub fn get_browsing_session(
     let mut stmt = conn.prepare("SELECT * FROM browsing_sessions WHERE id = ?1")?;
     let mut rows = stmt.query([id])?;
     match rows.next()? {
-        Some(row) => Ok(Some(map_browsing_session(BrowsingSessionDbRow::from_row(row)?))),
+        Some(row) => Ok(Some(map_browsing_session(BrowsingSessionDbRow::from_row(
+            row,
+        )?))),
         None => Ok(None),
     }
 }
@@ -458,6 +559,269 @@ pub fn get_session_messages(
     let data = rows.collect::<rusqlite::Result<Vec<_>>>()?;
 
     Ok(MessagesResult { data, total })
+}
+
+pub fn get_session_activity(
+    conn: &Connection,
+    session_id: &str,
+) -> rusqlite::Result<SessionActivity> {
+    let summary = conn.query_row(
+        "SELECT
+            COUNT(*) as total_messages,
+            COUNT(timestamp) as timestamped_messages,
+            MIN(timestamp) as first_timestamp,
+            MAX(timestamp) as last_timestamp
+         FROM messages
+         WHERE session_id = ?1",
+        [session_id],
+        |row| {
+            Ok((
+                row.get::<_, i64>("total_messages")?,
+                row.get::<_, i64>("timestamped_messages")?,
+                row.get::<_, Option<String>>("first_timestamp")?,
+                row.get::<_, Option<String>>("last_timestamp")?,
+            ))
+        },
+    )?;
+
+    if summary.0 == 0 {
+        return Ok(SessionActivity {
+            bucket_count: 0,
+            total_messages: 0,
+            first_timestamp: None,
+            last_timestamp: None,
+            timestamped_messages: 0,
+            untimestamped_messages: 0,
+            navigation_basis: "ordinal".to_string(),
+            data: Vec::new(),
+        });
+    }
+
+    let bucket_count = summary.0.clamp(8, 40);
+    let mut stmt = conn.prepare(
+        "WITH ordered AS (
+            SELECT
+                ordinal,
+                role,
+                timestamp,
+                ROW_NUMBER() OVER (ORDER BY ordinal) - 1 as seq,
+                COUNT(*) OVER () as total_count
+            FROM messages
+            WHERE session_id = ?1
+        ),
+        bucketed AS (
+            SELECT
+                MIN(CAST((seq * ?2) / total_count AS INTEGER), ?3 - 1) as bucket_index,
+                ordinal,
+                role,
+                timestamp
+            FROM ordered
+        )
+        SELECT
+            bucket_index,
+            MIN(ordinal) as start_ordinal,
+            MAX(ordinal) as end_ordinal,
+            COUNT(*) as message_count,
+            COALESCE(SUM(CASE WHEN role = 'user' THEN 1 ELSE 0 END), 0) as user_message_count,
+            COALESCE(SUM(CASE WHEN role != 'user' THEN 1 ELSE 0 END), 0) as assistant_message_count,
+            MIN(timestamp) as first_timestamp,
+            MAX(timestamp) as last_timestamp
+        FROM bucketed
+        GROUP BY bucket_index
+        ORDER BY bucket_index",
+    )?;
+    let rows = stmt.query_map(
+        (session_id, bucket_count, bucket_count),
+        SessionActivityBucket::from_row,
+    )?;
+    let buckets = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let by_index: HashMap<i64, SessionActivityBucket> = buckets
+        .into_iter()
+        .map(|bucket| (bucket.bucket_index, bucket))
+        .collect();
+
+    let mut data = Vec::new();
+    for bucket_index in 0..bucket_count {
+        data.push(
+            by_index
+                .get(&bucket_index)
+                .cloned()
+                .unwrap_or(SessionActivityBucket {
+                    bucket_index,
+                    start_ordinal: None,
+                    end_ordinal: None,
+                    message_count: 0,
+                    user_message_count: 0,
+                    assistant_message_count: 0,
+                    first_timestamp: None,
+                    last_timestamp: None,
+                }),
+        );
+    }
+
+    let untimestamped_messages = (summary.0 - summary.1).max(0);
+    let navigation_basis = if summary.1 == 0 {
+        "ordinal"
+    } else if untimestamped_messages == 0 {
+        "timestamp"
+    } else {
+        "mixed"
+    };
+
+    Ok(SessionActivity {
+        bucket_count,
+        total_messages: summary.0,
+        first_timestamp: summary.2,
+        last_timestamp: summary.3,
+        timestamped_messages: summary.1,
+        untimestamped_messages,
+        navigation_basis: navigation_basis.to_string(),
+        data,
+    })
+}
+
+pub fn list_pinned_messages(
+    conn: &Connection,
+    params: &PinsListParams,
+) -> rusqlite::Result<Vec<PinnedMessageRow>> {
+    let mut conditions = Vec::new();
+    let mut values: Vec<SqlValue> = Vec::new();
+
+    if let Some(session_id) = params.session_id.as_deref() {
+        conditions.push("p.session_id = ?".to_string());
+        values.push(SqlValue::Text(session_id.to_string()));
+    } else if let Some(project) = params.project.as_deref() {
+        conditions.push("bs.project = ?".to_string());
+        values.push(SqlValue::Text(project.to_string()));
+    }
+
+    let where_sql = if conditions.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", conditions.join(" AND "))
+    };
+    let sql = format!(
+        "SELECT
+            p.id,
+            p.session_id,
+            COALESCE(m.id, p.message_id) as message_id,
+            p.message_ordinal,
+            m.role,
+            m.content,
+            m.timestamp as message_timestamp,
+            p.created_at,
+            bs.project as session_project,
+            bs.agent as session_agent,
+            bs.first_message as session_first_message
+         FROM pinned_messages p
+         LEFT JOIN messages m
+           ON m.session_id = p.session_id
+          AND m.ordinal = p.message_ordinal
+         LEFT JOIN browsing_sessions bs
+           ON bs.id = p.session_id
+         {where_sql}
+         ORDER BY p.created_at DESC, p.id DESC"
+    );
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), PinnedMessageRow::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+fn get_pin_message_lookup(
+    conn: &Connection,
+    session_id: &str,
+    message_id: i64,
+) -> rusqlite::Result<Option<(i64, i64)>> {
+    let mut stmt = conn.prepare(
+        "SELECT id, ordinal
+         FROM messages
+         WHERE session_id = ?1 AND id = ?2",
+    )?;
+    let mut rows = stmt.query((session_id, message_id))?;
+    match rows.next()? {
+        Some(row) => Ok(Some((row.get(0)?, row.get(1)?))),
+        None => Ok(None),
+    }
+}
+
+pub fn pin_message(
+    conn: &Connection,
+    session_id: &str,
+    message_id: i64,
+) -> rusqlite::Result<Option<PinnedMessageRow>> {
+    let Some((current_message_id, message_ordinal)) =
+        get_pin_message_lookup(conn, session_id, message_id)?
+    else {
+        return Ok(None);
+    };
+
+    conn.execute(
+        "INSERT INTO pinned_messages (session_id, message_id, message_ordinal)
+         VALUES (?1, ?2, ?3)
+         ON CONFLICT(session_id, message_ordinal)
+         DO UPDATE SET message_id = excluded.message_id",
+        (session_id, current_message_id, message_ordinal),
+    )?;
+
+    let mut stmt = conn.prepare(
+        "SELECT
+            p.id,
+            p.session_id,
+            m.id as message_id,
+            p.message_ordinal,
+            m.role,
+            m.content,
+            m.timestamp as message_timestamp,
+            p.created_at,
+            bs.project as session_project,
+            bs.agent as session_agent,
+            bs.first_message as session_first_message
+         FROM pinned_messages p
+         LEFT JOIN messages m
+           ON m.session_id = p.session_id
+          AND m.ordinal = p.message_ordinal
+         LEFT JOIN browsing_sessions bs
+           ON bs.id = p.session_id
+         WHERE p.session_id = ?1 AND p.message_ordinal = ?2",
+    )?;
+    let mut rows = stmt.query((session_id, message_ordinal))?;
+    match rows.next()? {
+        Some(row) => Ok(Some(PinnedMessageRow::from_row(row)?)),
+        None => Ok(None),
+    }
+}
+
+pub fn unpin_message(
+    conn: &Connection,
+    session_id: &str,
+    message_id: i64,
+) -> rusqlite::Result<(bool, Option<i64>)> {
+    if let Some((_, message_ordinal)) = get_pin_message_lookup(conn, session_id, message_id)? {
+        let removed = conn.execute(
+            "DELETE FROM pinned_messages
+             WHERE session_id = ?1 AND message_ordinal = ?2",
+            (session_id, message_ordinal),
+        )? > 0;
+        return Ok((removed, Some(message_ordinal)));
+    }
+
+    let stored_pin = conn
+        .query_row(
+            "SELECT message_ordinal
+             FROM pinned_messages
+             WHERE session_id = ?1 AND message_id = ?2",
+            (session_id, message_id),
+            |row| row.get::<_, i64>(0),
+        )
+        .ok();
+
+    let removed = conn.execute(
+        "DELETE FROM pinned_messages
+         WHERE session_id = ?1 AND message_id = ?2",
+        (session_id, message_id),
+    )? > 0;
+    Ok((removed, stored_pin))
 }
 
 pub fn list_live_sessions(
@@ -515,10 +879,12 @@ pub fn list_live_sessions(
             last.last_item_at
                 .as_ref()
                 .or(last.started_at.as_ref())
-                .map(|sort_at| encode_time_cursor(TimeCursor {
-                    sort_at: sort_at.clone(),
-                    id: last.id.clone(),
-                }))
+                .map(|sort_at| {
+                    encode_time_cursor(TimeCursor {
+                        sort_at: sort_at.clone(),
+                        id: last.id.clone(),
+                    })
+                })
         })
         .filter(|_| data.len() as i64 == limit);
 
@@ -561,12 +927,21 @@ pub fn get_session_items(
     if !params.kinds.is_empty() {
         conditions.push(format!(
             "kind IN ({})",
-            params.kinds.iter().map(|_| "?").collect::<Vec<_>>().join(", ")
+            params
+                .kinds
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(", ")
         ));
         values.extend(params.kinds.iter().cloned().map(SqlValue::Text));
     }
 
-    if let Some(cursor) = params.cursor.as_deref().and_then(|raw| raw.parse::<i64>().ok()) {
+    if let Some(cursor) = params
+        .cursor
+        .as_deref()
+        .and_then(|raw| raw.parse::<i64>().ok())
+    {
         conditions.push("id > ?".into());
         values.push(SqlValue::Integer(cursor));
     }
@@ -603,6 +978,10 @@ pub fn search_messages(
     params: &SearchParams,
 ) -> rusqlite::Result<SearchResultPage> {
     let limit = params.limit.unwrap_or(20).clamp(1, 100);
+    let sort = match params.sort.as_deref() {
+        Some("relevance") => "relevance",
+        _ => "recent",
+    };
     let mut conditions: Vec<String> = Vec::new();
     let mut values: Vec<SqlValue> = Vec::new();
 
@@ -623,7 +1002,10 @@ pub fn search_messages(
 
     let mut count_params = vec![SqlValue::Text(params.q.clone())];
     count_params.extend(values.clone());
-    let count_refs: Vec<&dyn ToSql> = count_params.iter().map(|value| value as &dyn ToSql).collect();
+    let count_refs: Vec<&dyn ToSql> = count_params
+        .iter()
+        .map(|value| value as &dyn ToSql)
+        .collect();
     let count_sql = format!(
         "SELECT COUNT(*)
          FROM messages_fts
@@ -633,41 +1015,119 @@ pub fn search_messages(
     );
     let total: i64 = conn.query_row(&count_sql, count_refs.as_slice(), |row| row.get(0))?;
 
-    let cursor_value = params.cursor.as_deref().and_then(|raw| raw.parse::<i64>().ok());
-    let offset_condition = if cursor_value.is_some() {
-        " AND m.id < ?"
-    } else {
-        ""
-    };
-    let mut query_params = vec![SqlValue::Text(params.q.clone())];
-    query_params.extend(values);
-    if let Some(cursor) = cursor_value {
-        query_params.push(SqlValue::Integer(cursor));
-    }
-    query_params.push(SqlValue::Integer(limit));
+    let (data, cursor) = if sort == "relevance" {
+        let cursor_state = decode_relevance_cursor(params.cursor.as_deref());
+        let offset_condition = if cursor_state.is_some() {
+            " AND (
+                bm25(messages_fts) > ?
+                OR (bm25(messages_fts) = ? AND m.id < ?)
+            )"
+        } else {
+            ""
+        };
+        let mut query_params = vec![SqlValue::Text(params.q.clone())];
+        query_params.extend(values.clone());
+        if let Some(cursor_state) = cursor_state {
+            query_params.push(SqlValue::Real(cursor_state.rank));
+            query_params.push(SqlValue::Real(cursor_state.rank));
+            query_params.push(SqlValue::Integer(cursor_state.message_id));
+        }
+        query_params.push(SqlValue::Integer(limit));
 
-    let sql = format!(
-        "SELECT
-            m.session_id,
-            m.id as message_id,
-            m.ordinal as message_ordinal,
-            m.role as message_role,
-            snippet(messages_fts, 0, '<mark>', '</mark>', '...', 20) as snippet
-         FROM messages_fts
-         JOIN messages m ON m.rowid = messages_fts.rowid
-         JOIN browsing_sessions bs ON bs.id = m.session_id
-         WHERE messages_fts MATCH ?{join_filter}{offset_condition}
-         ORDER BY m.id DESC
-         LIMIT ?"
-    );
-    let query_refs: Vec<&dyn ToSql> = query_params.iter().map(|value| value as &dyn ToSql).collect();
-    let mut stmt = conn.prepare(&sql)?;
-    let rows = stmt.query_map(query_refs.as_slice(), SearchResultRow::from_row)?;
-    let data = rows.collect::<rusqlite::Result<Vec<_>>>()?;
-    let cursor = data
-        .last()
-        .map(|row| row.message_id.to_string())
-        .filter(|_| data.len() as i64 == limit);
+        let sql = format!(
+            "SELECT
+                m.session_id,
+                m.id as message_id,
+                m.ordinal as message_ordinal,
+                m.role as message_role,
+                snippet(messages_fts, 0, '<mark>', '</mark>', '...', 20) as snippet,
+                bs.project as session_project,
+                bs.agent as session_agent,
+                bs.started_at as session_started_at,
+                bs.ended_at as session_ended_at,
+                bs.first_message as session_first_message,
+                bm25(messages_fts) as search_rank
+             FROM messages_fts
+             JOIN messages m ON m.rowid = messages_fts.rowid
+             JOIN browsing_sessions bs ON bs.id = m.session_id
+             WHERE messages_fts MATCH ?{join_filter}{offset_condition}
+             ORDER BY search_rank ASC, m.id DESC
+             LIMIT ?"
+        );
+        let query_refs: Vec<&dyn ToSql> = query_params
+            .iter()
+            .map(|value| value as &dyn ToSql)
+            .collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(query_refs.as_slice(), |row| {
+            Ok((
+                SearchResultRow::from_row(row)?,
+                row.get::<_, Option<f64>>("search_rank")?,
+            ))
+        })?;
+        let ranked = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let cursor = ranked
+            .last()
+            .and_then(|(row, rank)| {
+                rank.map(|rank| {
+                    encode_relevance_cursor(RelevanceCursor {
+                        rank,
+                        message_id: row.message_id,
+                    })
+                })
+            })
+            .filter(|_| ranked.len() as i64 == limit);
+        let data = ranked.into_iter().map(|(row, _)| row).collect::<Vec<_>>();
+        (data, cursor)
+    } else {
+        let cursor_value = params
+            .cursor
+            .as_deref()
+            .and_then(|raw| raw.parse::<i64>().ok());
+        let offset_condition = if cursor_value.is_some() {
+            " AND m.id < ?"
+        } else {
+            ""
+        };
+        let mut query_params = vec![SqlValue::Text(params.q.clone())];
+        query_params.extend(values);
+        if let Some(cursor) = cursor_value {
+            query_params.push(SqlValue::Integer(cursor));
+        }
+        query_params.push(SqlValue::Integer(limit));
+
+        let sql = format!(
+            "SELECT
+                m.session_id,
+                m.id as message_id,
+                m.ordinal as message_ordinal,
+                m.role as message_role,
+                snippet(messages_fts, 0, '<mark>', '</mark>', '...', 20) as snippet,
+                bs.project as session_project,
+                bs.agent as session_agent,
+                bs.started_at as session_started_at,
+                bs.ended_at as session_ended_at,
+                bs.first_message as session_first_message
+             FROM messages_fts
+             JOIN messages m ON m.rowid = messages_fts.rowid
+             JOIN browsing_sessions bs ON bs.id = m.session_id
+             WHERE messages_fts MATCH ?{join_filter}{offset_condition}
+             ORDER BY m.id DESC
+             LIMIT ?"
+        );
+        let query_refs: Vec<&dyn ToSql> = query_params
+            .iter()
+            .map(|value| value as &dyn ToSql)
+            .collect();
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(query_refs.as_slice(), SearchResultRow::from_row)?;
+        let data = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+        let cursor = data
+            .last()
+            .map(|row| row.message_id.to_string())
+            .filter(|_| data.len() as i64 == limit);
+        (data, cursor)
+    };
 
     Ok(SearchResultPage {
         data,
@@ -983,6 +1443,17 @@ fn decode_time_cursor(cursor: Option<&str>) -> Option<TimeCursor> {
             id: "\u{ffff}".to_string(),
         }),
     }
+}
+
+fn encode_relevance_cursor(cursor: RelevanceCursor) -> String {
+    let json = serde_json::to_vec(&cursor).unwrap_or_default();
+    URL_SAFE_NO_PAD.encode(json)
+}
+
+fn decode_relevance_cursor(cursor: Option<&str>) -> Option<RelevanceCursor> {
+    let cursor = cursor?;
+    let bytes = URL_SAFE_NO_PAD.decode(cursor).ok()?;
+    serde_json::from_slice::<RelevanceCursor>(&bytes).ok()
 }
 
 fn day_span(earliest: &str, latest: &str) -> Option<i64> {

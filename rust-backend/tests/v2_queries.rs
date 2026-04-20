@@ -2,11 +2,12 @@ use std::path::Path;
 
 use agentmonitor_rs::db;
 use agentmonitor_rs::db::v2_queries::{
-    AnalyticsParams, LiveItemsListParams, LiveSessionsListParams, MessagesListParams, SearchParams,
-    SessionsListParams, get_analytics_summary, get_analytics_tools, get_browsing_session,
-    get_distinct_agents, get_distinct_projects, get_live_session, get_session_children,
-    get_session_items, get_session_messages, get_session_turns, list_browsing_sessions,
-    list_live_sessions, search_messages,
+    AnalyticsParams, LiveItemsListParams, LiveSessionsListParams, MessagesListParams,
+    PinsListParams, SearchParams, SessionsListParams, get_analytics_summary, get_analytics_tools,
+    get_browsing_session, get_distinct_agents, get_distinct_projects, get_live_session,
+    get_session_activity, get_session_children, get_session_items, get_session_messages,
+    get_session_turns, list_browsing_sessions, list_live_sessions, list_pinned_messages,
+    pin_message, search_messages, unpin_message,
 };
 
 fn setup_db() -> rusqlite::Connection {
@@ -85,8 +86,55 @@ fn seed_historical_v2(conn: &rusqlite::Connection) {
         [],
     )
     .unwrap();
-    conn.execute("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')", [])
-        .unwrap();
+    conn.execute(
+        "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+        [],
+    )
+    .unwrap();
+}
+
+fn seed_relevance_history(conn: &rusqlite::Connection) {
+    conn.execute(
+        "INSERT INTO browsing_sessions (
+            id, project, agent, first_message, started_at, ended_at, message_count, user_message_count,
+            parent_session_id, relationship_type, live_status, last_item_at, integration_mode, fidelity,
+            capabilities_json, file_path, file_size, file_hash
+        ) VALUES
+        (
+            'sess-rank-dense', 'project-alpha', 'claude', 'rankmagic dense', '2026-04-10T10:00:00Z', '2026-04-10T10:05:00Z',
+            1, 1, NULL, NULL, 'ended', '2026-04-10T10:05:00Z', 'claude-jsonl', 'full',
+            '{\"history\":\"full\",\"search\":\"full\",\"tool_analytics\":\"full\",\"live_items\":\"full\"}',
+            '/tmp/sess-rank-dense.jsonl', 111, 'hash-rank-dense'
+        ),
+        (
+            'sess-rank-medium', 'project-alpha', 'claude', 'rankmagic medium', '2026-04-10T10:30:00Z', '2026-04-10T10:35:00Z',
+            1, 1, NULL, NULL, 'ended', '2026-04-10T10:35:00Z', 'claude-jsonl', 'full',
+            '{\"history\":\"full\",\"search\":\"full\",\"tool_analytics\":\"full\",\"live_items\":\"full\"}',
+            '/tmp/sess-rank-medium.jsonl', 113, 'hash-rank-medium'
+        ),
+        (
+            'sess-rank-thin', 'project-alpha', 'claude', 'rankmagic thin', '2026-04-10T11:00:00Z', '2026-04-10T11:02:00Z',
+            1, 1, NULL, NULL, 'ended', '2026-04-10T11:02:00Z', 'claude-jsonl', 'full',
+            '{\"history\":\"full\",\"search\":\"full\",\"tool_analytics\":\"full\",\"live_items\":\"full\"}',
+            '/tmp/sess-rank-thin.jsonl', 112, 'hash-rank-thin'
+        )",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO messages (id, session_id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length)
+         VALUES
+         (10, 'sess-rank-dense', 0, 'user', 'rankmagic rankmagic rankmagic rankmagic', '2026-04-10T10:00:00Z', 0, 0, 36),
+         (11, 'sess-rank-medium', 0, 'user', 'rankmagic rankmagic', '2026-04-10T10:30:00Z', 0, 0, 20),
+         (12, 'sess-rank-thin', 0, 'user', 'rankmagic once', '2026-04-10T11:00:00Z', 0, 0, 14)",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+        [],
+    )
+    .unwrap();
 }
 
 #[test]
@@ -150,20 +198,134 @@ fn message_search_and_metadata_queries_work() {
             q: "Needle".into(),
             project: Some("project-alpha".into()),
             agent: Some("claude".into()),
+            sort: Some("recent".into()),
             ..Default::default()
         },
     )
     .unwrap();
     assert!(search.total >= 1);
-    assert!(search
-        .data
-        .iter()
-        .any(|row| row.session_id == "sess-a" && row.snippet.contains("<mark>")));
+    assert!(
+        search
+            .data
+            .iter()
+            .any(|row| row.session_id == "sess-a" && row.snippet.contains("<mark>"))
+    );
+    assert_eq!(
+        search.data[0].session_project.as_deref(),
+        Some("project-alpha")
+    );
+    assert_eq!(search.data[0].session_agent, "claude");
+    assert!(search.data[0].session_first_message.is_some());
 
     let projects = get_distinct_projects(&conn).unwrap();
     let agents = get_distinct_agents(&conn).unwrap();
     assert_eq!(projects, vec!["project-alpha".to_string()]);
     assert_eq!(agents, vec!["claude".to_string()]);
+}
+
+#[test]
+fn session_activity_and_pin_queries_work() {
+    let conn = setup_db();
+    seed_historical_v2(&conn);
+
+    let activity = get_session_activity(&conn, "sess-a").unwrap();
+    assert_eq!(activity.total_messages, 4);
+    assert_eq!(activity.timestamped_messages, 4);
+    assert_eq!(activity.untimestamped_messages, 0);
+    assert_eq!(activity.navigation_basis, "timestamp");
+    assert_eq!(activity.bucket_count, 8);
+    assert_eq!(activity.data.len(), 8);
+    assert_eq!(activity.data[0].start_ordinal, Some(0));
+
+    let pinned = pin_message(&conn, "sess-a", 1)
+        .unwrap()
+        .expect("expected pin");
+    assert_eq!(pinned.session_id, "sess-a");
+    assert_eq!(pinned.message_id, Some(1));
+    assert_eq!(pinned.message_ordinal, 0);
+    assert_eq!(pinned.session_project.as_deref(), Some("project-alpha"));
+
+    let session_pins = list_pinned_messages(
+        &conn,
+        &PinsListParams {
+            session_id: Some("sess-a".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(session_pins.len(), 1);
+    assert_eq!(session_pins[0].message_ordinal, 0);
+
+    let project_pins = list_pinned_messages(
+        &conn,
+        &PinsListParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(project_pins.len(), 1);
+
+    conn.execute(
+        "DELETE FROM messages WHERE session_id = 'sess-a' AND ordinal = 0",
+        [],
+    )
+    .unwrap();
+
+    let orphaned = list_pinned_messages(
+        &conn,
+        &PinsListParams {
+            session_id: Some("sess-a".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(orphaned[0].message_id, Some(1));
+    assert_eq!(orphaned[0].role, None);
+    assert_eq!(orphaned[0].content, None);
+
+    let unpinned = unpin_message(&conn, "sess-a", 1).unwrap();
+    assert_eq!(unpinned, (true, Some(0)));
+}
+
+#[test]
+fn relevance_search_prefers_denser_matches_and_returns_cursor() {
+    let conn = setup_db();
+    seed_relevance_history(&conn);
+
+    let search = search_messages(
+        &conn,
+        &SearchParams {
+            q: "rankmagic".into(),
+            project: Some("project-alpha".into()),
+            agent: Some("claude".into()),
+            sort: Some("relevance".into()),
+            limit: Some(2),
+            cursor: None,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(search.total, 3);
+    assert_eq!(search.data.len(), 2);
+    assert_eq!(search.data[0].session_id, "sess-rank-dense");
+    assert!(search.cursor.is_some());
+
+    let next_page = search_messages(
+        &conn,
+        &SearchParams {
+            q: "rankmagic".into(),
+            project: Some("project-alpha".into()),
+            agent: Some("claude".into()),
+            sort: Some("relevance".into()),
+            limit: Some(2),
+            cursor: search.cursor,
+        },
+    )
+    .unwrap();
+
+    assert_eq!(next_page.data.len(), 1);
+    assert_eq!(next_page.data[0].session_id, "sess-rank-thin");
 }
 
 #[test]
@@ -236,5 +398,10 @@ fn live_queries_return_sessions_turns_and_items() {
     .unwrap();
     assert_eq!(items.total, 4);
     assert_eq!(items.data.len(), 2);
-    assert!(items.data.iter().all(|item| matches!(item.kind.as_str(), "reasoning" | "tool_call")));
+    assert!(
+        items
+            .data
+            .iter()
+            .all(|item| matches!(item.kind.as_str(), "reasoning" | "tool_call"))
+    );
 }
