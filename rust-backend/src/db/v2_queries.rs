@@ -478,6 +478,224 @@ impl AgentComparisonRow {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageSourceBreakdown {
+    pub source: String,
+    pub event_count: i64,
+    pub usage_event_count: i64,
+    pub session_count: i64,
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+}
+
+impl UsageSourceBreakdown {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            source: row.get("source")?,
+            event_count: row.get("event_count")?,
+            usage_event_count: row.get("usage_event_count")?,
+            session_count: row.get("session_count")?,
+            cost_usd: row.get("cost_usd")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_write_tokens: row.get("cache_write_tokens")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageCoverage {
+    pub metric_scope: String,
+    pub matching_events: i64,
+    pub usage_events: i64,
+    pub missing_usage_events: i64,
+    pub matching_sessions: i64,
+    pub usage_sessions: i64,
+    pub sources_with_usage: i64,
+    pub source_breakdown: Vec<UsageSourceBreakdown>,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageSummary {
+    pub total_cost_usd: f64,
+    pub total_input_tokens: i64,
+    pub total_output_tokens: i64,
+    pub total_cache_read_tokens: i64,
+    pub total_cache_write_tokens: i64,
+    pub total_usage_events: i64,
+    pub total_sessions: i64,
+    pub active_days: i64,
+    pub span_days: i64,
+    pub average_cost_per_active_day: f64,
+    pub average_cost_per_session: f64,
+    pub peak_day: UsagePeakDay,
+    pub coverage: UsageCoverage,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsagePeakDay {
+    pub date: Option<String>,
+    pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageDailyPoint {
+    pub date: String,
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub usage_events: i64,
+    pub session_count: i64,
+}
+
+impl UsageDailyPoint {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            date: row.get("date")?,
+            cost_usd: row.get("cost_usd")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_write_tokens: row.get("cache_write_tokens")?,
+            usage_events: row.get("usage_events")?,
+            session_count: row.get("session_count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageProjectBreakdown {
+    pub project: String,
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub usage_events: i64,
+    pub session_count: i64,
+}
+
+impl UsageProjectBreakdown {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            project: row.get("project")?,
+            cost_usd: row.get("cost_usd")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_write_tokens: row.get("cache_write_tokens")?,
+            usage_events: row.get("usage_events")?,
+            session_count: row.get("session_count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageModelBreakdown {
+    pub model: String,
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub usage_events: i64,
+    pub session_count: i64,
+}
+
+impl UsageModelBreakdown {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            model: row.get("model")?,
+            cost_usd: row.get("cost_usd")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_write_tokens: row.get("cache_write_tokens")?,
+            usage_events: row.get("usage_events")?,
+            session_count: row.get("session_count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageAgentBreakdown {
+    pub agent: String,
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub usage_events: i64,
+    pub session_count: i64,
+}
+
+impl UsageAgentBreakdown {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            agent: row.get("agent")?,
+            cost_usd: row.get("cost_usd")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_write_tokens: row.get("cache_write_tokens")?,
+            usage_events: row.get("usage_events")?,
+            session_count: row.get("session_count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct UsageTopSessionRow {
+    pub id: String,
+    pub project: Option<String>,
+    pub agent: String,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub last_activity_at: Option<String>,
+    pub message_count: Option<i64>,
+    pub user_message_count: Option<i64>,
+    pub fidelity: Option<String>,
+    pub cost_usd: f64,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub event_count: i64,
+    pub usage_events: i64,
+    pub browsing_session_available: bool,
+}
+
+impl UsageTopSessionRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            project: row.get("project")?,
+            agent: row.get("agent")?,
+            started_at: row.get("started_at")?,
+            ended_at: row.get("ended_at")?,
+            last_activity_at: row.get("last_activity_at")?,
+            message_count: row.get("message_count")?,
+            user_message_count: row.get("user_message_count")?,
+            fidelity: row.get("fidelity")?,
+            cost_usd: row.get("cost_usd")?,
+            input_tokens: row.get("input_tokens")?,
+            output_tokens: row.get("output_tokens")?,
+            cache_read_tokens: row.get("cache_read_tokens")?,
+            cache_write_tokens: row.get("cache_write_tokens")?,
+            event_count: row.get("event_count")?,
+            usage_events: row.get("usage_events")?,
+            browsing_session_available: row.get::<_, i64>("browsing_session_available")? == 1,
+        })
+    }
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SessionsListParams {
     pub limit: Option<i64>,
@@ -1583,6 +1801,348 @@ pub fn get_analytics_agents(
     rows.collect::<rusqlite::Result<Vec<_>>>()
 }
 
+pub fn get_usage_coverage(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<UsageCoverage> {
+    let (where_sql, values) = usage_where(params, Some("e"));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let metrics_condition = usage_metrics_condition(Some("e"));
+
+    let summary_sql = format!(
+        "SELECT
+            COUNT(*) as matching_events,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN 1 ELSE 0 END), 0) as usage_events,
+            COUNT(DISTINCT e.session_id) as matching_sessions,
+            COUNT(DISTINCT CASE WHEN {metrics_condition} THEN e.session_id END) as usage_sessions
+         FROM events e
+         {where_sql}"
+    );
+    let summary = conn.query_row(&summary_sql, refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, i64>("matching_events")?,
+            row.get::<_, i64>("usage_events")?,
+            row.get::<_, i64>("matching_sessions")?,
+            row.get::<_, i64>("usage_sessions")?,
+        ))
+    })?;
+
+    let source_sql = format!(
+        "SELECT
+            COALESCE(NULLIF(e.source, ''), 'api') as source,
+            COUNT(*) as event_count,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN 1 ELSE 0 END), 0) as usage_event_count,
+            COUNT(DISTINCT CASE WHEN {metrics_condition} THEN e.session_id END) as session_count,
+            ROUND(COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.cost_usd ELSE 0 END), 0), 6) as cost_usd,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.tokens_in ELSE 0 END), 0) as input_tokens,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.tokens_out ELSE 0 END), 0) as output_tokens,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.cache_read_tokens ELSE 0 END), 0) as cache_read_tokens,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.cache_write_tokens ELSE 0 END), 0) as cache_write_tokens
+         FROM events e
+         {where_sql}
+         GROUP BY source
+         ORDER BY source ASC"
+    );
+    let mut stmt = conn.prepare(&source_sql)?;
+    let rows = stmt.query_map(refs.as_slice(), UsageSourceBreakdown::from_row)?;
+    let source_breakdown = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+    let sources_with_usage = source_breakdown
+        .iter()
+        .filter(|row| row.usage_event_count > 0)
+        .count() as i64;
+
+    Ok(UsageCoverage {
+        metric_scope: "event_usage".to_string(),
+        matching_events: summary.0,
+        usage_events: summary.1,
+        missing_usage_events: (summary.0 - summary.1).max(0),
+        matching_sessions: summary.2,
+        usage_sessions: summary.3,
+        sources_with_usage,
+        source_breakdown,
+        note: "Usage is derived from ingested events with cost or token data. Sessions without usage-bearing events are excluded from totals but still reflected in coverage.".to_string(),
+    })
+}
+
+pub fn get_usage_summary(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<UsageSummary> {
+    let (where_sql, values) = usage_where(params, Some("e"));
+    let usage_where = append_usage_metrics_condition(where_sql, Some("e"));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let timestamp_expr = usage_timestamp_expr(Some("e"));
+
+    let summary_sql = format!(
+        "SELECT
+            ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as total_cost_usd,
+            COALESCE(SUM(e.tokens_in), 0) as total_input_tokens,
+            COALESCE(SUM(e.tokens_out), 0) as total_output_tokens,
+            COALESCE(SUM(e.cache_read_tokens), 0) as total_cache_read_tokens,
+            COALESCE(SUM(e.cache_write_tokens), 0) as total_cache_write_tokens,
+            COUNT(*) as total_usage_events,
+            COUNT(DISTINCT e.session_id) as total_sessions,
+            COUNT(DISTINCT date({timestamp_expr})) as active_days,
+            MIN({timestamp_expr}) as earliest,
+            MAX({timestamp_expr}) as latest
+         FROM events e
+         {usage_where}"
+    );
+    let row = conn.query_row(&summary_sql, refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, f64>("total_cost_usd")?,
+            row.get::<_, i64>("total_input_tokens")?,
+            row.get::<_, i64>("total_output_tokens")?,
+            row.get::<_, i64>("total_cache_read_tokens")?,
+            row.get::<_, i64>("total_cache_write_tokens")?,
+            row.get::<_, i64>("total_usage_events")?,
+            row.get::<_, i64>("total_sessions")?,
+            row.get::<_, i64>("active_days")?,
+            row.get::<_, Option<String>>("earliest")?,
+            row.get::<_, Option<String>>("latest")?,
+        ))
+    })?;
+
+    let peak_sql = format!(
+        "SELECT
+            date({timestamp_expr}) as date,
+            ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd
+         FROM events e
+         {usage_where}
+         GROUP BY date({timestamp_expr})
+         ORDER BY cost_usd DESC, date DESC
+         LIMIT 1"
+    );
+    let peak_day = conn
+        .query_row(&peak_sql, refs.as_slice(), |row| {
+            Ok(UsagePeakDay {
+                date: row.get("date")?,
+                cost_usd: row.get("cost_usd")?,
+            })
+        })
+        .unwrap_or(UsagePeakDay {
+            date: None,
+            cost_usd: 0.0,
+        });
+
+    let span_days = match (&row.8, &row.9) {
+        (Some(earliest), Some(latest)) => day_span(earliest, latest).unwrap_or(0).max(1),
+        _ => 0,
+    };
+
+    Ok(UsageSummary {
+        total_cost_usd: row.0,
+        total_input_tokens: row.1,
+        total_output_tokens: row.2,
+        total_cache_read_tokens: row.3,
+        total_cache_write_tokens: row.4,
+        total_usage_events: row.5,
+        total_sessions: row.6,
+        active_days: if row.5 > 0 { row.7 } else { 0 },
+        span_days,
+        average_cost_per_active_day: if row.5 > 0 {
+            round_metric(row.0 / row.7.max(1) as f64)
+        } else {
+            0.0
+        },
+        average_cost_per_session: if row.6 > 0 {
+            round_metric(row.0 / row.6 as f64)
+        } else {
+            0.0
+        },
+        peak_day,
+        coverage: get_usage_coverage(conn, params)?,
+    })
+}
+
+pub fn get_usage_daily(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<UsageDailyPoint>> {
+    let (where_sql, values) = usage_where(params, Some("e"));
+    let usage_where = append_usage_metrics_condition(where_sql, Some("e"));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let timestamp_expr = usage_timestamp_expr(Some("e"));
+
+    let sql = format!(
+        "SELECT
+            date({timestamp_expr}) as date,
+            ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+            COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+            COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+            COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+            COUNT(*) as usage_events,
+            COUNT(DISTINCT e.session_id) as session_count
+         FROM events e
+         {usage_where}
+         GROUP BY date({timestamp_expr})
+         ORDER BY date ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), UsageDailyPoint::from_row)?;
+    let raw = rows.collect::<rusqlite::Result<Vec<_>>>()?;
+
+    let bounds = resolve_usage_date_bounds(
+        params,
+        raw.first().map(|row| row.date.as_str()),
+        raw.last().map(|row| row.date.as_str()),
+    );
+    let Some((from, to)) = bounds else {
+        return Ok(raw);
+    };
+
+    let by_date = raw
+        .into_iter()
+        .map(|row| (row.date.clone(), row))
+        .collect::<HashMap<_, _>>();
+    let mut data = Vec::new();
+    for date in enumerate_date_range(from, to) {
+        data.push(by_date.get(&date).cloned().unwrap_or(UsageDailyPoint {
+            date,
+            cost_usd: 0.0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            usage_events: 0,
+            session_count: 0,
+        }));
+    }
+    Ok(data)
+}
+
+pub fn get_usage_projects(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<UsageProjectBreakdown>> {
+    let (where_sql, values) = usage_where(params, Some("e"));
+    let usage_where = append_usage_metrics_condition(where_sql, Some("e"));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let project_expr = usage_project_expr(Some("e"));
+
+    let sql = format!(
+        "SELECT
+            {project_expr} as project,
+            ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+            COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+            COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+            COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+            COUNT(*) as usage_events,
+            COUNT(DISTINCT e.session_id) as session_count
+         FROM events e
+         {usage_where}
+         GROUP BY project
+         ORDER BY cost_usd DESC, input_tokens DESC, project ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), UsageProjectBreakdown::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+pub fn get_usage_models(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<UsageModelBreakdown>> {
+    let (where_sql, values) = usage_where(params, Some("e"));
+    let usage_where = append_usage_metrics_condition(where_sql, Some("e"));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let model_expr = usage_model_expr(Some("e"));
+
+    let sql = format!(
+        "SELECT
+            {model_expr} as model,
+            ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+            COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+            COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+            COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+            COUNT(*) as usage_events,
+            COUNT(DISTINCT e.session_id) as session_count
+         FROM events e
+         {usage_where}
+         GROUP BY model
+         ORDER BY cost_usd DESC, input_tokens DESC, model ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), UsageModelBreakdown::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+pub fn get_usage_agents(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<UsageAgentBreakdown>> {
+    let (where_sql, values) = usage_where(params, Some("e"));
+    let usage_where = append_usage_metrics_condition(where_sql, Some("e"));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let agent_expr = usage_agent_expr(Some("e"));
+
+    let sql = format!(
+        "SELECT
+            {agent_expr} as agent,
+            ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
+            COALESCE(SUM(e.tokens_in), 0) as input_tokens,
+            COALESCE(SUM(e.tokens_out), 0) as output_tokens,
+            COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+            COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+            COUNT(*) as usage_events,
+            COUNT(DISTINCT e.session_id) as session_count
+         FROM events e
+         {usage_where}
+         GROUP BY agent
+         ORDER BY cost_usd DESC, input_tokens DESC, agent ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), UsageAgentBreakdown::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+pub fn get_usage_top_sessions(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<UsageTopSessionRow>> {
+    let limit = params.limit.unwrap_or(10).clamp(1, 50);
+    let (where_sql, mut values) = usage_where(params, Some("e"));
+    values.push(SqlValue::Integer(limit));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let metrics_condition = usage_metrics_condition(Some("e"));
+    let timestamp_expr = usage_timestamp_expr(Some("e"));
+
+    let sql = format!(
+        "SELECT
+            e.session_id as id,
+            COALESCE(MAX(NULLIF(e.project, '')), MAX(bs.project), MAX(s.project)) as project,
+            COALESCE(MAX(e.agent_type), MAX(s.agent_type), MAX(bs.agent)) as agent,
+            COALESCE(MAX(bs.started_at), MAX(s.started_at), MIN({timestamp_expr})) as started_at,
+            COALESCE(MAX(bs.ended_at), MAX(s.ended_at), MAX({timestamp_expr})) as ended_at,
+            MAX({timestamp_expr}) as last_activity_at,
+            MAX(bs.message_count) as message_count,
+            MAX(bs.user_message_count) as user_message_count,
+            MAX(bs.fidelity) as fidelity,
+            ROUND(COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.cost_usd ELSE 0 END), 0), 6) as cost_usd,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.tokens_in ELSE 0 END), 0) as input_tokens,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.tokens_out ELSE 0 END), 0) as output_tokens,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.cache_read_tokens ELSE 0 END), 0) as cache_read_tokens,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN e.cache_write_tokens ELSE 0 END), 0) as cache_write_tokens,
+            COUNT(*) as event_count,
+            COALESCE(SUM(CASE WHEN {metrics_condition} THEN 1 ELSE 0 END), 0) as usage_events,
+            CASE WHEN MAX(bs.id) IS NULL THEN 0 ELSE 1 END as browsing_session_available
+         FROM events e
+         LEFT JOIN sessions s ON s.id = e.session_id
+         LEFT JOIN browsing_sessions bs ON bs.id = e.session_id
+         {where_sql}
+         GROUP BY e.session_id
+         HAVING COALESCE(SUM(CASE WHEN {metrics_condition} THEN 1 ELSE 0 END), 0) > 0
+         ORDER BY cost_usd DESC, last_activity_at DESC, e.session_id DESC
+         LIMIT ?"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), UsageTopSessionRow::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
 pub fn get_distinct_projects(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT project FROM browsing_sessions WHERE project IS NOT NULL ORDER BY project",
@@ -1877,6 +2437,129 @@ pub fn get_analytics_coverage(
             },
         })
     })
+}
+
+fn usage_timestamp_expr(alias: Option<&str>) -> String {
+    format!(
+        "COALESCE({}, {})",
+        qualify_column(alias, "client_timestamp"),
+        qualify_column(alias, "created_at")
+    )
+}
+
+fn usage_project_expr(alias: Option<&str>) -> String {
+    format!(
+        "COALESCE(NULLIF({}, ''), 'unknown')",
+        qualify_column(alias, "project")
+    )
+}
+
+fn usage_agent_expr(alias: Option<&str>) -> String {
+    qualify_column(alias, "agent_type")
+}
+
+fn usage_model_expr(alias: Option<&str>) -> String {
+    format!(
+        "COALESCE(NULLIF({}, ''), 'unknown')",
+        qualify_column(alias, "model")
+    )
+}
+
+fn usage_metrics_condition(alias: Option<&str>) -> String {
+    format!(
+        "(
+            COALESCE({}, 0) > 0
+            OR COALESCE({}, 0) > 0
+            OR COALESCE({}, 0) > 0
+            OR COALESCE({}, 0) > 0
+            OR COALESCE({}, 0) > 0
+        )",
+        qualify_column(alias, "cost_usd"),
+        qualify_column(alias, "tokens_in"),
+        qualify_column(alias, "tokens_out"),
+        qualify_column(alias, "cache_read_tokens"),
+        qualify_column(alias, "cache_write_tokens"),
+    )
+}
+
+fn usage_where(params: &AnalyticsParams, alias: Option<&str>) -> (String, Vec<SqlValue>) {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut values: Vec<SqlValue> = Vec::new();
+    let timestamp_expr = usage_timestamp_expr(alias);
+
+    if let Some(project) = params.project.as_deref() {
+        conditions.push(format!("{} = ?", usage_project_expr(alias)));
+        values.push(SqlValue::Text(project.to_string()));
+    }
+    if let Some(agent) = params.agent.as_deref() {
+        conditions.push(format!("{} = ?", usage_agent_expr(alias)));
+        values.push(SqlValue::Text(agent.to_string()));
+    }
+    if let Some(date_from) = params.date_from.as_deref() {
+        conditions.push(format!("datetime({timestamp_expr}) >= datetime(?)"));
+        values.push(SqlValue::Text(date_from.to_string()));
+    }
+    if let Some(date_to) = params.date_to.as_deref() {
+        conditions.push(format!(
+            "datetime({timestamp_expr}) < datetime(?, '+1 day')"
+        ));
+        values.push(SqlValue::Text(date_to.to_string()));
+    }
+
+    (where_clause(&conditions), values)
+}
+
+fn append_usage_metrics_condition(where_sql: String, alias: Option<&str>) -> String {
+    if where_sql.is_empty() {
+        format!("WHERE {}", usage_metrics_condition(alias))
+    } else {
+        format!("{where_sql} AND {}", usage_metrics_condition(alias))
+    }
+}
+
+fn resolve_usage_date_bounds(
+    params: &AnalyticsParams,
+    earliest: Option<&str>,
+    latest: Option<&str>,
+) -> Option<(NaiveDate, NaiveDate)> {
+    let from = params
+        .date_from
+        .as_deref()
+        .and_then(parse_date_only)
+        .or_else(|| earliest.and_then(parse_date_only))?;
+    let to = params
+        .date_to
+        .as_deref()
+        .and_then(parse_date_only)
+        .or_else(|| latest.and_then(parse_date_only))?;
+    if from > to {
+        return None;
+    }
+    Some((from, to))
+}
+
+fn parse_date_only(value: &str) -> Option<NaiveDate> {
+    if value.len() >= 10 {
+        NaiveDate::parse_from_str(&value[..10], "%Y-%m-%d").ok()
+    } else {
+        None
+    }
+}
+
+fn enumerate_date_range(from: NaiveDate, to: NaiveDate) -> Vec<String> {
+    let mut dates = Vec::new();
+    let mut cursor = from;
+    while cursor <= to {
+        dates.push(cursor.format("%Y-%m-%d").to_string());
+        cursor = cursor.succ_opt().unwrap_or(cursor);
+        if dates
+            .last()
+            .is_some_and(|last| last == &to.format("%Y-%m-%d").to_string())
+        {
+            break;
+        }
+    }
+    dates
 }
 
 fn where_clause(conditions: &[String]) -> String {

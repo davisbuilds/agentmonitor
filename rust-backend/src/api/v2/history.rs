@@ -12,7 +12,9 @@ use crate::db::v2_queries::{
     get_analytics_hour_of_week, get_analytics_projects, get_analytics_summary, get_analytics_tools,
     get_analytics_top_sessions, get_analytics_velocity, get_browsing_session, get_distinct_agents,
     get_distinct_projects, get_session_activity, get_session_children, get_session_messages,
-    list_browsing_sessions, list_pinned_messages, pin_message, search_messages, unpin_message,
+    get_usage_agents, get_usage_coverage, get_usage_daily, get_usage_models, get_usage_projects,
+    get_usage_summary, get_usage_top_sessions, list_browsing_sessions, list_pinned_messages,
+    pin_message, search_messages, unpin_message,
 };
 use crate::state::AppState;
 
@@ -578,6 +580,171 @@ pub async fn analytics_agents_handler(
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to get agent analytics" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn usage_summary_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_usage_summary(&db, &as_analytics_params(&query)) {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get usage summary" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn usage_daily_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_usage_daily(&db, &params) {
+        Ok(data) => match get_usage_coverage(&db, &params) {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get daily usage" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get daily usage" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn usage_projects_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_usage_projects(&db, &params) {
+        Ok(data) => match get_usage_coverage(&db, &params) {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get usage by project" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get usage by project" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn usage_models_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_usage_models(&db, &params) {
+        Ok(data) => match get_usage_coverage(&db, &params) {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get usage by model" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get usage by model" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn usage_agents_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_usage_agents(&db, &params) {
+        Ok(data) => match get_usage_coverage(&db, &params) {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get usage by agent" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get usage by agent" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn usage_top_sessions_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_usage_top_sessions(&db, &params) {
+        Ok(data) => match get_usage_coverage(&db, &params) {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get top usage sessions" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get top usage sessions" })),
         )
             .into_response(),
     }

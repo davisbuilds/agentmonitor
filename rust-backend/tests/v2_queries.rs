@@ -8,8 +8,9 @@ use agentmonitor_rs::db::v2_queries::{
     get_analytics_summary, get_analytics_tools, get_analytics_top_sessions, get_analytics_velocity,
     get_browsing_session, get_distinct_agents, get_distinct_projects, get_live_session,
     get_session_activity, get_session_children, get_session_items, get_session_messages,
-    get_session_turns, list_browsing_sessions, list_live_sessions, list_pinned_messages,
-    pin_message, search_messages, unpin_message,
+    get_session_turns, get_usage_agents, get_usage_coverage, get_usage_daily, get_usage_models,
+    get_usage_projects, get_usage_summary, get_usage_top_sessions, list_browsing_sessions,
+    list_live_sessions, list_pinned_messages, pin_message, search_messages, unpin_message,
 };
 
 fn setup_db() -> rusqlite::Connection {
@@ -151,6 +152,22 @@ fn seed_analytics_variant(conn: &rusqlite::Connection) {
             NULL,
             '/tmp/sess-summary.jsonl', 80, 'hash-summary'
         )",
+        [],
+    )
+    .unwrap();
+}
+
+fn seed_usage_events(conn: &rusqlite::Connection) {
+    conn.execute(
+        "INSERT INTO events (
+            session_id, agent_type, event_type, status, project, source, client_timestamp,
+            model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd
+        ) VALUES
+        ('sess-a', 'claude', 'llm_response', 'success', 'project-alpha', 'import', '2026-04-09T10:00:00Z', 'claude-sonnet-4', 100, 20, 10, 0, 0.5),
+        ('sess-a', 'claude', 'llm_response', 'success', 'project-alpha', 'import', '2026-04-09T10:10:00Z', 'claude-sonnet-4', 50, 10, 0, 0, 0.25),
+        ('sess-a', 'claude', 'message', 'success', 'project-alpha', 'otel', '2026-04-09T10:15:00Z', NULL, 0, 0, 0, 0, NULL),
+        ('sess-summary', 'codex', 'llm_response', 'success', 'project-alpha', 'otel', '2026-04-10T12:00:00Z', 'gpt-5.4', 80, 40, 5, 0, 0.8),
+        ('live-only-session', 'codex', 'llm_response', 'success', 'project-alpha', 'api', '2026-04-10T13:00:00Z', 'gpt-4.1-mini', 10, 5, 0, 0, 0.1)",
         [],
     )
     .unwrap();
@@ -482,6 +499,121 @@ fn analytics_queries_reflect_historical_projection() {
     assert_eq!(agents[1].agent, "codex");
     assert_eq!(agents[1].summary_fidelity_sessions, 1);
     assert_eq!(agents[1].tool_analytics_capable_sessions, 0);
+}
+
+#[test]
+fn usage_queries_reflect_event_projection() {
+    let conn = setup_db();
+    seed_historical_v2(&conn);
+    seed_analytics_variant(&conn);
+    seed_usage_events(&conn);
+
+    let summary = get_usage_summary(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!((summary.total_cost_usd - 1.65).abs() < 1e-9);
+    assert_eq!(summary.total_input_tokens, 240);
+    assert_eq!(summary.total_output_tokens, 75);
+    assert_eq!(summary.total_cache_read_tokens, 15);
+    assert_eq!(summary.total_usage_events, 4);
+    assert_eq!(summary.total_sessions, 3);
+    assert_eq!(summary.active_days, 2);
+    assert_eq!(summary.span_days, 2);
+    assert!((summary.average_cost_per_active_day - 0.83).abs() < 1e-9);
+    assert!((summary.average_cost_per_session - 0.55).abs() < 1e-9);
+    assert_eq!(summary.peak_day.date.as_deref(), Some("2026-04-10"));
+    assert!((summary.peak_day.cost_usd - 0.9).abs() < 1e-9);
+
+    let coverage = get_usage_coverage(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(coverage.matching_events, 5);
+    assert_eq!(coverage.usage_events, 4);
+    assert_eq!(coverage.missing_usage_events, 1);
+    assert_eq!(coverage.matching_sessions, 3);
+    assert_eq!(coverage.usage_sessions, 3);
+    assert_eq!(coverage.sources_with_usage, 3);
+    assert_eq!(coverage.source_breakdown.len(), 3);
+
+    let daily = get_usage_daily(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(daily.len(), 2);
+    assert_eq!(daily[0].date, "2026-04-09");
+    assert!((daily[0].cost_usd - 0.75).abs() < 1e-9);
+    assert_eq!(daily[0].usage_events, 2);
+    assert_eq!(daily[0].session_count, 1);
+    assert_eq!(daily[1].date, "2026-04-10");
+    assert!((daily[1].cost_usd - 0.9).abs() < 1e-9);
+    assert_eq!(daily[1].session_count, 2);
+
+    let projects = get_usage_projects(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].project, "project-alpha");
+    assert!((projects[0].cost_usd - 1.65).abs() < 1e-9);
+    assert_eq!(projects[0].session_count, 3);
+
+    let models = get_usage_models(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(models.len(), 3);
+    assert_eq!(models[0].model, "gpt-5.4");
+    assert!((models[0].cost_usd - 0.8).abs() < 1e-9);
+
+    let agents = get_usage_agents(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(agents.len(), 2);
+    assert_eq!(agents[0].agent, "codex");
+    assert!((agents[0].cost_usd - 0.9).abs() < 1e-9);
+    assert_eq!(agents[0].session_count, 2);
+
+    let top_sessions = get_usage_top_sessions(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            limit: Some(3),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(top_sessions.len(), 3);
+    assert_eq!(top_sessions[0].id, "sess-summary");
+    assert_eq!(top_sessions[1].id, "sess-a");
+    assert_eq!(top_sessions[2].id, "live-only-session");
+    assert!(!top_sessions[2].browsing_session_available);
 }
 
 #[test]

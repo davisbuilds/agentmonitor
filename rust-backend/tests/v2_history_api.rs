@@ -103,11 +103,27 @@ fn seed_claude_history(root: &Path) {
     );
 }
 
+fn seed_usage_events(conn: &rusqlite::Connection) {
+    conn.execute(
+        "INSERT INTO events (
+            session_id, agent_type, event_type, status, project, source, client_timestamp,
+            model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd
+        ) VALUES
+        ('parity-v2-parent', 'claude', 'llm_response', 'success', 'project-alpha', 'import', '2026-04-09T10:00:00Z', 'claude-sonnet-4', 120, 30, 10, 0, 0.6),
+        ('parity-v2-parent', 'claude', 'message', 'success', 'project-alpha', 'otel', '2026-04-09T10:05:00Z', NULL, 0, 0, 0, 0, NULL),
+        ('agent-child-1', 'claude', 'llm_response', 'success', 'project-alpha', 'otel', '2026-04-09T10:03:00Z', 'claude-sonnet-4', 60, 15, 0, 0, 0.2),
+        ('orphan-usage', 'codex', 'llm_response', 'success', 'project-alpha', 'api', '2026-04-10T11:00:00Z', 'gpt-5.4', 80, 20, 0, 0, 0.9)",
+        [],
+    )
+    .unwrap();
+}
+
 fn test_app() -> axum::Router {
     let conn = setup_db();
     let temp = TempDir::new().expect("temp dir");
     seed_claude_history(temp.path());
     run_import(&conn, &make_options(temp.path().to_path_buf()));
+    seed_usage_events(&conn);
 
     let config = Config::from_env();
     let state: Arc<AppState> = AppState::new(conn, config);
@@ -282,6 +298,50 @@ async fn v2_search_analytics_and_metadata_routes_match_contract() {
     assert_eq!(
         agents_analytics["data"].as_array().unwrap()[0]["agent"],
         "claude"
+    );
+
+    let (usage_summary_status, usage_summary) =
+        get_json(&app, "/api/v2/usage/summary?project=project-alpha").await;
+    assert_eq!(usage_summary_status, 200);
+    assert!((usage_summary["total_cost_usd"].as_f64().unwrap() - 1.7).abs() < 1e-9);
+    assert_eq!(usage_summary["total_usage_events"], 3);
+    assert_eq!(usage_summary["coverage"]["matching_events"], 4);
+
+    let (usage_daily_status, usage_daily) =
+        get_json(&app, "/api/v2/usage/daily?project=project-alpha").await;
+    assert_eq!(usage_daily_status, 200);
+    assert_eq!(usage_daily["data"].as_array().unwrap().len(), 2);
+    assert_eq!(usage_daily["coverage"]["usage_events"], 3);
+
+    let (usage_projects_status, usage_projects) =
+        get_json(&app, "/api/v2/usage/projects?project=project-alpha").await;
+    assert_eq!(usage_projects_status, 200);
+    assert_eq!(usage_projects["data"].as_array().unwrap().len(), 1);
+
+    let (usage_models_status, usage_models) =
+        get_json(&app, "/api/v2/usage/models?project=project-alpha").await;
+    assert_eq!(usage_models_status, 200);
+    assert_eq!(usage_models["data"].as_array().unwrap().len(), 2);
+
+    let (usage_agents_status, usage_agents) =
+        get_json(&app, "/api/v2/usage/agents?project=project-alpha").await;
+    assert_eq!(usage_agents_status, 200);
+    assert_eq!(usage_agents["data"].as_array().unwrap().len(), 2);
+
+    let (usage_top_status, usage_top_sessions) = get_json(
+        &app,
+        "/api/v2/usage/top-sessions?project=project-alpha&limit=3",
+    )
+    .await;
+    assert_eq!(usage_top_status, 200);
+    assert_eq!(usage_top_sessions["data"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        usage_top_sessions["data"].as_array().unwrap()[0]["id"],
+        "orphan-usage"
+    );
+    assert_eq!(
+        usage_top_sessions["data"].as_array().unwrap()[0]["browsing_session_available"],
+        false
     );
 
     let (projects_status, projects) = get_json(&app, "/api/v2/projects").await;
