@@ -146,9 +146,11 @@ async fn otel_logs_user_prompt_extracts_message_from_attributes() {
     let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
     assert_eq!(status, 200);
 
-    let (events_status, body) =
-        get_json(&app, "/api/events?session_id=otel-codex-prompt-attrs&event_type=user_prompt")
-            .await;
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-prompt-attrs&event_type=user_prompt",
+    )
+    .await;
     assert_eq!(events_status, 200);
 
     let events = body["events"].as_array().unwrap();
@@ -185,9 +187,11 @@ async fn otel_logs_user_prompt_keeps_existing_message() {
     let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
     assert_eq!(status, 200);
 
-    let (events_status, body) =
-        get_json(&app, "/api/events?session_id=otel-codex-prompt-existing&event_type=user_prompt")
-            .await;
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-prompt-existing&event_type=user_prompt",
+    )
+    .await;
     assert_eq!(events_status, 200);
 
     let events = body["events"].as_array().unwrap();
@@ -195,6 +199,252 @@ async fn otel_logs_user_prompt_keeps_existing_message() {
     let metadata = parse_event_metadata(&events[0]);
     assert_eq!(metadata["message"], "Keep this");
     assert_eq!(metadata["kind"], "body");
+}
+
+#[tokio::test]
+async fn otel_logs_codex_response_user_message_becomes_user_prompt() {
+    let app = test_app();
+    let session_id = "otel-codex-response-user-message";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"payload\":{\"type\":\"user_message\",\"message\":\"Ship it\"}}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.response" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-response-user-message&event_type=user_prompt",
+    )
+    .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["otel_event_name"], "codex.response");
+    assert_eq!(metadata["response_item_type"], "user_message");
+    assert_eq!(metadata["message"], "Ship it");
+}
+
+#[tokio::test]
+async fn otel_logs_codex_response_assistant_message_is_kept_as_response() {
+    let app = test_app();
+    let session_id = "otel-codex-response-assistant-message";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"payload\":{\"type\":\"assistant_message\",\"text\":\"Hello from Codex\"}}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.response" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-response-assistant-message&event_type=response",
+    )
+    .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["response_item_type"], "assistant_message");
+    assert_eq!(metadata["text"], "Hello from Codex");
+    assert_eq!(metadata["content_preview"], "Hello from Codex");
+}
+
+#[tokio::test]
+async fn otel_logs_codex_sse_response_completed_becomes_llm_response() {
+    let app = test_app();
+    let session_id = "otel-codex-sse-completed";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"event_kind\":\"response.completed\",\"input_token_count\":12,\"output_token_count\":4,\"tool_token_count\":16,\"model\":\"gpt-5.4\"}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.sse_event" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-sse-completed&event_type=llm_response",
+    )
+    .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["tokens_in"], 12);
+    assert_eq!(events[0]["tokens_out"], 4);
+    assert_eq!(events[0]["model"], "gpt-5.4");
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["event_kind"], "response.completed");
+    assert_eq!(metadata["tool_token_count"], 16.0);
+}
+
+#[tokio::test]
+async fn otel_logs_codex_websocket_failure_becomes_error() {
+    let app = test_app();
+    let session_id = "otel-codex-websocket-failed";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"event_kind\":\"response.failed\",\"error\":{\"message\":\"socket died\"}}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.websocket_event" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-websocket-failed&event_type=error",
+    )
+    .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["event_kind"], "response.failed");
+    assert_eq!(metadata["error"]["message"], "socket died");
+}
+
+#[tokio::test]
+async fn otel_logs_codex_websocket_delta_noise_is_skipped() {
+    let app = test_app();
+    let session_id = "otel-codex-websocket-delta";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"event_kind\":\"response.output_text.delta\",\"success\":true}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.websocket_event" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) =
+        get_json(&app, "/api/events?session_id=otel-codex-websocket-delta").await;
+    assert_eq!(events_status, 200);
+    assert_eq!(body["total"], 0);
+    assert_eq!(body["events"].as_array().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn otel_logs_codex_websocket_skipped_kind_failure_becomes_error() {
+    let app = test_app();
+    let session_id = "otel-codex-websocket-skipped-failure";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"event_kind\":\"response.output_text.delta\",\"success\":false,\"error\":{\"message\":\"socket closed\"}}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.websocket_event" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-websocket-skipped-failure&event_type=error",
+    )
+    .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["status"], "error");
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["event_kind"], "response.output_text.delta");
+    assert_eq!(metadata["success"], false);
+    assert_eq!(metadata["error"]["message"], "socket closed");
 }
 
 #[tokio::test]

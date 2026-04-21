@@ -19,9 +19,9 @@
 ## Active Decision Records
 
 - `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../archive/adr/2026-02-24-rust-backend-spike-decision-record.md) — **GO decision reached** for continued Rust backend evaluation. See [spike decision](../archive/plans/rust-spike/2026-02-24-rust-backend-spike-decision.md).
-## Rust Backend (phase 1 complete)
+## Rust Backend
 
-An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream behavior using axum, tokio, and rusqlite. Phase 1 parity work is complete and includes:
+An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream behavior using axum, tokio, and rusqlite. The current Rust runtime now covers:
 - `POST /api/events`, `POST /api/events/batch` — ingest with dedup and batch rejection
 - `GET /api/stats`, `GET /api/stats/tools`, `GET /api/stats/cost`, `GET /api/stats/usage-monitor` — aggregate and analytics counters
 - `GET /api/sessions`, `GET /api/sessions/:id`, `GET /api/sessions/:id/transcript`, `GET /api/filter-options`
@@ -30,9 +30,10 @@ An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream b
 - `GET /api/health` — service health with SSE client count
 - Import pipeline + runtime auto-import scheduling parity
 - Pricing auto-cost parity on ingest
+- historical `/api/v2` parity for sessions, activity, pins, search sorting/context, advanced analytics, usage, and insights
 
-Runs on port 3142 by default. Current verification includes full Rust test suite + shared parity tests.
-The current Rust runtime does not yet represent the canonical product surface end-to-end because it still centers on the legacy dashboard asset path rather than the full Svelte `/app` + `/api/v2` contract.
+Runs on port 3142 by default. Current verification includes the full Rust test suite, route/query integration coverage for the new `/api/v2` families, and shared parity tests over the historical `/api/v2` contract.
+The Rust runtime remains an alternate runtime under evaluation rather than the default server. TypeScript on port 3141 is still the canonical runtime until the rollout decision changes.
 
 Guardrail coverage for the Rust runtime host remains:
 - `rust-backend/tests/runtime_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.

@@ -97,4 +97,4 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 - `AGENTMONITOR_ANTHROPIC_API_KEY` or `ANTHROPIC_API_KEY`
 - `AGENTMONITOR_GEMINI_API_KEY`, `GEMINI_API_KEY`, or `GOOGLE_API_KEY`
 - Generated insights persist the exact date/project/agent scope plus the analytics/usage coverage they were created from.
-- The Rust backend is real and tested, but it is still converging on the same canonical `/app/` + `/api/v2/*` surface.
+- The Rust backend is real and tested, and now covers the historical `/api/v2/*` surface used by the Svelte app, but it remains an alternate runtime under evaluation rather than the default server.
