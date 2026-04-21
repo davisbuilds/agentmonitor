@@ -65,6 +65,7 @@ Product-surface reference for AgentMonitor.
 - Historical analytics live under `/api/v2/analytics/*` and are intended for the canonical Svelte app.
 - Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
 - Tool analytics remain capability-aware and intentionally exclude sessions whose projection contract does not expose tool analytics.
+- Skill analytics now include explicit Claude `Skill` tool calls plus inferred Codex skill reads from `.../SKILL.md` commands captured through OTEL or Codex JSONL fallback.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
 - The Svelte `Analytics` tab now supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
 
@@ -125,6 +126,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/analytics/activity` | GET | Daily activity series plus coverage metadata |
 | `/api/v2/analytics/projects` | GET | Per-project message/session breakdowns |
 | `/api/v2/analytics/tools` | GET | Tool-analytics-capable tool usage breakdowns |
+| `/api/v2/analytics/skills/daily` | GET | Daily explicit/inferred skill invocation breakdowns |
 | `/api/v2/analytics/hour-of-week` | GET | 7x24 historical activity heatmap data |
 | `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
 | `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |

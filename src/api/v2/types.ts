@@ -166,6 +166,17 @@ export interface ToolUsageStat {
   count: number;
 }
 
+export interface SkillUsageBreakdown {
+  skill_name: string;
+  count: number;
+}
+
+export interface SkillUsageDay {
+  date: string;
+  total: number;
+  skills: SkillUsageBreakdown[];
+}
+
 export interface AnalyticsCapabilityBreakdown {
   full: number;
   summary: number;

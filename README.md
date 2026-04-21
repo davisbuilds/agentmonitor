@@ -11,7 +11,7 @@ Local dashboard and session browser for observing AI coding agents across live t
 - Exposes session-browser APIs under `/api/v2/sessions/*`, including bucketed transcript activity for minimap-style navigation in the Sessions viewer.
 - Exposes pinned-message review APIs under `/api/v2/pins` and `/api/v2/sessions/:id/messages/:messageId/pin` for durable saved-review workflows.
 - Exposes transcript search under `/api/v2/search` with recency/relevance sorting and session-context metadata for navigation-first search UIs.
-- Exposes capability-aware analytics under `/api/v2/analytics/*`, including summary, activity, project, tool, hour-of-week, top-session, velocity, and per-agent views.
+- Exposes capability-aware analytics under `/api/v2/analytics/*`, including summary, activity, project, tool, skill, hour-of-week, top-session, velocity, and per-agent views.
 - Exposes event-derived historical usage under `/api/v2/usage/*`, including summary totals, daily series, project/model/agent attribution, and top sessions with coverage metadata.
 - Exposes persisted AI-generated insights under `/api/v2/insights/*`, scoped to the current historical filters and grounded in analytics and usage coverage metadata.
 

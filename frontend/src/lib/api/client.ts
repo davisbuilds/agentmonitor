@@ -272,6 +272,17 @@ export interface ToolUsageStat {
   count: number;
 }
 
+export interface SkillUsageBreakdown {
+  skill_name: string;
+  count: number;
+}
+
+export interface SkillUsageDay {
+  date: string;
+  total: number;
+  skills: SkillUsageBreakdown[];
+}
+
 export interface AnalyticsCapabilityBreakdown {
   full: number;
   summary: number;
@@ -686,6 +697,11 @@ export async function fetchAnalyticsProjects(params: Record<string, string | num
 export async function fetchAnalyticsTools(params: Record<string, string | number | undefined> = {}): Promise<{ data: ToolUsageStat[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/tools${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsTools');
+}
+
+export async function fetchAnalyticsSkillsDaily(params: Record<string, string | number | undefined> = {}): Promise<{ data: SkillUsageDay[]; coverage: AnalyticsCoverage }> {
+  const res = await fetch(`/api/v2/analytics/skills/daily${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsSkillsDaily');
 }
 
 export async function fetchAnalyticsHourOfWeek(params: Record<string, string | number | undefined> = {}): Promise<{ data: HourOfWeekDataPoint[]; coverage: AnalyticsCoverage }> {

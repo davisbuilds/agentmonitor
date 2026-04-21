@@ -22,6 +22,7 @@ import {
   getAnalyticsAgents,
   getAnalyticsProjects,
   getAnalyticsTools,
+  getAnalyticsSkillsDaily,
   getUsageSummary,
   getUsageCoverage,
   getUsageDaily,
@@ -404,6 +405,19 @@ v2Router.get('/analytics/tools', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/tools] Error:', err);
     res.status(500).json({ error: 'Failed to get tool data' });
+  }
+});
+
+v2Router.get('/analytics/skills/daily', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getAnalyticsSkillsDaily(params),
+      coverage: getAnalyticsCoverage(params, 'all_sessions'),
+    });
+  } catch (err) {
+    console.error('[v2/analytics/skills/daily] Error:', err);
+    res.status(500).json({ error: 'Failed to get skill analytics' });
   }
 });
 

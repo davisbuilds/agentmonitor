@@ -5,6 +5,7 @@
   import ActiveFilters from './ActiveFilters.svelte';
   import SummaryCards from './SummaryCards.svelte';
   import ActivityTimeline from './ActivityTimeline.svelte';
+  import SkillUsageTimeline from './SkillUsageTimeline.svelte';
   import ProjectBreakdown from './ProjectBreakdown.svelte';
   import ToolUsage from './ToolUsage.svelte';
   import HourOfWeekHeatmap from './HourOfWeekHeatmap.svelte';
@@ -99,6 +100,7 @@
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-12">
     <div class="space-y-4 xl:col-span-7">
       <ActivityTimeline />
+      <SkillUsageTimeline />
       <ProjectBreakdown />
       <HourOfWeekHeatmap />
       <VelocityMetrics />

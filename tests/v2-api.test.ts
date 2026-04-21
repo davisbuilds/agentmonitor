@@ -86,8 +86,10 @@ before(async () => {
 
   // Seed test data via parser
   const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
+  const { parseCodexSessionMessages } = await import('../src/parser/codex-sessions.js');
   const { insertEvent } = await import('../src/db/queries.js');
   const { syncClaudeLiveSession } = await import('../src/live/claude-adapter.js');
+  const { syncCodexLiveSession } = await import('../src/live/codex-adapter.js');
   const {
     SUMMARY_LIVE_PROJECTION_CAPABILITIES,
     upsertProjectedSessionSnapshot,
@@ -114,6 +116,65 @@ before(async () => {
     syncClaudeLiveSession(db, parsed);
   }
 
+  const claudeSkillJsonl = sampleJsonl([
+    {
+      type: 'user',
+      parentUuid: null,
+      sessionId: 'api-skill-claude-001',
+      cwd: '/Users/dev/alpha',
+      message: { role: 'user', content: [{ type: 'text', text: 'Plan this feature.' }] },
+      timestamp: '2026-03-08T09:00:00Z',
+    },
+    {
+      type: 'assistant',
+      parentUuid: 'api-skill-claude-001-user',
+      sessionId: 'api-skill-claude-001',
+      cwd: '/Users/dev/alpha',
+      message: {
+        role: 'assistant',
+        model: 'claude-opus-4-6',
+        content: [
+          { type: 'text', text: 'Using a planning skill first.' },
+          { type: 'tool_use', id: 'toolu_skill_1', name: 'Skill', input: { skill: 'writing-plans' } },
+        ],
+      },
+      timestamp: '2026-03-08T09:01:00Z',
+    },
+  ]);
+  const claudeSkillFilePath = '/fake/projects/-Users-dev-Dev-alpha/api-skill-claude-001.jsonl';
+  const claudeSkillParsed = parseSessionMessages(claudeSkillJsonl, 'api-skill-claude-001', claudeSkillFilePath);
+  insertParsedSession(db, claudeSkillParsed, claudeSkillFilePath, 512, 'hash_api_skill_claude_001');
+  syncClaudeLiveSession(db, claudeSkillParsed);
+
+  const codexSkillSessionId = 'rollout-2026-03-08T11-00-00-019d0000-0000-0000-0000-000000000001';
+  const codexSkillJsonl = sampleJsonl([
+    {
+      type: 'session_meta',
+      timestamp: '2026-03-08T11:00:00Z',
+      payload: {
+        id: '019d0000-0000-0000-0000-000000000001',
+        timestamp: '2026-03-08T11:00:00Z',
+        cwd: '/Users/dg-mac-mini/Dev/agentmonitor',
+      },
+    },
+    {
+      type: 'response_item',
+      timestamp: '2026-03-08T11:01:00Z',
+      payload: {
+        type: 'function_call',
+        name: 'exec_command',
+        arguments: JSON.stringify({
+          cmd: "sed -n '1,220p' /Users/dg-mac-mini/.agents/skills/first-principles/SKILL.md",
+          workdir: '/Users/dg-mac-mini/Dev/agentmonitor',
+        }),
+      },
+    },
+  ]);
+  const codexSkillFilePath = `/fake/codex/${codexSkillSessionId}.jsonl`;
+  const codexSkillParsed = parseCodexSessionMessages(codexSkillJsonl, codexSkillSessionId, codexSkillFilePath);
+  insertParsedSession(db, codexSkillParsed, codexSkillFilePath, 512, 'hash_api_skill_codex_001');
+  syncCodexLiveSession(db, codexSkillParsed);
+
   // Add a child session for relationship testing
   const childJsonl = makeSession('api-sess-006', 'alpha', 4, '2026-03-01T11:00:00Z');
   const childParsed = parseSessionMessages(childJsonl, 'api-sess-006');
@@ -139,6 +200,25 @@ before(async () => {
     integration_mode: 'codex-summary',
     fidelity: 'summary',
     capabilities: SUMMARY_LIVE_PROJECTION_CAPABILITIES,
+  });
+
+  insertEvent({
+    event_id: 'api-codex-live-skill-001',
+    session_id: '019d0000-0000-0000-0000-000000000099',
+    agent_type: 'codex',
+    event_type: 'tool_use',
+    tool_name: 'exec_command',
+    status: 'success',
+    project: 'agentmonitor',
+    client_timestamp: '2026-03-09T12:00:00Z',
+    metadata: {
+      otel_event_name: 'codex.tool_result',
+      arguments: {
+        cmd: "sed -n '1,220p' /Users/dg-mac-mini/.agents/skills/brainstorming/SKILL.md",
+        workdir: '/Users/dg-mac-mini/Dev/agentmonitor',
+      },
+    },
+    source: 'otel',
   });
 
   const searchRankFixtures = [
@@ -899,10 +979,45 @@ describe('GET /api/v2/analytics/tools', () => {
         excluded_sessions: number;
       };
     };
-    assert.equal(body.coverage.matching_sessions, 1);
-    assert.equal(body.coverage.included_sessions, 0);
-    assert.equal(body.coverage.excluded_sessions, 1);
-    assert.deepEqual(body.data, []);
+    assert.ok(body.coverage.matching_sessions >= 1);
+    assert.equal(
+      body.coverage.matching_sessions,
+      body.coverage.included_sessions + body.coverage.excluded_sessions,
+    );
+    assert.ok(body.coverage.excluded_sessions >= 1);
+  });
+});
+
+describe('GET /api/v2/analytics/skills/daily', () => {
+  test('returns explicit Claude skills and inferred Codex skills by day', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?date_from=2026-03-08&date_to=2026-03-09`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      data: Array<{ date: string; total: number; skills: Array<{ skill_name: string; count: number }> }>;
+      coverage: { metric_scope: string };
+    };
+
+    assert.equal(body.coverage.metric_scope, 'all_sessions');
+
+    const march8 = body.data.find((day) => day.date === '2026-03-08');
+    assert.ok(march8);
+    assert.ok(march8?.skills.some((skill) => skill.skill_name === 'writing-plans'));
+    assert.ok(march8?.skills.some((skill) => skill.skill_name === 'first-principles'));
+
+    const march9 = body.data.find((day) => day.date === '2026-03-09');
+    assert.ok(march9?.skills.some((skill) => skill.skill_name === 'brainstorming'));
+  });
+
+  test('respects agent filter for codex-only skill analytics', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?agent=codex&date_from=2026-03-08&date_to=2026-03-09`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      data: Array<{ date: string; skills: Array<{ skill_name: string }> }>;
+    };
+
+    assert.ok(body.data.every((day) => day.skills.every((skill) => skill.skill_name !== 'writing-plans')));
+    assert.ok(body.data.some((day) => day.skills.some((skill) => skill.skill_name === 'first-principles')));
+    assert.ok(body.data.some((day) => day.skills.some((skill) => skill.skill_name === 'brainstorming')));
   });
 });
 
@@ -995,7 +1110,11 @@ describe('GET /api/v2/analytics/agents', () => {
     };
     assert.equal(body.coverage.metric_scope, 'all_sessions');
     assert.ok(body.data.some(row => row.agent === 'claude' && row.session_count >= 8));
-    assert.ok(body.data.some(row => row.agent === 'codex' && row.session_count === 1 && row.summary_fidelity_sessions === 1));
+    assert.ok(body.data.some(
+      row => row.agent === 'codex'
+        && row.session_count >= 1
+        && row.summary_fidelity_sessions >= 1,
+    ));
   });
 });
 

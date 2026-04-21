@@ -3,6 +3,7 @@ import {
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
+  fetchAnalyticsSkillsDaily,
   fetchAnalyticsHourOfWeek,
   fetchAnalyticsTopSessions,
   fetchAnalyticsVelocity,
@@ -14,6 +15,7 @@ import {
   type ActivityDataPoint,
   type ProjectBreakdown,
   type ToolUsageStat,
+  type SkillUsageDay,
   type HourOfWeekDataPoint,
   type TopSessionStat,
   type VelocityMetrics,
@@ -33,6 +35,7 @@ type PanelKey =
   | 'activity'
   | 'projects'
   | 'tools'
+  | 'skills'
   | 'hourOfWeek'
   | 'topSessions'
   | 'velocity'
@@ -65,6 +68,7 @@ class AnalyticsStore {
     activity: 0,
     projects: 0,
     tools: 0,
+    skills: 0,
     hourOfWeek: 0,
     topSessions: 0,
     velocity: 0,
@@ -85,6 +89,7 @@ class AnalyticsStore {
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
+  skillUsageDaily = $state<SkillUsageDay[]>([]);
   hourOfWeek = $state<HourOfWeekDataPoint[]>([]);
   topSessions = $state<TopSessionStat[]>([]);
   velocity = $state<VelocityMetrics | null>(null);
@@ -95,6 +100,7 @@ class AnalyticsStore {
     activity: null,
     projects: null,
     tools: null,
+    skills: null,
     hourOfWeek: null,
     topSessions: null,
     velocity: null,
@@ -106,6 +112,7 @@ class AnalyticsStore {
     activity: false,
     projects: false,
     tools: false,
+    skills: false,
     hourOfWeek: false,
     topSessions: false,
     velocity: false,
@@ -117,6 +124,7 @@ class AnalyticsStore {
     activity: null,
     projects: null,
     tools: null,
+    skills: null,
     hourOfWeek: null,
     topSessions: null,
     velocity: null,
@@ -199,6 +207,7 @@ class AnalyticsStore {
       this.fetchActivity(),
       this.fetchProjects(),
       this.fetchTools(),
+      this.fetchSkills(),
       this.fetchHourOfWeek(),
       this.fetchTopSessions(),
       this.fetchVelocity(),
@@ -282,6 +291,26 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.tools) {
         this.loading.tools = false;
+      }
+    }
+  }
+
+  async fetchSkills(): Promise<void> {
+    const version = ++this.versions.skills;
+    this.loading.skills = true;
+    this.errors.skills = null;
+    try {
+      const result = await fetchAnalyticsSkillsDaily(this.queryParams);
+      if (version !== this.versions.skills) return;
+      this.skillUsageDaily = result.data;
+      this.coverage.skills = result.coverage;
+    } catch (err) {
+      if (version !== this.versions.skills) return;
+      console.error('Failed to load skill analytics:', err);
+      this.errors.skills = 'Failed to load skill analytics.';
+    } finally {
+      if (version === this.versions.skills) {
+        this.loading.skills = false;
       }
     }
   }
@@ -442,6 +471,7 @@ class AnalyticsStore {
       activity: this.activity,
       projects: this.projectBreakdowns,
       tools: this.toolUsage,
+      skills: this.skillUsageDaily,
       topSessions: this.topSessions,
       agents: this.agentComparison,
     });

@@ -29,6 +29,7 @@ Subdirectories have their own `AGENTS.md` (with `CLAUDE.md` symlinks) for domain
 - Production build: `pnpm build`
 - Production start: `pnpm start`
 - Import historical logs: `pnpm run import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
+- Force reparse session-browser history: `pnpm reparse:sessions` (Claude), `pnpm reparse:codex-sessions` (Codex)
 - Seed local demo data (server must be running): `pnpm seed`
 
 `pnpm install` at the repo root uses a workspace and installs both the backend package and the Svelte frontend package under `frontend/`.

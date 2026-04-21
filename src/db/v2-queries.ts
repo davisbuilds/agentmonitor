@@ -20,6 +20,7 @@ import type {
   ActivityDataPoint,
   ProjectBreakdown,
   ToolUsageStat,
+  SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
   TopSessionStat,
@@ -801,6 +802,94 @@ function enumerateDateRange(from: string, to: string): string[] {
   return dates;
 }
 
+function parseJsonString(value: string | null | undefined): unknown {
+  if (!value) return undefined;
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function asPlainObject(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  return value as Record<string, unknown>;
+}
+
+function extractCanonicalCodexSessionId(sessionId: string): string {
+  const match = sessionId.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+  return match?.[1] ?? sessionId;
+}
+
+function extractCodexCommandFromInputJson(inputJson: string | null): string | undefined {
+  const parsed = parseJsonString(inputJson);
+  if (typeof parsed === 'string') return parsed;
+
+  const record = asPlainObject(parsed);
+  if (!record) return undefined;
+
+  const cmd = record['cmd'];
+  if (typeof cmd === 'string') return cmd;
+
+  const command = record['command'];
+  if (typeof command === 'string') return command;
+
+  return undefined;
+}
+
+function extractCodexCommandFromEventMetadata(metadataJson: string | null): string | undefined {
+  const parsed = parseJsonString(metadataJson);
+  const record = asPlainObject(parsed);
+  if (!record) return undefined;
+
+  const argumentsValue = record['arguments'];
+  if (typeof argumentsValue === 'string') return argumentsValue;
+
+  const argumentsRecord = asPlainObject(argumentsValue);
+  if (argumentsRecord) {
+    const cmd = argumentsRecord['cmd'];
+    if (typeof cmd === 'string') return cmd;
+
+    const command = argumentsRecord['command'];
+    if (typeof command === 'string') return command;
+  }
+
+  const input = record['input'];
+  if (typeof input === 'string') return input;
+
+  return undefined;
+}
+
+function extractCodexSkillNamesFromCommand(command: string): string[] {
+  const skillNames = new Set<string>();
+  const pattern = /(?:^|[\s'"])(~?\/[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
+
+  for (const match of command.matchAll(pattern)) {
+    const skillName = match[2]?.trim();
+    if (skillName) skillNames.add(skillName);
+  }
+
+  return [...skillNames];
+}
+
+function isDateWithinRange(date: string, params: AnalyticsParams): boolean {
+  if (params.date_from && date < params.date_from) return false;
+  if (params.date_to && date > params.date_to) return false;
+  return true;
+}
+
+interface SkillAccumulator {
+  total: number;
+  skills: Map<string, number>;
+}
+
+function addSkillCount(days: Map<string, SkillAccumulator>, date: string, skillName: string): void {
+  const existing = days.get(date) ?? { total: 0, skills: new Map<string, number>() };
+  existing.total += 1;
+  existing.skills.set(skillName, (existing.skills.get(skillName) ?? 0) + 1);
+  days.set(date, existing);
+}
+
 export function getAnalyticsCoverage(
   params: AnalyticsParams = {},
   scope: AnalyticsCoverageScope = 'all_sessions',
@@ -980,6 +1069,135 @@ export function getAnalyticsTools(params: AnalyticsParams = {}): ToolUsageStat[]
     GROUP BY tc.tool_name, tc.category
     ORDER BY count DESC, tc.tool_name ASC
   `).all(...filter.values) as ToolUsageStat[];
+}
+
+export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {
+  const db = getDb();
+  const days = new Map<string, SkillAccumulator>();
+
+  const explicitSkillRows = db.prepare(`
+    SELECT
+      COALESCE(m.timestamp, bs.started_at) as timestamp,
+      bs.project,
+      bs.agent,
+      tc.input_json
+    FROM tool_calls tc
+    JOIN browsing_sessions bs ON bs.id = tc.session_id
+    LEFT JOIN messages m ON m.id = tc.message_id
+    WHERE tc.tool_name = 'Skill'
+      AND tc.input_json IS NOT NULL
+  `).all() as Array<{
+    timestamp: string | null;
+    project: string | null;
+    agent: string;
+    input_json: string | null;
+  }>;
+
+  for (const row of explicitSkillRows) {
+    if (params.project && row.project !== params.project) continue;
+    if (params.agent && row.agent !== params.agent) continue;
+    if (!row.timestamp) continue;
+
+    const parsed = asPlainObject(parseJsonString(row.input_json));
+    const skillName = typeof parsed?.['skill'] === 'string' ? parsed['skill'] : undefined;
+    if (!skillName) continue;
+
+    const date = row.timestamp.slice(0, 10);
+    if (!isDateWithinRange(date, params)) continue;
+    addSkillCount(days, date, skillName);
+  }
+
+  if (!params.agent || params.agent === 'codex') {
+    const codexEventRows = db.prepare(`
+      SELECT
+        session_id,
+        project,
+        COALESCE(client_timestamp, created_at) as timestamp,
+        metadata
+      FROM events
+      WHERE agent_type = 'codex'
+        AND event_type = 'tool_use'
+        AND tool_name = 'exec_command'
+        AND metadata LIKE '%SKILL.md%'
+    `).all() as Array<{
+      session_id: string;
+      project: string | null;
+      timestamp: string | null;
+      metadata: string | null;
+    }>;
+
+    const codexSessionsWithEvents = new Set<string>();
+
+    for (const row of codexEventRows) {
+      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
+      if (params.project && row.project !== params.project) continue;
+      if (!row.timestamp) continue;
+
+      const command = extractCodexCommandFromEventMetadata(row.metadata);
+      if (!command) continue;
+
+      const skillNames = extractCodexSkillNamesFromCommand(command);
+      if (skillNames.length === 0) continue;
+
+      const date = row.timestamp.slice(0, 10);
+      if (!isDateWithinRange(date, params)) continue;
+
+      for (const skillName of skillNames) {
+        addSkillCount(days, date, skillName);
+      }
+    }
+
+    const codexJsonlRows = db.prepare(`
+      SELECT
+        bs.id as session_id,
+        bs.project,
+        COALESCE(m.timestamp, bs.started_at) as timestamp,
+        tc.input_json
+      FROM tool_calls tc
+      JOIN browsing_sessions bs ON bs.id = tc.session_id
+      LEFT JOIN messages m ON m.id = tc.message_id
+      WHERE bs.agent = 'codex'
+        AND bs.integration_mode = 'codex-jsonl'
+        AND tc.tool_name = 'exec_command'
+        AND tc.input_json IS NOT NULL
+        AND tc.input_json LIKE '%SKILL.md%'
+    `).all() as Array<{
+      session_id: string;
+      project: string | null;
+      timestamp: string | null;
+      input_json: string | null;
+    }>;
+
+    for (const row of codexJsonlRows) {
+      const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
+      if (codexSessionsWithEvents.has(canonicalSessionId)) continue;
+      if (params.project && row.project !== params.project) continue;
+      if (!row.timestamp) continue;
+
+      const command = extractCodexCommandFromInputJson(row.input_json);
+      if (!command) continue;
+
+      const skillNames = extractCodexSkillNamesFromCommand(command);
+      if (skillNames.length === 0) continue;
+
+      const date = row.timestamp.slice(0, 10);
+      if (!isDateWithinRange(date, params)) continue;
+
+      for (const skillName of skillNames) {
+        addSkillCount(days, date, skillName);
+      }
+    }
+  }
+
+  return [...days.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, info]) => ({
+      date,
+      total: info.total,
+      skills: [...info.skills.entries()]
+        .map(([skill_name, count]) => ({ skill_name, count }))
+        .sort((left, right) => right.count - left.count || left.skill_name.localeCompare(right.skill_name)),
+    }));
 }
 
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {

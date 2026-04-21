@@ -4,6 +4,7 @@ import type {
   ActivityDataPoint,
   ProjectBreakdown,
   ToolUsageStat,
+  SkillUsageDay,
   TopSessionStat,
   AgentComparisonRow,
 } from './api/client';
@@ -23,6 +24,7 @@ export interface AnalyticsCsvPayload {
   activity: ActivityDataPoint[];
   projects: ProjectBreakdown[];
   tools: ToolUsageStat[];
+  skills: SkillUsageDay[];
   topSessions: TopSessionStat[];
   agents: AgentComparisonRow[];
 }
@@ -138,6 +140,17 @@ export function buildAnalyticsCsv(payload: AnalyticsCsvPayload): string {
     lines.push('Tool,Category,Count');
     for (const row of payload.tools) {
       lines.push(tableRow([row.tool_name, row.category, row.count]));
+    }
+  }
+
+  if (payload.skills.length > 0) {
+    lines.push('');
+    lines.push('Skills By Day');
+    lines.push('Date,Skill,Count');
+    for (const day of payload.skills) {
+      for (const skill of day.skills) {
+        lines.push(tableRow([day.date, skill.skill_name, skill.count]));
+      }
     }
   }
 

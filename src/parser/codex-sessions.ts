@@ -16,8 +16,49 @@ interface CodexLine {
     name?: string;
     input?: string;
     arguments?: string;
+    type?: string;
     [key: string]: unknown;
   };
+}
+
+function categorizeCodexToolName(toolName: string): string {
+  switch (toolName) {
+    case 'exec_command':
+    case 'shell_command':
+      return 'Bash';
+    case 'apply_patch':
+      return 'Edit';
+    default:
+      return 'Other';
+  }
+}
+
+function parseToolInput(payload: CodexLine['payload']): unknown {
+  if (!payload) return null;
+
+  if (typeof payload.input === 'string' && payload.input.length > 0) {
+    return payload.input;
+  }
+
+  if (typeof payload.arguments === 'string' && payload.arguments.length > 0) {
+    try {
+      return JSON.parse(payload.arguments);
+    } catch {
+      return payload.arguments;
+    }
+  }
+
+  return null;
+}
+
+function extractTextBlock(block: { type: string; text?: string }): string | null {
+  if ((block.type === 'text' || block.type === 'input_text' || block.type === 'output_text')
+    && typeof block.text === 'string'
+    && block.text.trim()) {
+    return block.text;
+  }
+
+  return null;
 }
 
 // --- Parse Codex JSONL content into ParsedSession ---
@@ -68,7 +109,7 @@ export function parseCodexSessionMessages(
     const role = line.payload.role;
     const contentBlocks = line.payload.content;
     const toolName = line.payload.name;
-    const toolInput = line.payload.input;
+    const toolInput = parseToolInput(line.payload);
 
     // Tool call response_item (no role, has name + input)
     if (toolName && !role) {
@@ -81,7 +122,7 @@ export function parseCodexSessionMessages(
       toolCalls.push({
         session_id: sessionId,
         tool_name: toolName,
-        category: toolName === 'apply_patch' ? 'Edit' : 'Other',
+        category: categorizeCodexToolName(toolName),
         tool_use_id: null,
         input_json: toolInput != null ? JSON.stringify(toolInput) : null,
         subagent_session_id: null,
@@ -107,8 +148,9 @@ export function parseCodexSessionMessages(
 
     const blocks: ContentBlock[] = [];
     for (const block of contentBlocks) {
-      if (block.type === 'text' && typeof block.text === 'string') {
-        blocks.push({ type: 'text', text: block.text });
+      const text = extractTextBlock(block);
+      if (text) {
+        blocks.push({ type: 'text', text });
       }
     }
 
