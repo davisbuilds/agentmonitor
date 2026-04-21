@@ -1,11 +1,18 @@
 import fs from 'fs';
 import path from 'path';
+import { normalizeExcludePatterns, shouldExcludePath } from './path-excludes.js';
+
+interface DiscoveryOptions {
+  excludePatterns?: string[];
+}
 
 function discoverFilesRecursive(
   rootDir: string,
   predicate: (entry: fs.Dirent, fullPath: string) => boolean,
+  options: DiscoveryOptions = {},
 ): string[] {
   const files: string[] = [];
+  const excludePatterns = normalizeExcludePatterns(options.excludePatterns);
 
   if (!fs.existsSync(rootDir)) return files;
 
@@ -17,11 +24,14 @@ function discoverFilesRecursive(
     for (const entry of fs.readdirSync(currentDir, { withFileTypes: true })) {
       const fullPath = path.join(currentDir, entry.name);
       if (entry.isDirectory()) {
+        if (shouldExcludePath(rootDir, fullPath, excludePatterns)) {
+          continue;
+        }
         stack.push(fullPath);
         continue;
       }
 
-      if (predicate(entry, fullPath)) {
+      if (!shouldExcludePath(rootDir, fullPath, excludePatterns) && predicate(entry, fullPath)) {
         files.push(fullPath);
       }
     }
@@ -30,6 +40,6 @@ function discoverFilesRecursive(
   return files.sort();
 }
 
-export function discoverJsonlFilesRecursive(rootDir: string): string[] {
-  return discoverFilesRecursive(rootDir, entry => entry.isFile() && entry.name.endsWith('.jsonl'));
+export function discoverJsonlFilesRecursive(rootDir: string, options: DiscoveryOptions = {}): string[] {
+  return discoverFilesRecursive(rootDir, entry => entry.isFile() && entry.name.endsWith('.jsonl'), options);
 }

@@ -287,6 +287,20 @@ const SKIP_EVENTS = new Set([
   'claude_code.response',
 ]);
 
+const SKIPPED_CODEX_WEBSOCKET_RESPONSE_KINDS = new Set([
+  'response.custom_tool_call_input.delta',
+  'response.function_call_arguments.delta',
+  'response.output_text.delta',
+  'response.created',
+  'response.in_progress',
+  'response.output_item.added',
+  'response.output_item.done',
+  'response.content_part.added',
+  'response.content_part.done',
+  'response.output_text.done',
+  'responsesapi.websocket_timing',
+]);
+
 const CODEX_RESPONSE_ITEM_TYPES = new Set([
   'assistant_message',
   'agent_message',
@@ -416,7 +430,10 @@ function resolveEventType(
         if (codexEventKind === 'response.failed' || hasCodexTransportFailure(logRecord, bodyJson)) {
           return 'error';
         }
-        if (codexEventKind === 'responsesapi.websocket_timing' || codexEventKind?.startsWith('response.')) {
+        if (codexEventKind && SKIPPED_CODEX_WEBSOCKET_RESPONSE_KINDS.has(codexEventKind)) {
+          return null;
+        }
+        if (codexEventKind?.startsWith('response.')) {
           return 'response';
         }
         return null;

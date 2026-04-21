@@ -232,6 +232,14 @@ describe('Claude Code log discovery', () => {
     assert.ok(files.some(f => f.endsWith(path.join('project-b', 'nested', 'deeper', 'sess-4.jsonl'))));
   });
 
+  test('supports exclude patterns during discovery', () => {
+    fs.mkdirSync(path.join(tmpDir, 'projects', 'project-a', 'vercel-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'projects', 'project-a', 'vercel-plugin', 'skill-injections.jsonl'), '');
+
+    const files = discoverClaudeCodeLogs(tmpDir, { excludePatterns: ['vercel-plugin'] });
+    assert.ok(!files.some(f => f.endsWith(path.join('vercel-plugin', 'skill-injections.jsonl'))));
+  });
+
   test('ignores non-jsonl files', () => {
     const files = discoverClaudeCodeLogs(tmpDir);
     assert.ok(!files.some(f => f.endsWith('.txt')));
@@ -692,5 +700,80 @@ describe('Import orchestrator integration', () => {
     assert.equal(state[0].source, 'claude-code');
     assert.equal(state[0].events_imported, 2);
     assert.ok(typeof state[0].file_hash === 'string');
+  });
+
+  test('full imports cache unchanged files even when no events are parsed', async () => {
+    const isolatedClaudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-empty-import-'));
+    const projectDir = path.join(isolatedClaudeDir, 'projects', 'empty-project');
+    fs.mkdirSync(projectDir, { recursive: true });
+    const emptyFile = path.join(projectDir, 'empty-session.jsonl');
+    fs.writeFileSync(emptyFile, `${JSON.stringify({ data: { status: 'starting' } })}\n`);
+
+    try {
+      const { runImport } = await import('../src/import/index.js');
+
+      const first = runImport({ source: 'claude-code', claudeDir: isolatedClaudeDir });
+      assert.equal(first.totalFiles, 1);
+      assert.equal(first.totalEventsFound, 0);
+      assert.equal(first.skippedFiles, 0);
+
+      if (!getDb) throw new Error('DB not initialized');
+      const state = getDb().prepare(
+        'SELECT file_hash, events_imported FROM import_state WHERE file_path = ?',
+      ).get(emptyFile) as { file_hash: string; events_imported: number } | undefined;
+      assert.ok(state, 'import_state should cache zero-event files after a full import');
+      assert.equal(state?.events_imported, 0);
+      assert.ok(typeof state?.file_hash === 'string' && state.file_hash.length > 0);
+
+      const second = runImport({ source: 'claude-code', claudeDir: isolatedClaudeDir });
+      assert.equal(second.totalFiles, 1);
+      assert.equal(second.skippedFiles, 1);
+      assert.equal(second.totalEventsFound, 0);
+      assert.equal(second.totalEventsImported, 0);
+    } finally {
+      fs.rmSync(isolatedClaudeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('runImport excludes matching paths before parsing', async () => {
+    const isolatedClaudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-exclude-import-'));
+    const projectDir = path.join(isolatedClaudeDir, 'projects', 'proj-a');
+    const excludedDir = path.join(projectDir, 'vercel-plugin');
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.mkdirSync(excludedDir, { recursive: true });
+
+    const includedFile = path.join(projectDir, 'session-a.jsonl');
+    const excludedFile = path.join(excludedDir, 'skill-injections.jsonl');
+    fs.writeFileSync(includedFile, JSON.stringify({
+      type: 'assistant',
+      sessionId: 'included-session',
+      timestamp: '2026-02-01T10:00:00Z',
+      costUSD: 0.01,
+    }));
+    fs.writeFileSync(excludedFile, JSON.stringify({
+      timestamp: '2026-03-20T12:34:40.479Z',
+      event: 'prompt-skill-injection',
+    }));
+
+    try {
+      const { runImport } = await import('../src/import/index.js');
+      const result = runImport({
+        source: 'claude-code',
+        claudeDir: isolatedClaudeDir,
+        excludePatterns: ['vercel-plugin'],
+      });
+
+      assert.equal(result.totalFiles, 1);
+      assert.equal(result.files.length, 1);
+      assert.equal(result.files[0].path, includedFile);
+
+      if (!getDb) throw new Error('DB not initialized');
+      const excludedState = getDb().prepare(
+        'SELECT * FROM import_state WHERE file_path = ?',
+      ).get(excludedFile);
+      assert.equal(excludedState, undefined);
+    } finally {
+      fs.rmSync(isolatedClaudeDir, { recursive: true, force: true });
+    }
   });
 });
