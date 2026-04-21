@@ -229,6 +229,34 @@ describe('syncSessionFile', () => {
     const watched = db.prepare('SELECT status FROM watched_files WHERE file_path = ?').get(filePath) as { status: string };
     assert.equal(watched.status, 'skipped');
   });
+
+  test('retries unchanged Claude file after transient sync error', () => {
+    const db = getDb();
+    const sessionId = 'retry-claude-001';
+    const filePath = writeSessionFile(sessionId, makeSession(sessionId));
+
+    db.exec(`
+      CREATE TRIGGER fail_claude_sync_once
+      BEFORE INSERT ON browsing_sessions
+      WHEN NEW.id = '${sessionId}'
+      BEGIN
+        SELECT RAISE(FAIL, 'forced Claude sync failure');
+      END;
+    `);
+
+    const first = syncSessionFile(db, filePath);
+    assert.equal(first, 'error');
+
+    const watchedError = db.prepare(
+      'SELECT status FROM watched_files WHERE file_path = ?',
+    ).get(filePath) as { status: string } | undefined;
+    assert.equal(watchedError?.status, 'error');
+
+    db.exec('DROP TRIGGER fail_claude_sync_once');
+
+    const second = syncSessionFile(db, filePath);
+    assert.equal(second, 'parsed');
+  });
 });
 
 describe('syncCodexSessionFile', () => {
@@ -285,6 +313,34 @@ describe('syncCodexSessionFile', () => {
 
     const result2 = syncCodexSessionFile(db, filePath);
     assert.equal(result2, 'skipped');
+  });
+
+  test('retries unchanged Codex file after transient sync error', () => {
+    const db = getDb();
+    const sessionId = 'retry-codex-001';
+    const filePath = writeCodexSessionFile(sessionId, makeCodexSession(sessionId));
+
+    db.exec(`
+      CREATE TRIGGER fail_codex_sync_once
+      BEFORE INSERT ON browsing_sessions
+      WHEN NEW.id = '${sessionId}'
+      BEGIN
+        SELECT RAISE(FAIL, 'forced Codex sync failure');
+      END;
+    `);
+
+    const first = syncCodexSessionFile(db, filePath);
+    assert.equal(first, 'error');
+
+    const watchedError = db.prepare(
+      'SELECT status FROM watched_files WHERE file_path = ?',
+    ).get(filePath) as { status: string } | undefined;
+    assert.equal(watchedError?.status, 'error');
+
+    db.exec('DROP TRIGGER fail_codex_sync_once');
+
+    const second = syncCodexSessionFile(db, filePath);
+    assert.equal(second, 'parsed');
   });
 });
 

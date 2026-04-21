@@ -38,11 +38,15 @@ export interface SyncSessionOutcome {
   session_id?: string;
 }
 
-function getExistingFileHash(db: Database.Database, filePath: string): string | undefined {
-  const existing = db.prepare(
-    'SELECT file_hash FROM watched_files WHERE file_path = ?'
-  ).get(filePath) as { file_hash: string } | undefined;
-  return existing?.file_hash;
+interface WatchedFileState {
+  file_hash: string;
+  status: SyncResult;
+}
+
+function getWatchedFileState(db: Database.Database, filePath: string): WatchedFileState | undefined {
+  return db.prepare(
+    'SELECT file_hash, status FROM watched_files WHERE file_path = ?'
+  ).get(filePath) as WatchedFileState | undefined;
 }
 
 function upsertWatchedFile(
@@ -76,8 +80,8 @@ export function syncSessionFileDetailed(
     fileMtime = stat.mtime.toISOString();
 
     // Check watched_files for existing record
-    const existingHash = getExistingFileHash(db, filePath);
-    if (!options.force && existingHash === fileHash) {
+    const existing = getWatchedFileState(db, filePath);
+    if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
       return { result: 'skipped' };
     }
 
@@ -156,8 +160,8 @@ export function syncCodexSessionFileDetailed(
     fileHash = hashFile(filePath);
     fileMtime = stat.mtime.toISOString();
 
-    const existingHash = getExistingFileHash(db, filePath);
-    if (!options.force && existingHash === fileHash) {
+    const existing = getWatchedFileState(db, filePath);
+    if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
       return { result: 'skipped' };
     }
 
