@@ -24,7 +24,7 @@ export interface AnalyticsCsvPayload {
   activity: ActivityDataPoint[];
   projects: ProjectBreakdown[];
   tools: ToolUsageStat[];
-  skills: SkillUsageDay[];
+  skills?: SkillUsageDay[];
   topSessions: TopSessionStat[];
   agents: AgentComparisonRow[];
 }
@@ -89,6 +89,7 @@ function tableRow(values: Array<string | number | null | undefined>): string {
 
 export function buildAnalyticsCsv(payload: AnalyticsCsvPayload): string {
   const lines: string[] = ['Section,Metric,Value'];
+  const skills = payload.skills ?? [];
 
   lines.push(sectionRow('Meta', 'Generated At', payload.generatedAt));
   lines.push(sectionRow('Filters', 'From', payload.filters.from));
@@ -143,11 +144,11 @@ export function buildAnalyticsCsv(payload: AnalyticsCsvPayload): string {
     }
   }
 
-  if (payload.skills.length > 0) {
+  if (skills.length > 0) {
     lines.push('');
     lines.push('Skills By Day');
     lines.push('Date,Skill,Count');
-    for (const day of payload.skills) {
+    for (const day of skills) {
       for (const skill of day.skills) {
         lines.push(tableRow([day.date, skill.skill_name, skill.count]));
       }

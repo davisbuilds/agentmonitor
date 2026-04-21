@@ -116,6 +116,7 @@ test('buildAnalyticsCsv emits summary and table sections for export', () => {
     tools: [
       { tool_name: 'Read', category: 'Read', count: 18 },
     ],
+    skills: [],
     topSessions: [
       {
         id: 'sess-1',
@@ -152,4 +153,39 @@ test('buildAnalyticsCsv emits summary and table sections for export', () => {
   assert.match(csv, /Activity By Day/);
   assert.match(csv, /Top Sessions/);
   assert.match(csv, /Agent Comparison/);
+});
+
+test('buildAnalyticsCsv emits the skills section when skill usage is present', () => {
+  const csv = buildAnalyticsCsv({
+    generatedAt: '2026-04-15T12:00:00.000Z',
+    filters: {
+      from: '2026-04-01',
+      to: '2026-04-15',
+      project: '',
+      agent: '',
+    },
+    summary: null,
+    velocity: null,
+    activity: [],
+    projects: [],
+    tools: [],
+    skills: [
+      {
+        date: '2026-04-11',
+        total: 3,
+        skills: [
+          { skill_name: 'local-review', count: 1 },
+          { skill_name: 'github:yeet', count: 1 },
+          { skill_name: 'first-principles', count: 1 },
+        ],
+      },
+    ],
+    topSessions: [],
+    agents: [],
+  });
+
+  assert.match(csv, /Skills By Day/);
+  assert.match(csv, /2026-04-11,local-review,1/);
+  assert.match(csv, /2026-04-11,github:yeet,1/);
+  assert.match(csv, /2026-04-11,first-principles,1/);
 });
