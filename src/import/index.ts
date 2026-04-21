@@ -4,6 +4,7 @@ import { insertEvent } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashFile as hashCodexFile } from './codex.js';
 import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
+import { createConfig } from '../config.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ export interface ImportOptions {
   force?: boolean;
   claudeDir?: string;
   codexDir?: string;
+  excludePatterns?: string[];
 }
 
 export interface ImportFileResult {
@@ -95,22 +97,20 @@ function processFile(
 ): ImportFileResult {
   const stat = fs.statSync(filePath);
   const hashFn = source === 'claude-code' ? hashClaudeFile : hashCodexFile;
+  const currentHash = hashFn(filePath);
 
   // Check import state (skip if unchanged, unless --force)
   if (!options.force) {
     const state = getImportState(filePath);
-    if (state) {
-      const currentHash = hashFn(filePath);
-      if (state.file_hash === currentHash) {
-        return {
-          path: filePath,
-          source,
-          eventsFound: 0,
-          eventsImported: 0,
-          skippedDuplicate: 0,
-          skippedUnchanged: true,
-        };
-      }
+    if (state && state.file_hash === currentHash) {
+      return {
+        path: filePath,
+        source,
+        eventsFound: 0,
+        eventsImported: 0,
+        skippedDuplicate: 0,
+        skippedUnchanged: true,
+      };
     }
   }
 
@@ -125,9 +125,8 @@ function processFile(
   // Date-scoped imports are partial — caching the hash would cause a later
   // full import to skip the file, permanently losing the excluded events.
   const isDateScoped = options.from !== undefined || options.to !== undefined;
-  if (!options.dryRun && !isDateScoped && events.length > 0) {
-    const hash = hashFn(filePath);
-    setImportState(filePath, hash, stat.size, source, imported);
+  if (!options.dryRun && !isDateScoped) {
+    setImportState(filePath, currentHash, stat.size, source, imported);
   }
 
   return {
@@ -144,13 +143,14 @@ function processFile(
 
 export function runImport(options: ImportOptions): ImportResult {
   const files: ImportFileResult[] = [];
+  const excludePatterns = options.excludePatterns ?? createConfig().sync.excludePatterns;
 
   // Discover files
   const claudeFiles = (options.source === 'claude-code' || options.source === 'all')
-    ? discoverClaudeCodeLogs(options.claudeDir)
+    ? discoverClaudeCodeLogs(options.claudeDir, { excludePatterns })
     : [];
   const codexFiles = (options.source === 'codex' || options.source === 'all')
-    ? discoverCodexLogs(options.codexDir)
+    ? discoverCodexLogs(options.codexDir, { excludePatterns })
     : [];
 
   // Process Claude Code files

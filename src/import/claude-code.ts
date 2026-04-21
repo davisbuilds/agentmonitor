@@ -59,10 +59,13 @@ const TYPE_MAP: Record<string, EventType> = {
 
 // ─── Discover JSONL files ──────────────────────────────────────────────
 
-export function discoverClaudeCodeLogs(baseDir?: string): string[] {
+export function discoverClaudeCodeLogs(
+  baseDir?: string,
+  options: { excludePatterns?: string[] } = {},
+): string[] {
   const claudeDir = baseDir ?? path.join(os.homedir(), '.claude');
   const projectsDir = path.join(claudeDir, 'projects');
-  return discoverJsonlFilesRecursive(projectsDir);
+  return discoverJsonlFilesRecursive(projectsDir, { excludePatterns: options.excludePatterns });
 }
 
 // ─── Parse a single JSONL file ──────────────────────────────────────────

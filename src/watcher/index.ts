@@ -18,9 +18,9 @@ function hashFile(filePath: string): string {
 
 // --- Discover session files ---
 
-export function discoverSessionFiles(claudeDir: string): string[] {
+export function discoverSessionFiles(claudeDir: string, options: SyncOptions = {}): string[] {
   const projectsDir = path.join(claudeDir, 'projects');
-  return discoverJsonlFilesRecursive(projectsDir);
+  return discoverJsonlFilesRecursive(projectsDir, { excludePatterns: options.excludePatterns });
 }
 
 // --- Sync a single session file ---
@@ -29,6 +29,7 @@ export type SyncResult = 'parsed' | 'skipped' | 'error';
 
 interface SyncOptions {
   force?: boolean;
+  excludePatterns?: string[];
 }
 
 export interface SyncSessionOutcome {
@@ -37,21 +38,50 @@ export interface SyncSessionOutcome {
   session_id?: string;
 }
 
+interface WatchedFileState {
+  file_hash: string;
+  status: SyncResult;
+}
+
+function getWatchedFileState(db: Database.Database, filePath: string): WatchedFileState | undefined {
+  return db.prepare(
+    'SELECT file_hash, status FROM watched_files WHERE file_path = ?'
+  ).get(filePath) as WatchedFileState | undefined;
+}
+
+function upsertWatchedFile(
+  db: Database.Database,
+  filePath: string,
+  fileHash: string,
+  fileMtime: string,
+  status: SyncResult,
+): void {
+  db.prepare(`
+    INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
+    VALUES (?, ?, ?, ?, datetime('now'))
+    ON CONFLICT(file_path) DO UPDATE SET
+      file_hash = excluded.file_hash,
+      file_mtime = excluded.file_mtime,
+      status = excluded.status,
+      last_parsed_at = datetime('now')
+  `).run(filePath, fileHash, fileMtime, status);
+}
+
 export function syncSessionFileDetailed(
   db: Database.Database,
   filePath: string,
   options: SyncOptions = {},
 ): SyncSessionOutcome {
+  let fileHash = 'error';
+  let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    const fileHash = hashFile(filePath);
+    fileHash = hashFile(filePath);
+    fileMtime = stat.mtime.toISOString();
 
     // Check watched_files for existing record
-    const existing = db.prepare(
-      'SELECT file_hash FROM watched_files WHERE file_path = ?'
-    ).get(filePath) as { file_hash: string } | undefined;
-
-    if (!options.force && existing && existing.file_hash === fileHash) {
+    const existing = getWatchedFileState(db, filePath);
+    if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
       return { result: 'skipped' };
     }
 
@@ -62,16 +92,7 @@ export function syncSessionFileDetailed(
 
     // Skip files with no messages (non-interactive sessions)
     if (parsed.messages.length === 0) {
-      // Still record in watched_files to skip on next scan
-      db.prepare(`
-        INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
-        VALUES (?, ?, ?, 'skipped', datetime('now'))
-        ON CONFLICT(file_path) DO UPDATE SET
-          file_hash = excluded.file_hash,
-          file_mtime = excluded.file_mtime,
-          status = 'skipped',
-          last_parsed_at = datetime('now')
-      `).run(filePath, fileHash, stat.mtime.toISOString());
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
       return { result: 'skipped', session_id: sessionId };
     }
 
@@ -80,27 +101,13 @@ export function syncSessionFileDetailed(
     const live = syncClaudeLiveSession(db, parsed);
 
     // Update watched_files
-    db.prepare(`
-      INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
-      VALUES (?, ?, ?, 'parsed', datetime('now'))
-      ON CONFLICT(file_path) DO UPDATE SET
-        file_hash = excluded.file_hash,
-        file_mtime = excluded.file_mtime,
-        status = 'parsed',
-        last_parsed_at = datetime('now')
-    `).run(filePath, fileHash, stat.mtime.toISOString());
+    upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
 
     return { result: 'parsed', live, session_id: sessionId };
   } catch (err) {
     console.error(`[watcher] Failed to sync ${filePath}:`, err);
     try {
-      db.prepare(`
-        INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
-        VALUES (?, ?, ?, 'error', datetime('now'))
-        ON CONFLICT(file_path) DO UPDATE SET
-          status = 'error',
-          last_parsed_at = datetime('now')
-      `).run(filePath, 'error', '');
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'error');
     } catch (dbErr) {
       console.error(`[watcher] Failed to record error state for ${filePath}:`, dbErr);
     }
@@ -122,7 +129,7 @@ export interface SyncStats {
 }
 
 export function syncAllFiles(db: Database.Database, claudeDir: string, options: SyncOptions = {}): SyncStats {
-  const files = discoverSessionFiles(claudeDir);
+  const files = discoverSessionFiles(claudeDir, options);
   const stats: SyncStats = { parsed: 0, skipped: 0, errors: 0, total: files.length };
 
   for (const filePath of files) {
@@ -135,26 +142,26 @@ export function syncAllFiles(db: Database.Database, claudeDir: string, options: 
 
 // --- Codex session file support ---
 
-function discoverCodexSessionFiles(codexHome?: string): string[] {
+function discoverCodexSessionFiles(codexHome?: string, options: SyncOptions = {}): string[] {
   const base = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   const sessionsDir = path.join(base, 'sessions');
-  return discoverJsonlFilesRecursive(sessionsDir);
+  return discoverJsonlFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
 }
 
-function syncCodexSessionFileDetailed(
+export function syncCodexSessionFileDetailed(
   db: Database.Database,
   filePath: string,
   options: SyncOptions = {},
 ): SyncSessionOutcome {
+  let fileHash = 'error';
+  let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    const fileHash = hashFile(filePath);
+    fileHash = hashFile(filePath);
+    fileMtime = stat.mtime.toISOString();
 
-    const existing = db.prepare(
-      'SELECT file_hash FROM watched_files WHERE file_path = ?'
-    ).get(filePath) as { file_hash: string } | undefined;
-
-    if (!options.force && existing && existing.file_hash === fileHash) {
+    const existing = getWatchedFileState(db, filePath);
+    if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
       return { result: 'skipped' };
     }
 
@@ -163,42 +170,20 @@ function syncCodexSessionFileDetailed(
     const parsed = parseCodexSessionMessages(content, sessionId, filePath);
 
     if (parsed.messages.length === 0) {
-      db.prepare(`
-        INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
-        VALUES (?, ?, ?, 'skipped', datetime('now'))
-        ON CONFLICT(file_path) DO UPDATE SET
-          file_hash = excluded.file_hash,
-          file_mtime = excluded.file_mtime,
-          status = 'skipped',
-          last_parsed_at = datetime('now')
-      `).run(filePath, fileHash, stat.mtime.toISOString());
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
       return { result: 'skipped', session_id: sessionId };
     }
 
     insertParsedSession(db, parsed, filePath, stat.size, fileHash);
     const live = syncCodexLiveSession(db, parsed);
 
-    db.prepare(`
-      INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
-      VALUES (?, ?, ?, 'parsed', datetime('now'))
-      ON CONFLICT(file_path) DO UPDATE SET
-        file_hash = excluded.file_hash,
-        file_mtime = excluded.file_mtime,
-        status = 'parsed',
-        last_parsed_at = datetime('now')
-    `).run(filePath, fileHash, stat.mtime.toISOString());
+    upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
 
     return { result: 'parsed', live, session_id: sessionId };
   } catch (err) {
     console.error(`[watcher] Failed to sync Codex ${filePath}:`, err);
     try {
-      db.prepare(`
-        INSERT INTO watched_files (file_path, file_hash, file_mtime, status, last_parsed_at)
-        VALUES (?, ?, ?, 'error', datetime('now'))
-        ON CONFLICT(file_path) DO UPDATE SET
-          status = 'error',
-          last_parsed_at = datetime('now')
-      `).run(filePath, 'error', '');
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'error');
     } catch (dbErr) {
       console.error(`[watcher] Failed to record error state for ${filePath}:`, dbErr);
     }
@@ -206,8 +191,12 @@ function syncCodexSessionFileDetailed(
   }
 }
 
+export function syncCodexSessionFile(db: Database.Database, filePath: string, options: SyncOptions = {}): SyncResult {
+  return syncCodexSessionFileDetailed(db, filePath, options).result;
+}
+
 export function syncAllCodexFiles(db: Database.Database, codexHome?: string, options: SyncOptions = {}): SyncStats {
-  const files = discoverCodexSessionFiles(codexHome);
+  const files = discoverCodexSessionFiles(codexHome, options);
   const stats: SyncStats = { parsed: 0, skipped: 0, errors: 0, total: files.length };
 
   for (const filePath of files) {
