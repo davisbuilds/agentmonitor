@@ -283,6 +283,7 @@ pub struct AnalyticsSummary {
     pub daily_average_sessions: f64,
     pub daily_average_messages: f64,
     pub date_range: AnalyticsDateRange,
+    pub coverage: AnalyticsCoverage,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -296,6 +297,7 @@ pub struct ActivityDataPoint {
     pub date: String,
     pub sessions: i64,
     pub messages: i64,
+    pub user_messages: i64,
 }
 
 impl ActivityDataPoint {
@@ -304,6 +306,7 @@ impl ActivityDataPoint {
             date: row.get("date")?,
             sessions: row.get("sessions")?,
             messages: row.get("messages")?,
+            user_messages: row.get("user_messages")?,
         })
     }
 }
@@ -313,6 +316,7 @@ pub struct ProjectBreakdown {
     pub project: String,
     pub session_count: i64,
     pub message_count: i64,
+    pub user_message_count: i64,
 }
 
 impl ProjectBreakdown {
@@ -321,6 +325,7 @@ impl ProjectBreakdown {
             project: row.get("project")?,
             session_count: row.get("session_count")?,
             message_count: row.get("message_count")?,
+            user_message_count: row.get("user_message_count")?,
         })
     }
 }
@@ -338,6 +343,137 @@ impl ToolUsageStat {
             tool_name: row.get("tool_name")?,
             category: row.get("category")?,
             count: row.get("count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AnalyticsCapabilityBreakdown {
+    pub full: i64,
+    pub summary: i64,
+    pub none: i64,
+    pub unknown: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AnalyticsCoverageCapabilityBreakdown {
+    pub history: AnalyticsCapabilityBreakdown,
+    pub search: AnalyticsCapabilityBreakdown,
+    pub tool_analytics: AnalyticsCapabilityBreakdown,
+    pub live_items: AnalyticsCapabilityBreakdown,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AnalyticsFidelityBreakdown {
+    pub full: i64,
+    pub summary: i64,
+    pub unknown: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AnalyticsCoverage {
+    pub metric_scope: String,
+    pub matching_sessions: i64,
+    pub included_sessions: i64,
+    pub excluded_sessions: i64,
+    pub fidelity_breakdown: AnalyticsFidelityBreakdown,
+    pub capability_breakdown: AnalyticsCoverageCapabilityBreakdown,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct HourOfWeekDataPoint {
+    pub day_of_week: i64,
+    pub hour_of_day: i64,
+    pub session_count: i64,
+    pub message_count: i64,
+    pub user_message_count: i64,
+}
+
+impl HourOfWeekDataPoint {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            day_of_week: row.get("day_of_week")?,
+            hour_of_day: row.get("hour_of_day")?,
+            session_count: row.get("session_count")?,
+            message_count: row.get("message_count")?,
+            user_message_count: row.get("user_message_count")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TopSessionStat {
+    pub id: String,
+    pub project: Option<String>,
+    pub agent: String,
+    pub started_at: Option<String>,
+    pub ended_at: Option<String>,
+    pub message_count: i64,
+    pub user_message_count: i64,
+    pub tool_call_count: i64,
+    pub fidelity: Option<String>,
+}
+
+impl TopSessionStat {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            project: row.get("project")?,
+            agent: row.get("agent")?,
+            started_at: row.get("started_at")?,
+            ended_at: row.get("ended_at")?,
+            message_count: row.get("message_count")?,
+            user_message_count: row.get("user_message_count")?,
+            tool_call_count: row.get("tool_call_count")?,
+            fidelity: row.get("fidelity")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VelocityMetrics {
+    pub total_sessions: i64,
+    pub total_messages: i64,
+    pub total_user_messages: i64,
+    pub active_days: i64,
+    pub span_days: i64,
+    pub sessions_per_active_day: f64,
+    pub messages_per_active_day: f64,
+    pub sessions_per_calendar_day: f64,
+    pub messages_per_calendar_day: f64,
+    pub average_messages_per_session: f64,
+    pub average_user_messages_per_session: f64,
+    pub coverage: AnalyticsCoverage,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AgentComparisonRow {
+    pub agent: String,
+    pub session_count: i64,
+    pub message_count: i64,
+    pub user_message_count: i64,
+    pub average_messages_per_session: f64,
+    pub full_fidelity_sessions: i64,
+    pub summary_fidelity_sessions: i64,
+    pub tool_analytics_capable_sessions: i64,
+    pub first_started_at: Option<String>,
+    pub last_started_at: Option<String>,
+}
+
+impl AgentComparisonRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            agent: row.get("agent")?,
+            session_count: row.get("session_count")?,
+            message_count: row.get("message_count")?,
+            user_message_count: row.get("user_message_count")?,
+            average_messages_per_session: row.get("average_messages_per_session")?,
+            full_fidelity_sessions: row.get("full_fidelity_sessions")?,
+            summary_fidelity_sessions: row.get("summary_fidelity_sessions")?,
+            tool_analytics_capable_sessions: row.get("tool_analytics_capable_sessions")?,
+            first_started_at: row.get("first_started_at")?,
+            last_started_at: row.get("last_started_at")?,
         })
     }
 }
@@ -394,6 +530,7 @@ pub struct AnalyticsParams {
     pub date_to: Option<String>,
     pub project: Option<String>,
     pub agent: Option<String>,
+    pub limit: Option<i64>,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -1140,7 +1277,7 @@ pub fn get_analytics_summary(
     conn: &Connection,
     params: &AnalyticsParams,
 ) -> rusqlite::Result<AnalyticsSummary> {
-    let (where_sql, values) = analytics_where(params, true);
+    let (where_sql, values) = analytics_where(params, None, true);
     let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
     let sql = format!(
         "SELECT
@@ -1182,6 +1319,7 @@ pub fn get_analytics_summary(
             earliest: row.3,
             latest: row.4,
         },
+        coverage: get_analytics_coverage(conn, params, "all_sessions")?,
     })
 }
 
@@ -1189,13 +1327,14 @@ pub fn get_analytics_activity(
     conn: &Connection,
     params: &AnalyticsParams,
 ) -> rusqlite::Result<Vec<ActivityDataPoint>> {
-    let (where_sql, values) = analytics_where(params, true);
+    let (where_sql, values) = analytics_where(params, None, true);
     let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
     let sql = format!(
         "SELECT
             date(started_at) as date,
             COUNT(*) as sessions,
-            COALESCE(SUM(message_count), 0) as messages
+            COALESCE(SUM(message_count), 0) as messages,
+            COALESCE(SUM(user_message_count), 0) as user_messages
          FROM browsing_sessions
          {where_sql}
          GROUP BY date(started_at)
@@ -1210,27 +1349,23 @@ pub fn get_analytics_projects(
     conn: &Connection,
     params: &AnalyticsParams,
 ) -> rusqlite::Result<Vec<ProjectBreakdown>> {
-    let mut conditions = vec!["project IS NOT NULL".to_string()];
-    let mut values: Vec<SqlValue> = Vec::new();
-    if let Some(date_from) = params.date_from.as_deref() {
-        conditions.push("started_at >= ?".into());
-        values.push(SqlValue::Text(date_from.to_string()));
-    }
-    if let Some(date_to) = params.date_to.as_deref() {
-        conditions.push("started_at < date(?, '+1 day')".into());
-        values.push(SqlValue::Text(date_to.to_string()));
+    let (mut where_sql, values) = analytics_where(params, None, true);
+    if where_sql.is_empty() {
+        where_sql = "WHERE project IS NOT NULL".to_string();
+    } else {
+        where_sql.push_str(" AND project IS NOT NULL");
     }
     let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
     let sql = format!(
         "SELECT
             project,
             COUNT(*) as session_count,
-            COALESCE(SUM(message_count), 0) as message_count
+            COALESCE(SUM(message_count), 0) as message_count,
+            COALESCE(SUM(user_message_count), 0) as user_message_count
          FROM browsing_sessions
-         {}
+         {where_sql}
          GROUP BY project
-         ORDER BY message_count DESC",
-        where_clause(&conditions)
+         ORDER BY message_count DESC, session_count DESC, project ASC"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(refs.as_slice(), ProjectBreakdown::from_row)?;
@@ -1241,22 +1376,17 @@ pub fn get_analytics_tools(
     conn: &Connection,
     params: &AnalyticsParams,
 ) -> rusqlite::Result<Vec<ToolUsageStat>> {
-    let mut conditions: Vec<String> = Vec::new();
-    let mut values: Vec<SqlValue> = Vec::new();
-    if let Some(project) = params.project.as_deref() {
-        conditions.push("bs.project = ?".into());
-        values.push(SqlValue::Text(project.to_string()));
-    }
-    if let Some(date_from) = params.date_from.as_deref() {
-        conditions.push("bs.started_at >= ?".into());
-        values.push(SqlValue::Text(date_from.to_string()));
-    }
-    if let Some(date_to) = params.date_to.as_deref() {
-        conditions.push("bs.started_at < date(?, '+1 day')".into());
-        values.push(SqlValue::Text(date_to.to_string()));
-    }
+    let (where_sql, values) = analytics_where(params, Some("bs"), true);
+    let sql_where = if where_sql.is_empty() {
+        format!("WHERE {}", tool_analytics_capable_condition(Some("bs")))
+    } else {
+        format!(
+            "{} AND {}",
+            where_sql,
+            tool_analytics_capable_condition(Some("bs"))
+        )
+    };
     let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
-    let join_filter = where_clause(&conditions);
     let sql = format!(
         "SELECT
             tc.tool_name,
@@ -1264,12 +1394,192 @@ pub fn get_analytics_tools(
             COUNT(*) as count
          FROM tool_calls tc
          JOIN browsing_sessions bs ON bs.id = tc.session_id
-         {join_filter}
+         {sql_where}
          GROUP BY tc.tool_name, tc.category
-         ORDER BY count DESC"
+         ORDER BY count DESC, tc.tool_name ASC"
     );
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(refs.as_slice(), ToolUsageStat::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+pub fn get_analytics_hour_of_week(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<HourOfWeekDataPoint>> {
+    let (where_sql, values) = analytics_where(params, None, true);
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let sql = format!(
+        "SELECT
+            ((CAST(strftime('%w', started_at) AS INTEGER) + 6) % 7) as day_of_week,
+            CAST(strftime('%H', started_at) AS INTEGER) as hour_of_day,
+            COUNT(*) as session_count,
+            COALESCE(SUM(message_count), 0) as message_count,
+            COALESCE(SUM(user_message_count), 0) as user_message_count
+         FROM browsing_sessions
+         {where_sql}
+         GROUP BY day_of_week, hour_of_day
+         ORDER BY day_of_week, hour_of_day"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), HourOfWeekDataPoint::from_row)?;
+    let mut buckets = rows
+        .collect::<rusqlite::Result<Vec<_>>>()?
+        .into_iter()
+        .map(|row| ((row.day_of_week, row.hour_of_day), row))
+        .collect::<HashMap<_, _>>();
+
+    let mut grid = Vec::with_capacity(7 * 24);
+    for day in 0..7 {
+        for hour in 0..24 {
+            grid.push(buckets.remove(&(day, hour)).unwrap_or(HourOfWeekDataPoint {
+                day_of_week: day,
+                hour_of_day: hour,
+                session_count: 0,
+                message_count: 0,
+                user_message_count: 0,
+            }));
+        }
+    }
+
+    Ok(grid)
+}
+
+pub fn get_analytics_top_sessions(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<TopSessionStat>> {
+    let limit = params.limit.unwrap_or(10).clamp(1, 50);
+    let (where_sql, mut values) = analytics_where(params, Some("bs"), true);
+    values.push(SqlValue::Integer(limit));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let sql = format!(
+        "SELECT
+            bs.id,
+            bs.project,
+            bs.agent,
+            bs.started_at,
+            bs.ended_at,
+            bs.message_count,
+            bs.user_message_count,
+            COALESCE(tc.tool_call_count, 0) as tool_call_count,
+            bs.fidelity
+         FROM browsing_sessions bs
+         LEFT JOIN (
+            SELECT session_id, COUNT(*) as tool_call_count
+            FROM tool_calls
+            GROUP BY session_id
+         ) tc ON tc.session_id = bs.id
+         {where_sql}
+         ORDER BY bs.message_count DESC, bs.started_at DESC, bs.id DESC
+         LIMIT ?"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), TopSessionStat::from_row)?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+pub fn get_analytics_velocity(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<VelocityMetrics> {
+    let (where_sql, values) = analytics_where(params, None, true);
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let sql = format!(
+        "SELECT
+            COUNT(*) as total_sessions,
+            COALESCE(SUM(message_count), 0) as total_messages,
+            COALESCE(SUM(user_message_count), 0) as total_user_messages,
+            COUNT(DISTINCT date(started_at)) as active_days,
+            MIN(started_at) as earliest,
+            MAX(started_at) as latest
+         FROM browsing_sessions
+         {where_sql}"
+    );
+    let row = conn.query_row(&sql, refs.as_slice(), |row| {
+        Ok((
+            row.get::<_, i64>("total_sessions")?,
+            row.get::<_, i64>("total_messages")?,
+            row.get::<_, i64>("total_user_messages")?,
+            row.get::<_, i64>("active_days")?,
+            row.get::<_, Option<String>>("earliest")?,
+            row.get::<_, Option<String>>("latest")?,
+        ))
+    })?;
+
+    let span_days = match (&row.4, &row.5) {
+        (Some(earliest), Some(latest)) => day_span(earliest, latest).unwrap_or(0).max(1),
+        _ => 0,
+    };
+    let active_days = if row.0 > 0 { row.3 } else { 0 };
+
+    Ok(VelocityMetrics {
+        total_sessions: row.0,
+        total_messages: row.1,
+        total_user_messages: row.2,
+        active_days,
+        span_days,
+        sessions_per_active_day: if row.0 > 0 {
+            round_metric(row.0 as f64 / row.3.max(1) as f64)
+        } else {
+            0.0
+        },
+        messages_per_active_day: if row.0 > 0 {
+            round_metric(row.1 as f64 / row.3.max(1) as f64)
+        } else {
+            0.0
+        },
+        sessions_per_calendar_day: if row.0 > 0 {
+            round_metric(row.0 as f64 / span_days.max(1) as f64)
+        } else {
+            0.0
+        },
+        messages_per_calendar_day: if row.0 > 0 {
+            round_metric(row.1 as f64 / span_days.max(1) as f64)
+        } else {
+            0.0
+        },
+        average_messages_per_session: if row.0 > 0 {
+            round_metric(row.1 as f64 / row.0 as f64)
+        } else {
+            0.0
+        },
+        average_user_messages_per_session: if row.0 > 0 {
+            round_metric(row.2 as f64 / row.0 as f64)
+        } else {
+            0.0
+        },
+        coverage: get_analytics_coverage(conn, params, "all_sessions")?,
+    })
+}
+
+pub fn get_analytics_agents(
+    conn: &Connection,
+    params: &AnalyticsParams,
+) -> rusqlite::Result<Vec<AgentComparisonRow>> {
+    let (where_sql, values) = analytics_where(params, None, true);
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let fidelity_expr = analytics_fidelity_expr(None);
+    let tool_analytics_condition = tool_analytics_capable_condition(None);
+    let sql = format!(
+        "SELECT
+            agent,
+            COUNT(*) as session_count,
+            COALESCE(SUM(message_count), 0) as message_count,
+            COALESCE(SUM(user_message_count), 0) as user_message_count,
+            ROUND(COALESCE(1.0 * SUM(message_count) / NULLIF(COUNT(*), 0), 0), 2) as average_messages_per_session,
+            COALESCE(SUM(CASE WHEN {fidelity_expr} = 'full' THEN 1 ELSE 0 END), 0) as full_fidelity_sessions,
+            COALESCE(SUM(CASE WHEN {fidelity_expr} = 'summary' THEN 1 ELSE 0 END), 0) as summary_fidelity_sessions,
+            COALESCE(SUM(CASE WHEN {tool_analytics_condition} THEN 1 ELSE 0 END), 0) as tool_analytics_capable_sessions,
+            MIN(started_at) as first_started_at,
+            MAX(started_at) as last_started_at
+         FROM browsing_sessions
+         {where_sql}
+         GROUP BY agent
+         ORDER BY message_count DESC, session_count DESC, agent ASC"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), AgentComparisonRow::from_row)?;
     rows.collect::<rusqlite::Result<Vec<_>>>()
 }
 
@@ -1397,28 +1707,176 @@ fn query_browsing_sessions(
     rows.collect::<rusqlite::Result<Vec<_>>>()
 }
 
-fn analytics_where(params: &AnalyticsParams, include_agent: bool) -> (String, Vec<SqlValue>) {
+fn qualify_column(alias: Option<&str>, column: &str) -> String {
+    match alias {
+        Some(alias) => format!("{alias}.{column}"),
+        None => column.to_string(),
+    }
+}
+
+fn analytics_where(
+    params: &AnalyticsParams,
+    alias: Option<&str>,
+    include_agent: bool,
+) -> (String, Vec<SqlValue>) {
     let mut conditions: Vec<String> = Vec::new();
     let mut values: Vec<SqlValue> = Vec::new();
 
     if let Some(project) = params.project.as_deref() {
-        conditions.push("project = ?".into());
+        conditions.push(format!("{} = ?", qualify_column(alias, "project")));
         values.push(SqlValue::Text(project.to_string()));
     }
     if include_agent && let Some(agent) = params.agent.as_deref() {
-        conditions.push("agent = ?".into());
+        conditions.push(format!("{} = ?", qualify_column(alias, "agent")));
         values.push(SqlValue::Text(agent.to_string()));
     }
     if let Some(date_from) = params.date_from.as_deref() {
-        conditions.push("started_at >= ?".into());
+        conditions.push(format!("{} >= ?", qualify_column(alias, "started_at")));
         values.push(SqlValue::Text(date_from.to_string()));
     }
     if let Some(date_to) = params.date_to.as_deref() {
-        conditions.push("started_at < date(?, '+1 day')".into());
+        conditions.push(format!(
+            "{} < date(?, '+1 day')",
+            qualify_column(alias, "started_at")
+        ));
         values.push(SqlValue::Text(date_to.to_string()));
     }
 
     (where_clause(&conditions), values)
+}
+
+fn analytics_fidelity_expr(alias: Option<&str>) -> String {
+    let fidelity_column = qualify_column(alias, "fidelity");
+    let integration_mode_column = qualify_column(alias, "integration_mode");
+    format!(
+        "CASE
+            WHEN {fidelity_column} = 'full' THEN 'full'
+            WHEN {fidelity_column} = 'summary' THEN 'summary'
+            WHEN {integration_mode_column} = 'claude-jsonl' THEN 'full'
+            ELSE 'unknown'
+        END"
+    )
+}
+
+fn analytics_capability_expr(capability: &str, alias: Option<&str>) -> String {
+    let capabilities_column = qualify_column(alias, "capabilities_json");
+    let fidelity_column = qualify_column(alias, "fidelity");
+    let integration_mode_column = qualify_column(alias, "integration_mode");
+    format!(
+        "COALESCE(
+            json_extract({capabilities_column}, '$.{capability}'),
+            CASE
+                WHEN {integration_mode_column} = 'claude-jsonl' OR {fidelity_column} = 'full' THEN 'full'
+                WHEN {fidelity_column} = 'summary' THEN 'none'
+                ELSE 'unknown'
+            END
+        )"
+    )
+}
+
+fn tool_analytics_capable_condition(alias: Option<&str>) -> String {
+    format!(
+        "{} IN ('summary', 'full')",
+        analytics_capability_expr("tool_analytics", alias)
+    )
+}
+
+fn round_metric(value: f64) -> f64 {
+    (value * 100.0).round() / 100.0
+}
+
+pub fn get_analytics_coverage(
+    conn: &Connection,
+    params: &AnalyticsParams,
+    scope: &str,
+) -> rusqlite::Result<AnalyticsCoverage> {
+    let (where_sql, values) = analytics_where(params, None, true);
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+    let included_condition = match scope {
+        "tool_analytics_capable" => tool_analytics_capable_condition(None),
+        _ => "1 = 1".to_string(),
+    };
+    let fidelity_expr = analytics_fidelity_expr(None);
+    let history_expr = analytics_capability_expr("history", None);
+    let search_expr = analytics_capability_expr("search", None);
+    let tool_analytics_expr = analytics_capability_expr("tool_analytics", None);
+    let live_items_expr = analytics_capability_expr("live_items", None);
+
+    let sql = format!(
+        "SELECT
+            COUNT(*) as matching_sessions,
+            COALESCE(SUM(CASE WHEN {included_condition} THEN 1 ELSE 0 END), 0) as included_sessions,
+            COALESCE(SUM(CASE WHEN {fidelity_expr} = 'full' THEN 1 ELSE 0 END), 0) as fidelity_full,
+            COALESCE(SUM(CASE WHEN {fidelity_expr} = 'summary' THEN 1 ELSE 0 END), 0) as fidelity_summary,
+            COALESCE(SUM(CASE WHEN {fidelity_expr} = 'unknown' THEN 1 ELSE 0 END), 0) as fidelity_unknown,
+            COALESCE(SUM(CASE WHEN {history_expr} = 'full' THEN 1 ELSE 0 END), 0) as history_full,
+            COALESCE(SUM(CASE WHEN {history_expr} = 'summary' THEN 1 ELSE 0 END), 0) as history_summary,
+            COALESCE(SUM(CASE WHEN {history_expr} = 'none' THEN 1 ELSE 0 END), 0) as history_none,
+            COALESCE(SUM(CASE WHEN {history_expr} = 'unknown' THEN 1 ELSE 0 END), 0) as history_unknown,
+            COALESCE(SUM(CASE WHEN {search_expr} = 'full' THEN 1 ELSE 0 END), 0) as search_full,
+            COALESCE(SUM(CASE WHEN {search_expr} = 'summary' THEN 1 ELSE 0 END), 0) as search_summary,
+            COALESCE(SUM(CASE WHEN {search_expr} = 'none' THEN 1 ELSE 0 END), 0) as search_none,
+            COALESCE(SUM(CASE WHEN {search_expr} = 'unknown' THEN 1 ELSE 0 END), 0) as search_unknown,
+            COALESCE(SUM(CASE WHEN {tool_analytics_expr} = 'full' THEN 1 ELSE 0 END), 0) as tool_analytics_full,
+            COALESCE(SUM(CASE WHEN {tool_analytics_expr} = 'summary' THEN 1 ELSE 0 END), 0) as tool_analytics_summary,
+            COALESCE(SUM(CASE WHEN {tool_analytics_expr} = 'none' THEN 1 ELSE 0 END), 0) as tool_analytics_none,
+            COALESCE(SUM(CASE WHEN {tool_analytics_expr} = 'unknown' THEN 1 ELSE 0 END), 0) as tool_analytics_unknown,
+            COALESCE(SUM(CASE WHEN {live_items_expr} = 'full' THEN 1 ELSE 0 END), 0) as live_items_full,
+            COALESCE(SUM(CASE WHEN {live_items_expr} = 'summary' THEN 1 ELSE 0 END), 0) as live_items_summary,
+            COALESCE(SUM(CASE WHEN {live_items_expr} = 'none' THEN 1 ELSE 0 END), 0) as live_items_none,
+            COALESCE(SUM(CASE WHEN {live_items_expr} = 'unknown' THEN 1 ELSE 0 END), 0) as live_items_unknown
+         FROM browsing_sessions
+         {where_sql}"
+    );
+
+    conn.query_row(&sql, refs.as_slice(), |row| {
+        let matching_sessions = row.get::<_, i64>("matching_sessions")?;
+        let included_sessions = row.get::<_, i64>("included_sessions")?;
+        Ok(AnalyticsCoverage {
+            metric_scope: scope.to_string(),
+            matching_sessions,
+            included_sessions,
+            excluded_sessions: (matching_sessions - included_sessions).max(0),
+            fidelity_breakdown: AnalyticsFidelityBreakdown {
+                full: row.get("fidelity_full")?,
+                summary: row.get("fidelity_summary")?,
+                unknown: row.get("fidelity_unknown")?,
+            },
+            capability_breakdown: AnalyticsCoverageCapabilityBreakdown {
+                history: AnalyticsCapabilityBreakdown {
+                    full: row.get("history_full")?,
+                    summary: row.get("history_summary")?,
+                    none: row.get("history_none")?,
+                    unknown: row.get("history_unknown")?,
+                },
+                search: AnalyticsCapabilityBreakdown {
+                    full: row.get("search_full")?,
+                    summary: row.get("search_summary")?,
+                    none: row.get("search_none")?,
+                    unknown: row.get("search_unknown")?,
+                },
+                tool_analytics: AnalyticsCapabilityBreakdown {
+                    full: row.get("tool_analytics_full")?,
+                    summary: row.get("tool_analytics_summary")?,
+                    none: row.get("tool_analytics_none")?,
+                    unknown: row.get("tool_analytics_unknown")?,
+                },
+                live_items: AnalyticsCapabilityBreakdown {
+                    full: row.get("live_items_full")?,
+                    summary: row.get("live_items_summary")?,
+                    none: row.get("live_items_none")?,
+                    unknown: row.get("live_items_unknown")?,
+                },
+            },
+            note: if scope == "tool_analytics_capable" {
+                "Only sessions whose capability contract exposes tool analytics are included in this metric."
+                    .to_string()
+            } else {
+                "This metric includes every session matching the current filters, including summary-only sessions."
+                    .to_string()
+            },
+        })
+    })
 }
 
 fn where_clause(conditions: &[String]) -> String {

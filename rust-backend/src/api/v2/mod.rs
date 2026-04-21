@@ -59,6 +59,19 @@ pub fn router() -> Router<Arc<AppState>> {
             get(history::analytics_projects_handler),
         )
         .route("/analytics/tools", get(history::analytics_tools_handler))
+        .route(
+            "/analytics/hour-of-week",
+            get(history::analytics_hour_of_week_handler),
+        )
+        .route(
+            "/analytics/top-sessions",
+            get(history::analytics_top_sessions_handler),
+        )
+        .route(
+            "/analytics/velocity",
+            get(history::analytics_velocity_handler),
+        )
+        .route("/analytics/agents", get(history::analytics_agents_handler))
         .route("/projects", get(history::projects_handler))
         .route("/agents", get(history::agents_handler))
 }

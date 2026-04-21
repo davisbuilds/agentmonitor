@@ -231,6 +231,8 @@ async fn v2_search_analytics_and_metadata_routes_match_contract() {
     assert_eq!(summary_status, 200);
     assert_eq!(summary["total_sessions"], 2);
     assert_eq!(summary["total_messages"], 5);
+    assert_eq!(summary["coverage"]["matching_sessions"], 2);
+    assert_eq!(summary["coverage"]["included_sessions"], 2);
 
     let (tools_status, tools) =
         get_json(&app, "/api/v2/analytics/tools?project=project-alpha").await;
@@ -241,6 +243,45 @@ async fn v2_search_analytics_and_metadata_routes_match_contract() {
             .unwrap()
             .iter()
             .any(|row| row["tool_name"] == "Agent")
+    );
+    assert_eq!(tools["coverage"]["metric_scope"], "tool_analytics_capable");
+
+    let (activity_status, activity) =
+        get_json(&app, "/api/v2/analytics/activity?project=project-alpha").await;
+    assert_eq!(activity_status, 200);
+    assert_eq!(activity["coverage"]["matching_sessions"], 2);
+    assert_eq!(activity["data"].as_array().unwrap().len(), 1);
+
+    let (hour_status, hour_of_week) =
+        get_json(&app, "/api/v2/analytics/hour-of-week?project=project-alpha").await;
+    assert_eq!(hour_status, 200);
+    assert_eq!(hour_of_week["data"].as_array().unwrap().len(), 168);
+
+    let (top_status, top_sessions) = get_json(
+        &app,
+        "/api/v2/analytics/top-sessions?project=project-alpha&limit=1",
+    )
+    .await;
+    assert_eq!(top_status, 200);
+    assert_eq!(top_sessions["data"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        top_sessions["data"].as_array().unwrap()[0]["id"],
+        "parity-v2-parent"
+    );
+
+    let (velocity_status, velocity) =
+        get_json(&app, "/api/v2/analytics/velocity?project=project-alpha").await;
+    assert_eq!(velocity_status, 200);
+    assert_eq!(velocity["total_sessions"], 2);
+    assert_eq!(velocity["coverage"]["matching_sessions"], 2);
+
+    let (agents_analytics_status, agents_analytics) =
+        get_json(&app, "/api/v2/analytics/agents?project=project-alpha").await;
+    assert_eq!(agents_analytics_status, 200);
+    assert_eq!(agents_analytics["data"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        agents_analytics["data"].as_array().unwrap()[0]["agent"],
+        "claude"
     );
 
     let (projects_status, projects) = get_json(&app, "/api/v2/projects").await;

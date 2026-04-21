@@ -3,7 +3,9 @@ use std::path::Path;
 use agentmonitor_rs::db;
 use agentmonitor_rs::db::v2_queries::{
     AnalyticsParams, LiveItemsListParams, LiveSessionsListParams, MessagesListParams,
-    PinsListParams, SearchParams, SessionsListParams, get_analytics_summary, get_analytics_tools,
+    PinsListParams, SearchParams, SessionsListParams, get_analytics_activity, get_analytics_agents,
+    get_analytics_coverage, get_analytics_hour_of_week, get_analytics_projects,
+    get_analytics_summary, get_analytics_tools, get_analytics_top_sessions, get_analytics_velocity,
     get_browsing_session, get_distinct_agents, get_distinct_projects, get_live_session,
     get_session_activity, get_session_children, get_session_items, get_session_messages,
     get_session_turns, list_browsing_sessions, list_live_sessions, list_pinned_messages,
@@ -132,6 +134,23 @@ fn seed_relevance_history(conn: &rusqlite::Connection) {
     .unwrap();
     conn.execute(
         "INSERT INTO messages_fts(messages_fts) VALUES('rebuild')",
+        [],
+    )
+    .unwrap();
+}
+
+fn seed_analytics_variant(conn: &rusqlite::Connection) {
+    conn.execute(
+        "INSERT INTO browsing_sessions (
+            id, project, agent, first_message, started_at, ended_at, message_count, user_message_count,
+            parent_session_id, relationship_type, live_status, last_item_at, integration_mode, fidelity,
+            capabilities_json, file_path, file_size, file_hash
+        ) VALUES (
+            'sess-summary', 'project-alpha', 'codex', 'Summary session', '2026-04-10T12:00:00Z', '2026-04-10T12:05:00Z',
+            2, 1, NULL, NULL, 'ended', '2026-04-10T12:05:00Z', 'codex-jsonl', 'summary',
+            NULL,
+            '/tmp/sess-summary.jsonl', 80, 'hash-summary'
+        )",
         [],
     )
     .unwrap();
@@ -332,20 +351,52 @@ fn relevance_search_prefers_denser_matches_and_returns_cursor() {
 fn analytics_queries_reflect_historical_projection() {
     let conn = setup_db();
     seed_historical_v2(&conn);
+    seed_analytics_variant(&conn);
 
     let summary = get_analytics_summary(
         &conn,
         &AnalyticsParams {
             project: Some("project-alpha".into()),
-            agent: Some("claude".into()),
             ..Default::default()
         },
     )
     .unwrap();
-    assert_eq!(summary.total_sessions, 2);
-    assert_eq!(summary.total_messages, 5);
-    assert_eq!(summary.total_user_messages, 3);
+    assert_eq!(summary.total_sessions, 3);
+    assert_eq!(summary.total_messages, 7);
+    assert_eq!(summary.total_user_messages, 4);
     assert!(summary.daily_average_sessions > 0.0);
+    assert_eq!(summary.coverage.matching_sessions, 3);
+    assert_eq!(summary.coverage.included_sessions, 3);
+    assert_eq!(summary.coverage.excluded_sessions, 0);
+    assert_eq!(summary.coverage.fidelity_breakdown.full, 2);
+    assert_eq!(summary.coverage.fidelity_breakdown.summary, 1);
+
+    let activity = get_analytics_activity(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(activity.len(), 2);
+    assert_eq!(activity[0].date, "2026-04-09");
+    assert_eq!(activity[0].sessions, 2);
+    assert_eq!(activity[0].messages, 5);
+    assert_eq!(activity[0].user_messages, 3);
+
+    let projects = get_analytics_projects(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0].project, "project-alpha");
+    assert_eq!(projects[0].message_count, 7);
+    assert_eq!(projects[0].user_message_count, 4);
 
     let tools = get_analytics_tools(
         &conn,
@@ -358,6 +409,79 @@ fn analytics_queries_reflect_historical_projection() {
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0].tool_name, "Read");
     assert_eq!(tools[0].count, 1);
+
+    let tool_coverage = get_analytics_coverage(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+        "tool_analytics_capable",
+    )
+    .unwrap();
+    assert_eq!(tool_coverage.matching_sessions, 3);
+    assert_eq!(tool_coverage.included_sessions, 2);
+    assert_eq!(tool_coverage.excluded_sessions, 1);
+    assert_eq!(tool_coverage.capability_breakdown.tool_analytics.none, 1);
+
+    let hour_of_week = get_analytics_hour_of_week(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(hour_of_week.len(), 168);
+    assert_eq!(
+        hour_of_week
+            .iter()
+            .map(|row| row.session_count)
+            .sum::<i64>(),
+        3
+    );
+
+    let top_sessions = get_analytics_top_sessions(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            limit: Some(2),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(top_sessions.len(), 2);
+    assert_eq!(top_sessions[0].id, "sess-a");
+    assert_eq!(top_sessions[1].id, "sess-summary");
+
+    let velocity = get_analytics_velocity(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(velocity.total_sessions, 3);
+    assert_eq!(velocity.total_messages, 7);
+    assert_eq!(velocity.active_days, 2);
+    assert_eq!(velocity.span_days, 2);
+    assert_eq!(velocity.coverage.matching_sessions, 3);
+
+    let agents = get_analytics_agents(
+        &conn,
+        &AnalyticsParams {
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(agents.len(), 2);
+    assert_eq!(agents[0].agent, "claude");
+    assert_eq!(agents[0].session_count, 2);
+    assert_eq!(agents[1].agent, "codex");
+    assert_eq!(agents[1].summary_fidelity_sessions, 1);
+    assert_eq!(agents[1].tool_analytics_capable_sessions, 0);
 }
 
 #[test]

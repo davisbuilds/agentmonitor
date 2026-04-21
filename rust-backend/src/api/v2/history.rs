@@ -8,10 +8,11 @@ use serde::Deserialize;
 
 use crate::db::v2_queries::{
     AnalyticsParams, MessagesListParams, PinsListParams, SearchParams, SessionsListParams,
-    get_analytics_activity, get_analytics_projects, get_analytics_summary, get_analytics_tools,
-    get_browsing_session, get_distinct_agents, get_distinct_projects, get_session_activity,
-    get_session_children, get_session_messages, list_browsing_sessions, list_pinned_messages,
-    pin_message, search_messages, unpin_message,
+    get_analytics_activity, get_analytics_agents, get_analytics_coverage,
+    get_analytics_hour_of_week, get_analytics_projects, get_analytics_summary, get_analytics_tools,
+    get_analytics_top_sessions, get_analytics_velocity, get_browsing_session, get_distinct_agents,
+    get_distinct_projects, get_session_activity, get_session_children, get_session_messages,
+    list_browsing_sessions, list_pinned_messages, pin_message, search_messages, unpin_message,
 };
 use crate::state::AppState;
 
@@ -49,6 +50,7 @@ pub struct AnalyticsQuery {
     date_to: Option<String>,
     project: Option<String>,
     agent: Option<String>,
+    limit: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -79,6 +81,7 @@ fn as_analytics_params(query: &AnalyticsQuery) -> AnalyticsParams {
         date_to: query.date_to.clone(),
         project: query.project.clone(),
         agent: query.agent.clone(),
+        limit: parse_i64(query.limit.as_deref()),
     }
 }
 
@@ -389,9 +392,24 @@ pub async fn analytics_activity_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AnalyticsQuery>,
 ) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
     let db = state.db.lock().await;
-    match get_analytics_activity(&db, &as_analytics_params(&query)) {
-        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+    match get_analytics_activity(&db, &params) {
+        Ok(data) => match get_analytics_coverage(&db, &params, "all_sessions") {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get activity data" })),
+            )
+                .into_response(),
+        },
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to get activity data" })),
@@ -404,9 +422,24 @@ pub async fn analytics_projects_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AnalyticsQuery>,
 ) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
     let db = state.db.lock().await;
-    match get_analytics_projects(&db, &as_analytics_params(&query)) {
-        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+    match get_analytics_projects(&db, &params) {
+        Ok(data) => match get_analytics_coverage(&db, &params, "all_sessions") {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get project data" })),
+            )
+                .into_response(),
+        },
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to get project data" })),
@@ -419,12 +452,132 @@ pub async fn analytics_tools_handler(
     State(state): State<Arc<AppState>>,
     Query(query): Query<AnalyticsQuery>,
 ) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
     let db = state.db.lock().await;
-    match get_analytics_tools(&db, &as_analytics_params(&query)) {
-        Ok(data) => (StatusCode::OK, Json(serde_json::json!({ "data": data }))).into_response(),
+    match get_analytics_tools(&db, &params) {
+        Ok(data) => match get_analytics_coverage(&db, &params, "tool_analytics_capable") {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get tool data" })),
+            )
+                .into_response(),
+        },
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": "Failed to get tool data" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_hour_of_week_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_analytics_hour_of_week(&db, &params) {
+        Ok(data) => match get_analytics_coverage(&db, &params, "all_sessions") {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get hour-of-week analytics" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get hour-of-week analytics" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_top_sessions_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_analytics_top_sessions(&db, &params) {
+        Ok(data) => match get_analytics_coverage(&db, &params, "all_sessions") {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get top sessions analytics" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get top sessions analytics" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_velocity_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let db = state.db.lock().await;
+    match get_analytics_velocity(&db, &as_analytics_params(&query)) {
+        Ok(data) => (StatusCode::OK, Json(data)).into_response(),
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get velocity analytics" })),
+        )
+            .into_response(),
+    }
+}
+
+pub async fn analytics_agents_handler(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<AnalyticsQuery>,
+) -> impl IntoResponse {
+    let params = as_analytics_params(&query);
+    let db = state.db.lock().await;
+    match get_analytics_agents(&db, &params) {
+        Ok(data) => match get_analytics_coverage(&db, &params, "all_sessions") {
+            Ok(coverage) => (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "data": data,
+                    "coverage": coverage,
+                })),
+            )
+                .into_response(),
+            Err(_) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Failed to get agent analytics" })),
+            )
+                .into_response(),
+        },
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({ "error": "Failed to get agent analytics" })),
         )
             .into_response(),
     }
