@@ -2,11 +2,37 @@
 date: 2026-04-19
 topic: rust-v2-parity
 stage: implementation-plan
-status: draft
+status: completed
 source: conversation
 ---
 
 # Rust V2 Parity Implementation Plan
+
+## Current Status
+
+Implemented on `feat/rust-v2-parity`.
+
+The Rust runtime now covers the current historical `/api/v2` surface used by the Svelte app:
+
+- schema/config parity for `pinned_messages`, `insights`, sync exclude patterns, and multi-provider insights settings
+- Codex OTEL parity for meaningful prompt/response/completion/error events, with the same websocket-noise filtering intent as TypeScript
+- session-review parity for activity buckets, pins, and search sorting/context
+- analytics parity for coverage-aware summary, activity, projects, tools, hour-of-week, top-sessions, velocity, and agent breakdowns
+- usage parity for event-derived summary, daily, project/model/agent attribution, and top-session views
+- insights parity for persisted CRUD plus OpenAI, Anthropic, and Gemini-backed generation
+
+Implemented commits on this branch:
+
+- `77d5eb4` `Add Rust schema and config parity primitives`
+- `ea1c153` `Align Rust Codex OTEL parsing with TS`
+- `c474bab` `Add Rust session review parity routes`
+- `82ffad9` `Expand Rust analytics v2 contract parity`
+- `71ecaf9` `Add Rust usage v2 API parity`
+- `63742fc` `Add Rust insights provider parity`
+
+Shared parity coverage now exercises the expanded historical contract through the black-box `tests/parity/v2` suite, including activity, pins, advanced analytics, usage, and insights generation metadata. Provider-backed insight generation itself remains covered by Rust integration tests rather than the shared parity harness, because the black-box harness does not provision provider keys or install test stubs.
+
+The remaining work after this plan is PR/review/merge and any later rollout decision about making Rust the default runtime. This branch does not require further implementation to satisfy the plan goals.
 
 ## Goal
 
@@ -351,17 +377,12 @@ Make the parity work durable by encoding the current TS contract into Rust-facin
 | Shared contract parity remains trustworthy | `pnpm test:parity:rust` | Rust contract checks cover the expanded `/api/v2` surface |
 | TS side remains stable while docs/shared expectations evolve | `pnpm build` | Main repo still builds cleanly |
 
-## Handoff
+## Completion
 
-Recommended execution order and PR slicing:
+The implementation work described above is complete on `feat/rust-v2-parity`.
 
-1. PR 1: Tasks 1 and 2.
-2. PR 2: Tasks 3 and 4.
-3. PR 3: Tasks 5 and 6.
-4. PR 4: Task 7 plus any final parity cleanup.
+Recommended next steps:
 
-Plan complete and saved to `docs/plans/2026-04-19-rust-v2-parity-implementation.md`.
-
-1. Execute in this session, task by task.
-2. Open a separate execution session.
-3. Refine this plan before implementation.
+1. Open and review the Rust parity PR against `main`.
+2. Validate the branch against any additional manual runtime smoke checks you want before merge.
+3. Decide separately whether Rust should remain an alternate runtime or move into a broader rollout plan.

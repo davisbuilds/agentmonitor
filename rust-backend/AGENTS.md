@@ -1,6 +1,6 @@
 # Rust Backend
 
-Reimplements core ingest and live-stream behavior using axum + tokio + rusqlite. Spike complete with GO decision — phased migration in progress.
+Reimplements the alternate AgentMonitor runtime using axum + tokio + rusqlite. Historical `/api/v2` parity with the current Svelte app contract is now implemented, while the broader runtime rollout decision is still under evaluation.
 
 See root `AGENTS.md` for project overview, API contract, and shared conventions.
 The convergence target is the canonical Svelte `/app/` experience backed by the `/api/v2/*` contract. Do not extend the legacy `/` dashboard path as a separate product.
@@ -33,4 +33,5 @@ The convergence target is the canonical Svelte `/app/` experience backed by the 
 
 - Run `pnpm rust:test` before pushing any Rust changes.
 - Use red/green TDD for new features and major changes.
-- 73 Rust tests + 18 shared parity tests.
+- Run `pnpm test:parity:rust` when you change shared historical `/api/v2` behavior.
+- Shared parity coverage now exercises sessions, search, activity, pins, advanced analytics, usage, and insights generation metadata against the Rust runtime.
