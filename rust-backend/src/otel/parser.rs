@@ -515,16 +515,16 @@ fn resolve_event_type(
             }
 
             if matches!(name, "codex.websocket_event" | "codex.websocket.event") {
+                if codex_event_kind.as_deref() == Some("response.failed")
+                    || has_codex_transport_failure(log_attrs, body_obj)
+                {
+                    return Some("error".to_string());
+                }
                 if codex_event_kind
                     .as_deref()
                     .is_some_and(is_skipped_codex_websocket_response_kind)
                 {
                     return None;
-                }
-                if codex_event_kind.as_deref() == Some("response.failed")
-                    || has_codex_transport_failure(log_attrs, body_obj)
-                {
-                    return Some("error".to_string());
                 }
                 if codex_event_kind
                     .as_deref()

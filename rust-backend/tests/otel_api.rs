@@ -405,6 +405,49 @@ async fn otel_logs_codex_websocket_delta_noise_is_skipped() {
 }
 
 #[tokio::test]
+async fn otel_logs_codex_websocket_skipped_kind_failure_becomes_error() {
+    let app = test_app();
+    let session_id = "otel-codex-websocket-skipped-failure";
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": {
+          "attributes": [
+            { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+            { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+          ]
+        },
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "body": { "stringValue": "{\"event_kind\":\"response.output_text.delta\",\"success\":false,\"error\":{\"message\":\"socket closed\"}}" },
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.websocket_event" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-websocket-skipped-failure&event_type=error",
+    )
+    .await;
+    assert_eq!(events_status, 200);
+
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["status"], "error");
+    let metadata = parse_event_metadata(&events[0]);
+    assert_eq!(metadata["event_kind"], "response.output_text.delta");
+    assert_eq!(metadata["success"], false);
+    assert_eq!(metadata["error"]["message"], "socket closed");
+}
+
+#[tokio::test]
 async fn otel_metrics_rejects_protobuf() {
     let app = test_app();
     let (status, _) = post_protobuf(&app, "/api/otel/v1/metrics").await;
