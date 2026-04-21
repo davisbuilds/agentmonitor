@@ -6,6 +6,7 @@ use axum::routing::{get, post};
 use crate::state::AppState;
 
 pub mod history;
+pub mod insights;
 pub mod live;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -80,6 +81,15 @@ pub fn router() -> Router<Arc<AppState>> {
         .route(
             "/usage/top-sessions",
             get(history::usage_top_sessions_handler),
+        )
+        .route("/insights", get(insights::list_insights_handler))
+        .route(
+            "/insights/generate",
+            post(insights::generate_insight_handler),
+        )
+        .route(
+            "/insights/{id}",
+            get(insights::get_insight_handler).delete(insights::delete_insight_handler),
         )
         .route("/projects", get(history::projects_handler))
         .route("/agents", get(history::agents_handler))

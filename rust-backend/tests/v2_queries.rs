@@ -2,15 +2,17 @@ use std::path::Path;
 
 use agentmonitor_rs::db;
 use agentmonitor_rs::db::v2_queries::{
-    AnalyticsParams, LiveItemsListParams, LiveSessionsListParams, MessagesListParams,
-    PinsListParams, SearchParams, SessionsListParams, get_analytics_activity, get_analytics_agents,
+    AnalyticsParams, CreateInsightInput, InsightsListParams, LiveItemsListParams,
+    LiveSessionsListParams, MessagesListParams, PinsListParams, SearchParams, SessionsListParams,
+    create_insight, delete_insight, get_analytics_activity, get_analytics_agents,
     get_analytics_coverage, get_analytics_hour_of_week, get_analytics_projects,
     get_analytics_summary, get_analytics_tools, get_analytics_top_sessions, get_analytics_velocity,
-    get_browsing_session, get_distinct_agents, get_distinct_projects, get_live_session,
-    get_session_activity, get_session_children, get_session_items, get_session_messages,
-    get_session_turns, get_usage_agents, get_usage_coverage, get_usage_daily, get_usage_models,
-    get_usage_projects, get_usage_summary, get_usage_top_sessions, list_browsing_sessions,
-    list_live_sessions, list_pinned_messages, pin_message, search_messages, unpin_message,
+    get_browsing_session, get_distinct_agents, get_distinct_projects, get_insight,
+    get_live_session, get_session_activity, get_session_children, get_session_items,
+    get_session_messages, get_session_turns, get_usage_agents, get_usage_coverage, get_usage_daily,
+    get_usage_models, get_usage_projects, get_usage_summary, get_usage_top_sessions,
+    list_browsing_sessions, list_insights, list_live_sessions, list_pinned_messages, pin_message,
+    search_messages, unpin_message,
 };
 
 fn setup_db() -> rusqlite::Connection {
@@ -614,6 +616,56 @@ fn usage_queries_reflect_event_projection() {
     assert_eq!(top_sessions[1].id, "sess-a");
     assert_eq!(top_sessions[2].id, "live-only-session");
     assert!(!top_sessions[2].browsing_session_available);
+}
+
+#[test]
+fn insight_queries_round_trip_persisted_rows() {
+    let conn = setup_db();
+
+    let created = create_insight(
+        &conn,
+        &CreateInsightInput {
+            kind: "overview".into(),
+            title: "Operational Summary".into(),
+            prompt: Some("focus on tool usage".into()),
+            content: "# Operational Summary\n\nScope\n".into(),
+            date_from: "2026-04-09".into(),
+            date_to: "2026-04-10".into(),
+            project: Some("project-alpha".into()),
+            agent: Some("claude".into()),
+            provider: "openai".into(),
+            model: "gpt-5-mini".into(),
+            analytics_summary: serde_json::json!({ "total_sessions": 2 }),
+            analytics_coverage: serde_json::json!({ "matching_sessions": 2 }),
+            usage_summary: serde_json::json!({ "total_cost_usd": 1.25 }),
+            usage_coverage: serde_json::json!({ "usage_events": 3 }),
+            input_snapshot: serde_json::json!({ "analytics_activity": [], "usage_daily": [] }),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(created.kind, "overview");
+    assert_eq!(created.title, "Operational Summary");
+    assert_eq!(created.provider, "openai");
+    assert_eq!(created.analytics_summary["total_sessions"], 2);
+
+    let fetched = get_insight(&conn, created.id).unwrap().expect("insight");
+    assert_eq!(fetched.id, created.id);
+
+    let listed = list_insights(
+        &conn,
+        &InsightsListParams {
+            kind: Some("overview".into()),
+            project: Some("project-alpha".into()),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, created.id);
+
+    assert!(delete_insight(&conn, created.id).unwrap());
+    assert!(get_insight(&conn, created.id).unwrap().is_none());
 }
 
 #[test]

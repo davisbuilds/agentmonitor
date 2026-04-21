@@ -696,6 +696,101 @@ impl UsageTopSessionRow {
     }
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InsightRow {
+    pub id: i64,
+    pub kind: String,
+    pub title: String,
+    pub prompt: Option<String>,
+    pub content: String,
+    pub date_from: String,
+    pub date_to: String,
+    pub project: Option<String>,
+    pub agent: Option<String>,
+    pub provider: String,
+    pub model: String,
+    pub analytics_summary: Value,
+    pub analytics_coverage: Value,
+    pub usage_summary: Value,
+    pub usage_coverage: Value,
+    pub input_snapshot: Value,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+struct InsightDbRow {
+    id: i64,
+    kind: String,
+    title: String,
+    prompt: Option<String>,
+    content: String,
+    date_from: String,
+    date_to: String,
+    project: Option<String>,
+    agent: Option<String>,
+    provider: String,
+    model: String,
+    analytics_summary_json: String,
+    analytics_coverage_json: String,
+    usage_summary_json: String,
+    usage_coverage_json: String,
+    input_json: String,
+    created_at: String,
+}
+
+impl InsightDbRow {
+    fn from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get("id")?,
+            kind: row.get("kind")?,
+            title: row.get("title")?,
+            prompt: row.get("prompt")?,
+            content: row.get("content")?,
+            date_from: row.get("date_from")?,
+            date_to: row.get("date_to")?,
+            project: row.get("project")?,
+            agent: row.get("agent")?,
+            provider: row.get("provider")?,
+            model: row.get("model")?,
+            analytics_summary_json: row.get("analytics_summary_json")?,
+            analytics_coverage_json: row.get("analytics_coverage_json")?,
+            usage_summary_json: row.get("usage_summary_json")?,
+            usage_coverage_json: row.get("usage_coverage_json")?,
+            input_json: row.get("input_json")?,
+            created_at: row.get("created_at")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct CreateInsightInput {
+    pub kind: String,
+    pub title: String,
+    pub prompt: Option<String>,
+    pub content: String,
+    pub date_from: String,
+    pub date_to: String,
+    pub project: Option<String>,
+    pub agent: Option<String>,
+    pub provider: String,
+    pub model: String,
+    pub analytics_summary: Value,
+    pub analytics_coverage: Value,
+    pub usage_summary: Value,
+    pub usage_coverage: Value,
+    pub input_snapshot: Value,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct InsightsListParams {
+    pub date_from: Option<String>,
+    pub date_to: Option<String>,
+    pub project: Option<String>,
+    pub agent: Option<String>,
+    pub kind: Option<String>,
+    pub limit: Option<i64>,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct SessionsListParams {
     pub limit: Option<i64>,
@@ -2143,6 +2238,86 @@ pub fn get_usage_top_sessions(
     rows.collect::<rusqlite::Result<Vec<_>>>()
 }
 
+pub fn list_insights(
+    conn: &Connection,
+    params: &InsightsListParams,
+) -> rusqlite::Result<Vec<InsightRow>> {
+    let limit = params.limit.unwrap_or(50).clamp(1, 200);
+    let (where_sql, mut values) = insights_where(params);
+    values.push(SqlValue::Integer(limit));
+    let refs: Vec<&dyn ToSql> = values.iter().map(|value| value as &dyn ToSql).collect();
+
+    let sql = format!(
+        "SELECT *
+         FROM insights
+         {where_sql}
+         ORDER BY created_at DESC, id DESC
+         LIMIT ?"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(refs.as_slice(), |row| {
+        Ok(parse_insight_row(InsightDbRow::from_row(row)?))
+    })?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+}
+
+pub fn get_insight(conn: &Connection, id: i64) -> rusqlite::Result<Option<InsightRow>> {
+    let mut stmt = conn.prepare("SELECT * FROM insights WHERE id = ?1")?;
+    let mut rows = stmt.query([id])?;
+    match rows.next()? {
+        Some(row) => Ok(Some(parse_insight_row(InsightDbRow::from_row(row)?))),
+        None => Ok(None),
+    }
+}
+
+pub fn create_insight(
+    conn: &Connection,
+    input: &CreateInsightInput,
+) -> rusqlite::Result<InsightRow> {
+    conn.execute(
+        "INSERT INTO insights (
+            kind,
+            title,
+            prompt,
+            content,
+            date_from,
+            date_to,
+            project,
+            agent,
+            provider,
+            model,
+            analytics_summary_json,
+            analytics_coverage_json,
+            usage_summary_json,
+            usage_coverage_json,
+            input_json
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+        (
+            &input.kind,
+            &input.title,
+            &input.prompt,
+            &input.content,
+            &input.date_from,
+            &input.date_to,
+            &input.project,
+            &input.agent,
+            &input.provider,
+            &input.model,
+            serde_json::to_string(&input.analytics_summary).unwrap_or_else(|_| "null".to_string()),
+            serde_json::to_string(&input.analytics_coverage).unwrap_or_else(|_| "null".to_string()),
+            serde_json::to_string(&input.usage_summary).unwrap_or_else(|_| "null".to_string()),
+            serde_json::to_string(&input.usage_coverage).unwrap_or_else(|_| "null".to_string()),
+            serde_json::to_string(&input.input_snapshot).unwrap_or_else(|_| "null".to_string()),
+        ),
+    )?;
+    let id = conn.last_insert_rowid();
+    get_insight(conn, id)?.ok_or(rusqlite::Error::QueryReturnedNoRows)
+}
+
+pub fn delete_insight(conn: &Connection, id: i64) -> rusqlite::Result<bool> {
+    Ok(conn.execute("DELETE FROM insights WHERE id = ?1", [id])? > 0)
+}
+
 pub fn get_distinct_projects(conn: &Connection) -> rusqlite::Result<Vec<String>> {
     let mut stmt = conn.prepare(
         "SELECT DISTINCT project FROM browsing_sessions WHERE project IS NOT NULL ORDER BY project",
@@ -2251,6 +2426,32 @@ fn normalize_projection_capabilities(
         live_items: normalized
             .remove("live_items")
             .unwrap_or_else(|| fallback.live_items.clone()),
+    }
+}
+
+fn parse_json_value(raw: &str) -> Value {
+    serde_json::from_str(raw).unwrap_or(Value::Null)
+}
+
+fn parse_insight_row(row: InsightDbRow) -> InsightRow {
+    InsightRow {
+        id: row.id,
+        kind: row.kind,
+        title: row.title,
+        prompt: row.prompt,
+        content: row.content,
+        date_from: row.date_from,
+        date_to: row.date_to,
+        project: row.project,
+        agent: row.agent,
+        provider: row.provider,
+        model: row.model,
+        analytics_summary: parse_json_value(&row.analytics_summary_json),
+        analytics_coverage: parse_json_value(&row.analytics_coverage_json),
+        usage_summary: parse_json_value(&row.usage_summary_json),
+        usage_coverage: parse_json_value(&row.usage_coverage_json),
+        input_snapshot: parse_json_value(&row.input_json),
+        created_at: row.created_at,
     }
 }
 
@@ -2549,17 +2750,42 @@ fn parse_date_only(value: &str) -> Option<NaiveDate> {
 fn enumerate_date_range(from: NaiveDate, to: NaiveDate) -> Vec<String> {
     let mut dates = Vec::new();
     let mut cursor = from;
-    while cursor <= to {
+    loop {
         dates.push(cursor.format("%Y-%m-%d").to_string());
-        cursor = cursor.succ_opt().unwrap_or(cursor);
-        if dates
-            .last()
-            .is_some_and(|last| last == &to.format("%Y-%m-%d").to_string())
-        {
+        if cursor >= to {
             break;
         }
+        cursor = cursor.succ_opt().unwrap_or(to);
     }
     dates
+}
+
+fn insights_where(params: &InsightsListParams) -> (String, Vec<SqlValue>) {
+    let mut conditions: Vec<String> = Vec::new();
+    let mut values: Vec<SqlValue> = Vec::new();
+
+    if let Some(kind) = params.kind.as_deref() {
+        conditions.push("kind = ?".to_string());
+        values.push(SqlValue::Text(kind.to_string()));
+    }
+    if let Some(project) = params.project.as_deref() {
+        conditions.push("project = ?".to_string());
+        values.push(SqlValue::Text(project.to_string()));
+    }
+    if let Some(agent) = params.agent.as_deref() {
+        conditions.push("agent = ?".to_string());
+        values.push(SqlValue::Text(agent.to_string()));
+    }
+    if let Some(date_from) = params.date_from.as_deref() {
+        conditions.push("date_to >= ?".to_string());
+        values.push(SqlValue::Text(date_from.to_string()));
+    }
+    if let Some(date_to) = params.date_to.as_deref() {
+        conditions.push("date_from <= ?".to_string());
+        values.push(SqlValue::Text(date_to.to_string()));
+    }
+
+    (where_clause(&conditions), values)
 }
 
 fn where_clause(conditions: &[String]) -> String {
