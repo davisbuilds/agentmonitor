@@ -358,6 +358,72 @@ describe('Codex log parser', () => {
     assert.equal(tokenEvents[1].tokens_out, 500);
   });
 
+  test('calculates cost for imported gpt-5.4 Codex token_count events', () => {
+    fs.writeFileSync(path.join(tmpDir, 'config.toml'), 'model = "gpt-5.4"\n');
+
+    const filePath = writeJsonl('codex-gpt54.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-gpt54', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T10:01:00Z',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 100_000,
+              output_tokens: 50_000,
+              cached_input_tokens: 40_000,
+            },
+          },
+        },
+      },
+    ]);
+
+    const events = parseCodexFile(filePath, { codexDir: tmpDir });
+    const tokenEvent = events.find(e => e.event_type === 'llm_response');
+    assert.ok(tokenEvent);
+    assert.equal(tokenEvent.model, 'gpt-5.4');
+    assert.ok(tokenEvent.cost_usd !== undefined);
+    assert.ok(Math.abs((tokenEvent.cost_usd as number) - 1.01) < 0.0001);
+  });
+
+  test('calculates cost for imported gpt-5.3-codex Codex token_count events', () => {
+    fs.writeFileSync(path.join(tmpDir, 'config.toml'), 'model = "gpt-5.3-codex"\n');
+
+    const filePath = writeJsonl('codex-gpt53-codex.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T10:00:00Z',
+        payload: { id: 'cdx-gpt53-codex', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T10:01:00Z',
+        payload: {
+          type: 'token_count',
+          info: {
+            total_token_usage: {
+              input_tokens: 100_000,
+              output_tokens: 50_000,
+              cached_input_tokens: 40_000,
+            },
+          },
+        },
+      },
+    ]);
+
+    const events = parseCodexFile(filePath, { codexDir: tmpDir });
+    const tokenEvent = events.find(e => e.event_type === 'llm_response');
+    assert.ok(tokenEvent);
+    assert.equal(tokenEvent.model, 'gpt-5.3-codex');
+    assert.ok(tokenEvent.cost_usd !== undefined);
+    assert.ok(Math.abs((tokenEvent.cost_usd as number) - 0.882) < 0.0001);
+  });
+
   test('parses response_item apply_patch as tool_use event', () => {
     const filePath = writeJsonl('codex-patch.jsonl', [
       {

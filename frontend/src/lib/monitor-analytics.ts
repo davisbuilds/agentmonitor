@@ -32,6 +32,7 @@ export function formatMonitorCost(value: number | null | undefined): string {
 export function shortModelName(model: string): string {
   if (!model) return 'unknown';
   return model
+    .replace(/claude-opus-4-7(-\d+)?/, 'opus-4.7')
     .replace(/claude-sonnet-4-5-\d+/, 'sonnet-4.5')
     .replace(/claude-opus-4-6(-\d+)?/, 'opus-4.6')
     .replace(/claude-opus-4-5-\d+/, 'opus-4.5')

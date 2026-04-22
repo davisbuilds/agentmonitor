@@ -35,6 +35,13 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.provider, 'anthropic');
     });
 
+    test('finds Claude Opus 4.7 by canonical name', () => {
+      const pricing = registry.lookup('claude-opus-4-7');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.deprecated, false);
+    });
+
     test('finds Claude Opus 4 by alias', () => {
       const pricing = registry.lookup('opus');
       assert.ok(pricing);
@@ -206,6 +213,17 @@ describe('PricingRegistry', () => {
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 
+    test('calculates cost for Claude Opus 4.7', () => {
+      const cost = registry.calculate('claude-opus-4-7', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      const expected = 0.5 + 1.25 + 0.02;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
     test('works via alias', () => {
       const byCanonical = registry.calculate('claude-sonnet-4-5-20250929', {
         input: 1000,
@@ -339,6 +357,24 @@ describe('Pricing auto-calculation on ingest', () => {
     // 1M * $3/MTok + 100K * $15/MTok = $3.00 + $1.50 = $4.50
     const cost = event.cost_usd as number;
     assert.ok(Math.abs(cost - 4.5) < 0.0001, `Expected ~$4.50, got $${cost}`);
+  });
+
+  test('auto-calculates cost_usd for Claude Opus 4.7 events', async () => {
+    const res = await postJson(`${baseUrl}/api/events`, {
+      session_id: 'sess-price-opus-47',
+      agent_type: 'claude_code',
+      event_type: 'llm_request',
+      model: 'claude-opus-4-7',
+      tokens_in: 100_000,
+      tokens_out: 50_000,
+      cache_read_tokens: 40_000,
+    });
+    assert.equal(res.status, 201);
+
+    const events = await getEvents();
+    const cost = events.events[0].cost_usd as number;
+    const expected = 0.5 + 1.25 + 0.02;
+    assert.ok(Math.abs(cost - expected) < 0.0001, `Expected ~$${expected}, got $${cost}`);
   });
 
   test('auto-calculates cost including cache tokens', async () => {

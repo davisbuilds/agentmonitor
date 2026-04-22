@@ -198,8 +198,9 @@ const Transcript = {
   shortModel(model) {
     if (!model) return '';
     return model
+      .replace(/claude-opus-4-7(-\d+)?/, 'opus-4.7')
       .replace('claude-sonnet-4-5-20250929', 'sonnet-4.5')
-      .replace('claude-opus-4-6', 'opus-4.6')
+      .replace(/claude-opus-4-6(-\d+)?/, 'opus-4.6')
       .replace('claude-haiku-4-5-20251001', 'haiku-4.5')
       .replace(/^claude-/, 'c-')
       .replace(/^gpt-/, 'gpt-');

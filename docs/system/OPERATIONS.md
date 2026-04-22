@@ -122,6 +122,7 @@ Operational notes:
 - Full imports update `import_state` even when a file produced zero events, so unchanged unsupported/non-interactive files are skipped on later full imports.
 - Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
 - `pnpm run import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm reparse:codex-sessions` when transcript-derived analytics such as inferred skill usage need to be backfilled.
+- If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm run recalculate-costs`; that backfills stale imports after pricing-data updates or importer fixes.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
 
 ## CI
