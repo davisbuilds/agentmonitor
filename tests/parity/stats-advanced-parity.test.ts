@@ -125,23 +125,20 @@ test('GET /api/stats/cost includes unique project and model costs', async () => 
   assert.ok(body.timeline.length >= 1);
 });
 
-test('GET /api/stats/usage-monitor returns expected per-agent usage shape', async () => {
-  // Ensure both built-in agent types have activity
-  await postJson('/api/events', {
-    session_id: uniqueSession(),
-    agent_type: 'claude_code',
-    event_type: 'llm_response',
-    tokens_in: 321,
-    tokens_out: 123,
-    cost_usd: 0.0,
+test('GET /api/stats/usage-monitor returns native provider quota snapshots', async () => {
+  await postJson('/api/provider-quotas/claude/statusline', {
+    rate_limits: {
+      five_hour: { used_percentage: 12, resets_at: 1_776_933_923 },
+      seven_day: { used_percentage: 34, resets_at: 1_777_416_387 },
+    },
   });
-  await postJson('/api/events', {
-    session_id: uniqueSession(),
-    agent_type: 'codex',
-    event_type: 'llm_response',
-    tokens_in: 111,
-    tokens_out: 222,
-    cost_usd: 1.23,
+  await postJson('/api/provider-quotas/codex', {
+    status: 'available',
+    source: 'parity-test',
+    plan_type: 'plus',
+    primary: { used_percent: 5, resets_at: '2026-04-23T08:45:23Z', window_minutes: 300 },
+    secondary: { used_percent: 24, resets_at: '2026-04-28T22:46:27Z', window_minutes: 10080 },
+    credits: { has_credits: false, unlimited: false, balance: '0' },
   });
 
   const res = await getJson('/api/stats/usage-monitor');
@@ -150,29 +147,21 @@ test('GET /api/stats/usage-monitor returns expected per-agent usage shape', asyn
   const body = await res.json();
   assert.equal(Array.isArray(body), true);
 
-  const claude = body.find((row: { agent_type: string }) => row.agent_type === 'claude_code');
+  const claude = body.find((row: { provider: string }) => row.provider === 'claude');
   assert.ok(claude, 'missing claude_code usage row');
-  assert.equal(claude.limitType, 'tokens');
-  assert.equal(typeof claude.session.used, 'number');
-  assert.equal(typeof claude.session.limit, 'number');
-  assert.equal(typeof claude.session.windowHours, 'number');
-  assert.ok(
-    claude.extended === null
-      || (typeof claude.extended.used === 'number'
-        && typeof claude.extended.limit === 'number'
-        && typeof claude.extended.windowHours === 'number'),
-  );
+  assert.equal(claude.agent_type, 'claude_code');
+  assert.equal(claude.status, 'available');
+  assert.equal(claude.primary.used_percent, 12);
+  assert.equal(claude.primary.window_minutes, 300);
+  assert.equal(claude.secondary.used_percent, 34);
+  assert.equal(claude.secondary.window_minutes, 10080);
 
-  const codex = body.find((row: { agent_type: string }) => row.agent_type === 'codex');
+  const codex = body.find((row: { provider: string }) => row.provider === 'codex');
   assert.ok(codex, 'missing codex usage row');
-  assert.equal(codex.limitType, 'cost');
-  assert.equal(typeof codex.session.used, 'number');
-  assert.equal(typeof codex.session.limit, 'number');
-  assert.equal(typeof codex.session.windowHours, 'number');
-  assert.ok(
-    codex.extended === null
-      || (typeof codex.extended.used === 'number'
-        && typeof codex.extended.limit === 'number'
-        && typeof codex.extended.windowHours === 'number'),
-  );
+  assert.equal(codex.agent_type, 'codex');
+  assert.equal(codex.status, 'available');
+  assert.equal(codex.plan_type, 'plus');
+  assert.equal(codex.primary.used_percent, 5);
+  assert.equal(codex.secondary.used_percent, 24);
+  assert.equal(codex.credits.has_credits, false);
 });

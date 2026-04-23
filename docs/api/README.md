@@ -8,6 +8,7 @@ Used by ingest clients and some current Monitor behaviors.
 
 - Event ingest contract: [event-contract.md](event-contract.md)
 - Main endpoints: `/api/events`, `/api/events/batch`, `/api/stats`, `/api/sessions`, `/api/stream`, `/api/otel/v1/*`
+- Provider quota endpoints: `/api/provider-quotas`, `/api/provider-quotas/:provider`, `/api/provider-quotas/claude/statusline`
 
 ## v2 Canonical App Contract
 

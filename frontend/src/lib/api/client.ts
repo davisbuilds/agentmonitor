@@ -13,15 +13,37 @@ export interface Stats {
   agent_breakdown: Record<string, number>;
   model_breakdown: Record<string, number>;
   branches: string[];
-  usage_monitor?: UsageMonitorData[];
+  quota_monitor?: QuotaMonitorData[];
+  usage_monitor?: QuotaMonitorData[];
 }
 
-export interface UsageMonitorData {
-  agent_type: string;
-  limitType: 'tokens' | 'cost';
-  session: { used: number; limit: number; windowHours: number };
-  extended: { used: number; limit: number; windowHours: number } | null;
-  weekly: { used: number; limit: number; windowHours: number } | null;
+export interface QuotaMonitorWindow {
+  used_percent: number;
+  remaining_percent: number;
+  resets_at: string | null;
+  window_minutes: number | null;
+}
+
+export interface QuotaMonitorCredits {
+  has_credits: boolean;
+  unlimited: boolean;
+  balance: string | null;
+}
+
+export interface QuotaMonitorData {
+  provider: 'claude' | 'codex';
+  agent_type: 'claude_code' | 'codex';
+  status: 'available' | 'unavailable' | 'error';
+  source: string | null;
+  updated_at: string | null;
+  account_label: string | null;
+  plan_type: string | null;
+  limit_id: string | null;
+  limit_name: string | null;
+  error_message: string | null;
+  primary: QuotaMonitorWindow | null;
+  secondary: QuotaMonitorWindow | null;
+  credits: QuotaMonitorCredits | null;
 }
 
 export interface AgentEvent {

@@ -21,8 +21,7 @@ pub async fn run_stats_broadcast_once(state: Arc<AppState>) -> bool {
         total_tokens_out: 0,
         total_cost_usd: 0.0,
     });
-    let usage_monitor =
-        queries::get_usage_monitor(&db, &state.config.usage_monitor).unwrap_or_default();
+    let quota_monitor = queries::get_usage_monitor(&db).unwrap_or_default();
     drop(db);
 
     state.sse_hub.broadcast(
@@ -34,7 +33,8 @@ pub async fn run_stats_broadcast_once(state: Arc<AppState>) -> bool {
             "total_tokens_in": stats.total_tokens_in,
             "total_tokens_out": stats.total_tokens_out,
             "total_cost_usd": stats.total_cost_usd,
-            "usage_monitor": usage_monitor,
+            "quota_monitor": quota_monitor,
+            "usage_monitor": quota_monitor,
         }),
     );
     true

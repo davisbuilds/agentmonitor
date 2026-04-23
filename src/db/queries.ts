@@ -1,5 +1,5 @@
 import { getDb } from './connection.js';
-import { config, type UsageLimitType } from '../config.js';
+import { config } from '../config.js';
 import { syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { resolveGitBranch } from '../util/git-branch.js';
@@ -619,75 +619,271 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   };
 }
 
-// --- Usage Monitor ---
+// --- Provider Quotas ---
 
-export interface AgentUsageData {
-  agent_type: string;
-  limitType: UsageLimitType;
-  session: { used: number; limit: number; windowHours: number };
-  extended: { used: number; limit: number; windowHours: number } | null;
-  weekly: { used: number; limit: number; windowHours: number } | null;
+export type ProviderName = 'claude' | 'codex';
+
+export interface ProviderQuotaWindow {
+  used_percent: number;
+  remaining_percent: number;
+  resets_at: string | null;
+  window_minutes: number | null;
 }
 
-export type UsageMonitorData = AgentUsageData[];
+export interface ProviderQuotaCredits {
+  has_credits: boolean;
+  unlimited: boolean;
+  balance: string | null;
+}
 
-export function getUsageMonitor(): UsageMonitorData {
-  const db = getDb();
-  const monitorConfig = config.usageMonitor;
+export interface ProviderQuotaSnapshot {
+  provider: ProviderName;
+  agent_type: 'claude_code' | 'codex';
+  status: 'available' | 'unavailable' | 'error';
+  source: string | null;
+  updated_at: string | null;
+  account_label: string | null;
+  plan_type: string | null;
+  limit_id: string | null;
+  limit_name: string | null;
+  error_message: string | null;
+  primary: ProviderQuotaWindow | null;
+  secondary: ProviderQuotaWindow | null;
+  credits: ProviderQuotaCredits | null;
+}
 
-  // Get all agent types that have events
-  const agentTypes = (db.prepare(
-    'SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL'
-  ).all() as { agent_type: string }[]).map(r => r.agent_type);
+interface ProviderQuotaWindowInput {
+  used_percent?: number | null;
+  resets_at?: string | number | null;
+  window_minutes?: number | null;
+}
 
-  const results: UsageMonitorData = [];
+export interface ProviderQuotaSnapshotInput {
+  provider: ProviderName;
+  agent_type?: 'claude_code' | 'codex';
+  status?: ProviderQuotaSnapshot['status'];
+  source?: string | null;
+  updated_at?: string | null;
+  account_label?: string | null;
+  plan_type?: string | null;
+  limit_id?: string | null;
+  limit_name?: string | null;
+  error_message?: string | null;
+  primary?: ProviderQuotaWindowInput | null;
+  secondary?: ProviderQuotaWindowInput | null;
+  credits?: {
+    has_credits?: boolean | null;
+    unlimited?: boolean | null;
+    balance?: string | null;
+  } | null;
+  raw_payload?: unknown;
+}
 
-  for (const agentType of agentTypes) {
-    const agentConfig = monitorConfig[agentType] || monitorConfig._default;
+const PROVIDER_DEFAULTS: Record<ProviderName, Pick<ProviderQuotaSnapshot, 'agent_type' | 'status' | 'source' | 'updated_at' | 'account_label' | 'plan_type' | 'limit_id' | 'limit_name' | 'error_message' | 'primary' | 'secondary' | 'credits'>> = {
+  claude: {
+    agent_type: 'claude_code',
+    status: 'unavailable',
+    source: null,
+    updated_at: null,
+    account_label: null,
+    plan_type: null,
+    limit_id: null,
+    limit_name: null,
+    error_message: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+  },
+  codex: {
+    agent_type: 'codex',
+    status: 'unavailable',
+    source: null,
+    updated_at: null,
+    account_label: null,
+    plan_type: null,
+    limit_id: null,
+    limit_name: null,
+    error_message: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+  },
+};
 
-    // Skip agents with no limits configured
-    if (agentConfig.sessionLimit === 0 && agentConfig.extendedLimit === 0 && agentConfig.weeklyLimit === 0) continue;
-
-    const sumExpr = agentConfig.limitType === 'cost'
-      ? 'COALESCE(SUM(cost_usd), 0)'
-      : 'COALESCE(SUM(tokens_in + tokens_out), 0)';
-
-    const sessionRow = db.prepare(`
-      SELECT ${sumExpr} as used
-      FROM events
-      WHERE agent_type = ? AND created_at >= datetime('now', ? || ' hours')
-    `).get(agentType, `-${agentConfig.sessionWindowHours}`) as { used: number };
-
-    let extended: AgentUsageData['extended'] = null;
-    if (agentConfig.extendedLimit > 0) {
-      const extRow = db.prepare(`
-        SELECT ${sumExpr} as used
-        FROM events
-        WHERE agent_type = ? AND created_at >= datetime('now', ? || ' hours')
-      `).get(agentType, `-${agentConfig.extendedWindowHours}`) as { used: number };
-      extended = { used: extRow.used, limit: agentConfig.extendedLimit, windowHours: agentConfig.extendedWindowHours };
-    }
-
-    let weekly: AgentUsageData['weekly'] = null;
-    if (agentConfig.weeklyLimit > 0) {
-      const weeklyRow = db.prepare(`
-        SELECT ${sumExpr} as used
-        FROM events
-        WHERE agent_type = ? AND created_at >= datetime('now', ? || ' hours')
-      `).get(agentType, `-${agentConfig.weeklyWindowHours}`) as { used: number };
-      weekly = { used: weeklyRow.used, limit: agentConfig.weeklyLimit, windowHours: agentConfig.weeklyWindowHours };
-    }
-
-    results.push({
-      agent_type: agentType,
-      limitType: agentConfig.limitType,
-      session: { used: sessionRow.used, limit: agentConfig.sessionLimit, windowHours: agentConfig.sessionWindowHours },
-      extended,
-      weekly,
-    });
+function normalizeQuotaReset(value: string | number | null | undefined): string | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value * 1000).toISOString();
   }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed === '') return null;
+    const numeric = Number(trimmed);
+    if (Number.isFinite(numeric) && trimmed === String(numeric)) {
+      return new Date(numeric * 1000).toISOString();
+    }
+    const parsed = Date.parse(trimmed);
+    return Number.isNaN(parsed) ? null : new Date(parsed).toISOString();
+  }
+  return null;
+}
 
-  return results;
+function normalizeQuotaWindow(input: ProviderQuotaWindowInput | null | undefined): ProviderQuotaWindow | null {
+  if (!input) return null;
+  if (input.used_percent == null || !Number.isFinite(input.used_percent)) return null;
+  const usedPercent = Math.max(0, Math.min(input.used_percent, 100));
+  return {
+    used_percent: usedPercent,
+    remaining_percent: Math.max(0, Math.min(100 - usedPercent, 100)),
+    resets_at: normalizeQuotaReset(input.resets_at),
+    window_minutes: input.window_minutes == null || !Number.isFinite(input.window_minutes)
+      ? null
+      : Math.max(0, Math.round(input.window_minutes)),
+  };
+}
+
+function normalizeQuotaTimestamp(value: string | null | undefined): string {
+  if (value) {
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return new Date(parsed).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+export function upsertProviderQuotaSnapshot(input: ProviderQuotaSnapshotInput): void {
+  const db = getDb();
+  const defaults = PROVIDER_DEFAULTS[input.provider];
+  const primary = normalizeQuotaWindow(input.primary);
+  const secondary = normalizeQuotaWindow(input.secondary);
+  const credits = input.credits
+    ? {
+        has_credits: Boolean(input.credits.has_credits),
+        unlimited: Boolean(input.credits.unlimited),
+        balance: input.credits.balance ?? null,
+      }
+    : null;
+
+  db.prepare(`
+    INSERT INTO provider_quotas (
+      provider, agent_type, status, source, updated_at, account_label, plan_type,
+      limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
+      primary_resets_at, secondary_used_percent, secondary_window_minutes,
+      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance, raw_payload
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(provider) DO UPDATE SET
+      agent_type = excluded.agent_type,
+      status = excluded.status,
+      source = excluded.source,
+      updated_at = excluded.updated_at,
+      account_label = excluded.account_label,
+      plan_type = excluded.plan_type,
+      limit_id = excluded.limit_id,
+      limit_name = excluded.limit_name,
+      error_message = excluded.error_message,
+      primary_used_percent = excluded.primary_used_percent,
+      primary_window_minutes = excluded.primary_window_minutes,
+      primary_resets_at = excluded.primary_resets_at,
+      secondary_used_percent = excluded.secondary_used_percent,
+      secondary_window_minutes = excluded.secondary_window_minutes,
+      secondary_resets_at = excluded.secondary_resets_at,
+      credits_has_credits = excluded.credits_has_credits,
+      credits_unlimited = excluded.credits_unlimited,
+      credits_balance = excluded.credits_balance,
+      raw_payload = excluded.raw_payload
+  `).run(
+    input.provider,
+    input.agent_type ?? defaults.agent_type,
+    input.status ?? (primary || secondary ? 'available' : defaults.status),
+    input.source ?? defaults.source,
+    normalizeQuotaTimestamp(input.updated_at),
+    input.account_label ?? defaults.account_label,
+    input.plan_type ?? defaults.plan_type,
+    input.limit_id ?? defaults.limit_id,
+    input.limit_name ?? defaults.limit_name,
+    input.error_message ?? defaults.error_message,
+    primary?.used_percent ?? null,
+    primary?.window_minutes ?? null,
+    primary?.resets_at ?? null,
+    secondary?.used_percent ?? null,
+    secondary?.window_minutes ?? null,
+    secondary?.resets_at ?? null,
+    credits ? (credits.has_credits ? 1 : 0) : null,
+    credits ? (credits.unlimited ? 1 : 0) : null,
+    credits?.balance ?? null,
+    input.raw_payload == null ? null : JSON.stringify(input.raw_payload),
+  );
+}
+
+export function getProviderQuotas(): ProviderQuotaSnapshot[] {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      provider, agent_type, status, source, updated_at, account_label, plan_type,
+      limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
+      primary_resets_at, secondary_used_percent, secondary_window_minutes,
+      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance
+    FROM provider_quotas
+  `).all() as Array<{
+    provider: ProviderName;
+    agent_type: 'claude_code' | 'codex';
+    status: ProviderQuotaSnapshot['status'];
+    source: string | null;
+    updated_at: string | null;
+    account_label: string | null;
+    plan_type: string | null;
+    limit_id: string | null;
+    limit_name: string | null;
+    error_message: string | null;
+    primary_used_percent: number | null;
+    primary_window_minutes: number | null;
+    primary_resets_at: string | null;
+    secondary_used_percent: number | null;
+    secondary_window_minutes: number | null;
+    secondary_resets_at: string | null;
+    credits_has_credits: number | null;
+    credits_unlimited: number | null;
+    credits_balance: string | null;
+  }>;
+
+  const byProvider = new Map(rows.map((row) => [row.provider, row]));
+
+  return (['claude', 'codex'] as const).map((provider) => {
+    const row = byProvider.get(provider);
+    if (!row) {
+      return { provider, ...PROVIDER_DEFAULTS[provider] };
+    }
+
+    return {
+      provider,
+      agent_type: row.agent_type,
+      status: row.status,
+      source: row.source,
+      updated_at: row.updated_at,
+      account_label: row.account_label,
+      plan_type: row.plan_type,
+      limit_id: row.limit_id,
+      limit_name: row.limit_name,
+      error_message: row.error_message,
+      primary: normalizeQuotaWindow({
+        used_percent: row.primary_used_percent,
+        resets_at: row.primary_resets_at,
+        window_minutes: row.primary_window_minutes,
+      }),
+      secondary: normalizeQuotaWindow({
+        used_percent: row.secondary_used_percent,
+        resets_at: row.secondary_resets_at,
+        window_minutes: row.secondary_window_minutes,
+      }),
+      credits: row.credits_has_credits == null && row.credits_unlimited == null && row.credits_balance == null
+        ? null
+        : {
+            has_credits: Boolean(row.credits_has_credits),
+            unlimited: Boolean(row.credits_unlimited),
+            balance: row.credits_balance,
+          },
+    };
+  });
 }
 
 // --- Filter Options ---

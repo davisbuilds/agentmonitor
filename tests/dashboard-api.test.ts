@@ -45,7 +45,7 @@ before(async () => {
 
 beforeEach(() => {
   if (!getDb) throw new Error('DB not initialized');
-  getDb().exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM agents;');
+  getDb().exec('DELETE FROM provider_quotas; DELETE FROM events; DELETE FROM sessions; DELETE FROM agents;');
 });
 
 after(async () => {
@@ -72,20 +72,36 @@ async function seedTestData() {
 // ─── Stats API ──────────────────────────────────────────────────────────
 
 describe('GET /api/stats', () => {
-  test('includes usage monitor data on initial load', async () => {
+  test('includes provider quota snapshots on initial load', async () => {
     await seedTestData();
+    await postJson(`${baseUrl}/api/provider-quotas/claude/statusline`, {
+      rate_limits: {
+        five_hour: { used_percentage: 12, resets_at: 1_776_933_923 },
+        seven_day: { used_percentage: 34, resets_at: 1_777_416_387 },
+      },
+    });
+    await postJson(`${baseUrl}/api/provider-quotas/codex`, {
+      status: 'available',
+      source: 'test',
+      plan_type: 'plus',
+      primary: { used_percent: 5, resets_at: 1_776_933_923, window_minutes: 300 },
+      secondary: { used_percent: 24, resets_at: 1_777_416_387, window_minutes: 10080 },
+    });
 
     const res = await fetch(`${baseUrl}/api/stats`);
     assert.equal(res.status, 200);
 
     const body = await res.json() as {
+      quota_monitor?: Array<Record<string, unknown>>;
       usage_monitor?: Array<Record<string, unknown>>;
     };
 
-    assert.ok(Array.isArray(body.usage_monitor));
-    assert.ok(body.usage_monitor.length >= 1);
-    const codex = body.usage_monitor.find((row) => row.agent_type === 'codex');
+    assert.ok(Array.isArray(body.quota_monitor));
+    assert.ok(body.quota_monitor.length >= 2);
+    assert.deepEqual(body.usage_monitor, body.quota_monitor);
+    const codex = body.quota_monitor.find((row) => row.provider === 'codex');
     assert.ok(codex);
+    assert.equal(codex.primary?.used_percent, 5);
   });
 });
 

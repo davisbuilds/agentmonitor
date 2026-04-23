@@ -67,6 +67,7 @@ async fn stats_broadcast_emits_stats_payload_when_clients_connected() {
     let msg = parse_sse_message(&raw);
     assert_eq!(msg["type"], "stats");
     assert!(msg["payload"]["total_events"].as_i64().unwrap_or(0) >= 1);
+    assert!(msg["payload"]["quota_monitor"].is_array());
     assert!(msg["payload"]["usage_monitor"].is_array());
 }
 

@@ -10,13 +10,6 @@ function parseEnvInt(value: string | undefined, fallback: number, min: number = 
   return parsed;
 }
 
-function parseEnvFloat(value: string | undefined, fallback: number, min: number = 0): number {
-  if (!value) return fallback;
-  const parsed = Number.parseFloat(value);
-  if (Number.isNaN(parsed) || parsed < min) return fallback;
-  return parsed;
-}
-
 function parseEnvBool(value: string | undefined, fallback: boolean): boolean {
   if (value == null || value === '') return fallback;
   const normalized = value.trim().toLowerCase();
@@ -35,18 +28,11 @@ function parseEnvList(value: string | undefined): string[] {
   return [...new Set(items)];
 }
 
-export type UsageLimitType = 'tokens' | 'cost';
 export type CodexLiveMode = 'otel-only' | 'exporter';
 export type InsightsProvider = 'openai' | 'anthropic' | 'gemini';
 
-interface AgentUsageConfig {
-  limitType: UsageLimitType;
-  sessionWindowHours: number;
-  sessionLimit: number;
-  extendedWindowHours: number;
-  extendedLimit: number;
-  weeklyWindowHours: number;
-  weeklyLimit: number;
+interface QuotaConfig {
+  codexPollIntervalMs: number;
 }
 
 interface LiveConfig {
@@ -105,41 +91,10 @@ function resolveProjectsDir(env: EnvMap, cwd: string): string {
   return detectProjectsDir(cwd);
 }
 
-function parseUsageMonitorConfig(env: EnvMap): Record<string, AgentUsageConfig> {
-  const defaultWindowHours = parseEnvInt(env.AGENTMONITOR_SESSION_WINDOW_HOURS, 5, 1);
-
-  // Known agent types — each uses its own limit type
-  const agents: Record<string, AgentUsageConfig> = {
-    claude_code: {
-      limitType: 'tokens',
-      sessionWindowHours: parseEnvInt(env.AGENTMONITOR_SESSION_WINDOW_HOURS_CLAUDE_CODE, defaultWindowHours, 1),
-      sessionLimit: parseEnvInt(env.AGENTMONITOR_SESSION_TOKEN_LIMIT_CLAUDE_CODE, 44000, 0),
-      extendedWindowHours: parseEnvInt(env.AGENTMONITOR_EXTENDED_WINDOW_HOURS_CLAUDE_CODE, 24, 1),
-      extendedLimit: parseEnvInt(env.AGENTMONITOR_EXTENDED_TOKEN_LIMIT_CLAUDE_CODE, 0, 0),
-      weeklyWindowHours: parseEnvInt(env.AGENTMONITOR_WEEKLY_WINDOW_HOURS_CLAUDE_CODE, 168, 1),
-      weeklyLimit: parseEnvInt(env.AGENTMONITOR_WEEKLY_TOKEN_LIMIT_CLAUDE_CODE, 293000, 0),
-    },
-    codex: {
-      limitType: 'cost',
-      sessionWindowHours: parseEnvInt(env.AGENTMONITOR_SESSION_WINDOW_HOURS_CODEX, defaultWindowHours, 1),
-      sessionLimit: parseEnvFloat(env.AGENTMONITOR_SESSION_COST_LIMIT_CODEX, 500, 0),
-      extendedWindowHours: parseEnvInt(env.AGENTMONITOR_EXTENDED_WINDOW_HOURS_CODEX, 168, 1),
-      extendedLimit: parseEnvFloat(env.AGENTMONITOR_EXTENDED_COST_LIMIT_CODEX, 1500, 0),
-      weeklyWindowHours: 168,
-      weeklyLimit: 0,
-    },
-    _default: {
-      limitType: 'tokens',
-      sessionWindowHours: defaultWindowHours,
-      sessionLimit: 0,
-      extendedWindowHours: 24,
-      extendedLimit: 0,
-      weeklyWindowHours: 168,
-      weeklyLimit: 0,
-    },
+function parseQuotaConfig(env: EnvMap): QuotaConfig {
+  return {
+    codexPollIntervalMs: parseEnvInt(env.AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS, 60_000, 1_000),
   };
-
-  return agents;
 }
 
 function parseCodexLiveMode(value: string | undefined): CodexLiveMode {
@@ -216,10 +171,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     sseHeartbeatMs: parseEnvInt(env.AGENTMONITOR_SSE_HEARTBEAT_MS, 30000, 1000),
     autoImportIntervalMinutes: parseEnvInt(env.AGENTMONITOR_AUTO_IMPORT_MINUTES, 10, 0),
     projectsDir: resolveProjectsDir(env, cwd),
-    // Usage monitor: per-agent-type limits (tokens or cost depending on agent)
-    // Claude Code: token limits (AGENTMONITOR_SESSION_TOKEN_LIMIT_CLAUDE_CODE)
-    // Codex: cost limits in USD (AGENTMONITOR_SESSION_COST_LIMIT_CODEX)
-    usageMonitor: parseUsageMonitorConfig(env),
+    quotas: parseQuotaConfig(env),
     live: parseLiveConfig(env),
     sync: parseSyncConfig(env),
     insights: parseInsightsConfig(env),

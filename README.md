@@ -14,6 +14,7 @@ Local dashboard and session browser for observing AI coding agents across live t
 - Exposes capability-aware analytics under `/api/v2/analytics/*`, including summary, activity, project, tool, skill, hour-of-week, top-session, velocity, and per-agent views.
 - Exposes event-derived historical usage under `/api/v2/usage/*`, including summary totals, daily series, project/model/agent attribution, and top sessions with coverage metadata.
 - Exposes persisted AI-generated insights under `/api/v2/insights/*`, scoped to the current historical filters and grounded in analytics and usage coverage metadata.
+- Exposes provider-native quota snapshots under `/api/provider-quotas`, including Codex app-server polling and Claude statusline bridge ingestion.
 
 ## Current Product Shape
 
@@ -67,6 +68,7 @@ Full command, config, and runtime notes live in [docs/system/OPERATIONS.md](docs
 
 - Claude Code hooks: [hooks/claude-code/README.md](hooks/claude-code/README.md)
 - Codex OTEL setup: [hooks/codex/README.md](hooks/codex/README.md)
+- Claude Code quota bridge: [hooks/claude-code/README.md#claude-statusline-quota-bridge](hooks/claude-code/README.md#claude-statusline-quota-bridge)
 - Generic ingest contract: [docs/api/event-contract.md](docs/api/event-contract.md)
 - Historical import and runtime behavior: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
 
@@ -86,6 +88,7 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 
 - The Svelte app is the product surface to extend. The legacy `/` dashboard is still served, but should not define new behavior.
 - Some Monitor features still read v1 endpoints today, while Sessions, Search, Analytics, Usage, Insights, and Live center on `/api/v2/*`.
+- The Monitor header now uses provider-native quota data only. AgentMonitor polls Codex quotas directly from the local Codex app-server and ingests Claude subscriber quota data through the official Claude Code statusline payload bridge.
 - The Sessions viewer uses `/api/v2/sessions/:id/activity` to render a bucketed transcript activity map and jump through long transcripts without loading the entire session up front.
 - Pinned-message review uses session-plus-ordinal deep links so saved transcript moments survive session re-imports that replace raw message row IDs.
 - Search results now include session context, and the Svelte app exposes a global command palette on `Cmd/Ctrl+K` for jumping into recent sessions or transcript hits without leaving the current tab first.
