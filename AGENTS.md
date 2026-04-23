@@ -31,6 +31,7 @@ Subdirectories have their own `AGENTS.md` (with `CLAUDE.md` symlinks) for domain
 - Import historical logs: `pnpm run import` (supports `--source`, `--from`, `--to`, `--dry-run`, `--force`)
 - Force reparse session-browser history: `pnpm reparse:sessions` (Claude), `pnpm reparse:codex-sessions` (Codex)
 - Seed local demo data (server must be running): `pnpm seed`
+- Install Claude quota bridge: `./hooks/claude-code/install-statusline-bridge.sh`
 
 `pnpm install` at the repo root uses a workspace and installs both the backend package and the Svelte frontend package under `frontend/`.
 
@@ -61,6 +62,10 @@ For legacy compatibility work on `/`, use two terminals:
 - Optional `event_id` is used for deduplication (unique constraint).
 - `metadata` payload is capped by `AGENTMONITOR_MAX_PAYLOAD_KB`.
 - OTEL endpoints: `POST /api/otel/v1/logs`, `POST /api/otel/v1/metrics` (JSON only, no protobuf).
+- Provider quota endpoints:
+  - `GET /api/provider-quotas`
+  - `POST /api/provider-quotas/:provider`
+  - `POST /api/provider-quotas/claude/statusline`
 - SSE endpoint: `GET /api/stream`.
 - SSE event names used by clients: `event`, `stats`, `session_update`.
 - Session timeout: 5 min idle → `idle`, 10 min idle → auto `ended`.
@@ -68,6 +73,7 @@ For legacy compatibility work on `/`, use two terminals:
 - Codex OTEL logs carry no token/cost data; use `pnpm run import --source codex` for cost backfill.
 - If Codex terminal activity is visible but `source=otel` stops updating, verify sessions are not still exporting to `127.0.0.1:3142` from older runtime config.
 - V1 endpoints remain active for legacy compatibility and current monitor behaviors, but they are not the long-term canonical product contract.
+- The Monitor header uses provider-native quota snapshots only. Codex quotas are polled from the local `codex app-server`; Claude quotas require the Claude statusline bridge and otherwise render as unavailable instead of estimated.
 - V2 API is the canonical app contract: all endpoints under `/api/v2/`.
   - `GET /api/v2/sessions`: list browsing sessions (cursor pagination, project/agent filters).
   - `GET /api/v2/sessions/:id`: single session detail.

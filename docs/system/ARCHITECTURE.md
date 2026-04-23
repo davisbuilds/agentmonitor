@@ -23,7 +23,8 @@
 
 An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream behavior using axum, tokio, and rusqlite. The current Rust runtime now covers:
 - `POST /api/events`, `POST /api/events/batch` — ingest with dedup and batch rejection
-- `GET /api/stats`, `GET /api/stats/tools`, `GET /api/stats/cost`, `GET /api/stats/usage-monitor` — aggregate and analytics counters
+- `GET /api/stats`, `GET /api/stats/tools`, `GET /api/stats/cost`, `GET /api/stats/usage-monitor` — aggregate counters, analytics, and provider-quota compatibility reads
+- `GET /api/provider-quotas`, `POST /api/provider-quotas/:provider`, `POST /api/provider-quotas/claude/statusline` — provider-native quota snapshot ingest/read endpoints
 - `GET /api/sessions`, `GET /api/sessions/:id`, `GET /api/sessions/:id/transcript`, `GET /api/filter-options`
 - `POST /api/otel/v1/logs`, `/api/otel/v1/metrics`, `/api/otel/v1/traces`
 - `GET /api/stream` — SSE fan-out via tokio::broadcast
@@ -138,7 +139,8 @@ Codex should be thought of as having multiple telemetry surfaces, not one monoli
 | Response completion usage | `codex.sse_event` with `event.kind=response.completed` | Captured | Response-complete token usage and related metadata can populate `llm_response` rows without waiting for backfill. |
 | Response item typing | `codex.response`, `codex.event_msg` payload types | Partially captured | Assistant messages, reasoning, shell-call style responses, and tool-result style outputs can be projected when the OTEL payload includes enough structure. |
 | Websocket request and response lifecycle | `codex.websocket_request`, `codex.websocket_event` | Partially captured | Request/error/response classification is available, and low-value websocket lifecycle markers are now filtered at ingest, but this is still not full transcript-grade data. |
-| Full Thread/Turn/Item lifecycle | `codex app-server` JSON-RPC | Not integrated yet | This is the richer path for true Codex-native parity, including item start/completion and streaming deltas. |
+| Provider quota state | `codex app-server` JSON-RPC | Captured | AgentMonitor polls the local app-server for native Codex quota windows and reset times for the monitor header. |
+| Full Thread/Turn/Item lifecycle | `codex app-server` JSON-RPC | Not integrated yet | App-server quota polling now exists, but transcript-grade Codex parity is still not using the richer item lifecycle stream. |
 | Persisted local rollout state | Codex local session/state files | Import-only today | Local Codex session import exists, but the live v2 path still centers on OTEL rather than direct local-state projection. |
 
 Planning implication: current AgentMonitor Codex fidelity limits should be treated as implementation limits of the current parser/projector, not as the hard ceiling of Codex telemetry itself.
