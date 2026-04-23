@@ -1,5 +1,5 @@
 import { Router, type Request, type Response } from 'express';
-import { getStats, getToolAnalytics, getCostOverTime, getCostByProject, getCostByModel, getUsageMonitor } from '../db/queries.js';
+import { getStats, getToolAnalytics, getCostOverTime, getCostByProject, getCostByModel, getProviderQuotas } from '../db/queries.js';
 
 export const statsRouter = Router();
 
@@ -9,9 +9,10 @@ statsRouter.get('/', (req: Request, res: Response) => {
     agentType: req.query.agent_type as string | undefined,
     since: req.query.since as string | undefined,
   });
-  const usage_monitor = getUsageMonitor();
+  const quota_monitor = getProviderQuotas();
 
-  res.json({ ...stats, usage_monitor });
+  // Keep usage_monitor as a compatibility alias while the Monitor surface migrates.
+  res.json({ ...stats, quota_monitor, usage_monitor: quota_monitor });
 });
 
 // GET /api/stats/tools - Tool analytics
@@ -37,7 +38,7 @@ statsRouter.get('/cost', (req: Request, res: Response) => {
   res.json({ timeline, by_project: byProject, by_model: byModel });
 });
 
-// GET /api/stats/usage-monitor - Rolling window token usage
+// GET /api/stats/usage-monitor - Compatibility alias for provider quota snapshots
 statsRouter.get('/usage-monitor', (_req: Request, res: Response) => {
-  res.json(getUsageMonitor());
+  res.json(getProviderQuotas());
 });

@@ -87,6 +87,31 @@ CREATE TABLE IF NOT EXISTS import_state (
     imported_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS provider_quotas (
+    provider TEXT PRIMARY KEY,
+    agent_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'unavailable',
+    source TEXT,
+    updated_at TEXT,
+    account_label TEXT,
+    plan_type TEXT,
+    limit_id TEXT,
+    limit_name TEXT,
+    error_message TEXT,
+    primary_used_percent REAL,
+    primary_window_minutes INTEGER,
+    primary_resets_at TEXT,
+    secondary_used_percent REAL,
+    secondary_window_minutes INTEGER,
+    secondary_resets_at TEXT,
+    credits_has_credits INTEGER,
+    credits_unlimited INTEGER,
+    credits_balance TEXT,
+    raw_payload TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
+
 CREATE TABLE IF NOT EXISTS browsing_sessions (
     id TEXT PRIMARY KEY,
     project TEXT,
@@ -247,11 +272,35 @@ fn apply_post_schema_migrations(conn: &Connection) -> Result<()> {
     ensure_column(conn, "browsing_sessions", "integration_mode", "TEXT")?;
     ensure_column(conn, "browsing_sessions", "fidelity", "TEXT")?;
     ensure_column(conn, "browsing_sessions", "capabilities_json", "TEXT")?;
+    ensure_column(
+        conn,
+        "provider_quotas",
+        "status",
+        "TEXT NOT NULL DEFAULT 'unavailable'",
+    )?;
+    ensure_column(conn, "provider_quotas", "source", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "updated_at", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "account_label", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "plan_type", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "limit_id", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "limit_name", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "error_message", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "primary_used_percent", "REAL")?;
+    ensure_column(conn, "provider_quotas", "primary_window_minutes", "INTEGER")?;
+    ensure_column(conn, "provider_quotas", "primary_resets_at", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "secondary_used_percent", "REAL")?;
+    ensure_column(conn, "provider_quotas", "secondary_window_minutes", "INTEGER")?;
+    ensure_column(conn, "provider_quotas", "secondary_resets_at", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "credits_has_credits", "INTEGER")?;
+    ensure_column(conn, "provider_quotas", "credits_unlimited", "INTEGER")?;
+    ensure_column(conn, "provider_quotas", "credits_balance", "TEXT")?;
+    ensure_column(conn, "provider_quotas", "raw_payload", "TEXT")?;
 
     conn.execute_batch(
         "
         CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC);
         CREATE INDEX IF NOT EXISTS idx_bs_live_status ON browsing_sessions(live_status);
+        CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
         ",
     )?;
 

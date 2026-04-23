@@ -1,4 +1,4 @@
-import { fetchSessionDetail, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type UsageMonitorData } from '../api/client';
+import { fetchSessionDetail, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
 import type { CostWindow } from '../monitor-analytics';
 import { parseTimestamp } from '../format';
 import { mergeSessionAggregates } from '../monitor-session-merge';
@@ -169,9 +169,9 @@ export function getToolStats(): ToolStats | null { return toolStats; }
 export function setToolStats(t: ToolStats): void { toolStats = t; }
 
 // --- Usage Monitor ---
-let usageMonitor = $state<UsageMonitorData[]>([]);
-export function getUsageMonitor(): UsageMonitorData[] { return usageMonitor; }
-export function setUsageMonitor(u: UsageMonitorData[]): void { usageMonitor = u; }
+let quotaMonitor = $state<QuotaMonitorData[]>([]);
+export function getQuotaMonitor(): QuotaMonitorData[] { return quotaMonitor; }
+export function setQuotaMonitor(u: QuotaMonitorData[]): void { quotaMonitor = u; }
 
 // --- Connection ---
 let connectionStatus = $state<'connected' | 'connecting' | 'disconnected'>('connecting');

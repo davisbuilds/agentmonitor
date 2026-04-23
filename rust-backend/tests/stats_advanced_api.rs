@@ -120,29 +120,30 @@ async fn stats_cost_returns_shape_and_breakdowns() {
 }
 
 #[tokio::test]
-async fn usage_monitor_returns_claude_and_codex_shapes() {
+async fn usage_monitor_returns_native_provider_quota_snapshots() {
     let app = test_app();
 
     post_json(
         &app,
-        "/api/events",
+        "/api/provider-quotas/claude/statusline",
         json!({
-            "session_id": "usage-claude",
-            "agent_type": "claude_code",
-            "event_type": "llm_response",
-            "tokens_in": 100,
-            "tokens_out": 200
+            "rate_limits": {
+                "five_hour": { "used_percentage": 12.0, "resets_at": 1_776_933_923 },
+                "seven_day": { "used_percentage": 34.0, "resets_at": 1_777_416_387 }
+            }
         }),
     )
     .await;
     post_json(
         &app,
-        "/api/events",
+        "/api/provider-quotas/codex",
         json!({
-            "session_id": "usage-codex",
-            "agent_type": "codex",
-            "event_type": "llm_response",
-            "cost_usd": 2.25
+            "status": "available",
+            "source": "rust-test",
+            "plan_type": "plus",
+            "primary": { "used_percent": 5.0, "resets_at": "2026-04-23T08:45:23Z", "window_minutes": 300 },
+            "secondary": { "used_percent": 24.0, "resets_at": "2026-04-28T22:46:27Z", "window_minutes": 10080 },
+            "credits": { "has_credits": false, "unlimited": false, "balance": "0" }
         }),
     )
     .await;
@@ -152,13 +153,16 @@ async fn usage_monitor_returns_claude_and_codex_shapes() {
     assert!(body.is_array());
 
     let rows = body.as_array().unwrap();
-    let claude = rows.iter().find(|row| row["agent_type"] == "claude_code");
+    let claude = rows.iter().find(|row| row["provider"] == "claude");
     assert!(claude.is_some());
-    assert_eq!(claude.unwrap()["limitType"], "tokens");
+    assert_eq!(claude.unwrap()["agent_type"], "claude_code");
+    assert_eq!(claude.unwrap()["primary"]["used_percent"], 12.0);
 
-    let codex = rows.iter().find(|row| row["agent_type"] == "codex");
+    let codex = rows.iter().find(|row| row["provider"] == "codex");
     assert!(codex.is_some());
-    assert_eq!(codex.unwrap()["limitType"], "cost");
+    assert_eq!(codex.unwrap()["agent_type"], "codex");
+    assert_eq!(codex.unwrap()["plan_type"], "plus");
+    assert_eq!(codex.unwrap()["secondary"]["used_percent"], 24.0);
 }
 
 #[tokio::test]

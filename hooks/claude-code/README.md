@@ -34,6 +34,38 @@ Start AgentMonitor (`pnpm dev`), then use Claude Code as normal. Events appear i
 ./hooks/claude-code/install.sh --uninstall
 ```
 
+## Claude Statusline Quota Bridge
+
+AgentMonitor can ingest Claude's native subscriber quota data directly from the official Claude Code statusline payload. This replaces guessed token ceilings with Claude-reported 5-hour and 7-day windows.
+
+If you already have a `statusLine.command` configured, wrap it with the bridge:
+
+```bash
+./hooks/claude-code/install-statusline-bridge.sh
+```
+
+Options:
+
+```bash
+# Point the bridge at a non-default AgentMonitor URL
+./hooks/claude-code/install-statusline-bridge.sh --url http://127.0.0.1:3141
+
+# Restore your original statusline command
+./hooks/claude-code/install-statusline-bridge.sh --uninstall
+```
+
+How it works:
+
+```
+Claude Code statusline payload
+  -> hooks/claude-code/statusline_bridge.sh
+  -> POST /api/provider-quotas/claude/statusline
+  -> AgentMonitor stores native quota snapshot
+  -> existing statusline command still renders normally
+```
+
+The installer preserves your existing `statusLine.command` by saving it to `~/.claude/agentmonitor-statusline-forward.txt` and replacing the live command with the bridge wrapper. Restart Claude Code after installation so the updated statusline command is loaded.
+
 ## How It Works
 
 ```

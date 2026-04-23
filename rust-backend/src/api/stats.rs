@@ -5,6 +5,7 @@ use axum::extract::{Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Deserialize;
+use serde_json::json;
 
 use crate::db::queries;
 use crate::state::AppState;
@@ -30,7 +31,7 @@ fn to_filters(query: &StatsQuery) -> queries::AnalyticsFilters {
 /// GET /api/stats — aggregated statistics.
 pub async fn stats_handler(
     State(state): State<Arc<AppState>>,
-) -> Json<queries::Stats> {
+) -> impl IntoResponse {
     let db = state.db.lock().await;
     let stats = queries::get_stats(&db).unwrap_or_else(|_| queries::Stats {
         total_events: 0,
@@ -40,7 +41,17 @@ pub async fn stats_handler(
         total_tokens_out: 0,
         total_cost_usd: 0.0,
     });
-    Json(stats)
+    let quota_monitor = queries::get_usage_monitor(&db).unwrap_or_default();
+    Json(json!({
+        "total_events": stats.total_events,
+        "active_sessions": stats.active_sessions,
+        "total_sessions": stats.total_sessions,
+        "total_tokens_in": stats.total_tokens_in,
+        "total_tokens_out": stats.total_tokens_out,
+        "total_cost_usd": stats.total_cost_usd,
+        "quota_monitor": quota_monitor,
+        "usage_monitor": quota_monitor,
+    }))
 }
 
 /// GET /api/stats/tools — tool analytics.
@@ -96,11 +107,11 @@ pub async fn usage_monitor_handler(
     State(state): State<Arc<AppState>>,
 ) -> impl IntoResponse {
     let db = state.db.lock().await;
-    match queries::get_usage_monitor(&db, &state.config.usage_monitor) {
+    match queries::get_usage_monitor(&db) {
         Ok(data) => (StatusCode::OK, Json(data)).into_response(),
         Err(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": "internal server error" })),
+            Json(json!({ "error": "internal server error" })),
         )
             .into_response(),
     }

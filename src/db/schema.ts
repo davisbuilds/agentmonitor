@@ -70,6 +70,33 @@ export function initSchema(): void {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS provider_quotas (
+      provider TEXT PRIMARY KEY,
+      agent_type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unavailable',
+      source TEXT,
+      updated_at TEXT,
+      account_label TEXT,
+      plan_type TEXT,
+      limit_id TEXT,
+      limit_name TEXT,
+      error_message TEXT,
+      primary_used_percent REAL,
+      primary_window_minutes INTEGER,
+      primary_resets_at TEXT,
+      secondary_used_percent REAL,
+      secondary_window_minutes INTEGER,
+      secondary_resets_at TEXT,
+      credits_has_credits INTEGER,
+      credits_unlimited INTEGER,
+      credits_balance TEXT,
+      raw_payload TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
+  `);
+
   // Backward-compatible schema updates for existing local databases.
   const eventColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(events)`).all() as Array<{ name: string }>).map(col => col.name)
@@ -95,6 +122,95 @@ export function initSchema(): void {
   }
   if (!eventColumns.has('source')) {
     db.exec("ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'api'");
+  }
+
+  const providerQuotaColumns = new Set<string>(
+    (db.prepare(`PRAGMA table_info(provider_quotas)`).all() as Array<{ name: string }>).map(col => col.name)
+  );
+
+  if (!providerQuotaColumns.has('provider') || !providerQuotaColumns.has('agent_type')) {
+    db.exec('DROP TABLE IF EXISTS provider_quotas');
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS provider_quotas (
+        provider TEXT PRIMARY KEY,
+        agent_type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'unavailable',
+        source TEXT,
+        updated_at TEXT,
+        account_label TEXT,
+        plan_type TEXT,
+        limit_id TEXT,
+        limit_name TEXT,
+        error_message TEXT,
+        primary_used_percent REAL,
+        primary_window_minutes INTEGER,
+        primary_resets_at TEXT,
+        secondary_used_percent REAL,
+        secondary_window_minutes INTEGER,
+        secondary_resets_at TEXT,
+        credits_has_credits INTEGER,
+        credits_unlimited INTEGER,
+        credits_balance TEXT,
+        raw_payload TEXT
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
+    `);
+  } else {
+    if (!providerQuotaColumns.has('status')) {
+      db.exec("ALTER TABLE provider_quotas ADD COLUMN status TEXT NOT NULL DEFAULT 'unavailable'");
+    }
+    if (!providerQuotaColumns.has('source')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN source TEXT');
+    }
+    if (!providerQuotaColumns.has('updated_at')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN updated_at TEXT');
+    }
+    if (!providerQuotaColumns.has('account_label')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN account_label TEXT');
+    }
+    if (!providerQuotaColumns.has('plan_type')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN plan_type TEXT');
+    }
+    if (!providerQuotaColumns.has('limit_id')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN limit_id TEXT');
+    }
+    if (!providerQuotaColumns.has('limit_name')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN limit_name TEXT');
+    }
+    if (!providerQuotaColumns.has('error_message')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN error_message TEXT');
+    }
+    if (!providerQuotaColumns.has('primary_used_percent')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN primary_used_percent REAL');
+    }
+    if (!providerQuotaColumns.has('primary_window_minutes')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN primary_window_minutes INTEGER');
+    }
+    if (!providerQuotaColumns.has('primary_resets_at')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN primary_resets_at TEXT');
+    }
+    if (!providerQuotaColumns.has('secondary_used_percent')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN secondary_used_percent REAL');
+    }
+    if (!providerQuotaColumns.has('secondary_window_minutes')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN secondary_window_minutes INTEGER');
+    }
+    if (!providerQuotaColumns.has('secondary_resets_at')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN secondary_resets_at TEXT');
+    }
+    if (!providerQuotaColumns.has('credits_has_credits')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN credits_has_credits INTEGER');
+    }
+    if (!providerQuotaColumns.has('credits_unlimited')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN credits_unlimited INTEGER');
+    }
+    if (!providerQuotaColumns.has('credits_balance')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN credits_balance TEXT');
+    }
+    if (!providerQuotaColumns.has('raw_payload')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN raw_payload TEXT');
+    }
   }
 
   db.exec('UPDATE events SET payload_truncated = 0 WHERE payload_truncated IS NULL');

@@ -40,6 +40,15 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/api/stats/tools", get(api::stats_tools_handler))
         .route("/api/stats/cost", get(api::stats_cost_handler))
         .route("/api/stats/usage-monitor", get(api::usage_monitor_handler))
+        .route("/api/provider-quotas", get(api::provider_quotas_handler))
+        .route(
+            "/api/provider-quotas/claude/statusline",
+            post(api::claude_statusline_quota_ingest_handler),
+        )
+        .route(
+            "/api/provider-quotas/{provider}",
+            post(api::provider_quota_ingest_handler),
+        )
         .route("/api/otel/v1/logs", post(api::otel_logs_handler))
         .route("/api/otel/v1/metrics", post(api::otel_metrics_handler))
         .route("/api/otel/v1/traces", post(api::otel_traces_handler))

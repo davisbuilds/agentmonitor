@@ -1,85 +1,88 @@
 <script lang="ts">
-  import { getUsageMonitor } from '../../stores/monitor.svelte';
-  import type { UsageMonitorData } from '../../api/client';
-  import { formatCost, formatNumber } from '../../format';
+  import { getQuotaMonitor } from '../../stores/monitor.svelte';
+  import type { QuotaMonitorData, QuotaMonitorWindow } from '../../api/client';
+  import { parseTimestamp, timeAgo } from '../../format';
 
-  const data = $derived(getUsageMonitor());
-  const agents = $derived(
-    data.filter((agent) => agent.session.limit > 0 || (agent.extended?.limit || 0) > 0 || (agent.weekly?.limit || 0) > 0)
-  );
-  const hasData = $derived(agents.length > 0);
+  const data = $derived(getQuotaMonitor());
+  const rows = $derived(data);
 
-  function barColor(percent: number): string {
-    if (percent >= 85) return 'bg-red-500';
-    if (percent >= 60) return 'bg-yellow-500';
+  function barColor(usedPercent: number): string {
+    if (usedPercent >= 85) return 'bg-red-500';
+    if (usedPercent >= 60) return 'bg-yellow-500';
     return 'bg-emerald-500';
   }
 
-  function agentLabel(agentType: string): string {
-    switch (agentType) {
-      case 'claude_code':
-        return 'Claude';
-      case 'codex':
-        return 'Codex';
-      default:
-        return agentType;
-    }
+  function providerLabel(row: QuotaMonitorData): string {
+    return row.provider === 'claude' ? 'Claude' : 'Codex';
   }
 
-  function formatUsage(value: number, limitType: UsageMonitorData['limitType']): string {
-    return limitType === 'cost' ? formatCost(value) : formatNumber(value);
+  function windowLabel(window: QuotaMonitorWindow): string {
+    const minutes = window.window_minutes ?? 0;
+    if (minutes === 300) return '5h';
+    if (minutes === 10080) return '1w';
+    if (minutes >= 1440 && minutes % 1440 === 0) return `${minutes / 1440}d`;
+    if (minutes >= 60 && minutes % 60 === 0) return `${minutes / 60}h`;
+    return `${minutes}m`;
   }
 
-  function formatWindowLabel(hours: number): string {
-    if (hours >= 168 && hours % 168 === 0) return `${hours / 168}w`;
-    if (hours >= 24 && hours % 24 === 0) return `${hours / 24}d`;
-    return `${hours}h`;
+  function resetLabel(value: string | null): string {
+    if (!value) return 'reset unavailable';
+    const resetAt = parseTimestamp(value);
+    const msRemaining = resetAt.getTime() - Date.now();
+    if (msRemaining <= 0) return 'resetting';
+    if (msRemaining < 60 * 60 * 1000) return `resets in ${Math.ceil(msRemaining / 60000)}m`;
+    if (msRemaining < 24 * 60 * 60 * 1000) return `resets ${resetAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }).toLowerCase()}`;
+    return `resets ${resetAt.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
   }
 
-  function percent(used: number, limit: number): number {
-    if (limit <= 0) return 0;
-    return Math.min((used / limit) * 100, 100);
+  function windows(row: QuotaMonitorData): QuotaMonitorWindow[] {
+    return [row.primary, row.secondary].filter(Boolean) as QuotaMonitorWindow[];
   }
 
-  function usageWindows(agent: UsageMonitorData): Array<{
-    key: string;
-    used: number;
-    limit: number;
-    windowHours: number;
-  }> {
-    return [
-      { key: 'session', ...agent.session },
-      ...(agent.extended ? [{ key: 'extended', ...agent.extended }] : []),
-      ...(agent.weekly ? [{ key: 'weekly', ...agent.weekly }] : []),
-    ].filter((window) => window.limit > 0);
+  function unavailableCopy(row: QuotaMonitorData): string {
+    if (row.status === 'error') return row.error_message || 'quota unavailable';
+    return row.provider === 'claude'
+      ? 'statusline bridge needed'
+      : 'native quota unavailable';
   }
 </script>
 
-{#if hasData}
+{#if rows.length > 0}
   <div class="border-b border-gray-800 px-4 sm:px-6 py-2 bg-gray-900/50">
     <div class="flex items-center gap-x-6 gap-y-2 flex-wrap">
-      {#each agents as agent}
+      {#each rows as row}
         <div class="flex items-center gap-3 text-xs min-w-0 flex-wrap">
-          <span class="text-gray-400 shrink-0">{agentLabel(agent.agent_type)}</span>
-          {#each usageWindows(agent) as window (window.key)}
-            {@const usagePercent = percent(window.used, window.limit)}
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="text-gray-500 shrink-0">{formatWindowLabel(window.windowHours)}</span>
-              <div
-                class="w-20 h-1.5 bg-gray-700 rounded-full overflow-hidden"
-                role="progressbar"
-                aria-label={`${agentLabel(agent.agent_type)} ${formatWindowLabel(window.windowHours)} usage`}
-                aria-valuenow={usagePercent}
-                aria-valuemin={0}
-                aria-valuemax={100}
-              >
-                <div class="h-full rounded-full {barColor(usagePercent)}" style="width: {usagePercent}%"></div>
+          <span class="text-gray-400 shrink-0">{providerLabel(row)}</span>
+          {#if row.status === 'available' && windows(row).length > 0}
+            {#each windows(row) as window, index (index)}
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="text-gray-500 shrink-0">{windowLabel(window)}</span>
+                <div
+                  class="w-20 h-1.5 bg-gray-700 rounded-full overflow-hidden"
+                  role="progressbar"
+                  aria-label={`${providerLabel(row)} ${windowLabel(window)} quota usage`}
+                  aria-valuenow={window.used_percent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
+                  <div class="h-full rounded-full {barColor(window.used_percent)}" style="width: {window.used_percent}%"></div>
+                </div>
+                <span class="text-gray-500 tabular-nums shrink-0">{Math.round(window.remaining_percent)}% left</span>
+                <span class="text-gray-600 shrink-0">{resetLabel(window.resets_at)}</span>
               </div>
-              <span class="text-gray-500 tabular-nums shrink-0">
-                {formatUsage(window.used, agent.limitType)}/{formatUsage(window.limit, agent.limitType)}
-              </span>
-            </div>
-          {/each}
+            {/each}
+            {#if row.plan_type}
+              <span class="text-gray-600 shrink-0 uppercase tracking-wide">{row.plan_type}</span>
+            {/if}
+            {#if row.updated_at}
+              <span class="text-gray-700 shrink-0">updated {timeAgo(row.updated_at)}</span>
+            {/if}
+          {:else}
+            <span class="text-gray-600 shrink-0">{unavailableCopy(row)}</span>
+            {#if row.updated_at}
+              <span class="text-gray-700 shrink-0">last update {timeAgo(row.updated_at)}</span>
+            {/if}
+          {/if}
         </div>
       {/each}
     </div>

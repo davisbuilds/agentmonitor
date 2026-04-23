@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use rusqlite::{Connection, ToSql, params, params_from_iter, types::Value as SqlValue};
 use serde::Serialize;
 
-use crate::config::UsageMonitorConfig;
 use crate::pricing::{TokenCounts, calculate_cost};
 
 // --- Agents ---
@@ -693,93 +692,228 @@ pub fn get_cost_by_model(
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct UsageWindow {
-    pub used: f64,
-    pub limit: f64,
-    #[serde(rename = "windowHours")]
-    pub window_hours: i64,
+pub struct ProviderQuotaWindow {
+    pub used_percent: f64,
+    pub remaining_percent: f64,
+    pub resets_at: Option<String>,
+    pub window_minutes: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct AgentUsageData {
-    pub agent_type: String,
-    #[serde(rename = "limitType")]
-    pub limit_type: String,
-    pub session: UsageWindow,
-    pub extended: Option<UsageWindow>,
+pub struct ProviderQuotaCredits {
+    pub has_credits: bool,
+    pub unlimited: bool,
+    pub balance: Option<String>,
 }
 
-pub fn get_usage_monitor(
+#[derive(Debug, Clone, Serialize)]
+pub struct ProviderQuotaSnapshot {
+    pub provider: String,
+    pub agent_type: String,
+    pub status: String,
+    pub source: Option<String>,
+    pub updated_at: Option<String>,
+    pub account_label: Option<String>,
+    pub plan_type: Option<String>,
+    pub limit_id: Option<String>,
+    pub limit_name: Option<String>,
+    pub error_message: Option<String>,
+    pub primary: Option<ProviderQuotaWindow>,
+    pub secondary: Option<ProviderQuotaWindow>,
+    pub credits: Option<ProviderQuotaCredits>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProviderQuotaSnapshotInput {
+    pub provider: String,
+    pub agent_type: String,
+    pub status: String,
+    pub source: Option<String>,
+    pub updated_at: Option<String>,
+    pub account_label: Option<String>,
+    pub plan_type: Option<String>,
+    pub limit_id: Option<String>,
+    pub limit_name: Option<String>,
+    pub error_message: Option<String>,
+    pub primary_used_percent: Option<f64>,
+    pub primary_window_minutes: Option<i64>,
+    pub primary_resets_at: Option<String>,
+    pub secondary_used_percent: Option<f64>,
+    pub secondary_window_minutes: Option<i64>,
+    pub secondary_resets_at: Option<String>,
+    pub credits_has_credits: Option<bool>,
+    pub credits_unlimited: Option<bool>,
+    pub credits_balance: Option<String>,
+    pub raw_payload: Option<String>,
+}
+
+fn normalize_quota_window(
+    used_percent: Option<f64>,
+    resets_at: Option<String>,
+    window_minutes: Option<i64>,
+) -> Option<ProviderQuotaWindow> {
+    used_percent.map(|used| ProviderQuotaWindow {
+        used_percent: used.clamp(0.0, 100.0),
+        remaining_percent: (100.0 - used).clamp(0.0, 100.0),
+        resets_at,
+        window_minutes,
+    })
+}
+
+pub fn upsert_provider_quota_snapshot(
     conn: &Connection,
-    usage_config: &UsageMonitorConfig,
-) -> rusqlite::Result<Vec<AgentUsageData>> {
-    let mut stmt =
-        conn.prepare_cached("SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL")?;
-    let agent_types = stmt
-        .query_map([], |row| row.get::<_, String>(0))?
+    input: &ProviderQuotaSnapshotInput,
+) -> rusqlite::Result<()> {
+    conn.execute(
+        "INSERT INTO provider_quotas (
+            provider, agent_type, status, source, updated_at, account_label, plan_type,
+            limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
+            primary_resets_at, secondary_used_percent, secondary_window_minutes,
+            secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance, raw_payload
+        ) VALUES (
+            ?1, ?2, ?3, ?4, COALESCE(?5, datetime('now')), ?6, ?7, ?8, ?9, ?10,
+            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20
+        )
+        ON CONFLICT(provider) DO UPDATE SET
+            agent_type = excluded.agent_type,
+            status = excluded.status,
+            source = excluded.source,
+            updated_at = excluded.updated_at,
+            account_label = excluded.account_label,
+            plan_type = excluded.plan_type,
+            limit_id = excluded.limit_id,
+            limit_name = excluded.limit_name,
+            error_message = excluded.error_message,
+            primary_used_percent = excluded.primary_used_percent,
+            primary_window_minutes = excluded.primary_window_minutes,
+            primary_resets_at = excluded.primary_resets_at,
+            secondary_used_percent = excluded.secondary_used_percent,
+            secondary_window_minutes = excluded.secondary_window_minutes,
+            secondary_resets_at = excluded.secondary_resets_at,
+            credits_has_credits = excluded.credits_has_credits,
+            credits_unlimited = excluded.credits_unlimited,
+            credits_balance = excluded.credits_balance,
+            raw_payload = excluded.raw_payload",
+        params![
+            input.provider,
+            input.agent_type,
+            input.status,
+            input.source,
+            input.updated_at,
+            input.account_label,
+            input.plan_type,
+            input.limit_id,
+            input.limit_name,
+            input.error_message,
+            input.primary_used_percent,
+            input.primary_window_minutes,
+            input.primary_resets_at,
+            input.secondary_used_percent,
+            input.secondary_window_minutes,
+            input.secondary_resets_at,
+            input.credits_has_credits.map(|value| if value { 1 } else { 0 }),
+            input.credits_unlimited.map(|value| if value { 1 } else { 0 }),
+            input.credits_balance,
+            input.raw_payload,
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn get_usage_monitor(conn: &Connection) -> rusqlite::Result<Vec<ProviderQuotaSnapshot>> {
+    let mut stmt = conn.prepare(
+        "SELECT
+            provider, agent_type, status, source, updated_at, account_label, plan_type,
+            limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
+            primary_resets_at, secondary_used_percent, secondary_window_minutes,
+            secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance
+         FROM provider_quotas",
+    )?;
+
+    let rows = stmt
+        .query_map([], |row| {
+            let provider: String = row.get(0)?;
+            let agent_type: String = row.get(1)?;
+            let status: String = row.get(2)?;
+            let source: Option<String> = row.get(3)?;
+            let updated_at: Option<String> = row.get(4)?;
+            let account_label: Option<String> = row.get(5)?;
+            let plan_type: Option<String> = row.get(6)?;
+            let limit_id: Option<String> = row.get(7)?;
+            let limit_name: Option<String> = row.get(8)?;
+            let error_message: Option<String> = row.get(9)?;
+            let primary_used_percent: Option<f64> = row.get(10)?;
+            let primary_window_minutes: Option<i64> = row.get(11)?;
+            let primary_resets_at: Option<String> = row.get(12)?;
+            let secondary_used_percent: Option<f64> = row.get(13)?;
+            let secondary_window_minutes: Option<i64> = row.get(14)?;
+            let secondary_resets_at: Option<String> = row.get(15)?;
+            let credits_has_credits: Option<i64> = row.get(16)?;
+            let credits_unlimited: Option<i64> = row.get(17)?;
+            let credits_balance: Option<String> = row.get(18)?;
+
+            Ok(ProviderQuotaSnapshot {
+                provider,
+                agent_type,
+                status,
+                source,
+                updated_at,
+                account_label,
+                plan_type,
+                limit_id,
+                limit_name,
+                error_message,
+                primary: normalize_quota_window(
+                    primary_used_percent,
+                    primary_resets_at,
+                    primary_window_minutes,
+                ),
+                secondary: normalize_quota_window(
+                    secondary_used_percent,
+                    secondary_resets_at,
+                    secondary_window_minutes,
+                ),
+                credits: if credits_has_credits.is_none()
+                    && credits_unlimited.is_none()
+                    && credits_balance.is_none()
+                {
+                    None
+                } else {
+                    Some(ProviderQuotaCredits {
+                        has_credits: credits_has_credits.unwrap_or_default() != 0,
+                        unlimited: credits_unlimited.unwrap_or_default() != 0,
+                        balance: credits_balance,
+                    })
+                },
+            })
+        })?
         .collect::<Result<Vec<_>, _>>()?;
 
-    let mut results: Vec<AgentUsageData> = Vec::new();
+    let mut by_provider: HashMap<String, ProviderQuotaSnapshot> = rows
+        .into_iter()
+        .map(|row| (row.provider.clone(), row))
+        .collect();
 
-    for agent_type in agent_types {
-        let cfg = usage_config.for_agent(&agent_type);
-
-        if cfg.session_limit <= 0.0 && cfg.extended_limit <= 0.0 {
-            continue;
-        }
-
-        let sum_expr = match cfg.limit_type {
-            crate::config::UsageLimitType::Cost => "COALESCE(SUM(cost_usd), 0)",
-            crate::config::UsageLimitType::Tokens => "COALESCE(SUM(tokens_in + tokens_out), 0)",
-        };
-
-        let session_sql = format!(
-            "SELECT {} as used
-             FROM events
-             WHERE agent_type = ?1 AND created_at >= datetime('now', ?2 || ' hours')",
-            sum_expr
-        );
-        let session_used: f64 = conn.query_row(
-            &session_sql,
-            params![agent_type, format!("-{}", cfg.session_window_hours)],
-            |row| row.get(0),
-        )?;
-
-        let extended = if cfg.extended_limit > 0.0 {
-            let ext_sql = format!(
-                "SELECT {} as used
-                 FROM events
-                 WHERE agent_type = ?1 AND created_at >= datetime('now', ?2 || ' hours')",
-                sum_expr
-            );
-            let ext_used: f64 = conn.query_row(
-                &ext_sql,
-                params![agent_type, format!("-{}", cfg.extended_window_hours)],
-                |row| row.get(0),
-            )?;
-
-            Some(UsageWindow {
-                used: ext_used,
-                limit: cfg.extended_limit,
-                window_hours: cfg.extended_window_hours,
-            })
-        } else {
-            None
-        };
-
-        results.push(AgentUsageData {
-            limit_type: cfg.limit_type.as_str().to_string(),
-            agent_type,
-            session: UsageWindow {
-                used: session_used,
-                limit: cfg.session_limit,
-                window_hours: cfg.session_window_hours,
-            },
-            extended,
-        });
+    let mut snapshots = Vec::new();
+    for (provider, agent_type) in [("claude", "claude_code"), ("codex", "codex")] {
+        snapshots.push(by_provider.remove(provider).unwrap_or(ProviderQuotaSnapshot {
+            provider: provider.to_string(),
+            agent_type: agent_type.to_string(),
+            status: "unavailable".to_string(),
+            source: None,
+            updated_at: None,
+            account_label: None,
+            plan_type: None,
+            limit_id: None,
+            limit_name: None,
+            error_message: None,
+            primary: None,
+            secondary: None,
+            credits: None,
+        }));
     }
 
-    Ok(results)
+    Ok(snapshots)
 }
 
 // --- Sessions API ---

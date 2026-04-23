@@ -5,6 +5,7 @@ import { startStatsBroadcast, stopStatsBroadcast } from './api/stream.js';
 import { broadcaster } from './sse/emitter.js';
 import { createApp } from './app.js';
 import { runImport } from './import/index.js';
+import { startProviderQuotaPolling, stopProviderQuotaPolling } from './provider-quotas/service.js';
 import { startWatcher, stopWatcher } from './watcher/service.js';
 
 // Initialize database
@@ -23,6 +24,9 @@ startStatsBroadcast();
 
 // Start session file watcher (v2 session browser)
 startWatcher();
+
+// Start provider quota collection
+startProviderQuotaPolling();
 
 // Session timeout checker - mark idle sessions every 60s
 const sessionChecker = setInterval(() => {
@@ -61,6 +65,7 @@ if (config.autoImportIntervalMinutes > 0) {
 function shutdown() {
   console.log('\nShutting down AgentMonitor...');
   stopWatcher();
+  stopProviderQuotaPolling();
   stopStatsBroadcast();
   clearInterval(sessionChecker);
   if (autoImportTimer) clearInterval(autoImportTimer);
