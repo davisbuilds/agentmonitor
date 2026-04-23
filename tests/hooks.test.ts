@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { execSync, execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test, { describe } from 'node:test';
 import { normalizeIngestEvent } from '../src/contracts/event-contract.js';
@@ -106,6 +108,14 @@ function runPythonHook(script: string, stdin: string): { exitCode: number; stdou
     const e = err as { status: number; stdout: string; stderr: string };
     return { exitCode: e.status, stdout: e.stdout || '', stderr: e.stderr || '' };
   }
+}
+
+function runStatuslineInstaller(args: string[], envOverrides: Record<string, string> = {}) {
+  return execFileSync('bash', [path.join(HOOKS_DIR, 'install-statusline-bridge.sh'), ...args], {
+    env: { ...process.env, ...envOverrides },
+    timeout: 10000,
+    encoding: 'utf-8',
+  });
 }
 
 // Validate that the payload a hook would send matches our contract
@@ -265,6 +275,51 @@ describe('Python hook scripts', () => {
       makePreToolUseInput('Read', { file_path: '/etc/passwd' })
     );
     assert.equal(result.exitCode, 0, `stderr: ${result.stderr}`);
+  });
+});
+
+describe('Claude statusline bridge installer', () => {
+  let hasJq = false;
+  try {
+    execSync('jq --version', { encoding: 'utf-8', timeout: 5000 });
+    hasJq = true;
+  } catch {
+    // jq not available
+  }
+
+  if (!hasJq) {
+    test('jq not available, skipping statusline bridge installer tests', { skip: 'jq not found' }, () => {});
+    return;
+  }
+
+  test('preserves the original statusline command across reinstalls', () => {
+    const claudeDir = mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-statusline-bridge-'));
+
+    try {
+      const settingsPath = path.join(claudeDir, 'settings.json');
+      const forwardPath = path.join(claudeDir, 'agentmonitor-statusline-forward.txt');
+      const originalCommand = 'original-statusline --flag';
+
+      writeFileSync(
+        settingsPath,
+        JSON.stringify({ statusLine: { command: originalCommand } }, null, 2)
+      );
+
+      runStatuslineInstaller([], { CLAUDE_CONFIG_DIR: claudeDir });
+      assert.equal(readFileSync(forwardPath, 'utf8'), originalCommand);
+
+      runStatuslineInstaller(['--url', 'http://127.0.0.1:9999'], { CLAUDE_CONFIG_DIR: claudeDir });
+      assert.equal(readFileSync(forwardPath, 'utf8'), originalCommand);
+
+      runStatuslineInstaller(['--uninstall'], { CLAUDE_CONFIG_DIR: claudeDir });
+
+      const restoredSettings = JSON.parse(readFileSync(settingsPath, 'utf8')) as {
+        statusLine?: { command?: string };
+      };
+      assert.equal(restoredSettings.statusLine?.command, originalCommand);
+    } finally {
+      rmSync(claudeDir, { recursive: true, force: true });
+    }
   });
 });
 

@@ -47,6 +47,11 @@ FORWARD_FILE="$CLAUDE_DIR/agentmonitor-statusline-forward.txt"
 BRIDGE_PATH="$SCRIPT_DIR/statusline_bridge.sh"
 BRIDGE_COMMAND="AGENTMONITOR_URL=\"$AGENTMONITOR_URL\" \"$BRIDGE_PATH\""
 
+is_bridge_command() {
+  local command="$1"
+  [[ "$command" == *"$BRIDGE_PATH"* ]]
+}
+
 mkdir -p "$CLAUDE_DIR"
 
 if [[ ! -f "$SETTINGS_FILE" ]]; then
@@ -87,7 +92,14 @@ if [[ "$current_command" == "$BRIDGE_COMMAND" ]]; then
   exit 0
 fi
 
-printf '%s' "$current_command" >"$FORWARD_FILE"
+if is_bridge_command "$current_command"; then
+  if [[ ! -f "$FORWARD_FILE" ]]; then
+    echo "Claude statusline bridge is already installed, but the saved original command is missing at $FORWARD_FILE" >&2
+    exit 1
+  fi
+else
+  printf '%s' "$current_command" >"$FORWARD_FILE"
+fi
 
 jq --arg command "$BRIDGE_COMMAND" '
   .statusLine = (.statusLine // {})
