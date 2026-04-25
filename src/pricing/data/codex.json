@@ -1,7 +1,23 @@
 {
   "provider": "openai",
-  "lastUpdated": "2026-03-13T00:00:00Z",
+  "lastUpdated": "2026-04-25T00:00:00Z",
   "models": {
+    "gpt-5.5": {
+      "aliases": [],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 30,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.5-pro": {
+      "aliases": [],
+      "inputCostPerMTok": 30,
+      "outputCostPerMTok": 180,
+      "cacheReadCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
     "gpt-5.4": {
       "aliases": [
         "gpt-5.4-2026-03-05"

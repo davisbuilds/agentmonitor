@@ -66,6 +66,18 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.provider, 'openai');
     });
 
+    test('finds OpenAI GPT-5.5 models', () => {
+      const standard = registry.lookup('gpt-5.5');
+      assert.ok(standard);
+      assert.equal(standard.provider, 'openai');
+      assert.equal(standard.deprecated, false);
+
+      const pro = registry.lookup('gpt-5.5-pro');
+      assert.ok(pro);
+      assert.equal(pro.provider, 'openai');
+      assert.equal(pro.deprecated, false);
+    });
+
     test('finds OpenAI GPT-5.4 snapshot alias', () => {
       const pricing = registry.lookup('gpt-5.4-2026-03-05');
       assert.ok(pricing);
@@ -179,6 +191,30 @@ describe('PricingRegistry', () => {
       assert.ok(cost !== null);
       // 100K * $2.50/MTok + 50K * $15/MTok + 40K * $0.25/MTok
       const expected = 0.25 + 0.75 + 0.01;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
+    test('calculates cost for OpenAI GPT-5.5 short-context pricing', () => {
+      const cost = registry.calculate('openai/gpt-5.5', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      // 100K * $5/MTok + 50K * $30/MTok + 40K * $0.50/MTok
+      const expected = 0.5 + 1.5 + 0.02;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
+    test('calculates cost for OpenAI GPT-5.5 Pro short-context pricing', () => {
+      const cost = registry.calculate('gpt-5.5-pro', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      // Pro has no cached-input discount in the pasted short-context table.
+      const expected = 3 + 9;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 
@@ -457,6 +493,24 @@ describe('Pricing auto-calculation on ingest', () => {
     const cost = events.events[0].cost_usd as number;
     // 500K * $2/MTok + 200K * $8/MTok = $1.00 + $1.60 = $2.60
     assert.ok(Math.abs(cost - 2.6) < 0.0001, `Expected ~$2.60, got $${cost}`);
+  });
+
+  test('auto-calculates cost for OpenAI GPT-5.5 events', async () => {
+    const res = await postJson(`${baseUrl}/api/events`, {
+      session_id: 'sess-price-gpt55',
+      agent_type: 'codex',
+      event_type: 'llm_request',
+      model: 'gpt-5.5',
+      tokens_in: 100_000,
+      tokens_out: 50_000,
+      cache_read_tokens: 40_000,
+    });
+    assert.equal(res.status, 201);
+
+    const events = await getEvents();
+    const cost = events.events[0].cost_usd as number;
+    const expected = 0.5 + 1.5 + 0.02;
+    assert.ok(Math.abs(cost - expected) < 0.0001, `Expected ~$${expected}, got $${cost}`);
   });
 
   test('stats endpoint includes total_cost_usd from auto-calculated costs', async () => {

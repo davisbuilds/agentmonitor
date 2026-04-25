@@ -152,6 +152,38 @@ mod tests {
     }
 
     #[test]
+    fn resolves_gpt_55_short_context_pricing() {
+        let cost = calculate_cost(
+            "openai/gpt-5.5",
+            TokenCounts {
+                input: 100_000,
+                output: 50_000,
+                cache_read: 40_000,
+                cache_write: 999_999,
+            },
+        );
+        let value = cost.expect("gpt-5.5 should resolve");
+        // 100K * $5/MTok + 50K * $30/MTok + 40K * $0.50/MTok + cache write * $0
+        assert!((value - 2.02).abs() < 1e-10);
+    }
+
+    #[test]
+    fn resolves_gpt_55_pro_short_context_pricing() {
+        let cost = calculate_cost(
+            "gpt-5.5-pro",
+            TokenCounts {
+                input: 100_000,
+                output: 50_000,
+                cache_read: 40_000,
+                cache_write: 0,
+            },
+        );
+        let value = cost.expect("gpt-5.5-pro should resolve");
+        // Pro has no cached-input discount in the short-context pricing table.
+        assert!((value - 12.0).abs() < 1e-10);
+    }
+
+    #[test]
     fn resolves_new_gemini_model() {
         let cost = calculate_cost(
             "google/gemini-3-flash-preview",
