@@ -192,6 +192,19 @@ test('monitor tool analytics use the v2 monitor endpoint instead of v1 tool stat
   expect(requestedPaths).not.toContain('/api/stats/tools');
 });
 
+test('monitor active sessions use the v2 monitor endpoint instead of v1 sessions', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#monitor`);
+
+  await expect(page.getByText('Active Agents')).toBeVisible();
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/sessions')).toBe(true);
+  expect(requestedPaths).not.toContain('/api/sessions');
+});
+
 test('monitor active agent cards include model and reasoning effort when available', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#monitor`);
 

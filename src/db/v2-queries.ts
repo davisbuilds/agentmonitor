@@ -1,4 +1,5 @@
 import { getDb } from './connection.js';
+import { config } from '../config.js';
 import type {
   BrowsingSessionRow,
   BrowsingSessionDbRow,
@@ -21,6 +22,7 @@ import type {
   ProjectBreakdown,
   ToolUsageStat,
   MonitorToolStat,
+  MonitorSessionRow,
   SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
@@ -36,6 +38,7 @@ import type {
   UsageModelBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
+  MonitorSessionsParams,
   InsightRow,
   InsightDbRow,
   InsightInputSnapshot,
@@ -1124,6 +1127,79 @@ export function getMonitorToolStats(params: UsageParams = {}): MonitorToolStat[]
     ...row,
     by_agent: byAgent.get(row.tool_name) ?? {},
   }));
+}
+
+function updateMonitorSessionStatuses(timeoutMinutes: number): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE sessions SET status = 'idle'
+    WHERE status = 'active'
+    AND last_event_at < datetime('now', ? || ' minutes')
+  `).run(`-${timeoutMinutes}`);
+
+  db.prepare(`
+    UPDATE sessions SET status = 'ended', ended_at = datetime('now')
+    WHERE status = 'idle'
+    AND last_event_at < datetime('now', ? || ' minutes')
+  `).run(`-${timeoutMinutes * 2}`);
+}
+
+export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessions: MonitorSessionRow[]; total: number } {
+  const db = getDb();
+  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.status) {
+    conditions.push('s.status = ?');
+    values.push(params.status);
+  }
+  if (params.exclude_status) {
+    conditions.push('s.status != ?');
+    values.push(params.exclude_status);
+  }
+  if (params.project) {
+    conditions.push('s.project = ?');
+    values.push(params.project);
+  }
+  if (params.agent) {
+    conditions.push('s.agent_type = ?');
+    values.push(params.agent);
+  }
+  if (params.date_from) {
+    conditions.push('datetime(s.last_event_at) >= datetime(?)');
+    values.push(params.date_from);
+  }
+  if (params.date_to) {
+    conditions.push(`datetime(s.last_event_at) < datetime(?, '+1 day')`);
+    values.push(params.date_to);
+  }
+
+  const requestedLimit = Number.isFinite(params.limit) ? Math.trunc(params.limit as number) : 50;
+  const applyLimit = requestedLimit > 0;
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const queryValues = applyLimit ? [...values, requestedLimit] : values;
+
+  const sessions = db.prepare(`
+    SELECT s.*,
+      COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
+      COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
+      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+    FROM sessions s
+    ${where}
+    ORDER BY
+      CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
+      datetime(s.last_event_at) DESC,
+      s.id DESC
+    ${applyLimit ? 'LIMIT ?' : ''}
+  `).all(...queryValues) as MonitorSessionRow[];
+
+  return { sessions, total: sessions.length };
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {

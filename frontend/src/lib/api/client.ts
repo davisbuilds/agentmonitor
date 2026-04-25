@@ -575,6 +575,22 @@ export async function fetchSessions(filters: Filters = {}): Promise<{ sessions: 
   return checkedJson(res, 'fetchSessions');
 }
 
+export async function fetchMonitorSessions(filters: Filters = {}): Promise<{ sessions: Session[]; total: number }> {
+  const params: Record<string, string> = {};
+  if (filters.status) params.status = filters.status;
+  if (filters.exclude_status) params.exclude_status = filters.exclude_status;
+  if (filters.project) params.project = filters.project;
+  if (filters.agent_type) params.agent = filters.agent_type;
+  if (filters.agent) params.agent = filters.agent;
+  if (filters.since) params.date_from = filters.since;
+  if (filters.date_from) params.date_from = filters.date_from;
+  if (filters.date_to) params.date_to = filters.date_to;
+  if (filters.limit) params.limit = filters.limit;
+
+  const res = await fetch(`/api/v2/monitor/sessions${qs(params)}`);
+  return checkedJson(res, 'fetchMonitorSessions');
+}
+
 export async function fetchFilterOptions(): Promise<FilterOptions> {
   const res = await fetch('/api/filter-options');
   return checkedJson(res, 'fetchFilterOptions');

@@ -1030,6 +1030,45 @@ describe('GET /api/v2/monitor/tools', () => {
   });
 });
 
+describe('GET /api/v2/monitor/sessions', () => {
+  test('returns live monitor session aggregates in the monitor widget shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions?agent=codex&exclude_status=ended`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      sessions: Array<{
+        id: string;
+        agent_id: string;
+        agent_type: string;
+        project: string | null;
+        status: string;
+        event_count: number;
+        tokens_in: number;
+        tokens_out: number;
+        total_cost_usd: number;
+        files_edited: number;
+        lines_added: number;
+        lines_removed: number;
+      }>;
+      total: number;
+    };
+
+    const row = body.sessions.find(session => session.id === '019d0000-0000-0000-0000-000000000099');
+    assert.ok(row, 'expected seeded codex monitor session row');
+    assert.equal(row.agent_id, 'codex-default');
+    assert.equal(row.agent_type, 'codex');
+    assert.equal(row.project, 'agentmonitor');
+    assert.equal(row.status, 'active');
+    assert.equal(row.event_count, 1);
+    assert.equal(row.tokens_in, 0);
+    assert.equal(row.tokens_out, 0);
+    assert.equal(row.total_cost_usd, 0);
+    assert.equal(row.files_edited, 0);
+    assert.equal(row.lines_added, 0);
+    assert.equal(row.lines_removed, 0);
+    assert.ok(body.total >= 1);
+  });
+});
+
 describe('GET /api/v2/analytics/skills/daily', () => {
   test('returns explicit Claude skills and inferred Codex skills by day', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?date_from=2026-03-08&date_to=2026-03-09`);

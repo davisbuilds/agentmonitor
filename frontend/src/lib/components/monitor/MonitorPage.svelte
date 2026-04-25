@@ -17,7 +17,7 @@
     getFilterOptions,
     setFilterOptions,
   } from '../../stores/monitor.svelte';
-  import { fetchStats, fetchEvents, fetchSessions, fetchCostData, fetchToolStats, fetchFilterOptions } from '../../api/client';
+  import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions } from '../../api/client';
   import { buildCostFilters } from '../../monitor-analytics';
 
   interface Props {
@@ -45,7 +45,7 @@
       const [statsData, eventsData, sessionsData] = await Promise.all([
         fetchStats(filters),
         fetchEvents(filters),
-        fetchSessions(sessionsParams),
+        fetchMonitorSessions(sessionsParams),
       ]);
       setStats(statsData);
       setQuotaMonitor(statsData.quota_monitor || statsData.usage_monitor || []);

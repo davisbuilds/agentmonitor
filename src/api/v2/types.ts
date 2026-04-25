@@ -175,6 +175,26 @@ export interface MonitorToolStat {
   by_agent: Record<string, number>;
 }
 
+export interface MonitorSessionRow {
+  id: string;
+  agent_id: string;
+  agent_type: string;
+  project: string | null;
+  branch: string | null;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  last_event_at: string;
+  metadata: string | null;
+  event_count: number;
+  tokens_in: number;
+  tokens_out: number;
+  total_cost_usd: number;
+  files_edited: number;
+  lines_added: number;
+  lines_removed: number;
+}
+
 export interface SkillUsageBreakdown {
   skill_name: string;
   count: number;
@@ -486,6 +506,16 @@ export interface UsageParams {
   date_to?: string;
   project?: string;
   agent?: string;
+  limit?: number;
+}
+
+export interface MonitorSessionsParams {
+  status?: string;
+  exclude_status?: string;
+  project?: string;
+  agent?: string;
+  date_from?: string;
+  date_to?: string;
   limit?: number;
 }
 
