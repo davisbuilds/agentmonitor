@@ -115,3 +115,16 @@ test('session viewer back restores the previously selected session', async ({ pa
   await expect(page.getByText('First seeded route session')).toBeVisible();
   await expect(page).toHaveURL(/#sessions\?session=e2e-route-session-a$/);
 });
+
+test('usage tab does not eagerly request v1 monitor filter options', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#usage`);
+
+  await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/summary')).toBe(true);
+  expect(requestedPaths).not.toContain('/api/filter-options');
+});

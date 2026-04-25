@@ -9,10 +9,8 @@
     openCommandPalette,
     type Tab,
   } from './lib/stores/router.svelte';
-  import { setFilterOptions } from './lib/stores/monitor.svelte';
   import { getLiveSettings, initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
-  import { fetchFilterOptions } from './lib/api/client';
   import StatsBar from './lib/components/monitor/StatsBar.svelte';
   import ConnectionStatus from './lib/components/monitor/ConnectionStatus.svelte';
   import FilterBar from './lib/components/monitor/FilterBar.svelte';
@@ -69,14 +67,6 @@
 
   onMount(async () => {
     window.addEventListener('keydown', handleGlobalKeydown);
-
-    // Load filter options
-    try {
-      const options = await fetchFilterOptions();
-      setFilterOptions(options);
-    } catch {
-      // Filter options may not be available
-    }
 
     await initializeLiveSettings();
     if (!getLiveSettings().enabled && getTab() === 'live') {
