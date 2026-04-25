@@ -53,6 +53,16 @@ test('search and analytics tabs explain capability boundaries', async ({ page })
   await expect(page.getByText('Only sessions with searchable history appear here.')).toBeVisible();
 
   await page.goto(`${baseUrl}/app/#analytics`);
-  await expect(page.getByText('Analytics mixes session-level and history-level coverage.')).toBeVisible();
-  await expect(page.getByText('Tool usage still depends on tool-analytics-capable sessions')).toBeVisible();
+  await expect(page.getByText('Analytics reflects session capability coverage.')).toBeVisible();
+  await expect(page.getByText('This metric includes every session matching the current filters').first()).toBeVisible();
+});
+
+test('app restores search and session deep links from the hash', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#search?q=quota%20reset&sort=relevance`);
+  await expect(page.getByPlaceholder('Search across transcript history...')).toHaveValue('quota reset');
+  await expect(page.locator('select').first()).toHaveValue('relevance');
+
+  await page.goto(`${baseUrl}/app/#sessions?session=missing-session&message=7`);
+  await expect(page.getByRole('button', { name: /Back/ })).toBeVisible();
+  await expect(page.getByText('Failed to load session.')).toBeVisible();
 });

@@ -8,6 +8,7 @@ import {
   type SearchSort,
 } from '../api/client';
 import { navigateToSession, navigateToSessionMessage } from './router.svelte';
+import { buildSearchHash, parseSearchHash } from '../route-state';
 
 const PAGE_SIZE = 25;
 const DEFAULT_RECENT_LIMIT = 12;
@@ -15,6 +16,7 @@ const DEFAULT_RECENT_LIMIT = 12;
 interface SearchStoreOptions {
   recentLimit?: number;
   defaultSort?: SearchSort;
+  syncUrl?: boolean;
 }
 
 class SearchStore {
@@ -23,10 +25,13 @@ class SearchStore {
   private requestVersion = 0;
   private readonly recentLimit: number;
   private readonly defaultSort: SearchSort;
+  private readonly syncUrl: boolean;
+  private hashListenerAttached = false;
 
   constructor(options: SearchStoreOptions = {}) {
     this.recentLimit = options.recentLimit ?? DEFAULT_RECENT_LIMIT;
     this.defaultSort = options.defaultSort ?? 'recent';
+    this.syncUrl = options.syncUrl ?? true;
     this.sort = this.defaultSort;
   }
 
@@ -55,6 +60,14 @@ class SearchStore {
   }
 
   async initialize(): Promise<void> {
+    if (this.syncUrl && typeof window !== 'undefined') {
+      this.applyRouteState(false);
+      if (!this.hashListenerAttached) {
+        window.addEventListener('hashchange', this.handleHashChange);
+        this.hashListenerAttached = true;
+      }
+    }
+
     if (!this.initialized) {
       const [projects, agents] = await Promise.all([
         fetchV2Projects().catch(() => ({ data: [] })),
@@ -109,6 +122,7 @@ class SearchStore {
     this.cursor = undefined;
     this.hasMore = false;
     this.error = null;
+    this.syncHash();
 
     if (!this.hasQuery) {
       this.cancelPending();
@@ -126,6 +140,7 @@ class SearchStore {
     this.project = next;
     this.cursor = undefined;
     this.hasMore = false;
+    this.syncHash();
     if (this.hasQuery) {
       this.scheduleSearch();
       return;
@@ -137,6 +152,7 @@ class SearchStore {
     this.agent = next;
     this.cursor = undefined;
     this.hasMore = false;
+    this.syncHash();
     if (this.hasQuery) {
       this.scheduleSearch();
       return;
@@ -148,6 +164,7 @@ class SearchStore {
     this.sort = next;
     this.cursor = undefined;
     this.hasMore = false;
+    this.syncHash();
     if (this.hasQuery) {
       this.scheduleSearch();
     }
@@ -223,12 +240,72 @@ class SearchStore {
     this.recentError = null;
   }
 
+  dispose(): void {
+    this.cancelPending();
+    if (this.hashListenerAttached && typeof window !== 'undefined') {
+      window.removeEventListener('hashchange', this.handleHashChange);
+      this.hashListenerAttached = false;
+    }
+  }
+
   private scheduleSearch(): void {
     this.cancelPending();
     this.debounceTimer = setTimeout(() => {
       void this.searchNow(false);
     }, 220);
   }
+
+  private syncHash(): void {
+    if (!this.syncUrl || typeof window === 'undefined') return;
+    const nextHash = buildSearchHash({
+      query: this.query,
+      project: this.project,
+      agent: this.agent,
+      sort: this.sort,
+    });
+    const nextUrl = `${window.location.pathname}${window.location.search}#${nextHash}`;
+    window.history.replaceState(null, '', nextUrl);
+  }
+
+  private applyRouteState(shouldFetch: boolean): void {
+    if (!this.syncUrl || typeof window === 'undefined') return;
+    const next = parseSearchHash(window.location.hash, {
+      query: this.query,
+      project: this.project,
+      agent: this.agent,
+      sort: this.defaultSort,
+    });
+    const changed = (
+      next.query !== this.query
+      || next.project !== this.project
+      || next.agent !== this.agent
+      || next.sort !== this.sort
+    );
+    if (!changed) return;
+
+    this.cancelPending();
+    this.query = next.query;
+    this.project = next.project;
+    this.agent = next.agent;
+    this.sort = next.sort;
+    this.cursor = undefined;
+    this.hasMore = false;
+    this.error = null;
+
+    if (!shouldFetch) return;
+    if (this.hasQuery) {
+      void this.searchNow(false);
+      return;
+    }
+    this.results = [];
+    this.total = 0;
+    this.searched = false;
+    void this.refreshRecent();
+  }
+
+  private readonly handleHashChange = (): void => {
+    this.applyRouteState(true);
+  };
 }
 
 export function createSearchStore(options?: SearchStoreOptions): SearchStore {
@@ -236,4 +313,4 @@ export function createSearchStore(options?: SearchStoreOptions): SearchStore {
 }
 
 export const search = createSearchStore();
-export const commandPaletteSearch = createSearchStore({ recentLimit: 10 });
+export const commandPaletteSearch = createSearchStore({ recentLimit: 10, syncUrl: false });

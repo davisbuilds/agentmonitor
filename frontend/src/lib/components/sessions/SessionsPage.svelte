@@ -12,6 +12,7 @@
     consumePendingSessionNavigation,
     getPendingSessionNavigationVersion,
   } from '../../stores/router.svelte';
+  import { buildSessionsHash, parseSessionsHash } from '../../route-state';
   import SessionViewer from './SessionViewer.svelte';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
 
@@ -34,6 +35,40 @@
 
   const PAGE_SIZE = 25;
   const pendingNavigationVersion = $derived(getPendingSessionNavigationVersion());
+
+  function currentRouteState() {
+    return {
+      project: filterProject,
+      agent: filterAgent,
+      sessionId: selectedSessionId,
+      messageOrdinal: selectedMessageOrdinal,
+    };
+  }
+
+  function syncHash(replace = false) {
+    if (typeof window === 'undefined') return;
+    const nextHash = buildSessionsHash(currentRouteState());
+    const nextUrl = `${window.location.pathname}${window.location.search}#${nextHash}`;
+    if (replace) {
+      window.history.replaceState(null, '', nextUrl);
+      return;
+    }
+    window.location.hash = nextHash;
+  }
+
+  function applyHashState(shouldLoadSessions: boolean) {
+    if (typeof window === 'undefined') return;
+    const next = parseSessionsHash(window.location.hash, currentRouteState());
+    const filtersChanged = next.project !== filterProject || next.agent !== filterAgent;
+    filterProject = next.project;
+    filterAgent = next.agent;
+    selectedSessionId = next.sessionId;
+    selectedMessageOrdinal = next.messageOrdinal;
+    if (filtersChanged && shouldLoadSessions) {
+      cursor = undefined;
+      void loadSessions();
+    }
+  }
 
   async function loadSessions(append = false) {
     loading = true;
@@ -63,17 +98,22 @@
 
   function handleFilterChange() {
     cursor = undefined;
+    selectedSessionId = null;
+    selectedMessageOrdinal = null;
+    syncHash(true);
     loadSessions();
   }
 
   function selectSession(id: string) {
     selectedSessionId = id;
     selectedMessageOrdinal = null;
+    syncHash();
   }
 
   function closeViewer() {
     selectedSessionId = null;
     selectedMessageOrdinal = null;
+    syncHash();
   }
 
   $effect(() => {
@@ -84,14 +124,20 @@
     selectedMessageOrdinal = pending.messageOrdinal;
   });
 
-  onMount(async () => {
-    const [projectsRes, agentsRes] = await Promise.all([
+  onMount(() => {
+    applyHashState(false);
+    void Promise.all([
       fetchV2Projects().catch(() => ({ data: [] })),
       fetchV2Agents().catch(() => ({ data: [] })),
-    ]);
-    projects = projectsRes.data;
-    agents = agentsRes.data;
-    loadSessions();
+    ]).then(([projectsRes, agentsRes]) => {
+      projects = projectsRes.data;
+      agents = agentsRes.data;
+      void loadSessions();
+    });
+
+    const handleHashChange = () => applyHashState(true);
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
   });
 </script>
 

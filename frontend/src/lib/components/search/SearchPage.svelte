@@ -39,7 +39,7 @@
 
   onMount(() => {
     void search.initialize();
-    return () => search.cancelPending();
+    return () => search.dispose();
   });
 </script>
 

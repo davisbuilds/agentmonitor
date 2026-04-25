@@ -1,4 +1,6 @@
-export type Tab = 'monitor' | 'live' | 'sessions' | 'pinned' | 'analytics' | 'usage' | 'insights' | 'search';
+import { buildSessionsHash, parseAppHash, type AppTab } from '../route-state';
+
+export type Tab = AppTab;
 
 let currentTab = $state<Tab>('monitor');
 let pendingSessionId = $state<string | null>(null);
@@ -14,7 +16,9 @@ export function setTab(tab: Tab): void {
   currentTab = tab;
   commandPaletteOpen = false;
   if (typeof window !== 'undefined') {
-    window.location.hash = tab === 'monitor' ? '' : tab;
+    if (parseAppHash(window.location.hash).tab === tab) return;
+    const nextHash = tab === 'monitor' ? '' : tab;
+    window.location.hash = nextHash;
   }
 }
 
@@ -38,14 +42,32 @@ export function navigateToSession(sessionId: string): void {
   pendingSessionId = sessionId;
   pendingMessageOrdinal = null;
   pendingSessionNavigationVersion += 1;
-  setTab('sessions');
+  currentTab = 'sessions';
+  commandPaletteOpen = false;
+  if (typeof window !== 'undefined') {
+    window.location.hash = buildSessionsHash({
+      project: '',
+      agent: '',
+      sessionId,
+      messageOrdinal: null,
+    });
+  }
 }
 
 export function navigateToSessionMessage(sessionId: string, messageOrdinal: number): void {
   pendingSessionId = sessionId;
   pendingMessageOrdinal = messageOrdinal;
   pendingSessionNavigationVersion += 1;
-  setTab('sessions');
+  currentTab = 'sessions';
+  commandPaletteOpen = false;
+  if (typeof window !== 'undefined') {
+    window.location.hash = buildSessionsHash({
+      project: '',
+      agent: '',
+      sessionId,
+      messageOrdinal,
+    });
+  }
 }
 
 export function getPendingSessionNavigationVersion(): number {
@@ -63,10 +85,7 @@ export function consumePendingSessionNavigation(): { sessionId: string | null; m
 // Initialize from URL hash
 function initFromHash(): void {
   if (typeof window === 'undefined') return;
-  const hash = window.location.hash.slice(1).split('?')[0];
-  if (hash === 'live' || hash === 'sessions' || hash === 'pinned' || hash === 'analytics' || hash === 'usage' || hash === 'insights' || hash === 'search') {
-    currentTab = hash;
-  }
+  currentTab = parseAppHash(window.location.hash).tab;
 }
 
 if (typeof window !== 'undefined') {
