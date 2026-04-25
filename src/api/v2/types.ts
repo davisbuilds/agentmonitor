@@ -166,6 +166,15 @@ export interface ToolUsageStat {
   count: number;
 }
 
+export interface MonitorToolStat {
+  tool_name: string;
+  total_calls: number;
+  error_count: number;
+  error_rate: number;
+  avg_duration_ms: number | null;
+  by_agent: Record<string, number>;
+}
+
 export interface SkillUsageBreakdown {
   skill_name: string;
   count: number;

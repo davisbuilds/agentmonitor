@@ -143,3 +143,16 @@ test('monitor cost card uses v2 usage APIs instead of v1 cost stats', async ({ p
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/models')).toBe(true);
   expect(requestedPaths).not.toContain('/api/stats/cost');
 });
+
+test('monitor tool analytics use the v2 monitor endpoint instead of v1 tool stats', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#monitor`);
+
+  await expect(page.getByText('Tool Analytics')).toBeVisible();
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/tools')).toBe(true);
+  expect(requestedPaths).not.toContain('/api/stats/tools');
+});

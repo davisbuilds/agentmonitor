@@ -1005,6 +1005,31 @@ describe('GET /api/v2/analytics/tools', () => {
   });
 });
 
+describe('GET /api/v2/monitor/tools', () => {
+  test('returns event-derived tool analytics in the monitor widget shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/tools?agent=codex&date_from=2026-03-09`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      tools: Array<{
+        tool_name: string;
+        total_calls: number;
+        error_count: number;
+        error_rate: number;
+        avg_duration_ms: number | null;
+        by_agent: Record<string, number>;
+      }>;
+    };
+
+    const row = body.tools.find(tool => tool.tool_name === 'exec_command');
+    assert.ok(row, 'expected seeded exec_command tool row');
+    assert.equal(row.total_calls, 1);
+    assert.equal(row.error_count, 0);
+    assert.equal(row.error_rate, 0);
+    assert.equal(row.avg_duration_ms, null);
+    assert.equal(row.by_agent.codex, 1);
+  });
+});
+
 describe('GET /api/v2/analytics/skills/daily', () => {
   test('returns explicit Claude skills and inferred Codex skills by day', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?date_from=2026-03-08&date_to=2026-03-09`);

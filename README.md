@@ -13,6 +13,7 @@ Local dashboard and session browser for observing AI coding agents across live t
 - Exposes transcript search under `/api/v2/search` with recency/relevance sorting and session-context metadata for navigation-first search UIs.
 - Exposes capability-aware analytics under `/api/v2/analytics/*`, including summary, activity, project, tool, skill, hour-of-week, top-session, velocity, and per-agent views.
 - Exposes event-derived historical usage under `/api/v2/usage/*`, including summary totals, daily series, project/model/agent attribution, and top sessions with coverage metadata.
+- Exposes event-derived Monitor migration endpoints under `/api/v2/monitor/*`, including tool error-rate and duration analytics.
 - Exposes persisted AI-generated insights under `/api/v2/insights/*`, scoped to the current historical filters and grounded in analytics and usage coverage metadata.
 - Exposes provider-native quota snapshots under `/api/provider-quotas`, including Codex app-server polling and Claude statusline bridge ingestion.
 

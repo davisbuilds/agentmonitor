@@ -22,6 +22,7 @@ import {
   getAnalyticsAgents,
   getAnalyticsProjects,
   getAnalyticsTools,
+  getMonitorToolStats,
   getAnalyticsSkillsDaily,
   getUsageSummary,
   getUsageCoverage,
@@ -406,6 +407,21 @@ v2Router.get('/analytics/tools', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/tools] Error:', err);
     res.status(500).json({ error: 'Failed to get tool data' });
+  }
+});
+
+v2Router.get('/monitor/tools', (req: Request, res: Response) => {
+  try {
+    const params = {
+      project: safeString(req.query.project as string | string[] | undefined),
+      agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+      date_from: safeString((req.query.date_from ?? req.query.since) as string | string[] | undefined),
+      date_to: safeString(req.query.date_to as string | string[] | undefined),
+    };
+    res.json({ tools: getMonitorToolStats(params) });
+  } catch (err) {
+    console.error('[v2/monitor/tools] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor tool data' });
   }
 });
 

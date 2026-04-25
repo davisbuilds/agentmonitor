@@ -20,6 +20,7 @@ import type {
   ActivityDataPoint,
   ProjectBreakdown,
   ToolUsageStat,
+  MonitorToolStat,
   SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
@@ -1081,6 +1082,48 @@ export function getAnalyticsTools(params: AnalyticsParams = {}): ToolUsageStat[]
     GROUP BY tc.tool_name, tc.category
     ORDER BY count DESC, tc.tool_name ASC
   `).all(...filter.values) as ToolUsageStat[];
+}
+
+export function getMonitorToolStats(params: UsageParams = {}): MonitorToolStat[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const where = [...filter.conditions, 'e.tool_name IS NOT NULL'].join(' AND ');
+
+  const rows = db.prepare(`
+    SELECT
+      e.tool_name,
+      COUNT(*) as total_calls,
+      COALESCE(SUM(CASE WHEN e.status = 'error' THEN 1 ELSE 0 END), 0) as error_count,
+      ROUND(CAST(COALESCE(SUM(CASE WHEN e.status = 'error' THEN 1 ELSE 0 END), 0) AS REAL) / COUNT(*), 4) as error_rate,
+      ROUND(AVG(e.duration_ms)) as avg_duration_ms
+    FROM events e
+    WHERE ${where}
+    GROUP BY e.tool_name
+    ORDER BY total_calls DESC, e.tool_name ASC
+  `).all(...filter.values) as Array<Omit<MonitorToolStat, 'by_agent'>>;
+
+  const agentRows = db.prepare(`
+    SELECT
+      e.tool_name,
+      e.agent_type,
+      COUNT(*) as count
+    FROM events e
+    WHERE ${where}
+    GROUP BY e.tool_name, e.agent_type
+    ORDER BY e.tool_name, count DESC
+  `).all(...filter.values) as Array<{ tool_name: string; agent_type: string; count: number }>;
+
+  const byAgent = new Map<string, Record<string, number>>();
+  for (const row of agentRows) {
+    const next = byAgent.get(row.tool_name) ?? {};
+    next[row.agent_type] = row.count;
+    byAgent.set(row.tool_name, next);
+  }
+
+  return rows.map(row => ({
+    ...row,
+    by_agent: byAgent.get(row.tool_name) ?? {},
+  }));
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {

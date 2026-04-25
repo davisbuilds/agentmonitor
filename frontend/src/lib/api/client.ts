@@ -607,7 +607,7 @@ export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
 }
 
 export async function fetchToolStats(filters: Filters = {}): Promise<ToolStats> {
-  const res = await fetch(`/api/stats/tools${qs(filters)}`);
+  const res = await fetch(`/api/v2/monitor/tools${qs(monitorCostFiltersToUsageParams(filters))}`);
   return checkedJson(res, 'fetchToolStats');
 }
 
