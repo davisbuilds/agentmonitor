@@ -536,10 +536,12 @@ export interface InsightGenerationStatus {
 
 type Filters = Record<string, string>;
 
-interface RawCostData {
-  timeline?: Array<{ bucket: string; cost_usd: number }>;
-  by_project?: Array<{ project: string; cost_usd: number; session_count?: number; event_count?: number }>;
-  by_model?: Array<{ model: string; cost_usd: number }>;
+function monitorCostFiltersToUsageParams(filters: Filters): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (filters.project) params.project = filters.project;
+  if (filters.agent_type) params.agent = filters.agent_type;
+  if (filters.since) params.date_from = filters.since;
+  return params;
 }
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -579,29 +581,28 @@ export async function fetchFilterOptions(): Promise<FilterOptions> {
 }
 
 export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
-  const res = await fetch(`/api/stats/cost${qs(filters)}`);
-  const data = await checkedJson<RawCostData>(res, 'fetchCostData');
+  const params = monitorCostFiltersToUsageParams(filters);
+  const [daily, projects, models] = await Promise.all([
+    fetchUsageDaily(params),
+    fetchUsageProjects(params),
+    fetchUsageModels(params),
+  ]);
+
   return {
-    timeline: Array.isArray(data.timeline)
-      ? data.timeline.map((item) => ({
-          date: item.bucket,
-          cost: item.cost_usd,
-        }))
-      : [],
-    by_project: Array.isArray(data.by_project)
-      ? data.by_project.map((item) => ({
-          project: item.project,
-          cost: item.cost_usd,
-          session_count: item.session_count ?? 0,
-          event_count: item.event_count ?? 0,
-        }))
-      : [],
-    by_model: Array.isArray(data.by_model)
-      ? data.by_model.map((item) => ({
-          model: item.model,
-          cost: item.cost_usd,
-        }))
-      : [],
+    timeline: daily.data.map((item) => ({
+      date: item.date,
+      cost: item.cost_usd,
+    })),
+    by_project: projects.data.map((item) => ({
+      project: item.project,
+      cost: item.cost_usd,
+      session_count: item.session_count,
+      event_count: item.usage_events,
+    })),
+    by_model: models.data.map((item) => ({
+      model: item.model,
+      cost: item.cost_usd,
+    })),
   };
 }
 
