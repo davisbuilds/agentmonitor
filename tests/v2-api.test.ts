@@ -1069,6 +1069,36 @@ describe('GET /api/v2/monitor/sessions', () => {
   });
 });
 
+describe('GET /api/v2/monitor/events', () => {
+  test('returns filtered monitor events in the monitor feed shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/events?agent=codex&source=otel&limit=1`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      events: Array<{
+        event_id: string | null;
+        session_id: string;
+        agent_type: string;
+        event_type: string;
+        tool_name: string | null;
+        status: string;
+        source: string;
+      }>;
+      total: number;
+    };
+
+    assert.equal(body.events.length, 1);
+    assert.ok(body.total >= 1);
+    const row = body.events[0];
+    assert.equal(row.event_id, 'api-codex-live-skill-001');
+    assert.equal(row.session_id, '019d0000-0000-0000-0000-000000000099');
+    assert.equal(row.agent_type, 'codex');
+    assert.equal(row.event_type, 'tool_use');
+    assert.equal(row.tool_name, 'exec_command');
+    assert.equal(row.status, 'success');
+    assert.equal(row.source, 'otel');
+  });
+});
+
 describe('GET /api/v2/analytics/skills/daily', () => {
   test('returns explicit Claude skills and inferred Codex skills by day', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?date_from=2026-03-08&date_to=2026-03-09`);

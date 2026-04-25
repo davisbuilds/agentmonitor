@@ -195,6 +195,31 @@ export interface MonitorSessionRow {
   lines_removed: number;
 }
 
+export interface MonitorEventRow {
+  id: number;
+  event_id: string | null;
+  schema_version: number;
+  session_id: string;
+  agent_type: string;
+  event_type: string;
+  tool_name: string | null;
+  status: string;
+  tokens_in: number;
+  tokens_out: number;
+  branch: string | null;
+  project: string | null;
+  duration_ms: number | null;
+  created_at: string;
+  client_timestamp: string | null;
+  metadata: string | null;
+  payload_truncated: number;
+  model: string | null;
+  cost_usd: number | null;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  source: string;
+}
+
 export interface SkillUsageBreakdown {
   skill_name: string;
   count: number;
@@ -517,6 +542,20 @@ export interface MonitorSessionsParams {
   date_from?: string;
   date_to?: string;
   limit?: number;
+}
+
+export interface MonitorEventsParams {
+  limit?: number;
+  offset?: number;
+  agent?: string;
+  event_type?: string;
+  tool_name?: string;
+  session_id?: string;
+  branch?: string;
+  model?: string;
+  source?: string;
+  since?: string;
+  until?: string;
 }
 
 export interface PinsListParams {

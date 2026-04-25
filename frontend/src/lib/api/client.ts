@@ -566,7 +566,20 @@ export async function fetchStats(filters: Filters = {}): Promise<Stats> {
 }
 
 export async function fetchEvents(filters: Filters = {}, limit = 100): Promise<{ events: AgentEvent[]; total: number }> {
-  const res = await fetch(`/api/events${qs({ ...filters, limit })}`);
+  const params: Record<string, string | number> = { limit };
+  if (filters.offset) params.offset = filters.offset;
+  if (filters.agent_type) params.agent = filters.agent_type;
+  if (filters.agent) params.agent = filters.agent;
+  if (filters.event_type) params.event_type = filters.event_type;
+  if (filters.tool_name) params.tool_name = filters.tool_name;
+  if (filters.session_id) params.session_id = filters.session_id;
+  if (filters.branch) params.branch = filters.branch;
+  if (filters.model) params.model = filters.model;
+  if (filters.source) params.source = filters.source;
+  if (filters.since) params.since = filters.since;
+  if (filters.until) params.until = filters.until;
+
+  const res = await fetch(`/api/v2/monitor/events${qs(params)}`);
   return checkedJson(res, 'fetchEvents');
 }
 

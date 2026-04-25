@@ -23,6 +23,7 @@ import type {
   ToolUsageStat,
   MonitorToolStat,
   MonitorSessionRow,
+  MonitorEventRow,
   SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
@@ -39,6 +40,7 @@ import type {
   UsageAgentBreakdown,
   UsageTopSessionRow,
   MonitorSessionsParams,
+  MonitorEventsParams,
   InsightRow,
   InsightDbRow,
   InsightInputSnapshot,
@@ -1200,6 +1202,61 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   `).all(...queryValues) as MonitorSessionRow[];
 
   return { sessions, total: sessions.length };
+}
+
+export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
+  const db = getDb();
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.agent) {
+    conditions.push('agent_type = ?');
+    values.push(params.agent);
+  }
+  if (params.event_type) {
+    conditions.push('event_type = ?');
+    values.push(params.event_type);
+  }
+  if (params.tool_name) {
+    conditions.push('tool_name = ?');
+    values.push(params.tool_name);
+  }
+  if (params.session_id) {
+    conditions.push('session_id = ?');
+    values.push(params.session_id);
+  }
+  if (params.branch) {
+    conditions.push('branch = ?');
+    values.push(params.branch);
+  }
+  if (params.model) {
+    conditions.push('model = ?');
+    values.push(params.model);
+  }
+  if (params.source) {
+    conditions.push('source = ?');
+    values.push(params.source);
+  }
+  if (params.since) {
+    conditions.push('created_at >= datetime(?)');
+    values.push(params.since);
+  }
+  if (params.until) {
+    conditions.push('created_at <= datetime(?)');
+    values.push(params.until);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = Math.min(Math.max(params.limit ?? 50, 1), 500);
+  const offset = Math.max(params.offset ?? 0, 0);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM events ${where}`).get(...values) as CountResult).c;
+  const events = db.prepare(`
+    SELECT * FROM events ${where}
+    ORDER BY datetime(created_at) DESC, id DESC
+    LIMIT ? OFFSET ?
+  `).all(...values, limit, offset) as MonitorEventRow[];
+
+  return { events, total };
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {

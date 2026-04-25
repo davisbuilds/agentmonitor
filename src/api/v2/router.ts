@@ -24,6 +24,7 @@ import {
   getAnalyticsTools,
   getMonitorToolStats,
   listMonitorSessions,
+  listMonitorEvents,
   getAnalyticsSkillsDaily,
   getUsageSummary,
   getUsageCoverage,
@@ -441,6 +442,28 @@ v2Router.get('/monitor/sessions', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/monitor/sessions] Error:', err);
     res.status(500).json({ error: 'Failed to list monitor sessions' });
+  }
+});
+
+v2Router.get('/monitor/events', (req: Request, res: Response) => {
+  try {
+    const params = {
+      limit: safeInt(req.query.limit as string),
+      offset: safeInt(req.query.offset as string),
+      agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+      event_type: safeString(req.query.event_type as string | string[] | undefined),
+      tool_name: safeString(req.query.tool_name as string | string[] | undefined),
+      session_id: safeString(req.query.session_id as string | string[] | undefined),
+      branch: safeString(req.query.branch as string | string[] | undefined),
+      model: safeString(req.query.model as string | string[] | undefined),
+      source: safeString(req.query.source as string | string[] | undefined),
+      since: safeString(req.query.since as string | string[] | undefined),
+      until: safeString(req.query.until as string | string[] | undefined),
+    };
+    res.json(listMonitorEvents(params));
+  } catch (err) {
+    console.error('[v2/monitor/events] Error:', err);
+    res.status(500).json({ error: 'Failed to list monitor events' });
   }
 });
 

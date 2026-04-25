@@ -205,6 +205,19 @@ test('monitor active sessions use the v2 monitor endpoint instead of v1 sessions
   expect(requestedPaths).not.toContain('/api/sessions');
 });
 
+test('monitor event feed uses the v2 monitor endpoint instead of v1 events', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#monitor`);
+
+  await expect(page.getByRole('heading', { name: 'All Events' })).toBeVisible();
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/events')).toBe(true);
+  expect(requestedPaths).not.toContain('/api/events');
+});
+
 test('monitor active agent cards include model and reasoning effort when available', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#monitor`);
 
