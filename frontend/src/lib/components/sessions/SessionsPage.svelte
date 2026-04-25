@@ -146,7 +146,7 @@
     <SessionViewer sessionId={selectedSessionId} initialMessageOrdinal={selectedMessageOrdinal} onclose={closeViewer} />
   {/key}
 {:else}
-  <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
+  <main class="flex-1 min-h-0 overflow-hidden flex flex-col p-4 sm:p-6">
     <!-- Filters -->
     <div class="flex items-center gap-3 mb-4 flex-wrap">
       <h2 class="text-lg font-semibold text-gray-200 mr-2">Sessions</h2>
@@ -176,7 +176,7 @@
     </div>
 
     <!-- Session List -->
-    <div class="flex-1 overflow-y-auto space-y-1">
+    <div class="min-h-0 flex-1 overflow-y-auto space-y-1">
       {#each sessions as session (session.id)}
         <button
           class="w-full text-left px-3 py-2 rounded hover:bg-gray-800/60 transition-colors border border-transparent hover:border-gray-700/50 group"

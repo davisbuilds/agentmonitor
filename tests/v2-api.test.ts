@@ -432,6 +432,23 @@ describe('GET /api/v2/sessions/:id/messages', () => {
     assert.equal(body.total, 20);
   });
 
+  test('supports centered ordinal window loading', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?around_ordinal=12&limit=5`);
+    const body = await res.json() as { data: Array<{ ordinal: number }>; total: number };
+    assert.equal(body.total, 20);
+    assert.deepEqual(body.data.map((message) => message.ordinal), [10, 11, 12, 13, 14]);
+  });
+
+  test('clamps ordinal windows near transcript bounds', async () => {
+    const startRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?around_ordinal=1&limit=5`);
+    const startBody = await startRes.json() as { data: Array<{ ordinal: number }>; total: number };
+    assert.deepEqual(startBody.data.map((message) => message.ordinal), [0, 1, 2, 3, 4]);
+
+    const endRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?around_ordinal=19&limit=5`);
+    const endBody = await endRes.json() as { data: Array<{ ordinal: number }>; total: number };
+    assert.deepEqual(endBody.data.map((message) => message.ordinal), [15, 16, 17, 18, 19]);
+  });
+
   test('returns 404 for missing session', async () => {
     const res = await fetch(`${baseUrl}/api/v2/sessions/nonexistent/messages`);
     assert.equal(res.status, 404);

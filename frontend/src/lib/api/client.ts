@@ -632,7 +632,7 @@ export async function fetchBrowsingSession(id: string): Promise<BrowsingSession>
   return checkedJson(res, 'fetchBrowsingSession');
 }
 
-export async function fetchMessages(sessionId: string, params: { offset?: number; limit?: number } = {}): Promise<{ data: Message[]; total: number }> {
+export async function fetchMessages(sessionId: string, params: { offset?: number; limit?: number; around_ordinal?: number } = {}): Promise<{ data: Message[]; total: number }> {
   const res = await fetch(`/api/v2/sessions/${sessionId}/messages${qs(params)}`);
   return checkedJson(res, 'fetchMessages');
 }

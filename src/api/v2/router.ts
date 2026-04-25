@@ -101,6 +101,7 @@ v2Router.get('/sessions/:id/messages', (req: Request, res: Response) => {
     const params = {
       offset: safeInt(req.query.offset as string),
       limit: safeInt(req.query.limit as string),
+      around_ordinal: safeInt(req.query.around_ordinal as string),
     };
     const result = getSessionMessages(sessionId, params);
     res.json(result);

@@ -313,13 +313,25 @@ interface MessagesResult {
 
 export function getSessionMessages(sessionId: string, params: MessagesListParams = {}): MessagesResult {
   const db = getDb();
-  const offset = params.offset ?? 0;
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 1000);
 
   const total = (db.prepare(
     'SELECT COUNT(*) as c FROM messages WHERE session_id = ?'
   ).get(sessionId) as CountResult).c;
 
+  if (params.around_ordinal != null) {
+    const beforeCount = Math.floor((limit - 1) / 2);
+    const maxStartOrdinal = Math.max(0, total - limit);
+    const requestedStartOrdinal = Math.max(0, params.around_ordinal - beforeCount);
+    const startOrdinal = Math.min(requestedStartOrdinal, maxStartOrdinal);
+    const data = db.prepare(
+      'SELECT * FROM messages WHERE session_id = ? AND ordinal >= ? ORDER BY ordinal LIMIT ?'
+    ).all(sessionId, startOrdinal, limit) as MessageRow[];
+
+    return { data, total };
+  }
+
+  const offset = Math.max(params.offset ?? 0, 0);
   const data = db.prepare(
     'SELECT * FROM messages WHERE session_id = ? ORDER BY ordinal LIMIT ? OFFSET ?'
   ).all(sessionId, limit, offset) as MessageRow[];

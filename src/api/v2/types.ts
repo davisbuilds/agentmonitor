@@ -436,6 +436,7 @@ export interface SessionsListParams {
 export interface MessagesListParams {
   offset?: number;
   limit?: number;
+  around_ordinal?: number;
 }
 
 export interface LiveSessionsListParams {
