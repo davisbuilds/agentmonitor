@@ -43,3 +43,48 @@ export function shortModelName(model: string): string {
     .replace(/^claude-/, 'c-')
     .replace(/^gpt-/, 'gpt-');
 }
+
+interface ActiveAgentLabelEvent {
+  model?: string;
+  metadata?: Record<string, unknown> | string;
+}
+
+function parseMetadata(metadata: Record<string, unknown> | string | undefined): Record<string, unknown> {
+  if (!metadata) return {};
+  if (typeof metadata === 'string') {
+    try {
+      const parsed = JSON.parse(metadata) as unknown;
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return metadata;
+}
+
+function cleanModelName(model: string): string {
+  return model.replace(/^(openai|anthropic|google)\//, '');
+}
+
+function reasoningEffortFromEvent(event: ActiveAgentLabelEvent): string | null {
+  const metadata = parseMetadata(event.metadata);
+  for (const key of ['reasoning_effort', 'thinking_level']) {
+    const value = metadata[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim().toLowerCase();
+    }
+  }
+  return null;
+}
+
+export function buildActiveAgentLabel(agentType: string, events: ActiveAgentLabelEvent[]): string {
+  const model = events.find(event => event.model?.trim())?.model?.trim();
+  const reasoningEffort = events.map(reasoningEffortFromEvent).find((value): value is string => value != null);
+
+  if (!model) return agentType;
+
+  const suffix = [cleanModelName(model), reasoningEffort].filter(Boolean).join(' ');
+  return `${agentType} (${suffix})`;
+}

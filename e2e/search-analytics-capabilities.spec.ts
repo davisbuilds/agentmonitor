@@ -62,6 +62,41 @@ test.beforeAll(async () => {
     'full',
     JSON.stringify({ history: 'full', search: 'full', tool_analytics: 'full', live_items: 'full' }),
   );
+  const activeMonitorTimestamp = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO sessions (
+      id, agent_id, agent_type, project, branch, status, started_at, last_event_at, metadata
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'e2e-monitor-model-session',
+    'codex',
+    'codex',
+    'agentmonitor',
+    'main',
+    'active',
+    activeMonitorTimestamp,
+    activeMonitorTimestamp,
+    '{}',
+  );
+  db.prepare(`
+    INSERT INTO events (
+      session_id, agent_type, event_type, status, tokens_in, tokens_out, project, branch,
+      model, created_at, metadata, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'e2e-monitor-model-session',
+    'codex',
+    'llm_response',
+    'success',
+    1200,
+    240,
+    'agentmonitor',
+    'main',
+    'gpt-5.5',
+    activeMonitorTimestamp,
+    JSON.stringify({ reasoning_effort: 'high' }),
+    'otel',
+  );
 
   const app = createApp();
   server = app.listen(0, '127.0.0.1');
@@ -155,4 +190,12 @@ test('monitor tool analytics use the v2 monitor endpoint instead of v1 tool stat
   await expect(page.getByText('Tool Analytics')).toBeVisible();
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/tools')).toBe(true);
   expect(requestedPaths).not.toContain('/api/stats/tools');
+});
+
+test('monitor active agent cards include model and reasoning effort when available', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#monitor`);
+
+  const card = page.locator('button').filter({ hasText: 'agentmonitor' }).first();
+  await expect(card).toBeVisible();
+  await expect(card).toContainText('codex (gpt-5.5 high)');
 });
