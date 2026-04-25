@@ -24,6 +24,8 @@ import type {
   MonitorToolStat,
   MonitorSessionRow,
   MonitorEventRow,
+  MonitorQuotaSnapshot,
+  MonitorStats,
   SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
@@ -41,6 +43,7 @@ import type {
   UsageTopSessionRow,
   MonitorSessionsParams,
   MonitorEventsParams,
+  MonitorStatsParams,
   InsightRow,
   InsightDbRow,
   InsightInputSnapshot,
@@ -1257,6 +1260,209 @@ export function listMonitorEvents(params: MonitorEventsParams = {}): { events: M
   `).all(...values, limit, offset) as MonitorEventRow[];
 
   return { events, total };
+}
+
+const MONITOR_QUOTA_DEFAULTS: Record<'claude' | 'codex', Omit<MonitorQuotaSnapshot, 'provider'>> = {
+  claude: {
+    agent_type: 'claude_code',
+    status: 'unavailable',
+    source: null,
+    updated_at: null,
+    account_label: null,
+    plan_type: null,
+    limit_id: null,
+    limit_name: null,
+    error_message: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+  },
+  codex: {
+    agent_type: 'codex',
+    status: 'unavailable',
+    source: null,
+    updated_at: null,
+    account_label: null,
+    plan_type: null,
+    limit_id: null,
+    limit_name: null,
+    error_message: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+  },
+};
+
+function monitorQuotaWindow(row: {
+  used_percent: number | null;
+  resets_at: string | null;
+  window_minutes: number | null;
+}): MonitorQuotaSnapshot['primary'] {
+  if (row.used_percent == null || !Number.isFinite(row.used_percent)) return null;
+  const usedPercent = Math.max(0, Math.min(row.used_percent, 100));
+  return {
+    used_percent: usedPercent,
+    remaining_percent: Math.max(0, Math.min(100 - usedPercent, 100)),
+    resets_at: row.resets_at,
+    window_minutes: row.window_minutes,
+  };
+}
+
+function listMonitorProviderQuotas(): MonitorQuotaSnapshot[] {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      provider, agent_type, status, source, updated_at, account_label, plan_type,
+      limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
+      primary_resets_at, secondary_used_percent, secondary_window_minutes,
+      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance
+    FROM provider_quotas
+  `).all() as Array<{
+    provider: 'claude' | 'codex';
+    agent_type: 'claude_code' | 'codex';
+    status: MonitorQuotaSnapshot['status'];
+    source: string | null;
+    updated_at: string | null;
+    account_label: string | null;
+    plan_type: string | null;
+    limit_id: string | null;
+    limit_name: string | null;
+    error_message: string | null;
+    primary_used_percent: number | null;
+    primary_window_minutes: number | null;
+    primary_resets_at: string | null;
+    secondary_used_percent: number | null;
+    secondary_window_minutes: number | null;
+    secondary_resets_at: string | null;
+    credits_has_credits: number | null;
+    credits_unlimited: number | null;
+    credits_balance: string | null;
+  }>;
+
+  const byProvider = new Map(rows.map(row => [row.provider, row]));
+  return (['claude', 'codex'] as const).map((provider) => {
+    const row = byProvider.get(provider);
+    if (!row) return { provider, ...MONITOR_QUOTA_DEFAULTS[provider] };
+
+    return {
+      provider,
+      agent_type: row.agent_type,
+      status: row.status,
+      source: row.source,
+      updated_at: row.updated_at,
+      account_label: row.account_label,
+      plan_type: row.plan_type,
+      limit_id: row.limit_id,
+      limit_name: row.limit_name,
+      error_message: row.error_message,
+      primary: monitorQuotaWindow({
+        used_percent: row.primary_used_percent,
+        resets_at: row.primary_resets_at,
+        window_minutes: row.primary_window_minutes,
+      }),
+      secondary: monitorQuotaWindow({
+        used_percent: row.secondary_used_percent,
+        resets_at: row.secondary_resets_at,
+        window_minutes: row.secondary_window_minutes,
+      }),
+      credits: row.credits_has_credits == null && row.credits_unlimited == null && row.credits_balance == null
+        ? null
+        : {
+            has_credits: Boolean(row.credits_has_credits),
+            unlimited: Boolean(row.credits_unlimited),
+            balance: row.credits_balance,
+          },
+    };
+  });
+}
+
+export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
+  const db = getDb();
+  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.agent) {
+    conditions.push('agent_type = ?');
+    values.push(params.agent);
+  }
+  if (params.since) {
+    conditions.push('created_at >= datetime(?)');
+    values.push(params.since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const totals = db.prepare(`
+    SELECT
+      COUNT(*) as total_events,
+      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(cost_usd), 0) as total_cost_usd
+    FROM events ${where}
+  `).get(...values) as {
+    total_events: number;
+    total_tokens_in: number;
+    total_tokens_out: number;
+    total_cost_usd: number;
+  };
+
+  const activeSessions = (db.prepare(
+    `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
+  ).get() as { count: number }).count;
+  const totalSessions = (db.prepare(
+    `SELECT COUNT(*) as count FROM sessions`
+  ).get() as { count: number }).count;
+  const liveSessions = (db.prepare(
+    `SELECT COUNT(*) as count FROM sessions WHERE status != 'ended'`
+  ).get() as { count: number }).count;
+  const activeAgents = (db.prepare(
+    `SELECT COUNT(DISTINCT agent_type) as count FROM sessions WHERE status != 'ended'`
+  ).get() as { count: number }).count;
+
+  const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
+  const toolRows = db.prepare(`
+    SELECT tool_name, COUNT(*) as count FROM events
+    ${toolWhere}
+    GROUP BY tool_name ORDER BY count DESC
+  `).all(...values) as { tool_name: string; count: number }[];
+  const toolBreakdown = Object.fromEntries(toolRows.map(row => [row.tool_name, row.count]));
+
+  const agentRows = db.prepare(`
+    SELECT agent_type, COUNT(*) as count FROM events ${where}
+    GROUP BY agent_type ORDER BY count DESC
+  `).all(...values) as { agent_type: string; count: number }[];
+  const agentBreakdown = Object.fromEntries(agentRows.map(row => [row.agent_type, row.count]));
+
+  const modelWhere = conditions.length > 0 ? `${where} AND model IS NOT NULL` : 'WHERE model IS NOT NULL';
+  const modelRows = db.prepare(`
+    SELECT model, COUNT(*) as count FROM events
+    ${modelWhere}
+    GROUP BY model ORDER BY count DESC
+  `).all(...values) as { model: string; count: number }[];
+  const modelBreakdown = Object.fromEntries(modelRows.map(row => [row.model, row.count]));
+
+  const branchRows = db.prepare(`
+    SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC
+  `).all() as { branch: string }[];
+
+  const quotaMonitor = listMonitorProviderQuotas();
+  return {
+    total_events: totals.total_events,
+    active_sessions: activeSessions,
+    total_sessions: totalSessions,
+    live_sessions: liveSessions,
+    active_agents: activeAgents,
+    total_tokens_in: totals.total_tokens_in,
+    total_tokens_out: totals.total_tokens_out,
+    total_cost_usd: totals.total_cost_usd,
+    tool_breakdown: toolBreakdown,
+    agent_breakdown: agentBreakdown,
+    model_breakdown: modelBreakdown,
+    branches: branchRows.map(row => row.branch),
+    quota_monitor: quotaMonitor,
+    usage_monitor: quotaMonitor,
+  };
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {

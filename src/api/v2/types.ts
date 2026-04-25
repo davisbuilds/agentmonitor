@@ -220,6 +220,52 @@ export interface MonitorEventRow {
   source: string;
 }
 
+export interface MonitorQuotaWindow {
+  used_percent: number;
+  remaining_percent: number;
+  resets_at: string | null;
+  window_minutes: number | null;
+}
+
+export interface MonitorQuotaCredits {
+  has_credits: boolean;
+  unlimited: boolean;
+  balance: string | null;
+}
+
+export interface MonitorQuotaSnapshot {
+  provider: 'claude' | 'codex';
+  agent_type: 'claude_code' | 'codex';
+  status: 'available' | 'unavailable' | 'error';
+  source: string | null;
+  updated_at: string | null;
+  account_label: string | null;
+  plan_type: string | null;
+  limit_id: string | null;
+  limit_name: string | null;
+  error_message: string | null;
+  primary: MonitorQuotaWindow | null;
+  secondary: MonitorQuotaWindow | null;
+  credits: MonitorQuotaCredits | null;
+}
+
+export interface MonitorStats {
+  total_events: number;
+  active_sessions: number;
+  live_sessions: number;
+  total_sessions: number;
+  active_agents: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cost_usd: number;
+  tool_breakdown: Record<string, number>;
+  agent_breakdown: Record<string, number>;
+  model_breakdown: Record<string, number>;
+  branches: string[];
+  quota_monitor: MonitorQuotaSnapshot[];
+  usage_monitor: MonitorQuotaSnapshot[];
+}
+
 export interface SkillUsageBreakdown {
   skill_name: string;
   count: number;
@@ -556,6 +602,11 @@ export interface MonitorEventsParams {
   source?: string;
   since?: string;
   until?: string;
+}
+
+export interface MonitorStatsParams {
+  agent?: string;
+  since?: string;
 }
 
 export interface PinsListParams {

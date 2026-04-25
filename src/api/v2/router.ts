@@ -25,6 +25,7 @@ import {
   getMonitorToolStats,
   listMonitorSessions,
   listMonitorEvents,
+  getMonitorStats,
   getAnalyticsSkillsDaily,
   getUsageSummary,
   getUsageCoverage,
@@ -464,6 +465,19 @@ v2Router.get('/monitor/events', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/monitor/events] Error:', err);
     res.status(500).json({ error: 'Failed to list monitor events' });
+  }
+});
+
+v2Router.get('/monitor/stats', (req: Request, res: Response) => {
+  try {
+    const params = {
+      agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+      since: safeString((req.query.since ?? req.query.date_from) as string | string[] | undefined),
+    };
+    res.json(getMonitorStats(params));
+  } catch (err) {
+    console.error('[v2/monitor/stats] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor stats' });
   }
 });
 

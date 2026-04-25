@@ -1099,6 +1099,39 @@ describe('GET /api/v2/monitor/events', () => {
   });
 });
 
+describe('GET /api/v2/monitor/stats', () => {
+  test('returns monitor summary stats and provider quota aliases', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/stats?agent=codex`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      total_events: number;
+      active_sessions: number;
+      live_sessions: number;
+      total_sessions: number;
+      active_agents: number;
+      total_tokens_in: number;
+      total_tokens_out: number;
+      total_cost_usd: number;
+      tool_breakdown: Record<string, number>;
+      agent_breakdown: Record<string, number>;
+      model_breakdown: Record<string, number>;
+      branches: string[];
+      quota_monitor: Array<Record<string, unknown>>;
+      usage_monitor: Array<Record<string, unknown>>;
+    };
+
+    assert.ok(body.total_events >= 1);
+    assert.ok(body.live_sessions >= 1);
+    assert.ok(body.total_sessions >= 1);
+    assert.equal(body.agent_breakdown.codex, body.total_events);
+    assert.equal(body.tool_breakdown.exec_command, 1);
+    assert.ok(Array.isArray(body.branches));
+    assert.ok(Array.isArray(body.quota_monitor));
+    assert.equal(body.quota_monitor.length, 2);
+    assert.deepEqual(body.usage_monitor, body.quota_monitor);
+  });
+});
+
 describe('GET /api/v2/analytics/skills/daily', () => {
   test('returns explicit Claude skills and inferred Codex skills by day', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?date_from=2026-03-08&date_to=2026-03-09`);
