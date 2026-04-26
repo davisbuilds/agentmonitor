@@ -96,11 +96,19 @@
     <div class="flex items-center gap-3">
       <button
         type="button"
-        class="hidden rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-left text-sm text-gray-300 transition hover:border-gray-600 hover:text-gray-100 sm:flex sm:min-w-[220px] sm:items-center sm:justify-between"
+        aria-label="Jump to session or transcript"
+        title="Jump to session or transcript (Cmd/Ctrl+K)"
+        class="rounded-xl border border-gray-700 bg-gray-900 p-2 text-gray-300 transition hover:border-gray-600 hover:text-gray-100"
         onclick={() => openCommandPalette()}
       >
-        <span>Jump to session or transcript...</span>
-        <span class="text-xs text-gray-500">Cmd/Ctrl+K</span>
+        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+          <path
+            d="M8.75 14.5a5.75 5.75 0 1 0 0-11.5 5.75 5.75 0 0 0 0 11.5ZM13 13l4 4"
+            stroke="currentColor"
+            stroke-width="1.8"
+            stroke-linecap="round"
+          />
+        </svg>
       </button>
       <ConnectionStatus />
     </div>

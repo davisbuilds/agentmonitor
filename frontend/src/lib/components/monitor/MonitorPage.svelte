@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import AgentCards from './AgentCards.svelte';
-  import EventFeed from './EventFeed.svelte';
   import CostDashboard from './CostDashboard.svelte';
   import ToolAnalytics from './ToolAnalytics.svelte';
   import SessionDetail from './SessionDetail.svelte';
@@ -97,8 +96,6 @@
   <section>
     <ToolAnalytics />
   </section>
-
-  <EventFeed />
 </main>
 
 <SessionDetail />
