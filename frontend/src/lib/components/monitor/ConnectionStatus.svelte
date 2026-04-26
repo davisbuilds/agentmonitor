@@ -4,22 +4,24 @@
   const status = $derived(getConnectionStatus());
   const dotClass = $derived(
     status === 'connected' ? 'bg-green-400' :
-    status === 'connecting' ? 'bg-yellow-400 animate-pulse' :
+    status === 'connecting' ? 'bg-yellow-400' :
     'bg-red-400'
-  );
-  const textClass = $derived(
-    status === 'connected' ? 'text-green-400' :
-    status === 'connecting' ? 'text-yellow-400' :
-    'text-red-400'
   );
   const label = $derived(
     status === 'connected' ? 'Connected' :
-    status === 'connecting' ? 'Connecting...' :
+    status === 'connecting' ? 'Connecting' :
     'Disconnected'
   );
 </script>
 
-<div class="flex items-center gap-2 text-sm text-gray-400">
-  <span class="w-2 h-2 rounded-full {dotClass}"></span>
-  <span class="{textClass}">{label}</span>
-</div>
+<span
+  class="group relative inline-flex h-8 w-8 items-center justify-center"
+  role="status"
+  aria-label={label}
+  title={label}
+>
+  <span class="h-2.5 w-2.5 rounded-full {dotClass}"></span>
+  <span class="pointer-events-none absolute right-0 top-full z-50 mt-2 rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-gray-200 opacity-0 shadow-lg transition-opacity group-hover:opacity-100">
+    {label}
+  </span>
+</span>
