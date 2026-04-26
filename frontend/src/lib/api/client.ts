@@ -611,7 +611,7 @@ export async function fetchMonitorSessions(filters: Filters = {}): Promise<{ ses
 }
 
 export async function fetchFilterOptions(): Promise<FilterOptions> {
-  const res = await fetch('/api/filter-options');
+  const res = await fetch('/api/v2/monitor/filter-options');
   return checkedJson(res, 'fetchFilterOptions');
 }
 

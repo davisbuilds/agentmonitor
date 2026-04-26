@@ -26,6 +26,7 @@ import type {
   MonitorEventRow,
   MonitorQuotaSnapshot,
   MonitorStats,
+  MonitorFilterOptions,
   SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
@@ -1463,6 +1464,48 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
     quota_monitor: quotaMonitor,
     usage_monitor: quotaMonitor,
   };
+}
+
+export function getMonitorFilterOptions(): MonitorFilterOptions {
+  const db = getDb();
+
+  const agentTypes = (db.prepare(
+    'SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL ORDER BY agent_type'
+  ).all() as { agent_type: string }[]).map(row => row.agent_type);
+
+  const eventTypes = (db.prepare(
+    'SELECT DISTINCT event_type FROM events WHERE event_type IS NOT NULL ORDER BY event_type'
+  ).all() as { event_type: string }[]).map(row => row.event_type);
+
+  const toolNames = (db.prepare(
+    'SELECT DISTINCT tool_name FROM events WHERE tool_name IS NOT NULL ORDER BY tool_name'
+  ).all() as { tool_name: string }[]).map(row => row.tool_name);
+
+  const models = (db.prepare(
+    'SELECT DISTINCT model FROM events WHERE model IS NOT NULL ORDER BY model'
+  ).all() as { model: string }[]).map(row => row.model);
+
+  const projects = (db.prepare(
+    'SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL ORDER BY project'
+  ).all() as { project: string }[]).map(row => row.project);
+
+  const branchRows = db.prepare(`
+    SELECT branch, project, MAX(last_event_at) as latest
+    FROM sessions
+    WHERE branch IS NOT NULL AND branch != 'HEAD'
+    GROUP BY branch
+    ORDER BY latest DESC
+  `).all() as { branch: string; project: string | null; latest: string }[];
+  const branches = branchRows.map(row => ({
+    value: row.branch,
+    label: row.project ? `${row.project} / ${row.branch}` : row.branch,
+  }));
+
+  const sources = (db.prepare(
+    'SELECT DISTINCT source FROM events WHERE source IS NOT NULL ORDER BY source'
+  ).all() as { source: string }[]).map(row => row.source);
+
+  return { agent_types: agentTypes, event_types: eventTypes, tool_names: toolNames, models, projects, branches, sources };
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {

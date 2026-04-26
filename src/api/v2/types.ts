@@ -266,6 +266,16 @@ export interface MonitorStats {
   usage_monitor: MonitorQuotaSnapshot[];
 }
 
+export interface MonitorFilterOptions {
+  agent_types: string[];
+  event_types: string[];
+  tool_names: string[];
+  models: string[];
+  projects: string[];
+  branches: Array<{ value: string; label: string }>;
+  sources: string[];
+}
+
 export interface SkillUsageBreakdown {
   skill_name: string;
   count: number;

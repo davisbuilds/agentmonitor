@@ -1132,6 +1132,30 @@ describe('GET /api/v2/monitor/stats', () => {
   });
 });
 
+describe('GET /api/v2/monitor/filter-options', () => {
+  test('returns monitor dropdown filter values in the dashboard shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/filter-options`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      agent_types: string[];
+      event_types: string[];
+      tool_names: string[];
+      models: string[];
+      projects: string[];
+      branches: Array<{ value: string; label: string }>;
+      sources: string[];
+    };
+
+    assert.ok(body.agent_types.includes('codex'));
+    assert.ok(body.event_types.includes('tool_use'));
+    assert.ok(body.tool_names.includes('exec_command'));
+    assert.ok(body.projects.includes('agentmonitor'));
+    assert.ok(body.sources.includes('otel'));
+    assert.ok(Array.isArray(body.models));
+    assert.ok(Array.isArray(body.branches));
+  });
+});
+
 describe('GET /api/v2/analytics/skills/daily', () => {
   test('returns explicit Claude skills and inferred Codex skills by day', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?date_from=2026-03-08&date_to=2026-03-09`);

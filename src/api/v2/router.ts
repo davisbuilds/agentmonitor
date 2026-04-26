@@ -26,6 +26,7 @@ import {
   listMonitorSessions,
   listMonitorEvents,
   getMonitorStats,
+  getMonitorFilterOptions,
   getAnalyticsSkillsDaily,
   getUsageSummary,
   getUsageCoverage,
@@ -478,6 +479,15 @@ v2Router.get('/monitor/stats', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/monitor/stats] Error:', err);
     res.status(500).json({ error: 'Failed to get monitor stats' });
+  }
+});
+
+v2Router.get('/monitor/filter-options', (_req: Request, res: Response) => {
+  try {
+    res.json(getMonitorFilterOptions());
+  } catch (err) {
+    console.error('[v2/monitor/filter-options] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor filter options' });
   }
 });
 

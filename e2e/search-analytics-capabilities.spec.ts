@@ -164,6 +164,19 @@ test('usage tab does not eagerly request v1 monitor filter options', async ({ pa
   expect(requestedPaths).not.toContain('/api/filter-options');
 });
 
+test('monitor filters use the v2 monitor endpoint instead of v1 filter options', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#monitor`);
+
+  await expect(page.getByRole('combobox').first()).toBeVisible();
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/filter-options')).toBe(true);
+  expect(requestedPaths).not.toContain('/api/filter-options');
+});
+
 test('monitor cost card uses v2 usage APIs instead of v1 cost stats', async ({ page }) => {
   const requestedPaths: string[] = [];
   page.on('request', (request) => {
