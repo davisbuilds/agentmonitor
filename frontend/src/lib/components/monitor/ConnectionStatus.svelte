@@ -12,13 +12,23 @@
     status === 'connecting' ? 'Connecting' :
     'Disconnected'
   );
+
+  let showTooltip = $state(false);
 </script>
 
-<span
-  class="inline-flex h-2.5 w-2.5 items-center justify-center"
-  role="status"
+<button
+  type="button"
+  class="relative inline-flex h-3 w-3 cursor-default items-center justify-center"
   aria-label={label}
-  title={label}
+  onmouseenter={() => showTooltip = true}
+  onmouseleave={() => showTooltip = false}
+  onfocus={() => showTooltip = true}
+  onblur={() => showTooltip = false}
 >
   <span class="h-2.5 w-2.5 rounded-full {dotClass}"></span>
-</span>
+  {#if showTooltip}
+    <span class="pointer-events-none absolute left-1/2 top-full z-50 mt-2 -translate-x-1/2 whitespace-nowrap rounded-md border border-gray-700 bg-gray-950 px-2 py-1 text-xs text-gray-200 shadow-lg">
+      {label}
+    </span>
+  {/if}
+</button>
