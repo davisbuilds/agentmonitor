@@ -276,6 +276,41 @@ export interface MonitorFilterOptions {
   sources: string[];
 }
 
+export interface MonitorTranscriptEvent {
+  id: number;
+  event_type: string;
+  tool_name: string | null;
+  status: string;
+  tokens_in: number;
+  tokens_out: number;
+  model: string | null;
+  cost_usd: number | null;
+  duration_ms: number | null;
+  created_at: string;
+  client_timestamp: string | null;
+  metadata: string | null;
+}
+
+export interface MonitorTranscriptEntry {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  type: string;
+  tool_name?: string;
+  detail?: string;
+  status?: string;
+  model?: string;
+  tokens_in?: number;
+  tokens_out?: number;
+  cost_usd?: number;
+  duration_ms?: number;
+  timestamp: string;
+}
+
+export interface MonitorTranscriptRow {
+  role: string;
+  content: string;
+  timestamp?: string;
+}
+
 export interface SkillUsageBreakdown {
   skill_name: string;
   count: number;

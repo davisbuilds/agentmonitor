@@ -27,6 +27,8 @@ import {
   listMonitorEvents,
   getMonitorStats,
   getMonitorFilterOptions,
+  getMonitorSessionWithEvents,
+  getMonitorSessionTranscript,
   getAnalyticsSkillsDaily,
   getUsageSummary,
   getUsageCoverage,
@@ -488,6 +490,35 @@ v2Router.get('/monitor/filter-options', (_req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/monitor/filter-options] Error:', err);
     res.status(500).json({ error: 'Failed to get monitor filter options' });
+  }
+});
+
+v2Router.get('/monitor/sessions/:id/transcript', (req: Request, res: Response) => {
+  try {
+    const transcript = getMonitorSessionTranscript(req.params['id'] as string);
+    if (!transcript) {
+      res.status(404).json({ error: 'No transcript data for this session' });
+      return;
+    }
+    res.json(transcript);
+  } catch (err) {
+    console.error('[v2/monitor/sessions/:id/transcript] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor session transcript' });
+  }
+});
+
+v2Router.get('/monitor/sessions/:id', (req: Request, res: Response) => {
+  try {
+    const eventLimit = safeInt((req.query.event_limit ?? req.query.limit) as string) ?? 10;
+    const result = getMonitorSessionWithEvents(req.params['id'] as string, eventLimit);
+    if (!result.session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[v2/monitor/sessions/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor session detail' });
   }
 });
 

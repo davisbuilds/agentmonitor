@@ -251,3 +251,21 @@ test('monitor active agent cards include model and reasoning effort when availab
   await expect(card).toBeVisible();
   await expect(card).toContainText('codex (gpt-5.5 high)');
 });
+
+test('monitor session detail drawer uses v2 detail and transcript endpoints', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#monitor`);
+
+  const card = page.locator('button').filter({ hasText: 'agentmonitor' }).first();
+  await expect(card).toBeVisible();
+  await card.click();
+
+  await expect(page.getByRole('heading', { name: 'Session Details' })).toBeVisible();
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/sessions/e2e-monitor-model-session')).toBe(true);
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/sessions/e2e-monitor-model-session/transcript')).toBe(true);
+  expect(requestedPaths.some(pathname => pathname.startsWith('/api/sessions/'))).toBe(false);
+});

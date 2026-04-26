@@ -27,6 +27,9 @@ import type {
   MonitorQuotaSnapshot,
   MonitorStats,
   MonitorFilterOptions,
+  MonitorTranscriptEvent,
+  MonitorTranscriptEntry,
+  MonitorTranscriptRow,
   SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
@@ -1506,6 +1509,131 @@ export function getMonitorFilterOptions(): MonitorFilterOptions {
   ).all() as { source: string }[]).map(row => row.source);
 
   return { agent_types: agentTypes, event_types: eventTypes, tool_names: toolNames, models, projects, branches, sources };
+}
+
+export function getMonitorSessionWithEvents(sessionId: string, eventLimit = 10): {
+  session: MonitorSessionRow | undefined;
+  events: MonitorEventRow[];
+} {
+  const db = getDb();
+  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+  const limit = Math.min(Math.max(eventLimit, 0), 500);
+
+  const session = db.prepare(`
+    SELECT s.*,
+      COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
+      COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
+      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+    FROM sessions s
+    WHERE s.id = ?
+  `).get(sessionId) as MonitorSessionRow | undefined;
+
+  const events = db.prepare(`
+    SELECT * FROM events
+    WHERE session_id = ?
+    ORDER BY datetime(created_at) DESC, id DESC
+    LIMIT ?
+  `).all(sessionId, limit) as MonitorEventRow[];
+
+  return { session, events };
+}
+
+function monitorTranscriptDetail(event: MonitorTranscriptEvent): string | undefined {
+  try {
+    const meta = JSON.parse(event.metadata || '{}') as Record<string, unknown>;
+    if (typeof meta.message === 'string' && event.event_type === 'user_prompt') return meta.message;
+    if (typeof meta.content_preview === 'string') return meta.content_preview;
+    if (typeof meta.command === 'string') return meta.command;
+    if (typeof meta.file_path === 'string') return meta.file_path;
+    if (typeof meta.pattern === 'string') return meta.pattern;
+    if (typeof meta.query === 'string') return meta.query;
+    if (typeof meta.diff_preview === 'string') return meta.diff_preview;
+    if (typeof meta.error === 'string') return meta.error;
+    if (meta.error && typeof meta.error === 'object' && 'message' in meta.error) {
+      const message = (meta.error as { message?: unknown }).message;
+      if (typeof message === 'string') return message;
+    }
+    if (meta.arguments && typeof meta.arguments === 'object' && 'cmd' in meta.arguments) {
+      const command = (meta.arguments as { cmd?: unknown }).cmd;
+      if (typeof command === 'string') return command;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function monitorTranscriptRole(eventType: string): MonitorTranscriptEntry['role'] {
+  switch (eventType) {
+    case 'session_start':
+    case 'session_end':
+      return 'system';
+    case 'user_prompt':
+      return 'user';
+    case 'tool_use':
+      return 'tool';
+    case 'error':
+      return 'assistant';
+    default:
+      return 'assistant';
+  }
+}
+
+function monitorTranscriptEntry(event: MonitorTranscriptEvent): MonitorTranscriptEntry {
+  const entry: MonitorTranscriptEntry = {
+    role: monitorTranscriptRole(event.event_type),
+    type: event.event_type,
+    timestamp: event.client_timestamp || event.created_at,
+  };
+
+  if (event.tool_name) entry.tool_name = event.tool_name;
+  const detail = monitorTranscriptDetail(event);
+  if (detail) entry.detail = detail;
+  if (event.status !== 'success') entry.status = event.status;
+  if (event.model) entry.model = event.model;
+  if (event.tokens_in > 0) entry.tokens_in = event.tokens_in;
+  if (event.tokens_out > 0) entry.tokens_out = event.tokens_out;
+  if (event.cost_usd && event.cost_usd > 0) entry.cost_usd = event.cost_usd;
+  if (event.duration_ms) entry.duration_ms = event.duration_ms;
+
+  return entry;
+}
+
+function monitorTranscriptContent(entry: MonitorTranscriptEntry): string {
+  const label = entry.tool_name ? `${entry.type} > ${entry.tool_name}` : entry.type;
+  return entry.detail ? `${label}: ${entry.detail}` : label;
+}
+
+export function getMonitorSessionTranscript(sessionId: string): {
+  session_id: string;
+  entries: MonitorTranscriptEntry[];
+  transcript: MonitorTranscriptRow[];
+} | null {
+  const db = getDb();
+  const events = db.prepare(`
+    SELECT id, event_type, tool_name, status, tokens_in, tokens_out,
+           model, cost_usd, duration_ms, created_at, client_timestamp, metadata
+    FROM events
+    WHERE session_id = ?
+    ORDER BY datetime(created_at) ASC, id ASC
+  `).all(sessionId) as MonitorTranscriptEvent[];
+
+  if (events.length === 0) return null;
+
+  const entries = events.map(monitorTranscriptEntry);
+  return {
+    session_id: sessionId,
+    entries,
+    transcript: entries.map(entry => ({
+      role: entry.role,
+      content: monitorTranscriptContent(entry),
+      timestamp: entry.timestamp,
+    })),
+  };
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {

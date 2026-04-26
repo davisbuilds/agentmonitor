@@ -1156,6 +1156,72 @@ describe('GET /api/v2/monitor/filter-options', () => {
   });
 });
 
+describe('GET /api/v2/monitor/sessions/:id', () => {
+  test('returns monitor session detail with recent events', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/019d0000-0000-0000-0000-000000000099?event_limit=5`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      session: {
+        id: string;
+        agent_type: string;
+        event_count: number;
+      };
+      events: Array<{
+        event_id: string | null;
+        event_type: string;
+        tool_name: string | null;
+      }>;
+    };
+
+    assert.equal(body.session.id, '019d0000-0000-0000-0000-000000000099');
+    assert.equal(body.session.agent_type, 'codex');
+    assert.equal(body.session.event_count, 1);
+    assert.equal(body.events.length, 1);
+    assert.equal(body.events[0].event_id, 'api-codex-live-skill-001');
+    assert.equal(body.events[0].event_type, 'tool_use');
+    assert.equal(body.events[0].tool_name, 'exec_command');
+  });
+
+  test('returns 404 for missing monitor session detail', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/missing-monitor-session`);
+    assert.equal(res.status, 404);
+  });
+});
+
+describe('GET /api/v2/monitor/sessions/:id/transcript', () => {
+  test('returns monitor transcript entries and drawer-compatible transcript rows', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/019d0000-0000-0000-0000-000000000099/transcript`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      session_id: string;
+      entries: Array<{
+        role: string;
+        type: string;
+        tool_name?: string;
+      }>;
+      transcript: Array<{
+        role: string;
+        content: string;
+        timestamp?: string;
+      }>;
+    };
+
+    assert.equal(body.session_id, '019d0000-0000-0000-0000-000000000099');
+    assert.equal(body.entries.length, 1);
+    assert.equal(body.entries[0].role, 'tool');
+    assert.equal(body.entries[0].type, 'tool_use');
+    assert.equal(body.entries[0].tool_name, 'exec_command');
+    assert.equal(body.transcript.length, 1);
+    assert.equal(body.transcript[0].role, 'tool');
+    assert.match(body.transcript[0].content, /tool_use > exec_command/);
+  });
+
+  test('returns 404 for missing monitor transcript data', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/missing-monitor-session/transcript`);
+    assert.equal(res.status, 404);
+  });
+});
+
 describe('GET /api/v2/analytics/skills/daily', () => {
   test('returns explicit Claude skills and inferred Codex skills by day', async () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/skills/daily?date_from=2026-03-08&date_to=2026-03-09`);

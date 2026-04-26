@@ -589,11 +589,6 @@ export async function fetchEvents(filters: Filters = {}, limit = 100): Promise<{
   return checkedJson(res, 'fetchEvents');
 }
 
-export async function fetchSessions(filters: Filters = {}): Promise<{ sessions: Session[]; total: number }> {
-  const res = await fetch(`/api/sessions${qs(filters)}`);
-  return checkedJson(res, 'fetchSessions');
-}
-
 export async function fetchMonitorSessions(filters: Filters = {}): Promise<{ sessions: Session[]; total: number }> {
   const params: Record<string, string> = {};
   if (filters.status) params.status = filters.status;
@@ -647,12 +642,12 @@ export async function fetchToolStats(filters: Filters = {}): Promise<ToolStats> 
 }
 
 export async function fetchSessionDetail(id: string, eventLimit = 10): Promise<{ session: Session; events: AgentEvent[] }> {
-  const res = await fetch(`/api/sessions/${id}?event_limit=${eventLimit}`);
+  const res = await fetch(`/api/v2/monitor/sessions/${encodeURIComponent(id)}?event_limit=${eventLimit}`);
   return checkedJson(res, 'fetchSessionDetail');
 }
 
 export async function fetchTranscript(id: string): Promise<{ transcript: Array<{ role: string; content: string; timestamp?: string }> }> {
-  const res = await fetch(`/api/sessions/${id}/transcript`);
+  const res = await fetch(`/api/v2/monitor/sessions/${encodeURIComponent(id)}/transcript`);
   return checkedJson(res, 'fetchTranscript');
 }
 
