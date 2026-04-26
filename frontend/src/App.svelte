@@ -101,12 +101,13 @@
         class="rounded-xl border border-gray-700 bg-gray-900 p-2 text-gray-300 transition hover:border-gray-600 hover:text-gray-100"
         onclick={() => openCommandPalette()}
       >
-        <svg class="h-4 w-4" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
-            d="M8.75 14.5a5.75 5.75 0 1 0 0-11.5 5.75 5.75 0 0 0 0 11.5ZM13 13l4 4"
+            d="m21 21-4.35-4.35m1.35-5.65a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
             stroke="currentColor"
-            stroke-width="1.8"
+            stroke-width="2"
             stroke-linecap="round"
+            stroke-linejoin="round"
           />
         </svg>
       </button>
