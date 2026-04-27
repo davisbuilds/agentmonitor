@@ -146,7 +146,7 @@ Product-surface reference for AgentMonitor.
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |
 | `/api/otel/v1/metrics` | POST | OTLP JSON metric ingestion |
 
-V1 endpoints remain active for compatibility and current monitor behavior, but the long-term product contract is `/api/v2/*`.
+V1 endpoints remain active for ingest, SSE, provider quota, and legacy dashboard compatibility, but the long-term product contract is `/api/v2/*`.
 
 ## SSE Event Types
 

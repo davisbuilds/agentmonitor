@@ -4,9 +4,9 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 ## Now
 
-- Establish the Svelte app at `/app/` and `/api/v2/*` as the clear product center.
-- Keep carrying forward durable localhost-monitoring behavior from the older v1 surface where it still adds operator value.
-- Converge the Rust backend onto the same canonical web contract instead of letting it evolve as a separate product shape.
+- Reduce remaining legacy `/` dashboard reliance now that the Svelte app and `/api/v2/*` contract are the clear product center.
+- Keep only the durable v1 localhost behavior that still serves ingest, SSE, provider quota, or legacy compatibility needs.
+- Keep converging the Rust backend onto the same canonical web contract instead of letting it evolve as a separate product shape.
 - Improve the Live surface, especially around fidelity boundaries, session noise, and operator clarity when data is summary-only.
 
 ## Next

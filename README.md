@@ -88,7 +88,7 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 ## Notes
 
 - The Svelte app is the product surface to extend. The legacy `/` dashboard is still served, but should not define new behavior.
-- Some Monitor features still read v1 endpoints today, while Sessions, Search, Analytics, Usage, Insights, and Live center on `/api/v2/*`.
+- The Svelte Monitor read path now uses `/api/v2/monitor/*`; v1 remains for ingest, SSE, provider quotas, and legacy dashboard compatibility.
 - The Monitor header now uses provider-native quota data only. AgentMonitor polls Codex quotas directly from the local Codex app-server and ingests Claude subscriber quota data through the official Claude Code statusline payload bridge.
 - The Sessions viewer uses `/api/v2/sessions/:id/activity` to render a bucketed transcript activity map and jump through long transcripts without loading the entire session up front.
 - Pinned-message review uses session-plus-ordinal deep links so saved transcript moments survive session re-imports that replace raw message row IDs.

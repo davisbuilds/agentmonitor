@@ -5,7 +5,7 @@
 1. Agent hooks (Claude Code) or OTEL exporters (Codex) send events via HTTP to the ingest API.
 2. Events are validated, normalized, and stored in SQLite.
 3. The SSE emitter broadcasts new events and stats to connected dashboard clients.
-4. The canonical Svelte app at `/app/` consumes the live and session APIs, with `/api/v2/*` as the target steady-state contract and some current Monitor dependencies still reading v1 endpoints.
+4. The canonical Svelte app at `/app/` consumes the `/api/v2/*` app contract, including Monitor reads under `/api/v2/monitor/*`.
 5. The legacy vanilla JS dashboard at `/` remains a transitional compatibility surface.
 6. Historical sessions can be backfilled via the import pipeline.
 
@@ -55,7 +55,7 @@ Express route handlers in `src/api/`:
 | `transcripts.ts` | `GET /api/sessions/:id` (transcript) | Session transcript aggregation |
 
 Routes are composed in `src/api/router.ts`.
-V1 routes remain important for compatibility and current monitor behavior, but `/api/v2/*` is the canonical contract for the long-term app surface.
+V1 routes remain important for ingest, SSE, provider quota, and legacy dashboard compatibility, but `/api/v2/*` is the canonical contract for the long-term app surface.
 
 ## Database Layer
 
