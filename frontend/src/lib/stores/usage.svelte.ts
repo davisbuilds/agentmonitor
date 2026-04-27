@@ -1,5 +1,4 @@
 import {
-  fetchFilterOptions,
   fetchUsageSummary,
   fetchUsageDaily,
   fetchUsageProjects,
@@ -14,7 +13,6 @@ import {
   type UsageAgentBreakdown,
   type UsageTopSessionRow,
 } from '../api/client';
-import { getFilterOptions, setFilterOptions } from './monitor.svelte';
 import { navigateToSession } from './router.svelte';
 import {
   createDefaultUsageFilters,
@@ -138,17 +136,16 @@ class UsageStore {
     }
 
     if (!this.initialized) {
-      let options = getFilterOptions();
-      if (options.projects.length === 0 && options.agent_types.length === 0) {
-        try {
-          options = await fetchFilterOptions();
-          setFilterOptions(options);
-        } catch {
-          // Usage can still load without cached monitor filter options.
-        }
+      try {
+        const [projectsRes, agentsRes] = await Promise.all([
+          fetchUsageProjects({ date_from: this.from, date_to: this.to }),
+          fetchUsageAgents({ date_from: this.from, date_to: this.to }),
+        ]);
+        this.projectOptions = projectsRes.data.map(row => row.project).sort((a, b) => a.localeCompare(b));
+        this.agentOptions = agentsRes.data.map(row => row.agent).sort((a, b) => a.localeCompare(b));
+      } catch {
+        // Usage can still load without filter options.
       }
-      this.projectOptions = [...options.projects].sort((a, b) => a.localeCompare(b));
-      this.agentOptions = [...options.agent_types].sort((a, b) => a.localeCompare(b));
       this.initialized = true;
     }
 

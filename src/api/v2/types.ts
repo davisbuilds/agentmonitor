@@ -166,6 +166,151 @@ export interface ToolUsageStat {
   count: number;
 }
 
+export interface MonitorToolStat {
+  tool_name: string;
+  total_calls: number;
+  error_count: number;
+  error_rate: number;
+  avg_duration_ms: number | null;
+  by_agent: Record<string, number>;
+}
+
+export interface MonitorSessionRow {
+  id: string;
+  agent_id: string;
+  agent_type: string;
+  project: string | null;
+  branch: string | null;
+  status: string;
+  started_at: string;
+  ended_at: string | null;
+  last_event_at: string;
+  metadata: string | null;
+  event_count: number;
+  tokens_in: number;
+  tokens_out: number;
+  total_cost_usd: number;
+  files_edited: number;
+  lines_added: number;
+  lines_removed: number;
+}
+
+export interface MonitorEventRow {
+  id: number;
+  event_id: string | null;
+  schema_version: number;
+  session_id: string;
+  agent_type: string;
+  event_type: string;
+  tool_name: string | null;
+  status: string;
+  tokens_in: number;
+  tokens_out: number;
+  branch: string | null;
+  project: string | null;
+  duration_ms: number | null;
+  created_at: string;
+  client_timestamp: string | null;
+  metadata: string | null;
+  payload_truncated: number;
+  model: string | null;
+  cost_usd: number | null;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  source: string;
+}
+
+export interface MonitorQuotaWindow {
+  used_percent: number;
+  remaining_percent: number;
+  resets_at: string | null;
+  window_minutes: number | null;
+}
+
+export interface MonitorQuotaCredits {
+  has_credits: boolean;
+  unlimited: boolean;
+  balance: string | null;
+}
+
+export interface MonitorQuotaSnapshot {
+  provider: 'claude' | 'codex';
+  agent_type: 'claude_code' | 'codex';
+  status: 'available' | 'unavailable' | 'error';
+  source: string | null;
+  updated_at: string | null;
+  account_label: string | null;
+  plan_type: string | null;
+  limit_id: string | null;
+  limit_name: string | null;
+  error_message: string | null;
+  primary: MonitorQuotaWindow | null;
+  secondary: MonitorQuotaWindow | null;
+  credits: MonitorQuotaCredits | null;
+}
+
+export interface MonitorStats {
+  total_events: number;
+  active_sessions: number;
+  live_sessions: number;
+  total_sessions: number;
+  active_agents: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cost_usd: number;
+  tool_breakdown: Record<string, number>;
+  agent_breakdown: Record<string, number>;
+  model_breakdown: Record<string, number>;
+  branches: string[];
+  quota_monitor: MonitorQuotaSnapshot[];
+  usage_monitor: MonitorQuotaSnapshot[];
+}
+
+export interface MonitorFilterOptions {
+  agent_types: string[];
+  event_types: string[];
+  tool_names: string[];
+  models: string[];
+  projects: string[];
+  branches: Array<{ value: string; label: string }>;
+  sources: string[];
+}
+
+export interface MonitorTranscriptEvent {
+  id: number;
+  event_type: string;
+  tool_name: string | null;
+  status: string;
+  tokens_in: number;
+  tokens_out: number;
+  model: string | null;
+  cost_usd: number | null;
+  duration_ms: number | null;
+  created_at: string;
+  client_timestamp: string | null;
+  metadata: string | null;
+}
+
+export interface MonitorTranscriptEntry {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  type: string;
+  tool_name?: string;
+  detail?: string;
+  status?: string;
+  model?: string;
+  tokens_in?: number;
+  tokens_out?: number;
+  cost_usd?: number;
+  duration_ms?: number;
+  timestamp: string;
+}
+
+export interface MonitorTranscriptRow {
+  role: string;
+  content: string;
+  timestamp?: string;
+}
+
 export interface SkillUsageBreakdown {
   skill_name: string;
   count: number;
@@ -436,6 +581,7 @@ export interface SessionsListParams {
 export interface MessagesListParams {
   offset?: number;
   limit?: number;
+  around_ordinal?: number;
 }
 
 export interface LiveSessionsListParams {
@@ -477,6 +623,35 @@ export interface UsageParams {
   project?: string;
   agent?: string;
   limit?: number;
+}
+
+export interface MonitorSessionsParams {
+  status?: string;
+  exclude_status?: string;
+  project?: string;
+  agent?: string;
+  date_from?: string;
+  date_to?: string;
+  limit?: number;
+}
+
+export interface MonitorEventsParams {
+  limit?: number;
+  offset?: number;
+  agent?: string;
+  event_type?: string;
+  tool_name?: string;
+  session_id?: string;
+  branch?: string;
+  model?: string;
+  source?: string;
+  since?: string;
+  until?: string;
+}
+
+export interface MonitorStatsParams {
+  agent?: string;
+  since?: string;
 }
 
 export interface PinsListParams {

@@ -22,6 +22,13 @@ import {
   getAnalyticsAgents,
   getAnalyticsProjects,
   getAnalyticsTools,
+  getMonitorToolStats,
+  listMonitorSessions,
+  listMonitorEvents,
+  getMonitorStats,
+  getMonitorFilterOptions,
+  getMonitorSessionWithEvents,
+  getMonitorSessionTranscript,
   getAnalyticsSkillsDaily,
   getUsageSummary,
   getUsageCoverage,
@@ -101,6 +108,7 @@ v2Router.get('/sessions/:id/messages', (req: Request, res: Response) => {
     const params = {
       offset: safeInt(req.query.offset as string),
       limit: safeInt(req.query.limit as string),
+      around_ordinal: safeInt(req.query.around_ordinal as string),
     };
     const result = getSessionMessages(sessionId, params);
     res.json(result);
@@ -405,6 +413,112 @@ v2Router.get('/analytics/tools', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/tools] Error:', err);
     res.status(500).json({ error: 'Failed to get tool data' });
+  }
+});
+
+v2Router.get('/monitor/tools', (req: Request, res: Response) => {
+  try {
+    const params = {
+      project: safeString(req.query.project as string | string[] | undefined),
+      agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+      date_from: safeString((req.query.date_from ?? req.query.since) as string | string[] | undefined),
+      date_to: safeString(req.query.date_to as string | string[] | undefined),
+    };
+    res.json({ tools: getMonitorToolStats(params) });
+  } catch (err) {
+    console.error('[v2/monitor/tools] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor tool data' });
+  }
+});
+
+v2Router.get('/monitor/sessions', (req: Request, res: Response) => {
+  try {
+    const params = {
+      status: safeString(req.query.status as string | string[] | undefined),
+      exclude_status: safeString(req.query.exclude_status as string | string[] | undefined),
+      project: safeString(req.query.project as string | string[] | undefined),
+      agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+      date_from: safeString((req.query.date_from ?? req.query.since) as string | string[] | undefined),
+      date_to: safeString(req.query.date_to as string | string[] | undefined),
+      limit: safeInt(req.query.limit as string),
+    };
+    res.json(listMonitorSessions(params));
+  } catch (err) {
+    console.error('[v2/monitor/sessions] Error:', err);
+    res.status(500).json({ error: 'Failed to list monitor sessions' });
+  }
+});
+
+v2Router.get('/monitor/events', (req: Request, res: Response) => {
+  try {
+    const params = {
+      limit: safeInt(req.query.limit as string),
+      offset: safeInt(req.query.offset as string),
+      agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+      event_type: safeString(req.query.event_type as string | string[] | undefined),
+      tool_name: safeString(req.query.tool_name as string | string[] | undefined),
+      session_id: safeString(req.query.session_id as string | string[] | undefined),
+      branch: safeString(req.query.branch as string | string[] | undefined),
+      model: safeString(req.query.model as string | string[] | undefined),
+      source: safeString(req.query.source as string | string[] | undefined),
+      since: safeString(req.query.since as string | string[] | undefined),
+      until: safeString(req.query.until as string | string[] | undefined),
+    };
+    res.json(listMonitorEvents(params));
+  } catch (err) {
+    console.error('[v2/monitor/events] Error:', err);
+    res.status(500).json({ error: 'Failed to list monitor events' });
+  }
+});
+
+v2Router.get('/monitor/stats', (req: Request, res: Response) => {
+  try {
+    const params = {
+      agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+      since: safeString((req.query.since ?? req.query.date_from) as string | string[] | undefined),
+    };
+    res.json(getMonitorStats(params));
+  } catch (err) {
+    console.error('[v2/monitor/stats] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor stats' });
+  }
+});
+
+v2Router.get('/monitor/filter-options', (_req: Request, res: Response) => {
+  try {
+    res.json(getMonitorFilterOptions());
+  } catch (err) {
+    console.error('[v2/monitor/filter-options] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor filter options' });
+  }
+});
+
+v2Router.get('/monitor/sessions/:id/transcript', (req: Request, res: Response) => {
+  try {
+    const transcript = getMonitorSessionTranscript(req.params['id'] as string);
+    if (!transcript) {
+      res.status(404).json({ error: 'No transcript data for this session' });
+      return;
+    }
+    res.json(transcript);
+  } catch (err) {
+    console.error('[v2/monitor/sessions/:id/transcript] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor session transcript' });
+  }
+});
+
+v2Router.get('/monitor/sessions/:id', (req: Request, res: Response) => {
+  try {
+    const eventLimit = safeInt((req.query.event_limit ?? req.query.limit) as string) ?? 10;
+    const result = getMonitorSessionWithEvents(req.params['id'] as string, eventLimit);
+    if (!result.session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[v2/monitor/sessions/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to get monitor session detail' });
   }
 });
 

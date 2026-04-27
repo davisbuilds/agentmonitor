@@ -432,6 +432,23 @@ describe('GET /api/v2/sessions/:id/messages', () => {
     assert.equal(body.total, 20);
   });
 
+  test('supports centered ordinal window loading', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?around_ordinal=12&limit=5`);
+    const body = await res.json() as { data: Array<{ ordinal: number }>; total: number };
+    assert.equal(body.total, 20);
+    assert.deepEqual(body.data.map((message) => message.ordinal), [10, 11, 12, 13, 14]);
+  });
+
+  test('clamps ordinal windows near transcript bounds', async () => {
+    const startRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?around_ordinal=1&limit=5`);
+    const startBody = await startRes.json() as { data: Array<{ ordinal: number }>; total: number };
+    assert.deepEqual(startBody.data.map((message) => message.ordinal), [0, 1, 2, 3, 4]);
+
+    const endRes = await fetch(`${baseUrl}/api/v2/sessions/api-sess-003/messages?around_ordinal=19&limit=5`);
+    const endBody = await endRes.json() as { data: Array<{ ordinal: number }>; total: number };
+    assert.deepEqual(endBody.data.map((message) => message.ordinal), [15, 16, 17, 18, 19]);
+  });
+
   test('returns 404 for missing session', async () => {
     const res = await fetch(`${baseUrl}/api/v2/sessions/nonexistent/messages`);
     assert.equal(res.status, 404);
@@ -985,6 +1002,223 @@ describe('GET /api/v2/analytics/tools', () => {
       body.coverage.included_sessions + body.coverage.excluded_sessions,
     );
     assert.ok(body.coverage.excluded_sessions >= 1);
+  });
+});
+
+describe('GET /api/v2/monitor/tools', () => {
+  test('returns event-derived tool analytics in the monitor widget shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/tools?agent=codex&date_from=2026-03-09`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      tools: Array<{
+        tool_name: string;
+        total_calls: number;
+        error_count: number;
+        error_rate: number;
+        avg_duration_ms: number | null;
+        by_agent: Record<string, number>;
+      }>;
+    };
+
+    const row = body.tools.find(tool => tool.tool_name === 'exec_command');
+    assert.ok(row, 'expected seeded exec_command tool row');
+    assert.equal(row.total_calls, 1);
+    assert.equal(row.error_count, 0);
+    assert.equal(row.error_rate, 0);
+    assert.equal(row.avg_duration_ms, null);
+    assert.equal(row.by_agent.codex, 1);
+  });
+});
+
+describe('GET /api/v2/monitor/sessions', () => {
+  test('returns live monitor session aggregates in the monitor widget shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions?agent=codex&exclude_status=ended`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      sessions: Array<{
+        id: string;
+        agent_id: string;
+        agent_type: string;
+        project: string | null;
+        status: string;
+        event_count: number;
+        tokens_in: number;
+        tokens_out: number;
+        total_cost_usd: number;
+        files_edited: number;
+        lines_added: number;
+        lines_removed: number;
+      }>;
+      total: number;
+    };
+
+    const row = body.sessions.find(session => session.id === '019d0000-0000-0000-0000-000000000099');
+    assert.ok(row, 'expected seeded codex monitor session row');
+    assert.equal(row.agent_id, 'codex-default');
+    assert.equal(row.agent_type, 'codex');
+    assert.equal(row.project, 'agentmonitor');
+    assert.equal(row.status, 'active');
+    assert.equal(row.event_count, 1);
+    assert.equal(row.tokens_in, 0);
+    assert.equal(row.tokens_out, 0);
+    assert.equal(row.total_cost_usd, 0);
+    assert.equal(row.files_edited, 0);
+    assert.equal(row.lines_added, 0);
+    assert.equal(row.lines_removed, 0);
+    assert.ok(body.total >= 1);
+  });
+});
+
+describe('GET /api/v2/monitor/events', () => {
+  test('returns filtered monitor events in the monitor feed shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/events?agent=codex&source=otel&limit=1`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      events: Array<{
+        event_id: string | null;
+        session_id: string;
+        agent_type: string;
+        event_type: string;
+        tool_name: string | null;
+        status: string;
+        source: string;
+      }>;
+      total: number;
+    };
+
+    assert.equal(body.events.length, 1);
+    assert.ok(body.total >= 1);
+    const row = body.events[0];
+    assert.equal(row.event_id, 'api-codex-live-skill-001');
+    assert.equal(row.session_id, '019d0000-0000-0000-0000-000000000099');
+    assert.equal(row.agent_type, 'codex');
+    assert.equal(row.event_type, 'tool_use');
+    assert.equal(row.tool_name, 'exec_command');
+    assert.equal(row.status, 'success');
+    assert.equal(row.source, 'otel');
+  });
+});
+
+describe('GET /api/v2/monitor/stats', () => {
+  test('returns monitor summary stats and provider quota aliases', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/stats?agent=codex`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      total_events: number;
+      active_sessions: number;
+      live_sessions: number;
+      total_sessions: number;
+      active_agents: number;
+      total_tokens_in: number;
+      total_tokens_out: number;
+      total_cost_usd: number;
+      tool_breakdown: Record<string, number>;
+      agent_breakdown: Record<string, number>;
+      model_breakdown: Record<string, number>;
+      branches: string[];
+      quota_monitor: Array<Record<string, unknown>>;
+      usage_monitor: Array<Record<string, unknown>>;
+    };
+
+    assert.ok(body.total_events >= 1);
+    assert.ok(body.live_sessions >= 1);
+    assert.ok(body.total_sessions >= 1);
+    assert.equal(body.agent_breakdown.codex, body.total_events);
+    assert.equal(body.tool_breakdown.exec_command, 1);
+    assert.ok(Array.isArray(body.branches));
+    assert.ok(Array.isArray(body.quota_monitor));
+    assert.equal(body.quota_monitor.length, 2);
+    assert.deepEqual(body.usage_monitor, body.quota_monitor);
+  });
+});
+
+describe('GET /api/v2/monitor/filter-options', () => {
+  test('returns monitor dropdown filter values in the dashboard shape', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/filter-options`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      agent_types: string[];
+      event_types: string[];
+      tool_names: string[];
+      models: string[];
+      projects: string[];
+      branches: Array<{ value: string; label: string }>;
+      sources: string[];
+    };
+
+    assert.ok(body.agent_types.includes('codex'));
+    assert.ok(body.event_types.includes('tool_use'));
+    assert.ok(body.tool_names.includes('exec_command'));
+    assert.ok(body.projects.includes('agentmonitor'));
+    assert.ok(body.sources.includes('otel'));
+    assert.ok(Array.isArray(body.models));
+    assert.ok(Array.isArray(body.branches));
+  });
+});
+
+describe('GET /api/v2/monitor/sessions/:id', () => {
+  test('returns monitor session detail with recent events', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/019d0000-0000-0000-0000-000000000099?event_limit=5`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      session: {
+        id: string;
+        agent_type: string;
+        event_count: number;
+      };
+      events: Array<{
+        event_id: string | null;
+        event_type: string;
+        tool_name: string | null;
+      }>;
+    };
+
+    assert.equal(body.session.id, '019d0000-0000-0000-0000-000000000099');
+    assert.equal(body.session.agent_type, 'codex');
+    assert.equal(body.session.event_count, 1);
+    assert.equal(body.events.length, 1);
+    assert.equal(body.events[0].event_id, 'api-codex-live-skill-001');
+    assert.equal(body.events[0].event_type, 'tool_use');
+    assert.equal(body.events[0].tool_name, 'exec_command');
+  });
+
+  test('returns 404 for missing monitor session detail', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/missing-monitor-session`);
+    assert.equal(res.status, 404);
+  });
+});
+
+describe('GET /api/v2/monitor/sessions/:id/transcript', () => {
+  test('returns monitor transcript entries and drawer-compatible transcript rows', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/019d0000-0000-0000-0000-000000000099/transcript`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      session_id: string;
+      entries: Array<{
+        role: string;
+        type: string;
+        tool_name?: string;
+      }>;
+      transcript: Array<{
+        role: string;
+        content: string;
+        timestamp?: string;
+      }>;
+    };
+
+    assert.equal(body.session_id, '019d0000-0000-0000-0000-000000000099');
+    assert.equal(body.entries.length, 1);
+    assert.equal(body.entries[0].role, 'tool');
+    assert.equal(body.entries[0].type, 'tool_use');
+    assert.equal(body.entries[0].tool_name, 'exec_command');
+    assert.equal(body.transcript.length, 1);
+    assert.equal(body.transcript[0].role, 'tool');
+    assert.match(body.transcript[0].content, /tool_use > exec_command/);
+  });
+
+  test('returns 404 for missing monitor transcript data', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/monitor/sessions/missing-monitor-session/transcript`);
+    assert.equal(res.status, 404);
   });
 });
 

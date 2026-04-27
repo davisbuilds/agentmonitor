@@ -29,13 +29,13 @@
     return typeof option === 'string' ? option : option.label;
   }
 
-  const filterDefs: Array<{ key: string; label: string; optionsKey: keyof typeof options }> = [
+  const filterDefs: Array<{ key: string; label: string; allLabel?: string; optionsKey: keyof typeof options }> = [
     { key: 'agent_type', label: 'Agent', optionsKey: 'agent_types' },
     { key: 'event_type', label: 'Event', optionsKey: 'event_types' },
     { key: 'tool_name', label: 'Tool', optionsKey: 'tool_names' },
     { key: 'model', label: 'Model', optionsKey: 'models' },
     { key: 'project', label: 'Project', optionsKey: 'projects' },
-    { key: 'branch', label: 'Branch', optionsKey: 'branches' },
+    { key: 'branch', label: 'Branch', allLabel: 'All Branches', optionsKey: 'branches' },
     { key: 'source', label: 'Source', optionsKey: 'sources' },
   ];
 </script>
@@ -49,7 +49,7 @@
         value={filters[def.key] || ''}
         onchange={(e) => handleChange(def.key, (e.target as HTMLSelectElement).value)}
       >
-        <option value="">All {def.label}s</option>
+        <option value="">{def.allLabel || `All ${def.label}s`}</option>
         {#each opts as opt}
           <option value={optionValue(opt)}>{optionLabel(opt)}</option>
         {/each}

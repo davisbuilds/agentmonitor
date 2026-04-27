@@ -206,6 +206,7 @@ export async function loadLiveSessions(append = false): Promise<void> {
 
 export async function selectLiveSession(sessionId: string): Promise<void> {
   selectedSessionId = sessionId;
+  selectedSession = sessions.find(session => session.id === sessionId) ?? selectedSession;
   selectedRequestToken += 1;
   selectedItemId = null;
   itemsCursor = undefined;

@@ -9,10 +9,8 @@
     openCommandPalette,
     type Tab,
   } from './lib/stores/router.svelte';
-  import { setFilterOptions } from './lib/stores/monitor.svelte';
   import { getLiveSettings, initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
-  import { fetchFilterOptions } from './lib/api/client';
   import StatsBar from './lib/components/monitor/StatsBar.svelte';
   import ConnectionStatus from './lib/components/monitor/ConnectionStatus.svelte';
   import FilterBar from './lib/components/monitor/FilterBar.svelte';
@@ -70,14 +68,6 @@
   onMount(async () => {
     window.addEventListener('keydown', handleGlobalKeydown);
 
-    // Load filter options
-    try {
-      const options = await fetchFilterOptions();
-      setFilterOptions(options);
-    } catch {
-      // Filter options may not be available
-    }
-
     await initializeLiveSettings();
     if (!getLiveSettings().enabled && getTab() === 'live') {
       setTab('monitor');
@@ -106,11 +96,20 @@
     <div class="flex items-center gap-3">
       <button
         type="button"
-        class="hidden rounded-xl border border-gray-700 bg-gray-900 px-3 py-2 text-left text-sm text-gray-300 transition hover:border-gray-600 hover:text-gray-100 sm:flex sm:min-w-[220px] sm:items-center sm:justify-between"
+        aria-label="Jump to session or transcript"
+        title="Jump to session or transcript (Cmd/Ctrl+K)"
+        class="rounded-xl border border-gray-700 bg-gray-900 p-2 text-gray-300 transition hover:border-gray-600 hover:text-gray-100"
         onclick={() => openCommandPalette()}
       >
-        <span>Jump to session or transcript...</span>
-        <span class="text-xs text-gray-500">Cmd/Ctrl+K</span>
+        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="m21 21-4.35-4.35m1.35-5.65a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </svg>
       </button>
       <ConnectionStatus />
     </div>

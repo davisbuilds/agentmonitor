@@ -43,9 +43,9 @@
 
 {#if sessionId}
   <!-- Backdrop -->
-  <div class="fixed inset-0 z-50 flex justify-start">
+  <div class="fixed inset-0 z-50">
     <button class="absolute inset-0 bg-black/50" onclick={close} aria-label="Close"></button>
-    <div class="relative w-full max-w-lg bg-gray-900 border-r border-gray-700 overflow-y-auto p-6">
+    <div class="fixed inset-y-0 right-0 w-full max-w-lg bg-gray-900 border-l border-gray-700 overflow-y-auto p-6">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Session Details</h2>
         <button class="text-gray-400 hover:text-white transition-colors text-lg" onclick={close}>&times;</button>

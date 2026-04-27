@@ -1,12 +1,22 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import AgentCards from './AgentCards.svelte';
-  import EventFeed from './EventFeed.svelte';
   import CostDashboard from './CostDashboard.svelte';
   import ToolAnalytics from './ToolAnalytics.svelte';
   import SessionDetail from './SessionDetail.svelte';
-  import { setEvents, setSessions, setStats, setCostData, setToolStats, setQuotaMonitor, getFilters, getCostWindow } from '../../stores/monitor.svelte';
-  import { fetchStats, fetchEvents, fetchSessions, fetchCostData, fetchToolStats } from '../../api/client';
+  import {
+    setEvents,
+    setSessions,
+    setStats,
+    setCostData,
+    setToolStats,
+    setQuotaMonitor,
+    getFilters,
+    getCostWindow,
+    getFilterOptions,
+    setFilterOptions,
+  } from '../../stores/monitor.svelte';
+  import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions } from '../../api/client';
   import { buildCostFilters } from '../../monitor-analytics';
 
   interface Props {
@@ -34,7 +44,7 @@
       const [statsData, eventsData, sessionsData] = await Promise.all([
         fetchStats(filters),
         fetchEvents(filters),
-        fetchSessions(sessionsParams),
+        fetchMonitorSessions(sessionsParams),
       ]);
       setStats(statsData);
       setQuotaMonitor(statsData.quota_monitor || statsData.usage_monitor || []);
@@ -47,7 +57,29 @@
     await loadAnalytics(filters);
   }
 
+  async function loadMonitorFilterOptions() {
+    const options = getFilterOptions();
+    if (
+      options.agent_types.length > 0
+      || options.event_types.length > 0
+      || options.tool_names.length > 0
+      || options.models.length > 0
+      || options.projects.length > 0
+      || options.branches.length > 0
+      || options.sources.length > 0
+    ) {
+      return;
+    }
+
+    try {
+      setFilterOptions(await fetchFilterOptions());
+    } catch {
+      // Monitor data still renders without dropdown metadata.
+    }
+  }
+
   onMount(() => {
+    void loadMonitorFilterOptions();
     reload(getFilters());
   });
 </script>
@@ -64,8 +96,6 @@
   <section>
     <ToolAnalytics />
   </section>
-
-  <EventFeed />
 </main>
 
 <SessionDetail />

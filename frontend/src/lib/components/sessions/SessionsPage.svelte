@@ -32,6 +32,7 @@
   // Selected session
   let selectedSessionId = $state<string | null>(null);
   let selectedMessageOrdinal = $state<number | null>(null);
+  let previousSelections = $state<Array<{ sessionId: string; messageOrdinal: number | null }>>([]);
 
   const PAGE_SIZE = 25;
   const pendingNavigationVersion = $derived(getPendingSessionNavigationVersion());
@@ -43,6 +44,53 @@
       sessionId: selectedSessionId,
       messageOrdinal: selectedMessageOrdinal,
     };
+  }
+
+  function sameSelection(
+    left: { sessionId: string; messageOrdinal: number | null },
+    right: { sessionId: string; messageOrdinal: number | null },
+  ) {
+    return left.sessionId === right.sessionId && left.messageOrdinal === right.messageOrdinal;
+  }
+
+  function rememberCurrentSelection(next: { sessionId: string; messageOrdinal: number | null }) {
+    if (!selectedSessionId) return;
+
+    const current = {
+      sessionId: selectedSessionId,
+      messageOrdinal: selectedMessageOrdinal,
+    };
+    if (sameSelection(current, next)) return;
+
+    const last = previousSelections[previousSelections.length - 1];
+    if (!last || !sameSelection(last, current)) {
+      previousSelections = [...previousSelections, current];
+    }
+  }
+
+  function selectSessionState(sessionId: string | null, messageOrdinal: number | null, trackPrevious = false) {
+    if (sessionId && trackPrevious) {
+      rememberCurrentSelection({ sessionId, messageOrdinal });
+    }
+    selectedSessionId = sessionId;
+    selectedMessageOrdinal = messageOrdinal;
+  }
+
+  function applyRouteSelection(nextSessionId: string | null, nextMessageOrdinal: number | null) {
+    if (!nextSessionId) {
+      previousSelections = [];
+      selectSessionState(null, null);
+      return;
+    }
+
+    const next = { sessionId: nextSessionId, messageOrdinal: nextMessageOrdinal };
+    const previous = previousSelections[previousSelections.length - 1];
+    if (previous && sameSelection(previous, next)) {
+      previousSelections = previousSelections.slice(0, -1);
+    } else {
+      rememberCurrentSelection(next);
+    }
+    selectSessionState(nextSessionId, nextMessageOrdinal);
   }
 
   function syncHash(replace = false) {
@@ -62,8 +110,7 @@
     const filtersChanged = next.project !== filterProject || next.agent !== filterAgent;
     filterProject = next.project;
     filterAgent = next.agent;
-    selectedSessionId = next.sessionId;
-    selectedMessageOrdinal = next.messageOrdinal;
+    applyRouteSelection(next.sessionId, next.messageOrdinal);
     if (filtersChanged && shouldLoadSessions) {
       cursor = undefined;
       void loadSessions();
@@ -98,21 +145,27 @@
 
   function handleFilterChange() {
     cursor = undefined;
-    selectedSessionId = null;
-    selectedMessageOrdinal = null;
+    previousSelections = [];
+    selectSessionState(null, null);
     syncHash(true);
     loadSessions();
   }
 
   function selectSession(id: string) {
-    selectedSessionId = id;
-    selectedMessageOrdinal = null;
+    selectSessionState(id, null, true);
     syncHash();
   }
 
   function closeViewer() {
-    selectedSessionId = null;
-    selectedMessageOrdinal = null;
+    const previous = previousSelections[previousSelections.length - 1];
+    if (previous) {
+      previousSelections = previousSelections.slice(0, -1);
+      selectSessionState(previous.sessionId, previous.messageOrdinal);
+      syncHash(true);
+      return;
+    }
+
+    selectSessionState(null, null);
     syncHash();
   }
 
@@ -120,8 +173,7 @@
     pendingNavigationVersion;
     const pending = consumePendingSessionNavigation();
     if (!pending.sessionId) return;
-    selectedSessionId = pending.sessionId;
-    selectedMessageOrdinal = pending.messageOrdinal;
+    selectSessionState(pending.sessionId, pending.messageOrdinal, true);
   });
 
   onMount(() => {
@@ -146,7 +198,7 @@
     <SessionViewer sessionId={selectedSessionId} initialMessageOrdinal={selectedMessageOrdinal} onclose={closeViewer} />
   {/key}
 {:else}
-  <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
+  <main class="flex-1 min-h-0 overflow-hidden flex flex-col p-4 sm:p-6">
     <!-- Filters -->
     <div class="flex items-center gap-3 mb-4 flex-wrap">
       <h2 class="text-lg font-semibold text-gray-200 mr-2">Sessions</h2>
@@ -176,7 +228,7 @@
     </div>
 
     <!-- Session List -->
-    <div class="flex-1 overflow-y-auto space-y-1">
+    <div class="min-h-0 flex-1 overflow-y-auto space-y-1">
       {#each sessions as session (session.id)}
         <button
           class="w-full text-left px-3 py-2 rounded hover:bg-gray-800/60 transition-colors border border-transparent hover:border-gray-700/50 group"

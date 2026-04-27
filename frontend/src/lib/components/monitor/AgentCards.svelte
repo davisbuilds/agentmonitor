@@ -2,6 +2,7 @@
   import { getSessions, getEvents, setSelectedSessionId } from '../../stores/monitor.svelte';
   import { formatCost, formatNumber, timeAgo, statusColor, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
+  import { buildActiveAgentLabel } from '../../monitor-analytics';
 
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
@@ -59,12 +60,12 @@
         onclick={() => setSelectedSessionId(session.id)}
       >
         <!-- Header -->
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full {statusColor(session.status)}"></span>
-            <span class="text-sm font-medium {agentColor(session.agent_type)}">{session.agent_type}</span>
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="flex items-start gap-2 min-w-0">
+            <span class="mt-1.5 w-2 h-2 rounded-full shrink-0 {statusColor(session.status)}"></span>
+            <span class="text-sm font-medium leading-tight {agentColor(session.agent_type)}">{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
           </div>
-          <span class="text-xs text-gray-500">{timeAgo(session.last_event_at)}</span>
+          <span class="text-xs text-gray-500 shrink-0">{timeAgo(session.last_event_at)}</span>
         </div>
 
         <!-- Project/Branch -->

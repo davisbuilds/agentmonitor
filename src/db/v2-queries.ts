@@ -1,4 +1,5 @@
 import { getDb } from './connection.js';
+import { config } from '../config.js';
 import type {
   BrowsingSessionRow,
   BrowsingSessionDbRow,
@@ -20,6 +21,15 @@ import type {
   ActivityDataPoint,
   ProjectBreakdown,
   ToolUsageStat,
+  MonitorToolStat,
+  MonitorSessionRow,
+  MonitorEventRow,
+  MonitorQuotaSnapshot,
+  MonitorStats,
+  MonitorFilterOptions,
+  MonitorTranscriptEvent,
+  MonitorTranscriptEntry,
+  MonitorTranscriptRow,
   SkillUsageDay,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
@@ -35,6 +45,9 @@ import type {
   UsageModelBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
+  MonitorSessionsParams,
+  MonitorEventsParams,
+  MonitorStatsParams,
   InsightRow,
   InsightDbRow,
   InsightInputSnapshot,
@@ -313,13 +326,25 @@ interface MessagesResult {
 
 export function getSessionMessages(sessionId: string, params: MessagesListParams = {}): MessagesResult {
   const db = getDb();
-  const offset = params.offset ?? 0;
   const limit = Math.min(Math.max(params.limit ?? 100, 1), 1000);
 
   const total = (db.prepare(
     'SELECT COUNT(*) as c FROM messages WHERE session_id = ?'
   ).get(sessionId) as CountResult).c;
 
+  if (params.around_ordinal != null) {
+    const beforeCount = Math.floor((limit - 1) / 2);
+    const maxStartOrdinal = Math.max(0, total - limit);
+    const requestedStartOrdinal = Math.max(0, params.around_ordinal - beforeCount);
+    const startOrdinal = Math.min(requestedStartOrdinal, maxStartOrdinal);
+    const data = db.prepare(
+      'SELECT * FROM messages WHERE session_id = ? AND ordinal >= ? ORDER BY ordinal LIMIT ?'
+    ).all(sessionId, startOrdinal, limit) as MessageRow[];
+
+    return { data, total };
+  }
+
+  const offset = Math.max(params.offset ?? 0, 0);
   const data = db.prepare(
     'SELECT * FROM messages WHERE session_id = ? ORDER BY ordinal LIMIT ? OFFSET ?'
   ).all(sessionId, limit, offset) as MessageRow[];
@@ -1069,6 +1094,546 @@ export function getAnalyticsTools(params: AnalyticsParams = {}): ToolUsageStat[]
     GROUP BY tc.tool_name, tc.category
     ORDER BY count DESC, tc.tool_name ASC
   `).all(...filter.values) as ToolUsageStat[];
+}
+
+export function getMonitorToolStats(params: UsageParams = {}): MonitorToolStat[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const where = [...filter.conditions, 'e.tool_name IS NOT NULL'].join(' AND ');
+
+  const rows = db.prepare(`
+    SELECT
+      e.tool_name,
+      COUNT(*) as total_calls,
+      COALESCE(SUM(CASE WHEN e.status = 'error' THEN 1 ELSE 0 END), 0) as error_count,
+      ROUND(CAST(COALESCE(SUM(CASE WHEN e.status = 'error' THEN 1 ELSE 0 END), 0) AS REAL) / COUNT(*), 4) as error_rate,
+      ROUND(AVG(e.duration_ms)) as avg_duration_ms
+    FROM events e
+    WHERE ${where}
+    GROUP BY e.tool_name
+    ORDER BY total_calls DESC, e.tool_name ASC
+  `).all(...filter.values) as Array<Omit<MonitorToolStat, 'by_agent'>>;
+
+  const agentRows = db.prepare(`
+    SELECT
+      e.tool_name,
+      e.agent_type,
+      COUNT(*) as count
+    FROM events e
+    WHERE ${where}
+    GROUP BY e.tool_name, e.agent_type
+    ORDER BY e.tool_name, count DESC
+  `).all(...filter.values) as Array<{ tool_name: string; agent_type: string; count: number }>;
+
+  const byAgent = new Map<string, Record<string, number>>();
+  for (const row of agentRows) {
+    const next = byAgent.get(row.tool_name) ?? {};
+    next[row.agent_type] = row.count;
+    byAgent.set(row.tool_name, next);
+  }
+
+  return rows.map(row => ({
+    ...row,
+    by_agent: byAgent.get(row.tool_name) ?? {},
+  }));
+}
+
+function updateMonitorSessionStatuses(timeoutMinutes: number): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE sessions SET status = 'idle'
+    WHERE status = 'active'
+    AND last_event_at < datetime('now', ? || ' minutes')
+  `).run(`-${timeoutMinutes}`);
+
+  db.prepare(`
+    UPDATE sessions SET status = 'ended', ended_at = datetime('now')
+    WHERE status = 'idle'
+    AND last_event_at < datetime('now', ? || ' minutes')
+  `).run(`-${timeoutMinutes * 2}`);
+}
+
+export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessions: MonitorSessionRow[]; total: number } {
+  const db = getDb();
+  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.status) {
+    conditions.push('s.status = ?');
+    values.push(params.status);
+  }
+  if (params.exclude_status) {
+    conditions.push('s.status != ?');
+    values.push(params.exclude_status);
+  }
+  if (params.project) {
+    conditions.push('s.project = ?');
+    values.push(params.project);
+  }
+  if (params.agent) {
+    conditions.push('s.agent_type = ?');
+    values.push(params.agent);
+  }
+  if (params.date_from) {
+    conditions.push('datetime(s.last_event_at) >= datetime(?)');
+    values.push(params.date_from);
+  }
+  if (params.date_to) {
+    conditions.push(`datetime(s.last_event_at) < datetime(?, '+1 day')`);
+    values.push(params.date_to);
+  }
+
+  const requestedLimit = Number.isFinite(params.limit) ? Math.trunc(params.limit as number) : 50;
+  const applyLimit = requestedLimit > 0;
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const queryValues = applyLimit ? [...values, requestedLimit] : values;
+
+  const sessions = db.prepare(`
+    SELECT s.*,
+      COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
+      COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
+      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+    FROM sessions s
+    ${where}
+    ORDER BY
+      CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
+      datetime(s.last_event_at) DESC,
+      s.id DESC
+    ${applyLimit ? 'LIMIT ?' : ''}
+  `).all(...queryValues) as MonitorSessionRow[];
+
+  return { sessions, total: sessions.length };
+}
+
+export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
+  const db = getDb();
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.agent) {
+    conditions.push('agent_type = ?');
+    values.push(params.agent);
+  }
+  if (params.event_type) {
+    conditions.push('event_type = ?');
+    values.push(params.event_type);
+  }
+  if (params.tool_name) {
+    conditions.push('tool_name = ?');
+    values.push(params.tool_name);
+  }
+  if (params.session_id) {
+    conditions.push('session_id = ?');
+    values.push(params.session_id);
+  }
+  if (params.branch) {
+    conditions.push('branch = ?');
+    values.push(params.branch);
+  }
+  if (params.model) {
+    conditions.push('model = ?');
+    values.push(params.model);
+  }
+  if (params.source) {
+    conditions.push('source = ?');
+    values.push(params.source);
+  }
+  if (params.since) {
+    conditions.push('created_at >= datetime(?)');
+    values.push(params.since);
+  }
+  if (params.until) {
+    conditions.push('created_at <= datetime(?)');
+    values.push(params.until);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = Math.min(Math.max(params.limit ?? 50, 1), 500);
+  const offset = Math.max(params.offset ?? 0, 0);
+  const total = (db.prepare(`SELECT COUNT(*) as c FROM events ${where}`).get(...values) as CountResult).c;
+  const events = db.prepare(`
+    SELECT * FROM events ${where}
+    ORDER BY datetime(created_at) DESC, id DESC
+    LIMIT ? OFFSET ?
+  `).all(...values, limit, offset) as MonitorEventRow[];
+
+  return { events, total };
+}
+
+const MONITOR_QUOTA_DEFAULTS: Record<'claude' | 'codex', Omit<MonitorQuotaSnapshot, 'provider'>> = {
+  claude: {
+    agent_type: 'claude_code',
+    status: 'unavailable',
+    source: null,
+    updated_at: null,
+    account_label: null,
+    plan_type: null,
+    limit_id: null,
+    limit_name: null,
+    error_message: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+  },
+  codex: {
+    agent_type: 'codex',
+    status: 'unavailable',
+    source: null,
+    updated_at: null,
+    account_label: null,
+    plan_type: null,
+    limit_id: null,
+    limit_name: null,
+    error_message: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+  },
+};
+
+function monitorQuotaWindow(row: {
+  used_percent: number | null;
+  resets_at: string | null;
+  window_minutes: number | null;
+}): MonitorQuotaSnapshot['primary'] {
+  if (row.used_percent == null || !Number.isFinite(row.used_percent)) return null;
+  const usedPercent = Math.max(0, Math.min(row.used_percent, 100));
+  return {
+    used_percent: usedPercent,
+    remaining_percent: Math.max(0, Math.min(100 - usedPercent, 100)),
+    resets_at: row.resets_at,
+    window_minutes: row.window_minutes,
+  };
+}
+
+function listMonitorProviderQuotas(): MonitorQuotaSnapshot[] {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      provider, agent_type, status, source, updated_at, account_label, plan_type,
+      limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
+      primary_resets_at, secondary_used_percent, secondary_window_minutes,
+      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance
+    FROM provider_quotas
+  `).all() as Array<{
+    provider: 'claude' | 'codex';
+    agent_type: 'claude_code' | 'codex';
+    status: MonitorQuotaSnapshot['status'];
+    source: string | null;
+    updated_at: string | null;
+    account_label: string | null;
+    plan_type: string | null;
+    limit_id: string | null;
+    limit_name: string | null;
+    error_message: string | null;
+    primary_used_percent: number | null;
+    primary_window_minutes: number | null;
+    primary_resets_at: string | null;
+    secondary_used_percent: number | null;
+    secondary_window_minutes: number | null;
+    secondary_resets_at: string | null;
+    credits_has_credits: number | null;
+    credits_unlimited: number | null;
+    credits_balance: string | null;
+  }>;
+
+  const byProvider = new Map(rows.map(row => [row.provider, row]));
+  return (['claude', 'codex'] as const).map((provider) => {
+    const row = byProvider.get(provider);
+    if (!row) return { provider, ...MONITOR_QUOTA_DEFAULTS[provider] };
+
+    return {
+      provider,
+      agent_type: row.agent_type,
+      status: row.status,
+      source: row.source,
+      updated_at: row.updated_at,
+      account_label: row.account_label,
+      plan_type: row.plan_type,
+      limit_id: row.limit_id,
+      limit_name: row.limit_name,
+      error_message: row.error_message,
+      primary: monitorQuotaWindow({
+        used_percent: row.primary_used_percent,
+        resets_at: row.primary_resets_at,
+        window_minutes: row.primary_window_minutes,
+      }),
+      secondary: monitorQuotaWindow({
+        used_percent: row.secondary_used_percent,
+        resets_at: row.secondary_resets_at,
+        window_minutes: row.secondary_window_minutes,
+      }),
+      credits: row.credits_has_credits == null && row.credits_unlimited == null && row.credits_balance == null
+        ? null
+        : {
+            has_credits: Boolean(row.credits_has_credits),
+            unlimited: Boolean(row.credits_unlimited),
+            balance: row.credits_balance,
+          },
+    };
+  });
+}
+
+export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
+  const db = getDb();
+  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  if (params.agent) {
+    conditions.push('agent_type = ?');
+    values.push(params.agent);
+  }
+  if (params.since) {
+    conditions.push('created_at >= datetime(?)');
+    values.push(params.since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const totals = db.prepare(`
+    SELECT
+      COUNT(*) as total_events,
+      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(cost_usd), 0) as total_cost_usd
+    FROM events ${where}
+  `).get(...values) as {
+    total_events: number;
+    total_tokens_in: number;
+    total_tokens_out: number;
+    total_cost_usd: number;
+  };
+
+  const activeSessions = (db.prepare(
+    `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
+  ).get() as { count: number }).count;
+  const totalSessions = (db.prepare(
+    `SELECT COUNT(*) as count FROM sessions`
+  ).get() as { count: number }).count;
+  const liveSessions = (db.prepare(
+    `SELECT COUNT(*) as count FROM sessions WHERE status != 'ended'`
+  ).get() as { count: number }).count;
+  const activeAgents = (db.prepare(
+    `SELECT COUNT(DISTINCT agent_type) as count FROM sessions WHERE status != 'ended'`
+  ).get() as { count: number }).count;
+
+  const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
+  const toolRows = db.prepare(`
+    SELECT tool_name, COUNT(*) as count FROM events
+    ${toolWhere}
+    GROUP BY tool_name ORDER BY count DESC
+  `).all(...values) as { tool_name: string; count: number }[];
+  const toolBreakdown = Object.fromEntries(toolRows.map(row => [row.tool_name, row.count]));
+
+  const agentRows = db.prepare(`
+    SELECT agent_type, COUNT(*) as count FROM events ${where}
+    GROUP BY agent_type ORDER BY count DESC
+  `).all(...values) as { agent_type: string; count: number }[];
+  const agentBreakdown = Object.fromEntries(agentRows.map(row => [row.agent_type, row.count]));
+
+  const modelWhere = conditions.length > 0 ? `${where} AND model IS NOT NULL` : 'WHERE model IS NOT NULL';
+  const modelRows = db.prepare(`
+    SELECT model, COUNT(*) as count FROM events
+    ${modelWhere}
+    GROUP BY model ORDER BY count DESC
+  `).all(...values) as { model: string; count: number }[];
+  const modelBreakdown = Object.fromEntries(modelRows.map(row => [row.model, row.count]));
+
+  const branchRows = db.prepare(`
+    SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC
+  `).all() as { branch: string }[];
+
+  const quotaMonitor = listMonitorProviderQuotas();
+  return {
+    total_events: totals.total_events,
+    active_sessions: activeSessions,
+    total_sessions: totalSessions,
+    live_sessions: liveSessions,
+    active_agents: activeAgents,
+    total_tokens_in: totals.total_tokens_in,
+    total_tokens_out: totals.total_tokens_out,
+    total_cost_usd: totals.total_cost_usd,
+    tool_breakdown: toolBreakdown,
+    agent_breakdown: agentBreakdown,
+    model_breakdown: modelBreakdown,
+    branches: branchRows.map(row => row.branch),
+    quota_monitor: quotaMonitor,
+    usage_monitor: quotaMonitor,
+  };
+}
+
+export function getMonitorFilterOptions(): MonitorFilterOptions {
+  const db = getDb();
+
+  const agentTypes = (db.prepare(
+    'SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL ORDER BY agent_type'
+  ).all() as { agent_type: string }[]).map(row => row.agent_type);
+
+  const eventTypes = (db.prepare(
+    'SELECT DISTINCT event_type FROM events WHERE event_type IS NOT NULL ORDER BY event_type'
+  ).all() as { event_type: string }[]).map(row => row.event_type);
+
+  const toolNames = (db.prepare(
+    'SELECT DISTINCT tool_name FROM events WHERE tool_name IS NOT NULL ORDER BY tool_name'
+  ).all() as { tool_name: string }[]).map(row => row.tool_name);
+
+  const models = (db.prepare(
+    'SELECT DISTINCT model FROM events WHERE model IS NOT NULL ORDER BY model'
+  ).all() as { model: string }[]).map(row => row.model);
+
+  const projects = (db.prepare(
+    'SELECT DISTINCT project FROM sessions WHERE project IS NOT NULL ORDER BY project'
+  ).all() as { project: string }[]).map(row => row.project);
+
+  const branchRows = db.prepare(`
+    SELECT branch, project, MAX(last_event_at) as latest
+    FROM sessions
+    WHERE branch IS NOT NULL AND branch != 'HEAD'
+    GROUP BY branch
+    ORDER BY latest DESC
+  `).all() as { branch: string; project: string | null; latest: string }[];
+  const branches = branchRows.map(row => ({
+    value: row.branch,
+    label: row.project ? `${row.project} / ${row.branch}` : row.branch,
+  }));
+
+  const sources = (db.prepare(
+    'SELECT DISTINCT source FROM events WHERE source IS NOT NULL ORDER BY source'
+  ).all() as { source: string }[]).map(row => row.source);
+
+  return { agent_types: agentTypes, event_types: eventTypes, tool_names: toolNames, models, projects, branches, sources };
+}
+
+export function getMonitorSessionWithEvents(sessionId: string, eventLimit = 10): {
+  session: MonitorSessionRow | undefined;
+  events: MonitorEventRow[];
+} {
+  const db = getDb();
+  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+  const limit = Math.min(Math.max(eventLimit, 0), 500);
+
+  const session = db.prepare(`
+    SELECT s.*,
+      COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
+      COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
+      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
+      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
+    FROM sessions s
+    WHERE s.id = ?
+  `).get(sessionId) as MonitorSessionRow | undefined;
+
+  const events = db.prepare(`
+    SELECT * FROM events
+    WHERE session_id = ?
+    ORDER BY datetime(created_at) DESC, id DESC
+    LIMIT ?
+  `).all(sessionId, limit) as MonitorEventRow[];
+
+  return { session, events };
+}
+
+function monitorTranscriptDetail(event: MonitorTranscriptEvent): string | undefined {
+  try {
+    const meta = JSON.parse(event.metadata || '{}') as Record<string, unknown>;
+    if (typeof meta.message === 'string' && event.event_type === 'user_prompt') return meta.message;
+    if (typeof meta.content_preview === 'string') return meta.content_preview;
+    if (typeof meta.command === 'string') return meta.command;
+    if (typeof meta.file_path === 'string') return meta.file_path;
+    if (typeof meta.pattern === 'string') return meta.pattern;
+    if (typeof meta.query === 'string') return meta.query;
+    if (typeof meta.diff_preview === 'string') return meta.diff_preview;
+    if (typeof meta.error === 'string') return meta.error;
+    if (meta.error && typeof meta.error === 'object' && 'message' in meta.error) {
+      const message = (meta.error as { message?: unknown }).message;
+      if (typeof message === 'string') return message;
+    }
+    if (meta.arguments && typeof meta.arguments === 'object' && 'cmd' in meta.arguments) {
+      const command = (meta.arguments as { cmd?: unknown }).cmd;
+      if (typeof command === 'string') return command;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function monitorTranscriptRole(eventType: string): MonitorTranscriptEntry['role'] {
+  switch (eventType) {
+    case 'session_start':
+    case 'session_end':
+      return 'system';
+    case 'user_prompt':
+      return 'user';
+    case 'tool_use':
+      return 'tool';
+    case 'error':
+      return 'assistant';
+    default:
+      return 'assistant';
+  }
+}
+
+function monitorTranscriptEntry(event: MonitorTranscriptEvent): MonitorTranscriptEntry {
+  const entry: MonitorTranscriptEntry = {
+    role: monitorTranscriptRole(event.event_type),
+    type: event.event_type,
+    timestamp: event.client_timestamp || event.created_at,
+  };
+
+  if (event.tool_name) entry.tool_name = event.tool_name;
+  const detail = monitorTranscriptDetail(event);
+  if (detail) entry.detail = detail;
+  if (event.status !== 'success') entry.status = event.status;
+  if (event.model) entry.model = event.model;
+  if (event.tokens_in > 0) entry.tokens_in = event.tokens_in;
+  if (event.tokens_out > 0) entry.tokens_out = event.tokens_out;
+  if (event.cost_usd && event.cost_usd > 0) entry.cost_usd = event.cost_usd;
+  if (event.duration_ms) entry.duration_ms = event.duration_ms;
+
+  return entry;
+}
+
+function monitorTranscriptContent(entry: MonitorTranscriptEntry): string {
+  const label = entry.tool_name ? `${entry.type} > ${entry.tool_name}` : entry.type;
+  return entry.detail ? `${label}: ${entry.detail}` : label;
+}
+
+export function getMonitorSessionTranscript(sessionId: string): {
+  session_id: string;
+  entries: MonitorTranscriptEntry[];
+  transcript: MonitorTranscriptRow[];
+} | null {
+  const db = getDb();
+  const events = db.prepare(`
+    SELECT id, event_type, tool_name, status, tokens_in, tokens_out,
+           model, cost_usd, duration_ms, created_at, client_timestamp, metadata
+    FROM events
+    WHERE session_id = ?
+    ORDER BY datetime(created_at) ASC, id ASC
+  `).all(sessionId) as MonitorTranscriptEvent[];
+
+  if (events.length === 0) return null;
+
+  const entries = events.map(monitorTranscriptEntry);
+  return {
+    session_id: sessionId,
+    entries,
+    transcript: entries.map(entry => ({
+      role: entry.role,
+      content: monitorTranscriptContent(entry),
+      timestamp: entry.timestamp,
+    })),
+  };
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {

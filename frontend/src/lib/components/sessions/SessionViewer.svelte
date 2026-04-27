@@ -31,8 +31,8 @@
   let totalMessages = $state(0);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let loadingPrevious = $state(false);
   let loadingMore = $state(false);
-  let hasMore = $state(false);
   let activity = $state<SessionActivity | null>(null);
   let activityLoading = $state(true);
   let activityError = $state<string | null>(null);
@@ -55,6 +55,10 @@
     return getSessionPreviewText(session.first_message) || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12));
   });
   const showMinimap = $derived.by(() => activityLoading || !!activityError || ((activity?.data.length ?? 0) > 0));
+  const loadedStartOrdinal = $derived(messages[0]?.ordinal ?? null);
+  const loadedEndOrdinal = $derived(messages[messages.length - 1]?.ordinal ?? null);
+  const hasPreviousMessages = $derived(loadedStartOrdinal != null && loadedStartOrdinal > 0);
+  const hasNextMessages = $derived(loadedEndOrdinal != null && totalMessages > 0 && loadedEndOrdinal < totalMessages - 1);
 
   function clearHighlightTimer() {
     if (highlightTimer) {
@@ -119,11 +123,25 @@
     scheduleActiveBucketSync();
   }
 
+  async function loadWindowAroundOrdinal(targetOrdinal: number): Promise<boolean> {
+    const res = await fetchMessages(sessionId, {
+      around_ordinal: targetOrdinal,
+      limit: PAGE_SIZE,
+    });
+    messages = res.data;
+    totalMessages = res.total;
+    await tick();
+    scheduleActiveBucketSync();
+    return res.data.length > 0;
+  }
+
   async function ensureOrdinalLoaded(targetOrdinal: number) {
-    while ((messages[messages.length - 1]?.ordinal ?? -1) < targetOrdinal && hasMore) {
-      const loaded = await loadMore();
-      if (!loaded) break;
+    const startOrdinal = messages[0]?.ordinal ?? null;
+    const endOrdinal = messages[messages.length - 1]?.ordinal ?? null;
+    if (startOrdinal != null && endOrdinal != null && targetOrdinal >= startOrdinal && targetOrdinal <= endOrdinal) {
+      return;
     }
+    await loadWindowAroundOrdinal(targetOrdinal);
   }
 
   function findLoadedOrdinal(targetOrdinal: number): number | null {
@@ -197,7 +215,9 @@
     try {
       const [sess, msgs, kids, activityData] = await Promise.all([
         fetchBrowsingSession(sessionId),
-        fetchMessages(sessionId, { limit: PAGE_SIZE }),
+        fetchMessages(sessionId, initialMessageOrdinal != null
+          ? { around_ordinal: initialMessageOrdinal, limit: PAGE_SIZE }
+          : { limit: PAGE_SIZE }),
         fetchSessionChildren(sessionId).catch(() => ({ data: [] })),
         fetchSessionActivity(sessionId).catch((err) => {
           console.error('Failed to load session activity:', err);
@@ -209,7 +229,6 @@
       messages = msgs.data;
       totalMessages = msgs.total;
       children = kids.data;
-      hasMore = msgs.data.length < msgs.total;
       activity = activityData;
       try {
         await pins.loadSession(sessionId);
@@ -219,7 +238,9 @@
       sessionPinnedOrdinals = [...(pins.sessionPins[sessionId] ?? [])];
     } catch (err) {
       console.error('Failed to load session:', err);
-      error = 'Failed to load session.';
+      error = err instanceof Error && err.message.includes('(404)')
+        ? `Session not found: ${sessionId}`
+        : 'Failed to load session.';
     } finally {
       loading = false;
       activityLoading = false;
@@ -232,15 +253,16 @@
   }
 
   async function loadMore(): Promise<boolean> {
-    if (loadingMore || !hasMore) return false;
+    if (loadingMore || !hasNextMessages) return false;
     loadingMore = true;
     try {
+      const nextOffset = (messages[messages.length - 1]?.ordinal ?? -1) + 1;
       const res = await fetchMessages(sessionId, {
-        offset: messages.length,
+        offset: nextOffset,
         limit: PAGE_SIZE,
       });
       messages = [...messages, ...res.data];
-      hasMore = messages.length < res.total;
+      totalMessages = res.total;
       await tick();
       scheduleActiveBucketSync();
       return res.data.length > 0;
@@ -249,6 +271,34 @@
       return false;
     } finally {
       loadingMore = false;
+    }
+  }
+
+  async function loadPrevious(): Promise<boolean> {
+    if (loadingPrevious || !hasPreviousMessages) return false;
+    const startOrdinal = messages[0]?.ordinal ?? 0;
+    const offset = Math.max(0, startOrdinal - PAGE_SIZE);
+    const limit = startOrdinal - offset;
+    const previousScrollHeight = transcriptEl?.scrollHeight ?? 0;
+    loadingPrevious = true;
+    try {
+      const res = await fetchMessages(sessionId, {
+        offset,
+        limit,
+      });
+      messages = [...res.data, ...messages];
+      totalMessages = res.total;
+      await tick();
+      if (transcriptEl) {
+        transcriptEl.scrollTop += transcriptEl.scrollHeight - previousScrollHeight;
+      }
+      scheduleActiveBucketSync();
+      return res.data.length > 0;
+    } catch (err) {
+      console.error('Failed to load previous messages:', err);
+      return false;
+    } finally {
+      loadingPrevious = false;
     }
   }
 
@@ -264,7 +314,7 @@
   });
 </script>
 
-<main class="flex-1 overflow-hidden flex flex-col">
+<main class="flex-1 min-h-0 overflow-hidden flex flex-col">
   <!-- Header -->
   <div class="border-b border-gray-800 px-4 sm:px-6 py-3 flex items-center gap-3 shrink-0">
     <button
@@ -324,8 +374,8 @@
   {/if}
 
   <!-- Messages -->
-  <div class="flex-1 overflow-hidden px-4 sm:px-6 py-4">
-    <div class="flex h-full flex-col gap-4 lg:flex-row lg:items-start">
+  <div class="min-h-0 flex-1 overflow-hidden px-4 sm:px-6 py-4">
+    <div class="flex h-full min-h-0 flex-col gap-4 lg:flex-row lg:items-start">
       <div
         bind:this={transcriptEl}
         class="min-h-0 flex-1 overflow-y-auto"
@@ -354,6 +404,18 @@
               <div class="text-center py-16 text-gray-500 text-sm">No messages in this session.</div>
             {/if}
           {:else}
+            {#if hasPreviousMessages}
+              <div class="text-center py-3">
+                <button
+                  class="text-sm text-blue-400 hover:text-blue-300"
+                  onclick={() => loadPrevious()}
+                  disabled={loadingPrevious}
+                >
+                  {loadingPrevious ? 'Loading...' : `Load previous (${loadedStartOrdinal}/${totalMessages})`}
+                </button>
+              </div>
+            {/if}
+
             {#each messages as message (message.id)}
                 <MessageBlock
                   message={message}
@@ -365,14 +427,14 @@
               />
             {/each}
 
-            {#if hasMore}
+            {#if hasNextMessages}
               <div class="text-center py-3">
                 <button
                   class="text-sm text-blue-400 hover:text-blue-300"
                   onclick={() => loadMore()}
                   disabled={loadingMore}
                 >
-                  {loadingMore ? 'Loading...' : `Load more (${messages.length}/${totalMessages})`}
+                  {loadingMore ? 'Loading...' : `Load more (${(loadedEndOrdinal ?? -1) + 1}/${totalMessages})`}
                 </button>
               </div>
             {/if}

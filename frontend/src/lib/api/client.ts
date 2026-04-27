@@ -536,10 +536,12 @@ export interface InsightGenerationStatus {
 
 type Filters = Record<string, string>;
 
-interface RawCostData {
-  timeline?: Array<{ bucket: string; cost_usd: number }>;
-  by_project?: Array<{ project: string; cost_usd: number; session_count?: number; event_count?: number }>;
-  by_model?: Array<{ model: string; cost_usd: number }>;
+function monitorCostFiltersToUsageParams(filters: Filters): Record<string, string> {
+  const params: Record<string, string> = {};
+  if (filters.project) params.project = filters.project;
+  if (filters.agent_type) params.agent = filters.agent_type;
+  if (filters.since) params.date_from = filters.since;
+  return params;
 }
 
 function qs(params: Record<string, string | number | undefined>): string {
@@ -559,64 +561,93 @@ async function checkedJson<T>(res: Response, context: string): Promise<T> {
 // V1 endpoints (Monitor tab)
 
 export async function fetchStats(filters: Filters = {}): Promise<Stats> {
-  const res = await fetch(`/api/stats${qs(filters)}`);
+  const params: Record<string, string> = {};
+  if (filters.agent_type) params.agent = filters.agent_type;
+  if (filters.agent) params.agent = filters.agent;
+  if (filters.since) params.since = filters.since;
+  if (filters.date_from) params.since = filters.date_from;
+
+  const res = await fetch(`/api/v2/monitor/stats${qs(params)}`);
   return checkedJson(res, 'fetchStats');
 }
 
 export async function fetchEvents(filters: Filters = {}, limit = 100): Promise<{ events: AgentEvent[]; total: number }> {
-  const res = await fetch(`/api/events${qs({ ...filters, limit })}`);
+  const params: Record<string, string | number> = { limit };
+  if (filters.offset) params.offset = filters.offset;
+  if (filters.agent_type) params.agent = filters.agent_type;
+  if (filters.agent) params.agent = filters.agent;
+  if (filters.event_type) params.event_type = filters.event_type;
+  if (filters.tool_name) params.tool_name = filters.tool_name;
+  if (filters.session_id) params.session_id = filters.session_id;
+  if (filters.branch) params.branch = filters.branch;
+  if (filters.model) params.model = filters.model;
+  if (filters.source) params.source = filters.source;
+  if (filters.since) params.since = filters.since;
+  if (filters.until) params.until = filters.until;
+
+  const res = await fetch(`/api/v2/monitor/events${qs(params)}`);
   return checkedJson(res, 'fetchEvents');
 }
 
-export async function fetchSessions(filters: Filters = {}): Promise<{ sessions: Session[]; total: number }> {
-  const res = await fetch(`/api/sessions${qs(filters)}`);
-  return checkedJson(res, 'fetchSessions');
+export async function fetchMonitorSessions(filters: Filters = {}): Promise<{ sessions: Session[]; total: number }> {
+  const params: Record<string, string> = {};
+  if (filters.status) params.status = filters.status;
+  if (filters.exclude_status) params.exclude_status = filters.exclude_status;
+  if (filters.project) params.project = filters.project;
+  if (filters.agent_type) params.agent = filters.agent_type;
+  if (filters.agent) params.agent = filters.agent;
+  if (filters.since) params.date_from = filters.since;
+  if (filters.date_from) params.date_from = filters.date_from;
+  if (filters.date_to) params.date_to = filters.date_to;
+  if (filters.limit) params.limit = filters.limit;
+
+  const res = await fetch(`/api/v2/monitor/sessions${qs(params)}`);
+  return checkedJson(res, 'fetchMonitorSessions');
 }
 
 export async function fetchFilterOptions(): Promise<FilterOptions> {
-  const res = await fetch('/api/filter-options');
+  const res = await fetch('/api/v2/monitor/filter-options');
   return checkedJson(res, 'fetchFilterOptions');
 }
 
 export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
-  const res = await fetch(`/api/stats/cost${qs(filters)}`);
-  const data = await checkedJson<RawCostData>(res, 'fetchCostData');
+  const params = monitorCostFiltersToUsageParams(filters);
+  const [daily, projects, models] = await Promise.all([
+    fetchUsageDaily(params),
+    fetchUsageProjects(params),
+    fetchUsageModels(params),
+  ]);
+
   return {
-    timeline: Array.isArray(data.timeline)
-      ? data.timeline.map((item) => ({
-          date: item.bucket,
-          cost: item.cost_usd,
-        }))
-      : [],
-    by_project: Array.isArray(data.by_project)
-      ? data.by_project.map((item) => ({
-          project: item.project,
-          cost: item.cost_usd,
-          session_count: item.session_count ?? 0,
-          event_count: item.event_count ?? 0,
-        }))
-      : [],
-    by_model: Array.isArray(data.by_model)
-      ? data.by_model.map((item) => ({
-          model: item.model,
-          cost: item.cost_usd,
-        }))
-      : [],
+    timeline: daily.data.map((item) => ({
+      date: item.date,
+      cost: item.cost_usd,
+    })),
+    by_project: projects.data.map((item) => ({
+      project: item.project,
+      cost: item.cost_usd,
+      session_count: item.session_count,
+      event_count: item.usage_events,
+    })),
+    by_model: models.data.map((item) => ({
+      model: item.model,
+      cost: item.cost_usd,
+    })),
   };
 }
 
 export async function fetchToolStats(filters: Filters = {}): Promise<ToolStats> {
-  const res = await fetch(`/api/stats/tools${qs(filters)}`);
+  const res = await fetch(`/api/v2/monitor/tools${qs(monitorCostFiltersToUsageParams(filters))}`);
   return checkedJson(res, 'fetchToolStats');
 }
 
 export async function fetchSessionDetail(id: string, eventLimit = 10): Promise<{ session: Session; events: AgentEvent[] }> {
-  const res = await fetch(`/api/sessions/${id}?event_limit=${eventLimit}`);
+  const res = await fetch(`/api/v2/monitor/sessions/${encodeURIComponent(id)}?event_limit=${eventLimit}`);
   return checkedJson(res, 'fetchSessionDetail');
 }
 
 export async function fetchTranscript(id: string): Promise<{ transcript: Array<{ role: string; content: string; timestamp?: string }> }> {
-  const res = await fetch(`/api/sessions/${id}/transcript`);
+  const res = await fetch(`/api/v2/monitor/sessions/${encodeURIComponent(id)}/transcript`);
   return checkedJson(res, 'fetchTranscript');
 }
 
@@ -632,7 +663,7 @@ export async function fetchBrowsingSession(id: string): Promise<BrowsingSession>
   return checkedJson(res, 'fetchBrowsingSession');
 }
 
-export async function fetchMessages(sessionId: string, params: { offset?: number; limit?: number } = {}): Promise<{ data: Message[]; total: number }> {
+export async function fetchMessages(sessionId: string, params: { offset?: number; limit?: number; around_ordinal?: number } = {}): Promise<{ data: Message[]; total: number }> {
   const res = await fetch(`/api/v2/sessions/${sessionId}/messages${qs(params)}`);
   return checkedJson(res, 'fetchMessages');
 }
