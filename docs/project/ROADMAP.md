@@ -9,6 +9,32 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 - Keep converging the Rust backend onto the same canonical web contract instead of letting it evolve as a separate product shape.
 - Improve the Live surface, especially around fidelity boundaries, session noise, and operator clarity when data is summary-only.
 
+## Focus Areas
+
+### Legacy Surface Reduction
+
+- Define cutover gates for replacing or redirecting the legacy `/` dashboard with the Svelte app.
+- Preserve v1 endpoints intentionally where they support ingest clients, SSE compatibility, provider quota bridge behavior, or low-risk legacy access.
+- Remove legacy-only UI paths once the Svelte app covers the corresponding operator workflows and manual regression checks are stable.
+
+### Live Fidelity and Operator Clarity
+
+- Improve Codex live projection beyond the current summary-first OTEL path where richer local or telemetry sources are available.
+- Make fidelity boundaries obvious in the UI so operators can distinguish transcript-capable sessions from summary-only sessions without guessing.
+- Reduce session noise through better grouping, filtering, and session lifecycle presentation in Live and Monitor views.
+
+### Rust Runtime Decision Path
+
+- Decide what Rust must prove to remain a maintained alternate runtime now that desktop packaging is not imminent.
+- Keep Rust parity focused on the canonical `/app` and `/api/v2/*` contract instead of broadening it into an independent product surface.
+- Use shared contract and runtime tests to make gaps explicit before any default-runtime or distribution decision.
+
+### Product Polish and Release Confidence
+
+- Continue tightening Monitor, Live, Sessions, Search, Analytics, Usage, and Insights around real review and monitoring workflows.
+- Maintain a manual regression checklist for the canonical Svelte app, especially around deep links, long transcripts, live updates, and drawer/navigation behavior.
+- Prefer small UI refinements that reduce ambiguity over larger redesigns unless operator workflows show a clear gap.
+
 ## Next
 
 - Define and verify parity gates for retiring or sharply reducing reliance on the legacy `/` dashboard.
