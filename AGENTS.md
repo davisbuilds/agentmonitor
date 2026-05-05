@@ -14,42 +14,40 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 
 ## Documentation Map
 
-- `docs/system/ARCHITECTURE.md` — runtime layout, directory map, DB schema, route file map, SSE broadcasting, event contract, OTEL parser + Codex telemetry capability matrix.
-- `docs/system/FEATURES.md` — product surface, full v1/v2 API endpoint catalog, SSE event types, capture/redaction controls.
-- `docs/system/OPERATIONS.md` — operational runbook.
-- `docs/project/ROADMAP.md`, `docs/project/GIT_HISTORY_POLICY.md` — project direction and history conventions.
-- `rust-backend/AGENTS.md` — Rust backend commands, gotchas, parity tests.
-- `frontend/AGENTS.md` — Svelte frontend code map, dev workflow, API consumption.
+- `docs/system/ARCHITECTURE.md` — high-level flow, canonical surface, Rust runtime status, route map, DB schema, SSE broadcasting, event contract, pricing engine, import pipeline, session sync, OTEL parser + Codex telemetry capability matrix, runtime path resolution, directory map.
+- `docs/system/FEATURES.md` — product surface, full v1/v2 API endpoint catalog, SSE event types, capture/redaction controls, analytics/usage/insights/search.
+- `docs/system/OPERATIONS.md` — local dev, full command catalog, all `AGENTMONITOR_*` env vars, Claude Code + Codex hook install, historical import, CI gates, runtime artifacts, manual live verification.
+- `docs/api/` — API navigation reference.
+- `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity, Rust convergence).
+- `docs/project/GIT_HISTORY_POLICY.md` — merge-commit-only policy and rationale.
+- `rust-backend/AGENTS.md`, `frontend/AGENTS.md` — domain-specific guidance.
+- `hooks/claude-code/README.md`, `hooks/codex/README.md` — hook setup details.
 
-## Working Commands
+## Quickstart
 
-- Install: `pnpm install` (workspace install — backend + `frontend/`)
-- Dev server: `pnpm dev`
-- Production build / start: `pnpm build` / `pnpm start`
-- CSS: `pnpm css:build`, `pnpm css:watch`
-- Import historical logs: `pnpm run import` (`--source`, `--from`, `--to`, `--dry-run`, `--force`)
-- Reparse session-browser history: `pnpm reparse:sessions` (Claude), `pnpm reparse:codex-sessions` (Codex)
-- Seed local demo data (server must be running): `pnpm seed`
-- Install Claude quota bridge: `./hooks/claude-code/install-statusline-bridge.sh`
+```bash
+pnpm install
+pnpm dev          # terminal 1: server in watch mode
+pnpm frontend:dev # terminal 2: Svelte at :5173 with API proxy
+pnpm css:watch    # terminal 3: shared Tailwind output (optional)
+```
 
-For canonical Svelte UI dev, run three terminals: `pnpm dev`, `pnpm css:watch`, `pnpm frontend:dev`.
+Full command catalog (build, test, parity, import, reparse, seed, bench) is in `docs/system/OPERATIONS.md`.
 
 ## Implementation Guardrails
 
 - Keep TypeScript ESM import style consistent (existing `.js` extension pattern in TS imports).
 - Keep v1 SQL in `src/db/queries.ts`, v2 SQL in `src/db/v2-queries.ts`. Keep v2 route handlers in `src/api/v2/router.ts`.
 - Prefer extending the Svelte `/app/` product path and v2 contracts over adding new behavior to the legacy `/` dashboard.
-- Preserve logical commit history on feature branches. For PR merges, prefer merge commits and do not squash branch history.
 - If API response shape changes, update `README.md` in the same change.
-- Do not commit local runtime artifacts (`data/`, `*.db`, generated CSS output).
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start; `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
 - **Dashboard bootstrap hard-depends on `GET /api/events`**: `public/js/app.js` parses stats, events, and sessions together before loading cost/tool sections. If `GET /api/events` returns non-JSON (e.g. 405 HTML), `reloadData()` throws and cost/tool panels stay blank even when `/api/stats/cost` has data.
 - **Codex OTEL drop-out**: if Codex terminal activity is visible but `source=otel` stops updating, verify sessions are not still exporting to `127.0.0.1:3142` from older runtime config.
-- **Provider quotas**: Monitor header uses provider-native snapshots only. Codex quotas come from local `codex app-server`; Claude quotas require the statusline bridge and otherwise render as unavailable rather than estimated.
+- **Provider quotas**: Monitor header uses provider-native snapshots only. Codex from local `codex app-server`; Claude requires the statusline bridge or renders as unavailable rather than estimated.
 
 ## Testing
 
-- **Pre-push**: `pnpm build`, `pnpm css:build` (if frontend styles touched), `pnpm rust:test` (if Rust touched).
+- **Pre-push** (matches required CI): `pnpm lint`, `pnpm build`, `pnpm test`. Run `pnpm rust:test` if Rust touched, `pnpm css:build` if frontend styles touched.
 - **TDD**: red/green for new features and major changes.
-- **E2E**: `pnpm exec playwright test` for browser-based UI testing.
+- **E2E**: `pnpm exec playwright test`.
 - **Sanity**: `GET /api/health`.
