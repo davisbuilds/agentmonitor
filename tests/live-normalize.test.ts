@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  applyLivePrivacyPolicy,
   normalizeClaudeBlock,
   normalizeCodexItem,
   normalizePlanState,
@@ -71,9 +72,88 @@ test('normalizeCodexItem maps command and diff records', () => {
   assert.equal(diff.kind, 'diff_snapshot');
 });
 
+test('normalizeCodexItem maps every reserved live item kind', () => {
+  const cases = [
+    ['fileChange', 'file_change'],
+    ['mcpToolCall', 'tool_call'],
+    ['tool_result', 'tool_result'],
+    ['plan', 'plan_update'],
+    ['turn/plan/updated', 'plan_update'],
+    ['diff', 'diff_snapshot'],
+    ['reasoning', 'reasoning'],
+    ['assistant_message', 'assistant_message'],
+    ['user_message', 'user_message'],
+    ['status', 'status_change'],
+  ] as const;
+
+  for (const [type, kind] of cases) {
+    const item = normalizeCodexItem({
+      type,
+      id: `${type}-1`,
+      status: 'completed',
+      created_at: '2026-03-23T12:01:00Z',
+      payload: { type },
+    });
+    assert.ok(item);
+    assert.equal(item.kind, kind);
+    assert.equal(item.source_item_id, `${type}-1`);
+    assert.equal(item.status, 'completed');
+  }
+});
+
 test('normalizeCodexItem returns null for unsupported records', () => {
   const item = normalizeCodexItem({ type: 'unhandled-item-type', payload: { foo: 'bar' } });
   assert.equal(item, null);
+});
+
+test('applyLivePrivacyPolicy redacts disabled prompt, reasoning, and tool argument capture', () => {
+  const basePolicy = {
+    capturePrompts: false,
+    captureReasoning: false,
+    captureToolArguments: false,
+    diffPayloadMaxBytes: 20,
+  };
+
+  assert.deepEqual(
+    applyLivePrivacyPolicy({ kind: 'user_message', payload: { text: 'secret prompt' } }, basePolicy).payload,
+    { redacted: true, reason: 'prompt_capture_disabled' },
+  );
+  assert.deepEqual(
+    applyLivePrivacyPolicy({ kind: 'reasoning', payload: { text: 'hidden chain' } }, basePolicy).payload,
+    { redacted: true, reason: 'reasoning_capture_disabled' },
+  );
+  assert.deepEqual(
+    applyLivePrivacyPolicy({ kind: 'tool_call', payload: { tool_name: 'Bash', input: { command: 'pwd' } } }, basePolicy).payload,
+    { tool_name: 'Bash', input: { redacted: true }, input_redacted: true },
+  );
+});
+
+test('applyLivePrivacyPolicy truncates oversized diff snapshots without splitting UTF-8 characters', () => {
+  const item = applyLivePrivacyPolicy(
+    { kind: 'diff_snapshot', payload: { diff: '😀'.repeat(20) } },
+    {
+      capturePrompts: true,
+      captureReasoning: true,
+      captureToolArguments: true,
+      diffPayloadMaxBytes: 25,
+    },
+  );
+
+  assert.equal(item.payload.truncated, true);
+  assert.equal(item.payload.reason, 'diff_payload_cap_exceeded');
+  assert.equal(typeof item.payload.original_size_bytes, 'number');
+  assert.equal(typeof item.payload.preview_json, 'string');
+
+  const small = { kind: 'diff_snapshot' as const, payload: { diff: 'small' } };
+  assert.equal(
+    applyLivePrivacyPolicy(small, {
+      capturePrompts: true,
+      captureReasoning: true,
+      captureToolArguments: true,
+      diffPayloadMaxBytes: 100,
+    }),
+    small,
+  );
 });
 
 test('normalizePlanState keeps only valid steps and standardizes labels', () => {

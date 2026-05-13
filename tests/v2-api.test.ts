@@ -624,6 +624,36 @@ describe('GET/POST/DELETE /api/v2 pins', () => {
     assert.equal(unpinBody.removed, true);
     assert.equal(unpinBody.message_ordinal, 0);
   });
+
+  test('returns validation and not-found errors for invalid pin operations', async () => {
+    const invalidPin = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/not-a-number/pin`, {
+      method: 'POST',
+    });
+    assert.equal(invalidPin.status, 400);
+
+    const missingMessagePin = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/999999/pin`, {
+      method: 'POST',
+    });
+    assert.equal(missingMessagePin.status, 404);
+
+    const invalidUnpin = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/not-a-number/pin`, {
+      method: 'DELETE',
+    });
+    assert.equal(invalidUnpin.status, 400);
+
+    const missingPin = await fetch(`${baseUrl}/api/v2/sessions/api-sess-001/messages/999999/pin`, {
+      method: 'DELETE',
+    });
+    assert.equal(missingPin.status, 404);
+
+    const missingSessionPin = await fetch(`${baseUrl}/api/v2/sessions/missing/messages/1/pin`, {
+      method: 'POST',
+    });
+    assert.equal(missingSessionPin.status, 404);
+
+    const missingSessionPins = await fetch(`${baseUrl}/api/v2/sessions/missing/pins`);
+    assert.equal(missingSessionPins.status, 404);
+  });
 });
 
 describe('GET /api/v2/sessions/:id/children', () => {
@@ -750,6 +780,11 @@ describe('GET /api/v2/live/sessions/:id/turns', () => {
     assert.equal(body.data[0].session_id, 'api-sess-001');
     assert.ok(body.data[0].source_turn_id.startsWith('claude-message:'));
   });
+
+  test('returns 404 for missing live session turns', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/missing-live-session/turns`);
+    assert.equal(res.status, 404);
+  });
 });
 
 describe('GET /api/v2/live/sessions/:id/items', () => {
@@ -786,6 +821,11 @@ describe('GET /api/v2/live/sessions/:id/items', () => {
     const secondBody = await second.json() as { data: Array<{ id: number }> };
     assert.ok(secondBody.data.length > 0);
     assert.ok(secondBody.data[0].id > firstBody.data[firstBody.data.length - 1].id);
+  });
+
+  test('returns 404 for missing live session items', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/missing-live-session/items`);
+    assert.equal(res.status, 404);
   });
 });
 
@@ -1433,6 +1473,42 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
 
     const missingRes = await fetch(`${baseUrl}/api/v2/insights/${generated.id}`);
     assert.equal(missingRes.status, 404);
+  });
+
+  test('validates insight list, lookup, generate, and delete inputs', async () => {
+    const invalidKindList = await fetch(`${baseUrl}/api/v2/insights?kind=bogus`);
+    assert.equal(invalidKindList.status, 400);
+
+    const invalidGet = await fetch(`${baseUrl}/api/v2/insights/not-a-number`);
+    assert.equal(invalidGet.status, 400);
+
+    const missingGet = await fetch(`${baseUrl}/api/v2/insights/999999`);
+    assert.equal(missingGet.status, 404);
+
+    const invalidDelete = await fetch(`${baseUrl}/api/v2/insights/not-a-number`, { method: 'DELETE' });
+    assert.equal(invalidDelete.status, 400);
+
+    const missingDelete = await fetch(`${baseUrl}/api/v2/insights/999999`, { method: 'DELETE' });
+    assert.equal(missingDelete.status, 404);
+
+    const invalidGenerateBodies = [
+      { kind: 'bad', date_from: '2026-03-01', date_to: '2026-03-02' },
+      { kind: 'overview', date_from: '2026-03-01' },
+      { kind: 'overview', date_from: '2026-03-01', date_to: '2026-03-02', project: 123 },
+      { kind: 'overview', date_from: '2026-03-01', date_to: '2026-03-02', agent: false },
+      { kind: 'overview', date_from: '2026-03-01', date_to: '2026-03-02', prompt: [] },
+      { kind: 'overview', date_from: '2026-03-01', date_to: '2026-03-02', provider: 'local' },
+      { kind: 'overview', date_from: '2026-03-01', date_to: '2026-03-02', model: 42 },
+    ];
+
+    for (const body of invalidGenerateBodies) {
+      const res = await fetch(`${baseUrl}/api/v2/insights/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 400);
+    }
   });
 
   test('returns generator config error when no API key is available and no test override is installed', async () => {

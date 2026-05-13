@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildActiveAgentLabel, buildCostFilters, formatMonitorCost } from '../frontend/src/lib/monitor-analytics.ts';
+import {
+  buildActiveAgentLabel,
+  buildCostFilters,
+  formatMonitorCost,
+  shortModelName,
+} from '../frontend/src/lib/monitor-analytics.ts';
 
 test('buildCostFilters applies rolling since window when no explicit since exists', () => {
   const filters = buildCostFilters({ project: 'agentmonitor' }, '60d', new Date('2026-04-10T12:00:00.000Z'));
@@ -18,6 +23,11 @@ test('buildCostFilters preserves explicit since and all-time selection', () => {
   assert.deepEqual(
     buildCostFilters({ agent_type: 'codex' }, 'all', new Date('2026-04-10T12:00:00.000Z')),
     { agent_type: 'codex' },
+  );
+
+  assert.deepEqual(
+    buildCostFilters({ project: 'agentmonitor' }, 'all', new Date('2026-04-10T12:00:00.000Z')),
+    { project: 'agentmonitor' },
   );
 });
 
@@ -44,4 +54,18 @@ test('buildActiveAgentLabel omits unavailable model metadata', () => {
     buildActiveAgentLabel('codex', [{ model: 'gpt-5.4', metadata: '{bad json' }]),
     'codex (gpt-5.4)',
   );
+});
+
+test('shortModelName compacts known provider model families', () => {
+  assert.equal(shortModelName(''), 'unknown');
+  assert.equal(shortModelName('claude-sonnet-4-5-20250929'), 'sonnet-4.5');
+  assert.equal(shortModelName('claude-opus-4-7'), 'opus-4.7');
+  assert.equal(shortModelName('claude-opus-4-6-20260101'), 'opus-4.6');
+  assert.equal(shortModelName('claude-opus-4-5-20260101'), 'opus-4.5');
+  assert.equal(shortModelName('claude-haiku-4-5-20260101'), 'haiku-4.5');
+  assert.equal(shortModelName('claude-3-5-sonnet-20241022'), 'sonnet-3.5');
+  assert.equal(shortModelName('claude-3-5-haiku-20241022'), 'haiku-3.5');
+  assert.equal(shortModelName('claude-3-opus-20240229'), 'opus-3');
+  assert.equal(shortModelName('claude-custom'), 'c-custom');
+  assert.equal(shortModelName('gpt-5.5'), 'gpt-5.5');
 });

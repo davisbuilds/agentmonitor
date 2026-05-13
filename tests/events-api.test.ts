@@ -255,6 +255,7 @@ test('POST /api/events stores client_timestamp while keeping server created_at',
 
 test('session branch refreshes from current git head when incoming branch is stale', async () => {
   const sessionId = 'session-branch-refresh';
+  const project = path.basename(process.cwd());
   const currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
     cwd: process.cwd(),
     encoding: 'utf-8',
@@ -265,7 +266,7 @@ test('session branch refreshes from current git head when incoming branch is sta
     agent_type: 'codex',
     event_type: 'tool_use',
     tool_name: 'exec_command',
-    project: 'agentmonitor',
+    project,
     branch: 'feature/stale-branch-test',
   });
   assert.equal(response.status, 201);
