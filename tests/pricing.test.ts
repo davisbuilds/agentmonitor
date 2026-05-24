@@ -47,6 +47,7 @@ describe('PricingRegistry', () => {
       const pricing = registry.lookup('opus');
       assert.ok(pricing);
       assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.deprecated, true);
     });
 
     test('finds OpenAI o3 model', () => {
@@ -146,9 +147,9 @@ describe('PricingRegistry', () => {
 
   describe('classification', () => {
     test('classifies known Claude aliases by canonical model and tier', () => {
-      assert.deepEqual(classifyModel('anthropic/sonnet'), {
-        raw_model: 'anthropic/sonnet',
-        canonical_model: 'claude-sonnet-4-20250514',
+      assert.deepEqual(classifyModel('anthropic/claude-sonnet-4-5'), {
+        raw_model: 'anthropic/claude-sonnet-4-5',
+        canonical_model: 'claude-sonnet-4-5-20250929',
         provider: 'anthropic',
         family: 'claude',
         tier: 'sonnet',
@@ -205,6 +206,18 @@ describe('PricingRegistry', () => {
       // 100K * $3/MTok + 50K * $15/MTok + 500K * $0.3/MTok + 10K * $3.75/MTok
       // = $0.30 + $0.75 + $0.15 + $0.0375
       const expected = 0.3 + 0.75 + 0.15 + 0.0375;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
+    test('calculates current cached-input price for OpenAI o3', () => {
+      const cost = registry.calculate('o3', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      // 100K * $2/MTok + 50K * $8/MTok + 40K * $0.50/MTok
+      const expected = 0.2 + 0.4 + 0.02;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 
@@ -266,6 +279,18 @@ describe('PricingRegistry', () => {
       assert.ok(cost !== null);
       // Pro has no cached-input discount in the pasted short-context table.
       const expected = 3 + 9;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
+    test('calculates current Gemini 2.5 Flash standard text pricing', () => {
+      const cost = registry.calculate('gemini-2.5-flash', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      // 100K * $0.30/MTok + 50K * $2.50/MTok + 40K * $0.03/MTok
+      const expected = 0.03 + 0.125 + 0.0012;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 
