@@ -60,6 +60,11 @@ test('buildUsageCsv includes summary and table sections', () => {
       span_days: 15,
       average_cost_per_active_day: 3.09,
       average_cost_per_session: 4.11,
+      cache_hit_rate: 0.056604,
+      estimated_cache_savings_usd: 0.00081,
+      pricing_known_events: 7,
+      pricing_unknown_events: 1,
+      unknown_model_events: 1,
       peak_day: { date: '2026-04-10', cost_usd: 4.56 },
       coverage: {
         metric_scope: 'event_usage',
@@ -100,6 +105,13 @@ test('buildUsageCsv includes summary and table sections', () => {
     models: [
       {
         model: 'gpt-5.4',
+        canonical_model: 'gpt-5.4',
+        provider: 'openai',
+        family: 'gpt',
+        tier: 'standard',
+        known: true,
+        deprecated: false,
+        pricing_status: 'known',
         cost_usd: 8.5,
         input_tokens: 3000,
         output_tokens: 500,
@@ -107,6 +119,20 @@ test('buildUsageCsv includes summary and table sections', () => {
         cache_write_tokens: 20,
         usage_events: 4,
         session_count: 2,
+      },
+    ],
+    tiers: [
+      {
+        provider: 'openai',
+        tier: 'standard',
+        cost_usd: 8.5,
+        input_tokens: 3000,
+        output_tokens: 500,
+        cache_read_tokens: 100,
+        cache_write_tokens: 20,
+        usage_events: 4,
+        session_count: 2,
+        unknown_model_events: 0,
       },
     ],
     agents: [
@@ -139,6 +165,14 @@ test('buildUsageCsv includes summary and table sections', () => {
         cache_write_tokens: 50,
         event_count: 3,
         usage_events: 2,
+        primary_model: 'gpt-5.4',
+        primary_tier: 'standard',
+        primary_provider: 'openai',
+        model_count: 1,
+        tier_costs: [
+          { provider: 'openai', tier: 'standard', cost_usd: 4.56, usage_events: 2 },
+        ],
+        unknown_model_events: 0,
         browsing_session_available: true,
       },
     ],
@@ -149,6 +183,7 @@ test('buildUsageCsv includes summary and table sections', () => {
   assert.match(csv, /Daily Usage/);
   assert.match(csv, /Projects/);
   assert.match(csv, /Models/);
+  assert.match(csv, /Tiers/);
   assert.match(csv, /Agents/);
   assert.match(csv, /Top Sessions/);
   assert.match(csv, /session-123/);

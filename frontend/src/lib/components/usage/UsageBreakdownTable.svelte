@@ -4,6 +4,7 @@
   import type {
     UsageProjectBreakdown,
     UsageModelBreakdown,
+    UsageTierBreakdown,
     UsageAgentBreakdown,
   } from '../../api/client';
 
@@ -15,19 +16,27 @@
     error = null,
   }: {
     title: string;
-    kind: 'project' | 'model' | 'agent';
-    rows: Array<UsageProjectBreakdown | UsageModelBreakdown | UsageAgentBreakdown>;
+    kind: 'project' | 'model' | 'tier' | 'agent';
+    rows: Array<UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown>;
     loading?: boolean;
     error?: string | null;
   } = $props();
 
-  function labelForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageAgentBreakdown): string {
+  function labelForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): string {
     if ('project' in row) return row.project;
     if ('model' in row) return row.model;
+    if ('tier' in row) return `${row.provider} / ${row.tier}`;
     return row.agent;
   }
 
-  function handleSelect(row: UsageProjectBreakdown | UsageModelBreakdown | UsageAgentBreakdown): void {
+  function detailForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): string {
+    const base = `${formatNumber(row.usage_events)} usage events • ${formatNumber(row.session_count)} session${row.session_count === 1 ? '' : 's'}`;
+    if ('pricing_status' in row && row.pricing_status !== 'known') return `${base} • ${row.pricing_status}`;
+    if ('unknown_model_events' in row && row.unknown_model_events > 0) return `${base} • ${formatNumber(row.unknown_model_events)} unknown`;
+    return base;
+  }
+
+  function handleSelect(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): void {
     if (kind === 'project' && 'project' in row) {
       void usage.setProject(row.project === 'unknown' ? '' : row.project);
     } else if (kind === 'agent' && 'agent' in row) {
@@ -38,6 +47,7 @@
   const helperText = $derived.by(() => {
     if (kind === 'project') return 'Click a project row to filter the page.';
     if (kind === 'agent') return 'Click an agent row to filter the page.';
+    if (kind === 'tier') return 'Tier totals are provider-neutral rollups from classified usage events.';
     return 'Model totals are event-derived and not currently filterable.';
   });
 </script>
@@ -68,15 +78,15 @@
     <div class="mt-4 space-y-2">
       {#each rows as row}
         <button
-          class="block w-full rounded-lg border border-transparent px-3 py-3 text-left transition {kind === 'model' ? 'cursor-default hover:border-transparent hover:bg-transparent' : 'hover:border-gray-700 hover:bg-gray-900/60'}"
-          disabled={kind === 'model'}
+          class="block w-full rounded-lg border border-transparent px-3 py-3 text-left transition {kind === 'model' || kind === 'tier' ? 'cursor-default hover:border-transparent hover:bg-transparent' : 'hover:border-gray-700 hover:bg-gray-900/60'}"
+          disabled={kind === 'model' || kind === 'tier'}
           onclick={() => handleSelect(row)}
         >
           <div class="flex items-center justify-between gap-3">
             <div class="min-w-0">
               <div class="truncate text-sm font-medium text-white">{labelForRow(row)}</div>
               <div class="mt-1 text-xs text-gray-500">
-                {formatNumber(row.usage_events)} usage events • {formatNumber(row.session_count)} session{row.session_count === 1 ? '' : 's'}
+                {detailForRow(row)}
               </div>
             </div>
             <div class="text-right">
