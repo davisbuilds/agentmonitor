@@ -100,8 +100,11 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 `src/pricing/` calculates per-event costs:
 
 - `PricingRegistry` loads JSON pricing data files for each model family (Claude, Codex, Gemini).
+- `PricingRegistry.resolve(model)` returns canonical model IDs after provider-prefix stripping and alias lookup.
+- `model-classification.ts` maps raw model names to provider, family, provider-neutral tier, lifecycle, and pricing-status metadata for v2 usage reporting.
 - Cost computed from `tokens_in`, `tokens_out`, `cache_read_tokens`, `cache_write_tokens`.
 - Costs stored as `cost_usd` on each event row.
+- V2 usage keeps stored `cost_usd` authoritative. Cache hit rate and estimated cache savings are derived at query time from usage rows and current pricing metadata.
 
 ## Import Pipeline
 
