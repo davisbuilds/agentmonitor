@@ -140,6 +140,20 @@ before(async () => {
       client_timestamp: '2026-04-03T10:00:00Z',
       source: 'api',
     },
+    {
+      event_id: 'usage-event-007',
+      session_id: 'usage-sess-005',
+      agent_type: 'claude_code',
+      event_type: 'assistant',
+      status: 'success' as const,
+      project: 'legacy',
+      model: 'claude-3-opus-20240229',
+      tokens_in: 100,
+      tokens_out: 10,
+      cost_usd: 0.005,
+      client_timestamp: '2026-04-04T10:00:00Z',
+      source: 'api',
+    },
   ];
 
   for (const event of events) {
@@ -241,6 +255,25 @@ describe('GET /api/v2/usage/summary', () => {
     assert.equal(body.coverage.matching_events, 1);
     assert.equal(body.coverage.usage_events, 1);
   });
+
+  test('counts deprecated models without pricing rates as unknown pricing coverage', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/summary?project=legacy`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      total_usage_events: number;
+      pricing_known_events: number;
+      pricing_unknown_events: number;
+      unknown_model_events: number;
+      estimated_cache_savings_usd: number;
+    };
+
+    assert.equal(body.total_usage_events, 1);
+    assert.equal(body.pricing_known_events, 0);
+    assert.equal(body.pricing_unknown_events, 1);
+    assert.equal(body.unknown_model_events, 0);
+    assert.equal(body.estimated_cache_savings_usd, 0);
+  });
 });
 
 describe('GET /api/v2/usage/daily', () => {
@@ -279,6 +312,7 @@ describe('GET /api/v2/usage/projects and /models', () => {
         ['alpha', 0.04, 2, 3],
         ['beta', 0.03, 1, 1],
         ['gamma', 0.015, 1, 1],
+        ['legacy', 0.005, 1, 1],
       ],
     );
   });
@@ -309,6 +343,7 @@ describe('GET /api/v2/usage/projects and /models', () => {
         ['gpt-5.4', 0.05, 3500, 800, 'standard', 'known'],
         ['claude-sonnet-4-5-20250929', 0.02, 1600, 300, 'sonnet', 'known'],
         ['unknown-expensive-model', 0.015, 300, 50, 'unknown', 'unknown'],
+        ['claude-3-opus-20240229', 0.005, 100, 10, 'opus', 'deprecated'],
       ],
     );
   });
@@ -340,6 +375,7 @@ describe('GET /api/v2/usage/tiers', () => {
         ['openai', 'standard', 0.05, 2, 2, 0],
         ['anthropic', 'sonnet', 0.02, 2, 1, 0],
         ['unknown', 'unknown', 0.015, 1, 1, 1],
+        ['anthropic', 'opus', 0.005, 1, 1, 0],
       ],
     );
   });

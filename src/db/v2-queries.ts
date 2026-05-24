@@ -2184,11 +2184,13 @@ export function getUsageSummary(params: UsageParams = {}): UsageSummary {
 
   for (const usageRow of usageRows) {
     const classification = classifyModelForUsage(usageRow.model);
-    if (classification.pricing_status === 'unknown') {
-      pricingUnknownEvents += 1;
-      unknownModelEvents += 1;
-    } else {
+    if (pricingRegistry.resolve(usageRow.model)) {
       pricingKnownEvents += 1;
+    } else {
+      pricingUnknownEvents += 1;
+    }
+    if (classification.pricing_status === 'unknown') {
+      unknownModelEvents += 1;
     }
     estimatedCacheSavingsUsd += estimateCacheSavings(usageRow);
   }
