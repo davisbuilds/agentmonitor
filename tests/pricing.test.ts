@@ -8,6 +8,7 @@ import test, { after, before, beforeEach, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PricingRegistry } from '../src/pricing/index.js';
+import { classifyModel } from '../src/pricing/model-classification.js';
 
 // ─── Unit tests: PricingRegistry ────────────────────────────────────────
 
@@ -127,6 +128,56 @@ describe('PricingRegistry', () => {
     test('returns null for pruned deprecated model', () => {
       const pricing = registry.lookup('claude-3-opus-20240229');
       assert.equal(pricing, null);
+    });
+  });
+
+  describe('resolve', () => {
+    test('returns canonical pricing metadata for aliases and provider-prefixed models', () => {
+      const resolved = registry.resolve('anthropic/claude-sonnet-4-5');
+      assert.ok(resolved);
+      assert.equal(resolved.canonicalModel, 'claude-sonnet-4-5-20250929');
+      assert.equal(resolved.pricing.provider, 'anthropic');
+    });
+
+    test('returns null for unknown models', () => {
+      assert.equal(registry.resolve('not-a-real-model'), null);
+    });
+  });
+
+  describe('classification', () => {
+    test('classifies known Claude aliases by canonical model and tier', () => {
+      assert.deepEqual(classifyModel('anthropic/sonnet'), {
+        raw_model: 'anthropic/sonnet',
+        canonical_model: 'claude-sonnet-4-20250514',
+        provider: 'anthropic',
+        family: 'claude',
+        tier: 'sonnet',
+        known: true,
+        deprecated: false,
+        pricing_status: 'known',
+      });
+    });
+
+    test('classifies known OpenAI and Gemini tiers', () => {
+      assert.equal(classifyModel('openai/o3').tier, 'reasoning');
+      assert.equal(classifyModel('gpt-5-mini').tier, 'economy');
+      assert.equal(classifyModel('google/gemini-2.5-pro-preview-05-06').tier, 'pro');
+    });
+
+    test('marks pruned legacy models as deprecated without pricing', () => {
+      const classification = classifyModel('claude-3-opus-20240229');
+      assert.equal(classification.canonical_model, 'claude-3-opus-20240229');
+      assert.equal(classification.provider, 'anthropic');
+      assert.equal(classification.tier, 'opus');
+      assert.equal(classification.known, false);
+      assert.equal(classification.deprecated, true);
+      assert.equal(classification.pricing_status, 'deprecated');
+    });
+
+    test('keeps unknown and empty models visible', () => {
+      assert.equal(classifyModel('unknown-model-xyz').pricing_status, 'unknown');
+      assert.equal(classifyModel('').canonical_model, 'unknown');
+      assert.equal(classifyModel(null).tier, 'unknown');
     });
   });
 
