@@ -35,6 +35,7 @@ import {
   getUsageDaily,
   getUsageProjects,
   getUsageModels,
+  getUsageTiers,
   getUsageAgents,
   getUsageTopSessions,
   listInsights,
@@ -632,6 +633,19 @@ v2Router.get('/usage/models', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/usage/models] Error:', err);
     res.status(500).json({ error: 'Failed to get usage by model' });
+  }
+});
+
+v2Router.get('/usage/tiers', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json({
+      data: getUsageTiers(params),
+      coverage: getUsageCoverage(params),
+    });
+  } catch (err) {
+    console.error('[v2/usage/tiers] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage by tier' });
   }
 });
 
