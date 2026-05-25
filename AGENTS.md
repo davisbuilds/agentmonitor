@@ -48,7 +48,7 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 
 ## Testing
 
-- **Pre-push** (matches required CI): `pnpm lint`, `pnpm build`, `pnpm test`. Run `pnpm rust:test` if Rust touched, `pnpm css:build` if frontend styles touched.
+- **Pre-push** (matches required CI): `pnpm lint`, `pnpm build`, `pnpm test`. Run `pnpm rust:test` if Rust touched, `pnpm frontend:check` (svelte-check) if Svelte/frontend TS touched.
 - **TDD**: red/green for new features and major changes.
 - **E2E**: `pnpm exec playwright test`.
 - **Sanity**: `GET /api/health`.

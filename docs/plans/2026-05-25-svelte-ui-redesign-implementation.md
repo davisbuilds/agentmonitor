@@ -2,14 +2,23 @@
 date: 2026-05-25
 topic: svelte-ui-redesign
 stage: implementation-plan
-status: phase-1-complete
+status: phases-1-2-complete
 source: conversation
 ---
 
 ## Implementation Status
 
-As of 2026-05-25, **Phase 1 (Foundation) is complete** on branch
-`feat/ui-redesign-instrument-console`. Phases 2–6 remain.
+As of 2026-05-25, **Phases 1–2 are complete** on branch
+`feat/ui-redesign-instrument-console`. Phases 3–6 remain.
+
+**Phase 2 (Shared primitives)** — `frontend/src/lib/components/ui/` with barrel `index.ts`:
+- Structure: `Panel` (header folded in via props/snippets — no separate `PanelHeader`),
+  `SectionHeader`, `SubTabs`, `Toolbar`.
+- Controls: `Button`, `Select`, `Field`, `Popover`.
+- Data: `Stat`, `DataTable` (generic), `Bar`, `Badge`, `StatusDot`, `EmptyState`.
+- Added a `svelte-check` gate (`pnpm frontend:check`) and cleared its baseline (3 latent type
+  errors). `QuotaPill` refactored onto `Popover` + `Bar` as an integration smoke test.
+- Verification: `frontend:check` (319 files, 0 errors), `pnpm lint`, `pnpm build`, `pnpm test` (445 pass).
 
 - Task 1.0 — Tailwind wired into Vite (`@tailwindcss/vite` + `import './app.css'`); dropped the
   `/css` proxy and `output.css` link. Dev (`:5173`) and built (`:3141`) `/app/` both render styled.
@@ -258,6 +267,7 @@ final design-critique re-walk should show the top findings resolved.
 ## Verification (every phase)
 
 - `pnpm lint`
+- `pnpm frontend:check`  (svelte-check — type-checks `.svelte`/TS; added in Phase 2)
 - `pnpm build`  (runs `tsc`, `css:build` for legacy, and `frontend:build`)
 - `pnpm test`
 - `pnpm css:build` if legacy-shared styles touched; `pnpm exec playwright test` for affected flows.
