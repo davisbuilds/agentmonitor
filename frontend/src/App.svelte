@@ -11,10 +11,9 @@
   } from './lib/stores/router.svelte';
   import { getLiveSettings, initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
-  import StatsBar from './lib/components/monitor/StatsBar.svelte';
   import ConnectionStatus from './lib/components/monitor/ConnectionStatus.svelte';
   import FilterBar from './lib/components/monitor/FilterBar.svelte';
-  import UsageMonitor from './lib/components/monitor/UsageMonitor.svelte';
+  import QuotaPill from './lib/components/monitor/QuotaPill.svelte';
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
   import LivePage from './lib/components/live/LivePage.svelte';
   import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
@@ -83,25 +82,32 @@
   });
 </script>
 
-<div class="min-h-full h-screen flex flex-col">
-  <!-- Usage Monitor -->
-  <UsageMonitor />
-
-  <!-- Header -->
-  <header class="border-b border-gray-800 px-4 sm:px-6 py-3 flex items-center justify-between shrink-0">
-    <div class="flex items-center gap-4 sm:gap-6 flex-wrap">
-      <h1 class="text-lg font-bold tracking-tight">AgentMonitor</h1>
-      <StatsBar />
+<div class="min-h-full h-screen flex flex-col bg-canvas text-text">
+  <!-- Command bar: wordmark · tabs · quota · search · connection -->
+  <header class="flex h-14 shrink-0 items-center gap-4 border-b border-line px-4 sm:px-6">
+    <div class="flex min-w-0 flex-1 items-center gap-5">
+      <h1 class="shrink-0 text-h3 font-semibold tracking-tight">AgentMonitor</h1>
+      <nav class="flex min-w-0 items-center gap-1 overflow-x-auto">
+        {#each tabs as t}
+          <button
+            class="shrink-0 rounded-sm px-3 py-1.5 text-meta transition-colors {tab === t.id ? 'bg-surface-2 text-text' : 'text-text-muted hover:bg-surface hover:text-text'}"
+            onclick={() => setTab(t.id)}
+          >
+            {t.label}
+          </button>
+        {/each}
+      </nav>
     </div>
-    <div class="flex items-center gap-3">
+    <div class="flex shrink-0 items-center gap-3">
+      <QuotaPill />
       <button
         type="button"
         aria-label="Jump to session or transcript"
         title="Jump to session or transcript (Cmd/Ctrl+K)"
-        class="rounded-xl border border-gray-700 bg-gray-900 p-2 text-gray-300 transition hover:border-gray-600 hover:text-gray-100"
+        class="rounded-sm border border-line bg-surface p-2 text-text-muted transition-colors hover:border-line-strong hover:text-text"
         onclick={() => openCommandPalette()}
       >
-        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <path
             d="m21 21-4.35-4.35m1.35-5.65a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z"
             stroke="currentColor"
@@ -115,23 +121,9 @@
     </div>
   </header>
 
-  <!-- Tab Bar -->
-  <nav class="border-b border-gray-800 px-4 sm:px-6">
-    <div class="flex items-center gap-0">
-      {#each tabs as t}
-        <button
-          class="px-4 py-2 text-sm transition-colors border-b-2 {tab === t.id ? 'text-white border-blue-500' : 'text-gray-400 border-transparent hover:text-gray-200'}"
-          onclick={() => setTab(t.id)}
-        >
-          {t.label}
-        </button>
-      {/each}
-    </div>
-  </nav>
-
-  <!-- Filter Bar (Monitor tab only) -->
+  <!-- Contextual sub-bar (only on tabs that filter) -->
   {#if tab === 'monitor'}
-    <div class="border-b border-gray-800 px-4 sm:px-6 py-2">
+    <div class="border-b border-line px-4 sm:px-6 py-2">
       <FilterBar onchange={handleFilterChange} />
     </div>
   {/if}

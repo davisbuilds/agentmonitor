@@ -45,7 +45,7 @@
     {@const opts = options[def.optionsKey] as Array<string | SelectOption> || []}
     {#if opts.length > 0}
       <select
-        class="bg-gray-800 border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:border-gray-500"
+        class="rounded-sm border border-line bg-surface px-2.5 py-1.5 text-meta text-text-muted transition-colors hover:border-line-strong focus:border-accent focus:outline-none"
         value={filters[def.key] || ''}
         onchange={(e) => handleChange(def.key, (e.target as HTMLSelectElement).value)}
       >
@@ -58,7 +58,7 @@
   {/each}
   {#if Object.keys(filters).length > 0}
     <button
-      class="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+      class="text-meta text-text-muted transition-colors hover:text-text"
       onclick={() => { setFilters({}); onchange({}); }}
     >Clear</button>
   {/if}
