@@ -74,9 +74,11 @@ Product-surface reference for AgentMonitor.
 - Historical usage lives under `/api/v2/usage/*` and is event-derived rather than transcript-derived.
 - Summary totals, daily series, project/model/tier/agent attribution, and top-session views all use cost/token-bearing event rows as their source of truth.
 - Usage models are classified at query time into canonical model, provider, family, tier, lifecycle, and pricing-status fields. Unknown and deprecated models remain visible in responses.
+- Usage endpoints accept optional `model`, `provider`, and `tier` filters in addition to date, project, and agent filters. Classification filters are applied consistently before summary, daily, attribution, tier, agent, and top-session panels aggregate.
+- Usage summary includes `prior_total_cost_usd` and `cost_delta_pct` for the immediately preceding same-length date range when a valid current range is supplied.
 - Stored `cost_usd` is authoritative for event cost. Cache hit rate and estimated cache savings are derived estimates from current pricing metadata and are coverage-limited when pricing is unknown.
 - Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
-- The Svelte `Usage` tab supports date ranges, project and agent filters, session drill-in when transcript history exists, and CSV export.
+- The Svelte `Usage` tab supports date ranges, project, agent, provider, tier, and model filters, session drill-in when transcript history exists, and CSV export.
 
 ## Insights
 
@@ -133,7 +135,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
 | `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |
 | `/api/v2/analytics/agents` | GET | Per-agent comparison rows for analytics UI |
-| `/api/v2/usage/summary` | GET | Event-derived usage totals plus coverage metadata |
+| `/api/v2/usage/summary` | GET | Event-derived usage totals, prior-period comparison, and coverage metadata |
 | `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |
 | `/api/v2/usage/projects` | GET | Usage attribution grouped by project |
 | `/api/v2/usage/models` | GET | Usage attribution grouped by model |

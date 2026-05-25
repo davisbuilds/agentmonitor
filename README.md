@@ -12,7 +12,7 @@ Local dashboard and session browser for observing AI coding agents across live t
 - Exposes pinned-message review APIs under `/api/v2/pins` and `/api/v2/sessions/:id/messages/:messageId/pin` for durable saved-review workflows.
 - Exposes transcript search under `/api/v2/search` with recency/relevance sorting and session-context metadata for navigation-first search UIs.
 - Exposes capability-aware analytics under `/api/v2/analytics/*`, including summary, activity, project, tool, skill, hour-of-week, top-session, velocity, and per-agent views.
-- Exposes event-derived historical usage under `/api/v2/usage/*`, including summary totals, daily series, project/model/tier/agent attribution, cache economics, and top sessions with coverage metadata.
+- Exposes event-derived historical usage under `/api/v2/usage/*`, including summary totals, daily series, project/model/tier/agent attribution, cache economics, prior-period comparison, and top sessions with coverage metadata.
 - Exposes event-derived Monitor migration endpoints under `/api/v2/monitor/*`, including summary stats, filter options, event feed data, active session aggregates, session detail/transcript data, and tool error-rate/duration analytics.
 - Exposes persisted AI-generated insights under `/api/v2/insights/*`, scoped to the current historical filters and grounded in analytics and usage coverage metadata.
 - Exposes provider-native quota snapshots under `/api/provider-quotas`, including Codex app-server polling and Claude statusline bridge ingestion.
@@ -94,7 +94,7 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 - Pinned-message review uses session-plus-ordinal deep links so saved transcript moments survive session re-imports that replace raw message row IDs.
 - Search results now include session context, and the Svelte app exposes a global command palette on `Cmd/Ctrl+K` for jumping into recent sessions or transcript hits without leaving the current tab first.
 - Analytics responses now include coverage metadata so the UI can distinguish “all matching sessions” from capability-limited slices like tool analytics.
-- Usage responses include coverage metadata so the UI can distinguish usage-bearing events from matching events that carry no cost or token data. Stored `cost_usd` remains the source of truth for event cost; cache hit rate and estimated cache savings are derived from current pricing metadata.
+- Usage responses include coverage metadata so the UI can distinguish usage-bearing events from matching events that carry no cost or token data. Usage endpoints accept `date_from`, `date_to`, `project`, `agent`, `model`, `provider`, and `tier` filters. Stored `cost_usd` remains the source of truth for event cost; cache hit rate, estimated cache savings, and prior-period deltas are derived at query time.
 - Insight generation is optional and now supports OpenAI, Anthropic, and Gemini providers. Configure it with:
 - `AGENTMONITOR_INSIGHTS_PROVIDER=openai|anthropic|gemini`
 - `AGENTMONITOR_OPENAI_API_KEY` or `OPENAI_API_KEY`
