@@ -2,6 +2,40 @@
 
 Local dashboard and session browser for observing AI coding agents across live telemetry, tool activity, costs, and session history.
 
+## Agent Setup
+
+New here? Paste the prompt below into your coding agent (Claude Code, Codex, etc.) and it will install, build, and verify the repo, then tell you how to launch the live dashboard.
+
+```text
+Set up the `agentmonitor` repo for me. It's a local dashboard for monitoring AI
+coding agents — Node.js + TypeScript + Express + SQLite backend with a Svelte 5
+frontend, all served on localhost.
+
+Do this, in order:
+
+1. Install deps. Use Node 24.13.0 (`nvm use` if nvm is present) and pnpm 10.29.3+;
+   run `pnpm install` from the repo root. Clone
+   https://github.com/davisbuilds/agentmonitor.git and cd in first if needed.
+
+2. Configure env (optional — it runs without any secrets). Copy `.env.example` to
+   `.env`; every `AGENTMONITOR_*` var already has a sensible default. The only
+   optional secrets are for AI-generated insights: AGENTMONITOR_INSIGHTS_PROVIDER
+   plus the matching provider key (OPENAI_API_KEY / ANTHROPIC_API_KEY /
+   GEMINI_API_KEY). Leave them as placeholders unless I ask for insights.
+
+3. Verify the build works WITHOUT any secrets: run `pnpm build` then `pnpm test`.
+   Both should pass offline. If either fails, show me the error and stop.
+
+4. Report back: confirm install + build + tests passed, note that AI insights are
+   the only thing needing a key, and give me the launch commands: `pnpm dev`
+   (terminal 1) and `pnpm frontend:dev` (terminal 2), then open
+   http://127.0.0.1:5173/app/.
+
+Don't commit anything.
+```
+
+Prefer to do it yourself? The manual steps are below.
+
 ## What It Does
 
 - Serves the canonical Svelte app at `/app/` for Monitor, Live, Sessions, Pinned, Analytics, Usage, Insights, and Search.
