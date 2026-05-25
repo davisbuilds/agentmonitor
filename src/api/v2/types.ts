@@ -541,6 +541,51 @@ export interface UsageTopSessionRow {
   browsing_session_available: boolean;
 }
 
+export type UsageBudgetPeriod = 'day' | 'week' | 'month' | 'all_time';
+export type UsageBudgetAlertState = 'ok' | 'info' | 'warning' | 'critical' | 'hard_stop_candidate';
+
+export interface UsageBudgetThresholds {
+  info: number;
+  warning: number;
+  critical: number;
+  hard_stop_candidate: number;
+}
+
+export interface UsageBudgetFilters {
+  project?: string;
+  agent?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
+}
+
+export interface UsageBudgetReport {
+  name: string;
+  period: UsageBudgetPeriod;
+  limit_usd: number;
+  spent_usd: number;
+  remaining_usd: number;
+  percent_used: number;
+  state: UsageBudgetAlertState;
+  thresholds: UsageBudgetThresholds;
+  filters: UsageBudgetFilters;
+  date_from: string | null;
+  date_to: string | null;
+  enforcing: false;
+}
+
+export interface UsageBudgetConfigStatus {
+  path: string;
+  present: boolean;
+  valid: boolean;
+  errors: string[];
+}
+
+export interface UsageBudgetsResponse {
+  data: UsageBudgetReport[];
+  config: UsageBudgetConfigStatus;
+}
+
 export type InsightKind = 'overview' | 'workflow' | 'usage';
 export type InsightProvider = 'openai' | 'anthropic' | 'gemini';
 

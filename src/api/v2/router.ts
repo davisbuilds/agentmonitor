@@ -47,6 +47,7 @@ import {
 import { liveStreamRouter } from './live-stream.js';
 import { config } from '../../config.js';
 import { generateInsight } from '../../insights/service.js';
+import { getUsageBudgets } from '../../usage/budgets.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -678,6 +679,15 @@ v2Router.get('/usage/top-sessions', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/usage/top-sessions] Error:', err);
     res.status(500).json({ error: 'Failed to get top usage sessions' });
+  }
+});
+
+v2Router.get('/usage/budgets', (_req: Request, res: Response) => {
+  try {
+    res.json(getUsageBudgets());
+  } catch (err) {
+    console.error('[v2/usage/budgets] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage budgets' });
   }
 });
 

@@ -10,6 +10,7 @@ import type Database from 'better-sqlite3';
 let server: Server;
 let baseUrl = '';
 let tempDir = '';
+let budgetsPath = '';
 let closeDb: (() => void) | null = null;
 let db: Database;
 /* eslint-disable @typescript-eslint/consistent-type-imports */
@@ -70,6 +71,8 @@ function makeSession(sessionId: string, project: string, msgCount: number, start
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-api-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
+  budgetsPath = path.join(tempDir, 'budgets.json');
+  process.env.AGENTMONITOR_USAGE_BUDGETS_PATH = budgetsPath;
 
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');
@@ -1389,6 +1392,116 @@ describe('GET /api/v2/analytics/agents', () => {
         && row.session_count >= 1
         && row.summary_fidelity_sessions >= 1,
     ));
+  });
+});
+
+describe('GET /api/v2/usage/budgets', () => {
+  test('returns an empty budget list when no config exists', async () => {
+    fs.rmSync(budgetsPath, { force: true });
+
+    const res = await fetch(`${baseUrl}/api/v2/usage/budgets`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: unknown[];
+      config: { present: boolean; valid: boolean; errors: string[] };
+    };
+
+    assert.deepEqual(body.data, []);
+    assert.equal(body.config.present, false);
+    assert.equal(body.config.valid, true);
+    assert.deepEqual(body.config.errors, []);
+  });
+
+  test('reports under-budget scoped spend without enforcing it', async () => {
+    fs.writeFileSync(budgetsPath, JSON.stringify({
+      budgets: [
+        {
+          name: 'Alpha Sonnet Monthly',
+          period: 'all_time',
+          limit_usd: 1,
+          thresholds: { info: 50, warning: 75, critical: 90, hard_stop_candidate: 100 },
+          filters: { project: 'alpha', provider: 'anthropic', tier: 'sonnet' },
+        },
+      ],
+    }));
+
+    const res = await fetch(`${baseUrl}/api/v2/usage/budgets`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: Array<{
+        name: string;
+        period: string;
+        limit_usd: number;
+        spent_usd: number;
+        percent_used: number;
+        state: string;
+        filters: Record<string, string>;
+        enforcing: boolean;
+      }>;
+      config: { present: boolean; valid: boolean; errors: string[] };
+    };
+
+    assert.equal(body.config.present, true);
+    assert.equal(body.config.valid, true);
+    assert.deepEqual(body.config.errors, []);
+    assert.equal(body.data.length, 1);
+    assert.equal(body.data[0]?.name, 'Alpha Sonnet Monthly');
+    assert.equal(body.data[0]?.spent_usd, 0.02);
+    assert.equal(body.data[0]?.percent_used, 2);
+    assert.equal(body.data[0]?.state, 'ok');
+    assert.equal(body.data[0]?.filters.project, 'alpha');
+    assert.equal(body.data[0]?.filters.provider, 'anthropic');
+    assert.equal(body.data[0]?.filters.tier, 'sonnet');
+    assert.equal(body.data[0]?.enforcing, false);
+  });
+
+  test('reports over-budget candidates as read-only alert states', async () => {
+    fs.writeFileSync(budgetsPath, JSON.stringify({
+      budgets: [
+        {
+          name: 'Alpha Tight Budget',
+          period: 'all_time',
+          limit_usd: 0.01,
+          thresholds: { info: 50, warning: 75, critical: 90, hard_stop_candidate: 100 },
+          filters: { project: 'alpha' },
+        },
+      ],
+    }));
+
+    const res = await fetch(`${baseUrl}/api/v2/usage/budgets`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: Array<{ spent_usd: number; percent_used: number; state: string; enforcing: boolean }>;
+    };
+
+    assert.equal(body.data[0]?.spent_usd, 0.02);
+    assert.equal(body.data[0]?.percent_used, 200);
+    assert.equal(body.data[0]?.state, 'hard_stop_candidate');
+    assert.equal(body.data[0]?.enforcing, false);
+  });
+
+  test('returns malformed config as a non-enforcing report error', async () => {
+    fs.writeFileSync(budgetsPath, JSON.stringify({
+      budgets: [
+        { name: 'Missing Limit', period: 'all_time' },
+      ],
+    }));
+
+    const res = await fetch(`${baseUrl}/api/v2/usage/budgets`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: unknown[];
+      config: { present: boolean; valid: boolean; errors: string[] };
+    };
+
+    assert.deepEqual(body.data, []);
+    assert.equal(body.config.present, true);
+    assert.equal(body.config.valid, false);
+    assert.match(body.config.errors.join('\n'), /limit_usd/);
   });
 });
 
