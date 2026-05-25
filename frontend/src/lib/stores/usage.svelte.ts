@@ -33,6 +33,8 @@ type PanelKey =
   | 'agents'
   | 'topSessions';
 
+type UsageFacetKey = 'project' | 'agent' | 'model' | 'provider' | 'tier';
+
 type FiltersSnapshot = {
   from: string;
   to: string;
@@ -56,6 +58,17 @@ class UsageStore {
   };
   private initialized = false;
   private hashListenerAttached = false;
+  private filterOptionsVersion = 0;
+  private readonly controllers: Record<PanelKey, AbortController | null> = {
+    summary: null,
+    daily: null,
+    projects: null,
+    models: null,
+    tiers: null,
+    agents: null,
+    topSessions: null,
+  };
+  private filterOptionsController: AbortController | null = null;
 
   from = $state(this.defaults.from);
   to = $state(this.defaults.to);
@@ -161,27 +174,7 @@ class UsageStore {
     }
 
     if (!this.initialized) {
-      try {
-        const [projectsRes, agentsRes, modelsRes, tiersRes] = await Promise.all([
-          fetchUsageProjects({ date_from: this.from, date_to: this.to }),
-          fetchUsageAgents({ date_from: this.from, date_to: this.to }),
-          fetchUsageModels({ date_from: this.from, date_to: this.to }),
-          fetchUsageTiers({ date_from: this.from, date_to: this.to }),
-        ]);
-        this.projectOptions = projectsRes.data.map(row => row.project).sort((a, b) => a.localeCompare(b));
-        this.agentOptions = agentsRes.data.map(row => row.agent).sort((a, b) => a.localeCompare(b));
-        this.modelOptions = modelsRes.data.map(row => row.model).sort((a, b) => a.localeCompare(b));
-        this.providerOptions = tiersRes.data
-          .map(row => row.provider)
-          .filter((value, index, values) => values.indexOf(value) === index)
-          .sort((a, b) => a.localeCompare(b));
-        this.tierOptions = tiersRes.data
-          .map(row => row.tier)
-          .filter((value, index, values) => values.indexOf(value) === index)
-          .sort((a, b) => a.localeCompare(b));
-      } catch {
-        // Usage can still load without filter options.
-      }
+      await this.fetchFilterOptions();
       this.initialized = true;
     }
 
@@ -193,6 +186,7 @@ class UsageStore {
       window.removeEventListener('hashchange', this.handleHashChange);
       this.hashListenerAttached = false;
     }
+    this.abortAll();
   }
 
   async fetchAll(): Promise<void> {
@@ -209,14 +203,16 @@ class UsageStore {
 
   async fetchSummary(): Promise<void> {
     const version = ++this.versions.summary;
+    const signal = this.nextSignal('summary');
     this.loading.summary = true;
     this.errors.summary = null;
     try {
-      const result = await fetchUsageSummary(this.queryParams);
+      const result = await fetchUsageSummary(this.queryParams, { signal });
       if (version !== this.versions.summary) return;
       this.summary = result;
       this.coverage = result.coverage;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (version !== this.versions.summary) return;
       console.error('Failed to load usage summary:', err);
       this.errors.summary = 'Failed to load usage summary.';
@@ -229,14 +225,16 @@ class UsageStore {
 
   async fetchDaily(): Promise<void> {
     const version = ++this.versions.daily;
+    const signal = this.nextSignal('daily');
     this.loading.daily = true;
     this.errors.daily = null;
     try {
-      const result = await fetchUsageDaily(this.queryParams);
+      const result = await fetchUsageDaily(this.queryParams, { signal });
       if (version !== this.versions.daily) return;
       this.daily = result.data;
       this.coverage = result.coverage;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (version !== this.versions.daily) return;
       console.error('Failed to load usage timeline:', err);
       this.errors.daily = 'Failed to load usage timeline.';
@@ -249,14 +247,16 @@ class UsageStore {
 
   async fetchProjects(): Promise<void> {
     const version = ++this.versions.projects;
+    const signal = this.nextSignal('projects');
     this.loading.projects = true;
     this.errors.projects = null;
     try {
-      const result = await fetchUsageProjects(this.queryParams);
+      const result = await fetchUsageProjects(this.queryParams, { signal });
       if (version !== this.versions.projects) return;
       this.projects = result.data;
       this.coverage = result.coverage;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (version !== this.versions.projects) return;
       console.error('Failed to load usage by project:', err);
       this.errors.projects = 'Failed to load project attribution.';
@@ -269,14 +269,16 @@ class UsageStore {
 
   async fetchModels(): Promise<void> {
     const version = ++this.versions.models;
+    const signal = this.nextSignal('models');
     this.loading.models = true;
     this.errors.models = null;
     try {
-      const result = await fetchUsageModels(this.queryParams);
+      const result = await fetchUsageModels(this.queryParams, { signal });
       if (version !== this.versions.models) return;
       this.models = result.data;
       this.coverage = result.coverage;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (version !== this.versions.models) return;
       console.error('Failed to load usage by model:', err);
       this.errors.models = 'Failed to load model attribution.';
@@ -289,14 +291,16 @@ class UsageStore {
 
   async fetchTiers(): Promise<void> {
     const version = ++this.versions.tiers;
+    const signal = this.nextSignal('tiers');
     this.loading.tiers = true;
     this.errors.tiers = null;
     try {
-      const result = await fetchUsageTiers(this.queryParams);
+      const result = await fetchUsageTiers(this.queryParams, { signal });
       if (version !== this.versions.tiers) return;
       this.tiers = result.data;
       this.coverage = result.coverage;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (version !== this.versions.tiers) return;
       console.error('Failed to load usage by tier:', err);
       this.errors.tiers = 'Failed to load tier attribution.';
@@ -309,14 +313,16 @@ class UsageStore {
 
   async fetchAgents(): Promise<void> {
     const version = ++this.versions.agents;
+    const signal = this.nextSignal('agents');
     this.loading.agents = true;
     this.errors.agents = null;
     try {
-      const result = await fetchUsageAgents(this.queryParams);
+      const result = await fetchUsageAgents(this.queryParams, { signal });
       if (version !== this.versions.agents) return;
       this.agents = result.data;
       this.coverage = result.coverage;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (version !== this.versions.agents) return;
       console.error('Failed to load usage by agent:', err);
       this.errors.agents = 'Failed to load agent attribution.';
@@ -329,14 +335,16 @@ class UsageStore {
 
   async fetchTopSessions(): Promise<void> {
     const version = ++this.versions.topSessions;
+    const signal = this.nextSignal('topSessions');
     this.loading.topSessions = true;
     this.errors.topSessions = null;
     try {
-      const result = await fetchUsageTopSessions({ ...this.queryParams, limit: 10 });
+      const result = await fetchUsageTopSessions({ ...this.queryParams, limit: 10 }, { signal });
       if (version !== this.versions.topSessions) return;
       this.topSessions = result.data;
       this.coverage = result.coverage;
     } catch (err) {
+      if (isAbortError(err)) return;
       if (version !== this.versions.topSessions) return;
       console.error('Failed to load top usage sessions:', err);
       this.errors.topSessions = 'Failed to load top sessions.';
@@ -351,7 +359,7 @@ class UsageStore {
     this.from = from;
     this.to = to < from ? from : to;
     this.syncHash();
-    await this.fetchAll();
+    await this.refreshUsage();
   }
 
   async applyQuickRange(days: number): Promise<void> {
@@ -364,37 +372,37 @@ class UsageStore {
   async setProject(project: string): Promise<void> {
     this.project = project;
     this.syncHash();
-    await this.fetchAll();
+    await this.refreshUsage();
   }
 
   async setAgent(agent: string): Promise<void> {
     this.agent = agent;
     this.syncHash();
-    await this.fetchAll();
+    await this.refreshUsage();
   }
 
   async setModel(model: string): Promise<void> {
     this.model = model;
     this.syncHash();
-    await this.fetchAll();
+    await this.refreshUsage();
   }
 
   async setProvider(provider: string): Promise<void> {
     this.provider = provider;
     this.syncHash();
-    await this.fetchAll();
+    await this.refreshUsage();
   }
 
   async setTier(tier: string): Promise<void> {
     this.tier = tier;
     this.syncHash();
-    await this.fetchAll();
+    await this.refreshUsage();
   }
 
   async clearAllFilters(): Promise<void> {
     this.applyFilters(this.defaults);
     this.syncHash();
-    await this.fetchAll();
+    await this.refreshUsage();
   }
 
   openSession(sessionId: string): void {
@@ -433,6 +441,76 @@ class UsageStore {
     window.history.replaceState(null, '', nextUrl);
   }
 
+  private async refreshUsage(): Promise<void> {
+    await Promise.all([
+      this.fetchFilterOptions(),
+      this.fetchAll(),
+    ]);
+  }
+
+  private async fetchFilterOptions(): Promise<void> {
+    const version = ++this.filterOptionsVersion;
+    this.filterOptionsController?.abort();
+    const controller = new AbortController();
+    this.filterOptionsController = controller;
+
+    try {
+      const [projectsRes, agentsRes, modelsRes, providerTiersRes, tierTiersRes] = await Promise.all([
+        fetchUsageProjects(this.facetQueryParams('project'), { signal: controller.signal }),
+        fetchUsageAgents(this.facetQueryParams('agent'), { signal: controller.signal }),
+        fetchUsageModels(this.facetQueryParams('model'), { signal: controller.signal }),
+        fetchUsageTiers(this.facetQueryParams('provider'), { signal: controller.signal }),
+        fetchUsageTiers(this.facetQueryParams('tier'), { signal: controller.signal }),
+      ]);
+
+      if (version !== this.filterOptionsVersion) return;
+
+      this.projectOptions = withSelectedOption(projectsRes.data.map(row => row.project), this.project);
+      this.agentOptions = withSelectedOption(agentsRes.data.map(row => row.agent), this.agent);
+      this.modelOptions = withSelectedOption(modelsRes.data.map(row => row.model), this.model);
+      this.providerOptions = withSelectedOption(providerTiersRes.data.map(row => row.provider), this.provider);
+      this.tierOptions = withSelectedOption(tierTiersRes.data.map(row => row.tier), this.tier);
+    } catch (err) {
+      if (isAbortError(err)) return;
+      // Usage can still load without refreshed filter options.
+    } finally {
+      if (this.filterOptionsController === controller) {
+        this.filterOptionsController = null;
+      }
+    }
+  }
+
+  private facetQueryParams(exclude: UsageFacetKey): Record<string, string> {
+    const params: Record<string, string> = {
+      date_from: this.from,
+      date_to: this.to,
+    };
+
+    for (const key of ['project', 'agent', 'model', 'provider', 'tier'] as const) {
+      if (key !== exclude && this[key]) {
+        params[key] = this[key];
+      }
+    }
+
+    return params;
+  }
+
+  private nextSignal(key: PanelKey): AbortSignal {
+    this.controllers[key]?.abort();
+    const controller = new AbortController();
+    this.controllers[key] = controller;
+    return controller.signal;
+  }
+
+  private abortAll(): void {
+    for (const key of Object.keys(this.controllers) as PanelKey[]) {
+      this.controllers[key]?.abort();
+      this.controllers[key] = null;
+    }
+    this.filterOptionsController?.abort();
+    this.filterOptionsController = null;
+  }
+
   private readonly handleHashChange = (): void => {
     if (typeof window === 'undefined') return;
     const next = parseUsageHash(window.location.hash, this.filters);
@@ -448,9 +526,19 @@ class UsageStore {
     if (!changed) return;
     this.applyFilters(next);
     if (this.initialized) {
-      void this.fetchAll();
+      void this.refreshUsage();
     }
   };
+}
+
+function isAbortError(err: unknown): boolean {
+  return err instanceof DOMException && err.name === 'AbortError';
+}
+
+function withSelectedOption(options: string[], selected: string): string[] {
+  const unique = new Set(options.filter(Boolean));
+  if (selected) unique.add(selected);
+  return [...unique].sort((a, b) => a.localeCompare(b));
 }
 
 export const usage = new UsageStore();

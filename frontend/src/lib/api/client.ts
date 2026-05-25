@@ -863,38 +863,38 @@ export async function fetchAnalyticsAgents(params: Record<string, string | numbe
   return checkedJson(res, 'fetchAnalyticsAgents');
 }
 
-export async function fetchUsageSummary(params: Record<string, string | number | undefined> = {}): Promise<UsageSummary> {
-  const res = await fetch(`/api/v2/usage/summary${qs(params)}`);
+export async function fetchUsageSummary(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<UsageSummary> {
+  const res = await fetch(`/api/v2/usage/summary${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageSummary');
 }
 
-export async function fetchUsageDaily(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageDailyPoint[]; coverage: UsageCoverage }> {
-  const res = await fetch(`/api/v2/usage/daily${qs(params)}`);
+export async function fetchUsageDaily(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageDailyPoint[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/daily${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageDaily');
 }
 
-export async function fetchUsageProjects(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageProjectBreakdown[]; coverage: UsageCoverage }> {
-  const res = await fetch(`/api/v2/usage/projects${qs(params)}`);
+export async function fetchUsageProjects(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageProjectBreakdown[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/projects${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageProjects');
 }
 
-export async function fetchUsageModels(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageModelBreakdown[]; coverage: UsageCoverage }> {
-  const res = await fetch(`/api/v2/usage/models${qs(params)}`);
+export async function fetchUsageModels(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageModelBreakdown[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/models${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageModels');
 }
 
-export async function fetchUsageTiers(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageTierBreakdown[]; coverage: UsageCoverage }> {
-  const res = await fetch(`/api/v2/usage/tiers${qs(params)}`);
+export async function fetchUsageTiers(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageTierBreakdown[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/tiers${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageTiers');
 }
 
-export async function fetchUsageAgents(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageAgentBreakdown[]; coverage: UsageCoverage }> {
-  const res = await fetch(`/api/v2/usage/agents${qs(params)}`);
+export async function fetchUsageAgents(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageAgentBreakdown[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/agents${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageAgents');
 }
 
-export async function fetchUsageTopSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageTopSessionRow[]; coverage: UsageCoverage }> {
-  const res = await fetch(`/api/v2/usage/top-sessions${qs(params)}`);
+export async function fetchUsageTopSessions(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageTopSessionRow[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/top-sessions${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageTopSessions');
 }
 
