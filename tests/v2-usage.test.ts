@@ -125,6 +125,35 @@ before(async () => {
       client_timestamp: '2026-04-03T08:00:00Z',
       source: 'api',
     },
+    {
+      event_id: 'usage-event-006',
+      session_id: 'usage-sess-004',
+      agent_type: 'codex',
+      event_type: 'assistant',
+      status: 'success' as const,
+      project: 'gamma',
+      model: 'unknown-expensive-model',
+      tokens_in: 300,
+      tokens_out: 50,
+      cache_read_tokens: 70,
+      cost_usd: 0.015,
+      client_timestamp: '2026-04-03T10:00:00Z',
+      source: 'api',
+    },
+    {
+      event_id: 'usage-event-007',
+      session_id: 'usage-sess-005',
+      agent_type: 'claude_code',
+      event_type: 'assistant',
+      status: 'success' as const,
+      project: 'legacy',
+      model: 'claude-3-opus-20240229',
+      tokens_in: 100,
+      tokens_out: 10,
+      cost_usd: 0.005,
+      client_timestamp: '2026-04-04T10:00:00Z',
+      source: 'api',
+    },
   ];
 
   for (const event of events) {
@@ -160,6 +189,11 @@ describe('GET /api/v2/usage/summary', () => {
       total_usage_events: number;
       total_sessions: number;
       active_days: number;
+      cache_hit_rate: number;
+      estimated_cache_savings_usd: number;
+      pricing_known_events: number;
+      pricing_unknown_events: number;
+      unknown_model_events: number;
       peak_day: { date: string | null; cost_usd: number };
       coverage: {
         metric_scope: string;
@@ -172,25 +206,30 @@ describe('GET /api/v2/usage/summary', () => {
       };
     };
 
-    assert.equal(body.total_cost_usd, 0.07);
-    assert.equal(body.total_input_tokens, 5100);
-    assert.equal(body.total_output_tokens, 1100);
-    assert.equal(body.total_cache_read_tokens, 400);
+    assert.equal(body.total_cost_usd, 0.085);
+    assert.equal(body.total_input_tokens, 5400);
+    assert.equal(body.total_output_tokens, 1150);
+    assert.equal(body.total_cache_read_tokens, 470);
     assert.equal(body.total_cache_write_tokens, 100);
-    assert.equal(body.total_usage_events, 4);
-    assert.equal(body.total_sessions, 3);
+    assert.equal(body.total_usage_events, 5);
+    assert.equal(body.total_sessions, 4);
     assert.equal(body.active_days, 3);
-    assert.deepEqual(body.peak_day, { date: '2026-04-02', cost_usd: 0.03 });
+    assert.equal(body.cache_hit_rate, 0.080068);
+    assert.equal(body.estimated_cache_savings_usd, 0.001005);
+    assert.equal(body.pricing_known_events, 4);
+    assert.equal(body.pricing_unknown_events, 1);
+    assert.equal(body.unknown_model_events, 1);
+    assert.deepEqual(body.peak_day, { date: '2026-04-03', cost_usd: 0.035 });
     assert.equal(body.coverage.metric_scope, 'event_usage');
-    assert.equal(body.coverage.matching_events, 5);
-    assert.equal(body.coverage.usage_events, 4);
+    assert.equal(body.coverage.matching_events, 6);
+    assert.equal(body.coverage.usage_events, 5);
     assert.equal(body.coverage.missing_usage_events, 1);
-    assert.equal(body.coverage.matching_sessions, 3);
-    assert.equal(body.coverage.usage_sessions, 3);
+    assert.equal(body.coverage.matching_sessions, 4);
+    assert.equal(body.coverage.usage_sessions, 4);
     assert.deepEqual(
       body.coverage.source_breakdown.map(row => [row.source, row.event_count, row.usage_event_count]),
       [
-        ['api', 1, 1],
+        ['api', 2, 2],
         ['import', 2, 2],
         ['otel', 2, 1],
       ],
@@ -216,6 +255,25 @@ describe('GET /api/v2/usage/summary', () => {
     assert.equal(body.coverage.matching_events, 1);
     assert.equal(body.coverage.usage_events, 1);
   });
+
+  test('counts deprecated models without pricing rates as unknown pricing coverage', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/summary?project=legacy`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      total_usage_events: number;
+      pricing_known_events: number;
+      pricing_unknown_events: number;
+      unknown_model_events: number;
+      estimated_cache_savings_usd: number;
+    };
+
+    assert.equal(body.total_usage_events, 1);
+    assert.equal(body.pricing_known_events, 0);
+    assert.equal(body.pricing_unknown_events, 1);
+    assert.equal(body.unknown_model_events, 0);
+    assert.equal(body.estimated_cache_savings_usd, 0);
+  });
 });
 
 describe('GET /api/v2/usage/daily', () => {
@@ -233,7 +291,7 @@ describe('GET /api/v2/usage/daily', () => {
       [
         ['2026-04-01', 0.02, 1600, 300, 2],
         ['2026-04-02', 0.03, 2000, 500, 1],
-        ['2026-04-03', 0.02, 1500, 300, 1],
+        ['2026-04-03', 0.035, 1800, 350, 2],
       ],
     );
   });
@@ -253,6 +311,8 @@ describe('GET /api/v2/usage/projects and /models', () => {
       [
         ['alpha', 0.04, 2, 3],
         ['beta', 0.03, 1, 1],
+        ['gamma', 0.015, 1, 1],
+        ['legacy', 0.005, 1, 1],
       ],
     );
   });
@@ -262,14 +322,60 @@ describe('GET /api/v2/usage/projects and /models', () => {
     assert.equal(res.status, 200);
 
     const body = await res.json() as {
-      data: Array<{ model: string; cost_usd: number; input_tokens: number; output_tokens: number }>;
+      data: Array<{
+        model: string;
+        cost_usd: number;
+        input_tokens: number;
+        output_tokens: number;
+        canonical_model: string;
+        provider: string;
+        family: string;
+        tier: string;
+        known: boolean;
+        deprecated: boolean;
+        pricing_status: string;
+      }>;
     };
 
     assert.deepEqual(
-      body.data.map(row => [row.model, row.cost_usd, row.input_tokens, row.output_tokens]),
+      body.data.map(row => [row.model, row.cost_usd, row.input_tokens, row.output_tokens, row.tier, row.pricing_status]),
       [
-        ['gpt-5.4', 0.05, 3500, 800],
-        ['claude-sonnet-4-5-20250929', 0.02, 1600, 300],
+        ['gpt-5.4', 0.05, 3500, 800, 'standard', 'known'],
+        ['claude-sonnet-4-5-20250929', 0.02, 1600, 300, 'sonnet', 'known'],
+        ['unknown-expensive-model', 0.015, 300, 50, 'unknown', 'unknown'],
+        ['claude-3-opus-20240229', 0.005, 100, 10, 'opus', 'deprecated'],
+      ],
+    );
+  });
+});
+
+describe('GET /api/v2/usage/tiers', () => {
+  test('returns provider-neutral tier rollups with unknown model counts', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/tiers`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: Array<{
+        provider: string;
+        tier: string;
+        cost_usd: number;
+        input_tokens: number;
+        output_tokens: number;
+        cache_read_tokens: number;
+        cache_write_tokens: number;
+        usage_events: number;
+        session_count: number;
+        unknown_model_events: number;
+      }>;
+    };
+
+    assert.deepEqual(
+      body.data.map(row => [row.provider, row.tier, row.cost_usd, row.usage_events, row.session_count, row.unknown_model_events]),
+      [
+        ['openai', 'standard', 0.05, 2, 2, 0],
+        ['anthropic', 'sonnet', 0.02, 2, 1, 0],
+        ['unknown', 'unknown', 0.015, 1, 1, 1],
+        ['anthropic', 'opus', 0.005, 1, 1, 0],
       ],
     );
   });
@@ -277,7 +383,7 @@ describe('GET /api/v2/usage/projects and /models', () => {
 
 describe('GET /api/v2/usage/top-sessions', () => {
   test('returns highest-cost sessions with browsing-session metadata when available', async () => {
-    const res = await fetch(`${baseUrl}/api/v2/usage/top-sessions?limit=3`);
+    const res = await fetch(`${baseUrl}/api/v2/usage/top-sessions?limit=4`);
     assert.equal(res.status, 200);
 
     const body = await res.json() as {
@@ -289,6 +395,12 @@ describe('GET /api/v2/usage/top-sessions', () => {
         input_tokens: number;
         output_tokens: number;
         browsing_session_available: boolean;
+        primary_model: string;
+        primary_tier: string;
+        primary_provider: string;
+        model_count: number;
+        tier_costs: Array<{ provider: string; tier: string; cost_usd: number; usage_events: number }>;
+        unknown_model_events: number;
       }>;
     };
 
@@ -296,13 +408,24 @@ describe('GET /api/v2/usage/top-sessions', () => {
       'usage-sess-002',
       'usage-sess-003',
       'usage-sess-001',
+      'usage-sess-004',
     ]);
     assert.equal(body.data[0]?.project, 'beta');
     assert.equal(body.data[0]?.agent, 'codex');
     assert.equal(body.data[0]?.cost_usd, 0.03);
     assert.equal(body.data[0]?.input_tokens, 2000);
     assert.equal(body.data[0]?.output_tokens, 500);
+    assert.equal(body.data[0]?.primary_model, 'gpt-5.4');
+    assert.equal(body.data[0]?.primary_tier, 'standard');
+    assert.equal(body.data[0]?.primary_provider, 'openai');
+    assert.equal(body.data[0]?.model_count, 1);
+    assert.deepEqual(body.data[0]?.tier_costs, [
+      { provider: 'openai', tier: 'standard', cost_usd: 0.03, usage_events: 1 },
+    ]);
+    assert.equal(body.data[0]?.unknown_model_events, 0);
     assert.equal(typeof body.data[0]?.browsing_session_available, 'boolean');
     assert.equal(body.data[2]?.browsing_session_available, true);
+    assert.equal(body.data[3]?.primary_provider, 'unknown');
+    assert.equal(body.data[3]?.unknown_model_events, 1);
   });
 });

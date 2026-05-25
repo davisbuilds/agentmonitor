@@ -43,6 +43,7 @@ import type {
   UsageDailyPoint,
   UsageProjectBreakdown,
   UsageModelBreakdown,
+  UsageTierBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
   MonitorSessionsParams,
@@ -57,6 +58,8 @@ import type {
   PinsListParams,
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
+import { pricingRegistry } from '../pricing/index.js';
+import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
 
 function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
   return {
@@ -1902,6 +1905,30 @@ interface UsageFilterState {
   where: string;
 }
 
+interface UsageRow {
+  session_id: string;
+  project: string;
+  agent_type: string;
+  model: string;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  timestamp: string | null;
+}
+
+interface UsageAccumulator {
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  sessions: Set<string>;
+  unknown_model_events: number;
+}
+
 function usageTimestampExpr(alias = 'e'): string {
   return `COALESCE(${qualifyColumn(alias, 'client_timestamp')}, ${qualifyColumn(alias, 'created_at')})`;
 }
@@ -1955,6 +1982,87 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilt
     values,
     where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
   };
+}
+
+function roundCost(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function roundRate(value: number): number {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
+
+function createUsageAccumulator(): UsageAccumulator {
+  return {
+    cost_usd: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    usage_events: 0,
+    sessions: new Set(),
+    unknown_model_events: 0,
+  };
+}
+
+function addUsageRow(acc: UsageAccumulator, row: UsageRow, classification: ModelClassification): void {
+  acc.cost_usd += row.cost_usd;
+  acc.input_tokens += row.tokens_in;
+  acc.output_tokens += row.tokens_out;
+  acc.cache_read_tokens += row.cache_read_tokens;
+  acc.cache_write_tokens += row.cache_write_tokens;
+  acc.usage_events += 1;
+  acc.sessions.add(row.session_id);
+  if (classification.pricing_status === 'unknown') {
+    acc.unknown_model_events += 1;
+  }
+}
+
+function usageAccumulatorToBreakdown(acc: UsageAccumulator): Omit<UsageTierBreakdown, 'provider' | 'tier'> {
+  return {
+    cost_usd: roundCost(acc.cost_usd),
+    input_tokens: acc.input_tokens,
+    output_tokens: acc.output_tokens,
+    cache_read_tokens: acc.cache_read_tokens,
+    cache_write_tokens: acc.cache_write_tokens,
+    usage_events: acc.usage_events,
+    session_count: acc.sessions.size,
+    unknown_model_events: acc.unknown_model_events,
+  };
+}
+
+function selectUsageRows(params: UsageParams = {}): UsageRow[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+  const timestampExpr = usageTimestampExpr('e');
+
+  return db.prepare(`
+    SELECT
+      e.session_id as session_id,
+      ${usageProjectExpr('e')} as project,
+      ${usageAgentExpr('e')} as agent_type,
+      ${usageModelExpr('e')} as model,
+      COALESCE(e.cost_usd, 0) as cost_usd,
+      COALESCE(e.tokens_in, 0) as tokens_in,
+      COALESCE(e.tokens_out, 0) as tokens_out,
+      COALESCE(e.cache_read_tokens, 0) as cache_read_tokens,
+      COALESCE(e.cache_write_tokens, 0) as cache_write_tokens,
+      ${timestampExpr} as timestamp
+    FROM events e
+    WHERE ${usageWhere}
+    ORDER BY ${timestampExpr} ASC, e.id ASC
+  `).all(...filter.values) as UsageRow[];
+}
+
+function estimateCacheSavings(row: UsageRow): number {
+  const resolved = pricingRegistry.resolve(row.model);
+  if (!resolved) return 0;
+  const pricing = resolved.pricing;
+  return (
+    row.cache_read_tokens * (pricing.inputCostPerToken - pricing.cacheReadCostPerToken)
+    + row.cache_write_tokens * (pricing.inputCostPerToken - pricing.cacheWriteCostPerToken)
+  );
 }
 
 function resolveUsageDateBounds(
@@ -2025,6 +2133,7 @@ export function getUsageSummary(params: UsageParams = {}): UsageSummary {
   const filter = buildUsageFilterState(params, 'e');
   const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
   const timestampExpr = usageTimestampExpr('e');
+  const usageRows = selectUsageRows(params);
 
   const row = db.prepare(`
     SELECT
@@ -2067,6 +2176,24 @@ export function getUsageSummary(params: UsageParams = {}): UsageSummary {
   const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
   const safeActiveDays = Math.max(row.active_days, 1);
   const safeSessions = Math.max(row.total_sessions, 1);
+  const cacheHitDenominator = row.total_input_tokens + row.total_cache_read_tokens;
+  let estimatedCacheSavingsUsd = 0;
+  let pricingKnownEvents = 0;
+  let pricingUnknownEvents = 0;
+  let unknownModelEvents = 0;
+
+  for (const usageRow of usageRows) {
+    const classification = classifyModelForUsage(usageRow.model);
+    if (pricingRegistry.resolve(usageRow.model)) {
+      pricingKnownEvents += 1;
+    } else {
+      pricingUnknownEvents += 1;
+    }
+    if (classification.pricing_status === 'unknown') {
+      unknownModelEvents += 1;
+    }
+    estimatedCacheSavingsUsd += estimateCacheSavings(usageRow);
+  }
 
   return {
     total_cost_usd: row.total_cost_usd,
@@ -2080,6 +2207,11 @@ export function getUsageSummary(params: UsageParams = {}): UsageSummary {
     span_days: spanDays,
     average_cost_per_active_day: row.total_usage_events > 0 ? roundMetric(row.total_cost_usd / safeActiveDays) : 0,
     average_cost_per_session: row.total_sessions > 0 ? roundMetric(row.total_cost_usd / safeSessions) : 0,
+    cache_hit_rate: cacheHitDenominator > 0 ? roundRate(row.total_cache_read_tokens / cacheHitDenominator) : 0,
+    estimated_cache_savings_usd: roundCost(estimatedCacheSavingsUsd),
+    pricing_known_events: pricingKnownEvents,
+    pricing_unknown_events: pricingUnknownEvents,
+    unknown_model_events: unknownModelEvents,
     peak_day: peakDay ?? { date: null, cost_usd: 0 },
     coverage: getUsageCoverage(params),
   };
@@ -2156,7 +2288,7 @@ export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] 
   const filter = buildUsageFilterState(params, 'e');
   const where = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
 
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT
       ${usageModelExpr('e')} as model,
       ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
@@ -2171,6 +2303,47 @@ export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] 
     GROUP BY model
     ORDER BY cost_usd DESC, input_tokens DESC, model ASC
   `).all(...filter.values) as UsageModelBreakdown[];
+
+  return rows.map(row => {
+    const classification = classifyModelForUsage(row.model);
+    return {
+      ...row,
+      canonical_model: classification.canonical_model,
+      provider: classification.provider,
+      family: classification.family,
+      tier: classification.tier,
+      known: classification.known,
+      deprecated: classification.deprecated,
+      pricing_status: classification.pricing_status,
+    };
+  });
+}
+
+export function getUsageTiers(params: UsageParams = {}): UsageTierBreakdown[] {
+  const tiers = new Map<string, { provider: string; tier: string; acc: UsageAccumulator }>();
+
+  for (const row of selectUsageRows(params)) {
+    const classification = classifyModelForUsage(row.model);
+    const provider = classification.provider;
+    const tier = classification.tier;
+    const key = `${provider}\0${tier}`;
+    const existing = tiers.get(key) ?? { provider, tier, acc: createUsageAccumulator() };
+    addUsageRow(existing.acc, row, classification);
+    tiers.set(key, existing);
+  }
+
+  return [...tiers.values()]
+    .map(({ provider, tier, acc }) => ({
+      provider,
+      tier,
+      ...usageAccumulatorToBreakdown(acc),
+    }))
+    .sort((a, b) => (
+      b.cost_usd - a.cost_usd
+      || b.input_tokens - a.input_tokens
+      || a.provider.localeCompare(b.provider)
+      || a.tier.localeCompare(b.tier)
+    ));
 }
 
 export function getUsageAgents(params: UsageParams = {}): UsageAgentBreakdown[] {
@@ -2201,6 +2374,47 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
   const metricsCondition = usageMetricsCondition('e');
   const timestampExpr = usageTimestampExpr('e');
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
+  const usageRows = selectUsageRows(params);
+  const enrichment = new Map<string, {
+    models: Map<string, { model: string; cost_usd: number; input_tokens: number; classification: ModelClassification }>;
+    tiers: Map<string, { provider: string; tier: string; cost_usd: number; usage_events: number }>;
+    unknown_model_events: number;
+  }>();
+
+  for (const usageRow of usageRows) {
+    const classification = classifyModelForUsage(usageRow.model);
+    const entry = enrichment.get(usageRow.session_id) ?? {
+      models: new Map(),
+      tiers: new Map(),
+      unknown_model_events: 0,
+    };
+    const modelKey = classification.canonical_model;
+    const modelEntry = entry.models.get(modelKey) ?? {
+      model: usageRow.model,
+      cost_usd: 0,
+      input_tokens: 0,
+      classification,
+    };
+    modelEntry.cost_usd += usageRow.cost_usd;
+    modelEntry.input_tokens += usageRow.tokens_in;
+    entry.models.set(modelKey, modelEntry);
+
+    const tierKey = `${classification.provider}\0${classification.tier}`;
+    const tierEntry = entry.tiers.get(tierKey) ?? {
+      provider: classification.provider,
+      tier: classification.tier,
+      cost_usd: 0,
+      usage_events: 0,
+    };
+    tierEntry.cost_usd += usageRow.cost_usd;
+    tierEntry.usage_events += 1;
+    entry.tiers.set(tierKey, tierEntry);
+
+    if (classification.pricing_status === 'unknown') {
+      entry.unknown_model_events += 1;
+    }
+    enrichment.set(usageRow.session_id, entry);
+  }
 
   const rows = db.prepare(`
     SELECT
@@ -2229,10 +2443,51 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
     HAVING COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) > 0
     ORDER BY cost_usd DESC, last_activity_at DESC, e.session_id DESC
     LIMIT ?
-  `).all(...filter.values, limit) as Array<Omit<UsageTopSessionRow, 'browsing_session_available'> & { browsing_session_available: number }>;
+  `).all(...filter.values, limit) as Array<
+    Omit<UsageTopSessionRow,
+      | 'browsing_session_available'
+      | 'primary_model'
+      | 'primary_tier'
+      | 'primary_provider'
+      | 'model_count'
+      | 'tier_costs'
+      | 'unknown_model_events'
+    > & { browsing_session_available: number }
+  >;
 
   return rows.map(row => ({
     ...row,
+    ...(() => {
+      const sessionEnrichment = enrichment.get(row.id);
+      const primary = sessionEnrichment
+        ? [...sessionEnrichment.models.values()].sort((a, b) => (
+          b.cost_usd - a.cost_usd
+          || b.input_tokens - a.input_tokens
+          || a.model.localeCompare(b.model)
+        ))[0]
+        : undefined;
+      const tierCosts = sessionEnrichment
+        ? [...sessionEnrichment.tiers.values()]
+          .map(tier => ({
+            ...tier,
+            cost_usd: roundCost(tier.cost_usd),
+          }))
+          .sort((a, b) => (
+            b.cost_usd - a.cost_usd
+            || a.provider.localeCompare(b.provider)
+            || a.tier.localeCompare(b.tier)
+          ))
+        : [];
+
+      return {
+        primary_model: primary?.model ?? 'unknown',
+        primary_tier: primary?.classification.tier ?? 'unknown',
+        primary_provider: primary?.classification.provider ?? 'unknown',
+        model_count: sessionEnrichment?.models.size ?? 0,
+        tier_costs: tierCosts,
+        unknown_model_events: sessionEnrichment?.unknown_model_events ?? 0,
+      };
+    })(),
     browsing_session_available: row.browsing_session_available === 1,
   }));
 }

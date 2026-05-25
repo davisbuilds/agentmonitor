@@ -2,7 +2,7 @@
 date: 2026-05-13
 topic: agent-usage-intelligence
 stage: implementation-plan
-status: draft
+status: tasks-1-5-complete
 source: conversation
 ---
 
@@ -13,6 +13,39 @@ source: conversation
 Turn AgentMonitor's existing event-derived Usage surface into an operator-grade usage intelligence layer with model classification, provider-neutral tier rollups, cache economics, high-signal session attribution, and a clear path to budget alerts and human-reviewed tier recommendations.
 
 ## Scope
+
+## Implementation Status
+
+As of 2026-05-24, the first implementation slice is complete on branch `agent-usage-intelligence`.
+
+Completed:
+
+- Task 1: model classification service and `PricingRegistry.resolve()`.
+- Task 2: additive v2 usage API and frontend client types for classification, cache economics, tier rollups, and top-session enrichment.
+- Task 3: backend usage-row scan/fold path, `/api/v2/usage/tiers`, cache hit rate, per-row estimated cache savings, classified model rows, and enriched top sessions.
+- Task 4: Usage store, API client, insight snapshot, and CSV export updates.
+- Task 5: Svelte Usage UI updates for tier attribution, cache economics, pricing coverage, and top-session primary model/tier indicators.
+
+Verification completed:
+
+- `pnpm lint`
+- `pnpm build`
+- `pnpm test` (`432` tests passed, `0` failed)
+- Manual smoke checks for `GET /api/health` and `GET /api/v2/usage/tiers`.
+
+Remaining planned follow-up scope:
+
+- Task 6: optional `tier`, `model`, and `provider` filters plus prior-period comparison.
+- Task 7: read-only budget alert contracts.
+- Task 8: human-reviewed tier feedback report.
+
+Implementation commits:
+
+- `4bfd4e9` Add pricing model classification
+- `dc86fc4` Add usage tier rollups and cache economics
+- `1e64f02` Surface usage intelligence in the Svelte app
+- `f68557b` Document usage intelligence contract
+- `c7f91cd` Stabilize monitor query fixture
 
 ### In Scope
 

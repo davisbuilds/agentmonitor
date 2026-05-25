@@ -26,9 +26,19 @@
         sub: `${formatNumber(summary.total_cache_read_tokens)} cache reads`,
       },
       {
+        label: 'Cache Hit Rate',
+        value: `${(summary.cache_hit_rate * 100).toFixed(1)}%`,
+        sub: `${formatCost(summary.estimated_cache_savings_usd)} estimated savings`,
+      },
+      {
         label: 'Output Tokens',
         value: formatNumber(summary.total_output_tokens),
         sub: `${formatNumber(summary.total_cache_write_tokens)} cache writes`,
+      },
+      {
+        label: 'Pricing Coverage',
+        value: formatNumber(summary.pricing_known_events),
+        sub: `${formatNumber(summary.pricing_unknown_events)} unknown events`,
       },
       {
         label: 'Usage Events',

@@ -95,7 +95,7 @@
     <div class="xl:col-span-5">
       <UsageTopSessions />
     </div>
-    <div class="xl:col-span-4">
+    <div class="xl:col-span-3">
       <UsageBreakdownTable
         title="By Project"
         kind="project"
@@ -104,7 +104,7 @@
         error={usage.errors.projects}
       />
     </div>
-    <div class="xl:col-span-4">
+    <div class="xl:col-span-3">
       <UsageBreakdownTable
         title="By Model"
         kind="model"
@@ -113,7 +113,16 @@
         error={usage.errors.models}
       />
     </div>
-    <div class="xl:col-span-4">
+    <div class="xl:col-span-3">
+      <UsageBreakdownTable
+        title="By Tier"
+        kind="tier"
+        rows={usage.tiers}
+        loading={usage.loading.tiers}
+        error={usage.errors.tiers}
+      />
+    </div>
+    <div class="xl:col-span-3">
       <UsageBreakdownTable
         title="By Agent"
         kind="agent"

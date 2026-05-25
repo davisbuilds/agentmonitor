@@ -432,6 +432,11 @@ export interface UsageSummary {
   span_days: number;
   average_cost_per_active_day: number;
   average_cost_per_session: number;
+  cache_hit_rate: number;
+  estimated_cache_savings_usd: number;
+  pricing_known_events: number;
+  pricing_unknown_events: number;
+  unknown_model_events: number;
   peak_day: {
     date: string | null;
     cost_usd: number;
@@ -463,6 +468,13 @@ export interface UsageProjectBreakdown {
 
 export interface UsageModelBreakdown {
   model: string;
+  canonical_model: string;
+  provider: string;
+  family: string;
+  tier: string;
+  known: boolean;
+  deprecated: boolean;
+  pricing_status: 'known' | 'deprecated' | 'unknown';
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
@@ -470,6 +482,19 @@ export interface UsageModelBreakdown {
   cache_write_tokens: number;
   usage_events: number;
   session_count: number;
+}
+
+export interface UsageTierBreakdown {
+  provider: string;
+  tier: string;
+  cost_usd: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  usage_events: number;
+  session_count: number;
+  unknown_model_events: number;
 }
 
 export interface UsageAgentBreakdown {
@@ -500,6 +525,17 @@ export interface UsageTopSessionRow {
   cache_write_tokens: number;
   event_count: number;
   usage_events: number;
+  primary_model: string;
+  primary_tier: string;
+  primary_provider: string;
+  model_count: number;
+  tier_costs: Array<{
+    provider: string;
+    tier: string;
+    cost_usd: number;
+    usage_events: number;
+  }>;
+  unknown_model_events: number;
   browsing_session_available: boolean;
 }
 
@@ -517,6 +553,7 @@ export interface InsightInputSnapshot {
   usage_daily: UsageDailyPoint[];
   usage_projects: UsageProjectBreakdown[];
   usage_models: UsageModelBreakdown[];
+  usage_tiers: UsageTierBreakdown[];
   usage_agents: UsageAgentBreakdown[];
   usage_top_sessions: UsageTopSessionRow[];
 }

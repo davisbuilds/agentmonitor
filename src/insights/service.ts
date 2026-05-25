@@ -16,6 +16,7 @@ import {
   getUsageModels,
   getUsageProjects,
   getUsageSummary,
+  getUsageTiers,
   getUsageTopSessions,
 } from '../db/v2-queries.js';
 import type {
@@ -105,6 +106,7 @@ function buildInsightDataset(params: GenerateInsightParams): InsightDatasetPacke
       usage_daily: getUsageDaily(usageParams).slice(-MAX_ACTIVITY_POINTS),
       usage_projects: getUsageProjects(usageParams).slice(0, MAX_BREAKDOWN_ROWS),
       usage_models: getUsageModels(usageParams).slice(0, MAX_BREAKDOWN_ROWS),
+      usage_tiers: getUsageTiers(usageParams).slice(0, MAX_BREAKDOWN_ROWS),
       usage_agents: getUsageAgents(usageParams).slice(0, MAX_BREAKDOWN_ROWS),
       usage_top_sessions: getUsageTopSessions({ ...usageParams, limit: MAX_TOP_SESSIONS }),
     },

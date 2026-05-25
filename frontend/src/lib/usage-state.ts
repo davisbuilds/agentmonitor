@@ -3,6 +3,7 @@ import type {
   UsageDailyPoint,
   UsageProjectBreakdown,
   UsageModelBreakdown,
+  UsageTierBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
 } from './api/client';
@@ -21,6 +22,7 @@ export interface UsageCsvPayload {
   daily: UsageDailyPoint[];
   projects: UsageProjectBreakdown[];
   models: UsageModelBreakdown[];
+  tiers: UsageTierBreakdown[];
   agents: UsageAgentBreakdown[];
   topSessions: UsageTopSessionRow[];
 }
@@ -98,6 +100,10 @@ export function buildUsageCsv(payload: UsageCsvPayload): string {
     lines.push(sectionRow('Summary', 'Output Tokens', payload.summary.total_output_tokens));
     lines.push(sectionRow('Summary', 'Cache Read Tokens', payload.summary.total_cache_read_tokens));
     lines.push(sectionRow('Summary', 'Cache Write Tokens', payload.summary.total_cache_write_tokens));
+    lines.push(sectionRow('Summary', 'Cache Hit Rate', payload.summary.cache_hit_rate));
+    lines.push(sectionRow('Summary', 'Estimated Cache Savings USD', payload.summary.estimated_cache_savings_usd));
+    lines.push(sectionRow('Summary', 'Pricing Known Events', payload.summary.pricing_known_events));
+    lines.push(sectionRow('Summary', 'Pricing Unknown Events', payload.summary.pricing_unknown_events));
     lines.push(sectionRow('Summary', 'Usage Events', payload.summary.total_usage_events));
     lines.push(sectionRow('Summary', 'Sessions', payload.summary.total_sessions));
     lines.push(sectionRow('Summary', 'Coverage Note', payload.summary.coverage.note));
@@ -140,15 +146,40 @@ export function buildUsageCsv(payload: UsageCsvPayload): string {
   if (payload.models.length > 0) {
     lines.push('');
     lines.push('Models');
-    lines.push('Model,Cost USD,Input Tokens,Output Tokens,Usage Events,Sessions');
+    lines.push('Model,Canonical Model,Provider,Family,Tier,Pricing Status,Cost USD,Input Tokens,Output Tokens,Usage Events,Sessions');
     for (const row of payload.models) {
       lines.push(tableRow([
         row.model,
+        row.canonical_model,
+        row.provider,
+        row.family,
+        row.tier,
+        row.pricing_status,
         row.cost_usd,
         row.input_tokens,
         row.output_tokens,
         row.usage_events,
         row.session_count,
+      ]));
+    }
+  }
+
+  if (payload.tiers.length > 0) {
+    lines.push('');
+    lines.push('Tiers');
+    lines.push('Provider,Tier,Cost USD,Input Tokens,Output Tokens,Cache Read Tokens,Cache Write Tokens,Usage Events,Sessions,Unknown Model Events');
+    for (const row of payload.tiers) {
+      lines.push(tableRow([
+        row.provider,
+        row.tier,
+        row.cost_usd,
+        row.input_tokens,
+        row.output_tokens,
+        row.cache_read_tokens,
+        row.cache_write_tokens,
+        row.usage_events,
+        row.session_count,
+        row.unknown_model_events,
       ]));
     }
   }
@@ -172,12 +203,17 @@ export function buildUsageCsv(payload: UsageCsvPayload): string {
   if (payload.topSessions.length > 0) {
     lines.push('');
     lines.push('Top Sessions');
-    lines.push('Session ID,Project,Agent,Cost USD,Input Tokens,Output Tokens,Usage Events,All Events,Started At,Last Activity,Has Browsing Session');
+    lines.push('Session ID,Project,Agent,Primary Model,Primary Provider,Primary Tier,Model Count,Unknown Model Events,Cost USD,Input Tokens,Output Tokens,Usage Events,All Events,Started At,Last Activity,Has Browsing Session');
     for (const row of payload.topSessions) {
       lines.push(tableRow([
         row.id,
         row.project,
         row.agent,
+        row.primary_model,
+        row.primary_provider,
+        row.primary_tier,
+        row.model_count,
+        row.unknown_model_events,
         row.cost_usd,
         row.input_tokens,
         row.output_tokens,

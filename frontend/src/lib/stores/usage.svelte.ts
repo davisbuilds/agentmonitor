@@ -3,6 +3,7 @@ import {
   fetchUsageDaily,
   fetchUsageProjects,
   fetchUsageModels,
+  fetchUsageTiers,
   fetchUsageAgents,
   fetchUsageTopSessions,
   type UsageSummary,
@@ -10,6 +11,7 @@ import {
   type UsageDailyPoint,
   type UsageProjectBreakdown,
   type UsageModelBreakdown,
+  type UsageTierBreakdown,
   type UsageAgentBreakdown,
   type UsageTopSessionRow,
 } from '../api/client';
@@ -27,6 +29,7 @@ type PanelKey =
   | 'daily'
   | 'projects'
   | 'models'
+  | 'tiers'
   | 'agents'
   | 'topSessions';
 
@@ -44,6 +47,7 @@ class UsageStore {
     daily: 0,
     projects: 0,
     models: 0,
+    tiers: 0,
     agents: 0,
     topSessions: 0,
   };
@@ -62,6 +66,7 @@ class UsageStore {
   daily = $state<UsageDailyPoint[]>([]);
   projects = $state<UsageProjectBreakdown[]>([]);
   models = $state<UsageModelBreakdown[]>([]);
+  tiers = $state<UsageTierBreakdown[]>([]);
   agents = $state<UsageAgentBreakdown[]>([]);
   topSessions = $state<UsageTopSessionRow[]>([]);
 
@@ -72,6 +77,7 @@ class UsageStore {
     daily: false,
     projects: false,
     models: false,
+    tiers: false,
     agents: false,
     topSessions: false,
   });
@@ -81,6 +87,7 @@ class UsageStore {
     daily: null,
     projects: null,
     models: null,
+    tiers: null,
     agents: null,
     topSessions: null,
   });
@@ -165,6 +172,7 @@ class UsageStore {
       this.fetchDaily(),
       this.fetchProjects(),
       this.fetchModels(),
+      this.fetchTiers(),
       this.fetchAgents(),
       this.fetchTopSessions(),
     ]);
@@ -246,6 +254,26 @@ class UsageStore {
     } finally {
       if (version === this.versions.models) {
         this.loading.models = false;
+      }
+    }
+  }
+
+  async fetchTiers(): Promise<void> {
+    const version = ++this.versions.tiers;
+    this.loading.tiers = true;
+    this.errors.tiers = null;
+    try {
+      const result = await fetchUsageTiers(this.queryParams);
+      if (version !== this.versions.tiers) return;
+      this.tiers = result.data;
+      this.coverage = result.coverage;
+    } catch (err) {
+      if (version !== this.versions.tiers) return;
+      console.error('Failed to load usage by tier:', err);
+      this.errors.tiers = 'Failed to load tier attribution.';
+    } finally {
+      if (version === this.versions.tiers) {
+        this.loading.tiers = false;
       }
     }
   }
@@ -334,6 +362,7 @@ class UsageStore {
       daily: this.daily,
       projects: this.projects,
       models: this.models,
+      tiers: this.tiers,
       agents: this.agents,
       topSessions: this.topSessions,
     });

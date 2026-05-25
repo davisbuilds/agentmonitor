@@ -72,7 +72,9 @@ Product-surface reference for AgentMonitor.
 ## Usage
 
 - Historical usage lives under `/api/v2/usage/*` and is event-derived rather than transcript-derived.
-- Summary totals, daily series, project/model/agent attribution, and top-session views all use cost/token-bearing event rows as their source of truth.
+- Summary totals, daily series, project/model/tier/agent attribution, and top-session views all use cost/token-bearing event rows as their source of truth.
+- Usage models are classified at query time into canonical model, provider, family, tier, lifecycle, and pricing-status fields. Unknown and deprecated models remain visible in responses.
+- Stored `cost_usd` is authoritative for event cost. Cache hit rate and estimated cache savings are derived estimates from current pricing metadata and are coverage-limited when pricing is unknown.
 - Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
 - The Svelte `Usage` tab supports date ranges, project and agent filters, session drill-in when transcript history exists, and CSV export.
 
@@ -135,6 +137,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |
 | `/api/v2/usage/projects` | GET | Usage attribution grouped by project |
 | `/api/v2/usage/models` | GET | Usage attribution grouped by model |
+| `/api/v2/usage/tiers` | GET | Usage attribution grouped by provider-neutral model tier |
 | `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
 | `/api/v2/insights` | GET | List persisted insights for the current historical slice |

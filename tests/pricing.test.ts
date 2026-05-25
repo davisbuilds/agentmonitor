@@ -8,6 +8,7 @@ import test, { after, before, beforeEach, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { PricingRegistry } from '../src/pricing/index.js';
+import { classifyModel } from '../src/pricing/model-classification.js';
 
 // ─── Unit tests: PricingRegistry ────────────────────────────────────────
 
@@ -46,6 +47,7 @@ describe('PricingRegistry', () => {
       const pricing = registry.lookup('opus');
       assert.ok(pricing);
       assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.deprecated, true);
     });
 
     test('finds OpenAI o3 model', () => {
@@ -130,6 +132,56 @@ describe('PricingRegistry', () => {
     });
   });
 
+  describe('resolve', () => {
+    test('returns canonical pricing metadata for aliases and provider-prefixed models', () => {
+      const resolved = registry.resolve('anthropic/claude-sonnet-4-5');
+      assert.ok(resolved);
+      assert.equal(resolved.canonicalModel, 'claude-sonnet-4-5-20250929');
+      assert.equal(resolved.pricing.provider, 'anthropic');
+    });
+
+    test('returns null for unknown models', () => {
+      assert.equal(registry.resolve('not-a-real-model'), null);
+    });
+  });
+
+  describe('classification', () => {
+    test('classifies known Claude aliases by canonical model and tier', () => {
+      assert.deepEqual(classifyModel('anthropic/claude-sonnet-4-5'), {
+        raw_model: 'anthropic/claude-sonnet-4-5',
+        canonical_model: 'claude-sonnet-4-5-20250929',
+        provider: 'anthropic',
+        family: 'claude',
+        tier: 'sonnet',
+        known: true,
+        deprecated: false,
+        pricing_status: 'known',
+      });
+    });
+
+    test('classifies known OpenAI and Gemini tiers', () => {
+      assert.equal(classifyModel('openai/o3').tier, 'reasoning');
+      assert.equal(classifyModel('gpt-5-mini').tier, 'economy');
+      assert.equal(classifyModel('google/gemini-2.5-pro-preview-05-06').tier, 'pro');
+    });
+
+    test('marks pruned legacy models as deprecated without pricing', () => {
+      const classification = classifyModel('claude-3-opus-20240229');
+      assert.equal(classification.canonical_model, 'claude-3-opus-20240229');
+      assert.equal(classification.provider, 'anthropic');
+      assert.equal(classification.tier, 'opus');
+      assert.equal(classification.known, false);
+      assert.equal(classification.deprecated, true);
+      assert.equal(classification.pricing_status, 'deprecated');
+    });
+
+    test('keeps unknown and empty models visible', () => {
+      assert.equal(classifyModel('unknown-model-xyz').pricing_status, 'unknown');
+      assert.equal(classifyModel('').canonical_model, 'unknown');
+      assert.equal(classifyModel(null).tier, 'unknown');
+    });
+  });
+
   describe('calculate', () => {
     test('calculates cost for Claude Sonnet 4.5', () => {
       // Sonnet 4.5: $3/MTok input, $15/MTok output
@@ -154,6 +206,18 @@ describe('PricingRegistry', () => {
       // 100K * $3/MTok + 50K * $15/MTok + 500K * $0.3/MTok + 10K * $3.75/MTok
       // = $0.30 + $0.75 + $0.15 + $0.0375
       const expected = 0.3 + 0.75 + 0.15 + 0.0375;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
+    test('calculates current cached-input price for OpenAI o3', () => {
+      const cost = registry.calculate('o3', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      // 100K * $2/MTok + 50K * $8/MTok + 40K * $0.50/MTok
+      const expected = 0.2 + 0.4 + 0.02;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 
@@ -215,6 +279,18 @@ describe('PricingRegistry', () => {
       assert.ok(cost !== null);
       // Pro has no cached-input discount in the pasted short-context table.
       const expected = 3 + 9;
+      assert.ok(Math.abs(cost - expected) < 0.0001);
+    });
+
+    test('calculates current Gemini 2.5 Flash standard text pricing', () => {
+      const cost = registry.calculate('gemini-2.5-flash', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      // 100K * $0.30/MTok + 50K * $2.50/MTok + 40K * $0.03/MTok
+      const expected = 0.03 + 0.125 + 0.0012;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 

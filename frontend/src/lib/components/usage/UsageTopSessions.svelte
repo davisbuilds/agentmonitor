@@ -41,6 +41,8 @@
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-500">
                 <span>{row.project ?? 'unknown project'}</span>
                 <span>{row.agent}</span>
+                <span>{row.primary_model}</span>
+                <span>{row.primary_provider}/{row.primary_tier}</span>
                 <span>{formatNumber(row.usage_events)} usage events</span>
                 <span>{formatNumber(row.input_tokens + row.output_tokens)} tokens</span>
               </div>
@@ -66,6 +68,16 @@
               {#if row.fidelity}
                 <span class="rounded-full border border-gray-700 px-2 py-1 text-gray-300">
                   {row.fidelity}
+                </span>
+              {/if}
+              {#if row.model_count > 1}
+                <span class="rounded-full border border-gray-700 px-2 py-1 text-gray-300">
+                  {formatNumber(row.model_count)} models
+                </span>
+              {/if}
+              {#if row.unknown_model_events > 0}
+                <span class="rounded-full border border-amber-500/40 px-2 py-1 text-amber-200">
+                  {formatNumber(row.unknown_model_events)} unknown model events
                 </span>
               {/if}
             </div>

@@ -35,6 +35,11 @@ export interface TokenCounts {
   cacheWrite?: number;
 }
 
+export interface ResolvedModelPricing {
+  canonicalModel: string;
+  pricing: ModelPricing;
+}
+
 // ─── PricingRegistry ────────────────────────────────────────────────────
 
 const M_TOK = 1_000_000;
@@ -98,15 +103,28 @@ export class PricingRegistry {
    * Look up pricing for a model by canonical name or alias.
    */
   lookup(model: string): ModelPricing | null {
-    const normalized = this.normalize(model);
+    return this.resolve(model)?.pricing ?? null;
+  }
+
+  /**
+   * Resolve a model by canonical name or alias and return the canonical ID.
+   */
+  resolve(model: string): ResolvedModelPricing | null {
+    const normalized = this.normalize(model.trim());
+    if (!normalized) return null;
 
     // Try direct canonical match
     const direct = this.models.get(normalized);
-    if (direct) return direct;
+    if (direct) {
+      return { canonicalModel: normalized, pricing: direct };
+    }
 
     // Try alias
     const canonical = this.aliases.get(normalized);
-    if (canonical) return this.models.get(canonical) ?? null;
+    if (canonical) {
+      const pricing = this.models.get(canonical);
+      if (pricing) return { canonicalModel: canonical, pricing };
+    }
 
     return null;
   }
