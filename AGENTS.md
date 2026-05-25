@@ -17,6 +17,7 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - `docs/system/ARCHITECTURE.md` — high-level flow, canonical surface, Rust runtime status, route map, DB schema, SSE broadcasting, event contract, pricing engine, import pipeline, session sync, OTEL parser + Codex telemetry capability matrix, runtime path resolution, directory map.
 - `docs/system/FEATURES.md` — product surface, full v1/v2 API endpoint catalog, SSE event types, capture/redaction controls, analytics/usage/insights/search.
 - `docs/system/OPERATIONS.md` — local dev, full command catalog, all `AGENTMONITOR_*` env vars, Claude Code + Codex hook install, historical import, CI gates, runtime artifacts, manual live verification.
+- `docs/system/DESIGN.md` — Svelte `/app/` design system ("Instrument Console"): color/type/space/radius tokens, layout language, accessibility floor. Tokens live in `frontend/src/app.css` `@theme`.
 - `docs/api/` — API navigation reference.
 - `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity, Rust convergence).
 - `docs/project/GIT_HISTORY_POLICY.md` — merge-commit-only policy and rationale.

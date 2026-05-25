@@ -5,6 +5,12 @@ This is the canonical product surface for AgentMonitor.
 
 See root `AGENTS.md` for project overview, API contract (V2 endpoints this app consumes), and shared conventions.
 
+**Design system:** follow `docs/system/DESIGN.md` ("Instrument Console"). Tokens live in
+`src/app.css` `@theme`; use `text-text`/`text-text-muted`, `bg-surface`, `border-line`, the
+`text-h1..text-meta` scale, two radii (`rounded-sm`/`rounded-lg`), `font-sans` (Mona Sans, UI) and
+`font-mono` (Geist Mono, numerals/code). Redesign is phased — see
+`docs/plans/2026-05-25-svelte-ui-redesign-implementation.md`.
+
 ## Working Commands
 
 - Build: `pnpm frontend:build` (output at `frontend/dist/`, served at `/app/`)

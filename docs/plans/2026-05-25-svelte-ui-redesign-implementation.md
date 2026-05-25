@@ -2,9 +2,31 @@
 date: 2026-05-25
 topic: svelte-ui-redesign
 stage: implementation-plan
-status: not-started
+status: phase-1-complete
 source: conversation
 ---
+
+## Implementation Status
+
+As of 2026-05-25, **Phase 1 (Foundation) is complete** on branch
+`feat/ui-redesign-instrument-console`. Phases 2–6 remain.
+
+- Task 1.0 — Tailwind wired into Vite (`@tailwindcss/vite` + `import './app.css'`); dropped the
+  `/css` proxy and `output.css` link. Dev (`:5173`) and built (`:3141`) `/app/` both render styled.
+- Task 1.1 — `@theme` token system authored in `frontend/src/app.css` (surfaces, AA text ramp,
+  scarce semantic accents, 1.25 type scale, two radii, motion defaults, focus-visible base).
+- Task 1.2 — Mona Sans (UI / `font-sans`) + Geist Mono (data / `font-mono`) self-hosted via Fontsource.
+- Task 1.3 — Shell collapsed from four stacked bars to one command bar + contextual filter sub-bar;
+  `QuotaPill` (compact + popover) replaces the full-width quota bar; `StatsBar` moved into Monitor;
+  shell/`ConnectionStatus`/`FilterBar` tokenized.
+- Task 1.4 — `docs/system/DESIGN.md` authored; doc map + frontend guidance updated.
+
+Verification: `pnpm lint`, `pnpm build`, `pnpm test` (445 pass / 0 fail). Visual baselines and
+post-Phase-1 captures in git-ignored `.design-audit/shots/`.
+
+Remaining: Phase 2 (shared primitives), Phase 3 (Monitor), Phase 4 (Sessions/Search/Pinned),
+Phase 5 (Analytics consolidation), Phase 6 (Live + responsive + motion + docs).
+
 
 # Svelte UI Redesign Implementation Plan
 
