@@ -105,6 +105,7 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - Cost computed from `tokens_in`, `tokens_out`, `cache_read_tokens`, `cache_write_tokens`.
 - Costs stored as `cost_usd` on each event row.
 - V2 usage keeps stored `cost_usd` authoritative. Cache hit rate, estimated cache savings, classification filters, tier rollups, top-session enrichment, and prior-period deltas are derived at query time from filtered usage rows and current pricing metadata.
+- Read-only usage budgets are evaluated from an optional local JSON config through the same v2 usage summary/filter path. They report alert states only; no hook enforcement or request blocking is implemented.
 
 ## Import Pipeline
 
