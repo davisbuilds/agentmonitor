@@ -82,6 +82,8 @@ const baseInsight: Insight = {
     pricing_known_events: 2,
     pricing_unknown_events: 0,
     unknown_model_events: 0,
+    prior_total_cost_usd: 0,
+    cost_delta_pct: 0,
     peak_day: { date: '2026-03-01', cost_usd: 1.25 },
     coverage: {
       metric_scope: 'event_usage',

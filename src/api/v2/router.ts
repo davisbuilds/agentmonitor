@@ -349,6 +349,9 @@ function readAnalyticsParams(req: Request): {
   agent?: string;
   date_from?: string;
   date_to?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
   limit?: number;
 } {
   return {
@@ -356,6 +359,9 @@ function readAnalyticsParams(req: Request): {
     agent: req.query.agent as string | undefined,
     date_from: req.query.date_from as string | undefined,
     date_to: req.query.date_to as string | undefined,
+    model: req.query.model as string | undefined,
+    provider: req.query.provider as string | undefined,
+    tier: req.query.tier as string | undefined,
     limit: safeInt(req.query.limit as string),
   };
 }

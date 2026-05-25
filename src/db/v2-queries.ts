@@ -830,6 +830,13 @@ function enumerateDateRange(from: string, to: string): string[] {
   return dates;
 }
 
+function addDaysToDateString(date: string, days: number): string | null {
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
 function parseJsonString(value: string | null | undefined): unknown {
   if (!value) return undefined;
   try {
@@ -1918,6 +1925,11 @@ interface UsageRow {
   timestamp: string | null;
 }
 
+interface UsageEventRow extends UsageRow {
+  source: string;
+  has_usage: boolean;
+}
+
 interface UsageAccumulator {
   cost_usd: number;
   input_tokens: number;
@@ -1984,6 +1996,34 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilt
   };
 }
 
+function normalizeUsageFilterValue(value: string | undefined): string | null {
+  const normalized = value?.trim().toLowerCase();
+  return normalized ? normalized : null;
+}
+
+function usageClassificationMatches(model: string, params: UsageParams): boolean {
+  const modelFilter = normalizeUsageFilterValue(params.model);
+  const providerFilter = normalizeUsageFilterValue(params.provider);
+  const tierFilter = normalizeUsageFilterValue(params.tier);
+  if (!modelFilter && !providerFilter && !tierFilter) return true;
+
+  const classification = classifyModelForUsage(model);
+  if (
+    modelFilter
+    && model.toLowerCase() !== modelFilter
+    && classification.canonical_model.toLowerCase() !== modelFilter
+  ) {
+    return false;
+  }
+  if (providerFilter && classification.provider.toLowerCase() !== providerFilter) {
+    return false;
+  }
+  if (tierFilter && classification.tier.toLowerCase() !== tierFilter) {
+    return false;
+  }
+  return true;
+}
+
 function roundCost(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
@@ -2018,7 +2058,7 @@ function addUsageRow(acc: UsageAccumulator, row: UsageRow, classification: Model
   }
 }
 
-function usageAccumulatorToBreakdown(acc: UsageAccumulator): Omit<UsageTierBreakdown, 'provider' | 'tier'> {
+function usageAccumulatorToMetrics(acc: UsageAccumulator): Omit<UsageProjectBreakdown, 'project'> {
   return {
     cost_usd: roundCost(acc.cost_usd),
     input_tokens: acc.input_tokens,
@@ -2027,7 +2067,69 @@ function usageAccumulatorToBreakdown(acc: UsageAccumulator): Omit<UsageTierBreak
     cache_write_tokens: acc.cache_write_tokens,
     usage_events: acc.usage_events,
     session_count: acc.sessions.size,
+  };
+}
+
+function usageAccumulatorToBreakdown(acc: UsageAccumulator): Omit<UsageTierBreakdown, 'provider' | 'tier'> {
+  return {
+    ...usageAccumulatorToMetrics(acc),
     unknown_model_events: acc.unknown_model_events,
+  };
+}
+
+function usageRowsToSummaryValues(rows: UsageRow[]): {
+  total_cost_usd: number;
+  total_input_tokens: number;
+  total_output_tokens: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_usage_events: number;
+  total_sessions: number;
+  active_days: number;
+  earliest: string | null;
+  latest: string | null;
+  peak_day: { date: string | null; cost_usd: number };
+} {
+  const sessions = new Set<string>();
+  const days = new Map<string, number>();
+  let totalCost = 0;
+  let totalInput = 0;
+  let totalOutput = 0;
+  let totalCacheRead = 0;
+  let totalCacheWrite = 0;
+  let earliest: string | null = null;
+  let latest: string | null = null;
+
+  for (const row of rows) {
+    totalCost += row.cost_usd;
+    totalInput += row.tokens_in;
+    totalOutput += row.tokens_out;
+    totalCacheRead += row.cache_read_tokens;
+    totalCacheWrite += row.cache_write_tokens;
+    sessions.add(row.session_id);
+    if (row.timestamp) {
+      if (!earliest || row.timestamp < earliest) earliest = row.timestamp;
+      if (!latest || row.timestamp > latest) latest = row.timestamp;
+      const date = row.timestamp.slice(0, 10);
+      days.set(date, (days.get(date) ?? 0) + row.cost_usd);
+    }
+  }
+
+  const peakDay = [...days.entries()]
+    .sort((a, b) => b[1] - a[1] || b[0].localeCompare(a[0]))[0];
+
+  return {
+    total_cost_usd: roundCost(totalCost),
+    total_input_tokens: totalInput,
+    total_output_tokens: totalOutput,
+    total_cache_read_tokens: totalCacheRead,
+    total_cache_write_tokens: totalCacheWrite,
+    total_usage_events: rows.length,
+    total_sessions: sessions.size,
+    active_days: rows.length > 0 ? days.size : 0,
+    earliest,
+    latest,
+    peak_day: peakDay ? { date: peakDay[0], cost_usd: roundCost(peakDay[1]) } : { date: null, cost_usd: 0 },
   };
 }
 
@@ -2037,7 +2139,7 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
   const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
   const timestampExpr = usageTimestampExpr('e');
 
-  return db.prepare(`
+  const rows = db.prepare(`
     SELECT
       e.session_id as session_id,
       ${usageProjectExpr('e')} as project,
@@ -2053,6 +2155,38 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
     WHERE ${usageWhere}
     ORDER BY ${timestampExpr} ASC, e.id ASC
   `).all(...filter.values) as UsageRow[];
+
+  return rows.filter(row => usageClassificationMatches(row.model, params));
+}
+
+function selectUsageEventRows(params: UsageParams = {}): UsageEventRow[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const timestampExpr = usageTimestampExpr('e');
+  const metricsCondition = usageMetricsCondition('e');
+
+  const rows = db.prepare(`
+    SELECT
+      e.session_id as session_id,
+      ${usageProjectExpr('e')} as project,
+      ${usageAgentExpr('e')} as agent_type,
+      ${usageModelExpr('e')} as model,
+      COALESCE(e.cost_usd, 0) as cost_usd,
+      COALESCE(e.tokens_in, 0) as tokens_in,
+      COALESCE(e.tokens_out, 0) as tokens_out,
+      COALESCE(e.cache_read_tokens, 0) as cache_read_tokens,
+      COALESCE(e.cache_write_tokens, 0) as cache_write_tokens,
+      ${timestampExpr} as timestamp,
+      COALESCE(NULLIF(e.source, ''), 'api') as source,
+      CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END as has_usage
+    FROM events e
+    ${filter.where}
+    ORDER BY ${timestampExpr} ASC, e.id ASC
+  `).all(...filter.values) as Array<Omit<UsageEventRow, 'has_usage'> & { has_usage: number }>;
+
+  return rows
+    .filter(row => usageClassificationMatches(row.model, params))
+    .map(row => ({ ...row, has_usage: row.has_usage === 1 }));
 }
 
 function estimateCacheSavings(row: UsageRow): number {
@@ -2079,49 +2213,55 @@ function resolveUsageDateBounds(
 }
 
 export function getUsageCoverage(params: UsageParams = {}): UsageCoverage {
-  const db = getDb();
-  const filter = buildUsageFilterState(params);
-  const metricsCondition = usageMetricsCondition('e');
+  const rows = selectUsageEventRows(params);
+  const matchingSessions = new Set<string>();
+  const usageSessions = new Set<string>();
+  const sources = new Map<string, UsageSourceBreakdown>();
 
-  const summary = db.prepare(`
-    SELECT
-      COUNT(*) as matching_events,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) as usage_events,
-      COUNT(DISTINCT e.session_id) as matching_sessions,
-      COUNT(DISTINCT CASE WHEN ${metricsCondition} THEN e.session_id END) as usage_sessions
-    FROM events e
-    ${filter.where}
-  `).get(...filter.values) as {
-    matching_events: number;
-    usage_events: number;
-    matching_sessions: number;
-    usage_sessions: number;
-  };
+  for (const row of rows) {
+    matchingSessions.add(row.session_id);
+    if (row.has_usage) usageSessions.add(row.session_id);
 
-  const sourceBreakdown = db.prepare(`
-    SELECT
-      COALESCE(NULLIF(e.source, ''), 'api') as source,
-      COUNT(*) as event_count,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) as usage_event_count,
-      COUNT(DISTINCT CASE WHEN ${metricsCondition} THEN e.session_id END) as session_count,
-      ROUND(COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cost_usd ELSE 0 END), 0), 6) as cost_usd,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_in ELSE 0 END), 0) as input_tokens,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_out ELSE 0 END), 0) as output_tokens,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_read_tokens ELSE 0 END), 0) as cache_read_tokens,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_write_tokens ELSE 0 END), 0) as cache_write_tokens
-    FROM events e
-    ${filter.where}
-    GROUP BY source
-    ORDER BY source ASC
-  `).all(...filter.values) as UsageSourceBreakdown[];
+    const source = row.source || 'api';
+    const existing = sources.get(source) ?? {
+      source,
+      event_count: 0,
+      usage_event_count: 0,
+      session_count: 0,
+      cost_usd: 0,
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    };
+    existing.event_count += 1;
+    if (row.has_usage) {
+      existing.usage_event_count += 1;
+      existing.cost_usd += row.cost_usd;
+      existing.input_tokens += row.tokens_in;
+      existing.output_tokens += row.tokens_out;
+      existing.cache_read_tokens += row.cache_read_tokens;
+      existing.cache_write_tokens += row.cache_write_tokens;
+    }
+    sources.set(source, existing);
+  }
+
+  const sourceBreakdown = [...sources.values()]
+    .map(row => ({
+      ...row,
+      session_count: new Set(rows.filter(event => event.source === row.source && event.has_usage).map(event => event.session_id)).size,
+      cost_usd: roundCost(row.cost_usd),
+    }))
+    .sort((a, b) => a.source.localeCompare(b.source));
+  const usageEvents = rows.filter(row => row.has_usage).length;
 
   return {
     metric_scope: 'event_usage',
-    matching_events: summary.matching_events,
-    usage_events: summary.usage_events,
-    missing_usage_events: Math.max(0, summary.matching_events - summary.usage_events),
-    matching_sessions: summary.matching_sessions,
-    usage_sessions: summary.usage_sessions,
+    matching_events: rows.length,
+    usage_events: usageEvents,
+    missing_usage_events: Math.max(0, rows.length - usageEvents),
+    matching_sessions: matchingSessions.size,
+    usage_sessions: usageSessions.size,
     sources_with_usage: sourceBreakdown.filter(row => row.usage_event_count > 0).length,
     source_breakdown: sourceBreakdown,
     note: 'Usage is derived from ingested events with cost or token data. Sessions without usage-bearing events are excluded from totals but still reflected in coverage.',
@@ -2129,50 +2269,8 @@ export function getUsageCoverage(params: UsageParams = {}): UsageCoverage {
 }
 
 export function getUsageSummary(params: UsageParams = {}): UsageSummary {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
-  const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
-  const timestampExpr = usageTimestampExpr('e');
   const usageRows = selectUsageRows(params);
-
-  const row = db.prepare(`
-    SELECT
-      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as total_cost_usd,
-      COALESCE(SUM(e.tokens_in), 0) as total_input_tokens,
-      COALESCE(SUM(e.tokens_out), 0) as total_output_tokens,
-      COALESCE(SUM(e.cache_read_tokens), 0) as total_cache_read_tokens,
-      COALESCE(SUM(e.cache_write_tokens), 0) as total_cache_write_tokens,
-      COUNT(*) as total_usage_events,
-      COUNT(DISTINCT e.session_id) as total_sessions,
-      COUNT(DISTINCT date(${timestampExpr})) as active_days,
-      MIN(${timestampExpr}) as earliest,
-      MAX(${timestampExpr}) as latest
-    FROM events e
-    WHERE ${usageWhere}
-  `).get(...filter.values) as {
-    total_cost_usd: number;
-    total_input_tokens: number;
-    total_output_tokens: number;
-    total_cache_read_tokens: number;
-    total_cache_write_tokens: number;
-    total_usage_events: number;
-    total_sessions: number;
-    active_days: number;
-    earliest: string | null;
-    latest: string | null;
-  };
-
-  const peakDay = db.prepare(`
-    SELECT
-      date(${timestampExpr}) as date,
-      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd
-    FROM events e
-    WHERE ${usageWhere}
-    GROUP BY date(${timestampExpr})
-    ORDER BY cost_usd DESC, date DESC
-    LIMIT 1
-  `).get(...filter.values) as { date: string; cost_usd: number } | undefined;
-
+  const row = usageRowsToSummaryValues(usageRows);
   const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
   const safeActiveDays = Math.max(row.active_days, 1);
   const safeSessions = Math.max(row.total_sessions, 1);
@@ -2195,6 +2293,23 @@ export function getUsageSummary(params: UsageParams = {}): UsageSummary {
     estimatedCacheSavingsUsd += estimateCacheSavings(usageRow);
   }
 
+  let priorTotalCostUsd = 0;
+  if (params.date_from && params.date_to && params.date_from <= params.date_to) {
+    const rangeDays = inclusiveDateSpanDays(params.date_from, params.date_to);
+    const priorTo = addDaysToDateString(params.date_from, -1);
+    const priorFrom = priorTo ? addDaysToDateString(priorTo, -(rangeDays - 1)) : null;
+    if (priorFrom && priorTo) {
+      priorTotalCostUsd = usageRowsToSummaryValues(selectUsageRows({
+        ...params,
+        date_from: priorFrom,
+        date_to: priorTo,
+      })).total_cost_usd;
+    }
+  }
+  const costDeltaPct = priorTotalCostUsd > 0
+    ? roundMetric(((row.total_cost_usd - priorTotalCostUsd) / priorTotalCostUsd) * 100)
+    : 0;
+
   return {
     total_cost_usd: row.total_cost_usd,
     total_input_tokens: row.total_input_tokens,
@@ -2212,32 +2327,29 @@ export function getUsageSummary(params: UsageParams = {}): UsageSummary {
     pricing_known_events: pricingKnownEvents,
     pricing_unknown_events: pricingUnknownEvents,
     unknown_model_events: unknownModelEvents,
-    peak_day: peakDay ?? { date: null, cost_usd: 0 },
+    prior_total_cost_usd: priorTotalCostUsd,
+    cost_delta_pct: costDeltaPct,
+    peak_day: row.peak_day,
     coverage: getUsageCoverage(params),
   };
 }
 
 export function getUsageDaily(params: UsageParams = {}): UsageDailyPoint[] {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
-  const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
-  const timestampExpr = usageTimestampExpr('e');
+  const days = new Map<string, UsageAccumulator>();
+  for (const row of selectUsageRows(params)) {
+    if (!row.timestamp) continue;
+    const date = row.timestamp.slice(0, 10);
+    const acc = days.get(date) ?? createUsageAccumulator();
+    addUsageRow(acc, row, classifyModelForUsage(row.model));
+    days.set(date, acc);
+  }
 
-  const rows = db.prepare(`
-    SELECT
-      date(${timestampExpr}) as date,
-      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
-      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
-      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
-      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
-      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
-      COUNT(*) as usage_events,
-      COUNT(DISTINCT e.session_id) as session_count
-    FROM events e
-    WHERE ${usageWhere}
-    GROUP BY date(${timestampExpr})
-    ORDER BY date ASC
-  `).all(...filter.values) as UsageDailyPoint[];
+  const rows = [...days.entries()]
+    .map(([date, acc]) => ({
+      date,
+      ...usageAccumulatorToMetrics(acc),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   const bounds = resolveUsageDateBounds(
     params,
@@ -2262,49 +2374,34 @@ export function getUsageDaily(params: UsageParams = {}): UsageDailyPoint[] {
 }
 
 export function getUsageProjects(params: UsageParams = {}): UsageProjectBreakdown[] {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
-  const where = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+  const projects = new Map<string, UsageAccumulator>();
+  for (const row of selectUsageRows(params)) {
+    const acc = projects.get(row.project) ?? createUsageAccumulator();
+    addUsageRow(acc, row, classifyModelForUsage(row.model));
+    projects.set(row.project, acc);
+  }
 
-  return db.prepare(`
-    SELECT
-      ${usageProjectExpr('e')} as project,
-      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
-      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
-      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
-      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
-      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
-      COUNT(*) as usage_events,
-      COUNT(DISTINCT e.session_id) as session_count
-    FROM events e
-    WHERE ${where}
-    GROUP BY project
-    ORDER BY cost_usd DESC, input_tokens DESC, project ASC
-  `).all(...filter.values) as UsageProjectBreakdown[];
+  return [...projects.entries()]
+    .map(([project, acc]) => ({
+      project,
+      ...usageAccumulatorToMetrics(acc),
+    }))
+    .sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.project.localeCompare(b.project));
 }
 
 export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
-  const where = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+  const models = new Map<string, UsageAccumulator>();
+  for (const usageRow of selectUsageRows(params)) {
+    const acc = models.get(usageRow.model) ?? createUsageAccumulator();
+    addUsageRow(acc, usageRow, classifyModelForUsage(usageRow.model));
+    models.set(usageRow.model, acc);
+  }
 
-  const rows = db.prepare(`
-    SELECT
-      ${usageModelExpr('e')} as model,
-      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
-      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
-      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
-      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
-      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
-      COUNT(*) as usage_events,
-      COUNT(DISTINCT e.session_id) as session_count
-    FROM events e
-    WHERE ${where}
-    GROUP BY model
-    ORDER BY cost_usd DESC, input_tokens DESC, model ASC
-  `).all(...filter.values) as UsageModelBreakdown[];
-
-  return rows.map(row => {
+  return [...models.entries()].map(([model, acc]) => {
+    const row = {
+      model,
+      ...usageAccumulatorToMetrics(acc),
+    };
     const classification = classifyModelForUsage(row.model);
     return {
       ...row,
@@ -2316,7 +2413,7 @@ export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] 
       deprecated: classification.deprecated,
       pricing_status: classification.pricing_status,
     };
-  });
+  }).sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.model.localeCompare(b.model));
 }
 
 export function getUsageTiers(params: UsageParams = {}): UsageTierBreakdown[] {
@@ -2347,47 +2444,61 @@ export function getUsageTiers(params: UsageParams = {}): UsageTierBreakdown[] {
 }
 
 export function getUsageAgents(params: UsageParams = {}): UsageAgentBreakdown[] {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
-  const where = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+  const agents = new Map<string, UsageAccumulator>();
+  for (const row of selectUsageRows(params)) {
+    const acc = agents.get(row.agent_type) ?? createUsageAccumulator();
+    addUsageRow(acc, row, classifyModelForUsage(row.model));
+    agents.set(row.agent_type, acc);
+  }
 
-  return db.prepare(`
-    SELECT
-      ${usageAgentExpr('e')} as agent,
-      ROUND(COALESCE(SUM(e.cost_usd), 0), 6) as cost_usd,
-      COALESCE(SUM(e.tokens_in), 0) as input_tokens,
-      COALESCE(SUM(e.tokens_out), 0) as output_tokens,
-      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
-      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
-      COUNT(*) as usage_events,
-      COUNT(DISTINCT e.session_id) as session_count
-    FROM events e
-    WHERE ${where}
-    GROUP BY agent
-    ORDER BY cost_usd DESC, input_tokens DESC, agent ASC
-  `).all(...filter.values) as UsageAgentBreakdown[];
+  return [...agents.entries()]
+    .map(([agent, acc]) => ({
+      agent,
+      ...usageAccumulatorToMetrics(acc),
+    }))
+    .sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.agent.localeCompare(b.agent));
 }
 
 export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRow[] {
   const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
-  const metricsCondition = usageMetricsCondition('e');
-  const timestampExpr = usageTimestampExpr('e');
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
-  const usageRows = selectUsageRows(params);
-  const enrichment = new Map<string, {
+  const sessions = new Map<string, {
+    id: string;
+    project: string | null;
+    agent: string;
+    first_activity_at: string | null;
+    last_activity_at: string | null;
+    acc: UsageAccumulator;
     models: Map<string, { model: string; cost_usd: number; input_tokens: number; classification: ModelClassification }>;
     tiers: Map<string, { provider: string; tier: string; cost_usd: number; usage_events: number }>;
     unknown_model_events: number;
   }>();
 
-  for (const usageRow of usageRows) {
+  for (const usageRow of selectUsageRows(params)) {
     const classification = classifyModelForUsage(usageRow.model);
-    const entry = enrichment.get(usageRow.session_id) ?? {
+    const entry = sessions.get(usageRow.session_id) ?? {
+      id: usageRow.session_id,
+      project: usageRow.project,
+      agent: usageRow.agent_type,
+      first_activity_at: usageRow.timestamp,
+      last_activity_at: usageRow.timestamp,
+      acc: createUsageAccumulator(),
       models: new Map(),
       tiers: new Map(),
       unknown_model_events: 0,
     };
+    addUsageRow(entry.acc, usageRow, classification);
+    entry.project = usageRow.project;
+    entry.agent = usageRow.agent_type;
+    if (usageRow.timestamp) {
+      if (!entry.first_activity_at || usageRow.timestamp < entry.first_activity_at) {
+        entry.first_activity_at = usageRow.timestamp;
+      }
+      if (!entry.last_activity_at || usageRow.timestamp > entry.last_activity_at) {
+        entry.last_activity_at = usageRow.timestamp;
+      }
+    }
+
     const modelKey = classification.canonical_model;
     const modelEntry = entry.models.get(modelKey) ?? {
       model: usageRow.model,
@@ -2413,83 +2524,85 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
     if (classification.pricing_status === 'unknown') {
       entry.unknown_model_events += 1;
     }
-    enrichment.set(usageRow.session_id, entry);
+    sessions.set(usageRow.session_id, entry);
   }
 
-  const rows = db.prepare(`
-    SELECT
-      e.session_id as id,
-      COALESCE(MAX(NULLIF(e.project, '')), MAX(bs.project), MAX(s.project)) as project,
-      COALESCE(MAX(e.agent_type), MAX(s.agent_type), MAX(bs.agent)) as agent,
-      COALESCE(MAX(bs.started_at), MAX(s.started_at), MIN(${timestampExpr})) as started_at,
-      COALESCE(MAX(bs.ended_at), MAX(s.ended_at), MAX(${timestampExpr})) as ended_at,
-      MAX(${timestampExpr}) as last_activity_at,
-      MAX(bs.message_count) as message_count,
-      MAX(bs.user_message_count) as user_message_count,
-      MAX(bs.fidelity) as fidelity,
-      ROUND(COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cost_usd ELSE 0 END), 0), 6) as cost_usd,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_in ELSE 0 END), 0) as input_tokens,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.tokens_out ELSE 0 END), 0) as output_tokens,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_read_tokens ELSE 0 END), 0) as cache_read_tokens,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN e.cache_write_tokens ELSE 0 END), 0) as cache_write_tokens,
-      COUNT(*) as event_count,
-      COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) as usage_events,
-      CASE WHEN MAX(bs.id) IS NULL THEN 0 ELSE 1 END as browsing_session_available
-    FROM events e
-    LEFT JOIN sessions s ON s.id = e.session_id
-    LEFT JOIN browsing_sessions bs ON bs.id = e.session_id
-    ${filter.where}
-    GROUP BY e.session_id
-    HAVING COALESCE(SUM(CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END), 0) > 0
-    ORDER BY cost_usd DESC, last_activity_at DESC, e.session_id DESC
-    LIMIT ?
-  `).all(...filter.values, limit) as Array<
-    Omit<UsageTopSessionRow,
-      | 'browsing_session_available'
-      | 'primary_model'
-      | 'primary_tier'
-      | 'primary_provider'
-      | 'model_count'
-      | 'tier_costs'
-      | 'unknown_model_events'
-    > & { browsing_session_available: number }
-  >;
+  const browsingStmt = db.prepare(`
+    SELECT project, agent, started_at, ended_at, message_count, user_message_count, fidelity
+    FROM browsing_sessions
+    WHERE id = ?
+  `);
+  const sessionStmt = db.prepare(`
+    SELECT project, agent_type, started_at, ended_at
+    FROM sessions
+    WHERE id = ?
+  `);
 
-  return rows.map(row => ({
-    ...row,
-    ...(() => {
-      const sessionEnrichment = enrichment.get(row.id);
-      const primary = sessionEnrichment
-        ? [...sessionEnrichment.models.values()].sort((a, b) => (
+  return [...sessions.values()]
+    .sort((a, b) => (
+      b.acc.cost_usd - a.acc.cost_usd
+      || (b.last_activity_at ?? '').localeCompare(a.last_activity_at ?? '')
+      || b.id.localeCompare(a.id)
+    ))
+    .slice(0, limit)
+    .map(entry => {
+      const browsing = browsingStmt.get(entry.id) as {
+        project: string | null;
+        agent: string | null;
+        started_at: string | null;
+        ended_at: string | null;
+        message_count: number | null;
+        user_message_count: number | null;
+        fidelity: string | null;
+      } | undefined;
+      const session = sessionStmt.get(entry.id) as {
+        project: string | null;
+        agent_type: string | null;
+        started_at: string | null;
+        ended_at: string | null;
+      } | undefined;
+      const primary = [...entry.models.values()].sort((a, b) => (
+        b.cost_usd - a.cost_usd
+        || b.input_tokens - a.input_tokens
+        || a.model.localeCompare(b.model)
+      ))[0];
+      const tierCosts = [...entry.tiers.values()]
+        .map(tier => ({
+          ...tier,
+          cost_usd: roundCost(tier.cost_usd),
+        }))
+        .sort((a, b) => (
           b.cost_usd - a.cost_usd
-          || b.input_tokens - a.input_tokens
-          || a.model.localeCompare(b.model)
-        ))[0]
-        : undefined;
-      const tierCosts = sessionEnrichment
-        ? [...sessionEnrichment.tiers.values()]
-          .map(tier => ({
-            ...tier,
-            cost_usd: roundCost(tier.cost_usd),
-          }))
-          .sort((a, b) => (
-            b.cost_usd - a.cost_usd
-            || a.provider.localeCompare(b.provider)
-            || a.tier.localeCompare(b.tier)
-          ))
-        : [];
+          || a.provider.localeCompare(b.provider)
+          || a.tier.localeCompare(b.tier)
+        ));
 
       return {
+        id: entry.id,
+        project: entry.project ?? browsing?.project ?? session?.project ?? null,
+        agent: entry.agent ?? session?.agent_type ?? browsing?.agent ?? 'unknown',
+        started_at: browsing?.started_at ?? session?.started_at ?? entry.first_activity_at,
+        ended_at: browsing?.ended_at ?? session?.ended_at ?? entry.last_activity_at,
+        last_activity_at: entry.last_activity_at,
+        message_count: browsing?.message_count ?? null,
+        user_message_count: browsing?.user_message_count ?? null,
+        fidelity: browsing?.fidelity ?? null,
+        cost_usd: roundCost(entry.acc.cost_usd),
+        input_tokens: entry.acc.input_tokens,
+        output_tokens: entry.acc.output_tokens,
+        cache_read_tokens: entry.acc.cache_read_tokens,
+        cache_write_tokens: entry.acc.cache_write_tokens,
+        event_count: entry.acc.usage_events,
+        usage_events: entry.acc.usage_events,
         primary_model: primary?.model ?? 'unknown',
         primary_tier: primary?.classification.tier ?? 'unknown',
         primary_provider: primary?.classification.provider ?? 'unknown',
-        model_count: sessionEnrichment?.models.size ?? 0,
+        model_count: entry.models.size,
         tier_costs: tierCosts,
-        unknown_model_events: sessionEnrichment?.unknown_model_events ?? 0,
+        unknown_model_events: entry.unknown_model_events,
+        browsing_session_available: Boolean(browsing),
       };
-    })(),
-    browsing_session_available: row.browsing_session_available === 1,
-  }));
+    });
 }
 
 // --- Insights ---

@@ -437,6 +437,8 @@ export interface UsageSummary {
   pricing_known_events: number;
   pricing_unknown_events: number;
   unknown_model_events: number;
+  prior_total_cost_usd: number;
+  cost_delta_pct: number;
   peak_day: {
     date: string | null;
     cost_usd: number;
@@ -651,6 +653,9 @@ export interface AnalyticsParams {
   date_to?: string;
   project?: string;
   agent?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
   limit?: number;
 }
 
@@ -659,6 +664,9 @@ export interface UsageParams {
   date_to?: string;
   project?: string;
   agent?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
   limit?: number;
 }
 
