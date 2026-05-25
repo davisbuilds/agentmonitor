@@ -2024,6 +2024,16 @@ function usageClassificationMatches(model: string, params: UsageParams): boolean
   return true;
 }
 
+function preferUsageProject(...projects: Array<string | null | undefined>): string | null {
+  for (const project of projects) {
+    const normalized = project?.trim();
+    if (normalized && normalized !== 'unknown') {
+      return normalized;
+    }
+  }
+  return null;
+}
+
 function roundCost(value: number): number {
   return Math.round(value * 1_000_000) / 1_000_000;
 }
@@ -2462,6 +2472,16 @@ export function getUsageAgents(params: UsageParams = {}): UsageAgentBreakdown[] 
 export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRow[] {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
+  const filter = buildUsageFilterState(params, 'e');
+  const eventCountWhere = [
+    'e.session_id = ?',
+    ...filter.conditions,
+  ].join(' AND ');
+  const eventCountStmt = db.prepare(`
+    SELECT COUNT(*) as event_count
+    FROM events e
+    WHERE ${eventCountWhere}
+  `);
   const sessions = new Map<string, {
     id: string;
     project: string | null;
@@ -2478,7 +2498,7 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
     const classification = classifyModelForUsage(usageRow.model);
     const entry = sessions.get(usageRow.session_id) ?? {
       id: usageRow.session_id,
-      project: usageRow.project,
+      project: preferUsageProject(usageRow.project),
       agent: usageRow.agent_type,
       first_activity_at: usageRow.timestamp,
       last_activity_at: usageRow.timestamp,
@@ -2488,7 +2508,7 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
       unknown_model_events: 0,
     };
     addUsageRow(entry.acc, usageRow, classification);
-    entry.project = usageRow.project;
+    entry.project = preferUsageProject(entry.project, usageRow.project);
     entry.agent = usageRow.agent_type;
     if (usageRow.timestamp) {
       if (!entry.first_activity_at || usageRow.timestamp < entry.first_activity_at) {
@@ -2579,7 +2599,7 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
 
       return {
         id: entry.id,
-        project: entry.project ?? browsing?.project ?? session?.project ?? null,
+        project: preferUsageProject(entry.project, browsing?.project, session?.project),
         agent: entry.agent ?? session?.agent_type ?? browsing?.agent ?? 'unknown',
         started_at: browsing?.started_at ?? session?.started_at ?? entry.first_activity_at,
         ended_at: browsing?.ended_at ?? session?.ended_at ?? entry.last_activity_at,
@@ -2592,7 +2612,7 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
         output_tokens: entry.acc.output_tokens,
         cache_read_tokens: entry.acc.cache_read_tokens,
         cache_write_tokens: entry.acc.cache_write_tokens,
-        event_count: entry.acc.usage_events,
+        event_count: (eventCountStmt.get(entry.id, ...filter.values) as { event_count: number }).event_count,
         usage_events: entry.acc.usage_events,
         primary_model: primary?.model ?? 'unknown',
         primary_tier: primary?.classification.tier ?? 'unknown',

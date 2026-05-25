@@ -434,6 +434,8 @@ describe('GET /api/v2/usage/top-sessions', () => {
         primary_tier: string;
         primary_provider: string;
         model_count: number;
+        event_count: number;
+        usage_events: number;
         tier_costs: Array<{ provider: string; tier: string; cost_usd: number; usage_events: number }>;
         unknown_model_events: number;
       }>;
@@ -454,6 +456,8 @@ describe('GET /api/v2/usage/top-sessions', () => {
     assert.equal(body.data[0]?.primary_tier, 'standard');
     assert.equal(body.data[0]?.primary_provider, 'openai');
     assert.equal(body.data[0]?.model_count, 1);
+    assert.equal(body.data[0]?.event_count, 2);
+    assert.equal(body.data[0]?.usage_events, 1);
     assert.deepEqual(body.data[0]?.tier_costs, [
       { provider: 'openai', tier: 'standard', cost_usd: 0.03, usage_events: 1 },
     ]);
@@ -462,6 +466,44 @@ describe('GET /api/v2/usage/top-sessions', () => {
     assert.equal(body.data[2]?.browsing_session_available, true);
     assert.equal(body.data[3]?.primary_provider, 'unknown');
     assert.equal(body.data[3]?.unknown_model_events, 1);
+  });
+
+  test('falls back to session project when usage event project is blank', async () => {
+    const { insertEvent } = await import('../src/db/queries.js');
+    const { getDb } = await import('../src/db/connection.js');
+    const db = getDb();
+    const eventId = 'usage-event-blank-project-fallback';
+
+    try {
+      insertEvent({
+        event_id: eventId,
+        session_id: 'usage-sess-001',
+        agent_type: 'codex',
+        event_type: 'assistant',
+        status: 'success',
+        project: '',
+        model: 'gpt-5.4',
+        tokens_in: 100,
+        tokens_out: 20,
+        cost_usd: 0.001,
+        client_timestamp: '2026-04-05T12:00:00Z',
+        source: 'api',
+      });
+
+      const res = await fetch(`${baseUrl}/api/v2/usage/top-sessions?date_from=2026-04-05&date_to=2026-04-05&limit=1`);
+      assert.equal(res.status, 200);
+
+      const body = await res.json() as {
+        data: Array<{ id: string; project: string | null; event_count: number; usage_events: number }>;
+      };
+
+      assert.deepEqual(
+        body.data.map(row => [row.id, row.project, row.event_count, row.usage_events]),
+        [['usage-sess-001', 'alpha', 1, 1]],
+      );
+    } finally {
+      db.prepare('DELETE FROM events WHERE event_id = ?').run(eventId);
+    }
   });
 });
 
