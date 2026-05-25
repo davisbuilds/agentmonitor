@@ -53,27 +53,27 @@ export function formatDuration(ms: number | null | undefined): string {
 export function agentColor(agentType: string): string {
   switch (agentType) {
     case 'claude':
-    case 'claude_code': return 'text-orange-400';
-    case 'codex': return 'text-gray-300';
-    default: return 'text-blue-400';
+    case 'claude_code': return 'text-claude';
+    case 'codex': return 'text-codex';
+    default: return 'text-accent';
   }
 }
 
 export function agentHexColor(agentType: string): string {
   switch (agentType) {
     case 'claude':
-    case 'claude_code': return '#fb923c';
-    case 'codex': return '#d1d5db';
-    default: return '#60a5fa';
+    case 'claude_code': return 'var(--color-claude)';
+    case 'codex': return 'var(--color-codex)';
+    default: return 'var(--color-accent)';
   }
 }
 
 export function statusColor(status: string): string {
   switch (status) {
-    case 'active': return 'bg-green-400';
-    case 'idle': return 'bg-yellow-400';
-    case 'ended': return 'bg-gray-500';
-    case 'error': return 'bg-red-400';
-    default: return 'bg-gray-500';
+    case 'active': return 'bg-ok';
+    case 'idle': return 'bg-warn';
+    case 'ended': return 'bg-line-strong';
+    case 'error': return 'bg-danger';
+    default: return 'bg-line-strong';
   }
 }

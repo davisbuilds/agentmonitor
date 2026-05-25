@@ -45,18 +45,18 @@ test('format helpers compact numbers, costs, durations, agents, and statuses', (
   assert.equal(formatDuration(999), '999ms');
   assert.equal(formatDuration(1250), '1.3s');
 
-  assert.equal(agentColor('claude_code'), 'text-orange-400');
-  assert.equal(agentColor('codex'), 'text-gray-300');
-  assert.equal(agentColor('other'), 'text-blue-400');
-  assert.equal(agentHexColor('claude'), '#fb923c');
-  assert.equal(agentHexColor('codex'), '#d1d5db');
-  assert.equal(agentHexColor('other'), '#60a5fa');
+  assert.equal(agentColor('claude_code'), 'text-claude');
+  assert.equal(agentColor('codex'), 'text-codex');
+  assert.equal(agentColor('other'), 'text-accent');
+  assert.equal(agentHexColor('claude'), 'var(--color-claude)');
+  assert.equal(agentHexColor('codex'), 'var(--color-codex)');
+  assert.equal(agentHexColor('other'), 'var(--color-accent)');
 
-  assert.equal(statusColor('active'), 'bg-green-400');
-  assert.equal(statusColor('idle'), 'bg-yellow-400');
-  assert.equal(statusColor('ended'), 'bg-gray-500');
-  assert.equal(statusColor('error'), 'bg-red-400');
-  assert.equal(statusColor('unknown'), 'bg-gray-500');
+  assert.equal(statusColor('active'), 'bg-ok');
+  assert.equal(statusColor('idle'), 'bg-warn');
+  assert.equal(statusColor('ended'), 'bg-line-strong');
+  assert.equal(statusColor('error'), 'bg-danger');
+  assert.equal(statusColor('unknown'), 'bg-line-strong');
 
   assert.equal(typeof formatTimeOfDay('2026-04-10T11:45:00Z'), 'string');
 });

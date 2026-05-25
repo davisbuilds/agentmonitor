@@ -1,7 +1,8 @@
 <script lang="ts">
   import { getSelectedSessionId, setSelectedSessionId } from '../../stores/monitor.svelte';
   import { fetchSessionDetail, fetchTranscript, type AgentEvent } from '../../api/client';
-  import { formatCost, formatNumber, timeAgo, formatDuration, statusColor, agentColor } from '../../format';
+  import { timeAgo, formatDuration, agentColor } from '../../format';
+  import { StatusDot } from '../ui';
 
   const sessionId = $derived(getSelectedSessionId());
   let loading = $state(false);
@@ -45,54 +46,59 @@
   <!-- Backdrop -->
   <div class="fixed inset-0 z-50">
     <button class="absolute inset-0 bg-black/50" onclick={close} aria-label="Close"></button>
-    <div class="fixed inset-y-0 right-0 w-full max-w-lg bg-gray-900 border-l border-gray-700 overflow-y-auto p-6">
-      <div class="flex items-center justify-between mb-4">
-        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Session Details</h2>
-        <button class="text-gray-400 hover:text-white transition-colors text-lg" onclick={close}>&times;</button>
+    <div class="fixed inset-y-0 right-0 w-full max-w-lg overflow-y-auto border-l border-line bg-surface p-6 shadow-overlay">
+      <div class="mb-4 flex items-center justify-between">
+        <h2 class="text-h3">Session Details</h2>
+        <button
+          class="rounded-sm p-1 text-text-muted transition-colors hover:bg-surface-2 hover:text-text"
+          aria-label="Close"
+          onclick={close}
+        >
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+          </svg>
+        </button>
       </div>
 
       {#if loading}
-        <div class="text-gray-500 text-sm">Loading...</div>
+        <div class="text-meta text-text-muted">Loading…</div>
       {:else if session}
-        <div class="space-y-4">
+        <div class="space-y-5">
           <!-- Metadata -->
-          <div class="space-y-2 text-xs">
-            <div class="flex justify-between">
-              <span class="text-gray-400">Status</span>
-              <div class="flex items-center gap-2">
-                <span class="w-2 h-2 rounded-full {statusColor(session.status as string)}"></span>
-                <span class="text-white">{session.status}</span>
-              </div>
+          <div class="space-y-2 text-meta">
+            <div class="flex justify-between gap-3">
+              <span class="text-text-muted">Status</span>
+              <StatusDot status={session.status as string} label={session.status as string} />
             </div>
-            <div class="flex justify-between">
-              <span class="text-gray-400">Agent</span>
-              <span class="{agentColor(session.agent_type as string)}">{session.agent_type}</span>
+            <div class="flex justify-between gap-3">
+              <span class="text-text-muted">Agent</span>
+              <span class={agentColor(session.agent_type as string)}>{session.agent_type}</span>
             </div>
             {#if session.project}
-              <div class="flex justify-between">
-                <span class="text-gray-400">Project</span>
-                <span class="text-white">{session.project}</span>
+              <div class="flex justify-between gap-3">
+                <span class="text-text-muted">Project</span>
+                <span class="truncate text-text">{session.project}</span>
               </div>
             {/if}
-            <div class="flex justify-between">
-              <span class="text-gray-400">Started</span>
-              <span class="text-white">{timeAgo(session.started_at as string)}</span>
+            <div class="flex justify-between gap-3">
+              <span class="text-text-muted">Started</span>
+              <span class="text-text">{timeAgo(session.started_at as string)}</span>
             </div>
-            <div class="flex justify-between">
-              <span class="text-gray-400">Session ID</span>
-              <span class="text-gray-500 text-[10px] font-mono">{sessionId}</span>
+            <div class="flex justify-between gap-3">
+              <span class="text-text-muted">Session ID</span>
+              <span class="truncate font-mono text-meta text-text-faint">{sessionId}</span>
             </div>
           </div>
 
           <!-- Transcript -->
           {#if transcript.length > 0}
             <div>
-              <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Transcript</h3>
-              <div class="space-y-2 max-h-96 overflow-y-auto">
+              <h3 class="mb-2 text-meta font-medium text-text-muted">Transcript</h3>
+              <div class="max-h-96 space-y-2 overflow-y-auto">
                 {#each transcript as msg}
-                  <div class="text-xs p-2 rounded {msg.role === 'user' ? 'bg-gray-800' : 'bg-gray-800/50'}">
-                    <span class="font-medium {msg.role === 'user' ? 'text-blue-400' : 'text-green-400'}">{msg.role}</span>
-                    <p class="text-gray-300 mt-1 whitespace-pre-wrap break-words">{msg.content}</p>
+                  <div class="rounded-sm p-2 text-meta {msg.role === 'user' ? 'bg-surface-2' : 'bg-surface-2/50'}">
+                    <span class="font-medium {msg.role === 'user' ? 'text-accent' : 'text-ok'}">{msg.role}</span>
+                    <p class="mt-1 whitespace-pre-wrap break-words text-text">{msg.content}</p>
                   </div>
                 {/each}
               </div>
@@ -102,13 +108,13 @@
           <!-- Recent Events -->
           {#if events.length > 0}
             <div>
-              <h3 class="text-xs font-semibold text-gray-400 uppercase mb-2">Recent Events</h3>
+              <h3 class="mb-2 text-meta font-medium text-text-muted">Recent Events</h3>
               <div class="space-y-1">
                 {#each events as event}
-                  <div class="text-xs flex items-center gap-2 text-gray-400">
-                    <span class="text-gray-300">{event.event_type}{event.tool_name ? ` > ${event.tool_name}` : ''}</span>
-                    {#if event.duration_ms}<span class="text-gray-600">{formatDuration(event.duration_ms)}</span>{/if}
-                    <span class="text-gray-600 ml-auto">{timeAgo(event.created_at)}</span>
+                  <div class="flex items-center gap-2 text-meta text-text-muted">
+                    <span class="text-text">{event.event_type}{event.tool_name ? ` › ${event.tool_name}` : ''}</span>
+                    {#if event.duration_ms}<span class="tabular font-mono text-text-faint">{formatDuration(event.duration_ms)}</span>{/if}
+                    <span class="ml-auto text-text-faint">{timeAgo(event.created_at)}</span>
                   </div>
                 {/each}
               </div>
@@ -116,7 +122,7 @@
           {/if}
         </div>
       {:else}
-        <div class="text-gray-500 text-sm">Session not found</div>
+        <div class="text-meta text-text-muted">Session not found</div>
       {/if}
     </div>
   </div>
