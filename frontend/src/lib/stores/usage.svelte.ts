@@ -38,6 +38,9 @@ type FiltersSnapshot = {
   to: string;
   project: string;
   agent: string;
+  model: string;
+  provider: string;
+  tier: string;
 };
 
 class UsageStore {
@@ -58,9 +61,15 @@ class UsageStore {
   to = $state(this.defaults.to);
   project = $state('');
   agent = $state('');
+  model = $state('');
+  provider = $state('');
+  tier = $state('');
 
   projectOptions = $state<string[]>([]);
   agentOptions = $state<string[]>([]);
+  modelOptions = $state<string[]>([]);
+  providerOptions = $state<string[]>([]);
+  tierOptions = $state<string[]>([]);
 
   summary = $state<UsageSummary | null>(null);
   daily = $state<UsageDailyPoint[]>([]);
@@ -98,6 +107,9 @@ class UsageStore {
       to: this.to,
       project: this.project,
       agent: this.agent,
+      model: this.model,
+      provider: this.provider,
+      tier: this.tier,
     };
   }
 
@@ -115,6 +127,9 @@ class UsageStore {
       || this.to !== this.defaults.to
       || this.project !== ''
       || this.agent !== ''
+      || this.model !== ''
+      || this.provider !== ''
+      || this.tier !== ''
     );
   }
 
@@ -129,6 +144,9 @@ class UsageStore {
     };
     if (this.project) params.project = this.project;
     if (this.agent) params.agent = this.agent;
+    if (this.model) params.model = this.model;
+    if (this.provider) params.provider = this.provider;
+    if (this.tier) params.tier = this.tier;
     return params;
   }
 
@@ -144,12 +162,23 @@ class UsageStore {
 
     if (!this.initialized) {
       try {
-        const [projectsRes, agentsRes] = await Promise.all([
+        const [projectsRes, agentsRes, modelsRes, tiersRes] = await Promise.all([
           fetchUsageProjects({ date_from: this.from, date_to: this.to }),
           fetchUsageAgents({ date_from: this.from, date_to: this.to }),
+          fetchUsageModels({ date_from: this.from, date_to: this.to }),
+          fetchUsageTiers({ date_from: this.from, date_to: this.to }),
         ]);
         this.projectOptions = projectsRes.data.map(row => row.project).sort((a, b) => a.localeCompare(b));
         this.agentOptions = agentsRes.data.map(row => row.agent).sort((a, b) => a.localeCompare(b));
+        this.modelOptions = modelsRes.data.map(row => row.model).sort((a, b) => a.localeCompare(b));
+        this.providerOptions = tiersRes.data
+          .map(row => row.provider)
+          .filter((value, index, values) => values.indexOf(value) === index)
+          .sort((a, b) => a.localeCompare(b));
+        this.tierOptions = tiersRes.data
+          .map(row => row.tier)
+          .filter((value, index, values) => values.indexOf(value) === index)
+          .sort((a, b) => a.localeCompare(b));
       } catch {
         // Usage can still load without filter options.
       }
@@ -344,6 +373,24 @@ class UsageStore {
     await this.fetchAll();
   }
 
+  async setModel(model: string): Promise<void> {
+    this.model = model;
+    this.syncHash();
+    await this.fetchAll();
+  }
+
+  async setProvider(provider: string): Promise<void> {
+    this.provider = provider;
+    this.syncHash();
+    await this.fetchAll();
+  }
+
+  async setTier(tier: string): Promise<void> {
+    this.tier = tier;
+    this.syncHash();
+    await this.fetchAll();
+  }
+
   async clearAllFilters(): Promise<void> {
     this.applyFilters(this.defaults);
     this.syncHash();
@@ -374,6 +421,9 @@ class UsageStore {
     this.to = filters.to;
     this.project = filters.project;
     this.agent = filters.agent;
+    this.model = filters.model;
+    this.provider = filters.provider;
+    this.tier = filters.tier;
   }
 
   private syncHash(): void {
@@ -391,6 +441,9 @@ class UsageStore {
       || next.to !== this.to
       || next.project !== this.project
       || next.agent !== this.agent
+      || next.model !== this.model
+      || next.provider !== this.provider
+      || next.tier !== this.tier
     );
     if (!changed) return;
     this.applyFilters(next);

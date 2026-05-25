@@ -13,6 +13,9 @@ export interface UsageFilters {
   to: string;
   project: string;
   agent: string;
+  model: string;
+  provider: string;
+  tier: string;
 }
 
 export interface UsageCsvPayload {
@@ -42,6 +45,9 @@ export function createDefaultUsageFilters(now = new Date()): UsageFilters {
     to: localDateString(now),
     project: '',
     agent: '',
+    model: '',
+    provider: '',
+    tier: '',
   };
 }
 
@@ -51,6 +57,9 @@ export function buildUsageHash(filters: UsageFilters): string {
   params.set('to', filters.to);
   if (filters.project) params.set('project', filters.project);
   if (filters.agent) params.set('agent', filters.agent);
+  if (filters.model) params.set('model', filters.model);
+  if (filters.provider) params.set('provider', filters.provider);
+  if (filters.tier) params.set('tier', filters.tier);
   const suffix = params.toString();
   return suffix ? `usage?${suffix}` : 'usage';
 }
@@ -66,6 +75,9 @@ export function parseUsageHash(hash: string, fallback: UsageFilters): UsageFilte
     to: params.get('to') || fallback.to,
     project: params.get('project') || '',
     agent: params.get('agent') || '',
+    model: params.get('model') || '',
+    provider: params.get('provider') || '',
+    tier: params.get('tier') || '',
   };
 }
 
@@ -93,9 +105,14 @@ export function buildUsageCsv(payload: UsageCsvPayload): string {
   lines.push(sectionRow('Filters', 'To', payload.filters.to));
   lines.push(sectionRow('Filters', 'Project', payload.filters.project || 'All'));
   lines.push(sectionRow('Filters', 'Agent', payload.filters.agent || 'All'));
+  lines.push(sectionRow('Filters', 'Model', payload.filters.model || 'All'));
+  lines.push(sectionRow('Filters', 'Provider', payload.filters.provider || 'All'));
+  lines.push(sectionRow('Filters', 'Tier', payload.filters.tier || 'All'));
 
   if (payload.summary) {
     lines.push(sectionRow('Summary', 'Total Cost USD', payload.summary.total_cost_usd));
+    lines.push(sectionRow('Summary', 'Prior Total Cost USD', payload.summary.prior_total_cost_usd));
+    lines.push(sectionRow('Summary', 'Cost Delta Percent', payload.summary.cost_delta_pct));
     lines.push(sectionRow('Summary', 'Input Tokens', payload.summary.total_input_tokens));
     lines.push(sectionRow('Summary', 'Output Tokens', payload.summary.total_output_tokens));
     lines.push(sectionRow('Summary', 'Cache Read Tokens', payload.summary.total_cache_read_tokens));
