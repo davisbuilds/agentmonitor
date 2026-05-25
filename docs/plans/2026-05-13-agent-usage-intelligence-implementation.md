@@ -2,7 +2,7 @@
 date: 2026-05-13
 topic: agent-usage-intelligence
 stage: implementation-plan
-status: tasks-1-5-complete
+status: tasks-1-8-complete
 source: conversation
 ---
 
@@ -16,7 +16,7 @@ Turn AgentMonitor's existing event-derived Usage surface into an operator-grade 
 
 ## Implementation Status
 
-As of 2026-05-24, the first implementation slice is complete on branch `agent-usage-intelligence`.
+As of 2026-05-25, the planned usage-intelligence implementation tasks are complete across branch `agent-usage-intelligence` and follow-up branch `agent-usage-intelligence-followups`.
 
 Completed:
 
@@ -25,19 +25,23 @@ Completed:
 - Task 3: backend usage-row scan/fold path, `/api/v2/usage/tiers`, cache hit rate, per-row estimated cache savings, classified model rows, and enriched top sessions.
 - Task 4: Usage store, API client, insight snapshot, and CSV export updates.
 - Task 5: Svelte Usage UI updates for tier attribution, cache economics, pricing coverage, and top-session primary model/tier indicators.
+- Task 6: optional `model`, `provider`, and `tier` usage filters plus prior-period comparison.
+- Task 7: read-only usage budget config, evaluator, and `/api/v2/usage/budgets` endpoint.
+- Task 8: human-reviewed tier feedback report at `/api/v2/usage/tier-feedback`.
 
 Verification completed:
 
 - `pnpm lint`
 - `pnpm build`
-- `pnpm test` (`432` tests passed, `0` failed)
+- `pnpm test` (`438` tests passed, `0` failed)
+- `node --import tsx --test tests/v2-usage.test.ts`
+- `node --import tsx --test tests/usage-state.test.ts`
+- `node --import tsx --test tests/v2-api.test.ts`
 - Manual smoke checks for `GET /api/health` and `GET /api/v2/usage/tiers`.
 
 Remaining planned follow-up scope:
 
-- Task 6: optional `tier`, `model`, and `provider` filters plus prior-period comparison.
-- Task 7: read-only budget alert contracts.
-- Task 8: human-reviewed tier feedback report.
+- None from this implementation plan.
 
 Implementation commits:
 
@@ -258,7 +262,8 @@ Implement the actual usage rollup behavior in `src/db/v2-queries.ts`, keeping al
 - Modify: `src/db/v2-queries.ts`
 - Modify: `src/api/v2/router.ts`
 - Modify: `src/api/v2/types.ts`
-- Test: `tests/v2-api.test.ts`
+- Test: `tests/v2-usage.test.ts`
+- Test: `tests/usage-state.test.ts`
 - Test: `tests/v2-router-errors.test.ts`
 
 **Dependencies**
@@ -452,8 +457,10 @@ Add higher-leverage exploration controls after the base classification and tier 
 
 **Verification**
 
-- Run: `pnpm test -- tests/v2-api.test.ts`
+- Run: `node --import tsx --test tests/v2-usage.test.ts`
 - Expect: all usage endpoints respect model/provider/tier filters and prior-period math.
+- Run: `node --import tsx --test tests/usage-state.test.ts`
+- Expect: usage hash state and CSV export include the new filters and comparison fields.
 - Run: `pnpm build`
 - Expect: frontend compiles with extended filters.
 - Manual:

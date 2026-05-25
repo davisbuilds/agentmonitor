@@ -194,6 +194,8 @@ describe('GET /api/v2/usage/summary', () => {
       pricing_known_events: number;
       pricing_unknown_events: number;
       unknown_model_events: number;
+      prior_total_cost_usd: number;
+      cost_delta_pct: number;
       peak_day: { date: string | null; cost_usd: number };
       coverage: {
         metric_scope: string;
@@ -219,6 +221,8 @@ describe('GET /api/v2/usage/summary', () => {
     assert.equal(body.pricing_known_events, 4);
     assert.equal(body.pricing_unknown_events, 1);
     assert.equal(body.unknown_model_events, 1);
+    assert.equal(body.prior_total_cost_usd, 0);
+    assert.equal(body.cost_delta_pct, 0);
     assert.deepEqual(body.peak_day, { date: '2026-04-03', cost_usd: 0.035 });
     assert.equal(body.coverage.metric_scope, 'event_usage');
     assert.equal(body.coverage.matching_events, 6);
@@ -273,6 +277,37 @@ describe('GET /api/v2/usage/summary', () => {
     assert.equal(body.pricing_unknown_events, 1);
     assert.equal(body.unknown_model_events, 0);
     assert.equal(body.estimated_cache_savings_usd, 0);
+  });
+
+  test('returns prior-period cost comparison for the immediately preceding same-length range', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/summary?date_from=2026-04-02&date_to=2026-04-03`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      total_cost_usd: number;
+      prior_total_cost_usd: number;
+      cost_delta_pct: number;
+    };
+
+    assert.equal(body.total_cost_usd, 0.065);
+    assert.equal(body.prior_total_cost_usd, 0.02);
+    assert.equal(body.cost_delta_pct, 225);
+  });
+
+  test('filters summary by model, provider, and tier classification', async () => {
+    const modelRes = await fetch(`${baseUrl}/api/v2/usage/summary?model=gpt-5.4`);
+    assert.equal(modelRes.status, 200);
+    const modelBody = await modelRes.json() as { total_cost_usd: number; total_usage_events: number; total_sessions: number };
+    assert.equal(modelBody.total_cost_usd, 0.05);
+    assert.equal(modelBody.total_usage_events, 2);
+    assert.equal(modelBody.total_sessions, 2);
+
+    const tierRes = await fetch(`${baseUrl}/api/v2/usage/summary?provider=anthropic&tier=sonnet`);
+    assert.equal(tierRes.status, 200);
+    const tierBody = await tierRes.json() as { total_cost_usd: number; total_usage_events: number; total_sessions: number };
+    assert.equal(tierBody.total_cost_usd, 0.02);
+    assert.equal(tierBody.total_usage_events, 2);
+    assert.equal(tierBody.total_sessions, 1);
   });
 });
 
@@ -399,6 +434,8 @@ describe('GET /api/v2/usage/top-sessions', () => {
         primary_tier: string;
         primary_provider: string;
         model_count: number;
+        event_count: number;
+        usage_events: number;
         tier_costs: Array<{ provider: string; tier: string; cost_usd: number; usage_events: number }>;
         unknown_model_events: number;
       }>;
@@ -419,6 +456,8 @@ describe('GET /api/v2/usage/top-sessions', () => {
     assert.equal(body.data[0]?.primary_tier, 'standard');
     assert.equal(body.data[0]?.primary_provider, 'openai');
     assert.equal(body.data[0]?.model_count, 1);
+    assert.equal(body.data[0]?.event_count, 2);
+    assert.equal(body.data[0]?.usage_events, 1);
     assert.deepEqual(body.data[0]?.tier_costs, [
       { provider: 'openai', tier: 'standard', cost_usd: 0.03, usage_events: 1 },
     ]);
@@ -427,5 +466,87 @@ describe('GET /api/v2/usage/top-sessions', () => {
     assert.equal(body.data[2]?.browsing_session_available, true);
     assert.equal(body.data[3]?.primary_provider, 'unknown');
     assert.equal(body.data[3]?.unknown_model_events, 1);
+  });
+
+  test('falls back to session project when usage event project is blank', async () => {
+    const { insertEvent } = await import('../src/db/queries.js');
+    const { getDb } = await import('../src/db/connection.js');
+    const db = getDb();
+    const eventId = 'usage-event-blank-project-fallback';
+
+    try {
+      insertEvent({
+        event_id: eventId,
+        session_id: 'usage-sess-001',
+        agent_type: 'codex',
+        event_type: 'assistant',
+        status: 'success',
+        project: '',
+        model: 'gpt-5.4',
+        tokens_in: 100,
+        tokens_out: 20,
+        cost_usd: 0.001,
+        client_timestamp: '2026-04-05T12:00:00Z',
+        source: 'api',
+      });
+
+      const res = await fetch(`${baseUrl}/api/v2/usage/top-sessions?date_from=2026-04-05&date_to=2026-04-05&limit=1`);
+      assert.equal(res.status, 200);
+
+      const body = await res.json() as {
+        data: Array<{ id: string; project: string | null; event_count: number; usage_events: number }>;
+      };
+
+      assert.deepEqual(
+        body.data.map(row => [row.id, row.project, row.event_count, row.usage_events]),
+        [['usage-sess-001', 'alpha', 1, 1]],
+      );
+    } finally {
+      db.prepare('DELETE FROM events WHERE event_id = ?').run(eventId);
+    }
+  });
+});
+
+describe('usage classification filters across panels', () => {
+  test('applies provider and tier filters consistently to every usage panel', async () => {
+    const query = 'date_from=2026-04-01&date_to=2026-04-03&provider=anthropic&tier=sonnet';
+    const [dailyRes, projectsRes, modelsRes, tiersRes, agentsRes, sessionsRes] = await Promise.all([
+      fetch(`${baseUrl}/api/v2/usage/daily?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/projects?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/models?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/tiers?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/agents?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/top-sessions?${query}`),
+    ]);
+
+    for (const res of [dailyRes, projectsRes, modelsRes, tiersRes, agentsRes, sessionsRes]) {
+      assert.equal(res.status, 200);
+    }
+
+    const daily = await dailyRes.json() as { data: Array<{ date: string; cost_usd: number; usage_events: number }> };
+    const projects = await projectsRes.json() as { data: Array<{ project: string; cost_usd: number; usage_events: number }> };
+    const models = await modelsRes.json() as { data: Array<{ model: string; provider: string; tier: string; cost_usd: number; usage_events: number }> };
+    const tiers = await tiersRes.json() as { data: Array<{ provider: string; tier: string; cost_usd: number; usage_events: number }> };
+    const agents = await agentsRes.json() as { data: Array<{ agent: string; cost_usd: number; usage_events: number }> };
+    const sessions = await sessionsRes.json() as { data: Array<{ id: string; cost_usd: number; primary_provider: string; primary_tier: string; usage_events: number }> };
+
+    assert.deepEqual(
+      daily.data.map(row => [row.date, row.cost_usd, row.usage_events]),
+      [
+        ['2026-04-01', 0.02, 2],
+        ['2026-04-02', 0, 0],
+        ['2026-04-03', 0, 0],
+      ],
+    );
+    assert.deepEqual(projects.data.map(row => [row.project, row.cost_usd, row.usage_events]), [['alpha', 0.02, 2]]);
+    assert.deepEqual(
+      models.data.map(row => [row.model, row.provider, row.tier, row.cost_usd, row.usage_events]),
+      [['claude-sonnet-4-5-20250929', 'anthropic', 'sonnet', 0.02, 2]],
+    );
+    assert.deepEqual(tiers.data.map(row => [row.provider, row.tier, row.cost_usd, row.usage_events]), [['anthropic', 'sonnet', 0.02, 2]]);
+    assert.deepEqual(agents.data.map(row => [row.agent, row.cost_usd, row.usage_events]), [['claude_code', 0.02, 2]]);
+    assert.deepEqual(sessions.data.map(row => [row.id, row.cost_usd, row.primary_provider, row.primary_tier, row.usage_events]), [
+      ['usage-sess-001', 0.02, 'anthropic', 'sonnet', 2],
+    ]);
   });
 });

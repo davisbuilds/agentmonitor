@@ -47,6 +47,8 @@ import {
 import { liveStreamRouter } from './live-stream.js';
 import { config } from '../../config.js';
 import { generateInsight } from '../../insights/service.js';
+import { getUsageBudgets } from '../../usage/budgets.js';
+import { getUsageTierFeedback } from '../../usage/tier-feedback.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -349,6 +351,9 @@ function readAnalyticsParams(req: Request): {
   agent?: string;
   date_from?: string;
   date_to?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
   limit?: number;
 } {
   return {
@@ -356,6 +361,9 @@ function readAnalyticsParams(req: Request): {
     agent: req.query.agent as string | undefined,
     date_from: req.query.date_from as string | undefined,
     date_to: req.query.date_to as string | undefined,
+    model: req.query.model as string | undefined,
+    provider: req.query.provider as string | undefined,
+    tier: req.query.tier as string | undefined,
     limit: safeInt(req.query.limit as string),
   };
 }
@@ -672,6 +680,25 @@ v2Router.get('/usage/top-sessions', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/usage/top-sessions] Error:', err);
     res.status(500).json({ error: 'Failed to get top usage sessions' });
+  }
+});
+
+v2Router.get('/usage/budgets', (_req: Request, res: Response) => {
+  try {
+    res.json(getUsageBudgets());
+  } catch (err) {
+    console.error('[v2/usage/budgets] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage budgets' });
+  }
+});
+
+v2Router.get('/usage/tier-feedback', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getUsageTierFeedback(params));
+  } catch (err) {
+    console.error('[v2/usage/tier-feedback] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage tier feedback' });
   }
 });
 

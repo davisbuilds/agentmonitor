@@ -61,6 +61,10 @@ interface InsightsConfig {
   providers: Record<InsightsProvider, InsightProviderConfig>;
 }
 
+interface UsageConfig {
+  budgetsPath: string;
+}
+
 function isAgentMonitorRepo(dir: string): boolean {
   const packageJsonPath = path.join(dir, 'package.json');
   if (!fs.existsSync(packageJsonPath)) return false;
@@ -174,6 +178,9 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     quotas: parseQuotaConfig(env),
     live: parseLiveConfig(env),
     sync: parseSyncConfig(env),
+    usage: {
+      budgetsPath: env.AGENTMONITOR_USAGE_BUDGETS_PATH?.trim() || './config/budgets.json',
+    } satisfies UsageConfig,
     insights: parseInsightsConfig(env),
   };
 }

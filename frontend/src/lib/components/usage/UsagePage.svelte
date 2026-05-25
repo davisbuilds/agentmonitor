@@ -65,6 +65,39 @@
         {/each}
       </select>
 
+      <select
+        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
+        bind:value={usage.provider}
+        onchange={(event) => usage.setProvider((event.currentTarget as HTMLSelectElement).value)}
+      >
+        <option value="">All Providers</option>
+        {#each usage.providerOptions as provider}
+          <option value={provider}>{provider}</option>
+        {/each}
+      </select>
+
+      <select
+        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
+        bind:value={usage.tier}
+        onchange={(event) => usage.setTier((event.currentTarget as HTMLSelectElement).value)}
+      >
+        <option value="">All Tiers</option>
+        {#each usage.tierOptions as tier}
+          <option value={tier}>{tier}</option>
+        {/each}
+      </select>
+
+      <select
+        class="max-w-56 rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
+        bind:value={usage.model}
+        onchange={(event) => usage.setModel((event.currentTarget as HTMLSelectElement).value)}
+      >
+        <option value="">All Models</option>
+        {#each usage.modelOptions as model}
+          <option value={model}>{model}</option>
+        {/each}
+      </select>
+
       <div class="hidden items-center gap-2 md:flex">
         <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => usage.applyQuickRange(7)}>7d</button>
         <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => usage.applyQuickRange(30)}>30d</button>

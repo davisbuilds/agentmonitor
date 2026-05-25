@@ -48,7 +48,7 @@
     if (kind === 'project') return 'Click a project row to filter the page.';
     if (kind === 'agent') return 'Click an agent row to filter the page.';
     if (kind === 'tier') return 'Tier totals are provider-neutral rollups from classified usage events.';
-    return 'Model totals are event-derived and not currently filterable.';
+    return 'Use the model filter above to narrow this table.';
   });
 </script>
 

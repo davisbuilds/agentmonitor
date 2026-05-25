@@ -104,7 +104,9 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - `model-classification.ts` maps raw model names to provider, family, provider-neutral tier, lifecycle, and pricing-status metadata for v2 usage reporting.
 - Cost computed from `tokens_in`, `tokens_out`, `cache_read_tokens`, `cache_write_tokens`.
 - Costs stored as `cost_usd` on each event row.
-- V2 usage keeps stored `cost_usd` authoritative. Cache hit rate and estimated cache savings are derived at query time from usage rows and current pricing metadata.
+- V2 usage keeps stored `cost_usd` authoritative. Cache hit rate, estimated cache savings, classification filters, tier rollups, top-session enrichment, and prior-period deltas are derived at query time from filtered usage rows and current pricing metadata.
+- Read-only usage budgets are evaluated from an optional local JSON config through the same v2 usage summary/filter path. They report alert states only; no hook enforcement or request blocking is implemented.
+- Tier feedback is generated from usage summaries, model attribution, and top-session metadata only. It does not inspect private message content and returns advisory findings for human review rather than executable model changes.
 
 ## Import Pipeline
 

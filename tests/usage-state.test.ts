@@ -14,10 +14,13 @@ test('buildUsageHash and parseUsageHash round-trip usage filters', () => {
     to: '2026-04-15',
     project: 'agentmonitor',
     agent: 'codex',
+    model: 'gpt-5.4',
+    provider: 'openai',
+    tier: 'standard',
   };
 
   const hash = buildUsageHash(filters);
-  assert.equal(hash, 'usage?from=2026-04-01&to=2026-04-15&project=agentmonitor&agent=codex');
+  assert.equal(hash, 'usage?from=2026-04-01&to=2026-04-15&project=agentmonitor&agent=codex&model=gpt-5.4&provider=openai&tier=standard');
 
   assert.deepEqual(parseUsageHash(`#${hash}`, createDefaultUsageFilters(new Date('2026-04-15T12:00:00Z'))), filters);
 });
@@ -28,6 +31,9 @@ test('parseUsageHash falls back for non-usage hashes and missing params', () => 
     to: '2026-04-15',
     project: '',
     agent: '',
+    model: '',
+    provider: '',
+    tier: '',
   };
 
   assert.deepEqual(parseUsageHash('#analytics?project=alpha', fallback), fallback);
@@ -36,6 +42,9 @@ test('parseUsageHash falls back for non-usage hashes and missing params', () => 
     to: '2026-04-15',
     project: 'alpha',
     agent: '',
+    model: '',
+    provider: '',
+    tier: '',
   });
 });
 
@@ -47,9 +56,14 @@ test('buildUsageCsv includes summary and table sections', () => {
       to: '2026-04-15',
       project: '',
       agent: 'codex',
+      model: 'gpt-5.4',
+      provider: 'openai',
+      tier: 'standard',
     },
     summary: {
       total_cost_usd: 12.34,
+      prior_total_cost_usd: 10,
+      cost_delta_pct: 23.4,
       total_input_tokens: 5000,
       total_output_tokens: 900,
       total_cache_read_tokens: 300,
@@ -180,6 +194,8 @@ test('buildUsageCsv includes summary and table sections', () => {
 
   assert.match(csv, /Section,Metric,Value/);
   assert.match(csv, /Summary,Total Cost USD,12\.34/);
+  assert.match(csv, /Summary,Prior Total Cost USD,10/);
+  assert.match(csv, /Filters,Provider,openai/);
   assert.match(csv, /Daily Usage/);
   assert.match(csv, /Projects/);
   assert.match(csv, /Models/);

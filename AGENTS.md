@@ -23,7 +23,7 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - `rust-backend/AGENTS.md`, `frontend/AGENTS.md` — domain-specific guidance.
 - `hooks/claude-code/README.md`, `hooks/codex/README.md` — hook setup details.
 
-## Quickstart
+## Command Quickstart
 
 ```bash
 pnpm install
@@ -51,3 +51,8 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - **TDD**: red/green for new features and major changes.
 - **E2E**: `pnpm exec playwright test`.
 - **Sanity**: `GET /api/health`.
+
+## Working Agreement
+
+- **Push back before building.** If a request is incoherent or self-contradictory, or a spec/plan is vague or skips key decisions, stop and interview me — ask clarifying questions and confirm intent before writing code or changing files. Don't guess at scope or comply silently. (Clear, well-scoped requests don't need this.)
+- **Keep docs current.** After a significant change, PR, or completed spec/plan, update any now-stale reference docs under `docs/system/` (and `docs/project/ROADMAP.md`) so they match shipped behavior. Skip this for trivial changes.

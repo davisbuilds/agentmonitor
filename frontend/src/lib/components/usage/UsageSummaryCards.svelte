@@ -18,7 +18,7 @@
       {
         label: 'Total Cost',
         value: formatCost(summary.total_cost_usd),
-        sub: `${formatCost(summary.average_cost_per_active_day)} per active day`,
+        sub: `${summary.cost_delta_pct >= 0 ? '+' : ''}${summary.cost_delta_pct.toFixed(1)}% vs ${formatCost(summary.prior_total_cost_usd)} prior`,
       },
       {
         label: 'Input Tokens',

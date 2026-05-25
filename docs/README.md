@@ -24,6 +24,8 @@ This folder holds the long-form reference material that does not belong in the r
 - Features and product surface: [system/FEATURES.md](system/FEATURES.md)
 - Operations, env vars, commands, testing: [system/OPERATIONS.md](system/OPERATIONS.md)
 - Architecture and code map: [system/ARCHITECTURE.md](system/ARCHITECTURE.md)
+- Read-only usage budgets: [system/usage-budgets.md](system/usage-budgets.md)
+- Human-reviewed tier feedback: [system/tier-feedback.md](system/tier-feedback.md)
 
 ## Project
 

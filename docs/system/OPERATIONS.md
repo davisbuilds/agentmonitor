@@ -61,6 +61,7 @@ All optional with sensible defaults:
 | `AGENTMONITOR_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
+| `AGENTMONITOR_USAGE_BUDGETS_PATH` | `./config/budgets.json` | Optional local JSON config for read-only usage budget reports |
 | `AGENTMONITOR_ENABLE_LIVE_TAB` | `true` | Shows the Svelte `Live` tab |
 | `AGENTMONITOR_CODEX_LIVE_MODE` | `otel-only` | Codex live fidelity mode (`otel-only`, reserved `exporter`) |
 | `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` | `true` | Capture or redact live prompt payloads |

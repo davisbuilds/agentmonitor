@@ -437,6 +437,8 @@ export interface UsageSummary {
   pricing_known_events: number;
   pricing_unknown_events: number;
   unknown_model_events: number;
+  prior_total_cost_usd: number;
+  cost_delta_pct: number;
   peak_day: {
     date: string | null;
     cost_usd: number;
@@ -537,6 +539,104 @@ export interface UsageTopSessionRow {
   }>;
   unknown_model_events: number;
   browsing_session_available: boolean;
+}
+
+export type UsageBudgetPeriod = 'day' | 'week' | 'month' | 'all_time';
+export type UsageBudgetAlertState = 'ok' | 'info' | 'warning' | 'critical' | 'hard_stop_candidate';
+
+export interface UsageBudgetThresholds {
+  info: number;
+  warning: number;
+  critical: number;
+  hard_stop_candidate: number;
+}
+
+export interface UsageBudgetFilters {
+  project?: string;
+  agent?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
+}
+
+export interface UsageBudgetReport {
+  name: string;
+  period: UsageBudgetPeriod;
+  limit_usd: number;
+  spent_usd: number;
+  remaining_usd: number;
+  percent_used: number;
+  state: UsageBudgetAlertState;
+  thresholds: UsageBudgetThresholds;
+  filters: UsageBudgetFilters;
+  date_from: string | null;
+  date_to: string | null;
+  enforcing: false;
+}
+
+export interface UsageBudgetConfigStatus {
+  path: string;
+  present: boolean;
+  valid: boolean;
+  errors: string[];
+}
+
+export interface UsageBudgetsResponse {
+  data: UsageBudgetReport[];
+  config: UsageBudgetConfigStatus;
+}
+
+export type UsageTierFeedbackConfidence = 'low' | 'medium' | 'high';
+
+export interface UsageTierFeedbackWindow {
+  date_from: string | null;
+  date_to: string | null;
+  project: string | null;
+  agent: string | null;
+  model: string | null;
+  provider: string | null;
+  tier: string | null;
+}
+
+export interface UsageTierFeedbackFinding {
+  kind: 'high_cost_low_tier' | 'low_complexity_premium_tier';
+  recommendation: string;
+  confidence: UsageTierFeedbackConfidence;
+  evidence: {
+    provider: string;
+    tier: string;
+    session_count: number;
+    total_cost_usd: number;
+    average_cost_usd: number;
+    sample_sessions: string[];
+  };
+}
+
+export interface UsageTierFeedbackCostOutlier {
+  kind: 'unknown_model_spend';
+  recommendation: string;
+  confidence: UsageTierFeedbackConfidence;
+  evidence: {
+    total_cost_usd: number;
+    share_of_window_cost: number;
+    usage_events: number;
+    sample_models: string[];
+  };
+}
+
+export interface UsageTierFeedbackReport {
+  generated_at: string;
+  window: UsageTierFeedbackWindow;
+  tier_mismatches: UsageTierFeedbackFinding[];
+  cost_outliers: UsageTierFeedbackCostOutlier[];
+  confidence: UsageTierFeedbackConfidence;
+  evidence: {
+    total_cost_usd: number;
+    usage_events: number;
+    session_count: number;
+    method: string;
+  };
+  human_review_required: true;
 }
 
 export type InsightKind = 'overview' | 'workflow' | 'usage';
@@ -651,6 +751,9 @@ export interface AnalyticsParams {
   date_to?: string;
   project?: string;
   agent?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
   limit?: number;
 }
 
@@ -659,6 +762,9 @@ export interface UsageParams {
   date_to?: string;
   project?: string;
   agent?: string;
+  model?: string;
+  provider?: string;
+  tier?: string;
   limit?: number;
 }
 
