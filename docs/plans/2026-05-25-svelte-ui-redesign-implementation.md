@@ -2,14 +2,24 @@
 date: 2026-05-25
 topic: svelte-ui-redesign
 stage: implementation-plan
-status: phases-1-2-complete
+status: phases-1-3-complete
 source: conversation
 ---
 
 ## Implementation Status
 
-As of 2026-05-25, **Phases 1–2 are complete** on branch
-`feat/ui-redesign-instrument-console`. Phases 3–6 remain.
+As of 2026-05-25, **Phases 1–3 are complete** on branch
+`feat/ui-redesign-instrument-console`. Phases 4–6 remain.
+
+**Phase 3 (Monitor)** — `monitor/*` migrated onto tokens + primitives:
+- `AgentCards` → `SectionHeader` + `StatusDot` + `EmptyState`, tokenized cards, mono tabular metrics.
+- `CostDashboard` → one `Panel` (Total Cost as a promoted `Stat`, By Model/By Project as `Bar` rows,
+  window switcher as `SubTabs`) — resolves `everything-in-cards`/`nested-cards` on Monitor.
+- `ToolAnalytics` → `Panel` + generic `DataTable` (with a `Bar` frequency cell).
+- `SessionDetail` drawer tokenized (`StatusDot`, `shadow-overlay`; session id off `text-[10px]`).
+- `FilterBar` → 3 primary filters inline + the rest behind a Filters `Popover`.
+- Tokenized the shared color helpers in `format.ts`; updated `tests/format.test.ts`; removed dead `EventFeed`.
+- Verification: `frontend:check` (318 files, 0 errors), `pnpm lint`, `pnpm build`, `pnpm test` (445 pass).
 
 **Phase 2 (Shared primitives)** — `frontend/src/lib/components/ui/` with barrel `index.ts`:
 - Structure: `Panel` (header folded in via props/snippets — no separate `PanelHeader`),
