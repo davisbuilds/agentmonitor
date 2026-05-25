@@ -586,6 +586,59 @@ export interface UsageBudgetsResponse {
   config: UsageBudgetConfigStatus;
 }
 
+export type UsageTierFeedbackConfidence = 'low' | 'medium' | 'high';
+
+export interface UsageTierFeedbackWindow {
+  date_from: string | null;
+  date_to: string | null;
+  project: string | null;
+  agent: string | null;
+  model: string | null;
+  provider: string | null;
+  tier: string | null;
+}
+
+export interface UsageTierFeedbackFinding {
+  kind: 'high_cost_low_tier' | 'low_complexity_premium_tier';
+  recommendation: string;
+  confidence: UsageTierFeedbackConfidence;
+  evidence: {
+    provider: string;
+    tier: string;
+    session_count: number;
+    total_cost_usd: number;
+    average_cost_usd: number;
+    sample_sessions: string[];
+  };
+}
+
+export interface UsageTierFeedbackCostOutlier {
+  kind: 'unknown_model_spend';
+  recommendation: string;
+  confidence: UsageTierFeedbackConfidence;
+  evidence: {
+    total_cost_usd: number;
+    share_of_window_cost: number;
+    usage_events: number;
+    sample_models: string[];
+  };
+}
+
+export interface UsageTierFeedbackReport {
+  generated_at: string;
+  window: UsageTierFeedbackWindow;
+  tier_mismatches: UsageTierFeedbackFinding[];
+  cost_outliers: UsageTierFeedbackCostOutlier[];
+  confidence: UsageTierFeedbackConfidence;
+  evidence: {
+    total_cost_usd: number;
+    usage_events: number;
+    session_count: number;
+    method: string;
+  };
+  human_review_required: true;
+}
+
 export type InsightKind = 'overview' | 'workflow' | 'usage';
 export type InsightProvider = 'openai' | 'anthropic' | 'gemini';
 

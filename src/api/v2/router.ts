@@ -48,6 +48,7 @@ import { liveStreamRouter } from './live-stream.js';
 import { config } from '../../config.js';
 import { generateInsight } from '../../insights/service.js';
 import { getUsageBudgets } from '../../usage/budgets.js';
+import { getUsageTierFeedback } from '../../usage/tier-feedback.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -688,6 +689,16 @@ v2Router.get('/usage/budgets', (_req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/usage/budgets] Error:', err);
     res.status(500).json({ error: 'Failed to get usage budgets' });
+  }
+});
+
+v2Router.get('/usage/tier-feedback', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getUsageTierFeedback(params));
+  } catch (err) {
+    console.error('[v2/usage/tier-feedback] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage tier feedback' });
   }
 });
 

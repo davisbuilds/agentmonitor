@@ -77,6 +77,7 @@ Product-surface reference for AgentMonitor.
 - Usage endpoints accept optional `model`, `provider`, and `tier` filters in addition to date, project, and agent filters. Classification filters are applied consistently before summary, daily, attribution, tier, agent, and top-session panels aggregate.
 - Usage summary includes `prior_total_cost_usd` and `cost_delta_pct` for the immediately preceding same-length date range when a valid current range is supplied.
 - Usage budget reports live at `/api/v2/usage/budgets`. They read an optional local JSON config, reuse usage filters to compute current spend, and return alert states without blocking or enforcing agent activity.
+- Usage tier feedback lives at `/api/v2/usage/tier-feedback`. It returns deterministic, evidence-bearing advisory findings for human review and does not auto-apply model or tier changes.
 - Stored `cost_usd` is authoritative for event cost. Cache hit rate and estimated cache savings are derived estimates from current pricing metadata and are coverage-limited when pricing is unknown.
 - Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
 - The Svelte `Usage` tab supports date ranges, project, agent, provider, tier, and model filters, session drill-in when transcript history exists, and CSV export.
@@ -144,6 +145,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
 | `/api/v2/usage/budgets` | GET | Read-only budget state from optional local budget config |
+| `/api/v2/usage/tier-feedback` | GET | Human-reviewed advisory tier feedback from usage evidence |
 | `/api/v2/insights` | GET | List persisted insights for the current historical slice |
 | `/api/v2/insights/:id` | GET | Fetch a single persisted insight |
 | `/api/v2/insights/generate` | POST | Generate and persist a new insight from analytics + usage data |

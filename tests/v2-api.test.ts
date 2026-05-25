@@ -109,6 +109,8 @@ before(async () => {
     { id: 'api-tie-001', project: 'tie', msgs: 4, date: '2026-03-06T09:00:00Z' },
     { id: 'api-tie-002', project: 'tie', msgs: 4, date: '2026-03-06T09:00:00Z' },
     { id: 'api-tie-003', project: 'tie', msgs: 4, date: '2026-03-06T09:00:00Z' },
+    { id: 'api-feedback-opus-001', project: 'feedback', msgs: 2, date: '2026-03-09T09:00:00Z' },
+    { id: 'api-feedback-opus-002', project: 'feedback', msgs: 2, date: '2026-03-09T10:00:00Z' },
   ];
 
   for (const s of sessions) {
@@ -268,6 +270,83 @@ before(async () => {
     client_timestamp: '2026-03-01T10:15:00Z',
     source: 'import',
   });
+
+  const feedbackEvents = [
+    {
+      event_id: 'api-feedback-economy-001',
+      session_id: 'api-feedback-economy-001',
+      agent_type: 'codex',
+      event_type: 'assistant',
+      status: 'success',
+      project: 'feedback',
+      model: 'gpt-5-mini',
+      tokens_in: 8000,
+      tokens_out: 2000,
+      cost_usd: 0.08,
+      client_timestamp: '2026-03-09T11:00:00Z',
+      source: 'api',
+    },
+    {
+      event_id: 'api-feedback-economy-002',
+      session_id: 'api-feedback-economy-002',
+      agent_type: 'codex',
+      event_type: 'assistant',
+      status: 'success',
+      project: 'feedback',
+      model: 'gpt-5-mini',
+      tokens_in: 9000,
+      tokens_out: 2100,
+      cost_usd: 0.09,
+      client_timestamp: '2026-03-09T12:00:00Z',
+      source: 'api',
+    },
+    {
+      event_id: 'api-feedback-opus-001',
+      session_id: 'api-feedback-opus-001',
+      agent_type: 'claude_code',
+      event_type: 'assistant',
+      status: 'success',
+      project: 'feedback',
+      model: 'claude-opus-4-7',
+      tokens_in: 80,
+      tokens_out: 20,
+      cost_usd: 0.002,
+      client_timestamp: '2026-03-09T09:01:00Z',
+      source: 'api',
+    },
+    {
+      event_id: 'api-feedback-opus-002',
+      session_id: 'api-feedback-opus-002',
+      agent_type: 'claude_code',
+      event_type: 'assistant',
+      status: 'success',
+      project: 'feedback',
+      model: 'claude-opus-4-7',
+      tokens_in: 70,
+      tokens_out: 15,
+      cost_usd: 0.002,
+      client_timestamp: '2026-03-09T10:01:00Z',
+      source: 'api',
+    },
+    {
+      event_id: 'api-feedback-unknown-001',
+      session_id: 'api-feedback-unknown-001',
+      agent_type: 'codex',
+      event_type: 'assistant',
+      status: 'success',
+      project: 'feedback',
+      model: 'unknown-frontier-model',
+      tokens_in: 12000,
+      tokens_out: 3000,
+      cost_usd: 0.2,
+      client_timestamp: '2026-03-09T13:00:00Z',
+      source: 'api',
+    },
+  ];
+
+  for (const event of feedbackEvents) {
+    insertEvent(event);
+  }
 
   // Start server
   const { createApp } = await import('../src/app.js');
@@ -1502,6 +1581,94 @@ describe('GET /api/v2/usage/budgets', () => {
     assert.equal(body.config.present, true);
     assert.equal(body.config.valid, false);
     assert.match(body.config.errors.join('\n'), /limit_usd/);
+  });
+});
+
+describe('GET /api/v2/usage/tier-feedback', () => {
+  test('returns deterministic advisory findings with evidence for suspicious tier usage', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/tier-feedback?project=feedback&date_from=2026-03-09&date_to=2026-03-09`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      generated_at: string;
+      window: { date_from: string | null; date_to: string | null; project: string | null };
+      confidence: string;
+      tier_mismatches: Array<{
+        kind: string;
+        recommendation: string;
+        confidence: string;
+        evidence: {
+          session_count: number;
+          total_cost_usd: number;
+          provider?: string;
+          tier?: string;
+          sample_sessions: string[];
+        };
+      }>;
+      cost_outliers: Array<{
+        kind: string;
+        confidence: string;
+        evidence: {
+          total_cost_usd: number;
+          share_of_window_cost: number;
+          sample_models: string[];
+        };
+      }>;
+      evidence: { total_cost_usd: number; usage_events: number; session_count: number };
+      human_review_required: boolean;
+    };
+
+    assert.match(body.generated_at, /^\d{4}-\d{2}-\d{2}T/);
+    assert.deepEqual(body.window, {
+      date_from: '2026-03-09',
+      date_to: '2026-03-09',
+      project: 'feedback',
+      agent: null,
+      model: null,
+      provider: null,
+      tier: null,
+    });
+    assert.equal(body.confidence, 'medium');
+    assert.equal(body.human_review_required, true);
+    assert.equal(body.evidence.total_cost_usd, 0.374);
+    assert.equal(body.evidence.usage_events, 5);
+    assert.equal(body.evidence.session_count, 5);
+
+    assert.deepEqual(
+      body.tier_mismatches.map(row => [row.kind, row.confidence, row.evidence.session_count, row.evidence.total_cost_usd]),
+      [
+        ['high_cost_low_tier', 'medium', 2, 0.17],
+        ['low_complexity_premium_tier', 'low', 2, 0.004],
+      ],
+    );
+    assert.equal(body.tier_mismatches[0]?.recommendation, 'Review whether repeated high-cost sessions should use a standard or premium tier.');
+    assert.deepEqual(body.tier_mismatches[0]?.evidence.sample_sessions, ['api-feedback-economy-002', 'api-feedback-economy-001']);
+    assert.equal(body.cost_outliers[0]?.kind, 'unknown_model_spend');
+    assert.equal(body.cost_outliers[0]?.confidence, 'medium');
+    assert.equal(body.cost_outliers[0]?.evidence.total_cost_usd, 0.2);
+    assert.equal(body.cost_outliers[0]?.evidence.share_of_window_cost, 0.534759);
+    assert.deepEqual(body.cost_outliers[0]?.evidence.sample_models, ['unknown-frontier-model']);
+  });
+
+  test('returns empty recommendations when there is insufficient evidence', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/tier-feedback?project=alpha&date_from=2026-03-01&date_to=2026-03-01`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      confidence: string;
+      tier_mismatches: unknown[];
+      cost_outliers: unknown[];
+      evidence: { total_cost_usd: number; usage_events: number; session_count: number };
+      human_review_required: boolean;
+    };
+
+    assert.equal(body.confidence, 'low');
+    assert.deepEqual(body.tier_mismatches, []);
+    assert.deepEqual(body.cost_outliers, []);
+    assert.equal(body.evidence.total_cost_usd, 0.02);
+    assert.equal(body.evidence.usage_events, 1);
+    assert.equal(body.evidence.session_count, 1);
+    assert.equal(body.human_review_required, true);
   });
 });
 

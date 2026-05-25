@@ -2,7 +2,7 @@
 date: 2026-05-13
 topic: agent-usage-intelligence
 stage: implementation-plan
-status: tasks-1-7-complete
+status: tasks-1-8-complete
 source: conversation
 ---
 
@@ -16,7 +16,7 @@ Turn AgentMonitor's existing event-derived Usage surface into an operator-grade 
 
 ## Implementation Status
 
-As of 2026-05-25, the first implementation slice is complete on branch `agent-usage-intelligence`, and Tasks 6 and 7 are complete on follow-up branch `agent-usage-intelligence-followups`.
+As of 2026-05-25, the planned usage-intelligence implementation tasks are complete across branch `agent-usage-intelligence` and follow-up branch `agent-usage-intelligence-followups`.
 
 Completed:
 
@@ -27,6 +27,7 @@ Completed:
 - Task 5: Svelte Usage UI updates for tier attribution, cache economics, pricing coverage, and top-session primary model/tier indicators.
 - Task 6: optional `model`, `provider`, and `tier` usage filters plus prior-period comparison.
 - Task 7: read-only usage budget config, evaluator, and `/api/v2/usage/budgets` endpoint.
+- Task 8: human-reviewed tier feedback report at `/api/v2/usage/tier-feedback`.
 
 Verification completed:
 
@@ -40,7 +41,7 @@ Verification completed:
 
 Remaining planned follow-up scope:
 
-- Task 8: human-reviewed tier feedback report.
+- None from this implementation plan.
 
 Implementation commits:
 

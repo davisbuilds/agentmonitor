@@ -524,6 +524,53 @@ export interface UsageTopSessionRow {
   browsing_session_available: boolean;
 }
 
+export type UsageTierFeedbackConfidence = 'low' | 'medium' | 'high';
+
+export interface UsageTierFeedbackReport {
+  generated_at: string;
+  window: {
+    date_from: string | null;
+    date_to: string | null;
+    project: string | null;
+    agent: string | null;
+    model: string | null;
+    provider: string | null;
+    tier: string | null;
+  };
+  tier_mismatches: Array<{
+    kind: 'high_cost_low_tier' | 'low_complexity_premium_tier';
+    recommendation: string;
+    confidence: UsageTierFeedbackConfidence;
+    evidence: {
+      provider: string;
+      tier: string;
+      session_count: number;
+      total_cost_usd: number;
+      average_cost_usd: number;
+      sample_sessions: string[];
+    };
+  }>;
+  cost_outliers: Array<{
+    kind: 'unknown_model_spend';
+    recommendation: string;
+    confidence: UsageTierFeedbackConfidence;
+    evidence: {
+      total_cost_usd: number;
+      share_of_window_cost: number;
+      usage_events: number;
+      sample_models: string[];
+    };
+  }>;
+  confidence: UsageTierFeedbackConfidence;
+  evidence: {
+    total_cost_usd: number;
+    usage_events: number;
+    session_count: number;
+    method: string;
+  };
+  human_review_required: true;
+}
+
 export type InsightKind = 'overview' | 'workflow' | 'usage';
 export type InsightProvider = 'openai' | 'anthropic' | 'gemini';
 
@@ -849,6 +896,11 @@ export async function fetchUsageAgents(params: Record<string, string | number | 
 export async function fetchUsageTopSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: UsageTopSessionRow[]; coverage: UsageCoverage }> {
   const res = await fetch(`/api/v2/usage/top-sessions${qs(params)}`);
   return checkedJson(res, 'fetchUsageTopSessions');
+}
+
+export async function fetchUsageTierFeedback(params: Record<string, string | number | undefined> = {}): Promise<UsageTierFeedbackReport> {
+  const res = await fetch(`/api/v2/usage/tier-feedback${qs(params)}`);
+  return checkedJson(res, 'fetchUsageTierFeedback');
 }
 
 export async function fetchInsights(params: Record<string, string | number | undefined> = {}): Promise<{ data: Insight[]; generation: InsightGenerationStatus }> {
