@@ -81,7 +81,7 @@ export function parseUsageHash(hash: string, fallback: UsageFilters): UsageFilte
   };
 }
 
-function csvEscape(value: string | number | null | undefined): string {
+function csvEscape(value: string | number | boolean | null | undefined): string {
   const stringValue = value == null ? '' : String(value);
   if (/[",\n]/.test(stringValue)) {
     return `"${stringValue.replace(/"/g, '""')}"`;
@@ -89,11 +89,11 @@ function csvEscape(value: string | number | null | undefined): string {
   return stringValue;
 }
 
-function sectionRow(section: string, metric: string, value: string | number | null | undefined): string {
+function sectionRow(section: string, metric: string, value: string | number | boolean | null | undefined): string {
   return [section, metric, value].map(csvEscape).join(',');
 }
 
-function tableRow(values: Array<string | number | null | undefined>): string {
+function tableRow(values: Array<string | number | boolean | null | undefined>): string {
   return values.map(csvEscape).join(',');
 }
 

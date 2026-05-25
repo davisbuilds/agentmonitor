@@ -64,16 +64,16 @@
     }
   }
 
-  onMount(async () => {
+  onMount(() => {
     window.addEventListener('keydown', handleGlobalKeydown);
 
-    await initializeLiveSettings();
-    if (!getLiveSettings().enabled && getTab() === 'live') {
-      setTab('monitor');
-    }
-
-    // Connect SSE
-    connectSSE();
+    void (async () => {
+      await initializeLiveSettings();
+      if (!getLiveSettings().enabled && getTab() === 'live') {
+        setTab('monitor');
+      }
+      connectSSE();
+    })();
 
     return () => {
       window.removeEventListener('keydown', handleGlobalKeydown);
