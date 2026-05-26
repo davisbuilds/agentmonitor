@@ -44,15 +44,38 @@ test('buildActiveAgentLabel includes model and reasoning effort when available',
       { metadata: { reasoning_effort: 'high' } },
       { model: 'openai/gpt-5.5' },
     ]),
-    'codex (gpt-5.5 high)',
+    'Codex (gpt-5.5 high)',
   );
 });
 
-test('buildActiveAgentLabel omits unavailable model metadata', () => {
-  assert.equal(buildActiveAgentLabel('claude_code', []), 'claude_code');
+test('buildActiveAgentLabel uses the friendly agent name and omits unavailable model metadata', () => {
+  assert.equal(buildActiveAgentLabel('claude_code', []), 'Claude');
   assert.equal(
     buildActiveAgentLabel('codex', [{ model: 'gpt-5.4', metadata: '{bad json' }]),
-    'codex (gpt-5.4)',
+    'Codex (gpt-5.4)',
+  );
+});
+
+test('buildActiveAgentLabel falls back to the raw type for unknown agents', () => {
+  assert.equal(buildActiveAgentLabel('amp', [{ model: 'gpt-5.4' }]), 'amp (gpt-5.4)');
+});
+
+test('buildActiveAgentLabel skips the <synthetic> marker and falls through to the real model', () => {
+  // Events are newest-first; a synthetic rate-limit/error turn (model "<synthetic>",
+  // written by Claude Code itself) must not overwrite the last real model.
+  assert.equal(
+    buildActiveAgentLabel('claude_code', [
+      { model: '<synthetic>' },
+      { model: 'anthropic/claude-opus-4-7' },
+    ]),
+    'Claude (claude-opus-4-7)',
+  );
+});
+
+test('buildActiveAgentLabel drops the suffix when the only model is <synthetic>', () => {
+  assert.equal(
+    buildActiveAgentLabel('claude_code', [{ model: '<synthetic>' }]),
+    'Claude',
   );
 });
 

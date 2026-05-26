@@ -44,7 +44,7 @@
 </script>
 
 <div class="overflow-x-auto {klass}">
-  <table class="w-full border-collapse text-body">
+  <table class="w-full border-collapse text-meta">
     <thead class={stickyHeader ? 'sticky top-0 z-10 bg-surface' : ''}>
       <tr class="border-b border-line">
         {#each columns as column}

@@ -41,6 +41,9 @@ test('format helpers compact numbers, costs, durations, agents, and statuses', (
   assert.equal(formatNumber(999), '999');
   assert.equal(formatNumber(1_250), '1.3K');
   assert.equal(formatNumber(2_500_000), '2.5M');
+  assert.equal(formatNumber(999_900_000), '999.9M');
+  assert.equal(formatNumber(1_000_000_000), '1.0B');
+  assert.equal(formatNumber(2_049_100_000), '2.0B');
 
   assert.equal(formatDuration(null), '-');
   assert.equal(formatDuration(999), '999ms');

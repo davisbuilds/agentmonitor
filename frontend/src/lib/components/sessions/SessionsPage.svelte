@@ -123,7 +123,7 @@
     loading = true;
     error = null;
     try {
-      const params: Record<string, string | number> = { limit: PAGE_SIZE };
+      const params: Record<string, string | number> = { limit: PAGE_SIZE, exclude_empty: 'true' };
       if (filterProject) params.project = filterProject;
       if (filterAgent) params.agent = filterAgent;
       if (append && cursor) params.cursor = cursor;

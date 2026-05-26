@@ -153,6 +153,12 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     conditions.push('message_count <= ?');
     values.push(params.max_messages);
   }
+  if (params.exclude_empty) {
+    // Hide telemetry-only sessions that have no browsable transcript — opening
+    // them shows nothing. The effective history capability mirrors what the
+    // client computes via inferProjectionCapabilities; 'unknown' is kept.
+    conditions.push(`${analyticsCapabilityExpr('history')} != 'none'`);
+  }
   const filterWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const filterValues = [...values];
 

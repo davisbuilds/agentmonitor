@@ -76,6 +76,7 @@ v2Router.get('/sessions', (req: Request, res: Response) => {
       date_to: req.query.date_to as string | undefined,
       min_messages: safeInt(req.query.min_messages as string),
       max_messages: safeInt(req.query.max_messages as string),
+      exclude_empty: req.query.exclude_empty === 'true',
     };
     const result = listBrowsingSessions(params);
     res.json(result);
