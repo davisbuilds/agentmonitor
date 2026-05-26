@@ -68,6 +68,15 @@ export function agentHexColor(agentType: string): string {
   }
 }
 
+export function agentDisplayName(agentType: string): string {
+  switch (agentType) {
+    case 'claude':
+    case 'claude_code': return 'Claude';
+    case 'codex': return 'Codex';
+    default: return 'Assistant';
+  }
+}
+
 export function statusColor(status: string): string {
   switch (status) {
     case 'active': return 'bg-ok';

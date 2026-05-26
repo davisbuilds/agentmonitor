@@ -96,6 +96,14 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* FTS snippet highlight (search injects <mark> via @html) — accent tint, not browser yellow. */
+  mark {
+    background-color: color-mix(in oklch, var(--color-accent) 22%, transparent);
+    color: var(--color-text);
+    border-radius: var(--radius-sm);
+    padding-inline: 0.1em;
+  }
+
   /* Keyboard focus is always visible on interactive elements. */
   :where(a, button, [role='button'], input, select, textarea, summary):focus-visible {
     outline: 2px solid var(--color-accent);

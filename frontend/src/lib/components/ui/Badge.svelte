@@ -5,11 +5,12 @@
 
   interface Props {
     tone?: Tone;
+    title?: string;
     class?: string;
     children: Snippet;
   }
 
-  let { tone = 'neutral', class: klass = '', children }: Props = $props();
+  let { tone = 'neutral', title, class: klass = '', children }: Props = $props();
 
   // Subtle tints — not loud, uppercase, full-saturation pills.
   const tones: Record<Tone, string> = {
@@ -21,6 +22,6 @@
   };
 </script>
 
-<span class="inline-flex items-center rounded-sm px-1.5 py-0.5 text-meta {tones[tone]} {klass}">
+<span class="inline-flex items-center rounded-sm px-1.5 py-0.5 text-meta {tones[tone]} {klass}" {title}>
   {@render children()}
 </span>

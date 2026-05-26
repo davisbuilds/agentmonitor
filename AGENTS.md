@@ -20,6 +20,7 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - `docs/system/DESIGN.md` — Svelte `/app/` design system ("Instrument Console"): color/type/space/radius tokens, layout language, accessibility floor. Tokens live in `frontend/src/app.css` `@theme`.
 - `docs/api/` — API navigation reference.
 - `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity, Rust convergence).
+- `docs/project/CURRENT_STATE.md` — high-change product/runtime notes moved out of the root README.
 - `docs/project/GIT_HISTORY_POLICY.md` — merge-commit-only policy and rationale.
 - `rust-backend/AGENTS.md`, `frontend/AGENTS.md` — domain-specific guidance.
 - `hooks/claude-code/README.md`, `hooks/codex/README.md` — hook setup details.
@@ -57,3 +58,4 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 
 - **Push back before building.** If a request is incoherent or self-contradictory, or a spec/plan is vague or skips key decisions, stop and interview me — ask clarifying questions and confirm intent before writing code or changing files. Don't guess at scope or comply silently. (Clear, well-scoped requests don't need this.)
 - **Keep docs current.** After a significant change, PR, or completed spec/plan, update any now-stale reference docs under `docs/system/` (and `docs/project/ROADMAP.md`) so they match shipped behavior. Skip this for trivial changes.
+- **Commit logically.** Commit completed work in coherent chunks as you proceed. Push only when explicitly asked.

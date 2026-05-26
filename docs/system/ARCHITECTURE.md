@@ -170,7 +170,7 @@ On April 9, 2026, AgentMonitor was pointed at active local Codex sessions export
 ## Directory Map
 
 ```text
-src/api/                  # HTTP route handlers (9 files)
+src/api/                  # HTTP route handlers
 src/contracts/            # TypeScript event types and validation
 src/db/                   # Schema, queries, connection management
 src/import/               # Historical log importers
@@ -183,5 +183,5 @@ public/                   # Dashboard HTML, JS components, CSS
 hooks/claude-code/        # Claude Code integration hooks (bash + Python)
 hooks/codex/              # Codex OTEL integration docs
 scripts/                  # Seed, import, benchmark, cost recalculation
-tests/                    # Node test runner suite (8 files)
+tests/                    # Node test runner suite
 ```

@@ -6,6 +6,7 @@
     summarizeCapabilities,
     type CapabilitySummaryTone,
   } from '../../session-capabilities';
+  import { Badge } from '../ui';
 
   interface Props {
     capabilities: SessionCapabilities | null;
@@ -17,48 +18,47 @@
   const summary = $derived.by(() => summarizeCapabilities(capabilities));
   const entries = $derived.by(() => getCapabilityEntries(capabilities));
 
-  function summaryToneClasses(tone: CapabilitySummaryTone): string {
+  type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn';
+
+  // Capability levels map onto signal tokens: full = ok, summary = warn, mixed = accent.
+  function summaryTone(tone: CapabilitySummaryTone): BadgeTone {
     switch (tone) {
       case 'full':
-        return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+        return 'ok';
       case 'summary':
-        return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+        return 'warn';
       case 'mixed':
-        return 'border-sky-500/30 bg-sky-500/10 text-sky-300';
+        return 'accent';
       default:
-        return 'border-gray-700 text-gray-400';
+        return 'neutral';
     }
   }
 
-  function levelClasses(level: SessionCapabilityLevel): string {
+  function levelTone(level: SessionCapabilityLevel): BadgeTone {
     switch (level) {
       case 'full':
-        return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+        return 'ok';
       case 'summary':
-        return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+        return 'warn';
       default:
-        return 'border-gray-700 text-gray-500';
+        return 'neutral';
     }
   }
 </script>
 
 {#if variant === 'summary'}
-  <span
-    class={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${summaryToneClasses(summary.tone)}`}
-    title={summary.description}
-  >
+  <Badge tone={summaryTone(summary.tone)} title={summary.description} class="uppercase tracking-wide">
     {summary.label}
-  </span>
+  </Badge>
 {:else if entries.length > 0}
   <div class="flex flex-wrap gap-2">
     {#each entries as entry (entry.key)}
-      <span class={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${levelClasses(entry.level)}`}>
-        {entry.shortLabel} {capabilityLevelText(entry.level)}
-      </span>
+      <Badge tone={levelTone(entry.level)} class="uppercase tracking-wide">
+        {entry.shortLabel}
+        {capabilityLevelText(entry.level)}
+      </Badge>
     {/each}
   </div>
 {:else}
-  <span class="rounded border border-gray-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">
-    capabilities unknown
-  </span>
+  <Badge tone="neutral" class="uppercase tracking-wide">capabilities unknown</Badge>
 {/if}

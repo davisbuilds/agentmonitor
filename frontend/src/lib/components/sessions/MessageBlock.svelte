@@ -1,10 +1,13 @@
 <script lang="ts">
   import type { Message, ContentBlock } from '../../api/client';
-  import { formatTimeOfDay } from '../../format';
+  import { formatTimeOfDay, agentDisplayName } from '../../format';
   import { parseSessionText } from '../../session-text';
+  import { classifyMessageAuthor } from '../../session-roles';
+  import { Badge } from '../ui';
 
   interface Props {
     message: Message;
+    agent?: string;
     highlighted?: boolean;
     pinned?: boolean;
     pinning?: boolean;
@@ -13,6 +16,7 @@
   }
   let {
     message,
+    agent = 'unknown',
     highlighted = false,
     pinned = false,
     pinning = false,
@@ -35,9 +39,18 @@
     toolExpanded = { ...toolExpanded, [id]: !toolExpanded[id] };
   }
 
-  const roleLabel = $derived(message.role === 'user' ? 'You' : 'Assistant');
-  const roleColor = $derived(message.role === 'user' ? 'text-blue-400' : 'text-green-400');
-  const borderColor = $derived(message.role === 'user' ? 'border-blue-500/20' : 'border-green-500/20');
+  // Shared classifier keeps the label in sync with the viewer's author filter.
+  const author = $derived(classifyMessageAuthor(message));
+  const roleLabel = $derived(
+    author === 'tool' ? 'Tool' : author === 'you' ? 'You' : agentDisplayName(agent),
+  );
+  // You = the one interactive accent; assistant = ok; tool output = neutral.
+  const roleColor = $derived(
+    author === 'tool' ? 'text-text-muted' : author === 'you' ? 'text-accent' : 'text-ok',
+  );
+  const borderColor = $derived(
+    author === 'tool' ? 'border-line' : author === 'you' ? 'border-accent/30' : 'border-ok/30',
+  );
 
   function togglePin() {
     if (pinning) return;
@@ -50,37 +63,37 @@
 </script>
 
 <div
-  class={`rounded-r-lg border-l-2 px-3 py-2 transition ${
+  class={`rounded-r-sm border-l-2 px-3 py-2 transition-colors ${
     borderColor
   } ${
-    highlighted ? 'bg-blue-500/5 ring-1 ring-blue-400/20' : ''
+    highlighted ? 'bg-accent/5 ring-1 ring-accent/20' : ''
   }`}
   data-message-ordinal={message.ordinal}
 >
   <!-- Role header -->
-  <div class="flex items-center gap-2 mb-1">
-    <span class="text-xs font-medium {roleColor}">{roleLabel}</span>
+  <div class="mb-1 flex items-center gap-2">
+    <span class="text-meta font-medium {roleColor}">{roleLabel}</span>
     {#if message.timestamp}
-      <span class="text-xs text-gray-600">{formatTimeOfDay(message.timestamp)}</span>
+      <span class="tabular font-mono text-meta text-text-faint">{formatTimeOfDay(message.timestamp)}</span>
     {/if}
     {#if message.has_thinking}
-      <span class="text-xs bg-purple-900/30 text-purple-400 px-1 rounded">thinking</span>
+      <Badge tone="neutral">thinking</Badge>
     {/if}
     {#if message.has_tool_use}
-      <span class="text-xs bg-amber-900/30 text-amber-400 px-1 rounded">tools</span>
+      <Badge tone="neutral">tools</Badge>
     {/if}
     {#if onpin || onunpin}
       <button
         type="button"
-        class={`ml-auto rounded border px-2 py-0.5 text-[11px] transition ${
+        class={`ml-auto rounded-sm border px-2 py-0.5 text-meta transition-colors ${
           pinned
-            ? 'border-amber-500/40 bg-amber-500/10 text-amber-200 hover:border-amber-400'
-            : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+            ? 'border-warn/40 bg-warn/10 text-warn hover:border-warn'
+            : 'border-line text-text-muted hover:border-line-strong hover:text-text'
         } ${pinning ? 'cursor-wait opacity-70' : ''}`}
         disabled={pinning}
         onclick={togglePin}
       >
-        {pinning ? 'Saving...' : pinned ? 'Pinned' : 'Pin'}
+        {pinning ? 'Saving…' : pinned ? 'Pinned' : 'Pin'}
       </button>
     {/if}
   </div>
@@ -90,63 +103,63 @@
     {#if block.type === 'text' && block.text}
       {@const parsedText = parseSessionText(block.text)}
       {#if parsedText?.kind === 'caveat'}
-        <div class="rounded border border-sky-900/60 bg-sky-950/20 px-3 py-2 text-xs text-sky-300">
+        <div class="rounded-sm border border-accent/30 bg-accent/10 px-3 py-2 text-meta text-accent">
           Local command transcript follows. Claude marked this output as contextual-only unless explicitly requested.
         </div>
       {:else if parsedText?.kind === 'command'}
-        <div class="rounded border border-gray-800 bg-gray-900/40 px-3 py-2">
-          <div class="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Local Command</div>
-          <div class="font-mono text-sm text-gray-200">{parsedText.name || parsedText.message}</div>
+        <div class="rounded-sm border border-line bg-surface-2 px-3 py-2">
+          <div class="mb-1 text-meta uppercase tracking-wide text-text-faint">Local Command</div>
+          <div class="font-mono text-body text-text">{parsedText.name || parsedText.message}</div>
           {#if parsedText.args}
-            <div class="mt-1 text-xs text-gray-500 whitespace-pre-wrap break-words">{parsedText.args}</div>
+            <div class="mt-1 whitespace-pre-wrap break-words text-meta text-text-muted">{parsedText.args}</div>
           {/if}
         </div>
       {:else if parsedText?.kind === 'output'}
-        <div class="rounded border border-gray-800 bg-gray-900/30 px-3 py-2">
-          <div class="text-[11px] uppercase tracking-wide {parsedText.stream === 'stderr' ? 'text-red-400' : 'text-gray-500'} mb-1">
+        <div class="rounded-sm border border-line bg-surface-2 px-3 py-2">
+          <div class="mb-1 text-meta uppercase tracking-wide {parsedText.stream === 'stderr' ? 'text-danger' : 'text-text-faint'}">
             {parsedText.stream}
           </div>
-          <div class="text-sm text-gray-300 whitespace-pre-wrap break-words leading-relaxed">
+          <div class="whitespace-pre-wrap break-words text-body leading-relaxed text-text-muted">
             {parsedText.text || '(no output)'}
           </div>
         </div>
       {:else}
-        <div class="text-sm text-gray-300 whitespace-pre-wrap break-words leading-relaxed">
+        <div class="whitespace-pre-wrap break-words text-body leading-relaxed text-text">
           {parsedText?.text || block.text}
         </div>
       {/if}
 
     {:else if block.type === 'thinking' && block.thinking}
-      <div class="mt-1 mb-1">
+      <div class="my-1">
         <button
-          class="text-xs text-purple-400 hover:text-purple-300"
+          class="text-meta text-text-muted transition-colors hover:text-text"
           onclick={() => thinkingExpanded = !thinkingExpanded}
         >
           {thinkingExpanded ? '▾' : '▸'} Thinking ({block.thinking.length} chars)
         </button>
         {#if thinkingExpanded}
-          <div class="mt-1 text-xs text-gray-500 whitespace-pre-wrap bg-gray-900/50 rounded p-2 max-h-64 overflow-y-auto">
+          <div class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-sm bg-surface-2 p-2 text-meta text-text-muted">
             {block.thinking}
           </div>
         {/if}
       </div>
 
     {:else if block.type === 'tool_use' && block.name}
-      <div class="mt-1 mb-1 bg-gray-900/40 rounded p-2 border border-gray-800">
+      <div class="my-1 rounded-sm border border-line bg-surface-2 p-2">
         <button
-          class="text-xs text-amber-400 hover:text-amber-300 flex items-center gap-1"
+          class="flex items-center gap-1 text-meta text-text-muted transition-colors hover:text-text"
           onclick={() => toggleTool(block.id || String(i))}
         >
           <span>{toolExpanded[block.id || String(i)] ? '▾' : '▸'}</span>
-          <span class="font-mono">{block.name}</span>
+          <span class="font-mono text-text">{block.name}</span>
         </button>
         {#if toolExpanded[block.id || String(i)] && block.input}
-          <pre class="mt-1 text-xs text-gray-500 overflow-x-auto max-h-48 overflow-y-auto">{JSON.stringify(block.input, null, 2)}</pre>
+          <pre class="mt-1 max-h-48 overflow-x-auto overflow-y-auto text-meta text-text-muted">{JSON.stringify(block.input, null, 2)}</pre>
         {/if}
       </div>
 
     {:else if block.type === 'tool_result'}
-      <div class="mt-1 mb-1 text-xs {block.is_error ? 'text-red-400' : 'text-gray-500'} bg-gray-900/30 rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap">
+      <div class="my-1 max-h-32 overflow-y-auto whitespace-pre-wrap rounded-sm bg-surface-2 p-2 text-meta {block.is_error ? 'text-danger' : 'text-text-muted'}">
         {block.content || '(empty result)'}
       </div>
     {/if}
