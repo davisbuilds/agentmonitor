@@ -3,6 +3,7 @@
   import { timeAgo } from '../../format';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import { hasSessionCapability } from '../../session-capabilities';
+  import { Badge, Button } from '../ui';
 
   interface Props {
     session: LiveSession | null;
@@ -88,18 +89,31 @@
     return text.replace(/\s+/g, ' ').trim().slice(0, 220);
   }
 
-  function badgeClasses(kind: string): string {
+  // Item kinds map onto the design's signal tokens (no bespoke hues): tool_call =
+  // the agent acting (accent), tool_result = a result (ok), plan = warn, the rest neutral.
+  type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn';
+  function kindTone(kind: string): BadgeTone {
     switch (kind) {
-      case 'reasoning':
-        return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
       case 'tool_call':
-        return 'bg-sky-500/15 text-sky-300 border-sky-500/30';
+        return 'accent';
       case 'tool_result':
-        return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+        return 'ok';
       case 'plan':
-        return 'bg-violet-500/15 text-violet-300 border-violet-500/30';
+        return 'warn';
       default:
-        return 'bg-gray-700/40 text-gray-300 border-gray-700';
+        return 'neutral';
+    }
+  }
+
+  function statusTone(status: string | null): BadgeTone {
+    switch (status) {
+      case 'live':
+      case 'active':
+        return 'ok';
+      case 'idle':
+        return 'warn';
+      default:
+        return 'neutral';
     }
   }
 
@@ -112,37 +126,35 @@
 </script>
 
 <div class="flex flex-col xl:h-full xl:overflow-hidden">
-  <div class="border-b border-gray-800 px-4 py-3 shrink-0">
+  <div class="shrink-0 border-b border-line px-4 py-3">
     {#if session}
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <h2 class="text-base font-semibold text-gray-100 truncate">{session.project || session.id}</h2>
-          <div class="mt-1 flex items-center gap-2 flex-wrap text-xs text-gray-500">
-            <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.integration_mode || 'unknown source'}</span>
-            <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.fidelity || 'n/a'} fidelity</span>
+          <h2 class="truncate text-h3">{session.project || session.id}</h2>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-meta text-text-faint">
+            <Badge tone="neutral" class="uppercase tracking-wide">{session.integration_mode || 'unknown source'}</Badge>
+            <Badge tone="neutral" class="uppercase tracking-wide">{session.fidelity || 'n/a'} fidelity</Badge>
             <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
-            <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.live_status || 'unknown'}</span>
-            <span>{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
-            <span>{items.length} item{items.length === 1 ? '' : 's'}</span>
+            <Badge tone={statusTone(session.live_status)} class="uppercase tracking-wide">{session.live_status || 'unknown'}</Badge>
+            <span class="tabular font-mono">{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
+            <span class="tabular font-mono">{items.length} item{items.length === 1 ? '' : 's'}</span>
           </div>
           {#if !hasSessionCapability(session.capabilities, 'history')}
-            <p class="mt-2 text-[11px] text-amber-300/90">
+            <p class="mt-2 text-meta text-warn">
               Transcript history is not available for this source yet. Use the live stream as the primary view.
             </p>
           {/if}
         </div>
-        <button class="shrink-0 text-sm text-blue-400 hover:text-blue-300" onclick={onopenhistory}>
-          Open in Sessions
-        </button>
+        <Button variant="ghost" size="sm" onclick={onopenhistory}>Open in Sessions</Button>
       </div>
     {:else}
-      <h2 class="text-base font-semibold text-gray-100">Live Stream</h2>
+      <h2 class="text-h3">Live Stream</h2>
     {/if}
 
-    <div class="mt-3 flex items-center gap-2 flex-wrap">
+    <div class="mt-3 flex flex-wrap items-center gap-2">
       {#each kindFilters as kind}
         <button
-          class="rounded border px-2 py-1 text-xs uppercase tracking-wide transition-colors {selectedKinds.includes(kind) ? 'border-blue-500/50 bg-blue-500/10 text-blue-200' : 'border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-200'}"
+          class="rounded-sm border px-2 py-1 text-meta uppercase tracking-wide transition-colors {selectedKinds.includes(kind) ? 'border-accent/50 bg-accent/10 text-accent' : 'border-line text-text-muted hover:border-line-strong hover:text-text'}"
           onclick={() => ontogglekind(kind)}
         >
           {kind.replace('_', ' ')}
@@ -151,39 +163,35 @@
     </div>
   </div>
 
-  <div class="px-4 py-4 space-y-3 xl:flex-1 xl:overflow-y-auto">
+  <div class="space-y-2 px-4 py-4 xl:flex-1 xl:overflow-y-auto">
     {#if loading && items.length === 0}
-      <div class="py-12 text-center text-sm text-gray-500">Loading live items...</div>
+      <div class="py-12 text-center text-meta text-text-muted">Loading live items…</div>
     {:else if error}
-      <div class="py-12 text-center text-sm text-red-400">{error}</div>
+      <div class="py-12 text-center text-meta text-danger">{error}</div>
     {:else if !session}
-      <div class="py-12 text-center text-sm text-gray-500">Select a live session to inspect its stream.</div>
+      <div class="py-12 text-center text-meta text-text-muted">Select a live session to inspect its stream.</div>
     {:else if items.length === 0}
-      <div class="py-12 text-center text-sm text-gray-500">No live items for this session yet.</div>
+      <div class="py-12 text-center text-meta text-text-muted">No live items for this session yet.</div>
     {:else}
       {#each items as item (item.id)}
         <button
-          class="w-full text-left rounded-xl border px-3 py-3 transition-colors {selectedItemId === item.id ? 'border-blue-500/60 bg-blue-500/10' : 'border-gray-800 bg-gray-900/50 hover:border-gray-700 hover:bg-gray-900/80'}"
+          class="animate-row-enter w-full rounded-sm border px-3 py-3 text-left transition-colors {selectedItemId === item.id ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface hover:border-line-strong hover:bg-surface-2'}"
           onclick={() => onselect(item.id)}
         >
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0 flex-1">
-              <div class="flex items-center gap-2 flex-wrap">
-                <span class={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${badgeClasses(item.kind)}`}>
-                  {item.kind.replace('_', ' ')}
-                </span>
+              <div class="flex flex-wrap items-center gap-2">
+                <Badge tone={kindTone(item.kind)} class="uppercase tracking-wide">{item.kind.replace('_', ' ')}</Badge>
                 {#if item.status}
-                  <span class="rounded border border-gray-700 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-gray-400">
-                    {item.status}
-                  </span>
+                  <Badge tone="neutral" class="uppercase tracking-wide">{item.status}</Badge>
                 {/if}
                 {#if turnLabel(item.turn_id)}
-                  <span class="text-xs text-gray-500">{turnLabel(item.turn_id)}</span>
+                  <span class="text-meta text-text-faint">{turnLabel(item.turn_id)}</span>
                 {/if}
               </div>
-              <p class="mt-2 text-sm text-gray-200">{preview(summaryFor(item))}</p>
+              <p class="mt-2 text-body text-text">{preview(summaryFor(item))}</p>
             </div>
-            <div class="shrink-0 text-right text-xs text-gray-500">
+            <div class="shrink-0 text-right tabular font-mono text-meta text-text-faint">
               <div>#{item.ordinal}</div>
               {#if item.created_at}
                 <div class="mt-1">{timeAgo(item.created_at)}</div>
@@ -195,9 +203,7 @@
 
       {#if hasMore}
         <div class="pt-2 text-center">
-          <button class="text-sm text-blue-400 hover:text-blue-300" onclick={onloadmore}>
-            Load newer items
-          </button>
+          <Button variant="ghost" size="sm" onclick={onloadmore}>Load newer items</Button>
         </div>
       {/if}
     {/if}

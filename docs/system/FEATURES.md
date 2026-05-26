@@ -25,7 +25,7 @@ Product-surface reference for AgentMonitor.
 - Session detail view with event timeline and transcript.
 - The Svelte `Sessions` viewer includes a transcript activity minimap that can jump into long conversations without requiring the full transcript to be preloaded.
 - Transcript turns are attributed as `You` (human input), the agent name (`Claude`/`Codex`, for assistant turns), or `Tool` (tool-result turns, which Claude Code stores under the `user` role). An author dropdown filters the loaded window to any one of these (or all), with a "loaded" count making the windowing explicit.
-- Messages can be pinned for later review, and the Svelte `Pinned` tab reopens them at the corresponding transcript ordinal.
+- Messages can be pinned for later review. Pinned moments live in the **Pinned sub-view of the Sessions tab** (Browse / Pinned SubTabs); "Open In Session" reopens them on Browse at the corresponding transcript ordinal. Legacy `#pinned` deep links redirect to `#sessions?view=pinned`.
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
 - Filter sessions by status, agent type, and project.
 

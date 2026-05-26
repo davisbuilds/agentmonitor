@@ -1,6 +1,6 @@
 # Svelte 5 Frontend
 
-Vite SPA served at `/app/` with Monitor, Sessions, Search, and Analytics tabs.
+Vite SPA served at `/app/` with Monitor, Live, Sessions, Analytics, and Search tabs.
 This is the canonical product surface for AgentMonitor.
 
 See root `AGENTS.md` for project overview, API contract (V2 endpoints this app consumes), and shared conventions.
@@ -19,7 +19,7 @@ See root `AGENTS.md` for project overview, API contract (V2 endpoints this app c
 ## Code Map
 
 - `src/lib/components/monitor/`: Monitor tab (real-time dashboard).
-- `src/lib/components/sessions/`: Sessions tab (session browser + message viewer).
+- `src/lib/components/sessions/`: Sessions tab. `SessionsShell.svelte` renders Browse | Pinned SubTabs (Pinned folded in from its old top-level tab); Browse = `SessionsPage` (list + `SessionViewer`), Pinned = `components/pinned/PinnedPage`. `view` rides the `#sessions?view=…` hash; legacy `#pinned` redirects to `#sessions?view=pinned`.
 - `src/lib/components/search/`: Search tab (FTS5 full-text search).
 - `src/lib/components/analytics/`: Analytics tab. `AnalyticsShell.svelte` hosts the shared filter bar + SubTabs and renders three sub-views — Overview (these components), Usage (`components/usage/`), and Insights (`components/insights/`). Shared filter state + the `#analytics?view=…` hash live in `stores/analytics-filters.svelte.ts`; the `analytics`/`usage`/`insights` data stores read filters from it and subscribe for refetch.
 - `src/lib/api/client.ts`: typed API client for v1 and v2 endpoints.

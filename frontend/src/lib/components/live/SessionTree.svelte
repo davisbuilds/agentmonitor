@@ -3,6 +3,7 @@
   import { agentHexColor, timeAgo } from '../../format';
   import { getSessionPreviewText } from '../../session-text';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import { Badge, Button } from '../ui';
 
   interface SessionTreeNode {
     session: LiveSession;
@@ -26,63 +27,62 @@
       || (session.message_count > 0 ? 'Live agent activity' : session.id.slice(0, 12));
   }
 
-  function statusClasses(status: string | null): string {
+  type BadgeTone = 'neutral' | 'ok' | 'warn';
+  function statusTone(status: string | null): BadgeTone {
     switch (status) {
       case 'live':
       case 'active':
-        return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+        return 'ok';
       case 'idle':
-        return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
-      case 'ended':
-        return 'bg-slate-500/15 text-slate-300 border-slate-500/30';
+        return 'warn';
       default:
-        return 'bg-gray-700/40 text-gray-300 border-gray-700';
+        return 'neutral';
     }
   }
 </script>
 
 <div class="space-y-2 xl:flex-1 xl:overflow-y-auto">
   {#if loading && sessions.length === 0}
-    <div class="text-sm text-gray-500 py-8 text-center">Loading live sessions...</div>
+    <div class="py-8 text-center text-meta text-text-muted">Loading live sessions…</div>
   {:else if error}
-    <div class="text-sm text-red-400 py-8 text-center">{error}</div>
+    <div class="py-8 text-center text-meta text-danger">{error}</div>
   {:else if sessions.length === 0}
-    <div class="text-sm text-gray-500 py-8 text-center">No live sessions match the current filters.</div>
+    <div class="py-8 text-center text-meta text-text-muted">No live sessions match the current filters.</div>
   {:else}
     {#each sessions as { session, depth } (session.id)}
       <button
-        class="w-full text-left rounded-lg border px-3 py-2 transition-colors {selectedSessionId === session.id ? 'border-blue-500/60 bg-blue-500/10' : 'border-gray-800 bg-gray-900/50 hover:border-gray-700 hover:bg-gray-900/80'}"
+        class="w-full rounded-sm border px-3 py-2 text-left transition-colors {selectedSessionId === session.id ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface hover:border-line-strong hover:bg-surface-2'}"
         style={`margin-left: ${Math.min(depth * 14, 42)}px; width: calc(100% - ${Math.min(depth * 14, 42)}px);`}
         onclick={() => onselect(session.id)}
       >
         <div class="flex items-start justify-between gap-3">
           <div class="min-w-0 flex-1">
-            <div class="flex items-center gap-2 min-w-0">
+            <div class="flex min-w-0 items-center gap-2">
               <span
-                class="inline-block h-2 w-2 rounded-full shrink-0"
+                class="inline-block h-2 w-2 shrink-0 rounded-full"
                 style={`background-color: ${agentHexColor(session.agent)}`}
               ></span>
-              <span class="truncate text-sm text-gray-200">{titleFor(session)}</span>
+              <span class="truncate text-body text-text">{titleFor(session)}</span>
             </div>
-            <div class="mt-1 flex items-center gap-2 flex-wrap text-xs text-gray-500">
+            <div class="mt-1 flex flex-wrap items-center gap-2 text-meta text-text-faint">
               {#if session.project}
-                <span class="rounded bg-gray-800 px-1.5 py-0.5">{session.project}</span>
+                <Badge tone="neutral">{session.project}</Badge>
               {/if}
               {#if session.relationship_type}
-                <span class="rounded bg-gray-800 px-1.5 py-0.5 uppercase tracking-wide">{session.relationship_type}</span>
+                <Badge tone="neutral" class="uppercase tracking-wide">{session.relationship_type}</Badge>
               {/if}
-              <span>{session.message_count} msgs</span>
+              <span class="tabular font-mono">{session.message_count} msgs</span>
               {#if session.last_item_at}
-                <span>{timeAgo(session.last_item_at)}</span>
+                <span class="tabular font-mono">{timeAgo(session.last_item_at)}</span>
               {:else if session.started_at}
-                <span>{timeAgo(session.started_at)}</span>
+                <span class="tabular font-mono">{timeAgo(session.started_at)}</span>
               {/if}
             </div>
           </div>
-          <div class="flex flex-col items-end gap-1 shrink-0">
-            <span class={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${statusClasses(session.live_status)}`}>
+          <div class="flex shrink-0 flex-col items-end gap-1">
+            <Badge tone={statusTone(session.live_status)} class="uppercase tracking-wide">
               {session.live_status || 'unknown'}
-            </span>
+            </Badge>
             <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
           </div>
         </div>
@@ -91,9 +91,7 @@
 
     {#if hasMore}
       <div class="pt-2 text-center">
-        <button class="text-sm text-blue-400 hover:text-blue-300" onclick={onloadmore}>
-          Load more sessions
-        </button>
+        <Button variant="ghost" size="sm" onclick={onloadmore}>Load more sessions</Button>
       </div>
     {/if}
   {/if}

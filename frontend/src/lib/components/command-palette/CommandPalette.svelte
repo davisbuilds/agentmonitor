@@ -134,7 +134,7 @@
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="fixed inset-0 z-50 bg-gray-950/80 px-4 py-[12vh] backdrop-blur-sm sm:px-6"
+  class="fixed inset-0 z-50 bg-canvas/80 px-4 py-[12vh] backdrop-blur-sm sm:px-6"
   tabindex="-1"
   onclick={(event) => {
     if (event.target === event.currentTarget) {
@@ -147,19 +147,19 @@
     }
   }}
 >
-  <div class="mx-auto flex max-h-[72vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-gray-700 bg-gray-950 shadow-2xl">
-    <div class="border-b border-gray-800 px-4 py-4 sm:px-5">
+  <div class="mx-auto flex max-h-[72vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-line bg-surface shadow-overlay">
+    <div class="border-b border-line px-4 py-4 sm:px-5">
       <div class="flex items-center gap-3">
         <input
           bind:this={inputRef}
           type="text"
-          placeholder="Jump to a session or transcript match..."
-          class="w-full rounded-xl border border-gray-700 bg-gray-900 px-4 py-3 text-sm text-gray-100 outline-none transition focus:border-blue-500"
+          placeholder="Jump to a session or transcript match…"
+          class="w-full rounded-sm border border-line bg-surface px-4 py-2.5 text-body text-text outline-none transition-colors placeholder:text-text-faint focus:border-accent"
           oninput={handleInput}
         />
         <button
           type="button"
-          class="rounded-lg border border-gray-700 px-3 py-2 text-xs text-gray-400 transition hover:border-gray-600 hover:text-gray-200"
+          class="rounded-sm border border-line px-3 py-2 text-meta text-text-muted transition-colors hover:border-line-strong hover:text-text"
           onclick={closePalette}
         >
           Esc
@@ -167,13 +167,13 @@
       </div>
 
       <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-        <div class="text-xs text-gray-500">{footerText}</div>
+        <div class="text-meta text-text-faint">{footerText}</div>
 
         {#if commandPaletteSearch.hasQuery}
-          <div class="inline-flex rounded-lg border border-gray-700 bg-gray-900 p-1 text-xs">
+          <div class="inline-flex rounded-sm border border-line bg-surface p-1 text-meta">
             <button
               type="button"
-              class={`rounded-md px-2.5 py-1 transition ${commandPaletteSearch.sort === 'recent' ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
+              class={`rounded-sm px-2.5 py-1 transition-colors ${commandPaletteSearch.sort === 'recent' ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text'}`}
               onclick={() => {
                 selectedIndex = 0;
                 commandPaletteSearch.setSort('recent');
@@ -183,7 +183,7 @@
             </button>
             <button
               type="button"
-              class={`rounded-md px-2.5 py-1 transition ${commandPaletteSearch.sort === 'relevance' ? 'bg-gray-700 text-gray-100' : 'text-gray-400 hover:text-gray-200'}`}
+              class={`rounded-sm px-2.5 py-1 transition-colors ${commandPaletteSearch.sort === 'relevance' ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text'}`}
               onclick={() => {
                 selectedIndex = 0;
                 commandPaletteSearch.setSort('relevance');
@@ -198,13 +198,13 @@
 
     <div class="min-h-[320px] overflow-y-auto p-2">
       {#if commandPaletteSearch.hasQuery && commandPaletteSearch.loading && commandPaletteSearch.results.length === 0}
-        <div class="px-3 py-14 text-center text-sm text-gray-500">Searching transcript history...</div>
+        <div class="px-3 py-14 text-center text-body text-text-muted">Searching transcript history…</div>
       {:else if commandPaletteSearch.hasQuery && commandPaletteSearch.error}
-        <div class="px-3 py-14 text-center text-sm text-red-300">{commandPaletteSearch.error}</div>
+        <div class="px-3 py-14 text-center text-body text-danger">{commandPaletteSearch.error}</div>
       {:else if !commandPaletteSearch.hasQuery && commandPaletteSearch.recentError}
-        <div class="px-3 py-14 text-center text-sm text-red-300">{commandPaletteSearch.recentError}</div>
+        <div class="px-3 py-14 text-center text-body text-danger">{commandPaletteSearch.recentError}</div>
       {:else if paletteItems.length === 0}
-        <div class="px-3 py-14 text-center text-sm text-gray-500">
+        <div class="px-3 py-14 text-center text-body text-text-muted">
           {commandPaletteSearch.hasQuery ? 'No transcript matches found.' : 'No recent sessions available.'}
         </div>
       {:else}
@@ -213,14 +213,14 @@
             {#if item.kind === 'result'}
               <button
                 type="button"
-                class={`w-full rounded-xl border px-3 py-3 text-left transition ${index === selectedIndex ? 'border-blue-500/60 bg-blue-500/10' : 'border-transparent bg-gray-900/50 hover:border-gray-700 hover:bg-gray-900'}`}
+                class={`w-full rounded-sm border px-3 py-3 text-left transition-colors ${index === selectedIndex ? 'border-accent/50 bg-accent/10' : 'border-transparent bg-surface hover:border-line-strong hover:bg-surface-2'}`}
                 data-palette-selected={index === selectedIndex ? 'true' : 'false'}
                 onclick={() => selectItem(item)}
                 onmouseenter={() => {
                   selectedIndex = index;
                 }}
               >
-                <div class="flex items-center justify-between gap-3 text-xs text-gray-500">
+                <div class="flex items-center justify-between gap-3 text-meta text-text-faint">
                   <div class="flex min-w-0 items-center gap-2">
                     <span
                       class="inline-block h-2 w-2 shrink-0 rounded-full"
@@ -240,11 +240,11 @@
                     {/if}
                   </div>
                 </div>
-                <div class="mt-2 line-clamp-2 text-sm text-gray-200">
+                <div class="mt-2 line-clamp-2 text-body text-text">
                   {@html sanitizeSnippet(item.result.snippet)}
                 </div>
                 {#if item.result.session_first_message}
-                  <div class="mt-2 truncate text-xs text-gray-500">
+                  <div class="mt-2 truncate text-meta text-text-faint">
                     {getSessionPreviewText(item.result.session_first_message)}
                   </div>
                 {/if}
@@ -252,7 +252,7 @@
             {:else}
               <button
                 type="button"
-                class={`w-full rounded-xl border px-3 py-3 text-left transition ${index === selectedIndex ? 'border-blue-500/60 bg-blue-500/10' : 'border-transparent bg-gray-900/50 hover:border-gray-700 hover:bg-gray-900'}`}
+                class={`w-full rounded-sm border px-3 py-3 text-left transition-colors ${index === selectedIndex ? 'border-accent/50 bg-accent/10' : 'border-transparent bg-surface hover:border-line-strong hover:bg-surface-2'}`}
                 data-palette-selected={index === selectedIndex ? 'true' : 'false'}
                 onclick={() => selectItem(item)}
                 onmouseenter={() => {
@@ -265,15 +265,15 @@
                       class="inline-block h-2 w-2 shrink-0 rounded-full"
                       style={`background-color:${agentHexColor(item.session.agent)}`}
                     ></span>
-                    <span class="truncate text-sm text-gray-200">{sessionPreview(item.session)}</span>
+                    <span class="truncate text-body text-text">{sessionPreview(item.session)}</span>
                   </div>
-                  <div class="shrink-0 text-xs text-gray-500">
+                  <div class="shrink-0 text-meta text-text-faint">
                     {#if item.session.started_at}
                       {timeAgo(item.session.started_at)}
                     {/if}
                   </div>
                 </div>
-                <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500">
+                <div class="mt-2 flex flex-wrap items-center gap-2 text-meta text-text-faint">
                   <span>{item.session.agent}</span>
                   {#if item.session.project}
                     <span>· {item.session.project}</span>
@@ -287,7 +287,7 @@
       {/if}
     </div>
 
-    <div class="border-t border-gray-800 px-4 py-3 text-xs text-gray-500 sm:px-5">
+    <div class="border-t border-line px-4 py-3 text-meta text-text-faint sm:px-5">
       Enter to open. Arrow keys move selection. Cmd/Ctrl+K toggles the palette.
     </div>
   </div>

@@ -7,6 +7,7 @@ import {
   buildSearchHash,
   buildSessionsHash,
   canonicalizeLegacyAnalyticsHash,
+  canonicalizeLegacyPinnedHash,
   parseAnalyticsRouteHash,
   parseAppHash,
   parseSearchHash,
@@ -47,6 +48,7 @@ test('buildAppHash omits monitor hash and serializes params', () => {
 
 test('sessions hashes round-trip selected session and filters', () => {
   const state = {
+    view: 'browse' as const,
     project: 'agentmonitor',
     agent: 'codex',
     sessionId: 'session-123',
@@ -56,6 +58,7 @@ test('sessions hashes round-trip selected session and filters', () => {
   const hash = buildSessionsHash(state);
   assert.equal(hash, 'sessions?project=agentmonitor&agent=codex&session=session-123&message=17');
   assert.deepEqual(parseSessionsHash(`#${hash}`, {
+    view: 'browse',
     project: '',
     agent: '',
     sessionId: null,
@@ -65,6 +68,7 @@ test('sessions hashes round-trip selected session and filters', () => {
 
 test('parseSessionsHash ignores invalid message ordinals and non-session hashes', () => {
   const fallback = {
+    view: 'browse' as const,
     project: 'fallback',
     agent: '',
     sessionId: null,
@@ -73,11 +77,30 @@ test('parseSessionsHash ignores invalid message ordinals and non-session hashes'
 
   assert.deepEqual(parseSessionsHash('#search?q=test', fallback), fallback);
   assert.deepEqual(parseSessionsHash('#sessions?session=abc&message=nope', fallback), {
+    view: 'browse',
     project: '',
     agent: '',
     sessionId: 'abc',
     messageOrdinal: null,
   });
+});
+
+test('Pinned folds into Sessions as a sub-view', () => {
+  // No longer a standalone tab; canonicalized into the Sessions tab.
+  assert.equal(parseAppHash('#pinned').tab, 'monitor');
+  assert.equal(canonicalizeLegacyPinnedHash('#pinned'), 'sessions?view=pinned');
+  assert.equal(canonicalizeLegacyPinnedHash('#sessions?view=pinned'), null);
+  assert.equal(canonicalizeLegacyPinnedHash('#analytics'), null);
+
+  // The Pinned sub-view serializes view=pinned and drops browse-only state.
+  assert.equal(
+    buildSessionsHash({ view: 'pinned', project: 'x', agent: 'y', sessionId: 's', messageOrdinal: 3 }),
+    'sessions?view=pinned',
+  );
+  const pinned = parseSessionsHash('#sessions?view=pinned', {
+    view: 'browse', project: '', agent: '', sessionId: null, messageOrdinal: null,
+  });
+  assert.equal(pinned.view, 'pinned');
 });
 
 test('search hashes round-trip query, filters, and non-default sort', () => {

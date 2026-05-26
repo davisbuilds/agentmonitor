@@ -2,7 +2,7 @@
 date: 2026-05-25
 topic: svelte-ui-redesign
 stage: implementation-plan
-status: phases-1-5-complete
+status: complete
 source: conversation
 ---
 
@@ -10,12 +10,21 @@ source: conversation
 
 As of 2026-05-26, **Phases 1–4 are complete and merged to `main`** (Phases 1–3
 via PR #18; Phase 4 + follow-ups via PR #19, merge commit `c0a2a37`).
-**Phase 5 is complete on branch `feat/ui-redesign-analytics-consolidation`**
-(Analytics/Usage/Insights consolidated into one tab with Overview/Usage/Insights
-sub-views, shared filter store + unified `#analytics?view=…` hash with legacy
-redirects, all three sub-view bodies migrated onto tokens incl. weighted bento
-summary cards and collapsed coverage banners). **Phase 6 remains** (Live tab,
-responsive/mobile, motion, final a11y/contrast sweep, ARCHITECTURE/ROADMAP docs).
+**Phase 5** (merged): Analytics/Usage/Insights consolidated into one tab with
+Overview/Usage/Insights sub-views, shared filter store + unified
+`#analytics?view=…` hash with legacy redirects, all three sub-view bodies
+migrated onto tokens incl. weighted bento summary cards and collapsed coverage
+banners.
+
+**Phase 6 is complete on branch `feat/ui-redesign-live-responsive`**: Live tab
+(`live/*` three-pane operator view) migrated onto tokens with in-card scrolling
+(bounded flex layout so panes scroll, not the page); one reduced-motion-safe
+enter animation on live rows; Pinned folded into the Sessions tab as a
+Browse/Pinned sub-view (`SessionsShell`, `#sessions?view=pinned`, legacy
+`#pinned` redirect); docs refreshed. Mobile/responsive was intentionally
+descoped (laptop-first — agents run on-device). Focus-visible rings ship from
+the Phase 1 base layer. **The redesign is complete — every `/app/` tab is on
+the Instrument Console tokens.**
 
 **Phase 4 follow-ups (PR #19, beyond the original plan)** — review/feedback fixes
 that shipped on the same branch:
