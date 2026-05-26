@@ -1,6 +1,7 @@
 # AgentMonitor
 
-Local dashboard and session browser for observing AI coding agents across live telemetry, tool activity, costs, and session history.
+Local dashboard and session browser for observing AI coding agents across live
+telemetry, tool activity, costs, quota state, and historical session data.
 
 ## Agent Setup
 
@@ -40,64 +41,79 @@ Prefer to do it yourself? The manual steps are below.
 
 - Serves the canonical Svelte app at `/app/` for Monitor, Live, Sessions, Pinned, Analytics, Usage, Insights, and Search.
 - Accepts live ingest from Claude Code hooks, Codex OTEL export, or generic HTTP event producers.
-- Watches local Claude session files and imports historical Claude Code and Codex sessions into SQLite.
+- Watches local Claude and Codex session history and imports historical sessions into SQLite.
 - Streams live updates over SSE for dashboards and operator views.
-- Exposes session-browser APIs under `/api/v2/sessions/*`, including bucketed transcript activity for minimap-style navigation in the Sessions viewer.
-- Exposes pinned-message review APIs under `/api/v2/pins` and `/api/v2/sessions/:id/messages/:messageId/pin` for durable saved-review workflows.
-- Exposes transcript search under `/api/v2/search` with recency/relevance sorting and session-context metadata for navigation-first search UIs.
-- Exposes capability-aware analytics under `/api/v2/analytics/*`, including summary, activity, project, tool, skill, hour-of-week, top-session, velocity, and per-agent views.
-- Exposes event-derived historical usage under `/api/v2/usage/*`, including summary totals, daily series, project/model/tier/agent attribution, cache economics, prior-period comparison, read-only budget reports, advisory tier feedback, and top sessions with coverage metadata.
-- Exposes event-derived Monitor migration endpoints under `/api/v2/monitor/*`, including summary stats, filter options, event feed data, active session aggregates, session detail/transcript data, and tool error-rate/duration analytics.
-- Exposes persisted AI-generated insights under `/api/v2/insights/*`, scoped to the current historical filters and grounded in analytics and usage coverage metadata.
-- Exposes provider-native quota snapshots under `/api/provider-quotas`, including Codex app-server polling and Claude statusline bridge ingestion.
-
-## Current Product Shape
-
-- Canonical UI and app contract: `/app/` + `/api/v2/*`
-- Transitional compatibility surface: legacy dashboard at `/`
-- Alternate runtime under evaluation: `rust-backend/`
+- Exposes canonical app APIs under `/api/v2/*`.
+- Provides provider-native quota snapshots through `/api/provider-quotas`.
+- Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
+- Keeps a Rust backend under `rust-backend/` as an alternate runtime under evaluation.
 
 ## Quick Start
 
 Requirements:
 
 - Node.js `24.13.0`
-- `pnpm` `10.29.3+`
-
-Install and run the canonical dev flow:
+- pnpm `10.29.3+`
 
 ```bash
 nvm use
 pnpm install
 
-# terminal 1
+# terminal 1: Express server on :3141
 pnpm dev
 
-# terminal 2
+# terminal 2: Vite frontend with API proxy on :5173
 pnpm frontend:dev
-
-# terminal 3 if you are touching shared Tailwind output or the legacy dashboard
-pnpm css:watch
 ```
 
 Open:
 
-- `http://127.0.0.1:5173/app/` for Vite-powered frontend development
-- `http://127.0.0.1:3141/app/` for the Express-served canonical app
-- `http://127.0.0.1:3141/` only for legacy compatibility work
+- `http://127.0.0.1:5173/app/` for Vite-powered frontend development.
+- `http://127.0.0.1:3141/app/` for the Express-served canonical app.
+- `http://127.0.0.1:3141/` only for legacy dashboard compatibility work.
 
-If you want the Express-served `/app/` to refresh as you edit frontend code, run `pnpm frontend:watch`.
+If you want the Express-served `/app/` to refresh as you edit frontend code, run
+`pnpm frontend:watch`. Run `pnpm css:watch` only when touching shared Tailwind
+output for the legacy dashboard or built `/app/`.
 
 ## Common Commands
 
 ```bash
-pnpm build
-pnpm test
+pnpm dev                         # TS server in watch mode
+pnpm frontend:dev                # Svelte/Vite dev server
+pnpm css:watch                   # Shared Tailwind output watcher
+pnpm build                       # TS build + CSS + frontend build
+pnpm start                       # Run compiled server
+pnpm lint                        # ESLint
+pnpm test                        # Node test runner suite
+pnpm frontend:check              # Svelte check
 pnpm run import --source claude-code
 pnpm run import --source codex
+pnpm reparse:sessions
+pnpm reparse:codex-sessions
+pnpm rust:dev                    # Alternate Rust runtime on :3142
+pnpm rust:test
 ```
 
-Full command, config, and runtime notes live in [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md).
+Full command, config, parity, import, benchmark, and runtime notes live in
+[docs/system/OPERATIONS.md](docs/system/OPERATIONS.md).
+
+## Configuration
+
+AgentMonitor runs locally without secrets. `.env` is optional because every
+`AGENTMONITOR_*` variable has a default.
+
+Common knobs:
+
+- `AGENTMONITOR_PORT` / `AGENTMONITOR_HOST` for the TypeScript runtime bind.
+- `AGENTMONITOR_DB_PATH` for the SQLite database location.
+- `AGENTMONITOR_PROJECTS_DIR` for git branch/project resolution.
+- `AGENTMONITOR_ENABLE_LIVE_TAB` and live capture/redaction flags.
+- `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` for historical discovery/import ignores.
+
+AI insight generation is optional and needs `AGENTMONITOR_INSIGHTS_PROVIDER` plus
+the matching provider key. See [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
+for the full environment table.
 
 ## Integrations
 
@@ -107,15 +123,45 @@ Full command, config, and runtime notes live in [docs/system/OPERATIONS.md](docs
 - Generic ingest contract: [docs/api/event-contract.md](docs/api/event-contract.md)
 - Historical import and runtime behavior: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
 
+## Code Layout
+
+```text
+src/api/              Express route handlers
+src/contracts/        TypeScript event contract types and validation
+src/db/               SQLite schema, migrations, queries, connection management
+src/import/           Historical Claude/Codex importers
+src/live/             Live session normalization and projection
+src/otel/             OTLP JSON parser
+src/pricing/          Model pricing and cost calculation
+src/provider-quotas/  Provider-native quota polling/ingest
+src/sse/              SSE client management and fan-out
+src/watcher/          Session-history watcher and sync
+frontend/             Svelte 5 `/app/` frontend
+public/               Legacy dashboard assets
+hooks/                Claude Code and Codex integration setup
+rust-backend/         Alternate Rust runtime
+tests/                Node test runner suite
+docs/                 System, project, API, and plan docs
+```
+
 ## Documentation
 
 Start with [docs/README.md](docs/README.md) for the full docs map.
 
+- Agent implementation guidance: [AGENTS.md](AGENTS.md)
 - Product and capability overview: [docs/system/FEATURES.md](docs/system/FEATURES.md)
 - Local development and runtime operations: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
 - Architecture and code organization: [docs/system/ARCHITECTURE.md](docs/system/ARCHITECTURE.md)
 - API docs and contracts: [docs/api/README.md](docs/api/README.md)
-- Roadmap and project direction: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
 - Current product/runtime state: [docs/project/CURRENT_STATE.md](docs/project/CURRENT_STATE.md)
+- Roadmap and project direction: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
 - Contributor workflow: [CONTRIBUTING.md](CONTRIBUTING.md)
-- Agent implementation guidance: [AGENTS.md](AGENTS.md)
+
+## Current Boundaries
+
+- Canonical product surface is Svelte `/app/` plus `/api/v2/*`.
+- Legacy `/` remains for compatibility and should not define new behavior.
+- TypeScript on `127.0.0.1:3141` is the default runtime.
+- Rust on `127.0.0.1:3142` remains an alternate runtime under evaluation.
+- Codex `otel-only` live data is summary-oriented; transcript-grade parity needs richer local-state integration.
+- AI insight generation is optional and the only path that needs provider API keys.
