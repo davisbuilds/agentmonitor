@@ -713,6 +713,8 @@ export interface SessionsListParams {
   date_to?: string;
   min_messages?: number;
   max_messages?: number;
+  /** Drop sessions with no browsable transcript (history capability 'none'). */
+  exclude_empty?: boolean;
 }
 
 export interface MessagesListParams {

@@ -28,6 +28,7 @@ Product-surface reference for AgentMonitor.
 - Messages can be pinned for later review. Pinned moments live in the **Pinned sub-view of the Sessions tab** (Browse / Pinned SubTabs); "Open In Session" reopens them on Browse at the corresponding transcript ordinal. Legacy `#pinned` deep links redirect to `#sessions?view=pinned`.
 - Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
 - Filter sessions by status, agent type, and project.
+- The Browse list requests `GET /api/v2/sessions?exclude_empty=true`, hiding telemetry-only sessions with no browsable transcript (history capability `none`) — these previously surfaced as "Local command activity" rows that opened to an empty viewer. The `exclude_empty` param is opt-in and adjusts both the result set and the `total` count.
 
 ## Live Ops Tab
 
