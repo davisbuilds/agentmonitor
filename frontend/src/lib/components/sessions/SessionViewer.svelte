@@ -161,9 +161,13 @@
     await loadWindowAroundOrdinal(targetOrdinal);
   }
 
+  // Resolve against the rendered (filtered) set so the result always has a DOM
+  // node. With an author filter active, a bucket jump lands on the nearest
+  // visible turn instead of silently no-opping on a hidden ordinal. When the
+  // filter is "all", filteredMessages === messages, so behavior is unchanged.
   function findLoadedOrdinal(targetOrdinal: number): number | null {
-    let fallback = messages[messages.length - 1]?.ordinal ?? null;
-    for (const message of messages) {
+    let fallback: number | null = null;
+    for (const message of filteredMessages) {
       if (message.ordinal >= targetOrdinal) return message.ordinal;
       fallback = message.ordinal;
     }
