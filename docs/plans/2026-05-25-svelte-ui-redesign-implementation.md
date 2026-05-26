@@ -2,14 +2,36 @@
 date: 2026-05-25
 topic: svelte-ui-redesign
 stage: implementation-plan
-status: phases-1-3-complete
+status: phases-1-4-complete
 source: conversation
 ---
 
 ## Implementation Status
 
-As of 2026-05-25, **Phases 1–3 are complete** on branch
-`feat/ui-redesign-instrument-console`. Phases 4–6 remain.
+As of 2026-05-25, **Phases 1–4 are complete**. Phases 1–3 merged to `main`
+via PR #18; Phase 4 lands on branch `feat/ui-redesign-sessions-search`.
+Phases 5–6 remain.
+
+**Phase 4 (Sessions / Search / Pinned)** — migrated onto tokens + primitives:
+- Shared `ProjectionCapabilities` moved off the emerald/amber/sky/gray palette
+  onto the `Badge` primitive (full→ok, summary→warn, mixed→accent) and off the
+  `text-[10px]` floor; added an optional `title` to `Badge` and a tokenized
+  `<mark>` base rule (accent tint) so FTS highlight stops rendering browser-yellow.
+- `SessionsPage` → `SectionHeader` + count, `Select` filters, breathing `divide-y`
+  rows, project as a neutral `Badge`, `EmptyState`/`Button` states. Hash deep-links
+  and the back-stack are untouched.
+- `SessionViewer` header/sub-bar/sub-session chips tokenized (`Badge`), states via
+  `EmptyState`, paging via `Button`. `MessageBlock` recolored (user=accent,
+  assistant=ok; thinking/tools neutral `Badge`; command/output/tool blocks on
+  surface-2 hairlines; every tiny size raised to the `text-meta` floor).
+  `ActivityMinimap` bars recolored to the accent ramp on a tokenized panel.
+- `SearchPage` — boxed capability banner collapsed to one 72ch tone-dotted line,
+  query input + `Select` filters tokenized, result-row role tags recolored, empty
+  states via `EmptyState`. FTS snippet highlighting preserved.
+- `PinnedPage` → `Panel` (project `Select` in actions), pin cards on surface-2,
+  Open/Unpin via `Button`, `EmptyState`. pin/unpin/open behavior unchanged.
+- Verification: `frontend:check` (318 files, 0 errors), `pnpm lint`, `pnpm build`,
+  `pnpm test` (445 pass). Visual capture: `.design-audit/shots/p4-*.png`.
 
 **Phase 3 (Monitor)** — `monitor/*` migrated onto tokens + primitives:
 - `AgentCards` → `SectionHeader` + `StatusDot` + `EmptyState`, tokenized cards, mono tabular metrics.
