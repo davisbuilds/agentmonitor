@@ -53,6 +53,8 @@ class AnalyticsFiltersStore {
   private hashListenerAttached = false;
   private optionsLoaded = false;
   private readonly subscribers = new Set<() => void>();
+  private batchDepth = 0;
+  private pendingNotify = false;
 
   view = $state<AnalyticsView>(this.defaults.view);
   from = $state(this.defaults.from);
@@ -116,7 +118,29 @@ class AnalyticsFiltersStore {
   }
 
   private notify(): void {
+    if (this.batchDepth > 0) {
+      this.pendingNotify = true;
+      return;
+    }
     for (const fn of this.subscribers) fn();
+  }
+
+  /**
+   * Apply several filter mutations as one unit: subscriber refetches are
+   * suppressed during `mutate` and fire at most once afterward. Without this,
+   * a multi-field reset would emit one refetch per setter.
+   */
+  batch(mutate: () => void): void {
+    this.batchDepth += 1;
+    try {
+      mutate();
+    } finally {
+      this.batchDepth -= 1;
+      if (this.batchDepth === 0 && this.pendingNotify) {
+        this.pendingNotify = false;
+        for (const fn of this.subscribers) fn();
+      }
+    }
   }
 
   /** Attach the hash listener + seed filters from the URL, and load options once. */

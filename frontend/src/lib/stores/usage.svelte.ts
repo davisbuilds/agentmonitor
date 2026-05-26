@@ -380,10 +380,12 @@ class UsageStore {
   }
 
   async clearAllFilters(): Promise<void> {
-    analyticsFilters.clearSharedFilters();
-    analyticsFilters.setModel('');
-    analyticsFilters.setProvider('');
-    analyticsFilters.setTier('');
+    analyticsFilters.batch(() => {
+      analyticsFilters.clearSharedFilters();
+      analyticsFilters.setModel('');
+      analyticsFilters.setProvider('');
+      analyticsFilters.setTier('');
+    });
   }
 
   openSession(sessionId: string): void {

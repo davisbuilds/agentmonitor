@@ -173,10 +173,12 @@ class InsightsStore {
   }
 
   async clearFilters(): Promise<void> {
-    analyticsFilters.clearSharedFilters();
-    analyticsFilters.setKind('overview');
-    analyticsFilters.setInsightProvider(this.generation.default_provider);
-    analyticsFilters.setInsightModel(this.generation.providers[this.generation.default_provider].default_model);
+    analyticsFilters.batch(() => {
+      analyticsFilters.clearSharedFilters();
+      analyticsFilters.setKind('overview');
+      analyticsFilters.setInsightProvider(this.generation.default_provider);
+      analyticsFilters.setInsightModel(this.generation.providers[this.generation.default_provider].default_model);
+    });
   }
 
   async generate(): Promise<void> {
