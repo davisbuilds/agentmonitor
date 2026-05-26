@@ -88,13 +88,15 @@ export function consumePendingSessionNavigation(): { sessionId: string | null; m
 function initFromHash(): void {
   if (typeof window === 'undefined') return;
   // Rewrite legacy deep links to their canonical consolidated form (#usage /
-  // #insights → #analytics?view=…, #pinned → #sessions?view=pinned); the
-  // resulting hashchange re-enters this function with the canonical hash.
+  // #insights → #analytics?view=…, #pinned → #sessions?view=pinned). Use
+  // replaceState (not location.hash =) so the rewrite adds no history entry —
+  // otherwise Back returns to the legacy hash and immediately re-redirects,
+  // trapping the user. replaceState fires no hashchange, so we read the
+  // canonical hash and set the tab in this same pass.
   const canonical = canonicalizeLegacyAnalyticsHash(window.location.hash)
     ?? canonicalizeLegacyPinnedHash(window.location.hash);
   if (canonical !== null) {
-    window.location.hash = canonical;
-    return;
+    window.history.replaceState(null, '', `#${canonical}`);
   }
   currentTab = parseAppHash(window.location.hash).tab;
 }
