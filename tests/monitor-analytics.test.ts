@@ -56,6 +56,25 @@ test('buildActiveAgentLabel omits unavailable model metadata', () => {
   );
 });
 
+test('buildActiveAgentLabel skips the <synthetic> marker and falls through to the real model', () => {
+  // Events are newest-first; a synthetic rate-limit/error turn (model "<synthetic>",
+  // written by Claude Code itself) must not overwrite the last real model.
+  assert.equal(
+    buildActiveAgentLabel('claude_code', [
+      { model: '<synthetic>' },
+      { model: 'anthropic/claude-opus-4-7' },
+    ]),
+    'claude_code (claude-opus-4-7)',
+  );
+});
+
+test('buildActiveAgentLabel drops the suffix when the only model is <synthetic>', () => {
+  assert.equal(
+    buildActiveAgentLabel('claude_code', [{ model: '<synthetic>' }]),
+    'claude_code',
+  );
+});
+
 test('shortModelName compacts known provider model families', () => {
   assert.equal(shortModelName(''), 'unknown');
   assert.equal(shortModelName('claude-sonnet-4-5-20250929'), 'sonnet-4.5');
