@@ -140,7 +140,7 @@
   });
 </script>
 
-<main class="flex-1 overflow-y-auto p-4 sm:p-6">
+<main class="flex-1 overflow-y-auto p-4 sm:p-6 xl:flex xl:min-h-0 xl:flex-col xl:overflow-hidden">
   {#if !liveSettings.enabled}
     <div class="flex h-full items-center justify-center px-6">
       <div class="max-w-xl rounded-lg border border-line bg-surface p-6 text-center">
@@ -151,8 +151,8 @@
       </div>
     </div>
   {:else}
-  <div class="space-y-4">
-    <section class="rounded-lg border border-line bg-surface">
+  <div class="space-y-4 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col xl:gap-4 xl:space-y-0">
+    <section class="rounded-lg border border-line bg-surface xl:shrink-0">
       <div class="px-4 py-4 sm:px-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -237,16 +237,16 @@
       </div>
     </section>
 
-    <div class="grid grid-cols-1 gap-4 xl:min-h-[calc(100vh-19rem)] xl:grid-cols-[19rem,minmax(0,1fr),22rem]">
-      <section class="flex min-h-[20rem] flex-col rounded-lg border border-line bg-surface xl:min-h-0 xl:overflow-hidden">
-        <div class="border-b border-line px-4 py-3">
+    <div class="flex flex-col gap-4 xl:min-h-0 xl:flex-1 xl:flex-row">
+      <section class="flex min-h-[20rem] flex-col rounded-lg border border-line bg-surface xl:min-h-0 xl:w-[19rem] xl:shrink-0 xl:overflow-hidden">
+        <div class="shrink-0 border-b border-line px-4 py-3">
           <h3 class="text-h3">Sessions</h3>
           <p class="mt-0.5 text-meta text-text-muted">
             Filtered live and recent sessions. Select one to inspect its stream.
           </p>
         </div>
 
-        <div class="px-3 py-3 xl:min-h-0 xl:flex-1">
+        <div class="px-3 py-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">
         <SessionTree
           sessions={sessionTree}
           {selectedSessionId}
@@ -259,7 +259,7 @@
         </div>
       </section>
 
-      <section class="min-h-[24rem] rounded-lg border border-line bg-surface xl:min-h-0 xl:overflow-hidden">
+      <section class="min-h-[24rem] rounded-lg border border-line bg-surface xl:min-h-0 xl:min-w-0 xl:flex-1 xl:overflow-hidden">
         <ItemStream
           session={selectedSession}
           {turns}
@@ -276,7 +276,7 @@
         />
       </section>
 
-      <section class="min-h-[20rem] rounded-lg border border-line bg-surface xl:min-h-0 xl:overflow-hidden">
+      <section class="min-h-[20rem] rounded-lg border border-line bg-surface xl:min-h-0 xl:w-[22rem] xl:shrink-0 xl:overflow-hidden">
         <InspectorPanel session={selectedSession} {turns} item={selectedItem} />
       </section>
     </div>
