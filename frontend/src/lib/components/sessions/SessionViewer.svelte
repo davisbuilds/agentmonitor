@@ -371,7 +371,7 @@
 
   <!-- Messages -->
   <div class="min-h-0 flex-1 overflow-hidden px-4 sm:px-6 py-4">
-    <div class="flex h-full min-h-0 flex-col gap-4 lg:flex-row lg:items-start">
+    <div class="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
       <div
         bind:this={transcriptEl}
         class="min-h-0 flex-1 overflow-y-auto"
