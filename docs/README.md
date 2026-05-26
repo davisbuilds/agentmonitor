@@ -30,6 +30,7 @@ This folder holds the long-form reference material that does not belong in the r
 ## Project
 
 - Roadmap: [project/ROADMAP.md](project/ROADMAP.md)
+- Current state: [project/CURRENT_STATE.md](project/CURRENT_STATE.md)
 - Git history policy: [project/GIT_HISTORY_POLICY.md](project/GIT_HISTORY_POLICY.md)
 
 ## Archive And Planning
