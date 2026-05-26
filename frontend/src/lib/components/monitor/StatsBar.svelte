@@ -7,10 +7,10 @@
   const agentCount = $derived(Number.isFinite(stats.active_agents) ? stats.active_agents : Object.keys(stats.agent_breakdown || {}).length);
 </script>
 
-<div class="flex items-center gap-3 sm:gap-5 text-sm text-gray-400 flex-wrap">
-  <span>Events: <span class="text-white font-medium">{formatNumber(stats.total_events)}</span></span>
-  <span>Sessions: <span class="text-white font-medium">{sessionCount}</span></span>
-  <span>Agents: <span class="text-white font-medium">{agentCount}</span></span>
-  <span>Cost: <span class="text-white font-medium">{formatCost(stats.total_cost_usd)}</span></span>
-  <span class="hidden sm:inline">Tokens: <span class="text-white font-medium">{formatNumber(stats.total_tokens_in)}</span> in / <span class="text-white font-medium">{formatNumber(stats.total_tokens_out)}</span> out</span>
+<div class="flex flex-wrap items-center gap-x-6 gap-y-1.5 text-meta text-text-muted">
+  <span>Events <span class="tabular ml-1 font-mono text-text">{formatNumber(stats.total_events)}</span></span>
+  <span>Sessions <span class="tabular ml-1 font-mono text-text">{sessionCount}</span></span>
+  <span>Agents <span class="tabular ml-1 font-mono text-text">{agentCount}</span></span>
+  <span>Cost <span class="tabular ml-1 font-mono text-text">{formatCost(stats.total_cost_usd)}</span></span>
+  <span>Tokens <span class="tabular ml-1 font-mono text-text">{formatNumber(stats.total_tokens_in)}</span> in / <span class="tabular font-mono text-text">{formatNumber(stats.total_tokens_out)}</span> out</span>
 </div>

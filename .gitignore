@@ -44,6 +44,9 @@ rust-backend/target/
 # docs
 **/archive/
 
+# local design-audit artifacts (screenshots, capture scripts)
+.design-audit/
+
 # Svelte frontend build
 frontend/dist/
 frontend/node_modules/

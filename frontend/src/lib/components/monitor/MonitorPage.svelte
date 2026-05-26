@@ -4,6 +4,7 @@
   import CostDashboard from './CostDashboard.svelte';
   import ToolAnalytics from './ToolAnalytics.svelte';
   import SessionDetail from './SessionDetail.svelte';
+  import StatsBar from './StatsBar.svelte';
   import {
     setEvents,
     setSessions,
@@ -84,7 +85,11 @@
   });
 </script>
 
-<main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6 gap-6">
+<main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6 gap-8">
+  <section>
+    <StatsBar />
+  </section>
+
   <section>
     <AgentCards />
   </section>

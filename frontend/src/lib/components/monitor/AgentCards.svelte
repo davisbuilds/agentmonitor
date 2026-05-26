@@ -1,8 +1,9 @@
 <script lang="ts">
   import { getSessions, getEvents, setSelectedSessionId } from '../../stores/monitor.svelte';
-  import { formatCost, formatNumber, timeAgo, statusColor, agentColor, parseTimestamp } from '../../format';
+  import { formatCost, formatNumber, timeAgo, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
   import { buildActiveAgentLabel } from '../../monitor-analytics';
+  import { SectionHeader, StatusDot, EmptyState } from '../ui';
 
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
@@ -35,79 +36,76 @@
   }
 
   function eventStatusDot(e: AgentEvent): string {
-    if (e.status === 'error') return 'bg-red-400';
-    if (e.event_type === 'tool_use') return 'bg-blue-400';
-    if (e.event_type === 'llm_response') return 'bg-purple-400';
-    return 'bg-gray-500';
+    if (e.status === 'error') return 'bg-danger';
+    if (e.event_type === 'tool_use') return 'bg-accent';
+    return 'bg-line-strong';
   }
 </script>
 
-<div class="flex items-center justify-between mb-3">
-  <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">Active Agents</h2>
-  <span class="text-xs text-gray-500">{sorted.length} sessions</span>
-</div>
+<SectionHeader title="Active Agents" count={`${sorted.length} session${sorted.length === 1 ? '' : 's'}`} />
 
-<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-  {#if sorted.length === 0}
-    <div class="col-span-full text-center py-12 text-gray-500">
-      No active agent sessions. Events will appear here as agents connect.
-    </div>
-  {:else}
+{#if sorted.length === 0}
+  <EmptyState
+    title="No active agent sessions"
+    description="Events will appear here as agents connect."
+  />
+{:else}
+  <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
     {#each sorted as session (session.id)}
       {@const recentEvents = eventsBySession.get(session.id) || []}
       <button
-        class="bg-gray-900 rounded-lg border border-gray-700 p-4 text-left hover:border-gray-500 transition-colors cursor-pointer w-full"
+        class="w-full cursor-pointer rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-line-strong"
         onclick={() => setSelectedSessionId(session.id)}
       >
         <!-- Header -->
-        <div class="flex items-start justify-between gap-3 mb-2">
-          <div class="flex items-start gap-2 min-w-0">
-            <span class="mt-1.5 w-2 h-2 rounded-full shrink-0 {statusColor(session.status)}"></span>
-            <span class="text-sm font-medium leading-tight {agentColor(session.agent_type)}">{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
+        <div class="mb-2 flex items-start justify-between gap-3">
+          <div class="flex min-w-0 items-start gap-2">
+            <StatusDot status={session.status} class="mt-1.5" />
+            <span class="text-body font-medium leading-tight {agentColor(session.agent_type)}">{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
           </div>
-          <span class="text-xs text-gray-500 shrink-0">{timeAgo(session.last_event_at)}</span>
+          <span class="shrink-0 text-meta text-text-faint">{timeAgo(session.last_event_at)}</span>
         </div>
 
         <!-- Project/Branch -->
         {#if session.project || session.branch}
-          <div class="text-xs text-gray-400 mb-2 truncate">
-            {#if session.project}<span class="text-gray-300">{session.project}</span>{/if}
-            {#if session.branch}<span class="text-gray-500 ml-1">({session.branch})</span>{/if}
+          <div class="mb-2 truncate text-meta text-text-muted">
+            {#if session.project}<span class="text-text">{session.project}</span>{/if}
+            {#if session.branch}<span class="ml-1 text-text-faint">({session.branch})</span>{/if}
           </div>
         {/if}
 
         <!-- Metrics -->
-        <div class="flex items-center gap-4 text-xs text-gray-500 mb-3">
-          <span>{session.event_count || 0} events</span>
-          <span>{formatNumber(session.tokens_in || 0)} in</span>
-          <span>{formatNumber(session.tokens_out || 0)} out</span>
+        <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-text-muted">
+          <span><span class="tabular font-mono text-text">{session.event_count || 0}</span> events</span>
+          <span><span class="tabular font-mono text-text">{formatNumber(session.tokens_in || 0)}</span> in</span>
+          <span><span class="tabular font-mono text-text">{formatNumber(session.tokens_out || 0)}</span> out</span>
           {#if session.files_edited}
-            <span>{session.files_edited} file{session.files_edited === 1 ? '' : 's'}</span>
+            <span><span class="tabular font-mono text-text">{session.files_edited}</span> file{session.files_edited === 1 ? '' : 's'}</span>
           {/if}
           {#if session.lines_added}
-            <span class="text-emerald-400">+{formatNumber(session.lines_added)}</span>
+            <span class="tabular font-mono text-ok">+{formatNumber(session.lines_added)}</span>
           {/if}
           {#if session.lines_removed}
-            <span class="text-red-400">-{formatNumber(session.lines_removed)}</span>
+            <span class="tabular font-mono text-danger">-{formatNumber(session.lines_removed)}</span>
           {/if}
           {#if (session.total_cost_usd || 0) > 0}
-            <span>{formatCost(session.total_cost_usd || 0)}</span>
+            <span class="tabular font-mono text-text">{formatCost(session.total_cost_usd || 0)}</span>
           {/if}
         </div>
 
         <!-- Mini event feed -->
         {#if recentEvents.length > 0}
-          <div class="space-y-1 max-h-48 overflow-hidden">
+          <div class="max-h-48 space-y-1 overflow-hidden">
             {#each recentEvents.slice(0, 8) as event}
-              <div class="flex items-center gap-2 text-xs">
-                <span class="w-1.5 h-1.5 rounded-full {eventStatusDot(event)} shrink-0"></span>
-                <span class="text-gray-400 truncate">{eventLabel(event)}</span>
-                <span class="text-gray-600 ml-auto shrink-0">{timeAgo(event.created_at)}</span>
+              <div class="flex items-center gap-2 text-meta">
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full {eventStatusDot(event)}"></span>
+                <span class="truncate text-text-muted">{eventLabel(event)}</span>
+                <span class="ml-auto shrink-0 text-text-faint">{timeAgo(event.created_at)}</span>
               </div>
             {/each}
           </div>
         {/if}
       </button>
     {/each}
-  {/if}
-</div>
+  </div>
+{/if}
