@@ -1,9 +1,12 @@
-export type AppTab = 'monitor' | 'live' | 'sessions' | 'pinned' | 'analytics' | 'search';
+export type AppTab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search';
 
-const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'pinned', 'analytics', 'search']);
+const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'analytics', 'search']);
 
 /** Sub-views inside the consolidated Analytics tab. */
 export type AnalyticsView = 'overview' | 'usage' | 'insights';
+
+/** Sub-views inside the Sessions tab (Pinned folded in). */
+export type SessionsView = 'browse' | 'pinned';
 
 export interface ParsedAppHash {
   tab: AppTab;
@@ -28,6 +31,7 @@ export interface AnalyticsRouteState {
 }
 
 export interface SessionsRouteState {
+  view: SessionsView;
   project: string;
   agent: string;
   sessionId: string | null;
@@ -71,6 +75,10 @@ export function buildAppHash(tab: AppTab, params: URLSearchParams | Record<strin
 }
 
 export function buildSessionsHash(state: SessionsRouteState): string {
+  // The Pinned sub-view has no session/filter state; Browse carries the rest.
+  if (state.view === 'pinned') {
+    return buildAppHash('sessions', { view: 'pinned' });
+  }
   return buildAppHash('sessions', {
     project: state.project,
     agent: state.agent,
@@ -87,6 +95,7 @@ export function parseSessionsHash(hash: string, fallback: SessionsRouteState): S
   const messageOrdinal = rawMessage == null ? null : Number.parseInt(rawMessage, 10);
 
   return {
+    view: parsed.params.get('view') === 'pinned' ? 'pinned' : 'browse',
     project: parsed.params.get('project') || '',
     agent: parsed.params.get('agent') || '',
     sessionId: parsed.params.get('session') || null,
@@ -152,6 +161,17 @@ export function canonicalizeLegacyAnalyticsHash(hash: string): string | null {
   const params = new URLSearchParams(query);
   params.set('view', rawTab);
   return `analytics?${params.toString()}`;
+}
+
+/**
+ * Rewrite a legacy top-level `#pinned` deep link into the canonical
+ * `#sessions?view=pinned` form. Returns null when no rewrite is needed.
+ */
+export function canonicalizeLegacyPinnedHash(hash: string): string | null {
+  const normalized = normalizeHash(hash);
+  const [rawTab = ''] = normalized.split('?');
+  if (rawTab !== 'pinned') return null;
+  return 'sessions?view=pinned';
 }
 
 export function buildSearchHash(state: SearchRouteState): string {

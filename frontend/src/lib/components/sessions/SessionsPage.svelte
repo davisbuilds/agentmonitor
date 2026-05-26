@@ -40,6 +40,7 @@
 
   function currentRouteState() {
     return {
+      view: 'browse' as const,
       project: filterProject,
       agent: filterAgent,
       sessionId: selectedSessionId,
