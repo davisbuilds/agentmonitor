@@ -10,14 +10,15 @@
     type SessionActivity,
     type SessionActivityBucket,
   } from '../../api/client';
-  import { timeAgo, agentHexColor } from '../../format';
+  import { timeAgo, agentHexColor, agentDisplayName } from '../../format';
   import { getMessagePreviewText, getSessionPreviewText } from '../../session-text';
+  import { classifyMessageAuthor, type MessageAuthor } from '../../session-roles';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import { hasSessionCapability } from '../../session-capabilities';
   import { pins } from '../../stores/pins.svelte';
   import ActivityMinimap from './ActivityMinimap.svelte';
   import MessageBlock from './MessageBlock.svelte';
-  import { Badge, Button, EmptyState } from '../ui';
+  import { Badge, Button, EmptyState, Select } from '../ui';
 
   interface Props {
     sessionId: string;
@@ -45,6 +46,21 @@
 
   let highlightTimer: ReturnType<typeof setTimeout> | null = null;
   let scrollFrame: number | null = null;
+
+  // Author filter operates on the loaded window only — paging pulls more, which
+  // then re-filters. "all" shows everything.
+  let authorFilter = $state<'all' | MessageAuthor>('all');
+  const authorOptions = $derived([
+    { value: 'all', label: 'All turns' },
+    { value: 'you', label: 'You' },
+    { value: 'assistant', label: agentDisplayName(session?.agent ?? 'unknown') },
+    { value: 'tool', label: 'Tools' },
+  ]);
+  const filteredMessages = $derived(
+    authorFilter === 'all'
+      ? messages
+      : messages.filter((message) => classifyMessageAuthor(message) === authorFilter),
+  );
 
   const PAGE_SIZE = 50;
   const displayTitle = $derived.by(() => {
@@ -352,6 +368,19 @@
     <div class="flex flex-wrap items-center gap-2 border-b border-line px-4 sm:px-6 py-2">
       <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
       <ProjectionCapabilities capabilities={session.capabilities} />
+      <div class="ml-auto flex items-center gap-2">
+        {#if authorFilter !== 'all'}
+          <span class="tabular font-mono text-meta text-text-faint">
+            {filteredMessages.length} of {messages.length} loaded
+          </span>
+        {/if}
+        <Select
+          value={authorFilter}
+          options={authorOptions}
+          aria-label="Filter transcript by author"
+          onchange={(value) => (authorFilter = value as 'all' | MessageAuthor)}
+        />
+      </div>
     </div>
   {/if}
 
@@ -407,7 +436,14 @@
               </div>
             {/if}
 
-            {#each messages as message (message.id)}
+            {#if filteredMessages.length === 0}
+              <div class="py-8 text-center text-meta text-text-muted">
+                No {authorFilter === 'you' ? 'You' : authorFilter === 'tool' ? 'Tool' : agentDisplayName(session?.agent ?? 'unknown')}
+                turns in the loaded window — load more to keep looking.
+              </div>
+            {/if}
+
+            {#each filteredMessages as message (message.id)}
                 <MessageBlock
                   message={message}
                   agent={session?.agent ?? 'unknown'}

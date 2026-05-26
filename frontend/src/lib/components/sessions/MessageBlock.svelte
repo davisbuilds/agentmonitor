@@ -2,6 +2,7 @@
   import type { Message, ContentBlock } from '../../api/client';
   import { formatTimeOfDay, agentDisplayName } from '../../format';
   import { parseSessionText } from '../../session-text';
+  import { classifyMessageAuthor } from '../../session-roles';
   import { Badge } from '../ui';
 
   interface Props {
@@ -38,21 +39,17 @@
     toolExpanded = { ...toolExpanded, [id]: !toolExpanded[id] };
   }
 
-  // Claude Code stores tool results under the `user` role. A user turn that is
-  // only tool_result blocks is the environment talking back to the model, not
-  // the human — surface it as "Tool", distinct from genuine "You" input.
-  const isToolResult = $derived(
-    message.role === 'user' && blocks.length > 0 && blocks.every((b) => b.type === 'tool_result'),
-  );
+  // Shared classifier keeps the label in sync with the viewer's author filter.
+  const author = $derived(classifyMessageAuthor(message));
   const roleLabel = $derived(
-    message.role === 'user' ? (isToolResult ? 'Tool' : 'You') : agentDisplayName(agent),
+    author === 'tool' ? 'Tool' : author === 'you' ? 'You' : agentDisplayName(agent),
   );
   // You = the one interactive accent; assistant = ok; tool output = neutral.
   const roleColor = $derived(
-    isToolResult ? 'text-text-muted' : message.role === 'user' ? 'text-accent' : 'text-ok',
+    author === 'tool' ? 'text-text-muted' : author === 'you' ? 'text-accent' : 'text-ok',
   );
   const borderColor = $derived(
-    isToolResult ? 'border-line' : message.role === 'user' ? 'border-accent/30' : 'border-ok/30',
+    author === 'tool' ? 'border-line' : author === 'you' ? 'border-accent/30' : 'border-ok/30',
   );
 
   function togglePin() {
