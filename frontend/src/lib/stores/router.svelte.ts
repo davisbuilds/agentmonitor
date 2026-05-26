@@ -1,4 +1,4 @@
-import { buildSessionsHash, parseAppHash, type AppTab } from '../route-state';
+import { buildSessionsHash, canonicalizeLegacyAnalyticsHash, parseAppHash, type AppTab } from '../route-state';
 
 export type Tab = AppTab;
 
@@ -85,6 +85,13 @@ export function consumePendingSessionNavigation(): { sessionId: string | null; m
 // Initialize from URL hash
 function initFromHash(): void {
   if (typeof window === 'undefined') return;
+  // Rewrite legacy #usage / #insights deep links to #analytics?view=…; the
+  // resulting hashchange re-enters this function with the canonical hash.
+  const canonical = canonicalizeLegacyAnalyticsHash(window.location.hash);
+  if (canonical !== null) {
+    window.location.hash = canonical;
+    return;
+  }
   currentTab = parseAppHash(window.location.hash).tab;
 }
 

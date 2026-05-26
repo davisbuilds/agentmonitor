@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { usage } from '../../stores/usage.svelte';
+  import { Select } from '../ui';
   import UsageCoverageBanner from './UsageCoverageBanner.svelte';
   import UsageSummaryCards from './UsageSummaryCards.svelte';
   import UsageTimeline from './UsageTimeline.svelte';
@@ -8,10 +9,6 @@
   import UsageTopSessions from './UsageTopSessions.svelte';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-
-  function formatAgentLabel(agent: string): string {
-    return agent === 'claude_code' ? 'claude' : agent;
-  }
 
   onMount(() => {
     void usage.initialize();
@@ -27,95 +24,30 @@
 </script>
 
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-  <div class="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-gray-800 bg-gray-950/50 px-4 py-3">
-    <div class="flex flex-wrap items-center gap-2">
-      <input
-        type="date"
-        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-        bind:value={usage.from}
-        onchange={(event) => usage.setDateRange((event.currentTarget as HTMLInputElement).value, usage.to)}
-      />
-      <span class="text-sm text-gray-500">to</span>
-      <input
-        type="date"
-        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-        bind:value={usage.to}
-        onchange={(event) => usage.setDateRange(usage.from, (event.currentTarget as HTMLInputElement).value)}
-      />
-
-      <select
-        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-        bind:value={usage.project}
-        onchange={(event) => usage.setProject((event.currentTarget as HTMLSelectElement).value)}
-      >
-        <option value="">All Projects</option>
-        {#each usage.projectOptions as project}
-          <option value={project}>{project}</option>
-        {/each}
-      </select>
-
-      <select
-        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-        bind:value={usage.agent}
-        onchange={(event) => usage.setAgent((event.currentTarget as HTMLSelectElement).value)}
-      >
-        <option value="">All Agents</option>
-        {#each usage.agentOptions as agent}
-          <option value={agent}>{formatAgentLabel(agent)}</option>
-        {/each}
-      </select>
-
-      <select
-        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-        bind:value={usage.provider}
-        onchange={(event) => usage.setProvider((event.currentTarget as HTMLSelectElement).value)}
-      >
-        <option value="">All Providers</option>
-        {#each usage.providerOptions as provider}
-          <option value={provider}>{provider}</option>
-        {/each}
-      </select>
-
-      <select
-        class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-        bind:value={usage.tier}
-        onchange={(event) => usage.setTier((event.currentTarget as HTMLSelectElement).value)}
-      >
-        <option value="">All Tiers</option>
-        {#each usage.tierOptions as tier}
-          <option value={tier}>{tier}</option>
-        {/each}
-      </select>
-
-      <select
-        class="max-w-56 rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-        bind:value={usage.model}
-        onchange={(event) => usage.setModel((event.currentTarget as HTMLSelectElement).value)}
-      >
-        <option value="">All Models</option>
-        {#each usage.modelOptions as model}
-          <option value={model}>{model}</option>
-        {/each}
-      </select>
-
-      <div class="hidden items-center gap-2 md:flex">
-        <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => usage.applyQuickRange(7)}>7d</button>
-        <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => usage.applyQuickRange(30)}>30d</button>
-        <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => usage.applyQuickRange(90)}>90d</button>
-      </div>
-    </div>
-
-    <div class="flex items-center gap-2">
-      <button class="rounded border border-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:border-gray-500 hover:text-white" onclick={() => usage.clearAllFilters()}>
-        Reset
-      </button>
-      <button class="rounded border border-gray-700 px-3 py-1.5 text-sm text-gray-300 hover:border-gray-500 hover:text-white" onclick={() => usage.fetchAll()}>
-        Refresh
-      </button>
-      <button class="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-500" onclick={() => usage.exportCsv()}>
-        Export CSV
-      </button>
-    </div>
+  <!-- Cost-specific facets; shared date/project/agent live in the Analytics bar. -->
+  <div class="flex flex-wrap items-center gap-2">
+    <span class="text-meta uppercase tracking-wide text-text-faint">Cost facets</span>
+    <Select
+      value={usage.provider}
+      options={usage.providerOptions}
+      placeholder="All Providers"
+      aria-label="Filter by provider"
+      onchange={(value) => usage.setProvider(value)}
+    />
+    <Select
+      value={usage.tier}
+      options={usage.tierOptions}
+      placeholder="All Tiers"
+      aria-label="Filter by tier"
+      onchange={(value) => usage.setTier(value)}
+    />
+    <Select
+      value={usage.model}
+      options={usage.modelOptions}
+      placeholder="All Models"
+      aria-label="Filter by model"
+      onchange={(value) => usage.setModel(value)}
+    />
   </div>
 
   <UsageCoverageBanner />

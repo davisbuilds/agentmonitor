@@ -48,6 +48,7 @@
 
     return () => {
       window.clearInterval(timer);
+      insights.dispose();
     };
   });
 </script>
@@ -55,10 +56,11 @@
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
   <div class="rounded-xl border border-gray-800 bg-gray-950/50 px-4 py-3">
     <div class="flex flex-col gap-3">
+      <!-- Insight kind + authoring LLM; shared date/project/agent live in the Analytics bar. -->
       <div class="flex flex-wrap items-center gap-2">
         <select
           class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-          bind:value={insights.kind}
+          value={insights.kind}
           onchange={(event) => insights.setKind((event.currentTarget as HTMLSelectElement).value as 'overview' | 'workflow' | 'usage')}
         >
           <option value="overview">Overview</option>
@@ -66,53 +68,9 @@
           <option value="usage">Usage</option>
         </select>
 
-        <input
-          type="date"
-          class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-          bind:value={insights.from}
-          onchange={(event) => insights.setDateRange((event.currentTarget as HTMLInputElement).value, insights.to)}
-        />
-        <span class="text-sm text-gray-500">to</span>
-        <input
-          type="date"
-          class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-          bind:value={insights.to}
-          onchange={(event) => insights.setDateRange(insights.from, (event.currentTarget as HTMLInputElement).value)}
-        />
-
         <select
           class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-          bind:value={insights.project}
-          onchange={(event) => insights.setProject((event.currentTarget as HTMLSelectElement).value)}
-        >
-          <option value="">All Projects</option>
-          {#each insights.projectOptions as project}
-            <option value={project}>{project}</option>
-          {/each}
-        </select>
-
-        <select
-          class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-          bind:value={insights.agent}
-          onchange={(event) => insights.setAgent((event.currentTarget as HTMLSelectElement).value)}
-        >
-          <option value="">All Agents</option>
-          {#each insights.agentOptions as agent}
-            <option value={agent}>{formatAgent(agent)}</option>
-          {/each}
-        </select>
-
-        <div class="hidden items-center gap-2 md:flex">
-          <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => insights.applyQuickRange(7)}>7d</button>
-          <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => insights.applyQuickRange(30)}>30d</button>
-          <button class="rounded border border-gray-700 px-2 py-1 text-xs text-gray-400 hover:border-gray-500 hover:text-white" onclick={() => insights.applyQuickRange(90)}>90d</button>
-        </div>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <select
-          class="rounded border border-gray-700 bg-gray-900 px-2 py-1.5 text-sm text-gray-300"
-          bind:value={insights.provider}
+          value={insights.provider}
           onchange={(event) => insights.setProvider((event.currentTarget as HTMLSelectElement).value as 'openai' | 'anthropic' | 'gemini')}
         >
           <option value="openai">OpenAI</option>
@@ -124,7 +82,7 @@
           type="text"
           class="min-w-[14rem] rounded border border-gray-700 bg-gray-900 px-3 py-1.5 text-sm text-gray-300"
           placeholder="Model"
-          bind:value={insights.model}
+          value={insights.model}
           oninput={(event) => insights.setModel((event.currentTarget as HTMLInputElement).value)}
         />
       </div>

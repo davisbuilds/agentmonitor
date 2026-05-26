@@ -1,10 +1,30 @@
-export type AppTab = 'monitor' | 'live' | 'sessions' | 'pinned' | 'analytics' | 'usage' | 'insights' | 'search';
+export type AppTab = 'monitor' | 'live' | 'sessions' | 'pinned' | 'analytics' | 'search';
 
-const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'pinned', 'analytics', 'usage', 'insights', 'search']);
+const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'pinned', 'analytics', 'search']);
+
+/** Sub-views inside the consolidated Analytics tab. */
+export type AnalyticsView = 'overview' | 'usage' | 'insights';
 
 export interface ParsedAppHash {
   tab: AppTab;
   params: URLSearchParams;
+}
+
+export interface AnalyticsRouteState {
+  view: AnalyticsView;
+  from: string;
+  to: string;
+  project: string;
+  agent: string;
+  // Usage sub-view specialized filters.
+  model: string;
+  provider: string;
+  tier: string;
+  // Insights sub-view specialized filters (provider/model here mean the LLM that
+  // authors the insight, distinct from Usage's billed provider/model).
+  insightProvider: string;
+  insightModel: string;
+  kind: string;
 }
 
 export interface SessionsRouteState {
@@ -72,6 +92,66 @@ export function parseSessionsHash(hash: string, fallback: SessionsRouteState): S
     sessionId: parsed.params.get('session') || null,
     messageOrdinal: Number.isFinite(messageOrdinal) ? messageOrdinal : null,
   };
+}
+
+export function buildAnalyticsRouteHash(state: AnalyticsRouteState): string {
+  const params = new URLSearchParams();
+  if (state.view !== 'overview') params.set('view', state.view);
+  if (state.from) params.set('from', state.from);
+  if (state.to) params.set('to', state.to);
+  if (state.project) params.set('project', state.project);
+  if (state.agent) params.set('agent', state.agent);
+
+  if (state.view === 'usage') {
+    if (state.model) params.set('model', state.model);
+    if (state.provider) params.set('provider', state.provider);
+    if (state.tier) params.set('tier', state.tier);
+  } else if (state.view === 'insights') {
+    if (state.insightProvider) params.set('provider', state.insightProvider);
+    if (state.insightModel) params.set('model', state.insightModel);
+    if (state.kind) params.set('kind', state.kind);
+  }
+
+  const suffix = params.toString();
+  return suffix ? `analytics?${suffix}` : 'analytics';
+}
+
+export function parseAnalyticsRouteHash(hash: string, fallback: AnalyticsRouteState): AnalyticsRouteState {
+  const parsed = parseAppHash(hash);
+  if (parsed.tab !== 'analytics') return fallback;
+
+  const params = parsed.params;
+  const rawView = params.get('view');
+  const view: AnalyticsView = rawView === 'usage' || rawView === 'insights' ? rawView : 'overview';
+
+  return {
+    view,
+    from: params.get('from') || fallback.from,
+    to: params.get('to') || fallback.to,
+    project: params.get('project') || '',
+    agent: params.get('agent') || '',
+    model: view === 'usage' ? params.get('model') || '' : '',
+    provider: view === 'usage' ? params.get('provider') || '' : '',
+    tier: view === 'usage' ? params.get('tier') || '' : '',
+    insightProvider: view === 'insights' ? params.get('provider') || '' : fallback.insightProvider,
+    insightModel: view === 'insights' ? params.get('model') || '' : '',
+    kind: view === 'insights' ? params.get('kind') || '' : fallback.kind,
+  };
+}
+
+/**
+ * Rewrite a legacy top-level `#usage`/`#insights` deep link into the canonical
+ * `#analytics?view=…` form. Returns null when no rewrite is needed (already
+ * canonical, or an unrelated hash).
+ */
+export function canonicalizeLegacyAnalyticsHash(hash: string): string | null {
+  const normalized = normalizeHash(hash);
+  const [rawTab = '', query = ''] = normalized.split('?');
+  if (rawTab !== 'usage' && rawTab !== 'insights') return null;
+
+  const params = new URLSearchParams(query);
+  params.set('view', rawTab);
+  return `analytics?${params.toString()}`;
 }
 
 export function buildSearchHash(state: SearchRouteState): string {

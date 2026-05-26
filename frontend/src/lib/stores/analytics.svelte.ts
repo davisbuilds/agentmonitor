@@ -8,8 +8,6 @@ import {
   fetchAnalyticsTopSessions,
   fetchAnalyticsVelocity,
   fetchAnalyticsAgents,
-  fetchV2Projects,
-  fetchV2Agents,
   type AnalyticsSummary,
   type AnalyticsCoverage,
   type ActivityDataPoint,
@@ -22,10 +20,8 @@ import {
   type AgentComparisonRow,
 } from '../api/client';
 import { navigateToSession } from './router.svelte';
+import { analyticsFilters } from './analytics-filters.svelte';
 import {
-  createDefaultAnalyticsFilters,
-  buildAnalyticsHash,
-  parseAnalyticsHash,
   buildAnalyticsCsv,
   downloadAnalyticsCsv,
 } from '../analytics-state';
@@ -48,21 +44,7 @@ type FiltersSnapshot = {
   agent: string;
 };
 
-function dateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function daysAgo(days: number, now = new Date()): string {
-  const next = new Date(now);
-  next.setDate(next.getDate() - days);
-  return dateString(next);
-}
-
 class AnalyticsStore {
-  private readonly defaults = createDefaultAnalyticsFilters();
   private readonly versions: Record<PanelKey, number> = {
     summary: 0,
     activity: 0,
@@ -74,16 +56,17 @@ class AnalyticsStore {
     velocity: 0,
     agents: 0,
   };
-  private hashListenerAttached = false;
-  private initialized = false;
+  private unsubscribe: (() => void) | null = null;
 
-  from = $state(this.defaults.from);
-  to = $state(this.defaults.to);
-  project = $state('');
-  agent = $state('');
+  // Shared filters live in the consolidated analytics filter store; the Overview
+  // sub-view reads from it and refetches when it changes.
+  get from(): string { return analyticsFilters.from; }
+  get to(): string { return analyticsFilters.to; }
+  get project(): string { return analyticsFilters.project; }
+  get agent(): string { return analyticsFilters.agent; }
 
-  projectOptions = $state<string[]>([]);
-  agentOptions = $state<string[]>([]);
+  get projectOptions(): string[] { return analyticsFilters.projectOptions; }
+  get agentOptions(): string[] { return analyticsFilters.agentOptions; }
 
   summary = $state<AnalyticsSummary | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
@@ -141,20 +124,15 @@ class AnalyticsStore {
   }
 
   get hasActiveFilters(): boolean {
-    return (
-      this.from !== this.defaults.from
-      || this.to !== this.defaults.to
-      || this.project !== ''
-      || this.agent !== ''
-    );
+    return analyticsFilters.hasActiveSharedFilters;
   }
 
   get defaultFrom(): string {
-    return this.defaults.from;
+    return analyticsFilters.defaultFrom;
   }
 
   get defaultTo(): string {
-    return this.defaults.to;
+    return analyticsFilters.defaultTo;
   }
 
   get anyLoading(): boolean {
@@ -172,32 +150,19 @@ class AnalyticsStore {
   }
 
   async initialize(): Promise<void> {
-    if (!this.hashListenerAttached && typeof window !== 'undefined') {
-      window.addEventListener('hashchange', this.handleHashChange);
-      this.hashListenerAttached = true;
+    if (!this.unsubscribe) {
+      this.unsubscribe = analyticsFilters.subscribe(() => {
+        void this.fetchAll();
+      });
     }
-
-    if (typeof window !== 'undefined') {
-      this.applyFilters(parseAnalyticsHash(window.location.hash, this.filters));
-    }
-
-    if (!this.initialized) {
-      const [projects, agents] = await Promise.all([
-        fetchV2Projects().catch(() => ({ data: [] })),
-        fetchV2Agents().catch(() => ({ data: [] })),
-      ]);
-      this.projectOptions = projects.data;
-      this.agentOptions = agents.data;
-      this.initialized = true;
-    }
-
+    await analyticsFilters.initialize();
     await this.fetchAll();
   }
 
   dispose(): void {
-    if (this.hashListenerAttached && typeof window !== 'undefined') {
-      window.removeEventListener('hashchange', this.handleHashChange);
-      this.hashListenerAttached = false;
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
     }
   }
 
@@ -395,55 +360,38 @@ class AnalyticsStore {
     }
   }
 
+  // Filter mutations delegate to the shared store, which syncs the hash and
+  // notifies subscribers (this store's fetchAll) — no direct fetch here.
   async setDateRange(from: string, to: string): Promise<void> {
-    this.from = from;
-    this.to = to < from ? from : to;
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.setDateRange(from, to);
   }
 
   async applyQuickRange(days: number): Promise<void> {
-    this.from = daysAgo(days - 1);
-    this.to = dateString(new Date());
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.applyQuickRange(days);
   }
 
   async setProject(project: string): Promise<void> {
-    this.project = project;
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.setProject(project);
   }
 
   async setAgent(agent: string): Promise<void> {
-    this.agent = agent;
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.setAgent(agent);
   }
 
   async clearDateRange(): Promise<void> {
-    this.from = this.defaults.from;
-    this.to = this.defaults.to;
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.setDateRange(analyticsFilters.defaultFrom, analyticsFilters.defaultTo);
   }
 
   async clearProject(): Promise<void> {
-    this.project = '';
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.setProject('');
   }
 
   async clearAgent(): Promise<void> {
-    this.agent = '';
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.setAgent('');
   }
 
   async clearAllFilters(): Promise<void> {
-    this.applyFilters(this.defaults);
-    this.syncHash();
-    await this.fetchAll();
+    analyticsFilters.clearSharedFilters();
   }
 
   async drillDownToDay(date: string): Promise<void> {
@@ -477,36 +425,6 @@ class AnalyticsStore {
     });
     downloadAnalyticsCsv(`agentmonitor-analytics-${this.from}-to-${this.to}.csv`, csv);
   }
-
-  private applyFilters(filters: FiltersSnapshot): void {
-    this.from = filters.from;
-    this.to = filters.to;
-    this.project = filters.project;
-    this.agent = filters.agent;
-  }
-
-  private syncHash(): void {
-    if (typeof window === 'undefined') return;
-    const nextHash = buildAnalyticsHash(this.filters);
-    const nextUrl = `${window.location.pathname}${window.location.search}#${nextHash}`;
-    window.history.replaceState(null, '', nextUrl);
-  }
-
-  private readonly handleHashChange = (): void => {
-    if (typeof window === 'undefined') return;
-    const next = parseAnalyticsHash(window.location.hash, this.filters);
-    const changed = (
-      next.from !== this.from
-      || next.to !== this.to
-      || next.project !== this.project
-      || next.agent !== this.agent
-    );
-    if (!changed) return;
-    this.applyFilters(next);
-    if (this.initialized) {
-      void this.fetchAll();
-    }
-  };
 }
 
 export const analytics = new AnalyticsStore();
