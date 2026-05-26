@@ -15,6 +15,7 @@
   import { buildSessionsHash, parseSessionsHash } from '../../route-state';
   import SessionViewer from './SessionViewer.svelte';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import { SectionHeader, Select, Badge, EmptyState, Button } from '../ui';
 
   let sessions = $state<BrowsingSession[]>([]);
   let total = $state(0);
@@ -200,86 +201,76 @@
 {:else}
   <main class="flex-1 min-h-0 overflow-hidden flex flex-col p-4 sm:p-6">
     <!-- Filters -->
-    <div class="flex items-center gap-3 mb-4 flex-wrap">
-      <h2 class="text-lg font-semibold text-gray-200 mr-2">Sessions</h2>
-      <span class="text-sm text-gray-500">{total} total</span>
-
-      <select
-        class="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded px-2 py-1"
-        bind:value={filterProject}
-        onchange={handleFilterChange}
-      >
-        <option value="">All Projects</option>
-        {#each projects as p}
-          <option value={p}>{p}</option>
-        {/each}
-      </select>
-
-      <select
-        class="bg-gray-900 border border-gray-700 text-gray-300 text-sm rounded px-2 py-1"
-        bind:value={filterAgent}
-        onchange={handleFilterChange}
-      >
-        <option value="">All Agents</option>
-        {#each agents as a}
-          <option value={a}>{a}</option>
-        {/each}
-      </select>
-    </div>
+    <SectionHeader title="Sessions" count={`${total} total`}>
+      {#snippet actions()}
+        <Select
+          bind:value={filterProject}
+          options={projects}
+          placeholder="All Projects"
+          aria-label="Filter by project"
+          onchange={handleFilterChange}
+        />
+        <Select
+          bind:value={filterAgent}
+          options={agents}
+          placeholder="All Agents"
+          aria-label="Filter by agent"
+          onchange={handleFilterChange}
+        />
+      {/snippet}
+    </SectionHeader>
 
     <!-- Session List -->
-    <div class="min-h-0 flex-1 overflow-y-auto space-y-1">
-      {#each sessions as session (session.id)}
-        <button
-          class="w-full text-left px-3 py-2 rounded hover:bg-gray-800/60 transition-colors border border-transparent hover:border-gray-700/50 group"
-          onclick={() => selectSession(session.id)}
-        >
-          <div class="flex items-center justify-between gap-2">
-            <div class="flex items-center gap-2 min-w-0 flex-1">
-              <span
-                class="inline-block w-2 h-2 rounded-full shrink-0"
-                style="background-color: {agentHexColor(session.agent)}"
-              ></span>
-              <span class="text-sm text-gray-300 truncate">
-                {getSessionPreviewText(session.first_message) || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12))}
-              </span>
+    <div class="min-h-0 flex-1 overflow-y-auto">
+      <div class="divide-y divide-line/60">
+        {#each sessions as session (session.id)}
+          <button
+            class="group w-full rounded-sm px-2 py-2.5 text-left transition-colors hover:bg-surface"
+            onclick={() => selectSession(session.id)}
+          >
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex min-w-0 flex-1 items-center gap-2">
+                <span
+                  class="inline-block h-2 w-2 shrink-0 rounded-full"
+                  style="background-color: {agentHexColor(session.agent)}"
+                ></span>
+                <span class="truncate text-body text-text group-hover:text-text">
+                  {getSessionPreviewText(session.first_message) || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12))}
+                </span>
+              </div>
+              <div class="flex shrink-0 items-center gap-2 text-meta text-text-faint">
+                {#if session.project}
+                  <Badge tone="neutral">{session.project}</Badge>
+                {/if}
+                <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
+                <span class="tabular font-mono">{session.message_count} msgs</span>
+                {#if session.started_at}
+                  <span class="tabular font-mono">{timeAgo(session.started_at)}</span>
+                {/if}
+              </div>
             </div>
-            <div class="flex items-center gap-3 shrink-0 text-xs text-gray-500">
-              {#if session.project}
-                <span class="bg-gray-800 px-1.5 py-0.5 rounded">{session.project}</span>
-              {/if}
-              <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
-              <span>{session.message_count} msgs</span>
-              {#if session.started_at}
-                <span>{timeAgo(session.started_at)}</span>
-              {/if}
-            </div>
-          </div>
-        </button>
-      {/each}
+          </button>
+        {/each}
+      </div>
 
       {#if loading}
-        <div class="text-center py-8 text-gray-500 text-sm">Loading sessions...</div>
+        <div class="py-8 text-center text-meta text-text-muted">Loading sessions…</div>
       {:else if error}
-        <div class="text-center py-16 text-red-400">
-          <p class="text-sm">{error}</p>
-          <button class="text-xs mt-2 text-blue-400 hover:text-blue-300" onclick={() => loadSessions()}>Retry</button>
-        </div>
+        <EmptyState title={error}>
+          {#snippet action()}
+            <Button variant="neutral" size="sm" onclick={() => loadSessions()}>Retry</Button>
+          {/snippet}
+        </EmptyState>
       {:else if sessions.length === 0}
-        <div class="text-center py-16 text-gray-500">
-          <p class="text-sm">No sessions found.</p>
-          <p class="text-xs mt-1">Sessions are discovered from ~/.claude/projects/ JSONL files.</p>
-        </div>
+        <EmptyState
+          title="No sessions found."
+          description="Sessions are discovered from ~/.claude/projects/ JSONL files."
+        />
       {/if}
 
       {#if hasMore && !loading}
-        <div class="text-center py-3">
-          <button
-            class="text-sm text-blue-400 hover:text-blue-300"
-            onclick={() => loadSessions(true)}
-          >
-            Load more
-          </button>
+        <div class="py-3 text-center">
+          <Button variant="ghost" size="sm" onclick={() => loadSessions(true)}>Load more</Button>
         </div>
       {/if}
     </div>

@@ -17,6 +17,7 @@
   import { pins } from '../../stores/pins.svelte';
   import ActivityMinimap from './ActivityMinimap.svelte';
   import MessageBlock from './MessageBlock.svelte';
+  import { Badge, Button, EmptyState } from '../ui';
 
   interface Props {
     sessionId: string;
@@ -316,13 +317,8 @@
 
 <main class="flex-1 min-h-0 overflow-hidden flex flex-col">
   <!-- Header -->
-  <div class="border-b border-gray-800 px-4 sm:px-6 py-3 flex items-center gap-3 shrink-0">
-    <button
-      class="text-gray-400 hover:text-gray-200 text-sm"
-      onclick={onclose}
-    >
-      ← Back
-    </button>
+  <div class="border-b border-line px-4 sm:px-6 py-3 flex items-center gap-3 shrink-0">
+    <Button variant="ghost" size="sm" onclick={onclose}>← Back</Button>
 
     {#if session}
       <div class="flex items-center gap-2 min-w-0 flex-1">
@@ -330,30 +326,30 @@
           class="inline-block w-2 h-2 rounded-full shrink-0"
           style="background-color: {agentHexColor(session.agent)}"
         ></span>
-        <span class="text-sm text-gray-200 truncate font-medium">
+        <span class="truncate text-body font-medium text-text">
           {displayTitle}
         </span>
       </div>
-      <div class="flex items-center gap-3 text-xs text-gray-500 shrink-0">
+      <div class="flex items-center gap-2 text-meta text-text-faint shrink-0">
         {#if session.project}
-          <span class="bg-gray-800 px-1.5 py-0.5 rounded">{session.project}</span>
+          <Badge tone="neutral">{session.project}</Badge>
         {/if}
         {#if session.integration_mode}
-          <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.integration_mode}</span>
+          <Badge tone="neutral" class="uppercase tracking-wide">{session.integration_mode}</Badge>
         {/if}
         {#if session.fidelity}
-          <span class="rounded border border-gray-700 px-1.5 py-0.5 uppercase tracking-wide">{session.fidelity} fidelity</span>
+          <Badge tone="neutral" class="uppercase tracking-wide">{session.fidelity} fidelity</Badge>
         {/if}
-        <span>{session.message_count} messages</span>
+        <span class="tabular font-mono">{session.message_count} messages</span>
         {#if session.started_at}
-          <span>{timeAgo(session.started_at)}</span>
+          <span class="tabular font-mono">{timeAgo(session.started_at)}</span>
         {/if}
       </div>
     {/if}
   </div>
 
   {#if session}
-    <div class="border-b border-gray-800 px-4 sm:px-6 py-2 space-y-2 text-xs text-gray-500">
+    <div class="border-b border-line px-4 sm:px-6 py-2 space-y-2">
       <div class="flex items-center gap-2 flex-wrap">
         <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
       </div>
@@ -363,12 +359,12 @@
 
   <!-- Children -->
   {#if children.length > 0}
-    <div class="border-b border-gray-800 px-4 sm:px-6 py-2 text-xs text-gray-500">
-      <span class="mr-2">Sub-sessions:</span>
+    <div class="border-b border-line px-4 sm:px-6 py-2 flex flex-wrap items-center gap-1.5 text-meta text-text-faint">
+      <span class="mr-1">Sub-sessions:</span>
       {#each children as child}
-        <span class="inline-block bg-gray-800 px-1.5 py-0.5 rounded mr-1">
+        <Badge tone="neutral">
           {(getSessionPreviewText(child.first_message) || (child.message_count > 0 ? 'Local command activity' : child.id.slice(0, 8))).slice(0, 30)}
-        </span>
+        </Badge>
       {/each}
     </div>
   {/if}
@@ -383,36 +379,33 @@
       >
         <div class="space-y-4">
           {#if loading}
-            <div class="text-center py-16 text-gray-500 text-sm">Loading messages...</div>
+            <div class="text-center py-16 text-meta text-text-muted">Loading messages…</div>
           {:else if error}
-            <div class="text-center py-16 text-red-400">
-              <p class="text-sm">{error}</p>
-              <button class="text-xs mt-2 text-blue-400 hover:text-blue-300" onclick={() => load()}>Retry</button>
-            </div>
+            <EmptyState title={error}>
+              {#snippet action()}
+                <Button variant="neutral" size="sm" onclick={() => load()}>Retry</Button>
+              {/snippet}
+            </EmptyState>
           {:else if messages.length === 0}
             {#if session && !hasSessionCapability(session.capabilities, 'history')}
-              <div class="text-center py-16 text-gray-500">
-                <p class="text-sm text-gray-300">Transcript history unavailable.</p>
-                <p class="mt-2 text-xs text-gray-500">
-                  {session.integration_mode || session.agent} currently projects this session without transcript history.
-                </p>
-                <p class="mt-1 text-xs text-gray-600">
-                  Search and tool analytics are limited by this session&apos;s reported capability contract.
-                </p>
-              </div>
+              <EmptyState
+                title="Transcript history unavailable."
+                description="{session.integration_mode || session.agent} currently projects this session without transcript history. Search and tool analytics are limited by this session's reported capability contract."
+              />
             {:else}
-              <div class="text-center py-16 text-gray-500 text-sm">No messages in this session.</div>
+              <EmptyState title="No messages in this session." />
             {/if}
           {:else}
             {#if hasPreviousMessages}
               <div class="text-center py-3">
-                <button
-                  class="text-sm text-blue-400 hover:text-blue-300"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onclick={() => loadPrevious()}
                   disabled={loadingPrevious}
                 >
-                  {loadingPrevious ? 'Loading...' : `Load previous (${loadedStartOrdinal}/${totalMessages})`}
-                </button>
+                  {loadingPrevious ? 'Loading…' : `Load previous (${loadedStartOrdinal}/${totalMessages})`}
+                </Button>
               </div>
             {/if}
 
@@ -429,13 +422,14 @@
 
             {#if hasNextMessages}
               <div class="text-center py-3">
-                <button
-                  class="text-sm text-blue-400 hover:text-blue-300"
+                <Button
+                  variant="ghost"
+                  size="sm"
                   onclick={() => loadMore()}
                   disabled={loadingMore}
                 >
-                  {loadingMore ? 'Loading...' : `Load more (${(loadedEndOrdinal ?? -1) + 1}/${totalMessages})`}
-                </button>
+                  {loadingMore ? 'Loading…' : `Load more (${(loadedEndOrdinal ?? -1) + 1}/${totalMessages})`}
+                </Button>
               </div>
             {/if}
           {/if}
