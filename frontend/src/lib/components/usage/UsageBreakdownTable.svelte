@@ -73,7 +73,7 @@
       No usage rows for this slice.
     </div>
   {:else}
-    <div class="mt-4 divide-y divide-line/60">
+    <div class="mt-4 max-h-80 divide-y divide-line/60 overflow-y-auto pr-1">
       {#each rows as row}
         <button
           class="block w-full rounded-sm border border-transparent px-3 py-2.5 text-left transition-colors {kind === 'model' || kind === 'tier' ? 'cursor-default' : 'hover:bg-surface-2'}"
