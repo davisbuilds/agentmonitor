@@ -349,10 +349,8 @@
   </div>
 
   {#if session}
-    <div class="border-b border-line px-4 sm:px-6 py-2 space-y-2">
-      <div class="flex items-center gap-2 flex-wrap">
-        <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
-      </div>
+    <div class="flex flex-wrap items-center gap-2 border-b border-line px-4 sm:px-6 py-2">
+      <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
       <ProjectionCapabilities capabilities={session.capabilities} />
     </div>
   {/if}
