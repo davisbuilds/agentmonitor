@@ -1,5 +1,6 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
+  import { Stat } from '../ui';
 
   const cards = $derived.by(() => {
     const velocity = analytics.velocity;
@@ -15,31 +16,30 @@
   });
 </script>
 
-<section class="rounded-xl border border-gray-800 bg-gray-900/40 p-4">
+<section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-sm font-semibold text-gray-200">Velocity</h3>
-      <p class="text-xs text-gray-500">Pace metrics across active days and calendar span.</p>
+      <h3 class="text-h3">Velocity</h3>
+      <p class="mt-0.5 text-meta text-text-muted">Pace metrics across active days and calendar span.</p>
     </div>
     {#if analytics.coverage.velocity}
-      <span class="text-xs text-gray-500">{analytics.coverage.velocity.note}</span>
+      <span class="text-meta text-text-faint">{analytics.coverage.velocity.note}</span>
     {/if}
   </div>
 
   {#if analytics.loading.velocity}
-    <div class="py-12 text-center text-sm text-gray-500">Loading velocity...</div>
+    <div class="py-12 text-center text-meta text-text-muted">Loading velocity…</div>
   {:else if analytics.errors.velocity}
-    <div class="py-12 text-center text-sm text-red-300">{analytics.errors.velocity}</div>
+    <div class="py-12 text-center text-meta text-danger">{analytics.errors.velocity}</div>
   {:else if analytics.velocity}
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
+    <div class="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-line bg-line sm:grid-cols-3">
       {#each cards as card}
-        <div class="h-full rounded-lg border border-gray-800 bg-gray-950/50 p-3">
-          <div class="text-lg font-semibold text-gray-100">{card.value}</div>
-          <div class="mt-1 text-xs text-gray-500">{card.label}</div>
+        <div class="bg-surface p-3">
+          <Stat label={card.label} value={card.value} />
         </div>
       {/each}
     </div>
   {:else}
-    <div class="py-12 text-center text-sm text-gray-500">No velocity data available.</div>
+    <div class="py-12 text-center text-meta text-text-muted">No velocity data available.</div>
   {/if}
 </section>
