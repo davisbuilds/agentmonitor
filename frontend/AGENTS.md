@@ -21,7 +21,7 @@ See root `AGENTS.md` for project overview, API contract (V2 endpoints this app c
 - `src/lib/components/monitor/`: Monitor tab (real-time dashboard).
 - `src/lib/components/sessions/`: Sessions tab (session browser + message viewer).
 - `src/lib/components/search/`: Search tab (FTS5 full-text search).
-- `src/lib/components/analytics/`: Analytics tab (charts, project/tool breakdowns).
+- `src/lib/components/analytics/`: Analytics tab. `AnalyticsShell.svelte` hosts the shared filter bar + SubTabs and renders three sub-views — Overview (these components), Usage (`components/usage/`), and Insights (`components/insights/`). Shared filter state + the `#analytics?view=…` hash live in `stores/analytics-filters.svelte.ts`; the `analytics`/`usage`/`insights` data stores read filters from it and subscribe for refetch.
 - `src/lib/api/client.ts`: typed API client for v1 and v2 endpoints.
 - `src/lib/stores/`: Svelte 5 reactive state (runes).
 

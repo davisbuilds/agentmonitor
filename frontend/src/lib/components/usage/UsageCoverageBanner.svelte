@@ -16,7 +16,7 @@
 
     if (coverage.missing_usage_events > 0) {
       return {
-        tone: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
+        dot: 'bg-warn',
         title: 'Usage totals are event-derived.',
         body: `${usageRatio} matching events carry cost or token data. ${coverage.missing_usage_events} matching event${coverage.missing_usage_events === 1 ? '' : 's'} are excluded from totals. ${sourceSummary}`,
       };
@@ -24,16 +24,16 @@
 
     const totalCost = usage.summary ? formatCost(usage.summary.total_cost_usd) : '$0.00';
     return {
-      tone: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
-      title: 'Usage totals have complete event coverage for this slice.',
+      dot: 'bg-accent',
+      title: 'Complete event coverage for this slice.',
       body: `${formatNumber(coverage.usage_events)} usage events across ${formatNumber(coverage.usage_sessions)} session${coverage.usage_sessions === 1 ? '' : 's'} contributed ${totalCost}. ${sourceSummary}`,
     };
   });
 </script>
 
 {#if banner}
-  <div class={`rounded-xl border px-4 py-3 text-sm ${banner.tone}`}>
-    <div class="font-medium">{banner.title}</div>
-    <p class="mt-1 text-xs text-gray-300">{banner.body}</p>
+  <div class="flex items-start gap-2 text-meta text-text-muted">
+    <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full {banner.dot}" aria-hidden="true"></span>
+    <p class="max-w-[80ch]"><span class="text-text">{banner.title}</span> {banner.body}</p>
   </div>
 {/if}

@@ -16,10 +16,8 @@ import {
   type UsageTopSessionRow,
 } from '../api/client';
 import { navigateToSession } from './router.svelte';
+import { analyticsFilters } from './analytics-filters.svelte';
 import {
-  createDefaultUsageFilters,
-  buildUsageHash,
-  parseUsageHash,
   buildUsageCsv,
   downloadUsageCsv,
 } from '../usage-state';
@@ -46,7 +44,6 @@ type FiltersSnapshot = {
 };
 
 class UsageStore {
-  private readonly defaults = createDefaultUsageFilters();
   private readonly versions: Record<PanelKey, number> = {
     summary: 0,
     daily: 0,
@@ -57,7 +54,7 @@ class UsageStore {
     topSessions: 0,
   };
   private initialized = false;
-  private hashListenerAttached = false;
+  private unsubscribe: (() => void) | null = null;
   private filterOptionsVersion = 0;
   private readonly controllers: Record<PanelKey, AbortController | null> = {
     summary: null,
@@ -70,13 +67,15 @@ class UsageStore {
   };
   private filterOptionsController: AbortController | null = null;
 
-  from = $state(this.defaults.from);
-  to = $state(this.defaults.to);
-  project = $state('');
-  agent = $state('');
-  model = $state('');
-  provider = $state('');
-  tier = $state('');
+  // Shared + Usage-specialized filters live in the consolidated analytics filter
+  // store; this store reads them and refetches when they change.
+  get from(): string { return analyticsFilters.from; }
+  get to(): string { return analyticsFilters.to; }
+  get project(): string { return analyticsFilters.project; }
+  get agent(): string { return analyticsFilters.agent; }
+  get model(): string { return analyticsFilters.model; }
+  get provider(): string { return analyticsFilters.provider; }
+  get tier(): string { return analyticsFilters.tier; }
 
   projectOptions = $state<string[]>([]);
   agentOptions = $state<string[]>([]);
@@ -127,19 +126,16 @@ class UsageStore {
   }
 
   get defaultFrom(): string {
-    return this.defaults.from;
+    return analyticsFilters.defaultFrom;
   }
 
   get defaultTo(): string {
-    return this.defaults.to;
+    return analyticsFilters.defaultTo;
   }
 
   get hasActiveFilters(): boolean {
     return (
-      this.from !== this.defaults.from
-      || this.to !== this.defaults.to
-      || this.project !== ''
-      || this.agent !== ''
+      analyticsFilters.hasActiveSharedFilters
       || this.model !== ''
       || this.provider !== ''
       || this.tier !== ''
@@ -164,14 +160,12 @@ class UsageStore {
   }
 
   async initialize(): Promise<void> {
-    if (!this.hashListenerAttached && typeof window !== 'undefined') {
-      window.addEventListener('hashchange', this.handleHashChange);
-      this.hashListenerAttached = true;
+    if (!this.unsubscribe) {
+      this.unsubscribe = analyticsFilters.subscribe(() => {
+        void this.refreshUsage();
+      });
     }
-
-    if (typeof window !== 'undefined') {
-      this.applyFilters(parseUsageHash(window.location.hash, this.filters));
-    }
+    await analyticsFilters.initialize();
 
     if (!this.initialized) {
       await this.fetchFilterOptions();
@@ -182,9 +176,9 @@ class UsageStore {
   }
 
   dispose(): void {
-    if (this.hashListenerAttached && typeof window !== 'undefined') {
-      window.removeEventListener('hashchange', this.handleHashChange);
-      this.hashListenerAttached = false;
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
     }
     this.abortAll();
   }
@@ -355,54 +349,43 @@ class UsageStore {
     }
   }
 
+  // Filter mutations delegate to the shared store, which syncs the hash and
+  // notifies subscribers (this store's refreshUsage) — no direct fetch here.
   async setDateRange(from: string, to: string): Promise<void> {
-    this.from = from;
-    this.to = to < from ? from : to;
-    this.syncHash();
-    await this.refreshUsage();
+    analyticsFilters.setDateRange(from, to);
   }
 
   async applyQuickRange(days: number): Promise<void> {
-    const to = new Date();
-    const from = new Date(to);
-    from.setDate(from.getDate() - (days - 1));
-    await this.setDateRange(from.toISOString().slice(0, 10), to.toISOString().slice(0, 10));
+    analyticsFilters.applyQuickRange(days);
   }
 
   async setProject(project: string): Promise<void> {
-    this.project = project;
-    this.syncHash();
-    await this.refreshUsage();
+    analyticsFilters.setProject(project);
   }
 
   async setAgent(agent: string): Promise<void> {
-    this.agent = agent;
-    this.syncHash();
-    await this.refreshUsage();
+    analyticsFilters.setAgent(agent);
   }
 
   async setModel(model: string): Promise<void> {
-    this.model = model;
-    this.syncHash();
-    await this.refreshUsage();
+    analyticsFilters.setModel(model);
   }
 
   async setProvider(provider: string): Promise<void> {
-    this.provider = provider;
-    this.syncHash();
-    await this.refreshUsage();
+    analyticsFilters.setProvider(provider);
   }
 
   async setTier(tier: string): Promise<void> {
-    this.tier = tier;
-    this.syncHash();
-    await this.refreshUsage();
+    analyticsFilters.setTier(tier);
   }
 
   async clearAllFilters(): Promise<void> {
-    this.applyFilters(this.defaults);
-    this.syncHash();
-    await this.refreshUsage();
+    analyticsFilters.batch(() => {
+      analyticsFilters.clearSharedFilters();
+      analyticsFilters.setModel('');
+      analyticsFilters.setProvider('');
+      analyticsFilters.setTier('');
+    });
   }
 
   openSession(sessionId: string): void {
@@ -422,23 +405,6 @@ class UsageStore {
       topSessions: this.topSessions,
     });
     downloadUsageCsv(`agentmonitor-usage-${this.from}-to-${this.to}.csv`, csv);
-  }
-
-  private applyFilters(filters: FiltersSnapshot): void {
-    this.from = filters.from;
-    this.to = filters.to;
-    this.project = filters.project;
-    this.agent = filters.agent;
-    this.model = filters.model;
-    this.provider = filters.provider;
-    this.tier = filters.tier;
-  }
-
-  private syncHash(): void {
-    if (typeof window === 'undefined') return;
-    const nextHash = buildUsageHash(this.filters);
-    const nextUrl = `${window.location.pathname}${window.location.search}#${nextHash}`;
-    window.history.replaceState(null, '', nextUrl);
   }
 
   private async refreshUsage(): Promise<void> {
@@ -511,24 +477,6 @@ class UsageStore {
     this.filterOptionsController = null;
   }
 
-  private readonly handleHashChange = (): void => {
-    if (typeof window === 'undefined') return;
-    const next = parseUsageHash(window.location.hash, this.filters);
-    const changed = (
-      next.from !== this.from
-      || next.to !== this.to
-      || next.project !== this.project
-      || next.agent !== this.agent
-      || next.model !== this.model
-      || next.provider !== this.provider
-      || next.tier !== this.tier
-    );
-    if (!changed) return;
-    this.applyFilters(next);
-    if (this.initialized) {
-      void this.refreshUsage();
-    }
-  };
 }
 
 function isAbortError(err: unknown): boolean {

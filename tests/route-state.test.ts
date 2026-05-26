@@ -2,13 +2,31 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildAnalyticsRouteHash,
   buildAppHash,
   buildSearchHash,
   buildSessionsHash,
+  canonicalizeLegacyAnalyticsHash,
+  parseAnalyticsRouteHash,
   parseAppHash,
   parseSearchHash,
   parseSessionsHash,
+  type AnalyticsRouteState,
 } from '../frontend/src/lib/route-state.ts';
+
+const analyticsFallback: AnalyticsRouteState = {
+  view: 'overview',
+  from: '2026-01-01',
+  to: '2026-01-30',
+  project: '',
+  agent: '',
+  model: '',
+  provider: '',
+  tier: '',
+  insightProvider: 'openai',
+  insightModel: '',
+  kind: '',
+};
 
 test('parseAppHash defaults to monitor and preserves query params', () => {
   assert.deepEqual(parseAppHash(''), {
@@ -78,6 +96,61 @@ test('search hashes round-trip query, filters, and non-default sort', () => {
     agent: '',
     sort: 'recent',
   }), state);
+});
+
+test('usage and insights are no longer standalone tabs', () => {
+  // Legacy top-level tabs collapse into the analytics tab via canonicalization.
+  assert.equal(parseAppHash('#usage?from=2026-01-01').tab, 'monitor');
+  assert.equal(parseAppHash('#insights').tab, 'monitor');
+  assert.equal(parseAppHash('#analytics?view=usage').tab, 'analytics');
+});
+
+test('canonicalizeLegacyAnalyticsHash rewrites old usage/insights deep links', () => {
+  assert.equal(
+    canonicalizeLegacyAnalyticsHash('#usage?from=2026-01-01&to=2026-01-30&project=p&model=gpt-5&tier=standard'),
+    'analytics?from=2026-01-01&to=2026-01-30&project=p&model=gpt-5&tier=standard&view=usage',
+  );
+  assert.equal(canonicalizeLegacyAnalyticsHash('#insights'), 'analytics?view=insights');
+  // Already-canonical or unrelated hashes are left alone.
+  assert.equal(canonicalizeLegacyAnalyticsHash('#analytics?view=usage'), null);
+  assert.equal(canonicalizeLegacyAnalyticsHash('#sessions?session=abc'), null);
+  assert.equal(canonicalizeLegacyAnalyticsHash(''), null);
+});
+
+test('analytics route hashes round-trip view + shared filters', () => {
+  // Overview view omits the view param; shared filters serialize.
+  assert.equal(
+    buildAnalyticsRouteHash({ ...analyticsFallback, view: 'overview', from: '2026-02-01', to: '2026-02-28', project: 'am' }),
+    'analytics?from=2026-02-01&to=2026-02-28&project=am',
+  );
+  const overview = parseAnalyticsRouteHash('#analytics?from=2026-02-01&to=2026-02-28&project=am', analyticsFallback);
+  assert.equal(overview.view, 'overview');
+  assert.equal(overview.from, '2026-02-01');
+  assert.equal(overview.project, 'am');
+});
+
+test('analytics route hashes carry only the active view\'s specialized filters', () => {
+  // Usage view: model/provider/tier serialize; insights fields do not.
+  const usageHash = buildAnalyticsRouteHash({
+    ...analyticsFallback, view: 'usage', model: 'gpt-5', provider: 'openai', tier: 'standard', insightModel: 'ignored',
+  });
+  assert.equal(usageHash, 'analytics?view=usage&from=2026-01-01&to=2026-01-30&model=gpt-5&provider=openai&tier=standard');
+  const usage = parseAnalyticsRouteHash(`#${usageHash}`, analyticsFallback);
+  assert.equal(usage.view, 'usage');
+  assert.equal(usage.model, 'gpt-5');
+  assert.equal(usage.tier, 'standard');
+
+  // Insights view: provider maps to insightProvider, model to insightModel, plus kind.
+  const insightsHash = buildAnalyticsRouteHash({
+    ...analyticsFallback, view: 'insights', insightProvider: 'anthropic', insightModel: 'claude', kind: 'weekly', model: 'ignored',
+  });
+  assert.equal(insightsHash, 'analytics?view=insights&from=2026-01-01&to=2026-01-30&provider=anthropic&model=claude&kind=weekly');
+  const insights = parseAnalyticsRouteHash(`#${insightsHash}`, analyticsFallback);
+  assert.equal(insights.view, 'insights');
+  assert.equal(insights.insightProvider, 'anthropic');
+  assert.equal(insights.insightModel, 'claude');
+  assert.equal(insights.kind, 'weekly');
+  assert.equal(insights.model, ''); // usage-model not set on insights view
 });
 
 test('search hashes omit default sort and fall back on non-search hashes', () => {

@@ -3,31 +3,27 @@
 
   const showingDate = $derived(analytics.from !== analytics.defaultFrom || analytics.to !== analytics.defaultTo);
   const dateLabel = $derived(showingDate ? `${analytics.from} to ${analytics.to}` : '');
+
+  const chip = 'rounded-sm border border-line bg-surface-2 px-2 py-0.5 text-meta text-text-muted transition-colors hover:border-line-strong hover:text-text';
 </script>
 
 {#if analytics.hasActiveFilters}
   <div class="flex flex-wrap items-center gap-2">
-    <span class="text-xs uppercase tracking-wide text-gray-600">Active Filters</span>
+    <span class="text-meta uppercase tracking-wide text-text-faint">Active filters</span>
 
     {#if showingDate}
-      <button class="rounded-full border border-sky-500/30 bg-sky-500/10 px-3 py-1 text-xs text-sky-200 hover:border-sky-400/50" onclick={() => analytics.clearDateRange()}>
-        {dateLabel} ×
-      </button>
+      <button class={chip} onclick={() => analytics.clearDateRange()}>{dateLabel} ×</button>
     {/if}
 
     {#if analytics.project}
-      <button class="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs text-emerald-200 hover:border-emerald-400/50" onclick={() => analytics.clearProject()}>
-        Project: {analytics.project} ×
-      </button>
+      <button class={chip} onclick={() => analytics.clearProject()}>Project: {analytics.project} ×</button>
     {/if}
 
     {#if analytics.agent}
-      <button class="rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs text-amber-200 hover:border-amber-400/50" onclick={() => analytics.clearAgent()}>
-        Agent: {analytics.agent} ×
-      </button>
+      <button class={chip} onclick={() => analytics.clearAgent()}>Agent: {analytics.agent} ×</button>
     {/if}
 
-    <button class="text-xs text-gray-400 hover:text-white" onclick={() => analytics.clearAllFilters()}>
+    <button class="text-meta text-text-muted transition-colors hover:text-text" onclick={() => analytics.clearAllFilters()}>
       Clear all
     </button>
   </div>

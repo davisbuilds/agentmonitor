@@ -1,7 +1,5 @@
 import {
   fetchInsights,
-  fetchV2Agents,
-  fetchV2Projects,
   generateInsight,
   deleteInsight,
   type Insight,
@@ -10,43 +8,33 @@ import {
   type InsightProvider,
 } from '../api/client';
 import {
-  clampInsightDateRange,
   insightMatchesListFilters,
   sameInsightListFilters,
   type InsightListFilters,
 } from '../insights-state';
-
-function localDateStr(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function daysAgo(days: number): string {
-  const date = new Date();
-  date.setDate(date.getDate() - days);
-  return localDateStr(date);
-}
+import { analyticsFilters } from './analytics-filters.svelte';
 
 class InsightsStore {
   private listVersion = 0;
   private initialized = false;
+  private unsubscribe: (() => void) | null = null;
 
-  readonly defaultFrom = daysAgo(29);
-  readonly defaultTo = localDateStr(new Date());
+  // Shared filters (date/project/agent) and the insight-specialized filters
+  // (kind + authoring provider/model) live in the consolidated filter store.
+  get defaultFrom(): string { return analyticsFilters.defaultFrom; }
+  get defaultTo(): string { return analyticsFilters.defaultTo; }
 
-  from = $state(this.defaultFrom);
-  to = $state(this.defaultTo);
-  project = $state('');
-  agent = $state('');
-  kind = $state<InsightKind>('overview');
-  provider = $state<InsightProvider>('openai');
-  model = $state('');
+  get from(): string { return analyticsFilters.from; }
+  get to(): string { return analyticsFilters.to; }
+  get project(): string { return analyticsFilters.project; }
+  get agent(): string { return analyticsFilters.agent; }
+  get kind(): InsightKind { return analyticsFilters.kind; }
+  get provider(): InsightProvider { return analyticsFilters.insightProvider; }
+  get model(): string { return analyticsFilters.insightModel; }
   prompt = $state('');
 
-  projectOptions = $state<string[]>([]);
-  agentOptions = $state<string[]>([]);
+  get projectOptions(): string[] { return analyticsFilters.projectOptions; }
+  get agentOptions(): string[] { return analyticsFilters.agentOptions; }
 
   items = $state<Insight[]>([]);
   selectedId = $state<number | null>(null);
@@ -95,17 +83,21 @@ class InsightsStore {
   }
 
   async initialize(): Promise<void> {
-    if (!this.initialized) {
-      const [projects, agents] = await Promise.all([
-        fetchV2Projects().catch(() => ({ data: [] })),
-        fetchV2Agents().catch(() => ({ data: [] })),
-      ]);
-      this.projectOptions = [...projects.data].sort((a, b) => a.localeCompare(b));
-      this.agentOptions = [...agents.data].sort((a, b) => a.localeCompare(b));
-      this.initialized = true;
+    if (!this.unsubscribe) {
+      this.unsubscribe = analyticsFilters.subscribe(() => {
+        void this.load();
+      });
     }
-
+    await analyticsFilters.initialize();
+    this.initialized = true;
     await this.load();
+  }
+
+  dispose(): void {
+    if (this.unsubscribe) {
+      this.unsubscribe();
+      this.unsubscribe = null;
+    }
   }
 
   async load(): Promise<void> {
@@ -118,9 +110,10 @@ class InsightsStore {
       if (version !== this.listVersion) return;
       this.items = result.data;
       this.generation = result.generation;
-      if (!this.model) {
-        this.provider = result.generation.default_provider;
-        this.model = result.generation.providers[this.provider].default_model;
+      if (!analyticsFilters.insightModel) {
+        const defaultProvider = result.generation.default_provider;
+        analyticsFilters.setInsightProvider(defaultProvider);
+        analyticsFilters.setInsightModel(result.generation.providers[defaultProvider].default_model);
       }
       if (this.items.length === 0) {
         this.selectedId = null;
@@ -140,35 +133,31 @@ class InsightsStore {
     }
   }
 
+  // Shared/specialized filter mutations delegate to the shared store, which
+  // notifies subscribers (this store's load) — no direct load here.
   async setDateRange(from: string, to: string): Promise<void> {
-    const next = clampInsightDateRange(from, to, from !== this.from ? 'from' : 'to');
-    this.from = next.from;
-    this.to = next.to;
-    await this.load();
+    analyticsFilters.setDateRange(from, to);
   }
 
   async setProject(project: string): Promise<void> {
-    this.project = project;
-    await this.load();
+    analyticsFilters.setProject(project);
   }
 
   async setAgent(agent: string): Promise<void> {
-    this.agent = agent;
-    await this.load();
+    analyticsFilters.setAgent(agent);
   }
 
   async setKind(kind: InsightKind): Promise<void> {
-    this.kind = kind;
-    await this.load();
+    analyticsFilters.setKind(kind);
   }
 
   setProvider(provider: InsightProvider): void {
-    this.provider = provider;
-    this.model = this.generation.providers[provider].default_model;
+    analyticsFilters.setInsightProvider(provider);
+    analyticsFilters.setInsightModel(this.generation.providers[provider].default_model);
   }
 
   setModel(model: string): void {
-    this.model = model;
+    analyticsFilters.setInsightModel(model);
   }
 
   setPrompt(prompt: string): void {
@@ -180,20 +169,16 @@ class InsightsStore {
   }
 
   async applyQuickRange(days: number): Promise<void> {
-    this.from = daysAgo(days - 1);
-    this.to = this.defaultTo;
-    await this.load();
+    analyticsFilters.applyQuickRange(days);
   }
 
   async clearFilters(): Promise<void> {
-    this.from = this.defaultFrom;
-    this.to = this.defaultTo;
-    this.project = '';
-    this.agent = '';
-    this.kind = 'overview';
-    this.provider = this.generation.default_provider;
-    this.model = this.generation.providers[this.provider].default_model;
-    await this.load();
+    analyticsFilters.batch(() => {
+      analyticsFilters.clearSharedFilters();
+      analyticsFilters.setKind('overview');
+      analyticsFilters.setInsightProvider(this.generation.default_provider);
+      analyticsFilters.setInsightModel(this.generation.providers[this.generation.default_provider].default_model);
+    });
   }
 
   async generate(): Promise<void> {

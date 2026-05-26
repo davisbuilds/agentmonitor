@@ -2,15 +2,40 @@
 date: 2026-05-25
 topic: svelte-ui-redesign
 stage: implementation-plan
-status: phases-1-4-complete
+status: phases-1-5-complete
 source: conversation
 ---
 
 ## Implementation Status
 
-As of 2026-05-25, **Phases 1–4 are complete**. Phases 1–3 merged to `main`
-via PR #18; Phase 4 lands on branch `feat/ui-redesign-sessions-search`.
-Phases 5–6 remain.
+As of 2026-05-26, **Phases 1–4 are complete and merged to `main`** (Phases 1–3
+via PR #18; Phase 4 + follow-ups via PR #19, merge commit `c0a2a37`).
+**Phase 5 is complete on branch `feat/ui-redesign-analytics-consolidation`**
+(Analytics/Usage/Insights consolidated into one tab with Overview/Usage/Insights
+sub-views, shared filter store + unified `#analytics?view=…` hash with legacy
+redirects, all three sub-view bodies migrated onto tokens incl. weighted bento
+summary cards and collapsed coverage banners). **Phase 6 remains** (Live tab,
+responsive/mobile, motion, final a11y/contrast sweep, ARCHITECTURE/ROADMAP docs).
+
+**Phase 4 follow-ups (PR #19, beyond the original plan)** — review/feedback fixes
+that shipped on the same branch:
+- Fixed an unscrollable session transcript on desktop: the messages row used
+  `lg:items-start`, so the transcript column sized to content height and
+  `overflow-y-auto` never engaged. Dropped to default `stretch`.
+- Corrected transcript role attribution: tool-result turns (which Claude Code
+  stores under the `user` role) were labeled "You". Added a shared
+  `session-roles.ts` `classifyMessageAuthor` (you / assistant / tool); the
+  assistant label now resolves to the agent name (**Claude**/**Codex**) via a
+  new `agentDisplayName` helper, and tool-result turns render as a neutral
+  **Tool**.
+- Added an author filter (`Select` in the capability bar: All / You /
+  Claude-or-Codex / Tools) operating on the loaded window, with a "N of M
+  loaded" hint. `findLoadedOrdinal` resolves against the rendered (filtered)
+  set so activity-map bucket jumps still land on a visible turn while filtered.
+- Collapsed the session capability bar (summary + detail badges) from two
+  stacked rows into one wrapping row.
+- New tests: `tests/session-roles.test.ts`, `agentDisplayName` cases in
+  `tests/format.test.ts` (446 pass). `FEATURES.md` updated.
 
 **Phase 4 (Sessions / Search / Pinned)** — migrated onto tokens + primitives:
 - Shared `ProjectionCapabilities` moved off the emerald/amber/sky/gray palette
@@ -264,6 +289,19 @@ Verify: gates green; deep-link/hash, snippet highlighting, pin/unpin all work; s
 ### Phase 5 — Analytics consolidation (Usage + Analytics + Insights → one `Analytics`)
 
 The IA change plus visual migration of the densest surfaces.
+
+> **Reality check (2026-05-26, pre-execution).** Analytics, Usage, and Insights
+> were *not* touched in Phases 1–4 — all three are still on the old
+> `gray-800`/`amber-500`/`sky-200`/`text-sm` palette with bespoke filter bars.
+> This is the largest phase: an IA change plus the visual migration of ~20
+> components (AnalyticsPage + 12 children, UsagePage + 6, InsightsPage), each
+> tab backed by its own store (`analytics`/`usage`/`insights.svelte.ts`) and
+> its own hash scheme (`buildAnalyticsHash`/`buildUsageHash` + insights). Given
+> the size, this phase is expected to ship as **multiple reviewable PRs**
+> (IA/router first, then shared filters, then per-sub-view visual migration)
+> rather than one. Open decisions (sequencing, filter unification, deep-link
+> redirect behavior, sub-view labels/default) are tracked with the stakeholder
+> before execution.
 
 - **Task 5.1 — Router/tab model.** Update `router.svelte.ts` (`Tab` type) and `App.svelte` tabs: replace
   `analytics`/`usage`/`insights` with a single `analytics` tab; add a sub-view dimension (`overview` | `usage` |

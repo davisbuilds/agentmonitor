@@ -31,7 +31,8 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 ### Product Polish and Release Confidence
 
-- Continue tightening Monitor, Live, Sessions, Search, Analytics, Usage, and Insights around real review and monitoring workflows.
+- Continue tightening Monitor, Live, Sessions, Search, and the consolidated Analytics tab (Overview / Usage / Insights sub-views) around real review and monitoring workflows.
+- The "Instrument Console" Svelte redesign is largely shipped (Phases 1–5): tokens + type + shell, shared primitives, and token migration of Monitor, Sessions/Search/Pinned, and the consolidated Analytics group. Phase 6 (Live tab, responsive/mobile, motion, final a11y/contrast sweep) remains.
 - Maintain a manual regression checklist for the canonical Svelte app, especially around deep links, long transcripts, live updates, and drawer/navigation behavior.
 - Prefer small UI refinements that reduce ambiguity over larger redesigns unless operator workflows show a clear gap.
 

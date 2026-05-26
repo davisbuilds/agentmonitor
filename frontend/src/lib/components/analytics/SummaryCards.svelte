@@ -1,9 +1,11 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
   import { formatNumber } from '../../format';
+  import { Stat } from '../ui';
+
+  const summary = $derived(analytics.summary);
 
   const cards = $derived.by(() => {
-    const summary = analytics.summary;
     if (!summary) return [];
     return [
       { label: 'Sessions', value: formatNumber(summary.total_sessions) },
@@ -16,40 +18,18 @@
   });
 </script>
 
-<section class="space-y-3">
-  <div class="flex items-center justify-between gap-3">
-    <div>
-      <h2 class="text-lg font-semibold text-gray-100">Analytics</h2>
-      <p class="text-sm text-gray-500">History-backed session analytics with explicit capability coverage.</p>
-    </div>
-    {#if analytics.coverage.summary}
-      <div class="rounded-lg border border-sky-500/20 bg-sky-500/10 px-3 py-2 text-xs text-sky-200">
-        {analytics.coverage.summary.note}
-      </div>
-    {/if}
+{#if analytics.errors.summary}
+  <div class="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-meta text-danger">
+    {analytics.errors.summary}
   </div>
-
-  {#if analytics.loading.summary}
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
-      {#each Array.from({ length: 6 }) as _}
-        <div class="rounded-xl border border-gray-800 bg-gray-900/50 p-3">
-          <div class="h-5 w-16 animate-pulse rounded bg-gray-800"></div>
-          <div class="mt-2 h-3 w-24 animate-pulse rounded bg-gray-800"></div>
-        </div>
-      {/each}
-    </div>
-  {:else if analytics.summary}
-    <div class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-3">
-      {#each cards as card}
-        <div class="h-full rounded-xl border border-gray-800 bg-gray-900/50 p-3">
-          <div class="text-lg font-bold text-gray-100">{card.value}</div>
-          <div class="mt-1 text-xs text-gray-500">{card.label}</div>
-        </div>
-      {/each}
-    </div>
-  {:else if analytics.errors.summary}
-    <div class="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
-      {analytics.errors.summary}
-    </div>
-  {/if}
-</section>
+{:else if analytics.loading.summary && !summary}
+  <div class="h-24 animate-pulse rounded-lg border border-line bg-surface"></div>
+{:else if summary}
+  <div class="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-line bg-line sm:grid-cols-3 lg:grid-cols-6">
+    {#each cards as card}
+      <div class="bg-surface p-4">
+        <Stat label={card.label} value={card.value} />
+      </div>
+    {/each}
+  </div>
+{/if}
