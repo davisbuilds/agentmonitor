@@ -21,15 +21,15 @@
 
     if (tools && tools.excluded_sessions > 0) {
       return {
-        tone: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
-        title: 'Analytics is capability-aware.',
+        dot: 'bg-warn',
+        title: 'Capability-aware.',
         body: `${summary.included_sessions} matching sessions are included in all-session metrics, but ${tools.excluded_sessions} summary-only session${tools.excluded_sessions === 1 ? '' : 's'} are excluded from tool analytics.`,
       };
     }
 
     return {
-      tone: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
-      title: 'Analytics reflects session capability coverage.',
+      dot: 'bg-accent',
+      title: 'Reflects session capability coverage.',
       body: summary.note,
     };
   });
@@ -51,9 +51,9 @@
   <ActiveFilters />
 
   {#if banner}
-    <div class={`rounded-xl border px-4 py-3 text-sm ${banner.tone}`}>
-      <div class="font-medium">{banner.title}</div>
-      <p class="mt-1 text-xs text-gray-300">{banner.body}</p>
+    <div class="flex items-start gap-2 text-meta text-text-muted">
+      <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full {banner.dot}" aria-hidden="true"></span>
+      <p class="max-w-[80ch]"><span class="text-text">{banner.title}</span> {banner.body}</p>
     </div>
   {/if}
 
