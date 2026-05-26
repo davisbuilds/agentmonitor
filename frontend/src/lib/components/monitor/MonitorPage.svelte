@@ -94,11 +94,8 @@
     <AgentCards />
   </section>
 
-  <section>
+  <section class="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
     <CostDashboard onwindowchange={() => void loadAnalytics(getFilters())} />
-  </section>
-
-  <section>
     <ToolAnalytics />
   </section>
 </main>
