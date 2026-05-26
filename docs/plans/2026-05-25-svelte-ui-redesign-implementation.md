@@ -2,15 +2,20 @@
 date: 2026-05-25
 topic: svelte-ui-redesign
 stage: implementation-plan
-status: phases-1-4-complete
+status: phases-1-5-complete
 source: conversation
 ---
 
 ## Implementation Status
 
-As of 2026-05-26, **Phases 1–4 are complete and merged to `main`**. Phases 1–3
-merged via PR #18; Phase 4 (plus post-review follow-ups) merged via PR #19
-(merge commit `c0a2a37`). Phases 5–6 remain.
+As of 2026-05-26, **Phases 1–4 are complete and merged to `main`** (Phases 1–3
+via PR #18; Phase 4 + follow-ups via PR #19, merge commit `c0a2a37`).
+**Phase 5 is complete on branch `feat/ui-redesign-analytics-consolidation`**
+(Analytics/Usage/Insights consolidated into one tab with Overview/Usage/Insights
+sub-views, shared filter store + unified `#analytics?view=…` hash with legacy
+redirects, all three sub-view bodies migrated onto tokens incl. weighted bento
+summary cards and collapsed coverage banners). **Phase 6 remains** (Live tab,
+responsive/mobile, motion, final a11y/contrast sweep, ARCHITECTURE/ROADMAP docs).
 
 **Phase 4 follow-ups (PR #19, beyond the original plan)** — review/feedback fixes
 that shipped on the same branch:

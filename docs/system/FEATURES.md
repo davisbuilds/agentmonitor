@@ -63,12 +63,14 @@ Product-surface reference for AgentMonitor.
 
 ## Analytics
 
+> The Svelte app consolidates historical Analytics, Usage, and Insights into a **single `Analytics` tab** with **Overview / Usage / Insights** sub-views (SubTabs). A shared filter bar drives `date / project / agent` across all three sub-views; per-view specialized filters stay local (Usage: model/provider/tier; Insights: kind + authoring provider/model). Deep links use one `#analytics?view=…` hash; legacy `#usage` / `#insights` links redirect. The backend `/api/v2/analytics/*`, `/api/v2/usage/*`, and `/api/v2/insights/*` contracts are unchanged.
+
 - Historical analytics live under `/api/v2/analytics/*` and are intended for the canonical Svelte app.
 - Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
 - Tool analytics remain capability-aware and intentionally exclude sessions whose projection contract does not expose tool analytics.
 - Skill analytics now include explicit Claude `Skill` tool calls plus inferred Codex skill reads from `.../SKILL.md` commands captured through OTEL or Codex JSONL fallback.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
-- The Svelte `Analytics` tab now supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
+- The `Overview` sub-view supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
 
 ## Usage
 
@@ -81,14 +83,14 @@ Product-surface reference for AgentMonitor.
 - Usage tier feedback lives at `/api/v2/usage/tier-feedback`. It returns deterministic, evidence-bearing advisory findings for human review and does not auto-apply model or tier changes.
 - Stored `cost_usd` is authoritative for event cost. Cache hit rate and estimated cache savings are derived estimates from current pricing metadata and are coverage-limited when pricing is unknown.
 - Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
-- The Svelte `Usage` tab supports date ranges, project, agent, provider, tier, and model filters, session drill-in when transcript history exists, and CSV export.
+- The `Usage` sub-view supports the shared date/project/agent filters plus provider, tier, and model facets, session drill-in when transcript history exists, and CSV export.
 
 ## Insights
 
 - Historical insights live under `/api/v2/insights/*` and persist generated outputs rather than recalculating them on page load.
 - Each saved insight carries its generation scope: kind, date range, project filter, and agent filter.
 - Each saved insight also persists the analytics summary, usage summary, and both coverage contracts used to generate it.
-- The Svelte `Insights` tab supports date, project, agent, provider, model, and insight-kind targeting plus optional prompt steering.
+- The `Insights` sub-view supports the shared date/project/agent filters plus authoring provider/model and insight-kind targeting, with optional prompt steering.
 - New insight generation supports OpenAI, Anthropic, and Gemini providers with provider-specific API keys and model overrides.
 - The UI keeps scope and coverage visible so generated text is never detached from the underlying data limits.
 
