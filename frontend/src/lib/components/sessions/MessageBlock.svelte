@@ -1,11 +1,12 @@
 <script lang="ts">
   import type { Message, ContentBlock } from '../../api/client';
-  import { formatTimeOfDay } from '../../format';
+  import { formatTimeOfDay, agentDisplayName } from '../../format';
   import { parseSessionText } from '../../session-text';
   import { Badge } from '../ui';
 
   interface Props {
     message: Message;
+    agent?: string;
     highlighted?: boolean;
     pinned?: boolean;
     pinning?: boolean;
@@ -14,6 +15,7 @@
   }
   let {
     message,
+    agent = 'unknown',
     highlighted = false,
     pinned = false,
     pinning = false,
@@ -36,10 +38,22 @@
     toolExpanded = { ...toolExpanded, [id]: !toolExpanded[id] };
   }
 
-  const roleLabel = $derived(message.role === 'user' ? 'You' : 'Assistant');
-  // User = the one interactive accent; assistant = ok (matches the session drawer).
-  const roleColor = $derived(message.role === 'user' ? 'text-accent' : 'text-ok');
-  const borderColor = $derived(message.role === 'user' ? 'border-accent/30' : 'border-ok/30');
+  // Claude Code stores tool results under the `user` role. A user turn that is
+  // only tool_result blocks is the environment talking back to the model, not
+  // the human — surface it as "Tool", distinct from genuine "You" input.
+  const isToolResult = $derived(
+    message.role === 'user' && blocks.length > 0 && blocks.every((b) => b.type === 'tool_result'),
+  );
+  const roleLabel = $derived(
+    message.role === 'user' ? (isToolResult ? 'Tool' : 'You') : agentDisplayName(agent),
+  );
+  // You = the one interactive accent; assistant = ok; tool output = neutral.
+  const roleColor = $derived(
+    isToolResult ? 'text-text-muted' : message.role === 'user' ? 'text-accent' : 'text-ok',
+  );
+  const borderColor = $derived(
+    isToolResult ? 'border-line' : message.role === 'user' ? 'border-accent/30' : 'border-ok/30',
+  );
 
   function togglePin() {
     if (pinning) return;

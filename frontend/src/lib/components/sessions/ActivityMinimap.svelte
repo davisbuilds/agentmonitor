@@ -45,13 +45,11 @@
 </script>
 
 <section class="rounded-lg border border-line bg-surface p-3">
-  <div class="flex items-start justify-between gap-3">
-    <div>
-      <h3 class="text-meta font-semibold uppercase tracking-wide text-text-muted">Activity Map</h3>
-      <p class="mt-1 text-meta text-text-faint">Jump through long transcripts by bucket.</p>
-    </div>
+  <div>
+    <h3 class="text-meta font-semibold uppercase tracking-wide text-text-muted">Activity Map</h3>
+    <p class="mt-1 text-meta text-text-faint">Jump through long transcripts by bucket.</p>
     {#if activity}
-      <span class="text-meta text-text-faint">{basisLabel}</span>
+      <p class="mt-1 text-meta text-text-faint">{basisLabel}</p>
     {/if}
   </div>
 

@@ -412,6 +412,7 @@
             {#each messages as message (message.id)}
                 <MessageBlock
                   message={message}
+                  agent={session?.agent ?? 'unknown'}
                   highlighted={highlightedOrdinal === message.ordinal}
                   pinned={sessionPinnedOrdinals.includes(message.ordinal)}
                   pinning={pinMutationOrdinal === message.ordinal}

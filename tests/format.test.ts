@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   agentColor,
+  agentDisplayName,
   agentHexColor,
   formatCost,
   formatDuration,
@@ -51,6 +52,11 @@ test('format helpers compact numbers, costs, durations, agents, and statuses', (
   assert.equal(agentHexColor('claude'), 'var(--color-claude)');
   assert.equal(agentHexColor('codex'), 'var(--color-codex)');
   assert.equal(agentHexColor('other'), 'var(--color-accent)');
+
+  assert.equal(agentDisplayName('claude'), 'Claude');
+  assert.equal(agentDisplayName('claude_code'), 'Claude');
+  assert.equal(agentDisplayName('codex'), 'Codex');
+  assert.equal(agentDisplayName('other'), 'Assistant');
 
   assert.equal(statusColor('active'), 'bg-ok');
   assert.equal(statusColor('idle'), 'bg-warn');
