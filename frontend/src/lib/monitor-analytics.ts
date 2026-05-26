@@ -88,12 +88,25 @@ function isRealModel(model: string | undefined): model is string {
   return !!trimmed && trimmed !== '<synthetic>';
 }
 
+// Friendly name for the agent in the live label. Recognized agents get their
+// product name (claude_code → "Claude"); anything else falls back to the raw
+// type so unknown runtimes stay identifiable rather than collapsing to a label.
+function agentLabelName(agentType: string): string {
+  switch (agentType) {
+    case 'claude':
+    case 'claude_code': return 'Claude';
+    case 'codex': return 'Codex';
+    default: return agentType;
+  }
+}
+
 export function buildActiveAgentLabel(agentType: string, events: ActiveAgentLabelEvent[]): string {
+  const name = agentLabelName(agentType);
   const model = events.map(event => event.model?.trim()).find(isRealModel);
   const reasoningEffort = events.map(reasoningEffortFromEvent).find((value): value is string => value != null);
 
-  if (!model) return agentType;
+  if (!model) return name;
 
   const suffix = [cleanModelName(model), reasoningEffort].filter(Boolean).join(' ');
-  return `${agentType} (${suffix})`;
+  return `${name} (${suffix})`;
 }
