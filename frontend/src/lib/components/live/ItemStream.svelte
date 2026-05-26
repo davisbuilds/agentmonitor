@@ -175,7 +175,7 @@
     {:else}
       {#each items as item (item.id)}
         <button
-          class="w-full rounded-sm border px-3 py-3 text-left transition-colors {selectedItemId === item.id ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface hover:border-line-strong hover:bg-surface-2'}"
+          class="animate-row-enter w-full rounded-sm border px-3 py-3 text-left transition-colors {selectedItemId === item.id ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface hover:border-line-strong hover:bg-surface-2'}"
           onclick={() => onselect(item.id)}
         >
           <div class="flex items-start justify-between gap-3">
