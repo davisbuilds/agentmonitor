@@ -1,5 +1,13 @@
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable, Writable } from 'node:stream';
 import type { ProviderQuotaSnapshotInput } from '../db/queries.js';
+
+type CodexAppServerProcess = ChildProcessByStdio<Writable, Readable, Readable>;
+
+/** Test seam: lets tests inject a fake JSON-RPC peer without shelling out. */
+export interface FetchCodexQuotaOptions {
+  spawn?: () => CodexAppServerProcess;
+}
 
 interface JsonRpcResponse {
   id?: number;
@@ -38,15 +46,20 @@ function buildQuotaWindow(window: unknown): ProviderQuotaSnapshotInput['primary'
   };
 }
 
-export async function fetchCodexQuotaSnapshot(timeoutMs: number = 10_000): Promise<ProviderQuotaSnapshotInput> {
+export async function fetchCodexQuotaSnapshot(
+  timeoutMs: number = 10_000,
+  options: FetchCodexQuotaOptions = {},
+): Promise<ProviderQuotaSnapshotInput> {
   return await new Promise((resolve) => {
     let settled = false;
     let stdoutBuffer = '';
     let stderrBuffer = '';
     const responses = new Map<number, JsonRpcResponse>();
-    const child = spawn('codex', ['app-server', '--listen', 'stdio://'], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    const child = options.spawn
+      ? options.spawn()
+      : (spawn('codex', ['app-server', '--listen', 'stdio://'], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }) as CodexAppServerProcess);
 
     const finish = (snapshot: ProviderQuotaSnapshotInput): void => {
       if (settled) return;
@@ -142,9 +155,15 @@ export async function fetchCodexQuotaSnapshot(timeoutMs: number = 10_000): Promi
 
     child.on('exit', () => {
       if (settled) return;
-      const errorMessage = responses.get(3)?.error?.message
-        ?? stderrBuffer.trim()
-        ?? 'Codex app-server exited before returning quota data';
+      // `??` only catches null/undefined, not empty strings — and codex-cli ≥0.133.0
+      // exits silently (empty stderr) when stdin EOFs before responses are written.
+      // Fall through any empty fallbacks so the user gets an actionable message.
+      const rpcError = responses.get(3)?.error?.message?.trim();
+      const stderr = stderrBuffer.trim();
+      const errorMessage =
+        (rpcError && rpcError.length > 0 ? rpcError : null) ??
+        (stderr.length > 0 ? stderr : null) ??
+        'Codex app-server exited before returning quota data (check `codex --version` and that you are signed in).';
       finish({
         provider: 'codex',
         agent_type: 'codex',
@@ -158,6 +177,9 @@ export async function fetchCodexQuotaSnapshot(timeoutMs: number = 10_000): Promi
     child.stdin.write('{"method":"initialized"}\n');
     child.stdin.write('{"id":2,"method":"account/read","params":{}}\n');
     child.stdin.write('{"id":3,"method":"account/rateLimits/read","params":null}\n');
-    child.stdin.end();
+    // NOTE: do not call `child.stdin.end()` here. codex-cli ≥0.133.0 detects the
+    // stdin EOF before flushing responses and exits silently with empty output,
+    // which made the Monitor card show "unavailable" with no diagnostic. Cleanup
+    // happens via the `child.kill()` call inside `finish()`.
   });
 }
