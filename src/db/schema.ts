@@ -1,4 +1,20 @@
 import { getDb } from './connection.js';
+import {
+  TRACE_QUALITY_EXPORT_PROVIDERS,
+  TRACE_QUALITY_EXPORT_STATUSES,
+  TRACE_QUALITY_OBSERVATION_TYPES,
+  TRACE_QUALITY_PAYLOAD_POLICIES,
+  TRACE_QUALITY_PROJECTION_STATUSES,
+  TRACE_QUALITY_PROMPT_REF_SOURCES,
+  TRACE_QUALITY_SCORE_SOURCES,
+  TRACE_QUALITY_SCORE_TARGET_TYPES,
+  TRACE_QUALITY_SCORE_VALUE_TYPES,
+  TRACE_QUALITY_SOURCE_KINDS,
+} from '../trace-quality/constants.js';
+
+function sqlStringList(values: readonly string[]): string {
+  return values.map(value => `'${value.replaceAll("'", "''")}'`).join(', ');
+}
 
 export function initSchema(): void {
   const db = getDb();
@@ -445,6 +461,165 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_si_session_created_at ON session_items(session_id, created_at, id);
     CREATE INDEX IF NOT EXISTS idx_si_turn_ordinal ON session_items(turn_id, ordinal);
     CREATE INDEX IF NOT EXISTS idx_si_source_item_id ON session_items(source_item_id);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS trace_quality_traces (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      browsing_session_id TEXT,
+      source_trace_id TEXT,
+      agent_type TEXT NOT NULL,
+      name TEXT NOT NULL,
+      status TEXT,
+      project TEXT,
+      branch TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      duration_ms INTEGER,
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+      tags_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(tags_json)),
+      coverage_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(coverage_json)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tq_traces_session ON trace_quality_traces(session_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tq_traces_browsing_session ON trace_quality_traces(browsing_session_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tq_traces_started_at ON trace_quality_traces(started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tq_traces_agent_type ON trace_quality_traces(agent_type);
+    CREATE INDEX IF NOT EXISTS idx_tq_traces_source_trace_id ON trace_quality_traces(source_trace_id);
+
+    CREATE TABLE IF NOT EXISTS trace_quality_observations (
+      id TEXT PRIMARY KEY,
+      trace_id TEXT NOT NULL,
+      parent_observation_id TEXT,
+      session_id TEXT NOT NULL,
+      source_kind TEXT NOT NULL CHECK (source_kind IN (${sqlStringList(TRACE_QUALITY_SOURCE_KINDS)})),
+      source_id TEXT,
+      source_item_id TEXT,
+      observation_type TEXT NOT NULL CHECK (observation_type IN (${sqlStringList(TRACE_QUALITY_OBSERVATION_TYPES)})),
+      name TEXT NOT NULL,
+      status TEXT,
+      status_message TEXT,
+      severity TEXT,
+      model TEXT,
+      tool_name TEXT,
+      started_at TEXT,
+      ended_at TEXT,
+      duration_ms INTEGER,
+      tokens_in INTEGER NOT NULL DEFAULT 0,
+      tokens_out INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd REAL,
+      input_hash TEXT,
+      output_hash TEXT,
+      input_summary TEXT,
+      output_summary TEXT,
+      payload_policy TEXT NOT NULL DEFAULT 'summary_only' CHECK (payload_policy IN (${sqlStringList(TRACE_QUALITY_PAYLOAD_POLICIES)})),
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(trace_id) REFERENCES trace_quality_traces(id) ON DELETE CASCADE,
+      FOREIGN KEY(parent_observation_id) REFERENCES trace_quality_observations(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_trace ON trace_quality_observations(trace_id, started_at, id);
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_parent ON trace_quality_observations(parent_observation_id);
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_session ON trace_quality_observations(session_id, started_at);
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_source ON trace_quality_observations(source_kind, source_id);
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_type ON trace_quality_observations(observation_type);
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_model ON trace_quality_observations(model);
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_tool_name ON trace_quality_observations(tool_name);
+    CREATE INDEX IF NOT EXISTS idx_tq_observations_payload_policy ON trace_quality_observations(payload_policy);
+
+    CREATE TABLE IF NOT EXISTS trace_quality_scores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_type TEXT NOT NULL CHECK (target_type IN (${sqlStringList(TRACE_QUALITY_SCORE_TARGET_TYPES)})),
+      target_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      value_type TEXT NOT NULL CHECK (value_type IN (${sqlStringList(TRACE_QUALITY_SCORE_VALUE_TYPES)})),
+      numeric_value REAL,
+      categorical_value TEXT,
+      boolean_value INTEGER CHECK (boolean_value IS NULL OR boolean_value IN (0, 1)),
+      text_value TEXT,
+      source TEXT NOT NULL CHECK (source IN (${sqlStringList(TRACE_QUALITY_SCORE_SOURCES)})),
+      evaluator_name TEXT,
+      comment TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tq_scores_target ON trace_quality_scores(target_type, target_id);
+    CREATE INDEX IF NOT EXISTS idx_tq_scores_name ON trace_quality_scores(name, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tq_scores_source ON trace_quality_scores(source);
+
+    CREATE TABLE IF NOT EXISTS trace_quality_prompt_refs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      version TEXT,
+      label TEXT,
+      source TEXT NOT NULL CHECK (source IN (${sqlStringList(TRACE_QUALITY_PROMPT_REF_SOURCES)})),
+      content_hash TEXT,
+      file_path TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tq_prompt_refs_name_version ON trace_quality_prompt_refs(name, version);
+    CREATE INDEX IF NOT EXISTS idx_tq_prompt_refs_source ON trace_quality_prompt_refs(source);
+
+    CREATE TABLE IF NOT EXISTS trace_quality_observation_prompts (
+      observation_id TEXT NOT NULL,
+      prompt_ref_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (observation_id, prompt_ref_id),
+      FOREIGN KEY(observation_id) REFERENCES trace_quality_observations(id) ON DELETE CASCADE,
+      FOREIGN KEY(prompt_ref_id) REFERENCES trace_quality_prompt_refs(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tq_observation_prompts_prompt_ref ON trace_quality_observation_prompts(prompt_ref_id);
+
+    CREATE TABLE IF NOT EXISTS trace_quality_projection_state (
+      source_table TEXT NOT NULL,
+      source_id TEXT NOT NULL,
+      projection_version TEXT NOT NULL,
+      trace_id TEXT,
+      observation_id TEXT,
+      payload_hash TEXT,
+      status TEXT NOT NULL CHECK (status IN (${sqlStringList(TRACE_QUALITY_PROJECTION_STATUSES)})),
+      projected_at TEXT,
+      error_message TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (source_table, source_id, projection_version),
+      FOREIGN KEY(trace_id) REFERENCES trace_quality_traces(id) ON DELETE SET NULL,
+      FOREIGN KEY(observation_id) REFERENCES trace_quality_observations(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tq_projection_state_status ON trace_quality_projection_state(status);
+    CREATE INDEX IF NOT EXISTS idx_tq_projection_state_trace ON trace_quality_projection_state(trace_id);
+
+    CREATE TABLE IF NOT EXISTS trace_quality_export_state (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL CHECK (provider IN (${sqlStringList(TRACE_QUALITY_EXPORT_PROVIDERS)})),
+      local_trace_id TEXT NOT NULL,
+      local_observation_id TEXT,
+      external_trace_id TEXT,
+      external_observation_id TEXT,
+      payload_hash TEXT,
+      status TEXT NOT NULL CHECK (status IN (${sqlStringList(TRACE_QUALITY_EXPORT_STATUSES)})),
+      exported_at TEXT,
+      error_message TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(local_trace_id) REFERENCES trace_quality_traces(id) ON DELETE CASCADE,
+      FOREIGN KEY(local_observation_id) REFERENCES trace_quality_observations(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tq_export_provider_status ON trace_quality_export_state(provider, status, exported_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tq_export_local_trace ON trace_quality_export_state(local_trace_id);
+    CREATE INDEX IF NOT EXISTS idx_tq_export_local_observation ON trace_quality_export_state(local_observation_id);
+    CREATE INDEX IF NOT EXISTS idx_tq_export_external_trace ON trace_quality_export_state(provider, external_trace_id);
   `);
 
   // FTS5 full-text search on message content
