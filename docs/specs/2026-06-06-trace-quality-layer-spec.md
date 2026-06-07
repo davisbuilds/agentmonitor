@@ -12,11 +12,23 @@ source: conversation
 
 Add a local, Langfuse-inspired trace quality layer to AgentMonitor that turns existing agent sessions, events, live items, messages, and tool calls into an inspectable trace/observation graph with local scores, prompt/version attribution, quality dashboards, and alertable findings, while keeping AgentMonitor local-first and independent from Langfuse, Terraform, Prometheus, Grafana, or any hosted observability platform.
 
+## Decision Summary
+
+Build a local trace-quality model first. Langfuse is a reference model and optional export target, not AgentMonitor storage, UI, evaluator, prompt store, or runtime dependency.
+
+The public implementation pattern supports this direction:
+
+- Langflow stores native traces locally and can also send data to external tracing providers.
+- Dify keeps tracing provider-neutral and maps its internal trace contracts to optional provider packages, including Langfuse.
+- Flowise and Open WebUI expose Langfuse as optional analytics/middleware around their native workflows.
+- LlamaIndex delegates to a Langfuse callback handler, but that pattern is less applicable to AgentMonitor because AgentMonitor usually observes Claude Code and Codex after the fact instead of owning their execution graph.
+
 ## Scope
 
 ### In Scope
 
 - Add first-class local trace and observation concepts alongside the existing `sessions`, `events`, `browsing_sessions`, `messages`, `tool_calls`, `session_turns`, and `session_items` tables.
+- Keep the local trace-quality model provider-neutral. It can be inspired by Langfuse and OpenTelemetry, but the canonical source of truth remains AgentMonitor's SQLite data.
 - Preserve existing event ingest, usage, analytics, live, search, pins, and insights behavior.
 - Normalize existing Claude Code and Codex data into observation types inspired by Langfuse and OpenTelemetry GenAI conventions:
   - `event`
@@ -34,12 +46,13 @@ Add a local, Langfuse-inspired trace quality layer to AgentMonitor that turns ex
 - Add quality and anomaly APIs under `/api/v2/*`, with coverage metadata so partial telemetry is visible.
 - Add Svelte `/app/` UI surfaces for trace inspection, scoring, quality trends, and alertable findings.
 - Add deterministic backfill and repair scripts so historical data can be projected into the new model.
-- Add an optional, disabled-by-default Langfuse/OTLP export path after the local model is stable.
+- Add an optional, disabled-by-default Langfuse export adapter after the local model is stable.
 - Document semantics in system docs after implementation ships.
 
 ### Out Of Scope
 
 - Replacing AgentMonitor's local SQLite storage with Langfuse, ClickHouse, Postgres, Prometheus, Grafana, Loki, CloudWatch, or OpenSearch.
+- Using Langfuse Cloud or self-hosted Langfuse as the default dashboard, database, evaluator, prompt store, or required service.
 - Importing `reaatech/terraform-mcp-observability` infrastructure, Terraform modules, AWS Managed Prometheus, CloudWatch Logs, or EKS assumptions.
 - Making Langfuse a runtime dependency for core AgentMonitor features.
 - Auto-sending local prompts, reasoning, tool arguments, or transcripts to any external service.
@@ -63,21 +76,35 @@ Add a local, Langfuse-inspired trace quality layer to AgentMonitor that turns ex
 - Langfuse custom dashboards: `https://langfuse.com/docs/metrics/features/custom-dashboards`
 - Langfuse scores/evaluation concepts: `https://langfuse.com/docs/evaluation/core-concepts`
 - Langfuse prompt-to-trace linking: `https://langfuse.com/docs/prompt-management/features/link-to-traces`
-- Referenced observability taxonomy repo: `https://github.com/reaatech/terraform-mcp-observability`
+- Langflow native traces: `https://docs.langflow.org/traces`
+- Langflow Langfuse tracer: `https://github.com/langflow-ai/langflow/blob/main/src/backend/base/langflow/services/tracing/langfuse.py`
+- Dify trace provider architecture: `https://github.com/langgenius/dify/tree/main/api/providers/trace`
+- Dify Langfuse provider: `https://github.com/langgenius/dify/tree/main/api/providers/trace/trace-langfuse`
+- Flowise Langfuse analytics integration: `https://github.com/FlowiseAI/Flowise/tree/main/packages/components/nodes/analytic/LangFuse`
+- Open WebUI Langfuse pipeline: `https://github.com/open-webui/pipelines/blob/main/examples/filters/langfuse_filter_pipeline.py`
+- LobeChat Langfuse observability docs: `https://github.com/lobehub/lobe-chat/blob/main/docs/self-hosting/advanced/observability/langfuse.mdx`
+- Optional background only, not an implementation dependency: `https://github.com/reaatech/terraform-mcp-observability`
 
 ## Assumptions And Constraints
 
 - AgentMonitor remains a localhost, account-free product by default.
 - TypeScript/Express/SQLite remains the first implementation target.
 - The Svelte `/app/` frontend and `/api/v2/*` API are the canonical product surface.
+- The local trace-quality schema must remain provider-neutral. Provider-specific export ids and state belong in export-specific tables, not in the core trace/observation rows.
 - Existing `events.cost_usd` remains authoritative for event cost. The trace-quality layer may aggregate cost, but should not silently recompute stored costs.
-- Existing `events.metadata`, `session_items.payload_json`, and transcript content may contain sensitive local data. The new model must respect current live capture/redaction settings and should prefer summaries or hashes when full payload retention is not needed.
+- If trace-quality data is exported to Langfuse, stored `cost_usd` should be exported when available. Langfuse-inferred pricing must not silently override AgentMonitor's stored cost. When pricing is unknown, export token usage and mark pricing coverage as unknown.
+- Existing `events.metadata`, `session_items.payload_json`, and transcript content may contain sensitive local data. The new model must respect current live capture/redaction settings and should prefer summaries, hashes, or source references when full payload retention is not needed.
+- Raw prompts, reasoning, tool arguments, and transcript text should not be duplicated into trace-quality rows by default.
 - The trace-quality layer must not make Codex OTEL look more complete than it is. Current Codex OTEL is useful for prompts, tool decisions/results, and completion usage, but remains summary-oriented for full transcript reconstruction.
 - A local AgentMonitor session maps most closely to a Langfuse session. A local trace should represent one coherent unit of agent work inside that session, usually one user turn, one agent run, or one imported completion.
 - A local observation should represent one step inside a trace: an LLM generation, tool call, tool result, reasoning span, evaluator, guardrail, or discrete event.
 - Some historical data cannot be perfectly reconstructed. Projection code must record provenance and coverage instead of inventing parent-child structure.
 - Scores should be durable and local. LLM-as-judge can be layered later through explicit user action, but the first scoring system should support human scores, API scores, and deterministic code evaluator scores.
-- The optional Langfuse export path should export only data the user explicitly enables, should be easy to disable, and should make filtering explicit to avoid noisy or expensive traces.
+- The optional Langfuse export adapter should export only data the user explicitly enables, should be easy to disable, and should make filtering explicit to avoid noisy or expensive traces.
+- The first Langfuse export implementation must include a dry-run preview that reports exactly what would leave localhost, including counts of prompts, reasoning items, tool arguments, transcript text, traces, observations, scores, and dropped/redacted fields.
+- Langfuse export transport is a design decision, not pre-decided. Consider Langfuse batch ingestion for projected historical traces, OTLP for complete live/root-span traces, and SDK export only if it can use an isolated OpenTelemetry provider.
+- If using the Langfuse v3 SDK, do not attach it to the process-global OpenTelemetry provider. Use an isolated provider so unrelated Express, SQLite, watcher, or runtime spans are not exported.
+- If using OTLP export, emit complete trace roots. Filtering spans without roots can create incomplete traces in Langfuse.
 - If API response shapes change, update `README.md`, `docs/system/FEATURES.md`, and `docs/system/ARCHITECTURE.md` in the same implementation change.
 - For non-trivial UI implementation, run Playwright when available and include screenshots or test output in handoff.
 
@@ -87,7 +114,7 @@ Add a local, Langfuse-inspired trace quality layer to AgentMonitor that turns ex
 
 **Objective**
 
-Add backward-compatible SQLite tables and shared TypeScript types for traces, observations, scores, prompt references, and projection state.
+Add backward-compatible SQLite tables and shared TypeScript types for traces, observations, scores, prompt references, projection state, and provider export state.
 
 **Files**
 
@@ -132,6 +159,8 @@ None
    - `observation_type TEXT NOT NULL`
    - `name TEXT NOT NULL`
    - `status TEXT`
+   - `status_message TEXT`
+   - `severity TEXT`
    - `model TEXT`
    - `tool_name TEXT`
    - `started_at TEXT`
@@ -142,8 +171,11 @@ None
    - `cache_read_tokens INTEGER DEFAULT 0`
    - `cache_write_tokens INTEGER DEFAULT 0`
    - `cost_usd REAL`
+   - `input_hash TEXT`
+   - `output_hash TEXT`
    - `input_summary TEXT`
    - `output_summary TEXT`
+   - `payload_policy TEXT NOT NULL DEFAULT 'summary_only'`
    - `metadata_json TEXT NOT NULL DEFAULT '{}'`
    - `created_at TEXT NOT NULL DEFAULT (datetime('now'))`
 3. Add a `trace_quality_scores` table:
@@ -173,9 +205,22 @@ None
    - `created_at TEXT NOT NULL DEFAULT (datetime('now'))`
 5. Add a `trace_quality_observation_prompts` join table for many-to-many prompt attribution.
 6. Add a `trace_quality_projection_state` table keyed by source table and source id so projection/backfill is idempotent.
-7. Add indexes for trace/session lookup, observation tree lookup, observation type, model, tool name, score target, score name, and prompt name/version.
-8. Define TypeScript enums/unions for observation type, source kind, score target type, score value type, score source, and projection coverage.
-9. Keep table creation additive. Do not migrate or rewrite existing rows.
+7. Add a `trace_quality_export_state` table that tracks provider-specific export attempts without polluting local trace/observation rows:
+   - `id INTEGER PRIMARY KEY AUTOINCREMENT`
+   - `provider TEXT NOT NULL`
+   - `local_trace_id TEXT NOT NULL`
+   - `local_observation_id TEXT`
+   - `external_trace_id TEXT`
+   - `external_observation_id TEXT`
+   - `payload_hash TEXT`
+   - `status TEXT NOT NULL`
+   - `exported_at TEXT`
+   - `error_message TEXT`
+   - `metadata_json TEXT NOT NULL DEFAULT '{}'`
+   - `created_at TEXT NOT NULL DEFAULT (datetime('now'))`
+8. Add indexes for trace/session lookup, observation tree lookup, observation type, model, tool name, score target, score name, prompt name/version, and export provider/status lookup.
+9. Define TypeScript enums/unions for observation type, source kind, score target type, score value type, score source, projection coverage, payload policy, export provider, and export status.
+10. Keep table creation additive. Do not migrate or rewrite existing rows.
 
 **Verification**
 
@@ -188,7 +233,7 @@ None
 
 - Fresh and existing databases initialize without destructive migration.
 - Invalid enum values are rejected or normalized before persistence.
-- The schema can represent nested observations, scores, prompt refs, and projection provenance.
+- The schema can represent nested observations, scores, prompt refs, projection provenance, privacy/payload policy, and provider export state.
 
 ### Task 2: Build Projection Mappers For Existing Sources
 
@@ -240,17 +285,26 @@ Task 1
    - `source_id`
    - `source_item_id`
    - source capability/fidelity metadata
-5. Populate `coverage_json` on each trace:
+5. Populate privacy and payload fields on each observation:
+   - `payload_policy`: `summary_only`, `hash_only`, `source_ref`, or `raw_allowed`
+   - `input_summary` / `output_summary` for safe display text
+   - `input_hash` / `output_hash` when raw payloads are unavailable, redacted, or intentionally not duplicated
+   - `status_message` and `severity` for errors, rate limits, warnings, and low-fidelity observations
+6. Populate `coverage_json` on each trace:
    - `has_full_transcript`
    - `has_tool_details`
    - `has_token_usage`
    - `has_cost`
    - `has_parent_child_structure`
+   - `has_raw_input`
+   - `has_raw_output`
+   - `has_reasoning`
+   - `has_prompt_refs`
    - `projection_source`
    - `projection_confidence`
-6. Add deterministic ids from source identity and projection version so repeated projection is idempotent.
-7. Add unit fixtures for Claude full-fidelity JSONL, Codex OTEL summary rows, Codex imported session rows, and generic API events.
-8. Keep projection pure where possible so tests can validate mapping without touching SQLite.
+7. Add deterministic ids from source identity and projection version so repeated projection is idempotent.
+8. Add unit fixtures for Claude full-fidelity JSONL, Codex OTEL summary rows, Codex imported session rows, and generic API events.
+9. Keep projection pure where possible so tests can validate mapping without touching SQLite.
 
 **Verification**
 
@@ -263,6 +317,7 @@ Task 1
 
 - Projection can run repeatedly without duplicate traces or observations.
 - Codex summary-only telemetry remains visibly summary-only.
+- Raw-content availability is explicit and cannot be inferred from observation type alone.
 - Existing event-derived usage metrics are unchanged.
 
 ### Task 3: Add Incremental Projection And Backfill Commands
@@ -571,11 +626,11 @@ Task 6
 - Findings provide evidence and next inspection targets.
 - Threshold behavior is deterministic and documented.
 
-### Task 8: Build Svelte Trace Quality UI
+### Task 8: Build Svelte Trace Explorer UI
 
 **Objective**
 
-Expose trace quality inspection in the canonical Svelte app with a trace list, trace tree, score controls, prompt rollups, and quality findings.
+Expose the local trace-quality model in the canonical Svelte app with a trace list, trace tree, coverage indicators, selected-observation inspector, and local score controls. This is the UI proof point for the local model before building broader dashboards or external export.
 
 **Files**
 
@@ -586,8 +641,7 @@ Expose trace quality inspection in the canonical Svelte app with a trace list, t
 - Create: `frontend/src/lib/components/trace-quality/TraceQualityPage.svelte`
 - Create: `frontend/src/lib/components/trace-quality/TraceTree.svelte`
 - Create: `frontend/src/lib/components/trace-quality/ScoreEditor.svelte`
-- Create: `frontend/src/lib/components/trace-quality/QualityFindings.svelte`
-- Create: `frontend/src/lib/components/trace-quality/PromptRollups.svelte`
+- Create: `frontend/src/lib/components/trace-quality/TraceCoverageBadge.svelte`
 - Create: `frontend/src/lib/stores/trace-quality.svelte.ts`
 - Test: add or extend frontend component/store tests if this repo has a local pattern available
 - Reference: `docs/system/DESIGN.md`
@@ -595,13 +649,13 @@ Expose trace quality inspection in the canonical Svelte app with a trace list, t
 
 **Dependencies**
 
-Task 7
+Tasks 4 and 5
 
 **Implementation Steps**
 
 1. Add typed client helpers for the new `/api/v2/trace-quality/*` endpoints.
 2. Add a `trace-quality` store that handles filters, loading states, errors, selected trace, selected observation, and score editing.
-3. Add a Quality sub-view under the consolidated Analytics tab unless product review chooses a separate top-level tab.
+3. Add a Quality sub-view under the consolidated Analytics tab unless product review chooses a separate top-level tab. The first version should center on trace inspection, not dashboard rollups.
 4. Add trace drill-in links from:
    - Usage top sessions
    - Analytics top sessions
@@ -627,9 +681,10 @@ Task 7
    - numeric score
    - categorical label
    - text note
-8. Add quality findings cards with severity, evidence, and links into trace/session detail.
-9. Follow the Instrument Console design language: dense, utilitarian, no marketing hero, no nested cards.
-10. Keep mobile readable, but continue the repo's laptop-first product stance.
+8. Render safe summaries and hashes/source references according to each observation's `payload_policy`; do not imply raw content is available when it is not.
+9. Defer prompt rollup dashboards and quality finding cards to Task 9.
+10. Follow the Instrument Console design language: dense, utilitarian, no marketing hero, no nested cards.
+11. Keep mobile readable, but continue the repo's laptop-first product stance.
 
 **Verification**
 
@@ -638,8 +693,8 @@ Task 7
 - Run: `pnpm build`
 - Expect: full backend and frontend build passes.
 - Run: `pnpm exec playwright test`
-- Expect: canonical app navigation and trace-quality workflows pass. If no dedicated trace-quality tests exist yet, add a smoke test for loading the Quality view and opening a seeded trace.
-- Manual check: open `/app/`, inspect Analytics Quality view, open a trace, add/remove a score, verify no overlapping text or unstable layout at desktop and narrow widths.
+- Expect: canonical app navigation and trace-explorer workflows pass. If no dedicated trace-quality tests exist yet, add a smoke test for loading the Quality view and opening a seeded trace.
+- Manual check: open `/app/`, inspect Analytics Quality view, open a trace, expand/collapse observations, add/remove a score, verify no overlapping text or unstable layout at desktop and narrow widths.
 
 **Done When**
 
@@ -647,11 +702,58 @@ Task 7
 - The UI makes partial telemetry clear.
 - Existing Monitor, Live, Sessions, Search, Usage, and Insights views still work.
 
-### Task 9: Add Optional Langfuse OTLP Export
+### Task 9: Build Svelte Quality Dashboards UI
 
 **Objective**
 
-Provide a disabled-by-default export path that can send selected local trace-quality data to a Langfuse OTLP endpoint for users who explicitly want external Langfuse analysis.
+Layer prompt rollups, score trends, and quality findings onto the trace explorer after the local trace model and basic UI are proven.
+
+**Files**
+
+- Modify: `frontend/src/lib/api/client.ts`
+- Modify: `frontend/src/lib/components/trace-quality/TraceQualityPage.svelte`
+- Create: `frontend/src/lib/components/trace-quality/QualityFindings.svelte`
+- Create: `frontend/src/lib/components/trace-quality/PromptRollups.svelte`
+- Create: `frontend/src/lib/components/trace-quality/ScoreTrends.svelte`
+- Modify: `frontend/src/lib/stores/trace-quality.svelte.ts`
+- Test: add or extend frontend component/store tests if this repo has a local pattern available
+- Reference: `docs/system/DESIGN.md`
+- Reference: `frontend/src/app.css`
+
+**Dependencies**
+
+Tasks 6, 7, and 8
+
+**Implementation Steps**
+
+1. Add UI client/store support for prompt rollups, score summaries, and quality findings.
+2. Add prompt rollups by version with generation count, duration, cost, token usage, score coverage, and last seen.
+3. Add score trend panels by date, model, tool, prompt, and agent where the backend has enough coverage.
+4. Add quality finding cards with severity, evidence, coverage caveats, and links into trace/session detail.
+5. Make coverage visible in every aggregate panel so sparse scores or missing token/cost data do not look authoritative.
+6. Keep dashboards local and read-only. Do not add notification, paging, blocking, or remote evaluation controls.
+
+**Verification**
+
+- Run: `pnpm frontend:check`
+- Expect: Svelte and frontend TypeScript checks pass.
+- Run: `pnpm build`
+- Expect: full backend and frontend build passes.
+- Run: `pnpm exec playwright test`
+- Expect: Quality dashboard smoke coverage passes, including opening a finding and navigating to the linked trace.
+- Manual check: open `/app/`, inspect prompt rollups, score trends, and findings at desktop and narrow widths.
+
+**Done When**
+
+- Operators can move from aggregate quality findings or prompt rollups into concrete traces.
+- Dashboard panels disclose coverage and avoid false precision.
+- Existing trace explorer workflows still work.
+
+### Task 10: Add Optional Langfuse Export Adapter
+
+**Objective**
+
+Provide a disabled-by-default export adapter that can send selected local trace-quality data to Langfuse for users who explicitly want external Langfuse analysis. The adapter must remain optional, manual-first, redaction-aware, and transport-neutral until implementation chooses the safest path.
 
 **Files**
 
@@ -664,37 +766,56 @@ Provide a disabled-by-default export path that can send selected local trace-qua
 
 **Dependencies**
 
-Task 8
+Task 8. Task 9 is useful for operator workflow polish but must not be required for export.
 
 **Implementation Steps**
 
 1. Add config flags:
    - `AGENTMONITOR_LANGFUSE_EXPORT_ENABLED=false`
+   - `AGENTMONITOR_LANGFUSE_EXPORT_TRANSPORT=ingestion_api|otlp|sdk`
+   - `AGENTMONITOR_LANGFUSE_ENDPOINT`
    - `AGENTMONITOR_LANGFUSE_OTLP_ENDPOINT`
    - `AGENTMONITOR_LANGFUSE_PUBLIC_KEY`
    - `AGENTMONITOR_LANGFUSE_SECRET_KEY`
    - `AGENTMONITOR_LANGFUSE_EXPORT_INCLUDE_PROMPTS=false`
    - `AGENTMONITOR_LANGFUSE_EXPORT_INCLUDE_REASONING=false`
    - `AGENTMONITOR_LANGFUSE_EXPORT_INCLUDE_TOOL_ARGUMENTS=false`
+   - `AGENTMONITOR_LANGFUSE_EXPORT_INCLUDE_TRANSCRIPTS=false`
 2. Keep export manual at first through `scripts/export-langfuse-traces.ts`. Do not auto-export during ingest in the first pass.
-3. Convert local traces and observations into OTLP spans with Langfuse-compatible attributes:
+3. Add an explicit transport decision gate before implementation:
+   - Prefer Langfuse ingestion API for deterministic export of projected historical traces.
+   - Prefer OTLP only when AgentMonitor can emit complete root spans and child spans without creating incomplete traces.
+   - Use the Langfuse SDK only if it can be configured with an isolated OpenTelemetry provider and cannot export unrelated process spans.
+4. Convert local traces and observations into the chosen Langfuse representation:
    - trace/session identifiers
    - observation type
+   - parent observation ids
    - model
    - token usage
    - cost
    - prompt reference metadata
    - score metadata where safe
-4. Apply explicit filtering so only LLM-relevant observations are exported.
-5. Apply redaction settings before serialization.
-6. Add `--dry-run` output that shows counts and field inclusion without sending network requests.
-7. Add test coverage using a local fake HTTP server. Do not require real Langfuse credentials in tests.
-8. Document that this is optional, user-triggered, and externalizes local telemetry.
+   - coverage metadata
+5. Apply explicit filtering so only LLM-relevant observations are exported.
+6. Apply redaction settings and each observation's `payload_policy` before serialization.
+7. Add `--dry-run` output that shows counts and field inclusion without sending network requests:
+   - traces
+   - observations by type
+   - scores
+   - prompt refs
+   - prompt bodies
+   - reasoning payloads
+   - tool arguments
+   - transcript text
+   - dropped/redacted fields
+8. Write `trace_quality_export_state` rows for successful exports and failed attempts, keyed by provider, local ids, external ids, payload hash, and status.
+9. Add test coverage using a local fake HTTP server. Do not require real Langfuse credentials in tests.
+10. Document that this is optional, user-triggered, and externalizes local telemetry.
 
 **Verification**
 
 - Run: `node --import tsx --test tests/trace-quality-langfuse-export.test.ts`
-- Expect: dry-run sends no requests, export sends expected OTLP payload to fake server, redaction flags remove prompt/reasoning/tool-argument payloads.
+- Expect: dry-run sends no requests, export sends expected payload to fake server, redaction flags remove prompt/reasoning/tool-argument/transcript payloads, export state is recorded, and SDK/OTLP tests do not require global OpenTelemetry side effects.
 - Run: `pnpm lint`
 - Expect: no new lint errors.
 - Run: `pnpm build`
@@ -706,7 +827,7 @@ Task 8
 - Export is explicit, reversible, and redaction-aware.
 - Tests never require external network or real credentials.
 
-### Task 10: Update System Docs, Roadmap, And Release Notes
+### Task 11: Update System Docs, Roadmap, And Release Notes
 
 **Objective**
 
@@ -724,7 +845,7 @@ Document shipped semantics after implementation so future agents do not confuse 
 
 **Dependencies**
 
-Tasks 1 through 9 as applicable
+Tasks 1 through 10 as applicable
 
 **Implementation Steps**
 
