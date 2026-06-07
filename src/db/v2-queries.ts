@@ -7,6 +7,7 @@ import type {
   LiveTurnRow,
   LiveItemRow,
   MessageRow,
+  ToolCallRow,
   SessionActivity,
   SessionActivityBucket,
   PinnedMessageRow,
@@ -324,6 +325,41 @@ export function getSessionItems(sessionId: string, params: LiveItemsListParams =
   }
 
   return { data, total, cursor };
+}
+
+export interface TraceQualitySessionSourceRows {
+  browsingSession: BrowsingSessionDbRow | undefined;
+  turns: LiveTurnRow[];
+  sessionItems: LiveItemRow[];
+  messages: MessageRow[];
+  toolCalls: ToolCallRow[];
+}
+
+export function getTraceQualitySessionSourceRows(sessionId: string): TraceQualitySessionSourceRows {
+  const db = getDb();
+  const browsingSession = db.prepare(
+    'SELECT * FROM browsing_sessions WHERE id = ?'
+  ).get(sessionId) as BrowsingSessionDbRow | undefined;
+  const turns = db.prepare(
+    'SELECT * FROM session_turns WHERE session_id = ? ORDER BY COALESCE(started_at, created_at), id'
+  ).all(sessionId) as LiveTurnRow[];
+  const sessionItems = db.prepare(
+    'SELECT * FROM session_items WHERE session_id = ? ORDER BY ordinal, id'
+  ).all(sessionId) as LiveItemRow[];
+  const messages = db.prepare(
+    'SELECT * FROM messages WHERE session_id = ? ORDER BY ordinal, id'
+  ).all(sessionId) as MessageRow[];
+  const toolCalls = db.prepare(
+    'SELECT * FROM tool_calls WHERE session_id = ? ORDER BY id'
+  ).all(sessionId) as ToolCallRow[];
+
+  return {
+    browsingSession,
+    turns,
+    sessionItems,
+    messages,
+    toolCalls,
+  };
 }
 
 // --- Messages ---
