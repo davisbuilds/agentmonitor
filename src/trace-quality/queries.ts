@@ -11,6 +11,9 @@ import type {
   TraceQualityReadCoverage,
   TraceQualityScore,
   TraceQualityScoreCoverage,
+  TraceQualityScoreRollup,
+  TraceQualityScoreRollupDimension,
+  TraceQualityScoreRollups,
   TraceQualityScoreListParams,
   TraceQualityScoreSummary,
   TraceQualityTrace,
@@ -60,6 +63,26 @@ interface ScoreSummarySqlRow {
 interface CategoryCountSqlRow {
   name: string;
   value_type: string;
+  categorical_value: string;
+  c: number;
+}
+
+interface ScoreRollupSqlRow {
+  key: string;
+  label: string | null;
+  score_count: number;
+  numeric_score_count: number | null;
+  numeric_avg: number | null;
+  boolean_true: number | null;
+  boolean_false: number | null;
+  trace_count: number;
+  observation_count: number;
+  first_score_at: string | null;
+  last_score_at: string | null;
+}
+
+interface ScoreRollupCategorySqlRow {
+  key: string;
   categorical_value: string;
   c: number;
 }
@@ -135,13 +158,34 @@ function traceScoreTargetSql(): string {
         ELSE NULL
       END AS resolved_trace_id,
       CASE
+        WHEN s.target_type = 'session' THEN s.target_id
+        WHEN s.target_type = 'trace' THEN st.session_id
+        WHEN s.target_type = 'observation' THEN so.session_id
+        WHEN s.target_type = 'event' THEN se.session_id
+        WHEN s.target_type = 'message' THEN sm.session_id
+        WHEN s.target_type = 'session_item' THEN si.session_id
+        ELSE NULL
+      END AS resolved_session_id,
+      CASE
         WHEN s.target_type = 'observation' THEN s.target_id
         ELSE NULL
       END AS resolved_observation_id
     FROM trace_quality_scores s
+    LEFT JOIN trace_quality_traces st
+      ON s.target_type = 'trace'
+     AND s.target_id = st.id
     LEFT JOIN trace_quality_observations so
       ON s.target_type = 'observation'
      AND s.target_id = so.id
+    LEFT JOIN events se
+      ON s.target_type = 'event'
+     AND (s.target_id = CAST(se.id AS TEXT) OR s.target_id = se.event_id)
+    LEFT JOIN messages sm
+      ON s.target_type = 'message'
+     AND s.target_id = CAST(sm.id AS TEXT)
+    LEFT JOIN session_items si
+      ON s.target_type = 'session_item'
+     AND (s.target_id = CAST(si.id AS TEXT) OR s.target_id = si.source_item_id)
   `;
 }
 
@@ -191,9 +235,22 @@ function appendScoreExistsFilter(conditions: string[], values: unknown[], params
       LEFT JOIN trace_quality_observations fso
         ON fs.target_type = 'observation'
        AND fs.target_id = fso.id
+      LEFT JOIN events fse
+        ON fs.target_type = 'event'
+       AND (fs.target_id = CAST(fse.id AS TEXT) OR fs.target_id = fse.event_id)
+      LEFT JOIN messages fsm
+        ON fs.target_type = 'message'
+       AND fs.target_id = CAST(fsm.id AS TEXT)
+      LEFT JOIN session_items fsi
+        ON fs.target_type = 'session_item'
+       AND (fs.target_id = CAST(fsi.id AS TEXT) OR fs.target_id = fsi.source_item_id)
       WHERE (
           (fs.target_type = 'trace' AND fs.target_id = t.id)
           OR (fs.target_type = 'observation' AND fso.trace_id = t.id)
+          OR (fs.target_type = 'session' AND fs.target_id = t.session_id)
+          OR (fs.target_type = 'event' AND fse.session_id = t.session_id)
+          OR (fs.target_type = 'message' AND fsm.session_id = t.session_id)
+          OR (fs.target_type = 'session_item' AND fsi.session_id = t.session_id)
         )
         AND ${scoreConditions.join(' AND ')}
     )
@@ -596,6 +653,277 @@ export function getTraceQualityScoreSummary(params: TraceQualityTraceListParams 
   };
 }
 
+function buildScoreValueFilter(alias: string, params: TraceQualityTraceListParams): { sql: string; values: unknown[] } {
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  if (params.score_name) {
+    conditions.push(`${alias}.name = ?`);
+    values.push(params.score_name);
+  }
+  if (params.min_score != null) {
+    conditions.push(`${alias}.numeric_value >= ?`);
+    values.push(params.min_score);
+  }
+  if (params.max_score != null) {
+    conditions.push(`${alias}.numeric_value <= ?`);
+    values.push(params.max_score);
+  }
+  return {
+    sql: conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '',
+    values,
+  };
+}
+
+function scoreRollupBaseCte(params: TraceQualityTraceListParams, includeSessionScopedScores: boolean): { sql: string; values: unknown[] } {
+  const selection = includedTraceSelection(params);
+  const traceScoreFilter = buildScoreValueFilter('s', params);
+  const sessionScopedScoreFilter = buildScoreValueFilter('ss', params);
+  const sessionScopedScoreUnion = includeSessionScopedScores
+    ? `
+      UNION ALL
+      SELECT
+        ss.id,
+        ss.name,
+        ss.value_type,
+        ss.numeric_value,
+        ss.categorical_value,
+        ss.boolean_value,
+        ss.created_at,
+        ro.trace_id,
+        rt.name AS trace_name,
+        CASE
+          WHEN ss.target_type = 'session' THEN ss.target_id
+          WHEN ss.target_type = 'event' THEN se.session_id
+          WHEN ss.target_type = 'message' THEN sm.session_id
+          WHEN ss.target_type = 'session_item' THEN si.session_id
+          ELSE NULL
+        END AS session_id,
+        ro.id AS observation_id,
+        COALESCE(ro.model, se.model) AS model,
+        COALESCE(ro.tool_name, se.tool_name) AS tool_name
+      FROM trace_quality_scores ss
+      LEFT JOIN events se
+        ON ss.target_type = 'event'
+       AND (ss.target_id = CAST(se.id AS TEXT) OR ss.target_id = se.event_id)
+      LEFT JOIN messages sm
+        ON ss.target_type = 'message'
+       AND ss.target_id = CAST(sm.id AS TEXT)
+      LEFT JOIN session_items si
+        ON ss.target_type = 'session_item'
+       AND (ss.target_id = CAST(si.id AS TEXT) OR ss.target_id = si.source_item_id)
+      LEFT JOIN trace_quality_observations ro
+        ON (ss.target_type = 'event'
+            AND ro.source_kind = 'event'
+            AND (ro.source_id = CAST(se.id AS TEXT) OR ro.source_item_id = se.event_id))
+        OR (ss.target_type = 'message'
+            AND ro.source_kind = 'message'
+            AND ro.source_id = CAST(sm.id AS TEXT))
+        OR (ss.target_type = 'session_item'
+            AND ro.source_kind = 'session_item'
+            AND (ro.source_id = CAST(si.id AS TEXT) OR ro.source_item_id = si.source_item_id))
+      LEFT JOIN trace_quality_traces rt ON rt.id = ro.trace_id
+      WHERE (
+          (
+            ss.target_type = 'session'
+            AND ss.target_id IN (SELECT session_id FROM selected_sessions)
+          )
+          OR (
+            ss.target_type = 'event'
+            AND se.session_id IN (SELECT session_id FROM selected_sessions)
+          )
+          OR (
+            ss.target_type = 'message'
+            AND sm.session_id IN (SELECT session_id FROM selected_sessions)
+          )
+          OR (
+            ss.target_type = 'session_item'
+            AND si.session_id IN (SELECT session_id FROM selected_sessions)
+          )
+        )
+        ${sessionScopedScoreFilter.sql}
+    `
+    : '';
+
+  return {
+    sql: `
+      WITH selected_traces AS (${selection.sql}),
+      selected_sessions AS (
+        SELECT DISTINCT session_id
+        FROM trace_quality_traces
+        WHERE id IN (SELECT id FROM selected_traces)
+      ),
+      score_base AS (
+        SELECT
+          s.id,
+          s.name,
+          s.value_type,
+          s.numeric_value,
+          s.categorical_value,
+          s.boolean_value,
+          s.created_at,
+          t.id AS trace_id,
+          t.name AS trace_name,
+          t.session_id,
+          o.id AS observation_id,
+          o.model,
+          o.tool_name
+        FROM trace_quality_scores s
+        LEFT JOIN trace_quality_observations o
+          ON s.target_type = 'observation'
+         AND s.target_id = o.id
+        JOIN trace_quality_traces t
+          ON (s.target_type = 'trace' AND s.target_id = t.id)
+          OR (s.target_type = 'observation' AND o.trace_id = t.id)
+        WHERE t.id IN (SELECT id FROM selected_traces)
+          ${traceScoreFilter.sql}
+        ${sessionScopedScoreUnion}
+      )
+    `,
+    values: [
+      ...selection.values,
+      ...traceScoreFilter.values,
+      ...(includeSessionScopedScores ? sessionScopedScoreFilter.values : []),
+    ],
+  };
+}
+
+function scoreRollupAggregateSelect(
+  dimension: TraceQualityScoreRollupDimension,
+  keyExpression: string,
+  labelExpression: string,
+  baseAlias = '',
+): string {
+  const prefix = baseAlias ? `${baseAlias}.` : '';
+  return `
+    SELECT
+      '${dimension}' AS dimension,
+      ${keyExpression} AS key,
+      ${labelExpression} AS label,
+      COUNT(*) AS score_count,
+      COALESCE(SUM(CASE WHEN ${prefix}numeric_value IS NOT NULL THEN 1 ELSE 0 END), 0) AS numeric_score_count,
+      AVG(${prefix}numeric_value) AS numeric_avg,
+      COALESCE(SUM(CASE WHEN ${prefix}boolean_value = 1 THEN 1 ELSE 0 END), 0) AS boolean_true,
+      COALESCE(SUM(CASE WHEN ${prefix}boolean_value = 0 THEN 1 ELSE 0 END), 0) AS boolean_false,
+      COUNT(DISTINCT ${prefix}trace_id) AS trace_count,
+      COUNT(DISTINCT ${prefix}observation_id) AS observation_count,
+      MIN(${prefix}created_at) AS first_score_at,
+      MAX(${prefix}created_at) AS last_score_at
+  `;
+}
+
+function mapScoreRollups(
+  dimension: TraceQualityScoreRollupDimension,
+  rows: ScoreRollupSqlRow[],
+  categoryRows: ScoreRollupCategorySqlRow[],
+): TraceQualityScoreRollup[] {
+  const categoryCounts = new Map<string, Record<string, number>>();
+  for (const row of categoryRows) {
+    const counts = categoryCounts.get(row.key) ?? {};
+    counts[row.categorical_value] = row.c;
+    categoryCounts.set(row.key, counts);
+  }
+
+  return rows.map(row => ({
+    dimension,
+    key: row.key,
+    label: row.label,
+    score_count: row.score_count,
+    numeric_score_count: row.numeric_score_count ?? 0,
+    numeric_avg: row.numeric_avg,
+    boolean_true: row.boolean_true ?? 0,
+    boolean_false: row.boolean_false ?? 0,
+    categorical_values: categoryCounts.get(row.key) ?? {},
+    trace_count: row.trace_count,
+    observation_count: row.observation_count,
+    first_score_at: row.first_score_at,
+    last_score_at: row.last_score_at,
+  }));
+}
+
+function getSimpleScoreRollups(
+  dimension: Exclude<TraceQualityScoreRollupDimension, 'prompt'>,
+  params: TraceQualityTraceListParams,
+  keyExpression: string,
+  labelExpression: string,
+  whereExpression: string,
+  includeSessionScores: boolean,
+): TraceQualityScoreRollup[] {
+  const db = getDb();
+  const base = scoreRollupBaseCte(params, includeSessionScores);
+  const rows = db.prepare(`
+    ${base.sql}
+    ${scoreRollupAggregateSelect(dimension, keyExpression, labelExpression)}
+    FROM score_base
+    WHERE ${whereExpression}
+    GROUP BY key
+    ORDER BY score_count DESC, key
+    LIMIT 100
+  `).all(...base.values) as ScoreRollupSqlRow[];
+
+  const categoryRows = db.prepare(`
+    ${base.sql}
+    SELECT
+      ${keyExpression} AS key,
+      categorical_value,
+      COUNT(*) AS c
+    FROM score_base
+    WHERE ${whereExpression}
+      AND categorical_value IS NOT NULL
+    GROUP BY key, categorical_value
+    ORDER BY key, categorical_value
+  `).all(...base.values) as ScoreRollupCategorySqlRow[];
+
+  return mapScoreRollups(dimension, rows, categoryRows);
+}
+
+function getPromptScoreRollups(params: TraceQualityTraceListParams): TraceQualityScoreRollup[] {
+  const db = getDb();
+  const base = scoreRollupBaseCte(params, true);
+  const rows = db.prepare(`
+    ${base.sql}
+    ${scoreRollupAggregateSelect('prompt', "CAST(pr.id AS TEXT)", "pr.name || COALESCE('@' || pr.version, '')", 'score_base')}
+    FROM score_base
+    JOIN trace_quality_observation_prompts op ON op.observation_id = score_base.observation_id
+    JOIN trace_quality_prompt_refs pr ON pr.id = op.prompt_ref_id
+    GROUP BY pr.id
+    ORDER BY score_count DESC, pr.name, pr.version, pr.id
+    LIMIT 100
+  `).all(...base.values) as ScoreRollupSqlRow[];
+
+  const categoryRows = db.prepare(`
+    ${base.sql}
+    SELECT
+      CAST(pr.id AS TEXT) AS key,
+      score_base.categorical_value,
+      COUNT(*) AS c
+    FROM score_base
+    JOIN trace_quality_observation_prompts op ON op.observation_id = score_base.observation_id
+    JOIN trace_quality_prompt_refs pr ON pr.id = op.prompt_ref_id
+    WHERE score_base.categorical_value IS NOT NULL
+    GROUP BY pr.id, score_base.categorical_value
+    ORDER BY pr.id, score_base.categorical_value
+  `).all(...base.values) as ScoreRollupCategorySqlRow[];
+
+  return mapScoreRollups('prompt', rows, categoryRows);
+}
+
+export function getTraceQualityScoreRollups(params: TraceQualityTraceListParams = {}): {
+  data: TraceQualityScoreRollups;
+  coverage: TraceQualityReadCoverage;
+} {
+  return {
+    data: {
+      trace: getSimpleScoreRollups('trace', params, 'trace_id', 'MAX(trace_name)', 'trace_id IS NOT NULL', true),
+      session: getSimpleScoreRollups('session', params, 'session_id', 'session_id', 'session_id IS NOT NULL', true),
+      model: getSimpleScoreRollups('model', params, 'model', 'model', 'model IS NOT NULL', true),
+      tool: getSimpleScoreRollups('tool', params, 'tool_name', 'tool_name', 'tool_name IS NOT NULL', true),
+      prompt: getPromptScoreRollups(params),
+      day: getSimpleScoreRollups('day', params, "substr(created_at, 1, 10)", "substr(created_at, 1, 10)", 'created_at IS NOT NULL', true),
+    },
+    coverage: getTraceQualityCoverage(params),
+  };
+}
+
 function getScoreSummaryForTrace(traceId: string): TraceQualityScoreSummary[] {
   const db = getDb();
   const rows = db.prepare(`
@@ -760,13 +1088,35 @@ export function getTraceQualityObservation(id: string): {
   };
 }
 
+function hasScoreTraceFilter(params: TraceQualityScoreListParams): boolean {
+  return Boolean(
+    params.project
+    || params.agent
+    || params.status
+    || params.observation_type
+    || params.model
+    || params.tool
+    || params.tool_name
+    || params.exclude_low_coverage,
+  );
+}
+
 function buildScoreWhere(params: TraceQualityScoreListParams): { where: string; values: unknown[] } {
-  const conditions = ['resolved_trace_id IS NOT NULL'];
+  const conditions = ['1 = 1'];
   const values: unknown[] = [];
 
   if (params.trace_id) {
-    conditions.push('resolved_trace_id = ?');
-    values.push(params.trace_id);
+    conditions.push(`
+      (
+        resolved_trace_id = ?
+        OR resolved_session_id = (
+          SELECT session_id
+          FROM trace_quality_traces
+          WHERE id = ?
+        )
+      )
+    `);
+    values.push(params.trace_id, params.trace_id);
   }
   if (params.observation_id) {
     conditions.push("target_type = 'observation' AND target_id = ?");
@@ -808,9 +1158,20 @@ function buildScoreWhere(params: TraceQualityScoreListParams): { where: string; 
     tool_name: params.tool_name,
     exclude_low_coverage: params.exclude_low_coverage,
   };
-  const selection = includedTraceSelection(traceFilters);
-  conditions.push(`resolved_trace_id IN (${selection.sql})`);
-  values.push(...selection.values);
+  if (hasScoreTraceFilter(params)) {
+    const selection = includedTraceSelection(traceFilters);
+    conditions.push(`
+      (
+        resolved_trace_id IN (${selection.sql})
+        OR resolved_session_id IN (
+          SELECT session_id
+          FROM trace_quality_traces
+          WHERE id IN (${selection.sql})
+        )
+      )
+    `);
+    values.push(...selection.values, ...selection.values);
+  }
 
   return { where: `WHERE ${conditions.join(' AND ')}`, values };
 }

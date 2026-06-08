@@ -88,9 +88,10 @@ Product-surface reference for AgentMonitor.
 
 ## Trace Quality
 
-- Local trace-quality reads live under `/api/v2/trace-quality/*` and are isolated from legacy monitor endpoints.
+- Local trace-quality APIs live under `/api/v2/trace-quality/*` and are isolated from legacy monitor endpoints.
 - Trace lists support date, project, agent, status, observation type, model, tool, score, and low-coverage filters with deterministic pagination.
 - Trace detail exposes parsed metadata, coverage, aggregate token/cost/duration totals, prompt attribution, and score summaries.
+- Local human/API review scores can be created, updated, and deleted without mutating source event or session rows.
 - Observation APIs expose both flat deterministic ordering and nested parent/child trees.
 - Score, prompt, and findings endpoints provide local review rollups for future evaluation workflows.
 - Aggregate trace-quality responses include coverage metadata so the UI can disclose matching traces, included traces, low-coverage exclusions, usage-bearing observations, missing-usage observations, and score coverage.
@@ -164,7 +165,11 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/trace-quality/traces/:id/observations` | GET | Flat and nested observation data for a trace |
 | `/api/v2/trace-quality/observations/:id` | GET | Observation detail with prompt refs and local scores |
 | `/api/v2/trace-quality/scores` | GET | Local trace-quality scores with filters and coverage |
+| `/api/v2/trace-quality/scores` | POST | Create a local human/API/code-evaluator/LLM-judge score after validating target and value shape |
+| `/api/v2/trace-quality/scores/:id` | PATCH | Update a local trace-quality score and clear stale value columns when value type changes |
+| `/api/v2/trace-quality/scores/:id` | DELETE | Delete a local trace-quality score |
 | `/api/v2/trace-quality/score-summary` | GET | Score rollups grouped by score name and value type |
+| `/api/v2/trace-quality/score-rollups` | GET | Score rollups grouped by trace, session, model, tool, prompt, and day |
 | `/api/v2/trace-quality/prompts` | GET | Prompt-version attribution rollups |
 | `/api/v2/trace-quality/findings` | GET | Derived trace-quality findings for review |
 | `/api/v2/insights` | GET | List persisted insights for the current historical slice |

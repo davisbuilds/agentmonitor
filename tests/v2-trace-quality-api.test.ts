@@ -25,6 +25,23 @@ async function getJson<T>(pathName: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function sendJson<T>(
+  method: 'POST' | 'PATCH' | 'DELETE',
+  pathName: string,
+  payload?: unknown,
+): Promise<{ status: number; body: T }> {
+  const response = await fetch(`${baseUrl}${pathName}`, {
+    method,
+    headers: payload === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: payload === undefined ? undefined : JSON.stringify(payload),
+  });
+  const text = await response.text();
+  return {
+    status: response.status,
+    body: (text ? JSON.parse(text) : {}) as T,
+  };
+}
+
 function seedTraceQualityData(): void {
   const db = getDb();
 
@@ -362,4 +379,223 @@ test('scores, score summaries, prompts, and findings return stable rollups', asy
     ['low_coverage', 'warning', 'trace-low', null],
   ]);
   assert.equal(findings.coverage.matching_traces, 2);
+});
+
+test('score rollups group local scores by trace, session, model, tool, prompt, and day', async () => {
+  const db = getDb();
+  const promptId = (db.prepare('SELECT id FROM trace_quality_prompt_refs WHERE name = ?')
+    .get('agentmonitor-system') as { id: number }).id;
+  db.prepare(`
+    INSERT INTO trace_quality_scores (
+      target_type, target_id, name, value_type, numeric_value, source, evaluator_name, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'observation',
+    'obs-root',
+    'helpfulness',
+    'numeric',
+    0.77,
+    'human',
+    'reviewer',
+    '{}',
+    '2026-06-07T12:00:00Z',
+  );
+
+  const helpfulness = await getJson<{
+    data: {
+      trace: Array<{ key: string; label: string | null; score_count: number; numeric_avg: number | null; observation_count: number }>;
+      session: Array<{ key: string; score_count: number }>;
+      model: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+      prompt: Array<{ key: string; label: string | null; score_count: number; numeric_avg: number | null }>;
+      day: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+    };
+    coverage: { score_coverage: { total_scores: number } };
+  }>('/api/v2/trace-quality/score-rollups?score_name=helpfulness');
+
+  assert.deepEqual(helpfulness.data.trace.map(row => [row.key, row.label, row.score_count, row.numeric_avg, row.observation_count]), [
+    ['trace-high', 'High quality trace', 1, 0.77, 1],
+  ]);
+  assert.deepEqual(helpfulness.data.session.map(row => [row.key, row.score_count]), [
+    ['session-high', 1],
+  ]);
+  assert.deepEqual(helpfulness.data.model.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['gpt-5', 1, 0.77],
+  ]);
+  assert.deepEqual(helpfulness.data.prompt.map(row => [row.key, row.label, row.score_count, row.numeric_avg]), [
+    [String(promptId), 'agentmonitor-system@2026-06-07', 1, 0.77],
+  ]);
+  assert.deepEqual(helpfulness.data.day.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['2026-06-07', 1, 0.77],
+  ]);
+  assert.equal(helpfulness.coverage.score_coverage.total_scores, 4);
+
+  const tool = await getJson<{ data: { tool: Array<{ key: string; score_count: number; boolean_true: number }> } }>(
+    '/api/v2/trace-quality/score-rollups?score_name=tool_error',
+  );
+  assert.deepEqual(tool.data.tool.map(row => [row.key, row.score_count, row.boolean_true]), [
+    ['Read', 1, 1],
+  ]);
+
+  db.prepare(`
+    INSERT INTO events (
+      id, event_id, session_id, agent_type, event_type, status,
+      created_at, client_timestamp, metadata, model, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    100,
+    'evt-source-100',
+    'session-high',
+    'codex',
+    'llm_response',
+    'success',
+    '2026-06-07T10:00:10Z',
+    '2026-06-07T10:00:10Z',
+    '{}',
+    'gpt-5',
+    'api',
+  );
+  db.prepare(`
+    INSERT INTO messages (id, session_id, ordinal, role, content, timestamp, content_length)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(200, 'session-high', 0, 'user', 'Review this trace', '2026-06-07T10:00:00Z', 17);
+  db.prepare(`
+    INSERT INTO session_items (
+      id, session_id, ordinal, source_item_id, kind, status, payload_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    101,
+    'session-high',
+    1,
+    'toolu-1',
+    'tool_call',
+    'error',
+    '{"tool_name":"Read"}',
+    '2026-06-07T10:00:31Z',
+  );
+  db.prepare(`
+    INSERT INTO trace_quality_scores (
+      target_type, target_id, name, value_type, numeric_value, source, evaluator_name, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?),
+      (?, ?, ?, ?, ?, ?, ?, ?, ?),
+      (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'event', '100', 'source_target_review', 'numeric', 0.61, 'human', 'reviewer', '{}', '2026-06-07T12:10:00Z',
+    'message', '200', 'source_target_review', 'numeric', 0.62, 'human', 'reviewer', '{}', '2026-06-07T12:11:00Z',
+    'session_item', '101', 'source_target_review', 'numeric', 0.63, 'human', 'reviewer', '{}', '2026-06-07T12:12:00Z',
+  );
+
+  const sourceTargets = await getJson<{
+    data: {
+      trace: Array<{ key: string; score_count: number; numeric_avg: number | null; observation_count: number }>;
+      session: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+      model: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+      tool: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+      prompt: Array<{ key: string; label: string | null; score_count: number; numeric_avg: number | null }>;
+      day: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+    };
+  }>('/api/v2/trace-quality/score-rollups?score_name=source_target_review');
+  assert.deepEqual(sourceTargets.data.trace.map(row => [row.key, row.score_count, row.numeric_avg, row.observation_count]), [
+    ['trace-high', 2, 0.62, 2],
+  ]);
+  assert.deepEqual(sourceTargets.data.session.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['session-high', 3, 0.62],
+  ]);
+  assert.deepEqual(sourceTargets.data.model.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['gpt-5', 1, 0.61],
+  ]);
+  assert.deepEqual(sourceTargets.data.tool.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['Read', 1, 0.63],
+  ]);
+  assert.deepEqual(sourceTargets.data.prompt.map(row => [row.key, row.label, row.score_count, row.numeric_avg]), [
+    [String(promptId), 'agentmonitor-system@2026-06-07', 1, 0.61],
+  ]);
+  assert.deepEqual(sourceTargets.data.day.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['2026-06-07', 3, 0.62],
+  ]);
+});
+
+test('score write endpoints create, patch, delete, and validate local review scores', async () => {
+  const created = await sendJson<{ score: { id: number; target_type: string; target_id: string; name: string; value: number; metadata: Record<string, unknown> } }>(
+    'POST',
+    '/api/v2/trace-quality/scores',
+    {
+      target_type: 'trace',
+      target_id: 'trace-high',
+      name: 'helpfulness',
+      value_type: 'numeric',
+      value: 0.88,
+      source: 'human',
+      evaluator_name: 'reviewer',
+      comment: 'Useful trace',
+      metadata: { rubric: 'manual' },
+    },
+  );
+
+  assert.equal(created.status, 201);
+  assert.equal(created.body.score.target_type, 'trace');
+  assert.equal(created.body.score.target_id, 'trace-high');
+  assert.equal(created.body.score.name, 'helpfulness');
+  assert.equal(created.body.score.value, 0.88);
+  assert.deepEqual(created.body.score.metadata, { rubric: 'manual' });
+
+  const patched = await sendJson<{ score: { id: number; value_type: string; value: boolean; numeric_value: number | null; boolean_value: number | null } }>(
+    'PATCH',
+    `/api/v2/trace-quality/scores/${created.body.score.id}`,
+    {
+      value_type: 'boolean',
+      value: false,
+      comment: 'Changed to pass/fail review',
+    },
+  );
+  assert.equal(patched.status, 200);
+  assert.equal(patched.body.score.value_type, 'boolean');
+  assert.equal(patched.body.score.value, false);
+  assert.equal(patched.body.score.numeric_value, null);
+  assert.equal(patched.body.score.boolean_value, 0);
+
+  const invalid = await sendJson<{ error: string }>('POST', '/api/v2/trace-quality/scores', {
+    target_type: 'trace',
+    target_id: 'missing-trace',
+    name: 'quality',
+    value_type: 'numeric',
+    value: 0.5,
+    source: 'human',
+  });
+  assert.equal(invalid.status, 400);
+  assert.match(invalid.body.error, /Score target not found/);
+
+  const deleted = await sendJson<{ deleted: true }>('DELETE', `/api/v2/trace-quality/scores/${created.body.score.id}`);
+  assert.equal(deleted.status, 200);
+  assert.deepEqual(deleted.body, { deleted: true });
+
+  const missingDelete = await sendJson<{ error: string }>('DELETE', `/api/v2/trace-quality/scores/${created.body.score.id}`);
+  assert.equal(missingDelete.status, 404);
+  assert.match(missingDelete.body.error, /Score not found/);
+
+  const sessionScore = await sendJson<{ score: { id: number; target_type: string; target_id: string; value: boolean } }>(
+    'POST',
+    '/api/v2/trace-quality/scores',
+    {
+      target_type: 'session',
+      target_id: 'session-high',
+      name: 'reviewed',
+      value_type: 'boolean',
+      value: true,
+      source: 'human',
+    },
+  );
+  assert.equal(sessionScore.status, 201);
+
+  const traceScopedScores = await getJson<{
+    data: Array<{ id: number; target_type: string; target_id: string; name: string; value: boolean | number | string | null }>;
+  }>('/api/v2/trace-quality/scores?trace_id=trace-high');
+  assert.ok(
+    traceScopedScores.data.some(score =>
+      score.id === sessionScore.body.score.id
+      && score.target_type === 'session'
+      && score.target_id === 'session-high'
+      && score.name === 'reviewed'
+      && score.value === true
+    ),
+  );
 });
