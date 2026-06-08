@@ -8,6 +8,7 @@ import { parseCodexSessionMessages } from '../parser/codex-sessions.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
+import { safelyProjectTraceQualityForSession } from '../trace-quality/service.js';
 
 // --- File hashing ---
 
@@ -99,6 +100,7 @@ export function syncSessionFileDetailed(
     // Insert parsed data
     insertParsedSession(db, parsed, filePath, stat.size, fileHash);
     const live = syncClaudeLiveSession(db, parsed);
+    safelyProjectTraceQualityForSession(sessionId, 'claude session sync');
 
     // Update watched_files
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
@@ -176,6 +178,7 @@ export function syncCodexSessionFileDetailed(
 
     insertParsedSession(db, parsed, filePath, stat.size, fileHash);
     const live = syncCodexLiveSession(db, parsed);
+    safelyProjectTraceQualityForSession(sessionId, 'codex session sync');
 
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
 

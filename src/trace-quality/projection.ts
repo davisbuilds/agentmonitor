@@ -8,7 +8,7 @@ import type {
   TraceQualityTraceRow,
 } from './types.js';
 
-const TRACE_QUALITY_PROJECTION_VERSION = 'trace-quality:v1';
+export const TRACE_QUALITY_PROJECTION_VERSION = 'trace-quality:v1';
 
 export interface EventProjectionSource {
   id: number;
