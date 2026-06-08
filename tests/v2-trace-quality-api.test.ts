@@ -361,11 +361,37 @@ test('scores, score summaries, prompts, and findings return stable rollups', asy
   assert.equal(summary.coverage.included_traces, 2);
 
   const prompts = await getJson<{
-    data: Array<{ name: string; version: string | null; observation_count: number; trace_count: number }>;
+    data: Array<{
+      name: string;
+      version: string | null;
+      observation_count: number;
+      trace_count: number;
+      generation_count: number;
+      median_duration_ms: number | null;
+      total_cost_usd: number;
+      total_tokens_in: number;
+      total_tokens_out: number;
+      score_count: number;
+      median_numeric_score: number | null;
+      last_seen: string | null;
+    }>;
     coverage: { included_traces: number };
   }>('/api/v2/trace-quality/prompts');
-  assert.deepEqual(prompts.data.map(prompt => [prompt.name, prompt.version, prompt.observation_count, prompt.trace_count]), [
-    ['agentmonitor-system', '2026-06-07', 1, 1],
+  assert.deepEqual(prompts.data.map(prompt => [
+    prompt.name,
+    prompt.version,
+    prompt.observation_count,
+    prompt.trace_count,
+    prompt.generation_count,
+    prompt.median_duration_ms,
+    prompt.total_cost_usd,
+    prompt.total_tokens_in,
+    prompt.total_tokens_out,
+    prompt.score_count,
+    prompt.median_numeric_score,
+    prompt.last_seen,
+  ]), [
+    ['agentmonitor-system', '2026-06-07', 1, 1, 1, 20000, 0.25, 100, 50, 2, 0.92, '2026-06-07T10:00:10Z'],
   ]);
   assert.equal(prompts.coverage.included_traces, 2);
 

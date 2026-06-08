@@ -835,6 +835,14 @@ export interface TraceQualityObservationTreeNode extends TraceQualityObservation
 }
 
 export interface TraceQualityPromptRollup extends TraceQualityPromptRef {
+  generation_count: number;
+  median_duration_ms: number | null;
+  total_cost_usd: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  score_count: number;
+  median_numeric_score: number | null;
+  last_seen: string | null;
   latest_observation_at: string | null;
 }
 

@@ -477,6 +477,40 @@ describe('POST /api/otel/v1/logs', () => {
     assert.equal(meta.exit_code, 0);
     assert.equal(meta.output, 'total 42');
   });
+
+  test('preserves prompt reference attributes as metadata without raw prompt capture', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [
+        { key: 'gen_ai.session.id', value: { stringValue: 'sess-prompt-ref' } },
+      ],
+      logRecords: [{
+        eventName: 'claude_code.api_request',
+        body: { stringValue: '{}' },
+        attributes: [
+          { key: 'gen_ai.request.model', value: { stringValue: 'claude-sonnet-4-20250514' } },
+          { key: 'prompt.name', value: { stringValue: 'agentmonitor-system' } },
+          { key: 'prompt.version', value: { stringValue: '2026-06-08' } },
+          { key: 'prompt.label', value: { stringValue: 'prod' } },
+          { key: 'prompt.hash', value: { stringValue: 'prompt-hash' } },
+          { key: 'prompt.source', value: { stringValue: 'system_prompt' } },
+        ],
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+
+    const meta = JSON.parse(events.events[0].metadata as string) as Record<string, unknown>;
+    assert.equal(meta.prompt_name, 'agentmonitor-system');
+    assert.equal(meta.prompt_version, '2026-06-08');
+    assert.equal(meta.prompt_label, 'prod');
+    assert.equal(meta.prompt_hash, 'prompt-hash');
+    assert.equal(meta.prompt_source, 'system_prompt');
+    assert.equal(meta.prompt, undefined);
+  });
 });
 
 // ─── Metrics endpoint tests ────────────────────────────────────────────

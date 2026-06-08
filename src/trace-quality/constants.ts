@@ -50,12 +50,17 @@ export const TRACE_QUALITY_SCORE_SOURCES = [
 ] as const;
 
 export const TRACE_QUALITY_PROMPT_REF_SOURCES = [
+  'metadata',
+  'skill_file',
+  'agent_instruction',
+  'task_template',
+  'system_prompt',
+  'manual',
+  // Legacy values kept readable for existing local databases and seeded rows.
   'file',
   'inline',
   'skill',
-  'agent_instruction',
   'template',
-  'metadata',
 ] as const;
 
 export const TRACE_QUALITY_PAYLOAD_POLICIES = [

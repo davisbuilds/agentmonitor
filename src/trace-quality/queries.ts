@@ -48,6 +48,20 @@ interface PromptRefSqlRow extends TraceQualityPromptRefRow {
   latest_observation_at?: string | null;
 }
 
+interface PromptRollupSqlRow extends PromptRefSqlRow {
+  generation_count: number | null;
+  total_cost_usd: number | null;
+  total_tokens_in: number | null;
+  total_tokens_out: number | null;
+  duration_values: string | null;
+}
+
+interface PromptScoreMetricSqlRow {
+  prompt_ref_id: number;
+  score_id: number;
+  numeric_value: number | null;
+}
+
 interface ScoreSummarySqlRow {
   name: string;
   value_type: string;
@@ -125,6 +139,31 @@ function normalizedLimit(limit: number | undefined, fallback: number, max: numbe
 function normalizedOffset(offset: number | undefined): number {
   if (offset == null || !Number.isFinite(offset)) return 0;
   return Math.max(Math.trunc(offset), 0);
+}
+
+function placeholders(values: readonly unknown[]): string {
+  return values.map(() => '?').join(', ');
+}
+
+function median(values: readonly number[]): number | null {
+  const sorted = values
+    .filter(value => Number.isFinite(value))
+    .sort((left, right) => left - right);
+  if (sorted.length === 0) return null;
+
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid] ?? null;
+  const left = sorted[mid - 1];
+  const right = sorted[mid];
+  return left == null || right == null ? null : (left + right) / 2;
+}
+
+function parseNumberList(value: string | null | undefined): number[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map(entry => Number(entry))
+    .filter(entry => Number.isFinite(entry));
 }
 
 function addDaysToDateString(date: string, days: number): string | null {
@@ -1243,6 +1282,11 @@ export function listTraceQualityPrompts(params: TraceQualityTraceListParams = {}
       pr.*,
       COUNT(DISTINCT op.observation_id) AS observation_count,
       COUNT(DISTINCT o.trace_id) AS trace_count,
+      COUNT(DISTINCT CASE WHEN o.observation_type = 'generation' THEN o.id END) AS generation_count,
+      COALESCE(SUM(COALESCE(o.cost_usd, 0)), 0) AS total_cost_usd,
+      COALESCE(SUM(COALESCE(o.tokens_in, 0)), 0) AS total_tokens_in,
+      COALESCE(SUM(COALESCE(o.tokens_out, 0)), 0) AS total_tokens_out,
+      GROUP_CONCAT(CASE WHEN o.duration_ms IS NOT NULL THEN o.duration_ms END) AS duration_values,
       MAX(COALESCE(o.started_at, o.created_at)) AS latest_observation_at
     FROM trace_quality_prompt_refs pr
     JOIN trace_quality_observation_prompts op ON op.prompt_ref_id = pr.id
@@ -1251,11 +1295,72 @@ export function listTraceQualityPrompts(params: TraceQualityTraceListParams = {}
     GROUP BY pr.id
     ORDER BY pr.name, pr.version, pr.id
     LIMIT ? OFFSET ?
-  `).all(...selection.values, limit, offset) as PromptRefSqlRow[];
+  `).all(...selection.values, limit, offset) as PromptRollupSqlRow[];
+
+  const promptIds = rows.map(row => row.id);
+  const scoreMetrics = new Map<number, { scoreCount: number; medianNumericScore: number | null }>();
+  if (promptIds.length > 0) {
+    const base = scoreRollupBaseCte(params, true);
+    const scoreRows = db.prepare(`
+      ${base.sql}
+      SELECT
+        prompt_scores.prompt_ref_id,
+        prompt_scores.score_id,
+        prompt_scores.numeric_value
+      FROM (
+        SELECT DISTINCT
+          pr.id AS prompt_ref_id,
+          score_base.id AS score_id,
+          score_base.numeric_value
+        FROM score_base
+        JOIN trace_quality_observation_prompts op
+          ON op.observation_id = score_base.observation_id
+          OR (score_base.observation_id IS NULL AND score_base.trace_id IS NOT NULL)
+        JOIN trace_quality_observations o
+          ON o.id = op.observation_id
+        JOIN trace_quality_prompt_refs pr
+          ON pr.id = op.prompt_ref_id
+        WHERE pr.id IN (${placeholders(promptIds)})
+          AND (
+            score_base.observation_id = o.id
+            OR (score_base.observation_id IS NULL AND score_base.trace_id = o.trace_id)
+          )
+      ) prompt_scores
+      ORDER BY prompt_scores.prompt_ref_id, prompt_scores.score_id
+    `).all(...base.values, ...promptIds) as PromptScoreMetricSqlRow[];
+
+    const scoreIdsByPrompt = new Map<number, Set<number>>();
+    const numericScoresByPrompt = new Map<number, number[]>();
+    for (const row of scoreRows) {
+      const scoreIds = scoreIdsByPrompt.get(row.prompt_ref_id) ?? new Set<number>();
+      scoreIds.add(row.score_id);
+      scoreIdsByPrompt.set(row.prompt_ref_id, scoreIds);
+      if (row.numeric_value != null) {
+        const values = numericScoresByPrompt.get(row.prompt_ref_id) ?? [];
+        values.push(row.numeric_value);
+        numericScoresByPrompt.set(row.prompt_ref_id, values);
+      }
+    }
+
+    for (const promptId of promptIds) {
+      scoreMetrics.set(promptId, {
+        scoreCount: scoreIdsByPrompt.get(promptId)?.size ?? 0,
+        medianNumericScore: median(numericScoresByPrompt.get(promptId) ?? []),
+      });
+    }
+  }
 
   return {
     data: rows.map(row => ({
       ...mapPromptRef(row),
+      generation_count: row.generation_count ?? 0,
+      median_duration_ms: median(parseNumberList(row.duration_values)),
+      total_cost_usd: row.total_cost_usd ?? 0,
+      total_tokens_in: row.total_tokens_in ?? 0,
+      total_tokens_out: row.total_tokens_out ?? 0,
+      score_count: scoreMetrics.get(row.id)?.scoreCount ?? 0,
+      median_numeric_score: scoreMetrics.get(row.id)?.medianNumericScore ?? null,
+      last_seen: row.latest_observation_at ?? null,
       latest_observation_at: row.latest_observation_at ?? null,
     })),
     total,

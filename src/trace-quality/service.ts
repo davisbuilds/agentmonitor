@@ -11,6 +11,7 @@ import {
   type TraceQualityProjectionInput,
   type TraceQualityProjectionResult,
 } from './projection.js';
+import type { ProjectedTraceQualityPromptRef } from './prompts.js';
 
 export type TraceQualitySourceRef =
   | { kind: 'event'; eventId: number }
@@ -129,6 +130,7 @@ function projectedPayloadHash(projection: TraceQualityProjectionResult): string 
     version: TRACE_QUALITY_PROJECTION_VERSION,
     traces: projection.traces,
     observations: projection.observations,
+    observationPrompts: projection.observationPrompts,
   });
 }
 
@@ -291,6 +293,65 @@ function insertObservation(db: Database.Database, observation: ProjectedTraceQua
     observation.payload_policy,
     observation.metadata_json,
   );
+}
+
+function promptRefByStableTuple(db: Database.Database, promptRef: ProjectedTraceQualityPromptRef): { id: number } | undefined {
+  return db.prepare(`
+    SELECT id
+    FROM trace_quality_prompt_refs
+    WHERE name = ?
+      AND source = ?
+      AND (version = ? OR (version IS NULL AND ? IS NULL))
+      AND (content_hash = ? OR (content_hash IS NULL AND ? IS NULL))
+      AND (file_path = ? OR (file_path IS NULL AND ? IS NULL))
+    ORDER BY id
+    LIMIT 1
+  `).get(
+    promptRef.name,
+    promptRef.source,
+    promptRef.version,
+    promptRef.version,
+    promptRef.content_hash,
+    promptRef.content_hash,
+    promptRef.file_path,
+    promptRef.file_path,
+  ) as { id: number } | undefined;
+}
+
+function upsertPromptRef(db: Database.Database, promptRef: ProjectedTraceQualityPromptRef): number {
+  const existing = promptRefByStableTuple(db, promptRef);
+  if (existing) {
+    db.prepare(`
+      UPDATE trace_quality_prompt_refs
+      SET label = ?, metadata_json = ?
+      WHERE id = ?
+    `).run(promptRef.label, promptRef.metadata_json, existing.id);
+    return existing.id;
+  }
+
+  return Number(db.prepare(`
+    INSERT INTO trace_quality_prompt_refs (
+      name, version, label, source, content_hash, file_path, metadata_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    promptRef.name,
+    promptRef.version,
+    promptRef.label,
+    promptRef.source,
+    promptRef.content_hash,
+    promptRef.file_path,
+    promptRef.metadata_json,
+  ).lastInsertRowid);
+}
+
+function insertObservationPromptLinks(db: Database.Database, projection: TraceQualityProjectionResult): void {
+  for (const link of projection.observationPrompts) {
+    const promptRefId = upsertPromptRef(db, link.prompt_ref);
+    db.prepare(`
+      INSERT OR IGNORE INTO trace_quality_observation_prompts (observation_id, prompt_ref_id)
+      VALUES (?, ?)
+    `).run(link.observation_id, promptRefId);
+  }
 }
 
 function upsertProjectionState(db: Database.Database, input: {
@@ -466,6 +527,7 @@ function projectTraceQualityForSource(
     for (const observation of projected.projection.observations) {
       insertObservation(db, observation);
     }
+    insertObservationPromptLinks(db, projected.projection);
     writeProjectionStateRows(db, projected.scope, projected.projection, payloadHash);
   });
 
