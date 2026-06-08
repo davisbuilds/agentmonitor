@@ -23,13 +23,14 @@ let monitorDate = '';
 let monitorSince = '';
 let monitorUntil = '';
 
-function sqliteUtc(timestampMs: number): string {
-  return new Date(timestampMs).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
+function sqliteDateTime(date: string, time: string): string {
+  return `${date} ${time}`;
 }
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-monitor-queries-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
+  process.env.AGENTMONITOR_SESSION_TIMEOUT = '1000000';
 
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');
@@ -43,17 +44,16 @@ before(async () => {
   initSchema();
 
   const db = getDb();
-  const now = Date.now();
-  monitorDate = new Date(now).toISOString().slice(0, 10);
+  monitorDate = new Date().toISOString().slice(0, 10);
   monitorSince = `${monitorDate}T00:00:00Z`;
   monitorUntil = `${monitorDate}T23:59:59Z`;
-  const monitorAStartedAt = new Date(now - 120_000).toISOString();
-  const monitorALastEventAt = new Date(now - 30_000).toISOString();
-  const monitorBStartedAt = new Date(now - 90_000).toISOString();
-  const monitorBLastEventAt = new Date(now - 45_000).toISOString();
-  const event1CreatedAt = sqliteUtc(now - 100_000);
-  const event2CreatedAt = sqliteUtc(now - 80_000);
-  const event3CreatedAt = sqliteUtc(now - 70_000);
+  const monitorAStartedAt = `${monitorDate}T12:00:00Z`;
+  const monitorALastEventAt = `${monitorDate}T12:10:00Z`;
+  const monitorBStartedAt = `${monitorDate}T13:00:00Z`;
+  const monitorBLastEventAt = `${monitorDate}T13:10:00Z`;
+  const event1CreatedAt = sqliteDateTime(monitorDate, '12:01:00');
+  const event2CreatedAt = sqliteDateTime(monitorDate, '12:02:00');
+  const event3CreatedAt = sqliteDateTime(monitorDate, '13:02:00');
 
   db.exec(`
     INSERT INTO agents (id, agent_type, name) VALUES
