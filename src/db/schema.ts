@@ -43,6 +43,10 @@ function ensureTraceQualityPromptRefSourceCheck(): void {
     return;
   }
 
+  // foreign_keys MUST be OFF for the rebuild: trace_quality_observation_prompts (and
+  // export_state) hold ON DELETE CASCADE refs to this table, so DROP TABLE with enforcement
+  // on would implicitly delete-all and cascade-wipe every existing link row. Preserving ids
+  // via INSERT...SELECT keeps those refs valid once enforcement is restored.
   const foreignKeys = Number(db.pragma('foreign_keys', { simple: true }));
   db.pragma('foreign_keys = OFF');
   try {

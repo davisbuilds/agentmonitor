@@ -1301,33 +1301,41 @@ export function listTraceQualityPrompts(params: TraceQualityTraceListParams = {}
   const scoreMetrics = new Map<number, { scoreCount: number; medianNumericScore: number | null }>();
   if (promptIds.length > 0) {
     const base = scoreRollupBaseCte(params, true);
+    // Two disjoint branches (split on observation_id IS NULL) keep both joins as
+    // index-friendly equi-joins. Observation-scoped scores attach to prompts on that
+    // exact observation; trace-scoped scores attach to every prompt on any observation
+    // in the trace. Session-scoped scores (no trace_id) are intentionally excluded.
     const scoreRows = db.prepare(`
       ${base.sql}
-      SELECT
-        prompt_scores.prompt_ref_id,
-        prompt_scores.score_id,
-        prompt_scores.numeric_value
+      SELECT DISTINCT prompt_ref_id, score_id, numeric_value
       FROM (
-        SELECT DISTINCT
-          pr.id AS prompt_ref_id,
+        SELECT
+          op.prompt_ref_id AS prompt_ref_id,
           score_base.id AS score_id,
-          score_base.numeric_value
+          score_base.numeric_value AS numeric_value
         FROM score_base
         JOIN trace_quality_observation_prompts op
           ON op.observation_id = score_base.observation_id
-          OR (score_base.observation_id IS NULL AND score_base.trace_id IS NOT NULL)
+        WHERE score_base.observation_id IS NOT NULL
+          AND op.prompt_ref_id IN (${placeholders(promptIds)})
+
+        UNION ALL
+
+        SELECT
+          op.prompt_ref_id AS prompt_ref_id,
+          score_base.id AS score_id,
+          score_base.numeric_value AS numeric_value
+        FROM score_base
         JOIN trace_quality_observations o
-          ON o.id = op.observation_id
-        JOIN trace_quality_prompt_refs pr
-          ON pr.id = op.prompt_ref_id
-        WHERE pr.id IN (${placeholders(promptIds)})
-          AND (
-            score_base.observation_id = o.id
-            OR (score_base.observation_id IS NULL AND score_base.trace_id = o.trace_id)
-          )
+          ON o.trace_id = score_base.trace_id
+        JOIN trace_quality_observation_prompts op
+          ON op.observation_id = o.id
+        WHERE score_base.observation_id IS NULL
+          AND score_base.trace_id IS NOT NULL
+          AND op.prompt_ref_id IN (${placeholders(promptIds)})
       ) prompt_scores
-      ORDER BY prompt_scores.prompt_ref_id, prompt_scores.score_id
-    `).all(...base.values, ...promptIds) as PromptScoreMetricSqlRow[];
+      ORDER BY prompt_ref_id, score_id
+    `).all(...base.values, ...promptIds, ...promptIds) as PromptScoreMetricSqlRow[];
 
     const scoreIdsByPrompt = new Map<number, Set<number>>();
     const numericScoresByPrompt = new Map<number, number[]>();
@@ -1361,7 +1369,6 @@ export function listTraceQualityPrompts(params: TraceQualityTraceListParams = {}
       score_count: scoreMetrics.get(row.id)?.scoreCount ?? 0,
       median_numeric_score: scoreMetrics.get(row.id)?.medianNumericScore ?? null,
       last_seen: row.latest_observation_at ?? null,
-      latest_observation_at: row.latest_observation_at ?? null,
     })),
     total,
     limit,

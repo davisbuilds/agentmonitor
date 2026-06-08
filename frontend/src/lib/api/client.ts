@@ -811,7 +811,6 @@ export interface TraceQualityPromptRollup extends TraceQualityPromptRef {
   score_count: number;
   median_numeric_score: number | null;
   last_seen: string | null;
-  latest_observation_at: string | null;
 }
 
 export interface TraceQualityFinding {
