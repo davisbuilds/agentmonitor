@@ -674,11 +674,11 @@ function buildScoreValueFilter(alias: string, params: TraceQualityTraceListParam
   };
 }
 
-function scoreRollupBaseCte(params: TraceQualityTraceListParams, includeSessionScores: boolean): { sql: string; values: unknown[] } {
+function scoreRollupBaseCte(params: TraceQualityTraceListParams, includeSessionScopedScores: boolean): { sql: string; values: unknown[] } {
   const selection = includedTraceSelection(params);
   const traceScoreFilter = buildScoreValueFilter('s', params);
-  const sessionScoreFilter = buildScoreValueFilter('ss', params);
-  const sessionScoreUnion = includeSessionScores
+  const sessionScopedScoreFilter = buildScoreValueFilter('ss', params);
+  const sessionScopedScoreUnion = includeSessionScopedScores
     ? `
       UNION ALL
       SELECT
@@ -689,26 +689,69 @@ function scoreRollupBaseCte(params: TraceQualityTraceListParams, includeSessionS
         ss.categorical_value,
         ss.boolean_value,
         ss.created_at,
-        NULL AS trace_id,
-        NULL AS trace_name,
-        ss.target_id AS session_id,
-        NULL AS observation_id,
-        NULL AS model,
-        NULL AS tool_name
+        ro.trace_id,
+        rt.name AS trace_name,
+        CASE
+          WHEN ss.target_type = 'session' THEN ss.target_id
+          WHEN ss.target_type = 'event' THEN se.session_id
+          WHEN ss.target_type = 'message' THEN sm.session_id
+          WHEN ss.target_type = 'session_item' THEN si.session_id
+          ELSE NULL
+        END AS session_id,
+        ro.id AS observation_id,
+        COALESCE(ro.model, se.model) AS model,
+        COALESCE(ro.tool_name, se.tool_name) AS tool_name
       FROM trace_quality_scores ss
-      WHERE ss.target_type = 'session'
-        AND ss.target_id IN (
-          SELECT DISTINCT st.session_id
-          FROM trace_quality_traces st
-          WHERE st.id IN (SELECT id FROM selected_traces)
+      LEFT JOIN events se
+        ON ss.target_type = 'event'
+       AND (ss.target_id = CAST(se.id AS TEXT) OR ss.target_id = se.event_id)
+      LEFT JOIN messages sm
+        ON ss.target_type = 'message'
+       AND ss.target_id = CAST(sm.id AS TEXT)
+      LEFT JOIN session_items si
+        ON ss.target_type = 'session_item'
+       AND (ss.target_id = CAST(si.id AS TEXT) OR ss.target_id = si.source_item_id)
+      LEFT JOIN trace_quality_observations ro
+        ON (ss.target_type = 'event'
+            AND ro.source_kind = 'event'
+            AND (ro.source_id = CAST(se.id AS TEXT) OR ro.source_item_id = se.event_id))
+        OR (ss.target_type = 'message'
+            AND ro.source_kind = 'message'
+            AND ro.source_id = CAST(sm.id AS TEXT))
+        OR (ss.target_type = 'session_item'
+            AND ro.source_kind = 'session_item'
+            AND (ro.source_id = CAST(si.id AS TEXT) OR ro.source_item_id = si.source_item_id))
+      LEFT JOIN trace_quality_traces rt ON rt.id = ro.trace_id
+      WHERE (
+          (
+            ss.target_type = 'session'
+            AND ss.target_id IN (SELECT session_id FROM selected_sessions)
+          )
+          OR (
+            ss.target_type = 'event'
+            AND se.session_id IN (SELECT session_id FROM selected_sessions)
+          )
+          OR (
+            ss.target_type = 'message'
+            AND sm.session_id IN (SELECT session_id FROM selected_sessions)
+          )
+          OR (
+            ss.target_type = 'session_item'
+            AND si.session_id IN (SELECT session_id FROM selected_sessions)
+          )
         )
-        ${sessionScoreFilter.sql}
+        ${sessionScopedScoreFilter.sql}
     `
     : '';
 
   return {
     sql: `
       WITH selected_traces AS (${selection.sql}),
+      selected_sessions AS (
+        SELECT DISTINCT session_id
+        FROM trace_quality_traces
+        WHERE id IN (SELECT id FROM selected_traces)
+      ),
       score_base AS (
         SELECT
           s.id,
@@ -733,13 +776,13 @@ function scoreRollupBaseCte(params: TraceQualityTraceListParams, includeSessionS
           OR (s.target_type = 'observation' AND o.trace_id = t.id)
         WHERE t.id IN (SELECT id FROM selected_traces)
           ${traceScoreFilter.sql}
-        ${sessionScoreUnion}
+        ${sessionScopedScoreUnion}
       )
     `,
     values: [
       ...selection.values,
       ...traceScoreFilter.values,
-      ...(includeSessionScores ? sessionScoreFilter.values : []),
+      ...(includeSessionScopedScores ? sessionScopedScoreFilter.values : []),
     ],
   };
 }
@@ -835,7 +878,7 @@ function getSimpleScoreRollups(
 
 function getPromptScoreRollups(params: TraceQualityTraceListParams): TraceQualityScoreRollup[] {
   const db = getDb();
-  const base = scoreRollupBaseCte(params, false);
+  const base = scoreRollupBaseCte(params, true);
   const rows = db.prepare(`
     ${base.sql}
     ${scoreRollupAggregateSelect('prompt', "CAST(pr.id AS TEXT)", "pr.name || COALESCE('@' || pr.version, '')", 'score_base')}
@@ -870,10 +913,10 @@ export function getTraceQualityScoreRollups(params: TraceQualityTraceListParams 
 } {
   return {
     data: {
-      trace: getSimpleScoreRollups('trace', params, 'trace_id', 'MAX(trace_name)', 'trace_id IS NOT NULL', false),
+      trace: getSimpleScoreRollups('trace', params, 'trace_id', 'MAX(trace_name)', 'trace_id IS NOT NULL', true),
       session: getSimpleScoreRollups('session', params, 'session_id', 'session_id', 'session_id IS NOT NULL', true),
-      model: getSimpleScoreRollups('model', params, 'model', 'model', 'model IS NOT NULL', false),
-      tool: getSimpleScoreRollups('tool', params, 'tool_name', 'tool_name', 'tool_name IS NOT NULL', false),
+      model: getSimpleScoreRollups('model', params, 'model', 'model', 'model IS NOT NULL', true),
+      tool: getSimpleScoreRollups('tool', params, 'tool_name', 'tool_name', 'tool_name IS NOT NULL', true),
       prompt: getPromptScoreRollups(params),
       day: getSimpleScoreRollups('day', params, "substr(created_at, 1, 10)", "substr(created_at, 1, 10)", 'created_at IS NOT NULL', true),
     },

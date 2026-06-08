@@ -435,6 +435,83 @@ test('score rollups group local scores by trace, session, model, tool, prompt, a
   assert.deepEqual(tool.data.tool.map(row => [row.key, row.score_count, row.boolean_true]), [
     ['Read', 1, 1],
   ]);
+
+  db.prepare(`
+    INSERT INTO events (
+      id, event_id, session_id, agent_type, event_type, status,
+      created_at, client_timestamp, metadata, model, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    100,
+    'evt-source-100',
+    'session-high',
+    'codex',
+    'llm_response',
+    'success',
+    '2026-06-07T10:00:10Z',
+    '2026-06-07T10:00:10Z',
+    '{}',
+    'gpt-5',
+    'api',
+  );
+  db.prepare(`
+    INSERT INTO messages (id, session_id, ordinal, role, content, timestamp, content_length)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(200, 'session-high', 0, 'user', 'Review this trace', '2026-06-07T10:00:00Z', 17);
+  db.prepare(`
+    INSERT INTO session_items (
+      id, session_id, ordinal, source_item_id, kind, status, payload_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    101,
+    'session-high',
+    1,
+    'toolu-1',
+    'tool_call',
+    'error',
+    '{"tool_name":"Read"}',
+    '2026-06-07T10:00:31Z',
+  );
+  db.prepare(`
+    INSERT INTO trace_quality_scores (
+      target_type, target_id, name, value_type, numeric_value, source, evaluator_name, metadata_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?),
+      (?, ?, ?, ?, ?, ?, ?, ?, ?),
+      (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'event', '100', 'source_target_review', 'numeric', 0.61, 'human', 'reviewer', '{}', '2026-06-07T12:10:00Z',
+    'message', '200', 'source_target_review', 'numeric', 0.62, 'human', 'reviewer', '{}', '2026-06-07T12:11:00Z',
+    'session_item', '101', 'source_target_review', 'numeric', 0.63, 'human', 'reviewer', '{}', '2026-06-07T12:12:00Z',
+  );
+
+  const sourceTargets = await getJson<{
+    data: {
+      trace: Array<{ key: string; score_count: number; numeric_avg: number | null; observation_count: number }>;
+      session: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+      model: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+      tool: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+      prompt: Array<{ key: string; label: string | null; score_count: number; numeric_avg: number | null }>;
+      day: Array<{ key: string; score_count: number; numeric_avg: number | null }>;
+    };
+  }>('/api/v2/trace-quality/score-rollups?score_name=source_target_review');
+  assert.deepEqual(sourceTargets.data.trace.map(row => [row.key, row.score_count, row.numeric_avg, row.observation_count]), [
+    ['trace-high', 2, 0.62, 2],
+  ]);
+  assert.deepEqual(sourceTargets.data.session.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['session-high', 3, 0.62],
+  ]);
+  assert.deepEqual(sourceTargets.data.model.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['gpt-5', 1, 0.61],
+  ]);
+  assert.deepEqual(sourceTargets.data.tool.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['Read', 1, 0.63],
+  ]);
+  assert.deepEqual(sourceTargets.data.prompt.map(row => [row.key, row.label, row.score_count, row.numeric_avg]), [
+    [String(promptId), 'agentmonitor-system@2026-06-07', 1, 0.61],
+  ]);
+  assert.deepEqual(sourceTargets.data.day.map(row => [row.key, row.score_count, row.numeric_avg]), [
+    ['2026-06-07', 3, 0.62],
+  ]);
 });
 
 test('score write endpoints create, patch, delete, and validate local review scores', async () => {
