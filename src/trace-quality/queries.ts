@@ -57,6 +57,13 @@ interface ScoreSummarySqlRow {
   scored_traces: number;
 }
 
+interface CategoryCountSqlRow {
+  name: string;
+  value_type: string;
+  categorical_value: string;
+  c: number;
+}
+
 interface FindingSortFields {
   sort_at: string;
   sort_rank: number;
@@ -315,6 +322,10 @@ function scoreValue(row: TraceQualityScoreRow): TraceQualityScore['value'] {
   }
 }
 
+function scoreSummaryCategoryKey(name: string, valueType: string): string {
+  return `${name}\u0000${valueType}`;
+}
+
 function mapScore(row: TraceQualityScoreRow): TraceQualityScore {
   return {
     ...row,
@@ -553,18 +564,19 @@ export function getTraceQualityScoreSummary(params: TraceQualityTraceListParams 
   `).all(...selection.values) as ScoreSummarySqlRow[];
 
   const categoryRows = db.prepare(`
-    SELECT name, categorical_value, COUNT(*) AS c
+    SELECT name, value_type, categorical_value, COUNT(*) AS c
     FROM (${traceScoreTargetSql()}) score_targets
     WHERE resolved_trace_id IN (${selection.sql})
       AND categorical_value IS NOT NULL
-    GROUP BY name, categorical_value
-    ORDER BY name, categorical_value
-  `).all(...selection.values) as Array<{ name: string; categorical_value: string; c: number }>;
+    GROUP BY name, value_type, categorical_value
+    ORDER BY name, value_type, categorical_value
+  `).all(...selection.values) as CategoryCountSqlRow[];
   const categoryCounts = new Map<string, Record<string, number>>();
   for (const row of categoryRows) {
-    const counts = categoryCounts.get(row.name) ?? {};
+    const key = scoreSummaryCategoryKey(row.name, row.value_type);
+    const counts = categoryCounts.get(key) ?? {};
     counts[row.categorical_value] = row.c;
-    categoryCounts.set(row.name, counts);
+    categoryCounts.set(key, counts);
   }
 
   return {
@@ -577,7 +589,7 @@ export function getTraceQualityScoreSummary(params: TraceQualityTraceListParams 
       numeric_max: row.numeric_max,
       boolean_true: row.boolean_true ?? 0,
       boolean_false: row.boolean_false ?? 0,
-      categorical_values: categoryCounts.get(row.name) ?? {},
+      categorical_values: categoryCounts.get(scoreSummaryCategoryKey(row.name, row.value_type)) ?? {},
       scored_traces: row.scored_traces,
     })),
     coverage: getTraceQualityCoverage(params),
@@ -604,18 +616,19 @@ function getScoreSummaryForTrace(traceId: string): TraceQualityScoreSummary[] {
   `).all(traceId) as ScoreSummarySqlRow[];
 
   const categoryRows = db.prepare(`
-    SELECT name, categorical_value, COUNT(*) AS c
+    SELECT name, value_type, categorical_value, COUNT(*) AS c
     FROM (${traceScoreTargetSql()}) score_targets
     WHERE resolved_trace_id = ?
       AND categorical_value IS NOT NULL
-    GROUP BY name, categorical_value
-    ORDER BY name, categorical_value
-  `).all(traceId) as Array<{ name: string; categorical_value: string; c: number }>;
+    GROUP BY name, value_type, categorical_value
+    ORDER BY name, value_type, categorical_value
+  `).all(traceId) as CategoryCountSqlRow[];
   const categoryCounts = new Map<string, Record<string, number>>();
   for (const row of categoryRows) {
-    const counts = categoryCounts.get(row.name) ?? {};
+    const key = scoreSummaryCategoryKey(row.name, row.value_type);
+    const counts = categoryCounts.get(key) ?? {};
     counts[row.categorical_value] = row.c;
-    categoryCounts.set(row.name, counts);
+    categoryCounts.set(key, counts);
   }
 
   return rows.map(row => ({
@@ -627,7 +640,7 @@ function getScoreSummaryForTrace(traceId: string): TraceQualityScoreSummary[] {
     numeric_max: row.numeric_max,
     boolean_true: row.boolean_true ?? 0,
     boolean_false: row.boolean_false ?? 0,
-    categorical_values: categoryCounts.get(row.name) ?? {},
+    categorical_values: categoryCounts.get(scoreSummaryCategoryKey(row.name, row.value_type)) ?? {},
     scored_traces: row.scored_traces,
   }));
 }

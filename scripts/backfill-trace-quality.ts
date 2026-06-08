@@ -14,6 +14,19 @@ import { closeDb } from '../src/db/connection.js';
 import { initSchema } from '../src/db/schema.js';
 import { backfillTraceQuality, type BackfillTraceQualityOptions } from '../src/trace-quality/service.js';
 
+function parseDateOption(raw: string | undefined, optionName: string): string {
+  if (!raw) {
+    console.error(`Missing value for ${optionName}.`);
+    process.exit(1);
+  }
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) {
+    console.error(`Invalid ${optionName} date: ${raw}`);
+    process.exit(1);
+  }
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : parsed.toISOString();
+}
+
 function parseArgs(): BackfillTraceQualityOptions {
   const args = process.argv.slice(2);
   let source: BackfillTraceQualityOptions['source'] = 'all';
@@ -42,23 +55,11 @@ function parseArgs(): BackfillTraceQualityOptions {
         }
         break;
       case '--from': {
-        const raw = args[++i];
-        const parsed = new Date(raw);
-        if (Number.isNaN(parsed.getTime())) {
-          console.error(`Invalid --from date: ${raw}`);
-          process.exit(1);
-        }
-        from = parsed.toISOString();
+        from = parseDateOption(args[++i], '--from');
         break;
       }
       case '--to': {
-        const raw = args[++i];
-        const parsed = new Date(raw);
-        if (Number.isNaN(parsed.getTime())) {
-          console.error(`Invalid --to date: ${raw}`);
-          process.exit(1);
-        }
-        to = parsed.toISOString();
+        to = parseDateOption(args[++i], '--to');
         break;
       }
       case '--dry-run':

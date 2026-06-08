@@ -183,6 +183,41 @@ test('backfill is idempotent when projected source payloads are unchanged', asyn
   assert.equal(countRows('events'), 1);
 });
 
+test('backfill date-only ranges include the full to date', async () => {
+  seedEvent();
+  getDb().prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out,
+      created_at, client_timestamp, metadata, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'evt-backfill-next-day',
+    'event-session-next-day',
+    'codex',
+    'llm_response',
+    'success',
+    1,
+    1,
+    '2026-06-08 00:00:00',
+    '2026-06-08T00:00:00.000Z',
+    '{"content_preview":"Next day response"}',
+    'api',
+  );
+  const { backfillTraceQuality } = await import('../src/trace-quality/service.js');
+
+  const summary = backfillTraceQuality({
+    source: 'events',
+    from: '2026-06-07',
+    to: '2026-06-07',
+    dryRun: true,
+  });
+
+  assert.equal(summary.sourcesScanned, 1);
+  assert.equal(summary.tracesCreated, 1);
+  assert.equal(summary.observationsCreated, 1);
+  assert.equal(countRows('trace_quality_traces'), 0);
+});
+
 test('force backfill rebuilds projected session rows without touching source rows', async () => {
   seedBrowsingSession();
   const { backfillTraceQuality } = await import('../src/trace-quality/service.js');

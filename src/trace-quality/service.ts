@@ -82,6 +82,36 @@ function placeholders(values: readonly unknown[]): string {
   return values.map(() => '?').join(', ');
 }
 
+function addDaysToDateString(date: string, days: number): string | null {
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+function appendBackfillDateRangeConditions(
+  conditions: string[],
+  values: unknown[],
+  column: string,
+  from: string | undefined,
+  to: string | undefined,
+): void {
+  if (from) {
+    conditions.push(`datetime(${column}) >= datetime(?)`);
+    values.push(from);
+  }
+  if (to) {
+    const nextDay = /^\d{4}-\d{2}-\d{2}$/.test(to) ? addDaysToDateString(to, 1) : null;
+    if (nextDay) {
+      conditions.push(`datetime(${column}) < datetime(?)`);
+      values.push(nextDay);
+    } else {
+      conditions.push(`datetime(${column}) <= datetime(?)`);
+      values.push(to);
+    }
+  }
+}
+
 function getJsonMetadata(value: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(value);
@@ -451,14 +481,13 @@ function eventIdsForBackfill(db: Database.Database, options: BackfillTraceQualit
     conditions.push('session_id = ?');
     values.push(options.sessionId);
   }
-  if (options.from) {
-    conditions.push('datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)');
-    values.push(options.from);
-  }
-  if (options.to) {
-    conditions.push('datetime(COALESCE(client_timestamp, created_at)) <= datetime(?)');
-    values.push(options.to);
-  }
+  appendBackfillDateRangeConditions(
+    conditions,
+    values,
+    'COALESCE(client_timestamp, created_at)',
+    options.from,
+    options.to,
+  );
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   return (db.prepare(`
@@ -477,14 +506,13 @@ function sessionIdsForBackfill(db: Database.Database, options: BackfillTraceQual
     conditions.push('id = ?');
     values.push(options.sessionId);
   }
-  if (options.from) {
-    conditions.push('datetime(COALESCE(started_at, last_item_at, ended_at)) >= datetime(?)');
-    values.push(options.from);
-  }
-  if (options.to) {
-    conditions.push('datetime(COALESCE(started_at, last_item_at, ended_at)) <= datetime(?)');
-    values.push(options.to);
-  }
+  appendBackfillDateRangeConditions(
+    conditions,
+    values,
+    'COALESCE(started_at, last_item_at, ended_at)',
+    options.from,
+    options.to,
+  );
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   return (db.prepare(`

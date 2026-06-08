@@ -181,9 +181,11 @@ function seedTraceQualityData(): void {
       boolean_value, text_value, source, evaluator_name, comment, metadata_json
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+      (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
       (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     'trace', 'trace-high', 'correctness', 'numeric', 0.92, null, null, null, 'human', 'reviewer', 'Looks good', '{}',
+    'trace', 'trace-high', 'correctness', 'categorical', null, 'pass', null, null, 'human', 'reviewer', 'Category pass', '{}',
     'observation', 'obs-child', 'tool_error', 'boolean', null, null, 1, null, 'system', 'detector', 'Tool failed', '{}',
     'trace', 'trace-low', 'correctness', 'numeric', 0.35, null, null, null, 'llm_judge', 'judge', 'Low confidence', '{}',
   );
@@ -252,7 +254,7 @@ test('trace list applies filters, pagination, and coverage accounting', async ()
   assert.equal(body.coverage.observations_with_usage, 1);
   assert.equal(body.coverage.observations_missing_usage, 1);
   assert.equal(body.coverage.score_coverage.scored_traces, 1);
-  assert.equal(body.coverage.score_coverage.total_scores, 2);
+  assert.equal(body.coverage.score_coverage.total_scores, 3);
 });
 
 test('trace detail returns parsed metadata, aggregate totals, prompts, and score summary', async () => {
@@ -264,7 +266,7 @@ test('trace detail returns parsed metadata, aggregate totals, prompts, and score
       coverage: Record<string, unknown>;
       aggregate: { observation_count: number; error_count: number; total_tokens_out: number };
       prompt_refs: Array<{ name: string; version: string | null; observation_count: number }>;
-      score_summary: Array<{ name: string; count: number; numeric_avg: number | null }>;
+      score_summary: Array<{ name: string; value_type: string; count: number; numeric_avg: number | null; categorical_values: Record<string, number> }>;
     };
     coverage: { included_traces: number };
   }>('/api/v2/trace-quality/traces/trace-high');
@@ -279,9 +281,10 @@ test('trace detail returns parsed metadata, aggregate totals, prompts, and score
   assert.deepEqual(body.trace.prompt_refs.map(prompt => [prompt.name, prompt.version, prompt.observation_count]), [
     ['agentmonitor-system', '2026-06-07', 1],
   ]);
-  assert.deepEqual(body.trace.score_summary.map(score => [score.name, score.count, score.numeric_avg]), [
-    ['correctness', 1, 0.92],
-    ['tool_error', 1, null],
+  assert.deepEqual(body.trace.score_summary.map(score => [score.name, score.value_type, score.count, score.numeric_avg, score.categorical_values]), [
+    ['correctness', 'categorical', 1, null, { pass: 1 }],
+    ['correctness', 'numeric', 1, 0.92, {}],
+    ['tool_error', 'boolean', 1, null, {}],
   ]);
   assert.equal(body.coverage.included_traces, 1);
 });
@@ -316,25 +319,27 @@ test('observation detail exposes scores and prompt refs', async () => {
 
 test('scores, score summaries, prompts, and findings return stable rollups', async () => {
   const scores = await getJson<{
-    data: Array<{ name: string; target_type: string; target_id: string; numeric_value: number | null }>;
+    data: Array<{ name: string; target_type: string; target_id: string; value_type: string; numeric_value: number | null; categorical_value: string | null }>;
     total: number;
     coverage: { score_coverage: { total_scores: number; scored_traces: number } };
   }>('/api/v2/trace-quality/scores?name=correctness&limit=10');
-  assert.equal(scores.total, 2);
-  assert.deepEqual(scores.data.map(score => [score.target_type, score.target_id, score.numeric_value]), [
-    ['trace', 'trace-high', 0.92],
-    ['trace', 'trace-low', 0.35],
+  assert.equal(scores.total, 3);
+  assert.deepEqual(scores.data.map(score => [score.target_type, score.target_id, score.value_type, score.numeric_value, score.categorical_value]), [
+    ['trace', 'trace-high', 'numeric', 0.92, null],
+    ['trace', 'trace-high', 'categorical', null, 'pass'],
+    ['trace', 'trace-low', 'numeric', 0.35, null],
   ]);
-  assert.equal(scores.coverage.score_coverage.total_scores, 3);
+  assert.equal(scores.coverage.score_coverage.total_scores, 4);
   assert.equal(scores.coverage.score_coverage.scored_traces, 2);
 
   const summary = await getJson<{
-    data: Array<{ name: string; count: number; numeric_avg: number | null; boolean_true: number }>;
+    data: Array<{ name: string; value_type: string; count: number; numeric_avg: number | null; boolean_true: number; categorical_values: Record<string, number> }>;
     coverage: { included_traces: number };
   }>('/api/v2/trace-quality/score-summary');
-  assert.deepEqual(summary.data.map(row => [row.name, row.count, row.numeric_avg, row.boolean_true]), [
-    ['correctness', 2, 0.635, 0],
-    ['tool_error', 1, null, 1],
+  assert.deepEqual(summary.data.map(row => [row.name, row.value_type, row.count, row.numeric_avg, row.boolean_true, row.categorical_values]), [
+    ['correctness', 'categorical', 1, null, 0, { pass: 1 }],
+    ['correctness', 'numeric', 2, 0.635, 0, {}],
+    ['tool_error', 'boolean', 1, null, 1, {}],
   ]);
   assert.equal(summary.coverage.included_traces, 2);
 
