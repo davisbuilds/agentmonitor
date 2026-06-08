@@ -18,6 +18,7 @@ Used by the canonical Svelte app at `/app/`.
 - Live ops: `/api/v2/live/settings`, `/api/v2/live/sessions`, `/api/v2/live/sessions/:id`, `/api/v2/live/sessions/:id/turns`, `/api/v2/live/sessions/:id/items`, `/api/v2/live/stream`
 - Monitor reads: `/api/v2/monitor/stats`, `/api/v2/monitor/sessions`, `/api/v2/monitor/events`, `/api/v2/monitor/filter-options`, `/api/v2/monitor/tools`, `/api/v2/monitor/sessions/:id`, `/api/v2/monitor/sessions/:id/transcript`
 - Search and analytics: `/api/v2/search`, `/api/v2/analytics/summary`, `/api/v2/analytics/activity`, `/api/v2/analytics/projects`, `/api/v2/analytics/tools`
+- Trace quality: `/api/v2/trace-quality/traces`, `/api/v2/trace-quality/traces/:id`, `/api/v2/trace-quality/traces/:id/observations`, `/api/v2/trace-quality/observations/:id`, `/api/v2/trace-quality/scores`, `/api/v2/trace-quality/score-summary`, `/api/v2/trace-quality/prompts`, `/api/v2/trace-quality/findings`
 - Filter metadata: `/api/v2/projects`, `/api/v2/agents`
 
 The current TypeScript route entrypoint for v2 is [../../src/api/v2/router.ts](../../src/api/v2/router.ts).

@@ -86,6 +86,15 @@ Product-surface reference for AgentMonitor.
 - Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
 - The `Usage` sub-view supports the shared date/project/agent filters plus provider, tier, and model facets, session drill-in when transcript history exists, and CSV export.
 
+## Trace Quality
+
+- Local trace-quality reads live under `/api/v2/trace-quality/*` and are isolated from legacy monitor endpoints.
+- Trace lists support date, project, agent, status, observation type, model, tool, score, and low-coverage filters with deterministic pagination.
+- Trace detail exposes parsed metadata, coverage, aggregate token/cost/duration totals, prompt attribution, and score summaries.
+- Observation APIs expose both flat deterministic ordering and nested parent/child trees.
+- Score, prompt, and findings endpoints provide local review rollups for future evaluation workflows.
+- Aggregate trace-quality responses include coverage metadata so the UI can disclose matching traces, included traces, low-coverage exclusions, usage-bearing observations, missing-usage observations, and score coverage.
+
 ## Insights
 
 - Historical insights live under `/api/v2/insights/*` and persist generated outputs rather than recalculating them on page load.
@@ -150,6 +159,14 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
 | `/api/v2/usage/budgets` | GET | Read-only budget state from optional local budget config |
 | `/api/v2/usage/tier-feedback` | GET | Human-reviewed advisory tier feedback from usage evidence |
+| `/api/v2/trace-quality/traces` | GET | Trace-quality trace list with filters, aggregates, pagination, and coverage |
+| `/api/v2/trace-quality/traces/:id` | GET | Trace detail with parsed metadata, prompt refs, score summary, and coverage |
+| `/api/v2/trace-quality/traces/:id/observations` | GET | Flat and nested observation data for a trace |
+| `/api/v2/trace-quality/observations/:id` | GET | Observation detail with prompt refs and local scores |
+| `/api/v2/trace-quality/scores` | GET | Local trace-quality scores with filters and coverage |
+| `/api/v2/trace-quality/score-summary` | GET | Score rollups grouped by score name and value type |
+| `/api/v2/trace-quality/prompts` | GET | Prompt-version attribution rollups |
+| `/api/v2/trace-quality/findings` | GET | Derived trace-quality findings for review |
 | `/api/v2/insights` | GET | List persisted insights for the current historical slice |
 | `/api/v2/insights/:id` | GET | Fetch a single persisted insight |
 | `/api/v2/insights/generate` | POST | Generate and persist a new insight from analytics + usage data |

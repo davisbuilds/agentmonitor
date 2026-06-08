@@ -43,6 +43,14 @@ import {
   deleteInsight,
   getDistinctProjects,
   getDistinctAgents,
+  getTraceQualityTrace,
+  getTraceQualityObservation,
+  getTraceQualityScoreSummary,
+  listTraceQualityFindings,
+  listTraceQualityObservations,
+  listTraceQualityPrompts,
+  listTraceQualityScores,
+  listTraceQualityTraces,
 } from '../../db/v2-queries.js';
 import { liveStreamRouter } from './live-stream.js';
 import { config } from '../../config.js';
@@ -59,8 +67,50 @@ function safeInt(value: string | undefined): number | undefined {
   return isNaN(n) ? undefined : n;
 }
 
+function safeNumber(value: string | undefined): number | undefined {
+  if (value == null) return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function safeString(value: string | string[] | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function readTraceQualityParams(req: Request): {
+  date_from?: string;
+  date_to?: string;
+  project?: string;
+  agent?: string;
+  status?: string;
+  observation_type?: string;
+  model?: string;
+  tool?: string;
+  tool_name?: string;
+  score_name?: string;
+  min_score?: number;
+  max_score?: number;
+  exclude_low_coverage?: boolean;
+  limit?: number;
+  offset?: number;
+} {
+  return {
+    date_from: safeString(req.query.date_from as string | string[] | undefined),
+    date_to: safeString(req.query.date_to as string | string[] | undefined),
+    project: safeString(req.query.project as string | string[] | undefined),
+    agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+    status: safeString(req.query.status as string | string[] | undefined),
+    observation_type: safeString(req.query.observation_type as string | string[] | undefined),
+    model: safeString(req.query.model as string | string[] | undefined),
+    tool: safeString(req.query.tool as string | string[] | undefined),
+    tool_name: safeString(req.query.tool_name as string | string[] | undefined),
+    score_name: safeString(req.query.score_name as string | string[] | undefined),
+    min_score: safeNumber(req.query.min_score as string | undefined),
+    max_score: safeNumber(req.query.max_score as string | undefined),
+    exclude_low_coverage: req.query.exclude_low_coverage === 'true',
+    limit: safeInt(req.query.limit as string),
+    offset: safeInt(req.query.offset as string),
+  };
 }
 
 // --- Sessions ---
@@ -700,6 +750,106 @@ v2Router.get('/usage/tier-feedback', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/usage/tier-feedback] Error:', err);
     res.status(500).json({ error: 'Failed to get usage tier feedback' });
+  }
+});
+
+// --- Trace quality ---
+
+v2Router.get('/trace-quality/traces', (req: Request, res: Response) => {
+  try {
+    res.json(listTraceQualityTraces(readTraceQualityParams(req)));
+  } catch (err) {
+    console.error('[v2/trace-quality/traces] Error:', err);
+    res.status(500).json({ error: 'Failed to list trace-quality traces' });
+  }
+});
+
+v2Router.get('/trace-quality/traces/:id/observations', (req: Request, res: Response) => {
+  try {
+    const result = listTraceQualityObservations(req.params['id'] as string, {
+      limit: safeInt(req.query.limit as string),
+      offset: safeInt(req.query.offset as string),
+    });
+    if (!result) {
+      res.status(404).json({ error: 'Trace not found' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[v2/trace-quality/traces/:id/observations] Error:', err);
+    res.status(500).json({ error: 'Failed to list trace-quality observations' });
+  }
+});
+
+v2Router.get('/trace-quality/traces/:id', (req: Request, res: Response) => {
+  try {
+    const result = getTraceQualityTrace(req.params['id'] as string);
+    if (!result) {
+      res.status(404).json({ error: 'Trace not found' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[v2/trace-quality/traces/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to get trace-quality trace' });
+  }
+});
+
+v2Router.get('/trace-quality/observations/:id', (req: Request, res: Response) => {
+  try {
+    const result = getTraceQualityObservation(req.params['id'] as string);
+    if (!result) {
+      res.status(404).json({ error: 'Observation not found' });
+      return;
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('[v2/trace-quality/observations/:id] Error:', err);
+    res.status(500).json({ error: 'Failed to get trace-quality observation' });
+  }
+});
+
+v2Router.get('/trace-quality/scores', (req: Request, res: Response) => {
+  try {
+    res.json(listTraceQualityScores({
+      ...readTraceQualityParams(req),
+      trace_id: safeString(req.query.trace_id as string | string[] | undefined),
+      observation_id: safeString(req.query.observation_id as string | string[] | undefined),
+      target_type: safeString(req.query.target_type as string | string[] | undefined),
+      target_id: safeString(req.query.target_id as string | string[] | undefined),
+      name: safeString((req.query.name ?? req.query.score_name) as string | string[] | undefined),
+      source: safeString(req.query.source as string | string[] | undefined),
+    }));
+  } catch (err) {
+    console.error('[v2/trace-quality/scores] Error:', err);
+    res.status(500).json({ error: 'Failed to list trace-quality scores' });
+  }
+});
+
+v2Router.get('/trace-quality/score-summary', (req: Request, res: Response) => {
+  try {
+    res.json(getTraceQualityScoreSummary(readTraceQualityParams(req)));
+  } catch (err) {
+    console.error('[v2/trace-quality/score-summary] Error:', err);
+    res.status(500).json({ error: 'Failed to get trace-quality score summary' });
+  }
+});
+
+v2Router.get('/trace-quality/prompts', (req: Request, res: Response) => {
+  try {
+    res.json(listTraceQualityPrompts(readTraceQualityParams(req)));
+  } catch (err) {
+    console.error('[v2/trace-quality/prompts] Error:', err);
+    res.status(500).json({ error: 'Failed to list trace-quality prompts' });
+  }
+});
+
+v2Router.get('/trace-quality/findings', (req: Request, res: Response) => {
+  try {
+    res.json(listTraceQualityFindings(readTraceQualityParams(req)));
+  } catch (err) {
+    console.error('[v2/trace-quality/findings] Error:', err);
+    res.status(500).json({ error: 'Failed to list trace-quality findings' });
   }
 });
 
