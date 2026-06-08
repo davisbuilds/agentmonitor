@@ -508,6 +508,16 @@ export function getEvents(filters: {
   return { events, total };
 }
 
+export function listTraceQualityEventSourcesForSession(sessionId: string): EventRow[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT *
+    FROM events
+    WHERE session_id = ?
+    ORDER BY COALESCE(client_timestamp, created_at), id
+  `).all(sessionId) as EventRow[];
+}
+
 // --- Stats ---
 
 export interface Stats {

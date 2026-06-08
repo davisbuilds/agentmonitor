@@ -39,6 +39,7 @@ pnpm rust:test:runtime-invariants # Run Rust runtime-host invariants
 pnpm lint               # ESLint
 pnpm seed               # Send demo events (server must be running)
 pnpm run import         # Import historical sessions
+pnpm run trace-quality:backfill # Backfill local trace-quality projection tables
 pnpm reparse:sessions   # Force reparse Claude session-browser history
 pnpm reparse:codex-sessions # Force reparse Codex session-browser history
 pnpm bench:ingest       # Ingest throughput benchmark
@@ -125,6 +126,23 @@ Operational notes:
 - `pnpm run import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm reparse:codex-sessions` when transcript-derived analytics such as inferred skill usage need to be backfilled.
 - If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm run recalculate-costs`; that backfills stale imports after pricing-data updates or importer fixes.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
+
+## Trace Quality Backfill
+
+```bash
+pnpm run trace-quality:backfill -- --dry-run
+pnpm run trace-quality:backfill -- --source events
+pnpm run trace-quality:backfill -- --source sessions --session-id <session-id>
+pnpm run trace-quality:backfill -- --source all --from 2026-06-01 --to 2026-06-08
+pnpm run trace-quality:backfill -- --force
+```
+
+Operational notes:
+
+- The backfill projects existing `events` and parsed session-browser rows into the local trace-quality tables. It does not mutate source `events`, `browsing_sessions`, `messages`, `session_items`, `session_turns`, or `tool_calls`.
+- Default runs are idempotent through `trace_quality_projection_state`; unchanged source payloads are skipped.
+- `--force` deletes and rebuilds projected trace-quality rows only for the selected source scope.
+- Use `--dry-run` before broad or forced runs to confirm the projected row counts.
 
 ## CI
 

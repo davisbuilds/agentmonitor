@@ -44,6 +44,7 @@ Prefer to do it yourself? The manual steps are below.
 - Watches local Claude and Codex session history and imports historical sessions into SQLite.
 - Streams live updates over SSE for dashboards and operator views.
 - Exposes canonical app APIs under `/api/v2/*`.
+- Exposes local trace-quality read APIs for projected traces, observations, scores, prompts, and derived findings.
 - Provides provider-native quota snapshots through `/api/provider-quotas`.
 - Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
 - Keeps a Rust backend under `rust-backend/` as an alternate runtime under evaluation.

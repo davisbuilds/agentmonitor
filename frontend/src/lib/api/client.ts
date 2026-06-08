@@ -618,6 +618,169 @@ export interface InsightGenerationStatus {
   }>;
 }
 
+export interface TraceQualityAggregateMetrics {
+  observation_count: number;
+  error_count: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_cost_usd: number;
+  total_duration_ms: number;
+  first_observation_at: string | null;
+  last_observation_at: string | null;
+}
+
+export interface TraceQualityScoreCoverage {
+  scored_traces: number;
+  unscored_traces: number;
+  total_scores: number;
+  trace_score_count: number;
+  observation_score_count: number;
+  numeric_score_count: number;
+}
+
+export interface TraceQualityReadCoverage {
+  matching_traces: number;
+  included_traces: number;
+  excluded_low_coverage_traces: number;
+  observations_with_usage: number;
+  observations_missing_usage: number;
+  score_coverage: TraceQualityScoreCoverage;
+  note: string;
+}
+
+export interface TraceQualityPromptRef {
+  id: number;
+  name: string;
+  version: string | null;
+  label: string | null;
+  source: string;
+  content_hash: string | null;
+  file_path: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  observation_count: number;
+  trace_count: number;
+}
+
+export interface TraceQualityScore {
+  id: number;
+  target_type: string;
+  target_id: string;
+  name: string;
+  value_type: string;
+  numeric_value: number | null;
+  categorical_value: string | null;
+  boolean_value: number | null;
+  text_value: string | null;
+  source: string;
+  evaluator_name: string | null;
+  comment: string | null;
+  metadata: Record<string, unknown>;
+  value: number | string | boolean | null;
+  created_at: string;
+}
+
+export interface TraceQualityScoreSummary {
+  name: string;
+  value_type: string;
+  count: number;
+  numeric_avg: number | null;
+  numeric_min: number | null;
+  numeric_max: number | null;
+  boolean_true: number;
+  boolean_false: number;
+  categorical_values: Record<string, number>;
+  scored_traces: number;
+}
+
+export interface TraceQualityTrace {
+  id: string;
+  session_id: string;
+  browsing_session_id: string | null;
+  source_trace_id: string | null;
+  agent_type: string;
+  name: string;
+  status: string | null;
+  project: string | null;
+  branch: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_ms: number | null;
+  metadata: Record<string, unknown>;
+  tags: unknown[];
+  coverage: Record<string, unknown>;
+  aggregate: TraceQualityAggregateMetrics;
+  score_count: number;
+  numeric_score_avg: number | null;
+  created_at: string;
+}
+
+export interface TraceQualityTraceDetail extends TraceQualityTrace {
+  prompt_refs: TraceQualityPromptRef[];
+  score_summary: TraceQualityScoreSummary[];
+}
+
+export interface TraceQualityObservation {
+  id: string;
+  trace_id: string;
+  parent_observation_id: string | null;
+  session_id: string;
+  source_kind: string;
+  source_id: string | null;
+  source_item_id: string | null;
+  observation_type: string;
+  name: string;
+  status: string | null;
+  status_message: string | null;
+  severity: string | null;
+  model: string | null;
+  tool_name: string | null;
+  started_at: string | null;
+  ended_at: string | null;
+  duration_ms: number | null;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number | null;
+  input_hash: string | null;
+  output_hash: string | null;
+  input_summary: string | null;
+  output_summary: string | null;
+  payload_policy: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface TraceQualityObservationTreeNode extends TraceQualityObservation {
+  children: TraceQualityObservationTreeNode[];
+}
+
+export interface TraceQualityObservationDetail extends TraceQualityObservation {
+  trace: Pick<TraceQualityTrace, 'id' | 'session_id' | 'agent_type' | 'name' | 'status' | 'project' | 'started_at'>;
+  prompt_refs: TraceQualityPromptRef[];
+  scores: TraceQualityScore[];
+}
+
+export interface TraceQualityPromptRollup extends TraceQualityPromptRef {
+  latest_observation_at: string | null;
+}
+
+export interface TraceQualityFinding {
+  id: string;
+  kind: 'observation_error' | 'low_score' | 'low_coverage';
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  trace_id: string;
+  observation_id: string | null;
+  score_id: number | null;
+  title: string;
+  message: string;
+  evidence: Record<string, unknown>;
+  created_at: string | null;
+}
+
 // --- API client ---
 
 type Filters = Record<string, string>;
@@ -901,6 +1064,70 @@ export async function fetchUsageTopSessions(params: Record<string, string | numb
 export async function fetchUsageTierFeedback(params: Record<string, string | number | undefined> = {}): Promise<UsageTierFeedbackReport> {
   const res = await fetch(`/api/v2/usage/tier-feedback${qs(params)}`);
   return checkedJson(res, 'fetchUsageTierFeedback');
+}
+
+export async function fetchTraceQualityTraces(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<{ data: TraceQualityTrace[]; total: number; limit: number; offset: number; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/traces${qs(params)}`);
+  return checkedJson(res, 'fetchTraceQualityTraces');
+}
+
+export async function fetchTraceQualityTrace(
+  id: string,
+): Promise<{ trace: TraceQualityTraceDetail; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/traces/${encodeURIComponent(id)}`);
+  return checkedJson(res, 'fetchTraceQualityTrace');
+}
+
+export async function fetchTraceQualityObservations(
+  traceId: string,
+  params: { limit?: number; offset?: number } = {},
+): Promise<{
+  data: TraceQualityObservation[];
+  tree: TraceQualityObservationTreeNode[];
+  total: number;
+  limit: number;
+  offset: number;
+  coverage: TraceQualityReadCoverage;
+}> {
+  const res = await fetch(`/api/v2/trace-quality/traces/${encodeURIComponent(traceId)}/observations${qs(params)}`);
+  return checkedJson(res, 'fetchTraceQualityObservations');
+}
+
+export async function fetchTraceQualityObservation(
+  id: string,
+): Promise<{ observation: TraceQualityObservationDetail; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/observations/${encodeURIComponent(id)}`);
+  return checkedJson(res, 'fetchTraceQualityObservation');
+}
+
+export async function fetchTraceQualityScores(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<{ data: TraceQualityScore[]; total: number; limit: number; offset: number; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/scores${qs(params)}`);
+  return checkedJson(res, 'fetchTraceQualityScores');
+}
+
+export async function fetchTraceQualityScoreSummary(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<{ data: TraceQualityScoreSummary[]; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/score-summary${qs(params)}`);
+  return checkedJson(res, 'fetchTraceQualityScoreSummary');
+}
+
+export async function fetchTraceQualityPrompts(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<{ data: TraceQualityPromptRollup[]; total: number; limit: number; offset: number; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/prompts${qs(params)}`);
+  return checkedJson(res, 'fetchTraceQualityPrompts');
+}
+
+export async function fetchTraceQualityFindings(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<{ data: TraceQualityFinding[]; total: number; limit: number; offset: number; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/findings${qs(params)}`);
+  return checkedJson(res, 'fetchTraceQualityFindings');
 }
 
 export async function fetchInsights(params: Record<string, string | number | undefined> = {}): Promise<{ data: Insight[]; generation: InsightGenerationStatus }> {

@@ -3,6 +3,7 @@ import { insertEvent, getEvents } from '../db/queries.js';
 import { broadcaster } from '../sse/emitter.js';
 import { normalizeIngestEvent } from '../contracts/event-contract.js';
 import { coerceJsonLikeBody } from './json-body.js';
+import { safelyProjectTraceQualityForEvent } from '../trace-quality/service.js';
 
 export const eventsRouter = Router();
 
@@ -25,6 +26,7 @@ eventsRouter.post('/', (req: Request, res: Response) => {
   }
 
   broadcaster.broadcast('event', event as unknown as Record<string, unknown>);
+  safelyProjectTraceQualityForEvent(event.id, 'api event ingest');
   res.status(201).json({ received: 1, ids: [event.id], duplicates: 0 });
 });
 
@@ -56,6 +58,7 @@ eventsRouter.post('/batch', (req: Request, res: Response) => {
     if (event) {
       ids.push(event.id);
       broadcaster.broadcast('event', event as unknown as Record<string, unknown>);
+      safelyProjectTraceQualityForEvent(event.id, 'api batch event ingest');
     } else {
       duplicates += 1;
     }

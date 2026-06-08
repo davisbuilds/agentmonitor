@@ -1,4 +1,10 @@
 import type { ProjectionCapabilities } from '../../live/projector.js';
+import type {
+  TraceQualityObservationRow,
+  TraceQualityPromptRefRow,
+  TraceQualityScoreRow,
+  TraceQualityTraceRow,
+} from '../../trace-quality/types.js';
 
 // --- Database row types (also used as API response shapes) ---
 
@@ -702,6 +708,109 @@ export interface SearchResultRow {
   session_first_message: string | null;
 }
 
+// --- Trace quality response types ---
+
+export interface TraceQualityAggregateMetrics {
+  observation_count: number;
+  error_count: number;
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_cost_usd: number;
+  total_duration_ms: number;
+  first_observation_at: string | null;
+  last_observation_at: string | null;
+}
+
+export interface TraceQualityScoreCoverage {
+  scored_traces: number;
+  unscored_traces: number;
+  total_scores: number;
+  trace_score_count: number;
+  observation_score_count: number;
+  numeric_score_count: number;
+}
+
+export interface TraceQualityReadCoverage {
+  matching_traces: number;
+  included_traces: number;
+  excluded_low_coverage_traces: number;
+  observations_with_usage: number;
+  observations_missing_usage: number;
+  score_coverage: TraceQualityScoreCoverage;
+  note: string;
+}
+
+export interface TraceQualityPromptRef extends Omit<TraceQualityPromptRefRow, 'metadata_json'> {
+  metadata: Record<string, unknown>;
+  observation_count: number;
+  trace_count: number;
+}
+
+export interface TraceQualityScore extends Omit<TraceQualityScoreRow, 'metadata_json'> {
+  metadata: Record<string, unknown>;
+  value: number | string | boolean | null;
+}
+
+export interface TraceQualityScoreSummary {
+  name: string;
+  value_type: string;
+  count: number;
+  numeric_avg: number | null;
+  numeric_min: number | null;
+  numeric_max: number | null;
+  boolean_true: number;
+  boolean_false: number;
+  categorical_values: Record<string, number>;
+  scored_traces: number;
+}
+
+export interface TraceQualityTrace extends Omit<TraceQualityTraceRow, 'metadata_json' | 'tags_json' | 'coverage_json'> {
+  metadata: Record<string, unknown>;
+  tags: unknown[];
+  coverage: Record<string, unknown>;
+  aggregate: TraceQualityAggregateMetrics;
+  score_count: number;
+  numeric_score_avg: number | null;
+}
+
+export interface TraceQualityTraceDetail extends TraceQualityTrace {
+  prompt_refs: TraceQualityPromptRef[];
+  score_summary: TraceQualityScoreSummary[];
+}
+
+export interface TraceQualityObservation extends Omit<TraceQualityObservationRow, 'metadata_json'> {
+  metadata: Record<string, unknown>;
+}
+
+export interface TraceQualityObservationDetail extends TraceQualityObservation {
+  trace: Pick<TraceQualityTraceRow, 'id' | 'session_id' | 'agent_type' | 'name' | 'status' | 'project' | 'started_at'>;
+  prompt_refs: TraceQualityPromptRef[];
+  scores: TraceQualityScore[];
+}
+
+export interface TraceQualityObservationTreeNode extends TraceQualityObservation {
+  children: TraceQualityObservationTreeNode[];
+}
+
+export interface TraceQualityPromptRollup extends TraceQualityPromptRef {
+  latest_observation_at: string | null;
+}
+
+export interface TraceQualityFinding {
+  id: string;
+  kind: 'observation_error' | 'low_score' | 'low_coverage';
+  severity: 'info' | 'warning' | 'error' | 'critical';
+  trace_id: string;
+  observation_id: string | null;
+  score_id: number | null;
+  title: string;
+  message: string;
+  evidence: Record<string, unknown>;
+  created_at: string | null;
+}
+
 // --- API request params ---
 
 export interface SessionsListParams {
@@ -768,6 +877,38 @@ export interface UsageParams {
   provider?: string;
   tier?: string;
   limit?: number;
+}
+
+export interface TraceQualityTraceListParams {
+  date_from?: string;
+  date_to?: string;
+  project?: string;
+  agent?: string;
+  status?: string;
+  observation_type?: string;
+  model?: string;
+  tool?: string;
+  tool_name?: string;
+  score_name?: string;
+  min_score?: number;
+  max_score?: number;
+  exclude_low_coverage?: boolean;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TraceQualityObservationListParams {
+  limit?: number;
+  offset?: number;
+}
+
+export interface TraceQualityScoreListParams extends TraceQualityTraceListParams {
+  trace_id?: string;
+  observation_id?: string;
+  target_type?: string;
+  target_id?: string;
+  name?: string;
+  source?: string;
 }
 
 export interface MonitorSessionsParams {

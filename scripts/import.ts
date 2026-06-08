@@ -34,6 +34,8 @@ function parseArgs(): {
 
   for (let i = 0; i < args.length; i++) {
     switch (args[i]) {
+      case '--':
+        break;
       case '--source':
         source = args[++i] as ImportSource;
         if (!['claude-code', 'codex', 'all'].includes(source)) {
