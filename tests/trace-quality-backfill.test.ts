@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import fs from 'node:fs';
+import { request, type Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach } from 'node:test';
-import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import type { closeDb as closeDbType, getDb as getDbType } from '../src/db/connection.js';
@@ -19,6 +19,34 @@ let baseUrl = '';
 
 function countRows(tableName: string): number {
   return (getDb().prepare(`SELECT COUNT(*) AS c FROM ${tableName}`).get() as { c: number }).c;
+}
+
+async function postJson(pathName: string, payload: unknown): Promise<{ status: number; body: string }> {
+  const url = new URL(pathName, baseUrl);
+  const body = JSON.stringify(payload);
+
+  return new Promise((resolve, reject) => {
+    const req = request(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body),
+      },
+    }, res => {
+      const chunks: Buffer[] = [];
+      res.on('data', chunk => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      });
+      res.on('end', () => {
+        resolve({
+          status: res.statusCode ?? 0,
+          body: Buffer.concat(chunks).toString('utf8'),
+        });
+      });
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
 }
 
 function clearDatabase(): void {
@@ -251,10 +279,7 @@ test('force backfill rebuilds projected session rows without touching source row
 });
 
 test('event ingest writes trace-quality projection without blocking the primary event row', async () => {
-  const response = await fetch(`${baseUrl}/api/events`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const response = await postJson('/api/events', {
       event_id: 'evt-api-hook-1',
       session_id: 'api-hook-session',
       agent_type: 'codex',
@@ -264,7 +289,6 @@ test('event ingest writes trace-quality projection without blocking the primary 
       tokens_out: 5,
       model: 'gpt-5',
       metadata: { content_preview: 'API hook response' },
-    }),
   });
 
   assert.equal(response.status, 201);
