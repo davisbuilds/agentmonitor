@@ -16,6 +16,64 @@ function sqlStringList(values: readonly string[]): string {
   return values.map(value => `'${value.replaceAll("'", "''")}'`).join(', ');
 }
 
+function createTraceQualityPromptRefsSql(tableName = 'trace_quality_prompt_refs', ifNotExists = false): string {
+  const createTable = ifNotExists ? 'CREATE TABLE IF NOT EXISTS' : 'CREATE TABLE';
+  return `
+    ${createTable} ${tableName} (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL,
+      version TEXT,
+      label TEXT,
+      source TEXT NOT NULL CHECK (source IN (${sqlStringList(TRACE_QUALITY_PROMPT_REF_SOURCES)})),
+      content_hash TEXT,
+      file_path TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `;
+}
+
+function ensureTraceQualityPromptRefSourceCheck(): void {
+  const db = getDb();
+  const tableSql = (db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='trace_quality_prompt_refs'"
+  ).get() as { sql: string } | undefined)?.sql ?? '';
+
+  if (!tableSql || TRACE_QUALITY_PROMPT_REF_SOURCES.every(source => tableSql.includes(`'${source}'`))) {
+    return;
+  }
+
+  // foreign_keys MUST be OFF for the rebuild: trace_quality_observation_prompts (and
+  // export_state) hold ON DELETE CASCADE refs to this table, so DROP TABLE with enforcement
+  // on would implicitly delete-all and cascade-wipe every existing link row. Preserving ids
+  // via INSERT...SELECT keeps those refs valid once enforcement is restored.
+  const foreignKeys = Number(db.pragma('foreign_keys', { simple: true }));
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    db.exec(createTraceQualityPromptRefsSql('trace_quality_prompt_refs_migrated'));
+    db.exec(`
+      INSERT INTO trace_quality_prompt_refs_migrated (
+        id, name, version, label, source, content_hash, file_path, metadata_json, created_at
+      )
+      SELECT id, name, version, label, source, content_hash, file_path, metadata_json, created_at
+      FROM trace_quality_prompt_refs;
+
+      DROP TABLE trace_quality_prompt_refs;
+      ALTER TABLE trace_quality_prompt_refs_migrated RENAME TO trace_quality_prompt_refs;
+
+      CREATE INDEX IF NOT EXISTS idx_tq_prompt_refs_name_version ON trace_quality_prompt_refs(name, version);
+      CREATE INDEX IF NOT EXISTS idx_tq_prompt_refs_source ON trace_quality_prompt_refs(source);
+    `);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`);
+  }
+}
+
 export function initSchema(): void {
   const db = getDb();
 
@@ -553,17 +611,7 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_tq_scores_name ON trace_quality_scores(name, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_tq_scores_source ON trace_quality_scores(source);
 
-    CREATE TABLE IF NOT EXISTS trace_quality_prompt_refs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      version TEXT,
-      label TEXT,
-      source TEXT NOT NULL CHECK (source IN (${sqlStringList(TRACE_QUALITY_PROMPT_REF_SOURCES)})),
-      content_hash TEXT,
-      file_path TEXT,
-      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+    ${createTraceQualityPromptRefsSql('trace_quality_prompt_refs', true)}
 
     CREATE INDEX IF NOT EXISTS idx_tq_prompt_refs_name_version ON trace_quality_prompt_refs(name, version);
     CREATE INDEX IF NOT EXISTS idx_tq_prompt_refs_source ON trace_quality_prompt_refs(source);
@@ -621,6 +669,8 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_tq_export_local_observation ON trace_quality_export_state(local_observation_id);
     CREATE INDEX IF NOT EXISTS idx_tq_export_external_trace ON trace_quality_export_state(provider, external_trace_id);
   `);
+
+  ensureTraceQualityPromptRefSourceCheck();
 
   // FTS5 full-text search on message content
   db.exec(`

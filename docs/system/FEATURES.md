@@ -91,9 +91,10 @@ Product-surface reference for AgentMonitor.
 - Local trace-quality APIs live under `/api/v2/trace-quality/*` and are isolated from legacy monitor endpoints.
 - Trace lists support date, project, agent, status, observation type, model, tool, score, and low-coverage filters with deterministic pagination.
 - Trace detail exposes parsed metadata, coverage, aggregate token/cost/duration totals, prompt attribution, and score summaries.
+- Prompt attribution links explicit prompt metadata, deterministic task-template refs, Claude `Skill` calls, and Codex `skills/.../SKILL.md` reads without copying prompt bodies into trace-quality prompt refs.
 - Local human/API review scores can be created, updated, and deleted without mutating source event or session rows.
 - Observation APIs expose both flat deterministic ordering and nested parent/child trees.
-- Score, prompt, and findings endpoints provide local review rollups for future evaluation workflows.
+- Score, prompt, and findings endpoints provide local review rollups for future evaluation workflows. Prompt rollups include generation count, median duration, total cost, token totals, score count, median numeric score, and last seen.
 - Aggregate trace-quality responses include coverage metadata so the UI can disclose matching traces, included traces, low-coverage exclusions, usage-bearing observations, missing-usage observations, and score coverage.
 
 ## Insights
@@ -170,7 +171,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/trace-quality/scores/:id` | DELETE | Delete a local trace-quality score |
 | `/api/v2/trace-quality/score-summary` | GET | Score rollups grouped by score name and value type |
 | `/api/v2/trace-quality/score-rollups` | GET | Score rollups grouped by trace, session, model, tool, prompt, and day |
-| `/api/v2/trace-quality/prompts` | GET | Prompt-version attribution rollups |
+| `/api/v2/trace-quality/prompts` | GET | Prompt-version attribution rollups with generation, duration, cost, token, score, and last-seen metrics |
 | `/api/v2/trace-quality/findings` | GET | Derived trace-quality findings for review |
 | `/api/v2/insights` | GET | List persisted insights for the current historical slice |
 | `/api/v2/insights/:id` | GET | Fetch a single persisted insight |

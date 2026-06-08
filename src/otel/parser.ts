@@ -124,6 +124,31 @@ function getAttrBoolean(attrs: OtelKeyValue[] | undefined, key: string): boolean
   return undefined;
 }
 
+function copyPromptRefAttributes(
+  target: Record<string, unknown>,
+  attrs: OtelKeyValue[] | undefined,
+): void {
+  const mappings: Array<[string, string[]]> = [
+    ['prompt_name', ['prompt_name', 'prompt.name', 'gen_ai.prompt.name', 'langfuse.prompt.name']],
+    ['prompt_version', ['prompt_version', 'prompt.version', 'gen_ai.prompt.version', 'langfuse.prompt.version']],
+    ['prompt_label', ['prompt_label', 'prompt.label', 'gen_ai.prompt.label', 'langfuse.prompt.label']],
+    ['prompt_hash', ['prompt_hash', 'prompt.hash', 'content_hash', 'gen_ai.prompt.hash', 'langfuse.prompt.hash']],
+    ['prompt_source', ['prompt_source', 'prompt.source', 'gen_ai.prompt.source']],
+    ['prompt_file_path', ['prompt_file_path', 'prompt.file_path', 'prompt.path']],
+  ];
+
+  for (const [metadataKey, attrKeys] of mappings) {
+    if (target[metadataKey] != null) continue;
+    for (const attrKey of attrKeys) {
+      const value = getAttr(attrs, attrKey);
+      if (value) {
+        target[metadataKey] = value;
+        break;
+      }
+    }
+  }
+}
+
 function getBodyJson(body: OtelAnyValue | undefined): Record<string, unknown> | undefined {
   if (!body) return undefined;
   if (body.stringValue) {
@@ -603,6 +628,8 @@ function parseLogRecord(
   if (resolvedEventName) {
     meta.otel_event_name ??= resolvedEventName;
   }
+  copyPromptRefAttributes(meta, logRecord.attributes);
+  copyPromptRefAttributes(meta, resourceAttrs);
 
   if (agentType === 'codex') {
     const codexEventKind = getCodexEventKind(logRecord, bodyJson);
