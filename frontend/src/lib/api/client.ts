@@ -682,6 +682,24 @@ export interface TraceQualityScore {
   created_at: string;
 }
 
+export type TraceQualityScoreMutationValue = number | string | boolean;
+
+export interface TraceQualityScoreMutationInput {
+  target_type?: 'session' | 'trace' | 'observation' | 'message' | 'event' | 'session_item';
+  target_id?: string;
+  name?: string;
+  value_type?: 'numeric' | 'categorical' | 'boolean' | 'text';
+  value?: TraceQualityScoreMutationValue;
+  numeric_value?: number;
+  categorical_value?: string;
+  boolean_value?: boolean | 0 | 1;
+  text_value?: string;
+  source?: 'human' | 'code_evaluator' | 'llm_judge' | 'api';
+  evaluator_name?: string | null;
+  comment?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
 export interface TraceQualityScoreSummary {
   name: string;
   value_type: string;
@@ -694,6 +712,26 @@ export interface TraceQualityScoreSummary {
   categorical_values: Record<string, number>;
   scored_traces: number;
 }
+
+export type TraceQualityScoreRollupDimension = 'trace' | 'session' | 'model' | 'tool' | 'prompt' | 'day';
+
+export interface TraceQualityScoreRollup {
+  dimension: TraceQualityScoreRollupDimension;
+  key: string;
+  label: string | null;
+  score_count: number;
+  numeric_score_count: number;
+  numeric_avg: number | null;
+  boolean_true: number;
+  boolean_false: number;
+  categorical_values: Record<string, number>;
+  trace_count: number;
+  observation_count: number;
+  first_score_at: string | null;
+  last_score_at: string | null;
+}
+
+export type TraceQualityScoreRollups = Record<TraceQualityScoreRollupDimension, TraceQualityScoreRollup[]>;
 
 export interface TraceQualityTrace {
   id: string;
@@ -1109,11 +1147,48 @@ export async function fetchTraceQualityScores(
   return checkedJson(res, 'fetchTraceQualityScores');
 }
 
+export async function createTraceQualityScore(
+  input: Required<Pick<TraceQualityScoreMutationInput, 'target_type' | 'target_id' | 'name' | 'value_type'>> & TraceQualityScoreMutationInput,
+): Promise<{ score: TraceQualityScore }> {
+  const res = await fetch('/api/v2/trace-quality/scores', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return checkedJson(res, 'createTraceQualityScore');
+}
+
+export async function updateTraceQualityScore(
+  id: number,
+  input: TraceQualityScoreMutationInput,
+): Promise<{ score: TraceQualityScore }> {
+  const res = await fetch(`/api/v2/trace-quality/scores/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return checkedJson(res, 'updateTraceQualityScore');
+}
+
+export async function deleteTraceQualityScore(id: number): Promise<{ deleted: true }> {
+  const res = await fetch(`/api/v2/trace-quality/scores/${id}`, {
+    method: 'DELETE',
+  });
+  return checkedJson(res, 'deleteTraceQualityScore');
+}
+
 export async function fetchTraceQualityScoreSummary(
   params: Record<string, string | number | boolean | undefined> = {},
 ): Promise<{ data: TraceQualityScoreSummary[]; coverage: TraceQualityReadCoverage }> {
   const res = await fetch(`/api/v2/trace-quality/score-summary${qs(params)}`);
   return checkedJson(res, 'fetchTraceQualityScoreSummary');
+}
+
+export async function fetchTraceQualityScoreRollups(
+  params: Record<string, string | number | boolean | undefined> = {},
+): Promise<{ data: TraceQualityScoreRollups; coverage: TraceQualityReadCoverage }> {
+  const res = await fetch(`/api/v2/trace-quality/score-rollups${qs(params)}`);
+  return checkedJson(res, 'fetchTraceQualityScoreRollups');
 }
 
 export async function fetchTraceQualityPrompts(

@@ -753,6 +753,26 @@ export interface TraceQualityScore extends Omit<TraceQualityScoreRow, 'metadata_
   value: number | string | boolean | null;
 }
 
+export type TraceQualityScoreMutationValue = number | string | boolean;
+
+export interface TraceQualityScoreCreateInput {
+  target_type: 'session' | 'trace' | 'observation' | 'message' | 'event' | 'session_item';
+  target_id: string;
+  name: string;
+  value_type: 'numeric' | 'categorical' | 'boolean' | 'text';
+  value?: TraceQualityScoreMutationValue;
+  numeric_value?: number;
+  categorical_value?: string;
+  boolean_value?: boolean | 0 | 1;
+  text_value?: string;
+  source?: 'human' | 'code_evaluator' | 'llm_judge' | 'api';
+  evaluator_name?: string | null;
+  comment?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export type TraceQualityScorePatchInput = Partial<TraceQualityScoreCreateInput>;
+
 export interface TraceQualityScoreSummary {
   name: string;
   value_type: string;
@@ -765,6 +785,26 @@ export interface TraceQualityScoreSummary {
   categorical_values: Record<string, number>;
   scored_traces: number;
 }
+
+export type TraceQualityScoreRollupDimension = 'trace' | 'session' | 'model' | 'tool' | 'prompt' | 'day';
+
+export interface TraceQualityScoreRollup {
+  dimension: TraceQualityScoreRollupDimension;
+  key: string;
+  label: string | null;
+  score_count: number;
+  numeric_score_count: number;
+  numeric_avg: number | null;
+  boolean_true: number;
+  boolean_false: number;
+  categorical_values: Record<string, number>;
+  trace_count: number;
+  observation_count: number;
+  first_score_at: string | null;
+  last_score_at: string | null;
+}
+
+export type TraceQualityScoreRollups = Record<TraceQualityScoreRollupDimension, TraceQualityScoreRollup[]>;
 
 export interface TraceQualityTrace extends Omit<TraceQualityTraceRow, 'metadata_json' | 'tags_json' | 'coverage_json'> {
   metadata: Record<string, unknown>;

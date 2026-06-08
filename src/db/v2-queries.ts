@@ -64,6 +64,7 @@ import { classifyModelForUsage, type ModelClassification } from '../pricing/mode
 
 export {
   getTraceQualityObservation,
+  getTraceQualityScoreRollups,
   getTraceQualityScoreSummary,
   getTraceQualityTrace,
   listTraceQualityFindings,
@@ -72,6 +73,15 @@ export {
   listTraceQualityScores,
   listTraceQualityTraces,
 } from '../trace-quality/queries.js';
+
+export {
+  createTraceQualityScore,
+  deleteTraceQualityScore,
+  isTraceQualityScoreMutationError,
+  isTraceQualityScoreNotFoundError,
+  runTraceQualityCodeEvaluators,
+  updateTraceQualityScore,
+} from '../trace-quality/scores.js';
 
 function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
   return {
