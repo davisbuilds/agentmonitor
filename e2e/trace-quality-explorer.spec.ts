@@ -51,6 +51,25 @@ test.beforeAll(async () => {
   insertObs.run('e2e-obs-root', 'e2e-trace-1', null, 'e2e-sess-1', 'event', 'generation', 'Root generation', 'success', 'gpt-5', null, now, 4200, 1200, 300, 0.05);
   insertObs.run('e2e-obs-child', 'e2e-trace-1', 'e2e-obs-root', 'e2e-sess-1', 'event', 'tool', 'Bash call', 'success', null, 'Bash', now, 800, 0, 0, null);
 
+  // A second trace in a different session: lets the hash deep-link test switch the
+  // open trace via an external hashchange. e2e-sess-1 keeps exactly one trace, so
+  // the session-scope auto-open test still applies.
+  db.prepare(`
+    INSERT INTO trace_quality_traces (id, session_id, agent_type, name, status, started_at, coverage_json)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'e2e-trace-2', 'e2e-sess-2', 'codex', 'Second explorer trace', 'success', now,
+    JSON.stringify({ has_full_transcript: true, has_tool_details: true, has_token_usage: true, has_cost: true, projection_confidence: 'high' }),
+  );
+  insertObs.run('e2e-obs-2-root', 'e2e-trace-2', null, 'e2e-sess-2', 'event', 'generation', 'Second root generation', 'success', 'gpt-5', null, now, 1000, 200, 50, 0.01);
+
+  // A machine-authored score on trace-1. The local-review panel must hide it (and
+  // its destructive Remove) because that surface only owns human-authored scores.
+  db.prepare(`
+    INSERT INTO trace_quality_scores (target_type, target_id, name, value_type, boolean_value, source, evaluator_name)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run('trace', 'e2e-trace-1', 'machine-correctness', 'boolean', 1, 'code_evaluator', 'builtin');
+
   const app = createApp();
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -114,4 +133,40 @@ test('quality explorer scopes to a session via drill-in and auto-opens a lone tr
   // Clearing the scope drops back to the date-filtered list.
   await page.getByRole('button', { name: 'Clear scope' }).click();
   await expect(page.getByText(/Scoped to session/)).toHaveCount(0);
+});
+
+test('quality explorer hides machine-authored scores from the local review panel', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#analytics?view=quality&trace=e2e-trace-1`);
+  await expect(page.getByRole('heading', { name: 'Seeded explorer trace' })).toBeVisible();
+
+  // The local-review panel is mounted...
+  await expect(page.getByRole('heading', { name: 'Local review scores' })).toBeVisible();
+  // ...but the seeded code_evaluator score is filtered out, so it has no destructive Remove.
+  await expect(page.getByText('machine-correctness')).toHaveCount(0);
+
+  // A human score, by contrast, shows and is removable — proving the panel renders
+  // scores and only filters by source.
+  await page.getByPlaceholder('Score name (e.g. correctness)').fill('human-correctness');
+  await page.getByRole('button', { name: 'Add score', exact: true }).click();
+  const scoreRow = page.locator('li', { hasText: 'human-correctness' });
+  await expect(scoreRow).toBeVisible();
+  await scoreRow.getByRole('button', { name: /Delete score human-correctness/ }).click();
+  await expect(page.locator('li', { hasText: 'human-correctness' })).toHaveCount(0);
+});
+
+test('quality explorer reloads the inspector when the trace hash changes externally', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#analytics?view=quality&trace=e2e-trace-1`);
+  await expect(page.getByRole('heading', { name: 'Seeded explorer trace' })).toBeVisible();
+  await expect(page.getByText('Root generation')).toBeVisible();
+
+  // An external nav (Back/Forward or an edited URL) that changes only `trace=`.
+  // Assigning location.hash fires a real hashchange, unlike in-app replaceState.
+  await page.evaluate(() => {
+    window.location.hash = 'analytics?view=quality&trace=e2e-trace-2';
+  });
+
+  // The inspector follows the hash to the new trace.
+  await expect(page.getByRole('heading', { name: 'Second explorer trace' })).toBeVisible();
+  await expect(page.getByText('Second root generation')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Seeded explorer trace' })).toHaveCount(0);
 });

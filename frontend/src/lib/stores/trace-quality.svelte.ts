@@ -84,12 +84,18 @@ class TraceQualityStore {
     return null;
   }
 
-  /** Scores attached to the current score target (observation scores, else trace scores). */
+  /**
+   * Human-authored scores on the current target (observation scores, else trace
+   * scores). Generated rows (`code_evaluator`/`llm_judge`/`api`/`system`) are
+   * excluded: this is the local human-review surface and its Remove action calls
+   * the destructive delete endpoint, so it must not expose machine-written scores
+   * for accidental deletion. Generated scores surface in the Quality dashboards.
+   */
   get targetScores(): TraceQualityScore[] {
-    if (this.selectedObservationId && this.observationDetail) {
-      return this.observationDetail.scores;
-    }
-    return this.traceScores;
+    const scores = this.selectedObservationId && this.observationDetail
+      ? this.observationDetail.scores
+      : this.traceScores;
+    return scores.filter((score) => score.source === 'human');
   }
 
   private get listParams(): Record<string, string> {

@@ -309,6 +309,12 @@ class AnalyticsFiltersStore {
       || next.tier !== this.tier
       || next.kind !== this.kind
       || next.sessionId !== this.sessionId
+      // Trace selection rides the hash: an external nav (Back/Forward, edited
+      // URL, or deep-link anchor) that changes only `trace=` must still notify so
+      // the Quality explorer reloads the inspector for the new trace. In-app
+      // selection uses replaceState and does not fire hashchange, so this only
+      // costs a list reload on genuine navigation.
+      || next.traceId !== this.traceId
     );
     this.applyState(next);
     if (sharedChanged) this.notify();
