@@ -19,6 +19,7 @@
   import ActivityMinimap from './ActivityMinimap.svelte';
   import MessageBlock from './MessageBlock.svelte';
   import { Badge, Button, EmptyState, Select } from '../ui';
+  import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
   interface Props {
     sessionId: string;
@@ -351,6 +352,7 @@
         </span>
       </div>
       <div class="flex items-center gap-2 text-meta text-text-faint shrink-0">
+        <TraceDrillInLink sessionId={sessionId} label="Quality ↗" />
         {#if session.project}
           <Badge tone="neutral">{session.project}</Badge>
         {/if}

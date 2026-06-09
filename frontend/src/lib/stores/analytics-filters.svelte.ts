@@ -37,6 +37,7 @@ export function createDefaultAnalyticsRouteState(now = new Date()): AnalyticsRou
     insightProvider: 'openai',
     insightModel: '',
     kind: 'overview',
+    sessionId: null,
     traceId: null,
   };
 }
@@ -74,7 +75,8 @@ class AnalyticsFiltersStore {
   insightModel = $state('');
   kind = $state<InsightKind>('overview');
 
-  // Quality sub-view: the trace open in the explorer (selection, not a filter).
+  // Quality sub-view: optional session scope (drill-in) and the open trace.
+  sessionId = $state<string | null>(null);
   traceId = $state<string | null>(null);
 
   projectOptions = $state<string[]>([]);
@@ -101,6 +103,7 @@ class AnalyticsFiltersStore {
       insightProvider: this.insightProvider,
       insightModel: this.insightModel,
       kind: this.kind,
+      sessionId: this.sessionId,
       traceId: this.traceId,
     };
   }
@@ -179,6 +182,7 @@ class AnalyticsFiltersStore {
     this.insightProvider = (state.insightProvider as InsightProvider) || 'openai';
     this.insightModel = state.insightModel;
     this.kind = (state.kind as InsightKind) || 'overview';
+    this.sessionId = state.sessionId;
     this.traceId = state.traceId;
   }
 
@@ -204,6 +208,15 @@ class AnalyticsFiltersStore {
     if (traceId === this.traceId) return;
     this.traceId = traceId;
     this.syncHash();
+  }
+
+  /** Clear the Quality explorer's session scope; reloads the (now unscoped) list. */
+  clearSessionScope(): void {
+    if (this.sessionId === null) return;
+    this.sessionId = null;
+    this.traceId = null;
+    this.syncHash();
+    this.notify();
   }
 
   // --- Shared filters (refetch the active sub-view) ---
@@ -295,6 +308,7 @@ class AnalyticsFiltersStore {
       || next.provider !== this.provider
       || next.tier !== this.tier
       || next.kind !== this.kind
+      || next.sessionId !== this.sessionId
     );
     this.applyState(next);
     if (sharedChanged) this.notify();

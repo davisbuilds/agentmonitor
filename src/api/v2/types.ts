@@ -967,6 +967,7 @@ export interface TraceQualityTraceListParams {
   date_to?: string;
   project?: string;
   agent?: string;
+  session_id?: string;
   status?: string;
   observation_type?: string;
   model?: string;

@@ -61,6 +61,15 @@ class TraceQualityStore {
     return analyticsFilters.traceId;
   }
 
+  /** When set (via drill-in), the list is scoped to one session and ignores the date window. */
+  get sessionScope(): string | null {
+    return analyticsFilters.sessionId;
+  }
+
+  clearSessionScope(): void {
+    analyticsFilters.clearSessionScope();
+  }
+
   get scoreTarget(): ScoreTarget | null {
     if (this.selectedObservationId && this.observationDetail) {
       return {
@@ -84,6 +93,14 @@ class TraceQualityStore {
   }
 
   private get listParams(): Record<string, string> {
+    // A session scope (drill-in) targets one session's traces regardless of when they ran,
+    // so it overrides the shared date window. Otherwise filter by the date/project/agent bar.
+    if (this.sessionScope) {
+      const scoped: Record<string, string> = { session_id: this.sessionScope };
+      if (this.project) scoped.project = this.project;
+      if (this.agent) scoped.agent = this.agent;
+      return scoped;
+    }
     const params: Record<string, string> = { date_from: this.from, date_to: this.to };
     if (this.project) params.project = this.project;
     if (this.agent) params.agent = this.agent;
@@ -119,6 +136,9 @@ class TraceQualityStore {
       const wanted = this.selectedTraceId;
       if (wanted && this.detail?.id !== wanted) {
         await this.loadDetail(wanted);
+      } else if (!wanted && this.sessionScope && result.data.length === 1) {
+        // Drill-in to a session with a single trace opens it directly.
+        await this.selectTrace(result.data[0]!.id);
       } else if (!wanted) {
         this.clearDetail();
       }

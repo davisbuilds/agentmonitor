@@ -1,6 +1,7 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
   import { timeAgo } from '../../format';
+  import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
   function preview(session: { id: string; project: string | null; message_count: number }) {
     return session.project ? `${session.project}` : session.id.slice(0, 12);
@@ -25,22 +26,25 @@
   {:else if analytics.topSessions.length > 0}
     <div class="divide-y divide-line/60">
       {#each analytics.topSessions as session, index}
-        <button
-          class="flex w-full items-center gap-3 rounded-sm px-2 py-2 text-left transition-colors hover:bg-surface-2"
-          onclick={() => analytics.openSession(session.id)}
-        >
-          <div class="w-6 text-right tabular font-mono text-meta text-text-faint">{index + 1}</div>
-          <div class="min-w-0 flex-1">
-            <div class="truncate text-body text-text">{preview(session)}</div>
-            <div class="text-meta text-text-faint">{session.agent} · {session.tool_call_count} tool calls</div>
-          </div>
-          <div class="text-right tabular font-mono text-meta text-text-muted">
-            <div>{session.message_count} msgs</div>
-            {#if session.started_at}
-              <div class="text-text-faint">{timeAgo(session.started_at)}</div>
-            {/if}
-          </div>
-        </button>
+        <div class="flex items-center gap-1">
+          <button
+            class="flex flex-1 items-center gap-3 rounded-sm px-2 py-2 text-left transition-colors hover:bg-surface-2"
+            onclick={() => analytics.openSession(session.id)}
+          >
+            <div class="w-6 text-right tabular font-mono text-meta text-text-faint">{index + 1}</div>
+            <div class="min-w-0 flex-1">
+              <div class="truncate text-body text-text">{preview(session)}</div>
+              <div class="text-meta text-text-faint">{session.agent} · {session.tool_call_count} tool calls</div>
+            </div>
+            <div class="text-right tabular font-mono text-meta text-text-muted">
+              <div>{session.message_count} msgs</div>
+              {#if session.started_at}
+                <div class="text-text-faint">{timeAgo(session.started_at)}</div>
+              {/if}
+            </div>
+          </button>
+          <TraceDrillInLink sessionId={session.id} class="mr-1 shrink-0" />
+        </div>
       {/each}
     </div>
   {:else}

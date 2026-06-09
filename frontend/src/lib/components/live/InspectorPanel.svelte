@@ -2,6 +2,7 @@
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
   import { timeAgo } from '../../format';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
   interface Props {
     session: LiveSession | null;
@@ -78,6 +79,10 @@
           <div class="flex items-center justify-between gap-3">
             <span class="text-text-faint">ID</span>
             <span class="font-mono text-meta text-text-muted">{session.id}</span>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <span class="text-text-faint">Trace quality</span>
+            <TraceDrillInLink sessionId={session.id} label="Inspect ↗" />
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-text-faint">Agent</span>

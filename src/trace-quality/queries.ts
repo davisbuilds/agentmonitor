@@ -304,6 +304,10 @@ function buildTraceWhere(
     conditions.push('t.agent_type = ?');
     values.push(params.agent);
   }
+  if (params.session_id) {
+    conditions.push('t.session_id = ?');
+    values.push(params.session_id);
+  }
   if (params.status) {
     conditions.push('t.status = ?');
     values.push(params.status);

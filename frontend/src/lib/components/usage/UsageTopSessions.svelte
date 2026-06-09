@@ -2,6 +2,7 @@
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatNumber } from '../../format';
   import { Badge, Button } from '../ui';
+  import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
   function openSession(sessionId: string, available: boolean): void {
     if (!available) return;
@@ -71,14 +72,17 @@
               {/if}
             </div>
 
-            <Button
-              variant="neutral"
-              size="sm"
-              disabled={!row.browsing_session_available}
-              onclick={() => openSession(row.id, row.browsing_session_available)}
-            >
-              {row.browsing_session_available ? 'Open Session' : 'Events Only'}
-            </Button>
+            <div class="flex items-center gap-1.5">
+              <TraceDrillInLink sessionId={row.id} />
+              <Button
+                variant="neutral"
+                size="sm"
+                disabled={!row.browsing_session_available}
+                onclick={() => openSession(row.id, row.browsing_session_available)}
+              >
+                {row.browsing_session_available ? 'Open Session' : 'Events Only'}
+              </Button>
+            </div>
           </div>
         </div>
       {/each}

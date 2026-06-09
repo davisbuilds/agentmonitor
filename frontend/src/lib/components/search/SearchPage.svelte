@@ -5,6 +5,7 @@
   import { openCommandPalette } from '../../stores/router.svelte';
   import { search } from '../../stores/search.svelte';
   import { Select, Button, EmptyState } from '../ui';
+  import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
   const sortOptions = [
     { value: 'recent', label: 'Newest First' },
@@ -118,6 +119,8 @@
     {#if search.hasQuery}
       <div class="space-y-2">
         {#each search.results as result (result.message_id)}
+          <div class="relative">
+          <TraceDrillInLink sessionId={result.session_id} class="absolute right-2 bottom-2 z-10 bg-surface" />
           <button
             class="w-full rounded-sm border border-line bg-surface px-3 py-3 text-left transition-colors hover:border-line-strong hover:bg-surface-2"
             onclick={() => search.openResult(result)}
@@ -153,6 +156,7 @@
               </div>
             {/if}
           </button>
+          </div>
         {/each}
 
         {#if search.loading && search.results.length === 0}

@@ -102,3 +102,16 @@ test('quality explorer restores an open trace from the hash deep link', async ({
   await expect(page.getByRole('heading', { name: 'Seeded explorer trace' })).toBeVisible();
   await expect(page.getByText('Root generation')).toBeVisible();
 });
+
+test('quality explorer scopes to a session via drill-in and auto-opens a lone trace', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#analytics?view=quality&session=e2e-sess-1`);
+
+  await expect(page.getByText(/Scoped to session/)).toBeVisible();
+  // The session has exactly one trace, so it opens automatically.
+  await expect(page.getByRole('heading', { name: 'Seeded explorer trace' })).toBeVisible();
+  await expect(page.getByText('Root generation')).toBeVisible();
+
+  // Clearing the scope drops back to the date-filtered list.
+  await page.getByRole('button', { name: 'Clear scope' }).click();
+  await expect(page.getByText(/Scoped to session/)).toHaveCount(0);
+});
