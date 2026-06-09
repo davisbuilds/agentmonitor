@@ -274,6 +274,19 @@ test('trace list applies filters, pagination, and coverage accounting', async ()
   assert.equal(body.coverage.score_coverage.total_scores, 3);
 });
 
+test('trace list filters by session_id for drill-in scoping', async () => {
+  const scoped = await getJson<{ data: Array<{ id: string; session_id: string }>; total: number }>(
+    '/api/v2/trace-quality/traces?session_id=session-high',
+  );
+  assert.deepEqual(scoped.data.map(trace => trace.id), ['trace-high']);
+  assert.ok(scoped.data.every(trace => trace.session_id === 'session-high'));
+
+  const empty = await getJson<{ data: unknown[]; total: number }>(
+    '/api/v2/trace-quality/traces?session_id=session-does-not-exist',
+  );
+  assert.equal(empty.total, 0);
+});
+
 test('trace detail returns parsed metadata, aggregate totals, prompts, and score summary', async () => {
   const body = await getJson<{
     trace: {

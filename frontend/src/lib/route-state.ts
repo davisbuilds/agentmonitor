@@ -3,7 +3,7 @@ export type AppTab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search';
 const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'analytics', 'search']);
 
 /** Sub-views inside the consolidated Analytics tab. */
-export type AnalyticsView = 'overview' | 'usage' | 'insights';
+export type AnalyticsView = 'overview' | 'usage' | 'insights' | 'quality';
 
 /** Sub-views inside the Sessions tab (Pinned folded in). */
 export type SessionsView = 'browse' | 'pinned';
@@ -28,6 +28,9 @@ export interface AnalyticsRouteState {
   insightProvider: string;
   insightModel: string;
   kind: string;
+  // Quality sub-view: optional session scope (drill-in) and the open trace.
+  sessionId: string | null;
+  traceId: string | null;
 }
 
 export interface SessionsRouteState {
@@ -119,10 +122,22 @@ export function buildAnalyticsRouteHash(state: AnalyticsRouteState): string {
     if (state.insightProvider) params.set('provider', state.insightProvider);
     if (state.insightModel) params.set('model', state.insightModel);
     if (state.kind) params.set('kind', state.kind);
+  } else if (state.view === 'quality') {
+    if (state.sessionId) params.set('session', state.sessionId);
+    if (state.traceId) params.set('trace', state.traceId);
   }
 
   const suffix = params.toString();
   return suffix ? `analytics?${suffix}` : 'analytics';
+}
+
+/** Hash href for drilling into the Quality explorer, optionally scoped to a session/trace. */
+export function buildAnalyticsQualityHash(opts: { sessionId?: string | null; traceId?: string | null } = {}): string {
+  const params = new URLSearchParams();
+  params.set('view', 'quality');
+  if (opts.sessionId) params.set('session', opts.sessionId);
+  if (opts.traceId) params.set('trace', opts.traceId);
+  return `analytics?${params.toString()}`;
 }
 
 export function parseAnalyticsRouteHash(hash: string, fallback: AnalyticsRouteState): AnalyticsRouteState {
@@ -131,7 +146,9 @@ export function parseAnalyticsRouteHash(hash: string, fallback: AnalyticsRouteSt
 
   const params = parsed.params;
   const rawView = params.get('view');
-  const view: AnalyticsView = rawView === 'usage' || rawView === 'insights' ? rawView : 'overview';
+  const view: AnalyticsView = rawView === 'usage' || rawView === 'insights' || rawView === 'quality'
+    ? rawView
+    : 'overview';
 
   return {
     view,
@@ -145,6 +162,8 @@ export function parseAnalyticsRouteHash(hash: string, fallback: AnalyticsRouteSt
     insightProvider: view === 'insights' ? params.get('provider') || '' : fallback.insightProvider,
     insightModel: view === 'insights' ? params.get('model') || '' : '',
     kind: view === 'insights' ? params.get('kind') || '' : fallback.kind,
+    sessionId: view === 'quality' ? params.get('session') || null : null,
+    traceId: view === 'quality' ? params.get('trace') || null : null,
   };
 }
 

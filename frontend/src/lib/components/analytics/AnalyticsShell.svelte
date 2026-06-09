@@ -3,11 +3,13 @@
   import { analytics } from '../../stores/analytics.svelte';
   import { usage } from '../../stores/usage.svelte';
   import { insights } from '../../stores/insights.svelte';
+  import { traceQuality } from '../../stores/trace-quality.svelte';
   import { Button, Select, SubTabs } from '../ui';
   import type { AnalyticsView } from '../../route-state';
   import AnalyticsPage from './AnalyticsPage.svelte';
   import UsagePage from '../usage/UsagePage.svelte';
   import InsightsPage from '../insights/InsightsPage.svelte';
+  import TraceQualityPage from '../trace-quality/TraceQualityPage.svelte';
 
   const f = analyticsFilters;
 
@@ -15,6 +17,7 @@
     { id: 'overview', label: 'Overview' },
     { id: 'usage', label: 'Usage' },
     { id: 'insights', label: 'Insights' },
+    { id: 'quality', label: 'Quality' },
   ];
 
   const quickRanges = [
@@ -29,6 +32,7 @@
   function refreshActive(): void {
     if (f.view === 'overview') void analytics.fetchAll();
     else if (f.view === 'usage') void usage.fetchAll();
+    else if (f.view === 'quality') void traceQuality.load();
     else void insights.load();
   }
 
@@ -97,6 +101,8 @@
     <AnalyticsPage />
   {:else if f.view === 'usage'}
     <UsagePage />
+  {:else if f.view === 'quality'}
+    <TraceQualityPage />
   {:else}
     <InsightsPage />
   {/if}

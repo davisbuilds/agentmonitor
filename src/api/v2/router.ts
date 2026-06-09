@@ -88,6 +88,7 @@ function readTraceQualityParams(req: Request): {
   date_to?: string;
   project?: string;
   agent?: string;
+  session_id?: string;
   status?: string;
   observation_type?: string;
   model?: string;
@@ -105,6 +106,7 @@ function readTraceQualityParams(req: Request): {
     date_to: safeString(req.query.date_to as string | string[] | undefined),
     project: safeString(req.query.project as string | string[] | undefined),
     agent: safeString((req.query.agent ?? req.query.agent_type) as string | string[] | undefined),
+    session_id: safeString(req.query.session_id as string | string[] | undefined),
     status: safeString(req.query.status as string | string[] | undefined),
     observation_type: safeString(req.query.observation_type as string | string[] | undefined),
     model: safeString(req.query.model as string | string[] | undefined),
