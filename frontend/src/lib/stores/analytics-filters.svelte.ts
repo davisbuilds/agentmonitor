@@ -37,6 +37,7 @@ export function createDefaultAnalyticsRouteState(now = new Date()): AnalyticsRou
     insightProvider: 'openai',
     insightModel: '',
     kind: 'overview',
+    traceId: null,
   };
 }
 
@@ -73,6 +74,9 @@ class AnalyticsFiltersStore {
   insightModel = $state('');
   kind = $state<InsightKind>('overview');
 
+  // Quality sub-view: the trace open in the explorer (selection, not a filter).
+  traceId = $state<string | null>(null);
+
   projectOptions = $state<string[]>([]);
   agentOptions = $state<string[]>([]);
 
@@ -97,6 +101,7 @@ class AnalyticsFiltersStore {
       insightProvider: this.insightProvider,
       insightModel: this.insightModel,
       kind: this.kind,
+      traceId: this.traceId,
     };
   }
 
@@ -174,6 +179,7 @@ class AnalyticsFiltersStore {
     this.insightProvider = (state.insightProvider as InsightProvider) || 'openai';
     this.insightModel = state.insightModel;
     this.kind = (state.kind as InsightKind) || 'overview';
+    this.traceId = state.traceId;
   }
 
   private syncHash(): void {
@@ -187,6 +193,16 @@ class AnalyticsFiltersStore {
   setView(view: AnalyticsView): void {
     if (view === this.view) return;
     this.view = view;
+    this.syncHash();
+  }
+
+  /**
+   * Set the Quality explorer's open trace. Selection (not a filter), so it only
+   * reflects to the hash for deep-linking — it does not notify list subscribers.
+   */
+  setTraceId(traceId: string | null): void {
+    if (traceId === this.traceId) return;
+    this.traceId = traceId;
     this.syncHash();
   }
 
