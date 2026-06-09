@@ -98,6 +98,8 @@ function readTraceQualityParams(req: Request): {
   min_score?: number;
   max_score?: number;
   exclude_low_coverage?: boolean;
+  kind?: string;
+  severity?: string;
   limit?: number;
   offset?: number;
 } {
@@ -116,6 +118,8 @@ function readTraceQualityParams(req: Request): {
     min_score: safeNumber(req.query.min_score as string | undefined),
     max_score: safeNumber(req.query.max_score as string | undefined),
     exclude_low_coverage: req.query.exclude_low_coverage === 'true',
+    kind: safeString(req.query.kind as string | string[] | undefined),
+    severity: safeString(req.query.severity as string | string[] | undefined),
     limit: safeInt(req.query.limit as string),
     offset: safeInt(req.query.offset as string),
   };

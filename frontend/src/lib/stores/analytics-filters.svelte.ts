@@ -210,6 +210,15 @@ class AnalyticsFiltersStore {
     this.syncHash();
   }
 
+  /** Scope the Quality explorer to a session (used by finding drill-ins); reloads the list. */
+  setSessionScope(sessionId: string): void {
+    if (sessionId === this.sessionId) return;
+    this.sessionId = sessionId;
+    this.traceId = null;
+    this.syncHash();
+    this.notify();
+  }
+
   /** Clear the Quality explorer's session scope; reloads the (now unscoped) list. */
   clearSessionScope(): void {
     if (this.sessionId === null) return;

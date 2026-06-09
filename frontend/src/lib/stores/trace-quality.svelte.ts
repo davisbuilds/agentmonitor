@@ -4,6 +4,10 @@ import {
   fetchTraceQualityObservations,
   fetchTraceQualityObservation,
   fetchTraceQualityScores,
+  fetchTraceQualityFindings,
+  fetchTraceQualityPrompts,
+  fetchTraceQualityScoreSummary,
+  fetchTraceQualityScoreRollups,
   createTraceQualityScore,
   deleteTraceQualityScore,
   type TraceQualityTrace,
@@ -13,8 +17,22 @@ import {
   type TraceQualityReadCoverage,
   type TraceQualityScore,
   type TraceQualityScoreMutationInput,
+  type TraceQualityFinding,
+  type TraceQualityFindingKind,
+  type TraceQualityFindingSeverity,
+  type TraceQualityPromptRollup,
+  type TraceQualityScoreSummary,
+  type TraceQualityScoreRollups,
 } from '../api/client';
 import { analyticsFilters } from './analytics-filters.svelte';
+
+/** Which surface of the Quality view is showing: per-trace explorer or aggregate dashboards. */
+export type QualityPanel = 'explorer' | 'dashboards';
+
+/** Empty rollups keyed by every dimension, used before dashboards load. */
+const EMPTY_ROLLUPS: TraceQualityScoreRollups = {
+  trace: [], session: [], model: [], tool: [], prompt: [], day: [],
+};
 
 /** The thing a new score attaches to: the selected observation, else the trace. */
 export interface ScoreTarget {
@@ -27,6 +45,8 @@ class TraceQualityStore {
   private listVersion = 0;
   private detailVersion = 0;
   private observationVersion = 0;
+  private dashboardVersion = 0;
+  private findingsVersion = 0;
   private unsubscribe: (() => void) | null = null;
 
   get from(): string { return analyticsFilters.from; }
@@ -56,6 +76,19 @@ class TraceQualityStore {
   // Score mutation status
   savingScore = $state(false);
   scoreError = $state<string | null>(null);
+
+  // Dashboards (aggregate findings / prompt rollups / score trends)
+  panel = $state<QualityPanel>('explorer');
+  findings = $state<TraceQualityFinding[]>([]);
+  prompts = $state<TraceQualityPromptRollup[]>([]);
+  scoreSummary = $state<TraceQualityScoreSummary[]>([]);
+  scoreRollups = $state<TraceQualityScoreRollups>(EMPTY_ROLLUPS);
+  dashboardsLoading = $state(false);
+  dashboardsLoaded = $state(false);
+  dashboardsError = $state<string | null>(null);
+  findingsLoading = $state(false);
+  findingKind = $state<TraceQualityFindingKind | ''>('');
+  findingSeverity = $state<TraceQualityFindingSeverity | ''>('');
 
   get selectedTraceId(): string | null {
     return analyticsFilters.traceId;
@@ -117,6 +150,8 @@ class TraceQualityStore {
     if (!this.unsubscribe) {
       this.unsubscribe = analyticsFilters.subscribe(() => {
         void this.load();
+        // Keep aggregate dashboards in sync with the shared filter bar once loaded.
+        if (this.dashboardsLoaded) void this.loadDashboards();
       });
     }
     await analyticsFilters.initialize();
@@ -274,6 +309,107 @@ class TraceQualityStore {
     } finally {
       this.savingScore = false;
     }
+  }
+
+  // --- Dashboards (aggregate findings / prompt rollups / score trends) ---
+
+  /** Dashboards aggregate over the shared date/project/agent window; session scope
+   *  is an explorer concern and does not apply here. */
+  private get dashboardParams(): Record<string, string> {
+    const params: Record<string, string> = { date_from: this.from, date_to: this.to };
+    if (this.project) params.project = this.project;
+    if (this.agent) params.agent = this.agent;
+    return params;
+  }
+
+  private get findingParams(): Record<string, string> {
+    const params = this.dashboardParams;
+    if (this.findingKind) params.kind = this.findingKind;
+    if (this.findingSeverity) params.severity = this.findingSeverity;
+    return params;
+  }
+
+  /** Switch the Quality view surface; lazily load dashboards the first time they show. */
+  setPanel(panel: QualityPanel): void {
+    this.panel = panel;
+    if (panel === 'dashboards' && !this.dashboardsLoaded) void this.loadDashboards();
+  }
+
+  async loadDashboards(): Promise<void> {
+    const version = ++this.dashboardVersion;
+    // `findings` is also written by loadFindings(); share its guard so a slow
+    // aggregate load can't clobber a newer findings-filter result (or vice-versa).
+    const findingsVersion = ++this.findingsVersion;
+    this.dashboardsLoading = true;
+    this.dashboardsError = null;
+    try {
+      const [findings, prompts, summary, rollups] = await Promise.all([
+        fetchTraceQualityFindings(this.findingParams),
+        fetchTraceQualityPrompts(this.dashboardParams),
+        fetchTraceQualityScoreSummary(this.dashboardParams),
+        fetchTraceQualityScoreRollups(this.dashboardParams),
+      ]);
+      if (findingsVersion === this.findingsVersion) this.findings = findings.data;
+      if (version === this.dashboardVersion) {
+        this.prompts = prompts.data;
+        this.scoreSummary = summary.data;
+        this.scoreRollups = rollups.data;
+        this.dashboardsLoaded = true;
+      }
+    } catch (err) {
+      if (version !== this.dashboardVersion) return;
+      console.error('Failed to load quality dashboards:', err);
+      this.dashboardsError = 'Failed to load quality dashboards.';
+    } finally {
+      if (version === this.dashboardVersion) this.dashboardsLoading = false;
+    }
+  }
+
+  /** Reload only findings (cheaper than the full dashboard) when a finding filter changes. */
+  async loadFindings(): Promise<void> {
+    const version = ++this.findingsVersion;
+    this.findingsLoading = true;
+    try {
+      const findings = await fetchTraceQualityFindings(this.findingParams);
+      if (version !== this.findingsVersion) return;
+      this.findings = findings.data;
+    } catch (err) {
+      if (version !== this.findingsVersion) return;
+      console.error('Failed to load findings:', err);
+    } finally {
+      if (version === this.findingsVersion) this.findingsLoading = false;
+    }
+  }
+
+  setFindingKind(kind: TraceQualityFindingKind | ''): void {
+    this.findingKind = kind;
+    void this.loadFindings();
+  }
+
+  setFindingSeverity(severity: TraceQualityFindingSeverity | ''): void {
+    this.findingSeverity = severity;
+    void this.loadFindings();
+  }
+
+  /** A finding can be inspected when it points at a concrete trace or session. */
+  canInspect(finding: TraceQualityFinding): boolean {
+    return Boolean(
+      finding.trace_id
+      || finding.evidence.impacted_trace_ids?.length
+      || finding.evidence.impacted_session_ids?.length,
+    );
+  }
+
+  /** Jump from a dashboard finding into the explorer, opening its trace or session. */
+  inspectFinding(finding: TraceQualityFinding): void {
+    this.panel = 'explorer';
+    const traceId = finding.trace_id ?? finding.evidence.impacted_trace_ids?.[0] ?? null;
+    if (traceId) {
+      void this.selectTrace(traceId);
+      return;
+    }
+    const sessionId = finding.evidence.impacted_session_ids?.[0] ?? null;
+    if (sessionId) analyticsFilters.setSessionScope(sessionId);
   }
 }
 

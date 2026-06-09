@@ -419,6 +419,29 @@ test('scores, score summaries, prompts, and findings return stable rollups', asy
   assert.equal(findings.coverage.matching_traces, 2);
 });
 
+test('findings can be filtered by kind and severity', async () => {
+  // kind narrows to a single finding kind.
+  const byKind = await getJson<{ data: Array<{ kind: string; severity: string }>; total: number }>(
+    '/api/v2/trace-quality/findings?kind=observation_error&limit=10',
+  );
+  assert.deepEqual(byKind.data.map(finding => [finding.kind, finding.severity]), [['observation_error', 'high']]);
+  assert.equal(byKind.total, 1);
+
+  // severity narrows independently of kind.
+  const bySeverity = await getJson<{ data: Array<{ kind: string; severity: string }>; total: number }>(
+    '/api/v2/trace-quality/findings?severity=warning&limit=10',
+  );
+  assert.deepEqual(bySeverity.data.map(finding => [finding.kind, finding.severity]), [['low_quality_score', 'warning']]);
+  assert.equal(bySeverity.total, 1);
+
+  // kind + severity combine; an impossible combination returns nothing rather than erroring.
+  const mismatch = await getJson<{ data: unknown[]; total: number }>(
+    '/api/v2/trace-quality/findings?kind=observation_error&severity=warning',
+  );
+  assert.equal(mismatch.total, 0);
+  assert.equal(mismatch.data.length, 0);
+});
+
 test('score rollups group local scores by trace, session, model, tool, prompt, and day', async () => {
   const db = getDb();
   const promptId = (db.prepare('SELECT id FROM trace_quality_prompt_refs WHERE name = ?')
