@@ -220,7 +220,7 @@ export function traceScoreTargetSql(): string {
   `;
 }
 
-function appendDateRangeConditions(
+export function appendDateRangeConditions(
   conditions: string[],
   values: unknown[],
   column: string,

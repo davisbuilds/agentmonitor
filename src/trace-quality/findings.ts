@@ -20,6 +20,7 @@ import {
 } from './constants.js';
 import {
   addDaysToDateString,
+  appendDateRangeConditions,
   getTraceQualityCoverage,
   includedTraceSelection,
   lowCoverageExpr,
@@ -137,7 +138,9 @@ function gteTier(
   return null;
 }
 
-const ERROR_STATUS_SQL = "o.status IN ('error', 'timeout')";
+// An observation is an "error" for rate purposes if its status failed OR its severity is
+// error/critical — matching the row-level observation_error finding and the trace aggregate.
+const ERROR_STATUS_SQL = "(o.status IN ('error', 'timeout') OR o.severity IN ('error', 'critical'))";
 
 // Rate-limit markers in an observation's name, status message, or (stringified) metadata.
 const RATE_LIMIT_MARKER_SQL = `(
@@ -182,7 +185,7 @@ function observationErrorFindings(ctx: FindingContext): TraceQualityFindingWithS
       COALESCE(o.started_at, o.created_at) AS sort_at
     FROM trace_quality_observations o
     WHERE o.trace_id IN (${ctx.selection.sql})
-      AND (o.status IN ('error', 'timeout') OR o.severity IN ('error', 'critical'))
+      AND ${ERROR_STATUS_SQL}
     ORDER BY datetime(COALESCE(o.started_at, o.created_at)), o.id
   `).all(...ctx.selection.values) as Array<{
     observation_id: string;
@@ -649,7 +652,9 @@ function dailySpikeFinding(
 
 // ─── pricing and telemetry findings ──────────────────────────────────────────
 
-const USAGE_BEARING_SQL = "(o.observation_type = 'generation' OR (o.tokens_in + o.tokens_out) > 0)";
+// Cache-only traffic still incurs (or should resolve) cost, so cache tokens count as usage too.
+const USAGE_BEARING_SQL =
+  "(o.observation_type = 'generation' OR (o.tokens_in + o.tokens_out + o.cache_read_tokens + o.cache_write_tokens) > 0)";
 
 function unknownPricingFindings(ctx: FindingContext): TraceQualityFindingWithSort[] {
   const t = THRESHOLDS.unknown_pricing;
@@ -711,8 +716,8 @@ function otelDropoffFindings(ctx: FindingContext): TraceQualityFindingWithSort[]
   const values: unknown[] = [];
   if (ctx.params.project) { conditions.push('project = ?'); values.push(ctx.params.project); }
   if (ctx.params.agent) { conditions.push('agent_type = ?'); values.push(ctx.params.agent); }
-  if (ctx.params.date_from) { conditions.push('ts >= ?'); values.push(ctx.params.date_from); }
-  if (ctx.params.date_to) { conditions.push('ts <= ?'); values.push(ctx.params.date_to); }
+  // Reuse the shared range helper so a date-only `date_to` stays inclusive of the whole day.
+  appendDateRangeConditions(conditions, values, 'ts', ctx.params.date_from, ctx.params.date_to);
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const row = ctx.db.prepare(`

@@ -129,14 +129,16 @@ function seedObservation(
     started_at?: string;
     tokens_in?: number;
     tokens_out?: number;
+    cache_read_tokens?: number;
     cost_usd?: number | null;
   } = {},
 ): void {
   getDb().prepare(`
     INSERT INTO trace_quality_observations (
       id, trace_id, session_id, source_kind, observation_type, name, status, severity,
-      tool_name, model, metadata_json, duration_ms, started_at, tokens_in, tokens_out, cost_usd
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      tool_name, model, metadata_json, duration_ms, started_at, tokens_in, tokens_out,
+      cache_read_tokens, cost_usd
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     traceId,
@@ -153,6 +155,7 @@ function seedObservation(
     opts.started_at ?? '2026-06-08T10:00:01.000Z',
     opts.tokens_in ?? 0,
     opts.tokens_out ?? 0,
+    opts.cache_read_tokens ?? 0,
     opts.cost_usd ?? null,
   );
 }
@@ -613,4 +616,40 @@ test('integration: every finding kind fires, output is sorted, pagination is sta
 
 test('integration: empty database produces no findings (no false positives)', () => {
   assert.equal(listTraceQualityFindings().total, 0);
+});
+
+// ─── PR review fixes ─────────────────────────────────────────────────────────
+
+test('error rates count severity error/critical even when status is not failing', () => {
+  seedTrace('t-sev', 'high');
+  for (let i = 0; i < 15; i++) seedObservation(`sev-ok-${i}`, 't-sev', { status: 'success' });
+  for (let i = 0; i < 5; i++) seedObservation(`sev-crit-${i}`, 't-sev', { status: 'success', severity: 'critical' });
+
+  const found = findingsByKind('high_error_rate');
+  assert.equal(found.length, 1); // 5/20 = 0.25 via severity, despite non-error status
+  assert.equal(found[0]!.severity, 'high');
+  assert.equal(found[0]!.evidence.metric_value, 0.25);
+});
+
+test('collector_or_otel_dropoff respects a date-only date_to as the whole day', () => {
+  seedEvent('ot-a', 'otel', '2026-06-08T05:00:00.000Z');
+  seedEvent('ot-b', 'otel', '2026-06-08T05:30:00.000Z');
+  seedEvent('api-c', 'api', '2026-06-08T07:30:00.000Z'); // 120 min after last otel, same day
+
+  const filtered = listTraceQualityFindings({ date_to: '2026-06-08' })
+    .data.filter(f => f.kind === 'collector_or_otel_dropoff');
+  assert.equal(filtered.length, 1); // not excluded by the inclusive end-of-day boundary
+  assert.equal(filtered[0]!.evidence.metric_value, 120);
+});
+
+test('unknown_pricing counts cache-token-only observations as usage-bearing', () => {
+  seedTrace('t-cache', 'high');
+  // Non-generation observations whose only usage is cache reads, with no resolved cost.
+  for (let i = 0; i < 10; i++) {
+    seedObservation(`cache-${i}`, 't-cache', { type: 'span', cache_read_tokens: 100, cost_usd: null });
+  }
+  const found = findingsByKind('unknown_pricing');
+  assert.equal(found.length, 1);
+  assert.equal(found[0]!.evidence.sample_size, 10);
+  assert.equal(found[0]!.evidence.impacted_total, 10);
 });
