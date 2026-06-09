@@ -653,3 +653,13 @@ test('unknown_pricing counts cache-token-only observations as usage-bearing', ()
   assert.equal(found[0]!.evidence.sample_size, 10);
   assert.equal(found[0]!.evidence.impacted_total, 10);
 });
+
+test('unknown_pricing ignores zero-token generations (no billable usage to price)', () => {
+  seedTrace('t-zerogen', 'high');
+  // Generations with no token usage and no cost can never be priced, so they must
+  // not inflate the unknown-pricing ratio (they are not genuinely "unknown pricing").
+  for (let i = 0; i < 20; i++) {
+    seedObservation(`zg-${i}`, 't-zerogen', { type: 'generation', tokens_in: 0, tokens_out: 0, cost_usd: null });
+  }
+  assert.equal(findingsByKind('unknown_pricing').length, 0);
+});

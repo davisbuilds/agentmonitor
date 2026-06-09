@@ -842,6 +842,7 @@ export interface TraceQualityFindingEvidence {
   baseline_window?: TraceQualityFindingWindow;
   sample_size?: number;
   dimension?: { type: 'tool' | 'model' | 'budget' | 'score'; value: string };
+  models?: string[];
   impacted_trace_ids?: string[];
   impacted_observation_ids?: string[];
   impacted_session_ids?: string[];

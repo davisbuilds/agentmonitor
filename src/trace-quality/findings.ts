@@ -653,8 +653,12 @@ function dailySpikeFinding(
 // ─── pricing and telemetry findings ──────────────────────────────────────────
 
 // Cache-only traffic still incurs (or should resolve) cost, so cache tokens count as usage too.
-const USAGE_BEARING_SQL =
-  "(o.observation_type = 'generation' OR (o.tokens_in + o.tokens_out + o.cache_read_tokens + o.cache_write_tokens) > 0)";
+// unknown_pricing measures genuinely unpriced *usage*, so it looks only at
+// observations that actually carry billable tokens. A zero-token generation has
+// nothing to price and must not count as "unknown pricing" (it would otherwise
+// inflate the ratio with rows that can never have a cost).
+const TOKEN_BEARING_SQL =
+  '((o.tokens_in + o.tokens_out + o.cache_read_tokens + o.cache_write_tokens) > 0)';
 
 function unknownPricingFindings(ctx: FindingContext): TraceQualityFindingWithSort[] {
   const t = THRESHOLDS.unknown_pricing;
@@ -664,7 +668,7 @@ function unknownPricingFindings(ctx: FindingContext): TraceQualityFindingWithSor
       COALESCE(SUM(CASE WHEN o.cost_usd IS NULL THEN 1 ELSE 0 END), 0) AS unknown
     FROM trace_quality_observations o
     WHERE o.trace_id IN (${ctx.selection.sql})
-      AND ${USAGE_BEARING_SQL}
+      AND ${TOKEN_BEARING_SQL}
   `).get(...ctx.selection.values) as { total: number; unknown: number };
 
   if (row.total < t.min_observations || row.unknown === 0) return [];
@@ -676,7 +680,7 @@ function unknownPricingFindings(ctx: FindingContext): TraceQualityFindingWithSor
     SELECT DISTINCT o.model
     FROM trace_quality_observations o
     WHERE o.trace_id IN (${ctx.selection.sql})
-      AND ${USAGE_BEARING_SQL}
+      AND ${TOKEN_BEARING_SQL}
       AND o.cost_usd IS NULL
       AND o.model IS NOT NULL
     ORDER BY o.model
@@ -691,7 +695,7 @@ function unknownPricingFindings(ctx: FindingContext): TraceQualityFindingWithSor
     observation_id: null,
     score_id: null,
     title: 'Usage with unknown pricing',
-    message: `${row.unknown} of ${row.total} usage-bearing observations have no resolved cost.`,
+    message: `${row.unknown} of ${row.total} observations with token usage have no resolved cost.`,
     evidence: {
       metric_value: ratio,
       threshold: t.warning,
@@ -699,7 +703,7 @@ function unknownPricingFindings(ctx: FindingContext): TraceQualityFindingWithSor
       unit: 'ratio',
       sample_size: row.total,
       window: selectedWindow(ctx.params),
-      impacted_observation_ids: cap(impactedObservationIds(ctx, `${USAGE_BEARING_SQL} AND o.cost_usd IS NULL`)),
+      impacted_observation_ids: cap(impactedObservationIds(ctx, `${TOKEN_BEARING_SQL} AND o.cost_usd IS NULL`)),
       impacted_total: row.unknown,
       models,
       next_inspection: inspection('traces', {}),
