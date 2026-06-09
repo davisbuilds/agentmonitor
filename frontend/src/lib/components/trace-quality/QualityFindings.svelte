@@ -117,6 +117,9 @@
             {#if ev.dimension}
               <span>{ev.dimension.type}: <span class="font-mono text-text-muted">{ev.dimension.value}</span></span>
             {/if}
+            {#if ev.models?.length}
+              <span>models: <span class="font-mono text-text-muted">{ev.models.join(', ')}</span></span>
+            {/if}
             {#if ev.sample_size != null}<span class="font-mono">n={ev.sample_size}</span>{/if}
             {#if ev.impacted_total != null}<span class="font-mono">{ev.impacted_total} impacted</span>{/if}
             {#if windowLabel(ev.window)}<span>{windowLabel(ev.window)}</span>{/if}
