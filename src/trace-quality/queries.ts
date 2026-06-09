@@ -1,7 +1,6 @@
 import { getDb } from '../db/connection.js';
 import type {
   CountResult,
-  TraceQualityFinding,
   TraceQualityObservation,
   TraceQualityObservationDetail,
   TraceQualityObservationListParams,
@@ -101,14 +100,7 @@ interface ScoreRollupCategorySqlRow {
   c: number;
 }
 
-interface FindingSortFields {
-  sort_at: string;
-  sort_rank: number;
-}
-
-type TraceQualityFindingWithSort = TraceQualityFinding & FindingSortFields;
-
-function parseJsonRecord(value: string | null | undefined): Record<string, unknown> {
+export function parseJsonRecord(value: string | null | undefined): Record<string, unknown> {
   if (!value) return {};
   try {
     const parsed = JSON.parse(value) as unknown;
@@ -131,17 +123,17 @@ function parseJsonArray(value: string | null | undefined): unknown[] {
   }
 }
 
-function normalizedLimit(limit: number | undefined, fallback: number, max: number): number {
+export function normalizedLimit(limit: number | undefined, fallback: number, max: number): number {
   if (limit == null || !Number.isFinite(limit)) return fallback;
   return Math.min(Math.max(Math.trunc(limit), 1), max);
 }
 
-function normalizedOffset(offset: number | undefined): number {
+export function normalizedOffset(offset: number | undefined): number {
   if (offset == null || !Number.isFinite(offset)) return 0;
   return Math.max(Math.trunc(offset), 0);
 }
 
-function placeholders(values: readonly unknown[]): string {
+export function placeholders(values: readonly unknown[]): string {
   return values.map(() => '?').join(', ');
 }
 
@@ -166,14 +158,14 @@ function parseNumberList(value: string | null | undefined): number[] {
     .filter(entry => Number.isFinite(entry));
 }
 
-function addDaysToDateString(date: string, days: number): string | null {
+export function addDaysToDateString(date: string, days: number): string | null {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   if (Number.isNaN(parsed.getTime())) return null;
   parsed.setUTCDate(parsed.getUTCDate() + days);
   return parsed.toISOString().slice(0, 10);
 }
 
-function lowCoverageExpr(alias = 't'): string {
+export function lowCoverageExpr(alias = 't'): string {
   return `COALESCE(json_extract(${alias}.coverage_json, '$.projection_confidence'), 'unknown') IN ('low', 'unknown')`;
 }
 
@@ -187,7 +179,7 @@ function observationHasUsageExpr(alias = 'o'): string {
   )`;
 }
 
-function traceScoreTargetSql(): string {
+export function traceScoreTargetSql(): string {
   return `
     SELECT
       s.*,
@@ -228,7 +220,7 @@ function traceScoreTargetSql(): string {
   `;
 }
 
-function appendDateRangeConditions(
+export function appendDateRangeConditions(
   conditions: string[],
   values: unknown[],
   column: string,
@@ -353,7 +345,7 @@ function buildTraceWhere(
   };
 }
 
-function includedTraceSelection(params: TraceQualityTraceListParams = {}): { sql: string; values: unknown[] } {
+export function includedTraceSelection(params: TraceQualityTraceListParams = {}): { sql: string; values: unknown[] } {
   const { where, values } = buildTraceWhere(params, { applyLowCoverageExclusion: true });
   return {
     sql: `SELECT t.id FROM trace_quality_traces t ${where}`,
@@ -528,7 +520,7 @@ function coverageFromTraceSelection(
   };
 }
 
-function getTraceQualityCoverage(params: TraceQualityTraceListParams = {}): TraceQualityReadCoverage {
+export function getTraceQualityCoverage(params: TraceQualityTraceListParams = {}): TraceQualityReadCoverage {
   const db = getDb();
   const matching = buildTraceWhere(params, { applyLowCoverageExclusion: false });
   const included = buildTraceWhere(params, { applyLowCoverageExclusion: true });
@@ -1377,161 +1369,7 @@ export function listTraceQualityPrompts(params: TraceQualityTraceListParams = {}
   };
 }
 
-function findingSeverityRank(severity: TraceQualityFinding['severity']): number {
-  switch (severity) {
-    case 'critical':
-      return 0;
-    case 'error':
-      return 1;
-    case 'warning':
-      return 2;
-    default:
-      return 3;
-  }
-}
-
-function mapLowScoreSeverity(value: number): TraceQualityFinding['severity'] {
-  if (value <= 0.2) return 'critical';
-  if (value <= 0.35) return 'warning';
-  return 'warning';
-}
-
-export function listTraceQualityFindings(params: TraceQualityTraceListParams = {}): {
-  data: TraceQualityFinding[];
-  total: number;
-  limit: number;
-  offset: number;
-  coverage: TraceQualityReadCoverage;
-} {
-  const db = getDb();
-  const limit = normalizedLimit(params.limit, 100, 500);
-  const offset = normalizedOffset(params.offset);
-  const selection = includedTraceSelection(params);
-  const findings: TraceQualityFindingWithSort[] = [];
-
-  const observationRows = db.prepare(`
-    SELECT
-      o.id AS observation_id,
-      o.trace_id,
-      o.name,
-      o.status,
-      o.severity,
-      COALESCE(o.started_at, o.created_at) AS sort_at
-    FROM trace_quality_observations o
-    WHERE o.trace_id IN (${selection.sql})
-      AND (o.status IN ('error', 'timeout') OR o.severity IN ('error', 'critical'))
-    ORDER BY datetime(COALESCE(o.started_at, o.created_at)), o.id
-  `).all(...selection.values) as Array<{
-    observation_id: string;
-    trace_id: string;
-    name: string;
-    status: string | null;
-    severity: string | null;
-    sort_at: string;
-  }>;
-
-  for (const row of observationRows) {
-    const severity = row.severity === 'critical' ? 'critical' : 'error';
-    findings.push({
-      id: `observation-error:${row.observation_id}`,
-      kind: 'observation_error',
-      severity,
-      trace_id: row.trace_id,
-      observation_id: row.observation_id,
-      score_id: null,
-      title: `${row.name} reported ${row.status ?? row.severity ?? 'an error'}`,
-      message: 'An observation has an error or critical status and should be reviewed.',
-      evidence: {
-        status: row.status,
-        severity: row.severity,
-      },
-      created_at: row.sort_at,
-      sort_at: row.sort_at,
-      sort_rank: 0,
-    });
-  }
-
-  const lowScoreThreshold = params.max_score ?? 0.5;
-  const lowScoreRows = db.prepare(`
-    SELECT
-      score_targets.id,
-      score_targets.name,
-      score_targets.numeric_value,
-      score_targets.resolved_trace_id AS trace_id,
-      score_targets.resolved_observation_id AS observation_id,
-      score_targets.created_at
-    FROM (${traceScoreTargetSql()}) score_targets
-    WHERE score_targets.resolved_trace_id IN (${selection.sql})
-      AND score_targets.numeric_value IS NOT NULL
-      AND score_targets.numeric_value <= ?
-    ORDER BY score_targets.numeric_value, score_targets.created_at, score_targets.id
-  `).all(...selection.values, lowScoreThreshold) as Array<{
-    id: number;
-    name: string;
-    numeric_value: number;
-    trace_id: string;
-    observation_id: string | null;
-    created_at: string;
-  }>;
-
-  for (const row of lowScoreRows) {
-    findings.push({
-      id: `low-score:${row.id}`,
-      kind: 'low_score',
-      severity: mapLowScoreSeverity(row.numeric_value),
-      trace_id: row.trace_id,
-      observation_id: row.observation_id,
-      score_id: row.id,
-      title: `${row.name} score is low`,
-      message: `Numeric score ${row.numeric_value} is at or below ${lowScoreThreshold}.`,
-      evidence: {
-        score_name: row.name,
-        numeric_value: row.numeric_value,
-        threshold: lowScoreThreshold,
-      },
-      created_at: row.created_at,
-      sort_at: row.created_at,
-      sort_rank: 1,
-    });
-  }
-
-  const lowCoverageRows = db.prepare(`
-    SELECT id, coverage_json, COALESCE(started_at, created_at) AS sort_at
-    FROM trace_quality_traces t
-    WHERE t.id IN (${selection.sql})
-      AND ${lowCoverageExpr('t')}
-    ORDER BY datetime(COALESCE(t.started_at, t.created_at)), t.id
-  `).all(...selection.values) as Array<{ id: string; coverage_json: string; sort_at: string }>;
-
-  for (const row of lowCoverageRows) {
-    findings.push({
-      id: `low-coverage:${row.id}`,
-      kind: 'low_coverage',
-      severity: 'warning',
-      trace_id: row.id,
-      observation_id: null,
-      score_id: null,
-      title: 'Trace has low projection coverage',
-      message: 'The trace was projected from partial source data.',
-      evidence: parseJsonRecord(row.coverage_json),
-      created_at: row.sort_at,
-      sort_at: row.sort_at,
-      sort_rank: 2,
-    });
-  }
-
-  findings.sort((a, b) =>
-    findingSeverityRank(a.severity) - findingSeverityRank(b.severity)
-    || a.sort_rank - b.sort_rank
-    || a.sort_at.localeCompare(b.sort_at)
-    || a.id.localeCompare(b.id)
-  );
-
-  return {
-    data: findings.slice(offset, offset + limit).map(({ sort_at: _sortAt, sort_rank: _sortRank, ...finding }) => finding),
-    total: findings.length,
-    limit,
-    offset,
-    coverage: getTraceQualityCoverage(params),
-  };
-}
+// Trace-quality findings now live in ./findings.ts (see the unified taxonomy).
+// Shared read helpers above (includedTraceSelection, lowCoverageExpr, traceScoreTargetSql,
+// getTraceQualityCoverage, parseJsonRecord, median, percentile inputs, normalizers) are exported
+// for that module to reuse without duplicating SQL.

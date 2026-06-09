@@ -41,6 +41,9 @@ rust-backend/target/
 *.swp
 *.swo
 
+# Claude Code local (settings, project memory)
+.claude/
+
 # docs
 **/archive/
 

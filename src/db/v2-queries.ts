@@ -67,12 +67,13 @@ export {
   getTraceQualityScoreRollups,
   getTraceQualityScoreSummary,
   getTraceQualityTrace,
-  listTraceQualityFindings,
   listTraceQualityObservations,
   listTraceQualityPrompts,
   listTraceQualityScores,
   listTraceQualityTraces,
 } from '../trace-quality/queries.js';
+
+export { listTraceQualityFindings } from '../trace-quality/findings.js';
 
 export {
   createTraceQualityScore,

@@ -63,6 +63,7 @@ interface InsightsConfig {
 
 interface UsageConfig {
   budgetsPath: string;
+  findingsThresholdsPath: string;
 }
 
 function isAgentMonitorRepo(dir: string): boolean {
@@ -180,6 +181,8 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     sync: parseSyncConfig(env),
     usage: {
       budgetsPath: env.AGENTMONITOR_USAGE_BUDGETS_PATH?.trim() || './config/budgets.json',
+      findingsThresholdsPath: env.AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH?.trim()
+        || './config/trace-quality-findings.json',
     } satisfies UsageConfig,
     insights: parseInsightsConfig(env),
   };

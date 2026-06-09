@@ -1,5 +1,7 @@
 import type { ProjectionCapabilities } from '../../live/projector.js';
 import type {
+  TraceQualityFindingKind,
+  TraceQualityFindingSeverity,
   TraceQualityObservationRow,
   TraceQualityPromptRefRow,
   TraceQualityScoreRow,
@@ -845,16 +847,50 @@ export interface TraceQualityPromptRollup extends TraceQualityPromptRef {
   last_seen: string | null;
 }
 
+export interface TraceQualityFindingInspection {
+  /** Where the operator should drill in next. */
+  target: 'traces' | 'trace' | 'observation' | 'scores' | 'usage';
+  params: Record<string, string | number | boolean>;
+}
+
+export interface TraceQualityFindingWindow {
+  from: string | null;
+  to: string | null;
+  /** e.g. 'selected_range' | 'latest_day' | 'baseline_7d'. */
+  label?: string;
+}
+
+export interface TraceQualityFindingEvidence {
+  metric_value?: number;
+  threshold?: number;
+  comparator?: 'gte' | 'lte';
+  unit?: 'ratio' | 'ms' | 'usd' | 'tokens' | 'count' | 'minutes';
+  window?: TraceQualityFindingWindow;
+  baseline_value?: number;
+  baseline_window?: TraceQualityFindingWindow;
+  sample_size?: number;
+  dimension?: { type: 'tool' | 'model' | 'budget' | 'score'; value: string };
+  /** Capped at DEFAULT_TRACE_QUALITY_FINDING_THRESHOLDS.impacted_id_cap; impacted_total is the true count. */
+  impacted_trace_ids?: string[];
+  impacted_observation_ids?: string[];
+  impacted_session_ids?: string[];
+  impacted_total?: number;
+  coverage_caveat?: string | null;
+  next_inspection?: TraceQualityFindingInspection;
+  [key: string]: unknown;
+}
+
 export interface TraceQualityFinding {
   id: string;
-  kind: 'observation_error' | 'low_score' | 'low_coverage';
-  severity: 'info' | 'warning' | 'error' | 'critical';
-  trace_id: string;
+  kind: TraceQualityFindingKind;
+  severity: TraceQualityFindingSeverity;
+  /** null for aggregate findings that span many or no traces. */
+  trace_id: string | null;
   observation_id: string | null;
   score_id: number | null;
   title: string;
   message: string;
-  evidence: Record<string, unknown>;
+  evidence: TraceQualityFindingEvidence;
   created_at: string | null;
 }
 

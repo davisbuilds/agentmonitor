@@ -2,6 +2,8 @@ import type {
   TRACE_QUALITY_COVERAGE_KEYS,
   TRACE_QUALITY_EXPORT_PROVIDERS,
   TRACE_QUALITY_EXPORT_STATUSES,
+  TRACE_QUALITY_FINDING_KINDS,
+  TRACE_QUALITY_FINDING_SEVERITIES,
   TRACE_QUALITY_OBSERVATION_TYPES,
   TRACE_QUALITY_PAYLOAD_POLICIES,
   TRACE_QUALITY_PROJECTION_STATUSES,
@@ -23,6 +25,9 @@ export type TraceQualityProjectionStatus = typeof TRACE_QUALITY_PROJECTION_STATU
 export type TraceQualityExportProvider = typeof TRACE_QUALITY_EXPORT_PROVIDERS[number];
 export type TraceQualityExportStatus = typeof TRACE_QUALITY_EXPORT_STATUSES[number];
 export type TraceQualityCoverageKey = typeof TRACE_QUALITY_COVERAGE_KEYS[number];
+export type TraceQualityFindingKind = typeof TRACE_QUALITY_FINDING_KINDS[number];
+export type TraceQualityFindingSeverity = typeof TRACE_QUALITY_FINDING_SEVERITIES[number];
+export type { TraceQualityFindingThresholds } from './constants.js';
 
 export type TraceQualityStatus = 'success' | 'error' | 'timeout' | 'running' | 'pending' | 'unknown';
 export type TraceQualitySeverity = 'info' | 'warning' | 'error' | 'critical';
