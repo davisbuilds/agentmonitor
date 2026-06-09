@@ -62,6 +62,8 @@ test.beforeAll(async () => {
     JSON.stringify({ has_full_transcript: true, has_tool_details: true, has_token_usage: true, has_cost: true, projection_confidence: 'high' }),
   );
   insertObs.run('e2e-obs-2-root', 'e2e-trace-2', null, 'e2e-sess-2', 'event', 'generation', 'Second root generation', 'success', 'gpt-5', null, now, 1000, 200, 50, 0.01);
+  // An error observation on trace-2 so the dashboards produce an inspectable finding.
+  insertObs.run('e2e-obs-2-err', 'e2e-trace-2', 'e2e-obs-2-root', 'e2e-sess-2', 'event', 'tool', 'Failing tool', 'error', null, 'Bash', now, 500, 0, 0, null);
 
   // A machine-authored score on trace-1. The local-review panel must hide it (and
   // its destructive Remove) because that surface only owns human-authored scores.
@@ -169,4 +171,26 @@ test('quality explorer reloads the inspector when the trace hash changes externa
   await expect(page.getByRole('heading', { name: 'Second explorer trace' })).toBeVisible();
   await expect(page.getByText('Second root generation')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Seeded explorer trace' })).toHaveCount(0);
+});
+
+test('quality dashboards show findings, prompt rollups, and score trends, and inspect opens a trace', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#analytics?view=quality`);
+  await page.getByRole('button', { name: 'Dashboards', exact: true }).click();
+
+  // All three dashboard sections render.
+  await expect(page.getByRole('heading', { name: 'Findings' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Prompt versions' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Score trends' })).toBeVisible();
+
+  // Score trends aggregate all scores, including machine-authored ones that the
+  // human-review panel hides.
+  await expect(page.getByText('machine-correctness')).toBeVisible();
+
+  // Narrow findings to the seeded error via the kind filter, then inspect it: the
+  // view jumps to the explorer with the impacted trace open.
+  await page.getByLabel('Filter findings by kind').selectOption('observation_error');
+  await expect(page.getByText('Failing tool reported error')).toBeVisible();
+  await page.getByRole('button', { name: 'Inspect', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Second explorer trace' })).toBeVisible();
+  await expect(page.getByText('Failing tool')).toBeVisible();
 });
