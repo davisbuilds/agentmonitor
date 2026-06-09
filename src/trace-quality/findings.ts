@@ -892,12 +892,17 @@ export function listTraceQualityFindings(params: TraceQualityTraceListParams = {
   const limit = normalizedLimit(params.limit, 100, 500);
   const offset = normalizedOffset(params.offset);
 
-  const findings = computeTraceQualityFindings(params).sort((a, b) =>
-    severitySortKey(a.severity) - severitySortKey(b.severity)
-    || a.sort_rank - b.sort_rank
-    || a.sort_at.localeCompare(b.sort_at)
-    || a.id.localeCompare(b.id),
-  );
+  const findings = computeTraceQualityFindings(params)
+    // Optional kind/severity narrowing for the findings dashboard. Unknown values
+    // simply match nothing rather than erroring.
+    .filter((finding) => (!params.kind || finding.kind === params.kind)
+      && (!params.severity || finding.severity === params.severity))
+    .sort((a, b) =>
+      severitySortKey(a.severity) - severitySortKey(b.severity)
+      || a.sort_rank - b.sort_rank
+      || a.sort_at.localeCompare(b.sort_at)
+      || a.id.localeCompare(b.id),
+    );
 
   return {
     data: findings

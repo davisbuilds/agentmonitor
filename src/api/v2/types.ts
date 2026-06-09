@@ -977,6 +977,9 @@ export interface TraceQualityTraceListParams {
   min_score?: number;
   max_score?: number;
   exclude_low_coverage?: boolean;
+  // Findings-only: narrow derived findings by kind and/or severity.
+  kind?: string;
+  severity?: string;
   limit?: number;
   offset?: number;
 }
