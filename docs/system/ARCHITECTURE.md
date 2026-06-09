@@ -70,6 +70,7 @@ SQLite via `better-sqlite3` with WAL mode.
 | `events` | Individual tool use, prompt, and lifecycle events with cost data |
 | `import_state` | Tracks imported files to prevent duplicate backfills |
 | `watched_files` | Tracks session-browser sync state for parsed, skipped, and erroring JSONL files |
+| `trace_quality_*` | Local trace-quality projection: traces, observations, scores, prompt refs + join, projection state, and export state (see [Trace Quality](#trace-quality)) |
 
 ### Key Patterns
 
@@ -128,6 +129,36 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - `watched_files` caches parsed, skipped, and error states by file hash so unchanged files are not reparsed on every periodic resync.
 - Periodic resync still runs as a safety net for missed file-system events and now covers both Claude and Codex history roots.
 
+## Trace Quality
+
+A local, provider-neutral trace-quality layer projects existing sources
+(`events`, `session_items`, `session_turns`, `messages`, `tool_calls`) into a
+trace/observation graph with local scores, prompt attribution, and derived
+findings. It is **additive**: source rows are never removed or reinterpreted, and
+each projected row records provenance.
+
+- **Projection:** `src/trace-quality/` holds projection mappers, source readers,
+  the projection service, v2 queries, the score model, prompt attribution, and the
+  findings engine. New data is projected incrementally on ingest/import;
+  historical data is projected/rebuilt out of band via
+  `scripts/backfill-trace-quality.ts` (`pnpm run trace-quality:backfill`).
+  `trace_quality_projection_state` keeps backfill idempotent.
+- **Honesty:** every trace carries a `coverage_json` flag set and aggregate reads
+  carry read-coverage metadata, so summary-only telemetry (e.g. Codex OTEL) is
+  never presented as full transcript fidelity. Observation `payload_policy`
+  governs whether raw content, a hash, or only a summary is retained.
+- **Read APIs:** the full surface is under `/api/v2/trace-quality/*` (handlers in
+  `src/api/v2/router.ts`, SQL in `src/trace-quality/queries.ts` and
+  `findings.ts`). Findings are read-only and computed from SQLite — no Prometheus
+  or Grafana.
+- **Export seam:** `trace_quality_export_state` and the `langfuse` export-provider
+  enum exist as a seam for the optional, **deferred** Langfuse export adapter
+  (spec Task 10). The chosen transport is the Langfuse ingestion API (batch);
+  nothing leaves localhost until that adapter is built.
+
+See [trace-quality.md](trace-quality.md) for the full model, taxonomy, and
+semantics.
+
 ## OTEL Parser
 
 `src/otel/parser.ts` converts OTLP JSON payloads (logs, metrics) into normalized events for the standard ingest pipeline.
@@ -175,6 +206,7 @@ src/contracts/            # TypeScript event types and validation
 src/db/                   # Schema, queries, connection management
 src/import/               # Historical log importers
 src/otel/                 # OTLP JSON parser
+src/trace-quality/        # Local trace-quality projection, scores, prompts, findings
 src/pricing/              # Cost calculation + JSON pricing data
 src/sse/                  # SSE client management and fan-out
 src/util/                 # Utilities (git branch detection)

@@ -18,6 +18,7 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - `docs/system/FEATURES.md` — product surface, full v1/v2 API endpoint catalog, SSE event types, capture/redaction controls, analytics/usage/insights/search.
 - `docs/system/OPERATIONS.md` — local dev, full command catalog, all `AGENTMONITOR_*` env vars, Claude Code + Codex hook install, historical import, CI gates, runtime artifacts, manual live verification.
 - `docs/system/DESIGN.md` — Svelte `/app/` design system ("Instrument Console"): color/type/space/radius tokens, layout language, accessibility floor. Tokens live in `frontend/src/app.css` `@theme`.
+- `docs/system/trace-quality.md` — local trace-quality layer: trace/observation model, observation taxonomy, coverage/payload-policy honesty, scores, prompt attribution, findings taxonomy, UI surface, and the deferred (ingestion-API) Langfuse export.
 - `docs/api/` — API navigation reference.
 - `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity, Rust convergence).
 - `docs/project/CURRENT_STATE.md` — high-change product/runtime notes moved out of the root README.

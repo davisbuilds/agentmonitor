@@ -144,6 +144,7 @@ Operational notes:
 - Default runs are idempotent through `trace_quality_projection_state`; unchanged source payloads are skipped.
 - `--force` deletes and rebuilds projected trace-quality rows only for the selected source scope.
 - Use `--dry-run` before broad or forced runs to confirm the projected row counts.
+- Optional Langfuse export is **deferred** (spec Task 10): no export script or `AGENTMONITOR_LANGFUSE_*` env vars ship yet, and no trace-quality data leaves localhost. When built it will be a manual, disabled-by-default, dry-run-previewable script using the Langfuse ingestion API. See [trace-quality.md](trace-quality.md#optional-langfuse-export--deferred).
 
 ## CI
 
