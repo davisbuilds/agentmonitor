@@ -95,6 +95,7 @@ Product-surface reference for AgentMonitor.
 - Local human/API review scores can be created, updated, and deleted without mutating source event or session rows.
 - Observation APIs expose both flat deterministic ordering and nested parent/child trees.
 - Score, prompt, and findings endpoints provide local review rollups for future evaluation workflows. Prompt rollups include generation count, median duration, total cost, token totals, score count, median numeric score, and last seen.
+- Local quality/alert findings are deterministic, read-only, and computed from SQLite (no Prometheus/Grafana). The taxonomy covers `high_error_rate`, `tool_failure_rate`, `model_error_rate`, `rate_limit_events`, `high_latency_p95`, `latency_spike`, `token_spike`, `cost_anomaly`, `daily_budget_risk`, `unknown_pricing`, `low_trace_coverage`, `collector_or_otel_dropoff`, `low_quality_score`, and per-observation `observation_error`. Each finding carries severity (`info`/`warning`/`high`/`critical`), evidence (metric value, threshold, window, sample size, impacted ids, coverage caveat), and a next-inspection target. Minimum-sample and baseline gates prevent false positives on sparse data; thresholds default in-code and are overridable via `AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH`.
 - Aggregate trace-quality responses include coverage metadata so the UI can disclose matching traces, included traces, low-coverage exclusions, usage-bearing observations, missing-usage observations, and score coverage.
 
 ## Insights
@@ -172,7 +173,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/trace-quality/score-summary` | GET | Score rollups grouped by score name and value type |
 | `/api/v2/trace-quality/score-rollups` | GET | Score rollups grouped by trace, session, model, tool, prompt, and day |
 | `/api/v2/trace-quality/prompts` | GET | Prompt-version attribution rollups with generation, duration, cost, token, score, and last-seen metrics |
-| `/api/v2/trace-quality/findings` | GET | Derived trace-quality findings for review |
+| `/api/v2/trace-quality/findings` | GET | Read-only quality/cost/latency/telemetry findings with severity, evidence, and next-inspection targets |
 | `/api/v2/insights` | GET | List persisted insights for the current historical slice |
 | `/api/v2/insights/:id` | GET | Fetch a single persisted insight |
 | `/api/v2/insights/generate` | POST | Generate and persist a new insight from analytics + usage data |

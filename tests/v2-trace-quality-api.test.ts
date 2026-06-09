@@ -400,9 +400,8 @@ test('scores, score summaries, prompts, and findings return stable rollups', asy
     coverage: { matching_traces: number };
   }>('/api/v2/trace-quality/findings?limit=10');
   assert.deepEqual(findings.data.map(finding => [finding.kind, finding.severity, finding.trace_id, finding.observation_id]), [
-    ['observation_error', 'error', 'trace-high', 'obs-child'],
-    ['low_score', 'warning', 'trace-low', null],
-    ['low_coverage', 'warning', 'trace-low', null],
+    ['observation_error', 'high', 'trace-high', 'obs-child'],
+    ['low_quality_score', 'warning', 'trace-low', null],
   ]);
   assert.equal(findings.coverage.matching_traces, 2);
 });

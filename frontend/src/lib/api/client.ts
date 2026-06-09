@@ -813,16 +813,54 @@ export interface TraceQualityPromptRollup extends TraceQualityPromptRef {
   last_seen: string | null;
 }
 
+export type TraceQualityFindingKind =
+  | 'high_error_rate' | 'tool_failure_rate' | 'model_error_rate' | 'rate_limit_events'
+  | 'high_latency_p95' | 'latency_spike' | 'token_spike' | 'cost_anomaly'
+  | 'daily_budget_risk' | 'unknown_pricing' | 'low_trace_coverage'
+  | 'collector_or_otel_dropoff' | 'low_quality_score' | 'observation_error';
+
+export type TraceQualityFindingSeverity = 'info' | 'warning' | 'high' | 'critical';
+
+export interface TraceQualityFindingInspection {
+  target: 'traces' | 'trace' | 'observation' | 'scores' | 'usage';
+  params: Record<string, string | number | boolean>;
+}
+
+export interface TraceQualityFindingWindow {
+  from: string | null;
+  to: string | null;
+  label?: string;
+}
+
+export interface TraceQualityFindingEvidence {
+  metric_value?: number;
+  threshold?: number;
+  comparator?: 'gte' | 'lte';
+  unit?: 'ratio' | 'ms' | 'usd' | 'tokens' | 'count' | 'minutes';
+  window?: TraceQualityFindingWindow;
+  baseline_value?: number;
+  baseline_window?: TraceQualityFindingWindow;
+  sample_size?: number;
+  dimension?: { type: 'tool' | 'model' | 'budget' | 'score'; value: string };
+  impacted_trace_ids?: string[];
+  impacted_observation_ids?: string[];
+  impacted_session_ids?: string[];
+  impacted_total?: number;
+  coverage_caveat?: string | null;
+  next_inspection?: TraceQualityFindingInspection;
+  [key: string]: unknown;
+}
+
 export interface TraceQualityFinding {
   id: string;
-  kind: 'observation_error' | 'low_score' | 'low_coverage';
-  severity: 'info' | 'warning' | 'error' | 'critical';
-  trace_id: string;
+  kind: TraceQualityFindingKind;
+  severity: TraceQualityFindingSeverity;
+  trace_id: string | null;
   observation_id: string | null;
   score_id: number | null;
   title: string;
   message: string;
-  evidence: Record<string, unknown>;
+  evidence: TraceQualityFindingEvidence;
   created_at: string | null;
 }
 
