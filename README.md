@@ -153,6 +153,7 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 - Product and capability overview: [docs/system/FEATURES.md](docs/system/FEATURES.md)
 - Local development and runtime operations: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
 - Architecture and code organization: [docs/system/ARCHITECTURE.md](docs/system/ARCHITECTURE.md)
+- Local trace-quality layer: [docs/system/trace-quality.md](docs/system/trace-quality.md)
 - API docs and contracts: [docs/api/README.md](docs/api/README.md)
 - Current product/runtime state: [docs/project/CURRENT_STATE.md](docs/project/CURRENT_STATE.md)
 - Roadmap and project direction: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)

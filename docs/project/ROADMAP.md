@@ -36,6 +36,12 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 - Maintain a manual regression checklist for the canonical Svelte app, especially around deep links, long transcripts, live updates, and drawer/navigation behavior.
 - Prefer small UI refinements that reduce ambiguity over larger redesigns unless operator workflows show a clear gap.
 
+### Trace Quality
+
+- The local trace-quality layer is **shipped**: additive projection of existing sources into a trace/observation graph, `/api/v2/trace-quality/*` read/score/prompt/findings APIs, prompt-version attribution, a deterministic read-only findings taxonomy, and the Svelte Quality sub-view (Explorer + Dashboards). See [../system/trace-quality.md](../system/trace-quality.md).
+- Keep coverage honesty as a first principle: summary-only telemetry (e.g. Codex OTEL) must never render as full transcript fidelity in the UI or API.
+- The optional Langfuse export adapter is **deferred** (see Later); the local model stands on its own and remains Langfuse-independent.
+
 ## Next
 
 - Define and verify parity gates for retiring or sharply reducing reliance on the legacy `/` dashboard.
@@ -48,6 +54,7 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 - Support richer Codex-native live fidelity beyond the current OTEL summary path.
 - Revisit packaging or alternate runtime distribution work once the canonical web contract is stable.
 - Expand multi-agent support where new integrations can map cleanly onto the existing monitor, history, and live models.
+- Build the optional, disabled-by-default Langfuse export adapter (deferred trace-quality spec Task 10) if real demand appears. The transport decision is settled — the Langfuse ingestion API (batch) — and must stay manual-first, redaction-aware, dry-run-previewable, and non-required for local functionality.
 
 ## Working Principles
 
