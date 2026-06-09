@@ -337,6 +337,9 @@ class TraceQualityStore {
 
   async loadDashboards(): Promise<void> {
     const version = ++this.dashboardVersion;
+    // `findings` is also written by loadFindings(); share its guard so a slow
+    // aggregate load can't clobber a newer findings-filter result (or vice-versa).
+    const findingsVersion = ++this.findingsVersion;
     this.dashboardsLoading = true;
     this.dashboardsError = null;
     try {
@@ -346,12 +349,13 @@ class TraceQualityStore {
         fetchTraceQualityScoreSummary(this.dashboardParams),
         fetchTraceQualityScoreRollups(this.dashboardParams),
       ]);
-      if (version !== this.dashboardVersion) return;
-      this.findings = findings.data;
-      this.prompts = prompts.data;
-      this.scoreSummary = summary.data;
-      this.scoreRollups = rollups.data;
-      this.dashboardsLoaded = true;
+      if (findingsVersion === this.findingsVersion) this.findings = findings.data;
+      if (version === this.dashboardVersion) {
+        this.prompts = prompts.data;
+        this.scoreSummary = summary.data;
+        this.scoreRollups = rollups.data;
+        this.dashboardsLoaded = true;
+      }
     } catch (err) {
       if (version !== this.dashboardVersion) return;
       console.error('Failed to load quality dashboards:', err);
