@@ -10,13 +10,13 @@ source: conversation
 
 ## Goal
 
-Deliver a first-class `amon` executable for AgentMonitor that consolidates local runtime, import/sync, session browsing, usage, analytics, trace-quality, and hook helper workflows behind a consistent, scriptable CLI.
+Deliver first-class `amon` and `agentmonitor` executables for AgentMonitor that consolidate local runtime, import/sync, session browsing, usage, analytics, trace-quality, and hook helper workflows behind a consistent, scriptable CLI.
 
 ## Scope
 
 ### In Scope
 
-- Add an npm package executable named `amon` that runs from the built package.
+- Add npm package executables named `amon` and `agentmonitor` that both run from the built package.
 - Add a TypeScript CLI entrypoint and command modules that do not import `src/server.ts` for one-shot commands.
 - Refactor server startup into reusable runtime code so `amon serve` and the existing `pnpm start` path share behavior.
 - Replace the current hand-rolled maintenance script UX with equivalent `amon` commands while keeping existing `pnpm` scripts as compatibility shims.
@@ -75,7 +75,7 @@ amon hooks print-codex-config
 
 ## Assumptions And Constraints
 
-- The package name remains `agentmonitor`; only the executable is `amon`.
+- The package name remains `agentmonitor`; both `amon` and `agentmonitor` are executable aliases for the same CLI.
 - Node 24 is available, so the CLI can use standard library `node:util` `parseArgs` rather than adding a parsing dependency in this pass.
 - Configuration remains env-first. CLI flags override process env for the current invocation; no new persistent config file is introduced.
 - One-shot commands must import shared services and query modules directly, not `src/server.ts`, because `src/server.ts` currently starts the HTTP server, watcher, quota polling, stats broadcast, and auto-import timers.
@@ -153,7 +153,7 @@ amon hooks print-codex-config
 
 **Objective**
 
-Expose `amon` as the package executable and add a tested CLI dispatcher with root help, version, global flag parsing, stdout/stderr conventions, and exit code handling.
+Expose `amon` and `agentmonitor` as package executables and add a tested CLI dispatcher with root help, version, global flag parsing, stdout/stderr conventions, and exit code handling.
 
 **Files**
 
@@ -174,7 +174,7 @@ None
 **Implementation Steps**
 
 1. Add a `#!/usr/bin/env node` shebang to `src/cli.ts`.
-2. Add `bin: { "amon": "./dist/cli.js" }` to `package.json`.
+2. Add `bin: { "amon": "./dist/cli.js", "agentmonitor": "./dist/cli.js" }` to `package.json`.
 3. Use `node:util` `parseArgs` in `src/cli/args.ts` to parse root global flags and dispatch to command handlers.
 4. Read package version from package metadata for `--version`.
 5. Implement root help that groups commands by runtime, data, sessions, live, reporting, quality, hooks, and meta.
@@ -197,7 +197,7 @@ None
 
 **Done When**
 
-- `amon` is declared as the package executable.
+- `amon` and `agentmonitor` are declared as package executables.
 - Root help and version work from the built artifact.
 - Unknown commands and invalid flags exit with code `2`.
 - No one-shot CLI command imports `src/server.ts`.
@@ -568,8 +568,8 @@ Tasks 1 through 7
   Mitigation: Sanitize all human-rendered agent-controlled text in `src/cli/output.ts`.
 - Risk: Existing script users are broken.
   Mitigation: Keep package scripts and script files as compatibility shims through this implementation pass.
-- Risk: `amon` is confused with the package name.
-  Mitigation: Documentation states package `agentmonitor`, executable `amon`; root help uses `amon` consistently.
+- Risk: Two executable names create unclear docs.
+  Mitigation: Documentation states `amon` is the short preferred command and `agentmonitor` is the explicit alias; root help uses the invoked command name.
 - Risk: `live watch` appears usable without a running server.
   Mitigation: Make it explicitly HTTP/SSE-backed and return exit `3` when unavailable.
 - Risk: Adding persistent CLI config creates another source of truth.
@@ -579,8 +579,8 @@ Tasks 1 through 7
 
 | Requirement | Proof command | Expected signal |
 | --- | --- | --- |
-| `amon` executable is packaged | `pnpm build && node dist/cli.js --help` | Help prints with `amon` usage and exit `0`. |
-| Package exposes executable | `node -e "const p=require('./package.json'); if(!p.bin?.amon) process.exit(1)"` | Exit `0`. |
+| `amon` executable is packaged | `pnpm build && ./dist/cli.js --help` | Help prints with `amon` usage and exit `0`. |
+| Package exposes executables | `node -e "const p=require('./package.json'); if(!p.bin?.amon || !p.bin?.agentmonitor) process.exit(1)"` | Exit `0`. |
 | Root version works | `node dist/cli.js --version` | Prints package version to stdout. |
 | Invalid usage is deterministic | `node dist/cli.js nope` | Exits `2` with concise stderr message. |
 | Server startup still works | `node dist/server.js` | Starts existing runtime behavior on configured host/port. |

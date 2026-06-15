@@ -6,7 +6,8 @@ Drop-in hook scripts that connect Claude Code to AgentMonitor. Events flow from 
 
 ```bash
 # From the agentmonitor project root:
-./hooks/claude-code/install.sh
+pnpm cli -- hooks install claude --dry-run
+pnpm cli -- hooks install claude --force
 ```
 
 This registers hooks in `~/.claude/settings.json` that fire on:
@@ -21,17 +22,20 @@ This registers hooks in `~/.claude/settings.json` that fire on:
 
 Start AgentMonitor (`pnpm dev`), then use Claude Code as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
 
+The underlying installer remains available as `./hooks/claude-code/install.sh`
+for manual use or environments that are not running through pnpm.
+
 ## Options
 
 ```bash
 # Use Python scripts instead of shell
-./hooks/claude-code/install.sh --python
+pnpm cli -- hooks install claude --python --force
 
 # Custom AgentMonitor URL
-./hooks/claude-code/install.sh --url http://localhost:9000
+pnpm cli -- --url http://localhost:9000 hooks install claude --force
 
 # Remove hooks
-./hooks/claude-code/install.sh --uninstall
+pnpm cli -- hooks install claude --uninstall --force
 ```
 
 ## Claude Statusline Quota Bridge

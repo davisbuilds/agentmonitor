@@ -27,6 +27,9 @@ Open `http://127.0.0.1:3141` or `http://127.0.0.1:5173/app/`.
 ```bash
 pnpm build              # TypeScript build + CSS build
 pnpm start              # Run compiled server from dist/
+pnpm cli -- --help      # AgentMonitor CLI help during local development
+pnpm cli -- health      # Check the local TypeScript server
+pnpm cli -- sessions list --json # Query session history from SQLite
 pnpm test               # Run self-contained TypeScript tests (excludes parity)
 pnpm test:watch         # Watch-mode self-contained test runner
 pnpm test:parity:ts     # Run isolated TypeScript parity tests (temp server + temp DB)
@@ -45,6 +48,53 @@ pnpm reparse:codex-sessions # Force reparse Codex session-browser history
 pnpm bench:ingest       # Ingest throughput benchmark
 pnpm recalculate-costs  # Recalculate costs from pricing data
 ```
+
+## AgentMonitor CLI
+
+The package exposes two equivalent executables after build or installation:
+`amon` and `agentmonitor`. Use `amon` as the short preferred form in examples;
+`agentmonitor` exists for explicitness and package-name discoverability.
+
+During local development, use `pnpm cli -- ...` to run the TypeScript entrypoint
+without installing the package:
+
+```bash
+pnpm cli -- --help
+pnpm cli -- serve --port 3141
+pnpm cli -- health --url http://127.0.0.1:3141
+pnpm cli -- status --json
+pnpm cli -- open
+
+pnpm cli -- import --source claude-code --dry-run
+pnpm cli -- sync sessions --source codex --force
+pnpm cli -- costs recalc --dry-run
+pnpm cli -- quality backfill --source all --dry-run
+
+pnpm cli -- sessions list --json
+pnpm cli -- sessions show <session-id>
+pnpm cli -- sessions search "deploy model"
+pnpm cli -- live watch
+
+pnpm cli -- usage summary --days 7
+pnpm cli -- analytics tools --limit 20
+pnpm cli -- quality findings --severity high
+
+pnpm cli -- hooks install claude --dry-run
+pnpm cli -- hooks print-codex-config
+```
+
+Built package examples:
+
+```bash
+pnpm build
+./dist/cli.js --help
+amon --help          # after installing or linking the package
+agentmonitor --help  # equivalent alias after installing or linking the package
+```
+
+The legacy package scripts remain compatibility wrappers. Prefer the CLI for new
+operator docs and automation because it has consistent global flags such as
+`--db-path`, `--url`, `--json`, `--plain`, `--quiet`, and `--no-input`.
 
 ## Environment Variables
 
@@ -79,14 +129,24 @@ Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENT
 ### Claude Code
 
 ```bash
-./hooks/claude-code/install.sh
+pnpm cli -- hooks install claude --dry-run
+pnpm cli -- hooks install claude --force
 ```
 
-Restart Claude Code after installing. See [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) for details.
+The underlying installer remains available as
+`./hooks/claude-code/install.sh`. Restart Claude Code after installing. See
+[../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) for
+details.
 
 ### Codex
 
-Add to `~/.codex/config.toml`:
+Print the recommended `~/.codex/config.toml` snippet:
+
+```bash
+pnpm cli -- hooks print-codex-config
+```
+
+The output is equivalent to:
 
 ```toml
 [otel]
@@ -94,6 +154,10 @@ log_user_prompt = true
 
 [otel.exporter.otlp-http]
 endpoint = "http://localhost:3141/api/otel/v1/logs"
+protocol = "json"
+
+[otel.metrics_exporter.otlp-http]
+endpoint = "http://localhost:3141/api/otel/v1/metrics"
 protocol = "json"
 ```
 
@@ -113,29 +177,31 @@ For full setup and behavior notes, use [../../hooks/claude-code/README.md](../..
 ## Historical Import
 
 ```bash
-pnpm run import --source claude-code    # Claude Code JSONL logs
-pnpm run import --source codex          # Codex session files
-pnpm run import --dry-run               # Preview without writing
-pnpm reparse:sessions                   # Rebuild browsing_sessions/messages/tool_calls from Claude JSONL
-pnpm reparse:codex-sessions             # Rebuild browsing_sessions/messages/tool_calls from Codex JSONL
+pnpm cli -- import --source claude-code    # Claude Code JSONL logs
+pnpm cli -- import --source codex          # Codex session files
+pnpm cli -- import --dry-run               # Preview without writing
+pnpm cli -- sync sessions --source claude  # Rebuild browsing_sessions/messages/tool_calls from Claude JSONL
+pnpm cli -- sync sessions --source codex   # Rebuild browsing_sessions/messages/tool_calls from Codex JSONL
+pnpm cli -- costs recalc --dry-run         # Preview cost backfill
 ```
 
 Operational notes:
 
+- `pnpm run import`, `pnpm reparse:sessions`, `pnpm reparse:codex-sessions`, and `pnpm recalculate-costs` remain compatibility wrappers around the CLI commands.
 - Full imports update `import_state` even when a file produced zero events, so unchanged unsupported/non-interactive files are skipped on later full imports.
 - Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
-- `pnpm run import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm reparse:codex-sessions` when transcript-derived analytics such as inferred skill usage need to be backfilled.
-- If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm run recalculate-costs`; that backfills stale imports after pricing-data updates or importer fixes.
+- `pnpm cli -- import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm cli -- sync sessions --source codex --force` when transcript-derived analytics such as inferred skill usage need to be backfilled.
+- If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm cli -- costs recalc`; that backfills stale imports after pricing-data updates or importer fixes.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
 
 ## Trace Quality Backfill
 
 ```bash
-pnpm run trace-quality:backfill -- --dry-run
-pnpm run trace-quality:backfill -- --source events
-pnpm run trace-quality:backfill -- --source sessions --session-id <session-id>
-pnpm run trace-quality:backfill -- --source all --from 2026-06-01 --to 2026-06-08
-pnpm run trace-quality:backfill -- --force
+pnpm cli -- quality backfill --dry-run
+pnpm cli -- quality backfill --source events
+pnpm cli -- quality backfill --source sessions --session-id <session-id>
+pnpm cli -- quality backfill --source all --from 2026-06-01 --to 2026-06-08
+pnpm cli -- quality backfill --force
 ```
 
 Operational notes:
@@ -144,6 +210,7 @@ Operational notes:
 - Default runs are idempotent through `trace_quality_projection_state`; unchanged source payloads are skipped.
 - `--force` deletes and rebuilds projected trace-quality rows only for the selected source scope.
 - Use `--dry-run` before broad or forced runs to confirm the projected row counts.
+- `pnpm run trace-quality:backfill` remains a compatibility wrapper around `pnpm cli -- quality backfill`.
 - Optional Langfuse export is **deferred** (spec Task 10): no export script or `AGENTMONITOR_LANGFUSE_*` env vars ship yet, and no trace-quality data leaves localhost. When built it will be a manual, disabled-by-default, dry-run-previewable script using the Langfuse ingestion API. See [trace-quality.md](trace-quality.md#optional-langfuse-export--deferred).
 
 ## CI

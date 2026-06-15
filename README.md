@@ -46,6 +46,7 @@ Prefer to do it yourself? The manual steps are below.
 - Exposes canonical app APIs under `/api/v2/*`.
 - Exposes local trace-quality APIs for projected traces, observations, local review scores, prompt/version attribution rollups, and derived findings.
 - Provides provider-native quota snapshots through `/api/provider-quotas`.
+- Ships a local operator CLI. The preferred command is `amon`; `agentmonitor` is an equivalent executable alias.
 - Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
 - Keeps a Rust backend under `rust-backend/` as an alternate runtime under evaluation.
 
@@ -85,13 +86,17 @@ pnpm frontend:dev                # Svelte/Vite dev server
 pnpm css:watch                   # Shared Tailwind output watcher
 pnpm build                       # TS build + CSS + frontend build
 pnpm start                       # Run compiled server
+pnpm cli -- --help               # CLI help during local development
+pnpm cli -- health               # Check the local server
+pnpm cli -- sessions list --json # Query session history from SQLite
+pnpm cli -- import --dry-run     # Preview historical import
 pnpm lint                        # ESLint
 pnpm test                        # Node test runner suite
 pnpm frontend:check              # Svelte check
-pnpm run import --source claude-code
-pnpm run import --source codex
-pnpm reparse:sessions
-pnpm reparse:codex-sessions
+pnpm run import --source claude-code # Compatibility wrapper for `amon import`
+pnpm run import --source codex       # Compatibility wrapper for `amon import`
+pnpm reparse:sessions                # Compatibility wrapper for `amon sync sessions`
+pnpm reparse:codex-sessions          # Compatibility wrapper for `amon sync sessions`
 pnpm rust:dev                    # Alternate Rust runtime on :3142
 pnpm rust:test
 ```
@@ -128,6 +133,8 @@ for the full environment table.
 
 ```text
 src/api/              Express route handlers
+src/cli/              Local operator CLI command modules
+src/cli.ts            CLI executable entrypoint for amon and agentmonitor
 src/contracts/        TypeScript event contract types and validation
 src/db/               SQLite schema, migrations, queries, connection management
 src/import/           Historical Claude/Codex importers
@@ -135,6 +142,7 @@ src/live/             Live session normalization and projection
 src/otel/             OTLP JSON parser
 src/pricing/          Model pricing and cost calculation
 src/provider-quotas/  Provider-native quota polling/ingest
+src/runtime.ts        Shared TypeScript runtime startup used by server and CLI
 src/sse/              SSE client management and fan-out
 src/watcher/          Session-history watcher and sync
 frontend/             Svelte 5 `/app/` frontend

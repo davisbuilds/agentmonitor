@@ -4,7 +4,13 @@ Codex CLI integrates with AgentMonitor via its native OpenTelemetry (OTLP) expor
 
 ## Setup
 
-Add this to `~/.codex/config.toml`:
+From the AgentMonitor project root, print the recommended Codex config snippet:
+
+```bash
+pnpm cli -- hooks print-codex-config
+```
+
+Add the output to `~/.codex/config.toml`:
 
 ```toml
 [otel]
