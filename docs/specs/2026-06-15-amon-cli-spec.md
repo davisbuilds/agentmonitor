@@ -23,9 +23,10 @@ PR #31 implements the first-pass CLI on branch `feature/amon-cli`.
 | Runtime | Implemented. `src/runtime.ts` owns shared TypeScript runtime startup; `src/server.ts` and `amon serve` share that runtime. |
 | Maintenance commands | Implemented. Import, sync, cost recalculation, and trace-quality backfill have CLI commands; old scripts are compatibility wrappers. |
 | Session/live/reporting reads | Implemented. Session, pin, live, usage, analytics, and quality read commands exist with human and JSON output where planned; `live watch --kinds` filters SSE payloads by live item kind. |
+| Follow-up tests | Implemented. Built packaging, runtime command, and reporting/maintenance contract tests cover the remaining follow-up tasks. |
 | Hook helpers | Implemented. Codex config printing and Claude hook install dry-run/force behavior exist. |
 | Review follow-up | Implemented. `amon live watch` now buffers split SSE lines before parsing `data:` records. |
-| Verification | Last verified after follow-up tasks with `pnpm lint`, `pnpm build`, and `pnpm test` (`545` passing tests). Focused CLI coverage includes built packaging checks and `live watch --kinds`. |
+| Verification | Last verified after all follow-up tasks with `pnpm lint`, `pnpm build`, and `pnpm test` (`553` passing tests). |
 
 Known implementation divergences from the original draft:
 
@@ -37,8 +38,7 @@ Known implementation divergences from the original draft:
 
 Recommended next implementation order:
 
-1. Task 11: Runtime command integration tests. Runtime startup and health behavior have the broadest blast radius and are easiest to regress accidentally.
-2. Task 12: Reporting and maintenance contract tests. This hardens script-facing JSON and dry-run behavior after the executable/runtime paths are protected.
+No CLI follow-up tasks remain from this spec after Tasks 10, 9, 11, and 12.
 
 ## Scope
 
@@ -676,6 +676,8 @@ Tasks 1 and 8
 
 Cover the highest-risk runtime CLI paths with tests that prove `serve`, `health`, `status`, and unavailable-server behavior keep working as the runtime evolves.
 
+**Status:** Implemented in follow-up. `tests/cli-runtime.test.ts` starts `amon serve --no-import --no-watch` in a child process against a temp DB, verifies `health` and `status`, covers server-unavailable exit `3`, and confirms `status --json` reports `server_reachable: false` without failing.
+
 **Files**
 
 - Create: `tests/cli-runtime.test.ts`
@@ -714,6 +716,8 @@ Tasks 1, 2, and 10
 **Objective**
 
 Strengthen confidence in JSON contracts and dry-run side-effect guarantees for the commands most likely to be used by scripts.
+
+**Status:** Implemented in follow-up. `tests/cli-contracts.test.ts` covers usage, analytics, and quality JSON contracts with coverage metadata, invalid numeric filter exit `2`, and dry-run side-effect guarantees for import, cost recalculation, and trace-quality backfill.
 
 **Files**
 
@@ -794,6 +798,6 @@ Tasks 3 and 5
 
 ## Handoff
 
-1. Implement Task 11, then Task 12.
+1. No implementation tasks remain from this CLI spec.
 2. Defer `--no-color` and `serve --no-browser` cleanup until the CLI adds color or browser-opening behavior.
 3. Keep Rust-native CLI parity, TUI mode, destructive data commands, self-update logic, and seed/bench replacement out of scope unless the product direction changes.
