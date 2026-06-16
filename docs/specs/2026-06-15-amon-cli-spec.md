@@ -2,7 +2,7 @@
 date: 2026-06-15
 topic: amon-cli
 stage: spec
-status: draft
+status: implemented-with-followups
 source: conversation
 ---
 
@@ -11,6 +11,38 @@ source: conversation
 ## Goal
 
 Deliver first-class `amon` and `agentmonitor` executables for AgentMonitor that consolidate local runtime, import/sync, session browsing, usage, analytics, trace-quality, and hook helper workflows behind a consistent, scriptable CLI.
+
+## Implementation Status
+
+PR #31 implements the first-pass CLI on branch `feature/amon-cli`.
+
+| Area | Current state |
+| --- | --- |
+| Executables | Implemented. `package.json` exposes `amon` and `agentmonitor`, both targeting `./dist/cli.js`. |
+| Packaging | Implemented. `prepack` builds the package, `.npmignore` keeps `dist/` packable, and the build chmods `dist/cli.js` executable. |
+| Runtime | Implemented. `src/runtime.ts` owns shared TypeScript runtime startup; `src/server.ts` and `amon serve` share that runtime. |
+| Maintenance commands | Implemented. Import, sync, cost recalculation, and trace-quality backfill have CLI commands; old scripts are compatibility wrappers. |
+| Session/live/reporting reads | Implemented. Session, pin, live, usage, analytics, and quality read commands exist with human and JSON output where planned. |
+| Hook helpers | Implemented. Codex config printing and Claude hook install dry-run/force behavior exist. |
+| Review follow-up | Implemented. `amon live watch` now buffers split SSE lines before parsing `data:` records. |
+| Verification | Last verified with `pnpm lint`, `pnpm build`, and `pnpm test` (`541` passing tests), plus focused CLI tests. |
+
+Known implementation divergences from the original draft:
+
+- The CLI uses a local parser in `src/cli/args.ts` instead of `node:util` `parseArgs`. Behavior is covered, but the implementation mechanism differs.
+- Dedicated test filenames from the draft were consolidated into `tests/cli-core.test.ts` and `tests/cli-commands.test.ts`.
+- `live watch --kinds` is parsed but not applied to the SSE stream yet. `live items --kinds` does filter.
+- `--no-color`, `NO_COLOR`, and `TERM=dumb` are effectively inert because current CLI output does not emit color.
+- `serve --no-browser` is accepted but currently a no-op because `serve` does not open a browser.
+- Broad maintenance commands produce summaries, but they do not yet emit rich progress diagnostics to stderr.
+- Built executable and npm-pack checks were manually verified; the repo does not yet have a committed automated built-artifact E2E test.
+
+Recommended next implementation order:
+
+1. Task 10: Built-artifact and packaged CLI E2E tests. This protects the central promise of the PR: `amon` and `agentmonitor` are real executables.
+2. Task 11: Runtime command integration tests. Runtime startup and health behavior have the broadest blast radius and are easiest to regress accidentally.
+3. Task 9: `live watch --kinds`. This is a small user-visible correctness fix for an advertised flag.
+4. Task 12: Reporting and maintenance contract tests. This hardens script-facing JSON and dry-run behavior after the executable/runtime paths are protected.
 
 ## Scope
 
@@ -76,7 +108,7 @@ amon hooks print-codex-config
 ## Assumptions And Constraints
 
 - The package name remains `agentmonitor`; both `amon` and `agentmonitor` are executable aliases for the same CLI.
-- Node 24 is available, so the CLI can use standard library `node:util` `parseArgs` rather than adding a parsing dependency in this pass.
+- Node 24 is available. The implemented CLI uses a small local parser rather than adding a parsing dependency.
 - Configuration remains env-first. CLI flags override process env for the current invocation; no new persistent config file is introduced.
 - One-shot commands must import shared services and query modules directly, not `src/server.ts`, because `src/server.ts` currently starts the HTTP server, watcher, quota polling, stats broadcast, and auto-import timers.
 - `amon serve` must preserve the existing default bind behavior: `127.0.0.1:3141`.
@@ -100,7 +132,7 @@ Global flags:
 | `--plain` | boolean | false | Emit stable line-oriented text where supported. |
 | `-q, --quiet` | boolean | false | Suppress non-essential human success text. |
 | `-v, --verbose` | boolean | false | Emit extra diagnostics to stderr. |
-| `--no-color` | boolean | false | Disable ANSI color; also honor `NO_COLOR` and `TERM=dumb`. |
+| `--no-color` | boolean | false | Parsed today. Meaningful enforcement is deferred until CLI output emits ANSI color. |
 | `--no-input` | boolean | false | Never prompt; fail if required confirmation or input is missing. |
 
 Command-specific flags:
@@ -115,7 +147,7 @@ Command-specific flags:
 | `sessions search` | `--sort recent|relevance`, `--project`, `--agent`, `--limit` |
 | `live sessions` | `--project`, `--agent`, `--status`, `--fidelity`, `--active-only`, `--limit`, `--cursor` |
 | `live items` | `--limit`, `--cursor`, `--kinds` |
-| `live watch` | `--kinds`, `--since-now` |
+| `live watch` | `--since-now`; `--kinds` is parsed but filtering is deferred |
 | `usage *` | `--date-from`, `--date-to`, `--project`, `--agent`, plus `--model`, `--provider`, `--tier` where usage endpoints support them |
 | `analytics *` | `--date-from`, `--date-to`, `--project`, `--agent` |
 | `quality *` | `--date-from`, `--date-to`, `--project`, `--agent`, plus command-specific filters from `/api/v2/trace-quality/*` |
@@ -556,6 +588,165 @@ Tasks 1 through 7
 - Executable packaging is covered by tests.
 - Failure modes have deterministic exit codes.
 
+### Task 9: Apply `live watch --kinds`
+
+**Objective**
+
+Make the advertised `amon live watch --kinds <csv>` flag meaningful so watch output can be narrowed to relevant live item kinds without post-processing.
+
+**Files**
+
+- Modify: `src/cli/commands/sessions-live.ts`
+- Modify: `tests/cli-commands.test.ts`
+- Modify: `docs/system/OPERATIONS.md`
+
+**Dependencies**
+
+Tasks 1 and 4
+
+**Implementation Steps**
+
+1. Parse `--kinds` for `live watch` into a normalized string array.
+2. Keep `/api/v2/live/stream` compatibility by applying the filter client-side first.
+3. For each SSE `data:` payload, parse the JSON event safely.
+4. Treat event payload kind fields as the match target: `payload.kind`, `payload.item.kind`, or another explicit live item kind field if the event shape evolves.
+5. Always allow connection/control events that do not represent live items only if they are needed for operator context; otherwise suppress them when `--kinds` is set.
+6. Keep malformed `data:` lines visible rather than crashing, because this command is an operator stream.
+7. Update help/docs to show `live watch --kinds message,tool_call`.
+
+**Verification**
+
+- Run: `node --import tsx --test tests/cli-commands.test.ts`
+- Expect: live watch tests cover chunk-split SSE lines and kind filtering.
+- Run: `pnpm lint`
+- Expect: no lint errors.
+- Run: `pnpm build`
+- Expect: CLI builds.
+
+**Done When**
+
+- `amon live watch --kinds message,tool_call` suppresses unmatched live item events.
+- Split SSE line buffering still works.
+- Unavailable-server behavior still returns exit `3`.
+
+### Task 10: Add Built-Artifact And Packaged CLI E2E Tests
+
+**Objective**
+
+Move the manual executable and npm pack smoke checks into committed tests so future packaging changes cannot silently break `amon` or `agentmonitor`.
+
+**Files**
+
+- Create: `tests/cli-e2e.test.ts`
+- Modify: `package.json`
+- Modify: `tests/codebase/dead-code.test.ts` if needed
+
+**Dependencies**
+
+Tasks 1 and 8
+
+**Implementation Steps**
+
+1. Add a Node test that assumes `pnpm build` has run and invokes `./dist/cli.js --help`.
+2. Assert `dist/cli.js` starts with `#!/usr/bin/env node`.
+3. Assert `dist/cli.js` is executable on POSIX platforms.
+4. Add a dry-run pack check that verifies `dist/cli.js` is included and has executable mode.
+5. Assert both package aliases still point to `./dist/cli.js`.
+6. Keep the test skipped or diagnostic when `dist/` is absent, unless it is wired into a build-first script.
+7. Add a package script such as `test:cli-e2e` if running it inside normal `pnpm test` would make the suite order-dependent.
+
+**Verification**
+
+- Run: `pnpm build`
+- Expect: build succeeds and `dist/cli.js` exists.
+- Run: `node --test tests/cli-e2e.test.ts`
+- Expect: built CLI and pack checks pass.
+- Run: `pnpm lint`
+- Expect: no lint errors.
+
+**Done When**
+
+- The executable packaging checks from PR #31 are automated.
+- `amon` and `agentmonitor` alias regressions fail tests.
+- The test command is documented in `docs/system/OPERATIONS.md` if it is not part of `pnpm test`.
+
+### Task 11: Add Runtime Command Integration Tests
+
+**Objective**
+
+Cover the highest-risk runtime CLI paths with tests that prove `serve`, `health`, `status`, and unavailable-server behavior keep working as the runtime evolves.
+
+**Files**
+
+- Create: `tests/cli-runtime.test.ts`
+- Modify: `src/runtime.ts` if test hooks are needed
+- Modify: `src/cli/commands/runtime.ts` if command seams need tightening
+
+**Dependencies**
+
+Tasks 1, 2, and 10
+
+**Implementation Steps**
+
+1. Start `amon serve --no-import --no-watch` on an ephemeral or test-selected port from a child process.
+2. Wait for `/api/health` to respond before assertions.
+3. Assert `amon health --url <test-url> --json` returns a health payload and exit `0`.
+4. Assert `amon status --url <test-url> --json` reports `server_reachable: true`.
+5. Assert `amon health --url http://127.0.0.1:1` exits `3`.
+6. Ensure the child process is always terminated and no timers or watcher processes are left running.
+7. Keep the test isolated with a temporary `AGENTMONITOR_DB_PATH`.
+
+**Verification**
+
+- Run: `node --import tsx --test tests/cli-runtime.test.ts`
+- Expect: runtime CLI tests pass and leave no running server.
+- Run: `pnpm test`
+- Expect: full suite remains stable if the test is included in the default suite.
+
+**Done When**
+
+- Runtime command coverage is automated.
+- Server-unavailable exit behavior is covered.
+- Test cleanup is deterministic on success and failure.
+
+### Task 12: Expand Reporting And Maintenance Contract Tests
+
+**Objective**
+
+Strengthen confidence in JSON contracts and dry-run side-effect guarantees for the commands most likely to be used by scripts.
+
+**Files**
+
+- Create or extend: `tests/cli-commands.test.ts`
+- Optionally create: `tests/cli-maintenance.test.ts`
+- Optionally create: `tests/cli-reporting.test.ts`
+
+**Dependencies**
+
+Tasks 3 and 5
+
+**Implementation Steps**
+
+1. Add JSON-shape tests for `usage daily`, `usage models`, `usage projects`, `analytics tools`, `quality findings`, and `quality scores`.
+2. Add invalid-filter tests that assert exit `2`, especially for numeric score filters and invalid enum-ish filters where the query layer validates.
+3. Add dry-run side-effect tests for `import`, `costs recalc`, and `quality backfill` against temporary databases.
+4. Add a partial-success test for session sync errors if it can be induced deterministically without brittle filesystem races.
+5. Assert coverage metadata is preserved in JSON output where the underlying query returns it.
+6. Keep fixtures minimal so the CLI tests remain fast and readable.
+
+**Verification**
+
+- Run: `node --import tsx --test tests/cli-commands.test.ts`
+- Expect: expanded CLI command tests pass.
+- Run: `pnpm test`
+- Expect: full suite passes.
+
+**Done When**
+
+- Script-facing JSON outputs are covered by regression tests.
+- Dry-run commands prove they do not write to source tables/state tables.
+- Invalid filters fail with deterministic exit code `2`.
+
 ## Risks And Mitigations
 
 - Risk: CLI one-shot commands accidentally start watchers, timers, or the server.
@@ -572,6 +763,10 @@ Tasks 1 through 7
   Mitigation: Documentation states `amon` is the short preferred command and `agentmonitor` is the explicit alias; root help uses the invoked command name.
 - Risk: `live watch` appears usable without a running server.
   Mitigation: Make it explicitly HTTP/SSE-backed and return exit `3` when unavailable.
+- Risk: `live watch --kinds` remains parsed but ineffective.
+  Mitigation: Implement client-side filtering first and add regression coverage before considering server-side SSE filtering.
+- Risk: Package executable behavior regresses because build/pack checks are manual.
+  Mitigation: Add built-artifact and npm pack tests as the next follow-up task.
 - Risk: Adding persistent CLI config creates another source of truth.
   Mitigation: Do not add config files in this pass; use flags over env over existing defaults.
 
@@ -591,10 +786,14 @@ Tasks 1 through 7
 | Usage JSON includes coverage | `node --import tsx src/cli.ts usage daily --json` | JSON response includes usage data and coverage where applicable. |
 | Quality findings work | `node --import tsx src/cli.ts quality findings --json` | JSON findings response, possibly empty. |
 | Hook dry-run is safe | `node --import tsx src/cli.ts hooks install claude --dry-run --no-input` | Preview only, exit `0`. |
+| Live watch buffers split SSE lines | `node --import tsx --test tests/cli-commands.test.ts` | Test `live watch preserves SSE data lines split across chunks` passes. |
+| Built CLI E2E is automated | `pnpm build && node --test tests/cli-e2e.test.ts` | Built executable and npm pack checks pass. |
+| Runtime commands are integration-tested | `node --import tsx --test tests/cli-runtime.test.ts` | Serve, health, status, and unavailable paths pass. |
+| Live watch kind filtering works | `node --import tsx --test tests/cli-commands.test.ts` | `live watch --kinds` suppresses unmatched events. |
 | Required TS gate passes | `pnpm lint && pnpm build && pnpm test` | All commands pass. |
 
 ## Handoff
 
-1. Execute in this session, task by task.
-2. Open a separate execution session.
-3. Refine this spec before implementation.
+1. Implement Task 10, then Task 11, then Task 9, then Task 12.
+2. Defer `--no-color` and `serve --no-browser` cleanup until the CLI adds color or browser-opening behavior.
+3. Keep Rust-native CLI parity, TUI mode, destructive data commands, self-update logic, and seed/bench replacement out of scope unless the product direction changes.
