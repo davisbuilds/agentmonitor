@@ -64,7 +64,52 @@ function writeFormatted(ctx: CliContext, jsonValue: unknown, humanText: string):
   }
 }
 
-async function streamLive(ctx: CliContext, sessionId: string | undefined, sinceNow: boolean): Promise<void> {
+function parseKindFilter(value: string | undefined): Set<string> | undefined {
+  const kinds = value?.split(',').map(kind => kind.trim()).filter(Boolean);
+  return kinds && kinds.length > 0 ? new Set(kinds) : undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function kindFromPayload(value: unknown): string | undefined {
+  const obj = objectValue(value);
+  if (!obj) return undefined;
+  if (typeof obj.kind === 'string') return obj.kind;
+
+  const item = objectValue(obj.item);
+  if (typeof item?.kind === 'string') return item.kind;
+
+  return undefined;
+}
+
+function liveEventKind(value: unknown): string | undefined {
+  const event = objectValue(value);
+  if (!event) return undefined;
+  return kindFromPayload(event.payload) ?? kindFromPayload(event);
+}
+
+function shouldWriteLiveData(data: string, kindFilter: Set<string> | undefined): boolean {
+  if (!kindFilter) return true;
+
+  try {
+    const parsed = JSON.parse(data) as unknown;
+    const kind = liveEventKind(parsed);
+    return kind ? kindFilter.has(kind) : false;
+  } catch {
+    return true;
+  }
+}
+
+async function streamLive(
+  ctx: CliContext,
+  sessionId: string | undefined,
+  sinceNow: boolean,
+  kindFilter?: Set<string>,
+): Promise<void> {
   const base = effectiveBaseUrl(ctx.global.url);
   const url = new URL(`${base}/api/v2/live/stream`);
   if (sessionId) url.searchParams.set('session_id', sessionId);
@@ -79,7 +124,8 @@ async function streamLive(ctx: CliContext, sessionId: string | undefined, sinceN
   function processLine(line: string): void {
     const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
     if (!normalized.startsWith('data: ')) return;
-    writeStdout(ctx, normalized.slice('data: '.length));
+    const data = normalized.slice('data: '.length);
+    if (shouldWriteLiveData(data, kindFilter)) writeStdout(ctx, data);
   }
   for await (const chunk of res.body) {
     buffer += decoder.decode(chunk, { stream: true });
@@ -285,12 +331,12 @@ export function registerSessionLiveCommands(): void {
     name: 'live watch',
     group: 'Live Commands',
     summary: 'Stream live SSE events as NDJSON',
-    usage: 'live watch [id] [--since-now] [--url <url>]',
-    examples: ['live watch', 'live watch abc123 --since-now'],
+    usage: 'live watch [id] [--since-now] [--kinds <csv>] [--url <url>]',
+    examples: ['live watch', 'live watch abc123 --since-now', 'live watch --kinds user_message,tool_call'],
     async handler(ctx, args) {
       const parsed = parseOptionSet(args, new Set(['--kinds']), new Set(['--since-now']));
       const sessionId = parsed.positionals.length > 0 ? requireOne(parsed.positionals, 'amon live watch [id] [options]') : undefined;
-      await streamLive(ctx, sessionId, parsed.flags.has('--since-now'));
+      await streamLive(ctx, sessionId, parsed.flags.has('--since-now'), parseKindFilter(parsed.values.get('--kinds')));
     },
   });
 }

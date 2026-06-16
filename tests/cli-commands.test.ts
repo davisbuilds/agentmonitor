@@ -166,3 +166,36 @@ test('live watch preserves SSE data lines split across chunks', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('live watch filters SSE payloads by live item kind', async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  globalThis.fetch = async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"type":"connected","payload":{"replayed":0}}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"item_delta","payload":{"kind":"reasoning"}}\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"item_delta","payload":{"item":{"kind":"tool_call"}}}\n\n'));
+        controller.enqueue(encoder.encode('data: not-json\n\n'));
+        controller.enqueue(encoder.encode('data: {"type":"item_delta","payload":{"kind":"tool_result"}}\n\n'));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  try {
+    const result = await runCli(['--url', 'http://127.0.0.1:3999', 'live', 'watch', '--kinds', 'tool_call,tool_result']);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.equal(
+      result.stdout,
+      '{"type":"item_delta","payload":{"item":{"kind":"tool_call"}}}\n'
+      + 'not-json\n'
+      + '{"type":"item_delta","payload":{"kind":"tool_result"}}\n',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

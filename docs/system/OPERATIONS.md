@@ -74,6 +74,7 @@ pnpm cli -- sessions list --json
 pnpm cli -- sessions show <session-id>
 pnpm cli -- sessions search "deploy model"
 pnpm cli -- live watch
+pnpm cli -- live watch --kinds user_message,tool_call
 
 pnpm cli -- usage summary --days 7
 pnpm cli -- analytics tools --limit 20
@@ -87,6 +88,7 @@ Built package examples:
 
 ```bash
 pnpm build
+node --import tsx --test tests/cli-e2e.test.ts
 ./dist/cli.js --help
 amon --help          # after installing or linking the package
 agentmonitor --help  # equivalent alias after installing or linking the package
