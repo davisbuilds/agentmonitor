@@ -134,3 +134,35 @@ test('hooks print-codex-config uses the requested URL', async () => {
   assert.match(result.stdout, /endpoint = "http:\/\/127\.0\.0\.1:3999\/api\/otel\/v1\/logs"/);
   assert.match(result.stdout, /endpoint = "http:\/\/127\.0\.0\.1:3999\/api\/otel\/v1\/metrics"/);
 });
+
+test('live watch preserves SSE data lines split across chunks', async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let requestedUrl = '';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: live_update\n'));
+        controller.enqueue(encoder.encode('data: {"type":"live'));
+        controller.enqueue(encoder.encode('_update","id":1}\n\n'));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  try {
+    const result = await runCli(['--url', 'http://127.0.0.1:3999', 'live', 'watch', 'cli-session-001', '--since-now']);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.equal(result.stdout, '{"type":"live_update","id":1}\n');
+    const url = new URL(requestedUrl);
+    assert.equal(url.pathname, '/api/v2/live/stream');
+    assert.equal(url.searchParams.get('session_id'), 'cli-session-001');
+    assert.equal(url.searchParams.has('since'), true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

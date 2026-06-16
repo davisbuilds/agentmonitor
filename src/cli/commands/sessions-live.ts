@@ -75,13 +75,23 @@ async function streamLive(ctx: CliContext, sessionId: string | undefined, sinceN
     throw unavailable(`${url.toString()} returned ${res.status}`);
   }
   const decoder = new TextDecoder();
+  let buffer = '';
+  function processLine(line: string): void {
+    const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
+    if (!normalized.startsWith('data: ')) return;
+    writeStdout(ctx, normalized.slice('data: '.length));
+  }
   for await (const chunk of res.body) {
-    const text = decoder.decode(chunk, { stream: true });
-    for (const line of text.split('\n')) {
-      if (!line.startsWith('data: ')) continue;
-      writeStdout(ctx, line.slice('data: '.length));
+    buffer += decoder.decode(chunk, { stream: true });
+    let newlineIndex = buffer.indexOf('\n');
+    while (newlineIndex !== -1) {
+      processLine(buffer.slice(0, newlineIndex));
+      buffer = buffer.slice(newlineIndex + 1);
+      newlineIndex = buffer.indexOf('\n');
     }
   }
+  buffer += decoder.decode();
+  if (buffer) processLine(buffer);
 }
 
 export function registerSessionLiveCommands(): void {
