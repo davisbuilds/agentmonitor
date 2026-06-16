@@ -72,3 +72,35 @@ test('package dry-run includes executable CLI aliases', (t) => {
     assert.ok(isExecutable(cliEntry.mode), 'expected packed dist/cli.js to be executable');
   }
 });
+
+test('built CLI runs when invoked through package bin symlinks', (t) => {
+  if (!requireBuiltCli(t)) return;
+  if (process.platform === 'win32') {
+    t.skip('npm bin shims are not symlinks on Windows');
+    return;
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(ROOT, 'node_modules', '.tmp-cli-bin-'));
+  try {
+    for (const name of ['amon', 'agentmonitor']) {
+      const binPath = path.join(tempDir, name);
+      fs.symlinkSync(DIST_CLI, binPath);
+
+      const version = spawnSync(binPath, ['--version'], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      assert.equal(version.status, 0, version.stderr || version.stdout);
+      assert.equal(version.stdout.trim(), pkg.version);
+
+      const help = spawnSync(binPath, ['--help'], {
+        cwd: ROOT,
+        encoding: 'utf8',
+      });
+      assert.equal(help.status, 0, help.stderr || help.stdout);
+      assert.match(help.stdout, new RegExp(`Usage: ${name} \\[global flags\\] <command> \\[args\\]`));
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});

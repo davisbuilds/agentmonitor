@@ -26,7 +26,7 @@ PR #31 implements the first-pass CLI on branch `feature/amon-cli`.
 | Follow-up tests | Implemented. Built packaging, runtime command, and reporting/maintenance contract tests cover the remaining follow-up tasks. |
 | Hook helpers | Implemented. Codex config printing and Claude hook install dry-run/force behavior exist. |
 | Review follow-up | Implemented. `amon live watch` now buffers split SSE lines before parsing `data:` records. |
-| Verification | Last verified after all follow-up tasks with `pnpm lint`, `pnpm build`, and `pnpm test` (`553` passing tests). |
+| Verification | Last verified after all follow-up tasks with `pnpm lint`, `pnpm build`, and `pnpm test` (`554` passing tests). |
 
 Known implementation divergences from the original draft:
 

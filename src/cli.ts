@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseCli } from './cli/args.js';
 import { dispatchCommand, listCommands } from './cli/commands.js';
 import { CliError, EXIT_SUCCESS, exitCodeForError, messageForError } from './cli/errors.js';
@@ -71,8 +73,16 @@ export async function main(argv: string[] = process.argv, io = {
   }
 }
 
-const isEntrypoint = process.argv[1] && import.meta.url === new URL(process.argv[1], 'file:').href;
-if (isEntrypoint) {
+function isEntrypoint(argvPath: string | undefined): boolean {
+  if (!argvPath) return false;
+  try {
+    return fs.realpathSync(argvPath) === fs.realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return import.meta.url === new URL(argvPath, 'file:').href;
+  }
+}
+
+if (isEntrypoint(process.argv[1])) {
   const result = await main();
   process.exitCode = result.exitCode;
 }
