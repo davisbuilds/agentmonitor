@@ -6,13 +6,15 @@
 2. Events are validated, normalized, and stored in SQLite.
 3. The SSE emitter broadcasts new events and stats to connected dashboard clients.
 4. The canonical Svelte app at `/app/` consumes the `/api/v2/*` app contract, including Monitor reads under `/api/v2/monitor/*`.
-5. The legacy vanilla JS dashboard at `/` remains a transitional compatibility surface.
-6. Historical sessions can be backfilled via the import pipeline.
+5. The `amon` / `agentmonitor` CLI provides local runtime, maintenance, reporting, and hook-helper workflows over the same runtime and data layers.
+6. The legacy vanilla JS dashboard at `/` remains a transitional compatibility surface.
+7. Historical sessions can be backfilled via the import pipeline.
 
 ## Canonical Surface
 
 - Canonical frontend: Svelte SPA served at `/app/`.
 - Canonical application contract: `/api/v2/*`.
+- Canonical local operator command: `amon`; `agentmonitor` is an equivalent executable alias.
 - Transitional compatibility surface: legacy dashboard at `/`.
 - New product work should prefer Svelte + v2, and carry forward durable v1 localhost behavior only where it still adds operator value.
 
@@ -56,6 +58,22 @@ Express route handlers in `src/api/`:
 
 Routes are composed in `src/api/router.ts`.
 V1 routes remain important for ingest, SSE, provider quota, and legacy dashboard compatibility, but `/api/v2/*` is the canonical contract for the long-term app surface.
+
+## TypeScript Runtime And CLI
+
+`src/runtime.ts` owns TypeScript runtime startup: Express app construction,
+server listen, watcher startup, periodic imports, provider-quota polling, stats
+broadcasting, and shutdown wiring. `src/server.ts` is a thin executable wrapper
+around that shared runtime. `amon serve` uses the same runtime module so CLI and
+`pnpm start` do not diverge.
+
+`src/cli.ts` is the executable entrypoint for both `amon` and `agentmonitor`.
+One-shot commands avoid importing `src/server.ts`; they either call shared
+service/query modules directly or, for live HTTP/SSE workflows, call the running
+localhost server. CLI reads for sessions, usage, analytics, and trace quality use
+the same v2 query/service layer that backs the Svelte app. `amon live watch`
+connects to `/api/v2/live/stream` and exits unavailable when no server is
+running.
 
 ## Database Layer
 
@@ -118,6 +136,7 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - `import_state` tracks full-file hashes for completed imports, including files that produced zero events, so unchanged non-importable files are skipped on later full imports.
 - Date-scoped imports intentionally do not update `import_state`, because they only represent a partial view of the file.
 - Import discovery can exclude configured path patterns before hashing or parsing, so known junk subtrees never enter the historical backfill pipeline.
+- `amon import` is the primary operator entrypoint. The older `pnpm run import` script remains a compatibility wrapper.
 
 ## Session Sync
 
@@ -128,6 +147,7 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - The same exclude-pattern matcher is applied to discovery, watcher events, and periodic resync so ignored paths behave consistently.
 - `watched_files` caches parsed, skipped, and error states by file hash so unchanged files are not reparsed on every periodic resync.
 - Periodic resync still runs as a safety net for missed file-system events and now covers both Claude and Codex history roots.
+- `amon sync sessions` is the primary manual resync entrypoint. The older reparse scripts remain compatibility wrappers.
 
 ## Trace Quality
 
@@ -140,8 +160,9 @@ each projected row records provenance.
 - **Projection:** `src/trace-quality/` holds projection mappers, source readers,
   the projection service, v2 queries, the score model, prompt attribution, and the
   findings engine. New data is projected incrementally on ingest/import;
-  historical data is projected/rebuilt out of band via
-  `scripts/backfill-trace-quality.ts` (`pnpm run trace-quality:backfill`).
+  historical data is projected/rebuilt out of band via `amon quality backfill`.
+  `scripts/backfill-trace-quality.ts` (`pnpm run trace-quality:backfill`) remains
+  a compatibility wrapper.
   `trace_quality_projection_state` keeps backfill idempotent.
 - **Honesty:** every trace carries a `coverage_json` flag set and aggregate reads
   carry read-coverage metadata, so summary-only telemetry (e.g. Codex OTEL) is
@@ -202,12 +223,15 @@ On April 9, 2026, AgentMonitor was pointed at active local Codex sessions export
 
 ```text
 src/api/                  # HTTP route handlers
+src/cli/                  # Local operator CLI command modules
+src/cli.ts                # CLI executable entrypoint for amon and agentmonitor
 src/contracts/            # TypeScript event types and validation
 src/db/                   # Schema, queries, connection management
 src/import/               # Historical log importers
 src/otel/                 # OTLP JSON parser
 src/trace-quality/        # Local trace-quality projection, scores, prompts, findings
 src/pricing/              # Cost calculation + JSON pricing data
+src/runtime.ts            # Shared TS runtime startup used by server and CLI
 src/sse/                  # SSE client management and fan-out
 src/util/                 # Utilities (git branch detection)
 frontend/dist/            # Built Svelte SPA served at /app by the TS runtime

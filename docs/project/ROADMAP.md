@@ -8,6 +8,7 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 - Keep only the durable v1 localhost behavior that still serves ingest, SSE, provider quota, or legacy compatibility needs.
 - Keep converging the Rust backend onto the same canonical web contract instead of letting it evolve as a separate product shape.
 - Improve the Live surface, especially around fidelity boundaries, session noise, and operator clarity when data is summary-only.
+- Use the shipped `amon` / `agentmonitor` CLI as the primary operator command surface for runtime checks, maintenance, and local reporting.
 
 ## Focus Areas
 
@@ -33,6 +34,7 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 - Continue tightening Monitor, Live, Sessions (Browse / Pinned sub-views), Search, and the consolidated Analytics tab (Overview / Usage / Insights sub-views) around real review and monitoring workflows.
 - The "Instrument Console" Svelte redesign is **shipped (Phases 1–6)**: every `/app/` tab is on the design tokens — foundation (tokens + type + shell), shared primitives, Monitor, Sessions/Search, the consolidated Analytics group, and the Live operator view. IA consolidations: Usage + Insights → Analytics sub-views; Pinned → a Sessions sub-view. Mobile was intentionally deprioritized (laptop-first; agents run on-device).
+- The first-class CLI is **shipped** with `amon` as the preferred executable and `agentmonitor` as an alias. Keep new maintenance and reporting workflows discoverable there before adding more package scripts.
 - Maintain a manual regression checklist for the canonical Svelte app, especially around deep links, long transcripts, live updates, and drawer/navigation behavior.
 - Prefer small UI refinements that reduce ambiguity over larger redesigns unless operator workflows show a clear gap.
 
@@ -47,7 +49,7 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 - Define and verify parity gates for retiring or sharply reducing reliance on the legacy `/` dashboard.
 - Tighten v2 contract coverage and runtime parity testing across the TypeScript and Rust backends.
 - Keep improving session browsing, search, analytics, and live inspection where real operator workflows expose gaps.
-- Make integration behavior and capture/redaction settings easier to understand from the product surface and docs.
+- Make integration behavior and capture/redaction settings easier to understand from the product surface, CLI, and docs.
 
 ## Later
 

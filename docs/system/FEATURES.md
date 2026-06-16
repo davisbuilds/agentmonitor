@@ -7,6 +7,15 @@ Product-surface reference for AgentMonitor.
 - Canonical product surface: Svelte app at `/app/`.
 - Canonical application contract: `/api/v2/*`.
 - Transitional compatibility surface: legacy dashboard at `/`.
+- Local operator CLI: `amon`, with `agentmonitor` as an equivalent executable alias.
+
+## Operator CLI
+
+- Runtime commands cover server startup, health checks, status reporting, and opening the canonical app.
+- Maintenance commands cover historical import, session-browser sync, cost recalculation, and trace-quality backfill.
+- Read commands cover sessions, pinned messages, live views, usage, analytics, and trace-quality reports.
+- Hook helpers print Codex OTEL configuration and wrap the Claude Code hook installer.
+- Human output is terminal-safe; `--json` is available for scripts and automation.
 
 ## Real-Time Dashboard
 
@@ -60,7 +69,7 @@ Product-surface reference for AgentMonitor.
 - Per-model pricing tables (JSON data files for Claude, Codex, Gemini families).
 - Automatic cost calculation on ingest from token counts.
 - Cost breakdowns by model, project, and time period.
-- Historical cost recalculation via `pnpm recalculate-costs`.
+- Historical cost recalculation via `amon costs recalc`; `pnpm recalculate-costs` remains a compatibility wrapper.
 
 ## Analytics
 
@@ -123,6 +132,7 @@ Product-surface reference for AgentMonitor.
 - Codex session file import.
 - File-hash tracking prevents duplicate backfills.
 - Supports `--from`, `--to` date filters and `--dry-run` mode.
+- CLI entrypoints are `amon import` for event history and `amon sync sessions` for session-browser rows. Existing package scripts remain compatibility wrappers.
 
 ## API Surface
 

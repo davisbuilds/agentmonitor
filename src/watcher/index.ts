@@ -144,7 +144,7 @@ export function syncAllFiles(db: Database.Database, claudeDir: string, options: 
 
 // --- Codex session file support ---
 
-function discoverCodexSessionFiles(codexHome?: string, options: SyncOptions = {}): string[] {
+export function discoverCodexSessionFiles(codexHome?: string, options: SyncOptions = {}): string[] {
   const base = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   const sessionsDir = path.join(base, 'sessions');
   return discoverJsonlFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });

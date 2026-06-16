@@ -52,8 +52,9 @@ are never removed or reinterpreted; each projected row records its provenance.
 
 New event/session data is projected incrementally during ingest/import.
 Historical data is projected (or rebuilt) out of band with
-`pnpm run trace-quality:backfill` — see [OPERATIONS.md](OPERATIONS.md#trace-quality-backfill)
+`amon quality backfill` — see [OPERATIONS.md](OPERATIONS.md#trace-quality-backfill)
 for flags (`--source`, `--session-id`, `--from`/`--to`, `--force`, `--dry-run`).
+`pnpm run trace-quality:backfill` remains a compatibility wrapper.
 Projection is deterministic: repeated runs produce stable trace/observation ids
 and do not duplicate rows.
 
