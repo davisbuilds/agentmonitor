@@ -323,7 +323,10 @@ describe('Codex log parser', () => {
     const events = parseCodexFile(filePath);
     const tokenEvent = events.find(e => e.event_type === 'llm_response');
     assert.ok(tokenEvent);
-    assert.equal(tokenEvent.tokens_in, 2500);
+    // OpenAI/Codex report input_tokens as cache-inclusive (cached is a subset).
+    // tokens_in is normalized to the uncached portion so it is never billed at
+    // the full input rate alongside the cheap cache-read rate.
+    assert.equal(tokenEvent.tokens_in, 2400); // 2500 total - 100 cached
     assert.equal(tokenEvent.tokens_out, 600);
     assert.equal(tokenEvent.cache_read_tokens, 100);
   });
@@ -387,8 +390,12 @@ describe('Codex log parser', () => {
     const tokenEvent = events.find(e => e.event_type === 'llm_response');
     assert.ok(tokenEvent);
     assert.equal(tokenEvent.model, 'gpt-5.4');
+    // Uncached input is billed at the full rate; the 40k cached tokens move to
+    // the cache-read rate instead of being double-charged at the input rate.
+    assert.equal(tokenEvent.tokens_in, 60_000); // 100k total - 40k cached
     assert.ok(tokenEvent.cost_usd !== undefined);
-    assert.ok(Math.abs((tokenEvent.cost_usd as number) - 1.01) < 0.0001);
+    // 60k*$2.5 + 50k*$15 + 40k*$0.25 per MTok = 0.15 + 0.75 + 0.01 = 0.91
+    assert.ok(Math.abs((tokenEvent.cost_usd as number) - 0.91) < 0.0001);
   });
 
   test('calculates cost for imported gpt-5.3-codex Codex token_count events', () => {
@@ -420,8 +427,10 @@ describe('Codex log parser', () => {
     const tokenEvent = events.find(e => e.event_type === 'llm_response');
     assert.ok(tokenEvent);
     assert.equal(tokenEvent.model, 'gpt-5.3-codex');
+    assert.equal(tokenEvent.tokens_in, 60_000); // 100k total - 40k cached
     assert.ok(tokenEvent.cost_usd !== undefined);
-    assert.ok(Math.abs((tokenEvent.cost_usd as number) - 0.882) < 0.0001);
+    // 60k*$1.75 + 50k*$14 + 40k*$0.175 per MTok = 0.105 + 0.7 + 0.007 = 0.812
+    assert.ok(Math.abs((tokenEvent.cost_usd as number) - 0.812) < 0.0001);
   });
 
   test('parses response_item apply_patch as tool_use event', () => {

@@ -184,6 +184,11 @@ export function parseCodexFile(
       prevTokensOut = totalOut;
       prevCacheRead = totalCacheRead;
 
+      // OpenAI/Codex report input_tokens as cache-inclusive (cached_input_tokens
+      // is a subset of it). Bill only the uncached remainder at the full input
+      // rate; the cached portion is charged separately at the cache-read rate.
+      const deltaInputUncached = Math.max(0, deltaIn - deltaCacheRead);
+
       // Only emit if there's a meaningful delta
       if (deltaIn <= 0 && deltaOut <= 0) continue;
 
@@ -196,7 +201,7 @@ export function parseCodexFile(
       // Calculate cost from deltas
       const costUsd = defaultModel
         ? pricingRegistry.calculate(defaultModel, {
-            input: deltaIn,
+            input: deltaInputUncached,
             output: deltaOut,
             cacheRead: deltaCacheRead,
           })
@@ -208,7 +213,7 @@ export function parseCodexFile(
         agent_type: 'codex',
         event_type: 'llm_response',
         status: 'success',
-        tokens_in: deltaIn,
+        tokens_in: deltaInputUncached,
         tokens_out: deltaOut,
         cache_read_tokens: deltaCacheRead,
         model: defaultModel,

@@ -674,11 +674,16 @@ fn parse_codex_file(file_path: &Path, options: &ImportOptions) -> Vec<ImportedEv
                 continue;
             }
 
+            // OpenAI/Codex report input_tokens as cache-inclusive (cached is a
+            // subset). Bill only the uncached remainder at the full input rate;
+            // the cached portion is charged at the cache-read rate.
+            let delta_input_uncached = (delta_in - delta_cache_read).max(0);
+
             let cost_usd = default_model.as_deref().and_then(|model| {
                 calculate_cost(
                     model,
                     TokenCounts {
-                        input: delta_in,
+                        input: delta_input_uncached,
                         output: delta_out,
                         cache_read: delta_cache_read,
                         cache_write: 0,
@@ -702,7 +707,7 @@ fn parse_codex_file(file_path: &Path, options: &ImportOptions) -> Vec<ImportedEv
                 event_type: "llm_response".to_string(),
                 tool_name: None,
                 status: "success".to_string(),
-                tokens_in: delta_in,
+                tokens_in: delta_input_uncached,
                 tokens_out: delta_out,
                 branch: None,
                 project: project.clone(),

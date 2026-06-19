@@ -563,16 +563,30 @@ function parseLogRecord(
     ?? asNumber(payload?.output_token_count)
     ?? 0;
 
-  const cacheReadTokens =
+  // Anthropic reports `input_tokens` already net of cache (cache_read is a
+  // separate, additive bucket). OpenAI/Codex report `input_token(s)` as
+  // cache-inclusive, with the cached count a subset of it. Distinguish by the
+  // field name that supplies the cache figure rather than by model, because
+  // Codex SSE records carry no model attribute.
+  const anthropicCacheRead =
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.cache_read_input_tokens')
-    ?? getAttrNumber(logRecord.attributes, 'cached_token_count')
     ?? asNumber(bodyJson?.cache_read_tokens)
+    ?? asNumber(payload?.cache_read_tokens);
+  const openaiCacheRead =
+    getAttrNumber(logRecord.attributes, 'cached_token_count')
     ?? asNumber(bodyJson?.cached_token_count)
     ?? asNumber(bodyJson?.cached_input_tokens)
-    ?? asNumber(payload?.cache_read_tokens)
     ?? asNumber(payload?.cached_token_count)
-    ?? asNumber(payload?.cached_input_tokens)
-    ?? 0;
+    ?? asNumber(payload?.cached_input_tokens);
+  const cacheReadTokens = anthropicCacheRead ?? openaiCacheRead ?? 0;
+
+  // Only subtract when the cache figure came from a cache-inclusive (OpenAI/
+  // Codex) source and no Anthropic-style net field was present, so the cached
+  // bulk is not billed at the full input rate alongside the cache-read rate.
+  const cacheInclusiveInput = anthropicCacheRead == null && (openaiCacheRead ?? 0) > 0;
+  const tokensInNet = cacheInclusiveInput
+    ? Math.max(0, (tokensIn as number) - cacheReadTokens)
+    : (tokensIn as number);
 
   const cacheWriteTokens =
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.cache_creation_input_tokens')
@@ -802,7 +816,7 @@ function parseLogRecord(
     event_type: eventType,
     tool_name: toolName,
     status,
-    tokens_in: tokensIn as number,
+    tokens_in: tokensInNet,
     tokens_out: tokensOut as number,
     cache_read_tokens: cacheReadTokens as number,
     cache_write_tokens: cacheWriteTokens as number,

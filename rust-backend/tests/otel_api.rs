@@ -330,6 +330,86 @@ async fn otel_logs_codex_sse_response_completed_becomes_llm_response() {
 }
 
 #[tokio::test]
+async fn otel_logs_codex_cached_input_is_netted_from_tokens_in() {
+    let app = test_app();
+    let session_id = "otel-codex-cached";
+    // OpenAI/Codex report input_token_count as cache-inclusive; cached_token_count
+    // is a subset and must not be billed at the full input rate.
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": { "attributes": [
+          { "key": "service.name", "value": { "stringValue": "codex_cli_rs" } },
+          { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+        ]},
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "codex.sse_event" } },
+              { "key": "event.kind", "value": { "stringValue": "response.completed" } },
+              { "key": "input_token_count", "value": { "intValue": "1200" } },
+              { "key": "output_token_count", "value": { "intValue": "320" } },
+              { "key": "cached_token_count", "value": { "intValue": "180" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) = get_json(
+        &app,
+        "/api/events?session_id=otel-codex-cached&event_type=llm_response",
+    )
+    .await;
+    assert_eq!(events_status, 200);
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["tokens_in"], 1020); // 1200 total - 180 cached
+    assert_eq!(events[0]["cache_read_tokens"], 180);
+}
+
+#[tokio::test]
+async fn otel_logs_claude_cache_read_leaves_tokens_in_net() {
+    let app = test_app();
+    let session_id = "otel-claude-net";
+    // Anthropic reports input_tokens already net of cache; it must be unchanged.
+    let payload = json!({
+      "resourceLogs": [{
+        "resource": { "attributes": [
+          { "key": "service.name", "value": { "stringValue": "claude_code" } },
+          { "key": "gen_ai.session.id", "value": { "stringValue": session_id } }
+        ]},
+        "scopeLogs": [{
+          "logRecords": [{
+            "timeUnixNano": "1700000000000000000",
+            "attributes": [
+              { "key": "event.name", "value": { "stringValue": "claude_code.api_request" } },
+              { "key": "gen_ai.request.model", "value": { "stringValue": "claude-opus-4-8" } },
+              { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "1500" } },
+              { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "300" } },
+              { "key": "gen_ai.usage.cache_read_input_tokens", "value": { "intValue": "800" } }
+            ]
+          }]
+        }]
+      }]
+    });
+
+    let (status, _) = post_json(&app, "/api/otel/v1/logs", payload).await;
+    assert_eq!(status, 200);
+
+    let (events_status, body) =
+        get_json(&app, "/api/events?session_id=otel-claude-net").await;
+    assert_eq!(events_status, 200);
+    let events = body["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0]["tokens_in"], 1500); // unchanged — already net
+    assert_eq!(events[0]["cache_read_tokens"], 800);
+}
+
+#[tokio::test]
 async fn otel_logs_codex_websocket_failure_becomes_error() {
     let app = test_app();
     let session_id = "otel-codex-websocket-failed";

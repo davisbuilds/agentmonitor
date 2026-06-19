@@ -1,4 +1,6 @@
+import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
+import { pricingRegistry } from '../pricing/index.js';
 import {
   TRACE_QUALITY_EXPORT_PROVIDERS,
   TRACE_QUALITY_EXPORT_STATUSES,
@@ -714,4 +716,79 @@ export function initSchema(): void {
       last_parsed_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+
+  runDataMigrations(db);
+}
+
+// Schema-version counter for one-shot data corrections (distinct from the
+// column-presence guards above, which handle additive DDL idempotently).
+const DATA_SCHEMA_VERSION = 1;
+
+/**
+ * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
+ * Each runs at most once and is wrapped in a transaction so a crash mid-run
+ * cannot leave a partially-migrated table (which would risk double-correction).
+ */
+export function runDataMigrations(db: Database): void {
+  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+  if (current >= DATA_SCHEMA_VERSION) return;
+
+  // Apply the data changes and advance the version counter in one transaction.
+  // PRAGMA user_version is itself transactional, so a crash mid-migration rolls
+  // back both — there is no window where rows are corrected but the version is
+  // not yet bumped (which would re-run and double-subtract on restart).
+  const run = db.transaction(() => {
+    if (current < 1) backfillCacheInclusiveInputTokens(db);
+    db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
+  });
+  run();
+}
+
+/**
+ * v1 — Repair historical OpenAI/Codex events that stored `tokens_in` as a
+ * cache-inclusive figure. Those rows billed the cached bulk at the full input
+ * rate (often ~10x the cache-read rate), massively overstating Codex spend.
+ * Re-normalize `tokens_in` to the uncached remainder and recompute `cost_usd`.
+ * Anthropic rows already store net input and are left untouched.
+ */
+function backfillCacheInclusiveInputTokens(db: Database): void {
+  const rows = db.prepare(`
+    SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens
+    FROM events
+    WHERE model IS NOT NULL AND cache_read_tokens > 0
+  `).all() as Array<{
+    id: number;
+    model: string;
+    tokens_in: number;
+    tokens_out: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+  }>;
+
+  const update = db.prepare('UPDATE events SET tokens_in = ?, cost_usd = ? WHERE id = ?');
+  let corrected = 0;
+
+  // Runs inside the runDataMigrations transaction; the version-counter guard is
+  // what makes this apply exactly once (the correction is not self-idempotent).
+  for (const row of rows) {
+    const provider = pricingRegistry.resolve(row.model)?.pricing.provider;
+    // Only OpenAI/Google report cache-inclusive input; Anthropic is already net.
+    if (provider !== 'openai' && provider !== 'google') continue;
+
+    const netIn = Math.max(0, row.tokens_in - row.cache_read_tokens);
+    if (netIn === row.tokens_in) continue; // nothing to subtract
+
+    const cost = pricingRegistry.calculate(row.model, {
+      input: netIn,
+      output: row.tokens_out,
+      cacheRead: row.cache_read_tokens,
+      cacheWrite: row.cache_write_tokens,
+    });
+    update.run(netIn, cost, row.id);
+    corrected++;
+  }
+
+  if (corrected > 0) {
+    console.log(`[migration] cache-inclusive input fix: corrected ${corrected} OpenAI/Codex events`);
+  }
 }

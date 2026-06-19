@@ -292,6 +292,66 @@ fn imports_codex_session_meta_and_token_counts() {
 }
 
 #[test]
+fn codex_token_count_bills_cached_input_at_cache_read_rate() {
+    let conn = setup_db();
+    let temp = TempDir::new().expect("temp dir");
+    let root = temp.path();
+    fs::create_dir_all(root.join("sessions").join("2026").join("02").join("01"))
+        .expect("create codex sessions dir");
+    fs::write(root.join("config.toml"), "model = \"gpt-5.4\"\n").expect("write config.toml");
+
+    let file_path = root
+        .join("sessions")
+        .join("2026")
+        .join("02")
+        .join("01")
+        .join("session-cache.jsonl");
+    write_jsonl(
+        &file_path,
+        &[
+            json!({
+                "type": "session_meta",
+                "timestamp": "2026-02-01T11:00:00Z",
+                "payload": { "id": "session-cache", "cwd": "/home/user/p", "timestamp": "2026-02-01T11:00:00Z" }
+            }),
+            json!({
+                "type": "event_msg",
+                "timestamp": "2026-02-01T11:01:00Z",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": {
+                            "input_tokens": 100_000,
+                            "output_tokens": 50_000,
+                            "cached_input_tokens": 40_000
+                        }
+                    }
+                }
+            }),
+        ],
+    );
+
+    let mut options = make_options(ImportSource::Codex);
+    options.codex_dir = Some(root.to_path_buf());
+    run_import(&conn, &options);
+
+    let (tokens_in, cache_read, cost): (i64, i64, f64) = conn
+        .query_row(
+            "SELECT tokens_in, cache_read_tokens, cost_usd FROM events
+             WHERE agent_type = 'codex' AND event_type = 'llm_response' LIMIT 1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+
+    // input_tokens is cache-inclusive: 100k total - 40k cached = 60k billed at input rate.
+    assert_eq!(tokens_in, 60_000);
+    assert_eq!(cache_read, 40_000);
+    // 60k*$2.5 + 50k*$15 + 40k*$0.25 per MTok = 0.15 + 0.75 + 0.01 = 0.91
+    assert!((cost - 0.91).abs() < 1e-4, "cost was {cost}");
+}
+
+#[test]
 fn date_filters_limit_imported_events() {
     let conn = setup_db();
     let temp = TempDir::new().expect("temp dir");

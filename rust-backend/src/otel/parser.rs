@@ -639,15 +639,30 @@ fn parse_log_record(
         .or_else(|| get_map_number(payload, "output_token_count"))
         .unwrap_or(0.0) as i64;
 
-    let cache_read_tokens = get_attr_number(log_attrs, "gen_ai.usage.cache_read_input_tokens")
-        .or_else(|| get_attr_number(log_attrs, "cached_token_count"))
+    // Anthropic reports input_tokens already net of cache (cache_read is a
+    // separate additive bucket); OpenAI/Codex report it cache-inclusive, with the
+    // cached count a subset. Distinguish by the field name that supplies the cache
+    // figure rather than by model, because Codex SSE records carry no model.
+    let anthropic_cache_read = get_attr_number(log_attrs, "gen_ai.usage.cache_read_input_tokens")
         .or_else(|| get_map_number(body_obj.as_ref(), "cache_read_tokens"))
+        .or_else(|| get_map_number(payload, "cache_read_tokens"));
+    let openai_cache_read = get_attr_number(log_attrs, "cached_token_count")
         .or_else(|| get_map_number(body_obj.as_ref(), "cached_token_count"))
         .or_else(|| get_map_number(body_obj.as_ref(), "cached_input_tokens"))
-        .or_else(|| get_map_number(payload, "cache_read_tokens"))
         .or_else(|| get_map_number(payload, "cached_token_count"))
-        .or_else(|| get_map_number(payload, "cached_input_tokens"))
-        .unwrap_or(0.0) as i64;
+        .or_else(|| get_map_number(payload, "cached_input_tokens"));
+    let cache_read_tokens = anthropic_cache_read.or(openai_cache_read).unwrap_or(0.0) as i64;
+
+    // Only subtract when the cache figure came from a cache-inclusive (OpenAI/
+    // Codex) source and no Anthropic-style net field was present, so the cached
+    // bulk is not billed at the full input rate alongside the cache-read rate.
+    let cache_inclusive_input =
+        anthropic_cache_read.is_none() && openai_cache_read.unwrap_or(0.0) > 0.0;
+    let tokens_in = if cache_inclusive_input {
+        (tokens_in - cache_read_tokens).max(0)
+    } else {
+        tokens_in
+    };
 
     let cache_write_tokens = get_attr_number(log_attrs, "gen_ai.usage.cache_creation_input_tokens")
         .or_else(|| get_map_number(body_obj.as_ref(), "cache_write_tokens"))
