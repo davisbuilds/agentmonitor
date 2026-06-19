@@ -311,6 +311,102 @@ fn apply_post_schema_migrations(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    run_data_migrations(conn)?;
+
+    Ok(())
+}
+
+/// Schema-version counter for one-shot data corrections (distinct from the
+/// column-presence guards above, which handle additive DDL idempotently).
+const DATA_SCHEMA_VERSION: i64 = 1;
+
+/// Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
+/// The data changes and the version bump share a single transaction, so a crash
+/// mid-migration rolls back both — there is no window where rows are corrected
+/// but the version is not yet advanced (which would re-run and double-subtract).
+pub fn run_data_migrations(conn: &Connection) -> Result<()> {
+    let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    if current >= DATA_SCHEMA_VERSION {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    if current < 1 {
+        backfill_cache_inclusive_input_tokens(&tx)?;
+    }
+    tx.pragma_update(None, "user_version", DATA_SCHEMA_VERSION)?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// v1 — Repair historical OpenAI/Codex events that stored `tokens_in` as a
+/// cache-inclusive figure, which billed the cached bulk at the full input rate
+/// (often ~10x the cache-read rate) and overstated Codex spend. Re-normalize
+/// `tokens_in` to the uncached remainder and recompute `cost_usd`. Anthropic
+/// rows already store net input and are left untouched.
+fn backfill_cache_inclusive_input_tokens(conn: &Connection) -> Result<()> {
+    use crate::pricing::{TokenCounts, calculate_cost, resolve_provider};
+
+    struct Row {
+        id: i64,
+        model: String,
+        tokens_in: i64,
+        tokens_out: i64,
+        cache_read_tokens: i64,
+        cache_write_tokens: i64,
+    }
+
+    let rows: Vec<Row> = {
+        let mut stmt = conn.prepare(
+            "SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens
+             FROM events
+             WHERE model IS NOT NULL AND cache_read_tokens > 0",
+        )?;
+        let mapped = stmt.query_map([], |row| {
+            Ok(Row {
+                id: row.get(0)?,
+                model: row.get(1)?,
+                tokens_in: row.get(2)?,
+                tokens_out: row.get(3)?,
+                cache_read_tokens: row.get(4)?,
+                cache_write_tokens: row.get(5)?,
+            })
+        })?;
+        mapped.collect::<Result<Vec<_>>>()?
+    };
+
+    let mut corrected = 0_u64;
+    for row in rows {
+        // Only OpenAI/Google report cache-inclusive input; Anthropic is already net.
+        match resolve_provider(&row.model) {
+            Some("openai") | Some("google") => {}
+            _ => continue,
+        }
+
+        let net_in = (row.tokens_in - row.cache_read_tokens).max(0);
+        if net_in == row.tokens_in {
+            continue;
+        }
+
+        let cost = calculate_cost(
+            &row.model,
+            TokenCounts {
+                input: net_in,
+                output: row.tokens_out,
+                cache_read: row.cache_read_tokens,
+                cache_write: row.cache_write_tokens,
+            },
+        );
+        conn.execute(
+            "UPDATE events SET tokens_in = ?1, cost_usd = ?2 WHERE id = ?3",
+            rusqlite::params![net_in, cost, row.id],
+        )?;
+        corrected += 1;
+    }
+
+    if corrected > 0 {
+        tracing::info!("cache-inclusive input fix: corrected {corrected} OpenAI/Codex events");
+    }
     Ok(())
 }
 

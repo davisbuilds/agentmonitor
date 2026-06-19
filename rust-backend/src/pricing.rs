@@ -22,10 +22,12 @@ struct ModelPricing {
 struct PricingRegistry {
     models: HashMap<String, ModelPricing>,
     aliases: HashMap<String, String>,
+    providers: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct PricingDataFile {
+    provider: String,
     models: HashMap<String, PricingDataModel>,
 }
 
@@ -75,10 +77,22 @@ impl PricingRegistry {
                 cache_write_cost_per_token: model.cache_write_cost_per_m_tok / M_TOK,
             };
             self.models.insert(canonical_name.clone(), pricing);
+            self.providers
+                .insert(canonical_name.clone(), file.provider.clone());
             for alias in model.aliases {
                 self.aliases.insert(alias, canonical_name.clone());
             }
         }
+    }
+
+    fn provider(&self, model_name: &str) -> Option<&str> {
+        let normalized = normalize_model_name(model_name);
+        let canonical = if self.models.contains_key(&normalized) {
+            &normalized
+        } else {
+            self.aliases.get(&normalized)?
+        };
+        self.providers.get(canonical).map(String::as_str)
     }
 
     fn lookup(&self, model_name: &str) -> Option<ModelPricing> {
@@ -114,6 +128,18 @@ fn normalize_model_name(model_name: &str) -> String {
 pub fn calculate_cost(model_name: &str, tokens: TokenCounts) -> Option<f64> {
     let registry = PRICING_REGISTRY.get_or_init(PricingRegistry::load);
     registry.calculate(model_name, tokens)
+}
+
+/// Resolve the provider ("anthropic" | "openai" | "google") for a model name,
+/// or `None` if the model is unknown to the pricing registry.
+pub fn resolve_provider(model_name: &str) -> Option<&'static str> {
+    let registry = PRICING_REGISTRY.get_or_init(PricingRegistry::load);
+    match registry.provider(model_name)? {
+        "anthropic" => Some("anthropic"),
+        "openai" => Some("openai"),
+        "google" => Some("google"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
