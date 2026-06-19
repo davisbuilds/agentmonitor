@@ -1059,7 +1059,9 @@ describe('Codex OTLP integration', () => {
     const events = await getEvents();
     assert.equal(events.total, 1);
     assert.equal(events.events[0].event_type, 'llm_response');
-    assert.equal(events.events[0].tokens_in, 1200);
+    // Codex/OpenAI report input_token_count as cache-inclusive; tokens_in is
+    // normalized to the uncached portion (1200 total - 180 cached).
+    assert.equal(events.events[0].tokens_in, 1020);
     assert.equal(events.events[0].tokens_out, 320);
     assert.equal(events.events[0].cache_read_tokens, 180);
 

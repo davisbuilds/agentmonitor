@@ -194,6 +194,8 @@ Operational notes:
 - Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
 - `pnpm cli -- import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm cli -- sync sessions --source codex --force` when transcript-derived analytics such as inferred skill usage need to be backfilled.
 - If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm cli -- costs recalc`; that backfills stale imports after pricing-data updates or importer fixes.
+- Re-importing does **not** repair token counts on rows already in the DB: `insertEvent` dedups by `event_id` and skips existing rows (insert-only, no upsert), and `--force` only bypasses the file-hash skip. One-shot corrections to already-stored rows must go through a `runDataMigrations` step in `src/db/schema.ts`, not re-import.
+- The cache-inclusive `tokens_in` repair (OpenAI/Codex rows that overstated cost by billing cached tokens at the full input rate) runs automatically once on next startup via the `user_version`-guarded migration; no manual command is needed. It re-normalizes `tokens_in` and recomputes `cost_usd` for OpenAI/Google rows and leaves Anthropic untouched.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
 
 ## Trace Quality Backfill
