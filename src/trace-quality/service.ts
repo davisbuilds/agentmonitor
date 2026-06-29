@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { getDb } from '../db/connection.js';
 import { readTraceQualityProjectionInputForSession } from './source-readers.js';
+import { bumpSessionTraceSummaryForEvent, maintainSessionTraceSummary } from './summary.js';
 import {
   projectTraceQuality,
   TRACE_QUALITY_PROJECTION_VERSION,
@@ -613,6 +614,7 @@ export function backfillTraceQuality(options: BackfillTraceQualityOptions): Trac
 export function safelyProjectTraceQualityForEvent(eventId: number, context: string): void {
   try {
     projectTraceQualityForSource({ kind: 'event', eventId });
+    bumpSessionTraceSummaryForEvent(eventId);
   } catch (err) {
     console.error(`[trace-quality] Failed to project event ${eventId} after ${context}:`, err);
   }
@@ -621,6 +623,7 @@ export function safelyProjectTraceQualityForEvent(eventId: number, context: stri
 export function safelyProjectTraceQualityForSession(sessionId: string, context: string): void {
   try {
     projectTraceQualityForSource({ kind: 'session', sessionId }, { force: true });
+    maintainSessionTraceSummary(sessionId);
   } catch (err) {
     console.error(`[trace-quality] Failed to project session ${sessionId} after ${context}:`, err);
   }

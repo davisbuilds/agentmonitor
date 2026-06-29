@@ -7,6 +7,7 @@ import { createApp } from './app.js';
 import { runImport } from './import/index.js';
 import { startProviderQuotaPolling, stopProviderQuotaPolling } from './provider-quotas/service.js';
 import { startWatcher, stopWatcher } from './watcher/service.js';
+import { ensureSessionTraceSummaryBackfill } from './trace-quality/summary.js';
 
 export interface RuntimeOptions {
   noWatch?: boolean;
@@ -20,6 +21,7 @@ export interface RuntimeHandle {
 
 export function startAgentMonitorRuntime(options: RuntimeOptions = {}): RuntimeHandle {
   initSchema();
+  ensureSessionTraceSummaryBackfill();
 
   const app = createApp();
   const server = app.listen(config.port, config.host, () => {

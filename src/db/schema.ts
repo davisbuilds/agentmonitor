@@ -698,6 +698,36 @@ export function initSchema(): void {
 
   ensureTraceQualityPromptRefSourceCheck();
 
+  // Lean, content-free, export-shaped per-session trace summary (trace-quality
+  // reframe). One row per session; the full observation tree is projected
+  // on-demand rather than persisted. Columns map to medallion's
+  // `silver.agent_runs` so the deferred export is near-free. No message text.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_trace_summary (
+      session_id         TEXT PRIMARY KEY,
+      agent_type         TEXT,
+      primary_model      TEXT,
+      started_at         TEXT,
+      ended_at           TEXT,
+      observation_count  INTEGER NOT NULL DEFAULT 0,
+      error_count        INTEGER NOT NULL DEFAULT 0,
+      tokens_in          INTEGER NOT NULL DEFAULT 0,
+      tokens_out         INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd           REAL NOT NULL DEFAULT 0,
+      latency_ms_total   INTEGER NOT NULL DEFAULT 0,
+      coverage_json      TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(coverage_json)),
+      quality_score      REAL,
+      quality_grade      TEXT,
+      projection_version TEXT NOT NULL,
+      updated_at         TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sts_started ON session_trace_summary(started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_sts_quality ON session_trace_summary(quality_score);
+  `);
+
   // FTS5 full-text search on message content
   db.exec(`
     CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
