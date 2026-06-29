@@ -359,6 +359,12 @@ Task 0
 
 ### Task 5: Re-grain event traces (GATED — risky)
 
+> **Status (2026-06-29): SUPERSEDED** by
+> `docs/specs/2026-06-29-trace-quality-reframe-spec.md`. The re-grain is now part
+> of a broader reframe (lean export-shaped per-session summary + on-demand detail;
+> drop the persisted warehouse) rather than a standalone re-grain of the persisted
+> tables. Do not execute this task; execute the reframe spec instead.
+
 **Objective**
 
 Fix the dominant storage cost: project event-sourced traces at session/turn
