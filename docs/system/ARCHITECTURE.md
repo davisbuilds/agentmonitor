@@ -20,26 +20,11 @@
 
 ## Active Decision Records
 
-- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../archive/adr/2026-02-24-rust-backend-spike-decision-record.md) — **GO decision reached** for continued Rust backend evaluation. See [spike decision](../archive/plans/rust-spike/2026-02-24-rust-backend-spike-decision.md).
-## Rust Backend
+- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../archive/adr/2026-02-24-rust-backend-spike-decision-record.md) — **superseded 2026-06-29**: the project standardized on the TypeScript runtime and removed the Rust backend. See [POSITIONING.md](../project/POSITIONING.md).
 
-An isolated Rust service (`rust-backend/`) reimplements ingest and live-stream behavior using axum, tokio, and rusqlite. The current Rust runtime now covers:
-- `POST /api/events`, `POST /api/events/batch` — ingest with dedup and batch rejection
-- `GET /api/stats`, `GET /api/stats/tools`, `GET /api/stats/cost`, `GET /api/stats/usage-monitor` — aggregate counters, analytics, and provider-quota compatibility reads
-- `GET /api/provider-quotas`, `POST /api/provider-quotas/:provider`, `POST /api/provider-quotas/claude/statusline` — provider-native quota snapshot ingest/read endpoints
-- `GET /api/sessions`, `GET /api/sessions/:id`, `GET /api/sessions/:id/transcript`, `GET /api/filter-options`
-- `POST /api/otel/v1/logs`, `/api/otel/v1/metrics`, `/api/otel/v1/traces`
-- `GET /api/stream` — SSE fan-out via tokio::broadcast
-- `GET /api/health` — service health with SSE client count
-- Import pipeline + runtime auto-import scheduling parity
-- Pricing auto-cost parity on ingest
-- historical `/api/v2` parity for sessions, activity, pins, search sorting/context, advanced analytics, usage, and insights
+## Runtime
 
-Runs on port 3142 by default. Current verification includes the full Rust test suite, route/query integration coverage for the new `/api/v2` families, and shared parity tests over the historical `/api/v2` contract.
-The Rust runtime remains an alternate runtime under evaluation rather than the default server. TypeScript on port 3141 is still the canonical runtime until the rollout decision changes.
-
-Guardrail coverage for the Rust runtime host remains:
-- `rust-backend/tests/runtime_invariants.rs` validates dedup persistence, session lifecycle transitions, and SSE delivery/client-count invariants.
+The TypeScript/Node runtime on `127.0.0.1:3141` is the single backend. An earlier Rust reimplementation under `rust-backend/` (axum + tokio + rusqlite) was evaluated as an alternate runtime and **removed on 2026-06-29** once the project committed to TypeScript (see [POSITIONING.md](../project/POSITIONING.md)). This app is I/O- and SQLite-bound, so the real performance wins come from schema and query design, not the host language; maintaining a second backend at parity was not worth its cost.
 
 ## API Layer
 
@@ -124,7 +109,6 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - Cost computed from `tokens_in`, `tokens_out`, `cache_read_tokens`, `cache_write_tokens`.
 - **Token-bucket invariant**: `tokens_in` is the uncached (full-rate) prompt portion and `cache_read_tokens` the cached portion — additive, never overlapping. Anthropic reports `input_tokens` already net, but OpenAI/Codex report it cache-inclusive (cached is a subset), so the Codex importer (`src/import/codex.ts`) and the OTEL log-record path (`src/otel/parser.ts`) subtract the cached count before storing `tokens_in`. Violating this double-bills the cached bulk at the full input rate (~10x), the cause of historically inflated Codex/gpt-5.x spend.
 - Historical rows predating that fix are repaired once by the `user_version`-guarded data migration in `src/db/schema.ts` (`runDataMigrations` → `backfillCacheInclusiveInputTokens`), which re-normalizes OpenAI/Google `tokens_in` and recomputes `cost_usd` atomically on next startup.
-- The Rust runtime mirrors all of the above: `rust-backend/src/importer.rs`, `rust-backend/src/otel/parser.rs`, and the `user_version`-guarded `run_data_migrations` in `rust-backend/src/db/schema.rs` (provider lookup via `pricing::resolve_provider`).
 - Costs stored as `cost_usd` on each event row.
 - V2 usage keeps stored `cost_usd` authoritative. Cache hit rate, estimated cache savings, classification filters, tier rollups, top-session enrichment, and prior-period deltas are derived at query time from filtered usage rows and current pricing metadata.
 - Read-only usage budgets are evaluated from an optional local JSON config through the same v2 usage summary/filter path. They report alert states only; no hook enforcement or request blocking is implemented.

@@ -35,10 +35,6 @@ pnpm test:watch         # Watch-mode self-contained test runner
 pnpm test:parity:ts     # Run isolated TypeScript parity tests (temp server + temp DB)
 pnpm test:v2:contract:ts # Run isolated black-box tests for the canonical TS /api/v2 contract
 pnpm test:parity:ts:live # Run parity tests against a running TS server on :3141
-pnpm test:parity:rust   # Run parity tests against a running Rust server on :3142
-pnpm rust:dev           # Run the Rust backend directly on :3142
-pnpm rust:test          # Run the Rust backend test suite
-pnpm rust:test:runtime-invariants # Run Rust runtime-host invariants
 pnpm lint               # ESLint
 pnpm seed               # Send demo events (server must be running)
 pnpm run import         # Import historical sessions

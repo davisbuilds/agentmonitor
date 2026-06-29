@@ -19,7 +19,6 @@ const SKIP_DIRS = new Set([
   'docs',
   'public',
   'data',
-  'rust-backend',
 ]);
 
 const EXPORT_EXCEPTIONS = new Set<string>([]);

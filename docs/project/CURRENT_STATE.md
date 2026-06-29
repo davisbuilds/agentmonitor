@@ -31,5 +31,4 @@ maintainers but too detailed for the root README.
 
 - The local operator CLI is the preferred command surface for maintenance and reporting. `amon` is the short executable name; `agentmonitor` is an equivalent alias.
 - Existing package scripts for import, session reparse, cost recalculation, and trace-quality backfill now remain as compatibility wrappers around the CLI.
-- The Rust backend is real and tested, and covers the historical `/api/v2/*` surface used by the Svelte app.
-- Rust remains an alternate runtime under evaluation rather than the default server.
+- The TypeScript/Node runtime on `127.0.0.1:3141` is the single backend. The Rust alternate runtime was removed on 2026-06-29; see [POSITIONING.md](POSITIONING.md).
