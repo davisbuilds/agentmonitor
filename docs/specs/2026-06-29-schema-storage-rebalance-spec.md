@@ -209,6 +209,23 @@ Task 0 (baseline)
 
 ### Task 2: Trigger-maintained analytics rollups
 
+> **Status (2026-06-29): split during execution.**
+> - **N+1 session-list rewrite — DONE.** `listMonitorSessions` now pages sessions
+>   then computes all seven aggregates in one grouped pass restricted to the page
+>   (`tests/monitor-session-list.test.ts` proves byte-identical output; dev DB
+>   269ms→34ms). This is the highest-value, exact-parity part and shipped.
+> - **Daily dimensional rollup — DEFERRED (blocked).** Code audit found the Usage
+>   surface is structurally incompatible with a `(day, agent, model, project)`
+>   sum-rollup at exact parity: every Usage breakdown emits `session_count` =
+>   COUNT(DISTINCT session_id) (un-summable across buckets), buckets by
+>   `date(COALESCE(client_timestamp, created_at))`, counts only metric-bearing
+>   events, and normalizes `project`/`model` to `'unknown'`; the live Monitor uses
+>   sub-day `since` windows a daily rollup can't serve. Since Phase 1's covering
+>   indexes already made these reads fast, the rollup's remaining value is
+>   scalability, not speed. Recorded in `docs/project/BACKLOG.md` with
+>   a session-grained redesign option and a revisit trigger. The rollup-table /
+>   trigger / backfill steps below are retained for that future redesign.
+
 **Objective**
 
 Add an incrementally-maintained daily rollup and route hot analytics reads
@@ -428,7 +445,7 @@ Tasks 0–4
   `docs/system/trace-quality.md` (retention + grain), and `docs/project/ROADMAP.md`.
 - Open the follow-up spec: **Rust runtime parity** for all schema/query/projection
   changes in this spec (`rust-backend/`), per the AGENTS.md parity rule.
-- Record the columnar/DuckDB option in `docs/project/IMPROVEMENT_BACKLOG.md` as a
+- Record the columnar/DuckDB option in `docs/project/BACKLOG.md` as a
   deferred end-state to revisit only if rollups become insufficient.
 
 ### Next Steps
