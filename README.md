@@ -48,7 +48,6 @@ Prefer to do it yourself? The manual steps are below.
 - Provides provider-native quota snapshots through `/api/provider-quotas`.
 - Ships a local operator CLI. The preferred command is `amon`; `agentmonitor` is an equivalent executable alias.
 - Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
-- Keeps a Rust backend under `rust-backend/` as an alternate runtime under evaluation.
 
 ## Quick Start
 
@@ -97,8 +96,6 @@ pnpm run import --source claude-code # Compatibility wrapper for `amon import`
 pnpm run import --source codex       # Compatibility wrapper for `amon import`
 pnpm reparse:sessions                # Compatibility wrapper for `amon sync sessions`
 pnpm reparse:codex-sessions          # Compatibility wrapper for `amon sync sessions`
-pnpm rust:dev                    # Alternate Rust runtime on :3142
-pnpm rust:test
 ```
 
 Full command, config, parity, import, benchmark, and runtime notes live in
@@ -148,7 +145,6 @@ src/watcher/          Session-history watcher and sync
 frontend/             Svelte 5 `/app/` frontend
 public/               Legacy dashboard assets
 hooks/                Claude Code and Codex integration setup
-rust-backend/         Alternate Rust runtime
 tests/                Node test runner suite
 docs/                 System, project, API, and plan docs
 ```
@@ -171,7 +167,6 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 
 - Canonical product surface is Svelte `/app/` plus `/api/v2/*`.
 - Legacy `/` remains for compatibility and should not define new behavior.
-- TypeScript on `127.0.0.1:3141` is the default runtime.
-- Rust on `127.0.0.1:3142` remains an alternate runtime under evaluation.
+- TypeScript on `127.0.0.1:3141` is the runtime.
 - Codex `otel-only` live data is summary-oriented; transcript-grade parity needs richer local-state integration.
 - AI insight generation is optional and the only path that needs provider API keys.

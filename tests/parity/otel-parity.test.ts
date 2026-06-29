@@ -1,6 +1,6 @@
 /**
  * Black-box parity tests for OTEL endpoints.
- * Runs unchanged against both TypeScript and Rust runtimes.
+ * Contract tests for the TypeScript runtime.
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';

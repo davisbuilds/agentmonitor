@@ -89,10 +89,10 @@ store; both are recorded as deferred end-states in Out of Scope.
 
 ### Out of Scope
 
-- **Rust runtime parity.** All schema/query/projection changes land in TS first;
-  porting to `rust-backend/` is a tracked follow-up spec (honors the AGENTS.md
-  TS↔Rust parity rule but is explicitly deferred here). Temporary drift is
-  accepted for the duration.
+- **Rust runtime.** Originally TS-first with a deferred Rust-parity follow-up.
+  Superseded 2026-06-29: the project standardized on the TypeScript runtime and
+  the Rust backend was removed (see `docs/project/POSITIONING.md`), so there is
+  no Rust parity work — all changes land in TS only.
 - **Columnar / DuckDB / Parquet OLAP store.** Documented as the end-state to
   revisit only if rollups stop being sufficient; not built here.
 - **`events` dimension normalization** into lookup/dictionary tables.
@@ -416,7 +416,6 @@ Tasks 0–4
 | Re-grain changes trace semantics consumed by UI/insights | Med | High | Gated Phase 5 in its own PR; ratio + read-resolution tests; `projection_version` bump lets re-project be re-run. |
 | Index changes regress an unmeasured query | Med | Med | `EXPLAIN QUERY PLAN` checks in Task 1; full `pnpm test`; keep singleton drops reversible. |
 | Payload prune removes data a feature still needs | Low | High | Retain hashes + summaries; prune only `summary_only`; round-trip test (Task 3). |
-| TS/Rust drift while Rust deferred | High | Low | Explicitly accepted; tracked as follow-up spec; parity rule re-applied there. |
 | `VACUUM` on a 2 GB DB is slow / needs disk | Low | Med | Run in maintenance step, off the hot path; document space/time cost. |
 
 ## Verification Matrix
@@ -443,8 +442,6 @@ Tasks 0–4
   in its own reviewed PR with before/after bench numbers.
 - After Phase 5 lands, update `docs/system/ARCHITECTURE.md` (trace-quality grain),
   `docs/system/trace-quality.md` (retention + grain), and `docs/project/ROADMAP.md`.
-- Open the follow-up spec: **Rust runtime parity** for all schema/query/projection
-  changes in this spec (`rust-backend/`), per the AGENTS.md parity rule.
 - Record the columnar/DuckDB option in `docs/project/BACKLOG.md` as a
   deferred end-state to revisit only if rollups become insufficient.
 

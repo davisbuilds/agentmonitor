@@ -1,10 +1,10 @@
 /**
  * Black-box parity tests for SSE streaming and health endpoints.
- * Runs unchanged against both TypeScript and Rust runtimes.
+ * Contract tests for the TypeScript runtime.
  *
  * Usage:
  *   AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/stats-stream-parity.test.ts
- *   AGENTMONITOR_BASE_URL=http://127.0.0.1:3142 node --import tsx --test tests/parity/stats-stream-parity.test.ts
+ *   AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/stats-stream-parity.test.ts
  */
 import assert from 'node:assert/strict';
 import test from 'node:test';
