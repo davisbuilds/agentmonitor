@@ -2,6 +2,29 @@
 
 Working list of opportunities noticed while implementing specs. These are not commitments for the active task unless explicitly pulled into scope.
 
+## Analytics Rollups (deferred — schema-storage-rebalance Phase 2 finding)
+
+- A daily dimensional rollup `events_rollup_daily(day, agent_type, model, project)`
+  CANNOT back the Usage surface at exact parity. Every Usage breakdown
+  (`getUsageDaily/Models/Agents/Projects/Tiers`) emits `session_count` =
+  COUNT(DISTINCT session_id), and a session spans multiple buckets, so distinct
+  session counts are unrecoverable from a coarser sum-rollup. Usage also buckets
+  by `date(COALESCE(client_timestamp, created_at))` (not `created_at`), counts
+  only metric-bearing events, and normalizes `project`/`model` to `'unknown'`.
+  The live Monitor surface (`getMonitorStats`) uses sub-day rolling `since`
+  windows a daily rollup cannot serve either. Net: the dimensional rollup as
+  specced has no exact-parity reader. Options if revisited: (a) a session-grained
+  rollup `(day, agent, model, project, session_id)` so `COUNT(DISTINCT session_id)`
+  stays exact (larger, but collapses many events/session/day into one row); or
+  (b) keep it deferred — Phase 1's covering indexes already made these reads fast
+  (e.g. monitor session list 269ms->34ms), so the rollup's remaining value is
+  long-term scalability, not current speed. Suggested revisit trigger: events
+  table > ~3M rows or a measured hot Usage read > ~150ms.
+- The legacy v1 `queries.ts` session list (the retiring `/` dashboard) still has
+  the same per-session correlated-subquery N+1 that v2 `listMonitorSessions` shed.
+  Left untouched to avoid investing in the deprecated surface; apply the same CTE
+  rewrite if v1 is kept.
+
 ## Trace Quality Layer
 
 - Consolidate score target resolution into one reusable query helper or SQLite view. The score read APIs, summaries, coverage accounting, findings, and rollups all need to answer "which trace/session does this score belong to?" and drift here can make session/message/event/session-item scores visible in one endpoint but missing in another.
