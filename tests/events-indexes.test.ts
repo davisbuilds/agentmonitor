@@ -54,11 +54,23 @@ function queryPlan(sql: string, ...params: unknown[]): string {
     .join(' | ');
 }
 
-test('low-selectivity single-column event indexes are dropped', () => {
+test('the redundant bare session_id index is dropped (superseded by composite)', () => {
   const names = indexNames();
-  assert.equal(names.has('idx_events_agent_type'), false, 'idx_events_agent_type should be dropped');
-  assert.equal(names.has('idx_events_event_type'), false, 'idx_events_event_type should be dropped');
   assert.equal(names.has('idx_events_session_id'), false, 'bare idx_events_session_id should be superseded');
+});
+
+test('filter-option enumeration indexes are retained', () => {
+  // Low-cardinality, so useless for row filtering, but they cover the
+  // `SELECT DISTINCT agent_type/event_type ... ORDER BY` filter-option reads.
+  const names = indexNames();
+  assert.ok(names.has('idx_events_agent_type'), 'idx_events_agent_type should be retained for DISTINCT enumeration');
+  assert.ok(names.has('idx_events_event_type'), 'idx_events_event_type should be retained for DISTINCT enumeration');
+});
+
+test('filter-option DISTINCT enumeration uses a covering index (no temp b-tree)', () => {
+  const plan = queryPlan('SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL ORDER BY agent_type');
+  assert.match(plan, /COVERING INDEX idx_events_agent_type/, `expected covering index, got: ${plan}`);
+  assert.doesNotMatch(plan, /TEMP B-TREE/, `expected no temp b-tree, got: ${plan}`);
 });
 
 test('covering composite event indexes exist', () => {

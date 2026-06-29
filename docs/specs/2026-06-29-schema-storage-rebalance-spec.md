@@ -51,11 +51,14 @@ Findings:
    `src/db/queries.ts` (9 `GROUP BY` sites). Session-list queries also run N+1
    correlated `SUM`/`COUNT` subqueries over `events` per session row
    (`src/db/v2-queries.ts:1269-1275`, `:1598-1600`).
-3. **Dead index weight on the hot ingest path.** `events` carries six
-   single-column indexes. Measured cardinalities: `agent_type` = 2,
-   `event_type` = 8, `model` = 14, `tool_name` = 36. The low-selectivity
-   singletons cost write throughput on the hottest table for negligible filter
-   benefit.
+3. **Index weight on the hot ingest path.** `events` carries six single-column
+   indexes. Measured cardinalities: `agent_type` = 2, `event_type` = 8,
+   `model` = 14, `tool_name` = 36. The bare `session_id` index is redundant once
+   a covering `(session_id, …)` composite exists. NOTE: `agent_type`/`event_type`
+   are too low-cardinality to help row *filtering* but are **retained** — they are
+   the covering indexes for the filter-option `SELECT DISTINCT … ORDER BY`
+   enumeration; dropping them regresses dashboard bootstrap to a full events scan
+   + temp b-tree. (Corrected after PR #33 review.)
 4. **Payload bulk is retained JSON.** `session_items.payload_json` (140 MB),
    trace `metadata_json`/`coverage_json`, and `events.metadata` dominate raw
    bytes. `payload_policy` ('summary_only') exists but is not enforced as a
@@ -75,7 +78,8 @@ store; both are recorded as deferred end-states in Out of Scope.
 - TypeScript runtime only (`src/`, `frontend/` reads): `schema.ts`,
   `v2-queries.ts`, `queries.ts`, `trace-quality/projection.ts` + `service.ts`.
 - Phase 0: baseline measurement harness (sizes + query timings) to prove deltas.
-- Phase 1: `events` index hygiene (drop dead singletons, add covering composites).
+- Phase 1: `events` index hygiene (drop the redundant bare `session_id` index,
+  add covering composites, retain the filter-option enumeration indexes).
 - Phase 2: trigger-maintained analytics rollup table + read-path rewrite, plus
   removal of N+1 per-session subqueries.
 - Phase 3: payload retention/compaction enforcement keyed on `payload_policy`.
@@ -174,16 +178,18 @@ Task 0 (baseline)
 
 **Implementation Steps**
 
-1. `DROP INDEX IF EXISTS idx_events_agent_type` and `idx_events_event_type`
-   (cardinality 2 and 8 — not useful for filtering).
+1. `DROP INDEX IF EXISTS idx_events_session_id` — redundant once the covering
+   `(session_id, …)` composite exists (its leftmost column serves session_id
+   equality + DISTINCT).
 2. Add covering composites for the measured access patterns:
    `idx_events_created_model (created_at, model, tokens_in, tokens_out, cost_usd)`
    and `idx_events_session_cost (session_id, tokens_in, tokens_out, cost_usd)`
    (kills the N+1 per-session `SUM` table lookups).
-3. Keep `idx_events_created_at`, `idx_events_session_id`, `idx_events_tool_name`,
-   `idx_events_model` only where still justified after composites; document the
-   final set with a comment.
-4. Make all changes idempotent and ordered after the additive column guards.
+3. **Retain** `idx_events_agent_type` and `idx_events_event_type`: they cover the
+   filter-option `SELECT DISTINCT … ORDER BY` enumeration. Keep `idx_events_created_at`,
+   `idx_events_tool_name`, `idx_events_model`. Document the final set with a comment.
+4. Make all changes idempotent and applied in all three index sites (fresh DB,
+   `events_migrated` rebuild, post-ALTER hygiene block).
 
 **Verification**
 
@@ -197,7 +203,8 @@ Task 0 (baseline)
 
 **Done When**
 
-- Dead singletons dropped, composites created, schema init idempotent.
+- Redundant bare `session_id` index dropped; composites created; filter-option
+  enumeration indexes retained; schema init idempotent.
 - Query plans confirm covering-index use for the targeted reads.
 
 ### Task 2: Trigger-maintained analytics rollups
