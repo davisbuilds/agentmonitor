@@ -222,7 +222,7 @@ Task 0 (baseline)
 >   events, and normalizes `project`/`model` to `'unknown'`; the live Monitor uses
 >   sub-day `since` windows a daily rollup can't serve. Since Phase 1's covering
 >   indexes already made these reads fast, the rollup's remaining value is
->   scalability, not speed. Recorded in `docs/project/IMPROVEMENT_BACKLOG.md` with
+>   scalability, not speed. Recorded in `docs/project/BACKLOG.md` with
 >   a session-grained redesign option and a revisit trigger. The rollup-table /
 >   trigger / backfill steps below are retained for that future redesign.
 
@@ -445,7 +445,7 @@ Tasks 0–4
   `docs/system/trace-quality.md` (retention + grain), and `docs/project/ROADMAP.md`.
 - Open the follow-up spec: **Rust runtime parity** for all schema/query/projection
   changes in this spec (`rust-backend/`), per the AGENTS.md parity rule.
-- Record the columnar/DuckDB option in `docs/project/IMPROVEMENT_BACKLOG.md` as a
+- Record the columnar/DuckDB option in `docs/project/BACKLOG.md` as a
   deferred end-state to revisit only if rollups become insufficient.
 
 ### Next Steps
