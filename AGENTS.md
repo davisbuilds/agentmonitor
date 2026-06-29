@@ -20,6 +20,7 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - `docs/system/DESIGN.md` — Svelte `/app/` design system ("Instrument Console"): color/type/space/radius tokens, layout language, accessibility floor. Tokens live in `frontend/src/app.css` `@theme`.
 - `docs/system/trace-quality.md` — local trace-quality layer: trace/observation model, observation taxonomy, coverage/payload-policy honesty, scores, prompt attribution, findings taxonomy, UI surface, and the deferred (ingestion-API) Langfuse export.
 - `docs/api/` — API navigation reference.
+- `docs/project/POSITIONING.md` — what the product is (Archetype B: local-first observability console for coding agents); scope, the Langfuse "collector not backend" stance, and the architectural implications that anchor the foundations work.
 - `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity, Rust convergence).
 - `docs/project/CURRENT_STATE.md` — high-change product/runtime notes moved out of the root README.
 - `docs/project/GIT_HISTORY_POLICY.md` — merge-commit-only policy and rationale.
