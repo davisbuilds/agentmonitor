@@ -127,12 +127,13 @@ export function initSchema(): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
-    CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
-    CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
     CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
-    CREATE INDEX IF NOT EXISTS idx_events_agent_type ON events(agent_type);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `);
+  // NOTE: session_id / model coverage and the dropping of the low-selectivity
+  // agent_type/event_type indexes are handled together in the index-hygiene
+  // block after the column-presence migrations below, because the covering
+  // composites reference cost_usd (added by an ALTER guard).
 
   // Import state tracking - avoids re-importing unchanged files
   db.exec(`
@@ -348,16 +349,32 @@ export function initSchema(): void {
       ALTER TABLE events_migrated RENAME TO events;
 
       CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
-      CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id);
-      CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
       CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
-      CREATE INDEX IF NOT EXISTS idx_events_agent_type ON events(agent_type);
       CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
     `);
   }
 
-  // Create index on model column after migrations ensure the column exists.
-  db.exec('CREATE INDEX IF NOT EXISTS idx_events_model ON events(model)');
+  // Event index hygiene (schema-storage-rebalance Phase 1).
+  // - Drop low-selectivity single-column indexes: agent_type (~2 distinct) and
+  //   event_type (~8 distinct) are never selective enough for the planner to
+  //   prefer, yet they tax every insert on the hottest table.
+  // - Replace the bare session_id index with a covering composite so the monitor
+  //   session-list SUM(tokens_in/out, cost_usd) subqueries resolve index-only
+  //   (the leftmost session_id column still serves plain equality lookups).
+  // - Add a covering (created_at, model, ...) composite for the time-windowed
+  //   cost/usage aggregates.
+  // Created here (not with the base table) because the covering columns include
+  // cost_usd, which is added by an ALTER guard above on legacy databases.
+  db.exec(`
+    DROP INDEX IF EXISTS idx_events_agent_type;
+    DROP INDEX IF EXISTS idx_events_event_type;
+    DROP INDEX IF EXISTS idx_events_session_id;
+    CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
+    CREATE INDEX IF NOT EXISTS idx_events_session_cost
+      ON events(session_id, tokens_in, tokens_out, cost_usd);
+    CREATE INDEX IF NOT EXISTS idx_events_created_model
+      ON events(created_at, model, tokens_in, tokens_out, cost_usd);
+  `);
 
   // --- V2 tables: session browser, messages, tool calls, FTS ---
 
