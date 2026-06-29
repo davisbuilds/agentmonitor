@@ -12,7 +12,9 @@ import type { Database } from 'better-sqlite3';
 
 import { getDb } from '../db/connection.js';
 import {
+  coverageForEvents,
   projectTraceQuality,
+  type EventProjectionSource,
   type ProjectedTraceQualityObservation,
   type ProjectedTraceQualityTrace,
 } from './projection.js';
@@ -25,7 +27,9 @@ import type { TraceQualityCoverage } from './types.js';
  * changes; the startup guard re-backfills every row whose stored version
  * differs, so derivation changes propagate without a manual reset.
  */
-const SESSION_TRACE_SUMMARY_VERSION = 'sts:v1';
+// v2: usage is rolled up from events (authoritative) even when detail structure
+// comes from live session_items, fixing zeroed Codex usage (PR #37 review).
+const SESSION_TRACE_SUMMARY_VERSION = 'sts:v2';
 
 export interface SessionTraceSummary {
   session_id: string;
@@ -116,55 +120,110 @@ function isError(observation: ProjectedTraceQualityObservation): boolean {
   return observation.severity === 'error' || observation.status === 'error';
 }
 
-/** Project a session in-memory and aggregate its observations into a summary. */
+interface MeasureRollup {
+  count: number;
+  tokensIn: number;
+  tokensOut: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cost: number;
+  latency: number;
+  errorCount: number;
+  primaryModel: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  coverage: TraceQualityCoverage;
+}
+
+/**
+ * Roll up usage from the session's events. Events are the authoritative usage
+ * source: `projectTraceQuality` structures detail from turns/items for Codex/
+ * Claude sessions and ignores `input.events`, but those item observations carry
+ * zero token/cost — the real usage lives on the event rows. So whenever a
+ * session has events, the summary measures and coverage come from them (this
+ * also makes the full derive agree with the O(1) incremental event path).
+ */
+function rollupFromEvents(events: readonly EventProjectionSource[]): MeasureRollup {
+  const rollup: MeasureRollup = {
+    count: events.length,
+    tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, cost: 0, latency: 0, errorCount: 0,
+    primaryModel: null, startedAt: null, endedAt: null, coverage: coverageForEvents(events),
+  };
+  const modelCounts = new Map<string, number>();
+  for (const event of events) {
+    rollup.tokensIn += event.tokens_in;
+    rollup.tokensOut += event.tokens_out;
+    rollup.cacheRead += event.cache_read_tokens;
+    rollup.cacheWrite += event.cache_write_tokens;
+    rollup.cost += event.cost_usd ?? 0;
+    rollup.latency += event.duration_ms ?? 0;
+    if (event.status === 'error') rollup.errorCount += 1;
+    if (event.model) modelCounts.set(event.model, (modelCounts.get(event.model) ?? 0) + 1);
+    const ts = event.client_timestamp ?? event.created_at;
+    if (ts && (rollup.startedAt === null || ts < rollup.startedAt)) rollup.startedAt = ts;
+    if (ts && (rollup.endedAt === null || ts > rollup.endedAt)) rollup.endedAt = ts;
+  }
+  rollup.primaryModel = [...modelCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+  return rollup;
+}
+
+/** Fallback rollup for sessions with no events (e.g. Claude JSONL message-sourced). */
+function rollupFromObservations(
+  observations: readonly ProjectedTraceQualityObservation[],
+  traces: readonly ProjectedTraceQualityTrace[],
+): MeasureRollup {
+  const rollup: MeasureRollup = {
+    count: observations.length,
+    tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, cost: 0, latency: 0, errorCount: 0,
+    primaryModel: null, startedAt: null, endedAt: null, coverage: mergeCoverage(traces),
+  };
+  const modelCounts = new Map<string, number>();
+  for (const observation of observations) {
+    rollup.tokensIn += observation.tokens_in;
+    rollup.tokensOut += observation.tokens_out;
+    rollup.cacheRead += observation.cache_read_tokens;
+    rollup.cacheWrite += observation.cache_write_tokens;
+    rollup.cost += observation.cost_usd ?? 0;
+    rollup.latency += observation.duration_ms ?? 0;
+    if (isError(observation)) rollup.errorCount += 1;
+    if (observation.model) modelCounts.set(observation.model, (modelCounts.get(observation.model) ?? 0) + 1);
+    if (observation.started_at && (rollup.startedAt === null || observation.started_at < rollup.startedAt)) rollup.startedAt = observation.started_at;
+    const end = observation.ended_at ?? observation.started_at;
+    if (end && (rollup.endedAt === null || end > rollup.endedAt)) rollup.endedAt = end;
+  }
+  rollup.primaryModel = [...modelCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
+  return rollup;
+}
+
+/** Project a session in-memory and aggregate it into a content-free summary. */
 export function deriveSessionTraceSummary(sessionId: string): SessionTraceSummary {
   const input = readTraceQualityProjectionInputForSession(sessionId);
-  const { traces, observations } = projectTraceQuality(input);
-
-  let tokensIn = 0;
-  let tokensOut = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  let cost = 0;
-  let latency = 0;
-  let errorCount = 0;
-  let startedAt: string | null = null;
-  let endedAt: string | null = null;
-  const modelCounts = new Map<string, number>();
-
-  for (const observation of observations) {
-    tokensIn += observation.tokens_in;
-    tokensOut += observation.tokens_out;
-    cacheRead += observation.cache_read_tokens;
-    cacheWrite += observation.cache_write_tokens;
-    cost += observation.cost_usd ?? 0;
-    latency += observation.duration_ms ?? 0;
-    if (isError(observation)) errorCount += 1;
-    if (observation.model) modelCounts.set(observation.model, (modelCounts.get(observation.model) ?? 0) + 1);
-    if (observation.started_at && (startedAt === null || observation.started_at < startedAt)) startedAt = observation.started_at;
-    const end = observation.ended_at ?? observation.started_at;
-    if (end && (endedAt === null || end > endedAt)) endedAt = end;
+  const events = input.events ?? [];
+  let rollup: MeasureRollup;
+  if (events.length > 0) {
+    rollup = rollupFromEvents(events);
+  } else {
+    const projected = projectTraceQuality(input);
+    rollup = rollupFromObservations(projected.observations, projected.traces);
   }
 
-  const primaryModel = [...modelCounts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? null;
-  const coverage = mergeCoverage(traces);
-  const { score, grade } = computeQualityScalar(observations.length, errorCount, coverage);
+  const { score, grade } = computeQualityScalar(rollup.count, rollup.errorCount, rollup.coverage);
 
   return {
     session_id: sessionId,
     agent_type: input.agentType ?? null,
-    primary_model: primaryModel,
-    started_at: input.browsingSession?.started_at ?? startedAt,
-    ended_at: input.browsingSession?.ended_at ?? endedAt,
-    observation_count: observations.length,
-    error_count: errorCount,
-    tokens_in: tokensIn,
-    tokens_out: tokensOut,
-    cache_read_tokens: cacheRead,
-    cache_write_tokens: cacheWrite,
-    cost_usd: Math.round(cost * 1e6) / 1e6,
-    latency_ms_total: latency,
-    coverage,
+    primary_model: rollup.primaryModel,
+    started_at: input.browsingSession?.started_at ?? rollup.startedAt,
+    ended_at: input.browsingSession?.ended_at ?? rollup.endedAt,
+    observation_count: rollup.count,
+    error_count: rollup.errorCount,
+    tokens_in: rollup.tokensIn,
+    tokens_out: rollup.tokensOut,
+    cache_read_tokens: rollup.cacheRead,
+    cache_write_tokens: rollup.cacheWrite,
+    cost_usd: Math.round(rollup.cost * 1e6) / 1e6,
+    latency_ms_total: rollup.latency,
+    coverage: rollup.coverage,
     quality_score: score,
     quality_grade: grade,
   };

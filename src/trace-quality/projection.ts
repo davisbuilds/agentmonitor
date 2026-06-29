@@ -754,7 +754,7 @@ function sortedToolCalls(toolCalls: readonly ToolCallProjectionSource[]): ToolCa
   return [...toolCalls].sort((a, b) => a.id - b.id);
 }
 
-function coverageForEvents(events: readonly EventProjectionSource[]): TraceQualityCoverage {
+export function coverageForEvents(events: readonly EventProjectionSource[]): TraceQualityCoverage {
   const hasTokenUsage = events.some(event =>
     event.tokens_in > 0
     || event.tokens_out > 0

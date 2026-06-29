@@ -115,6 +115,31 @@ test('backfill writes one row per event-bearing session, not per event', () => {
   assert.equal(sEvents.observation_count, 3, 'one row aggregating the session\'s 3 events');
 });
 
+test('event usage is preserved when the detail projection comes from live session_items (Codex)', () => {
+  // Regression for PR #37 P1: a Codex session has events with real usage AND
+  // materialized session_items. projectTraceQuality structures detail from the
+  // items (zero usage); the summary must still roll up the event tokens/cost.
+  const db = getDb();
+  db.prepare(`INSERT INTO browsing_sessions (id, agent, started_at, ended_at) VALUES ('s-codex', 'codex', ?, ?)`)
+    .run('2026-05-01T12:00:00Z', '2026-05-01T12:05:00Z');
+  db.prepare(`INSERT INTO session_turns (id, session_id, agent_type, started_at) VALUES (900, 's-codex', 'codex', ?)`)
+    .run('2026-05-01T12:00:00Z');
+  db.prepare(`INSERT INTO session_items (session_id, turn_id, ordinal, kind, payload_json, created_at)
+              VALUES ('s-codex', 900, 0, 'tool_call', '{}', ?)`).run('2026-05-01T12:00:30Z');
+  db.prepare(
+    `INSERT INTO events (id, event_id, session_id, agent_type, event_type, tool_name, status, model,
+       tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, created_at)
+     VALUES (?, ?, 's-codex', 'codex', ?, ?, 'success', 'gpt-5-codex', ?, ?, 0, 0, ?, ?, ?)`,
+  ).run(900, 'ce1', 'tool_use', 'apply_patch', 1000, 500, 0.5, 700, '2026-05-01T12:00:00Z');
+
+  const summary = deriveSessionTraceSummary('s-codex');
+  assert.equal(summary.tokens_in, 1000, 'event tokens must survive the item-based detail projection');
+  assert.equal(summary.tokens_out, 500);
+  assert.equal(summary.cost_usd, 0.5);
+  assert.equal(summary.primary_model, 'gpt-5-codex');
+  assert.equal(summary.coverage.has_token_usage, true);
+});
+
 test('incremental per-event bump matches the full derive for an event-sourced session', () => {
   const db = getDb();
   db.prepare('DELETE FROM session_trace_summary WHERE session_id = ?').run('s-events');
