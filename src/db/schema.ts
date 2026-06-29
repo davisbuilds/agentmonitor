@@ -705,7 +705,9 @@ export function initSchema(): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_trace_summary (
       session_id         TEXT PRIMARY KEY,
+      trace_id           TEXT,
       agent_type         TEXT,
+      project            TEXT,
       primary_model      TEXT,
       started_at         TEXT,
       ended_at           TEXT,
@@ -727,6 +729,24 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_sts_started ON session_trace_summary(started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sts_quality ON session_trace_summary(quality_score);
   `);
+
+  // Backward-compatible add of the stable per-session trace id (reframe Phase 2):
+  // the on-demand read layer emits it as each row's id and reverses it to a
+  // session for detail. Populated by the summary maintainers; the version bump
+  // (sts:v3) re-backfills existing rows so the column fills in on upgrade.
+  const sessionTraceSummaryColumns = new Set<string>(
+    (db.prepare(`PRAGMA table_info(session_trace_summary)`).all() as Array<{ name: string }>).map(col => col.name)
+  );
+  if (!sessionTraceSummaryColumns.has('trace_id')) {
+    db.exec('ALTER TABLE session_trace_summary ADD COLUMN trace_id TEXT');
+  }
+  // project: carried on the summary so the lean list honors the project filter
+  // without re-projecting (filter parity with the old persisted trace list).
+  if (!sessionTraceSummaryColumns.has('project')) {
+    db.exec('ALTER TABLE session_trace_summary ADD COLUMN project TEXT');
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_sts_trace ON session_trace_summary(trace_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_sts_project ON session_trace_summary(project)');
 
   // FTS5 full-text search on message content
   db.exec(`

@@ -45,19 +45,21 @@ import {
   getDistinctAgents,
   createTraceQualityScore,
   deleteTraceQualityScore,
-  getTraceQualityTrace,
   getTraceQualityObservation,
   getTraceQualityScoreRollups,
   getTraceQualityScoreSummary,
   isTraceQualityScoreMutationError,
   isTraceQualityScoreNotFoundError,
   listTraceQualityFindings,
-  listTraceQualityObservations,
   listTraceQualityPrompts,
   listTraceQualityScores,
-  listTraceQualityTraces,
   updateTraceQualityScore,
 } from '../../db/v2-queries.js';
+import {
+  getSessionTraceDetail,
+  listSessionObservations,
+  listSessionTraces,
+} from '../../trace-quality/on-demand.js';
 import { liveStreamRouter } from './live-stream.js';
 import { config } from '../../config.js';
 import { generateInsight } from '../../insights/service.js';
@@ -787,9 +789,11 @@ v2Router.get('/usage/tier-feedback', (req: Request, res: Response) => {
 
 // --- Trace quality ---
 
+// Lean view (reframe Phase 2): the trace list comes from session_trace_summary
+// and per-session detail is projected on-demand — one trace per session.
 v2Router.get('/trace-quality/traces', (req: Request, res: Response) => {
   try {
-    res.json(listTraceQualityTraces(readTraceQualityParams(req)));
+    res.json(listSessionTraces(readTraceQualityParams(req)));
   } catch (err) {
     console.error('[v2/trace-quality/traces] Error:', err);
     res.status(500).json({ error: 'Failed to list trace-quality traces' });
@@ -798,7 +802,7 @@ v2Router.get('/trace-quality/traces', (req: Request, res: Response) => {
 
 v2Router.get('/trace-quality/traces/:id/observations', (req: Request, res: Response) => {
   try {
-    const result = listTraceQualityObservations(req.params['id'] as string, {
+    const result = listSessionObservations(req.params['id'] as string, {
       limit: safeInt(req.query.limit as string),
       offset: safeInt(req.query.offset as string),
     });
@@ -815,7 +819,7 @@ v2Router.get('/trace-quality/traces/:id/observations', (req: Request, res: Respo
 
 v2Router.get('/trace-quality/traces/:id', (req: Request, res: Response) => {
   try {
-    const result = getTraceQualityTrace(req.params['id'] as string);
+    const result = getSessionTraceDetail(req.params['id'] as string);
     if (!result) {
       res.status(404).json({ error: 'Trace not found' });
       return;

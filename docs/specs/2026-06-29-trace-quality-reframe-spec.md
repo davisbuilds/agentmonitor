@@ -2,7 +2,7 @@
 date: 2026-06-29
 topic: trace-quality-reframe
 stage: spec
-status: draft
+status: in-progress
 source: conversation
 ---
 
