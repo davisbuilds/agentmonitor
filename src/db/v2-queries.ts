@@ -1264,22 +1264,63 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const queryValues = applyLimit ? [...values, requestedLimit] : values;
 
+  // Page the sessions first, then compute all seven event aggregates in a single
+  // grouped pass restricted to that page, instead of running seven correlated
+  // subqueries per returned row. Byte-identical to the previous correlated query
+  // (see tests/monitor-session-list.test.ts, which diffs both against seeded
+  // edge cases); the SUM(session_id IN page) restriction keeps it index-backed
+  // by idx_events_session_cost rather than scanning all events.
   const sessions = db.prepare(`
-    SELECT s.*,
-      COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
-      COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
-      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
-      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
-      COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
-      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
-      COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
-    FROM sessions s
-    ${where}
+    WITH page AS (
+      SELECT s.*
+      FROM sessions s
+      ${where}
+      ORDER BY
+        CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
+        datetime(s.last_event_at) DESC,
+        s.id DESC
+      ${applyLimit ? 'LIMIT ?' : ''}
+    ),
+    agg AS (
+      SELECT
+        e.session_id,
+        COUNT(*) AS event_count,
+        SUM(e.tokens_in) AS tokens_in,
+        SUM(e.tokens_out) AS tokens_out,
+        SUM(e.cost_usd) AS total_cost_usd,
+        COUNT(DISTINCT CASE
+          WHEN json_valid(e.metadata) = 1
+            AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin')
+            AND json_extract(e.metadata, '$.file_path') IS NOT NULL
+          THEN json_extract(e.metadata, '$.file_path')
+        END) AS files_edited,
+        SUM(CASE
+          WHEN json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL
+          THEN CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)
+        END) AS lines_added,
+        SUM(CASE
+          WHEN json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL
+          THEN CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)
+        END) AS lines_removed
+      FROM events e
+      WHERE e.session_id IN (SELECT id FROM page)
+      GROUP BY e.session_id
+    )
+    SELECT
+      page.*,
+      COALESCE(agg.event_count, 0) as event_count,
+      COALESCE(agg.tokens_in, 0) as tokens_in,
+      COALESCE(agg.tokens_out, 0) as tokens_out,
+      COALESCE(agg.total_cost_usd, 0) as total_cost_usd,
+      COALESCE(agg.files_edited, 0) as files_edited,
+      COALESCE(agg.lines_added, 0) as lines_added,
+      COALESCE(agg.lines_removed, 0) as lines_removed
+    FROM page
+    LEFT JOIN agg ON agg.session_id = page.id
     ORDER BY
-      CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
-      datetime(s.last_event_at) DESC,
-      s.id DESC
-    ${applyLimit ? 'LIMIT ?' : ''}
+      CASE page.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
+      datetime(page.last_event_at) DESC,
+      page.id DESC
   `).all(...queryValues) as MonitorSessionRow[];
 
   return { sessions, total: sessions.length };
