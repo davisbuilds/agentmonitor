@@ -138,31 +138,34 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 
 ## Trace Quality
 
-A local, provider-neutral trace-quality layer projects existing sources
-(`events`, `session_items`, `session_turns`, `messages`, `tool_calls`) into a
-trace/observation graph with local scores, prompt attribution, and derived
-findings. It is **additive**: source rows are never removed or reinterpreted, and
-each projected row records provenance.
+A **lean**, provider-neutral trace-quality view (reframe, 2026-06): one trace per
+session, derived on demand from existing sources (`events`, `session_items`,
+`session_turns`, `messages`, `tool_calls`) plus a tiny content-free per-session
+rollup. It is **additive**: source rows are never removed or reinterpreted. The
+persisted trace/observation/score/prompt warehouse was removed — that eval depth
+is deferred to the export (collector-not-backend; see POSITIONING.md).
 
-- **Projection:** `src/trace-quality/` holds projection mappers, source readers,
-  the projection service, v2 queries, the score model, prompt attribution, and the
-  findings engine. New data is projected incrementally on ingest/import;
-  historical data is projected/rebuilt out of band via `amon quality backfill`.
-  `scripts/backfill-trace-quality.ts` (`pnpm run trace-quality:backfill`) remains
-  a compatibility wrapper.
-  `trace_quality_projection_state` keeps backfill idempotent.
-- **Honesty:** every trace carries a `coverage_json` flag set and aggregate reads
-  carry read-coverage metadata, so summary-only telemetry (e.g. Codex OTEL) is
-  never presented as full transcript fidelity. Observation `payload_policy`
-  governs whether raw content, a hash, or only a summary is retained.
-- **Read APIs:** the full surface is under `/api/v2/trace-quality/*` (handlers in
-  `src/api/v2/router.ts`, SQL in `src/trace-quality/queries.ts` and
-  `findings.ts`). Findings are read-only and computed from SQLite — no Prometheus
-  or Grafana.
-- **Export seam:** `trace_quality_export_state` and the `langfuse` export-provider
-  enum exist as a seam for the optional, **deferred** Langfuse export adapter
-  (spec Task 10). The chosen transport is the Langfuse ingestion API (batch);
-  nothing leaves localhost until that adapter is built.
+- **Storage:** only `session_trace_summary` (one content-free, export-shaped row
+  per session; columns map to medallion's `silver.agent_runs`) and the dormant
+  `trace_quality_export_state` seam are persisted. `src/trace-quality/` holds the
+  projection (`projection.ts`), source readers, the on-demand read layer
+  (`on-demand.ts`), the summary derivation/maintenance (`summary.ts`), and the
+  ingest hooks (`service.ts`).
+- **Detail on-demand:** `on-demand.ts` projects a single session's trace +
+  observation tree in memory per request and never stores it; the list is served
+  straight from the summary. Ingest maintains the summary incrementally; a startup
+  guard self-heals incomplete migrations (stale version or NULL `trace_id`).
+- **Honesty:** traces carry a `coverage_json` flag set and reads carry
+  read-coverage metadata (over the full filtered set), so summary-only telemetry
+  (e.g. Codex OTEL) is never presented as full fidelity. Observation
+  `payload_policy` governs raw vs hash vs summary retention.
+- **Read APIs:** `/api/v2/trace-quality/{traces, traces/:id, traces/:id/observations}`
+  (handlers in `src/api/v2/router.ts`, reads in `src/trace-quality/on-demand.ts`).
+- **Reclaim:** existing DBs drop the old warehouse tables and VACUUM via the
+  explicit, opt-in `pnpm reclaim:trace-quality` (never run at startup).
+- **Export seam:** `trace_quality_export_state` (+ `langfuse` provider enum) is the
+  seam for the **deferred** export — medallion for the summary aggregate, Langfuse
+  for trace/eval depth. Nothing leaves localhost until that adapter is built.
 
 See [trace-quality.md](trace-quality.md) for the full model, taxonomy, and
 semantics.

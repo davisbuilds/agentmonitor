@@ -44,7 +44,7 @@ Prefer to do it yourself? The manual steps are below.
 - Watches local Claude and Codex session history and imports historical sessions into SQLite.
 - Streams live updates over SSE for dashboards and operator views.
 - Exposes canonical app APIs under `/api/v2/*`.
-- Exposes local trace-quality APIs for projected traces, observations, local review scores, prompt/version attribution rollups, and derived findings.
+- Exposes a lean local trace-quality view (one trace per session) — a content-free per-session summary plus on-demand observation detail.
 - Provides provider-native quota snapshots through `/api/provider-quotas`.
 - Ships a local operator CLI. The preferred command is `amon`; `agentmonitor` is an equivalent executable alias.
 - Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
