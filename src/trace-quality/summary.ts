@@ -8,6 +8,8 @@
  * (its columns map to medallion's `silver.agent_runs`). The full observation
  * tree is NOT persisted; detail is projected on-demand (Phase 2).
  */
+import { createHash } from 'node:crypto';
+
 import type { Database } from 'better-sqlite3';
 
 import { getDb } from '../db/connection.js';
@@ -29,11 +31,25 @@ import type { TraceQualityCoverage } from './types.js';
  */
 // v2: usage is rolled up from events (authoritative) even when detail structure
 // comes from live session_items, fixing zeroed Codex usage (PR #37 review).
-const SESSION_TRACE_SUMMARY_VERSION = 'sts:v2';
+// v3: add the stable per-session `trace_id` (reframe Phase 2 on-demand read
+// layer); the bump re-backfills existing rows so the column populates on upgrade.
+const SESSION_TRACE_SUMMARY_VERSION = 'sts:v3';
+
+/**
+ * Stable, deterministic trace id for a session. The lean view presents one trace
+ * per session; this id is persisted on `session_trace_summary` so the on-demand
+ * read layer can emit it (the list row's `id`) and reverse it back to a session
+ * for the detail/observation endpoints. A non-reversible hash, so the reverse
+ * lookup is a column read, not a recomputation.
+ */
+export function sessionTraceId(sessionId: string): string {
+  return `sts:${createHash('sha1').update(sessionId).digest('hex').slice(0, 24)}`;
+}
 
 export interface SessionTraceSummary {
   session_id: string;
   agent_type: string | null;
+  project: string | null;
   primary_model: string | null;
   started_at: string | null;
   ended_at: string | null;
@@ -212,6 +228,7 @@ export function deriveSessionTraceSummary(sessionId: string): SessionTraceSummar
   return {
     session_id: sessionId,
     agent_type: input.agentType ?? null,
+    project: input.project ?? null,
     primary_model: rollup.primaryModel,
     started_at: input.browsingSession?.started_at ?? rollup.startedAt,
     ended_at: input.browsingSession?.ended_at ?? rollup.endedAt,
@@ -232,6 +249,7 @@ export function deriveSessionTraceSummary(sessionId: string): SessionTraceSummar
 interface EventRowForSummary {
   session_id: string;
   agent_type: string | null;
+  project: string | null;
   model: string | null;
   tokens_in: number;
   tokens_out: number;
@@ -256,7 +274,7 @@ interface EventRowForSummary {
 export function bumpSessionTraceSummaryForEvent(eventId: number): void {
   const db = getDb();
   const event = db.prepare(`
-    SELECT session_id, agent_type, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+    SELECT session_id, agent_type, project, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
            cost_usd, duration_ms, status, event_type, tool_name,
            COALESCE(client_timestamp, created_at) AS ts
     FROM events WHERE id = ?
@@ -270,17 +288,18 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
 
   db.prepare(`
     INSERT INTO session_trace_summary (
-      session_id, agent_type, primary_model, started_at, ended_at,
+      session_id, trace_id, agent_type, project, primary_model, started_at, ended_at,
       observation_count, error_count, tokens_in, tokens_out,
       cache_read_tokens, cache_write_tokens, cost_usd, latency_ms_total,
       coverage_json, quality_score, quality_grade, projection_version, updated_at
     ) VALUES (
-      @session_id, @agent_type, @model, @ts, @ts,
+      @session_id, @trace_id, @agent_type, @project, @model, @ts, @ts,
       1, @is_err, @tokens_in, @tokens_out,
       @cache_read_tokens, @cache_write_tokens, @cost_usd, @duration,
       @coverage_json, NULL, NULL, @projection_version, datetime('now')
     )
     ON CONFLICT(session_id) DO UPDATE SET
+      project = COALESCE(session_trace_summary.project, excluded.project),
       primary_model = COALESCE(session_trace_summary.primary_model, excluded.primary_model),
       started_at = MIN(COALESCE(session_trace_summary.started_at, excluded.started_at), COALESCE(excluded.started_at, session_trace_summary.started_at)),
       ended_at = MAX(COALESCE(session_trace_summary.ended_at, excluded.ended_at), COALESCE(excluded.ended_at, session_trace_summary.ended_at)),
@@ -295,7 +314,9 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
       updated_at = datetime('now')
   `).run({
     session_id: event.session_id,
+    trace_id: sessionTraceId(event.session_id),
     agent_type: event.agent_type,
+    project: event.project,
     model: event.model,
     ts: event.ts,
     is_err: isErr,
@@ -337,18 +358,20 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
 function upsertSessionTraceSummary(db: Database, summary: SessionTraceSummary): void {
   db.prepare(`
     INSERT INTO session_trace_summary (
-      session_id, agent_type, primary_model, started_at, ended_at,
+      session_id, trace_id, agent_type, project, primary_model, started_at, ended_at,
       observation_count, error_count, tokens_in, tokens_out,
       cache_read_tokens, cache_write_tokens, cost_usd, latency_ms_total,
       coverage_json, quality_score, quality_grade, projection_version, updated_at
     ) VALUES (
-      @session_id, @agent_type, @primary_model, @started_at, @ended_at,
+      @session_id, @trace_id, @agent_type, @project, @primary_model, @started_at, @ended_at,
       @observation_count, @error_count, @tokens_in, @tokens_out,
       @cache_read_tokens, @cache_write_tokens, @cost_usd, @latency_ms_total,
       @coverage_json, @quality_score, @quality_grade, @projection_version, datetime('now')
     )
     ON CONFLICT(session_id) DO UPDATE SET
+      trace_id = excluded.trace_id,
       agent_type = excluded.agent_type,
+      project = excluded.project,
       primary_model = excluded.primary_model,
       started_at = excluded.started_at,
       ended_at = excluded.ended_at,
@@ -367,7 +390,9 @@ function upsertSessionTraceSummary(db: Database, summary: SessionTraceSummary): 
       updated_at = datetime('now')
   `).run({
     session_id: summary.session_id,
+    trace_id: sessionTraceId(summary.session_id),
     agent_type: summary.agent_type,
+    project: summary.project,
     primary_model: summary.primary_model,
     started_at: summary.started_at,
     ended_at: summary.ended_at,

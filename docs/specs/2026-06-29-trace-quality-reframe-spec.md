@@ -2,7 +2,7 @@
 date: 2026-06-29
 topic: trace-quality-reframe
 stage: spec
-status: draft
+status: in-progress
 source: conversation
 ---
 
@@ -170,19 +170,37 @@ Task 0
 
 - Every session has a correct, content-free, export-shaped summary row.
 
-### Task 2: Re-grain projection and serve detail on-demand
+### Task 2: Read-layer regrain — list from summary + on-demand session detail
+
+> **Approach corrected 2026-06-29 (seam-first).** The original plan here re-grained
+> the shared `projectEventTraces` and stopped persistence. A data-path trace showed
+> that is the wrong seam: the persist machinery cleans orphans only by
+> `session_turns`/`browsing_sessions` scope (not `events`), `stableId` is a
+> non-reversible hash, and the frontend already navigates by `sessionId` and reads
+> each row's `id` from the list response. The thinnest seam is the **read layer**:
+> the correct grain only needs the projection's *observations* (always per-event/
+> item), synthesized under one session-level container. So **`projectEventTraces`
+> and the persist path are NOT touched in this phase, and persistence is NOT
+> stopped here** — `stop-persisting` + dropping tables move to Phase 3, which keeps
+> scores/findings/prompts working until they are removed wholesale. No frontend
+> change is required. (File-level steps below are proposed — confirm against code
+> when executing.)
 
 **Objective**
 
-Fix the per-event mis-grain and serve a session's trace/observation tree by
-projecting on-demand, instead of reading persisted tables.
+Present the correctly-grained, one-trace-per-session detail entirely in the read
+layer — list from `session_trace_summary`, detail projected on-demand per session
+— without touching the shared projection or the persist path.
 
-**Files**
+**Files** (proposed — verify the seam first)
 
-- Modify: `src/trace-quality/projection.ts` (`projectEventTraces` → per-session/turn)
-- Modify: `src/trace-quality/service.ts` (stop persisting the tree; on-demand path)
-- Modify: `src/api/v2/router.ts` (`/trace-quality/traces/:id`, `/:id/observations`,
-  `/observations/:id` compute on-demand; `/traces` list reads the summary)
+- Modify: `src/db/schema.ts` (`session_trace_summary` gains a stable `trace_id`
+  the list emits and the detail endpoints resolve back to a session)
+- Create: `src/trace-quality/on-demand.ts` (`listSessionTraces` from summary;
+  `getSessionTraceDetail`/`listSessionObservations` projecting on-demand, using
+  only `projectTraceQuality(...).observations` under one synthesized session trace)
+- Modify: `src/api/v2/router.ts` (`/trace-quality/traces` reads the summary;
+  `/traces/:id` and `/:id/observations` resolve `trace_id`→session then project)
 - Test: `tests/trace-quality-ondemand.test.ts`
 
 **Dependencies**
@@ -191,25 +209,30 @@ Task 1
 
 **Implementation Steps**
 
-1. Change `projectEventTraces` to build one trace per session/turn container with
-   per-event observations, matching `projectTurnTraces` /
-   `projectBrowsingSessionTrace`.
-2. Stop the import-time persistence of `trace_quality_traces/_observations/
-   _projection_state`; route the detail endpoints through an on-demand projection
-   of the requested session (project, return, do not persist).
-3. Point `/trace-quality/traces` (list) at `session_trace_summary`.
+1. Add a deterministic `trace_id` to `session_trace_summary` (one per session);
+   the list emits it as each row's `id`, and the detail endpoints reverse it to a
+   `session_id` via the summary.
+2. Build the on-demand read module: list maps summary rows → the trace list shape;
+   detail resolves `trace_id`→session, runs `projectTraceQuality`, and returns the
+   session's **observations** under one synthesized session trace (ignore the
+   projection's own per-event trace grouping — only observations are used, so the
+   mis-grain in `projectEventTraces` is irrelevant and left untouched).
+3. Point `/trace-quality/traces` + the two detail endpoints at the on-demand
+   module. Leave `scores`/`findings`/`prompts` endpoints and the persist path as
+   they are (Phase 3 removes them together).
 
 **Verification**
 
 - Run: `pnpm test tests/trace-quality-ondemand.test.ts`
-- Expect: on-demand detail for seeded sessions matches the Task 0 oracle; one
-  trace per session/turn (ratio ≪ 1:1, not per-event).
-- Run: `pnpm build && pnpm test` (clean env)
-- Expect: green.
+- Expect: on-demand detail returns one trace per session with every event/item as
+  an observation (ratio ≪ 1:1); list shows one row per session from the summary.
+- Run: `pnpm build && pnpm test && pnpm frontend:check` (clean env)
+- Expect: green; the existing Quality explorer/drill-in works unchanged.
 
 **Done When**
 
-- Detail/drill-in resolve on-demand and correctly-grained; nothing new persisted.
+- List + detail are summary-backed / on-demand and correctly grained; the shared
+  projection, persist path, and frontend are untouched.
 
 ### Task 3: Remove the heavy subsystem, frontend, and reclaim space
 
@@ -234,10 +257,14 @@ Task 2
 
 **Implementation Steps**
 
-1. Guarded migration: `DROP TABLE` `trace_quality_traces`, `_observations`,
-   `_projection_state`, `_scores`, `_prompt_refs`, `_observation_prompts`. Keep
-   `trace_quality_export_state` dormant for the future export seam.
-2. Remove the scores/findings/prompts modules, their routes, and the dead
+1. **Stop persisting the tree** (moved here from Phase 2): remove the
+   `projectTraceQualityForSource` persist calls from the ingest hooks while
+   keeping the summary maintainers (`maintainSessionTraceSummary` /
+   `bumpSessionTraceSummaryForEvent`); then guarded migration: `DROP TABLE`
+   `trace_quality_traces`, `_observations`, `_projection_state`, `_scores`,
+   `_prompt_refs`, `_observation_prompts`. Keep `trace_quality_export_state`
+   dormant for the future export seam.
+2. Remove the scores/findings/prompts modules, their routes, and the now-dead
    projection-persistence + `projection_state` code paths.
 3. Update `TraceQualityPage.svelte` and remove dead frontend score/finding UI;
    keep the trace/cost view and on-demand drill-in.
@@ -261,7 +288,7 @@ Task 2
 
 | Risk | Likelihood | Impact | Mitigation |
 | --- | --- | --- | --- |
-| On-demand detail parity drifts from old persisted output | Med | High | Task 0 oracle fixtures; `tests/trace-quality-ondemand.test.ts` diffs against them. |
+| On-demand detail is incorrect (missing/duplicated observations) | Med | High | Assert correctness directly — every event/item appears once under one session trace; do not diff against the old (mis-grained) persisted output. |
 | On-demand projection slow for very large sessions | Low | Med | Single-session projection is ms-scale; add a per-session cache only if a measured read exceeds budget. |
 | Removing findings/prompts deletes features users rely on | Med | Med | User-approved aggressive cut; depth returns via the deferred export; code preserved in git history; `trace_quality_export_state` kept. |
 | Frontend breakage from removed endpoints | Med | Med | Frontend task + `pnpm frontend:check`; remove UI in the same change. |
@@ -272,11 +299,11 @@ Task 2
 
 | Requirement | Proof command | Expected signal |
 | --- | --- | --- |
-| Baseline captured | `pnpm bench:storage` | trace-quality ~900 MB; oracle written |
+| Baseline captured | `pnpm bench:storage` | trace-quality ~900 MB recorded |
 | Summary correct + lean | `pnpm test tests/trace-quality-summary.test.ts` | totals == direct SUM; ~session-count rows; content-free |
-| Re-grained on-demand detail | `pnpm test tests/trace-quality-ondemand.test.ts` | matches oracle; one trace per session/turn |
-| Nothing newly persisted | `sqlite3 ... "SELECT COUNT(*) FROM trace_quality_traces"` (pre-drop) | not growing on import |
-| Space reclaimed | `pnpm bench:storage` (post-VACUUM) | trace-quality storage → small summary table |
+| Re-grained on-demand detail (Phase 2) | `pnpm test tests/trace-quality-ondemand.test.ts` | one trace per session; every event/item an observation |
+| Persist stopped (Phase 3) | `sqlite3 ... "SELECT COUNT(*) FROM trace_quality_traces"` before/after an ingest | unchanged after Phase 3 (persist removed) |
+| Space reclaimed (Phase 3) | `pnpm bench:storage` (post-VACUUM) | trace-quality storage → small summary table |
 | No dead references | `pnpm lint && pnpm build && pnpm frontend:check` | green |
 | Full suite | `pnpm test` (clean env) | green |
 
