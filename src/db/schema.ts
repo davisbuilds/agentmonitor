@@ -10,6 +10,67 @@ function sqlStringList(values: readonly string[]): string {
   return values.map(value => `'${value.replaceAll("'", "''")}'`).join(', ');
 }
 
+/**
+ * Rebuild `trace_quality_export_state` without its legacy foreign keys to the
+ * (now-dropped) `trace_quality_traces`/`_observations` tables. A DB created
+ * before the reframe still carries those FKs; once the parent tables are dropped
+ * (by the reclaim script) any insert into the kept seam would fail with
+ * `no such table`. Self-healing and idempotent: a no-op once the table is FK-free
+ * or absent. Both `initSchema` (startup) and the reclaim script call it, so the
+ * seam is repaired before the parents disappear on either path.
+ */
+export function ensureTraceQualityExportStateFkFree(db: Database): void {
+  const sql = (db.prepare(
+    "SELECT sql FROM sqlite_master WHERE type='table' AND name='trace_quality_export_state'",
+  ).get() as { sql: string } | undefined)?.sql;
+  if (!sql || !/REFERENCES\s+trace_quality_(traces|observations)/i.test(sql)) return;
+
+  const foreignKeys = Number(db.pragma('foreign_keys', { simple: true }));
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.exec('BEGIN');
+    // Build the FK-free replacement under a temp name (so the old indexes keep
+    // their names until the original is dropped), copy rows, swap, re-index.
+    db.exec(`
+      CREATE TABLE trace_quality_export_state_rebuilt (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        provider TEXT NOT NULL CHECK (provider IN (${sqlStringList(TRACE_QUALITY_EXPORT_PROVIDERS)})),
+        local_trace_id TEXT NOT NULL,
+        local_observation_id TEXT,
+        external_trace_id TEXT,
+        external_observation_id TEXT,
+        payload_hash TEXT,
+        status TEXT NOT NULL CHECK (status IN (${sqlStringList(TRACE_QUALITY_EXPORT_STATUSES)})),
+        exported_at TEXT,
+        error_message TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json)),
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+      INSERT INTO trace_quality_export_state_rebuilt (
+        id, provider, local_trace_id, local_observation_id, external_trace_id,
+        external_observation_id, payload_hash, status, exported_at, error_message,
+        metadata_json, created_at
+      )
+      SELECT id, provider, local_trace_id, local_observation_id, external_trace_id,
+        external_observation_id, payload_hash, status, exported_at, error_message,
+        metadata_json, created_at
+      FROM trace_quality_export_state;
+      DROP TABLE trace_quality_export_state;
+      ALTER TABLE trace_quality_export_state_rebuilt RENAME TO trace_quality_export_state;
+      CREATE INDEX IF NOT EXISTS idx_tq_export_provider_status ON trace_quality_export_state(provider, status, exported_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tq_export_local_trace ON trace_quality_export_state(local_trace_id);
+      CREATE INDEX IF NOT EXISTS idx_tq_export_local_observation ON trace_quality_export_state(local_observation_id);
+      CREATE INDEX IF NOT EXISTS idx_tq_export_external_trace ON trace_quality_export_state(provider, external_trace_id);
+    `);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  } finally {
+    db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`);
+  }
+}
+
 export function initSchema(): void {
   const db = getDb();
 
@@ -506,6 +567,10 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_tq_export_local_observation ON trace_quality_export_state(local_observation_id);
     CREATE INDEX IF NOT EXISTS idx_tq_export_external_trace ON trace_quality_export_state(provider, external_trace_id);
   `);
+
+  // Repair the export seam on existing DBs: drop its legacy FKs to the removed
+  // warehouse tables so it stays usable after the reclaim drops those parents.
+  ensureTraceQualityExportStateFkFree(db);
 
   // Lean, content-free, export-shaped per-session trace summary (trace-quality
   // reframe). One row per session; the full observation tree is projected
