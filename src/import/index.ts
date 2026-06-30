@@ -5,7 +5,7 @@ import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile
 import { discoverCodexLogs, parseCodexFile, hashFile as hashCodexFile } from './codex.js';
 import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { createConfig } from '../config.js';
-import { safelyProjectTraceQualityForEvent } from '../trace-quality/service.js';
+import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -83,7 +83,7 @@ function importEvents(events: NormalizedIngestEvent[], dryRun: boolean): { impor
     const row = insertEvent(event);
     if (row) {
       imported++;
-      safelyProjectTraceQualityForEvent(row.id, 'historical import');
+      safelyMaintainTraceSummaryForEvent(row.id, 'historical import');
     } else {
       duplicates++;
     }

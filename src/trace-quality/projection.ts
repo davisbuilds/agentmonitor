@@ -7,15 +7,10 @@ import type {
   TraceQualitySeverity,
   TraceQualityTraceRow,
 } from './types.js';
-import {
-  promptAttributionForEvent,
-  promptAttributionForSessionItem,
-  promptAttributionForToolCall,
-  stablePromptRefKey,
-  type ProjectedTraceQualityObservationPrompt,
-} from './prompts.js';
 
-export const TRACE_QUALITY_PROJECTION_VERSION = 'trace-quality:v1';
+// Stamped into projected trace metadata. Internal-only since the reframe (the
+// projection is no longer persisted, so nothing outside this module needs it).
+const TRACE_QUALITY_PROJECTION_VERSION = 'trace-quality:v1';
 
 export interface EventProjectionSource {
   id: number;
@@ -130,7 +125,6 @@ export type ProjectedTraceQualityObservation = Omit<TraceQualityObservationRow, 
 export interface TraceQualityProjectionResult {
   traces: ProjectedTraceQualityTrace[];
   observations: ProjectedTraceQualityObservation[];
-  observationPrompts: ProjectedTraceQualityObservationPrompt[];
   warnings: string[];
 }
 
@@ -840,53 +834,11 @@ function coverageForMessages(
   };
 }
 
-function dedupePromptLinks(
-  links: readonly ProjectedTraceQualityObservationPrompt[],
-): ProjectedTraceQualityObservationPrompt[] {
-  const seen = new Set<string>();
-  return links.flatMap(link => {
-    const key = `${link.observation_id}\u0000${stablePromptRefKey(link.prompt_ref)}`;
-    if (seen.has(key)) return [];
-    seen.add(key);
-    return [link];
-  });
-}
-
-function finalizeProjection(result: TraceQualityProjectionResult): TraceQualityProjectionResult {
-  const observationPrompts = dedupePromptLinks(result.observationPrompts);
-  if (observationPrompts.length === 0) return { ...result, observationPrompts };
-
-  const traceIdByObservationId = new Map(result.observations.map(observation => [observation.id, observation.trace_id]));
-  const traceIdsWithPrompts = new Set<string>();
-  for (const link of observationPrompts) {
-    const traceId = traceIdByObservationId.get(link.observation_id);
-    if (traceId) traceIdsWithPrompts.add(traceId);
-  }
-
-  return {
-    ...result,
-    traces: result.traces.map(trace => {
-      if (!traceIdsWithPrompts.has(trace.id)) return trace;
-      const coverage = parseJsonRecord(trace.coverage_json) ?? {};
-      return {
-        ...trace,
-        coverage_json: serializeJson({
-          ...coverage,
-          has_prompt_refs: true,
-        }),
-      };
-    }),
-    observationPrompts,
-  };
-}
-
 function projectItemsForTrace(traceId: string, items: readonly SessionItemProjectionSource[]): {
   observations: ProjectedTraceQualityObservation[];
-  observationPrompts: ProjectedTraceQualityObservationPrompt[];
   warnings: string[];
 } {
   const observations: ProjectedTraceQualityObservation[] = [];
-  const observationPrompts: ProjectedTraceQualityObservationPrompt[] = [];
   const warnings: string[] = [];
   const toolCallObservationBySourceItemId = new Map<string, string>();
 
@@ -897,20 +849,12 @@ function projectItemsForTrace(traceId: string, items: readonly SessionItemProjec
     const observation = projectSessionItemObservation(traceId, item, parentObservationId);
     observations.push(observation);
 
-    const attribution = promptAttributionForSessionItem({
-      observation,
-      itemId: item.id,
-      payload: parseJsonRecord(item.payload_json),
-    });
-    observationPrompts.push(...attribution.links);
-    warnings.push(...attribution.warnings);
-
     if ((item.kind === 'tool_call' || item.kind === 'command_execution') && item.source_item_id) {
       toolCallObservationBySourceItemId.set(item.source_item_id, observation.id);
     }
   }
 
-  return { observations, observationPrompts, warnings };
+  return { observations, warnings };
 }
 
 function projectEventTraces(input: TraceQualityProjectionInput, events: readonly EventProjectionSource[]): TraceQualityProjectionResult {
@@ -919,7 +863,6 @@ function projectEventTraces(input: TraceQualityProjectionInput, events: readonly
   const branch = normalizeBranch(input);
   const traces: ProjectedTraceQualityTrace[] = [];
   const observations: ProjectedTraceQualityObservation[] = [];
-  const observationPrompts: ProjectedTraceQualityObservationPrompt[] = [];
   const warnings: string[] = [];
 
   for (const event of sortedEvents(events)) {
@@ -949,20 +892,10 @@ function projectEventTraces(input: TraceQualityProjectionInput, events: readonly
       tags: ['events'],
       coverage: coverageForEvents([event]),
     }));
-    const observation = projectEventObservation(traceId, event);
-    observations.push(observation);
-
-    const attribution = promptAttributionForEvent({
-      observation,
-      eventId: event.id,
-      metadata: parseJsonRecord(event.metadata),
-      toolName: event.tool_name,
-    });
-    observationPrompts.push(...attribution.links);
-    warnings.push(...attribution.warnings);
+    observations.push(projectEventObservation(traceId, event));
   }
 
-  return { traces, observations, observationPrompts, warnings };
+  return { traces, observations, warnings };
 }
 
 function projectTurnTraces(input: TraceQualityProjectionInput, turns: readonly SessionTurnProjectionSource[], items: readonly SessionItemProjectionSource[]): TraceQualityProjectionResult {
@@ -971,7 +904,6 @@ function projectTurnTraces(input: TraceQualityProjectionInput, turns: readonly S
   const branch = normalizeBranch(input);
   const traces: ProjectedTraceQualityTrace[] = [];
   const observations: ProjectedTraceQualityObservation[] = [];
-  const observationPrompts: ProjectedTraceQualityObservationPrompt[] = [];
   const warnings: string[] = [];
 
   for (const turn of sortedTurns(turns)) {
@@ -1001,7 +933,6 @@ function projectTurnTraces(input: TraceQualityProjectionInput, turns: readonly S
     }));
     const projectedItems = projectItemsForTrace(traceId, turnItems);
     observations.push(...projectedItems.observations);
-    observationPrompts.push(...projectedItems.observationPrompts);
     warnings.push(...projectedItems.warnings);
   }
 
@@ -1012,11 +943,10 @@ function projectTurnTraces(input: TraceQualityProjectionInput, turns: readonly S
     const fallback = projectBrowsingSessionTrace(input, unassignedItems, [], []);
     traces.push(...fallback.traces);
     observations.push(...fallback.observations);
-    observationPrompts.push(...fallback.observationPrompts);
     warnings.push(...fallback.warnings);
   }
 
-  return { traces, observations, observationPrompts, warnings };
+  return { traces, observations, warnings };
 }
 
 function projectBrowsingSessionTrace(
@@ -1058,35 +988,21 @@ function projectBrowsingSessionTrace(
       : coverageForMessages(input.browsingSession, messages, toolCalls),
   })];
 
-  const observationPrompts: ProjectedTraceQualityObservationPrompt[] = [];
   const warnings: string[] = [];
   const observations: ProjectedTraceQualityObservation[] = [];
 
   if (hasItems) {
     const projectedItems = projectItemsForTrace(traceId, items);
     observations.push(...projectedItems.observations);
-    observationPrompts.push(...projectedItems.observationPrompts);
     warnings.push(...projectedItems.warnings);
   } else {
     observations.push(...sortedMessages(messages).map(message => projectMessageObservation(traceId, message)));
     for (const toolCall of sortedToolCalls(toolCalls)) {
-      const observation = projectToolCallObservation(traceId, toolCall);
-      observations.push(observation);
-
-      const parsedInput = parseJsonValue(toolCall.input_json);
-      const inputRecord = asRecord(parsedInput) ?? (typeof parsedInput === 'string' ? { input: parsedInput } : undefined);
-      const attribution = promptAttributionForToolCall({
-        observation,
-        toolCallId: toolCall.id,
-        toolName: toolCall.tool_name,
-        input: inputRecord,
-      });
-      observationPrompts.push(...attribution.links);
-      warnings.push(...attribution.warnings);
+      observations.push(projectToolCallObservation(traceId, toolCall));
     }
   }
 
-  return { traces, observations, observationPrompts, warnings };
+  return { traces, observations, warnings };
 }
 
 export function projectTraceQuality(input: TraceQualityProjectionInput): TraceQualityProjectionResult {
@@ -1097,20 +1013,20 @@ export function projectTraceQuality(input: TraceQualityProjectionInput): TraceQu
   const toolCalls = sortedToolCalls(input.toolCalls ?? []);
 
   if (turns.length > 0) {
-    return finalizeProjection(projectTurnTraces(input, turns, items));
+    return projectTurnTraces(input, turns, items);
   }
 
   if (items.length > 0) {
-    return finalizeProjection(projectBrowsingSessionTrace(input, items, [], []));
+    return projectBrowsingSessionTrace(input, items, [], []);
   }
 
   if (messages.length > 0 || toolCalls.length > 0 || input.browsingSession) {
-    return finalizeProjection(projectBrowsingSessionTrace(input, [], messages, toolCalls));
+    return projectBrowsingSessionTrace(input, [], messages, toolCalls);
   }
 
   if (events.length > 0) {
-    return finalizeProjection(projectEventTraces(input, events));
+    return projectEventTraces(input, events);
   }
 
-  return { traces: [], observations: [], observationPrompts: [], warnings: ['No supported source rows were provided'] };
+  return { traces: [], observations: [], warnings: ['No supported source rows were provided'] };
 }

@@ -37,7 +37,6 @@ before(async () => {
   dbPath = path.join(tempDir, 'contracts.db');
   process.env.AGENTMONITOR_DB_PATH = dbPath;
   process.env.AGENTMONITOR_USAGE_BUDGETS_PATH = path.join(tempDir, 'budgets.json');
-  process.env.AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH = path.join(tempDir, 'findings.json');
 
   ({ initSchema } = await import('../src/db/schema.js'));
   ({ closeDb, getDb } = await import('../src/db/connection.js'));
@@ -55,11 +54,7 @@ beforeEach(() => {
   fs.rmSync(claudeDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(claudeDir, 'projects', 'project-a'), { recursive: true });
   getDb().exec(`
-    DELETE FROM trace_quality_scores;
-    DELETE FROM trace_quality_observation_prompts;
-    DELETE FROM trace_quality_prompt_refs;
-    DELETE FROM trace_quality_observations;
-    DELETE FROM trace_quality_traces;
+    DELETE FROM session_trace_summary;
     DELETE FROM tool_calls;
     DELETE FROM messages;
     DELETE FROM browsing_sessions;
@@ -155,54 +150,6 @@ function seedContractData(): void {
     null,
   );
 
-  db.prepare(`
-    INSERT INTO trace_quality_traces (
-      id, session_id, agent_type, name, status, project, started_at,
-      metadata_json, tags_json, coverage_json
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    'trace-contract',
-    'contract-session',
-    'codex',
-    'Contract trace',
-    'success',
-    'agentmonitor',
-    '2026-06-15T10:00:00.000Z',
-    '{}',
-    '[]',
-    '{"projection_confidence":"high","has_full_transcript":true,"has_token_usage":true}',
-  );
-
-  db.prepare(`
-    INSERT INTO trace_quality_observations (
-      id, trace_id, session_id, source_kind, source_id, observation_type, name, status,
-      severity, model, started_at, tokens_in, tokens_out, cost_usd, payload_policy, metadata_json
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    'obs-contract',
-    'trace-contract',
-    'contract-session',
-    'event',
-    '1',
-    'generation',
-    'Contract generation',
-    'success',
-    'info',
-    'gpt-5.4',
-    '2026-06-15T10:00:01.000Z',
-    100,
-    50,
-    0.001,
-    'summary_only',
-    '{}',
-  );
-
-  db.prepare(`
-    INSERT INTO trace_quality_scores (target_type, target_id, name, value_type, numeric_value, source)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run('trace', 'trace-contract', 'helpfulness', 'numeric', 0.85, 'human');
 }
 
 function countRows(table: string): number {
@@ -238,21 +185,15 @@ test('reporting commands preserve JSON data and coverage contracts', async () =>
   assert.equal(toolsJson.data[0]?.tool_name, 'Bash');
   assert.equal(toolsJson.coverage?.metric_scope, 'tool_analytics_capable');
 
-  const findings = await runCli(['quality', 'findings', '--json']);
-  assert.equal(findings.exitCode, 0, findings.stderr);
-  const findingsJson = JSON.parse(findings.stdout) as { data: unknown[]; coverage?: { matching_traces: number } };
-  assert.ok(Array.isArray(findingsJson.data));
-  assert.equal(findingsJson.coverage?.matching_traces, 1);
-
-  const scores = await runCli(['quality', 'scores', '--json']);
-  assert.equal(scores.exitCode, 0, scores.stderr);
-  const scoresJson = JSON.parse(scores.stdout) as { data: Array<{ name: string }>; coverage?: { matching_traces: number } };
-  assert.equal(scoresJson.data[0]?.name, 'helpfulness');
-  assert.equal(scoresJson.coverage?.matching_traces, 1);
+  const traces = await runCli(['quality', 'traces', '--json']);
+  assert.equal(traces.exitCode, 0, traces.stderr);
+  const tracesJson = JSON.parse(traces.stdout) as { data: unknown[]; coverage?: { matching_traces: number } };
+  assert.ok(Array.isArray(tracesJson.data));
+  assert.equal(typeof tracesJson.coverage?.matching_traces, 'number');
 });
 
 test('invalid numeric reporting filters exit with invalid usage', async () => {
-  const result = await runCli(['quality', 'scores', '--min-score', 'nope']);
+  const result = await runCli(['quality', 'traces', '--min-score', 'nope']);
 
   assert.equal(result.exitCode, 2);
   assert.equal(result.stdout, '');
@@ -305,17 +246,3 @@ test('cost recalculation dry-run leaves event costs unchanged', async () => {
   assert.equal(eventCost('evt-reprice'), null);
 });
 
-test('quality backfill dry-run reports projections without writing trace rows', async () => {
-  const beforeTraces = countRows('trace_quality_traces');
-  const beforeObservations = countRows('trace_quality_observations');
-
-  const result = await runCli(['quality', 'backfill', '--source', 'events', '--dry-run', '--json']);
-
-  assert.equal(result.exitCode, 0, result.stderr);
-  const parsed = JSON.parse(result.stdout) as { dry_run: boolean; source: string; sourcesScanned: number };
-  assert.equal(parsed.dry_run, true);
-  assert.equal(parsed.source, 'events');
-  assert.equal(parsed.sourcesScanned, 2);
-  assert.equal(countRows('trace_quality_traces'), beforeTraces);
-  assert.equal(countRows('trace_quality_observations'), beforeObservations);
-});
