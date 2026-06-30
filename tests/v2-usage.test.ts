@@ -550,3 +550,122 @@ describe('usage classification filters across panels', () => {
     ]);
   });
 });
+
+describe('Codex usage source reconciliation', () => {
+  test('treats imported Codex session usage as authoritative over overlapping OTEL usage', async () => {
+    const { insertEvent } = await import('../src/db/queries.js');
+    const { getDb } = await import('../src/db/connection.js');
+    const db = getDb();
+    const eventIds = [
+      'usage-reconcile-import',
+      'usage-reconcile-otel-duplicate',
+      'usage-reconcile-otel-after-import',
+      'usage-reconcile-otel-live-only',
+    ];
+
+    try {
+      insertEvent({
+        event_id: eventIds[0],
+        session_id: 'usage-reconcile-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 1000,
+        tokens_out: 100,
+        cache_read_tokens: 200,
+        cost_usd: 10,
+        client_timestamp: '2026-05-01T10:02:00Z',
+        source: 'import',
+        metadata: {},
+      });
+      insertEvent({
+        event_id: eventIds[1],
+        session_id: 'usage-reconcile-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 900,
+        tokens_out: 90,
+        cache_read_tokens: 180,
+        cost_usd: 9,
+        client_timestamp: '2026-05-01T10:01:00Z',
+        source: 'otel',
+        metadata: {},
+      });
+      insertEvent({
+        event_id: eventIds[2],
+        session_id: 'usage-reconcile-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 400,
+        tokens_out: 40,
+        cache_read_tokens: 40,
+        cost_usd: 4,
+        client_timestamp: '2026-05-01T10:03:00Z',
+        source: 'otel',
+        metadata: {},
+      });
+      insertEvent({
+        event_id: eventIds[3],
+        session_id: 'usage-reconcile-live-only',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 300,
+        tokens_out: 30,
+        cache_read_tokens: 30,
+        cost_usd: 3,
+        client_timestamp: '2026-05-01T10:04:00Z',
+        source: 'otel',
+        metadata: {},
+      });
+
+      const res = await fetch(`${baseUrl}/api/v2/usage/summary?date_from=2026-05-01&date_to=2026-05-01&agent=codex`);
+      assert.equal(res.status, 200);
+
+      const body = await res.json() as {
+        total_cost_usd: number;
+        total_input_tokens: number;
+        total_output_tokens: number;
+        total_cache_read_tokens: number;
+        total_usage_events: number;
+        total_sessions: number;
+        coverage: {
+          matching_events: number;
+          usage_events: number;
+          source_breakdown: Array<{ source: string; event_count: number; usage_event_count: number }>;
+        };
+      };
+
+      assert.equal(body.total_cost_usd, 17);
+      assert.equal(body.total_input_tokens, 1700);
+      assert.equal(body.total_output_tokens, 170);
+      assert.equal(body.total_cache_read_tokens, 270);
+      assert.equal(body.total_usage_events, 3);
+      assert.equal(body.total_sessions, 2);
+      assert.equal(body.coverage.matching_events, 3);
+      assert.equal(body.coverage.usage_events, 3);
+      assert.deepEqual(
+        body.coverage.source_breakdown.map(row => [row.source, row.event_count, row.usage_event_count]),
+        [
+          ['import', 1, 1],
+          ['otel', 2, 2],
+        ],
+      );
+    } finally {
+      const placeholders = eventIds.map(() => '?').join(', ');
+      db.prepare(`DELETE FROM events WHERE event_id IN (${placeholders})`).run(...eventIds);
+      db.prepare("DELETE FROM sessions WHERE id IN ('usage-reconcile-overlap', 'usage-reconcile-live-only')").run();
+      db.prepare("DELETE FROM agents WHERE id = 'codex-default' AND NOT EXISTS (SELECT 1 FROM sessions WHERE agent_id = 'codex-default')").run();
+    }
+  });
+});

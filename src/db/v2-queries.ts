@@ -61,6 +61,7 @@ import type {
 import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
+import { excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
 
 function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
   return {
@@ -1481,11 +1482,11 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   const values: unknown[] = [];
 
   if (params.agent) {
-    conditions.push('agent_type = ?');
+    conditions.push('e.agent_type = ?');
     values.push(params.agent);
   }
   if (params.since) {
-    conditions.push('created_at >= datetime(?)');
+    conditions.push('e.created_at >= datetime(?)');
     values.push(params.since);
   }
 
@@ -1493,10 +1494,10 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   const totals = db.prepare(`
     SELECT
       COUNT(*) as total_events,
-      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-      COALESCE(SUM(tokens_out), 0) as total_tokens_out,
-      COALESCE(SUM(cost_usd), 0) as total_cost_usd
-    FROM events ${where}
+      ${reconciledUsageSum('e', 'tokens_in')} as total_tokens_in,
+      ${reconciledUsageSum('e', 'tokens_out')} as total_tokens_out,
+      ${reconciledUsageSum('e', 'cost_usd')} as total_cost_usd
+    FROM events e ${where}
   `).get(...values) as {
     total_events: number;
     total_tokens_in: number;
@@ -1519,21 +1520,21 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
 
   const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
   const toolRows = db.prepare(`
-    SELECT tool_name, COUNT(*) as count FROM events
+    SELECT tool_name, COUNT(*) as count FROM events e
     ${toolWhere}
     GROUP BY tool_name ORDER BY count DESC
   `).all(...values) as { tool_name: string; count: number }[];
   const toolBreakdown = Object.fromEntries(toolRows.map(row => [row.tool_name, row.count]));
 
   const agentRows = db.prepare(`
-    SELECT agent_type, COUNT(*) as count FROM events ${where}
+    SELECT agent_type, COUNT(*) as count FROM events e ${where}
     GROUP BY agent_type ORDER BY count DESC
   `).all(...values) as { agent_type: string; count: number }[];
   const agentBreakdown = Object.fromEntries(agentRows.map(row => [row.agent_type, row.count]));
 
   const modelWhere = conditions.length > 0 ? `${where} AND model IS NOT NULL` : 'WHERE model IS NOT NULL';
   const modelRows = db.prepare(`
-    SELECT model, COUNT(*) as count FROM events
+    SELECT model, COUNT(*) as count FROM events e
     ${modelWhere}
     GROUP BY model ORDER BY count DESC
   `).all(...values) as { model: string; count: number }[];
@@ -2229,7 +2230,11 @@ function usageRowsToSummaryValues(rows: UsageRow[]): {
 function selectUsageRows(params: UsageParams = {}): UsageRow[] {
   const db = getDb();
   const filter = buildUsageFilterState(params, 'e');
-  const usageWhere = [...filter.conditions, usageMetricsCondition('e')].join(' AND ');
+  const usageWhere = [
+    ...filter.conditions,
+    usageMetricsCondition('e'),
+    excludeOverlappingCodexOtelUsageCondition('e'),
+  ].join(' AND ');
   const timestampExpr = usageTimestampExpr('e');
 
   const rows = db.prepare(`
@@ -2257,6 +2262,10 @@ function selectUsageEventRows(params: UsageParams = {}): UsageEventRow[] {
   const filter = buildUsageFilterState(params, 'e');
   const timestampExpr = usageTimestampExpr('e');
   const metricsCondition = usageMetricsCondition('e');
+  const eventWhere = [
+    ...filter.conditions,
+    excludeOverlappingCodexOtelUsageCondition('e'),
+  ].join(' AND ');
 
   const rows = db.prepare(`
     SELECT
@@ -2273,7 +2282,7 @@ function selectUsageEventRows(params: UsageParams = {}): UsageEventRow[] {
       COALESCE(NULLIF(e.source, ''), 'api') as source,
       CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END as has_usage
     FROM events e
-    ${filter.where}
+    ${eventWhere ? `WHERE ${eventWhere}` : ''}
     ORDER BY ${timestampExpr} ASC, e.id ASC
   `).all(...filter.values) as Array<Omit<UsageEventRow, 'has_usage'> & { has_usage: number }>;
 

@@ -4,6 +4,7 @@ import { syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { resolveGitBranch } from '../util/git-branch.js';
 import type { EventStatus, EventType, EventSource } from '../contracts/event-contract.js';
+import { excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
 
 // --- Agents ---
 
@@ -542,11 +543,11 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   const params: unknown[] = [];
 
   if (filters?.agentType) {
-    conditions.push('agent_type = ?');
+    conditions.push('e.agent_type = ?');
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('created_at >= datetime(?)');
+    conditions.push('e.created_at >= datetime(?)');
     params.push(filters.since);
   }
 
@@ -555,10 +556,10 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   const totals = db.prepare(`
     SELECT
       COUNT(*) as total_events,
-      COALESCE(SUM(tokens_in), 0) as total_tokens_in,
-      COALESCE(SUM(tokens_out), 0) as total_tokens_out,
-      COALESCE(SUM(cost_usd), 0) as total_cost_usd
-    FROM events ${where}
+      ${reconciledUsageSum('e', 'tokens_in')} as total_tokens_in,
+      ${reconciledUsageSum('e', 'tokens_out')} as total_tokens_out,
+      ${reconciledUsageSum('e', 'cost_usd')} as total_cost_usd
+    FROM events e ${where}
   `).get(...params) as { total_events: number; total_tokens_in: number; total_tokens_out: number; total_cost_usd: number };
 
   const activeSessions = (db.prepare(
@@ -576,7 +577,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   ).get() as { count: number }).count;
 
   const toolRows = db.prepare(`
-    SELECT tool_name, COUNT(*) as count FROM events
+    SELECT tool_name, COUNT(*) as count FROM events e
     ${where.replace('WHERE', conditions.length ? 'WHERE' : '')}
     ${conditions.length > 0 ? 'AND' : 'WHERE'} tool_name IS NOT NULL
     GROUP BY tool_name ORDER BY count DESC
@@ -588,7 +589,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   }
 
   const agentRows = db.prepare(`
-    SELECT agent_type, COUNT(*) as count FROM events ${where}
+    SELECT agent_type, COUNT(*) as count FROM events e ${where}
     GROUP BY agent_type ORDER BY count DESC
   `).all(...params) as { agent_type: string; count: number }[];
 
@@ -598,7 +599,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   }
 
   const modelRows = db.prepare(`
-    SELECT model, COUNT(*) as count FROM events
+    SELECT model, COUNT(*) as count FROM events e
     ${where.replace('WHERE', conditions.length ? 'WHERE' : '')}
     ${conditions.length > 0 ? 'AND' : 'WHERE'} model IS NOT NULL
     GROUP BY model ORDER BY count DESC
@@ -1035,24 +1036,25 @@ export function getCostOverTime(filters?: { since?: string; agentType?: string }
   const params: unknown[] = [];
 
   if (filters?.agentType) {
-    conditions.push('agent_type = ?');
+    conditions.push('e.agent_type = ?');
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)');
+    conditions.push('datetime(COALESCE(e.client_timestamp, e.created_at)) >= datetime(?)');
     params.push(filters.since);
   }
+  conditions.push(excludeOverlappingCodexOtelUsageCondition('e'));
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   return db.prepare(`
     SELECT
-      strftime('%Y-%m-%dT%H:00:00Z', COALESCE(client_timestamp, created_at)) as bucket,
-      COALESCE(SUM(cost_usd), 0) as cost_usd,
-      COALESCE(SUM(tokens_in), 0) as tokens_in,
-      COALESCE(SUM(tokens_out), 0) as tokens_out,
+      strftime('%Y-%m-%dT%H:00:00Z', COALESCE(e.client_timestamp, e.created_at)) as bucket,
+      COALESCE(SUM(e.cost_usd), 0) as cost_usd,
+      COALESCE(SUM(e.tokens_in), 0) as tokens_in,
+      COALESCE(SUM(e.tokens_out), 0) as tokens_out,
       COUNT(*) as event_count
-    FROM events ${where}
+    FROM events e ${where}
     GROUP BY bucket
     ORDER BY bucket ASC
   `).all(...params) as CostBucket[];
@@ -1069,7 +1071,7 @@ export interface ProjectCostRow {
 
 export function getCostByProject(limit: number = 10, filters?: { agentType?: string; since?: string }): ProjectCostRow[] {
   const db = getDb();
-  const conditions: string[] = ['e.cost_usd > 0'];
+  const conditions: string[] = ['e.cost_usd > 0', excludeOverlappingCodexOtelUsageCondition('e')];
   const params: unknown[] = [];
 
   if (filters?.agentType) {
@@ -1110,15 +1112,15 @@ export interface ModelCostRow {
 
 export function getCostByModel(filters?: { agentType?: string; since?: string }): ModelCostRow[] {
   const db = getDb();
-  const conditions: string[] = ['model IS NOT NULL', 'cost_usd > 0'];
+  const conditions: string[] = ['e.model IS NOT NULL', 'e.cost_usd > 0', excludeOverlappingCodexOtelUsageCondition('e')];
   const params: unknown[] = [];
 
   if (filters?.agentType) {
-    conditions.push('agent_type = ?');
+    conditions.push('e.agent_type = ?');
     params.push(filters.agentType);
   }
   if (filters?.since) {
-    conditions.push('created_at >= datetime(?)');
+    conditions.push('e.created_at >= datetime(?)');
     params.push(filters.since);
   }
 
@@ -1126,14 +1128,14 @@ export function getCostByModel(filters?: { agentType?: string; since?: string })
 
   return db.prepare(`
     SELECT
-      model,
-      COALESCE(SUM(cost_usd), 0) as cost_usd,
+      e.model,
+      COALESCE(SUM(e.cost_usd), 0) as cost_usd,
       COUNT(*) as event_count,
-      COALESCE(SUM(tokens_in), 0) as tokens_in,
-      COALESCE(SUM(tokens_out), 0) as tokens_out
-    FROM events
+      COALESCE(SUM(e.tokens_in), 0) as tokens_in,
+      COALESCE(SUM(e.tokens_out), 0) as tokens_out
+    FROM events e
     ${where}
-    GROUP BY model
+    GROUP BY e.model
     ORDER BY cost_usd DESC
   `).all(...params) as ModelCostRow[];
 }
