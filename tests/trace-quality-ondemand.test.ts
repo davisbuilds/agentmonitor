@@ -123,3 +123,24 @@ test('observations are re-grained: one trace per session, every event an observa
 test('observations for an unknown trace_id are null', () => {
   assert.equal(listSessionObservations('sts:does-not-exist', {}), null);
 });
+
+test('a date-only date_to includes rows timestamped on that day (exclusive next-day)', () => {
+  // Both seeded sessions started on 2026-05-01 at 10:00/10:30Z. A naive
+  // `started_at <= '2026-05-01'` would drop them; the range helper treats the
+  // date-only bound as the exclusive next day, so they must be included.
+  const result = listSessionTraces({ date_to: '2026-05-01' });
+  assert.equal(result.total, 2);
+  const before = listSessionTraces({ date_to: '2026-04-30' });
+  assert.equal(before.total, 0, 'the prior day excludes them');
+});
+
+test('coverage describes the full filtered set, not just the returned page', () => {
+  const paged = listSessionTraces({ limit: 1 });
+  assert.equal(paged.data.length, 1, 'page is limited');
+  assert.equal(paged.total, 2);
+  // Coverage must reflect both sessions (5 usage-bearing observations total),
+  // not only the single row on this page.
+  assert.equal(paged.coverage.matching_traces, 2);
+  assert.equal(paged.coverage.included_traces, 2);
+  assert.equal(paged.coverage.observations_with_usage, 5);
+});

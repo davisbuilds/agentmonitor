@@ -24,6 +24,7 @@ import {
   projectTraceQuality,
   type ProjectedTraceQualityObservation,
 } from './projection.js';
+import { appendDateRangeConditions } from './queries.js';
 import { readTraceQualityProjectionInputForSession } from './source-readers.js';
 import type { TraceQualityCoverage } from './types.js';
 
@@ -85,14 +86,9 @@ function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string
     clauses.push('agent_type = ?');
     values.push(params.agent);
   }
-  if (params.date_from) {
-    clauses.push("COALESCE(started_at, updated_at) >= ?");
-    values.push(params.date_from);
-  }
-  if (params.date_to) {
-    clauses.push("COALESCE(started_at, updated_at) <= ?");
-    values.push(params.date_to);
-  }
+  // Reuse the shared helper so a date-only `date_to` is treated as the exclusive
+  // next day (otherwise `<= 'YYYY-MM-DD'` drops every timestamped row on that day).
+  appendDateRangeConditions(clauses, values, 'COALESCE(started_at, updated_at)', params.date_from, params.date_to);
   return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', values };
 }
 
@@ -137,8 +133,10 @@ function mapSummaryToTrace(row: SessionTraceSummaryRow): TraceQualityTrace {
   };
 }
 
-/** Honest read-coverage over a set of summary rows (the lean view carries no scores). */
-function buildReadCoverage(rows: readonly SessionTraceSummaryRow[]): TraceQualityReadCoverage {
+type CoverageRow = Pick<SessionTraceSummaryRow, 'observation_count' | 'coverage_json'>;
+
+/** Honest read-coverage over the FULL filtered set of summary rows (not a page). */
+function buildReadCoverage(rows: readonly CoverageRow[]): TraceQualityReadCoverage {
   let withUsage = 0;
   let totalObservations = 0;
   for (const row of rows) {
@@ -185,12 +183,18 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
     LIMIT ? OFFSET ?
   `).all(...values, limit, offset) as SessionTraceSummaryRow[];
 
+  // Coverage describes the full filtered selection, not just the current page —
+  // the summary table is ~one row per session, so the extra scan is cheap.
+  const coverageRows = db.prepare(`
+    SELECT observation_count, coverage_json FROM session_trace_summary ${where}
+  `).all(...values) as CoverageRow[];
+
   return {
     data: rows.map(mapSummaryToTrace),
     total,
     limit,
     offset,
-    coverage: buildReadCoverage(rows),
+    coverage: buildReadCoverage(coverageRows),
   };
 }
 
