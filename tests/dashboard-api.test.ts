@@ -118,7 +118,7 @@ describe('GET /api/stats', () => {
         tokens_out: 100,
         cache_read_tokens: 200,
         cost_usd: 10,
-        client_timestamp: '2026-05-01T10:00:00Z',
+        client_timestamp: '2026-05-01T10:02:00Z',
         source: 'import',
       },
       {
@@ -137,6 +137,21 @@ describe('GET /api/stats', () => {
         source: 'otel',
       },
       {
+        event_id: 'stats-codex-otel-after-import',
+        session_id: 'stats-codex-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 400,
+        tokens_out: 40,
+        cache_read_tokens: 40,
+        cost_usd: 4,
+        client_timestamp: '2026-05-01T10:03:00Z',
+        source: 'otel',
+      },
+      {
         event_id: 'stats-codex-otel-live-only',
         session_id: 'stats-codex-live-only',
         agent_type: 'codex',
@@ -148,7 +163,7 @@ describe('GET /api/stats', () => {
         tokens_out: 30,
         cache_read_tokens: 30,
         cost_usd: 3,
-        client_timestamp: '2026-05-01T10:02:00Z',
+        client_timestamp: '2026-05-01T10:04:00Z',
         source: 'otel',
       },
     ];
@@ -164,10 +179,10 @@ describe('GET /api/stats', () => {
       total_cost_usd: number;
     };
 
-    assert.equal(body.total_events, 3);
-    assert.equal(body.total_tokens_in, 1300);
-    assert.equal(body.total_tokens_out, 130);
-    assert.equal(body.total_cost_usd, 13);
+    assert.equal(body.total_events, 4);
+    assert.equal(body.total_tokens_in, 1700);
+    assert.equal(body.total_tokens_out, 170);
+    assert.equal(body.total_cost_usd, 17);
   });
 });
 
@@ -303,7 +318,7 @@ describe('GET /api/stats/cost', () => {
         tokens_in: 1000,
         tokens_out: 100,
         cost_usd: 10,
-        client_timestamp: '2026-05-01T10:00:00Z',
+        client_timestamp: '2026-05-01T10:02:00Z',
         source: 'import',
       },
       {
@@ -321,6 +336,20 @@ describe('GET /api/stats/cost', () => {
         source: 'otel',
       },
       {
+        event_id: 'cost-codex-otel-after-import',
+        session_id: 'cost-codex-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 400,
+        tokens_out: 40,
+        cost_usd: 4,
+        client_timestamp: '2026-05-01T10:03:00Z',
+        source: 'otel',
+      },
+      {
         event_id: 'cost-codex-otel-live-only',
         session_id: 'cost-codex-live-only',
         agent_type: 'codex',
@@ -331,7 +360,7 @@ describe('GET /api/stats/cost', () => {
         tokens_in: 300,
         tokens_out: 30,
         cost_usd: 3,
-        client_timestamp: '2026-05-01T10:02:00Z',
+        client_timestamp: '2026-05-01T10:04:00Z',
         source: 'otel',
       },
     ];
@@ -347,10 +376,10 @@ describe('GET /api/stats/cost', () => {
 
     const model = body.by_model.find(row => row.model === 'gpt-5.4');
     assert.ok(model);
-    assert.equal(model.cost_usd, 13);
-    assert.equal(model.event_count, 2);
-    assert.equal(model.tokens_in, 1300);
-    assert.equal(model.tokens_out, 130);
+    assert.equal(model.cost_usd, 17);
+    assert.equal(model.event_count, 3);
+    assert.equal(model.tokens_in, 1700);
+    assert.equal(model.tokens_out, 170);
 
     const totals = body.timeline.reduce(
       (acc, row) => ({
@@ -361,7 +390,7 @@ describe('GET /api/stats/cost', () => {
       }),
       { cost_usd: 0, event_count: 0, tokens_in: 0, tokens_out: 0 },
     );
-    assert.deepEqual(totals, { cost_usd: 13, event_count: 2, tokens_in: 1300, tokens_out: 130 });
+    assert.deepEqual(totals, { cost_usd: 17, event_count: 3, tokens_in: 1700, tokens_out: 170 });
   });
 
   test('since filter accepts ISO timestamps for same-day rows', async () => {

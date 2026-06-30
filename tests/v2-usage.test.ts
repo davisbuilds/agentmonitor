@@ -559,6 +559,7 @@ describe('Codex usage source reconciliation', () => {
     const eventIds = [
       'usage-reconcile-import',
       'usage-reconcile-otel-duplicate',
+      'usage-reconcile-otel-after-import',
       'usage-reconcile-otel-live-only',
     ];
 
@@ -575,7 +576,7 @@ describe('Codex usage source reconciliation', () => {
         tokens_out: 100,
         cache_read_tokens: 200,
         cost_usd: 10,
-        client_timestamp: '2026-05-01T10:00:00Z',
+        client_timestamp: '2026-05-01T10:02:00Z',
         source: 'import',
         metadata: {},
       });
@@ -597,6 +598,22 @@ describe('Codex usage source reconciliation', () => {
       });
       insertEvent({
         event_id: eventIds[2],
+        session_id: 'usage-reconcile-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 400,
+        tokens_out: 40,
+        cache_read_tokens: 40,
+        cost_usd: 4,
+        client_timestamp: '2026-05-01T10:03:00Z',
+        source: 'otel',
+        metadata: {},
+      });
+      insertEvent({
+        event_id: eventIds[3],
         session_id: 'usage-reconcile-live-only',
         agent_type: 'codex',
         event_type: 'llm_response',
@@ -607,7 +624,7 @@ describe('Codex usage source reconciliation', () => {
         tokens_out: 30,
         cache_read_tokens: 30,
         cost_usd: 3,
-        client_timestamp: '2026-05-01T10:02:00Z',
+        client_timestamp: '2026-05-01T10:04:00Z',
         source: 'otel',
         metadata: {},
       });
@@ -629,19 +646,19 @@ describe('Codex usage source reconciliation', () => {
         };
       };
 
-      assert.equal(body.total_cost_usd, 13);
-      assert.equal(body.total_input_tokens, 1300);
-      assert.equal(body.total_output_tokens, 130);
-      assert.equal(body.total_cache_read_tokens, 230);
-      assert.equal(body.total_usage_events, 2);
+      assert.equal(body.total_cost_usd, 17);
+      assert.equal(body.total_input_tokens, 1700);
+      assert.equal(body.total_output_tokens, 170);
+      assert.equal(body.total_cache_read_tokens, 270);
+      assert.equal(body.total_usage_events, 3);
       assert.equal(body.total_sessions, 2);
-      assert.equal(body.coverage.matching_events, 2);
-      assert.equal(body.coverage.usage_events, 2);
+      assert.equal(body.coverage.matching_events, 3);
+      assert.equal(body.coverage.usage_events, 3);
       assert.deepEqual(
         body.coverage.source_breakdown.map(row => [row.source, row.event_count, row.usage_event_count]),
         [
           ['import', 1, 1],
-          ['otel', 1, 1],
+          ['otel', 2, 2],
         ],
       );
     } finally {

@@ -8,6 +8,10 @@ function usageMetricPresenceCondition(alias: string): string {
   )`;
 }
 
+function usageTimestampExpression(alias: string): string {
+  return `datetime(COALESCE(${alias}.client_timestamp, ${alias}.created_at))`;
+}
+
 function overlappingCodexOtelUsageCondition(alias: string): string {
   return `(
     ${alias}.agent_type = 'codex'
@@ -20,6 +24,7 @@ function overlappingCodexOtelUsageCondition(alias: string): string {
         AND imported_usage.agent_type = 'codex'
         AND imported_usage.source = 'import'
         AND ${usageMetricPresenceCondition('imported_usage')}
+        AND ${usageTimestampExpression('imported_usage')} >= ${usageTimestampExpression(alias)}
     )
   )`;
 }
