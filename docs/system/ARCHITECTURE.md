@@ -111,6 +111,7 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - Historical rows predating that fix are repaired once by the `user_version`-guarded data migration in `src/db/schema.ts` (`runDataMigrations` → `backfillCacheInclusiveInputTokens`), which re-normalizes OpenAI/Google `tokens_in` and recomputes `cost_usd` atomically on next startup.
 - Costs stored as `cost_usd` on each event row.
 - V2 usage keeps stored `cost_usd` authoritative. Cache hit rate, estimated cache savings, classification filters, tier rollups, top-session enrichment, and prior-period deltas are derived at query time from filtered usage rows and current pricing metadata.
+- Codex can produce both live OTEL usage and later imported JSONL usage for the same session. Aggregate usage/stat queries reconcile that overlap at read time: imported Codex usage is authoritative, overlapping Codex OTEL usage rows are excluded from token/cost rollups, and the raw event rows remain intact for monitor/session history.
 - Read-only usage budgets are evaluated from an optional local JSON config through the same v2 usage summary/filter path. They report alert states only; no hook enforcement or request blocking is implemented.
 - Tier feedback is generated from usage summaries, model attribution, and top-session metadata only. It does not inspect private message content and returns advisory findings for human review rather than executable model changes.
 

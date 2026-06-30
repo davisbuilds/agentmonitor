@@ -103,6 +103,72 @@ describe('GET /api/stats', () => {
     assert.ok(codex);
     assert.equal(codex.primary?.used_percent, 5);
   });
+
+  test('excludes overlapping Codex OTEL usage from token and cost totals', async () => {
+    const events = [
+      {
+        event_id: 'stats-codex-import-usage',
+        session_id: 'stats-codex-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 1000,
+        tokens_out: 100,
+        cache_read_tokens: 200,
+        cost_usd: 10,
+        client_timestamp: '2026-05-01T10:00:00Z',
+        source: 'import',
+      },
+      {
+        event_id: 'stats-codex-otel-duplicate',
+        session_id: 'stats-codex-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 900,
+        tokens_out: 90,
+        cache_read_tokens: 180,
+        cost_usd: 9,
+        client_timestamp: '2026-05-01T10:01:00Z',
+        source: 'otel',
+      },
+      {
+        event_id: 'stats-codex-otel-live-only',
+        session_id: 'stats-codex-live-only',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 300,
+        tokens_out: 30,
+        cache_read_tokens: 30,
+        cost_usd: 3,
+        client_timestamp: '2026-05-01T10:02:00Z',
+        source: 'otel',
+      },
+    ];
+    const batch = await postJson(`${baseUrl}/api/events/batch`, { events });
+    assert.equal(batch.status, 201);
+
+    const res = await fetch(`${baseUrl}/api/stats?agent_type=codex`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      total_events: number;
+      total_tokens_in: number;
+      total_tokens_out: number;
+      total_cost_usd: number;
+    };
+
+    assert.equal(body.total_events, 3);
+    assert.equal(body.total_tokens_in, 1300);
+    assert.equal(body.total_tokens_out, 130);
+    assert.equal(body.total_cost_usd, 13);
+  });
 });
 
 // ─── Tool Analytics API ─────────────────────────────────────────────────
@@ -222,6 +288,80 @@ describe('GET /api/stats/cost', () => {
     // Codex events total: 0.015 + 0.01 = 0.025
     assert.ok(totalCost > 0);
     assert.ok(totalCost < 0.03); // Should not include claude events
+  });
+
+  test('excludes overlapping Codex OTEL usage from cost breakdowns', async () => {
+    const events = [
+      {
+        event_id: 'cost-codex-import-usage',
+        session_id: 'cost-codex-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 1000,
+        tokens_out: 100,
+        cost_usd: 10,
+        client_timestamp: '2026-05-01T10:00:00Z',
+        source: 'import',
+      },
+      {
+        event_id: 'cost-codex-otel-duplicate',
+        session_id: 'cost-codex-overlap',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 900,
+        tokens_out: 90,
+        cost_usd: 9,
+        client_timestamp: '2026-05-01T10:01:00Z',
+        source: 'otel',
+      },
+      {
+        event_id: 'cost-codex-otel-live-only',
+        session_id: 'cost-codex-live-only',
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        project: 'reconcile',
+        model: 'gpt-5.4',
+        tokens_in: 300,
+        tokens_out: 30,
+        cost_usd: 3,
+        client_timestamp: '2026-05-01T10:02:00Z',
+        source: 'otel',
+      },
+    ];
+    const batch = await postJson(`${baseUrl}/api/events/batch`, { events });
+    assert.equal(batch.status, 201);
+
+    const res = await fetch(`${baseUrl}/api/stats/cost?agent_type=codex`);
+    assert.equal(res.status, 200);
+    const body = await res.json() as {
+      by_model: Array<{ model: string; cost_usd: number; event_count: number; tokens_in: number; tokens_out: number }>;
+      timeline: Array<{ cost_usd: number; event_count: number; tokens_in: number; tokens_out: number }>;
+    };
+
+    const model = body.by_model.find(row => row.model === 'gpt-5.4');
+    assert.ok(model);
+    assert.equal(model.cost_usd, 13);
+    assert.equal(model.event_count, 2);
+    assert.equal(model.tokens_in, 1300);
+    assert.equal(model.tokens_out, 130);
+
+    const totals = body.timeline.reduce(
+      (acc, row) => ({
+        cost_usd: acc.cost_usd + row.cost_usd,
+        event_count: acc.event_count + row.event_count,
+        tokens_in: acc.tokens_in + row.tokens_in,
+        tokens_out: acc.tokens_out + row.tokens_out,
+      }),
+      { cost_usd: 0, event_count: 0, tokens_in: 0, tokens_out: 0 },
+    );
+    assert.deepEqual(totals, { cost_usd: 13, event_count: 2, tokens_in: 1300, tokens_out: 130 });
   });
 
   test('since filter accepts ISO timestamps for same-day rows', async () => {

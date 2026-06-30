@@ -86,6 +86,7 @@ Product-surface reference for AgentMonitor.
 
 - Historical usage lives under `/api/v2/usage/*` and is event-derived rather than transcript-derived.
 - Summary totals, daily series, project/model/tier/agent attribution, and top-session views all use cost/token-bearing event rows as their source of truth.
+- Codex aggregate usage reconciles overlapping telemetry sources: when a Codex session has imported JSONL usage and OTEL usage rows, imported usage is treated as authoritative and overlapping OTEL usage rows are ignored for rollups. Raw events remain queryable in monitor/session history.
 - Usage models are classified at query time into canonical model, provider, family, tier, lifecycle, and pricing-status fields. Unknown and deprecated models remain visible in responses.
 - Usage endpoints accept optional `model`, `provider`, and `tier` filters in addition to date, project, and agent filters. Classification filters are applied consistently before summary, daily, attribution, tier, agent, and top-session panels aggregate.
 - Usage summary includes `prior_total_cost_usd` and `cost_delta_pct` for the immediately preceding same-length date range when a valid current range is supplied.
