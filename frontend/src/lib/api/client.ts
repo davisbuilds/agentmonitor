@@ -650,89 +650,6 @@ export interface TraceQualityReadCoverage {
   note: string;
 }
 
-export interface TraceQualityPromptRef {
-  id: number;
-  name: string;
-  version: string | null;
-  label: string | null;
-  source: string;
-  content_hash: string | null;
-  file_path: string | null;
-  metadata: Record<string, unknown>;
-  created_at: string;
-  observation_count: number;
-  trace_count: number;
-}
-
-export interface TraceQualityScore {
-  id: number;
-  target_type: string;
-  target_id: string;
-  name: string;
-  value_type: string;
-  numeric_value: number | null;
-  categorical_value: string | null;
-  boolean_value: number | null;
-  text_value: string | null;
-  source: string;
-  evaluator_name: string | null;
-  comment: string | null;
-  metadata: Record<string, unknown>;
-  value: number | string | boolean | null;
-  created_at: string;
-}
-
-export type TraceQualityScoreMutationValue = number | string | boolean;
-
-export interface TraceQualityScoreMutationInput {
-  target_type?: 'session' | 'trace' | 'observation' | 'message' | 'event' | 'session_item';
-  target_id?: string;
-  name?: string;
-  value_type?: 'numeric' | 'categorical' | 'boolean' | 'text';
-  value?: TraceQualityScoreMutationValue;
-  numeric_value?: number;
-  categorical_value?: string;
-  boolean_value?: boolean | 0 | 1;
-  text_value?: string;
-  source?: 'human' | 'code_evaluator' | 'llm_judge' | 'api';
-  evaluator_name?: string | null;
-  comment?: string | null;
-  metadata?: Record<string, unknown> | null;
-}
-
-export interface TraceQualityScoreSummary {
-  name: string;
-  value_type: string;
-  count: number;
-  numeric_avg: number | null;
-  numeric_min: number | null;
-  numeric_max: number | null;
-  boolean_true: number;
-  boolean_false: number;
-  categorical_values: Record<string, number>;
-  scored_traces: number;
-}
-
-export type TraceQualityScoreRollupDimension = 'trace' | 'session' | 'model' | 'tool' | 'prompt' | 'day';
-
-export interface TraceQualityScoreRollup {
-  dimension: TraceQualityScoreRollupDimension;
-  key: string;
-  label: string | null;
-  score_count: number;
-  numeric_score_count: number;
-  numeric_avg: number | null;
-  boolean_true: number;
-  boolean_false: number;
-  categorical_values: Record<string, number>;
-  trace_count: number;
-  observation_count: number;
-  first_score_at: string | null;
-  last_score_at: string | null;
-}
-
-export type TraceQualityScoreRollups = Record<TraceQualityScoreRollupDimension, TraceQualityScoreRollup[]>;
-
 export interface TraceQualityTrace {
   id: string;
   session_id: string;
@@ -755,10 +672,9 @@ export interface TraceQualityTrace {
   created_at: string;
 }
 
-export interface TraceQualityTraceDetail extends TraceQualityTrace {
-  prompt_refs: TraceQualityPromptRef[];
-  score_summary: TraceQualityScoreSummary[];
-}
+// The lean view's detail is the summary-backed trace; it carries no persisted
+// prompt refs or score summary (those moved to the deferred export).
+export type TraceQualityTraceDetail = TraceQualityTrace;
 
 export interface TraceQualityObservation {
   id: string;
@@ -794,75 +710,6 @@ export interface TraceQualityObservation {
 
 export interface TraceQualityObservationTreeNode extends TraceQualityObservation {
   children: TraceQualityObservationTreeNode[];
-}
-
-export interface TraceQualityObservationDetail extends TraceQualityObservation {
-  trace: Pick<TraceQualityTrace, 'id' | 'session_id' | 'agent_type' | 'name' | 'status' | 'project' | 'started_at'>;
-  prompt_refs: TraceQualityPromptRef[];
-  scores: TraceQualityScore[];
-}
-
-export interface TraceQualityPromptRollup extends TraceQualityPromptRef {
-  generation_count: number;
-  median_duration_ms: number | null;
-  total_cost_usd: number;
-  total_tokens_in: number;
-  total_tokens_out: number;
-  score_count: number;
-  median_numeric_score: number | null;
-  last_seen: string | null;
-}
-
-export type TraceQualityFindingKind =
-  | 'high_error_rate' | 'tool_failure_rate' | 'model_error_rate' | 'rate_limit_events'
-  | 'high_latency_p95' | 'latency_spike' | 'token_spike' | 'cost_anomaly'
-  | 'daily_budget_risk' | 'unknown_pricing' | 'low_trace_coverage'
-  | 'collector_or_otel_dropoff' | 'low_quality_score' | 'observation_error';
-
-export type TraceQualityFindingSeverity = 'info' | 'warning' | 'high' | 'critical';
-
-export interface TraceQualityFindingInspection {
-  target: 'traces' | 'trace' | 'observation' | 'scores' | 'usage';
-  params: Record<string, string | number | boolean>;
-}
-
-export interface TraceQualityFindingWindow {
-  from: string | null;
-  to: string | null;
-  label?: string;
-}
-
-export interface TraceQualityFindingEvidence {
-  metric_value?: number;
-  threshold?: number;
-  comparator?: 'gte' | 'lte';
-  unit?: 'ratio' | 'ms' | 'usd' | 'tokens' | 'count' | 'minutes';
-  window?: TraceQualityFindingWindow;
-  baseline_value?: number;
-  baseline_window?: TraceQualityFindingWindow;
-  sample_size?: number;
-  dimension?: { type: 'tool' | 'model' | 'budget' | 'score'; value: string };
-  models?: string[];
-  impacted_trace_ids?: string[];
-  impacted_observation_ids?: string[];
-  impacted_session_ids?: string[];
-  impacted_total?: number;
-  coverage_caveat?: string | null;
-  next_inspection?: TraceQualityFindingInspection;
-  [key: string]: unknown;
-}
-
-export interface TraceQualityFinding {
-  id: string;
-  kind: TraceQualityFindingKind;
-  severity: TraceQualityFindingSeverity;
-  trace_id: string | null;
-  observation_id: string | null;
-  score_id: number | null;
-  title: string;
-  message: string;
-  evidence: TraceQualityFindingEvidence;
-  created_at: string | null;
 }
 
 // --- API client ---
@@ -1177,78 +1024,6 @@ export async function fetchTraceQualityObservations(
 }> {
   const res = await fetch(`/api/v2/trace-quality/traces/${encodeURIComponent(traceId)}/observations${qs(params)}`);
   return checkedJson(res, 'fetchTraceQualityObservations');
-}
-
-export async function fetchTraceQualityObservation(
-  id: string,
-): Promise<{ observation: TraceQualityObservationDetail; coverage: TraceQualityReadCoverage }> {
-  const res = await fetch(`/api/v2/trace-quality/observations/${encodeURIComponent(id)}`);
-  return checkedJson(res, 'fetchTraceQualityObservation');
-}
-
-export async function fetchTraceQualityScores(
-  params: Record<string, string | number | boolean | undefined> = {},
-): Promise<{ data: TraceQualityScore[]; total: number; limit: number; offset: number; coverage: TraceQualityReadCoverage }> {
-  const res = await fetch(`/api/v2/trace-quality/scores${qs(params)}`);
-  return checkedJson(res, 'fetchTraceQualityScores');
-}
-
-export async function createTraceQualityScore(
-  input: Required<Pick<TraceQualityScoreMutationInput, 'target_type' | 'target_id' | 'name' | 'value_type'>> & TraceQualityScoreMutationInput,
-): Promise<{ score: TraceQualityScore }> {
-  const res = await fetch('/api/v2/trace-quality/scores', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  return checkedJson(res, 'createTraceQualityScore');
-}
-
-export async function updateTraceQualityScore(
-  id: number,
-  input: TraceQualityScoreMutationInput,
-): Promise<{ score: TraceQualityScore }> {
-  const res = await fetch(`/api/v2/trace-quality/scores/${id}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(input),
-  });
-  return checkedJson(res, 'updateTraceQualityScore');
-}
-
-export async function deleteTraceQualityScore(id: number): Promise<{ deleted: true }> {
-  const res = await fetch(`/api/v2/trace-quality/scores/${id}`, {
-    method: 'DELETE',
-  });
-  return checkedJson(res, 'deleteTraceQualityScore');
-}
-
-export async function fetchTraceQualityScoreSummary(
-  params: Record<string, string | number | boolean | undefined> = {},
-): Promise<{ data: TraceQualityScoreSummary[]; coverage: TraceQualityReadCoverage }> {
-  const res = await fetch(`/api/v2/trace-quality/score-summary${qs(params)}`);
-  return checkedJson(res, 'fetchTraceQualityScoreSummary');
-}
-
-export async function fetchTraceQualityScoreRollups(
-  params: Record<string, string | number | boolean | undefined> = {},
-): Promise<{ data: TraceQualityScoreRollups; coverage: TraceQualityReadCoverage }> {
-  const res = await fetch(`/api/v2/trace-quality/score-rollups${qs(params)}`);
-  return checkedJson(res, 'fetchTraceQualityScoreRollups');
-}
-
-export async function fetchTraceQualityPrompts(
-  params: Record<string, string | number | boolean | undefined> = {},
-): Promise<{ data: TraceQualityPromptRollup[]; total: number; limit: number; offset: number; coverage: TraceQualityReadCoverage }> {
-  const res = await fetch(`/api/v2/trace-quality/prompts${qs(params)}`);
-  return checkedJson(res, 'fetchTraceQualityPrompts');
-}
-
-export async function fetchTraceQualityFindings(
-  params: Record<string, string | number | boolean | undefined> = {},
-): Promise<{ data: TraceQualityFinding[]; total: number; limit: number; offset: number; coverage: TraceQualityReadCoverage }> {
-  const res = await fetch(`/api/v2/trace-quality/findings${qs(params)}`);
-  return checkedJson(res, 'fetchTraceQualityFindings');
 }
 
 export async function fetchInsights(params: Record<string, string | number | undefined> = {}): Promise<{ data: Insight[]; generation: InsightGenerationStatus }> {

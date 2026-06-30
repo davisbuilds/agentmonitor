@@ -4,10 +4,6 @@
   import { Badge, Button, Stat } from '../ui';
   import TraceCoverageBadge from './TraceCoverageBadge.svelte';
   import TraceTree from './TraceTree.svelte';
-  import ScoreEditor from './ScoreEditor.svelte';
-  import QualityFindings from './QualityFindings.svelte';
-  import PromptRollups from './PromptRollups.svelte';
-  import ScoreTrends from './ScoreTrends.svelte';
 
   const tq = traceQuality;
 
@@ -39,19 +35,6 @@
 </script>
 
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-  <!-- Explorer (per-trace) vs Dashboards (aggregate findings / prompts / score trends). -->
-  <div class="inline-flex rounded-sm border border-line bg-surface p-0.5 text-meta">
-    <button
-      class={`rounded-sm px-3 py-1 transition-colors ${tq.panel === 'explorer' ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text'}`}
-      onclick={() => tq.setPanel('explorer')}
-    >Explorer</button>
-    <button
-      class={`rounded-sm px-3 py-1 transition-colors ${tq.panel === 'dashboards' ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text'}`}
-      onclick={() => tq.setPanel('dashboards')}
-    >Dashboards</button>
-  </div>
-
-  {#if tq.panel === 'explorer'}
   {#if tq.sessionScope}
     <div class="flex flex-wrap items-center justify-between gap-2 rounded-sm border border-accent/30 bg-accent/10 px-3 py-2 text-meta text-text-muted">
       <span>Scoped to session <span class="font-mono text-text">{tq.sessionScope}</span> (date filter ignored).</span>
@@ -151,10 +134,10 @@
           {/if}
         </div>
 
-        <!-- Selected observation summary (payload-policy-safe) -->
-        {#if tq.observationDetail}
-          {@const o = tq.observationDetail}
-          <div class="border-b border-line px-4 py-3 space-y-2">
+        <!-- Selected observation summary (payload-policy-safe), read from the loaded tree -->
+        {#if tq.selectedObservation}
+          {@const o = tq.selectedObservation}
+          <div class="px-4 py-3 space-y-2">
             <div class="flex flex-wrap items-center gap-2 text-meta text-text-faint">
               <span class="text-text">{o.name}</span>
               <Badge tone="neutral">{o.observation_type}</Badge>
@@ -175,54 +158,11 @@
             {/if}
           </div>
         {/if}
-
-        <!-- Local review scores -->
-        <div class="px-4 py-4">
-          <ScoreEditor
-            target={tq.scoreTarget}
-            scores={tq.targetScores}
-            saving={tq.savingScore}
-            error={tq.scoreError}
-            onadd={(input) => tq.addScore(input)}
-            onremove={(id) => tq.removeScore(id)}
-          />
-        </div>
       {:else}
         <div class="px-4 py-16 text-center text-meta text-text-muted">
-          Select a trace to inspect its observation tree and attach local review scores.
+          Select a trace to inspect its observation tree.
         </div>
       {/if}
     </section>
   </div>
-  {:else}
-    <!-- Dashboards: aggregate findings, prompt rollups, and score trends. -->
-    {#if tq.coverage}
-      <div class="rounded-sm border border-line bg-surface-2 px-3 py-2 text-meta text-text-muted">
-        Aggregates cover <span class="text-text">{formatNumber(tq.coverage.included_traces)}</span> of
-        <span class="text-text">{formatNumber(tq.coverage.matching_traces)}</span> matching traces in this window. {tq.coverage.note}
-      </div>
-    {/if}
-
-    {#if tq.dashboardsLoading && !tq.dashboardsLoaded}
-      <div class="px-4 py-16 text-center text-meta text-text-muted">Loading quality dashboards…</div>
-    {:else if tq.dashboardsError}
-      <div class="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-meta text-danger">{tq.dashboardsError}</div>
-    {:else}
-      <div class="space-y-6">
-        <QualityFindings
-          findings={tq.findings}
-          loading={tq.findingsLoading}
-          error={tq.dashboardsError}
-          kind={tq.findingKind}
-          severity={tq.findingSeverity}
-          onkind={(kind) => tq.setFindingKind(kind)}
-          onseverity={(severity) => tq.setFindingSeverity(severity)}
-          caninspect={(finding) => tq.canInspect(finding)}
-          oninspect={(finding) => tq.inspectFinding(finding)}
-        />
-        <PromptRollups prompts={tq.prompts} />
-        <ScoreTrends summary={tq.scoreSummary} rollups={tq.scoreRollups} />
-      </div>
-    {/if}
-  {/if}
 </main>
