@@ -62,28 +62,6 @@ import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
 
-export {
-  getTraceQualityObservation,
-  getTraceQualityScoreRollups,
-  getTraceQualityScoreSummary,
-  getTraceQualityTrace,
-  listTraceQualityObservations,
-  listTraceQualityPrompts,
-  listTraceQualityScores,
-  listTraceQualityTraces,
-} from '../trace-quality/queries.js';
-
-export { listTraceQualityFindings } from '../trace-quality/findings.js';
-
-export {
-  createTraceQualityScore,
-  deleteTraceQualityScore,
-  isTraceQualityScoreMutationError,
-  isTraceQualityScoreNotFoundError,
-  runTraceQualityCodeEvaluators,
-  updateTraceQualityScore,
-} from '../trace-quality/scores.js';
-
 function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
   return {
     id: row.id,

@@ -8,7 +8,7 @@ import {
   type OtelLogsPayload,
   type OtelMetricsPayload,
 } from '../otel/parser.js';
-import { safelyProjectTraceQualityForEvent } from '../trace-quality/service.js';
+import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
 
 export const otelRouter = Router();
 
@@ -40,7 +40,7 @@ otelRouter.post('/v1/logs', (req: Request, res: Response) => {
     const row = insertEvent(event);
     if (row) {
       broadcaster.broadcast('event', row as unknown as Record<string, unknown>);
-      safelyProjectTraceQualityForEvent(row.id, 'otel log ingest');
+      safelyMaintainTraceSummaryForEvent(row.id, 'otel log ingest');
     }
   }
 
@@ -85,7 +85,7 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
 
     if (row) {
       broadcaster.broadcast('event', row as unknown as Record<string, unknown>);
-      safelyProjectTraceQualityForEvent(row.id, 'otel metric ingest');
+      safelyMaintainTraceSummaryForEvent(row.id, 'otel metric ingest');
     }
   }
 

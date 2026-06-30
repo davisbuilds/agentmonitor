@@ -224,51 +224,20 @@ export function registerReportingCommands(): void {
   registerCommand({
     name: 'quality traces',
     group: 'Quality Commands',
-    summary: 'List trace-quality traces',
+    summary: 'List trace-quality traces (one per session, from the lean summary)',
     usage: 'quality traces [--session-id <id>] [--limit <n>] [--json]',
     async handler(ctx, args) {
       const params = commonParams(args);
       const { closeDb } = await initDb();
       try {
-        const { listTraceQualityTraces } = await import('../../trace-quality/queries.js');
-        const result = listTraceQualityTraces(params);
-        writeReport(ctx, result, formatRows(result.data as unknown as Array<Record<string, unknown>>, ['id', 'session_id', 'agent', 'status', 'observation_count']));
-      } finally {
-        closeDb();
-      }
-    },
-  });
-
-  registerCommand({
-    name: 'quality findings',
-    group: 'Quality Commands',
-    summary: 'List deterministic trace-quality findings',
-    usage: 'quality findings [--kind <kind>] [--severity <level>] [--json]',
-    async handler(ctx, args) {
-      const params = commonParams(args);
-      const { closeDb } = await initDb();
-      try {
-        const { listTraceQualityFindings } = await import('../../trace-quality/findings.js');
-        const result = listTraceQualityFindings(params);
-        writeReport(ctx, result, formatRows(result.data as unknown as Array<Record<string, unknown>>, ['severity', 'kind', 'title', 'session_id']));
-      } finally {
-        closeDb();
-      }
-    },
-  });
-
-  registerCommand({
-    name: 'quality scores',
-    group: 'Quality Commands',
-    summary: 'List local trace-quality scores',
-    usage: 'quality scores [--trace-id <id>] [--json]',
-    async handler(ctx, args) {
-      const params = commonParams(args);
-      const { closeDb } = await initDb();
-      try {
-        const { listTraceQualityScores } = await import('../../trace-quality/queries.js');
-        const result = listTraceQualityScores(params);
-        writeReport(ctx, result, formatRows(result.data as unknown as Array<Record<string, unknown>>, ['id', 'target_type', 'name', 'source']));
+        const { ensureSessionTraceSummaryBackfill } = await import('../../trace-quality/summary.js');
+        const { listSessionTraces } = await import('../../trace-quality/on-demand.js');
+        // The CLI runs out-of-band from the server, so self-heal the summary here
+        // too — otherwise an upgraded DB with events but no summary rows reports an
+        // empty list until the server has run its startup backfill.
+        ensureSessionTraceSummaryBackfill();
+        const result = listSessionTraces(params);
+        writeReport(ctx, result, formatRows(result.data as unknown as Array<Record<string, unknown>>, ['id', 'session_id', 'agent_type', 'status']));
       } finally {
         closeDb();
       }

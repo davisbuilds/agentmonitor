@@ -38,7 +38,7 @@ pnpm test:parity:ts:live # Run parity tests against a running TS server on :3141
 pnpm lint               # ESLint
 pnpm seed               # Send demo events (server must be running)
 pnpm run import         # Import historical sessions
-pnpm run trace-quality:backfill # Backfill local trace-quality projection tables
+pnpm reclaim:trace-quality # Drop the old trace-quality warehouse tables + VACUUM (opt-in)
 pnpm reparse:sessions   # Force reparse Claude session-browser history
 pnpm reparse:codex-sessions # Force reparse Codex session-browser history
 pnpm bench:ingest       # Ingest throughput benchmark
@@ -64,7 +64,7 @@ pnpm cli -- open
 pnpm cli -- import --source claude-code --dry-run
 pnpm cli -- sync sessions --source codex --force
 pnpm cli -- costs recalc --dry-run
-pnpm cli -- quality backfill --source all --dry-run
+pnpm cli -- quality traces --json
 
 pnpm cli -- sessions list --json
 pnpm cli -- sessions show <session-id>
@@ -111,7 +111,6 @@ All optional with sensible defaults:
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
 | `AGENTMONITOR_USAGE_BUDGETS_PATH` | `./config/budgets.json` | Optional local JSON config for read-only usage budget reports |
-| `AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH` | `./config/trace-quality-findings.json` | Optional local JSON overriding trace-quality finding thresholds/windows; numeric fields deep-merge over in-code defaults, malformed files fall back to defaults |
 | `AGENTMONITOR_ENABLE_LIVE_TAB` | `true` | Shows the Svelte `Live` tab |
 | `AGENTMONITOR_CODEX_LIVE_MODE` | `otel-only` | Codex live fidelity mode (`otel-only`, reserved `exporter`) |
 | `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` | `true` | Capture or redact live prompt payloads |
@@ -194,24 +193,25 @@ Operational notes:
 - The cache-inclusive `tokens_in` repair (OpenAI/Codex rows that overstated cost by billing cached tokens at the full input rate) runs automatically once on next startup via the `user_version`-guarded migration; no manual command is needed. It re-normalizes `tokens_in` and recomputes `cost_usd` for OpenAI/Google rows and leaves Anthropic untouched.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
 
-## Trace Quality Backfill
+## Trace Quality Reclaim
+
+The trace-quality reframe (2026-06) removed the persisted trace/observation/score
+/prompt warehouse; detail is now projected on-demand and only the lean
+`session_trace_summary` is stored. An existing database keeps the old tables until
+you reclaim them with an explicit, opt-in one-shot:
 
 ```bash
-pnpm cli -- quality backfill --dry-run
-pnpm cli -- quality backfill --source events
-pnpm cli -- quality backfill --source sessions --session-id <session-id>
-pnpm cli -- quality backfill --source all --from 2026-06-01 --to 2026-06-08
-pnpm cli -- quality backfill --force
+pnpm reclaim:trace-quality --dry-run  # report which warehouse tables would be dropped + row counts
+pnpm reclaim:trace-quality            # DROP them + VACUUM to return the freed pages (~900 MB)
 ```
 
 Operational notes:
 
-- The backfill projects existing `events` and parsed session-browser rows into the local trace-quality tables. It does not mutate source `events`, `browsing_sessions`, `messages`, `session_items`, `session_turns`, or `tool_calls`.
-- Default runs are idempotent through `trace_quality_projection_state`; unchanged source payloads are skipped.
-- `--force` deletes and rebuilds projected trace-quality rows only for the selected source scope.
-- Use `--dry-run` before broad or forced runs to confirm the projected row counts.
-- `pnpm run trace-quality:backfill` remains a compatibility wrapper around `pnpm cli -- quality backfill`.
-- Optional Langfuse export is **deferred** (spec Task 10): no export script or `AGENTMONITOR_LANGFUSE_*` env vars ship yet, and no trace-quality data leaves localhost. When built it will be a manual, disabled-by-default, dry-run-previewable script using the Langfuse ingestion API. See [trace-quality.md](trace-quality.md#optional-langfuse-export--deferred).
+- It drops `trace_quality_{traces,observations,scores,prompt_refs,observation_prompts,projection_state}` and VACUUMs. The dormant `trace_quality_export_state` seam and `session_trace_summary` are kept.
+- It is **never run at startup** — a normal upgrade never rewrites a live DB. Run it when convenient; VACUUM needs a brief exclusive lock and temporary free disk (~the DB size).
+- The dropped data is a pure derived projection: source `events`, `browsing_sessions`, `messages`, `session_items`, `session_turns`, and `tool_calls` are untouched, so the lean view is fully reconstructable.
+- The summary self-heals on startup (`ensureSessionTraceSummaryBackfill` re-backfills any row at a stale version or with a NULL `trace_id`).
+- The deferred export (medallion for the aggregate, Langfuse for trace/eval depth) is its own later spec: no export script or `AGENTMONITOR_LANGFUSE_*` env vars ship yet, and nothing leaves localhost. See [trace-quality.md](trace-quality.md#deferred-export).
 
 ## CI
 

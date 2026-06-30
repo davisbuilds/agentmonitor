@@ -33,9 +33,9 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 ### Trace Quality
 
-- The local trace-quality layer is **shipped**: additive projection of existing sources into a trace/observation graph, `/api/v2/trace-quality/*` read/score/prompt/findings APIs, prompt-version attribution, a deterministic read-only findings taxonomy, and the Svelte Quality sub-view (Explorer + Dashboards). See [../system/trace-quality.md](../system/trace-quality.md).
-- Keep coverage honesty as a first principle: summary-only telemetry (e.g. Codex OTEL) must never render as full transcript fidelity in the UI or API.
-- The optional Langfuse export adapter is **deferred** (see Later); the local model stands on its own and remains Langfuse-independent.
+- **Reframed (2026-06) to a lean, collector-not-backend view** — shipped: one trace per session served from the content-free `session_trace_summary`, detail projected on-demand, and three `/api/v2/trace-quality/{traces,traces/:id,traces/:id/observations}` reads. The persisted trace/observation/score/prompt warehouse (~half the DB) was removed and is reclaimed via the opt-in `pnpm reclaim:trace-quality`. The eval depth (scores/findings/prompts) is **deferred to the export**, not reinvented locally. See [../system/trace-quality.md](../system/trace-quality.md) and [POSITIONING.md](POSITIONING.md).
+- Keep coverage honesty as a first principle: summary-only telemetry (e.g. Codex OTEL) must never render as full fidelity in the UI or API.
+- The export is **deferred** (see Later): the summary is already shaped to medallion's `silver.agent_runs`, and the `trace_quality_export_state` seam stays dormant for the Langfuse depth path.
 
 ## Next
 
@@ -49,7 +49,7 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 - Support richer Codex-native live fidelity beyond the current OTEL summary path.
 - Revisit packaging or alternate runtime distribution work once the canonical web contract is stable.
 - Expand multi-agent support where new integrations can map cleanly onto the existing monitor, history, and live models.
-- Build the optional, disabled-by-default Langfuse export adapter (deferred trace-quality spec Task 10) if real demand appears. The transport decision is settled — the Langfuse ingestion API (batch) — and must stay manual-first, redaction-aware, dry-run-previewable, and non-required for local functionality.
+- Build the **deferred trace-quality export** (its own spec): publish the content-free `session_trace_summary` to medallion's `silver.agent_runs` (near-free; mirrors prism's `insight` pattern), and/or forward the on-demand projection to Langfuse for trace/eval depth via the dormant `trace_quality_export_state` seam. Must stay manual-first, redaction-aware, dry-run-previewable, and never required for local functionality.
 
 ## Working Principles
 

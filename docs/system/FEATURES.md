@@ -12,7 +12,7 @@ Product-surface reference for AgentMonitor.
 ## Operator CLI
 
 - Runtime commands cover server startup, health checks, status reporting, and opening the canonical app.
-- Maintenance commands cover historical import, session-browser sync, cost recalculation, and trace-quality backfill.
+- Maintenance commands cover historical import, session-browser sync, cost recalculation, and the opt-in trace-quality reclaim (`pnpm reclaim:trace-quality`).
 - Read commands cover sessions, pinned messages, live views, usage, analytics, and trace-quality reports.
 - Hook helpers print Codex OTEL configuration and wrap the Claude Code hook installer.
 - Human output is terminal-safe; `--json` is available for scripts and automation.
@@ -97,18 +97,16 @@ Product-surface reference for AgentMonitor.
 
 ## Trace Quality
 
+- The **lean** trace-quality view (reframe, 2026-06): one trace per session,
+  served from the content-free `session_trace_summary` rollup, with detail
+  projected **on-demand** and never persisted. The old persisted warehouse
+  (traces/observations/scores/prompts/findings) was removed — that eval depth is
+  deferred to the export (Langfuse/medallion). See [trace-quality.md](trace-quality.md).
 - Local trace-quality APIs live under `/api/v2/trace-quality/*` and are isolated from legacy monitor endpoints.
-- Trace lists support date, project, agent, status, observation type, model, tool, score, and low-coverage filters with deterministic pagination.
-- Trace detail exposes parsed metadata, coverage, aggregate token/cost/duration totals, prompt attribution, and score summaries.
-- Prompt attribution links explicit prompt metadata, deterministic task-template refs, Claude `Skill` calls, and Codex `skills/.../SKILL.md` reads without copying prompt bodies into trace-quality prompt refs.
-- Local human/API review scores can be created, updated, and deleted without mutating source event or session rows.
-- Observation APIs expose both flat deterministic ordering and nested parent/child trees.
-- Score, prompt, and findings endpoints provide local review rollups for future evaluation workflows. Prompt rollups include generation count, median duration, total cost, token totals, score count, median numeric score, and last seen.
-- Local quality/alert findings are deterministic, read-only, and computed from SQLite (no Prometheus/Grafana). The taxonomy covers `high_error_rate`, `tool_failure_rate`, `model_error_rate`, `rate_limit_events`, `high_latency_p95`, `latency_spike`, `token_spike`, `cost_anomaly`, `daily_budget_risk`, `unknown_pricing`, `low_trace_coverage`, `collector_or_otel_dropoff`, `low_quality_score`, and per-observation `observation_error`. Each finding carries severity (`info`/`warning`/`high`/`critical`), evidence (metric value, threshold, window, sample size, impacted ids, coverage caveat), and a next-inspection target. Minimum-sample and baseline gates prevent false positives on sparse data; thresholds default in-code and are overridable via `AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH`. The findings endpoint accepts optional `kind` and `severity` query filters.
-- Aggregate trace-quality responses include coverage metadata so the UI can disclose matching traces, included traces, low-coverage exclusions, usage-bearing observations, missing-usage observations, and score coverage.
-- The Svelte app exposes a **Quality** sub-view under Analytics with two panels (Explorer | Dashboards toggle):
-  - **Explorer** — a trace list with coverage badges, a selected-trace inspector (aggregate stats, expandable observation tree, payload-policy-safe input/output summaries), and local human-review score controls (pass/fail, numeric, label, note). The score panel only lists human-authored scores; machine-written rows surface in the dashboards instead. Deep-linkable via `#analytics?view=quality&trace=<id>`. Drill-in links from Usage/Analytics top sessions, Live session detail, the Session browser, and Search results open the explorer scoped to a session (`&session=<id>`, which overrides the date filter and auto-opens a lone trace); the trace list supports a `session_id` filter for this.
-  - **Dashboards** — aggregate read-only panels over the shared date/project/agent window: finding cards (severity badge, evidence, coverage caveat, `kind`/`severity` filters, and an **Inspect** action that jumps into the explorer at the impacted trace/session), prompt-version rollups, and score trends (summary by score name plus rollups by day/model/tool/prompt/session/trace). Loaded lazily on first open.
+- Trace lists support `session_id`, `project`, `agent`, and date filters with deterministic pagination; rows carry aggregate token/cost/latency totals, telemetry coverage, and a derived quality scalar.
+- Observation detail is projected on-demand (one trace per session, every event/item an observation) in both flat deterministic ordering and a nested parent/child tree.
+- List/detail responses include read coverage (matching traces, included traces, usage-bearing vs missing-usage observations, a human-readable note) computed over the full filtered set, not just the page.
+- The Svelte app exposes a **Quality** sub-view under Analytics: the per-trace **Explorer** — a trace list with coverage badges and a selected-trace inspector (aggregate stats, expandable observation tree read from the loaded detail, payload-policy-safe input/output summaries). Deep-linkable via `#analytics?view=quality&trace=<id>`. Drill-in links from Usage/Analytics top sessions, Live session detail, the Session browser, and Search results open it scoped to a session (`&session=<id>`, which overrides the date filter and auto-opens a lone trace).
 
 ## Insights
 
@@ -175,18 +173,9 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
 | `/api/v2/usage/budgets` | GET | Read-only budget state from optional local budget config |
 | `/api/v2/usage/tier-feedback` | GET | Human-reviewed advisory tier feedback from usage evidence |
-| `/api/v2/trace-quality/traces` | GET | Trace-quality trace list with filters, aggregates, pagination, and coverage |
-| `/api/v2/trace-quality/traces/:id` | GET | Trace detail with parsed metadata, prompt refs, score summary, and coverage |
-| `/api/v2/trace-quality/traces/:id/observations` | GET | Flat and nested observation data for a trace |
-| `/api/v2/trace-quality/observations/:id` | GET | Observation detail with prompt refs and local scores |
-| `/api/v2/trace-quality/scores` | GET | Local trace-quality scores with filters and coverage |
-| `/api/v2/trace-quality/scores` | POST | Create a local human/API/code-evaluator/LLM-judge score after validating target and value shape |
-| `/api/v2/trace-quality/scores/:id` | PATCH | Update a local trace-quality score and clear stale value columns when value type changes |
-| `/api/v2/trace-quality/scores/:id` | DELETE | Delete a local trace-quality score |
-| `/api/v2/trace-quality/score-summary` | GET | Score rollups grouped by score name and value type |
-| `/api/v2/trace-quality/score-rollups` | GET | Score rollups grouped by trace, session, model, tool, prompt, and day |
-| `/api/v2/trace-quality/prompts` | GET | Prompt-version attribution rollups with generation, duration, cost, token, score, and last-seen metrics |
-| `/api/v2/trace-quality/findings` | GET | Read-only quality/cost/latency/telemetry findings with severity, evidence, and next-inspection targets; optional `kind`/`severity` filters |
+| `/api/v2/trace-quality/traces` | GET | Lean trace list (one per session) from `session_trace_summary` with `session_id`/`project`/`agent`/date filters, aggregates, pagination, and coverage |
+| `/api/v2/trace-quality/traces/:id` | GET | Summary-backed detail for one session trace |
+| `/api/v2/trace-quality/traces/:id/observations` | GET | Flat and nested observation tree, projected on-demand |
 | `/api/v2/insights` | GET | List persisted insights for the current historical slice |
 | `/api/v2/insights/:id` | GET | Fetch a single persisted insight |
 | `/api/v2/insights/generate` | POST | Generate and persist a new insight from analytics + usage data |

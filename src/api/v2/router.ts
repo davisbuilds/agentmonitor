@@ -43,17 +43,6 @@ import {
   deleteInsight,
   getDistinctProjects,
   getDistinctAgents,
-  createTraceQualityScore,
-  deleteTraceQualityScore,
-  getTraceQualityObservation,
-  getTraceQualityScoreRollups,
-  getTraceQualityScoreSummary,
-  isTraceQualityScoreMutationError,
-  isTraceQualityScoreNotFoundError,
-  listTraceQualityFindings,
-  listTraceQualityPrompts,
-  listTraceQualityScores,
-  updateTraceQualityScore,
 } from '../../db/v2-queries.js';
 import {
   getSessionTraceDetail,
@@ -125,26 +114,6 @@ function readTraceQualityParams(req: Request): {
     limit: safeInt(req.query.limit as string),
     offset: safeInt(req.query.offset as string),
   };
-}
-
-function readObjectBody(req: Request): Record<string, unknown> {
-  if (typeof req.body !== 'object' || req.body === null || Array.isArray(req.body)) {
-    throw new Error('Request body must be a JSON object');
-  }
-  return req.body as Record<string, unknown>;
-}
-
-function sendTraceQualityScoreError(err: unknown, res: Response, responseMessage: string): void {
-  if (isTraceQualityScoreMutationError(err)) {
-    res.status(isTraceQualityScoreNotFoundError(err) ? 404 : 400).json({ error: err.message });
-    return;
-  }
-  if (err instanceof Error && err.message === 'Request body must be a JSON object') {
-    res.status(400).json({ error: err.message });
-    return;
-  }
-  console.error(`[v2/trace-quality/scores] ${responseMessage}:`, err);
-  res.status(500).json({ error: responseMessage });
 }
 
 // --- Sessions ---
@@ -831,112 +800,9 @@ v2Router.get('/trace-quality/traces/:id', (req: Request, res: Response) => {
   }
 });
 
-v2Router.get('/trace-quality/observations/:id', (req: Request, res: Response) => {
-  try {
-    const result = getTraceQualityObservation(req.params['id'] as string);
-    if (!result) {
-      res.status(404).json({ error: 'Observation not found' });
-      return;
-    }
-    res.json(result);
-  } catch (err) {
-    console.error('[v2/trace-quality/observations/:id] Error:', err);
-    res.status(500).json({ error: 'Failed to get trace-quality observation' });
-  }
-});
-
-v2Router.get('/trace-quality/scores', (req: Request, res: Response) => {
-  try {
-    res.json(listTraceQualityScores({
-      ...readTraceQualityParams(req),
-      trace_id: safeString(req.query.trace_id as string | string[] | undefined),
-      observation_id: safeString(req.query.observation_id as string | string[] | undefined),
-      target_type: safeString(req.query.target_type as string | string[] | undefined),
-      target_id: safeString(req.query.target_id as string | string[] | undefined),
-      name: safeString((req.query.name ?? req.query.score_name) as string | string[] | undefined),
-      source: safeString(req.query.source as string | string[] | undefined),
-    }));
-  } catch (err) {
-    console.error('[v2/trace-quality/scores] Error:', err);
-    res.status(500).json({ error: 'Failed to list trace-quality scores' });
-  }
-});
-
-v2Router.post('/trace-quality/scores', (req: Request, res: Response) => {
-  try {
-    const score = createTraceQualityScore(readObjectBody(req));
-    res.status(201).json({ score });
-  } catch (err) {
-    sendTraceQualityScoreError(err, res, 'Failed to create trace-quality score');
-  }
-});
-
-v2Router.patch('/trace-quality/scores/:id', (req: Request, res: Response) => {
-  try {
-    const id = safeInt(req.params['id'] as string | undefined);
-    if (!id) {
-      res.status(400).json({ error: 'Invalid score id' });
-      return;
-    }
-    const score = updateTraceQualityScore(id, readObjectBody(req));
-    res.json({ score });
-  } catch (err) {
-    sendTraceQualityScoreError(err, res, 'Failed to update trace-quality score');
-  }
-});
-
-v2Router.delete('/trace-quality/scores/:id', (req: Request, res: Response) => {
-  try {
-    const id = safeInt(req.params['id'] as string | undefined);
-    if (!id) {
-      res.status(400).json({ error: 'Invalid score id' });
-      return;
-    }
-    if (!deleteTraceQualityScore(id)) {
-      res.status(404).json({ error: 'Score not found' });
-      return;
-    }
-    res.json({ deleted: true });
-  } catch (err) {
-    sendTraceQualityScoreError(err, res, 'Failed to delete trace-quality score');
-  }
-});
-
-v2Router.get('/trace-quality/score-summary', (req: Request, res: Response) => {
-  try {
-    res.json(getTraceQualityScoreSummary(readTraceQualityParams(req)));
-  } catch (err) {
-    console.error('[v2/trace-quality/score-summary] Error:', err);
-    res.status(500).json({ error: 'Failed to get trace-quality score summary' });
-  }
-});
-
-v2Router.get('/trace-quality/score-rollups', (req: Request, res: Response) => {
-  try {
-    res.json(getTraceQualityScoreRollups(readTraceQualityParams(req)));
-  } catch (err) {
-    console.error('[v2/trace-quality/score-rollups] Error:', err);
-    res.status(500).json({ error: 'Failed to get trace-quality score rollups' });
-  }
-});
-
-v2Router.get('/trace-quality/prompts', (req: Request, res: Response) => {
-  try {
-    res.json(listTraceQualityPrompts(readTraceQualityParams(req)));
-  } catch (err) {
-    console.error('[v2/trace-quality/prompts] Error:', err);
-    res.status(500).json({ error: 'Failed to list trace-quality prompts' });
-  }
-});
-
-v2Router.get('/trace-quality/findings', (req: Request, res: Response) => {
-  try {
-    res.json(listTraceQualityFindings(readTraceQualityParams(req)));
-  } catch (err) {
-    console.error('[v2/trace-quality/findings] Error:', err);
-    res.status(500).json({ error: 'Failed to list trace-quality findings' });
-  }
-});
+// Scores / findings / prompts / per-observation detail were removed in the
+// trace-quality reframe (Phase 3): that eval depth is deferred to the export
+// (Langfuse/medallion), see docs/project/POSITIONING.md.
 
 // --- Insights ---
 

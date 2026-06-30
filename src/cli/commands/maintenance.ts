@@ -9,7 +9,6 @@ import type Database from 'better-sqlite3';
 
 type ImportSource = 'claude-code' | 'codex' | 'all';
 type SyncSource = 'claude' | 'codex' | 'all';
-type QualitySource = 'events' | 'sessions' | 'all';
 
 function parseImportSource(value: string | undefined): ImportSource {
   const source = value ?? 'all';
@@ -23,14 +22,6 @@ function parseSyncSource(value: string | undefined): SyncSource {
   const source = value ?? 'all';
   if (source !== 'claude' && source !== 'codex' && source !== 'all') {
     throw invalidUsage(`Invalid --source: ${source}. Expected claude, codex, or all.`);
-  }
-  return source;
-}
-
-function parseQualitySource(value: string | undefined): QualitySource {
-  const source = value ?? 'all';
-  if (source !== 'events' && source !== 'sessions' && source !== 'all') {
-    throw invalidUsage(`Invalid --source: ${source}. Expected events, sessions, or all.`);
   }
   return source;
 }
@@ -301,57 +292,4 @@ export function registerMaintenanceCommands(): void {
     },
   });
 
-  registerCommand({
-    name: 'quality backfill',
-    group: 'Quality Commands',
-    summary: 'Backfill local trace-quality projection tables',
-    usage: 'quality backfill [--source events|sessions|all] [--session-id <id>] [--from <date>] [--to <date>] [--dry-run] [--force]',
-    examples: ['quality backfill --dry-run', 'quality backfill --source sessions --session-id abc123 --json'],
-    async handler(ctx, args) {
-      const parsed = parseOptionSet(
-        args,
-        new Set(['--source', '--session-id', '--from', '--to']),
-        new Set(['--dry-run', '--force']),
-      );
-      rejectExtraPositionals(parsed.positionals, 'amon quality backfill [options]');
-      const source = parseQualitySource(parsed.values.get('--source'));
-      const from = parseDateOption(parsed.values.get('--from'), '--from');
-      const to = parseDateOption(parsed.values.get('--to'), '--to');
-      const { initSchema } = await import('../../db/schema.js');
-      const { closeDb } = await import('../../db/connection.js');
-      const { backfillTraceQuality } = await import('../../trace-quality/service.js');
-      initSchema();
-      try {
-        const summary = backfillTraceQuality({
-          source,
-          sessionId: parsed.values.get('--session-id'),
-          from,
-          to,
-          dryRun: parsed.flags.has('--dry-run'),
-          force: parsed.flags.has('--force'),
-        });
-        const payload = {
-          dry_run: parsed.flags.has('--dry-run'),
-          source,
-          ...summary,
-        };
-        if (ctx.global.json) {
-          writeJson(ctx, payload);
-        } else {
-          writeStdout(ctx, [
-            'Trace quality backfill results',
-            `  sources_scanned: ${summary.sourcesScanned}`,
-            `  traces_created: ${summary.tracesCreated}`,
-            `  traces_updated: ${summary.tracesUpdated}`,
-            `  observations_created: ${summary.observationsCreated}`,
-            `  observations_updated: ${summary.observationsUpdated}`,
-            `  skipped_unchanged: ${summary.skippedUnchanged}`,
-            `  warnings: ${summary.warnings.length}`,
-          ].join('\n'));
-        }
-      } finally {
-        closeDb();
-      }
-    },
-  });
 }

@@ -24,9 +24,44 @@ import {
   projectTraceQuality,
   type ProjectedTraceQualityObservation,
 } from './projection.js';
-import { appendDateRangeConditions } from './queries.js';
 import { readTraceQualityProjectionInputForSession } from './source-readers.js';
 import type { TraceQualityCoverage } from './types.js';
+
+/** Shift a `YYYY-MM-DD` date string by whole days (UTC). */
+function addDaysToDateString(date: string, days: number): string | null {
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+}
+
+/**
+ * Append date-range conditions, treating a date-only `date_to` as the exclusive
+ * next day so timestamped rows on that day are included (not dropped by a bare
+ * `<= 'YYYY-MM-DD'`).
+ */
+function appendDateRangeConditions(
+  conditions: string[],
+  values: unknown[],
+  column: string,
+  dateFrom: string | undefined,
+  dateTo: string | undefined,
+): void {
+  if (dateFrom) {
+    conditions.push(`datetime(${column}) >= datetime(?)`);
+    values.push(dateFrom);
+  }
+  if (dateTo) {
+    const nextDay = /^\d{4}-\d{2}-\d{2}$/.test(dateTo) ? addDaysToDateString(dateTo, 1) : null;
+    if (nextDay) {
+      conditions.push(`datetime(${column}) < datetime(?)`);
+      values.push(nextDay);
+    } else {
+      conditions.push(`datetime(${column}) <= datetime(?)`);
+      values.push(dateTo);
+    }
+  }
+}
 
 interface SessionTraceSummaryRow {
   session_id: string;

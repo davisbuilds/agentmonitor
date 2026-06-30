@@ -301,12 +301,6 @@ test('source readers return ordered database rows for projection without mutatin
   const db = getDb();
   db.exec(`
     DELETE FROM trace_quality_export_state;
-    DELETE FROM trace_quality_projection_state;
-    DELETE FROM trace_quality_observation_prompts;
-    DELETE FROM trace_quality_prompt_refs;
-    DELETE FROM trace_quality_scores;
-    DELETE FROM trace_quality_observations;
-    DELETE FROM trace_quality_traces;
     DELETE FROM session_items;
     DELETE FROM session_turns;
     DELETE FROM tool_calls;
@@ -380,8 +374,4 @@ test('source readers return ordered database rows for projection without mutatin
   const projected = projectTraceQuality(input);
   assert.equal(projected.traces.length, 1);
   assert.equal(projected.observations.length, 1);
-
-  const persistedTraceCount = (db.prepare('SELECT COUNT(*) AS c FROM trace_quality_traces')
-    .get() as { c: number }).c;
-  assert.equal(persistedTraceCount, 0);
 });

@@ -423,11 +423,18 @@ export function maintainSessionTraceSummary(sessionId: string): void {
  */
 export function ensureSessionTraceSummaryBackfill(): void {
   const db = getDb();
-  const existing = db.prepare('SELECT projection_version FROM session_trace_summary LIMIT 1').get() as
-    | { projection_version: string }
-    | undefined;
-  // Up to date: a row exists and was built by the current derivation version.
-  if (existing && existing.projection_version === SESSION_TRACE_SUMMARY_VERSION) return;
+  // Re-backfill when the table is empty (but sessions exist) OR when any row is
+  // incompletely migrated: a stale projection_version, or a NULL trace_id that a
+  // partial/interrupted backfill could have left behind. Checking a single row's
+  // version is not enough — one up-to-date row would mask stale/NULL siblings,
+  // leaving the table permanently un-openable (NULL trace_id ⇒ no detail).
+  const total = (db.prepare('SELECT COUNT(*) AS c FROM session_trace_summary').get() as { c: number }).c;
+  const incomplete = (db.prepare(
+    `SELECT COUNT(*) AS c FROM session_trace_summary
+     WHERE projection_version IS NOT ? OR trace_id IS NULL`,
+  ).get(SESSION_TRACE_SUMMARY_VERSION) as { c: number }).c;
+  if (total > 0 && incomplete === 0) return; // fully migrated
+
   const hasSessions =
     db.prepare('SELECT 1 FROM browsing_sessions LIMIT 1').get() ?? db.prepare('SELECT 1 FROM events LIMIT 1').get();
   if (!hasSessions) return;
