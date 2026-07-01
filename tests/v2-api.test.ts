@@ -15,6 +15,7 @@ let closeDb: (() => void) | null = null;
 let db: Database;
 /* eslint-disable @typescript-eslint/consistent-type-imports */
 let setInsightGeneratorForTests: typeof import('../src/insights/service.js').setInsightGeneratorForTests;
+let setInsightProviderConfigForTests: typeof import('../src/insights/service.js').setInsightProviderConfigForTests;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 
 // Sample session data to seed into the DB
@@ -78,7 +79,7 @@ before(async () => {
   const dbModule = await import('../src/db/connection.js');
   closeDb = dbModule.closeDb;
   initSchema();
-  ({ setInsightGeneratorForTests } = await import('../src/insights/service.js'));
+  ({ setInsightGeneratorForTests, setInsightProviderConfigForTests } = await import('../src/insights/service.js'));
   setInsightGeneratorForTests(async (params) => ({
     title: `${params.kind} generated insight`,
     content: `# ${params.kind} generated insight\n\nGenerated for ${params.date_from} to ${params.date_to}.`,
@@ -1793,6 +1794,10 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
 
   test('returns generator config error when no API key is available and no test override is installed', async () => {
     setInsightGeneratorForTests(null);
+    // Force the no-key path regardless of the developer's ambient OPENAI_API_KEY.
+    // config.insights is a startup singleton, so this override — not env — is what
+    // makes the test hermetic across machines/CI.
+    setInsightProviderConfigForTests({ openai: { apiKey: null } });
     try {
       const res = await fetch(`${baseUrl}/api/v2/insights/generate`, {
         method: 'POST',
@@ -1807,6 +1812,7 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
       const body = await res.json() as { error: string };
       assert.match(body.error, /OPENAI_API_KEY/);
     } finally {
+      setInsightProviderConfigForTests(null);
       setInsightGeneratorForTests(async (params) => ({
         title: `${params.kind} generated insight`,
         content: `# ${params.kind} generated insight\n\nGenerated for ${params.date_from} to ${params.date_to}.`,
