@@ -7,13 +7,13 @@ import { writeJson, writeStdout } from '../output.js';
 import type { CliContext } from '../output.js';
 import type Database from 'better-sqlite3';
 
-type ImportSource = 'claude-code' | 'codex' | 'all';
+type ImportSource = 'claude-code' | 'codex' | 'antigravity' | 'all';
 type SyncSource = 'claude' | 'codex' | 'all';
 
 function parseImportSource(value: string | undefined): ImportSource {
   const source = value ?? 'all';
-  if (source !== 'claude-code' && source !== 'codex' && source !== 'all') {
-    throw invalidUsage(`Invalid --source: ${source}. Expected claude-code, codex, or all.`);
+  if (source !== 'claude-code' && source !== 'codex' && source !== 'antigravity' && source !== 'all') {
+    throw invalidUsage(`Invalid --source: ${source}. Expected claude-code, codex, antigravity, or all.`);
   }
   return source;
 }
@@ -108,12 +108,12 @@ export function registerMaintenanceCommands(): void {
     name: 'import',
     group: 'Data Commands',
     summary: 'Import historical Claude Code and Codex events',
-    usage: 'import [--source claude-code|codex|all] [--from <date>] [--to <date>] [--dry-run] [--force]',
+    usage: 'import [--source claude-code|codex|antigravity|all] [--from <date>] [--to <date>] [--dry-run] [--force]',
     examples: ['import --source codex --dry-run', 'import --source all --from 2026-06-01 --json'],
     async handler(ctx, args) {
       const parsed = parseOptionSet(
         args,
-        new Set(['--source', '--from', '--to', '--claude-dir', '--codex-dir']),
+        new Set(['--source', '--from', '--to', '--claude-dir', '--codex-dir', '--antigravity-dir']),
         new Set(['--dry-run', '--force']),
       );
       rejectExtraPositionals(parsed.positionals, 'amon import [options]');
@@ -134,6 +134,7 @@ export function registerMaintenanceCommands(): void {
           force: parsed.flags.has('--force'),
           claudeDir: parsed.values.get('--claude-dir'),
           codexDir: parsed.values.get('--codex-dir'),
+          antigravityDir: parsed.values.get('--antigravity-dir'),
         });
         const payload = {
           dry_run: parsed.flags.has('--dry-run'),

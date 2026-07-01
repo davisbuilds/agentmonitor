@@ -617,10 +617,14 @@ after(async () => {
 describe('Import orchestrator integration', () => {
   let claudeDir: string;
   let codexDir: string;
+  let antigravityDir: string;
 
   before(() => {
     claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-claude-'));
     codexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-codex-'));
+    // Empty (no conversations/*.db) so `source: 'all'` stays isolated from the
+    // developer's real ~/.gemini/antigravity-cli during tests.
+    antigravityDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-agr-'));
 
     // Mock Claude Code logs
     fs.mkdirSync(path.join(claudeDir, 'projects', 'my-project'), { recursive: true });
@@ -694,6 +698,7 @@ describe('Import orchestrator integration', () => {
       source: 'all',
       claudeDir,
       codexDir,
+      antigravityDir,
       force: true,
     });
 
