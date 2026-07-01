@@ -40,9 +40,27 @@ Each conversation `.db` has a `steps` table whose columns are a decomposed
 `oneof step` payload for that kind. `gen_metadata` holds the per-generation record
 (model + `UsageMetadata`).
 
-## Pinned: token usage — `google.cloud.aiplatform.master.UsageMetadata`
+## Real token accounting — course-correction (Task 2 exploration)
 
-Google's **stable public** schema, so these numbers are version-durable:
+Empirically decoding a real `gen_metadata` blob (2026-07-01) showed that the
+`UsageMetadata` message below appears as the **request generation config**
+(e.g. `max_output_tokens=8192`, `thoughts=0`), **not** the persisted response usage.
+The actual per-turn token accounting is a **private `CortexGeneratorMetadata`**
+message (proto `devtools/jetski/telemetry/extensions/cortex_generator_metadata.proto`,
+message `CortexGeneratorMetadata` — **not** recovered by protodump). Its usage field
+*names* are in the binary (`num_input_tokens`, `num_output_tokens`,
+`num_prompt_tokens`, `num_system_prompt_tokens`, `thinking_output_tokens`,
+`input_token_count`, `output_token_count`), but the **field numbers are not yet
+descriptor-pinned**. A wire-walk of one session found a usage-shaped record with
+`{2: 28362, 3: 3046, 9: 2599, 10: 447, 1: 1016}` (plausibly input / output /
+thinking / … ) — **unconfirmed**, single-sample, and deliberately not wired to cost
+yet (guessing here risks the ~10× double-bill the spec warns against). Pinning this
+mapping is the open item blocking cost extraction (see the spec's cost criterion).
+
+## Pinned: token usage schema — `google.cloud.aiplatform.master.UsageMetadata`
+
+Authoritative schema (used for the request config in practice; see the
+course-correction above). Numbers are version-durable:
 
 | Field | # |
 |---|---|
@@ -99,10 +117,10 @@ nor errored — a scanner limitation, not a write failure). So these internals a
 decoded empirically against fixtures, cross-checked with the plaintext strings we
 know survive:
 
-- `CortexStepMetadata` internal layout — exactly where `model` and the
-  `UsageMetadata` sub-message nest within `gen_metadata`. Recon (raw wire-walk)
-  located model near `gen_metadata` fields 1.19/1.21 and a usage block at 1.17.2.* /
-  1.4.* — treat as **unverified** until the Task 2 fixture asserts it.
+- **`CortexGeneratorMetadata` usage field numbers** — the real cost-bearing source
+  (see course-correction above). Field *names* known; numbers unpinned. Model id is
+  reliably readable (`gen_metadata` fields 1.19 = `gemini-pro-default`, 1.21 =
+  `Gemini 3.1 Pro (High)`).
 - Per-kind payload message fields (e.g. `CortexStepRunCommand` command/output).
 
 This partial-pin is intentional and honest: the cost-bearing surface (token counts +
