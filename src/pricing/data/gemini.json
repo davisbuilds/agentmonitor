@@ -4,7 +4,8 @@
   "models": {
     "gemini-3.1-pro-preview": {
       "aliases": [
-        "gemini-3.1-pro-preview-customtools"
+        "gemini-3.1-pro-preview-customtools",
+        "gemini-pro-default"
       ],
       "inputCostPerMTok": 2,
       "outputCostPerMTok": 12,
