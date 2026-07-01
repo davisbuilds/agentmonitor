@@ -13,6 +13,9 @@ import {
   STEP_FIELDS,
   STEP_PAYLOAD_KINDS,
   USAGE_METADATA_FIELDS,
+  GEN_METADATA_WRAPPER_FIELD,
+  GENERATOR_METADATA_FIELDS,
+  CORTEX_USAGE_FIELDS,
 } from './fieldmap.js';
 
 export type WireType = 0 | 1 | 2 | 5;
@@ -98,6 +101,14 @@ export function getVarint(
   return fields.get(field)?.[0]?.value;
 }
 
+/** First length-delimited payload for a field, or undefined. */
+function getBytes(
+  fields: Map<number, ProtoField[]>,
+  field: number,
+): Buffer | undefined {
+  return fields.get(field)?.[0]?.bytes;
+}
+
 export interface StepEnvelope {
   /** CortexStepType enum value (== the payload-kind field number). */
   type?: number;
@@ -160,5 +171,78 @@ export function decodeGoogleUsage(bytes: Buffer): GoogleUsage {
     cachedContentTokenCount: getVarint(f, USAGE_METADATA_FIELDS.cachedContentTokenCount) ?? 0,
     toolUsePromptTokenCount: getVarint(f, USAGE_METADATA_FIELDS.toolUsePromptTokenCount) ?? 0,
     thoughtsTokenCount: getVarint(f, USAGE_METADATA_FIELDS.thoughtsTokenCount) ?? 0,
+  };
+}
+
+export interface CortexUsage {
+  systemPromptTokens: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  thinkingTokens: number;
+  answerTokens: number;
+}
+
+export interface GeneratorMetadata {
+  /** Model id, e.g. "gemini-pro-default" (falls back to the display string). */
+  model?: string;
+  usage?: CortexUsage;
+}
+
+/**
+ * Decode a `gen_metadata.data` blob: the real per-generation record. Navigates the
+ * wrapper → CortexGeneratorMetadata → CortexUsage using the empirically-pinned
+ * field numbers (see fieldmap.ts + baseline doc). This is the cost-bearing source.
+ */
+export function decodeGeneratorMetadata(blob: Buffer): GeneratorMetadata {
+  const wrapper = decodeMessage(blob);
+  const gmBytes = getBytes(wrapper, GEN_METADATA_WRAPPER_FIELD);
+  if (!gmBytes) return {};
+  const gm = decodeMessage(gmBytes);
+
+  const modelBytes =
+    getBytes(gm, GENERATOR_METADATA_FIELDS.model) ??
+    getBytes(gm, GENERATOR_METADATA_FIELDS.modelDisplay);
+  const model = modelBytes ? modelBytes.toString('utf-8') : undefined;
+
+  const usageBytes = getBytes(gm, GENERATOR_METADATA_FIELDS.usage);
+  let usage: CortexUsage | undefined;
+  if (usageBytes) {
+    const u = decodeMessage(usageBytes);
+    usage = {
+      systemPromptTokens: getVarint(u, CORTEX_USAGE_FIELDS.systemPromptTokens) ?? 0,
+      inputTokens: getVarint(u, CORTEX_USAGE_FIELDS.inputTokens) ?? 0,
+      outputTokens: getVarint(u, CORTEX_USAGE_FIELDS.outputTokens) ?? 0,
+      cachedTokens: getVarint(u, CORTEX_USAGE_FIELDS.cachedTokens) ?? 0,
+      thinkingTokens: getVarint(u, CORTEX_USAGE_FIELDS.thinkingTokens) ?? 0,
+      answerTokens: getVarint(u, CORTEX_USAGE_FIELDS.answerTokens) ?? 0,
+    };
+  }
+  return { model, usage };
+}
+
+export interface BillingTokens {
+  /** Uncached, full-rate prompt tokens (system + non-cached input). */
+  tokensIn: number;
+  /** Total output tokens (includes reasoning). */
+  tokensOut: number;
+  /** Cached prompt tokens (billed at the cache-read rate). */
+  cacheReadTokens: number;
+  /** Reasoning tokens (informational lane; already inside tokensOut). */
+  thoughtsTokens: number;
+}
+
+/**
+ * Map CortexUsage onto AgentMonitor's token buckets, honoring the cache-inclusive
+ * invariant: tokensIn (uncached) and cacheReadTokens (cached) are additive and
+ * never overlap. system + input are separate CortexUsage buckets (a distinct
+ * num_system_prompt_tokens field exists), so both count as full-rate input.
+ */
+export function deriveBillingTokens(u: CortexUsage): BillingTokens {
+  return {
+    tokensIn: u.systemPromptTokens + u.inputTokens,
+    tokensOut: u.outputTokens,
+    cacheReadTokens: u.cachedTokens,
+    thoughtsTokens: u.thinkingTokens,
   };
 }

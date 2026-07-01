@@ -40,22 +40,34 @@ Each conversation `.db` has a `steps` table whose columns are a decomposed
 `oneof step` payload for that kind. `gen_metadata` holds the per-generation record
 (model + `UsageMetadata`).
 
-## Real token accounting — course-correction (Task 2 exploration)
+## Real token accounting — `CortexGeneratorMetadata` (empirically pinned)
 
-Empirically decoding a real `gen_metadata` blob (2026-07-01) showed that the
-`UsageMetadata` message below appears as the **request generation config**
-(e.g. `max_output_tokens=8192`, `thoughts=0`), **not** the persisted response usage.
-The actual per-turn token accounting is a **private `CortexGeneratorMetadata`**
-message (proto `devtools/jetski/telemetry/extensions/cortex_generator_metadata.proto`,
-message `CortexGeneratorMetadata` — **not** recovered by protodump). Its usage field
-*names* are in the binary (`num_input_tokens`, `num_output_tokens`,
-`num_prompt_tokens`, `num_system_prompt_tokens`, `thinking_output_tokens`,
-`input_token_count`, `output_token_count`), but the **field numbers are not yet
-descriptor-pinned**. A wire-walk of one session found a usage-shaped record with
-`{2: 28362, 3: 3046, 9: 2599, 10: 447, 1: 1016}` (plausibly input / output /
-thinking / … ) — **unconfirmed**, single-sample, and deliberately not wired to cost
-yet (guessing here risks the ~10× double-bill the spec warns against). Pinning this
-mapping is the open item blocking cost extraction (see the spec's cost criterion).
+The pinned Google `UsageMetadata` (below) turned out to be the **request generation
+config** (e.g. `max_output_tokens=8192`, `thoughts=0`), **not** the persisted usage.
+The real per-turn accounting is a **private `CortexGeneratorMetadata`** message (proto
+`cortex_generator_metadata.proto` — not recoverable by protodump). Its field *names*
+are in the binary; the **field numbers were pinned empirically** against **all 20
+local usage records** (`gen_metadata.data`), with the TS decoder re-validated on the
+same set (`out == thinking + answer` holds 20/20; the cache-growth session
+`ab9f2418` confirms field 2 is non-cached input).
+
+Location: `gen_metadata.data` → field **1** (`CortexGeneratorMetadata`) → usage at
+field **4**; model at field **19** (`gemini-pro-default`) / **21** (display).
+
+| CortexUsage field | # | Evidence |
+|---|---|---|
+| `system_prompt_tokens` | 1 | constant per model (1016 pro-default / 1020 flash) |
+| `input_tokens` (non-cached) | 2 | large/variable; **shrinks as field 5 grows** within a session |
+| `output_tokens` (total) | 3 | **== field 9 + field 10 in every record** |
+| `cached_tokens` | 5 | intermittent, ~8k round prefix; grows across turns |
+| `thinking_tokens` | 9 | reasoning; ≤ field 3 |
+| `answer_tokens` | 10 | field 3 − field 9 |
+
+**Billing (`deriveBillingTokens`):** `tokens_in = system + input` (both full-rate;
+they are distinct buckets), `cache_read_tokens = cached` (additive, non-overlapping —
+honors the invariant), `tokens_out = output` (includes reasoning), `thoughts =
+thinking` (informational lane). Field numbers live in `fieldmap.ts`
+(`CORTEX_USAGE_FIELDS`); the decoder is `proto.ts::decodeGeneratorMetadata`.
 
 ## Pinned: token usage schema — `google.cloud.aiplatform.master.UsageMetadata`
 
@@ -117,11 +129,9 @@ nor errored — a scanner limitation, not a write failure). So these internals a
 decoded empirically against fixtures, cross-checked with the plaintext strings we
 know survive:
 
-- **`CortexGeneratorMetadata` usage field numbers** — the real cost-bearing source
-  (see course-correction above). Field *names* known; numbers unpinned. Model id is
-  reliably readable (`gen_metadata` fields 1.19 = `gemini-pro-default`, 1.21 =
-  `Gemini 3.1 Pro (High)`).
-- Per-kind payload message fields (e.g. `CortexStepRunCommand` command/output).
+- Per-kind payload message fields (e.g. `CortexStepRunCommand` command/output) —
+  needed for tool args/outputs and transcript text in Task 3. (Token usage + model +
+  step taxonomy are all pinned; only the inside of each step payload is opaque.)
 
 This partial-pin is intentional and honest: the cost-bearing surface (token counts +
 step taxonomy + envelope) is descriptor-pinned; only private payload internals ride

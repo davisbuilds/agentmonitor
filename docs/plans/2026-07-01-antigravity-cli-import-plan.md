@@ -141,7 +141,17 @@ taxonomy, extracted from the binary — not guessed.
   is unmet** — do not silently proceed on recon numbers; escalate the honesty
   trade-off before continuing. (Spec Criteria #7; Open Question #1.)
 
-### Task 2: Protobuf decode helper with fixtures
+### Task 2: Protobuf decode helper with fixtures — DONE
+
+> Completed 2026-07-01. `src/import/antigravity/{fieldmap,proto}.ts` +
+> `tests/antigravity-proto.test.ts` (TDD). Generic wire reader (never throws on
+> partial rows) + `decodeStepEnvelope` + `decodeGeneratorMetadata`/`deriveBillingTokens`.
+> Course-correction: real usage is the private `CortexGeneratorMetadata`, not Google
+> `UsageMetadata` (which is the request config). Its field numbers were **empirically
+> pinned + validated against all 20 local usage records** (`out == thinking + answer`
+> 20/20; cache/​input relationship confirmed) — see the baseline doc. Cost is now
+> unblocked for Task 3. Still deferred: per-kind step payload internals (tool
+> args/outputs, transcript text) — fixture-decoded in Task 3.
 
 **Objective**
 

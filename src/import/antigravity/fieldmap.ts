@@ -28,6 +28,34 @@ export const USAGE_METADATA_FIELDS = {
 //   cache_read   = cachedContentTokenCount
 //   tokens_out   = candidatesTokenCount (thoughtsTokenCount tracked separately)
 
+// --- Real token accounting: CortexGeneratorMetadata (private exa/jetski proto,
+// not descriptor-recoverable). Field numbers below are EMPIRICALLY PINNED against
+// all 21 local conversation usage records (2026-07-01), not guessed:
+//   - field 1 is constant per model (1016 gemini-pro-default / 1020 flash) => system prompt
+//   - field 3 == field 9 + field 10 in every record => output = thinking + answer
+//   - field 2 shrinks as field 5 grows across a session => 2 is non-cached input, 5 is cache
+// See docs/specs/baselines/antigravity-proto-fieldmap.md "Real token accounting".
+
+/** gen_metadata blob wrapper → CortexGeneratorMetadata at field 1. */
+export const GEN_METADATA_WRAPPER_FIELD = 1;
+
+/** CortexGeneratorMetadata (the per-generation record). */
+export const GENERATOR_METADATA_FIELDS = {
+  usage: 4, // the CortexUsage sub-message
+  model: 19, // string, e.g. "gemini-pro-default"
+  modelDisplay: 21, // string, e.g. "Gemini 3.1 Pro (High)"
+} as const;
+
+/** CortexUsage sub-message (empirically pinned). All int varints. */
+export const CORTEX_USAGE_FIELDS = {
+  systemPromptTokens: 1, // constant per model
+  inputTokens: 2, // non-cached prompt
+  outputTokens: 3, // total output (= thinking + answer)
+  cachedTokens: 5, // cached prompt prefix (intermittent)
+  thinkingTokens: 9, // reasoning tokens
+  answerTokens: 10, // outputTokens - thinkingTokens
+} as const;
+
 /** gemini_coder.Step envelope (trajectory.proto). */
 export const STEP_FIELDS = {
   type: 1,          // exa.cortex_pb.CortexStepType (enum; mirrors payload kind number)

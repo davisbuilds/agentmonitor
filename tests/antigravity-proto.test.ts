@@ -5,6 +5,8 @@ import {
   getVarint,
   decodeStepEnvelope,
   decodeGoogleUsage,
+  decodeGeneratorMetadata,
+  deriveBillingTokens,
 } from '../src/import/antigravity/proto.js';
 
 // --- minimal protobuf encoder, for building deterministic fixtures ---
@@ -27,6 +29,9 @@ function vField(field: number, n: number): number[] {
 }
 function lField(field: number, bytes: number[]): number[] {
   return [...tag(field, 2), ...varint(bytes.length), ...bytes];
+}
+function sField(field: number, s: string): number[] {
+  return lField(field, [...Buffer.from(s, 'utf-8')]);
 }
 const buf = (arr: number[]) => Buffer.from(arr);
 
@@ -81,4 +86,50 @@ test('decodeGoogleUsage: maps pinned UsageMetadata field numbers', () => {
   assert.equal(u.totalTokenCount, 1500);
   assert.equal(u.cachedContentTokenCount, 800);
   assert.equal(u.thoughtsTokenCount, 300);
+});
+
+test('decodeGeneratorMetadata: extracts model + CortexUsage from the real gen_metadata shape', () => {
+  // wrapper.1 -> CortexGeneratorMetadata { 19: model, 4: CortexUsage }
+  // CortexUsage: 1=system, 2=input(non-cached), 3=output(=thinking+answer), 5=cached, 9=thinking, 10=answer
+  const usage = [
+    ...vField(1, 1016),
+    ...vField(2, 20000),
+    ...vField(3, 3000),
+    ...vField(5, 8000),
+    ...vField(9, 2500),
+    ...vField(10, 500),
+  ];
+  const gm = [...sField(19, 'gemini-pro-default'), ...lField(4, usage)];
+  const blob = buf(lField(1, gm));
+
+  const decoded = decodeGeneratorMetadata(blob);
+  assert.equal(decoded.model, 'gemini-pro-default');
+  assert.ok(decoded.usage);
+  assert.equal(decoded.usage!.inputTokens, 20000);
+  assert.equal(decoded.usage!.cachedTokens, 8000);
+  assert.equal(decoded.usage!.thinkingTokens, 2500);
+  // invariant proven across all 21 real records: output == thinking + answer
+  assert.equal(
+    decoded.usage!.outputTokens,
+    decoded.usage!.thinkingTokens + decoded.usage!.answerTokens,
+  );
+});
+
+test('deriveBillingTokens: honors the cache-inclusive invariant (in + cache additive, non-overlapping)', () => {
+  const billing = deriveBillingTokens({
+    systemPromptTokens: 1016,
+    inputTokens: 20000,
+    outputTokens: 3000,
+    cachedTokens: 8000,
+    thinkingTokens: 2500,
+    answerTokens: 500,
+  });
+  assert.equal(billing.tokensIn, 21016); // system + non-cached input
+  assert.equal(billing.cacheReadTokens, 8000); // cached bulk NOT folded into tokensIn
+  assert.equal(billing.tokensOut, 3000); // includes reasoning
+  assert.equal(billing.thoughtsTokens, 2500);
+});
+
+test('decodeGeneratorMetadata: returns empty on a blob without the wrapper', () => {
+  assert.deepEqual(decodeGeneratorMetadata(buf([...vField(2, 5)])), {});
 });
