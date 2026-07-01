@@ -35,7 +35,7 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 - **Reframed (2026-06) to a lean, collector-not-backend view** — shipped: one trace per session served from the content-free `session_trace_summary`, detail projected on-demand, and three `/api/v2/trace-quality/{traces,traces/:id,traces/:id/observations}` reads. The persisted trace/observation/score/prompt warehouse (~half the DB) was removed and is reclaimed via the opt-in `pnpm reclaim:trace-quality`. The eval depth (scores/findings/prompts) is **deferred to the export**, not reinvented locally. See [../system/trace-quality.md](../system/trace-quality.md) and [POSITIONING.md](POSITIONING.md).
 - Keep coverage honesty as a first principle: summary-only telemetry (e.g. Codex OTEL) must never render as full fidelity in the UI or API.
-- The export is **deferred** (see Later): the summary is already shaped to medallion's `silver.agent_runs`, and the `trace_quality_export_state` seam stays dormant for the Langfuse depth path.
+- The content-free aggregate export is **shipped** as `amon warehouse publish`: it publishes `session_trace_summary` into AgentMonitor's own `agentmonitor.runs` schema/table with lineage and an optional `medallion_bi` grant. The Langfuse depth path remains deferred via `trace_quality_export_state`.
 
 ## Next
 
@@ -49,7 +49,8 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 - Support richer Codex-native live fidelity beyond the current OTEL summary path.
 - Revisit packaging or alternate runtime distribution work once the canonical web contract is stable.
 - Expand multi-agent support where new integrations can map cleanly onto the existing monitor, history, and live models.
-- Build the **deferred trace-quality export** (its own spec): publish the content-free `session_trace_summary` to medallion's `silver.agent_runs` (near-free; mirrors prism's `insight` pattern), and/or forward the on-demand projection to Langfuse for trace/eval depth via the dormant `trace_quality_export_state` seam. Must stay manual-first, redaction-aware, dry-run-previewable, and never required for local functionality.
+- Build the **deferred Langfuse trace-quality depth export**: forward the on-demand projection to Langfuse for trace/eval depth via the dormant `trace_quality_export_state` seam. Keep it manual-first, redaction-aware, dry-run-previewable, and never required for local functionality.
+- Optional medallion-owned follow-up: add an adoption-KPI-excluded assistant/coding-agent usage view over `agentmonitor.runs`; do not fold AgentMonitor's personal account telemetry into `gold.adoption_kpis_daily`.
 
 ## Working Principles
 
