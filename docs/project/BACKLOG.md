@@ -36,3 +36,21 @@ Working list of opportunities noticed while implementing specs. These are not co
 - Define a formal tokenmaxxing task-template attribution contract. Prompt attribution currently records task-template refs only from explicit metadata because broad file-path inference would be speculative without a stable template path or metadata convention.
 - Decide how prompt rollups should treat session-scoped scores. Task 6 counts direct observation/source-target scores plus trace-level scores for traces containing a prompt; session-level scores remain excluded because assigning them to every prompt in a session may overstate attribution.
 - Let an ambiguous explicit prompt hint fall through to skill/template inference instead of vetoing it. Prompt attribution resolves explicit metadata, then task template, then inferred skills, and returns on the first tier that yields a ref *or* a warning. Today a partial explicit hint (e.g. `prompt_version` with no `prompt_name`) emits a warning and short-circuits, so a deterministic `Skill`/`SKILL.md` attribution on the same observation is dropped. A valid explicit ref should still win, but an explicit *warning* (no ref) should keep the warning and continue to lower tiers. Deferred because the overlap is rare, the prompts surface has no consumer yet, and it would change attribution behavior; revisit once the prompts UI ships.
+
+## Pricing (verified against Google's Gemini API pricing page, 2026-07-01)
+
+- **Add `gemini-3.5-flash` to `src/pricing/data/gemini.json`.** It's a real, priced
+  Google model ($1.50/M input, $9.00/M output, $0.15/M cache read) but is missing
+  from the file, so Antigravity flash sessions (internal id `gemini-3-flash-a`,
+  display "Gemini 3.5 Flash") currently resolve to `pricing_status=unknown` and get
+  no cost. Once added, alias the Antigravity id(s) to it like
+  `gemini-pro-default`→`gemini-3.1-pro-preview`. (Verified: `gemini-3.1-pro-preview`
+  rates $2/$12/$0.20 already match Google exactly for ≤200k prompts.)
+- **Model prompt-size price tiers (engine-wide, not Antigravity-specific).** Google
+  doubles Gemini rates above 200k prompt tokens (e.g. 3.1 Pro input $2→$4, output
+  $12→$18, cache $0.20→$0.40). `PricingRegistry`/`gemini.json` store a single flat
+  per-model rate, so any model with a >200k context window under-bills large
+  sessions ~2×. Would need a tiered pricing shape (`{ threshold, rates }[]`) and a
+  `calculate()` that picks the tier by prompt size. Affects Gemini today; other
+  providers use similar long-context tiers. Revisit if long-context cost accuracy
+  matters.
