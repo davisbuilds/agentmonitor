@@ -66,6 +66,14 @@ interface UsageConfig {
   findingsThresholdsPath: string;
 }
 
+interface WarehouseConfig {
+  enabled: boolean;
+  dsn: string | null;
+  account: string;
+  schema: string;
+  biRole: string | null;
+}
+
 function isAgentMonitorRepo(dir: string): boolean {
   const packageJsonPath = path.join(dir, 'package.json');
   if (!fs.existsSync(packageJsonPath)) return false;
@@ -163,6 +171,18 @@ function parseSyncConfig(env: EnvMap): SyncConfig {
   };
 }
 
+function parseWarehouseConfig(env: EnvMap): WarehouseConfig {
+  const dsn = env.AGENTMONITOR_WAREHOUSE_DSN?.trim() || null;
+  const rawBiRole = env.AGENTMONITOR_WAREHOUSE_BI_ROLE?.trim();
+  return {
+    enabled: Boolean(dsn),
+    dsn,
+    account: env.AGENTMONITOR_WAREHOUSE_ACCOUNT?.trim() || 'local',
+    schema: env.AGENTMONITOR_WAREHOUSE_SCHEMA?.trim() || 'agentmonitor',
+    biRole: rawBiRole === '' ? null : (rawBiRole ?? 'medallion_bi'),
+  };
+}
+
 export function createConfig(env: EnvMap = process.env, cwd: string = process.cwd()) {
   return {
     port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1),
@@ -185,6 +205,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
         || './config/trace-quality-findings.json',
     } satisfies UsageConfig,
     insights: parseInsightsConfig(env),
+    warehouse: parseWarehouseConfig(env),
   };
 }
 
