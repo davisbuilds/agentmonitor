@@ -53,8 +53,10 @@ Reconnaissance against local artifacts and the shipped `language_server` binary:
 ## Scope
 
 **In scope**
-- Historical import of `~/.gemini/antigravity-cli/conversations/**/*.db` via the
-  existing import + `watched_files` de-dupe template (`src/import/`, `src/watcher/`).
+- Historical import of `~/.gemini/antigravity-cli/conversations/**/*.db` reusing the
+  two existing ledgers: the importer path de-dupes via `import_state`
+  (`src/import/`), the session-sync path de-dupes via `watched_files`
+  (`src/watcher/`).
 - A new `src/import/antigravity.ts` parser: open each conversation DB read-only,
   decode step/usage/gen protobuf, emit normalized events on the standard contract.
 - Cost + usage attribution using the existing pricing engine and
@@ -86,11 +88,14 @@ Reconnaissance against local artifacts and the shipped `language_server` binary:
 4. Step events map onto the existing event taxonomy (prompt / llm_request /
    llm_response / tool_use / lifecycle) via a documented `CORTEX_STEP_TYPE_*`
    mapping; unmapped step types are ingested as a typed generic rather than dropped.
-5. Re-running import over unchanged DBs is a no-op (hash-based `watched_files`
-   de-dupe), matching Claude/Codex importer behavior.
-6. Imported Antigravity sessions render in the Svelte `/app/` session browser and
-   are filterable by agent, and contribute to usage/cost rollups with correct
-   coverage-honesty flags (summary vs full fidelity).
+5. Re-running import over unchanged DBs is a no-op: the `amon import` path skips via
+   `import_state` (`getImportState`/`setImportState` → `skippedUnchanged`) and the
+   session-sync path skips via `watched_files`, matching Claude/Codex behavior.
+6. Imported Antigravity sessions render in the Svelte `/app/` session browser, are
+   filterable by agent, are visible to search/analytics/trace-quality (i.e.
+   `session_items`/`session_turns` are populated, not just `browsing_sessions`), and
+   contribute to usage/cost rollups with correct coverage-honesty flags
+   (`integration_mode`/`fidelity` set on the session row).
 7. Decoding is anchored to **pinned field numbers** extracted from the binary's
    embedded proto descriptors (not the reverse-engineered numbers from recon), with
    a fixture-based test guarding against silent schema drift.

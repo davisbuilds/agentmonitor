@@ -16,9 +16,12 @@ trace-quality view, realizing
 `docs/specs/2026-07-01-antigravity-cli-import-spec.md`. Every `Done When` below
 traces to that spec's End State & Success Criteria.
 
-> Revised after plan critique (2026-07-01): the session browser is fed by
-> `browsing_sessions` via a `ParsedSession` projection, **not** by `watched_files`.
-> The seam is now one shared decoder → **two** projections (events + ParsedSession).
+> Revised after plan critique + PR #43 review (2026-07-01): the browser is fed by
+> `browsing_sessions` (via `insertParsedSession`), **not** `watched_files`; and
+> `session_items`/`session_turns`/`integration_mode`/`fidelity` come from a separate
+> projector step, not `insertParsedSession`. The seam is one shared decoder → **three**
+> insert paths (events; `ParsedSession`; live-adapter→projector). Importer idempotency
+> is `import_state`; session-sync idempotency is `watched_files`.
 
 ## Scope
 
@@ -28,8 +31,9 @@ traces to that spec's End State & Success Criteria.
 - **Event projection**: `src/import/antigravity.ts` → `NormalizedIngestEvent[]`
   (with cost computed in-parser) → `events`/`sessions`/`agents` for usage rollups.
 - **Session projection**: `src/parser/antigravity-sessions.ts` → `ParsedSession` →
-  `insertParsedSession` → `browsing_sessions`/`messages`/`tool_calls`/`session_items`
-  for the browser, search, analytics, and trace-quality.
+  `insertParsedSession` (`browsing_sessions`/`messages`/`tool_calls`) **plus** a
+  live-adapter → projector step for `session_items`/`session_turns` +
+  `integration_mode`/`fidelity` — for the browser, search, analytics, trace-quality.
 - Import orchestration wiring (`src/import/index.ts`) + watcher startup sync.
 - `agent_type="antigravity"` (events) and `browsing_sessions.agent="antigravity"`,
   with `google`/`gemini` model classification + pricing.
@@ -61,26 +65,36 @@ this pass against source:
    usage/cost rollups.
 2. **Browser/search/analytics/trace-quality path.** These read `browsing_sessions`
    (`src/db/v2-queries.ts:168,181,261`), filtered by the `agent` column, plus
-   `messages`/`tool_calls`/`session_items`. Those tables are populated by
-   `insertParsedSession(db, parsed)` (`src/parser/claude-code.ts:410`) from a
-   `ParsedSession` (`:95`), whose `metadata.agent` sets `browsing_sessions.agent`.
-   `integration_mode`/`fidelity` are **columns on `browsing_sessions`**
-   (`src/db/schema.ts:407-408,431-435`). `src/parser/codex-sessions.ts` is the mirror
-   to copy for a non-Claude source.
-3. **De-dupe ledger.** `watched_files` has only
-   `file_path/file_hash/file_mtime/status/last_parsed_at` (`src/db/schema.ts:669-675`).
-   It carries **no** `integration_mode`/`fidelity`/`coverage_json`; writing it does
-   nothing for browser visibility. `syncAll*Files`/`upsertWatchedFile` live in
-   `src/watcher/index.ts`; the `integration_mode`/`fidelity` seen in
-   `src/watcher/service.ts:62-70` are **ephemeral SSE literals** on the live path, not
-   stored state.
+   `messages`/`tool_calls` and `session_items`/`session_turns`. **Two writers, not
+   one** (verified against `src/watcher/index.ts:31-32`, the Claude historical sync):
+   - `insertParsedSession(db, parsed)` (`src/parser/claude-code.ts:410`) writes
+     **only** `browsing_sessions` (core columns) + `messages` + `tool_calls` — **not**
+     `session_items`, `session_turns`, `integration_mode`, or `fidelity`.
+   - `syncClaudeLiveSession`/`syncCodexLiveSession`
+     (`src/live/claude-adapter.ts:42`, `src/live/codex-adapter.ts:434`) then call the
+     projector `upsertProjectedSessionSnapshot` (`src/live/projector.ts:154`), which
+     sets `integration_mode`/`fidelity`/`capabilities_json` on `browsing_sessions`
+     and writes `session_items` + `session_turns`. This runs on the **historical**
+     sync too, not only live tailing.
+   So a non-Claude source needs BOTH: a `ParsedSession` (mirror
+   `src/parser/codex-sessions.ts`) **and** a live-adapter (mirror
+   `src/live/codex-adapter.ts`) feeding the projector.
+3. **De-dupe ledgers (two, distinct).** The importer path (`runImport`) de-dupes via
+   `import_state` (`getImportState`/`setImportState` → `skippedUnchanged`,
+   `src/import/index.ts:106,131`). The session-sync path de-dupes via `watched_files`
+   (`upsertWatchedFile`, `src/watcher/index.ts`), whose only columns are
+   `file_path/file_hash/file_mtime/status/last_parsed_at` (`src/db/schema.ts:669-675`)
+   — it carries no `integration_mode`/`fidelity`/`coverage_json`. The
+   `integration_mode`/`fidelity` seen in `src/watcher/service.ts:62-70` are ephemeral
+   SSE literals, not stored state.
 
-**Thinnest seam:** one shared proto decoder (Task 2) feeding **two projection
-builders** — a `NormalizedIngestEvent[]` builder (Task 3) and a `ParsedSession`
-builder (Task 6) — each handed to its existing insert path. `coverage_json` honesty
-(spec Open Question #3) is decided in the trace-quality projection layer
-(`src/trace-quality/*`), which reads the `messages`/`session_items` that Task 6
-populates — not in the watcher.
+**Thinnest seam:** one shared proto decoder (Task 2) feeding **three insert paths** —
+a `NormalizedIngestEvent[]` builder (Task 3, events/usage/cost), a `ParsedSession`
+builder (Task 6, browser rows via `insertParsedSession`), and a live-adapter (Task 6,
+`session_items`/`turns` + `integration_mode`/`fidelity` via the projector).
+`coverage_json` honesty (spec Open Question #3) is decided in the trace-quality
+projection (`src/trace-quality/*`), which reads the `session_items` the projector
+writes — not in the watcher.
 
 ## Task Breakdown
 
@@ -270,12 +284,15 @@ Make `amon import` discover and process Antigravity DBs idempotently.
 
 **Objective**
 
-Populate `browsing_sessions` (and `messages`/`tool_calls`/`session_items`) so
-Antigravity sessions are browsable, searchable, and trace-quality-covered.
+Populate the browser row **and** the projected stream so Antigravity sessions are
+browsable, searchable, and trace-quality-covered — which needs **two** writers per
+the Map (`insertParsedSession` + a live-adapter/projector step), not just one.
 
 **Files**
 
 - Create: `src/parser/antigravity-sessions.ts` (mirror `src/parser/codex-sessions.ts`)
+- Create: `src/live/antigravity-adapter.ts` (mirror `src/live/codex-adapter.ts` →
+  `syncAntigravityLiveSession` feeding `src/live/projector.ts`)
 - Modify: `src/watcher/index.ts` (add `syncAllAntigravityFiles`)
 - Modify: `src/watcher/service.ts` (startup + periodic resync call; live SSE literals)
 - Create: `tests/antigravity-sync.test.ts`
@@ -286,14 +303,20 @@ Antigravity sessions are browsable, searchable, and trace-quality-covered.
 
 1. `parseAntigravitySessions(filePath) → ParsedSession` from the shared decoder, with
    `metadata.agent="antigravity"`, messages/tool_calls built from decoded steps.
-2. `syncAllAntigravityFiles(db, dir?, opts)` over `conversations/**/*.db`: hash-guard
-   via `watched_files`, then `insertParsedSession(db, parsed)`; set
-   `browsing_sessions.integration_mode="antigravity-sqlite"` and a `fidelity`
-   reflecting decoded richness.
-3. Call from startup sync + periodic resync in `service.ts` (leave chokidar
+2. `syncAntigravityLiveSession(db, ...)` (mirror the Codex adapter): set
+   `integration_mode="antigravity-sqlite"` and `fidelity` (`summary` until per-kind
+   payload internals are decoded — Task 3 — then upgradeable), and call the projector
+   `upsertProjectedSessionSnapshot` so `browsing_sessions.integration_mode`/`fidelity`
+   are set and `session_items`/`session_turns` are written.
+3. `syncAllAntigravityFiles(db, dir?, opts)` over `conversations/**/*.db`: hash-guard
+   via `watched_files`, then `insertParsedSession(db, parsed)` **and**
+   `syncAntigravityLiveSession(...)` (matches `syncSessionFileDetailed`,
+   `src/watcher/index.ts:31-32`).
+4. Call from startup sync + periodic resync in `service.ts` (leave chokidar
    live-tailing out — deferred follow-on).
-4. Red/green: fixture DB yields a `browsing_sessions` row filterable by
-   `agent="antigravity"`, with `messages` present so trace-quality/search see it.
+5. Red/green: fixture DB yields a `browsing_sessions` row filterable by
+   `agent="antigravity"`, **plus** `messages` and `session_items` rows and non-null
+   `integration_mode`/`fidelity`, so trace-quality/search/analytics see it.
 
 **Verification**
 
@@ -301,9 +324,10 @@ Antigravity sessions are browsable, searchable, and trace-quality-covered.
 
 **Done When**
 
-- Antigravity sessions are listed and agent-filterable in the browser and visible to
-  search/analytics/trace-quality. `coverage_json` honesty is realized in the
-  trace-quality projection (reads the populated `messages`/`session_items`).
+- Antigravity sessions are agent-filterable in the browser AND visible to
+  search/analytics/trace-quality, with `session_items`/`session_turns` populated and
+  `integration_mode`/`fidelity` set (not null). `coverage_json` honesty is realized in
+  the trace-quality projection (reads the populated `session_items`).
   (Criteria #6; spec Open Question #3.)
 
 ### Task 7: Docs + agent-label surface
