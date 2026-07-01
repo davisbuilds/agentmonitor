@@ -64,6 +64,22 @@ test('decodeStepEnvelope: extracts type, status, kind from the oneof, metadata p
   assert.equal(step.hasMetadata, true);
 });
 
+test('decodeStepEnvelope: kind comes from the present oneof field, not the type enum', () => {
+  // Real row shape (verified against DBs): step_payload is the FULL Step. Here
+  // type(1)=14 but the present oneof is field 19 (user_input) — they differ, and
+  // kind must follow the oneof, not the type number (14 would wrongly map to view_file).
+  const stepPayload = buf([
+    ...vField(1, 14), // Step.type = CortexStepType enum 14
+    ...vField(4, 3), // status
+    ...lField(5, [...vField(1, 1)]), // metadata
+    ...lField(19, [...vField(1, 1)]), // oneof: user_input payload
+  ]);
+  const step = decodeStepEnvelope(stepPayload);
+  assert.equal(step.type, 14);
+  assert.equal(step.kind, 'user_input'); // NOT 'view_file'
+  assert.equal(step.hasMetadata, true);
+});
+
 test('decodeStepEnvelope: unknown kind falls back to generic marker, never throws', () => {
   const stepPayload = buf([...vField(1, 9999), ...lField(9999, [0x01])]);
   const step = decodeStepEnvelope(stepPayload);

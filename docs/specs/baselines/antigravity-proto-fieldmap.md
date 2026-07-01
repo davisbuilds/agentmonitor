@@ -34,11 +34,14 @@ it (an unconsumed constants module would trip the dead-code gate).
 
 ## SQLite → proto mapping
 
-Each conversation `.db` has a `steps` table whose columns are a decomposed
-`gemini_coder.Step`: `step_type` = `Step.type`, `metadata`/`error_details`/
-`task_details` = the same-named Step fields, and `step_payload` = the serialized
-`oneof step` payload for that kind. `gen_metadata` holds the per-generation record
-(model + `UsageMetadata`).
+Each conversation `.db` has a `steps` table. Some columns mirror `gemini_coder.Step`
+fields for indexing (`step_type` = `Step.type`, `status`, etc.), but **`step_payload`
+is the FULL serialized `gemini_coder.Step` message** — not just the oneof payload.
+Verified against real rows: a `step_payload` decodes to top-level fields
+`{1: type, 4: status, 5: metadata, <oneof-field>: payload}`, where field 1 equals the
+`step_type` column. So the decoder reads `step_payload` as the whole envelope; the
+decomposed columns are redundant with fields already inside it. `gen_metadata` holds
+the per-generation record (model + usage).
 
 ## Real token accounting — `CortexGeneratorMetadata` (empirically pinned)
 
@@ -103,11 +106,21 @@ lane. Skipping the subtraction double-bills the cached bulk at full input rate
 
 ## Pinned: step-kind taxonomy — the `oneof step` payload field numbers
 
-120 kinds (full map in the Appendix / Task 2 `fieldmap.ts`). The payload field number *is* the step-kind
-discriminator, and it **equals the `steps.step_type` column** — verified against all
-observed values: `14=view_file`, `15=list_directory`, `23=write_to_file`,
-`90=browser_scroll_down`, `98=file_change`. Representative kinds relevant to the
-event taxonomy (final mapping is Task 3):
+120 kinds (full map in the Appendix / Task 2 `fieldmap.ts`). The **step kind is the
+`oneof step` payload field that is present** inside a decoded `step_payload` — this is
+the reliable discriminator, and `decodeStepEnvelope` reads it that way.
+
+> **Correction (PR #44 review):** an earlier draft claimed the oneof field number
+> *equals* the `steps.step_type` column. It does **not**. `step_type` is the
+> `CortexStepType` enum (its own numbering, in the un-recovered `cortex.proto`); the
+> present oneof field is a different number. Verified against real rows:
+> `step_type 14 → user_input (oneof 19)`, `15 → planner_response (20)`,
+> `23 → checkpoint (30)`, `90 → ephemeral_message (103)`, `98 → conversation_history
+> (111)`. The matching digits in the original claim (14/15/23/90/98) were a
+> coincidence with unrelated oneof numbers. Do **not** map kinds from `step_type`;
+> map from the present oneof field.
+
+Representative kinds relevant to the event taxonomy (final mapping is Task 3):
 
 | # | kind | likely event category |
 |---|---|---|

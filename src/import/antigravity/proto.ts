@@ -110,19 +110,22 @@ function getBytes(
 }
 
 export interface StepEnvelope {
-  /** CortexStepType enum value (== the payload-kind field number). */
+  /** CortexStepType enum value (its own numbering; NOT the oneof kind field number). */
   type?: number;
   /** CortexStepStatus enum value. */
   status?: number;
-  /** Snake-case step kind from the Step `oneof`, if a known payload is set. */
+  /** Snake-case step kind, from whichever Step `oneof` payload field is present. */
   kind?: string;
   hasMetadata: boolean;
   hasError: boolean;
 }
 
 /**
- * Decode the pinned gemini_coder.Step envelope from a `steps.step_payload` blob.
- * Payload internals (the per-kind CortexStep* message) are private and left opaque.
+ * Decode a `steps.step_payload` blob, which is the FULL serialized gemini_coder.Step
+ * (top-level fields `{1: type, 4: status, 5: metadata, <oneof>: payload}`), not just
+ * the oneof payload. `kind` is derived from the present oneof field — deliberately
+ * NOT from `type` (the CortexStepType enum uses different numbers). The per-kind
+ * CortexStep* payload internals are private and left opaque.
  */
 export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
   const f = decodeMessage(stepPayload);

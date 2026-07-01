@@ -58,7 +58,7 @@ export const CORTEX_USAGE_FIELDS = {
 
 /** gemini_coder.Step envelope (trajectory.proto). */
 export const STEP_FIELDS = {
-  type: 1,          // exa.cortex_pb.CortexStepType (enum; mirrors payload kind number)
+  type: 1,          // exa.cortex_pb.CortexStepType (enum; its own numbering, NOT the oneof field #)
   status: 4,        // exa.cortex_pb.CortexStepStatus
   metadata: 5,      // exa.cortex_pb.CortexStepMetadata (holds model + usage; internals fixture-verified)
   error: 31,        // exa.cortex_pb.CortexErrorDetails
@@ -68,9 +68,11 @@ export const STEP_FIELDS = {
 
 /**
  * Step-kind discriminator: the `oneof step` payload field number in gemini_coder.Step.
- * 120 kinds. Verified to equal the SQLite `steps.step_type` column for all
- * observed values (14=view_file, 15=list_directory, 23=write_to_file,
- * 90=browser_scroll_down, 98=file_change).
+ * 120 kinds. Read the kind from whichever oneof field is PRESENT in a decoded
+ * `step_payload` — NOT from the `steps.step_type` column (that is the CortexStepType
+ * enum, a different numbering). Verified against real rows: step_type 14→user_input
+ * (oneof 19), 15→planner_response (20), 23→checkpoint (30), 90→ephemeral_message
+ * (103), 98→conversation_history (111).
  */
 export const STEP_PAYLOAD_KINDS: Record<number, string> = {
   7: 'dummy',
