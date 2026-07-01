@@ -369,6 +369,14 @@ export function initSchema(): void {
   // event_type ... ORDER BY` enumeration (src/db/queries.ts, v2-queries.ts).
   // Without them that dashboard-bootstrap read regresses from a covering-index
   // scan to a full events scan + temp b-tree.
+  //
+  // - idx_events_session_reconcile seeds the correlated Codex OTEL/import
+  //   usage-reconciliation subquery (src/db/usage-reconciliation.ts). That
+  //   subquery correlates on session_id (highly selective) then filters
+  //   agent_type='codex' AND source='import'. Without this index the planner
+  //   falls back to seeking idx_events_agent_type (agent_type=?), matching every
+  //   Codex row, turning the full-history stats aggregate into an O(n^2) scan
+  //   (measured ~95s per run on ~440k events; ~0.2s with this index).
   db.exec(`
     DROP INDEX IF EXISTS idx_events_session_id;
     CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
@@ -376,6 +384,8 @@ export function initSchema(): void {
       ON events(session_id, tokens_in, tokens_out, cost_usd);
     CREATE INDEX IF NOT EXISTS idx_events_created_model
       ON events(created_at, model, tokens_in, tokens_out, cost_usd);
+    CREATE INDEX IF NOT EXISTS idx_events_session_reconcile
+      ON events(session_id, agent_type, source);
   `);
 
   // --- V2 tables: session browser, messages, tool calls, FTS ---

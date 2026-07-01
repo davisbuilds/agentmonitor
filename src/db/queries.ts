@@ -145,11 +145,15 @@ export function updateIdleSessions(timeoutMinutes: number): number {
   `).run(`-${timeoutMinutes}`);
 
   // Auto-end idle sessions that remain inactive for an additional timeout window.
-  db.prepare(`
+  const ended = db.prepare(`
     UPDATE sessions SET status = 'ended', ended_at = datetime('now')
     WHERE status = 'idle'
     AND last_event_at < datetime('now', ? || ' minutes')
   `).run(`-${timeoutMinutes * 2}`);
+
+  if (idled.changes > 0 || ended.changes > 0) {
+    markStatsDirty(); // session status counts changed
+  }
 
   return idled.changes;
 }
@@ -433,6 +437,7 @@ export function insertEvent(event: {
       syncCodexSummaryLiveEvent(db, row);
     }
 
+    markStatsDirty(); // event (and its session-status side effects) changed totals
     return row;
   } catch (err: unknown) {
     // UNIQUE constraint violation = duplicate event_id, silently skip
@@ -628,6 +633,31 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     model_breakdown: modelBreakdown,
     branches: branchRows.map(r => r.branch),
   };
+}
+
+// Cached unfiltered stats for the periodic SSE broadcast.
+//
+// getStats() runs several full-table events aggregates (including the correlated
+// Codex usage-reconciliation sum). The stats broadcaster fires every
+// statsIntervalMs (default 5s) for as long as a dashboard tab is open, but the
+// underlying totals only change when events are ingested or session status
+// shifts. Recomputing the whole snapshot on every tick is pure waste, so we
+// memoize the unfiltered result and recompute lazily only after a write marks it
+// dirty (see markStatsDirty). The filtered getStats() path (HTTP /api/stats) is
+// on-demand and stays uncached.
+let cachedBroadcastStats: Stats | null = null;
+let broadcastStatsDirty = true;
+
+function markStatsDirty(): void {
+  broadcastStatsDirty = true;
+}
+
+export function getStatsForBroadcast(): Stats {
+  if (broadcastStatsDirty || cachedBroadcastStats === null) {
+    cachedBroadcastStats = getStats();
+    broadcastStatsDirty = false;
+  }
+  return cachedBroadcastStats;
 }
 
 // --- Provider Quotas ---

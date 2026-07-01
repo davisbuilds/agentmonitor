@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { broadcaster } from '../sse/emitter.js';
-import { getStats, getProviderQuotas } from '../db/queries.js';
+import { getStatsForBroadcast, getProviderQuotas } from '../db/queries.js';
 import { config } from '../config.js';
 
 export const streamRouter = Router();
@@ -12,7 +12,7 @@ export function startStatsBroadcast(): void {
   if (statsInterval) return;
   statsInterval = setInterval(() => {
     if (broadcaster.clientCount === 0) return;
-    const stats = getStats();
+    const stats = getStatsForBroadcast();
     const quota_monitor = getProviderQuotas();
     broadcaster.broadcast('stats', { ...stats, quota_monitor, usage_monitor: quota_monitor } as unknown as Record<string, unknown>);
   }, config.statsIntervalMs);
