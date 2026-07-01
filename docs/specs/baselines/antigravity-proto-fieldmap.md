@@ -34,15 +34,48 @@ it (an unconsumed constants module would trip the dead-code gate).
 
 ## SQLite → proto mapping
 
-Each conversation `.db` has a `steps` table whose columns are a decomposed
-`gemini_coder.Step`: `step_type` = `Step.type`, `metadata`/`error_details`/
-`task_details` = the same-named Step fields, and `step_payload` = the serialized
-`oneof step` payload for that kind. `gen_metadata` holds the per-generation record
-(model + `UsageMetadata`).
+Each conversation `.db` has a `steps` table. Some columns mirror `gemini_coder.Step`
+fields for indexing (`step_type` = `Step.type`, `status`, etc.), but **`step_payload`
+is the FULL serialized `gemini_coder.Step` message** — not just the oneof payload.
+Verified against real rows: a `step_payload` decodes to top-level fields
+`{1: type, 4: status, 5: metadata, <oneof-field>: payload}`, where field 1 equals the
+`step_type` column. So the decoder reads `step_payload` as the whole envelope; the
+decomposed columns are redundant with fields already inside it. `gen_metadata` holds
+the per-generation record (model + usage).
 
-## Pinned: token usage — `google.cloud.aiplatform.master.UsageMetadata`
+## Real token accounting — `CortexGeneratorMetadata` (empirically pinned)
 
-Google's **stable public** schema, so these numbers are version-durable:
+The pinned Google `UsageMetadata` (below) turned out to be the **request generation
+config** (e.g. `max_output_tokens=8192`, `thoughts=0`), **not** the persisted usage.
+The real per-turn accounting is a **private `CortexGeneratorMetadata`** message (proto
+`cortex_generator_metadata.proto` — not recoverable by protodump). Its field *names*
+are in the binary; the **field numbers were pinned empirically** against **all 20
+local usage records** (`gen_metadata.data`), with the TS decoder re-validated on the
+same set (`out == thinking + answer` holds 20/20; the cache-growth session
+`ab9f2418` confirms field 2 is non-cached input).
+
+Location: `gen_metadata.data` → field **1** (`CortexGeneratorMetadata`) → usage at
+field **4**; model at field **19** (`gemini-pro-default`) / **21** (display).
+
+| CortexUsage field | # | Evidence |
+|---|---|---|
+| `system_prompt_tokens` | 1 | constant per model (1016 pro-default / 1020 flash) |
+| `input_tokens` (non-cached) | 2 | large/variable; **shrinks as field 5 grows** within a session |
+| `output_tokens` (total) | 3 | **== field 9 + field 10 in every record** |
+| `cached_tokens` | 5 | intermittent, ~8k round prefix; grows across turns |
+| `thinking_tokens` | 9 | reasoning; ≤ field 3 |
+| `answer_tokens` | 10 | field 3 − field 9 |
+
+**Billing (`deriveBillingTokens`):** `tokens_in = system + input` (both full-rate;
+they are distinct buckets), `cache_read_tokens = cached` (additive, non-overlapping —
+honors the invariant), `tokens_out = output` (includes reasoning), `thoughts =
+thinking` (informational lane). Field numbers live in `fieldmap.ts`
+(`CORTEX_USAGE_FIELDS`); the decoder is `proto.ts::decodeGeneratorMetadata`.
+
+## Pinned: token usage schema — `google.cloud.aiplatform.master.UsageMetadata`
+
+Authoritative schema (used for the request config in practice; see the
+course-correction above). Numbers are version-durable:
 
 | Field | # |
 |---|---|
@@ -73,11 +106,21 @@ lane. Skipping the subtraction double-bills the cached bulk at full input rate
 
 ## Pinned: step-kind taxonomy — the `oneof step` payload field numbers
 
-120 kinds (full map in the Appendix / Task 2 `fieldmap.ts`). The payload field number *is* the step-kind
-discriminator, and it **equals the `steps.step_type` column** — verified against all
-observed values: `14=view_file`, `15=list_directory`, `23=write_to_file`,
-`90=browser_scroll_down`, `98=file_change`. Representative kinds relevant to the
-event taxonomy (final mapping is Task 3):
+120 kinds (full map in the Appendix / Task 2 `fieldmap.ts`). The **step kind is the
+`oneof step` payload field that is present** inside a decoded `step_payload` — this is
+the reliable discriminator, and `decodeStepEnvelope` reads it that way.
+
+> **Correction (PR #44 review):** an earlier draft claimed the oneof field number
+> *equals* the `steps.step_type` column. It does **not**. `step_type` is the
+> `CortexStepType` enum (its own numbering, in the un-recovered `cortex.proto`); the
+> present oneof field is a different number. Verified against real rows:
+> `step_type 14 → user_input (oneof 19)`, `15 → planner_response (20)`,
+> `23 → checkpoint (30)`, `90 → ephemeral_message (103)`, `98 → conversation_history
+> (111)`. The matching digits in the original claim (14/15/23/90/98) were a
+> coincidence with unrelated oneof numbers. Do **not** map kinds from `step_type`;
+> map from the present oneof field.
+
+Representative kinds relevant to the event taxonomy (final mapping is Task 3):
 
 | # | kind | likely event category |
 |---|---|---|
@@ -99,11 +142,9 @@ nor errored — a scanner limitation, not a write failure). So these internals a
 decoded empirically against fixtures, cross-checked with the plaintext strings we
 know survive:
 
-- `CortexStepMetadata` internal layout — exactly where `model` and the
-  `UsageMetadata` sub-message nest within `gen_metadata`. Recon (raw wire-walk)
-  located model near `gen_metadata` fields 1.19/1.21 and a usage block at 1.17.2.* /
-  1.4.* — treat as **unverified** until the Task 2 fixture asserts it.
-- Per-kind payload message fields (e.g. `CortexStepRunCommand` command/output).
+- Per-kind payload message fields (e.g. `CortexStepRunCommand` command/output) —
+  needed for tool args/outputs and transcript text in Task 3. (Token usage + model +
+  step taxonomy are all pinned; only the inside of each step payload is opaque.)
 
 This partial-pin is intentional and honest: the cost-bearing surface (token counts +
 step taxonomy + envelope) is descriptor-pinned; only private payload internals ride
