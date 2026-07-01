@@ -2,7 +2,7 @@
 date: 2026-07-01
 topic: antigravity-cli-import
 stage: plan
-status: draft
+status: in-progress
 source: conversation
 ---
 
@@ -84,17 +84,24 @@ populates — not in the watcher.
 
 ## Task Breakdown
 
-### Task 1: Pin the Antigravity proto field map (gates criterion #7)
+### Task 1: Pin the Antigravity proto field map (gates criterion #7) — DONE
+
+> Completed 2026-07-01. Descriptors extracted from the `language_server` binary via
+> `protodump`; `Step` envelope, 120-kind step taxonomy, and `UsageMetadata` token
+> fields are descriptor-pinned in `docs/specs/baselines/antigravity-proto-fieldmap.md`
+> (with the generated `fieldmap.ts` captured as an appendix). The `.ts` module itself
+> lands in Task 2 with its consumer — an unconsumed constants module trips the
+> dead-code gate. Private `exa.cortex_pb` payload internals were not recoverable by
+> protodump and are deferred to fixture verification in Task 2 (documented, not guessed).
 
 **Objective**
 
-Authoritative field-number map for usage/model/step protos and the
-`CORTEX_STEP_TYPE_*` integer→name enum, extracted from the binary — not guessed.
+Authoritative field-number map for usage/model/step protos and the step-kind
+taxonomy, extracted from the binary — not guessed.
 
 **Files**
 
-- Create: `docs/specs/baselines/antigravity-proto-fieldmap.md`
-- Create: `src/import/antigravity/fieldmap.ts`
+- Create: `docs/specs/baselines/antigravity-proto-fieldmap.md` (incl. generated map appendix)
 
 **Dependencies** None
 
@@ -129,6 +136,7 @@ intermediate, covered by fixture tests (red first).
 
 **Files**
 
+- Create: `src/import/antigravity/fieldmap.ts` (lift from the baseline doc appendix)
 - Create: `src/import/antigravity/proto.ts`
 - Create: `tests/antigravity-proto.test.ts`
 - Create: `tests/fixtures/antigravity/sample-conversation.db` (redacted copy)

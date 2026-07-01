@@ -104,10 +104,11 @@ Reconnaissance against local artifacts and the shipped `language_server` binary:
 
 ## Open Questions (resolve during planning)
 
-1. **Field-map extraction method.** Extract `exa.cortex_pb` / `gemini_coder`
-   `FileDescriptorProto` from the Go `language_server` binary (rawDesc) to get
-   authoritative field numbers + the `CORTEX_STEP_TYPE_*` integer map. Fallback:
-   the self-consistent reverse-engineered map from recon, guarded by fixtures.
+1. **Field-map extraction method.** ~~Resolved~~ (2026-07-01): `protodump` recovers
+   `FileDescriptorProto`s from the `language_server` binary — `gemini_coder.Step` +
+   `UsageMetadata` are descriptor-pinned. The private `exa.cortex_pb` payload file is
+   present but not recoverable by protodump, so its internals are fixture-verified in
+   Task 2. See `docs/specs/baselines/antigravity-proto-fieldmap.md`.
 2. **Usage field semantics.** Confirm prompt-vs-cached-vs-candidate-vs-thought
    field layout against `UsageMetadata`, and whether Antigravity's prompt count is
    cache-inclusive (the ~10x double-bill trap the pricing engine already handles
