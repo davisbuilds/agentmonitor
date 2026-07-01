@@ -4,6 +4,7 @@ import { registerMaintenanceCommands } from './commands/maintenance.js';
 import { registerReportingCommands } from './commands/reporting.js';
 import { registerRuntimeCommands } from './commands/runtime.js';
 import { registerSessionLiveCommands } from './commands/sessions-live.js';
+import { registerWarehouseCommands } from './commands/warehouse.js';
 import { commandHelp, rootHelp } from './help.js';
 import { writeStdout } from './output.js';
 
@@ -18,6 +19,7 @@ export function registerAllCommands(): void {
   registerSessionLiveCommands();
   registerReportingCommands();
   registerHookCommands();
+  registerWarehouseCommands();
 
   registerCommand({
     name: 'help',

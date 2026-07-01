@@ -144,11 +144,12 @@ session, derived on demand from existing sources (`events`, `session_items`,
 `session_turns`, `messages`, `tool_calls`) plus a tiny content-free per-session
 rollup. It is **additive**: source rows are never removed or reinterpreted. The
 persisted trace/observation/score/prompt warehouse was removed — that eval depth
-is deferred to the export (collector-not-backend; see POSITIONING.md).
+is deferred to Langfuse, while the content-free aggregate exports through the
+explicit warehouse CLI (collector-not-backend; see POSITIONING.md).
 
 - **Storage:** only `session_trace_summary` (one content-free, export-shaped row
-  per session; columns map to medallion's `silver.agent_runs`) and the dormant
-  `trace_quality_export_state` seam are persisted. `src/trace-quality/` holds the
+  per session that feeds optional `agentmonitor.runs` publish) and the dormant
+  `trace_quality_export_state` Langfuse seam are persisted. `src/trace-quality/` holds the
   projection (`projection.ts`), source readers, the on-demand read layer
   (`on-demand.ts`), the summary derivation/maintenance (`summary.ts`), and the
   ingest hooks (`service.ts`).

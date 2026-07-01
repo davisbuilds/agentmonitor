@@ -115,6 +115,7 @@ export function parseCli(argv: string[]): ParsedCli {
   for (let i = 2; i < argv.length; i += 1) {
     const arg = argv[i] as string;
     if (arg === '--') {
+      if (i === 2) continue;
       remaining.push(...argv.slice(i + 1));
       break;
     }

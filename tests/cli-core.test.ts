@@ -35,6 +35,13 @@ test('parseCli normalizes direct cli.js execution to amon', () => {
   assert.deepEqual(parsed.args, ['sessions', 'list']);
 });
 
+test('parseCli ignores the pnpm script separator before global flags', () => {
+  const parsed = parseCli(['/usr/local/bin/node', '/repo/dist/cli.js', '--', '--json', 'warehouse', 'publish', '--dry-run']);
+
+  assert.equal(parsed.global.json, true);
+  assert.deepEqual(parsed.args, ['warehouse', 'publish', '--dry-run']);
+});
+
 test('root help prints amon usage', async () => {
   const result = await runCli(['--help']);
 

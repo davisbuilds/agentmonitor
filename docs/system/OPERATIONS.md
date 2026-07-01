@@ -65,6 +65,7 @@ pnpm cli -- import --source claude-code --dry-run
 pnpm cli -- sync sessions --source codex --force
 pnpm cli -- costs recalc --dry-run
 pnpm cli -- quality traces --json
+pnpm cli -- warehouse publish --dry-run --json
 
 pnpm cli -- sessions list --json
 pnpm cli -- sessions show <session-id>
@@ -111,6 +112,10 @@ All optional with sensible defaults:
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
 | `AGENTMONITOR_USAGE_BUDGETS_PATH` | `./config/budgets.json` | Optional local JSON config for read-only usage budget reports |
+| `AGENTMONITOR_WAREHOUSE_DSN` | unset | Postgres DSN for explicit `warehouse publish`; unset disables live publish |
+| `AGENTMONITOR_WAREHOUSE_ACCOUNT` | `local` | Account label published as the warehouse identity grain |
+| `AGENTMONITOR_WAREHOUSE_SCHEMA` | `agentmonitor` | Postgres schema for `runs` and `publish_run` |
+| `AGENTMONITOR_WAREHOUSE_BI_ROLE` | `medallion_bi` | Optional BI read role granted on the `agentmonitor` schema when present |
 | `AGENTMONITOR_ENABLE_LIVE_TAB` | `true` | Shows the Svelte `Live` tab |
 | `AGENTMONITOR_CODEX_LIVE_MODE` | `otel-only` | Codex live fidelity mode (`otel-only`, reserved `exporter`) |
 | `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` | `true` | Capture or redact live prompt payloads |
@@ -211,7 +216,44 @@ Operational notes:
 - It is **never run at startup** — a normal upgrade never rewrites a live DB. Run it when convenient; VACUUM needs a brief exclusive lock and temporary free disk (~the DB size).
 - The dropped data is a pure derived projection: source `events`, `browsing_sessions`, `messages`, `session_items`, `session_turns`, and `tool_calls` are untouched, so the lean view is fully reconstructable.
 - The summary self-heals on startup (`ensureSessionTraceSummaryBackfill` re-backfills any row at a stale version or with a NULL `trace_id`).
-- The deferred export (medallion for the aggregate, Langfuse for trace/eval depth) is its own later spec: no export script or `AGENTMONITOR_LANGFUSE_*` env vars ship yet, and nothing leaves localhost. See [trace-quality.md](trace-quality.md#deferred-export).
+- The aggregate warehouse export is now the explicit `warehouse publish` command below. Langfuse trace/eval depth is still deferred; no `AGENTMONITOR_LANGFUSE_*` env vars ship yet. See [trace-quality.md](trace-quality.md#warehouse-aggregate-export).
+
+## Warehouse Export
+
+`amon warehouse publish` publishes the content-free `session_trace_summary`
+aggregate to a shared Postgres warehouse. It is opt-in and CLI-only: normal
+server startup, ingest, imports, and local dashboard use never require Postgres.
+
+```bash
+pnpm cli -- warehouse publish --dry-run --json
+AGENTMONITOR_WAREHOUSE_DSN=postgresql://... pnpm cli -- warehouse publish
+pnpm cli -- warehouse publish --date-from 2026-06-01 --date-to 2026-06-30
+```
+
+Contract:
+
+- Live publish writes to `<schema>.runs` (default `agentmonitor.runs`) with one
+  row per `(account, session_id)` and upserts on that key. It never removes a
+  warehouse row if a local session is later redacted or deleted; tombstones are a
+  separate future follow-up.
+- Each invocation appends `<schema>.publish_run` lineage with the effective
+  `account`, date window, published/suppressed counts, AgentMonitor version, and
+  BI grant status.
+- `AGENTMONITOR_WAREHOUSE_BI_ROLE` defaults to `medallion_bi`. The command checks
+  `pg_roles` before granting and reports `grant_skipped` when the role is absent,
+  so a fresh local Postgres can still publish successfully.
+- `--dry-run` does not require `AGENTMONITOR_WAREHOUSE_DSN`; it prints planned
+  SQL/counts and does not import or connect to `pg`.
+- `--account` overrides the configured account label and emits a warning because
+  re-publishing the same sessions under a different account can double-count in
+  BI aggregates.
+- `--min-batch` is only an operator guard against accidental tiny publishes. It
+  is not a privacy control; this export is a per-session fact, not a k-anonymous
+  aggregate.
+
+Before mapping rows, the command runs the same summary self-heal as
+`quality traces`; if any `session_trace_summary` row is stale or missing
+`trace_id`, it can re-backfill all sessions from local source tables.
 
 ## CI
 

@@ -37,6 +37,7 @@ before(async () => {
   dbPath = path.join(tempDir, 'contracts.db');
   process.env.AGENTMONITOR_DB_PATH = dbPath;
   process.env.AGENTMONITOR_USAGE_BUDGETS_PATH = path.join(tempDir, 'budgets.json');
+  delete process.env.AGENTMONITOR_WAREHOUSE_DSN;
 
   ({ initSchema } = await import('../src/db/schema.js'));
   ({ closeDb, getDb } = await import('../src/db/connection.js'));
@@ -246,3 +247,28 @@ test('cost recalculation dry-run leaves event costs unchanged', async () => {
   assert.equal(eventCost('evt-reprice'), null);
 });
 
+test('warehouse publish dry-run reports planned rows without a warehouse DSN', async () => {
+  const result = await runCli(['warehouse', 'publish', '--dry-run', '--json']);
+
+  assert.equal(result.exitCode, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout) as {
+    dry_run: boolean;
+    account: string;
+    rows_planned: number;
+    rows_suppressed: number;
+    statements: string[];
+  };
+  assert.equal(parsed.dry_run, true);
+  assert.equal(parsed.account, 'local');
+  assert.equal(parsed.rows_planned, 1);
+  assert.equal(parsed.rows_suppressed, 0);
+  assert.ok(parsed.statements.some(statement => statement.includes('INSERT INTO agentmonitor.runs')));
+});
+
+test('warehouse publish without dry-run fails clearly when no DSN is configured', async () => {
+  const result = await runCli(['warehouse', 'publish']);
+
+  assert.equal(result.exitCode, 3);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /set AGENTMONITOR_WAREHOUSE_DSN/);
+});
