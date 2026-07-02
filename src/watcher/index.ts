@@ -5,8 +5,11 @@ import crypto from 'crypto';
 import type Database from 'better-sqlite3';
 import { parseSessionMessages, insertParsedSession } from '../parser/claude-code.js';
 import { parseCodexSessionMessages } from '../parser/codex-sessions.js';
+import { parseAntigravitySessions } from '../parser/antigravity-sessions.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
+import { syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
+import { discoverAntigravityLogs } from '../import/antigravity.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 
@@ -204,6 +207,63 @@ export function syncAllCodexFiles(db: Database.Database, codexHome?: string, opt
 
   for (const filePath of files) {
     const result = syncCodexSessionFileDetailed(db, filePath, options).result;
+    stats[result === 'parsed' ? 'parsed' : result === 'skipped' ? 'skipped' : 'errors']++;
+  }
+
+  return stats;
+}
+
+// --- Antigravity conversation DB support ---
+
+function syncAntigravitySessionFileDetailed(
+  db: Database.Database,
+  filePath: string,
+  options: SyncOptions = {},
+): SyncSessionOutcome {
+  let fileHash = 'error';
+  let fileMtime = '';
+  try {
+    const stat = fs.statSync(filePath);
+    fileHash = hashFile(filePath);
+    fileMtime = stat.mtime.toISOString();
+
+    const existing = getWatchedFileState(db, filePath);
+    if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
+      return { result: 'skipped' };
+    }
+
+    const sessionId = path.basename(filePath, '.db');
+    const parsed = parseAntigravitySessions(filePath);
+
+    if (parsed.messages.length === 0) {
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
+      return { result: 'skipped', session_id: sessionId };
+    }
+
+    insertParsedSession(db, parsed, filePath, stat.size, fileHash);
+    const live = syncAntigravityLiveSession(db, parsed);
+    safelyMaintainTraceSummaryForSession(sessionId, 'antigravity session sync');
+
+    upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
+
+    return { result: 'parsed', live, session_id: sessionId };
+  } catch (err) {
+    console.error(`[watcher] Failed to sync Antigravity ${filePath}:`, err);
+    try {
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'error');
+    } catch (dbErr) {
+      console.error(`[watcher] Failed to record error state for ${filePath}:`, dbErr);
+    }
+    return { result: 'error' };
+  }
+}
+
+export function syncAllAntigravityFiles(db: Database.Database, dir?: string, options: SyncOptions = {}): SyncStats {
+  const files = discoverAntigravityLogs(dir, { excludePatterns: options.excludePatterns });
+  const stats: SyncStats = { parsed: 0, skipped: 0, errors: 0, total: files.length };
+
+  for (const filePath of files) {
+    const result = syncAntigravitySessionFileDetailed(db, filePath, options).result;
     stats[result === 'parsed' ? 'parsed' : result === 'skipped' ? 'skipped' : 'errors']++;
   }
 

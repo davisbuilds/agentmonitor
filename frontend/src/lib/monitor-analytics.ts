@@ -96,6 +96,7 @@ function agentLabelName(agentType: string): string {
     case 'claude':
     case 'claude_code': return 'Claude';
     case 'codex': return 'Codex';
+    case 'antigravity': return 'Antigravity';
     default: return agentType;
   }
 }

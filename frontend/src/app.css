@@ -34,6 +34,7 @@
   --color-danger: oklch(0.65 0.2 25);
   --color-claude: oklch(0.78 0.12 65); /* provider identity only (warm amber) */
   --color-codex: oklch(0.78 0.01 250); /* provider identity only (neutral) */
+  --color-antigravity: oklch(0.72 0.13 290); /* provider identity only (Gemini violet) */
 
   /* ---- Type: UI face on font-sans, data/numerals on font-mono ---- */
   --font-sans: 'Mona Sans Variable', ui-sans-serif, system-ui, sans-serif;
