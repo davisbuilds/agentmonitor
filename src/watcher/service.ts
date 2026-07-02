@@ -2,7 +2,7 @@ import path from 'path';
 import os from 'os';
 import { watch, type FSWatcher } from 'chokidar';
 import { getDb } from '../db/connection.js';
-import { syncSessionFileDetailed, syncCodexSessionFileDetailed, syncAllFiles, syncAllCodexFiles } from './index.js';
+import { syncSessionFileDetailed, syncCodexSessionFileDetailed, syncAllFiles, syncAllCodexFiles, syncAllAntigravityFiles } from './index.js';
 import { broadcaster } from '../sse/emitter.js';
 import { liveBroadcaster } from '../api/v2/live-stream.js';
 import { config } from '../config.js';
@@ -130,6 +130,12 @@ export function startWatcher(): void {
     console.log(`[watcher] Codex sync: ${codexStats.parsed} parsed, ${codexStats.skipped} skipped, ${codexStats.errors} errors (${codexStats.total} total files)`);
   }
 
+  // Sync Antigravity conversation DBs (historical + periodic resync; live-tailing deferred)
+  const antigravityStats = syncAllAntigravityFiles(db, undefined, { excludePatterns: config.sync.excludePatterns });
+  if (antigravityStats.total > 0) {
+    console.log(`[watcher] Antigravity sync: ${antigravityStats.parsed} parsed, ${antigravityStats.skipped} skipped, ${antigravityStats.errors} errors (${antigravityStats.total} total files)`);
+  }
+
   // Start chokidar watcher
   watcher = watch([
     path.join(projectsDir, '**/*.jsonl'),
@@ -167,12 +173,13 @@ export function startWatcher(): void {
   resyncTimer = setInterval(() => {
     const claudeStats = syncAllFiles(db, claudeDir, { excludePatterns: config.sync.excludePatterns });
     const codexStats = syncAllCodexFiles(db, undefined, { excludePatterns: config.sync.excludePatterns });
-    const parsed = claudeStats.parsed + codexStats.parsed;
+    const antigravityStats = syncAllAntigravityFiles(db, undefined, { excludePatterns: config.sync.excludePatterns });
+    const parsed = claudeStats.parsed + codexStats.parsed + antigravityStats.parsed;
 
     if (parsed > 0) {
       console.log(
         `[watcher] Periodic resync: ${parsed} new/updated sessions `
-        + `(claude=${claudeStats.parsed}, codex=${codexStats.parsed})`,
+        + `(claude=${claudeStats.parsed}, codex=${codexStats.parsed}, antigravity=${antigravityStats.parsed})`,
       );
       if (broadcaster.clientCount > 0) {
         broadcaster.broadcast('session_update', {
