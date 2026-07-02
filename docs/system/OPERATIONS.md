@@ -181,11 +181,15 @@ For full setup and behavior notes, use [../../hooks/claude-code/README.md](../..
 ```bash
 pnpm cli -- import --source claude-code    # Claude Code JSONL logs
 pnpm cli -- import --source codex          # Codex session files
+pnpm cli -- import --source antigravity    # Antigravity CLI conversation DBs (~/.gemini/antigravity-cli)
 pnpm cli -- import --dry-run               # Preview without writing
 pnpm cli -- sync sessions --source claude  # Rebuild browsing_sessions/messages/tool_calls from Claude JSONL
 pnpm cli -- sync sessions --source codex   # Rebuild browsing_sessions/messages/tool_calls from Codex JSONL
 pnpm cli -- costs recalc --dry-run         # Preview cost backfill
 ```
+
+`--source antigravity` also accepts `--antigravity-dir <path>` to point at a
+non-default `antigravity-cli` root (default `~/.gemini/antigravity-cli`).
 
 Operational notes:
 
@@ -193,6 +197,7 @@ Operational notes:
 - Full imports update `import_state` even when a file produced zero events, so unchanged unsupported/non-interactive files are skipped on later full imports.
 - Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
 - `pnpm cli -- import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm cli -- sync sessions --source codex --force` when transcript-derived analytics such as inferred skill usage need to be backfilled.
+- Antigravity has no `sync sessions` CLI subcommand: `import --source antigravity` writes events/usage/cost, and the running watcher projects the session-browser rows (`browsing_sessions` + `messages` + `session_items`, `integration_mode=antigravity-sqlite`, `fidelity=summary`) on startup and every periodic resync. There is no live file-tailing yet — new conversations appear on the next resync. Antigravity DBs are discovered recursively under `~/.gemini/antigravity-cli/conversations/**/*.db`.
 - If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm cli -- costs recalc`; that backfills stale imports after pricing-data updates or importer fixes.
 - Re-importing does **not** repair token counts on rows already in the DB: `insertEvent` dedups by `event_id` and skips existing rows (insert-only, no upsert), and `--force` only bypasses the file-hash skip. One-shot corrections to already-stored rows must go through a `runDataMigrations` step in `src/db/schema.ts`, not re-import.
 - The cache-inclusive `tokens_in` repair (OpenAI/Codex rows that overstated cost by billing cached tokens at the full input rate) runs automatically once on next startup via the `user_version`-guarded migration; no manual command is needed. It re-normalizes `tokens_in` and recomputes `cost_usd` for OpenAI/Google rows and leaves Anthropic untouched.

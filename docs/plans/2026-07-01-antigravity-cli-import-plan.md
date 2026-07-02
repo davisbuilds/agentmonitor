@@ -2,7 +2,7 @@
 date: 2026-07-01
 topic: antigravity-cli-import
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 ---
 
@@ -184,7 +184,7 @@ intermediate, covered by fixture tests (red first).
 
 - Decoder returns model + token buckets matching fixture expectations. (Criteria #2, #7.)
 
-### Task 3: Event projection — `antigravity.ts` importer (with in-parser cost)
+### Task 3: Event projection — `antigravity.ts` importer (with in-parser cost) — DONE
 
 **Objective**
 
@@ -221,7 +221,7 @@ correct token accounting, step→taxonomy mapping, and **cost computed in-parser
 - Parser emits taxonomy-mapped events with cache-net `tokens_in`, thoughts lane, and
   in-parser `cost_usd`. (Criteria #1, #2, #3, #4.)
 
-### Task 4: Model classification + pricing for the *observed* model strings
+### Task 4: Model classification + pricing for the *observed* model strings — DONE
 
 **Objective**
 
@@ -258,7 +258,7 @@ classify to google/gemini and resolve to a priced canonical.
 - Observed Antigravity models produce non-zero `cost_usd`; unknowns are honest.
   (Criteria #3.)
 
-### Task 5: Wire into import orchestration
+### Task 5: Wire into import orchestration — DONE
 
 **Objective**
 
@@ -290,7 +290,7 @@ Make `amon import` discover and process Antigravity DBs idempotently.
 
 - Re-running import over unchanged DBs is a no-op. (Criteria #5.)
 
-### Task 6: Session projection — browser/search/analytics/trace-quality visibility
+### Task 6: Session projection — browser/search/analytics/trace-quality visibility — DONE
 
 **Objective**
 
@@ -340,7 +340,7 @@ the Map (`insertParsedSession` + a live-adapter/projector step), not just one.
   the trace-quality projection (reads the populated `session_items`).
   (Criteria #6; spec Open Question #3.)
 
-### Task 7: Docs + agent-label surface
+### Task 7: Docs + agent-label surface — DONE
 
 **Objective**
 

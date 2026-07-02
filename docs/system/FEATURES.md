@@ -54,6 +54,7 @@ Product-surface reference for AgentMonitor.
 |-------|------------|-----------------|
 | Claude Code | Shell/Python hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`) | Yes (via hooks) |
 | Codex | OTEL JSON exporter (`logs`, `metrics`) | Via import backfill |
+| Antigravity CLI | Historical import of conversation SQLite DBs (protobuf decode; no OTEL/live) | Yes (via import; summary session fidelity) |
 | Generic | HTTP API (`POST /api/events`) | If provided in payload |
 
 ## Privacy And Capture Controls
