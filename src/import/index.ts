@@ -3,13 +3,14 @@ import { getDb } from '../db/connection.js';
 import { insertEvent } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashFile as hashCodexFile } from './codex.js';
+import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
-export type ImportSource = 'claude-code' | 'codex' | 'all';
+export type ImportSource = 'claude-code' | 'codex' | 'antigravity' | 'all';
 
 export interface ImportOptions {
   source: ImportSource;
@@ -19,6 +20,7 @@ export interface ImportOptions {
   force?: boolean;
   claudeDir?: string;
   codexDir?: string;
+  antigravityDir?: string;
   excludePatterns?: string[];
 }
 
@@ -94,11 +96,12 @@ function importEvents(events: NormalizedIngestEvent[], dryRun: boolean): { impor
 
 function processFile(
   filePath: string,
-  source: 'claude-code' | 'codex',
+  source: 'claude-code' | 'codex' | 'antigravity',
   options: ImportOptions,
 ): ImportFileResult {
   const stat = fs.statSync(filePath);
-  const hashFn = source === 'claude-code' ? hashClaudeFile : hashCodexFile;
+  const hashFn =
+    source === 'claude-code' ? hashClaudeFile : source === 'codex' ? hashCodexFile : hashAntigravityFile;
   const currentHash = hashFn(filePath);
 
   // Check import state (skip if unchanged, unless --force)
@@ -116,9 +119,13 @@ function processFile(
     }
   }
 
-  // Parse the file
-  const parseFn = source === 'claude-code' ? parseClaudeCodeFile : parseCodexFile;
-  const events = parseFn(filePath, { from: options.from, to: options.to, codexDir: options.codexDir });
+  // Parse the file (each source has its own option needs)
+  const events =
+    source === 'claude-code'
+      ? parseClaudeCodeFile(filePath, { from: options.from, to: options.to })
+      : source === 'codex'
+        ? parseCodexFile(filePath, { from: options.from, to: options.to, codexDir: options.codexDir })
+        : parseAntigravityFile(filePath, { from: options.from, to: options.to });
 
   // Import events
   const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
@@ -154,6 +161,9 @@ export function runImport(options: ImportOptions): ImportResult {
   const codexFiles = (options.source === 'codex' || options.source === 'all')
     ? discoverCodexLogs(options.codexDir, { excludePatterns })
     : [];
+  const antigravityFiles = (options.source === 'antigravity' || options.source === 'all')
+    ? discoverAntigravityLogs(options.antigravityDir, { excludePatterns })
+    : [];
 
   // Process Claude Code files
   for (const filePath of claudeFiles) {
@@ -163,6 +173,11 @@ export function runImport(options: ImportOptions): ImportResult {
   // Process Codex files
   for (const filePath of codexFiles) {
     files.push(processFile(filePath, 'codex', options));
+  }
+
+  // Process Antigravity files
+  for (const filePath of antigravityFiles) {
+    files.push(processFile(filePath, 'antigravity', options));
   }
 
   // Aggregate results

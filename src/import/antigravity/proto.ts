@@ -145,6 +145,19 @@ export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
   };
 }
 
+/**
+ * Extract a step's timestamp from its `steps.metadata` (CortexStepMetadata) blob:
+ * `metadata.field1.field1` is a unix-seconds created-at. Returns epoch ms, or
+ * undefined if absent/out of a sane range. (Verified across real rows.)
+ */
+export function decodeStepTimestampMs(metadata: Buffer): number | undefined {
+  const inner = getBytes(decodeMessage(metadata), 1);
+  if (!inner) return undefined;
+  const secs = getVarint(decodeMessage(inner), 1);
+  if (secs === undefined || secs < 1_000_000_000 || secs > 4_000_000_000) return undefined;
+  return secs * 1000;
+}
+
 export interface GoogleUsage {
   promptTokenCount: number;
   candidatesTokenCount: number;
