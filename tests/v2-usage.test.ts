@@ -330,6 +330,18 @@ describe('GET /api/v2/usage/daily', () => {
       ],
     );
   });
+
+  test('accepts full ISO timestamps for date bounds (what the monitor cost window sends)', async () => {
+    const query = 'date_from=2026-04-01T12:30:00.000Z&date_to=2026-04-03T00:00:00.000Z';
+    const res = await fetch(`${baseUrl}/api/v2/usage/daily?${encodeURI(query)}`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as { data: Array<{ date: string }> };
+    // Regression: ISO bounds used to produce an Invalid Date inside
+    // enumerateDateRange, collapsing the series to [] and hiding the
+    // monitor "Spend Over Time" chart whenever a cost window was active.
+    assert.deepEqual(body.data.map(row => row.date), ['2026-04-01', '2026-04-02', '2026-04-03']);
+  });
 });
 
 describe('GET /api/v2/usage/projects and /models', () => {
