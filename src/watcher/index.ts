@@ -5,8 +5,11 @@ import crypto from 'crypto';
 import type Database from 'better-sqlite3';
 import { parseSessionMessages, insertParsedSession } from '../parser/claude-code.js';
 import { parseCodexSessionMessages } from '../parser/codex-sessions.js';
+import { parseAntigravitySessions } from '../parser/antigravity-sessions.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
+import { syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
+import { discoverAntigravityLogs } from '../import/antigravity.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 
@@ -204,6 +207,87 @@ export function syncAllCodexFiles(db: Database.Database, codexHome?: string, opt
 
   for (const filePath of files) {
     const result = syncCodexSessionFileDetailed(db, filePath, options).result;
+    stats[result === 'parsed' ? 'parsed' : result === 'skipped' ? 'skipped' : 'errors']++;
+  }
+
+  return stats;
+}
+
+// --- Antigravity conversation DB support ---
+
+/**
+ * Change token for an Antigravity conversation DB. Folds the SQLite sidecars
+ * (`-wal`, `-shm`) into the hash: when a conversation DB is still open in WAL
+ * mode, newly committed steps can live only in `<uuid>.db-wal` while the main
+ * `.db` is byte-unchanged. Hashing the main file alone would make the periodic
+ * resync see the same hash and skip, leaving the browser/search/trace-quality
+ * projection stale until SQLite checkpoints. Folding in the sidecars means any
+ * committed WAL frame flips the token (over-parsing on a spurious change is
+ * harmless — `insertParsedSession` is delete-and-reinsert). (Codex review, PR #57.)
+ */
+export function hashAntigravityDb(filePath: string): string {
+  const h = crypto.createHash('sha256');
+  h.update(fs.readFileSync(filePath));
+  for (const suffix of ['-wal', '-shm']) {
+    try {
+      h.update(suffix);
+      h.update(fs.readFileSync(filePath + suffix));
+    } catch {
+      // sidecar absent (checkpointed / not in WAL mode) — nothing to fold in
+    }
+  }
+  return h.digest('hex');
+}
+
+function syncAntigravitySessionFileDetailed(
+  db: Database.Database,
+  filePath: string,
+  options: SyncOptions = {},
+): SyncSessionOutcome {
+  let fileHash = 'error';
+  let fileMtime = '';
+  try {
+    const stat = fs.statSync(filePath);
+    fileHash = hashAntigravityDb(filePath);
+    fileMtime = stat.mtime.toISOString();
+
+    const existing = getWatchedFileState(db, filePath);
+    if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
+      return { result: 'skipped' };
+    }
+
+    const sessionId = path.basename(filePath, '.db');
+    const parsed = parseAntigravitySessions(filePath);
+
+    if (parsed.messages.length === 0) {
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
+      return { result: 'skipped', session_id: sessionId };
+    }
+
+    insertParsedSession(db, parsed, filePath, stat.size, fileHash);
+    const live = syncAntigravityLiveSession(db, parsed);
+    safelyMaintainTraceSummaryForSession(sessionId, 'antigravity session sync');
+
+    upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
+
+    return { result: 'parsed', live, session_id: sessionId };
+  } catch (err) {
+    console.error(`[watcher] Failed to sync Antigravity ${filePath}:`, err);
+    try {
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'error');
+    } catch (dbErr) {
+      console.error(`[watcher] Failed to record error state for ${filePath}:`, dbErr);
+    }
+    return { result: 'error' };
+  }
+}
+
+export function syncAllAntigravityFiles(db: Database.Database, dir?: string, options: SyncOptions = {}): SyncStats {
+  const files = discoverAntigravityLogs(dir, { excludePatterns: options.excludePatterns });
+  const stats: SyncStats = { parsed: 0, skipped: 0, errors: 0, total: files.length };
+
+  for (const filePath of files) {
+    const result = syncAntigravitySessionFileDetailed(db, filePath, options).result;
     stats[result === 'parsed' ? 'parsed' : result === 'skipped' ? 'skipped' : 'errors']++;
   }
 
