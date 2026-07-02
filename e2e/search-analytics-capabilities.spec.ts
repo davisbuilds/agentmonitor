@@ -119,16 +119,16 @@ test.afterAll(async () => {
 test('search and analytics tabs explain capability boundaries', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#search`);
   await expect(page.getByText('Search is capability-aware.')).toBeVisible();
-  await expect(page.getByText('Only sessions with searchable history appear here.')).toBeVisible();
+  await expect(page.getByText('Only sessions with searchable history appear here')).toBeVisible();
 
   await page.goto(`${baseUrl}/app/#analytics`);
-  await expect(page.getByText('Analytics reflects session capability coverage.')).toBeVisible();
+  await expect(page.getByText('Reflects session capability coverage.')).toBeVisible();
   await expect(page.getByText('This metric includes every session matching the current filters').first()).toBeVisible();
 });
 
 test('app restores search and session deep links from the hash', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#search?q=quota%20reset&sort=relevance`);
-  await expect(page.getByPlaceholder('Search across transcript history...')).toHaveValue('quota reset');
+  await expect(page.getByPlaceholder('Search across transcript history…')).toHaveValue('quota reset');
   await expect(page.locator('select').first()).toHaveValue('relevance');
 
   await page.goto(`${baseUrl}/app/#sessions?session=missing-session&message=7`);
@@ -200,7 +200,7 @@ test('monitor stats bar uses the v2 monitor endpoint instead of v1 stats', async
 
   await page.goto(`${baseUrl}/app/#monitor`);
 
-  await expect(page.getByText('Events:')).toBeVisible();
+  await expect(page.getByText(/Events\s+\d/).first()).toBeVisible();
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/stats')).toBe(true);
   expect(requestedPaths).not.toContain('/api/stats');
 });
@@ -239,7 +239,9 @@ test('monitor event feed uses the v2 monitor endpoint instead of v1 events', asy
 
   await page.goto(`${baseUrl}/app/#monitor`);
 
-  await expect(page.getByRole('heading', { name: 'All Events' })).toBeVisible();
+  // The standalone "All Events" panel is gone; the feed lives inside the
+  // agent cards now, so anchor on the monitor page itself being rendered.
+  await expect(page.getByText('Active Agents')).toBeVisible();
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/events')).toBe(true);
   expect(requestedPaths).not.toContain('/api/events');
 });
@@ -249,7 +251,7 @@ test('monitor active agent cards include model and reasoning effort when availab
 
   const card = page.locator('button').filter({ hasText: 'agentmonitor' }).first();
   await expect(card).toBeVisible();
-  await expect(card).toContainText('codex (gpt-5.5 high)');
+  await expect(card).toContainText('Codex (gpt-5.5 high)');
 });
 
 test('monitor session detail drawer uses v2 detail and transcript endpoints', async ({ page }) => {
