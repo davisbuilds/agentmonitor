@@ -26,6 +26,16 @@ test('cost is computed for gemini-pro-default (non-zero, not null)', () => {
   assert.ok(cost !== null && cost > 0, `expected positive cost, got ${cost}`);
 });
 
+test('display-string fallback "Gemini 3.1 Pro (High)" is priced (decoder may use field 21 when field 19 is absent)', () => {
+  // When the internal id (gen_metadata field 19) is missing, the decoder falls
+  // back to the field-21 display string, which is what reaches pricing. Each
+  // reasoning-tier variant of the priced Pro model must still resolve to a cost.
+  for (const display of ['Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (Medium)', 'Gemini 3.1 Pro (Low)']) {
+    const cost = pricingRegistry.calculate(display, { input: 20000, output: 3000, cacheRead: 8000, cacheWrite: 0 });
+    assert.ok(cost !== null && cost > 0, `expected positive cost for "${display}", got ${cost}`);
+  }
+});
+
 test("unmapped Antigravity flash id classifies google/gemini but stays pricing 'unknown' (honest, never zero)", () => {
   const c = classifyModel('gemini-3-flash-a');
   assert.equal(c.provider, 'google');

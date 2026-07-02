@@ -5,7 +5,10 @@
     "gemini-3.1-pro-preview": {
       "aliases": [
         "gemini-3.1-pro-preview-customtools",
-        "gemini-pro-default"
+        "gemini-pro-default",
+        "Gemini 3.1 Pro (High)",
+        "Gemini 3.1 Pro (Medium)",
+        "Gemini 3.1 Pro (Low)"
       ],
       "inputCostPerMTok": 2,
       "outputCostPerMTok": 12,

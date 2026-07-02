@@ -43,3 +43,7 @@ function discoverFilesRecursive(
 export function discoverJsonlFilesRecursive(rootDir: string, options: DiscoveryOptions = {}): string[] {
   return discoverFilesRecursive(rootDir, entry => entry.isFile() && entry.name.endsWith('.jsonl'), options);
 }
+
+export function discoverDbFilesRecursive(rootDir: string, options: DiscoveryOptions = {}): string[] {
+  return discoverFilesRecursive(rootDir, entry => entry.isFile() && entry.name.endsWith('.db'), options);
+}

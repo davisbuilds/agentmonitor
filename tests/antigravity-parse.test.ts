@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
-import { parseAntigravityFile, stepKindToEvent } from '../src/import/antigravity.js';
+import { parseAntigravityFile, stepKindToEvent, discoverAntigravityLogs } from '../src/import/antigravity.js';
 
 // --- minimal protobuf encoder (deterministic fixtures) ---
 function varint(n: number): number[] {
@@ -85,6 +85,23 @@ test('parseAntigravityFile: llm_response carries cache-net tokens + cost from Co
   assert.equal(llm!.cache_read_tokens, 8000); // cached, not folded into tokens_in
   assert.equal((llm!.metadata as { thoughts_tokens: number }).thoughts_tokens, 2500);
   assert.ok(llm!.cost_usd !== undefined && llm!.cost_usd > 0, 'priced (gemini-pro-default)');
+});
+
+test('discoverAntigravityLogs: finds conversation DBs nested under subdirectories', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agr-home-'));
+  const conversations = path.join(home, 'conversations');
+  const nested = path.join(conversations, 'project-x', '2026-07');
+  fs.mkdirSync(nested, { recursive: true });
+  const flat = path.join(conversations, 'flat.db');
+  const deep = path.join(nested, 'deep.db');
+  fs.writeFileSync(flat, '');
+  fs.writeFileSync(deep, '');
+  fs.writeFileSync(path.join(nested, 'notes.txt'), 'ignore me');
+
+  const found = discoverAntigravityLogs(home);
+  assert.ok(found.includes(flat), 'top-level .db discovered');
+  assert.ok(found.includes(deep), 'nested .db discovered (recursive)');
+  assert.ok(!found.some((f) => f.endsWith('.txt')), 'non-.db files excluded');
 });
 
 test('stepKindToEvent: explicit and generic mappings', () => {

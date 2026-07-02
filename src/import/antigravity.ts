@@ -12,6 +12,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
+import { discoverDbFilesRecursive } from '../util/file-discovery.js';
 import { pricingRegistry } from '../pricing/index.js';
 import {
   decodeStepEnvelope,
@@ -31,13 +32,10 @@ export function discoverAntigravityLogs(
   options?: { excludePatterns?: string[] },
 ): string[] {
   const root = path.join(antigravityHome(dir), 'conversations');
-  if (!fs.existsSync(root)) return [];
-  const exclude = options?.excludePatterns ?? [];
-  return fs
-    .readdirSync(root)
-    .filter((f) => f.endsWith('.db'))
-    .map((f) => path.join(root, f))
-    .filter((f) => !exclude.some((p) => f.includes(p)));
+  // Recurse: conversation DBs may be nested under project/date subdirectories,
+  // matching the spec's `conversations/**/*.db` scope (mirrors the Claude/Codex
+  // JSONL importers). A flat readdir would silently drop nested sessions.
+  return discoverDbFilesRecursive(root, { excludePatterns: options?.excludePatterns });
 }
 
 export function hashFile(filePath: string): string {
