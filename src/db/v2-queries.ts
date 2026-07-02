@@ -2306,8 +2306,11 @@ function resolveUsageDateBounds(
   earliest: string | null,
   latest: string | null,
 ): { from: string | null; to: string | null } {
-  const from = params.date_from ?? earliest?.slice(0, 10) ?? null;
-  const to = params.date_to ?? latest?.slice(0, 10) ?? null;
+  // The monitor UI sends full ISO timestamps (e.g. 2026-06-02T12:02:29.756Z);
+  // enumerateDateRange needs bare YYYY-MM-DD or it yields an Invalid Date and
+  // the whole daily series comes back empty.
+  const from = params.date_from?.slice(0, 10) ?? earliest?.slice(0, 10) ?? null;
+  const to = params.date_to?.slice(0, 10) ?? latest?.slice(0, 10) ?? null;
   if (!from || !to || from > to) {
     return { from: null, to: null };
   }
