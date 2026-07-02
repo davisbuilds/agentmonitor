@@ -121,6 +121,7 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 
 - `claude-code.ts`: Parses Claude Code JSONL conversation logs.
 - `codex.ts`: Parses Codex session JSON files.
+- `antigravity.ts`: Parses Antigravity CLI conversation SQLite DBs (`~/.gemini/antigravity-cli/conversations/**/*.db`). Blobs are plaintext protobuf decoded with descriptor-pinned + empirically-pinned field maps (`src/import/antigravity/`, see `docs/specs/baselines/antigravity-proto-fieldmap.md`). `agent_type="antigravity"`; models classify google/gemini; real per-turn usage/cost comes from the private `CortexGeneratorMetadata` record (cache-inclusive token invariant honored).
 - `import_state` tracks full-file hashes for completed imports, including files that produced zero events, so unchanged non-importable files are skipped on later full imports.
 - Date-scoped imports intentionally do not update `import_state`, because they only represent a partial view of the file.
 - Import discovery can exclude configured path patterns before hashing or parsing, so known junk subtrees never enter the historical backfill pipeline.
@@ -130,11 +131,12 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 
 `src/watcher/` maintains the v2 session browser from local JSONL history:
 
-- Startup sync scans both `~/.claude/projects/**/*.jsonl` and `~/.codex/sessions/**/*.jsonl`.
-- Chokidar watches both roots for ongoing file additions and changes.
+- Startup sync scans `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**/*.jsonl`, and `~/.gemini/antigravity-cli/conversations/**/*.db`.
+- Chokidar watches the Claude and Codex JSONL roots for ongoing file additions and changes. Antigravity DBs are **not** live-tailed yet — they are picked up on startup and each periodic resync (file-watch tailing deferred).
+- The Antigravity browser projection is two writers per session (`src/parser/antigravity-sessions.ts` → `insertParsedSession`, then `src/live/antigravity-adapter.ts` → projector), producing `browsing_sessions`/`messages`/`session_items` at `integration_mode=antigravity-sqlite`, `fidelity=summary` (step-kind labels until per-kind payload internals are decoded).
 - The same exclude-pattern matcher is applied to discovery, watcher events, and periodic resync so ignored paths behave consistently.
 - `watched_files` caches parsed, skipped, and error states by file hash so unchanged files are not reparsed on every periodic resync.
-- Periodic resync still runs as a safety net for missed file-system events and now covers both Claude and Codex history roots.
+- Periodic resync still runs as a safety net for missed file-system events and now covers the Claude, Codex, and Antigravity history roots.
 - `amon sync sessions` is the primary manual resync entrypoint. The older reparse scripts remain compatibility wrappers.
 
 ## Trace Quality

@@ -37,6 +37,14 @@
       };
     }
 
+    if (search.agent === 'antigravity') {
+      return {
+        dot: 'bg-warn',
+        title: 'Antigravity search is partial.',
+        body: 'Summary fidelity — only step kinds are indexed (e.g. "run command"), not transcript text, until conversation payload internals are decoded.',
+      };
+    }
+
     return {
       dot: 'bg-accent',
       title: 'Search is capability-aware.',

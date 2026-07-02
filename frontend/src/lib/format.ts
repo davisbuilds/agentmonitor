@@ -56,6 +56,7 @@ export function agentColor(agentType: string): string {
     case 'claude':
     case 'claude_code': return 'text-claude';
     case 'codex': return 'text-codex';
+    case 'antigravity': return 'text-antigravity';
     default: return 'text-accent';
   }
 }
@@ -65,6 +66,7 @@ export function agentHexColor(agentType: string): string {
     case 'claude':
     case 'claude_code': return 'var(--color-claude)';
     case 'codex': return 'var(--color-codex)';
+    case 'antigravity': return 'var(--color-antigravity)';
     default: return 'var(--color-accent)';
   }
 }
@@ -74,6 +76,7 @@ export function agentDisplayName(agentType: string): string {
     case 'claude':
     case 'claude_code': return 'Claude';
     case 'codex': return 'Codex';
+    case 'antigravity': return 'Antigravity';
     default: return 'Assistant';
   }
 }
