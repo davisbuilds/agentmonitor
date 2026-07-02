@@ -215,6 +215,30 @@ export function syncAllCodexFiles(db: Database.Database, codexHome?: string, opt
 
 // --- Antigravity conversation DB support ---
 
+/**
+ * Change token for an Antigravity conversation DB. Folds the SQLite sidecars
+ * (`-wal`, `-shm`) into the hash: when a conversation DB is still open in WAL
+ * mode, newly committed steps can live only in `<uuid>.db-wal` while the main
+ * `.db` is byte-unchanged. Hashing the main file alone would make the periodic
+ * resync see the same hash and skip, leaving the browser/search/trace-quality
+ * projection stale until SQLite checkpoints. Folding in the sidecars means any
+ * committed WAL frame flips the token (over-parsing on a spurious change is
+ * harmless — `insertParsedSession` is delete-and-reinsert). (Codex review, PR #57.)
+ */
+export function hashAntigravityDb(filePath: string): string {
+  const h = crypto.createHash('sha256');
+  h.update(fs.readFileSync(filePath));
+  for (const suffix of ['-wal', '-shm']) {
+    try {
+      h.update(suffix);
+      h.update(fs.readFileSync(filePath + suffix));
+    } catch {
+      // sidecar absent (checkpointed / not in WAL mode) — nothing to fold in
+    }
+  }
+  return h.digest('hex');
+}
+
 function syncAntigravitySessionFileDetailed(
   db: Database.Database,
   filePath: string,
@@ -224,7 +248,7 @@ function syncAntigravitySessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    fileHash = hashFile(filePath);
+    fileHash = hashAntigravityDb(filePath);
     fileMtime = stat.mtime.toISOString();
 
     const existing = getWatchedFileState(db, filePath);

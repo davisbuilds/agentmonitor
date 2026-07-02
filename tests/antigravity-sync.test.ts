@@ -6,6 +6,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connection.js';
 import type { syncAllAntigravityFiles as syncAllAntigravityFilesFn } from '../src/watcher/index.js';
+import { hashAntigravityDb } from '../src/watcher/index.js';
 
 // --- minimal protobuf encoder (deterministic fixtures) ---
 function varint(n: number): number[] {
@@ -97,6 +98,29 @@ test('syncAllAntigravityFiles: projects a browsable, trace-quality-visible sessi
   const items = db.prepare('SELECT COUNT(*) c FROM session_items WHERE session_id = ?').get(uuid) as { c: number };
   assert.ok(turns.c > 0, 'session_turns projected');
   assert.ok(items.c > 0, 'session_items projected');
+});
+
+test('hashAntigravityDb: change token folds in WAL/SHM sidecars (catches committed-in-WAL steps)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agr-hash-'));
+  const dbPath = path.join(dir, 'conv.db');
+  fs.writeFileSync(dbPath, Buffer.from('main-db-page-bytes'));
+
+  const base = hashAntigravityDb(dbPath);
+  assert.equal(hashAntigravityDb(dbPath), base, 'stable when nothing changes');
+
+  // A still-open DB commits new steps into the WAL sidecar; the main file is unchanged.
+  fs.writeFileSync(dbPath + '-wal', Buffer.from('wal-frame-1'));
+  const withWal = hashAntigravityDb(dbPath);
+  assert.notEqual(withWal, base, 'a new/changed WAL flips the token even though main .db is identical');
+
+  fs.writeFileSync(dbPath + '-wal', Buffer.from('wal-frame-1+2'));
+  const grownWal = hashAntigravityDb(dbPath);
+  assert.notEqual(grownWal, withWal, 'more committed WAL frames flip the token again');
+
+  fs.writeFileSync(dbPath + '-shm', Buffer.from('shm-index'));
+  assert.notEqual(hashAntigravityDb(dbPath), grownWal, 'SHM state also participates');
+
+  fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('syncAllAntigravityFiles: is idempotent (hash-guarded via watched_files)', () => {
