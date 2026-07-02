@@ -1,0 +1,29 @@
+# Weekly dependency-vulnerability audit. Backstop to Dependabot alerts:
+# scheduled rather than per-PR so a newly published CVE in an existing
+# dependency can't block unrelated work.
+name: Security audit
+
+on:
+  schedule:
+    - cron: "0 12 * * 1" # Mondays 12:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: pnpm audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+        with:
+          version: 10.29.3
+
+      - name: Audit production dependencies
+        run: pnpm audit --prod --audit-level high
