@@ -42,6 +42,10 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # eslint/tsc don't see inside .svelte components; svelte-check does.
+      - name: Svelte check
+        run: pnpm frontend:check
+
       - name: Build
         run: pnpm build
 
