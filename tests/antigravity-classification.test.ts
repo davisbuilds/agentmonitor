@@ -36,17 +36,25 @@ test('display-string fallback "Gemini 3.1 Pro (High)" is priced (decoder may use
   }
 });
 
-test("unmapped Antigravity flash id classifies google/gemini but stays pricing 'unknown' (honest, never zero)", () => {
+test("Antigravity flash id 'gemini-3-flash-a' now resolves to priced Gemini 3.5 Flash", () => {
   const c = classifyModel('gemini-3-flash-a');
   assert.equal(c.provider, 'google');
   assert.equal(c.family, 'gemini');
-  assert.equal(c.pricing_status, 'unknown');
-  // unresolved → null cost, not a silent 0
+  assert.equal(c.tier, 'flash');
+  assert.equal(c.canonical_model, 'gemini-3.5-flash');
+  assert.equal(c.pricing_status, 'known');
   const cost = pricingRegistry.calculate('gemini-3-flash-a', {
     input: 100,
     output: 10,
     cacheRead: 0,
     cacheWrite: 0,
   });
-  assert.equal(cost, null);
+  assert.ok(cost !== null && cost > 0, `expected positive cost, got ${cost}`);
+});
+
+test('a genuinely-unknown model still resolves to null cost, not a silent zero (honesty invariant)', () => {
+  const c = classifyModel('gemini-99-imaginary');
+  assert.equal(c.provider, 'google');
+  assert.equal(c.pricing_status, 'unknown');
+  assert.equal(pricingRegistry.calculate('gemini-99-imaginary', { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 }), null);
 });

@@ -1,7 +1,20 @@
 {
   "provider": "google",
-  "lastUpdated": "2026-05-24T00:00:00Z",
+  "lastUpdated": "2026-07-02T00:00:00Z",
   "models": {
+    "gemini-3.5-flash": {
+      "aliases": [
+        "gemini-3-flash-a",
+        "Gemini 3.5 Flash (High)",
+        "Gemini 3.5 Flash (Medium)",
+        "Gemini 3.5 Flash (Low)"
+      ],
+      "inputCostPerMTok": 1.5,
+      "outputCostPerMTok": 9,
+      "cacheReadCostPerMTok": 0.15,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
     "gemini-3.1-pro-preview": {
       "aliases": [
         "gemini-3.1-pro-preview-customtools",

@@ -39,13 +39,10 @@ Working list of opportunities noticed while implementing specs. These are not co
 
 ## Pricing (verified against Google's Gemini API pricing page, 2026-07-01)
 
-- **Add `gemini-3.5-flash` to `src/pricing/data/gemini.json`.** It's a real, priced
-  Google model ($1.50/M input, $9.00/M output, $0.15/M cache read) but is missing
-  from the file, so Antigravity flash sessions (internal id `gemini-3-flash-a`,
-  display "Gemini 3.5 Flash") currently resolve to `pricing_status=unknown` and get
-  no cost. Once added, alias the Antigravity id(s) to it like
-  `gemini-pro-default`→`gemini-3.1-pro-preview`. (Verified: `gemini-3.1-pro-preview`
-  rates $2/$12/$0.20 already match Google exactly for ≤200k prompts.)
+- ~~**Add `gemini-3.5-flash` to `src/pricing/data/gemini.json`.**~~ DONE (2026-07-02):
+  added `gemini-3.5-flash` ($1.50/$9.00/$0.15) with the Antigravity id/display
+  aliases (`gemini-3-flash-a`, `Gemini 3.5 Flash (High/Medium/Low)`); also added
+  `claude-fable-5` ($10/$50/$1, 5m cache-write $12.50) + a `fable` classifier tier.
 - **Model prompt-size price tiers (engine-wide, not Antigravity-specific).** Google
   doubles Gemini rates above 200k prompt tokens (e.g. 3.1 Pro input $2→$4, output
   $12→$18, cache $0.20→$0.40). `PricingRegistry`/`gemini.json` store a single flat
