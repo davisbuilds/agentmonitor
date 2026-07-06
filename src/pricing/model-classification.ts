@@ -47,6 +47,7 @@ function inferTier(model: string, provider: string): string {
     if (model.includes('haiku')) return 'haiku';
     if (model.includes('sonnet')) return 'sonnet';
     if (model.includes('opus')) return 'opus';
+    if (model.includes('fable')) return 'fable';
     return 'unknown';
   }
 

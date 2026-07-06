@@ -1,0 +1,10 @@
+# Gitleaks config — extends the default ruleset. Full history is scanned in
+# CI, so allowlists below cover verified non-secrets (including in deleted
+# files). Keep entries tight and give each a reason.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deleted macOS release test used fake API-key fixtures (history only)"
+paths = ['''tests/release/macos-release\.test\.ts''']

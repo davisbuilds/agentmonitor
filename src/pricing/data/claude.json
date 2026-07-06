@@ -1,7 +1,15 @@
 {
   "provider": "anthropic",
-  "lastUpdated": "2026-06-09T00:00:00Z",
+  "lastUpdated": "2026-07-02T00:00:00Z",
   "models": {
+    "claude-fable-5": {
+      "aliases": [],
+      "inputCostPerMTok": 10,
+      "outputCostPerMTok": 50,
+      "cacheReadCostPerMTok": 1,
+      "cacheWriteCostPerMTok": 12.5,
+      "deprecated": false
+    },
     "claude-opus-4-8": {
       "aliases": [],
       "inputCostPerMTok": 5,

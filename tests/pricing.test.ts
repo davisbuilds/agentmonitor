@@ -54,6 +54,28 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.deprecated, false);
     });
 
+    test('finds Claude Fable 5 with the published per-MTok rates', () => {
+      const pricing = registry.lookup('claude-fable-5');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.inputCostPerToken, 10 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 50 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 1 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 12.5 / 1_000_000); // 5-minute cache write
+      assert.equal(pricing.deprecated, false);
+    });
+
+    test('finds Gemini 3.5 Flash by canonical name and Antigravity aliases', () => {
+      const canonical = registry.lookup('gemini-3.5-flash');
+      assert.ok(canonical);
+      assert.equal(canonical.provider, 'google');
+      assert.equal(canonical.inputCostPerToken, 1.5 / 1_000_000);
+      assert.equal(canonical.outputCostPerToken, 9 / 1_000_000);
+      assert.equal(canonical.cacheReadCostPerToken, 0.15 / 1_000_000);
+      assert.ok(registry.lookup('gemini-3-flash-a'), 'internal id alias resolves');
+      assert.ok(registry.lookup('Gemini 3.5 Flash (Medium)'), 'display-string alias resolves');
+    });
+
     test('finds Claude Opus 4 by alias', () => {
       const pricing = registry.lookup('opus');
       assert.ok(pricing);
@@ -176,6 +198,24 @@ describe('PricingRegistry', () => {
       assert.equal(classifyModel('google/gemini-2.5-pro-preview-05-06').tier, 'pro');
     });
 
+    test('classifies Claude Fable 5 as a known anthropic/fable tier', () => {
+      const c = classifyModel('claude-fable-5');
+      assert.equal(c.provider, 'anthropic');
+      assert.equal(c.family, 'claude');
+      assert.equal(c.tier, 'fable');
+      assert.equal(c.pricing_status, 'known');
+    });
+
+    test('classifies the Antigravity flash id/display via gemini-3.5-flash', () => {
+      for (const id of ['gemini-3-flash-a', 'Gemini 3.5 Flash (Medium)']) {
+        const c = classifyModel(id);
+        assert.equal(c.provider, 'google', id);
+        assert.equal(c.canonical_model, 'gemini-3.5-flash', id);
+        assert.equal(c.tier, 'flash', id);
+        assert.equal(c.pricing_status, 'known', id);
+      }
+    });
+
     test('marks pruned legacy models as deprecated without pricing', () => {
       const classification = classifyModel('claude-3-opus-20240229');
       assert.equal(classification.canonical_model, 'claude-3-opus-20240229');
@@ -194,6 +234,30 @@ describe('PricingRegistry', () => {
   });
 
   describe('calculate', () => {
+    test('calculates cost for Claude Fable 5 (input $10, output $50, cacheRead $1, 5m cacheWrite $12.50 per MTok)', () => {
+      const cost = registry.calculate('claude-fable-5', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 200_000,
+        cacheWrite: 10_000,
+      });
+      assert.ok(cost !== null);
+      // 100K*$10 + 50K*$50 + 200K*$1 + 10K*$12.50 (per MTok)
+      const expected = 1.0 + 2.5 + 0.2 + 0.125;
+      assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
+    });
+
+    test('calculates cost for Gemini 3.5 Flash via the Antigravity internal id (input $1.50, output $9, cacheRead $0.15)', () => {
+      const cost = registry.calculate('gemini-3-flash-a', {
+        input: 1_000_000,
+        output: 1_000_000,
+        cacheRead: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      const expected = 1.5 + 9 + 0.15;
+      assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
+    });
+
     test('calculates cost for Claude Sonnet 4.5', () => {
       // Sonnet 4.5: $3/MTok input, $15/MTok output
       const cost = registry.calculate('claude-sonnet-4-5-20250929', {
