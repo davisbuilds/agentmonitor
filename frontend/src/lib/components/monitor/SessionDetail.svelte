@@ -2,7 +2,7 @@
   import { getSelectedSessionId, setSelectedSessionId } from '../../stores/monitor.svelte';
   import { fetchSessionDetail, fetchTranscript, type AgentEvent } from '../../api/client';
   import { timeAgo, formatDuration, agentColor } from '../../format';
-  import { StatusDot } from '../ui';
+  import { StatusDot, Badge } from '../ui';
 
   const sessionId = $derived(getSelectedSessionId());
   let loading = $state(false);
@@ -74,6 +74,16 @@
               <span class="text-text-muted">Agent</span>
               <span class={agentColor(session.agent_type as string)}>{session.agent_type}</span>
             </div>
+            {#if session.mode === 'headless' || session.mode === 'interactive'}
+              <div class="flex justify-between gap-3">
+                <span class="text-text-muted">Mode</span>
+                {#if session.mode === 'headless'}
+                  <Badge tone="neutral" title="Headless run (claude -p / codex exec)">headless</Badge>
+                {:else}
+                  <span class="text-text">interactive</span>
+                {/if}
+              </div>
+            {/if}
             {#if session.project}
               <div class="flex justify-between gap-3">
                 <span class="text-text-muted">Project</span>

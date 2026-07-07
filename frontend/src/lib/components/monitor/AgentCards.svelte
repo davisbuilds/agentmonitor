@@ -3,7 +3,7 @@
   import { formatCost, formatNumber, timeAgo, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
   import { buildActiveAgentLabel } from '../../monitor-analytics';
-  import { SectionHeader, StatusDot, EmptyState } from '../ui';
+  import { SectionHeader, StatusDot, EmptyState, Badge } from '../ui';
 
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
@@ -62,6 +62,9 @@
           <div class="flex min-w-0 items-start gap-2">
             <StatusDot status={session.status} class="mt-1.5" />
             <span class="text-body font-medium leading-tight {agentColor(session.agent_type)}">{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
+            {#if session.mode === 'headless'}
+              <Badge tone="neutral" class="mt-0.5" title="Headless run (claude -p / codex exec)">headless</Badge>
+            {/if}
           </div>
           <span class="shrink-0 text-meta text-text-faint">{timeAgo(session.last_event_at)}</span>
         </div>
