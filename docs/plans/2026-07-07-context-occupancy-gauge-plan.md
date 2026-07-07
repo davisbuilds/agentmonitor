@@ -69,8 +69,10 @@ default and configurable Codex default, and never returning a window smaller tha
 observed tokens (guard against `>100%`).
 
 **Files**: `src/pricing/context-windows.ts` (new),
-`src/pricing/context-windows.test.ts` (new), `src/config.ts` (add
-`AGENTMONITOR_CODEX_CONTEXT_WINDOW` default ~256000).
+`tests/context-windows.test.ts` (new — tests live in `tests/`, importing from
+`../src/...`; `src/**/*.test.ts` is NOT globbed by `pnpm test`), `src/config.ts`
+(add `AGENTMONITOR_CODEX_CONTEXT_WINDOW` default ~256000, via the existing
+`parseEnvInt` convention).
 
 **Dependencies**: None.
 
@@ -84,14 +86,17 @@ observed tokens (guard against `>100%`).
 3. Expose a `computeOccupancy({ usedTokens, window })` helper returning
    `{ used, window, pct }` with `pct = round((used / window) * 100)`.
 
-**Verification**: `pnpm test src/pricing/context-windows.test.ts` — all green.
+**Verification**: `pnpm test` — new `tests/context-windows.test.ts` green (matched
+by the `tests/*.test.ts` glob in the `test` script).
 
 **Done When**: resolver + occupancy helper pass unit tests including the
 over-window guard. (Traces to contract: denominator resolution + no nonsensical
 `>100%`.)
 
 **Assumptions Verified**: `src/pricing/` has no context-window field today
-(`rg context.?window src/pricing` empty); `src/config.ts` is the env-var home.
+(`rg context.?window src/pricing` empty); `src/config.ts` is the env-var home;
+`package.json:19` `test` script globs `tests/*.test.ts` + `tests/codebase/*.test.ts`
+only (no `src/**` — all 61 existing tests live in `tests/`).
 
 ### Task 2: Claude numerator extraction (TDD)
 
@@ -99,27 +104,30 @@ over-window guard. (Traces to contract: denominator resolution + no nonsensical
 `input + cache_read + cache_creation` input tokens and the model, exposing them
 on `ParsedSessionMetadata`.
 
-**Files**: `src/parser/claude-code.ts`, `src/parser/claude-code.test.ts` (or the
-existing parser test file).
+**Files**: `src/parser/claude-code.ts`, `tests/claude-parser.test.ts` (new, in
+`tests/`, importing from `../src/parser/claude-code.js`).
 
 **Dependencies**: None.
 
 **Implementation Steps**:
 1. Red: fixture JSONL with two assistant turns of differing `message.usage`;
    assert metadata reports the **last** turn's input+cache sum and its model.
-2. Green: while iterating lines, track the most recent assistant `message.usage`
-   and `message.model`; add `context_used_tokens?: number` and `model?: string`
-   (if not already present) to `ParsedSessionMetadata`; populate them.
+2. Green: add `usage` to the inline `ClaudeCodeLine.message` type
+   (`claude-code.ts:50-54` already declares `model` but not `usage`); while
+   iterating lines, track the most recent assistant `message.usage` +
+   `message.model`; add `context_used_tokens?: number` and `model?: string` to
+   `ParsedSessionMetadata`; populate them.
 
-**Verification**: `pnpm test` (parser suite) — new assertions green; existing
-green.
+**Verification**: `pnpm test` — `tests/claude-parser.test.ts` green; existing
+suite green.
 
 **Done When**: parser surfaces last-turn occupancy tokens + model without
 altering existing parsed output. (Traces to: Claude numerator = latest request.)
 
 **Assumptions Verified**: `ParsedMessage`/`ParsedSessionMetadata`
-(`claude-code.ts:64-99`) carry no token fields today; usage lives at
-`message.usage` in the raw line.
+(`claude-code.ts:64-99`) carry no token fields today; `ClaudeCodeLine.message`
+(`:50-54`) types `model` but not `usage`; usage lives at `message.usage` in the
+raw line.
 
 ### Task 3: Codex numerator + reported window extraction (TDD)
 
@@ -127,27 +135,43 @@ altering existing parsed output. (Traces to: Claude numerator = latest request.)
 `last_token_usage` input (inclusive of cached) and `model_context_window`,
 exposing them on `ParsedSessionMetadata`.
 
-**Files**: `src/parser/codex-sessions.ts`, its test file.
+**Files**: `src/parser/codex-sessions.ts`, `tests/codex-parser.test.ts` (new, in
+`tests/`).
 
-**Dependencies**: Task 2 (shared metadata fields).
+**Dependencies**: Task 2 — **shared-file convenience only** (both edit the shared
+`ParsedSessionMetadata` interface; no logical prerequisite). Sequence to avoid a
+merge conflict on that interface.
+
+**Note on task size**: this is **net-new parsing logic**, not surfacing an
+already-typed field. `codex-sessions.ts` today only processes `session_meta` and
+`response_item` lines (`:93-184`) and its `CodexLine.payload` type has **no `info`
+field** — it has never looked at telemetry lines. Task 3 adds a whole new
+`event_msg`/`token_count` branch plus payload typing.
 
 **Implementation Steps**:
-1. Red: fixture Codex JSONL with `token_count` events carrying `last_token_usage`
-   and `model_context_window`; assert metadata reports the last event's input
-   (+cached) and the reported window.
-2. Green: track the most recent `last_token_usage` + `model_context_window`;
-   populate `context_used_tokens` and a new `context_window_reported?: number`.
-   Do **not** use `total_token_usage` (cumulative — already consumed by billing).
+1. Red: fixture Codex JSONL with `event_msg`/`token_count` lines carrying
+   `info.last_token_usage` and `info.model_context_window`; assert metadata
+   reports the last event's input (+cached) and the reported window.
+2. Green: add a `token_count` branch to the line loop and an `info` field to the
+   `CodexLine.payload` type; track the most recent `last_token_usage` +
+   `model_context_window`; populate `context_used_tokens` and a new
+   `context_window_reported?: number`. Do **not** use `total_token_usage`
+   (cumulative — already consumed by billing).
 
-**Verification**: `pnpm test` (codex parser suite) — green.
+**Verification**: `pnpm test` — `tests/codex-parser.test.ts` green.
 
 **Done When**: Codex parser surfaces last-request occupancy + reported window.
 (Traces to: Codex numerator + first-party window.)
 
-**Assumptions Verified**: `src/import/codex.ts:13-38` already types
-`last_token_usage`/`total_token_usage`/`model_context_window`, confirming the
-JSONL shape; the live JSONL path is `syncCodexLiveSession`
-(`codex-adapter.ts:434`).
+**Assumptions Verified**: `src/parser/codex-sessions.ts:93-184` handles only
+`session_meta`/`response_item` and its `CodexLine.payload` has no `info` field
+(net-new work). `src/import/codex.ts:13-38` (a *separate* historical importer,
+not this file) types the same `info.{last_token_usage,total_token_usage,
+model_context_window}` shape — reference only. Raw telemetry confirmed present in
+today's live rollout JSONL. Live JSONL path is `syncCodexLiveSession`
+(`codex-adapter.ts:434`), distinct from the OTEL/hook event path
+`syncCodexSummaryLiveEvent` — the JSONL path is what a running Codex session
+flows through.
 
 ### Task 4: Persist occupancy on the live projection
 
@@ -170,8 +194,9 @@ and are written by both live adapters.
 3. In each adapter, call the Task 1 resolver with the parsed numerator/model/
    reported-window and write both fields into the snapshot upsert.
 
-**Verification**: `pnpm test` (projector/adapter suites) + `pnpm build`. Add an
-adapter test asserting a synced session persists the expected occupancy.
+**Verification**: `pnpm test` + `pnpm build`. Add `tests/live-occupancy.test.ts`
+(or extend `tests/codex-adapter.test.ts`) asserting a synced session persists the
+expected occupancy.
 
 **Done When**: a synced Claude and Codex session row in `browsing_sessions` holds
 correct `context_used_tokens`/`context_window_tokens`. (Traces to: live pipeline
@@ -181,14 +206,13 @@ carries occupancy.)
 adapters already call `upsertProjectedSessionSnapshot` (claude-adapter.ts:110,
 codex-adapter.ts:502).
 
-### Task 5: Expose occupancy on the live API + SSE
+### Task 5: Expose occupancy on the live API
 
-**Objective**: `LiveSession` responses and live-session SSE updates include
-`context_used_tokens`, `context_window_tokens`, and derived `context_pct`.
+**Objective**: `LiveSession` responses include `context_used_tokens`,
+`context_window_tokens`, and derived `context_pct`.
 
 **Files**: `src/db/v2-queries.ts` (`BrowsingSessionDbRow`, `mapBrowsingSessionRow`
-at :66, `LiveSessionRow`), `src/api/v2/types.ts`, `src/api/v2/live-stream.ts` (if
-snapshots are broadcast).
+at `:66`, `LiveSessionRow`), `src/api/v2/types.ts`.
 
 **Dependencies**: Task 4.
 
@@ -196,8 +220,11 @@ snapshots are broadcast).
 1. Add the two columns to `BrowsingSessionDbRow` and map them (plus computed
    `context_pct` via the Task 1 helper) in `mapBrowsingSessionRow`; emit `null`
    occupancy when tokens are absent (unavailable, not `0%`).
-2. Extend the `LiveSession` API type + any SSE payload that carries session
-   snapshots.
+2. Extend the `LiveSession` API type. **No SSE payload change needed**: the live
+   SSE events (`session_presence`/`turn_update`) carry no session data — they
+   trigger a debounced REST refetch (`stores/live.svelte.ts:262-282`), and
+   `mapBrowsingSessionRow` is `SELECT *`, so widened columns flow through the
+   existing refetch path automatically.
 
 **Verification**: `pnpm test` + a request-level test (or existing API test) that
 `GET` live sessions returns occupancy fields; `pnpm build`.
@@ -205,8 +232,10 @@ snapshots are broadcast).
 **Done When**: live API returns occupancy; sessions without usage report `null`.
 (Traces to: contract's falsifiable API behaviors.)
 
-**Assumptions Verified**: read path is `listLiveSessions`/`getLiveSession` →
-`mapBrowsingSessionRow` (`v2-queries.ts:66,182,281`).
+**Assumptions Verified**: read path is `listLiveSessions` (`v2-queries.ts:217`) /
+`getLiveSession` (`:279`) → `mapBrowsingSessionRow` (`:66`). (Note `:182` is
+`listBrowsingSessions`, a different v1-style list — do not confuse.) SSE events
+are refetch-triggers, not data carriers (`live.svelte.ts:262-282`).
 
 ### Task 6: Card pill + detail/inspector gauge (frontend)
 
@@ -219,15 +248,17 @@ used/window/percent gauge renders in the session detail + Live inspector.
 `frontend/src/lib/components/live/InspectorPanel.svelte`,
 `frontend/src/lib/api/client.ts` (`LiveSession`/`Session` occupancy fields).
 
-**Dependencies**: Task 5 and Task 7 (card data source).
+**Dependencies**: Task 5. (The `AgentCards` pill placement lands in Task 7, which
+supplies the v1 card's occupancy data; the `ContextPill` component + the
+v2-native Live inspector/detail readout built here do not depend on Task 7.)
 
 **Implementation Steps**:
-1. Add occupancy fields to the frontend `LiveSession` type (and the v1 `Session`
-   type once Task 7 supplies them).
+1. Add occupancy fields to the frontend `LiveSession` type.
 2. Build `ContextPill` reusing the `QuotaPill` fill-color thresholds
    (`ok/warn/danger` at 60/85%); render `null` occupancy as absent, not `0%`.
-3. Place the pill in `AgentCards`; add the used/window/percent readout in
-   `monitor/SessionDetail` and `live/InspectorPanel`.
+3. Add the used/window/percent readout in `live/InspectorPanel` (v2-native).
+   (`monitor/SessionDetail` + `AgentCards` pill placement follow in Task 7 once
+   the v1 `Session` carries occupancy.)
 
 **Verification**: `pnpm frontend:check`; `pnpm build`; manual `:3141/app/` render
 against a live session; optional Playwright snapshot.
@@ -241,30 +272,49 @@ occupancy updates live. (Traces to: card + detail rendering, live updates.)
 ### Task 7: Bridge occupancy into the v1 monitor card/detail (frontend)
 
 **Objective**: The v1-fed monitor cards and `monitor/SessionDetail` obtain
-occupancy despite reading the v1 store, by merging the v2 live occupancy keyed by
-session id.
+occupancy despite reading the v1 store, by fetching v2 live occupancy and merging
+it onto the v1 `Session` objects keyed by session id.
+
+**Note on task size**: this is a **full vertical slice, not a thin merge**
+(confirmed). `stores/monitor.svelte.ts` has **no v2 fetch of any kind** today, and
+its SSE handler (`handleSessionUpdate`) only recognizes `idle_check`,
+`auto_import`/`resync`, and `session_parsed` — it ignores the
+`session_presence`/`turn_update` events the watcher broadcasts. So there is no
+existing fetch/subscription to reuse; all three pieces below are net-new. Consider
+splitting into 7a (fetch + index) and 7b (merge + refresh trigger) if it runs
+long.
 
 **Files**: `frontend/src/lib/stores/monitor.svelte.ts`,
-`frontend/src/lib/api/client.ts`.
+`frontend/src/lib/api/client.ts` (v1 `Session` occupancy fields),
+`frontend/src/lib/components/monitor/AgentCards.svelte`,
+`frontend/src/lib/components/monitor/SessionDetail.svelte`.
 
-**Dependencies**: Task 5.
+**Dependencies**: Task 5, Task 6 (consumes the `ContextPill` built there).
 
 **Implementation Steps**:
-1. Extend the monitor store to fetch v2 live-session occupancy (reusing the
-   existing live-sessions fetch/SSE if one is already wired) and index it by
-   session id.
-2. Merge occupancy onto the `Session` objects `getSessions()` returns, so
-   `AgentCards`/`SessionDetail` read it directly.
+1. Add a v2 occupancy fetch to the monitor store, reusing `fetchLiveSessions` /
+   `fetchLiveSession` (`client.ts:889-901`, already built for the Live tab);
+   index results by session id.
+2. Refresh the index on a live signal — either subscribe the monitor store to
+   `session_presence`/`turn_update` on the existing SSE channel, or piggyback on
+   the polling already in `stores/live.svelte.ts` — rather than adding an
+   independent poll loop.
+3. Add occupancy fields to the v1 `Session` type and merge occupancy onto the
+   `Session` objects `getSessions()` returns.
+4. Place `ContextPill` in `AgentCards` and add the used/window/percent readout in
+   `monitor/SessionDetail`.
 
 **Verification**: `pnpm frontend:check`; manual check that a Claude and a Codex
-card both show occupancy sourced from v2.
+card both show occupancy sourced from v2, matching the Live inspector.
 
 **Done When**: monitor cards render occupancy that matches the Live inspector for
 the same session. (Traces to: card surface requirement despite v1/v2 split.)
 
 **Assumptions Verified**: `stores/monitor.svelte.ts` owns `Session` state and
-already merges live event aggregates (`applyLiveEventAggregate`,
-`handleSessionUpdate`), so it is the correct merge point.
+merges live event aggregates (`applyLiveEventAggregate`, `handleSessionUpdate`) —
+correct merge point — but has **no v2 fetch** and its SSE handler ignores
+`session_presence`/`turn_update` (net-new wiring required). `fetchLiveSessions`/
+`fetchLiveSession` exist at `client.ts:889-901`.
 
 ### Task 8 (deferrable): Occupancy trajectory sparkline
 
@@ -294,10 +344,13 @@ open question.
 
 ## Risks And Mitigations
 
-- **v1/v2 data-model split** (highest risk): the card surface reads v1, occupancy
-  lives in v2. Mitigation: Task 7 merges by session id rather than duplicating the
-  extraction pipeline into v1. If the monitor store has no existing v2 fetch, this
-  task grows — reassess seam then.
+- **v1/v2 data-model split** (highest risk, and Task 7's cost is now confirmed,
+  not conditional): the card surface reads v1, occupancy lives in v2, and the
+  monitor store has **no** existing v2 fetch and ignores presence SSE events — so
+  Task 7 is a full vertical slice (fetch + refresh subscription + merge), not a
+  thin bridge. Mitigation: reuse the already-built `fetchLiveSessions` and the
+  Live tab's SSE/polling rather than duplicating the extraction pipeline into v1;
+  split Task 7 into 7a/7b if it runs long.
 - **Claude window ambiguity**: 1M is a resolved default, not transcript-proven; a
   200K session would misreport the denominator. Mitigation: over-window guard
   (Task 1) plus observed-peak upward correction; documented as a known limit.
@@ -314,7 +367,7 @@ open question.
 | Claude latest-request numerator (T2) | `pnpm test` (claude parser) | last-turn numerator green |
 | Codex `last_token_usage` + reported window (T3) | `pnpm test` (codex parser) | last-request + window green |
 | Occupancy persisted on projection (T4) | `pnpm test` + `pnpm build` | persisted occupancy row |
-| Live API/SSE exposes occupancy / `null` (T5) | `pnpm test` (API) | occupancy or `null`, never `0%` |
+| Live API exposes occupancy / `null` (T5) | `pnpm test` (API) | occupancy or `null`, never `0%` |
 | Card pill + detail gauge render live (T6) | `pnpm frontend:check` + manual `:3141/app/` | pill + gauge render, updates live |
 | v1 card occupancy matches v2 inspector (T7) | `pnpm frontend:check` + manual | card matches inspector |
 | Trajectory drops after compaction (T8) | `pnpm test` + manual | sparkline drops on compaction |
