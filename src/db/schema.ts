@@ -437,6 +437,12 @@ export function initSchema(): void {
   if (!browsingSessionColumns.has('capabilities_json')) {
     db.exec('ALTER TABLE browsing_sessions ADD COLUMN capabilities_json TEXT');
   }
+  if (!browsingSessionColumns.has('context_used_tokens')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN context_used_tokens INTEGER');
+  }
+  if (!browsingSessionColumns.has('context_window_tokens')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN context_window_tokens INTEGER');
+  }
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_live_status ON browsing_sessions(live_status)');

@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import type Database from 'better-sqlite3';
 import type { ContentBlock, ParsedMessage, ParsedSession } from '../parser/claude-code.js';
+import { resolveContextWindow } from '../pricing/context-windows.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock, type LivePrivacyPolicy } from './normalize.js';
 import {
   clearProjectedSessionStream,
@@ -107,6 +108,14 @@ export function syncClaudeLiveSession(
   }
 
   const liveStatus = deriveLiveStatus(parsed.metadata.ended_at);
+  const usedTokens = parsed.metadata.context_used_tokens ?? null;
+  const contextWindow = usedTokens != null
+    ? resolveContextWindow({
+        agent: parsed.metadata.agent,
+        model: parsed.metadata.model,
+        observedTokens: usedTokens,
+      })
+    : null;
   upsertProjectedSessionSnapshot(db, {
     id: sessionId,
     agent: parsed.metadata.agent,
@@ -118,6 +127,8 @@ export function syncClaudeLiveSession(
     user_message_count: parsed.metadata.user_message_count,
     live_status: liveStatus,
     last_item_at: parsed.metadata.ended_at,
+    context_used_tokens: usedTokens,
+    context_window_tokens: contextWindow,
   }, {
     integration_mode: 'claude-jsonl',
     fidelity: 'full',

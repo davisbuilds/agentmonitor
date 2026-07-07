@@ -28,6 +28,8 @@ export interface ProjectedSessionSnapshot {
   user_message_count: number;
   live_status: string | null;
   last_item_at: string | null;
+  context_used_tokens?: number | null;
+  context_window_tokens?: number | null;
 }
 
 export interface ProjectedSessionIncrement {
@@ -160,8 +162,9 @@ export function upsertProjectedSessionSnapshot(
   db.prepare(`
     INSERT INTO browsing_sessions (
       id, project, agent, first_message, started_at, ended_at, message_count, user_message_count,
-      live_status, last_item_at, integration_mode, fidelity, capabilities_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      live_status, last_item_at, integration_mode, fidelity, capabilities_json,
+      context_used_tokens, context_window_tokens
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       project = COALESCE(excluded.project, browsing_sessions.project),
       agent = COALESCE(excluded.agent, browsing_sessions.agent),
@@ -174,7 +177,11 @@ export function upsertProjectedSessionSnapshot(
       last_item_at = COALESCE(excluded.last_item_at, browsing_sessions.last_item_at),
       integration_mode = excluded.integration_mode,
       fidelity = excluded.fidelity,
-      capabilities_json = excluded.capabilities_json
+      capabilities_json = excluded.capabilities_json,
+      -- Occupancy always reflects the latest sync (excluded), but never clobbers
+      -- a known value with NULL (e.g. a summary sync that carries no usage).
+      context_used_tokens = COALESCE(excluded.context_used_tokens, browsing_sessions.context_used_tokens),
+      context_window_tokens = COALESCE(excluded.context_window_tokens, browsing_sessions.context_window_tokens)
   `).run(
     session.id,
     session.project,
@@ -189,6 +196,8 @@ export function upsertProjectedSessionSnapshot(
     encoded.integration_mode,
     encoded.fidelity,
     encoded.capabilities_json,
+    session.context_used_tokens ?? null,
+    session.context_window_tokens ?? null,
   );
 }
 
