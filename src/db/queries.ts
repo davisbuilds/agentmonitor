@@ -24,19 +24,55 @@ function upsertSession(
   agentId: string,
   agentType: string,
   project?: string,
-  branch?: string
+  branch?: string,
+  mode?: 'interactive' | 'headless'
 ): void {
   const db = getDb();
+  // `mode` (invocation mode) is a session-level constant persisted in metadata.
+  // When present it is merged into metadata on both insert and conflict so it
+  // survives across the many event upserts a session accumulates.
   db.prepare(`
-    INSERT INTO sessions (id, agent_id, agent_type, project, branch)
-    VALUES (?, ?, ?, ?, ?)
+    INSERT INTO sessions (id, agent_id, agent_type, project, branch, metadata)
+    VALUES (
+      @id, @agentId, @agentType, @project, @branch,
+      CASE WHEN @mode IS NOT NULL THEN json_object('mode', @mode) ELSE '{}' END
+    )
     ON CONFLICT(id) DO UPDATE SET
       last_event_at = datetime('now'),
       status = 'active',
       ended_at = NULL,
       project = COALESCE(excluded.project, sessions.project),
-      branch = COALESCE(excluded.branch, sessions.branch)
-  `).run(id, agentId, agentType, project || null, branch || null);
+      branch = COALESCE(excluded.branch, sessions.branch),
+      metadata = CASE
+        WHEN @mode IS NOT NULL
+          THEN json_set(COALESCE(NULLIF(sessions.metadata, ''), '{}'), '$.mode', @mode)
+        ELSE sessions.metadata
+      END
+  `).run({
+    id,
+    agentId,
+    agentType,
+    project: project || null,
+    branch: branch || null,
+    mode: mode ?? null,
+  });
+}
+
+// Backfill/patch a session's invocation mode independent of event insertion.
+// `insertEvent` sets mode via upsertSession, but it returns early for duplicate
+// event_ids (and unchanged files are skipped entirely by import_state), so
+// sessions imported before mode existed are never updated through that path.
+// The import pipeline calls this once per session per file so a re-import
+// (including `--force`) backfills mode even when every event is a duplicate.
+// Guarded so it is a no-op UPDATE when the mode is already correct.
+export function setSessionMode(sessionId: string, mode: 'interactive' | 'headless'): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE sessions
+    SET metadata = json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.mode', @mode)
+    WHERE id = @id
+      AND (json_extract(metadata, '$.mode') IS NULL OR json_extract(metadata, '$.mode') != @mode)
+  `).run({ id: sessionId, mode });
 }
 
 export interface SessionRow {
@@ -328,6 +364,7 @@ export function insertEvent(event: {
   cache_read_tokens?: number;
   cache_write_tokens?: number;
   source?: string;
+  mode?: 'interactive' | 'headless';
 }): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
@@ -338,7 +375,7 @@ export function insertEvent(event: {
 
   const agentId = `${event.agent_type}-default`;
   upsertAgent(agentId, event.agent_type);
-  upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch);
+  upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch, event.mode);
 
   // Backfill project/branch from session if missing on this event
   if (!event.project || !event.branch) {

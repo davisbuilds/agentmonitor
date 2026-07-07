@@ -293,7 +293,7 @@ describe('Codex log parser', () => {
     assert.equal(events[0].status, 'success');
     assert.equal(events[0].source, 'import');
     const meta = events[0].metadata as Record<string, unknown>;
-    assert.equal(meta.cli_version, 'codex-cli/1.0');
+    assert.equal(meta.originator, 'codex-cli/1.0');
     assert.equal(meta.cwd, '/home/user/project');
   });
 

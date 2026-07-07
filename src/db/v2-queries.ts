@@ -1287,6 +1287,7 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
     )
     SELECT
       page.*,
+      json_extract(page.metadata, '$.mode') as mode,
       COALESCE(agg.event_count, 0) as event_count,
       COALESCE(agg.tokens_in, 0) as tokens_in,
       COALESCE(agg.tokens_out, 0) as tokens_out,
@@ -1615,6 +1616,7 @@ export function getMonitorSessionWithEvents(sessionId: string, eventLimit = 10):
 
   const session = db.prepare(`
     SELECT s.*,
+      json_extract(s.metadata, '$.mode') as mode,
       COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
       COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
       COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,

@@ -22,6 +22,7 @@ Product-surface reference for AgentMonitor.
 - The Svelte `Monitor` tab is the canonical real-time operator surface.
 - The legacy dashboard at `/` remains available for compatibility, but should not define new product behavior.
 - Agent cards showing active sessions, tool usage, and token counts.
+- Invocation-mode indicator: sessions run headlessly (`claude -p` / `codex exec`) show a muted `headless` pill on the agent card and a `Mode` row in session detail; interactive sessions show no pill. Antigravity/Gemini emit no such signal and are always unmarked. The `mode` field (`interactive` | `headless` | `null`) is exposed on `/api/v2/monitor/sessions` and `/api/v2/monitor/sessions/:id`.
 - Live event feed with filtering by agent type, event type, tool name, model, and branch.
 - Stats bar with aggregate counters and cost totals.
 - Cost dashboard with breakdowns by model, project, and timeline.

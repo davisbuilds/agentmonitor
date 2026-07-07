@@ -45,6 +45,13 @@ const sessionBackfillInFlight = new Set<string>();
 const editedFilesBySession = new Map<string, Set<string>>();
 export function getSessions(): Session[] { return sessions; }
 export function setSessions(s: Session[]): void { sessions = s; }
+// Bumped when the server reports an auto-import brought in new events. The
+// Monitor subscribes and refetches so importer-derived fields (e.g. a session's
+// invocation `mode`, which the live hook/OTEL stream never carries) appear
+// without a manual page reload.
+let autoImportSignal = $state(0);
+export function getAutoImportSignal(): number { return autoImportSignal; }
+
 export function handleSessionUpdate(update: Record<string, unknown>): void {
   if (update.type === 'idle_check') {
     sessions = sessions.map(s => {
@@ -54,6 +61,15 @@ export function handleSessionUpdate(update: Record<string, unknown>): void {
       }
       return s;
     });
+  } else if (update.type === 'auto_import' || update.type === 'resync') {
+    autoImportSignal++;
+  } else if (update.type === 'session_parsed' && typeof update.session_id === 'string') {
+    // The watcher just parsed this session's file, which may have stamped
+    // importer-derived fields (e.g. invocation `mode`). Refetch just this
+    // session so the pill appears without reloading the whole dashboard.
+    if (sessions.some((s) => s.id === update.session_id)) {
+      void backfillSession(update.session_id);
+    }
   }
 }
 

@@ -1,5 +1,6 @@
 import path from 'path';
 import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
+import { codexInvocationMode } from '../util/invocation-mode.js';
 
 // --- Codex JSONL line types ---
 
@@ -75,6 +76,7 @@ export function parseCodexSessionMessages(
   let endedAt: string | null = null;
   let userMessageCount = 0;
   let cwd: string | null = null;
+  let originator: string | undefined;
 
   const lines: CodexLine[] = [];
   for (const raw of jsonlContent.split('\n')) {
@@ -92,6 +94,7 @@ export function parseCodexSessionMessages(
     if (line.type === 'session_meta' && line.payload) {
       cwd = (line.payload.cwd as string) ?? null;
       startedAt = line.payload.timestamp ?? line.timestamp ?? null;
+      originator = line.payload.originator;
       break;
     }
   }
@@ -196,6 +199,7 @@ export function parseCodexSessionMessages(
       user_message_count: userMessageCount,
       parent_session_id: null,
       relationship_type: null,
+      mode: codexInvocationMode(originator),
     },
   };
 }

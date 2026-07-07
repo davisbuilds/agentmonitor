@@ -113,10 +113,11 @@ function handleFileChange(
   }, DEBOUNCE_MS));
 }
 
-export function startWatcher(): void {
-  const claudeDir = getClaudeDir();
+export function startWatcher(overrides?: { claudeDir?: string; codexHome?: string; antigravityDir?: string }): void {
+  const claudeDir = overrides?.claudeDir ?? getClaudeDir();
   const projectsDir = path.join(claudeDir, 'projects');
-  const codexSessionsDir = path.join(getCodexHome(), 'sessions');
+  const codexHome = overrides?.codexHome ?? getCodexHome();
+  const codexSessionsDir = path.join(codexHome, 'sessions');
 
   // Initial sync on startup
   const db = getDb();
@@ -125,27 +126,34 @@ export function startWatcher(): void {
   console.log(`[watcher] Initial sync complete: ${stats.parsed} parsed, ${stats.skipped} skipped, ${stats.errors} errors (${stats.total} total files)`);
 
   // Sync Codex session files
-  const codexStats = syncAllCodexFiles(db, undefined, { excludePatterns: config.sync.excludePatterns });
+  const codexStats = syncAllCodexFiles(db, codexHome, { excludePatterns: config.sync.excludePatterns });
   if (codexStats.total > 0) {
     console.log(`[watcher] Codex sync: ${codexStats.parsed} parsed, ${codexStats.skipped} skipped, ${codexStats.errors} errors (${codexStats.total} total files)`);
   }
 
   // Sync Antigravity conversation DBs (historical + periodic resync; live-tailing deferred)
-  const antigravityStats = syncAllAntigravityFiles(db, undefined, { excludePatterns: config.sync.excludePatterns });
+  const antigravityStats = syncAllAntigravityFiles(db, overrides?.antigravityDir, { excludePatterns: config.sync.excludePatterns });
   if (antigravityStats.total > 0) {
     console.log(`[watcher] Antigravity sync: ${antigravityStats.parsed} parsed, ${antigravityStats.skipped} skipped, ${antigravityStats.errors} errors (${antigravityStats.total} total files)`);
   }
 
-  // Start chokidar watcher
-  watcher = watch([
-    path.join(projectsDir, '**/*.jsonl'),
-    path.join(codexSessionsDir, '**/*.jsonl'),
-  ], {
+  // Watch the session directories directly and filter to `.jsonl` in the
+  // handler. chokidar dropped glob support in v4, so the previous
+  // `projectsDir/**/*.jsonl` patterns silently matched nothing and no live
+  // file events ever fired (live tailing relied entirely on the periodic
+  // resync below). Directory watching is recursive by default.
+  watcher = watch([projectsDir, codexSessionsDir], {
     persistent: true,
     ignoreInitial: true, // We already did initial sync
-    ignored: (filePath) => (
-      shouldExcludePath(projectsDir, filePath, config.sync.excludePatterns)
-      || shouldExcludePath(codexSessionsDir, filePath, config.sync.excludePatterns)
+    ignored: (filePath, stats) => (
+      // Only exclude *files* by pattern/extension; directories must pass so
+      // chokidar keeps traversing into them.
+      !!stats?.isFile()
+      && (
+        !filePath.endsWith('.jsonl')
+        || shouldExcludePath(projectsDir, filePath, config.sync.excludePatterns)
+        || shouldExcludePath(codexSessionsDir, filePath, config.sync.excludePatterns)
+      )
     ),
     awaitWriteFinish: {
       stabilityThreshold: 300,
@@ -153,14 +161,13 @@ export function startWatcher(): void {
     },
   });
 
-  watcher.on('add', (filePath) => {
+  const onFsEvent = (filePath: string) => {
+    if (!filePath.endsWith('.jsonl')) return;
     const source = filePath.startsWith(codexSessionsDir) ? 'codex' : 'claude';
     handleFileChange(filePath, source, projectsDir, codexSessionsDir);
-  });
-  watcher.on('change', (filePath) => {
-    const source = filePath.startsWith(codexSessionsDir) ? 'codex' : 'claude';
-    handleFileChange(filePath, source, projectsDir, codexSessionsDir);
-  });
+  };
+  watcher.on('add', onFsEvent);
+  watcher.on('change', onFsEvent);
 
   watcher.on('error', (err) => {
     console.error('[watcher] Error:', err);
@@ -172,8 +179,8 @@ export function startWatcher(): void {
   const RESYNC_INTERVAL_MS = 15 * 60_000;
   resyncTimer = setInterval(() => {
     const claudeStats = syncAllFiles(db, claudeDir, { excludePatterns: config.sync.excludePatterns });
-    const codexStats = syncAllCodexFiles(db, undefined, { excludePatterns: config.sync.excludePatterns });
-    const antigravityStats = syncAllAntigravityFiles(db, undefined, { excludePatterns: config.sync.excludePatterns });
+    const codexStats = syncAllCodexFiles(db, codexHome, { excludePatterns: config.sync.excludePatterns });
+    const antigravityStats = syncAllAntigravityFiles(db, overrides?.antigravityDir, { excludePatterns: config.sync.excludePatterns });
     const parsed = claudeStats.parsed + codexStats.parsed + antigravityStats.parsed;
 
     if (parsed > 0) {

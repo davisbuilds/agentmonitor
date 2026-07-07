@@ -6,6 +6,7 @@ import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { parsePatchMeta } from '../otel/parser.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
+import { codexInvocationMode } from '../util/invocation-mode.js';
 
 // ─── Codex JSONL line types ─────────────────────────────────────────────
 
@@ -87,6 +88,7 @@ export function parseCodexFile(
   let sessionId: string | undefined;
   let cwd: string | undefined;
   let sessionTimestamp: string | undefined;
+  let originator: string | undefined;
 
   for (const rawLine of lines) {
     let line: CodexLogLine;
@@ -100,9 +102,12 @@ export function parseCodexFile(
       sessionId = line.payload.id;
       cwd = line.payload.cwd;
       sessionTimestamp = line.payload.timestamp ?? line.timestamp;
+      originator = line.payload.originator;
       break;
     }
   }
+
+  const mode = codexInvocationMode(originator);
 
   // Fall back to filename for session ID
   if (!sessionId) {
@@ -158,7 +163,7 @@ export function parseCodexFile(
         project,
         client_timestamp: line.timestamp,
         metadata: {
-          cli_version: line.payload.originator,
+          originator,
           cwd,
         },
         source: 'import',
@@ -320,7 +325,9 @@ export function parseCodexFile(
     });
   }
 
-  return events;
+  // Invocation mode is a session-level constant derived from originator; stamp it
+  // on every event so the session upsert persists it regardless of insert order.
+  return mode ? events.map((e) => ({ ...e, mode })) : events;
 }
 
 // ─── File hash for import state tracking ────────────────────────────────

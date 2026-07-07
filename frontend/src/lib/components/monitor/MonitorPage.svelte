@@ -16,6 +16,7 @@
     getCostWindow,
     getFilterOptions,
     setFilterOptions,
+    getAutoImportSignal,
   } from '../../stores/monitor.svelte';
   import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions } from '../../api/client';
   import { buildCostFilters } from '../../monitor-analytics';
@@ -82,6 +83,19 @@
   onMount(() => {
     void loadMonitorFilterOptions();
     reload(getFilters());
+  });
+
+  // Refetch when the server reports an auto-import (new events landed). This is
+  // how importer-derived fields like session invocation `mode` reach an already
+  // open Monitor — the live SSE stream (hooks/OTEL) does not carry them. Guarded
+  // against the effect's initial run so mount doesn't double-load.
+  let lastAutoImportSignal = getAutoImportSignal();
+  $effect(() => {
+    const signal = getAutoImportSignal();
+    if (signal !== lastAutoImportSignal) {
+      lastAutoImportSignal = signal;
+      void reload(getFilters());
+    }
   });
 </script>
 

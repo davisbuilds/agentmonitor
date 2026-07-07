@@ -12,6 +12,7 @@ import { syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
 import { discoverAntigravityLogs } from '../import/antigravity.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
+import { setSessionMode } from '../db/queries.js';
 
 // --- File hashing ---
 
@@ -103,6 +104,11 @@ export function syncSessionFileDetailed(
     // Insert parsed data
     insertParsedSession(db, parsed, filePath, stat.size, fileHash);
     const live = syncClaudeLiveSession(db, parsed);
+    // Stamp the Monitor session's invocation mode from the JSONL the watcher
+    // already parsed, so a live session gets its headless/interactive pill
+    // without waiting for the next auto-import tick. No-op if the Monitor
+    // session row does not exist yet (created by hooks/import, not the watcher).
+    if (parsed.metadata.mode) setSessionMode(parsed.metadata.session_id, parsed.metadata.mode);
     safelyMaintainTraceSummaryForSession(sessionId, 'claude session sync');
 
     // Update watched_files
@@ -181,6 +187,13 @@ export function syncCodexSessionFileDetailed(
 
     insertParsedSession(db, parsed, filePath, stat.size, fileHash);
     const live = syncCodexLiveSession(db, parsed);
+    // The Monitor session row is keyed by the Codex session UUID (session_meta.id),
+    // not the rollout filename the watcher uses for browsing_sessions — match the
+    // import's id resolution so mode lands on the right row. No-op if absent.
+    if (parsed.metadata.mode) {
+      const uuid = sessionId.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+      setSessionMode(uuid?.[1] ?? sessionId, parsed.metadata.mode);
+    }
     safelyMaintainTraceSummaryForSession(sessionId, 'codex session sync');
 
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');

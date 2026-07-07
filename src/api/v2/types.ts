@@ -194,6 +194,7 @@ export interface MonitorSessionRow {
   ended_at: string | null;
   last_event_at: string;
   metadata: string | null;
+  mode: 'interactive' | 'headless' | null;
   event_count: number;
   tokens_in: number;
   tokens_out: number;

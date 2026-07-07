@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { claudeInvocationMode } from '../util/invocation-mode.js';
 
 // --- Tool category normalization ---
 
@@ -54,6 +55,8 @@ interface ClaudeCodeLine {
   // progress / system fields
   data?: Record<string, unknown>;
   subtype?: string;
+  entrypoint?: string;
+  promptSource?: string;
 }
 
 // --- Parsed output types ---
@@ -90,6 +93,9 @@ export interface ParsedSessionMetadata {
   user_message_count: number;
   parent_session_id: string | null;
   relationship_type: string | null;
+  // Invocation mode derived from the session log (see src/util/invocation-mode.ts).
+  // Undefined when the agent emits no signal (e.g. Antigravity).
+  mode?: 'interactive' | 'headless';
 }
 
 export interface ParsedSession {
@@ -257,6 +263,8 @@ export function parseSessionMessages(
   const parentSessionId: string | null = null;
   let relationshipType: string | null = null;
   let sawSidechain = false;
+  let entrypoint: string | undefined;
+  let promptSource: string | undefined;
 
   const lines = jsonlContent.split('\n');
 
@@ -277,6 +285,10 @@ export function parseSessionMessages(
     if (line.isSidechain) {
       sawSidechain = true;
     }
+
+    // Invocation-mode signal rides every line; capture the first seen.
+    if (entrypoint === undefined && typeof line.entrypoint === 'string') entrypoint = line.entrypoint;
+    if (promptSource === undefined && typeof line.promptSource === 'string') promptSource = line.promptSource;
 
     // Only process user and assistant message lines
     if (lineType !== 'user' && lineType !== 'assistant') continue;
@@ -401,6 +413,7 @@ export function parseSessionMessages(
       user_message_count: userMessageCount,
       parent_session_id: parentSessionId,
       relationship_type: relationshipType,
+      mode: claudeInvocationMode(entrypoint, promptSource),
     },
   };
 }

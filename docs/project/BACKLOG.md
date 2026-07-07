@@ -2,6 +2,29 @@
 
 Working list of opportunities noticed while implementing specs. These are not commitments for the active task unless explicitly pulled into scope.
 
+## Invocation Mode (headless/interactive pill)
+
+- Live marking works: the file watcher stamps `sessions.metadata.mode` from the
+  JSONL as it parses (verified end-to-end — a real `claude -p` and a synthetic
+  drop both mark within ~1s), with `session_parsed` refreshing the open Monitor
+  and auto-import as the backstop. Fixing the chokidar-5 glob regression (watch
+  dirs, not globs) was required to make this — and all live file-tailing — fire
+  at all. Residual edge: if a session's file were fully written before its
+  Monitor row exists (hook POST vs. watcher parse) *and* never touched again, it
+  would wait for the next resync/auto-import; not observed in practice because
+  real runs write incrementally and re-fire the watcher after the row appears.
+- No `mode` filter facet in the Monitor `FilterBar` yet (intentionally scoped
+  out). Adding one is cheap if wanted: `mode` currently lives in
+  `sessions.metadata` (json_extract), so a filterable/indexed path would want a
+  dedicated column.
+- Fixed inline: the Codex import previously mislabeled `session_meta.originator`
+  into `metadata.cli_version` (`src/import/codex.ts`) and dropped the real
+  `cli_version`; now stored under `metadata.originator`. No consumer read the old
+  field.
+- Resolved (PR #60 review): historical sessions imported before this feature now
+  backfill via `setSessionMode` on `amon import --force`, and the open Monitor
+  refetches on the `auto_import` SSE broadcast instead of needing a manual reload.
+
 ## Analytics Rollups (deferred — schema-storage-rebalance Phase 2 finding)
 
 - A daily dimensional rollup `events_rollup_daily(day, agent_type, model, project)`

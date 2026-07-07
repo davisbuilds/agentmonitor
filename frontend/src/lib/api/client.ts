@@ -77,6 +77,10 @@ export interface Session {
   started_at: string;
   ended_at?: string;
   last_event_at: string;
+  // Invocation mode: 'headless' for one-shot runs (claude -p / codex exec),
+  // 'interactive' for TUI/editor sessions. null when the agent emits no signal
+  // (e.g. Antigravity/Gemini). Only surfaced by the Monitor sessions endpoint.
+  mode?: 'interactive' | 'headless' | null;
   metadata?: Record<string, unknown> | string;
   event_count?: number;
   tokens_in?: number;
