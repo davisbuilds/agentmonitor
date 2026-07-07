@@ -2,6 +2,26 @@
 
 Working list of opportunities noticed while implementing specs. These are not commitments for the active task unless explicitly pulled into scope.
 
+## Context occupancy gauge
+
+- **Authoritative Claude context window via the statusline bridge (accuracy
+  refinement).** The occupancy gauge resolves the Claude denominator to a 1M
+  default (guarded), because the transcript does not state the active window.
+  The existing Claude statusline bridge (`hooks/claude-code/statusline_bridge.sh`
+  → `POST /api/provider-quotas/claude/statusline`) already forwards Claude Code's
+  full statusline payload, which carries `exceeds_200k_tokens` (and the model).
+  Feed that in as an authoritative override of the resolved default so the
+  denominator matches the real window instead of a guess. Additive, opt-in, and
+  matches the "first-party snapshot preferred, derived fallback" pattern already
+  used for quota. Note: the statusline does not provide a better *numerator* — the
+  context-fill number is computed by the statusline script from the same
+  transcript token usage we already parse, so this refines only the window.
+- **Trajectory sparkline (Task 8, deferred).** Session-lifetime occupancy fill
+  over time with compaction drop-offs, in the detail/inspector surface. Needs a
+  bounded sample buffer in the projection and a retention decision (see
+  `docs/plans/2026-07-07-context-occupancy-gauge-plan.md`). Gauge + pill shipped
+  first; this is the fast-follow.
+
 ## Invocation Mode (headless/interactive pill)
 
 - Live marking works: the file watcher stamps `sessions.metadata.mode` from the
