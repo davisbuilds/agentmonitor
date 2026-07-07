@@ -3,6 +3,7 @@
   import { timeAgo } from '../../format';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
+  import ContextPill from '../monitor/ContextPill.svelte';
 
   interface Props {
     session: LiveSession | null;
@@ -96,6 +97,16 @@
             <span class="text-text-faint">Fidelity</span>
             <span>{session.fidelity || 'n/a'}</span>
           </div>
+          {#if session.context_pct != null}
+            <div class="pt-1">
+              <ContextPill
+                variant="full"
+                pct={session.context_pct}
+                usedTokens={session.context_used_tokens}
+                windowTokens={session.context_window_tokens}
+              />
+            </div>
+          {/if}
           <div class="pt-1">
             <div class="mb-2 text-meta uppercase tracking-wide text-text-faint">Capabilities</div>
             <ProjectionCapabilities capabilities={session.capabilities} />

@@ -156,6 +156,10 @@ export interface LiveSession extends BrowsingSession {
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;
+  // Context-window occupancy; null when unavailable (never 0%).
+  context_used_tokens: number | null;
+  context_window_tokens: number | null;
+  context_pct: number | null;
 }
 
 export interface LiveTurn {
