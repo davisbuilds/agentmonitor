@@ -22,7 +22,7 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - `docs/project/POSITIONING.md` — what the product is (Archetype B: local-first observability console for coding agents); scope, the Langfuse "collector not backend" stance, and the architectural implications that anchor the foundations work.
 - `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity).
 - `docs/project/CURRENT_STATE.md` — high-change product/runtime notes moved out of the root README.
-- `docs/project/GIT_HISTORY_POLICY.md` — merge-commit-only policy and rationale.
+- `docs/project/GIT_HISTORY_POLICY.md` — merge-commit + rebase policy (squash disabled) and rationale.
 - `frontend/AGENTS.md` — domain-specific guidance.
 - `hooks/claude-code/README.md`, `hooks/codex/README.md` — hook setup details.
 
