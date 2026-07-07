@@ -12,6 +12,7 @@ let closeDb: typeof import('../src/db/connection.js').closeDb;
 let initSchema: typeof import('../src/db/schema.js').initSchema;
 let syncClaudeLiveSession: typeof import('../src/live/claude-adapter.js').syncClaudeLiveSession;
 let syncCodexLiveSession: typeof import('../src/live/codex-adapter.js').syncCodexLiveSession;
+let getLiveSession: typeof import('../src/db/v2-queries.js').getLiveSession;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 
 before(async () => {
@@ -24,6 +25,7 @@ before(async () => {
   ({ initSchema } = await import('../src/db/schema.js'));
   ({ syncClaudeLiveSession } = await import('../src/live/claude-adapter.js'));
   ({ syncCodexLiveSession } = await import('../src/live/codex-adapter.js'));
+  ({ getLiveSession } = await import('../src/db/v2-queries.js'));
 
   initSchema();
 });
@@ -79,4 +81,24 @@ test('syncCodexLiveSession persists occupancy with the reported window', () => {
 test('a session with no usage persists null occupancy (unavailable, not 0)', () => {
   syncClaudeLiveSession(getDb(), baseParsed('claude-none', 'claude', {}));
   assert.deepEqual(readOccupancy('claude-none'), { used: null, window: null });
+});
+
+test('live API exposes occupancy fields with derived context_pct', () => {
+  syncCodexLiveSession(getDb(), baseParsed('codex-api', 'codex', {
+    context_used_tokens: 64_000,
+    context_window_reported: 256_000,
+  }));
+  const row = getLiveSession('codex-api');
+  assert.ok(row);
+  assert.equal(row.context_used_tokens, 64_000);
+  assert.equal(row.context_window_tokens, 256_000);
+  assert.equal(row.context_pct, 25); // round(64000/256000*100)
+});
+
+test('live API reports null context_pct when occupancy is unavailable', () => {
+  syncClaudeLiveSession(getDb(), baseParsed('claude-api-none', 'claude', {}));
+  const row = getLiveSession('claude-api-none');
+  assert.ok(row);
+  assert.equal(row.context_pct, null);
+  assert.equal(row.context_used_tokens, null);
 });
