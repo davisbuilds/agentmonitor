@@ -2,7 +2,7 @@
 date: 2026-07-07
 topic: context-occupancy-gauge
 stage: plan
-status: draft
+status: complete
 source: conversation
 ---
 

@@ -4,6 +4,24 @@ Working list of opportunities noticed while implementing specs. These are not co
 
 ## Context occupancy gauge
 
+- **Occupancy only populates on live sync, not initial/bulk sync.** Occupancy is
+  written by the live adapters (`syncClaudeLiveSession`/`syncCodexLiveSession`);
+  the initial watcher sync and historical parse write `browsing_sessions` via
+  `insertParsedSession`, which does not carry occupancy. So on a fresh server
+  start, a session shows occupancy only after its next live turn (seconds for a
+  genuinely active session; never for idle/historical ones). This matches the
+  spec's "historical occupancy out of scope," but if we want cards populated
+  immediately after restart, `insertParsedSession` could write the two columns
+  from `parsed.metadata.context_used_tokens` + the resolver (small, additive).
+  Verified live: only the actively-written session showed occupancy on a scratch
+  boot (24–25%, 1M window); bulk-imported sessions were blank.
+- **Monitor-card join not visually verified under live v1 hooks.** The Live
+  inspector (pure v2) renders occupancy correctly end-to-end. The Monitor cards
+  read the v1 store and join v2 occupancy by session id; this was svelte-checked
+  and logically verified, but not screenshotted with a live hook/OTEL-fed active
+  session (the scratch server had 0 active v1 sessions). Confirm the v1/v2
+  session-id join renders on a card in a real running instance, especially for
+  Codex (v1 OTEL id vs v2 rollout id).
 - **Authoritative Claude context window via the statusline bridge (accuracy
   refinement).** The occupancy gauge resolves the Claude denominator to a 1M
   default (guarded), because the transcript does not state the active window.

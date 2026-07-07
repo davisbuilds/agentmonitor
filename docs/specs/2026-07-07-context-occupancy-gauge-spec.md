@@ -2,7 +2,7 @@
 date: 2026-07-07
 topic: context-occupancy-gauge
 stage: spec
-status: draft
+status: complete
 source: conversation
 ---
 
