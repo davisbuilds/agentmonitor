@@ -4,15 +4,15 @@ Working list of opportunities noticed while implementing specs. These are not co
 
 ## Invocation Mode (headless/interactive pill)
 
-- Instant live marking is mostly done: the file watcher now stamps
-  `sessions.metadata.mode` from the JSONL as it parses (near-live), with
-  auto-import as the backstop. Remaining edge: a short headless run can finish
-  before its Monitor session row exists (session_start hook POST vs. watcher
-  parse race), so it stays unmarked until the next `runImport` tick. Fully
-  closing this would require the session_start hook itself to carry the
-  `entrypoint` (it currently doesn't), or the watcher to (re)apply mode after the
-  row appears. Low priority — the auto-import backstop covers it within the
-  interval.
+- Live marking works: the file watcher stamps `sessions.metadata.mode` from the
+  JSONL as it parses (verified end-to-end — a real `claude -p` and a synthetic
+  drop both mark within ~1s), with `session_parsed` refreshing the open Monitor
+  and auto-import as the backstop. Fixing the chokidar-5 glob regression (watch
+  dirs, not globs) was required to make this — and all live file-tailing — fire
+  at all. Residual edge: if a session's file were fully written before its
+  Monitor row exists (hook POST vs. watcher parse) *and* never touched again, it
+  would wait for the next resync/auto-import; not observed in practice because
+  real runs write incrementally and re-fire the watcher after the row appears.
 - No `mode` filter facet in the Monitor `FilterBar` yet (intentionally scoped
   out). Adding one is cheap if wanted: `mode` currently lives in
   `sessions.metadata` (json_extract), so a filterable/indexed path would want a

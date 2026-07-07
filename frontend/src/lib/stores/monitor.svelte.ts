@@ -61,8 +61,15 @@ export function handleSessionUpdate(update: Record<string, unknown>): void {
       }
       return s;
     });
-  } else if (update.type === 'auto_import') {
+  } else if (update.type === 'auto_import' || update.type === 'resync') {
     autoImportSignal++;
+  } else if (update.type === 'session_parsed' && typeof update.session_id === 'string') {
+    // The watcher just parsed this session's file, which may have stamped
+    // importer-derived fields (e.g. invocation `mode`). Refetch just this
+    // session so the pill appears without reloading the whole dashboard.
+    if (sessions.some((s) => s.id === update.session_id)) {
+      void backfillSession(update.session_id);
+    }
   }
 }
 

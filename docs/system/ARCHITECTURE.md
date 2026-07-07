@@ -137,7 +137,7 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 `src/watcher/` maintains the v2 session browser from local JSONL history:
 
 - Startup sync scans `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**/*.jsonl`, and `~/.gemini/antigravity-cli/conversations/**/*.db`.
-- Chokidar watches the Claude and Codex JSONL roots for ongoing file additions and changes. Antigravity DBs are **not** live-tailed yet — they are picked up on startup and each periodic resync (file-watch tailing deferred).
+- Chokidar watches the Claude and Codex JSONL **directories** (recursively) and the handler filters to `.jsonl`. chokidar dropped glob support in v4, so the earlier `root/**/*.jsonl` patterns matched nothing and no live file events fired — live tailing had silently degraded to startup + periodic resync only. Antigravity DBs are **not** live-tailed yet — they are picked up on startup and each periodic resync (file-watch tailing deferred).
 - The Antigravity browser projection is two writers per session (`src/parser/antigravity-sessions.ts` → `insertParsedSession`, then `src/live/antigravity-adapter.ts` → projector), producing `browsing_sessions`/`messages`/`session_items` at `integration_mode=antigravity-sqlite`, `fidelity=summary` (step-kind labels until per-kind payload internals are decoded).
 - The same exclude-pattern matcher is applied to discovery, watcher events, and periodic resync so ignored paths behave consistently.
 - `watched_files` caches parsed, skipped, and error states by file hash so unchanged files are not reparsed on every periodic resync.
