@@ -107,6 +107,9 @@ export interface ParsedSessionMetadata {
   context_used_tokens?: number;
   // Model of the most recent assistant turn (for context-window resolution).
   model?: string;
+  // First-party context-window size when the source reports one (Codex
+  // model_context_window). Undefined for Claude (resolved by default instead).
+  context_window_reported?: number;
 }
 
 export interface ParsedSession {
