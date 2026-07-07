@@ -2,6 +2,26 @@
 
 Working list of opportunities noticed while implementing specs. These are not commitments for the active task unless explicitly pulled into scope.
 
+## Invocation Mode (headless/interactive pill)
+
+- Thread `mode` through the live ingest paths for instant marking. Today the
+  headless/interactive pill is derived only in the import parsers
+  (`src/import/{claude-code,codex}.ts`) and persisted via `upsertSession`, so a
+  just-started session stays unmarked until the next `runImport` tick. The live
+  Claude path is hook-sourced (`src/api/events.ts`) and Codex is OTEL-sourced
+  (`src/api/otel.ts`), neither of which sets `mode`. Options: have the Claude
+  hooks read `entrypoint` from the transcript, or have the watcher stamp
+  `sessions.metadata.mode` from the JSONL it already parses. Deferred because
+  headless runs are short and auto-import backfills them quickly.
+- No `mode` filter facet in the Monitor `FilterBar` yet (intentionally scoped
+  out). Adding one is cheap if wanted: `mode` currently lives in
+  `sessions.metadata` (json_extract), so a filterable/indexed path would want a
+  dedicated column.
+- Fixed inline: the Codex import previously mislabeled `session_meta.originator`
+  into `metadata.cli_version` (`src/import/codex.ts`) and dropped the real
+  `cli_version`; now stored under `metadata.originator`. No consumer read the old
+  field.
+
 ## Analytics Rollups (deferred — schema-storage-rebalance Phase 2 finding)
 
 - A daily dimensional rollup `events_rollup_daily(day, agent_type, model, project)`
