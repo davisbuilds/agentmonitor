@@ -4,15 +4,15 @@ Working list of opportunities noticed while implementing specs. These are not co
 
 ## Invocation Mode (headless/interactive pill)
 
-- Instant live marking is still slightly deferred: `mode` is derived only in the
-  import parsers (`src/import/{claude-code,codex}.ts`), so a just-started session
-  is unmarked until the next `runImport` tick (then the `auto_import` broadcast
-  refreshes the open Monitor). The live Claude path is hook-sourced
-  (`src/api/events.ts`) and Codex is OTEL-sourced (`src/api/otel.ts`), neither of
-  which sets `mode`. To mark on first paint, have the Claude hooks read
-  `entrypoint` from the transcript, or have the watcher stamp
-  `sessions.metadata.mode` from the JSONL it already parses. Low priority —
-  headless runs are short and auto-import backfills within the interval.
+- Instant live marking is mostly done: the file watcher now stamps
+  `sessions.metadata.mode` from the JSONL as it parses (near-live), with
+  auto-import as the backstop. Remaining edge: a short headless run can finish
+  before its Monitor session row exists (session_start hook POST vs. watcher
+  parse race), so it stays unmarked until the next `runImport` tick. Fully
+  closing this would require the session_start hook itself to carry the
+  `entrypoint` (it currently doesn't), or the watcher to (re)apply mode after the
+  row appears. Low priority — the auto-import backstop covers it within the
+  interval.
 - No `mode` filter facet in the Monitor `FilterBar` yet (intentionally scoped
   out). Adding one is cheap if wanted: `mode` currently lives in
   `sessions.metadata` (json_extract), so a filterable/indexed path would want a
