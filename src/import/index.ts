@@ -1,6 +1,6 @@
 import fs from 'fs';
 import { getDb } from '../db/connection.js';
-import { insertEvent } from '../db/queries.js';
+import { insertEvent, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashFile as hashCodexFile } from './codex.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
@@ -81,7 +81,13 @@ function importEvents(events: NormalizedIngestEvent[], dryRun: boolean): { impor
     return { imported: events.length, duplicates: 0 };
   }
 
+  // Invocation mode is a session-level constant carried on events. Collect it
+  // here and apply once per session below, so it backfills even when every event
+  // is a duplicate (upsertSession inside insertEvent is skipped on the dup path).
+  const sessionModes = new Map<string, 'interactive' | 'headless'>();
+
   for (const event of events) {
+    if (event.mode) sessionModes.set(event.session_id, event.mode);
     const row = insertEvent(event);
     if (row) {
       imported++;
@@ -89,6 +95,10 @@ function importEvents(events: NormalizedIngestEvent[], dryRun: boolean): { impor
     } else {
       duplicates++;
     }
+  }
+
+  for (const [sessionId, mode] of sessionModes) {
+    setSessionMode(sessionId, mode);
   }
 
   return { imported, duplicates };

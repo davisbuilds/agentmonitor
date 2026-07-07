@@ -4,15 +4,15 @@ Working list of opportunities noticed while implementing specs. These are not co
 
 ## Invocation Mode (headless/interactive pill)
 
-- Thread `mode` through the live ingest paths for instant marking. Today the
-  headless/interactive pill is derived only in the import parsers
-  (`src/import/{claude-code,codex}.ts`) and persisted via `upsertSession`, so a
-  just-started session stays unmarked until the next `runImport` tick. The live
-  Claude path is hook-sourced (`src/api/events.ts`) and Codex is OTEL-sourced
-  (`src/api/otel.ts`), neither of which sets `mode`. Options: have the Claude
-  hooks read `entrypoint` from the transcript, or have the watcher stamp
-  `sessions.metadata.mode` from the JSONL it already parses. Deferred because
-  headless runs are short and auto-import backfills them quickly.
+- Instant live marking is still slightly deferred: `mode` is derived only in the
+  import parsers (`src/import/{claude-code,codex}.ts`), so a just-started session
+  is unmarked until the next `runImport` tick (then the `auto_import` broadcast
+  refreshes the open Monitor). The live Claude path is hook-sourced
+  (`src/api/events.ts`) and Codex is OTEL-sourced (`src/api/otel.ts`), neither of
+  which sets `mode`. To mark on first paint, have the Claude hooks read
+  `entrypoint` from the transcript, or have the watcher stamp
+  `sessions.metadata.mode` from the JSONL it already parses. Low priority —
+  headless runs are short and auto-import backfills within the interval.
 - No `mode` filter facet in the Monitor `FilterBar` yet (intentionally scoped
   out). Adding one is cheap if wanted: `mode` currently lives in
   `sessions.metadata` (json_extract), so a filterable/indexed path would want a
@@ -21,6 +21,9 @@ Working list of opportunities noticed while implementing specs. These are not co
   into `metadata.cli_version` (`src/import/codex.ts`) and dropped the real
   `cli_version`; now stored under `metadata.originator`. No consumer read the old
   field.
+- Resolved (PR #60 review): historical sessions imported before this feature now
+  backfill via `setSessionMode` on `amon import --force`, and the open Monitor
+  refetches on the `auto_import` SSE broadcast instead of needing a manual reload.
 
 ## Analytics Rollups (deferred — schema-storage-rebalance Phase 2 finding)
 

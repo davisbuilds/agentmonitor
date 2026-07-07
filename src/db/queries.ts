@@ -58,6 +58,23 @@ function upsertSession(
   });
 }
 
+// Backfill/patch a session's invocation mode independent of event insertion.
+// `insertEvent` sets mode via upsertSession, but it returns early for duplicate
+// event_ids (and unchanged files are skipped entirely by import_state), so
+// sessions imported before mode existed are never updated through that path.
+// The import pipeline calls this once per session per file so a re-import
+// (including `--force`) backfills mode even when every event is a duplicate.
+// Guarded so it is a no-op UPDATE when the mode is already correct.
+export function setSessionMode(sessionId: string, mode: 'interactive' | 'headless'): void {
+  const db = getDb();
+  db.prepare(`
+    UPDATE sessions
+    SET metadata = json_set(COALESCE(NULLIF(metadata, ''), '{}'), '$.mode', @mode)
+    WHERE id = @id
+      AND (json_extract(metadata, '$.mode') IS NULL OR json_extract(metadata, '$.mode') != @mode)
+  `).run({ id: sessionId, mode });
+}
+
 export interface SessionRow {
   id: string;
   agent_id: string;
