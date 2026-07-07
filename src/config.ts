@@ -197,6 +197,9 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     autoImportIntervalMinutes: parseEnvInt(env.AGENTMONITOR_AUTO_IMPORT_MINUTES, 10, 0),
     projectsDir: resolveProjectsDir(env, cwd),
     quotas: parseQuotaConfig(env),
+    contextWindow: {
+      codexDefault: parseEnvInt(env.AGENTMONITOR_CODEX_CONTEXT_WINDOW, 256_000, 1),
+    },
     live: parseLiveConfig(env),
     sync: parseSyncConfig(env),
     usage: {
