@@ -51,6 +51,10 @@ export interface NormalizedIngestEvent {
   cache_read_tokens?: number;
   cache_write_tokens?: number;
   source?: EventSource;
+  // Invocation mode of the owning session (interactive vs headless). Session-level
+  // constant carried on events so the session upsert can persist it; see
+  // src/util/invocation-mode.ts.
+  mode?: 'interactive' | 'headless';
 }
 
 export interface ContractValidationError {

@@ -4,6 +4,7 @@ import os from 'os';
 import crypto from 'crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
+import { claudeInvocationMode } from '../util/invocation-mode.js';
 
 // ─── Claude Code JSONL line types ──────────────────────────────────────
 
@@ -37,6 +38,8 @@ interface ClaudeCodeLogLine {
   error?: string | { message?: string };
   cwd?: string;
   gitBranch?: string;
+  entrypoint?: string;    // 'cli' (interactive) | 'sdk-cli' (headless -p)
+  promptSource?: string;  // 'typed'/'queued'/... (interactive) | 'sdk' (headless)
   // tool_result fields
   is_error?: boolean;
   status?: string;
@@ -219,6 +222,7 @@ export function parseClaudeCodeFile(
       client_timestamp: line.timestamp,
       metadata: Object.keys(metadataObj).length > 0 ? metadataObj : {},
       source: 'import',
+      mode: claudeInvocationMode(line.entrypoint, line.promptSource),
     };
 
     events.push(event);
