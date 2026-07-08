@@ -75,7 +75,9 @@ describe('cache-inclusive input backfill migration', () => {
   test('version guard makes it run exactly once', () => {
     const db = getDb();
     const before = getRow('openai-old');
-    assert.equal(db.pragma('user_version', { simple: true }), 1);
+    // runDataMigrations advances the counter to the current DATA_SCHEMA_VERSION
+    // (bumped to 2 when the occupancy backfill migration was added).
+    assert.equal(db.pragma('user_version', { simple: true }), 2);
 
     // Re-running without resetting the guard must short-circuit — no second
     // subtraction of the already-netted cached tokens.

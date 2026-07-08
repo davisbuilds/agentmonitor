@@ -686,7 +686,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 1;
+const DATA_SCHEMA_VERSION = 2;
 
 /**
  * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
@@ -703,9 +703,39 @@ export function runDataMigrations(db: Database): void {
   // not yet bumped (which would re-run and double-subtract on restart).
   const run = db.transaction(() => {
     if (current < 1) backfillCacheInclusiveInputTokens(db);
+    if (current < 2) backfillOccupancyOnUpgrade(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run();
+}
+
+/**
+ * v2 — Backfill context-window occupancy for sessions synced before the gauge
+ * shipped. The gauge writes occupancy inside `insertParsedSession`, but the
+ * watcher skips files whose hash is unchanged, so pre-existing idle Claude/Codex
+ * sessions in an upgraded database would otherwise never populate. Invalidate
+ * their `watched_files` hash once so the next startup sync reparses them and
+ * fills the occupancy columns; already-populated sessions and non-live agents
+ * (Antigravity is always null) are left alone. This is DB-only and cheap — the
+ * actual reparse cost is deferred to the watcher's normal startup pass. The
+ * version-counter guard makes it run exactly once, so genuinely-null sessions
+ * (no usage) are re-parsed at most one extra time rather than on every boot.
+ */
+function backfillOccupancyOnUpgrade(db: Database): void {
+  const result = db.prepare(`
+    UPDATE watched_files
+    SET file_hash = ''
+    WHERE file_path IN (
+      SELECT file_path FROM browsing_sessions
+      WHERE agent IN ('claude', 'codex')
+        AND context_used_tokens IS NULL
+        AND file_path IS NOT NULL
+    )
+  `).run();
+
+  if (result.changes > 0) {
+    console.log(`[migration] occupancy backfill: flagged ${result.changes} session file(s) for reparse`);
+  }
 }
 
 /**

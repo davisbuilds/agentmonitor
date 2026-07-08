@@ -4,17 +4,22 @@ Working list of opportunities noticed while implementing specs. These are not co
 
 ## Context occupancy gauge
 
-- **Occupancy only populates on live sync, not initial/bulk sync.** Occupancy is
-  written by the live adapters (`syncClaudeLiveSession`/`syncCodexLiveSession`);
-  the initial watcher sync and historical parse write `browsing_sessions` via
-  `insertParsedSession`, which does not carry occupancy. So on a fresh server
-  start, a session shows occupancy only after its next live turn (seconds for a
-  genuinely active session; never for idle/historical ones). This matches the
-  spec's "historical occupancy out of scope," but if we want cards populated
-  immediately after restart, `insertParsedSession` could write the two columns
-  from `parsed.metadata.context_used_tokens` + the resolver (small, additive).
-  Verified live: only the actively-written session showed occupancy on a scratch
-  boot (24–25%, 1M window); bulk-imported sessions were blank.
+- **Resolved: occupancy now backfills on initial sync / import.**
+  `insertParsedSession` (the watcher initial-sync and historical-parse path) now
+  resolves and writes the two occupancy columns using the same per-agent window
+  resolver as the live adapters, so cards populate immediately on boot/import
+  rather than only after a session's next live turn. Idle/historical sessions
+  that carry a parsed `context_used_tokens` now show occupancy too.
+- **Resolved: pre-existing sessions backfill automatically on upgrade (PR #63
+  review).** The backfill runs when a file is parsed, but the watcher skips
+  unchanged-hash files, so an already-synced DB kept blank occupancy on idle
+  sessions. Fixed with a one-shot `runDataMigrations` step (`user_version` 1→2,
+  `backfillOccupancyOnUpgrade`) that invalidates the `watched_files` hash for
+  null-occupancy Claude/Codex sessions once; the next startup sync reparses them
+  and fills the columns. Gated to Claude/Codex (Antigravity is always null), and
+  the version-counter guard means genuinely-null sessions are re-parsed at most
+  once, not every boot. Trade-off accepted: the first boot after upgrade reparses
+  those historical sessions (bounded, one-time).
 - **Monitor-card join not visually verified under live v1 hooks.** The Live
   inspector (pure v2) renders occupancy correctly end-to-end. The Monitor cards
   read the v1 store and join v2 occupancy by session id; this was svelte-checked
@@ -24,18 +29,19 @@ Working list of opportunities noticed while implementing specs. These are not co
   which aliases each occupancy entry under the embedded UUID as well (PR #61
   review fix); still confirm the join renders on a real running card, especially
   for Codex.
-- **Authoritative Claude context window via the statusline bridge (accuracy
-  refinement).** The occupancy gauge resolves the Claude denominator to a 1M
-  default (guarded), because the transcript does not state the active window.
-  The existing Claude statusline bridge (`hooks/claude-code/statusline_bridge.sh`
-  → `POST /api/provider-quotas/claude/statusline`) already forwards Claude Code's
-  full statusline payload, which carries `exceeds_200k_tokens` (and the model).
-  Feed that in as an authoritative override of the resolved default so the
-  denominator matches the real window instead of a guess. Additive, opt-in, and
-  matches the "first-party snapshot preferred, derived fallback" pattern already
-  used for quota. Note: the statusline does not provide a better *numerator* — the
-  context-fill number is computed by the statusline script from the same
-  transcript token usage we already parse, so this refines only the window.
+- **Won't do (investigated): statusline can't authoritatively set the Claude
+  window.** Idea was to override the guarded 1M default with a real window from
+  the statusline bridge. On inspection the bridge already forwards the full
+  payload (`--data-binary`), but the payload carries no numeric window or token
+  count — its only context signal is the boolean `exceeds_200k_tokens`, which is
+  a *usage threshold*, not a window size. `true` merely confirms the window is
+  ≥1M (a no-op for the 1M default); `false` is ambiguous (a 200K plan vs a 1M
+  plan not yet past 200K), so it cannot safely set 200K without producing a wrong
+  "near-full of 200K" reading for the common 1M-plan-small-session case. The
+  statusline `%` you see in the terminal is computed by the script from the same
+  transcript tokens we already parse, so it offers no better numerator either.
+  Real per-plan fidelity would need to detect the 200K-vs-1M *plan*, which no
+  ingested source exposes today. Not worth building as framed.
 - **Trajectory sparkline (Task 8, deferred).** Session-lifetime occupancy fill
   over time with compaction drop-offs, in the detail/inspector surface. Needs a
   bounded sample buffer in the projection and a retention decision (see
