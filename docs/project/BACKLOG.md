@@ -10,18 +10,16 @@ Working list of opportunities noticed while implementing specs. These are not co
   resolver as the live adapters, so cards populate immediately on boot/import
   rather than only after a session's next live turn. Idle/historical sessions
   that carry a parsed `context_used_tokens` now show occupancy too.
-- **Pre-existing sessions in an already-synced DB still need a reparse (PR #63
-  review).** The backfill only runs when a file is actually parsed, and the
-  watcher skips files whose hash is unchanged (`syncSessionFileDetailed` returns
-  `skipped` on a matching `watched_files` hash). So an operator upgrading with an
-  existing database keeps blank occupancy on unchanged idle sessions until their
-  transcript changes or they run a one-time `amon reparse`. A self-healing
-  reparse-when-occupancy-null in the skip path was rejected: sessions that are
-  *legitimately* null (no usage, Antigravity) would then reparse on every boot.
-  The clean fix, if wanted, is a one-shot startup backfill guarded by a schema
-  meta-flag (reparse null-occupancy rows once, then record it done) so the
-  genuinely-null sessions are visited exactly once. Deferred — `amon reparse`
-  covers it today and the gap only affects the first boot after upgrade.
+- **Resolved: pre-existing sessions backfill automatically on upgrade (PR #63
+  review).** The backfill runs when a file is parsed, but the watcher skips
+  unchanged-hash files, so an already-synced DB kept blank occupancy on idle
+  sessions. Fixed with a one-shot `runDataMigrations` step (`user_version` 1→2,
+  `backfillOccupancyOnUpgrade`) that invalidates the `watched_files` hash for
+  null-occupancy Claude/Codex sessions once; the next startup sync reparses them
+  and fills the columns. Gated to Claude/Codex (Antigravity is always null), and
+  the version-counter guard means genuinely-null sessions are re-parsed at most
+  once, not every boot. Trade-off accepted: the first boot after upgrade reparses
+  those historical sessions (bounded, one-time).
 - **Monitor-card join not visually verified under live v1 hooks.** The Live
   inspector (pure v2) renders occupancy correctly end-to-end. The Monitor cards
   read the v1 store and join v2 occupancy by session id; this was svelte-checked
