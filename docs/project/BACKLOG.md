@@ -112,11 +112,18 @@ Working list of opportunities noticed while implementing specs. These are not co
   added `gemini-3.5-flash` ($1.50/$9.00/$0.15) with the Antigravity id/display
   aliases (`gemini-3-flash-a`, `Gemini 3.5 Flash (High/Medium/Low)`); also added
   `claude-fable-5` ($10/$50/$1, 5m cache-write $12.50) + a `fable` classifier tier.
-- **Model prompt-size price tiers (engine-wide, not Antigravity-specific).** Google
-  doubles Gemini rates above 200k prompt tokens (e.g. 3.1 Pro input $2→$4, output
-  $12→$18, cache $0.20→$0.40). `PricingRegistry`/`gemini.json` store a single flat
-  per-model rate, so any model with a >200k context window under-bills large
-  sessions ~2×. Would need a tiered pricing shape (`{ threshold, rates }[]`) and a
-  `calculate()` that picks the tier by prompt size. Affects Gemini today; other
-  providers use similar long-context tiers. Revisit if long-context cost accuracy
-  matters.
+- ~~**Model prompt-size price tiers.**~~ DONE (2026-07-08): `calculate()` now
+  selects rates by prompt size (uncached `input` + `cacheRead`) via an optional
+  `tiers` array; applied verified >200K tiers to `gemini-3.1-pro-preview`
+  ($2/$12/$0.20→$4/$18/$0.40) and `gemini-2.5-pro`
+  ($1.25/$10/$0.125→$2.50/$15/$0.25). Current Claude models bill 1M at standard
+  rate (no tier). **Recompute:** new tiers only affect newly-calculated costs;
+  existing stored `cost_usd` for large historical Gemini sessions still needs an
+  `amon reparse` / maintenance recalc to pick up the correction.
+- **Claude Sonnet 5 is on introductory pricing through 2026-08-31.** `claude.json`
+  encodes the intro rates ($2/$10 input/output, cacheRead $0.20, 5m write $2.50).
+  Standard pricing ($3/$15, cacheRead $0.30, 5m write $3.75) takes effect
+  2026-09-01 — update the `claude-sonnet-5` entry then. The engine has no
+  date-awareness, so this is a manual data bump. (Sonnet 5 also uses a newer
+  tokenizer that emits ~30% more tokens for the same text; cost reflects actual
+  reported tokens, so no engine change needed.)

@@ -4,13 +4,24 @@ import path from 'path';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
-interface PricingDataModel {
-  aliases?: string[];
+interface PricingDataRates {
   inputCostPerMTok: number;
   outputCostPerMTok: number;
   cacheReadCostPerMTok: number;
   cacheWriteCostPerMTok: number;
+}
+
+// A higher prompt-size band: when a request's prompt exceeds `abovePromptTokens`,
+// these rates replace the base rates for every token class (that is how Google's
+// long-context tiering works — e.g. Gemini doubles all rates above 200K prompt).
+interface PricingDataTier extends PricingDataRates {
+  abovePromptTokens: number;
+}
+
+interface PricingDataModel extends PricingDataRates {
+  aliases?: string[];
   deprecated: boolean;
+  tiers?: PricingDataTier[];
 }
 
 interface PricingDataFile {
@@ -19,13 +30,22 @@ interface PricingDataFile {
   models: Record<string, PricingDataModel>;
 }
 
-export interface ModelPricing {
+export interface PricingRates {
   inputCostPerToken: number;
   outputCostPerToken: number;
   cacheReadCostPerToken: number;
   cacheWriteCostPerToken: number;
+}
+
+export interface PricingTier extends PricingRates {
+  abovePromptTokens: number;
+}
+
+export interface ModelPricing extends PricingRates {
   provider: string;
   deprecated: boolean;
+  /** Higher prompt-size bands, ascending by threshold. Absent for flat models. */
+  tiers?: PricingTier[];
 }
 
 export interface TokenCounts {
@@ -43,6 +63,29 @@ export interface ResolvedModelPricing {
 // ─── PricingRegistry ────────────────────────────────────────────────────
 
 const M_TOK = 1_000_000;
+
+function toPerToken(rates: PricingDataRates): PricingRates {
+  return {
+    inputCostPerToken: rates.inputCostPerMTok / M_TOK,
+    outputCostPerToken: rates.outputCostPerMTok / M_TOK,
+    cacheReadCostPerToken: rates.cacheReadCostPerMTok / M_TOK,
+    cacheWriteCostPerToken: rates.cacheWriteCostPerMTok / M_TOK,
+  };
+}
+
+// Pick the effective rates for a request. Flat models (no `tiers`) always use
+// their base rates. Tiered models select by the request's prompt size — the
+// input context, i.e. uncached input + cache reads — applying the highest band
+// whose threshold the prompt strictly exceeds (the ">200K" boundary is exclusive).
+function selectRates(pricing: ModelPricing, tokens: TokenCounts): PricingRates {
+  if (!pricing.tiers || pricing.tiers.length === 0) return pricing;
+  const promptTokens = tokens.input + (tokens.cacheRead ?? 0);
+  let rates: PricingRates = pricing;
+  for (const tier of pricing.tiers) {
+    if (promptTokens > tier.abovePromptTokens) rates = tier;
+  }
+  return rates;
+}
 
 export class PricingRegistry {
   private models = new Map<string, ModelPricing>();
@@ -71,13 +114,16 @@ export class PricingRegistry {
   private loadProvider(data: PricingDataFile): void {
     for (const [canonicalName, model] of Object.entries(data.models)) {
       const pricing: ModelPricing = {
-        inputCostPerToken: model.inputCostPerMTok / M_TOK,
-        outputCostPerToken: model.outputCostPerMTok / M_TOK,
-        cacheReadCostPerToken: model.cacheReadCostPerMTok / M_TOK,
-        cacheWriteCostPerToken: model.cacheWriteCostPerMTok / M_TOK,
+        ...toPerToken(model),
         provider: data.provider,
         deprecated: model.deprecated,
       };
+
+      if (model.tiers && model.tiers.length > 0) {
+        pricing.tiers = model.tiers
+          .map(tier => ({ ...toPerToken(tier), abovePromptTokens: tier.abovePromptTokens }))
+          .sort((a, b) => a.abovePromptTokens - b.abovePromptTokens);
+      }
 
       this.models.set(canonicalName, pricing);
 
@@ -137,10 +183,23 @@ export class PricingRegistry {
     const pricing = this.lookup(model);
     if (!pricing) return null;
 
-    return (tokens.input * pricing.inputCostPerToken)
-      + (tokens.output * pricing.outputCostPerToken)
-      + ((tokens.cacheRead ?? 0) * pricing.cacheReadCostPerToken)
-      + ((tokens.cacheWrite ?? 0) * pricing.cacheWriteCostPerToken);
+    const rates = selectRates(pricing, tokens);
+    return (tokens.input * rates.inputCostPerToken)
+      + (tokens.output * rates.outputCostPerToken)
+      + ((tokens.cacheRead ?? 0) * rates.cacheReadCostPerToken)
+      + ((tokens.cacheWrite ?? 0) * rates.cacheWriteCostPerToken);
+  }
+
+  /**
+   * Resolve the effective per-token rates for a request, tier-selected by prompt
+   * size (uncached `input` + `cacheRead`). Flat models return their base rates.
+   * Returns null when the model is unknown. Use this anywhere a cost/savings
+   * figure must agree with `calculate()` on long-context tiered pricing.
+   */
+  effectiveRates(model: string, tokens: TokenCounts): PricingRates | null {
+    const pricing = this.lookup(model);
+    if (!pricing) return null;
+    return selectRates(pricing, tokens);
   }
 
   /**

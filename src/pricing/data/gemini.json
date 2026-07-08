@@ -1,6 +1,6 @@
 {
   "provider": "google",
-  "lastUpdated": "2026-07-02T00:00:00Z",
+  "lastUpdated": "2026-07-08T00:00:00Z",
   "models": {
     "gemini-3.5-flash": {
       "aliases": [
@@ -27,7 +27,16 @@
       "outputCostPerMTok": 12,
       "cacheReadCostPerMTok": 0.2,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 200000,
+          "inputCostPerMTok": 4,
+          "outputCostPerMTok": 18,
+          "cacheReadCostPerMTok": 0.4,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gemini-3.1-flash-lite-preview": {
       "aliases": [],
@@ -53,7 +62,16 @@
       "outputCostPerMTok": 10,
       "cacheReadCostPerMTok": 0.125,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 200000,
+          "inputCostPerMTok": 2.5,
+          "outputCostPerMTok": 15,
+          "cacheReadCostPerMTok": 0.25,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gemini-2.5-flash": {
       "aliases": [
