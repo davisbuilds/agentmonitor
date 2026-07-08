@@ -452,6 +452,102 @@ describe('PricingRegistry', () => {
       assert.ok(registry.knownModels.length > 0);
     });
   });
+
+  // ─── Sonnet 5 (introductory pricing, in effect through 2026-08-31) ──────
+  describe('Claude Sonnet 5', () => {
+    test('resolves with introductory per-MTok rates ($2/$10, cacheRead $0.20, 5m write $2.50)', () => {
+      const pricing = registry.lookup('claude-sonnet-5');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.deprecated, false);
+      assert.equal(pricing.inputCostPerToken, 2 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 10 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 2.5 / 1_000_000);
+    });
+
+    test('classifies as a known anthropic/sonnet tier', () => {
+      const c = classifyModel('claude-sonnet-5');
+      assert.equal(c.provider, 'anthropic');
+      assert.equal(c.family, 'claude');
+      assert.equal(c.tier, 'sonnet');
+      assert.equal(c.pricing_status, 'known');
+    });
+
+    test('calculates cost at introductory rates', () => {
+      const cost = registry.calculate('claude-sonnet-5', {
+        input: 100_000,
+        output: 50_000,
+        cacheRead: 500_000,
+        cacheWrite: 10_000,
+      });
+      assert.ok(cost !== null);
+      // 100K*$2 + 50K*$10 + 500K*$0.20 + 10K*$2.50 (per MTok)
+      const expected = 0.2 + 0.5 + 0.1 + 0.025;
+      assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
+    });
+  });
+
+  // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
+  describe('tiered prompt-size pricing', () => {
+    test('Gemini 3.1 Pro uses base rates at/under the 200K prompt threshold', () => {
+      // 150K input + 40K cacheRead = 190K prompt → base tier
+      const cost = registry.calculate('gemini-3.1-pro-preview', {
+        input: 150_000,
+        output: 50_000,
+        cacheRead: 40_000,
+      });
+      assert.ok(cost !== null);
+      // base: input $2, output $12, cacheRead $0.20
+      const expected = 0.3 + 0.6 + 0.008;
+      assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
+    });
+
+    test('Gemini 3.1 Pro doubles all rates when the prompt exceeds 200K (cacheRead counts toward the threshold)', () => {
+      // 150K input + 100K cacheRead = 250K prompt → >200K tier
+      const cost = registry.calculate('gemini-3.1-pro-preview', {
+        input: 150_000,
+        output: 50_000,
+        cacheRead: 100_000,
+      });
+      assert.ok(cost !== null);
+      // >200K: input $4, output $18, cacheRead $0.40
+      const expected = 0.6 + 0.9 + 0.04;
+      assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
+    });
+
+    test('the 200K boundary is exclusive — exactly 200K prompt stays on base rates', () => {
+      const cost = registry.calculate('gemini-3.1-pro-preview', {
+        input: 200_000,
+        output: 0,
+      });
+      assert.ok(cost !== null);
+      // exactly 200K → base $2 input
+      assert.ok(Math.abs(cost - 0.4) < 0.0001, `got ${cost}`);
+    });
+
+    test('Gemini 2.5 Pro tiers at 200K ($1.25/$10/$0.125 → $2.50/$15/$0.25)', () => {
+      const base = registry.calculate('gemini-2.5-pro', { input: 100_000, output: 100_000 });
+      const over = registry.calculate('gemini-2.5-pro', { input: 300_000, output: 100_000 });
+      assert.ok(base !== null && over !== null);
+      // base: 100K*$1.25 + 100K*$10
+      assert.ok(Math.abs(base - (0.125 + 1.0)) < 0.0001, `base got ${base}`);
+      // over: 300K*$2.50 + 100K*$15
+      assert.ok(Math.abs(over - (0.75 + 1.5)) < 0.0001, `over got ${over}`);
+    });
+
+    test('a flat model (no tiers) is unaffected by a large prompt', () => {
+      // gemini-3.5-flash is flat; 2M prompt must still use the single rate
+      const cost = registry.calculate('gemini-3.5-flash', {
+        input: 1_000_000,
+        output: 0,
+        cacheRead: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      // 1M*$1.50 + 1M*$0.15, no doubling
+      assert.ok(Math.abs(cost - (1.5 + 0.15)) < 0.0001, `got ${cost}`);
+    });
+  });
 });
 
 // ─── Integration tests: pricing in ingestion pipeline ────────────────────
