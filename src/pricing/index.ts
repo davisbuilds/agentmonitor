@@ -191,6 +191,18 @@ export class PricingRegistry {
   }
 
   /**
+   * Resolve the effective per-token rates for a request, tier-selected by prompt
+   * size (uncached `input` + `cacheRead`). Flat models return their base rates.
+   * Returns null when the model is unknown. Use this anywhere a cost/savings
+   * figure must agree with `calculate()` on long-context tiered pricing.
+   */
+  effectiveRates(model: string, tokens: TokenCounts): PricingRates | null {
+    const pricing = this.lookup(model);
+    if (!pricing) return null;
+    return selectRates(pricing, tokens);
+  }
+
+  /**
    * Check if a model is known to the registry.
    */
   has(model: string): boolean {

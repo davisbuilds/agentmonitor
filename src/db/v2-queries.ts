@@ -2301,12 +2301,19 @@ function selectUsageEventRows(params: UsageParams = {}): UsageEventRow[] {
 }
 
 function estimateCacheSavings(row: UsageRow): number {
-  const resolved = pricingRegistry.resolve(row.model);
-  if (!resolved) return 0;
-  const pricing = resolved.pricing;
+  // Use the same tier-selected rates `calculate()` billed this event at, so a
+  // long-context Gemini request (prompt > 200K) reports savings against its
+  // doubled long-context input rate, not the base rate.
+  const rates = pricingRegistry.effectiveRates(row.model, {
+    input: row.tokens_in,
+    output: row.tokens_out,
+    cacheRead: row.cache_read_tokens,
+    cacheWrite: row.cache_write_tokens,
+  });
+  if (!rates) return 0;
   return (
-    row.cache_read_tokens * (pricing.inputCostPerToken - pricing.cacheReadCostPerToken)
-    + row.cache_write_tokens * (pricing.inputCostPerToken - pricing.cacheWriteCostPerToken)
+    row.cache_read_tokens * (rates.inputCostPerToken - rates.cacheReadCostPerToken)
+    + row.cache_write_tokens * (rates.inputCostPerToken - rates.cacheWriteCostPerToken)
   );
 }
 

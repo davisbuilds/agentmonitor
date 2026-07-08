@@ -548,6 +548,24 @@ describe('PricingRegistry', () => {
       assert.ok(Math.abs(cost - (1.5 + 0.15)) < 0.0001, `got ${cost}`);
     });
   });
+
+  // effectiveRates exposes the same tier selection to non-calculate() consumers
+  // (e.g. usage-summary cache-savings), so their figures agree with billing.
+  describe('effectiveRates', () => {
+    test('returns base rates for a small prompt and tier rates once it exceeds 200K', () => {
+      const base = registry.effectiveRates('gemini-3.1-pro-preview', { input: 100_000, output: 0, cacheRead: 50_000 });
+      const over = registry.effectiveRates('gemini-3.1-pro-preview', { input: 150_000, output: 0, cacheRead: 100_000 });
+      assert.ok(base && over);
+      assert.equal(base.inputCostPerToken, 2 / 1_000_000);
+      assert.equal(base.cacheReadCostPerToken, 0.2 / 1_000_000);
+      assert.equal(over.inputCostPerToken, 4 / 1_000_000);
+      assert.equal(over.cacheReadCostPerToken, 0.4 / 1_000_000);
+    });
+
+    test('returns null for an unknown model', () => {
+      assert.equal(registry.effectiveRates('not-a-model', { input: 1, output: 1 }), null);
+    });
+  });
 });
 
 // ─── Integration tests: pricing in ingestion pipeline ────────────────────
