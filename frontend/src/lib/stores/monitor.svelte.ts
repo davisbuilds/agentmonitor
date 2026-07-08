@@ -57,14 +57,22 @@ let occupancyBySession = $state<Record<string, SessionOccupancy>>({});
 export function getSessionOccupancy(id: string): SessionOccupancy | null {
   return occupancyBySession[id] ?? null;
 }
+// Codex browsing sessions are keyed by the rollout filename, but the v1 Monitor
+// card is keyed by the embedded session UUID; alias occupancy under both so the
+// card's id lookup resolves. Claude ids are already the UUID (self-alias, no-op).
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 export async function refreshOccupancy(): Promise<void> {
   try {
-    const res = await fetchLiveSessions({ limit: 0 });
+    // `/api/v2/live/sessions` clamps limit into [1, 500]; request the ceiling so
+    // every displayed card gets its occupancy, not just the single newest row.
+    const res = await fetchLiveSessions({ limit: 500 });
     const next: Record<string, SessionOccupancy> = {};
     for (const s of res.data) {
-      if (s.context_pct != null) {
-        next[s.id] = { used: s.context_used_tokens, window: s.context_window_tokens, pct: s.context_pct };
-      }
+      if (s.context_pct == null) continue;
+      const occ: SessionOccupancy = { used: s.context_used_tokens, window: s.context_window_tokens, pct: s.context_pct };
+      next[s.id] = occ;
+      const uuid = s.id.match(UUID_RE);
+      if (uuid) next[uuid[0]] = occ;
     }
     occupancyBySession = next;
   } catch (err) {

@@ -19,9 +19,11 @@ Working list of opportunities noticed while implementing specs. These are not co
   inspector (pure v2) renders occupancy correctly end-to-end. The Monitor cards
   read the v1 store and join v2 occupancy by session id; this was svelte-checked
   and logically verified, but not screenshotted with a live hook/OTEL-fed active
-  session (the scratch server had 0 active v1 sessions). Confirm the v1/v2
-  session-id join renders on a card in a real running instance, especially for
-  Codex (v1 OTEL id vs v2 rollout id).
+  session (the scratch server had 0 active v1 sessions). The Codex id mismatch
+  (v1 OTEL UUID vs v2 rollout filename) is now handled in `refreshOccupancy`,
+  which aliases each occupancy entry under the embedded UUID as well (PR #61
+  review fix); still confirm the join renders on a real running card, especially
+  for Codex.
 - **Authoritative Claude context window via the statusline bridge (accuracy
   refinement).** The occupancy gauge resolves the Claude denominator to a 1M
   default (guarded), because the transcript does not state the active window.
