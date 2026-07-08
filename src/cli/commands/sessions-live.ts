@@ -242,6 +242,9 @@ export function registerSessionLiveCommands(): void {
           file_path: null,
           file_size: null,
           file_hash: null,
+          context_used_tokens: null,
+          context_window_tokens: null,
+          context_pct: null,
         }));
         writeFormatted(ctx, result, formatSessionRows(rows));
       } finally {

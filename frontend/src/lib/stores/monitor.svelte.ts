@@ -1,4 +1,4 @@
-import { fetchSessionDetail, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
+import { fetchSessionDetail, fetchLiveSessions, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
 import type { CostWindow } from '../monitor-analytics';
 import { parseTimestamp } from '../format';
 import { mergeSessionAggregates } from '../monitor-session-merge';
@@ -45,6 +45,40 @@ const sessionBackfillInFlight = new Set<string>();
 const editedFilesBySession = new Map<string, Set<string>>();
 export function getSessions(): Session[] { return sessions; }
 export function setSessions(s: Session[]): void { sessions = s; }
+
+// --- Context-window occupancy (v2 live projection, joined to v1 cards by id) ---
+// Occupancy lives on the v2 browsing_sessions projection, not the v1 Session
+// aggregate. Rather than mutate Session objects the event stream constantly
+// rebuilds, we keep occupancy as a separate map keyed by session id and join it
+// at render. Refreshed on the same signals that drive the monitor (mount,
+// auto-import, session_parsed).
+export interface SessionOccupancy { used: number | null; window: number | null; pct: number; }
+let occupancyBySession = $state<Record<string, SessionOccupancy>>({});
+export function getSessionOccupancy(id: string): SessionOccupancy | null {
+  return occupancyBySession[id] ?? null;
+}
+// Codex browsing sessions are keyed by the rollout filename, but the v1 Monitor
+// card is keyed by the embedded session UUID; alias occupancy under both so the
+// card's id lookup resolves. Claude ids are already the UUID (self-alias, no-op).
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
+export async function refreshOccupancy(): Promise<void> {
+  try {
+    // `/api/v2/live/sessions` clamps limit into [1, 500]; request the ceiling so
+    // every displayed card gets its occupancy, not just the single newest row.
+    const res = await fetchLiveSessions({ limit: 500 });
+    const next: Record<string, SessionOccupancy> = {};
+    for (const s of res.data) {
+      if (s.context_pct == null) continue;
+      const occ: SessionOccupancy = { used: s.context_used_tokens, window: s.context_window_tokens, pct: s.context_pct };
+      next[s.id] = occ;
+      const uuid = s.id.match(UUID_RE);
+      if (uuid) next[uuid[0]] = occ;
+    }
+    occupancyBySession = next;
+  } catch (err) {
+    console.error('Failed to load session occupancy:', err);
+  }
+}
 // Bumped when the server reports an auto-import brought in new events. The
 // Monitor subscribes and refetches so importer-derived fields (e.g. a session's
 // invocation `mode`, which the live hook/OTEL stream never carries) appear
@@ -69,6 +103,9 @@ export function handleSessionUpdate(update: Record<string, unknown>): void {
     // session so the pill appears without reloading the whole dashboard.
     if (sessions.some((s) => s.id === update.session_id)) {
       void backfillSession(update.session_id);
+      // The same parse updates the v2 occupancy projection; pull it so the
+      // context pill tracks the latest turn without a manual reload.
+      void refreshOccupancy();
     }
   }
 }

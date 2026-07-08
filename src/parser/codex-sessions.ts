@@ -4,6 +4,13 @@ import { codexInvocationMode } from '../util/invocation-mode.js';
 
 // --- Codex JSONL line types ---
 
+interface CodexTokenUsage {
+  input_tokens?: number;
+  cached_input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+}
+
 interface CodexLine {
   timestamp?: string;
   type?: string;
@@ -18,6 +25,12 @@ interface CodexLine {
     input?: string;
     arguments?: string;
     type?: string;
+    // event_msg / token_count telemetry
+    info?: {
+      last_token_usage?: CodexTokenUsage;
+      total_token_usage?: CodexTokenUsage;
+      model_context_window?: number;
+    } | null;
     [key: string]: unknown;
   };
 }
@@ -77,6 +90,10 @@ export function parseCodexSessionMessages(
   let userMessageCount = 0;
   let cwd: string | null = null;
   let originator: string | undefined;
+  // Latest context-window occupancy from token_count telemetry (in file order).
+  // Numerator is last_token_usage.input_tokens, which is cache-inclusive.
+  let contextUsedTokens: number | undefined;
+  let contextWindowReported: number | undefined;
 
   const lines: CodexLine[] = [];
   for (const raw of jsonlContent.split('\n')) {
@@ -105,6 +122,21 @@ export function parseCodexSessionMessages(
     if (timestamp) {
       if (!startedAt || timestamp < startedAt) startedAt = timestamp;
       if (!endedAt || timestamp > endedAt) endedAt = timestamp;
+    }
+
+    // Context-window occupancy: track the latest token_count telemetry. The
+    // last request's input_tokens (cache-inclusive) is how full the window is;
+    // total_token_usage is cumulative billing and must NOT be used here.
+    if (line.type === 'event_msg' && line.payload?.type === 'token_count') {
+      const info = line.payload.info;
+      const lastUsage = info?.last_token_usage;
+      if (lastUsage && typeof lastUsage.input_tokens === 'number') {
+        contextUsedTokens = lastUsage.input_tokens;
+      }
+      if (typeof info?.model_context_window === 'number') {
+        contextWindowReported = info.model_context_window;
+      }
+      continue;
     }
 
     if (line.type !== 'response_item' || !line.payload) continue;
@@ -200,6 +232,8 @@ export function parseCodexSessionMessages(
       parent_session_id: null,
       relationship_type: null,
       mode: codexInvocationMode(originator),
+      context_used_tokens: contextUsedTokens,
+      context_window_reported: contextWindowReported,
     },
   };
 }

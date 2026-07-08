@@ -1,9 +1,10 @@
 <script lang="ts">
-  import { getSessions, getEvents, setSelectedSessionId } from '../../stores/monitor.svelte';
+  import { getSessions, getEvents, setSelectedSessionId, getSessionOccupancy } from '../../stores/monitor.svelte';
   import { formatCost, formatNumber, timeAgo, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
   import { buildActiveAgentLabel } from '../../monitor-analytics';
   import { SectionHeader, StatusDot, EmptyState, Badge } from '../ui';
+  import ContextPill from './ContextPill.svelte';
 
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
@@ -53,6 +54,7 @@
   <div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
     {#each sorted as session (session.id)}
       {@const recentEvents = eventsBySession.get(session.id) || []}
+      {@const occupancy = getSessionOccupancy(session.id)}
       <button
         class="w-full cursor-pointer rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-line-strong"
         onclick={() => setSelectedSessionId(session.id)}
@@ -66,7 +68,16 @@
               <Badge tone="neutral" class="mt-0.5" title="Headless run (claude -p / codex exec)">headless</Badge>
             {/if}
           </div>
-          <span class="shrink-0 text-meta text-text-faint">{timeAgo(session.last_event_at)}</span>
+          <div class="flex shrink-0 items-center gap-2">
+            {#if occupancy}
+              <ContextPill
+                pct={occupancy.pct}
+                usedTokens={occupancy.used}
+                windowTokens={occupancy.window}
+              />
+            {/if}
+            <span class="text-meta text-text-faint">{timeAgo(session.last_event_at)}</span>
+          </div>
         </div>
 
         <!-- Project/Branch -->

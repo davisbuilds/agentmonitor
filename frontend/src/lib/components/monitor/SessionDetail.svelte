@@ -1,10 +1,12 @@
 <script lang="ts">
-  import { getSelectedSessionId, setSelectedSessionId } from '../../stores/monitor.svelte';
+  import { getSelectedSessionId, setSelectedSessionId, getSessionOccupancy } from '../../stores/monitor.svelte';
   import { fetchSessionDetail, fetchTranscript, type AgentEvent } from '../../api/client';
   import { timeAgo, formatDuration, agentColor } from '../../format';
   import { StatusDot, Badge } from '../ui';
+  import ContextPill from './ContextPill.svelte';
 
   const sessionId = $derived(getSelectedSessionId());
+  const occupancy = $derived(sessionId ? getSessionOccupancy(sessionId) : null);
   let loading = $state(false);
   let session = $state<Record<string, unknown> | null>(null);
   let events = $state<AgentEvent[]>([]);
@@ -98,6 +100,15 @@
               <span class="text-text-muted">Session ID</span>
               <span class="truncate font-mono text-meta text-text-faint">{sessionId}</span>
             </div>
+            {#if occupancy}
+              <ContextPill
+                variant="full"
+                pct={occupancy.pct}
+                usedTokens={occupancy.used}
+                windowTokens={occupancy.window}
+                class="pt-1"
+              />
+            {/if}
           </div>
 
           <!-- Transcript -->
