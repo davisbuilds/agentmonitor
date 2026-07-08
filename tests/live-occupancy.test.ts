@@ -12,6 +12,7 @@ let closeDb: typeof import('../src/db/connection.js').closeDb;
 let initSchema: typeof import('../src/db/schema.js').initSchema;
 let syncClaudeLiveSession: typeof import('../src/live/claude-adapter.js').syncClaudeLiveSession;
 let syncCodexLiveSession: typeof import('../src/live/codex-adapter.js').syncCodexLiveSession;
+let insertParsedSession: typeof import('../src/parser/claude-code.js').insertParsedSession;
 let getLiveSession: typeof import('../src/db/v2-queries.js').getLiveSession;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 
@@ -25,6 +26,7 @@ before(async () => {
   ({ initSchema } = await import('../src/db/schema.js'));
   ({ syncClaudeLiveSession } = await import('../src/live/claude-adapter.js'));
   ({ syncCodexLiveSession } = await import('../src/live/codex-adapter.js'));
+  ({ insertParsedSession } = await import('../src/parser/claude-code.js'));
   ({ getLiveSession } = await import('../src/db/v2-queries.js'));
 
   initSchema();
@@ -101,4 +103,27 @@ test('live API reports null context_pct when occupancy is unavailable', () => {
   assert.ok(row);
   assert.equal(row.context_pct, null);
   assert.equal(row.context_used_tokens, null);
+});
+
+// --- Initial-sync backfill: insertParsedSession must carry occupancy too, so
+// cards populate on server boot / import, not only after the next live turn.
+test('insertParsedSession backfills Claude occupancy with the 1M default window', () => {
+  insertParsedSession(getDb(), baseParsed('claude-insert', 'claude', {
+    context_used_tokens: 250_000,
+    model: 'claude-opus-4-8',
+  }), 'claude-insert.jsonl', 0, 'hash');
+  assert.deepEqual(readOccupancy('claude-insert'), { used: 250_000, window: 1_000_000 });
+});
+
+test('insertParsedSession backfills Codex occupancy with the reported window', () => {
+  insertParsedSession(getDb(), baseParsed('codex-insert', 'codex', {
+    context_used_tokens: 64_000,
+    context_window_reported: 258_400,
+  }), 'codex-insert.jsonl', 0, 'hash');
+  assert.deepEqual(readOccupancy('codex-insert'), { used: 64_000, window: 258_400 });
+});
+
+test('insertParsedSession writes null occupancy when there is no usage', () => {
+  insertParsedSession(getDb(), baseParsed('insert-none', 'claude', {}), 'insert-none.jsonl', 0, 'hash');
+  assert.deepEqual(readOccupancy('insert-none'), { used: null, window: null });
 });
