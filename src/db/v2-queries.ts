@@ -60,6 +60,7 @@ import type {
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
+import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
 import { excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
 
@@ -87,6 +88,12 @@ function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
     file_path: row.file_path,
     file_size: row.file_size,
     file_hash: row.file_hash,
+    context_used_tokens: row.context_used_tokens ?? null,
+    context_window_tokens: row.context_window_tokens ?? null,
+    context_pct: computeOccupancy({
+      usedTokens: row.context_used_tokens,
+      window: row.context_window_tokens,
+    })?.pct ?? null,
   };
 }
 

@@ -51,6 +51,12 @@ interface ClaudeCodeLine {
     role?: string;
     content?: unknown;
     model?: string;
+    usage?: {
+      input_tokens?: number;
+      cache_read_input_tokens?: number;
+      cache_creation_input_tokens?: number;
+      output_tokens?: number;
+    };
   };
   // progress / system fields
   data?: Record<string, unknown>;
@@ -96,6 +102,14 @@ export interface ParsedSessionMetadata {
   // Invocation mode derived from the session log (see src/util/invocation-mode.ts).
   // Undefined when the agent emits no signal (e.g. Antigravity).
   mode?: 'interactive' | 'headless';
+  // Context-window occupancy numerator: the most recent assistant turn's prompt
+  // size (input + cache_read + cache_creation). Undefined when no usage seen.
+  context_used_tokens?: number;
+  // Model of the most recent assistant turn (for context-window resolution).
+  model?: string;
+  // First-party context-window size when the source reports one (Codex
+  // model_context_window). Undefined for Claude (resolved by default instead).
+  context_window_reported?: number;
 }
 
 export interface ParsedSession {
@@ -265,6 +279,9 @@ export function parseSessionMessages(
   let sawSidechain = false;
   let entrypoint: string | undefined;
   let promptSource: string | undefined;
+  // Latest assistant turn's context-window occupancy (in file order).
+  let contextUsedTokens: number | undefined;
+  let latestModel: string | undefined;
 
   const lines = jsonlContent.split('\n');
 
@@ -380,6 +397,18 @@ export function parseSessionMessages(
       }
     }
 
+    // Track the latest assistant turn's context-window occupancy. The prompt
+    // size (input + cache_read + cache_creation) of the most recent request is
+    // how full the window is right now; output_tokens is generation, not window.
+    if (msg.role === 'assistant' && msg.usage) {
+      const u = msg.usage;
+      contextUsedTokens =
+        (u.input_tokens ?? 0) +
+        (u.cache_read_input_tokens ?? 0) +
+        (u.cache_creation_input_tokens ?? 0);
+      if (typeof msg.model === 'string') latestModel = msg.model;
+    }
+
     messages.push({
       session_id: sessionId,
       ordinal: messages.length,
@@ -414,6 +443,8 @@ export function parseSessionMessages(
       parent_session_id: parentSessionId,
       relationship_type: relationshipType,
       mode: claudeInvocationMode(entrypoint, promptSource),
+      context_used_tokens: contextUsedTokens,
+      model: latestModel,
     },
   };
 }

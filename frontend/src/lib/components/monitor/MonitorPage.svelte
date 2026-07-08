@@ -17,6 +17,7 @@
     getFilterOptions,
     setFilterOptions,
     getAutoImportSignal,
+    refreshOccupancy,
   } from '../../stores/monitor.svelte';
   import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions } from '../../api/client';
   import { buildCostFilters } from '../../monitor-analytics';
@@ -52,6 +53,7 @@
       setQuotaMonitor(statsData.quota_monitor || statsData.usage_monitor || []);
       setEvents(eventsData.events || []);
       setSessions(sessionsData.sessions || []);
+      void refreshOccupancy();
     } catch (err) {
       console.error('Failed to load monitor data:', err);
     }

@@ -20,6 +20,7 @@ import {
   upsertProjectedSessionSnapshot,
 } from './projector.js';
 import type { ClaudeLiveSyncResult } from './claude-adapter.js';
+import { resolveContextWindow } from '../pricing/context-windows.js';
 
 export interface CodexSummaryLiveSyncResult {
   inserted_turns: number;
@@ -499,6 +500,15 @@ export function syncCodexLiveSession(
   }
 
   const liveStatus = deriveLiveStatusFromTimestamp(parsed.metadata.ended_at);
+  const usedTokens = parsed.metadata.context_used_tokens ?? null;
+  const contextWindow = usedTokens != null
+    ? resolveContextWindow({
+        agent: 'codex',
+        reportedWindow: parsed.metadata.context_window_reported,
+        observedTokens: usedTokens,
+        codexDefaultWindow: config.contextWindow.codexDefault,
+      })
+    : null;
   upsertProjectedSessionSnapshot(db, {
     id: sessionId,
     agent: 'codex',
@@ -510,6 +520,8 @@ export function syncCodexLiveSession(
     user_message_count: parsed.metadata.user_message_count,
     live_status: liveStatus,
     last_item_at: parsed.metadata.ended_at,
+    context_used_tokens: usedTokens,
+    context_window_tokens: contextWindow,
   }, {
     integration_mode: 'codex-jsonl',
     fidelity: 'summary',

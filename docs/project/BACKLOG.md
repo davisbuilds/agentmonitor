@@ -2,6 +2,46 @@
 
 Working list of opportunities noticed while implementing specs. These are not commitments for the active task unless explicitly pulled into scope.
 
+## Context occupancy gauge
+
+- **Occupancy only populates on live sync, not initial/bulk sync.** Occupancy is
+  written by the live adapters (`syncClaudeLiveSession`/`syncCodexLiveSession`);
+  the initial watcher sync and historical parse write `browsing_sessions` via
+  `insertParsedSession`, which does not carry occupancy. So on a fresh server
+  start, a session shows occupancy only after its next live turn (seconds for a
+  genuinely active session; never for idle/historical ones). This matches the
+  spec's "historical occupancy out of scope," but if we want cards populated
+  immediately after restart, `insertParsedSession` could write the two columns
+  from `parsed.metadata.context_used_tokens` + the resolver (small, additive).
+  Verified live: only the actively-written session showed occupancy on a scratch
+  boot (24–25%, 1M window); bulk-imported sessions were blank.
+- **Monitor-card join not visually verified under live v1 hooks.** The Live
+  inspector (pure v2) renders occupancy correctly end-to-end. The Monitor cards
+  read the v1 store and join v2 occupancy by session id; this was svelte-checked
+  and logically verified, but not screenshotted with a live hook/OTEL-fed active
+  session (the scratch server had 0 active v1 sessions). The Codex id mismatch
+  (v1 OTEL UUID vs v2 rollout filename) is now handled in `refreshOccupancy`,
+  which aliases each occupancy entry under the embedded UUID as well (PR #61
+  review fix); still confirm the join renders on a real running card, especially
+  for Codex.
+- **Authoritative Claude context window via the statusline bridge (accuracy
+  refinement).** The occupancy gauge resolves the Claude denominator to a 1M
+  default (guarded), because the transcript does not state the active window.
+  The existing Claude statusline bridge (`hooks/claude-code/statusline_bridge.sh`
+  → `POST /api/provider-quotas/claude/statusline`) already forwards Claude Code's
+  full statusline payload, which carries `exceeds_200k_tokens` (and the model).
+  Feed that in as an authoritative override of the resolved default so the
+  denominator matches the real window instead of a guess. Additive, opt-in, and
+  matches the "first-party snapshot preferred, derived fallback" pattern already
+  used for quota. Note: the statusline does not provide a better *numerator* — the
+  context-fill number is computed by the statusline script from the same
+  transcript token usage we already parse, so this refines only the window.
+- **Trajectory sparkline (Task 8, deferred).** Session-lifetime occupancy fill
+  over time with compaction drop-offs, in the detail/inspector surface. Needs a
+  bounded sample buffer in the projection and a retention decision (see
+  `docs/plans/2026-07-07-context-occupancy-gauge-plan.md`). Gauge + pill shipped
+  first; this is the fast-follow.
+
 ## Invocation Mode (headless/interactive pill)
 
 - Live marking works: the file watcher stamps `sessions.metadata.mode` from the

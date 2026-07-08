@@ -29,9 +29,16 @@ export interface BrowsingSessionRow {
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;
+  // Context-window occupancy (live sessions). Raw columns from the projection;
+  // context_pct is derived at read time. All null when occupancy is unavailable.
+  context_used_tokens: number | null;
+  context_window_tokens: number | null;
+  context_pct: number | null;
 }
 
-export interface BrowsingSessionDbRow extends Omit<BrowsingSessionRow, 'capabilities'> {
+// context_pct is derived, not stored, so it is omitted from the raw DB row.
+export interface BrowsingSessionDbRow
+  extends Omit<BrowsingSessionRow, 'capabilities' | 'context_pct'> {
   capabilities_json: string | null;
 }
 
