@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
 import { claudeInvocationMode } from '../util/invocation-mode.js';
+import { config } from '../config.js';
+import { resolveContextWindow } from '../pricing/context-windows.js';
 
 // --- Tool category normalization ---
 
@@ -466,10 +468,25 @@ export function insertParsedSession(
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(metadata.session_id);
     db.prepare('DELETE FROM browsing_sessions WHERE id = ?').run(metadata.session_id);
 
+    // Backfill context-window occupancy so cards populate on import/boot, not
+    // only after the next live turn. Mirrors the live adapters' resolution: the
+    // resolver branches per agent (Claude 1M default, Codex reported-else-config
+    // default), and returns null when the agent/usage yields no window.
+    const usedTokens = metadata.context_used_tokens ?? null;
+    const contextWindow = usedTokens != null
+      ? resolveContextWindow({
+          agent: metadata.agent,
+          model: metadata.model,
+          reportedWindow: metadata.context_window_reported,
+          observedTokens: usedTokens,
+          codexDefaultWindow: config.contextWindow.codexDefault,
+        })
+      : null;
+
     // Insert browsing session
     db.prepare(`
-      INSERT INTO browsing_sessions (id, project, agent, first_message, started_at, ended_at, message_count, user_message_count, parent_session_id, relationship_type, file_path, file_size, file_hash)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO browsing_sessions (id, project, agent, first_message, started_at, ended_at, message_count, user_message_count, parent_session_id, relationship_type, file_path, file_size, file_hash, context_used_tokens, context_window_tokens)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       metadata.session_id,
       metadata.project,
@@ -484,6 +501,8 @@ export function insertParsedSession(
       filePath,
       fileSize,
       fileHash,
+      usedTokens,
+      contextWindow,
     );
 
     // Insert messages and collect their IDs for tool call linking
