@@ -1,5 +1,6 @@
 import { getDb } from './connection.js';
 import { config } from '../config.js';
+import { scanSkillCatalogs, resolveVersionAt, type CatalogSnapshot } from '../skills/catalog.js';
 import type {
   BrowsingSessionRow,
   BrowsingSessionDbRow,
@@ -32,6 +33,7 @@ import type {
   MonitorTranscriptEntry,
   MonitorTranscriptRow,
   SkillUsageDay,
+  SkillHealthRow,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
   TopSessionStat,
@@ -1866,6 +1868,331 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
         .map(([skill_name, count]) => ({ skill_name, count }))
         .sort((left, right) => right.count - left.count || left.skill_name.localeCompare(right.skill_name)),
     }));
+}
+
+const INTERRUPT_MARKER = '[Request interrupted by user';
+
+type UserMessageKind = 'interrupt' | 'prompt';
+
+/**
+ * Classify a stored user-message content payload for misfire detection. Only
+ * `text` blocks count: an interrupt is a text block starting with the interrupt
+ * marker; any other non-empty text block is a genuine prompt. Tool-result-only
+ * messages (the mechanical returns that also arrive in user-role messages) are
+ * not turn boundaries and resolve to null. This deliberately ignores the marker
+ * when it appears inside a quoted tool_result rather than as the user's own text.
+ */
+function classifyUserMessage(contentJson: string | null): UserMessageKind | null {
+  const parsed = parseJsonString(contentJson);
+
+  const texts: string[] = [];
+  if (typeof parsed === 'string') {
+    texts.push(parsed);
+  } else if (Array.isArray(parsed)) {
+    for (const block of parsed) {
+      if (block && typeof block === 'object' && (block as { type?: unknown }).type === 'text') {
+        const text = (block as { text?: unknown }).text;
+        if (typeof text === 'string') texts.push(text);
+      }
+    }
+  }
+
+  let hasPrompt = false;
+  for (const text of texts) {
+    const trimmed = text.trimStart();
+    if (trimmed.startsWith(INTERRUPT_MARKER)) return 'interrupt';
+    if (trimmed.length > 0) hasPrompt = true;
+  }
+  return hasPrompt ? 'prompt' : null;
+}
+
+interface UserTurnBoundary {
+  ordinal: number;
+  kind: UserMessageKind;
+}
+
+/**
+ * For each session, the ordinal-sorted list of genuine user turns (interrupts
+ * and prompts). Pre-filtered in SQL to user messages that carry a text block,
+ * which drops the tool-result-only messages that otherwise dominate the payload.
+ */
+function loadUserTurnBoundaries(sessionIds: string[]): Map<string, UserTurnBoundary[]> {
+  const boundaries = new Map<string, UserTurnBoundary[]>();
+  if (sessionIds.length === 0) return boundaries;
+
+  const db = getDb();
+  const CHUNK = 400;
+  for (let i = 0; i < sessionIds.length; i += CHUNK) {
+    const chunk = sessionIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(', ');
+    const rows = db.prepare(`
+      SELECT session_id, ordinal, content
+      FROM messages
+      WHERE role = 'user'
+        AND session_id IN (${placeholders})
+        AND content LIKE '%"type":"text"%'
+      ORDER BY session_id, ordinal
+    `).all(...chunk) as Array<{ session_id: string; ordinal: number; content: string | null }>;
+
+    for (const row of rows) {
+      const kind = classifyUserMessage(row.content);
+      if (!kind) continue;
+      const list = boundaries.get(row.session_id) ?? [];
+      list.push({ ordinal: row.ordinal, kind });
+      boundaries.set(row.session_id, list);
+    }
+  }
+  return boundaries;
+}
+
+/** True when the invoking turn was interrupted before the next genuine prompt. */
+function invocationMisfired(boundaries: UserTurnBoundary[] | undefined, invocationOrdinal: number): boolean {
+  if (!boundaries) return false;
+  for (const boundary of boundaries) {
+    if (boundary.ordinal <= invocationOrdinal) continue;
+    return boundary.kind === 'interrupt';
+  }
+  return false;
+}
+
+function loadCatalogSnapshots(): CatalogSnapshot[] {
+  const db = getDb();
+  return db.prepare(`
+    SELECT name, version, first_seen_at AS firstSeenAt, last_seen_at AS lastSeenAt
+    FROM skill_catalog_snapshots
+  `).all() as CatalogSnapshot[];
+}
+
+interface HealthAccumulator {
+  name: string;
+  version: string | null;
+  versionApproximate: boolean;
+  invocations: number;
+  lastInvokedAt: string | null;
+  misfireEligible: number;
+  misfires: number;
+}
+
+function healthKey(name: string, version: string | null): string {
+  return `${name} ${version ?? ''}`;
+}
+
+function recordHealthInvocation(
+  acc: Map<string, HealthAccumulator>,
+  invokedNames: Set<string>,
+  name: string,
+  version: string | null,
+  approximate: boolean,
+  timestamp: string,
+  misfire: boolean | null,
+): void {
+  invokedNames.add(name);
+  const key = healthKey(name, version);
+  const entry = acc.get(key) ?? {
+    name,
+    version,
+    versionApproximate: false,
+    invocations: 0,
+    lastInvokedAt: null,
+    misfireEligible: 0,
+    misfires: 0,
+  };
+  entry.invocations += 1;
+  if (approximate) entry.versionApproximate = true;
+  if (!entry.lastInvokedAt || timestamp > entry.lastInvokedAt) entry.lastInvokedAt = timestamp;
+  if (misfire !== null) {
+    entry.misfireEligible += 1;
+    if (misfire) entry.misfires += 1;
+  }
+  acc.set(key, entry);
+}
+
+/**
+ * Per-skill trigger health: invocation counts, last-invoked, interrupt-based
+ * misfire rate, and never-fired flags, attributed to the skill version installed
+ * at each invocation. Computed at query time over existing tool_calls/messages/
+ * events rows, so it covers historical sessions with no reingest.
+ */
+export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHealthRow[] {
+  const db = getDb();
+  const snapshots = loadCatalogSnapshots();
+  const acc = new Map<string, HealthAccumulator>();
+  const invokedNames = new Set<string>();
+
+  // Explicit Skill tool calls, with the invoking message's session + ordinal for
+  // misfire linkage.
+  const explicitRows = db.prepare(`
+    SELECT
+      COALESCE(m.timestamp, bs.started_at) AS timestamp,
+      bs.project,
+      bs.agent,
+      m.session_id AS session_id,
+      m.ordinal AS ordinal,
+      tc.input_json
+    FROM tool_calls tc
+    JOIN browsing_sessions bs ON bs.id = tc.session_id
+    LEFT JOIN messages m ON m.id = tc.message_id
+    WHERE tc.tool_name = 'Skill'
+      AND tc.input_json IS NOT NULL
+  `).all() as Array<{
+    timestamp: string | null;
+    project: string | null;
+    agent: string;
+    session_id: string | null;
+    ordinal: number | null;
+    input_json: string | null;
+  }>;
+
+  interface ExplicitInvocation {
+    skillName: string;
+    timestamp: string;
+    sessionId: string | null;
+    ordinal: number | null;
+  }
+  const explicitInvocations: ExplicitInvocation[] = [];
+  for (const row of explicitRows) {
+    if (params.project && row.project !== params.project) continue;
+    if (params.agent && row.agent !== params.agent) continue;
+    if (!row.timestamp) continue;
+    const date = row.timestamp.slice(0, 10);
+    if (!isDateWithinRange(date, params)) continue;
+
+    const parsed = asPlainObject(parseJsonString(row.input_json));
+    const skillName = typeof parsed?.['skill'] === 'string' ? parsed['skill'] : undefined;
+    if (!skillName) continue;
+
+    explicitInvocations.push({
+      skillName,
+      timestamp: row.timestamp,
+      sessionId: row.session_id,
+      ordinal: row.ordinal,
+    });
+  }
+
+  const boundaries = loadUserTurnBoundaries([
+    ...new Set(explicitInvocations.map(i => i.sessionId).filter((id): id is string => Boolean(id))),
+  ]);
+
+  for (const inv of explicitInvocations) {
+    const misfire = inv.sessionId != null && inv.ordinal != null
+      ? invocationMisfired(boundaries.get(inv.sessionId), inv.ordinal)
+      : null;
+    const resolved = resolveVersionAt(snapshots, inv.skillName, inv.timestamp);
+    recordHealthInvocation(
+      acc, invokedNames, inv.skillName, resolved.version, resolved.approximate, inv.timestamp, misfire,
+    );
+  }
+
+  // Codex SKILL.md reads: counted toward invocations, but not misfire-eligible
+  // (the Codex event model has no assistant-turn linkage).
+  if (!params.agent || params.agent === 'codex') {
+    const codexEventRows = db.prepare(`
+      SELECT
+        session_id,
+        project,
+        COALESCE(client_timestamp, created_at) AS timestamp,
+        metadata
+      FROM events
+      WHERE agent_type = 'codex'
+        AND event_type = 'tool_use'
+        AND tool_name = 'exec_command'
+        AND metadata LIKE '%SKILL.md%'
+    `).all() as Array<{
+      session_id: string;
+      project: string | null;
+      timestamp: string | null;
+      metadata: string | null;
+    }>;
+
+    const codexSessionsWithEvents = new Set<string>();
+    for (const row of codexEventRows) {
+      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
+      if (params.project && row.project !== params.project) continue;
+      if (!row.timestamp) continue;
+      const date = row.timestamp.slice(0, 10);
+      if (!isDateWithinRange(date, params)) continue;
+
+      const command = extractCodexCommandFromEventMetadata(row.metadata);
+      if (!command) continue;
+      for (const skillName of extractCodexSkillNamesFromCommand(command)) {
+        const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
+        recordHealthInvocation(
+          acc, invokedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
+        );
+      }
+    }
+
+    const codexJsonlRows = db.prepare(`
+      SELECT
+        bs.id AS session_id,
+        bs.project,
+        COALESCE(m.timestamp, bs.started_at) AS timestamp,
+        tc.input_json
+      FROM tool_calls tc
+      JOIN browsing_sessions bs ON bs.id = tc.session_id
+      LEFT JOIN messages m ON m.id = tc.message_id
+      WHERE bs.agent = 'codex'
+        AND bs.integration_mode = 'codex-jsonl'
+        AND tc.tool_name = 'exec_command'
+        AND tc.input_json IS NOT NULL
+        AND tc.input_json LIKE '%SKILL.md%'
+    `).all() as Array<{
+      session_id: string;
+      project: string | null;
+      timestamp: string | null;
+      input_json: string | null;
+    }>;
+
+    for (const row of codexJsonlRows) {
+      if (codexSessionsWithEvents.has(extractCanonicalCodexSessionId(row.session_id))) continue;
+      if (params.project && row.project !== params.project) continue;
+      if (!row.timestamp) continue;
+      const date = row.timestamp.slice(0, 10);
+      if (!isDateWithinRange(date, params)) continue;
+
+      const command = extractCodexCommandFromInputJson(row.input_json);
+      if (!command) continue;
+      for (const skillName of extractCodexSkillNamesFromCommand(command)) {
+        const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
+        recordHealthInvocation(
+          acc, invokedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
+        );
+      }
+    }
+  }
+
+  const rows: SkillHealthRow[] = [...acc.values()].map(entry => ({
+    name: entry.name,
+    version: entry.version,
+    versionApproximate: entry.versionApproximate,
+    invocations: entry.invocations,
+    lastInvokedAt: entry.lastInvokedAt,
+    neverFired: false,
+    misfires: entry.misfireEligible > 0 ? entry.misfires : null,
+    misfireRate: entry.misfireEligible > 0 ? entry.misfires / entry.misfireEligible : null,
+  }));
+
+  // Never-fired: installed catalog skills with no invocations in range.
+  const catalog = scanSkillCatalogs(config.skillCatalogDirs);
+  for (const skill of catalog) {
+    if (invokedNames.has(skill.name)) continue;
+    rows.push({
+      name: skill.name,
+      version: skill.version,
+      versionApproximate: false,
+      invocations: 0,
+      lastInvokedAt: null,
+      neverFired: true,
+      misfires: null,
+      misfireRate: null,
+    });
+  }
+
+  return rows.sort((a, b) =>
+    b.invocations - a.invocations
+    || (b.misfireRate ?? -1) - (a.misfireRate ?? -1)
+    || a.name.localeCompare(b.name),
+  );
 }
 
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
