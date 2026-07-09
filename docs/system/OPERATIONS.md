@@ -123,6 +123,7 @@ All optional with sensible defaults:
 | `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` | `true` | Capture or redact tool-call input arguments |
 | `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` | `32768` | Payload cap for diff-style live records |
 | `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` | unset | Comma-separated path patterns to ignore during historical discovery, import, and watcher resync |
+| `AGENTMONITOR_SKILL_CATALOG_DIRS` | `~/.claude/skills`, `$CODEX_HOME/skills` | Path-delimited (`:`) installed skill catalogs scanned for version attribution and never-fired detection by `/api/v2/analytics/skills/health` |
 
 Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`, `AGENTMONITOR_BENCH_BATCH_SIZE`.
 

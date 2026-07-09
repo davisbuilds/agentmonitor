@@ -82,6 +82,7 @@ Product-surface reference for AgentMonitor.
 - Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
 - Tool analytics remain capability-aware and intentionally exclude sessions whose projection contract does not expose tool analytics.
 - Skill analytics now include explicit Claude `Skill` tool calls plus inferred Codex skill reads from `.../SKILL.md` commands captured through OTEL or Codex JSONL fallback.
+- **Skill trigger health** (`/api/v2/analytics/skills/health`) reports, per skill: invocation count, last-invoked, a **misfire rate**, a **never-fired** flag for installed catalog skills with zero invocations in range, and the skill **version** installed at each invocation. It is computed at query time over existing rows, so it covers historical sessions with no reingest, and it stamps the installed catalog (`AGENTMONITOR_SKILL_CATALOG_DIRS`) into a snapshot table on request (60s-throttled). Caveats: a misfire is the interrupt-based heuristic "the invoking assistant turn was aborted (`[Request interrupted by user]`) before the next genuine user prompt", so it under-counts rather than over-counts; **Codex reads are misfire-ineligible** (`misfires`/`misfireRate` are `null`) because the Codex event model has no assistant-turn linkage; and versions attributed to invocations predating the first snapshot are the currently-installed version, flagged `versionApproximate`.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
 - The `Overview` sub-view supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
 
@@ -164,6 +165,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/analytics/projects` | GET | Per-project message/session breakdowns |
 | `/api/v2/analytics/tools` | GET | Tool-analytics-capable tool usage breakdowns |
 | `/api/v2/analytics/skills/daily` | GET | Daily explicit/inferred skill invocation breakdowns |
+| `/api/v2/analytics/skills/health` | GET | Per-skill trigger health: invocations, last-invoked, version attribution, never-fired flags, interrupt-based misfire rate |
 | `/api/v2/analytics/hour-of-week` | GET | 7x24 historical activity heatmap data |
 | `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
 | `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |

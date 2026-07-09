@@ -338,6 +338,28 @@ export interface SkillUsageDay {
   skills: SkillUsageBreakdown[];
 }
 
+export interface SkillHealthRow {
+  name: string;
+  /** Version installed when the skill was invoked (or currently installed, for
+   *  never-fired skills); null when it cannot be resolved from the catalog. */
+  version: string | null;
+  /** True when at least one invocation's version was an approximate fallback. */
+  versionApproximate: boolean;
+  /** Total invocations in range (explicit Skill calls + Codex SKILL.md reads). */
+  invocations: number;
+  lastInvokedAt: string | null;
+  neverFired: boolean;
+  /** Invocations that could be assessed for misfire — explicit Skill calls with
+   *  a linked assistant turn. Excludes Codex reads (no turn linkage). The
+   *  denominator behind misfireRate; use it to weight the rate by sample size. */
+  misfireEligible: number;
+  /** Misfiring explicit invocations; null when none are misfire-eligible
+   *  (e.g. a skill invoked only via Codex, which has no assistant-turn linkage). */
+  misfires: number | null;
+  /** misfires / misfireEligible; null when none are eligible. */
+  misfireRate: number | null;
+}
+
 export interface AnalyticsCapabilityBreakdown {
   full: number;
   summary: number;
