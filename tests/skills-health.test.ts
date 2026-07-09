@@ -144,8 +144,16 @@ test('counts a Codex invocation but marks it misfire-ineligible', () => {
   const row = rowsByName().get('deep-research');
   assert.ok(row);
   assert.equal(row.invocations, 1);
+  assert.equal(row.misfireEligible, 0);
   assert.equal(row.misfires, null);
   assert.equal(row.misfireRate, null);
+});
+
+test('exposes misfireEligible as the denominator behind misfireRate', () => {
+  const byName = rowsByName();
+  // Explicit Claude invocation -> eligible denominator of 1.
+  assert.equal(byName.get('write-spec')?.misfireEligible, 1);
+  assert.equal(byName.get('test-strategy')?.misfireEligible, 1);
 });
 
 test('retains an invocation whose skill is absent from the catalog with a null version', () => {

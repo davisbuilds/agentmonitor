@@ -349,10 +349,14 @@ export interface SkillHealthRow {
   invocations: number;
   lastInvokedAt: string | null;
   neverFired: boolean;
+  /** Invocations that could be assessed for misfire — explicit Skill calls with
+   *  a linked assistant turn. Excludes Codex reads (no turn linkage). The
+   *  denominator behind misfireRate; use it to weight the rate by sample size. */
+  misfireEligible: number;
   /** Misfiring explicit invocations; null when none are misfire-eligible
    *  (e.g. a skill invoked only via Codex, which has no assistant-turn linkage). */
   misfires: number | null;
-  /** misfires / misfire-eligible invocations; null when none are eligible. */
+  /** misfires / misfireEligible; null when none are eligible. */
   misfireRate: number | null;
 }
 

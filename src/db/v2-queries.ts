@@ -2189,6 +2189,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
     invocations: entry.invocations,
     lastInvokedAt: entry.lastInvokedAt,
     neverFired: false,
+    misfireEligible: entry.misfireEligible,
     misfires: entry.misfireEligible > 0 ? entry.misfires : null,
     misfireRate: entry.misfireEligible > 0 ? entry.misfires / entry.misfireEligible : null,
   }));
@@ -2204,6 +2205,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       invocations: 0,
       lastInvokedAt: null,
       neverFired: true,
+      misfireEligible: 0,
       misfires: null,
       misfireRate: null,
     });
