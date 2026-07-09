@@ -2,7 +2,7 @@
 date: 2026-07-07
 topic: skill-trigger-health
 stage: spec
-status: draft
+status: complete
 source: conversation
 ---
 

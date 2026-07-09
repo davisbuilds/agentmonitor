@@ -2,7 +2,7 @@
 date: 2026-07-09
 topic: skill-trigger-health
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 ---
 
