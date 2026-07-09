@@ -1,10 +1,17 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { before, after } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { scanSkillCatalogs } from '../src/skills/catalog.ts';
+import type { Database } from 'better-sqlite3';
+import {
+  scanSkillCatalogs,
+  refreshCatalogSnapshots,
+  resolveVersionAt,
+  type CatalogSkill,
+  type CatalogSnapshot,
+} from '../src/skills/catalog.ts';
 
 function makeSkill(dir: string, name: string, frontmatter: string): void {
   const skillDir = path.join(dir, name);
@@ -101,4 +108,120 @@ test('scanSkillCatalogs handles quoted version values', () => {
   const skills = scanSkillCatalogs([root]);
 
   assert.equal(skills[0]?.version, '4.1.0');
+});
+
+// --- Snapshot persistence (DB-backed) ---
+
+let db: Database;
+let closeDb: () => void;
+
+function skill(name: string, version: string | null): CatalogSkill {
+  return { name, version, dir: '/catalog' };
+}
+
+function loadSnapshots(name: string): CatalogSnapshot[] {
+  return db
+    .prepare(
+      `SELECT name, version, first_seen_at AS firstSeenAt, last_seen_at AS lastSeenAt
+       FROM skill_catalog_snapshots WHERE name = ? ORDER BY first_seen_at`,
+    )
+    .all(name) as CatalogSnapshot[];
+}
+
+before(async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-snapshots-'));
+  process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
+  const { initSchema } = await import('../src/db/schema.js');
+  const dbModule = await import('../src/db/connection.js');
+  initSchema();
+  db = dbModule.getDb();
+  closeDb = dbModule.closeDb;
+});
+
+after(() => {
+  closeDb?.();
+});
+
+test('refreshCatalogSnapshots inserts a fresh (name, version) pair', () => {
+  db.exec('DELETE FROM skill_catalog_snapshots');
+  refreshCatalogSnapshots(db, [skill('alpha', '1.0.0')], '2026-01-01T00:00:00Z');
+
+  const rows = loadSnapshots('alpha');
+  assert.deepEqual(rows, [
+    { name: 'alpha', version: '1.0.0', firstSeenAt: '2026-01-01T00:00:00Z', lastSeenAt: '2026-01-01T00:00:00Z' },
+  ]);
+});
+
+test('refreshCatalogSnapshots bumps last_seen_at without moving first_seen_at', () => {
+  db.exec('DELETE FROM skill_catalog_snapshots');
+  refreshCatalogSnapshots(db, [skill('alpha', '1.0.0')], '2026-01-01T00:00:00Z');
+  refreshCatalogSnapshots(db, [skill('alpha', '1.0.0')], '2026-01-05T00:00:00Z');
+
+  const rows = loadSnapshots('alpha');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.firstSeenAt, '2026-01-01T00:00:00Z');
+  assert.equal(rows[0]?.lastSeenAt, '2026-01-05T00:00:00Z');
+});
+
+test('refreshCatalogSnapshots keeps a single row for a version-less skill across refreshes', () => {
+  db.exec('DELETE FROM skill_catalog_snapshots');
+  refreshCatalogSnapshots(db, [skill('legacy', null)], '2026-01-01T00:00:00Z');
+  refreshCatalogSnapshots(db, [skill('legacy', null)], '2026-01-02T00:00:00Z');
+
+  const rows = loadSnapshots('legacy');
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.version, null);
+  assert.equal(rows[0]?.lastSeenAt, '2026-01-02T00:00:00Z');
+});
+
+test('refreshCatalogSnapshots records a version bump as a distinct row', () => {
+  db.exec('DELETE FROM skill_catalog_snapshots');
+  refreshCatalogSnapshots(db, [skill('beta', '1.0.0')], '2026-02-01T00:00:00Z');
+  refreshCatalogSnapshots(db, [skill('beta', '1.0.0')], '2026-02-10T00:00:00Z');
+  refreshCatalogSnapshots(db, [skill('beta', '2.0.0')], '2026-03-01T00:00:00Z');
+
+  const rows = loadSnapshots('beta');
+  assert.deepEqual(rows, [
+    { name: 'beta', version: '1.0.0', firstSeenAt: '2026-02-01T00:00:00Z', lastSeenAt: '2026-02-10T00:00:00Z' },
+    { name: 'beta', version: '2.0.0', firstSeenAt: '2026-03-01T00:00:00Z', lastSeenAt: '2026-03-01T00:00:00Z' },
+  ]);
+});
+
+test('resolveVersionAt returns the version whose window covers the timestamp', () => {
+  const snapshots: CatalogSnapshot[] = [
+    { name: 'beta', version: '1.0.0', firstSeenAt: '2026-02-01T00:00:00Z', lastSeenAt: '2026-02-10T00:00:00Z' },
+    { name: 'beta', version: '2.0.0', firstSeenAt: '2026-03-01T00:00:00Z', lastSeenAt: '2026-03-20T00:00:00Z' },
+  ];
+
+  assert.deepEqual(resolveVersionAt(snapshots, 'beta', '2026-02-05T00:00:00Z'), {
+    version: '1.0.0',
+    approximate: false,
+  });
+  assert.deepEqual(resolveVersionAt(snapshots, 'beta', '2026-03-10T00:00:00Z'), {
+    version: '2.0.0',
+    approximate: false,
+  });
+});
+
+test('resolveVersionAt falls back to the earliest version (approximate) before history', () => {
+  const snapshots: CatalogSnapshot[] = [
+    { name: 'beta', version: '1.0.0', firstSeenAt: '2026-02-01T00:00:00Z', lastSeenAt: '2026-02-10T00:00:00Z' },
+    { name: 'beta', version: '2.0.0', firstSeenAt: '2026-03-01T00:00:00Z', lastSeenAt: '2026-03-20T00:00:00Z' },
+  ];
+
+  assert.deepEqual(resolveVersionAt(snapshots, 'beta', '2026-01-15T00:00:00Z'), {
+    version: '1.0.0',
+    approximate: true,
+  });
+});
+
+test('resolveVersionAt returns null for an unknown skill', () => {
+  const snapshots: CatalogSnapshot[] = [
+    { name: 'beta', version: '1.0.0', firstSeenAt: '2026-02-01T00:00:00Z', lastSeenAt: '2026-02-10T00:00:00Z' },
+  ];
+
+  assert.deepEqual(resolveVersionAt(snapshots, 'ghost', '2026-02-05T00:00:00Z'), {
+    version: null,
+    approximate: false,
+  });
 });

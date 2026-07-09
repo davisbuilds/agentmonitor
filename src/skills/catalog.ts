@@ -1,11 +1,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Database } from 'better-sqlite3';
 
 export interface CatalogSkill {
   name: string;
   version: string | null;
   /** The catalog directory this skill was resolved from (not the skill dir). */
   dir: string;
+}
+
+export interface CatalogSnapshot {
+  name: string;
+  version: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+}
+
+export interface ResolvedVersion {
+  version: string | null;
+  /** True when the timestamp fell outside every observed window and the version
+   *  is an approximation (the earliest known version for that skill). */
+  approximate: boolean;
 }
 
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---/;
@@ -62,4 +77,61 @@ export function scanSkillCatalogs(dirs: string[]): CatalogSkill[] {
   }
 
   return skills;
+}
+
+/**
+ * Stamp the current catalog state into `skill_catalog_snapshots`: for each
+ * observed (name, version) pair, extend `last_seen_at` to `now` if the pair is
+ * already known, otherwise insert it with `first_seen_at = last_seen_at = now`.
+ * Uniqueness is enforced here (via a NULL-safe `IS` match) rather than by the
+ * table's primary key, because a version-less skill's NULL version cannot key a
+ * NULL-distinct primary key.
+ */
+export function refreshCatalogSnapshots(db: Database, skills: CatalogSkill[], now: string): void {
+  const select = db.prepare(
+    'SELECT rowid FROM skill_catalog_snapshots WHERE name = ? AND version IS ?',
+  );
+  const update = db.prepare('UPDATE skill_catalog_snapshots SET last_seen_at = ? WHERE rowid = ?');
+  const insert = db.prepare(
+    'INSERT INTO skill_catalog_snapshots (name, version, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?)',
+  );
+
+  const apply = db.transaction((rows: CatalogSkill[]) => {
+    for (const { name, version } of rows) {
+      const existing = select.get(name, version) as { rowid: number } | undefined;
+      if (existing) {
+        update.run(now, existing.rowid);
+      } else {
+        insert.run(name, version, now, now);
+      }
+    }
+  });
+
+  apply(skills);
+}
+
+/**
+ * Resolve the skill version that was installed at `timestamp`, given the full
+ * snapshot set. Returns the version whose observed window covers the timestamp;
+ * failing that (e.g. an invocation predating the first snapshot), the earliest
+ * known version for that skill, flagged approximate. Unknown skills resolve to a
+ * null version. ISO-8601 UTC timestamps compare lexicographically.
+ */
+export function resolveVersionAt(
+  snapshots: CatalogSnapshot[],
+  name: string,
+  timestamp: string,
+): ResolvedVersion {
+  const rows = snapshots.filter(s => s.name === name);
+  if (rows.length === 0) return { version: null, approximate: false };
+
+  const covering = rows
+    .filter(s => s.firstSeenAt <= timestamp && timestamp <= s.lastSeenAt)
+    .sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt));
+  if (covering.length > 0) {
+    return { version: covering[0].version, approximate: false };
+  }
+
+  const earliest = rows.reduce((a, b) => (a.firstSeenAt <= b.firstSeenAt ? a : b));
+  return { version: earliest.version, approximate: true };
 }

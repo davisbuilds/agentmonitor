@@ -681,6 +681,24 @@ export function initSchema(): void {
     );
   `);
 
+  // Point-in-time record of which skill versions were installed when. A refresh
+  // stamps each observed (name, version) pair; the [first_seen_at, last_seen_at]
+  // window lets a past skill invocation be attributed to the version installed
+  // at that time. Uniqueness for version-less rows is enforced in application
+  // code (see refreshCatalogSnapshots), since a nullable version can't
+  // participate in a NULL-distinct primary key.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS skill_catalog_snapshots (
+      name TEXT NOT NULL,
+      version TEXT,
+      first_seen_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      PRIMARY KEY (name, version)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_scs_name ON skill_catalog_snapshots(name);
+  `);
+
   runDataMigrations(db);
 }
 
