@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -51,4 +52,33 @@ test('createConfig parses sync exclude patterns', () => {
   }, repoRoot);
 
   assert.deepEqual(config.sync.excludePatterns, ['vercel-plugin', path.join('nested', 'sessions')]);
+});
+
+test('createConfig defaults skillCatalogDirs to the claude and codex skill homes', () => {
+  const config = createConfig({}, repoRoot);
+
+  assert.deepEqual(config.skillCatalogDirs, [
+    path.join(os.homedir(), '.claude', 'skills'),
+    path.join(os.homedir(), '.codex', 'skills'),
+  ]);
+});
+
+test('createConfig honors CODEX_HOME for the codex skill catalog default', () => {
+  const config = createConfig({ CODEX_HOME: '/custom/codex' }, repoRoot);
+
+  assert.deepEqual(config.skillCatalogDirs, [
+    path.join(os.homedir(), '.claude', 'skills'),
+    path.join('/custom/codex', 'skills'),
+  ]);
+});
+
+test('createConfig parses AGENTMONITOR_SKILL_CATALOG_DIRS with tilde expansion and dedupe', () => {
+  const config = createConfig({
+    AGENTMONITOR_SKILL_CATALOG_DIRS: `~/skills-a${path.delimiter}/abs/skills-b${path.delimiter} ~/skills-a `,
+  }, repoRoot);
+
+  assert.deepEqual(config.skillCatalogDirs, [
+    path.join(os.homedir(), 'skills-a'),
+    '/abs/skills-b',
+  ]);
 });

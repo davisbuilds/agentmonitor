@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 type EnvMap = NodeJS.ProcessEnv;
@@ -171,6 +172,30 @@ function parseSyncConfig(env: EnvMap): SyncConfig {
   };
 }
 
+function expandTilde(dir: string): string {
+  if (dir === '~') return os.homedir();
+  if (dir.startsWith('~/')) return path.join(os.homedir(), dir.slice(2));
+  return dir;
+}
+
+function parseSkillCatalogDirs(env: EnvMap): string[] {
+  const override = env.AGENTMONITOR_SKILL_CATALOG_DIRS?.trim();
+  if (override) {
+    const dirs = override
+      .split(path.delimiter)
+      .map(item => item.trim())
+      .filter(Boolean)
+      .map(expandTilde);
+    return [...new Set(dirs)];
+  }
+
+  const codexHome = env.CODEX_HOME?.trim() || path.join(os.homedir(), '.codex');
+  return [
+    path.join(os.homedir(), '.claude', 'skills'),
+    path.join(codexHome, 'skills'),
+  ];
+}
+
 function parseWarehouseConfig(env: EnvMap): WarehouseConfig {
   const dsn = env.AGENTMONITOR_WAREHOUSE_DSN?.trim() || null;
   const rawBiRole = env.AGENTMONITOR_WAREHOUSE_BI_ROLE?.trim();
@@ -202,6 +227,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     },
     live: parseLiveConfig(env),
     sync: parseSyncConfig(env),
+    skillCatalogDirs: parseSkillCatalogDirs(env),
     usage: {
       budgetsPath: env.AGENTMONITOR_USAGE_BUDGETS_PATH?.trim() || './config/budgets.json',
       findingsThresholdsPath: env.AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH?.trim()
