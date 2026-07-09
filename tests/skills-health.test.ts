@@ -76,6 +76,8 @@ before(async () => {
   makeCatalogSkill(catalogRoot, 'write-spec', '1.0.0');
   makeCatalogSkill(catalogRoot, 'test-strategy', '1.0.0');
   makeCatalogSkill(catalogRoot, 'never-used', '2.0.0');
+  // Installed at 2.0.0, but the only invocation is attributed to 1.0.0 (below).
+  makeCatalogSkill(catalogRoot, 'bumped', '2.0.0');
   process.env.AGENTMONITOR_SKILL_CATALOG_DIRS = catalogRoot;
 
   const { initSchema } = await import('../src/db/schema.js');
@@ -87,6 +89,10 @@ before(async () => {
 
   // Version snapshot covering the invocation window.
   insertSnapshot('write-spec', '1.0.0', '2026-06-01T00:00:00Z', '2026-07-31T00:00:00Z');
+  // `bumped`: 1.0.0 covered the invocation; 2.0.0 is the now-installed version.
+  insertSnapshot('bumped', '1.0.0', '2026-06-01T00:00:00Z', '2026-06-30T00:00:00Z');
+  insertSnapshot('bumped', '2.0.0', '2026-07-01T00:00:00Z', '2026-07-31T00:00:00Z');
+  seedInvocation('s-bumped', 'bumped', userText('ok'), '2026-06-15T10:00:00Z');
 
   // (i) interrupted turn -> misfire.
   seedInvocation('s-misfire', 'write-spec', userText('[Request interrupted by user]'));
@@ -171,6 +177,16 @@ test('emits never-fired rows for installed catalog skills with no invocations', 
   assert.equal(row.invocations, 0);
   assert.equal(row.version, '2.0.0');
   assert.equal(row.misfireRate, null);
+});
+
+test('surfaces a freshly-installed version as never-fired even when an older version has invocations', () => {
+  const rows = getAnalyticsSkillsHealth().filter(r => r.name === 'bumped');
+  const byVersion = new Map(rows.map(r => [r.version, r]));
+  // 1.0.0 was invoked; 2.0.0 is installed but never fired — both rows present.
+  assert.equal(byVersion.get('1.0.0')?.neverFired, false);
+  assert.equal(byVersion.get('1.0.0')?.invocations, 1);
+  assert.equal(byVersion.get('2.0.0')?.neverFired, true);
+  assert.equal(byVersion.get('2.0.0')?.invocations, 0);
 });
 
 test('excludes out-of-range invocations but still lists never-fired catalog skills', () => {

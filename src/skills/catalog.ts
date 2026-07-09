@@ -111,11 +111,24 @@ export function refreshCatalogSnapshots(db: Database, skills: CatalogSkill[], no
 }
 
 /**
+ * Parse a stored timestamp to epoch millis for comparison. Handles both ISO
+ * (`2026-07-09T18:00:00.000Z`, from parsed message timestamps and snapshot
+ * writes) and SQLite `datetime('now')` output (`2026-07-09 18:00:00`, UTC but
+ * space-separated and Z-less, which `events.created_at` uses). Lexicographic
+ * comparison of the two formats is wrong (space sorts before `T`), so both sides
+ * must be normalized before comparing. Returns NaN for unparseable input.
+ */
+function toEpochMs(timestamp: string): number {
+  const iso = timestamp.includes('T') ? timestamp : `${timestamp.replace(' ', 'T')}Z`;
+  return Date.parse(iso);
+}
+
+/**
  * Resolve the skill version that was installed at `timestamp`, given the full
  * snapshot set. Returns the version whose observed window covers the timestamp;
  * failing that (e.g. an invocation predating the first snapshot), the earliest
  * known version for that skill, flagged approximate. Unknown skills resolve to a
- * null version. ISO-8601 UTC timestamps compare lexicographically.
+ * null version.
  */
 export function resolveVersionAt(
   snapshots: CatalogSnapshot[],
@@ -125,13 +138,16 @@ export function resolveVersionAt(
   const rows = snapshots.filter(s => s.name === name);
   if (rows.length === 0) return { version: null, approximate: false };
 
-  const covering = rows
-    .filter(s => s.firstSeenAt <= timestamp && timestamp <= s.lastSeenAt)
-    .sort((a, b) => b.firstSeenAt.localeCompare(a.firstSeenAt));
+  const t = toEpochMs(timestamp);
+  const covering = Number.isNaN(t)
+    ? []
+    : rows
+      .filter(s => toEpochMs(s.firstSeenAt) <= t && t <= toEpochMs(s.lastSeenAt))
+      .sort((a, b) => toEpochMs(b.firstSeenAt) - toEpochMs(a.firstSeenAt));
   if (covering.length > 0) {
     return { version: covering[0].version, approximate: false };
   }
 
-  const earliest = rows.reduce((a, b) => (a.firstSeenAt <= b.firstSeenAt ? a : b));
+  const earliest = rows.reduce((a, b) => (toEpochMs(a.firstSeenAt) <= toEpochMs(b.firstSeenAt) ? a : b));
   return { version: earliest.version, approximate: true };
 }

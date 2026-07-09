@@ -2000,14 +2000,17 @@ function healthKey(name: string, version: string | null): string {
 
 function recordHealthInvocation(
   acc: Map<string, HealthAccumulator>,
-  invokedNames: Set<string>,
+  unpinnedNames: Set<string>,
   name: string,
   version: string | null,
   approximate: boolean,
   timestamp: string,
   misfire: boolean | null,
 ): void {
-  invokedNames.add(name);
+  // A null or approximate version means we couldn't pin this invocation to a
+  // specific installed version; record the name so never-fired detection won't
+  // claim the installed version was never invoked.
+  if (version === null || approximate) unpinnedNames.add(name);
   const key = healthKey(name, version);
   const entry = acc.get(key) ?? {
     name,
@@ -2038,7 +2041,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
   const db = getDb();
   const snapshots = loadCatalogSnapshots();
   const acc = new Map<string, HealthAccumulator>();
-  const invokedNames = new Set<string>();
+  const unpinnedNames = new Set<string>();
 
   // Explicit Skill tool calls, with the invoking message's session + ordinal for
   // misfire linkage.
@@ -2100,7 +2103,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       : null;
     const resolved = resolveVersionAt(snapshots, inv.skillName, inv.timestamp);
     recordHealthInvocation(
-      acc, invokedNames, inv.skillName, resolved.version, resolved.approximate, inv.timestamp, misfire,
+      acc, unpinnedNames, inv.skillName, resolved.version, resolved.approximate, inv.timestamp, misfire,
     );
   }
 
@@ -2138,7 +2141,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       for (const skillName of extractCodexSkillNamesFromCommand(command)) {
         const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
         recordHealthInvocation(
-          acc, invokedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
+          acc, unpinnedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
         );
       }
     }
@@ -2176,7 +2179,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       for (const skillName of extractCodexSkillNamesFromCommand(command)) {
         const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
         recordHealthInvocation(
-          acc, invokedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
+          acc, unpinnedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
         );
       }
     }
@@ -2194,10 +2197,15 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
     misfireRate: entry.misfireEligible > 0 ? entry.misfires / entry.misfireEligible : null,
   }));
 
-  // Never-fired: installed catalog skills with no invocations in range.
+  // Never-fired: installed catalog (name, version) pairs with no invocations in
+  // range. Keyed by version, not name, so a freshly-installed version surfaces as
+  // never-fired even while an older version of the same skill has invocations —
+  // but a name with any unpinned (null/approximate) invocation is skipped, since
+  // that invocation may in fact be the installed version we just can't attribute.
   const catalog = scanSkillCatalogs(config.skillCatalogDirs);
   for (const skill of catalog) {
-    if (invokedNames.has(skill.name)) continue;
+    if (acc.has(healthKey(skill.name, skill.version))) continue;
+    if (unpinnedNames.has(skill.name)) continue;
     rows.push({
       name: skill.name,
       version: skill.version,

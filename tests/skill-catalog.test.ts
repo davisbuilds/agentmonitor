@@ -225,3 +225,17 @@ test('resolveVersionAt returns null for an unknown skill', () => {
     approximate: false,
   });
 });
+
+test('resolveVersionAt matches a SQLite space-format timestamp against ISO snapshots', () => {
+  // Snapshots are ISO (with T/Z); events.created_at is 'YYYY-MM-DD HH:MM:SS' (UTC,
+  // space-separated). Lexically the space sorts before 'T', so a naive string
+  // compare would push this in-window invocation to the approximate fallback.
+  const snapshots: CatalogSnapshot[] = [
+    { name: 'beta', version: '1.0.0', firstSeenAt: '2026-02-01T00:00:00.000Z', lastSeenAt: '2026-02-10T00:00:00.000Z' },
+  ];
+
+  assert.deepEqual(resolveVersionAt(snapshots, 'beta', '2026-02-05 12:00:00'), {
+    version: '1.0.0',
+    approximate: false,
+  });
+});
