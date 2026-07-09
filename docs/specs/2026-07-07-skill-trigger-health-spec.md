@@ -35,15 +35,17 @@ When this ships, the following holds:
 
 1. Every detected skill invocation (explicit `Skill` tool calls and Codex
    `SKILL.md` reads — the existing detection basis) is attributed to a skill
-   **version** when the skill can be resolved against a configured skills
-   manifest (dojo's `skills.json`). Unresolvable invocations are retained with
-   an unknown version, never dropped.
+   **version** when the skill can be resolved against the configured
+   **installed skill catalogs** — the directories sessions actually load
+   (defaults: `~/.claude/skills`, `~/.codex/skills`), reading `version:` from
+   each skill's SKILL.md frontmatter. Unresolvable invocations are retained
+   with an unknown version, never dropped.
 2. A **trigger-health surface** reports, per skill: invocation count,
-   last-invoked timestamp, a **never-fired** flag (in-catalog skills with zero
-   invocations in the queried range appear explicitly rather than being
-   omitted), and a **misfire rate** (fraction of invocations followed by a
-   deterministic operator-redirect signal within a bounded window after the
-   invocation).
+   last-invoked timestamp, a **never-fired** flag (skills present in the
+   installed catalogs with zero invocations in the queried range appear
+   explicitly rather than being omitted), and a **misfire rate** (fraction of
+   invocations whose assistant turn is interrupted/aborted by the operator
+   before the next user prompt — the frozen phase-1 redirect heuristic).
 3. Metrics are **backfillable**: recomputing over already-ingested historical
    transcripts populates trigger health for past sessions; no live-only hook is
    required.
@@ -56,9 +58,10 @@ Verified by:
   per-skill entries containing name, version, invocation count, misfire rate,
   and never-fired status, including at least one never-fired catalog skill and
   at least one version-attributed skill.
-- `pnpm test` passes, with fixture-backed tests proving: version join against a
-  manifest, unknown-version retention, misfire detection on a redirect fixture,
-  non-misfire on a clean fixture, and never-fired inclusion.
+- `pnpm test` passes, with fixture-backed tests proving: version join against
+  an installed-catalog fixture, unknown-version retention, misfire detection on
+  an interrupted-turn fixture, non-misfire on a clean fixture, and never-fired
+  inclusion.
 - After a historical reparse/import of pre-existing transcripts, the health
   endpoint reports invocations dated before this feature shipped.
 
@@ -68,8 +71,8 @@ Verified by:
   so a before/after comparison of a skill edit is a single API call.
 - A catalog skill with zero invocations in the queried range appears in the
   response flagged never-fired.
-- A fixture session in which the operator interrupts or redirects immediately
-  after a skill fires increments that skill's misfire count; a fixture session
+- A fixture session in which the operator interrupts/aborts the assistant turn
+  a skill fired in increments that skill's misfire count; a fixture session
   where work proceeds normally does not.
 - Codex-detected invocations participate in counts (version may be unknown).
 - From the dojo repo, a single HTTP request retrieves everything needed to rank
@@ -89,10 +92,11 @@ rate version-over-version; that is explicitly not a phase-1 gate.
 
 **In scope**
 
-- Skill-version attribution via a configurable skills-manifest join.
+- Skill-version attribution via a join against configurable installed skill
+  catalogs.
 - Trigger-health metrics: per-skill invocation counts, last-invoked,
-  never-fired (against the configured catalog), misfire rate via a
-  deterministic redirect heuristic.
+  never-fired (against the installed catalogs), misfire rate via the
+  interrupt/abort heuristic.
 - Backfill over already-ingested historical sessions.
 - JSON API exposure of the above.
 
@@ -105,11 +109,18 @@ rate version-over-version; that is explicitly not a phase-1 gate.
 - Dashboard/UI visualization of trigger health (API-first; UI may follow).
 - Trigger-**miss** detection (skill should have fired but didn't) — requires
   intent inference; only never-fired and misfire are in phase 1.
+- Richer misfire signals (lexical negation in the next prompt, prompt-rephrase
+  similarity) — candidate phase-2 refinements once interrupt-based rates have a
+  baseline.
 
 ## Assumptions And Constraints
 
-- Dojo's generated `skills.json` manifest exposes skill name and version and is
-  readable from the local filesystem; it is the catalog denominator candidate.
+- Dojo holds the canonical skill copies, but invoked skills are the synced
+  copies under the installed catalogs (`~/.claude/skills`, `~/.codex/skills`);
+  those installed copies carry the same name and `version:` frontmatter as
+  their dojo source, so name+version is sufficient identity for phase 1.
+- Installed catalog paths are configurable; the two defaults above cover the
+  current harnesses.
 - Existing skill-invocation detection (explicit `Skill` tool calls, Codex
   `SKILL.md` path extraction) is the detection basis; this spec does not add
   new detection channels.
@@ -117,25 +128,17 @@ rate version-over-version; that is explicitly not a phase-1 gate.
   transcripts (no model calls).
 - Local-first: no external services; consistent with AgentMonitor's positioning
   as a local observability console.
-- Version attribution reflects the manifest state available at
-  computation time; AgentMonitor has no historical record of past manifest
-  states, so backfilled attribution is approximate and should be marked as
-  such.
+- Version attribution reflects the installed-catalog state available at
+  computation time; AgentMonitor has no historical record of past catalog
+  states, so backfilled attribution uses the currently installed version and is
+  marked approximate.
 
 ## Open Questions
 
-- **Misfire signal set and window**: which events count as operator redirect
-  (session interrupt, lexical "no/stop/don't" in the next user prompt, prompt
-  rephrase?) and how many turns/seconds after invocation the window extends.
-  Needs a small fixture study before the heuristic is frozen.
-- **Never-fired denominator**: dojo's `skills.json` only, or the union of
-  installed skills across `~/.claude/skills`, plugins, and project catalogs?
-  Phase 1 could take a single configurable manifest path and defer multi-source.
-- **Backfill version semantics**: attribute old invocations to the current
-  manifest version (marked approximate), or leave version unknown for sessions
-  predating version capture?
-- **Name collisions**: the same skill name can exist in multiple sources with
-  different content; is name+version sufficient identity for phase 1?
+- **Skills invoked from other sources**: project-local `.claude/skills` and
+  plugin-bundled skills are neither in the installed global catalogs nor
+  version-resolvable in phase 1; they surface as unknown-version rows. Is that
+  acceptable long-term, or does phase 2 need per-project catalog discovery?
 
 ## Handoff
 
