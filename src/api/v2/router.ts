@@ -30,6 +30,8 @@ import {
   getMonitorSessionWithEvents,
   getMonitorSessionTranscript,
   getAnalyticsSkillsDaily,
+  getAnalyticsSkillsHealth,
+  refreshSkillCatalogSnapshots,
   getUsageSummary,
   getUsageCoverage,
   getUsageDaily,
@@ -595,6 +597,20 @@ v2Router.get('/analytics/skills/daily', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/skills/daily] Error:', err);
     res.status(500).json({ error: 'Failed to get skill analytics' });
+  }
+});
+
+v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    refreshSkillCatalogSnapshots();
+    res.json({
+      data: getAnalyticsSkillsHealth(params),
+      coverage: getAnalyticsCoverage(params, 'all_sessions'),
+    });
+  } catch (err) {
+    console.error('[v2/analytics/skills/health] Error:', err);
+    res.status(500).json({ error: 'Failed to get skill health' });
   }
 });
 

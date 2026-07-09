@@ -1,6 +1,11 @@
 import { getDb } from './connection.js';
 import { config } from '../config.js';
-import { scanSkillCatalogs, resolveVersionAt, type CatalogSnapshot } from '../skills/catalog.js';
+import {
+  scanSkillCatalogs,
+  refreshCatalogSnapshots,
+  resolveVersionAt,
+  type CatalogSnapshot,
+} from '../skills/catalog.js';
 import type {
   BrowsingSessionRow,
   BrowsingSessionDbRow,
@@ -1953,6 +1958,22 @@ function invocationMisfired(boundaries: UserTurnBoundary[] | undefined, invocati
     return boundary.kind === 'interrupt';
   }
   return false;
+}
+
+const CATALOG_REFRESH_TTL_MS = 60_000;
+let lastCatalogRefreshMs = 0;
+
+/**
+ * Stamp the currently-installed skill catalog into the snapshot table, throttled
+ * so repeated requests don't rescan the filesystem. Call before serving trigger
+ * health so version attribution reflects the present install without a startup
+ * hook. Filesystem read errors are already swallowed by scanSkillCatalogs.
+ */
+export function refreshSkillCatalogSnapshots(nowMs: number = Date.now()): void {
+  if (nowMs - lastCatalogRefreshMs < CATALOG_REFRESH_TTL_MS) return;
+  lastCatalogRefreshMs = nowMs;
+  const skills = scanSkillCatalogs(config.skillCatalogDirs);
+  refreshCatalogSnapshots(getDb(), skills, new Date(nowMs).toISOString());
 }
 
 function loadCatalogSnapshots(): CatalogSnapshot[] {

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { before, after } from 'node:test';
+import type { AddressInfo } from 'node:net';
+import type { Server } from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -10,6 +12,8 @@ import type { SkillHealthRow } from '../src/api/v2/types.ts';
 let db: Database;
 let closeDb: () => void;
 let getAnalyticsSkillsHealth: (params?: Record<string, unknown>) => SkillHealthRow[];
+let server: Server;
+let baseUrl: string;
 
 function makeCatalogSkill(root: string, name: string, version: string | null): void {
   const dir = path.join(root, name);
@@ -100,9 +104,16 @@ before(async () => {
     'exec_command',
     JSON.stringify({ cmd: 'cat ~/.codex/skills/deep-research/SKILL.md' }),
   );
+
+  const { createApp } = await import('../src/app.js');
+  const app = createApp({ serveStatic: false });
+  server = app.listen(0);
+  const { port } = server.address() as AddressInfo;
+  baseUrl = `http://127.0.0.1:${port}`;
 });
 
 after(() => {
+  server?.close();
   closeDb?.();
 });
 
@@ -162,4 +173,30 @@ test('excludes out-of-range invocations but still lists never-fired catalog skil
   assert.equal(rows.get('write-spec')?.neverFired, true);
   assert.equal(rows.has('ghost-skill'), false);
   assert.equal(rows.get('never-used')?.neverFired, true);
+});
+
+test('GET /api/v2/analytics/skills/health returns the daily-style envelope with health rows', async () => {
+  const res = await fetch(`${baseUrl}/api/v2/analytics/skills/health`);
+  assert.equal(res.status, 200);
+
+  const body = await res.json() as { data: SkillHealthRow[]; coverage: unknown };
+  assert.ok(Array.isArray(body.data));
+  assert.ok(body.coverage);
+
+  const byName = new Map(body.data.map(r => [r.name, r]));
+  assert.equal(byName.get('write-spec')?.misfireRate, 1);
+  assert.equal(byName.get('test-strategy')?.misfireRate, 0);
+  assert.equal(byName.get('deep-research')?.misfireRate, null);
+  assert.equal(byName.get('never-used')?.neverFired, true);
+});
+
+test('GET /api/v2/analytics/skills/health honors the date range for backfill queries', async () => {
+  const res = await fetch(`${baseUrl}/api/v2/analytics/skills/health?date_from=2026-07-01&date_to=2026-07-01`);
+  assert.equal(res.status, 200);
+
+  const body = await res.json() as { data: SkillHealthRow[] };
+  const byName = new Map(body.data.map(r => [r.name, r]));
+  // Claude invocations dated 2026-07-01 are present; the codex read (07-02) is not.
+  assert.equal(byName.get('write-spec')?.invocations, 1);
+  assert.equal(byName.get('deep-research'), undefined);
 });
