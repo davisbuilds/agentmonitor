@@ -156,3 +156,16 @@ These are the deferred follow-ups surfaced during and after the build.
 - **Why it matters**: the engine has no date-awareness, so this is a manual data
   bump on that date. (Sonnet 5's newer tokenizer emits ~30% more tokens; cost
   reflects reported tokens, so no engine change needed.)
+
+#### `claude-opus-4-8` is unpriced in the registry
+📥 noted
+- **What**: the pricing registry classifies `claude-opus-4-8` as
+  `known: false` / `pricing_status: "unknown"`, even though it is the
+  highest-spend model in the local DB. Surfaced by the Top Models chart, where it
+  is the dominant series while the Usage header reports "Pricing Coverage 8 ·
+  31.1K unknown events".
+- **Why it matters**: totals still reconcile, because usage rows carry their own
+  `cost_usd` from ingestion rather than a registry lookup — so this is a
+  classification gap, not a wrong number. But tier rollups bucket the model under
+  `unknown`, and any future recompute-from-tokens path would silently price it at
+  zero. Add the Opus 4.8 tiers to `claude.json` the way the GPT-5.6 tiers were.

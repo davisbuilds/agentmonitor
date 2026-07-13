@@ -51,6 +51,7 @@ import type {
   UsageDailyPoint,
   UsageProjectBreakdown,
   UsageModelBreakdown,
+  UsageModelDailyPoint,
   UsageTierBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
@@ -2868,6 +2869,25 @@ export function getUsageProjects(params: UsageParams = {}): UsageProjectBreakdow
     .sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.project.localeCompare(b.project));
 }
 
+function toUsageModelBreakdown(model: string, acc: UsageAccumulator): UsageModelBreakdown {
+  const classification = classifyModelForUsage(model);
+  return {
+    model,
+    ...usageAccumulatorToMetrics(acc),
+    canonical_model: classification.canonical_model,
+    provider: classification.provider,
+    family: classification.family,
+    tier: classification.tier,
+    known: classification.known,
+    deprecated: classification.deprecated,
+    pricing_status: classification.pricing_status,
+  };
+}
+
+function compareUsageModelBreakdown(a: UsageModelBreakdown, b: UsageModelBreakdown): number {
+  return b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.model.localeCompare(b.model);
+}
+
 export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] {
   const models = new Map<string, UsageAccumulator>();
   for (const usageRow of selectUsageRows(params)) {
@@ -2876,23 +2896,43 @@ export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] 
     models.set(usageRow.model, acc);
   }
 
-  return [...models.entries()].map(([model, acc]) => {
-    const row = {
-      model,
-      ...usageAccumulatorToMetrics(acc),
-    };
-    const classification = classifyModelForUsage(row.model);
-    return {
-      ...row,
-      canonical_model: classification.canonical_model,
-      provider: classification.provider,
-      family: classification.family,
-      tier: classification.tier,
-      known: classification.known,
-      deprecated: classification.deprecated,
-      pricing_status: classification.pricing_status,
-    };
-  }).sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.model.localeCompare(b.model));
+  return [...models.entries()]
+    .map(([model, acc]) => toUsageModelBreakdown(model, acc))
+    .sort(compareUsageModelBreakdown);
+}
+
+export function getUsageModelsDaily(params: UsageParams = {}): UsageModelDailyPoint[] {
+  const days = new Map<string, Map<string, UsageAccumulator>>();
+  for (const row of selectUsageRows(params)) {
+    if (!row.timestamp) continue;
+    const date = row.timestamp.slice(0, 10);
+    const models = days.get(date) ?? new Map<string, UsageAccumulator>();
+    const acc = models.get(row.model) ?? createUsageAccumulator();
+    addUsageRow(acc, row, classifyModelForUsage(row.model));
+    models.set(row.model, acc);
+    days.set(date, models);
+  }
+
+  const points = [...days.entries()]
+    .map(([date, models]) => ({
+      date,
+      models: [...models.entries()]
+        .map(([model, acc]) => toUsageModelBreakdown(model, acc))
+        .sort(compareUsageModelBreakdown),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const bounds = resolveUsageDateBounds(
+    params,
+    points[0]?.date ?? null,
+    points.length > 0 ? points[points.length - 1]?.date ?? null : null,
+  );
+  if (!bounds.from || !bounds.to) {
+    return points;
+  }
+
+  const byDate = new Map(points.map(point => [point.date, point]));
+  return enumerateDateRange(bounds.from, bounds.to).map(date => byDate.get(date) ?? { date, models: [] });
 }
 
 export function getUsageTiers(params: UsageParams = {}): UsageTierBreakdown[] {

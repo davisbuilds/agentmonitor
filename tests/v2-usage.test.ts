@@ -396,6 +396,71 @@ describe('GET /api/v2/usage/projects and /models', () => {
   });
 });
 
+describe('GET /api/v2/usage/models/daily', () => {
+  test('returns per-day model slices over a gap-filled date axis', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/models/daily?date_from=2026-04-01&date_to=2026-04-04`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: Array<{
+        date: string;
+        models: Array<{ model: string; cost_usd: number; usage_events: number; session_count: number; pricing_status: string }>;
+      }>;
+    };
+
+    assert.deepEqual(
+      body.data.map(point => point.date),
+      ['2026-04-01', '2026-04-02', '2026-04-03', '2026-04-04'],
+    );
+
+    assert.deepEqual(
+      body.data.map(point => point.models.map(slice => [slice.model, slice.cost_usd, slice.usage_events])),
+      [
+        [['claude-sonnet-4-5-20250929', 0.02, 2]],
+        [['gpt-5.4', 0.03, 1]],
+        // Highest-cost model first within the day.
+        [['gpt-5.4', 0.02, 1], ['unknown-expensive-model', 0.015, 1]],
+        [['claude-3-opus-20240229', 0.005, 1]],
+      ],
+    );
+  });
+
+  test('gap-fills days with no usage as empty model lists', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/models/daily?date_from=2026-04-01&date_to=2026-04-03&model=claude-sonnet-4-5-20250929`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as { data: Array<{ date: string; models: Array<{ model: string }> }> };
+
+    assert.deepEqual(
+      body.data.map(point => [point.date, point.models.map(slice => slice.model)]),
+      [
+        ['2026-04-01', ['claude-sonnet-4-5-20250929']],
+        ['2026-04-02', []],
+        ['2026-04-03', []],
+      ],
+    );
+  });
+
+  test('carries model classification onto each slice', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/models/daily?date_from=2026-04-03&date_to=2026-04-03`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: Array<{
+        models: Array<{ model: string; provider: string; tier: string; known: boolean; pricing_status: string }>;
+      }>;
+    };
+
+    assert.deepEqual(
+      body.data[0]?.models.map(slice => [slice.model, slice.provider, slice.tier, slice.known, slice.pricing_status]),
+      [
+        ['gpt-5.4', 'openai', 'standard', true, 'known'],
+        ['unknown-expensive-model', 'unknown', 'unknown', false, 'unknown'],
+      ],
+    );
+  });
+});
+
 describe('GET /api/v2/usage/tiers', () => {
   test('returns provider-neutral tier rollups with unknown model counts', async () => {
     const res = await fetch(`${baseUrl}/api/v2/usage/tiers`);

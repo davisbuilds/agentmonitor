@@ -176,6 +176,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |
 | `/api/v2/usage/projects` | GET | Usage attribution grouped by project |
 | `/api/v2/usage/models` | GET | Usage attribution grouped by model |
+| `/api/v2/usage/models/daily` | GET | Per-day model mix over a gap-filled date axis; backs the Top Models chart |
 | `/api/v2/usage/tiers` | GET | Usage attribution grouped by provider-neutral model tier |
 | `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |

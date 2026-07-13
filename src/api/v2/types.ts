@@ -524,6 +524,12 @@ export interface UsageModelBreakdown {
   session_count: number;
 }
 
+/** One day of the date axis. `models` is empty on days with no usage. */
+export interface UsageModelDailyPoint {
+  date: string;
+  models: UsageModelBreakdown[];
+}
+
 export interface UsageTierBreakdown {
   provider: string;
   tier: string;

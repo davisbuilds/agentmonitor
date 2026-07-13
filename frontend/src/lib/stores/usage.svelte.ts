@@ -3,6 +3,7 @@ import {
   fetchUsageDaily,
   fetchUsageProjects,
   fetchUsageModels,
+  fetchUsageModelsDaily,
   fetchUsageTiers,
   fetchUsageAgents,
   fetchUsageTopSessions,
@@ -11,6 +12,7 @@ import {
   type UsageDailyPoint,
   type UsageProjectBreakdown,
   type UsageModelBreakdown,
+  type UsageModelDailyPoint,
   type UsageTierBreakdown,
   type UsageAgentBreakdown,
   type UsageTopSessionRow,
@@ -27,6 +29,7 @@ type PanelKey =
   | 'daily'
   | 'projects'
   | 'models'
+  | 'modelsDaily'
   | 'tiers'
   | 'agents'
   | 'topSessions';
@@ -49,6 +52,7 @@ class UsageStore {
     daily: 0,
     projects: 0,
     models: 0,
+    modelsDaily: 0,
     tiers: 0,
     agents: 0,
     topSessions: 0,
@@ -61,6 +65,7 @@ class UsageStore {
     daily: null,
     projects: null,
     models: null,
+    modelsDaily: null,
     tiers: null,
     agents: null,
     topSessions: null,
@@ -87,6 +92,7 @@ class UsageStore {
   daily = $state<UsageDailyPoint[]>([]);
   projects = $state<UsageProjectBreakdown[]>([]);
   models = $state<UsageModelBreakdown[]>([]);
+  modelsDaily = $state<UsageModelDailyPoint[]>([]);
   tiers = $state<UsageTierBreakdown[]>([]);
   agents = $state<UsageAgentBreakdown[]>([]);
   topSessions = $state<UsageTopSessionRow[]>([]);
@@ -98,6 +104,7 @@ class UsageStore {
     daily: false,
     projects: false,
     models: false,
+    modelsDaily: false,
     tiers: false,
     agents: false,
     topSessions: false,
@@ -108,6 +115,7 @@ class UsageStore {
     daily: null,
     projects: null,
     models: null,
+    modelsDaily: null,
     tiers: null,
     agents: null,
     topSessions: null,
@@ -189,6 +197,7 @@ class UsageStore {
       this.fetchDaily(),
       this.fetchProjects(),
       this.fetchModels(),
+      this.fetchModelsDaily(),
       this.fetchTiers(),
       this.fetchAgents(),
       this.fetchTopSessions(),
@@ -279,6 +288,28 @@ class UsageStore {
     } finally {
       if (version === this.versions.models) {
         this.loading.models = false;
+      }
+    }
+  }
+
+  async fetchModelsDaily(): Promise<void> {
+    const version = ++this.versions.modelsDaily;
+    const signal = this.nextSignal('modelsDaily');
+    this.loading.modelsDaily = true;
+    this.errors.modelsDaily = null;
+    try {
+      const result = await fetchUsageModelsDaily(this.queryParams, { signal });
+      if (version !== this.versions.modelsDaily) return;
+      this.modelsDaily = result.data;
+      this.coverage = result.coverage;
+    } catch (err) {
+      if (isAbortError(err)) return;
+      if (version !== this.versions.modelsDaily) return;
+      console.error('Failed to load daily usage by model:', err);
+      this.errors.modelsDaily = 'Failed to load model mix over time.';
+    } finally {
+      if (version === this.versions.modelsDaily) {
+        this.loading.modelsDaily = false;
       }
     }
   }

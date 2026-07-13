@@ -477,6 +477,12 @@ export interface UsageModelBreakdown {
   session_count: number;
 }
 
+/** One day of the date axis. `models` is empty on days with no usage. */
+export interface UsageModelDailyPoint {
+  date: string;
+  models: UsageModelBreakdown[];
+}
+
 export interface UsageTierBreakdown {
   provider: string;
   tier: string;
@@ -983,6 +989,11 @@ export async function fetchUsageProjects(params: Record<string, string | number 
 export async function fetchUsageModels(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageModelBreakdown[]; coverage: UsageCoverage }> {
   const res = await fetch(`/api/v2/usage/models${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageModels');
+}
+
+export async function fetchUsageModelsDaily(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageModelDailyPoint[]; coverage: UsageCoverage }> {
+  const res = await fetch(`/api/v2/usage/models/daily${qs(params)}`, init);
+  return checkedJson(res, 'fetchUsageModelsDaily');
 }
 
 export async function fetchUsageTiers(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageTierBreakdown[]; coverage: UsageCoverage }> {
