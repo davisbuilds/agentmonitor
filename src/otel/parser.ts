@@ -580,18 +580,34 @@ function parseLogRecord(
     ?? asNumber(payload?.cached_input_tokens);
   const cacheReadTokens = anthropicCacheRead ?? openaiCacheRead ?? 0;
 
-  // Only subtract when the cache figure came from a cache-inclusive (OpenAI/
-  // Codex) source and no Anthropic-style net field was present, so the cached
-  // bulk is not billed at the full input rate alongside the cache-read rate.
-  const cacheInclusiveInput = anthropicCacheRead == null && (openaiCacheRead ?? 0) > 0;
-  const tokensInNet = cacheInclusiveInput
-    ? Math.max(0, (tokensIn as number) - cacheReadTokens)
-    : (tokensIn as number);
+  const anthropicCacheWrite =
+    getAttrNumber(logRecord.attributes, 'gen_ai.usage.cache_creation_input_tokens');
+  const normalizedCacheWrite =
+    getAttrNumber(logRecord.attributes, 'cache_write_tokens')
+    ?? asNumber(bodyJson?.cache_write_tokens)
+    ?? asNumber(payload?.cache_write_tokens);
+  const cacheWriteTokens = anthropicCacheWrite ?? normalizedCacheWrite ?? 0;
 
-  const cacheWriteTokens =
-    getAttrNumber(logRecord.attributes, 'gen_ai.usage.cache_creation_input_tokens')
-    ?? (typeof bodyJson?.cache_write_tokens === 'number' ? bodyJson.cache_write_tokens : undefined)
-    ?? 0;
+  // `cache_write_tokens` is a normalized field used by more than one provider.
+  // It is part of inclusive input only when the record itself identifies an
+  // OpenAI/Codex source; for Claude/Anthropic it remains an additive bucket.
+  const openaiCacheWrite = (
+    agentType === 'codex'
+    || agentType.toLowerCase().includes('openai')
+    || (model ? /^gpt-|^o\d/.test(model.replace(/^openai\//, '').toLowerCase()) : false)
+  )
+    ? normalizedCacheWrite
+    : undefined;
+
+  // Only subtract when the cache figures came from cache-inclusive OpenAI/Codex
+  // fields and no Anthropic-style net field was present. Both cached reads and
+  // GPT-5.6 cache writes are subsets of the reported total input tokens.
+  const cacheInclusiveInput = anthropicCacheRead == null
+    && anthropicCacheWrite == null
+    && ((openaiCacheRead ?? 0) > 0 || (openaiCacheWrite ?? 0) > 0);
+  const tokensInNet = cacheInclusiveInput
+    ? Math.max(0, (tokensIn as number) - cacheReadTokens - cacheWriteTokens)
+    : (tokensIn as number);
 
   const costUsd =
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.cost')

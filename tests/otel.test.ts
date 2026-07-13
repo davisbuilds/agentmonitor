@@ -1075,6 +1075,68 @@ describe('Codex OTLP integration', () => {
     assert.equal(meta.tool_token_count, 12);
   });
 
+  test('normalizes GPT-5.6 cache reads and writes out of inclusive OpenAI input', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'openai-api',
+      resourceAttrs: [
+        { key: 'gen_ai.session.id', value: { stringValue: 'gpt56-cache-write' } },
+      ],
+      logRecords: [{
+        eventName: 'openai.api_response',
+        body: {
+          stringValue: JSON.stringify({
+            event_type: 'llm_response',
+            model: 'gpt-5.6-terra',
+            input_tokens: 100_000,
+            output_tokens: 20_000,
+            cached_input_tokens: 40_000,
+            cache_write_tokens: 10_000,
+          }),
+        },
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tokens_in, 50_000);
+    assert.equal(events.events[0].cache_read_tokens, 40_000);
+    assert.equal(events.events[0].cache_write_tokens, 10_000);
+    // 50K*$2.50 + 40K*$0.25 + 10K*$3.125 + 20K*$15 = $0.46625.
+    assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.46625) < 0.0001);
+  });
+
+  test('keeps normalized Claude cache-write body tokens additive to net input', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [
+        { key: 'gen_ai.session.id', value: { stringValue: 'claude-cache-write-body' } },
+      ],
+      logRecords: [{
+        eventName: 'anthropic.api_response',
+        body: {
+          stringValue: JSON.stringify({
+            event_type: 'llm_response',
+            model: 'claude-sonnet-4-5-20250929',
+            input_tokens: 100_000,
+            output_tokens: 20_000,
+            cache_write_tokens: 10_000,
+          }),
+        },
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tokens_in, 100_000);
+    assert.equal(events.events[0].cache_write_tokens, 10_000);
+    // 100K*$3 + 10K*$3.75 + 20K*$15 = $0.6375.
+    assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.6375) < 0.0001);
+  });
+
   test('drops noisy codex websocket lifecycle markers without creating events or live items', async () => {
     const ignoredKinds = [
       'response.custom_tool_call_input.delta',

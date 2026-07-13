@@ -28,6 +28,7 @@ interface CodexLogLine {
     cwd?: string;
     originator?: string;
     timestamp?: string;
+    model?: string;
 
     // event_msg
     type?: string;
@@ -89,6 +90,7 @@ export function parseCodexFile(
   let cwd: string | undefined;
   let sessionTimestamp: string | undefined;
   let originator: string | undefined;
+  let firstTurnModel: string | undefined;
 
   for (const rawLine of lines) {
     let line: CodexLogLine;
@@ -98,12 +100,14 @@ export function parseCodexFile(
       continue;
     }
 
-    if (line.type === 'session_meta') {
+    if (line.type === 'session_meta' && !sessionId) {
       sessionId = line.payload.id;
       cwd = line.payload.cwd;
       sessionTimestamp = line.payload.timestamp ?? line.timestamp;
       originator = line.payload.originator;
-      break;
+    }
+    if (line.type === 'turn_context' && !firstTurnModel && typeof line.payload.model === 'string') {
+      firstTurnModel = line.payload.model;
     }
   }
 
@@ -134,6 +138,8 @@ export function parseCodexFile(
   let prevTokensOut = 0;
   let prevCacheRead = 0;
   let eventIndex = 0;
+  let currentModel = defaultModel;
+  let currentModelSource: 'turn_context' | 'config' | undefined = defaultModel ? 'config' : undefined;
 
   for (const rawLine of lines) {
     let line: CodexLogLine;
@@ -159,15 +165,25 @@ export function parseCodexFile(
         status: 'success',
         tokens_in: 0,
         tokens_out: 0,
-        model: defaultModel,
+        model: firstTurnModel ?? defaultModel,
         project,
         client_timestamp: line.timestamp,
         metadata: {
           originator,
           cwd,
+          _model_source: firstTurnModel ? 'turn_context' : currentModelSource,
         },
         source: 'import',
       });
+      continue;
+    }
+
+    // Codex records the model selected for each turn in the JSONL. This is the
+    // authoritative source for usage attribution; config.toml is only a legacy
+    // fallback for older logs that predate turn_context.
+    if (line.type === 'turn_context' && typeof line.payload?.model === 'string') {
+      currentModel = line.payload.model;
+      currentModelSource = 'turn_context';
       continue;
     }
 
@@ -204,8 +220,8 @@ export function parseCodexFile(
         .slice(0, 32);
 
       // Calculate cost from deltas
-      const costUsd = defaultModel
-        ? pricingRegistry.calculate(defaultModel, {
+      const costUsd = currentModel
+        ? pricingRegistry.calculate(currentModel, {
             input: deltaInputUncached,
             output: deltaOut,
             cacheRead: deltaCacheRead,
@@ -221,11 +237,15 @@ export function parseCodexFile(
         tokens_in: deltaInputUncached,
         tokens_out: deltaOut,
         cache_read_tokens: deltaCacheRead,
-        model: defaultModel,
+        model: currentModel,
         cost_usd: costUsd ?? undefined,
         project,
         client_timestamp: line.timestamp,
-        metadata: { _synthetic: true, _source: 'codex_session_jsonl' },
+        metadata: {
+          _synthetic: true,
+          _source: 'codex_session_jsonl',
+          _model_source: currentModelSource,
+        },
         source: 'import',
       });
 
@@ -313,13 +333,14 @@ export function parseCodexFile(
       status: 'success',
       tokens_in: 0,
       tokens_out: 0,
-      model: defaultModel,
+      model: currentModel,
       project,
       client_timestamp: lastTimestamp,
       metadata: {
         total_tokens_in: prevTokensIn,
         total_tokens_out: prevTokensOut,
         total_cache_read: prevCacheRead,
+        _model_source: currentModelSource,
       },
       source: 'import',
     });

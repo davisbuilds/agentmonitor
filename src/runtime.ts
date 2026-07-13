@@ -50,10 +50,14 @@ export function startAgentMonitorRuntime(options: RuntimeOptions = {}): RuntimeH
   function autoImportAll() {
     try {
       const result = runImport({ source: 'all' });
-      if (result.totalEventsImported > 0) {
-        console.log(`Auto-import: imported ${result.totalEventsImported} events from ${result.totalFiles - result.skippedFiles} file(s)`);
+      if (result.totalEventsImported > 0 || result.totalEventsRefreshed > 0) {
+        console.log(`Auto-import: imported ${result.totalEventsImported} and refreshed ${result.totalEventsRefreshed} events from ${result.totalFiles - result.skippedFiles} file(s)`);
         if (broadcaster.clientCount > 0) {
-          broadcaster.broadcast('session_update', { type: 'auto_import', imported: result.totalEventsImported });
+          broadcaster.broadcast('session_update', {
+            type: 'auto_import',
+            imported: result.totalEventsImported,
+            refreshed: result.totalEventsRefreshed,
+          });
         }
       }
     } catch (err) {

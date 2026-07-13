@@ -70,7 +70,9 @@ Product-surface reference for AgentMonitor.
 ## Cost Tracking
 
 - Per-model pricing tables (JSON data files for Claude, Codex, Gemini families).
+- GPT-5.6 Sol/Terra/Luna standard API pricing, including the `gpt-5.6` → Sol alias, 90%-discounted cache reads, 1.25x cache writes, and full-request long-context rates above 272K input tokens.
 - Automatic cost calculation on ingest from token counts.
+- Codex JSONL usage is attributed from each turn's recorded model rather than the machine's current config; a one-shot upgrade refresh corrects explicit historical turn attribution and its trace-summary rollups.
 - Cost breakdowns by model, project, and time period.
 - Historical cost recalculation via `amon costs recalc`; `pnpm recalculate-costs` remains a compatibility wrapper.
 

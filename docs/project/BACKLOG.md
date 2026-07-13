@@ -139,6 +139,15 @@ These are the deferred follow-ups surfaced during and after the build.
 
 ### Pricing
 
+#### Processing-service tier is not captured with usage events
+📥 noted
+- **What**: cost estimation uses standard synchronous API rates. Event rows do not
+  record OpenAI Standard, Priority, Batch, or other processing-service tiers, so
+  the registry cannot select service-tier-specific pricing.
+- **Why it matters**: GPT-5.6 Priority prices differ from standard rates. Standard
+  pricing remains the honest default until ingestion exposes the billed service
+  tier; do not infer it from the model ID.
+
 #### Claude Sonnet 5 intro pricing expires 2026-08-31
 📥 noted
 - **What**: `claude.json` encodes intro rates ($2/$10, cacheRead $0.20, 5m write

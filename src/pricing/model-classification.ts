@@ -60,6 +60,9 @@ function inferTier(model: string, provider: string): string {
 
   if (provider === 'openai') {
     if (/^o\d/.test(model) || model.includes('reasoning')) return 'reasoning';
+    if (model === 'gpt-5.6-sol') return 'sol';
+    if (model === 'gpt-5.6-terra') return 'terra';
+    if (model === 'gpt-5.6-luna') return 'luna';
     if (model.includes('mini') || model.includes('nano')) return 'economy';
     if (model.includes('pro') || model.includes('max')) return 'premium';
     if (model.startsWith('gpt-')) return 'standard';

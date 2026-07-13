@@ -76,8 +76,8 @@ describe('cache-inclusive input backfill migration', () => {
     const db = getDb();
     const before = getRow('openai-old');
     // runDataMigrations advances the counter to the current DATA_SCHEMA_VERSION
-    // (bumped to 2 when the occupancy backfill migration was added).
-    assert.equal(db.pragma('user_version', { simple: true }), 2);
+    // (bumped to 3 when the Codex model-attribution refresh was added).
+    assert.equal(db.pragma('user_version', { simple: true }), 3);
 
     // Re-running without resetting the guard must short-circuit — no second
     // subtraction of the already-netted cached tokens.

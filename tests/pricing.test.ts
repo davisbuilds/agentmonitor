@@ -113,6 +113,17 @@ describe('PricingRegistry', () => {
       assert.equal(pro.deprecated, false);
     });
 
+    test('finds all GPT-5.6 tiers and resolves the unsuffixed alias to Sol', () => {
+      for (const model of ['gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+        const pricing = registry.lookup(model);
+        assert.ok(pricing, model);
+        assert.equal(pricing.provider, 'openai', model);
+        assert.equal(pricing.deprecated, false, model);
+      }
+
+      assert.equal(registry.resolve('gpt-5.6')?.canonicalModel, 'gpt-5.6-sol');
+    });
+
     test('finds OpenAI GPT-5.4 snapshot alias', () => {
       const pricing = registry.lookup('gpt-5.4-2026-03-05');
       assert.ok(pricing);
@@ -196,6 +207,13 @@ describe('PricingRegistry', () => {
       assert.equal(classifyModel('openai/o3').tier, 'reasoning');
       assert.equal(classifyModel('gpt-5-mini').tier, 'economy');
       assert.equal(classifyModel('google/gemini-2.5-pro-preview-05-06').tier, 'pro');
+    });
+
+    test('classifies GPT-5.6 models by their durable capability tiers', () => {
+      assert.equal(classifyModel('gpt-5.6').tier, 'sol');
+      assert.equal(classifyModel('gpt-5.6-sol').tier, 'sol');
+      assert.equal(classifyModel('gpt-5.6-terra').tier, 'terra');
+      assert.equal(classifyModel('gpt-5.6-luna').tier, 'luna');
     });
 
     test('classifies Claude Fable 5 as a known anthropic/fable tier', () => {
@@ -490,6 +508,34 @@ describe('PricingRegistry', () => {
 
   // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
   describe('tiered prompt-size pricing', () => {
+    test('GPT-5.6 tiers bill cache writes and apply full-request long-context rates above 272K', () => {
+      const cases = [
+        { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 6.25], long: [10, 45, 1, 12.5] },
+        { model: 'gpt-5.6-terra', base: [2.5, 15, 0.25, 3.125], long: [5, 22.5, 0.5, 6.25] },
+        { model: 'gpt-5.6-luna', base: [1, 6, 0.1, 1.25], long: [2, 9, 0.2, 2.5] },
+      ] as const;
+
+      for (const { model, base, long } of cases) {
+        const atBoundary = registry.calculate(model, {
+          input: 190_000,
+          output: 100_000,
+          cacheRead: 72_000,
+          cacheWrite: 10_000,
+        });
+        const aboveBoundary = registry.calculate(model, {
+          input: 190_001,
+          output: 100_000,
+          cacheRead: 72_000,
+          cacheWrite: 10_000,
+        });
+        assert.ok(atBoundary !== null && aboveBoundary !== null, model);
+        const expectedBase = (190_000 * base[0] + 100_000 * base[1] + 72_000 * base[2] + 10_000 * base[3]) / 1_000_000;
+        const expectedLong = (190_001 * long[0] + 100_000 * long[1] + 72_000 * long[2] + 10_000 * long[3]) / 1_000_000;
+        assert.ok(Math.abs(atBoundary - expectedBase) < 0.000001, `${model} base got ${atBoundary}`);
+        assert.ok(Math.abs(aboveBoundary - expectedLong) < 0.000001, `${model} long got ${aboveBoundary}`);
+      }
+    });
+
     test('Gemini 3.1 Pro uses base rates at/under the 200K prompt threshold', () => {
       // 150K input + 40K cacheRead = 190K prompt → base tier
       const cost = registry.calculate('gemini-3.1-pro-preview', {
