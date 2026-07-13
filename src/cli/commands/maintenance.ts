@@ -143,6 +143,7 @@ export function registerMaintenanceCommands(): void {
           skipped_files: result.skippedFiles,
           events_found: result.totalEventsFound,
           events_imported: result.totalEventsImported,
+          events_refreshed: result.totalEventsRefreshed,
           duplicates: result.totalDuplicates,
           files: result.files,
         };

@@ -704,7 +704,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 2;
+const DATA_SCHEMA_VERSION = 3;
 
 /**
  * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
@@ -722,9 +722,29 @@ export function runDataMigrations(db: Database): void {
   const run = db.transaction(() => {
     if (current < 1) backfillCacheInclusiveInputTokens(db);
     if (current < 2) backfillOccupancyOnUpgrade(db);
+    if (current < 3) invalidateCodexImportsForModelAttribution(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run();
+}
+
+/**
+ * v3 — Codex JSONL now carries an authoritative model on each turn_context.
+ * Older imports used the current config.toml model for every historical event.
+ * Invalidate the event-import hashes once so normal auto-import reparses those
+ * files; the duplicate-refresh path updates only events backed by an explicit
+ * turn_context, leaving legacy config-only logs untouched.
+ */
+function invalidateCodexImportsForModelAttribution(db: Database): void {
+  const result = db.prepare(`
+    UPDATE import_state
+    SET file_hash = ''
+    WHERE source = 'codex'
+  `).run();
+
+  if (result.changes > 0) {
+    console.log(`[migration] Codex model attribution: flagged ${result.changes} event import file(s) for refresh`);
+  }
 }
 
 /**

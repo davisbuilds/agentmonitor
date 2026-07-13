@@ -3,7 +3,12 @@ import { config } from '../config.js';
 import { syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { resolveGitBranch } from '../util/git-branch.js';
-import type { EventStatus, EventType, EventSource } from '../contracts/event-contract.js';
+import type {
+  EventStatus,
+  EventType,
+  EventSource,
+  NormalizedIngestEvent,
+} from '../contracts/event-contract.js';
 import { excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
 
 // --- Agents ---
@@ -73,6 +78,63 @@ export function setSessionMode(sessionId: string, mode: 'interactive' | 'headles
     WHERE id = @id
       AND (json_extract(metadata, '$.mode') IS NULL OR json_extract(metadata, '$.mode') != @mode)
   `).run({ id: sessionId, mode });
+}
+
+/**
+ * Refresh a deterministic imported Codex event after its source JSONL gains an
+ * authoritative per-turn model. This is deliberately narrower than a general
+ * duplicate upsert: only import rows marked as turn_context-backed may change,
+ * and only model plus the derived cost are refreshed.
+ */
+export function refreshImportedCodexEventModel(
+  event: NormalizedIngestEvent,
+): { id: number; sessionId: string } | null {
+  if (
+    !event.event_id
+    || event.source !== 'import'
+    || event.agent_type !== 'codex'
+    || !event.model
+    || event.metadata === null
+    || typeof event.metadata !== 'object'
+    || Array.isArray(event.metadata)
+    || (event.metadata as Record<string, unknown>)._model_source !== 'turn_context'
+  ) {
+    return null;
+  }
+
+  const hasUsage = event.tokens_in > 0
+    || event.tokens_out > 0
+    || (event.cache_read_tokens ?? 0) > 0
+    || (event.cache_write_tokens ?? 0) > 0;
+  const cost = hasUsage
+    ? pricingRegistry.calculate(event.model, {
+        input: event.tokens_in,
+        output: event.tokens_out,
+        cacheRead: event.cache_read_tokens,
+        cacheWrite: event.cache_write_tokens,
+      })
+    : null;
+
+  const row = getDb().prepare(`
+    UPDATE events
+    SET model = @model,
+        cost_usd = CASE WHEN @hasUsage = 1 THEN @cost ELSE cost_usd END
+    WHERE event_id = @eventId
+      AND source = 'import'
+      AND agent_type = 'codex'
+      AND (
+        model IS NOT @model
+        OR (@hasUsage = 1 AND cost_usd IS NOT @cost)
+      )
+    RETURNING id, session_id
+  `).get({
+    eventId: event.event_id,
+    model: event.model,
+    hasUsage: hasUsage ? 1 : 0,
+    cost,
+  }) as { id: number; session_id: string } | undefined;
+
+  return row ? { id: row.id, sessionId: row.session_id } : null;
 }
 
 export interface SessionRow {

@@ -1,12 +1,12 @@
 import fs from 'fs';
 import { getDb } from '../db/connection.js';
-import { insertEvent, setSessionMode } from '../db/queries.js';
+import { insertEvent, refreshImportedCodexEventModel, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashFile as hashCodexFile } from './codex.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { createConfig } from '../config.js';
-import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
+import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -29,6 +29,7 @@ export interface ImportFileResult {
   source: string;
   eventsFound: number;
   eventsImported: number;
+  eventsRefreshed: number;
   skippedDuplicate: number;
   skippedUnchanged: boolean;
 }
@@ -38,6 +39,7 @@ export interface ImportResult {
   totalFiles: number;
   totalEventsFound: number;
   totalEventsImported: number;
+  totalEventsRefreshed: number;
   totalDuplicates: number;
   skippedFiles: number;
 }
@@ -73,18 +75,23 @@ function setImportState(filePath: string, hash: string, size: number, source: st
 
 // ─── Core import logic ──────────────────────────────────────────────────
 
-function importEvents(events: NormalizedIngestEvent[], dryRun: boolean): { imported: number; duplicates: number } {
+function importEvents(
+  events: NormalizedIngestEvent[],
+  dryRun: boolean,
+): { imported: number; refreshed: number; duplicates: number } {
   let imported = 0;
+  let refreshed = 0;
   let duplicates = 0;
 
   if (dryRun) {
-    return { imported: events.length, duplicates: 0 };
+    return { imported: events.length, refreshed: 0, duplicates: 0 };
   }
 
   // Invocation mode is a session-level constant carried on events. Collect it
   // here and apply once per session below, so it backfills even when every event
   // is a duplicate (upsertSession inside insertEvent is skipped on the dup path).
   const sessionModes = new Map<string, 'interactive' | 'headless'>();
+  const refreshedSessions = new Set<string>();
 
   for (const event of events) {
     if (event.mode) sessionModes.set(event.session_id, event.mode);
@@ -94,14 +101,22 @@ function importEvents(events: NormalizedIngestEvent[], dryRun: boolean): { impor
       safelyMaintainTraceSummaryForEvent(row.id, 'historical import');
     } else {
       duplicates++;
+      const refreshedEvent = refreshImportedCodexEventModel(event);
+      if (refreshedEvent) {
+        refreshed++;
+        refreshedSessions.add(refreshedEvent.sessionId);
+      }
     }
   }
 
   for (const [sessionId, mode] of sessionModes) {
     setSessionMode(sessionId, mode);
   }
+  for (const sessionId of refreshedSessions) {
+    safelyMaintainTraceSummaryForSession(sessionId, 'Codex model-attribution refresh');
+  }
 
-  return { imported, duplicates };
+  return { imported, refreshed, duplicates };
 }
 
 function processFile(
@@ -123,6 +138,7 @@ function processFile(
         source,
         eventsFound: 0,
         eventsImported: 0,
+        eventsRefreshed: 0,
         skippedDuplicate: 0,
         skippedUnchanged: true,
       };
@@ -138,7 +154,7 @@ function processFile(
         : parseAntigravityFile(filePath, { from: options.from, to: options.to });
 
   // Import events
-  const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
+  const { imported, refreshed, duplicates } = importEvents(events, options.dryRun ?? false);
 
   // Record import state (unless dry run or date-scoped import).
   // Date-scoped imports are partial — caching the hash would cause a later
@@ -153,6 +169,7 @@ function processFile(
     source,
     eventsFound: events.length,
     eventsImported: imported,
+    eventsRefreshed: refreshed,
     skippedDuplicate: duplicates,
     skippedUnchanged: false,
   };
@@ -193,12 +210,14 @@ export function runImport(options: ImportOptions): ImportResult {
   // Aggregate results
   let totalEventsFound = 0;
   let totalEventsImported = 0;
+  let totalEventsRefreshed = 0;
   let totalDuplicates = 0;
   let skippedFiles = 0;
 
   for (const f of files) {
     totalEventsFound += f.eventsFound;
     totalEventsImported += f.eventsImported;
+    totalEventsRefreshed += f.eventsRefreshed;
     totalDuplicates += f.skippedDuplicate;
     if (f.skippedUnchanged) skippedFiles++;
   }
@@ -208,6 +227,7 @@ export function runImport(options: ImportOptions): ImportResult {
     totalFiles: files.length,
     totalEventsFound,
     totalEventsImported,
+    totalEventsRefreshed,
     totalDuplicates,
     skippedFiles,
   };

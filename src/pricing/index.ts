@@ -75,11 +75,11 @@ function toPerToken(rates: PricingDataRates): PricingRates {
 
 // Pick the effective rates for a request. Flat models (no `tiers`) always use
 // their base rates. Tiered models select by the request's prompt size — the
-// input context, i.e. uncached input + cache reads — applying the highest band
-// whose threshold the prompt strictly exceeds (the ">200K" boundary is exclusive).
+// input context, i.e. uncached input + cache reads + cache writes — applying the
+// highest band whose threshold the prompt strictly exceeds (boundaries are exclusive).
 function selectRates(pricing: ModelPricing, tokens: TokenCounts): PricingRates {
   if (!pricing.tiers || pricing.tiers.length === 0) return pricing;
-  const promptTokens = tokens.input + (tokens.cacheRead ?? 0);
+  const promptTokens = tokens.input + (tokens.cacheRead ?? 0) + (tokens.cacheWrite ?? 0);
   let rates: PricingRates = pricing;
   for (const tier of pricing.tiers) {
     if (promptTokens > tier.abovePromptTokens) rates = tier;
@@ -192,7 +192,7 @@ export class PricingRegistry {
 
   /**
    * Resolve the effective per-token rates for a request, tier-selected by prompt
-   * size (uncached `input` + `cacheRead`). Flat models return their base rates.
+   * size (uncached `input` + `cacheRead` + `cacheWrite`). Flat models return their base rates.
    * Returns null when the model is unknown. Use this anywhere a cost/savings
    * figure must agree with `calculate()` on long-context tiered pricing.
    */

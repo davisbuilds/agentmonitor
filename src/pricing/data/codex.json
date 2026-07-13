@@ -1,7 +1,60 @@
 {
   "provider": "openai",
-  "lastUpdated": "2026-05-24T00:00:00Z",
+  "lastUpdated": "2026-07-12T00:00:00Z",
   "models": {
+    "gpt-5.6-sol": {
+      "aliases": [
+        "gpt-5.6"
+      ],
+      "inputCostPerMTok": 5,
+      "outputCostPerMTok": 30,
+      "cacheReadCostPerMTok": 0.5,
+      "cacheWriteCostPerMTok": 6.25,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 10,
+          "outputCostPerMTok": 45,
+          "cacheReadCostPerMTok": 1,
+          "cacheWriteCostPerMTok": 12.5
+        }
+      ]
+    },
+    "gpt-5.6-terra": {
+      "aliases": [],
+      "inputCostPerMTok": 2.5,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.25,
+      "cacheWriteCostPerMTok": 3.125,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 5,
+          "outputCostPerMTok": 22.5,
+          "cacheReadCostPerMTok": 0.5,
+          "cacheWriteCostPerMTok": 6.25
+        }
+      ]
+    },
+    "gpt-5.6-luna": {
+      "aliases": [],
+      "inputCostPerMTok": 1,
+      "outputCostPerMTok": 6,
+      "cacheReadCostPerMTok": 0.1,
+      "cacheWriteCostPerMTok": 1.25,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 2,
+          "outputCostPerMTok": 9,
+          "cacheReadCostPerMTok": 0.2,
+          "cacheWriteCostPerMTok": 2.5
+        }
+      ]
+    },
     "gpt-5.5": {
       "aliases": [],
       "inputCostPerMTok": 5,

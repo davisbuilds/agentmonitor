@@ -5,8 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connection.js';
-import type { syncAllAntigravityFiles as syncAllAntigravityFilesFn } from '../src/watcher/index.js';
-import { hashAntigravityDb } from '../src/watcher/index.js';
+import type {
+  hashAntigravityDb as hashAntigravityDbFn,
+  syncAllAntigravityFiles as syncAllAntigravityFilesFn,
+} from '../src/watcher/index.js';
 
 // --- minimal protobuf encoder (deterministic fixtures) ---
 function varint(n: number): number[] {
@@ -51,6 +53,7 @@ let tempDir = '';
 let home = '';
 let getDb: typeof getDbFn;
 let closeDb: typeof closeDbFn;
+let hashAntigravityDb: typeof hashAntigravityDbFn;
 let syncAllAntigravityFiles: typeof syncAllAntigravityFilesFn;
 
 before(async () => {
@@ -64,7 +67,7 @@ before(async () => {
   closeDb = dbModule.closeDb;
   const { initSchema } = await import('../src/db/schema.js');
   initSchema();
-  ({ syncAllAntigravityFiles } = await import('../src/watcher/index.js'));
+  ({ hashAntigravityDb, syncAllAntigravityFiles } = await import('../src/watcher/index.js'));
 });
 
 after(() => {
