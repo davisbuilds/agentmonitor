@@ -582,11 +582,22 @@ function parseLogRecord(
 
   const anthropicCacheWrite =
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.cache_creation_input_tokens');
-  const openaiCacheWrite =
+  const normalizedCacheWrite =
     getAttrNumber(logRecord.attributes, 'cache_write_tokens')
     ?? asNumber(bodyJson?.cache_write_tokens)
     ?? asNumber(payload?.cache_write_tokens);
-  const cacheWriteTokens = anthropicCacheWrite ?? openaiCacheWrite ?? 0;
+  const cacheWriteTokens = anthropicCacheWrite ?? normalizedCacheWrite ?? 0;
+
+  // `cache_write_tokens` is a normalized field used by more than one provider.
+  // It is part of inclusive input only when the record itself identifies an
+  // OpenAI/Codex source; for Claude/Anthropic it remains an additive bucket.
+  const openaiCacheWrite = (
+    agentType === 'codex'
+    || agentType.toLowerCase().includes('openai')
+    || (model ? /^gpt-|^o\d/.test(model.replace(/^openai\//, '').toLowerCase()) : false)
+  )
+    ? normalizedCacheWrite
+    : undefined;
 
   // Only subtract when the cache figures came from cache-inclusive OpenAI/Codex
   // fields and no Anthropic-style net field was present. Both cached reads and

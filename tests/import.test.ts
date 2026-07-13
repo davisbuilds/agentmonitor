@@ -793,6 +793,7 @@ describe('Import orchestrator integration', () => {
 
     try {
       const { runImport } = await import('../src/import/index.js');
+      const { getStatsForBroadcast } = await import('../src/db/queries.js');
       fs.writeFileSync(filePath, [sessionMeta, tokenCount].join('\n'));
       runImport({ source: 'codex', codexDir: isolatedCodexDir });
 
@@ -804,6 +805,9 @@ describe('Import orchestrator integration', () => {
       assert.equal(before.model, 'gpt-5.6-sol');
       // Sol: 60K*$5 + 40K*$0.50 + 20K*$30 = $0.92.
       assert.ok(Math.abs(before.cost_usd - 0.92) < 0.0001);
+      const statsBefore = getStatsForBroadcast();
+      assert.ok(Math.abs(statsBefore.total_cost_usd - 0.92) < 0.0001);
+      assert.equal(statsBefore.model_breakdown['gpt-5.6-sol'], 3);
 
       const turnContext = JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-terra' } });
       fs.writeFileSync(filePath, [sessionMeta, turnContext, tokenCount].join('\n'));
@@ -823,6 +827,11 @@ describe('Import orchestrator integration', () => {
       `).get() as { primary_model: string; cost_usd: number };
       assert.equal(summary.primary_model, 'gpt-5.6-terra');
       assert.ok(Math.abs(summary.cost_usd - 0.46) < 0.0001);
+
+      const statsAfter = getStatsForBroadcast();
+      assert.ok(Math.abs(statsAfter.total_cost_usd - 0.46) < 0.0001);
+      assert.equal(statsAfter.model_breakdown['gpt-5.6-sol'], undefined);
+      assert.equal(statsAfter.model_breakdown['gpt-5.6-terra'], 3);
     } finally {
       fs.rmSync(isolatedCodexDir, { recursive: true, force: true });
     }

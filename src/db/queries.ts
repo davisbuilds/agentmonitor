@@ -134,6 +134,7 @@ export function refreshImportedCodexEventModel(
     cost,
   }) as { id: number; session_id: string } | undefined;
 
+  if (row) markStatsDirty();
   return row ? { id: row.id, sessionId: row.session_id } : null;
 }
 

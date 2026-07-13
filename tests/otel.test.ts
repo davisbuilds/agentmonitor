@@ -1107,6 +1107,36 @@ describe('Codex OTLP integration', () => {
     assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.46625) < 0.0001);
   });
 
+  test('keeps normalized Claude cache-write body tokens additive to net input', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [
+        { key: 'gen_ai.session.id', value: { stringValue: 'claude-cache-write-body' } },
+      ],
+      logRecords: [{
+        eventName: 'anthropic.api_response',
+        body: {
+          stringValue: JSON.stringify({
+            event_type: 'llm_response',
+            model: 'claude-sonnet-4-5-20250929',
+            input_tokens: 100_000,
+            output_tokens: 20_000,
+            cache_write_tokens: 10_000,
+          }),
+        },
+      }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tokens_in, 100_000);
+    assert.equal(events.events[0].cache_write_tokens, 10_000);
+    // 100K*$3 + 10K*$3.75 + 20K*$15 = $0.6375.
+    assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.6375) < 0.0001);
+  });
+
   test('drops noisy codex websocket lifecycle markers without creating events or live items', async () => {
     const ignoredKinds = [
       'response.custom_tool_call_input.delta',
