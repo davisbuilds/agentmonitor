@@ -108,6 +108,25 @@
 
   const maxTotal = $derived(rows.reduce((max, row) => Math.max(max, row.total), 0));
   const rangeTotal = $derived(rows.reduce((sum, row) => sum + row.total, 0));
+
+  function shortDate(date: string): string {
+    return date.slice(5).replace('-', '/');
+  }
+
+  /**
+   * Label a handful of columns, never all of them — a tick under every day
+   * collides on a 30-day range. Always anchor the first and last.
+   */
+  const tickIndexes = $derived.by(() => {
+    const count = rows.length;
+    if (count === 0) return new Set<number>();
+    const target = Math.min(6, count);
+    const step = Math.max(1, Math.round((count - 1) / Math.max(1, target - 1)));
+    const ticks = new Set<number>();
+    for (let i = 0; i < count; i += step) ticks.add(i);
+    ticks.add(count - 1);
+    return ticks;
+  });
 </script>
 
 <section class="flex h-full flex-col rounded-lg border border-line bg-surface p-4 xl:max-h-[34rem]">
@@ -134,13 +153,16 @@
   </div>
 
   {#if usage.loading.modelsDaily}
-    <div class="mt-4 flex-1 space-y-3 overflow-y-auto pr-1">
-      {#each Array.from({ length: 6 }) as _}
-        <div class="space-y-2">
-          <div class="h-3 w-20 animate-pulse rounded-sm bg-surface-2"></div>
-          <div class="h-2 animate-pulse rounded-sm bg-surface-2"></div>
-        </div>
-      {/each}
+    <div class="mt-4 flex min-h-[15rem] flex-1 gap-2">
+      <div class="w-16 shrink-0" aria-hidden="true"></div>
+      <div class="flex min-w-0 flex-1 items-end gap-[2px] border-b border-line pb-px">
+        {#each [40, 65, 30, 80, 55, 70, 45, 90, 60, 35, 75, 50] as height}
+          <div
+            class="flex-1 animate-pulse rounded-t-[4px] bg-surface-2"
+            style={`height:${height}%`}
+          ></div>
+        {/each}
+      </div>
     </div>
   {:else if usage.errors.modelsDaily}
     <div class="mt-4 rounded-sm border border-danger/30 bg-danger/10 px-3 py-2 text-meta text-danger">
@@ -164,33 +186,52 @@
       {/each}
     </ul>
 
-    <div class="mt-3 min-h-0 flex-1 overflow-y-auto pr-1">
-      <div class="space-y-1">
-        {#each rows as row}
-          <button
-            class="block w-full rounded-sm border border-transparent px-3 py-2.5 text-left transition-colors hover:border-line hover:bg-surface-2"
-            onclick={() => usage.setDateRange(row.date, row.date)}
-          >
-            <div class="flex items-center justify-between gap-3 text-body">
-              <span class="tabular font-mono text-text">{row.date}</span>
-              <span class="tabular font-mono text-text-muted">{formatMetric(row.total, metric)}</span>
-            </div>
+    <div class="mt-4 flex min-h-[15rem] flex-1 flex-col">
+      <div class="flex min-h-0 flex-1 gap-2">
+        <!-- y-axis: just the extremes; a full gridded scale would out-shout the data -->
+        <div class="flex w-16 shrink-0 flex-col justify-between text-right text-meta tabular font-mono text-text-faint">
+          <span>{formatMetric(maxTotal, metric)}</span>
+          <span>0</span>
+        </div>
 
-            {#if row.segments.length > 0}
-              <div class="mt-2 flex h-1.5 gap-[2px]">
-                {#each row.segments as segment}
-                  <div
-                    class="h-full rounded-[2px] transition-all"
-                    style={`background:${colorFor(segment.model)}; width:${Math.max((segment.value / maxTotal) * 100, 0.5)}%`}
-                    title={`${segment.model} · ${formatMetric(segment.value, metric)} (${Math.round((segment.value / row.total) * 100)}%)`}
-                  ></div>
-                {/each}
-              </div>
-            {:else}
-              <div class="mt-2 h-1.5 rounded-[2px] bg-surface-2"></div>
-            {/if}
-          </button>
-        {/each}
+        <div class="flex min-w-0 flex-1 items-end gap-[2px] border-b border-line pb-px">
+          {#each rows as row}
+            <button
+              class="group flex h-full min-w-0 flex-1 flex-col justify-end rounded-t-sm transition-colors hover:bg-surface-2"
+              onclick={() => usage.setDateRange(row.date, row.date)}
+              title={`${row.date} · ${formatMetric(row.total, metric)}`}
+              aria-label={`${row.date}: ${formatMetric(row.total, metric)}`}
+            >
+              {#if row.total > 0}
+                <div
+                  class="flex w-full flex-col-reverse gap-[2px] overflow-hidden rounded-t-[4px]"
+                  style={`height:${Math.max((row.total / maxTotal) * 100, 1)}%`}
+                >
+                  {#each row.segments as segment}
+                    <div
+                      class="w-full"
+                      style={`background:${colorFor(segment.model)}; flex:${segment.value} 1 0; min-height:2px`}
+                      title={`${row.date} · ${segment.model} · ${formatMetric(segment.value, metric)} (${Math.round((segment.value / row.total) * 100)}%)`}
+                    ></div>
+                  {/each}
+                </div>
+              {:else}
+                <div class="h-px w-full bg-line" aria-hidden="true"></div>
+              {/if}
+            </button>
+          {/each}
+        </div>
+      </div>
+
+      <div class="flex gap-2 pt-1.5">
+        <div class="w-16 shrink-0" aria-hidden="true"></div>
+        <div class="flex min-w-0 flex-1 gap-[2px]">
+          {#each rows as row, index}
+            <span class="min-w-0 flex-1 text-center text-meta tabular font-mono text-text-faint">
+              {tickIndexes.has(index) ? shortDate(row.date) : ''}
+            </span>
+          {/each}
+        </div>
       </div>
     </div>
   {/if}
