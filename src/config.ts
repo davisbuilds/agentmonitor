@@ -1,8 +1,27 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 type EnvMap = NodeJS.ProcessEnv;
+
+// src/config.ts and dist/config.js both sit one level under the package root.
+const packageRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+/**
+ * The default database lives with the install, not with the shell.
+ *
+ * This was `./data/agentmonitor.db` — resolved against the working directory —
+ * so `amon serve` from anywhere but the repo root did not fail. It created an
+ * empty database there and the auto-importer began filling it, producing a
+ * dashboard that looked plausible and was simply about someone else's data.
+ * An explicit AGENTMONITOR_DB_PATH is still honored as given.
+ */
+function resolveDbPath(env: EnvMap): string {
+  const configured = env.AGENTMONITOR_DB_PATH?.trim();
+  if (configured) return configured;
+  return path.join(packageRoot, 'data', 'agentmonitor.db');
+}
 
 function parseEnvInt(value: string | undefined, fallback: number, min: number = 0): number {
   if (!value) return fallback;
@@ -212,7 +231,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
   return {
     port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1),
     host: env.AGENTMONITOR_HOST || '127.0.0.1',
-    dbPath: env.AGENTMONITOR_DB_PATH || './data/agentmonitor.db',
+    dbPath: resolveDbPath(env),
     maxPayloadKB: parseEnvInt(env.AGENTMONITOR_MAX_PAYLOAD_KB, 10, 0),
     sessionTimeoutMinutes: parseEnvInt(env.AGENTMONITOR_SESSION_TIMEOUT, 5, 1),
     maxFeed: parseEnvInt(env.AGENTMONITOR_MAX_FEED, 200, 1),
