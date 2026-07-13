@@ -38,6 +38,8 @@ import {
   getUsageProjects,
   getUsageModels,
   getUsageModelsDaily,
+  getUsageOverview,
+  getUsageFacets,
   getUsageTiers,
   getUsageAgents,
   getUsageTopSessions,
@@ -665,6 +667,24 @@ v2Router.get('/analytics/agents', (req: Request, res: Response) => {
 });
 
 // --- Usage ---
+
+v2Router.get('/usage/overview', (req: Request, res: Response) => {
+  try {
+    res.json(getUsageOverview(readAnalyticsParams(req)));
+  } catch (err) {
+    console.error('[v2/usage/overview] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage overview' });
+  }
+});
+
+v2Router.get('/usage/facets', (req: Request, res: Response) => {
+  try {
+    res.json(getUsageFacets(readAnalyticsParams(req)));
+  } catch (err) {
+    console.error('[v2/usage/facets] Error:', err);
+    res.status(500).json({ error: 'Failed to get usage facets' });
+  }
+});
 
 v2Router.get('/usage/summary', (req: Request, res: Response) => {
   try {

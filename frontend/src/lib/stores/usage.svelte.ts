@@ -1,12 +1,6 @@
 import {
-  fetchUsageSummary,
-  fetchUsageDaily,
-  fetchUsageProjects,
-  fetchUsageModels,
-  fetchUsageModelsDaily,
-  fetchUsageTiers,
-  fetchUsageAgents,
-  fetchUsageTopSessions,
+  fetchUsageOverview,
+  fetchUsageFacets,
   type UsageSummary,
   type UsageCoverage,
   type UsageDailyPoint,
@@ -33,8 +27,6 @@ type PanelKey =
   | 'tiers'
   | 'agents'
   | 'topSessions';
-
-type UsageFacetKey = 'project' | 'agent' | 'model' | 'provider' | 'tier';
 
 type FiltersSnapshot = {
   from: string;
@@ -191,194 +183,61 @@ class UsageStore {
     this.abortAll();
   }
 
+  /**
+   * One request, not eight. Every panel is a rollup of the same rows and each
+   * per-panel response carried an identical `coverage` block, so fanning out
+   * made the server scan (and recompute coverage) eight times over — and since
+   * it is synchronous, the requests serialized rather than overlapping.
+   */
   async fetchAll(): Promise<void> {
-    await Promise.all([
-      this.fetchSummary(),
-      this.fetchDaily(),
-      this.fetchProjects(),
-      this.fetchModels(),
-      this.fetchModelsDaily(),
-      this.fetchTiers(),
-      this.fetchAgents(),
-      this.fetchTopSessions(),
-    ]);
-  }
+    const keys: PanelKey[] = [
+      'summary', 'daily', 'projects', 'models', 'modelsDaily', 'tiers', 'agents', 'topSessions',
+    ];
+    const versions = new Map(keys.map(key => [key, ++this.versions[key]]));
+    const stale = (): boolean => keys.some(key => versions.get(key) !== this.versions[key]);
 
-  async fetchSummary(): Promise<void> {
-    const version = ++this.versions.summary;
-    const signal = this.nextSignal('summary');
-    this.loading.summary = true;
-    this.errors.summary = null;
+    // One request backs every panel, so the same controller is registered under
+    // each key: abortAll()/dispose() and any later per-panel nextSignal() all
+    // still cancel it.
+    const controller = new AbortController();
+    for (const key of keys) {
+      this.controllers[key]?.abort();
+      this.controllers[key] = controller;
+      this.loading[key] = true;
+      this.errors[key] = null;
+    }
+
     try {
-      const result = await fetchUsageSummary(this.queryParams, { signal });
-      if (version !== this.versions.summary) return;
-      this.summary = result;
-      this.coverage = result.coverage;
+      const overview = await fetchUsageOverview(this.queryParams, { signal: controller.signal });
+      if (stale()) return;
+
+      this.summary = overview.summary;
+      this.daily = overview.daily;
+      this.projects = overview.projects;
+      this.models = overview.models;
+      this.modelsDaily = overview.models_daily;
+      this.tiers = overview.tiers;
+      this.agents = overview.agents;
+      this.topSessions = overview.top_sessions;
+      this.coverage = overview.coverage;
     } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.summary) return;
-      console.error('Failed to load usage summary:', err);
-      this.errors.summary = 'Failed to load usage summary.';
+      if (isAbortError(err) || stale()) return;
+      console.error('Failed to load usage overview:', err);
+      for (const key of keys) this.errors[key] = 'Failed to load usage data.';
     } finally {
-      if (version === this.versions.summary) {
-        this.loading.summary = false;
+      if (!stale()) {
+        for (const key of keys) this.loading[key] = false;
       }
     }
   }
 
-  async fetchDaily(): Promise<void> {
-    const version = ++this.versions.daily;
-    const signal = this.nextSignal('daily');
-    this.loading.daily = true;
-    this.errors.daily = null;
-    try {
-      const result = await fetchUsageDaily(this.queryParams, { signal });
-      if (version !== this.versions.daily) return;
-      this.daily = result.data;
-      this.coverage = result.coverage;
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.daily) return;
-      console.error('Failed to load usage timeline:', err);
-      this.errors.daily = 'Failed to load usage timeline.';
-    } finally {
-      if (version === this.versions.daily) {
-        this.loading.daily = false;
-      }
-    }
-  }
 
-  async fetchProjects(): Promise<void> {
-    const version = ++this.versions.projects;
-    const signal = this.nextSignal('projects');
-    this.loading.projects = true;
-    this.errors.projects = null;
-    try {
-      const result = await fetchUsageProjects(this.queryParams, { signal });
-      if (version !== this.versions.projects) return;
-      this.projects = result.data;
-      this.coverage = result.coverage;
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.projects) return;
-      console.error('Failed to load usage by project:', err);
-      this.errors.projects = 'Failed to load project attribution.';
-    } finally {
-      if (version === this.versions.projects) {
-        this.loading.projects = false;
-      }
-    }
-  }
 
-  async fetchModels(): Promise<void> {
-    const version = ++this.versions.models;
-    const signal = this.nextSignal('models');
-    this.loading.models = true;
-    this.errors.models = null;
-    try {
-      const result = await fetchUsageModels(this.queryParams, { signal });
-      if (version !== this.versions.models) return;
-      this.models = result.data;
-      this.coverage = result.coverage;
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.models) return;
-      console.error('Failed to load usage by model:', err);
-      this.errors.models = 'Failed to load model attribution.';
-    } finally {
-      if (version === this.versions.models) {
-        this.loading.models = false;
-      }
-    }
-  }
 
-  async fetchModelsDaily(): Promise<void> {
-    const version = ++this.versions.modelsDaily;
-    const signal = this.nextSignal('modelsDaily');
-    this.loading.modelsDaily = true;
-    this.errors.modelsDaily = null;
-    try {
-      const result = await fetchUsageModelsDaily(this.queryParams, { signal });
-      if (version !== this.versions.modelsDaily) return;
-      this.modelsDaily = result.data;
-      this.coverage = result.coverage;
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.modelsDaily) return;
-      console.error('Failed to load daily usage by model:', err);
-      this.errors.modelsDaily = 'Failed to load model mix over time.';
-    } finally {
-      if (version === this.versions.modelsDaily) {
-        this.loading.modelsDaily = false;
-      }
-    }
-  }
 
-  async fetchTiers(): Promise<void> {
-    const version = ++this.versions.tiers;
-    const signal = this.nextSignal('tiers');
-    this.loading.tiers = true;
-    this.errors.tiers = null;
-    try {
-      const result = await fetchUsageTiers(this.queryParams, { signal });
-      if (version !== this.versions.tiers) return;
-      this.tiers = result.data;
-      this.coverage = result.coverage;
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.tiers) return;
-      console.error('Failed to load usage by tier:', err);
-      this.errors.tiers = 'Failed to load tier attribution.';
-    } finally {
-      if (version === this.versions.tiers) {
-        this.loading.tiers = false;
-      }
-    }
-  }
 
-  async fetchAgents(): Promise<void> {
-    const version = ++this.versions.agents;
-    const signal = this.nextSignal('agents');
-    this.loading.agents = true;
-    this.errors.agents = null;
-    try {
-      const result = await fetchUsageAgents(this.queryParams, { signal });
-      if (version !== this.versions.agents) return;
-      this.agents = result.data;
-      this.coverage = result.coverage;
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.agents) return;
-      console.error('Failed to load usage by agent:', err);
-      this.errors.agents = 'Failed to load agent attribution.';
-    } finally {
-      if (version === this.versions.agents) {
-        this.loading.agents = false;
-      }
-    }
-  }
 
-  async fetchTopSessions(): Promise<void> {
-    const version = ++this.versions.topSessions;
-    const signal = this.nextSignal('topSessions');
-    this.loading.topSessions = true;
-    this.errors.topSessions = null;
-    try {
-      const result = await fetchUsageTopSessions({ ...this.queryParams, limit: 10 }, { signal });
-      if (version !== this.versions.topSessions) return;
-      this.topSessions = result.data;
-      this.coverage = result.coverage;
-    } catch (err) {
-      if (isAbortError(err)) return;
-      if (version !== this.versions.topSessions) return;
-      console.error('Failed to load top usage sessions:', err);
-      this.errors.topSessions = 'Failed to load top sessions.';
-    } finally {
-      if (version === this.versions.topSessions) {
-        this.loading.topSessions = false;
-      }
-    }
-  }
+
 
   // Filter mutations delegate to the shared store, which syncs the hash and
   // notifies subscribers (this store's refreshUsage) — no direct fetch here.
@@ -452,21 +311,19 @@ class UsageStore {
     this.filterOptionsController = controller;
 
     try {
-      const [projectsRes, agentsRes, modelsRes, providerTiersRes, tierTiersRes] = await Promise.all([
-        fetchUsageProjects(this.facetQueryParams('project'), { signal: controller.signal }),
-        fetchUsageAgents(this.facetQueryParams('agent'), { signal: controller.signal }),
-        fetchUsageModels(this.facetQueryParams('model'), { signal: controller.signal }),
-        fetchUsageTiers(this.facetQueryParams('provider'), { signal: controller.signal }),
-        fetchUsageTiers(this.facetQueryParams('tier'), { signal: controller.signal }),
-      ]);
+      // One DISTINCT query server-side. This was five full rollup requests — each
+      // scanning and pricing-classifying every usage row — to read off five lists
+      // of distinct strings. The server applies the same self-excluding facet
+      // scoping these five calls used to encode in their query params.
+      const facets = await fetchUsageFacets(this.queryParams, { signal: controller.signal });
 
       if (version !== this.filterOptionsVersion) return;
 
-      this.projectOptions = withSelectedOption(projectsRes.data.map(row => row.project), this.project);
-      this.agentOptions = withSelectedOption(agentsRes.data.map(row => row.agent), this.agent);
-      this.modelOptions = withSelectedOption(modelsRes.data.map(row => row.model), this.model);
-      this.providerOptions = withSelectedOption(providerTiersRes.data.map(row => row.provider), this.provider);
-      this.tierOptions = withSelectedOption(tierTiersRes.data.map(row => row.tier), this.tier);
+      this.projectOptions = withSelectedOption(facets.projects, this.project);
+      this.agentOptions = withSelectedOption(facets.agents, this.agent);
+      this.modelOptions = withSelectedOption(facets.models, this.model);
+      this.providerOptions = withSelectedOption(facets.providers, this.provider);
+      this.tierOptions = withSelectedOption(facets.tiers, this.tier);
     } catch (err) {
       if (isAbortError(err)) return;
       // Usage can still load without refreshed filter options.
@@ -477,20 +334,6 @@ class UsageStore {
     }
   }
 
-  private facetQueryParams(exclude: UsageFacetKey): Record<string, string> {
-    const params: Record<string, string> = {
-      date_from: this.from,
-      date_to: this.to,
-    };
-
-    for (const key of ['project', 'agent', 'model', 'provider', 'tier'] as const) {
-      if (key !== exclude && this[key]) {
-        params[key] = this[key];
-      }
-    }
-
-    return params;
-  }
 
   private nextSignal(key: PanelKey): AbortSignal {
     this.controllers[key]?.abort();

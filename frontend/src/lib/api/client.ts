@@ -996,6 +996,37 @@ export async function fetchUsageModelsDaily(params: Record<string, string | numb
   return checkedJson(res, 'fetchUsageModelsDaily');
 }
 
+/** Every Usage panel from one server-side scan — see fetchUsageOverview. */
+export interface UsageOverview {
+  summary: UsageSummary;
+  daily: UsageDailyPoint[];
+  projects: UsageProjectBreakdown[];
+  models: UsageModelBreakdown[];
+  models_daily: UsageModelDailyPoint[];
+  tiers: UsageTierBreakdown[];
+  agents: UsageAgentBreakdown[];
+  top_sessions: UsageTopSessionRow[];
+  coverage: UsageCoverage;
+}
+
+export interface UsageFacets {
+  projects: string[];
+  agents: string[];
+  models: string[];
+  providers: string[];
+  tiers: string[];
+}
+
+export async function fetchUsageFacets(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<UsageFacets> {
+  const res = await fetch(`/api/v2/usage/facets${qs(params)}`, init);
+  return checkedJson(res, 'fetchUsageFacets');
+}
+
+export async function fetchUsageOverview(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<UsageOverview> {
+  const res = await fetch(`/api/v2/usage/overview${qs(params)}`, init);
+  return checkedJson(res, 'fetchUsageOverview');
+}
+
 export async function fetchUsageTiers(params: Record<string, string | number | undefined> = {}, init: RequestInit = {}): Promise<{ data: UsageTierBreakdown[]; coverage: UsageCoverage }> {
   const res = await fetch(`/api/v2/usage/tiers${qs(params)}`, init);
   return checkedJson(res, 'fetchUsageTiers');
