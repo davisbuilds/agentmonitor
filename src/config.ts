@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { resolveDbPath } from './db-path.js';
 
 type EnvMap = NodeJS.ProcessEnv;
 
@@ -212,7 +213,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
   return {
     port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1),
     host: env.AGENTMONITOR_HOST || '127.0.0.1',
-    dbPath: env.AGENTMONITOR_DB_PATH || './data/agentmonitor.db',
+    dbPath: resolveDbPath(env),
     maxPayloadKB: parseEnvInt(env.AGENTMONITOR_MAX_PAYLOAD_KB, 10, 0),
     sessionTimeoutMinutes: parseEnvInt(env.AGENTMONITOR_SESSION_TIMEOUT, 5, 1),
     maxFeed: parseEnvInt(env.AGENTMONITOR_MAX_FEED, 200, 1),
