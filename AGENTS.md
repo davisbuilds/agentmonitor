@@ -47,6 +47,7 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - **Dashboard bootstrap hard-depends on `GET /api/events`**: `public/js/app.js` parses stats, events, and sessions together before loading cost/tool sections. If `GET /api/events` returns non-JSON (e.g. 405 HTML), `reloadData()` throws and cost/tool panels stay blank even when `/api/stats/cost` has data.
 - **Codex OTEL drop-out**: if Codex terminal activity is visible but `source=otel` stops updating, verify Codex is exporting OTLP to `127.0.0.1:3141` and not a stale endpoint (e.g. an old `:3142` runtime config).
 - **Provider quotas**: Monitor header uses provider-native snapshots only. Codex from local `codex app-server`; Claude requires the statusline bridge or renders as unavailable rather than estimated.
+- **Every gate reads `src/`; only the built server reads `dist/`**: `pnpm test` (tsx), `pnpm dev` (tsx) and `pnpm lint` all run from source. `amon serve` — how the tool is actually used — loads `dist/`. So a bug in what the build *emits* passes lint, build, and test simultaneously. This shipped stale pricing tables for five months (`cp -r` nesting into `dist/pricing/data/data/`), and an unpriced model bills as **$0 rather than raising**, so the dashboard stayed plausible while under-reporting the top models. `scripts/check-pricing-dist.mjs` guards that one case; the class is wider — any non-TS asset the build copies has this shape. If a bug reproduces for the user but not in tests, check whether they run the built path while you are testing `src/`.
 
 ## Testing
 
@@ -54,6 +55,8 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - **TDD**: red/green for new features and major changes.
 - **E2E**: `pnpm exec playwright test`.
 - **Sanity**: `GET /api/health`.
+- **Never trust a test you haven't watched fail.** Before claiming a test or CI guard covers a bug, reintroduce the bug and confirm it goes red. The failures worth guarding here are the silent ones — wrong costs, two chart series sharing a color, a test reading the real DB — and they all still render a plausible-looking result, so green on fixed code proves nothing on its own. A Top Models color test once passed against the broken implementation because the fixture had 6 models and the palette has 6 colors.
+- **Tests cannot open the install database**: `getDb()` throws under the test runner if the resolved path is `<install-root>/data/agentmonitor.db`. Point `AGENTMONITOR_DB_PATH` at a temp file *before* importing anything that reads `config` — `config.ts` snapshots the env when it is imported, so an early import silently pins the default.
 
 ## Working Agreement
 

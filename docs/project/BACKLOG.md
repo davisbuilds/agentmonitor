@@ -10,6 +10,14 @@ Convention: each item has **What** (the friction), **Why it matters**, and
 optionally **Sketch** (a one-line implementation thought). Status one of:
 `📥 noted` / `🟡 in-progress` / `🗑 dropped`.
 
+**Cite a number, or say it is a guess.** Any causal or performance claim here —
+"X is slow", "Y causes the flake" — carries a measurement, or is labelled
+*hypothesis, unmeasured*. Entries get read back later as established fact and
+turned into work: an unmarked guess about the Analytics fan-out was written here,
+believed on re-read, and nearly bought a whole endpoint before a 30-second `curl`
+showed the endpoints return in 1–4ms. The label is the forcing function that makes
+someone run the cheap probe first.
+
 When an item ships it **leaves this doc** — record it as a concise what/why
 bullet in `ROADMAP.md` (Completed Highlights) instead of keeping a "resolved"
 note here. This file stays future-only.
