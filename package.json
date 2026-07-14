@@ -12,7 +12,7 @@
   "scripts": {
     "cli": "tsx src/cli.ts",
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && cp -r src/pricing/data dist/pricing/data && pnpm run css:build && pnpm run frontend:build",
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && rm -rf dist/pricing/data && cp -r src/pricing/data dist/pricing/data && node scripts/check-pricing-dist.mjs && pnpm run css:build && pnpm run frontend:build",
     "prepack": "pnpm build",
     "start": "node dist/server.js",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts' 'scripts/**/*.ts'",

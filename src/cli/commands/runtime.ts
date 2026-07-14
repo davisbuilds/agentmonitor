@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolveDbPath } from '../../db-path.js';
 import { parseIntegerOption, parseOptionSet, rejectExtraPositionals } from '../args.js';
 import { registerCommand } from '../commands.js';
 import { invalidUsage } from '../errors.js';
@@ -8,8 +9,10 @@ import { effectiveBaseUrl, fetchJson } from '../http.js';
 import { writeHuman, writeJson, writeStdout } from '../output.js';
 import type { CliContext } from '../output.js';
 
+// Deliberately the same resolver the server uses: a local copy of the default
+// would let `amon status` report on a different database than `amon serve` opens.
 function effectiveDbPath(): string {
-  return process.env.AGENTMONITOR_DB_PATH || './data/agentmonitor.db';
+  return resolveDbPath();
 }
 
 function setServeEnv(ctx: CliContext, args: string[]): { noImport: boolean; noWatch: boolean } {
@@ -90,7 +93,9 @@ export function registerRuntimeCommands(): void {
     async handler(ctx, args) {
       rejectExtraPositionals(args, 'amon status [--url <url>]');
       const baseUrl = effectiveBaseUrl(ctx.global.url);
-      const dbPath = path.resolve(process.cwd(), ctx.global.dbPath || effectiveDbPath());
+      // --db-path is already exported into the env by the dispatcher, so the
+      // resolver sees it; a relative one stays cwd-relative, the default is absolute.
+      const dbPath = path.resolve(effectiveDbPath());
       let server: unknown = null;
       let serverReachable: boolean;
       try {
