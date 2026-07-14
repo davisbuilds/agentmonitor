@@ -172,10 +172,13 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
 | `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |
 | `/api/v2/analytics/agents` | GET | Per-agent comparison rows for analytics UI |
+| `/api/v2/usage/overview` | GET | Every Usage panel + coverage from one scan; what the Usage page loads |
+| `/api/v2/usage/facets` | GET | Option lists for the five Usage filter dropdowns |
 | `/api/v2/usage/summary` | GET | Event-derived usage totals, prior-period comparison, and coverage metadata |
 | `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |
 | `/api/v2/usage/projects` | GET | Usage attribution grouped by project |
 | `/api/v2/usage/models` | GET | Usage attribution grouped by model |
+| `/api/v2/usage/models/daily` | GET | Per-day model mix over a gap-filled date axis; backs the Top Models chart |
 | `/api/v2/usage/tiers` | GET | Usage attribution grouped by provider-neutral model tier |
 | `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |

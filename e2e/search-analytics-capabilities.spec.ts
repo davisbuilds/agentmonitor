@@ -160,8 +160,30 @@ test('usage tab does not eagerly request v1 monitor filter options', async ({ pa
   await page.goto(`${baseUrl}/app/#usage`);
 
   await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
-  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/summary')).toBe(true);
+  // The page loads through two v2 calls: rollups via /usage/overview, dropdowns via /usage/facets.
+  // Waiting on both keeps the /api/filter-options assertion below from passing vacuously.
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/overview')).toBe(true);
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/facets')).toBe(true);
   expect(requestedPaths).not.toContain('/api/filter-options');
+});
+
+test('usage tab loads its rollups from /usage/overview, not per-panel endpoints', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#usage`);
+
+  await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/overview')).toBe(true);
+
+  // /usage/overview reuses one scan of the events table for every rollup. The granular endpoints
+  // still exist (the Monitor cost card uses them), so a per-panel fetch could creep back in here
+  // and cost nothing but latency — this pins the Usage page to the batched call.
+  for (const panel of ['summary', 'daily', 'projects', 'models', 'models/daily', 'tiers', 'agents', 'top-sessions', 'coverage']) {
+    expect(requestedPaths).not.toContain(`/api/v2/usage/${panel}`);
+  }
 });
 
 test('monitor filters use the v2 monitor endpoint instead of v1 filter options', async ({ page }) => {

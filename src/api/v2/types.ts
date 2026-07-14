@@ -524,6 +524,34 @@ export interface UsageModelBreakdown {
   session_count: number;
 }
 
+/** One day of the date axis. `models` is empty on days with no usage. */
+export interface UsageModelDailyPoint {
+  date: string;
+  models: UsageModelBreakdown[];
+}
+
+/** Option lists for the five Usage filter dropdowns. */
+export interface UsageFacets {
+  projects: string[];
+  agents: string[];
+  models: string[];
+  providers: string[];
+  tiers: string[];
+}
+
+/** Every Usage-page panel from a single scan. Fields mirror the per-panel endpoints. */
+export interface UsageOverview {
+  summary: UsageSummary;
+  daily: UsageDailyPoint[];
+  projects: UsageProjectBreakdown[];
+  models: UsageModelBreakdown[];
+  models_daily: UsageModelDailyPoint[];
+  tiers: UsageTierBreakdown[];
+  agents: UsageAgentBreakdown[];
+  top_sessions: UsageTopSessionRow[];
+  coverage: UsageCoverage;
+}
+
 export interface UsageTierBreakdown {
   provider: string;
   tier: string;

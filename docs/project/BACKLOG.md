@@ -157,23 +157,16 @@ These are the deferred follow-ups surfaced during and after the build.
   bump on that date. (Sonnet 5's newer tokenizer emits ~30% more tokens; cost
   reflects reported tokens, so no engine change needed.)
 
-#### Pricing tables were never shipped to `dist/` — models added since Feb billed as $0
-✅ fixed 2026-07-13
-- **What**: the build ran `cp -r src/pricing/data dist/pricing/data`. That creates
-  the directory on the first run, but on every run after — the destination now
-  existing — `cp` descends and writes `dist/pricing/data/data/`, leaving the JSON
-  the runtime reads frozen at the first build (2026-02-19). Opus 4.8, Fable 5,
-  Sonnet 5 and the GPT-5.6 tiers all landed in `src/` and none reached `dist/`.
-- **Why it went unnoticed for five months**: every gate reads `src/`. `tsc`
-  passed, `pnpm test` passed (tsx, `src/`), `pnpm dev` was correct (tsx, `src/`).
-  Only the built server — what `amon serve` runs — was wrong, and an unpriced
-  model bills as **$0 rather than raising**, so the dashboard stayed plausible
-  while under-reporting the most-used models entirely.
-- **Fix**: `rm -rf` the destination before copying, plus
-  `scripts/check-pricing-dist.mjs` in `pnpm build`, which fails if the shipped
-  tables drift from source. Verified by reintroducing the `cp -r` condition.
-- **Follow-up**: events written while the build was stale carry `cost_usd = 0`.
-  `amon costs recalc` repairs them (it skips models it cannot price rather than
-  zeroing them).
-- **Generalize**: any non-TS asset the build copies into `dist/` has this shape,
-  and no gate would catch it. Worth auditing other `cp` steps.
+#### Analytics Overview fans out ~9 parallel requests on mount
+📥 noted
+- **What**: `AnalyticsPage` fires summary, activity, projects, tools, skills,
+  hour-of-week, top-sessions, velocity, and agents as independent fetches on
+  mount — the same N-request fan-out the Usage page had before `/usage/overview`
+  batched it into one scan.
+- **Why it matters**: `better-sqlite3` is synchronous, so these serialize on
+  Node's single thread rather than overlapping. It already shows up as a CI
+  flake: `search-analytics-capabilities.spec.ts:119` waits on the coverage
+  banner, which cannot render until `coverage.summary` resolves, and on a loaded
+  runner that exceeds Playwright's 5s `expect` timeout. It passes on retry, so it
+  reads as flaky rather than slow. An `/api/v2/analytics/overview` mirroring
+  `/usage/overview` would likely fix the flake and the tab's load time together.

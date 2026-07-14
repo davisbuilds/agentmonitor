@@ -51,6 +51,9 @@ import type {
   UsageDailyPoint,
   UsageProjectBreakdown,
   UsageModelBreakdown,
+  UsageModelDailyPoint,
+  UsageOverview,
+  UsageFacets,
   UsageTierBreakdown,
   UsageAgentBreakdown,
   UsageTopSessionRow,
@@ -2376,11 +2379,6 @@ interface UsageRow {
   timestamp: string | null;
 }
 
-interface UsageEventRow extends UsageRow {
-  source: string;
-  has_usage: boolean;
-}
-
 interface UsageAccumulator {
   cost_usd: number;
   input_tokens: number;
@@ -2624,40 +2622,6 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
   return rows.filter(row => usageClassificationMatches(row.model, params));
 }
 
-function selectUsageEventRows(params: UsageParams = {}): UsageEventRow[] {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
-  const timestampExpr = usageTimestampExpr('e');
-  const metricsCondition = usageMetricsCondition('e');
-  const eventWhere = [
-    ...filter.conditions,
-    excludeOverlappingCodexOtelUsageCondition('e'),
-  ].join(' AND ');
-
-  const rows = db.prepare(`
-    SELECT
-      e.session_id as session_id,
-      ${usageProjectExpr('e')} as project,
-      ${usageAgentExpr('e')} as agent_type,
-      ${usageModelExpr('e')} as model,
-      COALESCE(e.cost_usd, 0) as cost_usd,
-      COALESCE(e.tokens_in, 0) as tokens_in,
-      COALESCE(e.tokens_out, 0) as tokens_out,
-      COALESCE(e.cache_read_tokens, 0) as cache_read_tokens,
-      COALESCE(e.cache_write_tokens, 0) as cache_write_tokens,
-      ${timestampExpr} as timestamp,
-      COALESCE(NULLIF(e.source, ''), 'api') as source,
-      CASE WHEN ${metricsCondition} THEN 1 ELSE 0 END as has_usage
-    FROM events e
-    ${eventWhere ? `WHERE ${eventWhere}` : ''}
-    ORDER BY ${timestampExpr} ASC, e.id ASC
-  `).all(...filter.values) as Array<Omit<UsageEventRow, 'has_usage'> & { has_usage: number }>;
-
-  return rows
-    .filter(row => usageClassificationMatches(row.model, params))
-    .map(row => ({ ...row, has_usage: row.has_usage === 1 }));
-}
-
 function estimateCacheSavings(row: UsageRow): number {
   // Use the same tier-selected rates `calculate()` billed this event at, so a
   // long-context Gemini request (prompt > 200K) reports savings against its
@@ -2691,19 +2655,77 @@ function resolveUsageDateBounds(
   return { from, to };
 }
 
+interface UsageCoverageGroup {
+  source: string;
+  model: string;
+  session_id: string;
+  event_count: number;
+  usage_event_count: number;
+  cost_usd: number;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+}
+
+/**
+ * Grouped in SQL rather than materialized row-by-row: coverage only ever reports
+ * counts and sums, so pulling every in-range event into JS (~133k on a 30-day
+ * range) to add them up was the single most expensive read on the Usage page.
+ *
+ * Grouping by (source, model, session_id) — not just source — is what keeps the
+ * JS-side classification filter honest: provider/tier params resolve through the
+ * pricing registry, which SQL cannot see, so the model has to survive into JS.
+ * Carrying session_id keeps COUNT(DISTINCT session) exact across models within a
+ * source. The grouped set is a few hundred rows at most.
+ */
+function selectUsageCoverageGroups(params: UsageParams = {}): UsageCoverageGroup[] {
+  const db = getDb();
+  const filter = buildUsageFilterState(params, 'e');
+  const hasUsage = usageMetricsCondition('e');
+  const where = [
+    ...filter.conditions,
+    excludeOverlappingCodexOtelUsageCondition('e'),
+  ].join(' AND ');
+
+  const rows = db.prepare(`
+    SELECT
+      COALESCE(NULLIF(e.source, ''), 'api') as source,
+      ${usageModelExpr('e')} as model,
+      e.session_id as session_id,
+      COUNT(*) as event_count,
+      SUM(CASE WHEN ${hasUsage} THEN 1 ELSE 0 END) as usage_event_count,
+      SUM(CASE WHEN ${hasUsage} THEN COALESCE(e.cost_usd, 0) ELSE 0 END) as cost_usd,
+      SUM(CASE WHEN ${hasUsage} THEN COALESCE(e.tokens_in, 0) ELSE 0 END) as tokens_in,
+      SUM(CASE WHEN ${hasUsage} THEN COALESCE(e.tokens_out, 0) ELSE 0 END) as tokens_out,
+      SUM(CASE WHEN ${hasUsage} THEN COALESCE(e.cache_read_tokens, 0) ELSE 0 END) as cache_read_tokens,
+      SUM(CASE WHEN ${hasUsage} THEN COALESCE(e.cache_write_tokens, 0) ELSE 0 END) as cache_write_tokens
+    FROM events e
+    ${where ? `WHERE ${where}` : ''}
+    GROUP BY source, model, e.session_id
+  `).all(...filter.values) as UsageCoverageGroup[];
+
+  return rows.filter(row => usageClassificationMatches(row.model, params));
+}
+
 export function getUsageCoverage(params: UsageParams = {}): UsageCoverage {
-  const rows = selectUsageEventRows(params);
+  const groups = selectUsageCoverageGroups(params);
+
   const matchingSessions = new Set<string>();
   const usageSessions = new Set<string>();
-  const sources = new Map<string, UsageSourceBreakdown>();
+  const sources = new Map<string, UsageSourceBreakdown & { usageSessionIds: Set<string> }>();
 
-  for (const row of rows) {
-    matchingSessions.add(row.session_id);
-    if (row.has_usage) usageSessions.add(row.session_id);
+  let matchingEvents = 0;
+  let usageEvents = 0;
 
-    const source = row.source || 'api';
-    const existing = sources.get(source) ?? {
-      source,
+  for (const group of groups) {
+    matchingEvents += group.event_count;
+    usageEvents += group.usage_event_count;
+    matchingSessions.add(group.session_id);
+    if (group.usage_event_count > 0) usageSessions.add(group.session_id);
+
+    const existing = sources.get(group.source) ?? {
+      source: group.source,
       event_count: 0,
       usage_event_count: 0,
       session_count: 0,
@@ -2712,33 +2734,32 @@ export function getUsageCoverage(params: UsageParams = {}): UsageCoverage {
       output_tokens: 0,
       cache_read_tokens: 0,
       cache_write_tokens: 0,
+      usageSessionIds: new Set<string>(),
     };
-    existing.event_count += 1;
-    if (row.has_usage) {
-      existing.usage_event_count += 1;
-      existing.cost_usd += row.cost_usd;
-      existing.input_tokens += row.tokens_in;
-      existing.output_tokens += row.tokens_out;
-      existing.cache_read_tokens += row.cache_read_tokens;
-      existing.cache_write_tokens += row.cache_write_tokens;
-    }
-    sources.set(source, existing);
+    existing.event_count += group.event_count;
+    existing.usage_event_count += group.usage_event_count;
+    existing.cost_usd += group.cost_usd;
+    existing.input_tokens += group.tokens_in;
+    existing.output_tokens += group.tokens_out;
+    existing.cache_read_tokens += group.cache_read_tokens;
+    existing.cache_write_tokens += group.cache_write_tokens;
+    if (group.usage_event_count > 0) existing.usageSessionIds.add(group.session_id);
+    sources.set(group.source, existing);
   }
 
   const sourceBreakdown = [...sources.values()]
-    .map(row => ({
+    .map(({ usageSessionIds, ...row }) => ({
       ...row,
-      session_count: new Set(rows.filter(event => event.source === row.source && event.has_usage).map(event => event.session_id)).size,
+      session_count: usageSessionIds.size,
       cost_usd: roundCost(row.cost_usd),
     }))
     .sort((a, b) => a.source.localeCompare(b.source));
-  const usageEvents = rows.filter(row => row.has_usage).length;
 
   return {
     metric_scope: 'event_usage',
-    matching_events: rows.length,
+    matching_events: matchingEvents,
     usage_events: usageEvents,
-    missing_usage_events: Math.max(0, rows.length - usageEvents),
+    missing_usage_events: Math.max(0, matchingEvents - usageEvents),
     matching_sessions: matchingSessions.size,
     usage_sessions: usageSessions.size,
     sources_with_usage: sourceBreakdown.filter(row => row.usage_event_count > 0).length,
@@ -2747,8 +2768,13 @@ export function getUsageCoverage(params: UsageParams = {}): UsageCoverage {
   };
 }
 
-export function getUsageSummary(params: UsageParams = {}): UsageSummary {
-  const usageRows = selectUsageRows(params);
+// The `usageRows` parameter lets getUsageOverview() feed every rollup from one
+// scan instead of each re-running an identical query. Callers that want a single
+// panel keep passing params alone and pay for their own scan, as before.
+export function getUsageSummary(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageSummary {
   const row = usageRowsToSummaryValues(usageRows);
   const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
   const safeActiveDays = Math.max(row.active_days, 1);
@@ -2813,9 +2839,12 @@ export function getUsageSummary(params: UsageParams = {}): UsageSummary {
   };
 }
 
-export function getUsageDaily(params: UsageParams = {}): UsageDailyPoint[] {
+export function getUsageDaily(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageDailyPoint[] {
   const days = new Map<string, UsageAccumulator>();
-  for (const row of selectUsageRows(params)) {
+  for (const row of usageRows) {
     if (!row.timestamp) continue;
     const date = row.timestamp.slice(0, 10);
     const acc = days.get(date) ?? createUsageAccumulator();
@@ -2852,9 +2881,12 @@ export function getUsageDaily(params: UsageParams = {}): UsageDailyPoint[] {
   });
 }
 
-export function getUsageProjects(params: UsageParams = {}): UsageProjectBreakdown[] {
+export function getUsageProjects(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageProjectBreakdown[] {
   const projects = new Map<string, UsageAccumulator>();
-  for (const row of selectUsageRows(params)) {
+  for (const row of usageRows) {
     const acc = projects.get(row.project) ?? createUsageAccumulator();
     addUsageRow(acc, row, classifyModelForUsage(row.model));
     projects.set(row.project, acc);
@@ -2868,37 +2900,85 @@ export function getUsageProjects(params: UsageParams = {}): UsageProjectBreakdow
     .sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.project.localeCompare(b.project));
 }
 
-export function getUsageModels(params: UsageParams = {}): UsageModelBreakdown[] {
+function toUsageModelBreakdown(model: string, acc: UsageAccumulator): UsageModelBreakdown {
+  const classification = classifyModelForUsage(model);
+  return {
+    model,
+    ...usageAccumulatorToMetrics(acc),
+    canonical_model: classification.canonical_model,
+    provider: classification.provider,
+    family: classification.family,
+    tier: classification.tier,
+    known: classification.known,
+    deprecated: classification.deprecated,
+    pricing_status: classification.pricing_status,
+  };
+}
+
+function compareUsageModelBreakdown(a: UsageModelBreakdown, b: UsageModelBreakdown): number {
+  return b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.model.localeCompare(b.model);
+}
+
+export function getUsageModels(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageModelBreakdown[] {
   const models = new Map<string, UsageAccumulator>();
-  for (const usageRow of selectUsageRows(params)) {
+  for (const usageRow of usageRows) {
     const acc = models.get(usageRow.model) ?? createUsageAccumulator();
     addUsageRow(acc, usageRow, classifyModelForUsage(usageRow.model));
     models.set(usageRow.model, acc);
   }
 
-  return [...models.entries()].map(([model, acc]) => {
-    const row = {
-      model,
-      ...usageAccumulatorToMetrics(acc),
-    };
-    const classification = classifyModelForUsage(row.model);
-    return {
-      ...row,
-      canonical_model: classification.canonical_model,
-      provider: classification.provider,
-      family: classification.family,
-      tier: classification.tier,
-      known: classification.known,
-      deprecated: classification.deprecated,
-      pricing_status: classification.pricing_status,
-    };
-  }).sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.model.localeCompare(b.model));
+  return [...models.entries()]
+    .map(([model, acc]) => toUsageModelBreakdown(model, acc))
+    .sort(compareUsageModelBreakdown);
 }
 
-export function getUsageTiers(params: UsageParams = {}): UsageTierBreakdown[] {
+export function getUsageModelsDaily(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageModelDailyPoint[] {
+  const days = new Map<string, Map<string, UsageAccumulator>>();
+  for (const row of usageRows) {
+    if (!row.timestamp) continue;
+    const date = row.timestamp.slice(0, 10);
+    const models = days.get(date) ?? new Map<string, UsageAccumulator>();
+    const acc = models.get(row.model) ?? createUsageAccumulator();
+    addUsageRow(acc, row, classifyModelForUsage(row.model));
+    models.set(row.model, acc);
+    days.set(date, models);
+  }
+
+  const points = [...days.entries()]
+    .map(([date, models]) => ({
+      date,
+      models: [...models.entries()]
+        .map(([model, acc]) => toUsageModelBreakdown(model, acc))
+        .sort(compareUsageModelBreakdown),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const bounds = resolveUsageDateBounds(
+    params,
+    points[0]?.date ?? null,
+    points.length > 0 ? points[points.length - 1]?.date ?? null : null,
+  );
+  if (!bounds.from || !bounds.to) {
+    return points;
+  }
+
+  const byDate = new Map(points.map(point => [point.date, point]));
+  return enumerateDateRange(bounds.from, bounds.to).map(date => byDate.get(date) ?? { date, models: [] });
+}
+
+export function getUsageTiers(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageTierBreakdown[] {
   const tiers = new Map<string, { provider: string; tier: string; acc: UsageAccumulator }>();
 
-  for (const row of selectUsageRows(params)) {
+  for (const row of usageRows) {
     const classification = classifyModelForUsage(row.model);
     const provider = classification.provider;
     const tier = classification.tier;
@@ -2922,9 +3002,12 @@ export function getUsageTiers(params: UsageParams = {}): UsageTierBreakdown[] {
     ));
 }
 
-export function getUsageAgents(params: UsageParams = {}): UsageAgentBreakdown[] {
+export function getUsageAgents(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageAgentBreakdown[] {
   const agents = new Map<string, UsageAccumulator>();
-  for (const row of selectUsageRows(params)) {
+  for (const row of usageRows) {
     const acc = agents.get(row.agent_type) ?? createUsageAccumulator();
     addUsageRow(acc, row, classifyModelForUsage(row.model));
     agents.set(row.agent_type, acc);
@@ -2938,7 +3021,10 @@ export function getUsageAgents(params: UsageParams = {}): UsageAgentBreakdown[] 
     .sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.agent.localeCompare(b.agent));
 }
 
-export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRow[] {
+export function getUsageTopSessions(
+  params: UsageParams = {},
+  usageRows: UsageRow[] = selectUsageRows(params),
+): UsageTopSessionRow[] {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
   const filter = buildUsageFilterState(params, 'e');
@@ -2963,7 +3049,7 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
     unknown_model_events: number;
   }>();
 
-  for (const usageRow of selectUsageRows(params)) {
+  for (const usageRow of usageRows) {
     const classification = classifyModelForUsage(usageRow.model);
     const entry = sessions.get(usageRow.session_id) ?? {
       id: usageRow.session_id,
@@ -3092,6 +3178,92 @@ export function getUsageTopSessions(params: UsageParams = {}): UsageTopSessionRo
         browsing_session_available: Boolean(browsing),
       };
     });
+}
+
+/**
+ * Options for the five Usage filter dropdowns.
+ *
+ * These were five separate calls to the full rollup endpoints (projects/agents/
+ * models/tiers x2) — each scanning every usage row and pricing-classifying it —
+ * purely to read off a list of distinct values. The distinct (project, agent,
+ * model) tuples number in the low hundreds even across a year, so one DISTINCT
+ * query answers all five.
+ *
+ * Each list omits its own filter (selecting a model must not collapse the model
+ * dropdown to that one model) but honors the other four, which is why the facets
+ * are derived per-key rather than shared. Provider and tier are pure functions of
+ * the model via the pricing registry, so they need no extra query.
+ */
+export function getUsageFacets(params: UsageParams = {}): UsageFacets {
+  const db = getDb();
+  // Only dates constrain the SQL here; project/agent are applied per-facet in JS
+  // below, alongside the classification filters SQL cannot express.
+  const filter = buildUsageFilterState({ date_from: params.date_from, date_to: params.date_to }, 'e');
+  const where = [
+    ...filter.conditions,
+    usageMetricsCondition('e'),
+    excludeOverlappingCodexOtelUsageCondition('e'),
+  ].join(' AND ');
+
+  const rows = db.prepare(`
+    SELECT DISTINCT
+      ${usageProjectExpr('e')} as project,
+      ${usageAgentExpr('e')} as agent,
+      ${usageModelExpr('e')} as model
+    FROM events e
+    WHERE ${where}
+  `).all(...filter.values) as Array<{ project: string; agent: string; model: string }>;
+
+  const collect = (
+    exclude: 'project' | 'agent' | 'model' | 'provider' | 'tier',
+    pick: (row: { project: string; agent: string; model: string }) => string,
+  ): string[] => {
+    const scoped: UsageParams = { ...params };
+    delete scoped[exclude];
+    delete scoped.date_from;
+    delete scoped.date_to;
+
+    const values = new Set<string>();
+    for (const row of rows) {
+      if (scoped.project && row.project !== scoped.project) continue;
+      if (scoped.agent && row.agent !== scoped.agent) continue;
+      if (!usageClassificationMatches(row.model, scoped)) continue;
+      const value = pick(row);
+      if (value) values.add(value);
+    }
+    return [...values].sort((a, b) => a.localeCompare(b));
+  };
+
+  return {
+    projects: collect('project', row => row.project),
+    agents: collect('agent', row => row.agent),
+    models: collect('model', row => row.model),
+    providers: collect('provider', row => classifyModelForUsage(row.model).provider),
+    tiers: collect('tier', row => classifyModelForUsage(row.model).tier),
+  };
+}
+
+/**
+ * Every panel on the Usage page is a different rollup of the same rows, and each
+ * response carried an identical `coverage` block. Fetching them as eight requests
+ * meant eight scans plus eight identical coverage computations — and because
+ * better-sqlite3 is synchronous, the "parallel" requests just serialized. One
+ * scan, one coverage, all rollups.
+ */
+export function getUsageOverview(params: UsageParams = {}): UsageOverview {
+  const usageRows = selectUsageRows(params);
+
+  return {
+    summary: getUsageSummary(params, usageRows),
+    daily: getUsageDaily(params, usageRows),
+    projects: getUsageProjects(params, usageRows),
+    models: getUsageModels(params, usageRows),
+    models_daily: getUsageModelsDaily(params, usageRows),
+    tiers: getUsageTiers(params, usageRows),
+    agents: getUsageAgents(params, usageRows),
+    top_sessions: getUsageTopSessions(params, usageRows),
+    coverage: getUsageCoverage(params),
+  };
 }
 
 // --- Insights ---

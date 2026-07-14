@@ -377,6 +377,19 @@ export function initSchema(): void {
   //   falls back to seeking idx_events_agent_type (agent_type=?), matching every
   //   Codex row, turning the full-history stats aggregate into an O(n^2) scan
   //   (measured ~95s per run on ~440k events; ~0.2s with this index).
+  //
+  // - idx_events_usage_ts is an EXPRESSION index, and the expression must stay
+  //   character-identical to usageTimestampExpr()/the date predicate in
+  //   v2-queries.ts or SQLite silently ignores it and reverts to a full scan.
+  //   Every usage read filters on datetime(COALESCE(client_timestamp,
+  //   created_at)); wrapping the column in datetime() is not sloppiness but
+  //   load-bearing normalization, because the two columns store different
+  //   formats (client_timestamp '2026-02-19T02:07:56.664Z' vs created_at
+  //   '2026-02-20 04:21:39'). That means the predicate cannot be made sargable
+  //   by comparing raw strings — 'T' (0x54) and ' ' (0x20) sort differently, so
+  //   a string compare would silently mis-bucket same-day rows. Indexing the
+  //   normalized expression keeps the semantics and gets the seek:
+  //   SCAN (497k rows) -> SEARCH USING INDEX.
   db.exec(`
     DROP INDEX IF EXISTS idx_events_session_id;
     CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
@@ -386,6 +399,8 @@ export function initSchema(): void {
       ON events(created_at, model, tokens_in, tokens_out, cost_usd);
     CREATE INDEX IF NOT EXISTS idx_events_session_reconcile
       ON events(session_id, agent_type, source);
+    CREATE INDEX IF NOT EXISTS idx_events_usage_ts
+      ON events(datetime(COALESCE(client_timestamp, created_at)));
   `);
 
   // --- V2 tables: session browser, messages, tool calls, FTS ---

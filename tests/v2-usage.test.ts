@@ -396,6 +396,71 @@ describe('GET /api/v2/usage/projects and /models', () => {
   });
 });
 
+describe('GET /api/v2/usage/models/daily', () => {
+  test('returns per-day model slices over a gap-filled date axis', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/models/daily?date_from=2026-04-01&date_to=2026-04-04`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: Array<{
+        date: string;
+        models: Array<{ model: string; cost_usd: number; usage_events: number; session_count: number; pricing_status: string }>;
+      }>;
+    };
+
+    assert.deepEqual(
+      body.data.map(point => point.date),
+      ['2026-04-01', '2026-04-02', '2026-04-03', '2026-04-04'],
+    );
+
+    assert.deepEqual(
+      body.data.map(point => point.models.map(slice => [slice.model, slice.cost_usd, slice.usage_events])),
+      [
+        [['claude-sonnet-4-5-20250929', 0.02, 2]],
+        [['gpt-5.4', 0.03, 1]],
+        // Highest-cost model first within the day.
+        [['gpt-5.4', 0.02, 1], ['unknown-expensive-model', 0.015, 1]],
+        [['claude-3-opus-20240229', 0.005, 1]],
+      ],
+    );
+  });
+
+  test('gap-fills days with no usage as empty model lists', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/models/daily?date_from=2026-04-01&date_to=2026-04-03&model=claude-sonnet-4-5-20250929`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as { data: Array<{ date: string; models: Array<{ model: string }> }> };
+
+    assert.deepEqual(
+      body.data.map(point => [point.date, point.models.map(slice => slice.model)]),
+      [
+        ['2026-04-01', ['claude-sonnet-4-5-20250929']],
+        ['2026-04-02', []],
+        ['2026-04-03', []],
+      ],
+    );
+  });
+
+  test('carries model classification onto each slice', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/models/daily?date_from=2026-04-03&date_to=2026-04-03`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      data: Array<{
+        models: Array<{ model: string; provider: string; tier: string; known: boolean; pricing_status: string }>;
+      }>;
+    };
+
+    assert.deepEqual(
+      body.data[0]?.models.map(slice => [slice.model, slice.provider, slice.tier, slice.known, slice.pricing_status]),
+      [
+        ['gpt-5.4', 'openai', 'standard', true, 'known'],
+        ['unknown-expensive-model', 'unknown', 'unknown', false, 'unknown'],
+      ],
+    );
+  });
+});
+
 describe('GET /api/v2/usage/tiers', () => {
   test('returns provider-neutral tier rollups with unknown model counts', async () => {
     const res = await fetch(`${baseUrl}/api/v2/usage/tiers`);
@@ -679,5 +744,93 @@ describe('Codex usage source reconciliation', () => {
       db.prepare("DELETE FROM sessions WHERE id IN ('usage-reconcile-overlap', 'usage-reconcile-live-only')").run();
       db.prepare("DELETE FROM agents WHERE id = 'codex-default' AND NOT EXISTS (SELECT 1 FROM sessions WHERE agent_id = 'codex-default')").run();
     }
+  });
+});
+
+describe('GET /api/v2/usage/overview', () => {
+  // The overview exists to collapse the Usage page's 8 requests (and its 8
+  // redundant coverage computations) into one scan. It is only safe to swap the
+  // page onto it if it is indistinguishable from the endpoints it replaces, so
+  // assert equivalence against each of them rather than re-asserting values.
+  const query = 'date_from=2026-04-01&date_to=2026-04-04';
+
+  test('matches every per-panel endpoint it replaces', async () => {
+    const [overviewRes, ...panelRes] = await Promise.all([
+      fetch(`${baseUrl}/api/v2/usage/overview?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/summary?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/daily?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/projects?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/models?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/models/daily?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/tiers?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/agents?${query}`),
+      fetch(`${baseUrl}/api/v2/usage/top-sessions?${query}`),
+    ]);
+
+    assert.equal(overviewRes.status, 200);
+    for (const res of panelRes) assert.equal(res.status, 200);
+
+    const overview = await overviewRes.json() as Record<string, unknown>;
+    const [summary, daily, projects, models, modelsDaily, tiers, agents, topSessions] =
+      await Promise.all(panelRes.map(res => res.json() as Promise<{ data: unknown; coverage?: unknown }>));
+
+    assert.deepEqual(overview.summary, summary.data ?? summary);
+    assert.deepEqual(overview.daily, daily.data);
+    assert.deepEqual(overview.projects, projects.data);
+    assert.deepEqual(overview.models, models.data);
+    assert.deepEqual(overview.models_daily, modelsDaily.data);
+    assert.deepEqual(overview.tiers, tiers.data);
+    assert.deepEqual(overview.agents, agents.data);
+    assert.deepEqual(overview.top_sessions, topSessions.data);
+
+    // Coverage is identical on every panel today; the overview carries it once.
+    assert.deepEqual(overview.coverage, daily.coverage);
+  });
+
+  test('honors the usage filters', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/overview?date_from=2026-04-01&date_to=2026-04-04&model=gpt-5.4`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      models: Array<{ model: string }>;
+      summary: { total_cost_usd: number };
+    };
+
+    assert.deepEqual(body.models.map(row => row.model), ['gpt-5.4']);
+    assert.equal(body.summary.total_cost_usd, 0.05);
+  });
+});
+
+describe('GET /api/v2/usage/facets', () => {
+  test('returns the five dropdown option lists', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/facets?date_from=2026-04-01&date_to=2026-04-04`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as {
+      projects: string[]; agents: string[]; models: string[]; providers: string[]; tiers: string[];
+    };
+
+    assert.deepEqual(body.projects, ['alpha', 'beta', 'gamma', 'legacy']);
+    assert.deepEqual(body.agents, ['claude_code', 'codex']);
+    assert.deepEqual(body.models, [
+      'claude-3-opus-20240229',
+      'claude-sonnet-4-5-20250929',
+      'gpt-5.4',
+      'unknown-expensive-model',
+    ]);
+    assert.deepEqual(body.providers, ['anthropic', 'openai', 'unknown']);
+    assert.deepEqual(body.tiers, ['opus', 'sonnet', 'standard', 'unknown']);
+  });
+
+  test('a facet does not narrow its own option list, but other filters do', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/usage/facets?date_from=2026-04-01&date_to=2026-04-04&model=gpt-5.4`);
+    assert.equal(res.status, 200);
+
+    const body = await res.json() as { models: string[]; projects: string[] };
+
+    // The model dropdown must still offer every model, or you could never switch away.
+    assert.equal(body.models.length, 4);
+    // Other facets narrow to what the selected model actually ran on.
+    assert.deepEqual(body.projects, ['alpha', 'beta']);
   });
 });
