@@ -3,6 +3,7 @@ import path from 'node:path';
 import test, { describe } from 'node:test';
 
 import { createConfig } from '../src/config.js';
+import { assertTestDbIsIsolated } from '../src/db/connection.js';
 import { resolveDbPath } from '../src/db-path.js';
 
 describe('config: default database path', () => {
@@ -39,5 +40,27 @@ describe('config: default database path', () => {
   test('the server and `amon status` agree on an explicit path', () => {
     const env = { AGENTMONITOR_DB_PATH: '/tmp/custom.db' };
     assert.equal(resolveDbPath(env), createConfig(env, '/anywhere').dbPath);
+  });
+});
+
+describe('db: tests cannot open the install database', () => {
+  const underTest = { NODE_TEST_CONTEXT: 'child-v8' } satisfies NodeJS.ProcessEnv;
+  const installDb = resolveDbPath({});
+
+  test('opening the install database from a test throws', () => {
+    assert.throws(
+      () => assertTestDbIsIsolated(installDb, underTest),
+      /Refusing to open the install database/,
+    );
+  });
+
+  test('an isolated temp database is allowed', () => {
+    assert.doesNotThrow(() => assertTestDbIsIsolated('/tmp/scratch/agentmonitor.db', underTest));
+  });
+
+  // The guard is a test-runner interlock, not a runtime restriction: the server's
+  // whole job is to open this file.
+  test('the server may open the install database', () => {
+    assert.doesNotThrow(() => assertTestDbIsIsolated(installDb, {}));
   });
 });
