@@ -1,71 +1,29 @@
 <script lang="ts">
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatNumber } from '../../format';
-  import type { UsageModelBreakdown, UsageModelDailyPoint } from '../../api/client';
-
-  type Metric = 'cost' | 'tokens';
-
-  const TOP_N = 5;
-
-  // Validated against the dark chart surface (#101419): lightness band, chroma
-  // floor, adjacent-pair CVD separation (worst ΔE 15.7), and 3:1 contrast all pass.
-  // Order is the CVD-safety mechanism, not cosmetic — do not reshuffle without
-  // re-validating. Green and red are omitted deliberately: they read as the
-  // reserved ok/danger status tokens.
-  const SERIES_COLORS = ['#3987e5', '#199e70', '#c98500', '#d55181', '#9085e9', '#d95926'];
-  const OTHER_COLOR = '#82878c';
-  const OTHER_LABEL = 'Other';
+  import type { UsageModelDailyPoint } from '../../api/client';
+  import {
+    assignModelColors,
+    measure,
+    rankModels,
+    OTHER_COLOR,
+    OTHER_LABEL,
+    type UsageMetric as Metric,
+  } from './model-colors';
 
   let metric = $state<Metric>('cost');
-
-  function measure(slice: UsageModelBreakdown, m: Metric): number {
-    return m === 'cost' ? slice.cost_usd : slice.input_tokens + slice.output_tokens;
-  }
 
   function formatMetric(value: number, m: Metric): string {
     return m === 'cost' ? formatCost(value) : `${formatNumber(value)} tokens`;
   }
 
-  /**
-   * Hues are keyed to the range's models ranked by cost — deliberately NOT by the
-   * selected metric and NOT by the top-N set. Both would make a series' color
-   * depend on its rank, so toggling to Tokens would repaint the survivors. Ranking
-   * a fixed universe hands each model its own slot, so a hue means one model for
-   * as long as the range holds, and two series can never share one.
-   */
-  const colorByModel = $derived.by(() => {
-    const costTotals = new Map<string, number>();
-    for (const point of usage.modelsDaily) {
-      for (const slice of point.models) {
-        costTotals.set(slice.model, (costTotals.get(slice.model) ?? 0) + slice.cost_usd);
-      }
-    }
+  const topModels = $derived(rankModels(usage.modelsDaily, metric));
+  const colorByModel = $derived(assignModelColors(usage.modelsDaily));
 
-    const ranked = [...costTotals.entries()]
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, SERIES_COLORS.length);
-
-    return new Map(ranked.map(([model], index) => [model, SERIES_COLORS[index]]));
-  });
-
+  /** Gray is reserved for the aggregated Other series; every named model has a hue. */
   function colorFor(model: string): string {
     return colorByModel.get(model) ?? OTHER_COLOR;
   }
-
-  /** Models ranked over the whole range, so stack order is stable across days. */
-  const topModels = $derived.by(() => {
-    const totals = new Map<string, number>();
-    for (const point of usage.modelsDaily) {
-      for (const slice of point.models) {
-        totals.set(slice.model, (totals.get(slice.model) ?? 0) + measure(slice, metric));
-      }
-    }
-    return [...totals.entries()]
-      .filter(([, total]) => total > 0)
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, TOP_N)
-      .map(([model]) => model);
-  });
 
   const hasOther = $derived.by(() =>
     usage.modelsDaily.some(point =>
