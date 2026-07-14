@@ -149,24 +149,47 @@ These are the deferred follow-ups surfaced during and after the build.
   tier; do not infer it from the model ID.
 
 #### Claude Sonnet 5 intro pricing expires 2026-08-31
-📥 noted
+📥 noted — now guarded by CI, no longer depends on anyone remembering
 - **What**: `claude.json` encodes intro rates ($2/$10, cacheRead $0.20, 5m write
   $2.50). Standard pricing ($3/$15, cacheRead $0.30, 5m write $3.75) takes effect
   2026-09-01.
 - **Why it matters**: the engine has no date-awareness, so this is a manual data
   bump on that date. (Sonnet 5's newer tokenizer emits ~30% more tokens; cost
   reflects reported tokens, so no engine change needed.)
+- **Guard**: `tests/pricing-expiry.test.ts` fails the build from 2026-09-01 if the
+  registry still returns intro rates, with the replacement values in the message.
+  A silent 33% under-count is exactly the dist-pricing failure mode — wrong money,
+  no error — so it gets a deadline instead of a memory.
+- **Real fix (still open)**: date-aware rates, so a model can carry a rate schedule
+  rather than one set of numbers forever. The guard buys time; it is not the fix.
 
-#### Analytics Overview fans out ~9 parallel requests on mount
+#### Analytics Overview fan-out is NOT worth batching (measured 2026-07-14)
+🗑 dropped
+- **What**: `AnalyticsPage` fires ~9 independent fetches on mount, which looked
+  like the N-request fan-out `/usage/overview` had just fixed on the Usage page.
+- **Why it was dropped**: measured before building. Every analytics endpoint
+  returns in **1–4ms** against the 122K-row dev DB (~14ms of SQL for the whole
+  page), so there is no serialization cost to reclaim. The Usage win did not come
+  from batching per se — it came from *redundant* work: coverage was recomputed 8
+  times, each materializing 133K rows. Analytics has no equivalent redundancy, so
+  an `/api/v2/analytics/overview` would add a large second read surface to save
+  single-digit milliseconds.
+- **Also corrects an earlier claim**: this fan-out was blamed for the CI flake in
+  `search-analytics-capabilities.spec.ts:119`. It is not the cause. That spec's
+  seeded DB holds two sessions, so its queries are effectively instant; the flake
+  is cold-start timing in the Playwright harness, not query time. Diagnose it
+  there — see below — rather than by adding an endpoint.
+
+#### CI flake: analytics capability banner times out on a cold runner
 📥 noted
-- **What**: `AnalyticsPage` fires summary, activity, projects, tools, skills,
-  hour-of-week, top-sessions, velocity, and agents as independent fetches on
-  mount — the same N-request fan-out the Usage page had before `/usage/overview`
-  batched it into one scan.
-- **Why it matters**: `better-sqlite3` is synchronous, so these serialize on
-  Node's single thread rather than overlapping. It already shows up as a CI
-  flake: `search-analytics-capabilities.spec.ts:119` waits on the coverage
-  banner, which cannot render until `coverage.summary` resolves, and on a loaded
-  runner that exceeds Playwright's 5s `expect` timeout. It passes on retry, so it
-  reads as flaky rather than slow. An `/api/v2/analytics/overview` mirroring
-  `/usage/overview` would likely fix the flake and the tab's load time together.
+- **What**: `search-analytics-capabilities.spec.ts:119` intermittently exceeds
+  Playwright's 5s `expect` timeout waiting for the coverage banner. It passes on
+  retry, so CI stays green and it reads as flaky rather than broken.
+- **Why it matters**: it burns retries and trains us to ignore a red E2E. Ruled
+  out so far: it is not query time (the seeded DB has two sessions), and it is not
+  a text race between `coverage.summary` and `coverage.tools` (both seeded sessions
+  are `tool_analytics: full`, so `excluded_sessions` is always 0 and the banner
+  cannot flip branches). Most likely first-navigation cost — it is the first test
+  in the file — but that is unconfirmed.
+- **Sketch**: instrument the wait before changing the timeout. Raising it would
+  hide the cause, and the point is to learn whether first paint is genuinely slow.
