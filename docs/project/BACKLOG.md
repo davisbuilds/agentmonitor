@@ -157,15 +157,16 @@ These are the deferred follow-ups surfaced during and after the build.
   bump on that date. (Sonnet 5's newer tokenizer emits ~30% more tokens; cost
   reflects reported tokens, so no engine change needed.)
 
-#### `claude-opus-4-8` is unpriced in the registry
+#### Analytics Overview fans out ~9 parallel requests on mount
 📥 noted
-- **What**: the pricing registry classifies `claude-opus-4-8` as
-  `known: false` / `pricing_status: "unknown"`, even though it is the
-  highest-spend model in the local DB. Surfaced by the Top Models chart, where it
-  is the dominant series while the Usage header reports "Pricing Coverage 8 ·
-  31.1K unknown events".
-- **Why it matters**: totals still reconcile, because usage rows carry their own
-  `cost_usd` from ingestion rather than a registry lookup — so this is a
-  classification gap, not a wrong number. But tier rollups bucket the model under
-  `unknown`, and any future recompute-from-tokens path would silently price it at
-  zero. Add the Opus 4.8 tiers to `claude.json` the way the GPT-5.6 tiers were.
+- **What**: `AnalyticsPage` fires summary, activity, projects, tools, skills,
+  hour-of-week, top-sessions, velocity, and agents as independent fetches on
+  mount — the same N-request fan-out the Usage page had before `/usage/overview`
+  batched it into one scan.
+- **Why it matters**: `better-sqlite3` is synchronous, so these serialize on
+  Node's single thread rather than overlapping. It already shows up as a CI
+  flake: `search-analytics-capabilities.spec.ts:119` waits on the coverage
+  banner, which cannot render until `coverage.summary` resolves, and on a loaded
+  runner that exceeds Playwright's 5s `expect` timeout. It passes on retry, so it
+  reads as flaky rather than slow. An `/api/v2/analytics/overview` mirroring
+  `/usage/overview` would likely fix the flake and the tab's load time together.
