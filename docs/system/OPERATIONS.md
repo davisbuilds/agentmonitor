@@ -103,7 +103,7 @@ All optional with sensible defaults:
 |----------|---------|----------|
 | `AGENTMONITOR_PORT` | `3141` | HTTP listen port |
 | `AGENTMONITOR_HOST` | `127.0.0.1` | HTTP bind address |
-| `AGENTMONITOR_DB_PATH` | `./data/agentmonitor.db` | SQLite database path |
+| `AGENTMONITOR_DB_PATH` | `<install-root>/data/agentmonitor.db` | SQLite database path. The default follows the install, not the shell, so `amon serve` reads the same DB from any directory. A value set here is used as given — a relative one is resolved against the working directory. |
 | `AGENTMONITOR_MAX_PAYLOAD_KB` | `10` | Max metadata payload size |
 | `AGENTMONITOR_SESSION_TIMEOUT` | `5` | Minutes before session goes idle |
 | `AGENTMONITOR_MAX_FEED` | `200` | Max events in feed |

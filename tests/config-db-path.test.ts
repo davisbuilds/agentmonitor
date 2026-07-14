@@ -3,6 +3,7 @@ import path from 'node:path';
 import test, { describe } from 'node:test';
 
 import { createConfig } from '../src/config.js';
+import { resolveDbPath } from '../src/db-path.js';
 
 describe('config: default database path', () => {
   test('does not depend on the working directory', () => {
@@ -26,5 +27,17 @@ describe('config: default database path', () => {
   test('an explicit AGENTMONITOR_DB_PATH still wins', () => {
     const { dbPath } = createConfig({ AGENTMONITOR_DB_PATH: '/tmp/custom.db' }, '/anywhere');
     assert.equal(dbPath, '/tmp/custom.db');
+  });
+
+  // `amon status` reports on the DB it resolves itself. When it kept its own copy
+  // of the default, a server started from a non-repo cwd was healthy and reading
+  // the install DB while status pointed at a cwd-relative file that did not exist.
+  test('the server and `amon status` resolve the same default', () => {
+    assert.equal(resolveDbPath({}), createConfig({}, '/anywhere').dbPath);
+  });
+
+  test('the server and `amon status` agree on an explicit path', () => {
+    const env = { AGENTMONITOR_DB_PATH: '/tmp/custom.db' };
+    assert.equal(resolveDbPath(env), createConfig(env, '/anywhere').dbPath);
   });
 });
