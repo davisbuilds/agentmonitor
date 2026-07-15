@@ -34,8 +34,10 @@ maintainers but too detailed for the root README.
 - Skill analytics recognize both legacy Codex `exec_command` and newer `exec`
   reads of `SKILL.md`, excluding shell-variable and glob paths that do not name
   a concrete skill. Date-only timeline labels preserve the API's UTC calendar
-  bucket instead of shifting to the browser's previous local day. If
-  session-browser rows are missing while
+  bucket instead of shifting to the browser's previous local day. Startup emits
+  a read-only warning if a currently discoverable Claude/Codex transcript is
+  cached as parsed but has no session-browser projection. If session-browser
+  rows are missing while
   `watched_files` remains populated, `amon sync sessions --source all --force`
   is the recovery path; event import alone cannot restore tool-call history.
 - The TypeScript/Node runtime on `127.0.0.1:3141` is the single backend. The Rust alternate runtime was removed on 2026-06-29; see [POSITIONING.md](POSITIONING.md).

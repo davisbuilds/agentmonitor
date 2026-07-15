@@ -48,6 +48,10 @@ interface WatchedFileState {
   status: SyncResult;
 }
 
+interface MissingProjectionRow {
+  file_path: string;
+}
+
 function getWatchedFileState(db: Database.Database, filePath: string): WatchedFileState | undefined {
   return db.prepare(
     'SELECT file_hash, status FROM watched_files WHERE file_path = ?'
@@ -70,6 +74,33 @@ function upsertWatchedFile(
       status = excluded.status,
       last_parsed_at = datetime('now')
   `).run(filePath, fileHash, fileMtime, status);
+}
+
+/**
+ * Return currently discoverable transcript files whose cache says parsing
+ * succeeded but whose browser projection is absent. Stale cache rows for files
+ * no longer on disk and intentionally skipped files are excluded by design.
+ */
+export function findMissingSessionProjections(
+  db: Database.Database,
+  currentFilePaths: Iterable<string>,
+): string[] {
+  const currentFiles = new Set(currentFilePaths);
+  if (currentFiles.size === 0) return [];
+
+  const missingRows = db.prepare(`
+    SELECT wf.file_path
+    FROM watched_files wf
+    WHERE wf.status = 'parsed'
+      AND NOT EXISTS (
+        SELECT 1 FROM browsing_sessions bs WHERE bs.file_path = wf.file_path
+      )
+  `).all() as MissingProjectionRow[];
+
+  return missingRows
+    .map(row => row.file_path)
+    .filter(filePath => currentFiles.has(filePath))
+    .sort();
 }
 
 export function syncSessionFileDetailed(

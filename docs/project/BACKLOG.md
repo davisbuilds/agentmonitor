@@ -39,20 +39,6 @@ note here. This file stays future-only.
 - **Sketch**: acquire an install-local PID/lock before starting timers, and make a
   listen failure tear down every watcher, interval, and DB handle before exit.
 
-### Data resilience
-
-#### Detect session-browser tables that disagree with `watched_files`
-📥 noted
-- **What**: after the browser tables were cleared, 806 `watched_files` rows made
-  normal sync skip unchanged JSONLs; the live DB had only 279 browsing sessions
-  and 1,199 tool calls. A forced parse of 369 surviving files restored 640
-  browsing sessions and 49,883 tool calls.
-- **Why it matters**: event import self-recovered enough data to keep the product
-  plausible, while transcript/tool/skill analytics remained silently sparse.
-- **Sketch**: add a startup/doctor invariant comparing parsed-file coverage with
-  browser-table coverage, report the mismatch loudly, and offer an explicit
-  force-sync repair rather than reparsing automatically.
-
 ### Skill trigger health (2026-07-09)
 
 Source: `docs/plans/2026-07-09-skill-trigger-health-plan.md` (phase 1 shipped).

@@ -201,7 +201,11 @@ Operational notes:
 - `watched_files` is independent of the session-browser tables. If
   `browsing_sessions`, `messages`, or `tool_calls` are restored, cleared, or
   otherwise fall behind while the hashes remain, ordinary startup considers
-  unchanged JSONLs current. Back up the database, then run
+  unchanged JSONLs current. Startup emits a read-only warning when a currently
+  discoverable Claude/Codex transcript is cached as `parsed` but has no matching
+  `browsing_sessions.file_path`; stale files, excluded files, errors, and
+  intentionally skipped transcripts do not trigger it. Back up the database,
+  then run
   `pnpm cli -- sync sessions --source all --force` to rebuild those derived rows.
 - Antigravity has no `sync sessions` CLI subcommand: `import --source antigravity` writes events/usage/cost, and the running watcher projects the session-browser rows (`browsing_sessions` + `messages` + `session_items`, `integration_mode=antigravity-sqlite`, `fidelity=summary`) on startup and every periodic resync. There is no live file-tailing yet — new conversations appear on the next resync. Antigravity DBs are discovered recursively under `~/.gemini/antigravity-cli/conversations/**/*.db`.
 - If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm cli -- costs recalc`; that backfills stale imports after pricing-data updates or importer fixes.
