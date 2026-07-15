@@ -6,12 +6,15 @@ Product-surface reference for AgentMonitor.
 
 - Canonical product surface: Svelte app at `/app/`.
 - Canonical application contract: `/api/v2/*`.
-- Transitional compatibility surface: legacy dashboard at `/`.
+- Transitional compatibility surface: legacy dashboard at direct loopback `/`;
+  the Portless root redirects to `/app/`.
 - Local operator CLI: `amon`, with `agentmonitor` as an equivalent executable alias.
 
 ## Operator CLI
 
-- Runtime commands cover server startup, health checks, status reporting, and opening the canonical app.
+- Runtime commands cover Portless-backed server startup at
+  `https://agentmonitor.localhost`, direct-only startup, health checks, status
+  reporting, and opening the canonical app.
 - Maintenance commands cover historical import, session-browser sync, cost recalculation, and the opt-in trace-quality reclaim (`pnpm reclaim:trace-quality`).
 - Read commands cover sessions, pinned messages, live views, usage, analytics, and trace-quality reports.
 - Hook helpers print Codex OTEL configuration and wrap the Claude Code hook installer.

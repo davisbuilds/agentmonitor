@@ -28,6 +28,16 @@ note here. This file stays future-only.
 
 ### Runtime CLI
 
+#### `amon serve --no-browser` is accepted but has no effect
+📥 noted
+- **What**: the serve parser accepts `--no-browser`, but neither direct nor
+  Portless-backed startup opens a browser, so the flag currently changes no
+  observable behavior.
+- **Why it matters**: the flag implies an auto-open default that does not exist,
+  which makes the runtime CLI contract misleading.
+- **Sketch**: either implement browser opening after health readiness and honor
+  the opt-out, or remove the flag in a deliberate compatibility pass.
+
 #### Enforce one runtime/database holder per install
 📥 noted
 - **What**: recovery found two Node processes holding the install DB; one was an

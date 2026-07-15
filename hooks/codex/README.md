@@ -25,7 +25,9 @@ endpoint = "http://127.0.0.1:3141/api/otel/v1/metrics"
 protocol = "json"
 ```
 
-Start AgentMonitor (`pnpm dev`), then use Codex as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
+Start AgentMonitor with `amon serve`, then use Codex as normal. View events at
+`https://agentmonitor.localhost`; Codex continues exporting OTEL directly to
+`http://127.0.0.1:3141`.
 
 ## What Gets Captured
 

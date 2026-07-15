@@ -68,6 +68,42 @@ async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   ]);
 }
 
+function writeFakePortless(dir: string): string {
+  const scriptPath = path.join(dir, 'fake-portless.mjs');
+  fs.writeFileSync(scriptPath, `
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+
+const args = process.argv.slice(2);
+const markerPath = process.env.AGENTMONITOR_PORTLESS_MARKER;
+if (!markerPath) throw new Error('Missing AGENTMONITOR_PORTLESS_MARKER');
+fs.writeFileSync(markerPath, JSON.stringify(args));
+
+const commandIndex = args.indexOf(process.execPath);
+if (commandIndex === -1) throw new Error('Missing child Node command');
+const appPortIndex = args.indexOf('--app-port');
+const appPort = appPortIndex === -1 ? '' : args[appPortIndex + 1];
+const child = spawn(args[commandIndex], args.slice(commandIndex + 1), {
+  env: {
+    ...process.env,
+    PORT: appPort,
+    PORTLESS_URL: 'https://agentmonitor.localhost',
+  },
+  stdio: 'inherit',
+});
+
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => child.kill(signal));
+}
+
+child.on('exit', (code, signal) => {
+  if (signal) process.kill(process.pid, signal);
+  else process.exit(code ?? 1);
+});
+`);
+  return scriptPath;
+}
+
 test('serve starts a runtime that health and status can inspect', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-runtime-'));
   const dbPath = path.join(tempDir, 'runtime.db');
@@ -77,6 +113,7 @@ test('serve starts a runtime that health and status can inspect', async () => {
     ...process.env,
     AGENTMONITOR_DB_PATH: dbPath,
     AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+    AGENTMONITOR_PORTLESS_CLI: path.join(tempDir, 'missing-portless-cli.js'),
     PATH: '/usr/bin:/bin',
   };
   const child = spawn(process.execPath, [
@@ -84,6 +121,7 @@ test('serve starts a runtime that health and status can inspect', async () => {
     'tsx',
     'src/cli.ts',
     'serve',
+    '--no-portless',
     '--host',
     '127.0.0.1',
     '--port',
@@ -127,6 +165,59 @@ test('serve starts a runtime that health and status can inspect', async () => {
 
   assert.match(stdout, new RegExp(`AgentMonitor listening on http://127\\.0\\.0\\.1:${port}`));
   assert.equal(stderr, '');
+});
+
+test('serve launches the runtime through Portless by default', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-portless-runtime-'));
+  const dbPath = path.join(tempDir, 'runtime.db');
+  const markerPath = path.join(tempDir, 'portless-args.json');
+  const portlessCli = writeFakePortless(tempDir);
+  const port = await allocatePort();
+  const baseUrl = `http://127.0.0.1:${port}`;
+  const env = {
+    ...process.env,
+    AGENTMONITOR_DB_PATH: dbPath,
+    AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+    AGENTMONITOR_PORTLESS_CLI: portlessCli,
+    AGENTMONITOR_PORTLESS_MARKER: markerPath,
+  };
+  const child = spawn(process.execPath, [
+    '--import',
+    'tsx',
+    'src/cli.ts',
+    'serve',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(port),
+    '--no-import',
+    '--no-watch',
+  ], {
+    cwd: process.cwd(),
+    env,
+    stdio: 'pipe',
+  });
+  let stdout = '';
+  child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+
+  try {
+    await waitForHealth(baseUrl, child);
+    assert.equal(fs.existsSync(markerPath), true, 'Portless wrapper was not invoked');
+    const portlessArgs = JSON.parse(fs.readFileSync(markerPath, 'utf8')) as string[];
+    assert.deepEqual(portlessArgs.slice(0, 4), [
+      '--name',
+      'agentmonitor',
+      '--app-port',
+      String(port),
+    ]);
+    assert.equal(portlessArgs.includes('--no-portless'), true);
+  } finally {
+    await stopChild(child);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+
+  assert.match(stdout, /Dashboard: https:\/\/agentmonitor\.localhost\/app\//);
+  assert.equal(child.exitCode, 0, 'Portless-backed serve should shut down cleanly');
 });
 
 test('health exits 3 when the server is unavailable', () => {

@@ -10,6 +10,8 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - Transport: HTTP ingestion + Server-Sent Events for live updates.
 - Session ingestion: chokidar file-watcher discovers `~/.claude/projects/**/*.jsonl` automatically.
 - Default bind: `127.0.0.1:3141`.
+- Operator origin: `amon serve` exposes `https://agentmonitor.localhost` through
+  pinned Portless while hooks and OTEL keep using the direct bind.
 
 ## Documentation Map
 
@@ -33,6 +35,10 @@ pnpm install
 pnpm dev          # terminal 1: server in watch mode
 pnpm frontend:dev # terminal 2: Svelte at :5173 with API proxy
 pnpm css:watch    # terminal 3: shared Tailwind output (optional)
+
+pnpm build
+pnpm link --global
+amon serve        # compiled app at https://agentmonitor.localhost
 ```
 
 Full command catalog (build, test, parity, import, reparse, seed, bench) is in `docs/system/OPERATIONS.md`.
@@ -42,6 +48,8 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - Keep TypeScript ESM import style consistent (existing `.js` extension pattern in TS imports).
 - Keep v1 SQL in `src/db/queries.ts`, v2 SQL in `src/db/v2-queries.ts`. Keep v2 route handlers in `src/api/v2/router.ts`.
 - Prefer extending the Svelte `/app/` product path and v2 contracts over adding new behavior to the legacy `/` dashboard.
+- Keep Portless at the human-facing `amon serve` boundary. Do not route hook or
+  OTEL ingestion away from the fixed `127.0.0.1:3141` backend.
 - If API response shape changes, update `README.md` in the same change.
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start; `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
 - **Dashboard bootstrap hard-depends on `GET /api/events`**: `public/js/app.js` parses stats, events, and sessions together before loading cost/tool sections. If `GET /api/events` returns non-JSON (e.g. 405 HTML), `reloadData()` throws and cost/tool panels stay blank even when `/api/stats/cost` has data.

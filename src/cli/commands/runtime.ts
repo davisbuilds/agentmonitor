@@ -7,6 +7,7 @@ import { registerCommand } from '../commands.js';
 import { invalidUsage } from '../errors.js';
 import { effectiveBaseUrl, fetchJson } from '../http.js';
 import { writeHuman, writeJson, writeStdout } from '../output.js';
+import { runPortlessServe } from '../portless.js';
 import type { CliContext } from '../output.js';
 
 // Deliberately the same resolver the server uses: a local copy of the default
@@ -15,27 +16,39 @@ function effectiveDbPath(): string {
   return resolveDbPath();
 }
 
-function setServeEnv(ctx: CliContext, args: string[]): { noImport: boolean; noWatch: boolean } {
+function setServeEnv(ctx: CliContext, args: string[]): {
+  noImport: boolean;
+  noPortless: boolean;
+  noWatch: boolean;
+  port: number;
+} {
   const parsed = parseOptionSet(
     args,
     new Set(['--host', '--port']),
-    new Set(['--no-browser', '--no-import', '--no-watch']),
+    new Set(['--no-browser', '--no-import', '--no-portless', '--no-watch']),
   );
-  rejectExtraPositionals(parsed.positionals, 'amon serve [--host <host>] [--port <port>]');
+  rejectExtraPositionals(parsed.positionals, 'amon serve [--host <host>] [--port <port>] [--no-portless]');
   const host = parsed.values.get('--host');
   const port = parsed.values.get('--port');
   if (host) process.env.AGENTMONITOR_HOST = host;
+  let effectivePort = 3141;
   if (port) {
     const numericPort = parseIntegerOption(port, '--port');
     if (!numericPort || numericPort < 1 || numericPort > 65535) {
       throw invalidUsage(`Invalid --port: ${port}`);
     }
+    effectivePort = numericPort;
     process.env.AGENTMONITOR_PORT = String(numericPort);
+  } else {
+    const envPort = Number.parseInt(process.env.AGENTMONITOR_PORT ?? '', 10);
+    if (Number.isFinite(envPort) && envPort >= 1) effectivePort = envPort;
   }
   if (ctx.global.dbPath) process.env.AGENTMONITOR_DB_PATH = ctx.global.dbPath;
   return {
     noImport: parsed.flags.has('--no-import'),
+    noPortless: parsed.flags.has('--no-portless'),
     noWatch: parsed.flags.has('--no-watch'),
+    port: effectivePort,
   };
 }
 
@@ -54,11 +67,15 @@ export function registerRuntimeCommands(): void {
   registerCommand({
     name: 'serve',
     group: 'Runtime Commands',
-    summary: 'Start the local AgentMonitor server',
-    usage: 'serve [--host <host>] [--port <port>] [--no-import] [--no-watch]',
-    examples: ['serve', 'serve --port 3999 --no-import --no-watch'],
+    summary: 'Start AgentMonitor at https://agentmonitor.localhost',
+    usage: 'serve [--host <host>] [--port <port>] [--no-import] [--no-watch] [--no-portless]',
+    examples: ['serve', 'serve --no-portless', 'serve --port 3999 --no-import --no-watch'],
     async handler(ctx, args) {
       const options = setServeEnv(ctx, args);
+      if (!options.noPortless) {
+        await runPortlessServe(options.port, args);
+        return;
+      }
       const { installRuntimeSignalHandlers, startAgentMonitorRuntime } = await import('../../runtime.js');
       const runtime = startAgentMonitorRuntime(options);
       installRuntimeSignalHandlers(runtime);

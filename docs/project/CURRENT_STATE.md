@@ -30,6 +30,10 @@ maintainers but too detailed for the root README.
 ## Runtime Direction
 
 - The local operator CLI is the preferred command surface for maintenance and reporting. `amon` is the short executable name; `agentmonitor` is an equivalent alias.
+- `amon serve` is the single built-product launcher: pinned Portless provides
+  `https://agentmonitor.localhost`, whose root redirects to `/app/`, while the
+  backend remains directly available on `127.0.0.1:3141` for ingestion and API
+  clients. `--no-portless` preserves direct-only startup.
 - Existing package scripts for import, session reparse, and cost recalculation remain as compatibility wrappers around the CLI. Trace-quality was reframed (2026-06) to a lean on-demand view; the old warehouse is dropped via the opt-in `pnpm reclaim:trace-quality`.
 - Skill analytics recognize both legacy Codex `exec_command` and newer `exec`
   reads of `SKILL.md`, excluding shell-variable and glob paths that do not name

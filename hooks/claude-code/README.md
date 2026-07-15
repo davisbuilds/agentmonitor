@@ -20,7 +20,9 @@ This registers hooks in `~/.claude/settings.json` that fire on:
 | `PreToolUse` (Bash only) | safety check | sync (can block destructive commands) |
 | `UserPromptSubmit` | `user_prompt` | async (non-blocking) |
 
-Start AgentMonitor (`pnpm dev`), then use Claude Code as normal. Events appear in the dashboard at `http://127.0.0.1:3141`.
+Start AgentMonitor with `amon serve`, then use Claude Code as normal. View events
+at `https://agentmonitor.localhost`; hooks continue posting directly to
+`http://127.0.0.1:3141`.
 
 The underlying installer remains available as `./hooks/claude-code/install.sh`
 for manual use or environments that are not running through pnpm.

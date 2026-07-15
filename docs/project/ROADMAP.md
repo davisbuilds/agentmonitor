@@ -6,6 +6,14 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Stable Portless operator origin (2026-07-14) — *What:* `amon serve` remains the
+  single built-product launcher and now wraps the fixed `127.0.0.1:3141` runtime
+  with pinned, package-local Portless at `https://agentmonitor.localhost`; the
+  named root redirects to canonical `/app/`, Ctrl-C removes the route, and
+  `--no-portless` preserves direct startup. Hook and OTEL ingestion remain on
+  loopback rather than inheriting browser HTTPS concerns. *Why:* give the local
+  console one stable human-facing origin without destabilizing its machine-facing
+  ingestion contract.
 - Session-analytics recovery + Codex `exec` compatibility (2026-07-14) —
   *What:* after an isolated-test import-order bug cleared the real DB's event and
   session-browser tables, a frozen SQLite snapshot and `.recover` rehearsal
@@ -19,9 +27,9 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   file is cached as parsed but its browser projection is absent. Red/green
   regressions guard the analytics and warning paths; the test-runner install-DB
   interlock plus a destructive-fixture handle assertion prevent recurrence.
-  *Why:* ordinary import rebuilt enough usage history for the dashboard to look
-  plausible, while the independent `watched_files` cache silently skipped the
-  deleted transcript-derived rows.
+   *Why:* ordinary import rebuilt enough usage history for the dashboard to look
+   plausible, while the independent `watched_files` cache silently skipped the
+   deleted transcript-derived rows.
 - Pricing tables reach `dist/`, and the cwd stops deciding which DB you read (2026-07-13) — *What:* the build ran `cp -r src/pricing/data dist/pricing/data`, which creates the directory on the first run but on every run after descends into it and writes `dist/pricing/data/data/`, freezing the JSON the runtime reads at the first build (2026-02-19). Opus 4.8, Fable 5, Sonnet 5 and the GPT-5.6 tiers all landed in `src/` and none reached `dist/`. Fixed by clearing the destination first, plus `scripts/check-pricing-dist.mjs` in `pnpm build`. Separately, the default DB path was cwd-relative, so `amon serve` from outside the repo silently created a second database and auto-imported into it; it now follows the install, resolved through one shared resolver so `amon status` cannot disagree with the server. *Why it hid for five months:* every gate reads `src/` — `tsc`, `pnpm test` and `pnpm dev` all run from source, and only `amon serve` loads `dist/`. An unpriced model bills as $0 rather than raising, so the dashboard stayed plausible while under-reporting the most-used models entirely. Events written while the build was stale carry `cost_usd = 0`; `amon costs recalc` repairs them. Any non-TS asset the build copies into `dist/` has this shape and no gate would catch it.
 - GPT-5.6 pricing + Codex attribution backport (2026-07-12) — *What:* added standard API pricing for `gpt-5.6-sol`, `gpt-5.6-terra`, and `gpt-5.6-luna`, including the unsuffixed Sol alias, cache-write charges, and full-request long-context tiers above 272K; usage classification exposes the durable Sol/Terra/Luna tiers. Codex historical import now follows each JSONL `turn_context` model rather than stamping current `config.toml`, with a one-shot hash invalidation and narrowly scoped duplicate refresh that corrects model/cost plus trace summaries while leaving legacy config-only logs untouched. *Why:* the pricing table alone would have mislabeled real Terra and Luna sessions as whichever model happened to be configured during import.
 - Skill trigger health, phase 1 (2026-07-09) — *What:* `/api/v2/analytics/skills/health` reports per-skill invocations, last-invoked, never-fired flags, an interrupt-based misfire rate (with `misfireEligible` denominator), and the skill version installed at each invocation. Computed at query time over existing `tool_calls`/`messages`/`events` rows (historical backfill, no reingest) with a TTL-throttled catalog-snapshot refresh; installed catalogs configurable via `AGENTMONITOR_SKILL_CATALOG_DIRS`. *Why:* the measurement plane for a skill feedback loop — version-over-version comparison of skill edits. Verified on the live 1.1GB DB (79 rows over 639 invocations). Dojo-side consumer + signal widening are phase 2 (see BACKLOG). Spec/plan: `docs/specs/2026-07-07-skill-trigger-health-spec.md`, `docs/plans/2026-07-09-skill-trigger-health-plan.md`.
