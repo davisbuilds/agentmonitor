@@ -24,6 +24,9 @@ importers:
       pg:
         specifier: ^8.22.0
         version: 8.22.0
+      portless:
+        specifier: 0.15.2
+        version: 0.15.2
       uuid:
         specifier: ^14.0.1
         version: 14.0.1
@@ -1451,6 +1454,12 @@ packages:
   playwright@1.61.1:
     resolution: {integrity: sha512-DWnY5o3YbLWK4GovuAVwpqL+1VwGNdUGrRr++8j8PtQQzvAVZUIMjKQ90fY689sEJZJBbZVw1rXaOKSTitkzPQ==}
     engines: {node: '>=18'}
+    hasBin: true
+
+  portless@0.15.2:
+    resolution: {integrity: sha512-jyTXeRUfYgVerW/YMP1bexm79da0+55K0HgHQukHEJMmpp9AsXKVLywF4F+NnutSO1yV91AX2IK7DWAH+i2pKg==}
+    engines: {node: '>=24'}
+    os: [darwin, linux, win32]
     hasBin: true
 
   postcss@8.5.16:
@@ -2961,6 +2970,8 @@ snapshots:
       playwright-core: 1.61.1
     optionalDependencies:
       fsevents: 2.3.2
+
+  portless@0.15.2: {}
 
   postcss@8.5.16:
     dependencies:

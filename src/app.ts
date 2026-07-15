@@ -35,6 +35,17 @@ export function createApp(options: CreateAppOptions = {}): Express {
     next(err);
   });
 
+  // Portless owns the friendly human-facing origin. Preserve the legacy `/`
+  // surface on direct loopback access while making the named origin land on
+  // the canonical Svelte app.
+  app.get('/', (req: Request, res: Response, next: NextFunction) => {
+    if (req.hostname.toLowerCase() === 'agentmonitor.localhost') {
+      res.redirect(302, '/app/');
+      return;
+    }
+    next();
+  });
+
   if (options.serveStatic !== false) {
     app.use(express.static(publicDir));
   }

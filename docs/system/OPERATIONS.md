@@ -11,7 +11,26 @@ Related docs:
 - Claude Code integration details: [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md)
 - Codex integration details: [../../hooks/codex/README.md](../../hooks/codex/README.md)
 
-## Local Development
+## Operator Startup
+
+```bash
+pnpm build
+pnpm link --global
+amon serve
+```
+
+`amon serve` is the single launcher for the built product. It runs Express on
+the fixed `127.0.0.1:3141` backend and uses the pinned, package-local Portless
+CLI to expose `https://agentmonitor.localhost`. The named root redirects to
+`/app/`; direct `http://127.0.0.1:3141/` retains the legacy compatibility
+dashboard. Hooks, OTEL exporters, and direct API clients stay on `:3141`.
+
+Portless starts its HTTPS proxy automatically and may request local-CA trust on
+first use. `amon serve --no-portless` bypasses the named HTTPS origin and starts
+only the direct backend. Ctrl-C shuts down the runtime and removes its Portless
+route.
+
+## Source Development
 
 ```bash
 pnpm install
@@ -20,7 +39,8 @@ pnpm frontend:dev # terminal 2: Svelte app at :5173 with API proxy
 pnpm css:watch    # optional terminal 3: shared Tailwind output for legacy / and built /app/
 ```
 
-Open `http://127.0.0.1:3141` or `http://127.0.0.1:5173/app/`.
+Open `http://127.0.0.1:3141/app/` or `http://127.0.0.1:5173/app/` in this
+source/HMR workflow.
 
 ## Useful Commands
 
@@ -56,7 +76,8 @@ without installing the package:
 
 ```bash
 pnpm cli -- --help
-pnpm cli -- serve --port 3141
+pnpm cli -- serve
+pnpm cli -- serve --no-portless
 pnpm cli -- health --url http://127.0.0.1:3141
 pnpm cli -- status --json
 pnpm cli -- open
@@ -89,6 +110,7 @@ node --import tsx --test tests/cli-e2e.test.ts
 ./dist/cli.js --help
 amon --help          # after installing or linking the package
 agentmonitor --help  # equivalent alias after installing or linking the package
+amon serve           # https://agentmonitor.localhost, backed by 127.0.0.1:3141
 ```
 
 The legacy package scripts remain compatibility wrappers. Prefer the CLI for new
@@ -285,8 +307,9 @@ Do not commit: `data/`, `*.db`, generated CSS output in `public/css/output.css`.
 
 ## Manual Live Verification
 
-1. Start the server with `pnpm dev` and the Svelte app with `pnpm frontend:dev`.
-2. Open `/app/` and confirm the `Live` tab appears when `AGENTMONITOR_ENABLE_LIVE_TAB=true`.
+1. Run `pnpm build`, then start the built runtime with `amon serve`.
+2. Open `https://agentmonitor.localhost` and confirm it redirects to `/app/` and
+   the `Live` tab appears when `AGENTMONITOR_ENABLE_LIVE_TAB=true`.
 3. Confirm the live settings banner matches your env for prompt, reasoning, and tool-argument capture.
 4. Start a Claude session and verify new items appear without a full page reload.
 5. If prompts or reasoning are disabled, confirm the inspector shows redacted payloads rather than raw content.

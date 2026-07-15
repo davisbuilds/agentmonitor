@@ -25,8 +25,9 @@ export function startAgentMonitorRuntime(options: RuntimeOptions = {}): RuntimeH
 
   const app = createApp();
   const server = app.listen(config.port, config.host, () => {
+    const publicUrl = process.env.PORTLESS_URL?.replace(/\/+$/, '');
     console.log(`AgentMonitor listening on http://${config.host}:${config.port}`);
-    console.log(`Dashboard: http://localhost:${config.port}/app/`);
+    console.log(`Dashboard: ${publicUrl ? `${publicUrl}/app/` : `http://localhost:${config.port}/app/`}`);
   });
 
   startStatsBroadcast();

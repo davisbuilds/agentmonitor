@@ -27,10 +27,11 @@ Do this, in order:
 3. Verify the build works WITHOUT any secrets: run `pnpm build` then `pnpm test`.
    Both should pass offline. If either fails, show me the error and stop.
 
-4. Report back: confirm install + build + tests passed, note that AI insights are
-   the only thing needing a key, and give me the launch commands: `pnpm dev`
-   (terminal 1) and `pnpm frontend:dev` (terminal 2), then open
-   http://127.0.0.1:5173/app/.
+4. Link the built CLI with `pnpm link --global`, then report back: confirm install
+   + build + tests passed, note that AI insights are the only thing needing a
+   key, and give me the launch command `amon serve`. Open
+   https://agentmonitor.localhost; the first run may ask to trust Portless's
+   local HTTPS certificate.
 
 Don't commit anything.
 ```
@@ -60,7 +61,21 @@ Requirements:
 ```bash
 nvm use
 pnpm install
+pnpm build
+pnpm link --global
+amon serve
+```
 
+Open `https://agentmonitor.localhost`. Portless terminates local HTTPS and sends
+traffic to the fixed AgentMonitor server on `127.0.0.1:3141`; the bare named URL
+redirects to the canonical `/app/` surface. Hooks, OTEL exporters, and direct API
+clients continue to use `http://127.0.0.1:3141`. Portless is pinned as an
+AgentMonitor dependency, so no global Portless install is required. Use
+`amon serve --no-portless` for direct-only startup.
+
+For active frontend development with Vite HMR, keep the two-process workflow:
+
+```bash
 # terminal 1: Express server on :3141
 pnpm dev
 
@@ -72,7 +87,7 @@ Open:
 
 - `http://127.0.0.1:5173/app/` for Vite-powered frontend development.
 - `http://127.0.0.1:3141/app/` for the Express-served canonical app.
-- `http://127.0.0.1:3141/` only for legacy dashboard compatibility work.
+- `http://127.0.0.1:3141/` only for direct legacy dashboard compatibility work.
 
 If you want the Express-served `/app/` to refresh as you edit frontend code, run
 `pnpm frontend:watch`. Run `pnpm css:watch` only when touching shared Tailwind
@@ -86,6 +101,8 @@ pnpm frontend:dev                # Svelte/Vite dev server
 pnpm css:watch                   # Shared Tailwind output watcher
 pnpm build                       # TS build + CSS + frontend build
 pnpm start                       # Run compiled server
+amon serve                       # Compiled runtime at https://agentmonitor.localhost
+amon serve --no-portless         # Direct runtime on http://127.0.0.1:3141
 pnpm cli -- --help               # CLI help during local development
 pnpm cli -- health               # Check the local server
 pnpm cli -- sessions list --json # Query session history from SQLite
@@ -167,7 +184,8 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 ## Current Boundaries
 
 - Canonical product surface is Svelte `/app/` plus `/api/v2/*`.
-- Legacy `/` remains for compatibility and should not define new behavior.
+- Legacy `/` remains on direct loopback access for compatibility; the Portless
+  root redirects to `/app/`.
 - TypeScript on `127.0.0.1:3141` is the runtime.
 - Codex `otel-only` live data is summary-oriented; transcript-grade parity needs richer local-state integration.
 - AI insight generation is optional and the only path that needs provider API keys.

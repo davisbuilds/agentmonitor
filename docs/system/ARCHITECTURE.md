@@ -50,7 +50,11 @@ V1 routes remain important for ingest, SSE, provider quota, and legacy dashboard
 server listen, watcher startup, periodic imports, provider-quota polling, stats
 broadcasting, and shutdown wiring. `src/server.ts` is a thin executable wrapper
 around that shared runtime. `amon serve` uses the same runtime module so CLI and
-`pnpm start` do not diverge.
+`pnpm start` do not diverge. By default, `amon serve` launches that runtime
+through the pinned Portless CLI with a fixed upstream port of `3141`, producing
+`https://agentmonitor.localhost`; `--no-portless` starts the shared runtime
+directly. Portless owns only the human-facing origin. Hook, OTEL, CLI HTTP, and
+parity clients continue to use the loopback backend directly.
 
 `src/cli.ts` is the executable entrypoint for both `amon` and `agentmonitor`.
 One-shot commands avoid importing `src/server.ts`; they either call shared
