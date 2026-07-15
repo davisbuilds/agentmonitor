@@ -958,10 +958,11 @@ function extractCodexCommandFromEventMetadata(metadataJson: string | null): stri
 function extractCodexSkillNamesFromCommand(command: string): string[] {
   const skillNames = new Set<string>();
   const pattern = /(?:^|[\s'"])(~?\/[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
+  const literalSkillName = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
   for (const match of command.matchAll(pattern)) {
     const skillName = match[2]?.trim();
-    if (skillName) skillNames.add(skillName);
+    if (skillName && literalSkillName.test(skillName)) skillNames.add(skillName);
   }
 
   return [...skillNames];

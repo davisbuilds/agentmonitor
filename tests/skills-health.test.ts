@@ -147,6 +147,19 @@ before(async () => {
     'otel',
   );
 
+  insertSession('s-codex-shell-variable', 'codex', 'codex-jsonl');
+  const shellVariableMsg = insertMessage(
+    's-codex-shell-variable', 0, 'assistant', '[]', '2026-07-05T10:00:00Z',
+  );
+  insertToolCall(
+    shellVariableMsg,
+    's-codex-shell-variable',
+    'exec_command',
+    JSON.stringify({
+      cmd: 'for skill in diagnose; do cat "/skills/$skill/SKILL.md"; done; cat /skills/*/SKILL.md',
+    }),
+  );
+
   const { createApp } = await import('../src/app.js');
   const app = createApp({ serveStatic: false });
   server = app.listen(0);
@@ -200,6 +213,15 @@ test('counts newer Codex exec skill reads from JSONL and live events', () => {
   const byDate = new Map(daily.map(day => [day.date, day]));
   assert.deepEqual(byDate.get('2026-07-03')?.skills, [{ skill_name: 'diagnose', count: 1 }]);
   assert.deepEqual(byDate.get('2026-07-04')?.skills, [{ skill_name: 'first-principles', count: 1 }]);
+});
+
+test('does not count shell-variable or glob SKILL.md paths as skill invocations', () => {
+  const inferredPlaceholders = [...rowsByName().keys()].filter(name => name === '$skill' || name === '*');
+  assert.deepEqual(inferredPlaceholders, []);
+  assert.deepEqual(
+    getAnalyticsSkillsDaily({ date_from: '2026-07-05', date_to: '2026-07-05' }),
+    [],
+  );
 });
 
 test('exposes misfireEligible as the denominator behind misfireRate', () => {

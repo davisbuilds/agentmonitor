@@ -1,6 +1,6 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
-  import { formatNumber } from '../../format';
+  import { formatDateOnly, formatNumber } from '../../format';
   import type { SkillUsageDay } from '../../api/client';
 
   type TooltipState = {
@@ -36,14 +36,6 @@
       dates.push(new Date(cursor).toISOString().slice(0, 10));
     }
     return dates;
-  }
-
-  function formatDayLabel(date: string): string {
-    return new Date(`${date}T00:00:00.000Z`).toLocaleDateString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    });
   }
 
   function colorForSkill(skillName: string): string {
@@ -122,7 +114,7 @@
         {#each days as day}
           <button
             class="relative flex h-full flex-1 items-end rounded-t-sm bg-surface-2 transition-colors hover:bg-line"
-            title={`${formatDayLabel(day.date)}: ${day.total} skill invocation${day.total === 1 ? '' : 's'}`}
+            title={`${formatDateOnly(day.date)}: ${day.total} skill invocation${day.total === 1 ? '' : 's'}`}
             onmouseenter={(event) => showTooltip(event, day)}
             onmousemove={(event) => moveTooltip(event, day)}
             onmouseleave={() => (tooltip = null)}
@@ -167,7 +159,7 @@
           class="pointer-events-none fixed z-20 min-w-56 rounded-lg border border-line bg-surface px-3 py-2 shadow-overlay"
           style={`left:${tooltip.x}px;top:${tooltip.y}px`}
         >
-          <div class="mb-2 text-body font-medium text-text">{formatDayLabel(tooltip.day.date)}</div>
+          <div class="mb-2 text-body font-medium text-text">{formatDateOnly(tooltip.day.date)}</div>
           <div class="space-y-1 text-meta">
             {#each tooltip.day.skills as skill}
               <div class="flex items-center justify-between gap-3">
