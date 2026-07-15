@@ -198,12 +198,32 @@ Operational notes:
 - Full imports update `import_state` even when a file produced zero events, so unchanged unsupported/non-interactive files are skipped on later full imports.
 - Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
 - `pnpm cli -- import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm cli -- sync sessions --source codex --force` when transcript-derived analytics such as inferred skill usage need to be backfilled.
+- `watched_files` is independent of the session-browser tables. If
+  `browsing_sessions`, `messages`, or `tool_calls` are restored, cleared, or
+  otherwise fall behind while the hashes remain, ordinary startup considers
+  unchanged JSONLs current. Back up the database, then run
+  `pnpm cli -- sync sessions --source all --force` to rebuild those derived rows.
 - Antigravity has no `sync sessions` CLI subcommand: `import --source antigravity` writes events/usage/cost, and the running watcher projects the session-browser rows (`browsing_sessions` + `messages` + `session_items`, `integration_mode=antigravity-sqlite`, `fidelity=summary`) on startup and every periodic resync. There is no live file-tailing yet — new conversations appear on the next resync. Antigravity DBs are discovered recursively under `~/.gemini/antigravity-cli/conversations/**/*.db`.
 - If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm cli -- costs recalc`; that backfills stale imports after pricing-data updates or importer fixes.
 - Re-importing does **not** repair token counts on rows already in the DB: `insertEvent` dedups by `event_id` and skips existing rows (insert-only, no general upsert), and `--force` only bypasses the file-hash skip. One-shot corrections to already-stored rows must go through a `runDataMigrations` step in `src/db/schema.ts`. The narrow exception is Codex model attribution: deterministic duplicate import rows backed by an explicit JSONL `turn_context` may refresh only `model` and derived `cost_usd`, followed by a `session_trace_summary` rebuild; config-only legacy rows remain untouched.
 - The cache-inclusive `tokens_in` repair (OpenAI/Codex rows that overstated cost by billing cached tokens at the full input rate) runs automatically once on next startup via the `user_version`-guarded migration; no manual command is needed. It re-normalizes `tokens_in` and recomputes `cost_usd` for OpenAI/Google rows and leaves Anthropic untouched.
 - The GPT-5.6 upgrade runs another one-shot migration: Codex event-import hashes are invalidated, then the normal auto-import reparses those files and refreshes explicit per-turn model/cost attribution. Import output reports `events_refreshed`; no manual re-import is required when auto-import is enabled. With `--no-import` or a disabled auto-import interval, run `pnpm cli -- import --source codex --force` once after upgrading.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
+
+### Database recovery safety
+
+Before any repair that rewrites the install database, stop duplicate runtimes
+and create a consistent SQLite backup:
+
+```bash
+sqlite3 data/agentmonitor.db ".backup 'data/agentmonitor.pre-recovery.db'"
+lsof -nP data/agentmonitor.db data/agentmonitor.db-wal data/agentmonitor.db-shm
+```
+
+Keep the DB, WAL, and SHM files together if preserving a raw forensic snapshot;
+copying only the main DB while a writer is active is not a complete snapshot.
+The test runner has a hard interlock that refuses the install DB, but maintenance
+commands are intentionally allowed to mutate an explicitly selected database.
 
 ## Trace Quality Reclaim
 

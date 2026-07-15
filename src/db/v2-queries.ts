@@ -1795,7 +1795,7 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
       FROM events
       WHERE agent_type = 'codex'
         AND event_type = 'tool_use'
-        AND tool_name = 'exec_command'
+        AND tool_name IN ('exec_command', 'exec')
         AND metadata LIKE '%SKILL.md%'
     `).all() as Array<{
       session_id: string;
@@ -1836,7 +1836,7 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
       LEFT JOIN messages m ON m.id = tc.message_id
       WHERE bs.agent = 'codex'
         AND bs.integration_mode = 'codex-jsonl'
-        AND tc.tool_name = 'exec_command'
+        AND tc.tool_name IN ('exec_command', 'exec')
         AND tc.input_json IS NOT NULL
         AND tc.input_json LIKE '%SKILL.md%'
     `).all() as Array<{
@@ -2122,7 +2122,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       FROM events
       WHERE agent_type = 'codex'
         AND event_type = 'tool_use'
-        AND tool_name = 'exec_command'
+        AND tool_name IN ('exec_command', 'exec')
         AND metadata LIKE '%SKILL.md%'
     `).all() as Array<{
       session_id: string;
@@ -2160,7 +2160,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       LEFT JOIN messages m ON m.id = tc.message_id
       WHERE bs.agent = 'codex'
         AND bs.integration_mode = 'codex-jsonl'
-        AND tc.tool_name = 'exec_command'
+        AND tc.tool_name IN ('exec_command', 'exec')
         AND tc.input_json IS NOT NULL
         AND tc.input_json LIKE '%SKILL.md%'
     `).all() as Array<{
