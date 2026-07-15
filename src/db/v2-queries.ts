@@ -958,10 +958,15 @@ function extractCodexCommandFromEventMetadata(metadataJson: string | null): stri
 function extractCodexSkillNamesFromCommand(command: string): string[] {
   const skillNames = new Set<string>();
   const pattern = /(?:^|[\s'"])(~?\/[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
+  const placeholderCharacters = ['$', '*', '?', '[', ']', '{', '}'];
 
   for (const match of command.matchAll(pattern)) {
     const skillName = match[2]?.trim();
-    if (skillName) skillNames.add(skillName);
+    const isConcreteSkill = skillName
+      && skillName !== '.'
+      && skillName !== '..'
+      && !placeholderCharacters.some(character => skillName.includes(character));
+    if (isConcreteSkill) skillNames.add(skillName);
   }
 
   return [...skillNames];
@@ -1795,7 +1800,7 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
       FROM events
       WHERE agent_type = 'codex'
         AND event_type = 'tool_use'
-        AND tool_name = 'exec_command'
+        AND tool_name IN ('exec_command', 'exec')
         AND metadata LIKE '%SKILL.md%'
     `).all() as Array<{
       session_id: string;
@@ -1807,7 +1812,6 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
     const codexSessionsWithEvents = new Set<string>();
 
     for (const row of codexEventRows) {
-      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
       if (params.project && row.project !== params.project) continue;
       if (!row.timestamp) continue;
 
@@ -1816,6 +1820,7 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
 
       const skillNames = extractCodexSkillNamesFromCommand(command);
       if (skillNames.length === 0) continue;
+      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
 
       const date = row.timestamp.slice(0, 10);
       if (!isDateWithinRange(date, params)) continue;
@@ -1836,7 +1841,7 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
       LEFT JOIN messages m ON m.id = tc.message_id
       WHERE bs.agent = 'codex'
         AND bs.integration_mode = 'codex-jsonl'
-        AND tc.tool_name = 'exec_command'
+        AND tc.tool_name IN ('exec_command', 'exec')
         AND tc.input_json IS NOT NULL
         AND tc.input_json LIKE '%SKILL.md%'
     `).all() as Array<{
@@ -2122,7 +2127,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       FROM events
       WHERE agent_type = 'codex'
         AND event_type = 'tool_use'
-        AND tool_name = 'exec_command'
+        AND tool_name IN ('exec_command', 'exec')
         AND metadata LIKE '%SKILL.md%'
     `).all() as Array<{
       session_id: string;
@@ -2133,7 +2138,6 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
 
     const codexSessionsWithEvents = new Set<string>();
     for (const row of codexEventRows) {
-      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
       if (params.project && row.project !== params.project) continue;
       if (!row.timestamp) continue;
       const date = row.timestamp.slice(0, 10);
@@ -2141,7 +2145,10 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
 
       const command = extractCodexCommandFromEventMetadata(row.metadata);
       if (!command) continue;
-      for (const skillName of extractCodexSkillNamesFromCommand(command)) {
+      const skillNames = extractCodexSkillNamesFromCommand(command);
+      if (skillNames.length === 0) continue;
+      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
+      for (const skillName of skillNames) {
         const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
         recordHealthInvocation(
           acc, unpinnedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
@@ -2160,7 +2167,7 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
       LEFT JOIN messages m ON m.id = tc.message_id
       WHERE bs.agent = 'codex'
         AND bs.integration_mode = 'codex-jsonl'
-        AND tc.tool_name = 'exec_command'
+        AND tc.tool_name IN ('exec_command', 'exec')
         AND tc.input_json IS NOT NULL
         AND tc.input_json LIKE '%SKILL.md%'
     `).all() as Array<{

@@ -11,6 +11,11 @@ import type { SkillHealthRow } from '../src/api/v2/types.ts';
 
 let db: Database;
 let closeDb: () => void;
+let getAnalyticsSkillsDaily: (params?: Record<string, unknown>) => Array<{
+  date: string;
+  total: number;
+  skills: Array<{ skill_name: string; count: number }>;
+}>;
 let getAnalyticsSkillsHealth: (params?: Record<string, unknown>) => SkillHealthRow[];
 let server: Server;
 let baseUrl: string;
@@ -76,6 +81,9 @@ before(async () => {
   makeCatalogSkill(catalogRoot, 'write-spec', '1.0.0');
   makeCatalogSkill(catalogRoot, 'test-strategy', '1.0.0');
   makeCatalogSkill(catalogRoot, 'never-used', '2.0.0');
+  makeCatalogSkill(catalogRoot, 'diagnose', '1.0.0');
+  makeCatalogSkill(catalogRoot, 'first-principles', '1.0.0');
+  makeCatalogSkill(catalogRoot, '_review', '1.0.0');
   // Installed at 2.0.0, but the only invocation is attributed to 1.0.0 (below).
   makeCatalogSkill(catalogRoot, 'bumped', '2.0.0');
   process.env.AGENTMONITOR_SKILL_CATALOG_DIRS = catalogRoot;
@@ -85,7 +93,7 @@ before(async () => {
   initSchema();
   db = dbModule.getDb();
   closeDb = dbModule.closeDb;
-  ({ getAnalyticsSkillsHealth } = await import('../src/db/v2-queries.js'));
+  ({ getAnalyticsSkillsDaily, getAnalyticsSkillsHealth } = await import('../src/db/v2-queries.js'));
 
   // Version snapshot covering the invocation window.
   insertSnapshot('write-spec', '1.0.0', '2026-06-01T00:00:00Z', '2026-07-31T00:00:00Z');
@@ -109,6 +117,90 @@ before(async () => {
     's-codex',
     'exec_command',
     JSON.stringify({ cmd: 'cat ~/.codex/skills/deep-research/SKILL.md' }),
+  );
+
+  // Newer Codex captures use `exec` rather than `exec_command`. Both the JSONL
+  // and event-backed analytics paths must recognize it.
+  insertSession('s-codex-exec', 'codex', 'codex-jsonl');
+  const codexExecMsg = insertMessage('s-codex-exec', 0, 'assistant', '[]', '2026-07-03T10:00:00Z');
+  insertToolCall(
+    codexExecMsg,
+    's-codex-exec',
+    'exec',
+    JSON.stringify({ cmd: 'cat ~/.agents/skills/diagnose/SKILL.md' }),
+  );
+  db.prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, tool_name, status, project,
+      created_at, client_timestamp, metadata, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'codex-exec-skill-event',
+    'codex-exec-event-session',
+    'codex',
+    'tool_use',
+    'exec',
+    'success',
+    'proj',
+    '2026-07-04 10:00:00',
+    '2026-07-04T10:00:00Z',
+    JSON.stringify({ arguments: { cmd: 'cat ~/.agents/skills/first-principles/SKILL.md' } }),
+    'otel',
+  );
+
+  insertSession('s-codex-shell-variable', 'codex', 'codex-jsonl');
+  const shellVariableMsg = insertMessage(
+    's-codex-shell-variable', 0, 'assistant', '[]', '2026-07-05T10:00:00Z',
+  );
+  insertToolCall(
+    shellVariableMsg,
+    's-codex-shell-variable',
+    'exec_command',
+    JSON.stringify({
+      cmd: 'for skill in diagnose; do cat "/skills/$skill/SKILL.md"; done; cat /skills/*/SKILL.md',
+    }),
+  );
+
+  const fallbackUuid = '019d0000-0000-0000-0000-000000000002';
+  const fallbackSessionId = `rollout-2026-07-06T10-00-00-${fallbackUuid}`;
+  insertSession(fallbackSessionId, 'codex', 'codex-jsonl');
+  const fallbackMessage = insertMessage(
+    fallbackSessionId, 0, 'assistant', '[]', '2026-07-06T10:00:00Z',
+  );
+  insertToolCall(
+    fallbackMessage,
+    fallbackSessionId,
+    'exec',
+    JSON.stringify({ cmd: 'cat ~/.agents/skills/jsonl-fallback/SKILL.md' }),
+  );
+  db.prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, tool_name, status, project,
+      created_at, client_timestamp, metadata, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'codex-placeholder-skill-event',
+    fallbackUuid,
+    'codex',
+    'tool_use',
+    'exec',
+    'success',
+    'proj',
+    '2026-07-06 10:00:00',
+    '2026-07-06T10:00:00Z',
+    JSON.stringify({ arguments: { cmd: 'cat /skills/$skill/SKILL.md' } }),
+    'otel',
+  );
+
+  insertSession('s-codex-underscore-skill', 'codex', 'codex-jsonl');
+  const underscoreMessage = insertMessage(
+    's-codex-underscore-skill', 0, 'assistant', '[]', '2026-07-07T10:00:00Z',
+  );
+  insertToolCall(
+    underscoreMessage,
+    's-codex-underscore-skill',
+    'exec',
+    JSON.stringify({ cmd: 'cat ~/.agents/skills/_review/SKILL.md' }),
   );
 
   const { createApp } = await import('../src/app.js');
@@ -153,6 +245,42 @@ test('counts a Codex invocation but marks it misfire-ineligible', () => {
   assert.equal(row.misfireEligible, 0);
   assert.equal(row.misfires, null);
   assert.equal(row.misfireRate, null);
+});
+
+test('counts newer Codex exec skill reads from JSONL and live events', () => {
+  const health = rowsByName();
+  assert.equal(health.get('diagnose')?.invocations, 1);
+  assert.equal(health.get('first-principles')?.invocations, 1);
+
+  const daily = getAnalyticsSkillsDaily({ date_from: '2026-07-03', date_to: '2026-07-04' });
+  const byDate = new Map(daily.map(day => [day.date, day]));
+  assert.deepEqual(byDate.get('2026-07-03')?.skills, [{ skill_name: 'diagnose', count: 1 }]);
+  assert.deepEqual(byDate.get('2026-07-04')?.skills, [{ skill_name: 'first-principles', count: 1 }]);
+});
+
+test('does not count shell-variable or glob SKILL.md paths as skill invocations', () => {
+  const inferredPlaceholders = [...rowsByName().keys()].filter(name => name === '$skill' || name === '*');
+  assert.deepEqual(inferredPlaceholders, []);
+  assert.deepEqual(
+    getAnalyticsSkillsDaily({ date_from: '2026-07-05', date_to: '2026-07-05' }),
+    [],
+  );
+});
+
+test('uses the JSONL skill read when matching OTEL events contain no concrete skill', () => {
+  assert.equal(rowsByName().get('jsonl-fallback')?.invocations, 1);
+  assert.deepEqual(
+    getAnalyticsSkillsDaily({ date_from: '2026-07-06', date_to: '2026-07-06' }),
+    [{ date: '2026-07-06', total: 1, skills: [{ skill_name: 'jsonl-fallback', count: 1 }] }],
+  );
+});
+
+test('counts concrete skill directory names that begin with an underscore', () => {
+  assert.equal(rowsByName().get('_review')?.invocations, 1);
+  assert.deepEqual(
+    getAnalyticsSkillsDaily({ date_from: '2026-07-07', date_to: '2026-07-07' }),
+    [{ date: '2026-07-07', total: 1, skills: [{ skill_name: '_review', count: 1 }] }],
+  );
 });
 
 test('exposes misfireEligible as the denominator behind misfireRate', () => {

@@ -26,6 +26,19 @@ note here. This file stays future-only.
 
 ## Open
 
+### Runtime CLI
+
+#### Enforce one runtime/database holder per install
+📥 noted
+- **What**: recovery found two Node processes holding the install DB; one was an
+  orphaned `dist/server.js` with no listening socket while `amon serve` owned
+  `127.0.0.1:3141`. During the clean-runtime restart, `SIGTERM` released the
+  listener but the old process retained its DB handles until force-stopped.
+- **Why it matters**: a failed or superseded startup can keep watcher/import
+  timers alive and write the same SQLite file without providing a usable server.
+- **Sketch**: acquire an install-local PID/lock before starting timers, and make a
+  listen failure tear down every watcher, interval, and DB handle before exit.
+
 ### Skill trigger health (2026-07-09)
 
 Source: `docs/plans/2026-07-09-skill-trigger-health-plan.md` (phase 1 shipped).

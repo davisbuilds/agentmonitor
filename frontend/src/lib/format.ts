@@ -29,6 +29,15 @@ export function formatNumber(n: number): string {
   return n.toLocaleString();
 }
 
+export function formatDateOnly(value: string, locales?: Intl.LocalesArgument): string {
+  return new Date(`${value}T00:00:00.000Z`).toLocaleDateString(locales, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function timeAgo(dateStr: string): string {
   const diff = Math.max(0, Date.now() - parseTimestamp(dateStr).getTime());
   const seconds = Math.floor(diff / 1000);

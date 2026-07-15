@@ -2,7 +2,16 @@ import path from 'path';
 import os from 'os';
 import { watch, type FSWatcher } from 'chokidar';
 import { getDb } from '../db/connection.js';
-import { syncSessionFileDetailed, syncCodexSessionFileDetailed, syncAllFiles, syncAllCodexFiles, syncAllAntigravityFiles } from './index.js';
+import {
+  discoverCodexSessionFiles,
+  discoverSessionFiles,
+  findMissingSessionProjections,
+  syncSessionFileDetailed,
+  syncCodexSessionFileDetailed,
+  syncAllFiles,
+  syncAllCodexFiles,
+  syncAllAntigravityFiles,
+} from './index.js';
 import { broadcaster } from '../sse/emitter.js';
 import { liveBroadcaster } from '../api/v2/live-stream.js';
 import { config } from '../config.js';
@@ -118,6 +127,10 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   const projectsDir = path.join(claudeDir, 'projects');
   const codexHome = overrides?.codexHome ?? getCodexHome();
   const codexSessionsDir = path.join(codexHome, 'sessions');
+  const currentSessionFiles = [
+    ...discoverSessionFiles(claudeDir, { excludePatterns: config.sync.excludePatterns }),
+    ...discoverCodexSessionFiles(codexHome, { excludePatterns: config.sync.excludePatterns }),
+  ];
 
   // Initial sync on startup
   const db = getDb();
@@ -129,6 +142,15 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   const codexStats = syncAllCodexFiles(db, codexHome, { excludePatterns: config.sync.excludePatterns });
   if (codexStats.total > 0) {
     console.log(`[watcher] Codex sync: ${codexStats.parsed} parsed, ${codexStats.skipped} skipped, ${codexStats.errors} errors (${codexStats.total} total files)`);
+  }
+
+  const missingProjections = findMissingSessionProjections(db, currentSessionFiles);
+  if (missingProjections.length > 0) {
+    console.warn(
+      `[watcher] WARNING: ${missingProjections.length} cached Claude/Codex session file(s) `
+      + 'have no browsing projection. Preserve the database, then run '
+      + '`amon sync sessions --source all --force` to rebuild session analytics.',
+    );
   }
 
   // Sync Antigravity conversation DBs (historical + periodic resync; live-tailing deferred)

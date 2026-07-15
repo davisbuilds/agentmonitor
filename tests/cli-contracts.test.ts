@@ -54,7 +54,13 @@ beforeEach(() => {
   initSchema();
   fs.rmSync(claudeDir, { recursive: true, force: true });
   fs.mkdirSync(path.join(claudeDir, 'projects', 'project-a'), { recursive: true });
-  getDb().exec(`
+  const activeDb = getDb();
+  assert.equal(
+    path.resolve(activeDb.name),
+    path.resolve(dbPath),
+    'destructive CLI fixture must be connected to its temporary database',
+  );
+  activeDb.exec(`
     DELETE FROM session_trace_summary;
     DELETE FROM tool_calls;
     DELETE FROM messages;
