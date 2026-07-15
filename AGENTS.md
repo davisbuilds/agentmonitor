@@ -64,7 +64,16 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - **E2E**: `pnpm exec playwright test`.
 - **Sanity**: `GET /api/health`.
 - **Never trust a test you haven't watched fail.** Before claiming a test or CI guard covers a bug, reintroduce the bug and confirm it goes red. The failures worth guarding here are the silent ones — wrong costs, two chart series sharing a color, a test reading the real DB — and they all still render a plausible-looking result, so green on fixed code proves nothing on its own. A Top Models color test once passed against the broken implementation because the fixture had 6 models and the palette has 6 colors.
-- **Tests cannot open the install database**: `getDb()` throws under the test runner if the resolved path is `<install-root>/data/agentmonitor.db`. Point `AGENTMONITOR_DB_PATH` at a temp file *before* importing anything that reads `config` — `config.ts` snapshots the env when it is imported, so an early import silently pins the default.
+- **Tests cannot open the install database**: `getDb()` throws under the test runner if the resolved path is `<install-root>/data/agentmonitor.db`. Point `AGENTMONITOR_DB_PATH` at a temp file *before* importing anything that reads `config` — `config.ts` snapshots the env when it is imported, so an early import silently pins the default. Destructive fixtures must also assert that the opened database handle resolves to their intended temp path immediately before any table-wide delete.
+- **Session-browser recovery is separate from event import**: `import_state`
+  protects `events`, while `watched_files` protects
+  `browsing_sessions`/`messages`/`tool_calls`. If those browser tables are lost
+  but `watched_files` survives, normal startup skips unchanged JSONLs and leaves
+  analytics plausibly sparse. Startup warns when a currently discoverable
+  Claude/Codex file is cached as parsed but has no browser projection. Preserve
+  the DB first, then run
+  `amon sync sessions --source all --force`; `amon import --force` alone does not
+  rebuild tool-call or inferred-skill history.
 
 ## Working Agreement
 

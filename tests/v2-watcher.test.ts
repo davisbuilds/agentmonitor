@@ -5,6 +5,7 @@ import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
 import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connection.js';
 import type {
+  findMissingSessionProjections as findMissingSessionProjectionsFn,
   syncCodexSessionFile as syncCodexSessionFileFn,
   syncCodexSessionFileDetailed as syncCodexSessionFileDetailedFn,
   syncSessionFile as syncSessionFileFn,
@@ -441,5 +442,35 @@ describe('syncAllFiles', () => {
 
     assert.equal(excludedRecord, undefined);
     assert.ok(stats.total >= 0);
+  });
+});
+
+describe('session projection cache consistency', () => {
+  let findMissingSessionProjections: typeof findMissingSessionProjectionsFn;
+  let syncSessionFile: typeof syncSessionFileFn;
+
+  before(async () => {
+    const mod = await import('../src/watcher/index.js');
+    findMissingSessionProjections = mod.findMissingSessionProjections;
+    syncSessionFile = mod.syncSessionFile;
+  });
+
+  test('reports a currently discovered parsed file whose browsing projection was deleted', () => {
+    const db = getDb();
+    const sessionId = 'missing-projection-001';
+    const filePath = writeSessionFile(sessionId, makeSession(sessionId));
+    assert.equal(syncSessionFile(db, filePath), 'parsed');
+
+    db.prepare('DELETE FROM browsing_sessions WHERE id = ?').run(sessionId);
+
+    assert.deepEqual(findMissingSessionProjections(db, [filePath]), [filePath]);
+  });
+
+  test('does not report skipped files that intentionally have no browsing projection', () => {
+    const db = getDb();
+    const filePath = writeSessionFile('empty-projection-001', '{}\n');
+    assert.equal(syncSessionFile(db, filePath), 'skipped');
+
+    assert.deepEqual(findMissingSessionProjections(db, [filePath]), []);
   });
 });

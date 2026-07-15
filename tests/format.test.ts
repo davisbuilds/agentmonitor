@@ -5,6 +5,7 @@ import {
   agentDisplayName,
   agentHexColor,
   formatCost,
+  formatDateOnly,
   formatDuration,
   formatNumber,
   formatTimeOfDay,
@@ -12,6 +13,17 @@ import {
   statusColor,
   timeAgo,
 } from '../frontend/src/lib/format.ts';
+
+test('formatDateOnly preserves a UTC calendar date in a negative local offset', () => {
+  const originalTimezone = process.env.TZ;
+  process.env.TZ = 'America/Chicago';
+  try {
+    assert.equal(formatDateOnly('2026-06-30', 'en-US'), 'Jun 30, 2026');
+  } finally {
+    if (originalTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = originalTimezone;
+  }
+});
 
 test('parseTimestamp treats bare SQLite timestamps as UTC', () => {
   assert.equal(parseTimestamp('2026-04-10 11:45:00').toISOString(), '2026-04-10T11:45:00.000Z');
