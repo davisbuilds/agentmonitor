@@ -958,11 +958,15 @@ function extractCodexCommandFromEventMetadata(metadataJson: string | null): stri
 function extractCodexSkillNamesFromCommand(command: string): string[] {
   const skillNames = new Set<string>();
   const pattern = /(?:^|[\s'"])(~?\/[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
-  const literalSkillName = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+  const placeholderCharacters = ['$', '*', '?', '[', ']', '{', '}'];
 
   for (const match of command.matchAll(pattern)) {
     const skillName = match[2]?.trim();
-    if (skillName && literalSkillName.test(skillName)) skillNames.add(skillName);
+    const isConcreteSkill = skillName
+      && skillName !== '.'
+      && skillName !== '..'
+      && !placeholderCharacters.some(character => skillName.includes(character));
+    if (isConcreteSkill) skillNames.add(skillName);
   }
 
   return [...skillNames];
@@ -1808,7 +1812,6 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
     const codexSessionsWithEvents = new Set<string>();
 
     for (const row of codexEventRows) {
-      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
       if (params.project && row.project !== params.project) continue;
       if (!row.timestamp) continue;
 
@@ -1817,6 +1820,7 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
 
       const skillNames = extractCodexSkillNamesFromCommand(command);
       if (skillNames.length === 0) continue;
+      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
 
       const date = row.timestamp.slice(0, 10);
       if (!isDateWithinRange(date, params)) continue;
@@ -2134,7 +2138,6 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
 
     const codexSessionsWithEvents = new Set<string>();
     for (const row of codexEventRows) {
-      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
       if (params.project && row.project !== params.project) continue;
       if (!row.timestamp) continue;
       const date = row.timestamp.slice(0, 10);
@@ -2142,7 +2145,10 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
 
       const command = extractCodexCommandFromEventMetadata(row.metadata);
       if (!command) continue;
-      for (const skillName of extractCodexSkillNamesFromCommand(command)) {
+      const skillNames = extractCodexSkillNamesFromCommand(command);
+      if (skillNames.length === 0) continue;
+      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
+      for (const skillName of skillNames) {
         const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
         recordHealthInvocation(
           acc, unpinnedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
