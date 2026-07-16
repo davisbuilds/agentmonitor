@@ -73,6 +73,12 @@ clients continue to use `http://127.0.0.1:3141`. Portless is pinned as an
 AgentMonitor dependency, so no global Portless install is required. Use
 `amon serve --no-portless` for direct-only startup.
 
+Only one long-running AgentMonitor runtime may own a resolved SQLite database at
+a time. A second `amon serve`/`pnpm start` targeting the same DB exits with the
+owner PID and path; stale ownership from a dead process is recovered
+automatically. One-shot reporting and maintenance commands remain available
+while the runtime is active.
+
 For active frontend development with Vite HMR, keep the two-process workflow:
 
 ```bash
@@ -157,6 +163,7 @@ src/live/             Live session normalization and projection
 src/otel/             OTLP JSON parser
 src/pricing/          Model pricing and cost calculation
 src/provider-quotas/  Provider-native quota polling/ingest
+src/runtime-ownership.ts DB-scoped long-running runtime ownership
 src/runtime.ts        Shared TypeScript runtime startup used by server and CLI
 src/sse/              SSE client management and fan-out
 src/watcher/          Session-history watcher and sync

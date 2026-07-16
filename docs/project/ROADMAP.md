@@ -6,6 +6,17 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Exclusive runtime DB ownership + complete teardown (2026-07-15) — *What:*
+  every long-running runtime now acquires ownership of its canonical SQLite path
+  before schema, HTTP, watcher, import, quota, or broadcast work. A second
+  same-DB process exits with the live owner PID; different DBs can coexist and
+  dead-process state recovers automatically. Startup waits for the HTTP bind,
+  while bind failure and SIGINT/SIGTERM/programmatic shutdown close timers, both
+  SSE registries, in-flight quota polling, Chokidar, HTTP, and SQLite before
+  releasing ownership. One-shot CLI commands remain available. *Why:* recovery
+  found an orphan runtime retaining DB handles and background work after losing
+  its listener; port exclusivity alone did not protect one SQLite history from
+  two runtime lifecycles.
 - Stable Portless operator origin (2026-07-14) — *What:* `amon serve` remains the
   single built-product launcher and now wraps the fixed `127.0.0.1:3141` runtime
   with pinned, package-local Portless at `https://agentmonitor.localhost`; the

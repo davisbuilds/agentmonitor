@@ -229,6 +229,17 @@ test('live stream schedules heartbeat writes for connected clients', async () =>
   }
 });
 
+test('live stream closes every client during runtime shutdown', () => {
+  liveBroadcaster.resetForTests();
+  const res = createMockLiveResponse();
+  assert.equal(liveBroadcaster.addClient(res, {}), true);
+
+  liveBroadcaster.closeAllClients();
+
+  assert.equal(liveBroadcaster.clientCount, 0);
+  assert.equal((res as unknown as { writableEnded: boolean }).writableEnded, true);
+});
+
 test('live stream enforces max clients and recovers after disconnect', async () => {
   liveBroadcaster.resetForTests();
 

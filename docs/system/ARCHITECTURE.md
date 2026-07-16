@@ -56,6 +56,18 @@ through the pinned Portless CLI with a fixed upstream port of `3141`, producing
 directly. Portless owns only the human-facing origin. Hook, OTEL, CLI HTTP, and
 parity clients continue to use the loopback backend directly.
 
+Before schema initialization or HTTP/background startup, the shared runtime
+acquires exclusive ownership for the canonical SQLite path. Ownership is scoped
+to the DB rather than the package install, so isolated alternate DBs can run
+concurrently while a second runtime targeting the same DB fails before it starts
+a listener, watcher, importer, broadcaster, or quota poller. Dead-process state
+is recovered automatically. Startup resolves only after the HTTP bind succeeds;
+bind failure and SIGINT/SIGTERM/programmatic shutdown share one teardown path
+that stops the HTTP listener from accepting reconnects, stops timers, closes both
+SSE client registries and their idle sockets, awaits quota and Chokidar work,
+closes SQLite, then releases DB ownership. One-shot CLI commands do not acquire
+runtime ownership.
+
 `src/cli.ts` is the executable entrypoint for both `amon` and `agentmonitor`.
 One-shot commands avoid importing `src/server.ts`; they either call shared
 service/query modules directly or, for live HTTP/SSE workflows, call the running
@@ -237,6 +249,7 @@ src/import/               # Historical log importers
 src/otel/                 # OTLP JSON parser
 src/trace-quality/        # Local trace-quality projection, scores, prompts, findings
 src/pricing/              # Cost calculation + JSON pricing data
+src/runtime-ownership.ts  # DB-scoped long-running runtime ownership
 src/runtime.ts            # Shared TS runtime startup used by server and CLI
 src/sse/                  # SSE client management and fan-out
 src/util/                 # Utilities (git branch detection)

@@ -101,6 +101,10 @@ class LiveSSEBroadcaster {
   resetForTests(): void {
     this.history = [];
     this.nextEventId = 1;
+    this.closeAllClients();
+  }
+
+  closeAllClients(): void {
     for (const client of Array.from(this.clients)) {
       this.removeClient(client);
     }

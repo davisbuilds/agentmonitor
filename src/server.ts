@@ -2,3 +2,4 @@ import { installRuntimeSignalHandlers, startAgentMonitorRuntime } from './runtim
 
 const runtime = startAgentMonitorRuntime();
 installRuntimeSignalHandlers(runtime);
+await runtime;

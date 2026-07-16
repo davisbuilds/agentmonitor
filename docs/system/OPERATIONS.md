@@ -30,6 +30,21 @@ first use. `amon serve --no-portless` bypasses the named HTTPS origin and starts
 only the direct backend. Ctrl-C shuts down the runtime and removes its Portless
 route.
 
+Long-running startup is exclusive per resolved SQLite database. If another live
+`amon serve` or `pnpm start` already owns that DB, startup exits non-zero before
+opening a listener or starting background work and reports the owner PID and
+canonical DB path. Ownership left by a dead process is recovered automatically;
+do not delete the adjacent `.runtime.lock` file while its reported PID is live.
+Different explicit DB paths can run concurrently. One-shot commands such as
+`amon status`, reporting, import, sync, cost recalculation, and warehouse publish
+are intentionally not excluded by runtime ownership.
+
+On bind failure or SIGINT/SIGTERM, the runtime first stops the HTTP listener from
+accepting automatic EventSource reconnects, then stops timers, closes SSE clients
+and their idle sockets, awaits in-flight quota polling and the file watcher,
+closes SQLite, and releases ownership. This ordering makes an immediate same-DB
+restart safe even when a dashboard stream was connected during shutdown.
+
 ## Source Development
 
 ```bash

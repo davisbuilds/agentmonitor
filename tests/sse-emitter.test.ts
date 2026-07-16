@@ -59,3 +59,16 @@ test('broadcaster drops clients with repeated backpressure', () => {
 
   assert.equal(blocked.writableEnded, true);
 });
+
+test('broadcaster closes every client during runtime shutdown', () => {
+  const first = new FakeResponse();
+  const second = new FakeResponse();
+  assert.equal(broadcaster.addClient(first as never), true);
+  assert.equal(broadcaster.addClient(second as never), true);
+
+  broadcaster.closeAllClients();
+
+  assert.equal(broadcaster.clientCount, 0);
+  assert.equal(first.writableEnded, true);
+  assert.equal(second.writableEnded, true);
+});

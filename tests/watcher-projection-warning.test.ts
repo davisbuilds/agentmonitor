@@ -52,7 +52,7 @@ test('startup warns when a cached parsed transcript has no browsing projection',
     )));
   } finally {
     console.warn = originalWarn;
-    stopWatcher();
+    await stopWatcher();
     closeDb();
     fs.rmSync(root, { recursive: true, force: true });
   }
