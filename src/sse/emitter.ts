@@ -71,6 +71,12 @@ class SSEBroadcaster {
     }
   }
 
+  closeAllClients(): void {
+    for (const client of Array.from(this.clients)) {
+      this.removeClient(client);
+    }
+  }
+
   private safeWrite(client: SSEClient, chunk: string): boolean {
     if (!this.clients.has(client)) return false;
     if (client.res.writableEnded || client.res.destroyed) return false;

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { resolveDbPath } from '../../db-path.js';
 import { parseIntegerOption, parseOptionSet, rejectExtraPositionals } from '../args.js';
 import { registerCommand } from '../commands.js';
-import { invalidUsage } from '../errors.js';
+import { CliError, invalidUsage } from '../errors.js';
 import { effectiveBaseUrl, fetchJson } from '../http.js';
 import { writeHuman, writeJson, writeStdout } from '../output.js';
 import { runPortlessServe } from '../portless.js';
@@ -77,8 +77,15 @@ export function registerRuntimeCommands(): void {
         return;
       }
       const { installRuntimeSignalHandlers, startAgentMonitorRuntime } = await import('../../runtime.js');
+      const { RuntimeOwnershipError } = await import('../../runtime-ownership.js');
       const runtime = startAgentMonitorRuntime(options);
       installRuntimeSignalHandlers(runtime);
+      try {
+        await runtime;
+      } catch (error) {
+        if (error instanceof RuntimeOwnershipError) throw new CliError(error.message);
+        throw error;
+      }
       await new Promise<void>(() => undefined);
     },
   });

@@ -3,17 +3,17 @@ import { upsertProviderQuotaSnapshot } from '../db/queries.js';
 import { fetchCodexQuotaSnapshot } from './codex.js';
 
 let codexQuotaTimer: ReturnType<typeof setInterval> | null = null;
-let codexQuotaRefreshInFlight = false;
+let codexQuotaRefreshInFlight: Promise<void> | null = null;
 
-async function refreshCodexQuotaSnapshot(): Promise<void> {
-  if (codexQuotaRefreshInFlight) return;
-  codexQuotaRefreshInFlight = true;
-  try {
+function refreshCodexQuotaSnapshot(): Promise<void> {
+  if (codexQuotaRefreshInFlight) return codexQuotaRefreshInFlight;
+  codexQuotaRefreshInFlight = (async () => {
     const snapshot = await fetchCodexQuotaSnapshot();
     upsertProviderQuotaSnapshot(snapshot);
-  } finally {
-    codexQuotaRefreshInFlight = false;
-  }
+  })().finally(() => {
+    codexQuotaRefreshInFlight = null;
+  });
+  return codexQuotaRefreshInFlight;
 }
 
 export function startProviderQuotaPolling(): void {
@@ -24,8 +24,10 @@ export function startProviderQuotaPolling(): void {
   }, config.quotas.codexPollIntervalMs);
 }
 
-export function stopProviderQuotaPolling(): void {
-  if (!codexQuotaTimer) return;
-  clearInterval(codexQuotaTimer);
-  codexQuotaTimer = null;
+export async function stopProviderQuotaPolling(): Promise<void> {
+  if (codexQuotaTimer) {
+    clearInterval(codexQuotaTimer);
+    codexQuotaTimer = null;
+  }
+  await codexQuotaRefreshInFlight;
 }

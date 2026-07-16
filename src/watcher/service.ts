@@ -220,11 +220,9 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   }, RESYNC_INTERVAL_MS);
 }
 
-export function stopWatcher(): void {
-  if (watcher) {
-    watcher.close();
-    watcher = undefined;
-  }
+export async function stopWatcher(): Promise<void> {
+  const activeWatcher = watcher;
+  watcher = undefined;
   if (resyncTimer) {
     clearInterval(resyncTimer);
     resyncTimer = undefined;
@@ -234,4 +232,7 @@ export function stopWatcher(): void {
     clearTimeout(timeout);
   }
   debounceMap.clear();
+  if (activeWatcher) {
+    await activeWatcher.close();
+  }
 }

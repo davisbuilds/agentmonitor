@@ -48,8 +48,8 @@ before(async () => {
   initSchema();
 });
 
-after(() => {
-  stopWatcher();
+after(async () => {
+  await stopWatcher();
   closeDb();
   fs.rmSync(root, { recursive: true, force: true });
 });

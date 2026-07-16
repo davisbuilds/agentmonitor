@@ -13,8 +13,20 @@ interface CliRun {
   stderr: string;
 }
 
+interface ChildExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+}
+
+const CLI_ENTRYPOINT = process.env.AGENTMONITOR_TEST_CLI_ENTRYPOINT?.trim() || 'src/cli.ts';
+
+function cliInvocation(args: string[]): string[] {
+  const loader = CLI_ENTRYPOINT.endsWith('.ts') ? ['--import', 'tsx'] : [];
+  return [...loader, CLI_ENTRYPOINT, ...args];
+}
+
 function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): CliRun {
-  const result = spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
+  const result = spawnSync(process.execPath, cliInvocation(args), {
     cwd: process.cwd(),
     env,
     encoding: 'utf8',
@@ -60,12 +72,57 @@ async function waitForHealth(baseUrl: string, child: ChildProcessWithoutNullStre
 async function stopChild(child: ChildProcessWithoutNullStreams): Promise<void> {
   if (child.exitCode !== null || child.signalCode !== null) return;
   child.kill('SIGTERM');
-  await Promise.race([
-    new Promise<void>((resolve) => child.once('close', () => resolve())),
-    delay(5_000).then(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-    }),
-  ]);
+  await waitForChildExit(child, 5_000).catch(() => undefined);
+}
+
+async function waitForChildExit(
+  child: ChildProcessWithoutNullStreams,
+  timeoutMs = 3_000,
+): Promise<ChildExit> {
+  if (child.exitCode !== null || child.signalCode !== null) {
+    return { code: child.exitCode, signal: child.signalCode };
+  }
+
+  const result = await new Promise<ChildExit | null>((resolve) => {
+    const timeout = setTimeout(() => {
+      child.off('close', onClose);
+      resolve(null);
+    }, timeoutMs);
+    const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
+      clearTimeout(timeout);
+      resolve({ code, signal });
+    };
+    child.once('close', onClose);
+    if (child.exitCode !== null || child.signalCode !== null) {
+      child.off('close', onClose);
+      clearTimeout(timeout);
+      resolve({ code: child.exitCode, signal: child.signalCode });
+    }
+  });
+  if (result) return result;
+
+  child.kill('SIGKILL');
+  if (child.exitCode === null && child.signalCode === null) {
+    await new Promise<void>((resolve) => child.once('close', () => resolve()));
+  }
+  throw new Error(`Child did not exit within ${timeoutMs}ms and required SIGKILL`);
+}
+
+function spawnDirectServe(env: NodeJS.ProcessEnv, port: number): ChildProcessWithoutNullStreams {
+  return spawn(process.execPath, cliInvocation([
+    'serve',
+    '--no-portless',
+    '--host',
+    '127.0.0.1',
+    '--port',
+    String(port),
+    '--no-import',
+    '--no-watch',
+  ]), {
+    cwd: process.cwd(),
+    env,
+    stdio: 'pipe',
+  });
 }
 
 function writeFakePortless(dir: string): string {
@@ -116,10 +173,7 @@ test('serve starts a runtime that health and status can inspect', async () => {
     AGENTMONITOR_PORTLESS_CLI: path.join(tempDir, 'missing-portless-cli.js'),
     PATH: '/usr/bin:/bin',
   };
-  const child = spawn(process.execPath, [
-    '--import',
-    'tsx',
-    'src/cli.ts',
+  const child = spawn(process.execPath, cliInvocation([
     'serve',
     '--no-portless',
     '--host',
@@ -128,7 +182,7 @@ test('serve starts a runtime that health and status can inspect', async () => {
     String(port),
     '--no-import',
     '--no-watch',
-  ], {
+  ]), {
     cwd: process.cwd(),
     env,
     stdio: 'pipe',
@@ -167,6 +221,135 @@ test('serve starts a runtime that health and status can inspect', async () => {
   assert.equal(stderr, '');
 });
 
+test('serve rejects a second live runtime targeting the same database', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-runtime-owner-cli-'));
+  const dbPath = path.join(tempDir, 'runtime.db');
+  const firstPort = await allocatePort();
+  const secondPort = await allocatePort();
+  const env = {
+    ...process.env,
+    AGENTMONITOR_DB_PATH: dbPath,
+    AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+  };
+  const first = spawnDirectServe(env, firstPort);
+  let second: ChildProcessWithoutNullStreams | undefined;
+  let secondStdout = '';
+  let secondStderr = '';
+
+  try {
+    await waitForHealth(`http://127.0.0.1:${firstPort}`, first);
+    second = spawnDirectServe(env, secondPort);
+    second.stdout.on('data', chunk => { secondStdout += chunk.toString(); });
+    second.stderr.on('data', chunk => { secondStderr += chunk.toString(); });
+
+    const result = await waitForChildExit(second);
+    assert.equal(result.code, 1);
+    assert.equal(result.signal, null);
+    assert.equal(secondStdout, '');
+    assert.match(secondStderr, /Database is already owned by AgentMonitor runtime PID/);
+    assert.match(secondStderr, new RegExp(dbPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  } finally {
+    if (second) await stopChild(second);
+    await stopChild(first);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('SIGTERM closes an active SSE client and permits immediate same-DB restart', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-runtime-sse-shutdown-'));
+  const dbPath = path.join(tempDir, 'runtime.db');
+  const port = await allocatePort();
+  const env = {
+    ...process.env,
+    AGENTMONITOR_DB_PATH: dbPath,
+    AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+  };
+  const first = spawnDirectServe(env, port);
+  const controller = new AbortController();
+  let replacement: ChildProcessWithoutNullStreams | undefined;
+
+  try {
+    await waitForHealth(`http://127.0.0.1:${port}`, first);
+    const stream = await fetch(`http://127.0.0.1:${port}/api/stream`, {
+      signal: controller.signal,
+    });
+    assert.equal(stream.status, 200);
+
+    first.kill('SIGTERM');
+    const stopped = await waitForChildExit(first);
+    assert.equal(stopped.code, 0);
+    assert.equal(stopped.signal, null);
+
+    replacement = spawnDirectServe(env, port);
+    await waitForHealth(`http://127.0.0.1:${port}`, replacement);
+  } finally {
+    controller.abort();
+    if (replacement) await stopChild(replacement);
+    await stopChild(first);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('different databases can run concurrently', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-runtime-independent-db-'));
+  const firstPort = await allocatePort();
+  const secondPort = await allocatePort();
+  const baseEnv = {
+    ...process.env,
+    AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+  };
+  const first = spawnDirectServe({
+    ...baseEnv,
+    AGENTMONITOR_DB_PATH: path.join(tempDir, 'first.db'),
+  }, firstPort);
+  const second = spawnDirectServe({
+    ...baseEnv,
+    AGENTMONITOR_DB_PATH: path.join(tempDir, 'second.db'),
+  }, secondPort);
+
+  try {
+    await Promise.all([
+      waitForHealth(`http://127.0.0.1:${firstPort}`, first),
+      waitForHealth(`http://127.0.0.1:${secondPort}`, second),
+    ]);
+  } finally {
+    await Promise.all([stopChild(first), stopChild(second)]);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('a failed HTTP bind releases database ownership for a later startup', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-runtime-bind-failure-'));
+  const dbPath = path.join(tempDir, 'runtime.db');
+  const port = await allocatePort();
+  const blocker = net.createServer();
+  await new Promise<void>((resolve) => blocker.listen(port, '127.0.0.1', resolve));
+  const env = {
+    ...process.env,
+    AGENTMONITOR_DB_PATH: dbPath,
+    AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+  };
+  const failed = spawnDirectServe(env, port);
+  let replacement: ChildProcessWithoutNullStreams | undefined;
+
+  try {
+    const result = await waitForChildExit(failed);
+    assert.equal(result.code, 1);
+    assert.equal(result.signal, null);
+
+    await new Promise<void>((resolve, reject) => blocker.close(error => error ? reject(error) : resolve()));
+    replacement = spawnDirectServe(env, port);
+    await waitForHealth(`http://127.0.0.1:${port}`, replacement);
+  } finally {
+    if (blocker.listening) {
+      await new Promise<void>((resolve) => blocker.close(() => resolve()));
+    }
+    if (replacement) await stopChild(replacement);
+    await stopChild(failed);
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('serve launches the runtime through Portless by default', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-portless-runtime-'));
   const dbPath = path.join(tempDir, 'runtime.db');
@@ -181,10 +364,7 @@ test('serve launches the runtime through Portless by default', async () => {
     AGENTMONITOR_PORTLESS_CLI: portlessCli,
     AGENTMONITOR_PORTLESS_MARKER: markerPath,
   };
-  const child = spawn(process.execPath, [
-    '--import',
-    'tsx',
-    'src/cli.ts',
+  const child = spawn(process.execPath, cliInvocation([
     'serve',
     '--host',
     '127.0.0.1',
@@ -192,7 +372,7 @@ test('serve launches the runtime through Portless by default', async () => {
     String(port),
     '--no-import',
     '--no-watch',
-  ], {
+  ]), {
     cwd: process.cwd(),
     env,
     stdio: 'pipe',
