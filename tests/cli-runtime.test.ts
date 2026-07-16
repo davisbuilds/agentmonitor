@@ -161,6 +161,48 @@ child.on('exit', (code, signal) => {
   return scriptPath;
 }
 
+function writeSlowCodex(dir: string): string {
+  const scriptPath = path.join(dir, 'codex');
+  fs.writeFileSync(scriptPath, `#!/usr/bin/env node
+process.stdin.resume();
+setTimeout(() => {
+  process.stdout.write(JSON.stringify({
+    id: 3,
+    result: {
+      rateLimits: {
+        limitId: 'codex',
+        primary: null,
+        secondary: null,
+      },
+    },
+  }) + '\\n');
+}, 1000);
+`);
+  fs.chmodSync(scriptPath, 0o755);
+  return scriptPath;
+}
+
+async function waitForResponseEnd(response: Response): Promise<void> {
+  assert.ok(response.body);
+  const reader = response.body.getReader();
+  while (!(await reader.read()).done) {
+    // Drain until runtime shutdown ends the SSE response.
+  }
+}
+
+async function canOpenTcpConnection(port: number): Promise<boolean> {
+  return await new Promise<boolean>((resolve) => {
+    const socket = net.createConnection({ host: '127.0.0.1', port });
+    const finish = (connected: boolean) => {
+      socket.destroy();
+      resolve(connected);
+    };
+    socket.setTimeout(500, () => finish(false));
+    socket.once('connect', () => finish(true));
+    socket.once('error', () => finish(false));
+  });
+}
+
 test('serve starts a runtime that health and status can inspect', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-runtime-'));
   const dbPath = path.join(tempDir, 'runtime.db');
@@ -255,7 +297,7 @@ test('serve rejects a second live runtime targeting the same database', async ()
   }
 });
 
-test('SIGTERM closes an active SSE client and permits immediate same-DB restart', async () => {
+test('SIGTERM stops accepting SSE reconnects and permits immediate same-DB restart', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-runtime-sse-shutdown-'));
   const dbPath = path.join(tempDir, 'runtime.db');
   const port = await allocatePort();
@@ -263,7 +305,9 @@ test('SIGTERM closes an active SSE client and permits immediate same-DB restart'
     ...process.env,
     AGENTMONITOR_DB_PATH: dbPath,
     AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+    PATH: `${tempDir}:${process.env.PATH ?? ''}`,
   };
+  writeSlowCodex(tempDir);
   const first = spawnDirectServe(env, port);
   const controller = new AbortController();
   let replacement: ChildProcessWithoutNullStreams | undefined;
@@ -276,6 +320,12 @@ test('SIGTERM closes an active SSE client and permits immediate same-DB restart'
     assert.equal(stream.status, 200);
 
     first.kill('SIGTERM');
+    await waitForResponseEnd(stream);
+    assert.equal(
+      await canOpenTcpConnection(port),
+      false,
+      'runtime accepted a reconnect after beginning shutdown',
+    );
     const stopped = await waitForChildExit(first);
     assert.equal(stopped.code, 0);
     assert.equal(stopped.signal, null);

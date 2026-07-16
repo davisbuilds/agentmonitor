@@ -63,9 +63,10 @@ concurrently while a second runtime targeting the same DB fails before it starts
 a listener, watcher, importer, broadcaster, or quota poller. Dead-process state
 is recovered automatically. Startup resolves only after the HTTP bind succeeds;
 bind failure and SIGINT/SIGTERM/programmatic shutdown share one teardown path
-that stops timers, closes both SSE client registries, awaits quota and Chokidar
-work, closes HTTP and SQLite, then releases DB ownership. One-shot CLI commands do
-not acquire runtime ownership.
+that stops the HTTP listener from accepting reconnects, stops timers, closes both
+SSE client registries and their idle sockets, awaits quota and Chokidar work,
+closes SQLite, then releases DB ownership. One-shot CLI commands do not acquire
+runtime ownership.
 
 `src/cli.ts` is the executable entrypoint for both `amon` and `agentmonitor`.
 One-shot commands avoid importing `src/server.ts`; they either call shared

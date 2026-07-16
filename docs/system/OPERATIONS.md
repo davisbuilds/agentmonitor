@@ -39,10 +39,11 @@ Different explicit DB paths can run concurrently. One-shot commands such as
 `amon status`, reporting, import, sync, cost recalculation, and warehouse publish
 are intentionally not excluded by runtime ownership.
 
-On bind failure or SIGINT/SIGTERM, the runtime stops timers, closes SSE clients,
-awaits in-flight quota polling and the file watcher, closes HTTP and SQLite, and
-then releases ownership. This ordering makes an immediate same-DB restart safe
-even when a dashboard stream was connected during shutdown.
+On bind failure or SIGINT/SIGTERM, the runtime first stops the HTTP listener from
+accepting automatic EventSource reconnects, then stops timers, closes SSE clients
+and their idle sockets, awaits in-flight quota polling and the file watcher,
+closes SQLite, and releases ownership. This ordering makes an immediate same-DB
+restart safe even when a dashboard stream was connected during shutdown.
 
 ## Source Development
 

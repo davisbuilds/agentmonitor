@@ -65,17 +65,27 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       if (sessionChecker) clearInterval(sessionChecker);
       if (autoImportTimer) clearInterval(autoImportTimer);
       if (autoImportDelay) clearTimeout(autoImportDelay);
+
+      // Stop accepting connections before ending SSE responses. EventSource
+      // clients reconnect automatically when a stream closes; leaving the
+      // listener open during the awaited service cleanup can admit a new stream
+      // that keeps server.close() pending indefinitely.
+      const serverClosePromise = server?.listening
+        ? new Promise<void>((resolve, reject) => {
+            server?.close(error => error ? reject(error) : resolve());
+          })
+        : undefined;
+      // Attach a handler immediately in case close fails before the later await.
+      void serverClosePromise?.catch(() => undefined);
+
       stopStatsBroadcast();
       broadcaster.closeAllClients();
       liveBroadcaster.closeAllClients();
+      server?.closeIdleConnections();
 
       await attempt(stopProviderQuotaPolling);
       await attempt(stopWatcher);
-      if (server?.listening) {
-        await attempt(() => new Promise<void>((resolve, reject) => {
-          server?.close(error => error ? reject(error) : resolve());
-        }));
-      }
+      if (serverClosePromise) await attempt(() => serverClosePromise);
       await attempt(() => closeDb());
       await attempt(() => ownership.release());
 
