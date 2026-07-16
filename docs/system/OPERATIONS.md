@@ -77,6 +77,8 @@ pnpm reclaim:trace-quality # Drop the old trace-quality warehouse tables + VACUU
 pnpm reparse:sessions   # Force reparse Claude session-browser history
 pnpm reparse:codex-sessions # Force reparse Codex session-browser history
 pnpm bench:ingest       # Ingest throughput benchmark
+pnpm bench:storage      # Storage and analytics-query baseline
+pnpm bench:usage        # Running-server Usage overview latency benchmark
 pnpm recalculate-costs  # Recalculate costs from pricing data
 ```
 
@@ -162,7 +164,25 @@ All optional with sensible defaults:
 | `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` | unset | Comma-separated path patterns to ignore during historical discovery, import, and watcher resync |
 | `AGENTMONITOR_SKILL_CATALOG_DIRS` | `~/.claude/skills`, `$CODEX_HOME/skills` | Path-delimited (`:`) installed skill catalogs scanned for version attribution and never-fired detection by `/api/v2/analytics/skills/health` |
 
-Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`, `AGENTMONITOR_BENCH_BATCH_SIZE`.
+Ingest benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`,
+`AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`,
+`AGENTMONITOR_BENCH_BATCH_SIZE`.
+
+## Performance Benchmarks
+
+Run the Usage benchmark against an already-running source or built server. It is
+read-only, reports warmup and measured samples separately, and exits nonzero when
+an optional median budget is missed:
+
+```bash
+pnpm bench:usage -- --date-from 2026-06-17 --date-to 2026-07-16 --runs 5
+pnpm bench:usage -- --date-from 2026-06-17 --date-to 2026-07-16 --runs 5 --max-median-ms 150
+```
+
+Use `--base-url` or `AGENTMONITOR_BASE_URL` for a non-default server. The default
+is `http://127.0.0.1:3141`; `--warmups` defaults to one. Every sample consumes and
+validates the JSON response, so the timing includes HTTP serialization rather
+than measuring only a SQL fragment.
 
 ## Hook Installation
 
