@@ -175,7 +175,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
 | `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |
 | `/api/v2/analytics/agents` | GET | Per-agent comparison rows for analytics UI |
-| `/api/v2/usage/overview` | GET | Every Usage panel + coverage from one scan; what the Usage page loads |
+| `/api/v2/usage/overview` | GET | Every Usage panel from one shared usage-row selection plus one coverage aggregate; what the Usage page loads |
 | `/api/v2/usage/facets` | GET | Option lists for the five Usage filter dropdowns |
 | `/api/v2/usage/summary` | GET | Event-derived usage totals, prior-period comparison, and coverage metadata |
 | `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |

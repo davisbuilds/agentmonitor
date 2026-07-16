@@ -6,6 +6,18 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Usage overview hot-path optimization (2026-07-16) — *What:* the representative
+  30-day built-product read fell from a 229.24 ms warm median to 134.67 ms while
+  preserving exact parity with every per-panel Usage endpoint. The overview now
+  selects coverage once, reuses each row's model classification across all folds,
+  derives usage-side coverage from those rows, uses a compact prior-period cost
+  aggregate, and bulk-enriches the limited top sessions. `pnpm bench:usage`
+  provides a read-only threshold gate. *Why:* the
+  live database crossed the backlog's 150 ms trigger at only ~270K events, but
+  profiling showed redundant work rather than a need for a persisted rollup. If
+  the direct path crosses 150 ms again near multi-million-row scale, revisit a
+  session-grained `(day, agent, model, project, session_id)` derived store so
+  distinct-session counts remain exact.
 - Exclusive runtime DB ownership + complete teardown (2026-07-15) — *What:*
   every long-running runtime now acquires ownership of its canonical SQLite path
   before schema, HTTP, watcher, import, quota, or broadcast work. A second

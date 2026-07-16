@@ -788,16 +788,25 @@ describe('GET /api/v2/usage/overview', () => {
   });
 
   test('honors the usage filters', async () => {
-    const res = await fetch(`${baseUrl}/api/v2/usage/overview?date_from=2026-04-01&date_to=2026-04-04&model=gpt-5.4`);
+    const filteredQuery = 'date_from=2026-04-01&date_to=2026-04-04&model=gpt-5.4';
+    const [res, summaryRes] = await Promise.all([
+      fetch(`${baseUrl}/api/v2/usage/overview?${filteredQuery}`),
+      fetch(`${baseUrl}/api/v2/usage/summary?${filteredQuery}`),
+    ]);
     assert.equal(res.status, 200);
+    assert.equal(summaryRes.status, 200);
 
     const body = await res.json() as {
       models: Array<{ model: string }>;
-      summary: { total_cost_usd: number };
+      summary: { total_cost_usd: number; coverage: unknown };
+      coverage: unknown;
     };
+    const summary = await summaryRes.json() as { coverage: unknown };
 
     assert.deepEqual(body.models.map(row => row.model), ['gpt-5.4']);
     assert.equal(body.summary.total_cost_usd, 0.05);
+    assert.deepEqual(body.coverage, summary.coverage);
+    assert.deepEqual(body.summary.coverage, summary.coverage);
   });
 });
 

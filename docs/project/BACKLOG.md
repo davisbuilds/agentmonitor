@@ -95,21 +95,6 @@ These are the deferred follow-ups surfaced during and after the build.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 
-#### Daily dimensional rollup can't back Usage at exact parity
-📥 noted
-- **What**: a daily `events_rollup_daily(day, agent_type, model, project)` cannot
-  serve Usage: every Usage breakdown emits `COUNT(DISTINCT session_id)`, sessions
-  span buckets, so distinct counts are unrecoverable from a sum-rollup. Usage also
-  buckets by `date(COALESCE(client_timestamp, created_at))`, counts only
-  metric-bearing events, and normalizes `project`/`model` to `'unknown'`; the live
-  Monitor uses sub-day rolling windows a daily rollup can't serve either.
-- **Why it matters**: the rollup as specced has no exact-parity reader, and Phase
-  1's covering indexes already made these reads fast (monitor list 269ms → 34ms),
-  so its remaining value is long-term scalability, not current speed.
-- **Sketch**: if revisited, use a session-grained rollup
-  `(day, agent, model, project, session_id)` so distinct counts stay exact.
-  Revisit trigger: events table > ~3M rows or a hot Usage read > ~150ms.
-
 #### Legacy v1 session-list N+1
 📥 noted
 - **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the
