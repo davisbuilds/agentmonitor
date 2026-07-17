@@ -34,6 +34,11 @@ maintainers but too detailed for the root README.
   `https://agentmonitor.localhost`, whose root redirects to `/app/`, while the
   backend remains directly available on `127.0.0.1:3141` for ingestion and API
   clients. `--no-portless` preserves direct-only startup.
+- Long-running runtime ownership is exclusive per canonical SQLite path. A
+  competing same-DB startup fails before HTTP/background work, dead-process
+  ownership recovers automatically, and bind failure or shutdown closes SSE,
+  watcher/quota work, HTTP, and SQLite before releasing ownership. Alternate DBs
+  and one-shot CLI commands remain independent.
 - Existing package scripts for import, session reparse, and cost recalculation remain as compatibility wrappers around the CLI. Trace-quality was reframed (2026-06) to a lean on-demand view; the old warehouse is dropped via the opt-in `pnpm reclaim:trace-quality`.
 - Skill analytics recognize both legacy Codex `exec_command` and newer `exec`
   reads of `SKILL.md`, excluding shell-variable and glob paths that do not name

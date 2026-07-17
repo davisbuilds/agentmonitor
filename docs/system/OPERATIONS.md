@@ -30,6 +30,21 @@ first use. `amon serve --no-portless` bypasses the named HTTPS origin and starts
 only the direct backend. Ctrl-C shuts down the runtime and removes its Portless
 route.
 
+Long-running startup is exclusive per resolved SQLite database. If another live
+`amon serve` or `pnpm start` already owns that DB, startup exits non-zero before
+opening a listener or starting background work and reports the owner PID and
+canonical DB path. Ownership left by a dead process is recovered automatically;
+do not delete the adjacent `.runtime.lock` file while its reported PID is live.
+Different explicit DB paths can run concurrently. One-shot commands such as
+`amon status`, reporting, import, sync, cost recalculation, and warehouse publish
+are intentionally not excluded by runtime ownership.
+
+On bind failure or SIGINT/SIGTERM, the runtime first stops the HTTP listener from
+accepting automatic EventSource reconnects, then stops timers, closes SSE clients
+and their idle sockets, awaits in-flight quota polling and the file watcher,
+closes SQLite, and releases ownership. This ordering makes an immediate same-DB
+restart safe even when a dashboard stream was connected during shutdown.
+
 ## Source Development
 
 ```bash
@@ -62,6 +77,8 @@ pnpm reclaim:trace-quality # Drop the old trace-quality warehouse tables + VACUU
 pnpm reparse:sessions   # Force reparse Claude session-browser history
 pnpm reparse:codex-sessions # Force reparse Codex session-browser history
 pnpm bench:ingest       # Ingest throughput benchmark
+pnpm bench:storage      # Storage and analytics-query baseline
+pnpm bench:usage        # Running-server Usage overview latency benchmark
 pnpm recalculate-costs  # Recalculate costs from pricing data
 ```
 
@@ -147,7 +164,25 @@ All optional with sensible defaults:
 | `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` | unset | Comma-separated path patterns to ignore during historical discovery, import, and watcher resync |
 | `AGENTMONITOR_SKILL_CATALOG_DIRS` | `~/.claude/skills`, `$CODEX_HOME/skills` | Path-delimited (`:`) installed skill catalogs scanned for version attribution and never-fired detection by `/api/v2/analytics/skills/health` |
 
-Benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`, `AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`, `AGENTMONITOR_BENCH_BATCH_SIZE`.
+Ingest benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`,
+`AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`,
+`AGENTMONITOR_BENCH_BATCH_SIZE`.
+
+## Performance Benchmarks
+
+Run the Usage benchmark against an already-running source or built server. It is
+read-only, reports warmup and measured samples separately, and exits nonzero when
+an optional median budget is missed:
+
+```bash
+pnpm bench:usage -- --date-from 2026-06-17 --date-to 2026-07-16 --runs 5
+pnpm bench:usage -- --date-from 2026-06-17 --date-to 2026-07-16 --runs 5 --max-median-ms 150
+```
+
+Use `--base-url` or `AGENTMONITOR_BASE_URL` for a non-default server. The default
+is `http://127.0.0.1:3141`; `--warmups` defaults to one. Every sample consumes and
+validates the JSON response, so the timing includes HTTP serialization rather
+than measuring only a SQL fragment.
 
 ## Hook Installation
 

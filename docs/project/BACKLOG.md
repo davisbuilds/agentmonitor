@@ -26,6 +26,22 @@ note here. This file stays future-only.
 
 ## Open
 
+### Ingestion
+
+#### `src/contracts/event-contract.ts` has no test of its own
+📥 noted
+- **What**: 246 lines of ingestion validation (`normalizeEventType`, `normalizeStatus`,
+  `normalizeClientTimestamp`, `getRequiredString`, `getOptionalNonNegativeInt`) with no
+  dedicated test file. It's reached indirectly through import/API tests, but its own
+  coercion branches aren't pinned.
+- **Why it matters**: this is the boundary where untrusted hook payloads become typed
+  events. The failure mode matches the one this repo already knows well — a bad
+  normalization silently reshapes data into something plausible rather than throwing, so
+  it surfaces as wrong numbers on the dashboard, not as an error.
+- **Sketch**: table-driven tests over the `normalize*`/`get*` helpers with malformed,
+  missing, and out-of-range fields; assert coercion vs. rejection explicitly. Noted
+  2026-07-16 during the portfolio TDD-guidance pass.
+
 ### Runtime CLI
 
 #### `amon serve --no-browser` is accepted but has no effect
@@ -37,17 +53,6 @@ note here. This file stays future-only.
   which makes the runtime CLI contract misleading.
 - **Sketch**: either implement browser opening after health readiness and honor
   the opt-out, or remove the flag in a deliberate compatibility pass.
-
-#### Enforce one runtime/database holder per install
-📥 noted
-- **What**: recovery found two Node processes holding the install DB; one was an
-  orphaned `dist/server.js` with no listening socket while `amon serve` owned
-  `127.0.0.1:3141`. During the clean-runtime restart, `SIGTERM` released the
-  listener but the old process retained its DB handles until force-stopped.
-- **Why it matters**: a failed or superseded startup can keep watcher/import
-  timers alive and write the same SQLite file without providing a usable server.
-- **Sketch**: acquire an install-local PID/lock before starting timers, and make a
-  listen failure tear down every watcher, interval, and DB handle before exit.
 
 ### Skill trigger health (2026-07-09)
 
@@ -105,21 +110,6 @@ These are the deferred follow-ups surfaced during and after the build.
   the existing daily tests.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
-
-#### Daily dimensional rollup can't back Usage at exact parity
-📥 noted
-- **What**: a daily `events_rollup_daily(day, agent_type, model, project)` cannot
-  serve Usage: every Usage breakdown emits `COUNT(DISTINCT session_id)`, sessions
-  span buckets, so distinct counts are unrecoverable from a sum-rollup. Usage also
-  buckets by `date(COALESCE(client_timestamp, created_at))`, counts only
-  metric-bearing events, and normalizes `project`/`model` to `'unknown'`; the live
-  Monitor uses sub-day rolling windows a daily rollup can't serve either.
-- **Why it matters**: the rollup as specced has no exact-parity reader, and Phase
-  1's covering indexes already made these reads fast (monitor list 269ms → 34ms),
-  so its remaining value is long-term scalability, not current speed.
-- **Sketch**: if revisited, use a session-grained rollup
-  `(day, agent, model, project, session_id)` so distinct counts stay exact.
-  Revisit trigger: events table > ~3M rows or a hot Usage read > ~150ms.
 
 #### Legacy v1 session-list N+1
 📥 noted
