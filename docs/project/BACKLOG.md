@@ -26,6 +26,22 @@ note here. This file stays future-only.
 
 ## Open
 
+### Ingestion
+
+#### `src/contracts/event-contract.ts` has no test of its own
+📥 noted
+- **What**: 246 lines of ingestion validation (`normalizeEventType`, `normalizeStatus`,
+  `normalizeClientTimestamp`, `getRequiredString`, `getOptionalNonNegativeInt`) with no
+  dedicated test file. It's reached indirectly through import/API tests, but its own
+  coercion branches aren't pinned.
+- **Why it matters**: this is the boundary where untrusted hook payloads become typed
+  events. The failure mode matches the one this repo already knows well — a bad
+  normalization silently reshapes data into something plausible rather than throwing, so
+  it surfaces as wrong numbers on the dashboard, not as an error.
+- **Sketch**: table-driven tests over the `normalize*`/`get*` helpers with malformed,
+  missing, and out-of-range fields; assert coercion vs. rejection explicitly. Noted
+  2026-07-16 during the portfolio TDD-guidance pass.
+
 ### Runtime CLI
 
 #### `amon serve --no-browser` is accepted but has no effect

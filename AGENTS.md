@@ -60,7 +60,7 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 ## Testing
 
 - **Pre-push** (matches required CI): `pnpm lint`, `pnpm build`, `pnpm test`. Run `pnpm frontend:check` (svelte-check) if Svelte/frontend TS touched.
-- **TDD**: red/green for new features and major changes.
+- **TDD**: red/green for new features, major refactors, and large changes. The red step must fail for the behavior you're about to fix, not merely because a symbol is missing — write the signature first, then a test that fails on the behavior (see "Never trust a test you haven't watched fail" below). Skip the red step for code with no behavior to assert, and cover it after. For smaller edits, still run the relevant existing tests before wrapping up.
 - **E2E**: `pnpm exec playwright test`.
 - **Sanity**: `GET /api/health`.
 - **Never trust a test you haven't watched fail.** Before claiming a test or CI guard covers a bug, reintroduce the bug and confirm it goes red. The failures worth guarding here are the silent ones — wrong costs, two chart series sharing a color, a test reading the real DB — and they all still render a plausible-looking result, so green on fixed code proves nothing on its own. A Top Models color test once passed against the broken implementation because the fixture had 6 models and the palette has 6 colors.
