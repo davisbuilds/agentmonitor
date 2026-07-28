@@ -3,15 +3,18 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import type { getDb as getDbType, closeDb as closeDbType } from '../src/db/connection.js';
+import type { insertParsedSession as insertParsedSessionType } from '../src/parser/claude-code.js';
+import type { parseCodexSessionMessages as parseCodexSessionMessagesType } from '../src/parser/codex-sessions.js';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amon-skill-context-'));
 process.env['AGENTMONITOR_DB_PATH'] = path.join(tempDir, 'test.db');
 process.env['AGENTMONITOR_SKILL_DIRS'] = path.join(tempDir, 'skills');
 
-let getDb: typeof import('../src/db/connection.js').getDb;
-let closeDb: typeof import('../src/db/connection.js').closeDb;
-let insertParsedSession: typeof import('../src/parser/claude-code.js').insertParsedSession;
-let parseCodexSessionMessages: typeof import('../src/parser/codex-sessions.js').parseCodexSessionMessages;
+let getDb: typeof getDbType;
+let closeDb: typeof closeDbType;
+let insertParsedSession: typeof insertParsedSessionType;
+let parseCodexSessionMessages: typeof parseCodexSessionMessagesType;
 
 before(async () => {
   ({ getDb, closeDb } = await import('../src/db/connection.js'));

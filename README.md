@@ -49,7 +49,9 @@ Prefer to do it yourself? The manual steps are below.
 - Provides provider-native quota snapshots through `/api/provider-quotas`.
 - Ships a local operator CLI. The preferred command is `amon`; `agentmonitor` is an equivalent executable alias.
 - Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
-- Reports per-skill trigger health (invocations, never-fired, version-attributed misfire rate) via `/api/v2/analytics/skills/health`.
+- Reports per-skill trigger health plus additive, per-harness consultation
+  decomposition (first read, post-compaction rehydration, repeat, and
+  unclassifiable evidence) via `/api/v2/analytics/skills/health`.
 
 ## Quick Start
 

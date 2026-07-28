@@ -381,9 +381,30 @@ test('GET /api/v2/analytics/skills/health returns the daily-style envelope with 
   const res = await fetch(`${baseUrl}/api/v2/analytics/skills/health`);
   assert.equal(res.status, 200);
 
-  const body = await res.json() as { data: SkillHealthRow[]; coverage: unknown };
+  const body = await res.json() as {
+    data: SkillHealthRow[];
+    coverage: unknown;
+    dataSemantics: {
+      data: string;
+      crossHarnessComparable: boolean;
+    };
+    consultations: {
+      byHarness: Array<{ harness: string }>;
+      comparability: { status: string; limitingEvidence: string[] };
+    };
+  };
   assert.ok(Array.isArray(body.data));
   assert.ok(body.coverage);
+  assert.equal(body.dataSemantics.data, 'phase_1_compatibility');
+  assert.equal(body.dataSemantics.crossHarnessComparable, false);
+  assert.deepEqual(
+    body.consultations.byHarness.map(harness => harness.harness),
+    ['claude', 'codex'],
+  );
+  assert.deepEqual(body.consultations.comparability, {
+    status: 'not_directly_comparable',
+    limitingEvidence: ['different_detection_semantics'],
+  });
 
   const byName = new Map(body.data.map(r => [r.name, r]));
   assert.equal(byName.get('write-spec')?.misfireRate, 1);

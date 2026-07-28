@@ -97,7 +97,7 @@ These are the deferred follow-ups surfaced during and after the build.
 ### Skill extraction unification
 
 #### Unify Claude/Codex skill-invocation extraction between the daily and health queries
-🟡 in-progress
+✅ delivered 2026-07-28
 - **What**: Claude `Skill` calls and Codex `.../SKILL.md` reads are identified in
   two places in `src/db/v2-queries.ts` — `getAnalyticsSkillsDaily` and
   `getAnalyticsSkillsHealth` — with the Codex event/JSONL blocks (including the
@@ -113,6 +113,9 @@ These are the deferred follow-ups surfaced during and after the build.
   the existing daily tests plus the out-of-window OTEL/in-window JSONL
   regression. Pulled into
   `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md` Task 4.
+- **Result**: `src/skills/invocation-ledger.ts` now supplies both analytics
+  paths. OTEL selection is date/project-filtered before JSONL suppression, and
+  the named regression is pinned.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 

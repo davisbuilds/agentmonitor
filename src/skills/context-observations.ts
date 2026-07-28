@@ -57,11 +57,6 @@ export function projectIdentityFromCwd(cwd: string | null | undefined): string |
   return `cwd:${sha256(normalized)}`;
 }
 
-export function projectLabelFromCwd(cwd: string | null | undefined): string | null {
-  if (!cwd?.trim()) return null;
-  return path.posix.basename(path.posix.normalize(cwd.trim().replaceAll('\\', '/'))) || null;
-}
-
 function decodeXmlText(value: string): string {
   return value
     .replaceAll('&lt;', '<')

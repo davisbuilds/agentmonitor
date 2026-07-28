@@ -150,6 +150,7 @@ export function getSkillConsultationAnalytics(
            last_item_at, skill_context_capabilities_json
     FROM browsing_sessions
   `).all() as SessionRow[]).filter(session => {
+    if (!['claude', 'codex'].includes(session.agent)) return false;
     if (params.agent && session.agent !== params.agent) return false;
     if (params.project && session.project !== params.project) return false;
     return true;
@@ -165,6 +166,8 @@ export function getSkillConsultationAnalytics(
     }
     return overlap || occurrenceSessions.has(session.id);
   });
+  const sessionsById = new Map(sessions.map(session => [session.id, session]));
+  const windowSessionsById = new Map(windowSessions.map(session => [session.id, session]));
   const sessionsByHarness = new Map<string, SessionRow[]>();
   for (const session of windowSessions) {
     const list = sessionsByHarness.get(session.agent) ?? [];
@@ -222,7 +225,7 @@ export function getSkillConsultationAnalytics(
     if (classification === 'first_read') {
       aggregate.firstReadSessions.add(occurrence.sessionId);
       const identity = occurrence.matchedObservation?.projectIdentity ?? 'unknown';
-      const session = sessions.find(candidate => candidate.id === occurrence.sessionId);
+      const session = sessionsById.get(occurrence.sessionId);
       const label = identity === 'unknown' ? 'Unknown' : (session?.project ?? identity);
       const bucket = aggregate.projects.get(identity) ?? { label, sessions: new Set<string>() };
       bucket.sessions.add(occurrence.sessionId);
@@ -256,6 +259,8 @@ export function getSkillConsultationAnalytics(
     const set = presented.get(row.skill_name) ?? new Set<string>();
     set.add(row.session_id);
     presented.set(row.skill_name, set);
+    const session = windowSessionsById.get(row.session_id);
+    if (session) aggregateFor(session.agent, row.skill_name);
   }
 
   for (const aggregate of aggregates.values()) {

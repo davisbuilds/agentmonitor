@@ -158,6 +158,24 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - Startup sync scans `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**/*.jsonl`, and `~/.gemini/antigravity-cli/conversations/**/*.db`.
 - Chokidar watches the Claude and Codex JSONL **directories** (recursively) and the handler filters to `.jsonl`. chokidar dropped glob support in v4, so the earlier `root/**/*.jsonl` patterns matched nothing and no live file events fired — live tailing had silently degraded to startup + periodic resync only. Antigravity DBs are **not** live-tailed yet — they are picked up on startup and each periodic resync (file-watch tailing deferred).
 - The Antigravity browser projection is two writers per session (`src/parser/antigravity-sessions.ts` → `insertParsedSession`, then `src/live/antigravity-adapter.ts` → projector), producing `browsing_sessions`/`messages`/`session_items` at `integration_mode=antigravity-sqlite`, `fidelity=summary` (step-kind labels until per-kind payload internals are decoded).
+- Claude and Codex session parsers also emit an ordered skill-context
+  projection. `session_context_observations` retains consultation, compaction,
+  and runtime catalog-presentation occurrences; normalized catalog entries live
+  in `session_catalog_observation_entries`. The shared
+  `insertParsedSession` transaction replaces these rows alongside messages and
+  tool calls, while `browsing_sessions.project_identity` and
+  `skill_context_capabilities_json` preserve session identity and observability
+  limits. Claude explicit `Skill` calls and Codex concrete `.../SKILL.md` reads
+  still define the phase-1 invocation basis; ordered parser rows only enrich a
+  selected occurrence and never create an analytics count.
+- `src/skills/invocation-ledger.ts` is the canonical occurrence selector used by
+  both daily and health analytics. It filters Codex OTEL evidence before
+  marking a canonical session event-backed, then uses JSONL only as fallback.
+  `src/skills/consultation-analytics.ts` matches selected occurrences to ordered
+  observations and derives per-harness first reads, post-compaction
+  rehydrations, repeats, unclassifiable coverage, project breadth, version
+  breakdowns, and exposure partitions. Mixed Claude/Codex output carries
+  `different_detection_semantics` rather than a pooled engagement claim.
 - The same exclude-pattern matcher is applied to discovery, watcher events, and periodic resync so ignored paths behave consistently.
 - `watched_files` caches parsed, skipped, and error states by file hash so unchanged files are not reparsed on every periodic resync.
 - Periodic resync still runs as a safety net for missed file-system events and now covers the Claude, Codex, and Antigravity history roots.
