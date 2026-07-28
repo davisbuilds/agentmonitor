@@ -10,6 +10,7 @@ const EVENT_TYPES = [
   'git_commit',
   'plan_step',
   'user_prompt',
+  'instruction_load',
 ] as const;
 
 const EVENT_STATUSES = [

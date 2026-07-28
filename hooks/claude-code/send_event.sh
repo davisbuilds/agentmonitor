@@ -33,6 +33,17 @@ extract_nested() {
   fi
 }
 
+# Extract a top-level field while preserving its JSON representation.
+# Without jq, optional structured fields are unavailable rather than guessed.
+extract_json_field() {
+  local field="$1"
+  if command -v jq &>/dev/null; then
+    echo "$HOOK_INPUT" | jq -c --arg field "$field" '.[$field] // null' 2>/dev/null
+  else
+    echo "null"
+  fi
+}
+
 # Derive project name from cwd (basename of working directory)
 get_project() {
   local cwd

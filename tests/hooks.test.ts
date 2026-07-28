@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
-import { execSync, execFileSync } from 'node:child_process';
+import { execSync, execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test, { describe } from 'node:test';
@@ -78,6 +80,105 @@ function makeNotificationInput(): string {
     title: 'Done',
     notification_type: 'idle_prompt',
   });
+}
+
+function makeInstructionsLoadedInput(
+  overrides: Record<string, unknown> = {},
+): string {
+  return JSON.stringify({
+    session_id: 'test-session-001',
+    transcript_path: '/tmp/transcript.jsonl',
+    cwd: '/home/user/my-project',
+    permission_mode: 'default',
+    hook_event_name: 'InstructionsLoaded',
+    file_path: '/home/user/my-project/CLAUDE.md',
+    memory_type: 'Project',
+    load_reason: 'session_start',
+    content: 'must never be emitted',
+    ...overrides,
+  });
+}
+
+interface CapturedHookPayload {
+  event_id?: string;
+  session_id: string;
+  agent_type: string;
+  event_type: string;
+  project?: string;
+  metadata?: Record<string, unknown>;
+}
+
+function runHookProcess(
+  executable: string,
+  args: string[],
+  stdin: string,
+  url: string,
+  envOverrides: Record<string, string> = {},
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, {
+      env: { ...ENV, ...envOverrides, AGENTMONITOR_URL: url },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stderr = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('exit', code => {
+      if (code === 0) resolve();
+      else reject(new Error(`${executable} exited with ${code}: ${stderr}`));
+    });
+    child.stdin.end(stdin);
+  });
+}
+
+async function captureHookPayloads(
+  runs: Array<{
+    executable: string;
+    args: string[];
+    stdin: string;
+    env?: Record<string, string>;
+  }>,
+): Promise<CapturedHookPayload[]> {
+  const payloads: CapturedHookPayload[] = [];
+  let resolveReceived: (() => void) | undefined;
+  const received = new Promise<void>(resolve => {
+    resolveReceived = resolve;
+  });
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    request.on('end', () => {
+      payloads.push(JSON.parse(Buffer.concat(chunks).toString('utf8')) as CapturedHookPayload);
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end('{}');
+      if (payloads.length === runs.length) resolveReceived?.();
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const address = server.address() as AddressInfo;
+  const url = `http://127.0.0.1:${address.port}`;
+  try {
+    for (const run of runs) {
+      await runHookProcess(run.executable, run.args, run.stdin, url, run.env);
+    }
+    await Promise.race([
+      received,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error(
+          `Expected ${runs.length} hook payloads, received ${payloads.length}`,
+        )), 1_000);
+      }),
+    ]);
+    return payloads;
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
 }
 
 function runShellHook(script: string, stdin: string): { exitCode: number; stdout: string; stderr: string } {
@@ -357,5 +458,92 @@ describe('Hook payload contract validation', () => {
       project: 'my-project',
       metadata: { blocked: true, reason: 'destructive_command', command: 'rm -rf /' },
     });
+  });
+
+  test('instruction_load payload passes contract', () => {
+    validatePayloadShape('instruction_load', {
+      project: 'my-project',
+      metadata: {
+        file_path: '/home/user/my-project/CLAUDE.md',
+        memory_type: 'Project',
+        load_reason: 'session_start',
+      },
+    });
+  });
+});
+
+describe('Instruction-load telemetry hooks', () => {
+  test('shell hook emits each received load without instruction contents', async () => {
+    const script = path.join(HOOKS_DIR, 'instructions_loaded.sh');
+    const payloads = await captureHookPayloads([
+      {
+        executable: 'bash',
+        args: [script],
+        stdin: makeInstructionsLoadedInput(),
+      },
+      {
+        executable: 'bash',
+        args: [script],
+        stdin: makeInstructionsLoadedInput({ load_reason: 'compact' }),
+      },
+    ]);
+
+    assert.deepEqual(payloads.map(payload => payload.event_type), [
+      'instruction_load',
+      'instruction_load',
+    ]);
+    assert.deepEqual(payloads.map(payload => payload.metadata?.['load_reason']), [
+      'session_start',
+      'compact',
+    ]);
+    assert.equal(payloads.every(payload => payload.event_id === undefined), true);
+    assert.equal(JSON.stringify(payloads).includes('must never be emitted'), false);
+  });
+
+  test('Python hook preserves optional load metadata without instruction contents', async () => {
+    const payloads = await captureHookPayloads([{
+      executable: 'python3',
+      args: [path.join(PYTHON_DIR, 'instructions_loaded.py')],
+      stdin: makeInstructionsLoadedInput({
+        load_reason: 'path_glob_match',
+        globs: ['src/**/*.ts'],
+        trigger_file_path: '/home/user/my-project/src/index.ts',
+        parent_file_path: '/home/user/my-project/CLAUDE.md',
+      }),
+    }]);
+
+    assert.deepEqual(payloads[0]?.metadata, {
+      file_path: '/home/user/my-project/CLAUDE.md',
+      memory_type: 'Project',
+      load_reason: 'path_glob_match',
+      globs: ['src/**/*.ts'],
+      trigger_file_path: '/home/user/my-project/src/index.ts',
+      parent_file_path: '/home/user/my-project/CLAUDE.md',
+    });
+    assert.equal(JSON.stringify(payloads).includes('must never be emitted'), false);
+  });
+
+  test('SessionStart hooks preserve the instruction-load instrumentation marker', async () => {
+    const payloads = await captureHookPayloads([
+      {
+        executable: 'bash',
+        args: [path.join(HOOKS_DIR, 'session_start.sh')],
+        stdin: makeSessionStartInput(),
+        env: { AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED: '1' },
+      },
+      {
+        executable: 'python3',
+        args: [path.join(PYTHON_DIR, 'session_start.py')],
+        stdin: makeSessionStartInput(),
+        env: { AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED: '1' },
+      },
+    ]);
+
+    assert.equal(
+      payloads.every(
+        payload => payload.metadata?.['instruction_load_instrumented'] === true,
+      ),
+      true,
+    );
   });
 });

@@ -196,7 +196,10 @@ pnpm cli -- hooks install claude --force
 The underlying installer remains available as
 `./hooks/claude-code/install.sh`. Restart Claude Code after installing. See
 [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) for
-details.
+details. Current installs include asynchronous, content-free
+`InstructionsLoaded` telemetry for session-start, lazy, include, and
+post-compaction loads. Re-run the installer to add it to an older hook
+configuration.
 
 ### Codex
 

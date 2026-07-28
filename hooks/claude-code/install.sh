@@ -12,7 +12,8 @@
 set -euo pipefail
 
 HOOKS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SETTINGS_FILE="$HOME/.claude/settings.json"
+CLAUDE_CONFIG_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+SETTINGS_FILE="$CLAUDE_CONFIG_DIR/settings.json"
 USE_PYTHON=false
 AGENTMONITOR_URL="http://127.0.0.1:3141"
 UNINSTALL=false
@@ -60,12 +61,22 @@ echo "Backed up settings to $BACKUP"
 if [ "$UNINSTALL" = true ]; then
   # Remove all AgentMonitor hook entries (identified by agentmonitor marker in command path)
   jq '
+    def without_agentmonitor:
+      map(
+        .hooks = (
+          (.hooks // []) |
+          map(
+            select((((.command? // "") | test("AGENTMONITOR_URL=|hooks/claude-code")) | not))
+          )
+        )
+      ) | map(select(.hooks | length > 0));
+
     if .hooks then
-      .hooks |= with_entries(
-        .value |= map(
-          .hooks |= map(select(.command | test("agentmonitor|hooks/claude-code") | not))
-        ) | map(select(.hooks | length > 0))
-      ) | if .hooks == {} then del(.hooks) else . end
+      .hooks |= (
+        with_entries(.value |= without_agentmonitor) |
+        with_entries(select(.value | length > 0))
+      ) |
+      if .hooks == {} then del(.hooks) else . end
     else . end
   ' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
 
@@ -80,6 +91,7 @@ if [ "$USE_PYTHON" = true ]; then
   SESSION_END="python3 $HOOKS_DIR/python/session_end.py"
   POST_TOOL="python3 $HOOKS_DIR/python/post_tool_use.py"
   PRE_TOOL="python3 $HOOKS_DIR/python/pre_tool_use.py"
+  INSTRUCTIONS_LOADED="python3 $HOOKS_DIR/python/instructions_loaded.py"
   USER_PROMPT="$HOOKS_DIR/user_prompt_submit.sh"  # No Python variant yet
   LANG_LABEL="Python"
 else
@@ -87,6 +99,7 @@ else
   SESSION_END="$HOOKS_DIR/session_end.sh"
   POST_TOOL="$HOOKS_DIR/post_tool_use.sh"
   PRE_TOOL="$HOOKS_DIR/pre_tool_use.sh"
+  INSTRUCTIONS_LOADED="$HOOKS_DIR/instructions_loaded.sh"
   USER_PROMPT="$HOOKS_DIR/user_prompt_submit.sh"
   LANG_LABEL="Shell"
 fi
@@ -96,24 +109,41 @@ jq --arg session_start "$SESSION_START" \
    --arg session_end "$SESSION_END" \
    --arg post_tool "$POST_TOOL" \
    --arg pre_tool "$PRE_TOOL" \
+   --arg instructions_loaded "$INSTRUCTIONS_LOADED" \
    --arg user_prompt "$USER_PROMPT" \
    --arg url "$AGENTMONITOR_URL" \
    '
-  .hooks = ((.hooks // {}) * {
-    "SessionStart": [
+  def without_agentmonitor:
+    map(
+      .hooks |= map(
+        select((((.command? // "") | test("AGENTMONITOR_URL=|hooks/claude-code")) | not))
+      )
+    ) | map(select(.hooks | length > 0));
+
+  .hooks = (.hooks // {}) |
+  .hooks["SessionStart"] = (
+    ((.hooks["SessionStart"] // []) | without_agentmonitor) +
+    [
       {
         "matcher": "",
         "hooks": [
           {
             "type": "command",
-            "command": ("AGENTMONITOR_URL=" + $url + " " + $session_start),
+            "command": (
+              "AGENTMONITOR_URL=" + $url +
+              " AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED=1 " +
+              $session_start
+            ),
             "timeout": 10,
             "async": true
           }
         ]
       }
-    ],
-    "Stop": [
+    ]
+  ) |
+  .hooks["Stop"] = (
+    ((.hooks["Stop"] // []) | without_agentmonitor) +
+    [
       {
         "hooks": [
           {
@@ -124,8 +154,11 @@ jq --arg session_start "$SESSION_START" \
           }
         ]
       }
-    ],
-    "PostToolUse": [
+    ]
+  ) |
+  .hooks["PostToolUse"] = (
+    ((.hooks["PostToolUse"] // []) | without_agentmonitor) +
+    [
       {
         "matcher": "",
         "hooks": [
@@ -137,8 +170,11 @@ jq --arg session_start "$SESSION_START" \
           }
         ]
       }
-    ],
-    "PreToolUse": [
+    ]
+  ) |
+  .hooks["PreToolUse"] = (
+    ((.hooks["PreToolUse"] // []) | without_agentmonitor) +
+    [
       {
         "matcher": "Bash",
         "hooks": [
@@ -151,8 +187,11 @@ jq --arg session_start "$SESSION_START" \
           }
         ]
       }
-    ],
-    "UserPromptSubmit": [
+    ]
+  ) |
+  .hooks["UserPromptSubmit"] = (
+    ((.hooks["UserPromptSubmit"] // []) | without_agentmonitor) +
+    [
       {
         "matcher": "",
         "hooks": [
@@ -165,7 +204,23 @@ jq --arg session_start "$SESSION_START" \
         ]
       }
     ]
-  })
+  ) |
+  .hooks["InstructionsLoaded"] = (
+    ((.hooks["InstructionsLoaded"] // []) | without_agentmonitor) +
+    [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ("AGENTMONITOR_URL=" + $url + " " + $instructions_loaded),
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ]
+  )
 ' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
 
 echo ""
@@ -180,6 +235,7 @@ echo "  Stop          -> session_end event (async)"
 echo "  PostToolUse   -> tool_use event (async)"
 echo "  PreToolUse    -> safety checks on Bash (sync, blocks destructive commands)"
 echo "  UserPromptSubmit -> user_prompt event (async)"
+echo "  InstructionsLoaded -> instruction_load event (async, metadata only)"
 echo ""
 echo "Start AgentMonitor with 'pnpm dev' then use Claude Code as normal."
 echo "Events will appear in the dashboard at $AGENTMONITOR_URL"
