@@ -101,7 +101,7 @@ function responseItemText(payload: Record<string, unknown>): string {
       return typeof text === 'string' ? text : '';
     })
     .filter(Boolean)
-    .join('\n');
+    .join('');
 }
 
 // --- Parse Codex JSONL content into ParsedSession ---

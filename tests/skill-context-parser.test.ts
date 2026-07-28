@@ -187,6 +187,40 @@ test('Codex parses entries from the runtime Markdown skill catalog', () => {
   );
 });
 
+test('Codex preserves catalog bytes across contiguous content fragments', () => {
+  const fragmentedCatalog =
+    '<skills_instructions><skills><skill><name>test-strategy</name>'
+    + '<description>Test behavior.</description></skill></skills></skills_instructions>';
+  const parsed = parseCodexSessionMessages(JSON.stringify({
+    type: 'response_item',
+    timestamp: '2026-07-01T00:00:01Z',
+    payload: {
+      role: 'developer',
+      content: [
+        { type: 'input_text', text: '<skills_instr' },
+        {
+          type: 'input_text',
+          text: 'uctions><skills><skill><name>test-strategy</name>',
+        },
+        {
+          type: 'input_text',
+          text: '<description>Test behavior.</description></skill></skills></skills_instructions>',
+        },
+      ],
+    },
+  }), 'codex-fragmented-catalog');
+
+  const presentation = parsed.skillContext?.observations.find(
+    observation => observation.kind === 'catalog_presentation',
+  );
+  assert.ok(presentation);
+  assert.deepEqual(presentation.catalogEntries?.map(entry => entry.name), ['test-strategy']);
+  assert.equal(
+    (presentation.metadata?.['measurement'] as { value?: number }).value,
+    Buffer.byteLength(fragmentedCatalog),
+  );
+});
+
 test('Codex does not report an unrecognized catalog body as observed empty', () => {
   const parsed = parseCodexSessionMessages(JSON.stringify({
     type: 'response_item',

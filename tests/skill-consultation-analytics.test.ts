@@ -35,6 +35,7 @@ before(async () => {
       content: [{ type: 'tool_use', id, name: 'Skill', input: { skill: 'test-strategy' } }],
     },
   });
+  const fullPath = '/tmp/.claude/projects/-Users-test-Dev-alpha/full.jsonl';
   const full = parseSessionMessages([
     line('2026-07-10T10:00:00Z', 'one'),
     line('2026-07-10T10:01:00Z', 'two'),
@@ -45,14 +46,86 @@ before(async () => {
       timestamp: '2026-07-10T10:02:00Z',
     }),
     line('2026-07-10T10:03:00Z', 'three', '/work/beta'),
-  ].join('\n'), 'eligible-session');
-  insertParsedSession(getDb(), full, '/tmp/full.jsonl', 10, 'full');
+  ].join('\n'), 'eligible-session', fullPath);
+  insertParsedSession(
+    getDb(),
+    full,
+    fullPath,
+    10,
+    'full',
+  );
 
+  const degradedPath = '/tmp/.claude/projects/-Users-test-Dev-alpha/degraded.jsonl';
   const degraded = parseSessionMessages([
     '{"broken":',
     line('2026-07-10T11:00:00Z', 'degraded'),
-  ].join('\n'), 'degraded-session');
-  insertParsedSession(getDb(), degraded, '/tmp/degraded.jsonl', 10, 'degraded');
+  ].join('\n'), 'degraded-session', degradedPath);
+  insertParsedSession(
+    getDb(),
+    degraded,
+    degradedPath,
+    10,
+    'degraded',
+  );
+
+  const windowHistoryPath =
+    '/tmp/.claude/projects/-Users-test-Dev-window-history/session.jsonl';
+  const windowHistory = parseSessionMessages([
+    line('2026-07-09T23:58:00Z', 'window-history-first', '/work/window-history'),
+    JSON.stringify({
+      type: 'system',
+      subtype: 'compact_boundary',
+      cwd: '/work/window-history',
+      timestamp: '2026-07-09T23:59:00Z',
+    }),
+    line('2026-07-10T00:01:00Z', 'window-history-second', '/work/window-history'),
+  ].join('\n'), 'window-history-session', windowHistoryPath);
+  insertParsedSession(
+    getDb(),
+    windowHistory,
+    windowHistoryPath,
+    10,
+    'window-history',
+  );
+
+  const activeAcrossWindowPath =
+    '/tmp/.claude/projects/-Users-test-Dev-active-window/across.jsonl';
+  const activeAcrossWindow = parseSessionMessages([
+    JSON.stringify({
+      type: 'user',
+      cwd: '/work/active-window',
+      timestamp: '2026-07-09T23:00:00Z',
+      message: {
+        role: 'user',
+        content: [{ type: 'text', text: 'Keep working.' }],
+      },
+    }),
+  ].join('\n'), 'active-across-window', activeAcrossWindowPath);
+  insertParsedSession(
+    getDb(),
+    activeAcrossWindow,
+    activeAcrossWindowPath,
+    10,
+    'active-across-window',
+  );
+  getDb().prepare(`
+    UPDATE browsing_sessions
+    SET live_status = 'live'
+    WHERE id = 'active-across-window'
+  `).run();
+
+  const activeWindowInvocationPath =
+    '/tmp/.claude/projects/-Users-test-Dev-active-window/invocation.jsonl';
+  const activeWindowInvocation = parseSessionMessages([
+    line('2026-07-10T10:00:00Z', 'active-window-read', '/work/active-window'),
+  ].join('\n'), 'active-window-invocation', activeWindowInvocationPath);
+  insertParsedSession(
+    getDb(),
+    activeWindowInvocation,
+    activeWindowInvocationPath,
+    10,
+    'active-window-invocation',
+  );
 
   const codexUuid = '019d1234-1234-7234-8234-123456789abc';
   const codexSessionId = `rollout-2026-07-10T12-00-00-${codexUuid}`;
@@ -123,6 +196,7 @@ after(() => {
 test('classifies consultations and reconciles coverage, projects, and versions', () => {
   const result = getAnalyticsSkillConsultations({
     agent: 'claude',
+    project: 'alpha',
     date_from: '2026-07-10',
     date_to: '2026-07-10',
   });
@@ -177,4 +251,35 @@ test('classifies OTEL-backed Codex reads against canonical JSONL compactions and
     presentedWithFirstRead: 1,
     presentedWithoutFirstRead: 0,
   });
+});
+
+test('classifies in-window consultations against earlier history in the same session', () => {
+  const result = getAnalyticsSkillConsultations({
+    agent: 'claude',
+    project: 'window-history',
+    date_from: '2026-07-10',
+    date_to: '2026-07-10',
+  });
+  const row = result.byHarness[0]?.skills.find(skill => skill.name === 'test-strategy');
+  assert.ok(row);
+  assert.deepEqual(row.classes, {
+    first_read: 0,
+    rehydration_after_compaction: 1,
+    repeat_no_compaction: 0,
+    unclassifiable: 0,
+  });
+});
+
+test('counts an active session through the response time despite a stale parsed end', () => {
+  const result = getAnalyticsSkillConsultations({
+    agent: 'claude',
+    project: 'active-window',
+    date_from: '2026-07-10',
+    date_to: '2026-07-10',
+  }, new Date('2026-07-10T12:00:00Z'));
+  const row = result.byHarness[0]?.skills.find(skill => skill.name === 'test-strategy');
+  assert.ok(row);
+  assert.equal(row.sessionsInWindow, 2);
+  assert.equal(row.eligibleSessionsInWindow, 2);
+  assert.equal(row.firstReadEngagementRate, 0.5);
 });

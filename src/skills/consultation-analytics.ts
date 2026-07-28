@@ -12,6 +12,7 @@ interface SessionRow {
   started_at: string | null;
   ended_at: string | null;
   last_item_at: string | null;
+  live_status: string | null;
   skill_context_capabilities_json: string | null;
 }
 
@@ -20,6 +21,7 @@ interface StoredObservation {
   session_id: string;
   ordinal: number;
   kind: string;
+  skill_name: string | null;
 }
 
 const emptyClasses = (): SkillConsultationClassCounts => ({
@@ -71,38 +73,55 @@ function classifyOccurrences(
   observations: StoredObservation[],
 ): Map<SkillInvocationOccurrence, SkillConsultationClass> {
   const compactions = new Map<string, number[]>();
+  const consultations = new Map<string, number[]>();
   for (const observation of observations) {
-    if (observation.kind !== 'compaction') continue;
     const sessionId = extractCanonicalCodexSessionId(observation.session_id);
-    const values = compactions.get(sessionId) ?? [];
-    values.push(observation.ordinal);
-    compactions.set(sessionId, values);
+    if (observation.kind === 'compaction') {
+      const values = compactions.get(sessionId) ?? [];
+      values.push(observation.ordinal);
+      compactions.set(sessionId, values);
+    } else if (observation.kind === 'consultation' && observation.skill_name) {
+      const key = `${sessionId}\0${observation.skill_name}`;
+      const values = consultations.get(key) ?? [];
+      values.push(observation.ordinal);
+      consultations.set(key, values);
+    }
   }
+  const countBefore = (ordinals: number[], target: number): number => {
+    let low = 0;
+    let high = ordinals.length;
+    while (low < high) {
+      const midpoint = Math.floor((low + high) / 2);
+      if (ordinals[midpoint]! < target) low = midpoint + 1;
+      else high = midpoint;
+    }
+    return low;
+  };
   const classes = new Map<SkillInvocationOccurrence, SkillConsultationClass>();
-  const lastGeneration = new Map<string, number>();
-  const sorted = [...occurrences].sort((left, right) => {
-    const sessionOrder = left.canonicalSessionId.localeCompare(right.canonicalSessionId);
-    if (sessionOrder !== 0) return sessionOrder;
-    return (left.matchedObservation?.ordinal ?? Number.MAX_SAFE_INTEGER)
-      - (right.matchedObservation?.ordinal ?? Number.MAX_SAFE_INTEGER);
-  });
-  for (const occurrence of sorted) {
+  for (const occurrence of occurrences) {
     if (!occurrence.matchedObservation || !occurrence.classificationCapability.observable) {
       classes.set(occurrence, 'unclassifiable');
       continue;
     }
-    const generation = (compactions.get(occurrence.canonicalSessionId) ?? [])
-      .filter(ordinal => ordinal < occurrence.matchedObservation!.ordinal).length;
     const key = `${occurrence.canonicalSessionId}\0${occurrence.skillName}`;
-    const previous = lastGeneration.get(key);
-    if (previous === undefined) {
+    const consultationOrdinals = consultations.get(key) ?? [];
+    const currentOrdinal = occurrence.matchedObservation.ordinal;
+    const priorIndex = countBefore(consultationOrdinals, currentOrdinal) - 1;
+    if (priorIndex < 0) {
       classes.set(occurrence, 'first_read');
-    } else if (generation > previous) {
+      continue;
+    }
+    const compactionOrdinals = compactions.get(occurrence.canonicalSessionId) ?? [];
+    const currentGeneration = countBefore(compactionOrdinals, currentOrdinal);
+    const previousGeneration = countBefore(
+      compactionOrdinals,
+      consultationOrdinals[priorIndex]!,
+    );
+    if (currentGeneration > previousGeneration) {
       classes.set(occurrence, 'rehydration_after_compaction');
     } else {
       classes.set(occurrence, 'repeat_no_compaction');
     }
-    lastGeneration.set(key, generation);
   }
   return classes;
 }
@@ -128,7 +147,7 @@ function sessionFilter(params: AnalyticsParams): SqlFilter {
 
 const SESSION_SELECT = `
   SELECT id, agent, project, project_identity, started_at, ended_at,
-         last_item_at, skill_context_capabilities_json
+         last_item_at, live_status, skill_context_capabilities_json
   FROM browsing_sessions
 `;
 
@@ -188,8 +207,13 @@ function selectScopedSessions(
     intervalValues.push(toExclusive.slice(0, 10));
   }
   if (from) {
-    intervalClauses.push('COALESCE(ended_at, last_item_at, ?) >= ?');
-    intervalValues.push(asOf, from.slice(0, 10));
+    intervalClauses.push(`
+      CASE
+        WHEN live_status IN ('live', 'active', 'available') THEN ?
+        ELSE COALESCE(ended_at, last_item_at, ?)
+      END >= ?
+    `);
+    intervalValues.push(asOf, asOf, from.slice(0, 10));
   }
   const byInterval = selectSessions(
     db,
@@ -231,7 +255,7 @@ function selectObservations(
     const chunk = sessionIds.slice(offset, offset + 500);
     const placeholders = chunk.map(() => '?').join(', ');
     rows.push(...db.prepare(`
-      SELECT id, session_id, ordinal, kind
+      SELECT id, session_id, ordinal, kind, skill_name
       FROM session_context_observations
       WHERE session_id IN (${placeholders})
       ORDER BY session_id, ordinal, id
