@@ -2,6 +2,12 @@ import type Database from 'better-sqlite3';
 import { claudeInvocationMode } from '../util/invocation-mode.js';
 import { config } from '../config.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
+import {
+  projectIdentityFromCwd,
+  type ParsedSkillContext,
+  type SessionContextObservation,
+} from '../skills/context-observations.js';
+import { extractExplicitSkillName } from '../skills/invocation-detection.js';
 
 // --- Tool category normalization ---
 
@@ -118,6 +124,7 @@ export interface ParsedSession {
   messages: ParsedMessage[];
   toolCalls: ParsedToolCall[];
   metadata: ParsedSessionMetadata;
+  skillContext?: ParsedSkillContext;
 }
 
 function cleanPreviewText(text: string): string {
@@ -284,6 +291,10 @@ export function parseSessionMessages(
   // Latest assistant turn's context-window occupancy (in file order).
   let contextUsedTokens: number | undefined;
   let latestModel: string | undefined;
+  let latestCwd: string | null = null;
+  let rawOrdinal = 0;
+  let malformedRecords = 0;
+  const contextObservations: SessionContextObservation[] = [];
 
   const lines = jsonlContent.split('\n');
 
@@ -295,11 +306,29 @@ export function parseSessionMessages(
     try {
       line = JSON.parse(trimmed) as ClaudeCodeLine;
     } catch {
-      continue; // Skip malformed lines
+      malformedRecords++;
+      rawOrdinal++;
+      continue;
     }
+    const recordOrdinal = rawOrdinal++;
 
     const lineType = line.type;
-    if (!lineType) continue;
+    if (typeof line.cwd === 'string' && line.cwd.trim()) latestCwd = line.cwd;
+    const projectIdentity = projectIdentityFromCwd(latestCwd);
+
+    if (lineType === 'system' && line.subtype === 'compact_boundary') {
+      contextObservations.push({
+        ordinal: recordOrdinal,
+        kind: 'compaction',
+        source: 'claude_jsonl',
+        timestamp: line.timestamp ?? null,
+        projectIdentity: projectIdentity ?? undefined,
+      });
+    }
+
+    if (!lineType) {
+      continue;
+    }
 
     if (line.isSidechain) {
       sawSidechain = true;
@@ -356,6 +385,22 @@ export function parseSessionMessages(
 
           // Extract tool call record
           if (block.name) {
+            if (block.name === 'Skill') {
+              const skillName = extractExplicitSkillName(
+                block.input != null ? JSON.stringify(block.input) : null,
+              );
+              if (skillName) {
+                contextObservations.push({
+                  ordinal: recordOrdinal,
+                  kind: 'consultation',
+                  source: 'claude_skill_tool',
+                  timestamp: line.timestamp ?? null,
+                  skillName,
+                  projectIdentity: projectIdentity ?? undefined,
+                  metadata: { toolUseId: block.id ?? null },
+                });
+              }
+            }
             toolCalls.push({
               session_id: sessionId,
               tool_name: block.name,
@@ -448,6 +493,27 @@ export function parseSessionMessages(
       context_used_tokens: contextUsedTokens,
       model: latestModel,
     },
+    skillContext: {
+      projectIdentity: projectIdentityFromCwd(latestCwd),
+      observations: contextObservations,
+      capabilities: {
+        orderedConsultations: malformedRecords === 0
+          ? { observable: true }
+          : { observable: false, reason: 'malformed_source_record' },
+        compactionVisibility: malformedRecords === 0
+          ? { observable: true }
+          : { observable: false, reason: 'malformed_source_record' },
+        catalogPresentation: {
+          observable: false,
+          reason: 'harness_signal_unavailable',
+        },
+        instructionLoads: {
+          observable: false,
+          reason: 'instruction_load_signal_absent',
+        },
+        diagnostics: malformedRecords > 0 ? ['malformed_source_record'] : [],
+      },
+    },
   };
 }
 
@@ -462,8 +528,16 @@ export function insertParsedSession(
 ): void {
   const txn = db.transaction(() => {
     const { metadata, messages, toolCalls } = parsed;
+    const skillContext = parsed.skillContext;
 
     // Clear existing data for this session (for re-parse)
+    db.prepare(`
+      DELETE FROM session_catalog_observation_entries
+      WHERE observation_id IN (
+        SELECT id FROM session_context_observations WHERE session_id = ?
+      )
+    `).run(metadata.session_id);
+    db.prepare('DELETE FROM session_context_observations WHERE session_id = ?').run(metadata.session_id);
     db.prepare('DELETE FROM tool_calls WHERE session_id = ?').run(metadata.session_id);
     db.prepare('DELETE FROM messages WHERE session_id = ?').run(metadata.session_id);
     db.prepare('DELETE FROM browsing_sessions WHERE id = ?').run(metadata.session_id);
@@ -485,8 +559,13 @@ export function insertParsedSession(
 
     // Insert browsing session
     db.prepare(`
-      INSERT INTO browsing_sessions (id, project, agent, first_message, started_at, ended_at, message_count, user_message_count, parent_session_id, relationship_type, file_path, file_size, file_hash, context_used_tokens, context_window_tokens)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO browsing_sessions (
+        id, project, agent, first_message, started_at, ended_at, message_count,
+        user_message_count, parent_session_id, relationship_type, file_path,
+        file_size, file_hash, context_used_tokens, context_window_tokens,
+        project_identity, skill_context_capabilities_json
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       metadata.session_id,
       metadata.project,
@@ -503,6 +582,8 @@ export function insertParsedSession(
       fileHash,
       usedTokens,
       contextWindow,
+      skillContext?.projectIdentity ?? null,
+      skillContext ? JSON.stringify(skillContext.capabilities) : null,
     );
 
     // Insert messages and collect their IDs for tool call linking
@@ -548,6 +629,45 @@ export function insertParsedSession(
         if (tc.subagent_session_id) {
           subagentSessionIds.add(tc.subagent_session_id);
         }
+      }
+    }
+
+    const insertObservation = db.prepare(`
+      INSERT INTO session_context_observations (
+        session_id, ordinal, kind, source, observed_at, skill_name,
+        command_fingerprint, project_identity, reason, metadata_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertCatalogEntry = db.prepare(`
+      INSERT INTO session_catalog_observation_entries (
+        observation_id, ordinal, skill_name, description,
+        description_fingerprint, source_location, scope
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const observation of skillContext?.observations ?? []) {
+      const result = insertObservation.run(
+        metadata.session_id,
+        observation.ordinal,
+        observation.kind,
+        observation.source,
+        observation.timestamp,
+        observation.skillName ?? null,
+        observation.commandFingerprint ?? null,
+        observation.projectIdentity ?? null,
+        observation.reason ?? null,
+        JSON.stringify(observation.metadata ?? {}),
+      );
+      const observationId = Number(result.lastInsertRowid);
+      for (const [entryOrdinal, entry] of (observation.catalogEntries ?? []).entries()) {
+        insertCatalogEntry.run(
+          observationId,
+          entryOrdinal,
+          entry.name,
+          entry.description,
+          entry.descriptionFingerprint,
+          entry.sourceLocation,
+          entry.scope,
+        );
       }
     }
 

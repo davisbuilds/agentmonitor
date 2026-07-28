@@ -1,6 +1,16 @@
 import path from 'path';
 import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
+import {
+  parseCodexCatalogPresentations,
+  projectIdentityFromCwd,
+  type SessionContextObservation,
+} from '../skills/context-observations.js';
+import {
+  extractCodexCommandFromInputJson,
+  extractCodexSkillNamesFromCommand,
+  fingerprintCodexCommand,
+} from '../skills/invocation-detection.js';
 
 // --- Codex JSONL line types ---
 
@@ -75,6 +85,25 @@ function extractTextBlock(block: { type: string; text?: string }): string | null
   return null;
 }
 
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function responseItemText(payload: Record<string, unknown>): string {
+  const content = payload['content'];
+  if (!Array.isArray(content)) return '';
+  return content
+    .map(item => {
+      const block = asRecord(item);
+      const text = block?.['text'];
+      return typeof text === 'string' ? text : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
 // --- Parse Codex JSONL content into ParsedSession ---
 
 export function parseCodexSessionMessages(
@@ -94,20 +123,24 @@ export function parseCodexSessionMessages(
   // Numerator is last_token_usage.input_tokens, which is cache-inclusive.
   let contextUsedTokens: number | undefined;
   let contextWindowReported: number | undefined;
+  let malformedRecords = 0;
+  const contextObservations: SessionContextObservation[] = [];
 
-  const lines: CodexLine[] = [];
+  const lines: Array<{ line: CodexLine; ordinal: number }> = [];
+  let sourceOrdinal = 0;
   for (const raw of jsonlContent.split('\n')) {
     const trimmed = raw.trim();
     if (!trimmed) continue;
     try {
-      lines.push(JSON.parse(trimmed) as CodexLine);
+      lines.push({ line: JSON.parse(trimmed) as CodexLine, ordinal: sourceOrdinal });
     } catch {
-      continue;
+      malformedRecords++;
     }
+    sourceOrdinal++;
   }
 
   // Extract session metadata
-  for (const line of lines) {
+  for (const { line } of lines) {
     if (line.type === 'session_meta' && line.payload) {
       cwd = (line.payload.cwd as string) ?? null;
       startedAt = line.payload.timestamp ?? line.timestamp ?? null;
@@ -116,8 +149,60 @@ export function parseCodexSessionMessages(
     }
   }
 
+  let latestCwd = cwd;
+  const inspectContextPayload = (
+    payload: Record<string, unknown>,
+    ordinal: number,
+    timestamp: string | null,
+    source: string,
+  ): void => {
+    const payloadCwd = payload['cwd'];
+    if (typeof payloadCwd === 'string' && payloadCwd.trim()) latestCwd = payloadCwd;
+    const projectIdentity = projectIdentityFromCwd(latestCwd);
+    const name = payload['name'];
+    if (typeof name === 'string' && ['exec_command', 'exec'].includes(name)) {
+      const input = typeof payload['input'] === 'string'
+        ? payload['input']
+        : typeof payload['arguments'] === 'string'
+          ? payload['arguments']
+          : null;
+      const command = extractCodexCommandFromInputJson(input);
+      if (command) {
+        const commandFingerprint = fingerprintCodexCommand(command);
+        for (const skillName of extractCodexSkillNamesFromCommand(command)) {
+          contextObservations.push({
+            ordinal,
+            kind: 'consultation',
+            source,
+            timestamp,
+            skillName,
+            commandFingerprint,
+            projectIdentity: projectIdentity ?? undefined,
+          });
+        }
+      }
+    }
+
+    const text = responseItemText(payload);
+    for (const presentation of parseCodexCatalogPresentations(text)) {
+      contextObservations.push({
+        ordinal,
+        kind: 'catalog_presentation',
+        source,
+        timestamp,
+        projectIdentity: projectIdentity ?? undefined,
+        metadata: {
+          fingerprint: presentation.fingerprint,
+          measurement: presentation.measurement,
+          truncation: presentation.truncation,
+        },
+        catalogEntries: presentation.entries,
+      });
+    }
+  };
+
   // Process response_item lines as messages
-  for (const line of lines) {
+  for (const { line, ordinal } of lines) {
     const timestamp = line.timestamp ?? null;
     if (timestamp) {
       if (!startedAt || timestamp < startedAt) startedAt = timestamp;
@@ -139,7 +224,43 @@ export function parseCodexSessionMessages(
       continue;
     }
 
+    if (line.type === 'turn_context' && typeof line.payload?.cwd === 'string') {
+      latestCwd = line.payload.cwd;
+    }
+
+    if (line.type === 'compacted') {
+      contextObservations.push({
+        ordinal: ordinal * 1000,
+        kind: 'compaction',
+        source: 'codex_compacted',
+        timestamp,
+        projectIdentity: projectIdentityFromCwd(latestCwd) ?? undefined,
+      });
+      const replacementHistory = line.payload?.['replacement_history'];
+      if (Array.isArray(replacementHistory)) {
+        replacementHistory.forEach((item, replacementIndex) => {
+          const record = asRecord(item);
+          const nestedPayload = asRecord(record?.['payload']) ?? record;
+          if (nestedPayload) {
+            inspectContextPayload(
+              nestedPayload,
+              ordinal * 1000 + replacementIndex + 1,
+              typeof record?.['timestamp'] === 'string' ? record['timestamp'] : timestamp,
+              'codex_replacement_history',
+            );
+          }
+        });
+      }
+      continue;
+    }
+
     if (line.type !== 'response_item' || !line.payload) continue;
+    inspectContextPayload(
+      line.payload as Record<string, unknown>,
+      ordinal * 1000,
+      timestamp,
+      'codex_response_item',
+    );
 
     const role = line.payload.role;
     const contentBlocks = line.payload.content;
@@ -234,6 +355,28 @@ export function parseCodexSessionMessages(
       mode: codexInvocationMode(originator),
       context_used_tokens: contextUsedTokens,
       context_window_reported: contextWindowReported,
+    },
+    skillContext: {
+      projectIdentity: projectIdentityFromCwd(latestCwd),
+      observations: contextObservations.sort((left, right) => left.ordinal - right.ordinal),
+      capabilities: {
+        orderedConsultations: malformedRecords === 0
+          ? { observable: true }
+          : { observable: false, reason: 'malformed_source_record' },
+        compactionVisibility: malformedRecords === 0
+          ? { observable: true }
+          : { observable: false, reason: 'malformed_source_record' },
+        catalogPresentation: contextObservations.some(
+          observation => observation.kind === 'catalog_presentation',
+        )
+          ? { observable: true }
+          : { observable: false, reason: 'presentation_signal_absent' },
+        instructionLoads: {
+          observable: false,
+          reason: 'instruction_load_signal_absent',
+        },
+        diagnostics: malformedRecords > 0 ? ['malformed_source_record'] : [],
+      },
     },
   };
 }

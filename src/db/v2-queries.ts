@@ -39,6 +39,7 @@ import type {
   MonitorTranscriptRow,
   SkillUsageDay,
   SkillHealthRow,
+  SkillConsultationAnalytics,
   AnalyticsCoverage,
   HourOfWeekDataPoint,
   TopSessionStat,
@@ -73,6 +74,8 @@ import { pricingRegistry } from '../pricing/index.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
 import { excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
+import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
+import { getSkillConsultationAnalytics } from '../skills/consultation-analytics.js';
 
 function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
   return {
@@ -906,78 +909,6 @@ function parseJsonString(value: string | null | undefined): unknown {
   }
 }
 
-function asPlainObject(value: unknown): Record<string, unknown> | undefined {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
-  return value as Record<string, unknown>;
-}
-
-function extractCanonicalCodexSessionId(sessionId: string): string {
-  const match = sessionId.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-  return match?.[1] ?? sessionId;
-}
-
-function extractCodexCommandFromInputJson(inputJson: string | null): string | undefined {
-  const parsed = parseJsonString(inputJson);
-  if (typeof parsed === 'string') return parsed;
-
-  const record = asPlainObject(parsed);
-  if (!record) return undefined;
-
-  const cmd = record['cmd'];
-  if (typeof cmd === 'string') return cmd;
-
-  const command = record['command'];
-  if (typeof command === 'string') return command;
-
-  return undefined;
-}
-
-function extractCodexCommandFromEventMetadata(metadataJson: string | null): string | undefined {
-  const parsed = parseJsonString(metadataJson);
-  const record = asPlainObject(parsed);
-  if (!record) return undefined;
-
-  const argumentsValue = record['arguments'];
-  if (typeof argumentsValue === 'string') return argumentsValue;
-
-  const argumentsRecord = asPlainObject(argumentsValue);
-  if (argumentsRecord) {
-    const cmd = argumentsRecord['cmd'];
-    if (typeof cmd === 'string') return cmd;
-
-    const command = argumentsRecord['command'];
-    if (typeof command === 'string') return command;
-  }
-
-  const input = record['input'];
-  if (typeof input === 'string') return input;
-
-  return undefined;
-}
-
-function extractCodexSkillNamesFromCommand(command: string): string[] {
-  const skillNames = new Set<string>();
-  const pattern = /(?:^|[\s'"])(~?\/[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
-  const placeholderCharacters = ['$', '*', '?', '[', ']', '{', '}'];
-
-  for (const match of command.matchAll(pattern)) {
-    const skillName = match[2]?.trim();
-    const isConcreteSkill = skillName
-      && skillName !== '.'
-      && skillName !== '..'
-      && !placeholderCharacters.some(character => skillName.includes(character));
-    if (isConcreteSkill) skillNames.add(skillName);
-  }
-
-  return [...skillNames];
-}
-
-function isDateWithinRange(date: string, params: AnalyticsParams): boolean {
-  if (params.date_from && date < params.date_from) return false;
-  if (params.date_to && date > params.date_to) return false;
-  return true;
-}
-
 interface SkillAccumulator {
   total: number;
   skills: Map<string, number>;
@@ -1755,121 +1686,10 @@ export function getMonitorSessionTranscript(sessionId: string): {
 }
 
 export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsageDay[] {
-  const db = getDb();
   const days = new Map<string, SkillAccumulator>();
 
-  const explicitSkillRows = db.prepare(`
-    SELECT
-      COALESCE(m.timestamp, bs.started_at) as timestamp,
-      bs.project,
-      bs.agent,
-      tc.input_json
-    FROM tool_calls tc
-    JOIN browsing_sessions bs ON bs.id = tc.session_id
-    LEFT JOIN messages m ON m.id = tc.message_id
-    WHERE tc.tool_name = 'Skill'
-      AND tc.input_json IS NOT NULL
-  `).all() as Array<{
-    timestamp: string | null;
-    project: string | null;
-    agent: string;
-    input_json: string | null;
-  }>;
-
-  for (const row of explicitSkillRows) {
-    if (params.project && row.project !== params.project) continue;
-    if (params.agent && row.agent !== params.agent) continue;
-    if (!row.timestamp) continue;
-
-    const parsed = asPlainObject(parseJsonString(row.input_json));
-    const skillName = typeof parsed?.['skill'] === 'string' ? parsed['skill'] : undefined;
-    if (!skillName) continue;
-
-    const date = row.timestamp.slice(0, 10);
-    if (!isDateWithinRange(date, params)) continue;
-    addSkillCount(days, date, skillName);
-  }
-
-  if (!params.agent || params.agent === 'codex') {
-    const codexEventRows = db.prepare(`
-      SELECT
-        session_id,
-        project,
-        COALESCE(client_timestamp, created_at) as timestamp,
-        metadata
-      FROM events
-      WHERE agent_type = 'codex'
-        AND event_type = 'tool_use'
-        AND tool_name IN ('exec_command', 'exec')
-        AND metadata LIKE '%SKILL.md%'
-    `).all() as Array<{
-      session_id: string;
-      project: string | null;
-      timestamp: string | null;
-      metadata: string | null;
-    }>;
-
-    const codexSessionsWithEvents = new Set<string>();
-
-    for (const row of codexEventRows) {
-      if (params.project && row.project !== params.project) continue;
-      if (!row.timestamp) continue;
-
-      const command = extractCodexCommandFromEventMetadata(row.metadata);
-      if (!command) continue;
-
-      const skillNames = extractCodexSkillNamesFromCommand(command);
-      if (skillNames.length === 0) continue;
-      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
-
-      const date = row.timestamp.slice(0, 10);
-      if (!isDateWithinRange(date, params)) continue;
-
-      for (const skillName of skillNames) {
-        addSkillCount(days, date, skillName);
-      }
-    }
-
-    const codexJsonlRows = db.prepare(`
-      SELECT
-        bs.id as session_id,
-        bs.project,
-        COALESCE(m.timestamp, bs.started_at) as timestamp,
-        tc.input_json
-      FROM tool_calls tc
-      JOIN browsing_sessions bs ON bs.id = tc.session_id
-      LEFT JOIN messages m ON m.id = tc.message_id
-      WHERE bs.agent = 'codex'
-        AND bs.integration_mode = 'codex-jsonl'
-        AND tc.tool_name IN ('exec_command', 'exec')
-        AND tc.input_json IS NOT NULL
-        AND tc.input_json LIKE '%SKILL.md%'
-    `).all() as Array<{
-      session_id: string;
-      project: string | null;
-      timestamp: string | null;
-      input_json: string | null;
-    }>;
-
-    for (const row of codexJsonlRows) {
-      const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
-      if (codexSessionsWithEvents.has(canonicalSessionId)) continue;
-      if (params.project && row.project !== params.project) continue;
-      if (!row.timestamp) continue;
-
-      const command = extractCodexCommandFromInputJson(row.input_json);
-      if (!command) continue;
-
-      const skillNames = extractCodexSkillNamesFromCommand(command);
-      if (skillNames.length === 0) continue;
-
-      const date = row.timestamp.slice(0, 10);
-      if (!isDateWithinRange(date, params)) continue;
-
-      for (const skillName of skillNames) {
-        addSkillCount(days, date, skillName);
-      }
-    }
+  for (const occurrence of selectSkillInvocationOccurrences(getDb(), params)) {
+    addSkillCount(days, occurrence.timestamp.slice(0, 10), occurrence.skillName);
   }
 
   return [...days.entries()]
@@ -2050,149 +1870,37 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
   const snapshots = loadCatalogSnapshots();
   const acc = new Map<string, HealthAccumulator>();
   const unpinnedNames = new Set<string>();
-
-  // Explicit Skill tool calls, with the invoking message's session + ordinal for
-  // misfire linkage.
-  const explicitRows = db.prepare(`
-    SELECT
-      COALESCE(m.timestamp, bs.started_at) AS timestamp,
-      bs.project,
-      bs.agent,
-      m.session_id AS session_id,
-      m.ordinal AS ordinal,
-      tc.input_json
-    FROM tool_calls tc
-    JOIN browsing_sessions bs ON bs.id = tc.session_id
-    LEFT JOIN messages m ON m.id = tc.message_id
-    WHERE tc.tool_name = 'Skill'
-      AND tc.input_json IS NOT NULL
-  `).all() as Array<{
-    timestamp: string | null;
-    project: string | null;
-    agent: string;
-    session_id: string | null;
-    ordinal: number | null;
-    input_json: string | null;
-  }>;
-
-  interface ExplicitInvocation {
-    skillName: string;
-    timestamp: string;
-    sessionId: string | null;
-    ordinal: number | null;
-  }
-  const explicitInvocations: ExplicitInvocation[] = [];
-  for (const row of explicitRows) {
-    if (params.project && row.project !== params.project) continue;
-    if (params.agent && row.agent !== params.agent) continue;
-    if (!row.timestamp) continue;
-    const date = row.timestamp.slice(0, 10);
-    if (!isDateWithinRange(date, params)) continue;
-
-    const parsed = asPlainObject(parseJsonString(row.input_json));
-    const skillName = typeof parsed?.['skill'] === 'string' ? parsed['skill'] : undefined;
-    if (!skillName) continue;
-
-    explicitInvocations.push({
-      skillName,
-      timestamp: row.timestamp,
-      sessionId: row.session_id,
-      ordinal: row.ordinal,
-    });
-  }
+  const occurrences = selectSkillInvocationOccurrences(db, params);
+  const explicitInvocations = occurrences.filter(
+    occurrence => occurrence.detectionSource === 'explicit_skill_tool',
+  );
 
   const boundaries = loadUserTurnBoundaries([
-    ...new Set(explicitInvocations.map(i => i.sessionId).filter((id): id is string => Boolean(id))),
+    ...new Set(explicitInvocations.map(invocation => invocation.sessionId)),
   ]);
 
-  for (const inv of explicitInvocations) {
-    const misfire = inv.sessionId != null && inv.ordinal != null
-      ? invocationMisfired(boundaries.get(inv.sessionId), inv.ordinal)
+  for (const occurrence of occurrences) {
+    const misfire = occurrence.detectionSource === 'explicit_skill_tool'
+      && occurrence.messageOrdinal != null
+      ? invocationMisfired(
+        boundaries.get(occurrence.sessionId),
+        occurrence.messageOrdinal,
+      )
       : null;
-    const resolved = resolveVersionAt(snapshots, inv.skillName, inv.timestamp);
-    recordHealthInvocation(
-      acc, unpinnedNames, inv.skillName, resolved.version, resolved.approximate, inv.timestamp, misfire,
+    const resolved = resolveVersionAt(
+      snapshots,
+      occurrence.skillName,
+      occurrence.timestamp,
     );
-  }
-
-  // Codex SKILL.md reads: counted toward invocations, but not misfire-eligible
-  // (the Codex event model has no assistant-turn linkage).
-  if (!params.agent || params.agent === 'codex') {
-    const codexEventRows = db.prepare(`
-      SELECT
-        session_id,
-        project,
-        COALESCE(client_timestamp, created_at) AS timestamp,
-        metadata
-      FROM events
-      WHERE agent_type = 'codex'
-        AND event_type = 'tool_use'
-        AND tool_name IN ('exec_command', 'exec')
-        AND metadata LIKE '%SKILL.md%'
-    `).all() as Array<{
-      session_id: string;
-      project: string | null;
-      timestamp: string | null;
-      metadata: string | null;
-    }>;
-
-    const codexSessionsWithEvents = new Set<string>();
-    for (const row of codexEventRows) {
-      if (params.project && row.project !== params.project) continue;
-      if (!row.timestamp) continue;
-      const date = row.timestamp.slice(0, 10);
-      if (!isDateWithinRange(date, params)) continue;
-
-      const command = extractCodexCommandFromEventMetadata(row.metadata);
-      if (!command) continue;
-      const skillNames = extractCodexSkillNamesFromCommand(command);
-      if (skillNames.length === 0) continue;
-      codexSessionsWithEvents.add(extractCanonicalCodexSessionId(row.session_id));
-      for (const skillName of skillNames) {
-        const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
-        recordHealthInvocation(
-          acc, unpinnedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
-        );
-      }
-    }
-
-    const codexJsonlRows = db.prepare(`
-      SELECT
-        bs.id AS session_id,
-        bs.project,
-        COALESCE(m.timestamp, bs.started_at) AS timestamp,
-        tc.input_json
-      FROM tool_calls tc
-      JOIN browsing_sessions bs ON bs.id = tc.session_id
-      LEFT JOIN messages m ON m.id = tc.message_id
-      WHERE bs.agent = 'codex'
-        AND bs.integration_mode = 'codex-jsonl'
-        AND tc.tool_name IN ('exec_command', 'exec')
-        AND tc.input_json IS NOT NULL
-        AND tc.input_json LIKE '%SKILL.md%'
-    `).all() as Array<{
-      session_id: string;
-      project: string | null;
-      timestamp: string | null;
-      input_json: string | null;
-    }>;
-
-    for (const row of codexJsonlRows) {
-      if (codexSessionsWithEvents.has(extractCanonicalCodexSessionId(row.session_id))) continue;
-      if (params.project && row.project !== params.project) continue;
-      if (!row.timestamp) continue;
-      const date = row.timestamp.slice(0, 10);
-      if (!isDateWithinRange(date, params)) continue;
-
-      const command = extractCodexCommandFromInputJson(row.input_json);
-      if (!command) continue;
-      for (const skillName of extractCodexSkillNamesFromCommand(command)) {
-        const resolved = resolveVersionAt(snapshots, skillName, row.timestamp);
-        recordHealthInvocation(
-          acc, unpinnedNames, skillName, resolved.version, resolved.approximate, row.timestamp, null,
-        );
-      }
-    }
+    recordHealthInvocation(
+      acc,
+      unpinnedNames,
+      occurrence.skillName,
+      resolved.version,
+      resolved.approximate,
+      occurrence.timestamp,
+      misfire,
+    );
   }
 
   const rows: SkillHealthRow[] = [...acc.values()].map(entry => ({
@@ -2233,6 +1941,16 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
     b.invocations - a.invocations
     || (b.misfireRate ?? -1) - (a.misfireRate ?? -1)
     || a.name.localeCompare(b.name),
+  );
+}
+
+export function getAnalyticsSkillConsultations(
+  params: AnalyticsParams = {},
+): SkillConsultationAnalytics {
+  return getSkillConsultationAnalytics(
+    getDb(),
+    params,
+    loadCatalogSnapshots(),
   );
 }
 
