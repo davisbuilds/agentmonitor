@@ -203,6 +203,40 @@ before(async () => {
     JSON.stringify({ cmd: 'cat ~/.agents/skills/_review/SKILL.md' }),
   );
 
+  // Regression: daily used to mark a canonical session OTEL-backed before
+  // applying the date filter, suppressing this in-window JSONL fallback because
+  // of the later out-of-window OTEL row. Health already filters first.
+  const dateFallbackUuid = '019d0000-0000-0000-0000-000000000003';
+  const dateFallbackSessionId = `rollout-2026-07-08T10-00-00-${dateFallbackUuid}`;
+  insertSession(dateFallbackSessionId, 'codex', 'codex-jsonl');
+  const dateFallbackMessage = insertMessage(
+    dateFallbackSessionId, 0, 'assistant', '[]', '2026-07-08T10:00:00Z',
+  );
+  insertToolCall(
+    dateFallbackMessage,
+    dateFallbackSessionId,
+    'exec',
+    JSON.stringify({ cmd: 'cat ~/.agents/skills/date-filter-fallback/SKILL.md' }),
+  );
+  db.prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, tool_name, status, project,
+      created_at, client_timestamp, metadata, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'codex-out-of-window-concrete-event',
+    dateFallbackUuid,
+    'codex',
+    'tool_use',
+    'exec',
+    'success',
+    'proj',
+    '2026-07-20 10:00:00',
+    '2026-07-20T10:00:00Z',
+    JSON.stringify({ arguments: { cmd: 'cat ~/.agents/skills/date-filter-fallback/SKILL.md' } }),
+    'otel',
+  );
+
   const { createApp } = await import('../src/app.js');
   const app = createApp({ serveStatic: false });
   server = app.listen(0);
@@ -283,6 +317,22 @@ test('counts concrete skill directory names that begin with an underscore', () =
   );
 });
 
+test('an out-of-window OTEL skill read does not suppress an in-window JSONL fallback', () => {
+  const params = { date_from: '2026-07-08', date_to: '2026-07-08' };
+  assert.equal(
+    getAnalyticsSkillsHealth(params).find(row => row.name === 'date-filter-fallback')?.invocations,
+    1,
+  );
+  assert.deepEqual(
+    getAnalyticsSkillsDaily(params),
+    [{
+      date: '2026-07-08',
+      total: 1,
+      skills: [{ skill_name: 'date-filter-fallback', count: 1 }],
+    }],
+  );
+});
+
 test('exposes misfireEligible as the denominator behind misfireRate', () => {
   const byName = rowsByName();
   // Explicit Claude invocation -> eligible denominator of 1.
@@ -331,9 +381,30 @@ test('GET /api/v2/analytics/skills/health returns the daily-style envelope with 
   const res = await fetch(`${baseUrl}/api/v2/analytics/skills/health`);
   assert.equal(res.status, 200);
 
-  const body = await res.json() as { data: SkillHealthRow[]; coverage: unknown };
+  const body = await res.json() as {
+    data: SkillHealthRow[];
+    coverage: unknown;
+    dataSemantics: {
+      data: string;
+      crossHarnessComparable: boolean;
+    };
+    consultations: {
+      byHarness: Array<{ harness: string }>;
+      comparability: { status: string; limitingEvidence: string[] };
+    };
+  };
   assert.ok(Array.isArray(body.data));
   assert.ok(body.coverage);
+  assert.equal(body.dataSemantics.data, 'phase_1_compatibility');
+  assert.equal(body.dataSemantics.crossHarnessComparable, false);
+  assert.deepEqual(
+    body.consultations.byHarness.map(harness => harness.harness),
+    ['claude', 'codex'],
+  );
+  assert.deepEqual(body.consultations.comparability, {
+    status: 'not_directly_comparable',
+    limitingEvidence: ['different_detection_semantics'],
+  });
 
   const byName = new Map(body.data.map(r => [r.name, r]));
   assert.equal(byName.get('write-spec')?.misfireRate, 1);

@@ -46,7 +46,7 @@ function hashOf(sessionId: string): string | undefined {
   return row?.file_hash;
 }
 
-test('the occupancy backfill migration invalidates only null-occupancy Claude/Codex watched files', () => {
+test('occupancy and skill-context migrations invalidate their eligible watched files', () => {
   // initSchema already ran migrations to the current version; rewind so our
   // seeded rows are present when the occupancy migration (v2) runs.
   getDb().pragma('user_version = 1');
@@ -61,11 +61,13 @@ test('the occupancy backfill migration invalidates only null-occupancy Claude/Co
 
   runDataMigrations(getDb());
 
-  // Null-occupancy Claude/Codex files are invalidated so the watcher reparses them.
+  // Null-occupancy Claude/Codex files are invalidated by v2.
   assert.equal(hashOf('claude-null'), '', 'claude null-occupancy invalidated');
   assert.equal(hashOf('codex-null'), '', 'codex null-occupancy invalidated');
-  // Already-populated and non-live agents are untouched.
-  assert.equal(hashOf('claude-occ'), 'h-claude-occ', 'populated session untouched');
+  // v4 additionally invalidates every file-backed Claude/Codex session for the
+  // ordered skill-context projection, including populated occupancy sessions.
+  assert.equal(hashOf('claude-occ'), '', 'populated Claude session invalidated for skill context');
+  // Non-live agents remain untouched.
   assert.equal(hashOf('anti-null'), 'h-anti-null', 'antigravity (always-null) untouched');
   assert.equal(
     (getDb().prepare('SELECT file_hash FROM watched_files WHERE file_path = ?').get('/fake/orphan.jsonl') as { file_hash: string }).file_hash,

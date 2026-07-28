@@ -269,6 +269,12 @@ Operational notes:
 - Re-importing does **not** repair token counts on rows already in the DB: `insertEvent` dedups by `event_id` and skips existing rows (insert-only, no general upsert), and `--force` only bypasses the file-hash skip. One-shot corrections to already-stored rows must go through a `runDataMigrations` step in `src/db/schema.ts`. The narrow exception is Codex model attribution: deterministic duplicate import rows backed by an explicit JSONL `turn_context` may refresh only `model` and derived `cost_usd`, followed by a `session_trace_summary` rebuild; config-only legacy rows remain untouched.
 - The cache-inclusive `tokens_in` repair (OpenAI/Codex rows that overstated cost by billing cached tokens at the full input rate) runs automatically once on next startup via the `user_version`-guarded migration; no manual command is needed. It re-normalizes `tokens_in` and recomputes `cost_usd` for OpenAI/Google rows and leaves Anthropic untouched.
 - The GPT-5.6 upgrade runs another one-shot migration: Codex event-import hashes are invalidated, then the normal auto-import reparses those files and refreshes explicit per-turn model/cost attribution. Import output reports `events_refreshed`; no manual re-import is required when auto-import is enabled. With `--no-import` or a disabled auto-import interval, run `pnpm cli -- import --source codex --force` once after upgrading.
+- Skill-context projection migration v4 clears the `watched_files` hash once
+  for file-backed Claude and Codex sessions. The next normal startup sync
+  reparses those transcripts and fills ordered consultation, compaction, and
+  Codex catalog-presentation evidence. If startup sync is disabled, run
+  `pnpm cli -- sync sessions --source all --force`; event import alone does not
+  build this session-browser projection.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
 
 ### Database recovery safety

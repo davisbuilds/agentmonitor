@@ -13,6 +13,7 @@ import Database from 'better-sqlite3';
 import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
 import { stepKindToEvent } from '../import/antigravity.js';
 import { decodeStepEnvelope, decodeStepTimestampMs } from '../import/antigravity/proto.js';
+import { unavailableSkillContext } from '../skills/context-observations.js';
 
 interface StepRow { idx: number; step_type: number; status: number; step_payload: Buffer; metadata: Buffer | null }
 
@@ -47,6 +48,7 @@ function emptySession(sessionId: string): ParsedSession {
       parent_session_id: null,
       relationship_type: null,
     },
+    skillContext: unavailableSkillContext(),
   };
 }
 
@@ -132,6 +134,7 @@ export function parseAntigravitySessions(filePath: string): ParsedSession {
         parent_session_id: null,
         relationship_type: null,
       },
+      skillContext: unavailableSkillContext(),
     };
   } finally {
     db.close();

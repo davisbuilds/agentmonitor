@@ -31,6 +31,7 @@ import {
   getMonitorSessionTranscript,
   getAnalyticsSkillsDaily,
   getAnalyticsSkillsHealth,
+  getAnalyticsSkillConsultations,
   refreshSkillCatalogSnapshots,
   getUsageSummary,
   getUsageCoverage,
@@ -610,6 +611,12 @@ v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
     res.json({
       data: getAnalyticsSkillsHealth(params),
       coverage: getAnalyticsCoverage(params, 'all_sessions'),
+      dataSemantics: {
+        data: 'phase_1_compatibility',
+        window: 'session_start_legacy',
+        crossHarnessComparable: params.agent != null,
+      },
+      consultations: getAnalyticsSkillConsultations(params),
     });
   } catch (err) {
     console.error('[v2/analytics/skills/health] Error:', err);

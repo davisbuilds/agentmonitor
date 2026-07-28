@@ -458,6 +458,16 @@ export function initSchema(): void {
   if (!browsingSessionColumns.has('context_window_tokens')) {
     db.exec('ALTER TABLE browsing_sessions ADD COLUMN context_window_tokens INTEGER');
   }
+  if (!browsingSessionColumns.has('project_identity')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN project_identity TEXT');
+  }
+  if (!browsingSessionColumns.has('skill_context_capabilities_json')) {
+    db.exec(`
+      ALTER TABLE browsing_sessions
+      ADD COLUMN skill_context_capabilities_json TEXT
+        CHECK (skill_context_capabilities_json IS NULL OR json_valid(skill_context_capabilities_json))
+    `);
+  }
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_live_status ON browsing_sessions(live_status)');
@@ -535,6 +545,46 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_tc_session_id ON tool_calls(session_id);
     CREATE INDEX IF NOT EXISTS idx_tc_category ON tool_calls(category);
     CREATE INDEX IF NOT EXISTS idx_tc_tool_name ON tool_calls(tool_name);
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session_context_observations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      ordinal INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK (
+        kind IN ('consultation', 'compaction', 'catalog_presentation', 'instruction_load')
+      ),
+      source TEXT NOT NULL,
+      observed_at TEXT,
+      skill_name TEXT,
+      command_fingerprint TEXT,
+      project_identity TEXT,
+      reason TEXT,
+      metadata_json TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(metadata_json))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sco_session_kind_name_ordinal
+      ON session_context_observations(session_id, kind, skill_name, ordinal);
+    CREATE INDEX IF NOT EXISTS idx_sco_skill_time
+      ON session_context_observations(skill_name, observed_at);
+
+    CREATE TABLE IF NOT EXISTS session_catalog_observation_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      observation_id INTEGER NOT NULL,
+      ordinal INTEGER NOT NULL,
+      skill_name TEXT NOT NULL,
+      description TEXT,
+      description_fingerprint TEXT,
+      source_location TEXT,
+      scope TEXT,
+      FOREIGN KEY(observation_id) REFERENCES session_context_observations(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_scoe_observation_ordinal
+      ON session_catalog_observation_entries(observation_id, ordinal);
+    CREATE INDEX IF NOT EXISTS idx_scoe_skill
+      ON session_catalog_observation_entries(skill_name);
   `);
 
   db.exec(`
@@ -719,7 +769,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 3;
+const DATA_SCHEMA_VERSION = 4;
 
 /**
  * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
@@ -738,9 +788,32 @@ export function runDataMigrations(db: Database): void {
     if (current < 1) backfillCacheInclusiveInputTokens(db);
     if (current < 2) backfillOccupancyOnUpgrade(db);
     if (current < 3) invalidateCodexImportsForModelAttribution(db);
+    if (current < 4) invalidateSessionFilesForSkillContext(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run();
+}
+
+/**
+ * v4 — ordered skill-context observations are projected from source session
+ * files. Clear only already-associated Claude/Codex watcher hashes so normal
+ * startup reparses each eligible file once.
+ */
+function invalidateSessionFilesForSkillContext(db: Database): void {
+  const result = db.prepare(`
+    UPDATE watched_files
+    SET file_hash = ''
+    WHERE file_path IN (
+      SELECT file_path
+      FROM browsing_sessions
+      WHERE agent IN ('claude', 'codex')
+        AND file_path IS NOT NULL
+    )
+  `).run();
+
+  if (result.changes > 0) {
+    console.log(`[migration] skill context: flagged ${result.changes} session file(s) for reparse`);
+  }
 }
 
 /**
