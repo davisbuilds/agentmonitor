@@ -79,7 +79,13 @@ test('installer registers both instruction-load modes and preserves unrelated se
     hooks: {
       SessionStart: [{
         matcher: '',
-        hooks: [{ type: 'command', command: '/opt/unrelated/session-start.sh' }],
+        hooks: [
+          { type: 'command', command: '/opt/unrelated/session-start.sh' },
+          {
+            type: 'command',
+            command: 'AGENTMONITOR_URL=http://127.0.0.1:7777 /opt/custom/session-audit.sh',
+          },
+        ],
       }],
       InstructionsLoaded: [{
         matcher: 'compact',
@@ -101,6 +107,9 @@ test('installer registers both instruction-load modes and preserves unrelated se
     assert.ok(commandsFor(shellSettings, 'SessionStart').some(command =>
       command.includes('AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED=1')));
     assert.ok(commandsFor(shellSettings, 'SessionStart').includes('/opt/unrelated/session-start.sh'));
+    assert.ok(commandsFor(shellSettings, 'SessionStart').includes(
+      'AGENTMONITOR_URL=http://127.0.0.1:7777 /opt/custom/session-audit.sh',
+    ));
     assert.ok(commandsFor(shellSettings, 'InstructionsLoaded').includes('/opt/unrelated/instructions.sh'));
     assert.equal(shellSettings.theme, 'dark');
 
@@ -111,11 +120,17 @@ test('installer registers both instruction-load modes and preserves unrelated se
     assert.equal(commandsFor(pythonSettings, 'InstructionsLoaded').some(command =>
       command.endsWith('/instructions_loaded.sh')), false);
     assert.ok(commandsFor(pythonSettings, 'SessionStart').includes('/opt/unrelated/session-start.sh'));
+    assert.ok(commandsFor(pythonSettings, 'SessionStart').includes(
+      'AGENTMONITOR_URL=http://127.0.0.1:7777 /opt/custom/session-audit.sh',
+    ));
     assert.ok(commandsFor(pythonSettings, 'InstructionsLoaded').includes('/opt/unrelated/instructions.sh'));
 
     runInstaller(['--uninstall'], configDir);
     const uninstalled = readSettings(configDir);
-    assert.deepEqual(commandsFor(uninstalled, 'SessionStart'), ['/opt/unrelated/session-start.sh']);
+    assert.deepEqual(commandsFor(uninstalled, 'SessionStart'), [
+      '/opt/unrelated/session-start.sh',
+      'AGENTMONITOR_URL=http://127.0.0.1:7777 /opt/custom/session-audit.sh',
+    ]);
     assert.deepEqual(commandsFor(uninstalled, 'InstructionsLoaded'), ['/opt/unrelated/instructions.sh']);
     assert.equal(uninstalled.theme, 'dark');
   } finally {

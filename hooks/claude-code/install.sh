@@ -59,14 +59,15 @@ cp "$SETTINGS_FILE" "$BACKUP"
 echo "Backed up settings to $BACKUP"
 
 if [ "$UNINSTALL" = true ]; then
-  # Remove all AgentMonitor hook entries (identified by agentmonitor marker in command path)
+  # Remove only hooks owned by this installer. AGENTMONITOR_URL may also be
+  # used by unrelated commands, so the executable path is the ownership marker.
   jq '
     def without_agentmonitor:
       map(
         .hooks = (
           (.hooks // []) |
           map(
-            select((((.command? // "") | test("AGENTMONITOR_URL=|hooks/claude-code")) | not))
+            select((((.command? // "") | test("/hooks/claude-code/")) | not))
           )
         )
       ) | map(select(.hooks | length > 0));
@@ -116,7 +117,7 @@ jq --arg session_start "$SESSION_START" \
   def without_agentmonitor:
     map(
       .hooks |= map(
-        select((((.command? // "") | test("AGENTMONITOR_URL=|hooks/claude-code")) | not))
+        select((((.command? // "") | test("/hooks/claude-code/")) | not))
       )
     ) | map(select(.hooks | length > 0));
 
