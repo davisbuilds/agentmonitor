@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { AnalyticsParams, SkillConsultationAnalytics, SkillConsultationClass, SkillConsultationClassCounts, SkillConsultationRow } from '../api/v2/types.js';
 import { resolveVersionAt, type CatalogSnapshot } from './catalog.js';
+import { extractCanonicalCodexSessionId } from './invocation-detection.js';
 import { selectSkillInvocationOccurrences, type SkillInvocationOccurrence } from './invocation-ledger.js';
 
 interface SessionRow {
@@ -34,18 +35,6 @@ function utcBoundary(date: string | undefined, addDay: boolean): string | null {
   if (Number.isNaN(parsed.getTime())) return null;
   if (addDay) parsed.setUTCDate(parsed.getUTCDate() + 1);
   return parsed.toISOString();
-}
-
-function overlapsWindow(
-  session: SessionRow,
-  from: string | null,
-  toExclusive: string | null,
-  asOf: string,
-): boolean | null {
-  const start = session.started_at;
-  const end = session.ended_at ?? session.last_item_at ?? (start ? asOf : null);
-  if (!start || !end) return null;
-  return (!toExclusive || start < toExclusive) && (!from || end >= from);
 }
 
 function capability(
@@ -84,14 +73,15 @@ function classifyOccurrences(
   const compactions = new Map<string, number[]>();
   for (const observation of observations) {
     if (observation.kind !== 'compaction') continue;
-    const values = compactions.get(observation.session_id) ?? [];
+    const sessionId = extractCanonicalCodexSessionId(observation.session_id);
+    const values = compactions.get(sessionId) ?? [];
     values.push(observation.ordinal);
-    compactions.set(observation.session_id, values);
+    compactions.set(sessionId, values);
   }
   const classes = new Map<SkillInvocationOccurrence, SkillConsultationClass>();
   const lastGeneration = new Map<string, number>();
   const sorted = [...occurrences].sort((left, right) => {
-    const sessionOrder = left.sessionId.localeCompare(right.sessionId);
+    const sessionOrder = left.canonicalSessionId.localeCompare(right.canonicalSessionId);
     if (sessionOrder !== 0) return sessionOrder;
     return (left.matchedObservation?.ordinal ?? Number.MAX_SAFE_INTEGER)
       - (right.matchedObservation?.ordinal ?? Number.MAX_SAFE_INTEGER);
@@ -101,9 +91,9 @@ function classifyOccurrences(
       classes.set(occurrence, 'unclassifiable');
       continue;
     }
-    const generation = (compactions.get(occurrence.sessionId) ?? [])
+    const generation = (compactions.get(occurrence.canonicalSessionId) ?? [])
       .filter(ordinal => ordinal < occurrence.matchedObservation!.ordinal).length;
-    const key = `${occurrence.sessionId}\0${occurrence.skillName}`;
+    const key = `${occurrence.canonicalSessionId}\0${occurrence.skillName}`;
     const previous = lastGeneration.get(key);
     if (previous === undefined) {
       classes.set(occurrence, 'first_read');
@@ -115,6 +105,160 @@ function classifyOccurrences(
     lastGeneration.set(key, generation);
   }
   return classes;
+}
+
+interface SqlFilter {
+  clauses: string[];
+  values: unknown[];
+}
+
+function sessionFilter(params: AnalyticsParams): SqlFilter {
+  const clauses = ["agent IN ('claude', 'codex')"];
+  const values: unknown[] = [];
+  if (params.agent) {
+    clauses.push('agent = ?');
+    values.push(params.agent);
+  }
+  if (params.project) {
+    clauses.push('project = ?');
+    values.push(params.project);
+  }
+  return { clauses, values };
+}
+
+const SESSION_SELECT = `
+  SELECT id, agent, project, project_identity, started_at, ended_at,
+         last_item_at, skill_context_capabilities_json
+  FROM browsing_sessions
+`;
+
+function selectSessions(
+  db: Database.Database,
+  filter: SqlFilter,
+  extraClause?: string,
+  extraValues: unknown[] = [],
+): SessionRow[] {
+  const clauses = extraClause ? [...filter.clauses, extraClause] : filter.clauses;
+  return db.prepare(`
+    ${SESSION_SELECT}
+    WHERE ${clauses.join(' AND ')}
+  `).all(...filter.values, ...extraValues) as SessionRow[];
+}
+
+function selectSessionsByIds(
+  db: Database.Database,
+  filter: SqlFilter,
+  sessionIds: string[],
+): SessionRow[] {
+  const rows: SessionRow[] = [];
+  for (let offset = 0; offset < sessionIds.length; offset += 500) {
+    const chunk = sessionIds.slice(offset, offset + 500);
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(...selectSessions(
+      db,
+      filter,
+      `id IN (${placeholders})`,
+      chunk,
+    ));
+  }
+  return rows;
+}
+
+function selectScopedSessions(
+  db: Database.Database,
+  params: AnalyticsParams,
+  occurrences: SkillInvocationOccurrence[],
+  asOf: string,
+  from: string | null,
+  toExclusive: string | null,
+): { sessions: SessionRow[]; windowMembershipUnobservable: number } {
+  const filter = sessionFilter(params);
+  const bounded = Boolean(from || toExclusive);
+  if (!bounded) {
+    return {
+      sessions: selectSessions(db, filter),
+      windowMembershipUnobservable: 0,
+    };
+  }
+
+  const intervalClauses = ['started_at IS NOT NULL'];
+  const intervalValues: unknown[] = [];
+  if (toExclusive) {
+    intervalClauses.push('started_at < ?');
+    intervalValues.push(toExclusive.slice(0, 10));
+  }
+  if (from) {
+    intervalClauses.push('COALESCE(ended_at, last_item_at, ?) >= ?');
+    intervalValues.push(asOf, from.slice(0, 10));
+  }
+  const byInterval = selectSessions(
+    db,
+    filter,
+    `(${intervalClauses.join(' AND ')})`,
+    intervalValues,
+  );
+  const occurrenceSessionIds = [...new Set(occurrences.flatMap(occurrence => [
+    occurrence.sessionId,
+    occurrence.matchedObservation?.sessionId,
+  ]).filter((id): id is string => Boolean(id)))];
+  const byOccurrence = selectSessionsByIds(db, filter, occurrenceSessionIds);
+  const sessionsById = new Map(
+    [...byInterval, ...byOccurrence].map(session => [session.id, session]),
+  );
+
+  const unknownCount = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM browsing_sessions
+    WHERE ${[...filter.clauses, 'started_at IS NULL'].join(' AND ')}
+  `).get(...filter.values) as { count: number };
+  const ownedUnknown = new Set(
+    byOccurrence
+      .filter(session => session.started_at === null)
+      .map(session => session.id),
+  ).size;
+  return {
+    sessions: [...sessionsById.values()],
+    windowMembershipUnobservable: Math.max(0, unknownCount.count - ownedUnknown),
+  };
+}
+
+function selectObservations(
+  db: Database.Database,
+  sessionIds: string[],
+): StoredObservation[] {
+  const rows: StoredObservation[] = [];
+  for (let offset = 0; offset < sessionIds.length; offset += 500) {
+    const chunk = sessionIds.slice(offset, offset + 500);
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(...db.prepare(`
+      SELECT id, session_id, ordinal, kind
+      FROM session_context_observations
+      WHERE session_id IN (${placeholders})
+      ORDER BY session_id, ordinal, id
+    `).all(...chunk) as StoredObservation[]);
+  }
+  return rows;
+}
+
+function selectPresentationRows(
+  db: Database.Database,
+  sessionIds: string[],
+): Array<{ session_id: string; skill_name: string }> {
+  const rows: Array<{ session_id: string; skill_name: string }> = [];
+  for (let offset = 0; offset < sessionIds.length; offset += 500) {
+    const chunk = sessionIds.slice(offset, offset + 500);
+    const placeholders = chunk.map(() => '?').join(', ');
+    rows.push(...db.prepare(`
+      SELECT observation.session_id, entry.skill_name
+      FROM session_context_observations observation
+      JOIN session_catalog_observation_entries entry
+        ON entry.observation_id = observation.id
+      WHERE observation.kind = 'catalog_presentation'
+        AND observation.session_id IN (${placeholders})
+      GROUP BY observation.session_id, entry.skill_name
+    `).all(...chunk) as Array<{ session_id: string; skill_name: string }>);
+  }
+  return rows;
 }
 
 interface MutableAggregate {
@@ -139,37 +283,24 @@ export function getSkillConsultationAnalytics(
   const from = utcBoundary(params.date_from, false);
   const toExclusive = utcBoundary(params.date_to, true);
   const occurrences = selectSkillInvocationOccurrences(db, params);
-  const observations = db.prepare(`
-    SELECT id, session_id, ordinal, kind
-    FROM session_context_observations
-    ORDER BY session_id, ordinal, id
-  `).all() as StoredObservation[];
+  const scoped = selectScopedSessions(
+    db,
+    params,
+    occurrences,
+    asOf,
+    from,
+    toExclusive,
+  );
+  const sessions = scoped.sessions;
+  const sessionIds = sessions.map(session => session.id);
+  const observations = selectObservations(db, sessionIds);
   const classes = classifyOccurrences(occurrences, observations);
-  const sessions = (db.prepare(`
-    SELECT id, agent, project, project_identity, started_at, ended_at,
-           last_item_at, skill_context_capabilities_json
-    FROM browsing_sessions
-  `).all() as SessionRow[]).filter(session => {
-    if (!['claude', 'codex'].includes(session.agent)) return false;
-    if (params.agent && session.agent !== params.agent) return false;
-    if (params.project && session.project !== params.project) return false;
-    return true;
-  });
-
-  const occurrenceSessions = new Set(occurrences.map(occurrence => occurrence.sessionId));
-  let windowMembershipUnobservable = 0;
-  const windowSessions = sessions.filter(session => {
-    const overlap = overlapsWindow(session, from, toExclusive, asOf);
-    if (overlap === null) {
-      if (!occurrenceSessions.has(session.id)) windowMembershipUnobservable++;
-      return occurrenceSessions.has(session.id);
-    }
-    return overlap || occurrenceSessions.has(session.id);
-  });
+  const sessionsByCanonicalId = new Map(
+    sessions.map(session => [extractCanonicalCodexSessionId(session.id), session]),
+  );
   const sessionsById = new Map(sessions.map(session => [session.id, session]));
-  const windowSessionsById = new Map(windowSessions.map(session => [session.id, session]));
   const sessionsByHarness = new Map<string, SessionRow[]>();
-  for (const session of windowSessions) {
+  for (const session of sessions) {
     const list = sessionsByHarness.get(session.agent) ?? [];
     list.push(session);
     sessionsByHarness.set(session.agent, list);
@@ -223,12 +354,12 @@ export function getSkillConsultationAnalytics(
     aggregate.row.invocations++;
     aggregate.row.classes[classification]++;
     if (classification === 'first_read') {
-      aggregate.firstReadSessions.add(occurrence.sessionId);
+      aggregate.firstReadSessions.add(occurrence.canonicalSessionId);
       const identity = occurrence.matchedObservation?.projectIdentity ?? 'unknown';
-      const session = sessionsById.get(occurrence.sessionId);
+      const session = sessionsByCanonicalId.get(occurrence.canonicalSessionId);
       const label = identity === 'unknown' ? 'Unknown' : (session?.project ?? identity);
       const bucket = aggregate.projects.get(identity) ?? { label, sessions: new Set<string>() };
-      bucket.sessions.add(occurrence.sessionId);
+      bucket.sessions.add(occurrence.canonicalSessionId);
       aggregate.projects.set(identity, bucket);
     }
     const resolved = resolveVersionAt(snapshots, occurrence.skillName, occurrence.timestamp);
@@ -247,19 +378,14 @@ export function getSkillConsultationAnalytics(
     aggregate.versions.set(versionKey, version);
   }
 
-  const presentationRows = db.prepare(`
-    SELECT observation.session_id, entry.skill_name
-    FROM session_context_observations observation
-    JOIN session_catalog_observation_entries entry ON entry.observation_id = observation.id
-    WHERE observation.kind = 'catalog_presentation'
-    GROUP BY observation.session_id, entry.skill_name
-  `).all() as Array<{ session_id: string; skill_name: string }>;
+  const presentationRows = selectPresentationRows(db, sessionIds);
   const presented = new Map<string, Set<string>>();
   for (const row of presentationRows) {
+    const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
     const set = presented.get(row.skill_name) ?? new Set<string>();
-    set.add(row.session_id);
+    set.add(canonicalSessionId);
     presented.set(row.skill_name, set);
-    const session = windowSessionsById.get(row.session_id);
+    const session = sessionsById.get(row.session_id);
     if (session) aggregateFor(session.agent, row.skill_name);
   }
 
@@ -277,7 +403,7 @@ export function getSkillConsultationAnalytics(
     const eligibleIds = new Set(
       (sessionsByHarness.get(aggregate.row.harness) ?? [])
         .filter(session => capability(session).observable)
-        .map(session => session.id),
+        .map(session => extractCanonicalCodexSessionId(session.id)),
     );
     const presentedIds = [...(presented.get(aggregate.row.name) ?? [])]
       .filter(sessionId => eligibleIds.has(sessionId));
@@ -299,7 +425,7 @@ export function getSkillConsultationAnalytics(
       from,
       toExclusive,
       sessionMembership: 'observed_interval_overlap_or_in_window_occurrence',
-      windowMembershipUnobservable,
+      windowMembershipUnobservable: scoped.windowMembershipUnobservable,
     },
     byHarness: harnesses.map(harness => ({
       harness,

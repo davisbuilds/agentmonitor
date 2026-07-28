@@ -72,6 +72,40 @@ function xmlValue(block: string, tag: string): string | null {
   return match ? decodeXmlText(match[1] ?? '') : null;
 }
 
+function markdownCatalogEntries(body: string): CatalogObservationEntry[] {
+  const logicalLines: string[] = [];
+  for (const rawLine of body.split('\n')) {
+    const line = rawLine.trim();
+    if (/^-\s+/.test(line)) {
+      logicalLines.push(line);
+    } else if (
+      logicalLines.length > 0
+      && line
+      && !line.startsWith('#')
+      && !line.startsWith('<')
+    ) {
+      logicalLines[logicalLines.length - 1] += ` ${line}`;
+    }
+  }
+
+  const entries: CatalogObservationEntry[] = [];
+  const pattern = /^-\s+([A-Za-z0-9_.-]+(?::[A-Za-z0-9_.-]+)*):\s+(.+?)\s+\(file:\s*(.+?)\)\s*$/;
+  for (const line of logicalLines) {
+    const match = line.match(pattern);
+    if (!match) continue;
+    const name = match[1]!;
+    const description = match[2]!.trim();
+    entries.push({
+      name,
+      description,
+      descriptionFingerprint: sha256(description),
+      sourceLocation: match[3]!.trim(),
+      scope: null,
+    });
+  }
+  return entries;
+}
+
 export interface ParsedCatalogPresentation {
   retainedBlock: string;
   fingerprint: string;
@@ -104,6 +138,10 @@ export function parseCodexCatalogPresentations(text: string): ParsedCatalogPrese
         scope: xmlValue(skillBlock, 'scope'),
       });
     }
+    if (entries.length === 0) entries.push(...markdownCatalogEntries(body));
+    const explicitlyEmpty = /<skills(?:\s[^>]*)?>\s*<\/skills>/i.test(body)
+      || /available skills\s*:\s*(?:none|\[\])/i.test(body);
+    if (entries.length === 0 && !explicitlyEmpty) continue;
     const canonical = JSON.stringify(entries.map(entry => ({
       name: entry.name,
       description: entry.description,

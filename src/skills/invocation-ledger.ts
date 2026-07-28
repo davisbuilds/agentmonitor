@@ -28,6 +28,7 @@ export interface SkillInvocationOccurrence {
   occurrenceIndex: number;
   matchedObservation: {
     id: number;
+    sessionId: string;
     ordinal: number;
     projectIdentity: string | null;
   } | null;
@@ -41,6 +42,13 @@ function isDateWithinRange(date: string, params: AnalyticsParams): boolean {
   if (params.date_from && date < params.date_from) return false;
   if (params.date_to && date > params.date_to) return false;
   return true;
+}
+
+function nextUtcDate(date: string): string | null {
+  const parsed = new Date(`${date}T00:00:00.000Z`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  parsed.setUTCDate(parsed.getUTCDate() + 1);
+  return parsed.toISOString().slice(0, 10);
 }
 
 function assignOccurrenceIndexes(
@@ -83,22 +91,52 @@ interface StoredConsultationObservation {
 function enrichWithOrderedObservations(
   db: Database.Database,
   occurrences: SkillInvocationOccurrence[],
+  params: AnalyticsParams,
 ): void {
-  const rows = db.prepare(`
-    SELECT
-      observation.id,
-      observation.session_id,
-      observation.ordinal,
-      observation.skill_name,
-      observation.command_fingerprint,
-      observation.project_identity,
-      session.skill_context_capabilities_json
-    FROM session_context_observations observation
-    JOIN browsing_sessions session ON session.id = observation.session_id
-    WHERE observation.kind = 'consultation'
-      AND observation.skill_name IS NOT NULL
-    ORDER BY observation.session_id, observation.ordinal, observation.id
-  `).all() as StoredConsultationObservation[];
+  const skillNames = [...new Set(occurrences.map(occurrence => occurrence.skillName))];
+  if (skillNames.length === 0) return;
+  const rows: StoredConsultationObservation[] = [];
+  for (let offset = 0; offset < skillNames.length; offset += 500) {
+    const chunk = skillNames.slice(offset, offset + 500);
+    const filters = [
+      "observation.kind = 'consultation'",
+      `observation.skill_name IN (${chunk.map(() => '?').join(', ')})`,
+    ];
+    const values: unknown[] = [...chunk];
+    if (params.project) {
+      filters.push('session.project = ?');
+      values.push(params.project);
+    }
+    if (params.agent) {
+      filters.push('session.agent = ?');
+      values.push(params.agent);
+    }
+    if (params.date_from) {
+      filters.push('observation.observed_at >= ?');
+      values.push(params.date_from);
+    }
+    const observationToExclusive = params.date_to
+      ? nextUtcDate(params.date_to)
+      : null;
+    if (observationToExclusive) {
+      filters.push('observation.observed_at < ?');
+      values.push(observationToExclusive);
+    }
+    rows.push(...db.prepare(`
+      SELECT
+        observation.id,
+        observation.session_id,
+        observation.ordinal,
+        observation.skill_name,
+        observation.command_fingerprint,
+        observation.project_identity,
+        session.skill_context_capabilities_json
+      FROM session_context_observations observation
+      JOIN browsing_sessions session ON session.id = observation.session_id
+      WHERE ${filters.join(' AND ')}
+      ORDER BY observation.session_id, observation.ordinal, observation.id
+    `).all(...values) as StoredConsultationObservation[]);
+  }
 
   const indexes = new Map<string, number>();
   const candidates = new Map<string, StoredConsultationObservation[]>();
@@ -149,6 +187,7 @@ function enrichWithOrderedObservations(
     }
     occurrence.matchedObservation = {
       id: match.id,
+      sessionId: match.session_id,
       ordinal: match.ordinal,
       projectIdentity: match.project_identity,
     };
@@ -175,6 +214,28 @@ export function selectSkillInvocationOccurrences(
     'occurrenceIndex' | 'matchedObservation' | 'classificationCapability'
   >[] = [];
 
+  const explicitFilters = [
+    "tc.tool_name = 'Skill'",
+    'tc.input_json IS NOT NULL',
+  ];
+  const explicitValues: unknown[] = [];
+  if (params.project) {
+    explicitFilters.push('bs.project = ?');
+    explicitValues.push(params.project);
+  }
+  if (params.agent) {
+    explicitFilters.push('bs.agent = ?');
+    explicitValues.push(params.agent);
+  }
+  if (params.date_from) {
+    explicitFilters.push('COALESCE(m.timestamp, bs.started_at) >= ?');
+    explicitValues.push(params.date_from);
+  }
+  const explicitToExclusive = params.date_to ? nextUtcDate(params.date_to) : null;
+  if (explicitToExclusive) {
+    explicitFilters.push('COALESCE(m.timestamp, bs.started_at) < ?');
+    explicitValues.push(explicitToExclusive);
+  }
   const explicitRows = db.prepare(`
     SELECT
       tc.session_id,
@@ -187,10 +248,9 @@ export function selectSkillInvocationOccurrences(
     FROM tool_calls tc
     JOIN browsing_sessions bs ON bs.id = tc.session_id
     LEFT JOIN messages m ON m.id = tc.message_id
-    WHERE tc.tool_name = 'Skill'
-      AND tc.input_json IS NOT NULL
+    WHERE ${explicitFilters.join(' AND ')}
     ORDER BY timestamp, tc.id
-  `).all() as Array<{
+  `).all(...explicitValues) as Array<{
     session_id: string;
     timestamp: string | null;
     project: string | null;
@@ -221,6 +281,26 @@ export function selectSkillInvocationOccurrences(
   }
 
   if (!params.agent || params.agent === 'codex') {
+    const eventFilters = [
+      "agent_type = 'codex'",
+      "event_type = 'tool_use'",
+      "tool_name IN ('exec_command', 'exec')",
+      "metadata LIKE '%SKILL.md%'",
+    ];
+    const eventValues: unknown[] = [];
+    if (params.project) {
+      eventFilters.push('project = ?');
+      eventValues.push(params.project);
+    }
+    if (params.date_from) {
+      eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)');
+      eventValues.push(params.date_from);
+    }
+    const eventToExclusive = params.date_to ? nextUtcDate(params.date_to) : null;
+    if (eventToExclusive) {
+      eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) < datetime(?)');
+      eventValues.push(eventToExclusive);
+    }
     const eventRows = db.prepare(`
       SELECT
         id,
@@ -229,12 +309,9 @@ export function selectSkillInvocationOccurrences(
         COALESCE(client_timestamp, created_at) AS timestamp,
         metadata
       FROM events
-      WHERE agent_type = 'codex'
-        AND event_type = 'tool_use'
-        AND tool_name IN ('exec_command', 'exec')
-        AND metadata LIKE '%SKILL.md%'
+      WHERE ${eventFilters.join(' AND ')}
       ORDER BY timestamp, id
-    `).all() as Array<{
+    `).all(...eventValues) as Array<{
       id: number;
       session_id: string;
       project: string | null;
@@ -269,6 +346,27 @@ export function selectSkillInvocationOccurrences(
       }
     }
 
+    const jsonlFilters = [
+      "bs.agent = 'codex'",
+      "bs.integration_mode = 'codex-jsonl'",
+      "tc.tool_name IN ('exec_command', 'exec')",
+      'tc.input_json IS NOT NULL',
+      "tc.input_json LIKE '%SKILL.md%'",
+    ];
+    const jsonlValues: unknown[] = [];
+    if (params.project) {
+      jsonlFilters.push('bs.project = ?');
+      jsonlValues.push(params.project);
+    }
+    if (params.date_from) {
+      jsonlFilters.push('COALESCE(m.timestamp, bs.started_at) >= ?');
+      jsonlValues.push(params.date_from);
+    }
+    const jsonlToExclusive = params.date_to ? nextUtcDate(params.date_to) : null;
+    if (jsonlToExclusive) {
+      jsonlFilters.push('COALESCE(m.timestamp, bs.started_at) < ?');
+      jsonlValues.push(jsonlToExclusive);
+    }
     const jsonlRows = db.prepare(`
       SELECT
         tc.id,
@@ -280,13 +378,9 @@ export function selectSkillInvocationOccurrences(
       FROM tool_calls tc
       JOIN browsing_sessions bs ON bs.id = tc.session_id
       LEFT JOIN messages m ON m.id = tc.message_id
-      WHERE bs.agent = 'codex'
-        AND bs.integration_mode = 'codex-jsonl'
-        AND tc.tool_name IN ('exec_command', 'exec')
-        AND tc.input_json IS NOT NULL
-        AND tc.input_json LIKE '%SKILL.md%'
+      WHERE ${jsonlFilters.join(' AND ')}
       ORDER BY timestamp, tc.id
-    `).all() as Array<{
+    `).all(...jsonlValues) as Array<{
       id: number;
       session_id: string;
       project: string | null;
@@ -321,6 +415,6 @@ export function selectSkillInvocationOccurrences(
   }
 
   const selected = assignOccurrenceIndexes(occurrences);
-  enrichWithOrderedObservations(db, selected);
+  enrichWithOrderedObservations(db, selected, params);
   return selected;
 }

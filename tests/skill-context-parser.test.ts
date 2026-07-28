@@ -9,6 +9,15 @@ const catalog = `<skills_instructions>
 </skills>
 </skills_instructions>`;
 
+const runtimeMarkdownCatalog = `<skills_instructions>
+## Skills
+
+### Available skills
+- test-strategy: Guide agents to test behavior. (file: /skills/test-strategy/SKILL.md)
+- github:yeet: Publish local changes to GitHub. (file: /plugins/github/skills/yeet/SKILL.md)
+- test-strategy: Project-specific testing guidance. (file: /work/alpha/.agents/skills/test-strategy/SKILL.md)
+</skills_instructions>`;
+
 test('Claude preserves consultations and compaction in source order', () => {
   const parsed = parseSessionMessages([
     JSON.stringify({
@@ -128,6 +137,78 @@ test('Codex preserves initial and post-compaction catalog occurrences', () => {
   assert.equal(
     (presentations[0]?.metadata?.['measurement'] as { unit?: string }).unit,
     'utf8_bytes',
+  );
+});
+
+test('Codex parses entries from the runtime Markdown skill catalog', () => {
+  const parsed = parseCodexSessionMessages([
+    JSON.stringify({
+      type: 'session_meta',
+      timestamp: '2026-07-01T00:00:00Z',
+      payload: { cwd: '/work/alpha', originator: 'codex_cli_rs' },
+    }),
+    JSON.stringify({
+      type: 'response_item',
+      timestamp: '2026-07-01T00:00:01Z',
+      payload: {
+        role: 'developer',
+        content: [{ type: 'input_text', text: runtimeMarkdownCatalog }],
+      },
+    }),
+  ].join('\n'), 'codex-markdown-catalog');
+
+  const presentation = parsed.skillContext?.observations.find(
+    observation => observation.kind === 'catalog_presentation',
+  );
+  assert.ok(presentation);
+  assert.deepEqual(
+    presentation.catalogEntries?.map(entry => ({
+      name: entry.name,
+      description: entry.description,
+      sourceLocation: entry.sourceLocation,
+    })),
+    [
+      {
+        name: 'test-strategy',
+        description: 'Guide agents to test behavior.',
+        sourceLocation: '/skills/test-strategy/SKILL.md',
+      },
+      {
+        name: 'github:yeet',
+        description: 'Publish local changes to GitHub.',
+        sourceLocation: '/plugins/github/skills/yeet/SKILL.md',
+      },
+      {
+        name: 'test-strategy',
+        description: 'Project-specific testing guidance.',
+        sourceLocation: '/work/alpha/.agents/skills/test-strategy/SKILL.md',
+      },
+    ],
+  );
+});
+
+test('Codex does not report an unrecognized catalog body as observed empty', () => {
+  const parsed = parseCodexSessionMessages(JSON.stringify({
+    type: 'response_item',
+    timestamp: '2026-07-01T00:00:01Z',
+    payload: {
+      role: 'developer',
+      content: [{
+        type: 'input_text',
+        text: '<skills_instructions>opaque future format</skills_instructions>',
+      }],
+    },
+  }), 'codex-unknown-catalog');
+
+  assert.equal(
+    parsed.skillContext?.observations.some(
+      observation => observation.kind === 'catalog_presentation',
+    ),
+    false,
+  );
+  assert.deepEqual(
+    parsed.skillContext?.capabilities.catalogPresentation,
+    { observable: false, reason: 'presentation_signal_absent' },
   );
 });
 
