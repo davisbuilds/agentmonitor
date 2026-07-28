@@ -97,17 +97,22 @@ These are the deferred follow-ups surfaced during and after the build.
 ### Skill extraction unification
 
 #### Unify Claude/Codex skill-invocation extraction between the daily and health queries
-📥 noted
+🟡 in-progress
 - **What**: Claude `Skill` calls and Codex `.../SKILL.md` reads are identified in
   two places in `src/db/v2-queries.ts` — `getAnalyticsSkillsDaily` and
   `getAnalyticsSkillsHealth` — with the Codex event/JSONL blocks (including the
-  session-dedup logic) copy-pasted between them.
+  session-dedup logic) copy-pasted between them. The copies have already drifted:
+  daily marks a canonical Codex session as OTEL-backed before date filtering,
+  while health marks it afterward. An out-of-window concrete OTEL row can
+  therefore suppress an in-window JSONL row in daily but not health.
 - **Why it matters**: edge-case path handling drifts across the copies; a single
   parser is one place to fix Codex parsing and keeps the two queries honest.
 - **Sketch**: a shared invocation iterator yielding
   `{ skillName, timestamp, project, agent, sessionId?, ordinal?, source }`; daily
   folds into date buckets, health folds into name+version. Guard the refactor with
-  the existing daily tests.
+  the existing daily tests plus the out-of-window OTEL/in-window JSONL
+  regression. Pulled into
+  `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md` Task 4.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 

@@ -7,7 +7,7 @@ stage: spec
 status: draft
 source: conversation
 risk_profile: routine
-readiness: draft
+readiness: ready
 ---
 
 # Skill Consultation and Harness Context Telemetry Spec
@@ -96,7 +96,10 @@ When this ships, all of the following observable behaviors hold, verified by
    a structured comparability status. It never presents a pooled raw invocation
    count, first-read rate, or non-use conclusion as directly comparable when
    event semantics or coverage differ. The status names the limiting evidence,
-   rather than using an unexplained warning string.
+   rather than using an unexplained warning string. A pre-existing pooled field
+   retained solely for API compatibility is explicitly machine-labeled
+   compatibility-only and non-comparative; new consumers use the per-harness
+   decomposition.
 
 5. **Runtime catalog presentation is reported only from runtime evidence.**
    For every session where the harness exposes its presented skill catalog,
@@ -118,15 +121,17 @@ When this ships, all of the following observable behaviors hold, verified by
    reports `observable: false` with a reason; it never substitutes the installed
    filesystem catalog.
 
-6. **Expected-versus-presented comparison requires a session-valid expected
+6. **Expected-versus-presented comparison requires an occurrence-valid expected
    realization.** When a session is associated with an immutable expected
    catalog realization, AgentMonitor preserves that realization's identity and
    provenance and can compare expected members and description fingerprints
-   with the observed presentation. Only then may it report omitted,
-   unexpected, or description-mismatched skills. Without a session-valid
-   expected realization, comparison reports `unavailable`; it must not compare
-   a historical session with the current filesystem or silently infer the
-   intended profile.
+   only when that specific presentation's timestamp falls within the
+   realization's validity interval. Only then may it report omitted,
+   unexpected, or description-mismatched skills. A session can therefore have a
+   valid initial comparison and an unavailable later comparison. Without
+   occurrence-valid expectation evidence, comparison reports `unavailable`; it
+   must not compare a historical presentation with the current filesystem or
+   silently infer the intended profile.
 
 7. **Budget occupancy never compares incompatible or unauthoritative numbers.**
    Each catalog-size measurement and each applicable limit reports its value,
@@ -134,8 +139,11 @@ When this ships, all of the following observable behaviors hold, verified by
    reported only when measurement and limit are comparable. An undocumented
    limit, an unknown session context window, an estimated value presented as
    exact, or incompatible units yields `unknown`, not an over/under-budget
-   claim. Provider-policy changes can therefore make a result unknown without
-   retroactively producing a false result.
+   claim. An authoritative policy artifact identifies the applicable
+   harness/model/version, context window, representation, unit, measurement
+   method, evidence source, observation time, and freshness; a caller-supplied
+   authority label alone is insufficient. Provider-policy changes can therefore
+   make a result unknown without retroactively producing a false result.
 
 8. **Catalog exposure and consultation can be joined only on jointly eligible
    sessions.** Where both runtime catalog presentation and consultation
@@ -156,6 +164,9 @@ When this ships, all of the following observable behaviors hold, verified by
    the instruction identities that reached the session and any harness-provided
    load reason. A session without the necessary telemetry reports
    `observable: false`; it is never represented as an observed empty file list.
+   Configuration for an asynchronous hook without any received load events is
+   also unobservable, because non-delivery cannot prove absence. An observed
+   empty list requires an explicit runtime channel that reports the empty state.
    Repeated loading after compaction remains distinguishable from initial
    loading when the harness exposes that reason.
 
@@ -168,13 +179,20 @@ When this ships, all of the following observable behaviors hold, verified by
 
 11. **Phase 1 behavior remains available and reconcilable.** Existing version
     attribution, never-fired detection, misfire eligibility, coverage
-    reporting, and daily analytics remain available. Daily and health totals
-    reconcile for the same filters and window, even if one surface points to
-    the richer decomposition rather than duplicating every field.
+    reporting, and daily analytics remain available. One known phase-1
+    inconsistency is corrected: Codex OTEL rows are date-filtered before marking
+    a canonical session as event-backed, matching health's existing behavior,
+    so an out-of-window OTEL row cannot suppress an in-window JSONL fallback.
+    Apart from that fixture-pinned correction, the existing harness
+    source-selection and fallback rules remain the canonical occurrence set;
+    richer parser evidence may classify a selected occurrence but cannot add,
+    replace, or suppress one. Daily and health totals reconcile for the same
+    filters and window, even if one surface points to the richer decomposition
+    rather than duplicating every field.
 
 The contract is falsified by any unexplained reconciliation failure, any rate
 whose denominator includes ineligible sessions, any omission claim without a
-session-valid expected realization, or any presentation of unavailable
+presentation-valid expected realization, or any presentation of unavailable
 telemetry as an observed empty result.
 
 ## Success Criteria
@@ -212,6 +230,10 @@ telemetry as an observed empty result.
 - The class-decomposition, catalog-presentation, expected-versus-presented,
   project-breadth, and instruction-reach analyses are reproducible from the
   local product without bespoke transcript scripts.
+- The `/app/` Analytics Overview keeps raw invocation volume distinguishable
+  from per-harness first-read engagement and exposes coverage, project breadth,
+  version, and presentation-join detail without pooled cross-harness or
+  skill-value labels.
 
 ## Evaluation
 
@@ -273,7 +295,7 @@ response must additionally satisfy the reconciliation invariants using
 - Reporting first-consultation breadth by observed project.
 - Preserving safe cross-harness comparability semantics.
 - Reporting per-session runtime catalog presentation where observable.
-- Comparing observed presentation with an immutable, session-valid expected
+- Comparing observed presentation with an immutable, occurrence-valid expected
   realization when one is available.
 - Reporting catalog measurements, limits, and occupancy with units, methods,
   and provenance.
@@ -282,6 +304,9 @@ response must additionally satisfy the reconciliation invariants using
 - Aggregating logical skill identity across versions without losing attribution
   quality.
 - Exposing the evidence over AgentMonitor's local JSON API.
+- Surfacing the aggregate, per-harness consultation evidence in the canonical
+  `/app/` Analytics Overview while preserving uncertainty and avoiding
+  value/removal labels.
 
 ### Out of Scope
 
@@ -296,6 +321,8 @@ response must additionally satisfy the reconciliation invariants using
 - Broadening which events count as detected skill invocations.
 - Inferring a missed trigger where no skill consultation was detected.
 - Remote telemetry publication or any dependency on an external service.
+- Changes to the legacy `/` dashboard or an automated recommendation/ranking
+  surface.
 - Outcome experiments or qualitative review needed to decide whether a
   low-frequency skill should actually be removed.
 
@@ -312,22 +339,26 @@ response must additionally satisfy the reconciliation invariants using
   Classification names describe detected consultation evidence, not a claim
   about inaccessible model-internal state.
 - Claude Code instruction reach is observable only for sessions carrying the
-  relevant instruction-load telemetry. Older or uninstrumented sessions remain
-  unobservable.
+  relevant received instruction-load telemetry. Older or uninstrumented
+  sessions remain unobservable; configuration for an asynchronous hook is not
+  receipt evidence.
 - Project identity can be absent or ambiguous. Such sessions remain in an
   explicit `unknown` project bucket and are not guessed from unrelated current
-  state.
+  state. Where a harness reports cwd changes, first-consultation breadth uses
+  the project identity observed at that consultation rather than rewriting
+  history from the session's final cwd.
 - An expected realization is optional input from an external profile authority.
   Raw presentation observation remains useful without it, and unavailable
   comparison does not invalidate the observation.
 - Expected realization provenance must be immutable enough to establish what
-  was intended for the specific session. A mutable path or today's installed
-  catalog is insufficient historical evidence by itself.
+  was intended for the specific presentation occurrence. A mutable path or
+  today's installed catalog is insufficient historical evidence by itself.
 - Harness limits and context windows can change. Unknown or stale policy
   evidence degrades budget status to `unknown`, never to a guessed result.
 - Historical ingestion fidelity is uneven. The contract exposes that ceiling
   through eligibility and reasoned coverage rather than silently shrinking the
-  denominator.
+  denominator. A malformed or unsupported record that could conceal a
+  consultation or compaction degrades the affected session to unclassifiable.
 - AgentMonitor is local-first. Session identifiers, project identities,
   instruction paths, and catalog contents are not published externally by this
   contract.
@@ -342,8 +373,11 @@ observable/unknown states above and do not change the current contract.
 
 ## Handoff
 
-1. Review this revised contract in a fresh session with a critique agent,
-   including the cross-repository profile and harness-audit context.
-2. Revise any blocking findings and set `readiness: ready` only after the
-   falsifiability and authority boundaries survive that critique.
-3. Hand off to `write-plan` to choose delivery seams and implementation order.
+1. Fresh `gpt-5.6-terra` high-effort critique and closure completed on
+   2026-07-28 with both cross-repository audits, the distribution-profile
+   contract, downstream consumer, and implementation source in context.
+2. Blocking findings were revised: canonical phase-1 source selection,
+   asynchronous instruction non-delivery, occurrence-time realization validity,
+   policy authority, parser completeness, and mixed-harness compatibility.
+3. Execute
+   `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md`.
