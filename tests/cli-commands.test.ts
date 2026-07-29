@@ -127,6 +127,29 @@ test('sync sessions dry-run previews discovered files without writing', async ()
   assert.equal(parsed.total_files, 1);
 });
 
+test('sync sessions defaults to the configured Claude history root', async () => {
+  const previous = process.env.AGENTMONITOR_CLAUDE_DIR;
+  process.env.AGENTMONITOR_CLAUDE_DIR = claudeDir;
+  try {
+    const result = await runCli([
+      'sync',
+      'sessions',
+      '--source',
+      'claude',
+      '--dry-run',
+      '--json',
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    const parsed = JSON.parse(result.stdout) as { claude_files: number; total_files: number };
+    assert.equal(parsed.claude_files, 1);
+    assert.equal(parsed.total_files, 1);
+  } finally {
+    if (previous === undefined) delete process.env.AGENTMONITOR_CLAUDE_DIR;
+    else process.env.AGENTMONITOR_CLAUDE_DIR = previous;
+  }
+});
+
 test('hooks print-codex-config uses the requested URL', async () => {
   const result = await runCli(['--url', 'http://127.0.0.1:3999', 'hooks', 'print-codex-config']);
 

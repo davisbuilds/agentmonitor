@@ -150,6 +150,7 @@ All optional with sensible defaults:
 | `AGENTMONITOR_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
+| `AGENTMONITOR_CLAUDE_DIR` | `~/.claude` | Claude data root containing `projects/`; used by startup sync, watcher resync, automatic/historical import, and `amon sync sessions` |
 | `AGENTMONITOR_USAGE_BUDGETS_PATH` | `./config/budgets.json` | Optional local JSON config for read-only usage budget reports |
 | `AGENTMONITOR_WAREHOUSE_DSN` | unset | Postgres DSN for explicit `warehouse publish`; unset disables live publish |
 | `AGENTMONITOR_WAREHOUSE_ACCOUNT` | `local` | Account label published as the warehouse identity grain |
@@ -231,7 +232,10 @@ Current runtime note:
 - `AGENTMONITOR_CODEX_LIVE_MODE=otel-only` is the only implemented Codex mode today.
 - OTEL-only Codex data is suitable for summary observability, not `claude-esp`-style plan/diff/reasoning playback.
 - The `exporter` mode name is reserved for a future richer Codex-side exporter.
-- The session-browser watcher separately follows local Claude JSONL history under `~/.claude/projects` and local Codex history under `~/.codex/sessions`.
+- The session-browser watcher separately follows local Claude JSONL history
+  under `$AGENTMONITOR_CLAUDE_DIR/projects` (default `~/.claude/projects`) and
+  local Codex history under `$CODEX_HOME/sessions` (default
+  `~/.codex/sessions`).
 - The watcher and full historical import both maintain file-hash skip caches, so unchanged files that previously parsed to zero messages/events are not retried on every restart or periodic sync.
 - `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` uses root-relative glob-style patterns. Bare names such as `vercel-plugin` match any path segment; path patterns such as `nested/sessions` match that subtree relative to the watched root.
 
@@ -251,6 +255,8 @@ pnpm cli -- costs recalc --dry-run         # Preview cost backfill
 
 `--source antigravity` also accepts `--antigravity-dir <path>` to point at a
 non-default `antigravity-cli` root (default `~/.gemini/antigravity-cli`).
+Claude import and session sync accept `--claude-dir <path>` as a command-local
+override; otherwise both use `AGENTMONITOR_CLAUDE_DIR`.
 
 Operational notes:
 

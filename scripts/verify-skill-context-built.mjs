@@ -154,7 +154,8 @@ try {
   const claudeSessionId = `claude-skill-oracle-${verifierRunId}`;
   const codexSessionId = `codex-skill-oracle-${verifierRunId}`;
   const dbPath = path.join(resolvedTempDir, 'agentmonitor.db');
-  const projectsDir = path.join(resolvedTempDir, 'projects');
+  const claudeDir = path.join(resolvedTempDir, 'claude');
+  const projectsDir = path.join(claudeDir, 'projects');
   const catalogDir = path.join(resolvedTempDir, 'catalog');
   const codexHome = path.join(resolvedTempDir, 'codex');
   fs.mkdirSync(projectsDir, { recursive: true });
@@ -178,9 +179,9 @@ try {
     AGENTMONITOR_HOST: '127.0.0.1',
     AGENTMONITOR_PORT: String(port),
     AGENTMONITOR_PROJECTS_DIR: projectsDir,
+    AGENTMONITOR_CLAUDE_DIR: claudeDir,
     AGENTMONITOR_SKILL_CATALOG_DIRS: catalogDir,
     AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
-    AGENTMONITOR_SYNC_EXCLUDE_PATTERNS: '*',
     CODEX_HOME: codexHome,
   });
 
@@ -230,7 +231,7 @@ try {
   const claudePath = path.join(
     projectsDir,
     '-work-alpha',
-    'claude-skill-oracle.jsonl',
+    `${claudeSessionId}.jsonl`,
   );
   fs.mkdirSync(path.dirname(claudePath), { recursive: true });
   fs.writeFileSync(claudePath, claudeSource);
