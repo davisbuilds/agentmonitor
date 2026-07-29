@@ -376,8 +376,8 @@ The CI job runs:
 Parity tests are available for manual/shared-runtime verification but are not part of the required CI workflow.
 
 The skill-context built-product oracle verifies compiled parsers, schema,
-server/API behavior, and the Analytics consultation panel against isolated
-Claude and Codex fixtures:
+server/API behavior, and the Analytics consultation preview/explorer against
+isolated Claude and Codex fixtures:
 
 ```bash
 pnpm build

@@ -81,7 +81,7 @@ Product-surface reference for AgentMonitor.
 
 ## Analytics
 
-> The Svelte app consolidates historical Analytics, Usage, and Insights into a **single `Analytics` tab** with **Overview / Usage / Insights** sub-views (SubTabs). A shared filter bar drives `date / project / agent` across all three sub-views; per-view specialized filters stay local (Usage: model/provider/tier; Insights: kind + authoring provider/model). Deep links use one `#analytics?view=…` hash; legacy `#usage` / `#insights` links redirect. The backend `/api/v2/analytics/*`, `/api/v2/usage/*`, and `/api/v2/insights/*` contracts are unchanged.
+> The Svelte app consolidates historical Analytics, Usage, Skills, Insights, and Quality into a **single `Analytics` tab** with **Overview / Usage / Skills / Insights / Quality** sub-views (SubTabs). A shared filter bar drives `date / project / agent` across all five sub-views; per-view specialized filters stay local (Usage: model/provider/tier; Skills: harness/name/signal/sort; Insights: kind + authoring provider/model). Deep links use one `#analytics?view=…` hash; legacy `#usage` / `#insights` links redirect. The backend `/api/v2/analytics/*`, `/api/v2/usage/*`, and `/api/v2/insights/*` contracts are unchanged.
 
 - Historical analytics live under `/api/v2/analytics/*` and are intended for the canonical Svelte app.
 - Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
@@ -110,12 +110,16 @@ Product-surface reference for AgentMonitor.
   value, placement, or removal recommendations—and current installed files are
   not used to reconstruct historical runtime state.
 - The Analytics `Overview` keeps raw phase-1 invocation volume as a separate
-  timeline and adds a **Skill consultations** evidence panel. It shows Claude
-  and Codex in separate lanes with first-read engagement, post-compaction
-  rehydrations, repeats, unclassifiable occurrences, project breadth, catalog
-  exposure gaps, and expandable version/coverage detail. Mixed-harness rates
-  are never pooled, unavailable denominators render with reasons, and the
-  shared agent filter collapses the panel to one harness.
+  timeline and a bounded **Skill consultations** index. The index summarizes
+  each selected harness and shows at most six high-volume rows, so project and
+  velocity panels remain near the top of the page.
+- The dedicated `Skills` sub-view (`#analytics?view=skills`) is the complete
+  consultation evidence ledger. It filters by runtime-derived harness, skill
+  name, observed signal, and sort order; progressively reveals large result
+  sets; and keeps expandable first-read, post-compaction, repeat,
+  unclassifiable, project, catalog-exposure, version, and coverage evidence.
+  Mixed-harness rates are never pooled, unavailable denominators render with
+  reasons, and the shared agent filter collapses the explorer to one harness.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
 - **Session skill context** (`GET /api/v2/sessions/:id/skill-context`) exposes
   ordered consultation classifications, catalog presentations and measurements,

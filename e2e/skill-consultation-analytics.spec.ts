@@ -9,13 +9,30 @@ const claudeProject = `cwd:${createHash('sha256').update('/work/alpha').digest('
 
 test.skip(!baseUrl, 'AGENTMONITOR_E2E_URL is provided by the built-runtime verifier');
 
-test('Analytics renders per-harness consultation evidence and filter-responsive detail', async ({
+test('Analytics keeps consultation overview bounded and provides a filterable explorer', async ({
   page,
 }) => {
   fs.mkdirSync(artifactDir, { recursive: true });
   await page.goto(`${baseUrl}/app/#analytics`);
 
-  const region = page.getByRole('region', { name: 'Skill consultations' });
+  const preview = page.getByRole('region', { name: 'Skill consultations' });
+  await expect(preview).toBeVisible();
+  await expect(preview.locator('details')).toHaveCount(0);
+  await expect(preview.getByTestId('skill-preview-row')).toHaveCount(2);
+  await expect(preview.getByRole('link', { name: /Explore all 2 skills/ })).toBeVisible();
+
+  await preview.screenshot({
+    path: path.join(artifactDir, 'skill-consultations-preview-desktop.png'),
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await preview.screenshot({
+    path: path.join(artifactDir, 'skill-consultations-preview-narrow.png'),
+  });
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await preview.getByRole('link', { name: /Explore all 2 skills/ }).click();
+  await expect(page).toHaveURL(/#analytics\?.*view=skills/);
+
+  const region = page.getByRole('region', { name: 'Skill consultation explorer' });
   await expect(region).toBeVisible();
   const comparability = region.getByTestId('skill-comparability');
   await expect(comparability).toContainText('Rates are not pooled across harnesses.');
@@ -46,8 +63,20 @@ test('Analytics renders per-harness consultation evidence and filter-responsive 
   await expect(claudeSkill.getByText('exact')).toBeVisible();
   await expect(claudeSkill.getByText(claudeProject)).toBeVisible();
 
+  await region.getByRole('button', { name: 'Codex' }).click();
+  await expect(codex).toBeVisible();
+  await expect(claude).toHaveCount(0);
+
+  await region.getByLabel('Search skills').fill('does-not-exist');
+  await expect(page).toHaveURL(/skill=does-not-exist/);
+  await expect(region.getByText('No skills match the explorer filters.')).toBeVisible();
+  await region.getByRole('button', { name: 'Reset explorer filters' }).click();
+  await expect(page).not.toHaveURL(/skill=/);
+  await expect(claude).toBeVisible();
+  await expect(codex).toBeVisible();
+
   await region.screenshot({
-    path: path.join(artifactDir, 'skill-consultations-desktop.png'),
+    path: path.join(artifactDir, 'skill-consultations-explorer-desktop.png'),
   });
 
   await page.getByLabel('Filter by agent').selectOption('codex');
@@ -55,11 +84,8 @@ test('Analytics renders per-harness consultation evidence and filter-responsive 
   await expect(claude).toHaveCount(0);
   await expect(region.getByTestId('skill-comparability')).toHaveCount(0);
 
-  await page.getByLabel('Filter by agent').selectOption('');
-  await expect(claude).toBeVisible();
-  await expect(codex).toBeVisible();
   await page.setViewportSize({ width: 390, height: 844 });
   await region.screenshot({
-    path: path.join(artifactDir, 'skill-consultations-narrow.png'),
+    path: path.join(artifactDir, 'skill-consultations-explorer-narrow.png'),
   });
 });
