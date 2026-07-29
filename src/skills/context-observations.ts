@@ -109,10 +109,11 @@ function markdownCatalogEntries(body: string): CatalogObservationEntry[] {
 export interface ParsedCatalogPresentation {
   retainedBlock: string;
   fingerprint: string;
+  representation: 'skills_instructions_xml' | 'skills_instructions_markdown';
   measurement: {
     value: number;
     unit: 'utf8_bytes';
-    method: 'skill_catalog_presentation/v1';
+    method: 'retained_catalog_block_utf8_bytes/v1';
   };
   truncation: 'observed' | 'not_observed' | 'unknown';
   entries: CatalogObservationEntry[];
@@ -139,14 +140,19 @@ export function parseCodexCatalogPresentations(text: string): ParsedCatalogPrese
       });
     }
     if (entries.length === 0) entries.push(...markdownCatalogEntries(body));
+    const representation = /<skill>([\s\S]*?)<\/skill>/i.test(body)
+      || /<skills(?:\s[^>]*)?>\s*<\/skills>/i.test(body)
+      ? 'skills_instructions_xml'
+      : 'skills_instructions_markdown';
     const explicitlyEmpty = /<skills(?:\s[^>]*)?>\s*<\/skills>/i.test(body)
       || /available skills\s*:\s*(?:none|\[\])/i.test(body);
     if (entries.length === 0 && !explicitlyEmpty) continue;
-    const canonical = JSON.stringify(entries.map(entry => ({
+    const canonical = JSON.stringify(entries.map((entry, ordinal) => ({
+      ordinal,
       name: entry.name,
       description: entry.description,
       sourceLocation: entry.sourceLocation,
-      scope: entry.scope,
+      sourceScope: entry.scope,
     })));
     const lower = retainedBlock.toLowerCase();
     const truncation = /truncat(?:ed|ion)\s*[:=]\s*(?:true|yes|1)/.test(lower)
@@ -157,10 +163,11 @@ export function parseCodexCatalogPresentations(text: string): ParsedCatalogPrese
     presentations.push({
       retainedBlock,
       fingerprint: sha256(canonical),
+      representation,
       measurement: {
         value: Buffer.byteLength(retainedBlock, 'utf8'),
         unit: 'utf8_bytes',
-        method: 'skill_catalog_presentation/v1',
+        method: 'retained_catalog_block_utf8_bytes/v1',
       },
       truncation,
       entries,
