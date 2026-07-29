@@ -172,6 +172,14 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
   limits. Claude explicit `Skill` calls and Codex concrete `.../SKILL.md` reads
   still define the phase-1 invocation basis; ordered parser rows only enrich a
   selected occurrence and never create an analytics count.
+- `skill_expected_realizations` stores bounded, canonicalized, SHA-256-addressed
+  desired-state evidence supplied by an external profile authority. Identical
+  array reorderings replay idempotently; reusing an immutable ID for different
+  content conflicts. `session_expected_skill_realizations` holds an explicit
+  one-realization session binding without a `browsing_sessions` foreign key so
+  parser delete-and-reinsert cycles cannot erase it. Association requires an
+  existing same-harness session and cannot be rebound. No current-filesystem
+  state is used to construct historical expectations.
 - Newly installed Claude hook configurations register asynchronous
   `InstructionsLoaded` capture for all load reasons. Shell and Python hooks
   persist only `file_path`, `memory_type`, `load_reason`, and supplied optional

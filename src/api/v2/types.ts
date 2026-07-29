@@ -428,6 +428,88 @@ export interface SkillHealthDataSemantics {
   crossHarnessComparable: boolean;
 }
 
+export type SkillExpectedRealizationHarness = 'claude' | 'codex';
+
+export interface SkillExpectedRealizationMemberInput {
+  name: string;
+  descriptionFingerprint: string;
+  version?: string | null;
+  contentIdentity?: string | null;
+}
+
+export interface SkillExpectedRealizationMember {
+  name: string;
+  descriptionFingerprint: string;
+  version: string | null;
+  contentIdentity: string | null;
+}
+
+export interface SkillExpectedRealizationProvenance {
+  producer: string;
+  producerVersion: string;
+  artifactId: string;
+  artifactRevision: string;
+  sourceUri: string;
+}
+
+interface SkillExpectedPolicyArtifactBase {
+  artifactId: string;
+  artifactRevision: string;
+  contentHash: string;
+  harness: SkillExpectedRealizationHarness;
+  harnessVersion: string;
+  model: string | null;
+  modelVersion: string | null;
+  contextWindowIdentity: string;
+  runtimeRepresentation: string;
+  limitValue: number;
+  limitUnit: string;
+  measurementMethod: string;
+  observedAt: string;
+  expiresAt: string;
+  producer: string;
+  producerVersion: string;
+}
+
+export interface SkillExpectedVendorPolicyArtifact
+  extends SkillExpectedPolicyArtifactBase {
+  kind: 'vendor_policy_snapshot';
+  sourceUri: string;
+  probeIdentity?: never;
+}
+
+export interface SkillExpectedProbePolicyArtifact
+  extends SkillExpectedPolicyArtifactBase {
+  kind: 'version_scoped_probe';
+  probeIdentity: string;
+  sourceUri?: never;
+}
+
+export type SkillExpectedPolicyArtifact =
+  | SkillExpectedVendorPolicyArtifact
+  | SkillExpectedProbePolicyArtifact;
+
+export interface SkillExpectedRealizationInput {
+  id: string;
+  harness: SkillExpectedRealizationHarness;
+  profileIdentity: string;
+  profileComposition: string[];
+  canonicalRevision: string;
+  validFrom: string;
+  validTo?: string | null;
+  skills: SkillExpectedRealizationMemberInput[];
+  policyArtifacts?: SkillExpectedPolicyArtifact[];
+  provenance: SkillExpectedRealizationProvenance;
+}
+
+export interface SkillExpectedRealization
+  extends Omit<SkillExpectedRealizationInput, 'validTo' | 'skills' | 'policyArtifacts'> {
+  validTo: string | null;
+  skills: SkillExpectedRealizationMember[];
+  policyArtifacts: SkillExpectedPolicyArtifact[];
+  contentHash: string;
+}
+
 export interface AnalyticsCapabilityBreakdown {
   full: number;
   summary: number;
