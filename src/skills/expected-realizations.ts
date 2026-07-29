@@ -720,6 +720,28 @@ function hydrateExpectedRealization(
   return { ...payload, contentHash: row.content_hash };
 }
 
+export function verifyPersistedExpectedRealization(
+  payloadJson: string,
+  expectedContentHash: string,
+): SkillExpectedRealization | null {
+  if (!/^[a-f0-9]{64}$/.test(expectedContentHash)) return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(payloadJson) as unknown;
+  } catch {
+    return null;
+  }
+  const validation = validateExpectedRealization(payload);
+  if (
+    !validation.ok
+    || validation.canonicalJson !== payloadJson
+    || validation.realization.contentHash !== expectedContentHash
+  ) {
+    return null;
+  }
+  return validation.realization;
+}
+
 export function createExpectedRealization(
   db: Database,
   input: SkillExpectedRealizationInput | unknown,

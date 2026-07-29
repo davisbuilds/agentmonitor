@@ -180,6 +180,19 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
   parser delete-and-reinsert cycles cannot erase it. Association requires an
   existing same-harness session and cannot be rebound. No current-filesystem
   state is used to construct historical expectations.
+- `src/skills/session-skill-context.ts` is the bounded read-side oracle for one
+  selected Claude or Codex browser session. It preserves every ordered catalog
+  presentation and instruction-load occurrence, classifies consultations
+  against compaction generations, and compares each presentation only with an
+  associated realization valid at that occurrence's timestamp. Catalog budget
+  ratios are emitted only when the retained UTF-8-byte measurement and a fresh,
+  integrity-checked policy artifact match the occurrence's harness version,
+  model scope, context-window identity, runtime representation, unit, and
+  measurement method. Missing signals, missing asynchronous hook delivery,
+  invalid authority, incompatible units, and stale policy remain distinct
+  unavailable/unknown states rather than inferred zeroes. Codex runtime
+  catalogs emitted before the first turn metadata use that session's first
+  reported model and context-window identity.
 - Newly installed Claude hook configurations register asynchronous
   `InstructionsLoaded` capture for all load reasons. Shell and Python hooks
   persist only `file_path`, `memory_type`, `load_reason`, and supplied optional
