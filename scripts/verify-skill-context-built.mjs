@@ -19,13 +19,116 @@ assert.equal(
 
 async function stopChild(child) {
   if (child.exitCode !== null) return;
-  child.kill('SIGTERM');
   const exited = once(child, 'exit');
-  const timeout = new Promise(resolve => setTimeout(resolve, 5_000, 'timeout'));
-  if (await Promise.race([exited, timeout]) === 'timeout') {
+  child.kill('SIGTERM');
+  let timeoutId;
+  const timeout = new Promise(resolve => {
+    timeoutId = setTimeout(resolve, 5_000, 'timeout');
+  });
+  const result = await Promise.race([
+    exited.then(() => 'exited'),
+    timeout,
+  ]);
+  clearTimeout(timeoutId);
+  if (result === 'timeout') {
+    const killed = once(child, 'exit');
     child.kill('SIGKILL');
-    await once(child, 'exit');
+    await killed;
   }
+}
+
+async function waitForChildExit(child, label, timeoutMs) {
+  const result = await new Promise((resolve, reject) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off('error', onError);
+      child.off('exit', onExit);
+    };
+    const onError = error => {
+      cleanup();
+      reject(new Error(`${label} could not start: ${error.message}`, { cause: error }));
+    };
+    const onExit = (code, signal) => {
+      cleanup();
+      resolve({ code, signal, timedOut: false });
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      resolve({ code: null, signal: null, timedOut: true });
+    }, timeoutMs);
+    child.once('error', onError);
+    child.once('exit', onExit);
+  });
+
+  if (result.timedOut) {
+    await stopChild(child);
+    throw new Error(`${label} timed out after ${timeoutMs}ms`);
+  }
+  return result;
+}
+
+async function runDojoRuntimeSmoke(baseUrl) {
+  if (process.env['AGENTMONITOR_VERIFY_DOJO_RUNTIME'] !== '1') {
+    return { status: 'not_requested' };
+  }
+
+  const runtimePath = path.resolve(
+    repoRoot,
+    '..',
+    'dojo',
+    'scripts',
+    'skill_health_runtime.py',
+  );
+  if (!fs.existsSync(runtimePath)) {
+    console.log(`Dojo runtime smoke skipped: ${runtimePath} is absent`);
+    return { status: 'skipped_absent' };
+  }
+
+  const healthUrl = `${baseUrl}/api/v2/analytics/skills/health`
+    + '?date_from=2026-07-01&date_to=2026-07-29';
+  const python = [
+    'import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("skill_health_runtime", sys.argv[1])',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'rows = module.load_health_rows(url=sys.argv[2], path=None)',
+    'if not any(row.get("name") == "test-strategy" for row in rows):',
+    '    raise RuntimeError("Dojo runtime response is missing test-strategy")',
+    'print(json.dumps({"rows": len(rows), "test_strategy": True}))',
+  ].join('\n');
+  const child = spawn('python3', ['-c', python, runtimePath, healthUrl], {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', chunk => {
+    stdout += chunk;
+  });
+  child.stderr.on('data', chunk => {
+    stderr += chunk;
+  });
+  const result = await waitForChildExit(child, 'Dojo runtime smoke', 15_000);
+  assert.equal(
+    result.code,
+    0,
+    `Dojo runtime smoke failed (signal: ${result.signal ?? 'none'})\n${stderr}${stdout}`,
+  );
+  let payload;
+  try {
+    payload = JSON.parse(stdout.trim());
+  } catch (error) {
+    throw new Error(
+      `Dojo runtime smoke returned invalid JSON on stdout\nstdout: ${stdout}\nstderr: ${stderr}`,
+      { cause: error },
+    );
+  }
+  if (stderr && process.env['AGENTMONITOR_VERIFY_DEBUG'] === '1') {
+    console.error(stderr);
+  }
+  return { status: 'passed', ...payload };
 }
 
 const tempPrefix = path.join(os.tmpdir(), 'agentmonitor-skill-context-built-');
@@ -306,6 +409,7 @@ try {
     repeat_no_compaction: 0,
     unclassifiable: 0,
   });
+  const dojoRuntimeSmoke = await runDojoRuntimeSmoke(baseUrl);
 
   const realization = {
     id: 'built-codex-realization',
@@ -396,6 +500,7 @@ try {
       realizationReplay: replayResponse.status,
       association: associateResponse.status,
       context: contextResponse.status,
+      dojoRuntimeSmoke,
     }),
   );
 } finally {

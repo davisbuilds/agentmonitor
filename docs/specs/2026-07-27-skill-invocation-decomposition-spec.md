@@ -4,7 +4,7 @@ revised: 2026-07-28
 author: codex-gpt-5
 topic: skill-invocation-decomposition
 stage: spec
-status: draft
+status: shipped
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -379,5 +379,7 @@ observable/unknown states above and do not change the current contract.
 2. Blocking findings were revised: canonical phase-1 source selection,
    asynchronous instruction non-delivery, occurrence-time realization validity,
    policy authority, parser completeness, and mixed-harness compatibility.
-3. Execute
+3. Tasks 1-10 completed on 2026-07-29. Source, built-runtime, copied-database
+   migration/recovery, fixed-window reconciliation, benchmark, UI, and actual
+   Dojo consumer checks passed; see the completion evidence in
    `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md`.

@@ -77,6 +77,7 @@ test('covering composite event indexes exist', () => {
   const names = indexNames();
   assert.ok(names.has('idx_events_session_cost'), 'idx_events_session_cost should exist');
   assert.ok(names.has('idx_events_created_model'), 'idx_events_created_model should exist');
+  assert.ok(names.has('idx_events_session_reconcile'), 'idx_events_session_reconcile should exist');
   assert.ok(names.has('idx_events_created_at'), 'idx_events_created_at should remain');
   assert.ok(names.has('idx_events_tool_name'), 'idx_events_tool_name should remain');
 });
@@ -92,4 +93,17 @@ test('time-windowed cost aggregate uses the covering created/model index', () =>
     '2026-05-01',
   );
   assert.match(plan, /idx_events_created_model/, `expected covering created/model index, got: ${plan}`);
+});
+
+test('event-session reconciliation uses the dedicated composite index', () => {
+  const plan = queryPlan(
+    `SELECT id FROM events
+     WHERE session_id = ? AND agent_type = 'codex' AND source = 'import'`,
+    'session-1',
+  );
+  assert.match(
+    plan,
+    /idx_events_session_reconcile/,
+    `expected event-session reconciliation index, got: ${plan}`,
+  );
 });

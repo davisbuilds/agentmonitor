@@ -103,13 +103,20 @@ These are the deferred follow-ups surfaced during and after the build.
   lexical negation in the next prompt (both already scoped out of phase 1);
   measure against real sessions before building ranking on top.
 
-#### Never-fired scan runs un-throttled per health request
+#### Windowed Codex skill-event scan chooses the agent index
 📥 noted
-- **What**: each `/api/v2/analytics/skills/health` request scans the filesystem
-  for never-fired detection, separate from the TTL-throttled snapshot refresh
-  scan.
-- **Why it matters**: minor today; a free cleanup if the skill-extraction
-  unification below happens (thread the single scanned catalog through both).
+- **What**: on the 2026-07-29 copied 1.4 GB database,
+  `EXPLAIN QUERY PLAN` for the fixed-window Codex skill-event leg chose
+  low-cardinality `idx_events_agent_type` and a temporary ordering b-tree
+  instead of `idx_events_usage_ts`. After removing the duplicate ledger read,
+  the complete enriched 2026-07-01..27 health query measured a 102.5 ms median
+  over seven warm runs versus 88.3 ms for phase 1 alone.
+- **Why it matters**: current latency is acceptable, but this leg still scales
+  with all retained Codex events and may become the next health-query bottleneck
+  as history grows.
+- **Sketch**: benchmark a purpose-built partial/composite skill-event index
+  against the real predicate and ordering; retain it only if the planner uses it
+  and write cost/storage remain justified.
 
 ### Skill extraction unification
 
