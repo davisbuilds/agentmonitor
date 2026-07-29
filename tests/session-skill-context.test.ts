@@ -643,6 +643,105 @@ test('accepts an exact Codex model identifier as model-scoped budget authority',
   });
 });
 
+test('selects one compatible policy after filtering and rejects ambiguous limits', () => {
+  const compatibleSessionId = 'budget-compatible-policy';
+  insertSession(compatibleSessionId, 'codex', capabilities({
+    catalog: { observable: true },
+  }));
+  insertObservation({
+    sessionId: compatibleSessionId,
+    ordinal: 1,
+    kind: 'catalog_presentation',
+    observedAt: '2026-07-01T12:00:00.000Z',
+    metadata: runtimeMetadata(),
+    entries: [],
+  });
+  const compatibleRealization = realization(
+    'expected-compatible-policy',
+    policy({
+      artifactId: 'a-incompatible',
+      limitUnit: 'tokens',
+    }),
+  );
+  compatibleRealization.policyArtifacts = [
+    policy({
+      artifactId: 'a-incompatible',
+      limitUnit: 'tokens',
+    }),
+    policy({
+      artifactId: 'z-compatible',
+      artifactRevision: 'r2',
+      limitValue: 512,
+    }),
+  ];
+  assert.equal(
+    createExpectedRealization(db, compatibleRealization).ok,
+    true,
+  );
+  assert.equal(
+    associateExpectedRealization(
+      db,
+      compatibleSessionId,
+      'expected-compatible-policy',
+    ).ok,
+    true,
+  );
+  const compatible = getSessionSkillContext(db, compatibleSessionId);
+  assert.equal(compatible?.catalog.observable, true);
+  if (!compatible?.catalog.observable) return;
+  assert.deepEqual(compatible.catalog.occurrences[0]?.budget, {
+    status: 'available',
+    used: 128,
+    limit: 512,
+    ratio: 0.25,
+    unit: 'utf8_bytes',
+    measurementMethod: 'retained_catalog_block_utf8_bytes/v1',
+    policyArtifactId: 'z-compatible',
+    policyArtifactRevision: 'r2',
+    policyArtifactHash: 'a'.repeat(64),
+  });
+
+  const ambiguousSessionId = 'budget-ambiguous-policy';
+  insertSession(ambiguousSessionId, 'codex', capabilities({
+    catalog: { observable: true },
+  }));
+  insertObservation({
+    sessionId: ambiguousSessionId,
+    ordinal: 1,
+    kind: 'catalog_presentation',
+    observedAt: '2026-07-01T12:00:00.000Z',
+    metadata: runtimeMetadata(),
+    entries: [],
+  });
+  const ambiguousRealization = realization(
+    'expected-ambiguous-policy',
+    policy({ artifactId: 'limit-a' }),
+  );
+  ambiguousRealization.policyArtifacts = [
+    policy({ artifactId: 'limit-a', limitValue: 256 }),
+    policy({ artifactId: 'limit-b', limitValue: 512 }),
+  ];
+  assert.equal(
+    createExpectedRealization(db, ambiguousRealization).ok,
+    true,
+  );
+  assert.equal(
+    associateExpectedRealization(
+      db,
+      ambiguousSessionId,
+      'expected-ambiguous-policy',
+    ).ok,
+    true,
+  );
+  const ambiguous = getSessionSkillContext(db, ambiguousSessionId);
+  assert.equal(ambiguous?.catalog.observable, true);
+  if (!ambiguous?.catalog.observable) return;
+  assert.deepEqual(ambiguous.catalog.occurrences[0]?.budget, {
+    status: 'unknown',
+    reason: 'limit_authority_ambiguous',
+  });
+});
+
 test('rejects a content-hashed realization with an incomplete policy artifact', () => {
   const sessionId = 'invalid-policy-realization';
   const realizationId = 'invalid-policy';

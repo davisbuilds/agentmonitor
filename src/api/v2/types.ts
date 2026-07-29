@@ -594,6 +594,7 @@ export type SkillCatalogBudget =
         | 'measurement_unavailable'
         | 'no_authoritative_limit'
         | 'limit_authority_unrecognized'
+        | 'limit_authority_ambiguous'
         | 'policy_not_fresh'
         | 'policy_scope_mismatch'
         | 'incompatible_units'

@@ -406,13 +406,22 @@ function catalogBudget(
   if (scoped.length === 0) {
     return { status: 'unknown', reason: 'policy_scope_mismatch' };
   }
-  const policy = scoped[0]!;
-  if (policy.limitUnit !== measurement.unit) {
+  const unitCompatible = scoped.filter(
+    policy => policy.limitUnit === measurement.unit,
+  );
+  if (unitCompatible.length === 0) {
     return { status: 'unknown', reason: 'incompatible_units' };
   }
-  if (policy.measurementMethod !== measurement.method) {
+  const compatible = unitCompatible.filter(
+    policy => policy.measurementMethod === measurement.method,
+  );
+  if (compatible.length === 0) {
     return { status: 'unknown', reason: 'incompatible_measurement_methods' };
   }
+  if (compatible.length > 1) {
+    return { status: 'unknown', reason: 'limit_authority_ambiguous' };
+  }
+  const policy = compatible[0]!;
   return {
     status: 'available',
     used: measurement.value,

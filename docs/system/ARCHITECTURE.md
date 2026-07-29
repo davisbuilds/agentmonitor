@@ -189,8 +189,10 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
   integrity-checked policy artifact match the occurrence's harness version,
   model scope, context-window identity, runtime representation, unit, and
   measurement method. Missing signals, missing asynchronous hook delivery,
-  invalid authority, incompatible units, and stale policy remain distinct
-  unavailable/unknown states rather than inferred zeroes. Codex runtime
+  invalid or ambiguous authority, incompatible units, and stale policy remain
+  distinct unavailable/unknown states rather than inferred zeroes. Multiple
+  fresh artifacts are filtered for full runtime/unit/method compatibility, and
+  a numeric ratio requires exactly one remaining authority. Codex runtime
   catalogs emitted before the first turn metadata use that session's first
   reported model and context-window identity. Because Codex currently reports
   an exact versioned model identifier but no separate model-version field, a
