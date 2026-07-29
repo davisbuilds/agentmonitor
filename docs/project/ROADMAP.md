@@ -69,10 +69,17 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   Immutable, content-hashed expected realizations can now be stored and
   explicitly associated to same-harness sessions without being erased by
   transcript reparse; conflicting artifact IDs and session rebinds fail without
-  writes. *Why:* raw reads conflate distinct consultation behavior and invite
-  unsafe cross-harness conclusions, while current filesystem state is not
-  historical desired-state authority. Per-session projection, the additive API
-  resources, and the `/app/` panel remain the next review slices. Spec/plan:
+  writes. A bounded per-session oracle now preserves distinct catalog and
+  instruction occurrences, compares each catalog only against realization
+  authority valid at that occurrence, and reports numeric catalog occupancy
+  only for a fresh policy with fully compatible runtime scope, units, and
+  measurement method. Codex world-state instruction identities are retained
+  without instruction contents, and initial catalogs are scoped with the
+  session's first reported runtime identity. *Why:* raw reads conflate distinct
+  consultation behavior and invite unsafe cross-harness conclusions, while
+  current filesystem state is not historical desired-state authority. The
+  additive API resources and the `/app/` panel remain the next review slices.
+  Spec/plan:
   `docs/specs/2026-07-27-skill-invocation-decomposition-spec.md` and
   `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md`.
 - Pricing tables reach `dist/`, and the cwd stops deciding which DB you read (2026-07-13) — *What:* the build ran `cp -r src/pricing/data dist/pricing/data`, which creates the directory on the first run but on every run after descends into it and writes `dist/pricing/data/data/`, freezing the JSON the runtime reads at the first build (2026-02-19). Opus 4.8, Fable 5, Sonnet 5 and the GPT-5.6 tiers all landed in `src/` and none reached `dist/`. Fixed by clearing the destination first, plus `scripts/check-pricing-dist.mjs` in `pnpm build`. Separately, the default DB path was cwd-relative, so `amon serve` from outside the repo silently created a second database and auto-imported into it; it now follows the install, resolved through one shared resolver so `amon status` cannot disagree with the server. *Why it hid for five months:* every gate reads `src/` — `tsc`, `pnpm test` and `pnpm dev` all run from source, and only `amon serve` loads `dist/`. An unpriced model bills as $0 rather than raising, so the dashboard stayed plausible while under-reporting the most-used models entirely. Events written while the build was stale carry `cost_usd = 0`; `amon costs recalc` repairs them. Any non-TS asset the build copies into `dist/` has this shape and no gate would catch it.

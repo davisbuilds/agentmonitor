@@ -119,11 +119,16 @@ export function parseCodexSessionMessages(
   let userMessageCount = 0;
   let cwd: string | null = null;
   let originator: string | undefined;
+  let harnessVersion: string | null = null;
+  let initialModel: string | null = null;
+  let initialContextWindowReported: number | undefined;
+  let latestModel: string | null = null;
   // Latest context-window occupancy from token_count telemetry (in file order).
   // Numerator is last_token_usage.input_tokens, which is cache-inclusive.
   let contextUsedTokens: number | undefined;
   let contextWindowReported: number | undefined;
   let malformedRecords = 0;
+  let sawInstructionWorldState = false;
   const contextObservations: SessionContextObservation[] = [];
 
   const lines: Array<{ line: CodexLine; ordinal: number }> = [];
@@ -145,8 +150,29 @@ export function parseCodexSessionMessages(
       cwd = (line.payload.cwd as string) ?? null;
       startedAt = line.payload.timestamp ?? line.timestamp ?? null;
       originator = line.payload.originator;
+      harnessVersion = typeof line.payload['cli_version'] === 'string'
+        ? line.payload['cli_version']
+        : null;
       break;
     }
+  }
+  for (const { line } of lines) {
+    if (
+      initialModel === null
+      && line.type === 'turn_context'
+      && typeof line.payload?.['model'] === 'string'
+    ) {
+      initialModel = line.payload['model'];
+    }
+    if (
+      initialContextWindowReported === undefined
+      && line.type === 'event_msg'
+      && line.payload?.type === 'token_count'
+      && typeof line.payload.info?.model_context_window === 'number'
+    ) {
+      initialContextWindowReported = line.payload.info.model_context_window;
+    }
+    if (initialModel !== null && initialContextWindowReported !== undefined) break;
   }
 
   let latestCwd = cwd;
@@ -195,6 +221,15 @@ export function parseCodexSessionMessages(
           fingerprint: presentation.fingerprint,
           measurement: presentation.measurement,
           truncation: presentation.truncation,
+          runtime: {
+            harnessVersion,
+            model: latestModel ?? initialModel,
+            modelVersion: null,
+            contextWindowIdentity: (contextWindowReported ?? initialContextWindowReported) === undefined
+              ? null
+              : `tokens:${contextWindowReported ?? initialContextWindowReported}`,
+            representation: presentation.representation,
+          },
         },
         catalogEntries: presentation.entries,
       });
@@ -226,6 +261,35 @@ export function parseCodexSessionMessages(
 
     if (line.type === 'turn_context' && typeof line.payload?.cwd === 'string') {
       latestCwd = line.payload.cwd;
+    }
+    if (line.type === 'turn_context' && typeof line.payload?.['model'] === 'string') {
+      latestModel = line.payload['model'];
+    }
+
+    if (line.type === 'world_state' && line.payload) {
+      const state = asRecord(line.payload['state']);
+      if (state && Object.prototype.hasOwnProperty.call(state, 'agents_md')) {
+        sawInstructionWorldState = true;
+        const rawAgents = state['agents_md'];
+        const agents = Array.isArray(rawAgents) ? rawAgents : [rawAgents];
+        for (const rawAgent of agents) {
+          const agent = asRecord(rawAgent);
+          const directory = agent?.['directory'];
+          if (typeof directory !== 'string' || !directory.trim()) continue;
+          contextObservations.push({
+            ordinal: ordinal * 1000,
+            kind: 'instruction_load',
+            source: 'codex_world_state',
+            timestamp,
+            projectIdentity: projectIdentityFromCwd(latestCwd) ?? undefined,
+            metadata: {
+              file_path: path.join(directory, 'AGENTS.md'),
+              memory_type: 'AGENTS.md',
+            },
+          });
+        }
+      }
+      continue;
     }
 
     if (line.type === 'compacted') {
@@ -371,10 +435,12 @@ export function parseCodexSessionMessages(
         )
           ? { observable: true }
           : { observable: false, reason: 'presentation_signal_absent' },
-        instructionLoads: {
-          observable: false,
-          reason: 'instruction_load_signal_absent',
-        },
+        instructionLoads: sawInstructionWorldState
+          ? { observable: true }
+          : {
+              observable: false,
+              reason: 'instruction_load_signal_absent',
+            },
         diagnostics: malformedRecords > 0 ? ['malformed_source_record'] : [],
       },
     },

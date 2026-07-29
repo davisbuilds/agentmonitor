@@ -80,7 +80,11 @@ test('Codex preserves initial and post-compaction catalog occurrences', () => {
     JSON.stringify({
       type: 'session_meta',
       timestamp: '2026-07-01T00:00:00Z',
-      payload: { cwd: '/work/alpha', originator: 'codex_cli_rs' },
+      payload: {
+        cwd: '/work/alpha',
+        originator: 'codex_cli_rs',
+        cli_version: '0.145.0',
+      },
     }),
     JSON.stringify({
       type: 'response_item',
@@ -88,6 +92,19 @@ test('Codex preserves initial and post-compaction catalog occurrences', () => {
       payload: {
         role: 'developer',
         content: [{ type: 'input_text', text: catalog }],
+      },
+    }),
+    JSON.stringify({
+      type: 'turn_context',
+      timestamp: '2026-07-01T00:00:01Z',
+      payload: { cwd: '/work/alpha', model: 'gpt-5.6-terra' },
+    }),
+    JSON.stringify({
+      type: 'event_msg',
+      timestamp: '2026-07-01T00:00:01Z',
+      payload: {
+        type: 'token_count',
+        info: { model_context_window: 258_400 },
       },
     }),
     JSON.stringify({
@@ -138,6 +155,13 @@ test('Codex preserves initial and post-compaction catalog occurrences', () => {
     (presentations[0]?.metadata?.['measurement'] as { unit?: string }).unit,
     'utf8_bytes',
   );
+  assert.deepEqual(presentations[0]?.metadata?.['runtime'], {
+    harnessVersion: '0.145.0',
+    model: 'gpt-5.6-terra',
+    modelVersion: null,
+    contextWindowIdentity: 'tokens:258400',
+    representation: 'skills_instructions_xml',
+  });
 });
 
 test('Codex parses entries from the runtime Markdown skill catalog', () => {
@@ -243,6 +267,53 @@ test('Codex does not report an unrecognized catalog body as observed empty', () 
   assert.deepEqual(
     parsed.skillContext?.capabilities.catalogPresentation,
     { observable: false, reason: 'presentation_signal_absent' },
+  );
+});
+
+test('Codex retains explicit AGENTS world-state reach without instruction contents', () => {
+  const parsed = parseCodexSessionMessages(JSON.stringify({
+    type: 'world_state',
+    timestamp: '2026-07-01T00:00:01Z',
+    payload: {
+      full: true,
+      state: {
+        agents_md: {
+          directory: '/work/project',
+          text: 'secret instruction contents',
+        },
+      },
+    },
+  }), 'codex-agents-world-state');
+
+  assert.deepEqual(parsed.skillContext?.capabilities.instructionLoads, {
+    observable: true,
+  });
+  const loads = parsed.skillContext?.observations.filter(
+    observation => observation.kind === 'instruction_load',
+  ) ?? [];
+  assert.equal(loads.length, 1);
+  assert.equal(loads[0]?.metadata?.['file_path'], '/work/project/AGENTS.md');
+  assert.equal(JSON.stringify(loads).includes('secret instruction contents'), false);
+});
+
+test('Codex explicit empty AGENTS world state is observed empty', () => {
+  const parsed = parseCodexSessionMessages(JSON.stringify({
+    type: 'world_state',
+    timestamp: '2026-07-01T00:00:01Z',
+    payload: {
+      full: true,
+      state: { agents_md: null },
+    },
+  }), 'codex-empty-agents-world-state');
+
+  assert.deepEqual(parsed.skillContext?.capabilities.instructionLoads, {
+    observable: true,
+  });
+  assert.equal(
+    parsed.skillContext?.observations.some(
+      observation => observation.kind === 'instruction_load',
+    ),
+    false,
   );
 });
 

@@ -463,12 +463,12 @@ function policyArtifacts(
       issues,
       MAX_ID_LENGTH,
     );
-    if ((model === null) !== (modelVersion === null)) {
+    if (model === null && modelVersion !== null) {
       addIssue(
         issues,
-        `${itemPath}.model`,
+        `${itemPath}.modelVersion`,
         'incomplete_model_identity',
-        'model and modelVersion must both be present or both be null',
+        'modelVersion requires a model identifier',
       );
     }
     const contextWindowIdentity = boundedString(
@@ -718,6 +718,28 @@ function hydrateExpectedRealization(
 ): SkillExpectedRealization {
   const payload = JSON.parse(row.payload_json) as CanonicalExpectedRealization;
   return { ...payload, contentHash: row.content_hash };
+}
+
+export function verifyPersistedExpectedRealization(
+  payloadJson: string,
+  expectedContentHash: string,
+): SkillExpectedRealization | null {
+  if (!/^[a-f0-9]{64}$/.test(expectedContentHash)) return null;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(payloadJson) as unknown;
+  } catch {
+    return null;
+  }
+  const validation = validateExpectedRealization(payload);
+  if (
+    !validation.ok
+    || validation.canonicalJson !== payloadJson
+    || validation.realization.contentHash !== expectedContentHash
+  ) {
+    return null;
+  }
+  return validation.realization;
 }
 
 export function createExpectedRealization(

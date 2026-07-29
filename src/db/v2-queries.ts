@@ -2086,6 +2086,109 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
 
 // --- Expected skill realizations ---
 
+export interface SessionSkillContextSessionRow {
+  id: string;
+  agent: string;
+  started_at: string | null;
+  ended_at: string | null;
+  live_status: string | null;
+  skill_context_capabilities_json: string | null;
+}
+
+export interface SessionSkillContextObservationRow {
+  id: number;
+  ordinal: number;
+  kind: string;
+  source: string;
+  observed_at: string | null;
+  skill_name: string | null;
+  command_fingerprint: string | null;
+  project_identity: string | null;
+  reason: string | null;
+  metadata_json: string;
+}
+
+export interface SessionSkillContextCatalogEntryRow {
+  observation_id: number;
+  ordinal: number;
+  skill_name: string;
+  description: string | null;
+  description_fingerprint: string | null;
+  source_location: string | null;
+  scope: string | null;
+}
+
+export interface SessionSkillContextInstructionEventRow {
+  id: number;
+  event_type: string;
+  source: string;
+  observed_at: string | null;
+  metadata: string;
+}
+
+export function selectSessionSkillContextSession(
+  db: Database,
+  sessionId: string,
+): SessionSkillContextSessionRow | undefined {
+  return db.prepare(`
+    SELECT id, agent, started_at, ended_at, live_status,
+           skill_context_capabilities_json
+    FROM browsing_sessions
+    WHERE id = ?
+  `).get(sessionId) as SessionSkillContextSessionRow | undefined;
+}
+
+export function selectSessionSkillContextObservations(
+  db: Database,
+  sessionId: string,
+  limit: number,
+): SessionSkillContextObservationRow[] {
+  return db.prepare(`
+    SELECT id, ordinal, kind, source, observed_at, skill_name,
+           command_fingerprint, project_identity, reason, metadata_json
+    FROM session_context_observations
+    WHERE session_id = ?
+    ORDER BY ordinal ASC, id ASC
+    LIMIT ?
+  `).all(sessionId, limit) as SessionSkillContextObservationRow[];
+}
+
+export function selectSessionSkillContextCatalogEntries(
+  db: Database,
+  sessionId: string,
+  limit: number,
+): SessionSkillContextCatalogEntryRow[] {
+  return db.prepare(`
+    SELECT entry.observation_id, entry.ordinal, entry.skill_name,
+           entry.description, entry.description_fingerprint,
+           entry.source_location, entry.scope
+    FROM session_catalog_observation_entries entry
+    JOIN session_context_observations observation
+      ON observation.id = entry.observation_id
+    WHERE observation.session_id = ?
+      AND observation.kind = 'catalog_presentation'
+    ORDER BY observation.ordinal ASC, observation.id ASC, entry.ordinal ASC
+    LIMIT ?
+  `).all(sessionId, limit) as SessionSkillContextCatalogEntryRow[];
+}
+
+export function selectSessionSkillContextInstructionEvents(
+  db: Database,
+  sessionId: string,
+  limit: number,
+): SessionSkillContextInstructionEventRow[] {
+  return db.prepare(`
+    SELECT id, event_type, source,
+           COALESCE(client_timestamp, created_at) AS observed_at,
+           metadata
+    FROM events
+    WHERE session_id = ?
+      AND event_type IN ('session_start', 'instruction_load')
+    ORDER BY COALESCE(client_timestamp, created_at) ASC, id ASC
+    LIMIT ?
+  `).all(sessionId, limit) as SessionSkillContextInstructionEventRow[];
+}
+
 export interface ExpectedRealizationPersistenceRow {
   payload_json: string;
   content_hash: string;

@@ -510,6 +510,185 @@ export interface SkillExpectedRealization
   contentHash: string;
 }
 
+export type SkillContextCapability =
+  | { observable: true }
+  | { observable: false; reason: string };
+
+export interface SessionSkillContextObservation {
+  id: number;
+  ordinal: number;
+  kind: 'consultation' | 'compaction' | 'catalog_presentation' | 'instruction_load';
+  source: string;
+  observedAt: string | null;
+  skillName: string | null;
+  commandFingerprint: string | null;
+  projectIdentity: string | null;
+  reason: string | null;
+  consultationClass: SkillConsultationClass | null;
+}
+
+export interface SkillCatalogPresentationEntry {
+  ordinal: number;
+  name: string;
+  description: string | null;
+  descriptionFingerprint: string | null;
+  sourceLocation: string | null;
+  sourceScope: string | null;
+}
+
+export interface SkillCatalogPresentationMeasurement {
+  value: number;
+  unit: string;
+  method: string;
+  exact: true;
+}
+
+export interface SkillExpectedRealizationReference {
+  id: string;
+  contentHash: string;
+  profileIdentity: string;
+  canonicalRevision: string;
+  validFrom: string;
+  validTo: string | null;
+  provenance: SkillExpectedRealizationProvenance;
+}
+
+export type SkillExpectedComparison =
+  | {
+      status: 'compared';
+      realization: SkillExpectedRealizationReference;
+      matching: string[];
+      omitted: string[];
+      unexpected: string[];
+      descriptionMismatched: Array<{
+        name: string;
+        expectedFingerprint: string;
+        observedFingerprints: Array<string | null>;
+      }>;
+    }
+  | {
+      status: 'unavailable';
+      reason:
+        | 'no_expected_realization'
+        | 'invalid_expected_realization'
+        | 'presentation_unobservable'
+        | 'occurrence_timestamp_unavailable'
+        | 'realization_not_valid_for_occurrence';
+    };
+
+export type SkillCatalogBudget =
+  | {
+      status: 'available';
+      used: number;
+      limit: number;
+      ratio: number;
+      unit: string;
+      measurementMethod: string;
+      policyArtifactId: string;
+      policyArtifactRevision: string;
+      policyArtifactHash: string;
+    }
+  | {
+      status: 'unknown';
+      reason:
+        | 'measurement_unavailable'
+        | 'no_authoritative_limit'
+        | 'limit_authority_unrecognized'
+        | 'limit_authority_ambiguous'
+        | 'policy_not_fresh'
+        | 'policy_scope_mismatch'
+        | 'incompatible_units'
+        | 'incompatible_measurement_methods';
+    };
+
+export interface SkillCatalogPresentationOccurrence {
+  observationId: number;
+  ordinal: number;
+  source: string;
+  observedAt: string | null;
+  projectIdentity: string | null;
+  fingerprint: string;
+  entries: SkillCatalogPresentationEntry[];
+  measurement: SkillCatalogPresentationMeasurement | null;
+  truncation: 'observed' | 'not_observed' | 'unknown';
+  runtime: {
+    harnessVersion: string | null;
+    model: string | null;
+    modelVersion: string | null;
+    contextWindowIdentity: string | null;
+    representation: string | null;
+  };
+  comparison: SkillExpectedComparison;
+  budget: SkillCatalogBudget;
+}
+
+export type SkillCatalogPresentationState =
+  | {
+      observable: true;
+      occurrences: SkillCatalogPresentationOccurrence[];
+    }
+  | {
+      observable: false;
+      reason: 'presentation_signal_absent' | 'harness_signal_unavailable';
+      occurrences: [];
+      comparison: {
+        status: 'unavailable';
+        reason: 'presentation_unobservable';
+      };
+      budget: {
+        status: 'unknown';
+        reason: 'measurement_unavailable';
+      };
+    };
+
+export interface SkillInstructionLoadOccurrence {
+  ordinal: number;
+  source: string;
+  observedAt: string | null;
+  filePath: string | null;
+  memoryType: string | null;
+  loadReason: string | null;
+  triggerFilePath: string | null;
+  parentFilePath: string | null;
+}
+
+export type SkillInstructionReachState =
+  | {
+      observable: true;
+      occurrences: SkillInstructionLoadOccurrence[];
+    }
+  | {
+      observable: false;
+      reason:
+        | 'instruction_load_signal_absent'
+        | 'instrumented_no_events_received'
+        | 'harness_signal_unavailable';
+      occurrences: [];
+    };
+
+export type SessionExpectedRealizationState =
+  | {
+      status: 'associated';
+      realization: SkillExpectedRealizationReference;
+    }
+  | {
+      status: 'unavailable';
+      reason: 'no_expected_realization' | 'invalid_expected_realization';
+    };
+
+export interface SessionSkillContext {
+  sessionId: string;
+  harness: SkillExpectedRealizationHarness;
+  startedAt: string | null;
+  endedAt: string | null;
+  active: boolean;
+  consultationClassification: SkillContextCapability;
+  observations: SessionSkillContextObservation[];
+  catalog: SkillCatalogPresentationState;
+  expectedRealization: SessionExpectedRealizationState;
+  instructions: SkillInstructionReachState;
+}
+
 export interface AnalyticsCapabilityBreakdown {
   full: number;
   summary: number;
