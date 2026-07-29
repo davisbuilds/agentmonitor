@@ -198,6 +198,16 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
   an exact versioned model identifier but no separate model-version field, a
   policy can scope to that exact `model`; `modelVersion` is an optional
   additional qualifier only for harnesses that expose one.
+- The v2 router exposes that oracle at
+  `GET /api/v2/sessions/:id/skill-context`. Immutable realization creation and
+  one-time session association are exposed as bounded `PUT` resources at
+  `/api/v2/skills/expected-realizations/:id` and
+  `/api/v2/sessions/:id/expected-skill-realization`; path identity, immutable
+  content, dependency, harness, and policy-semantic failures have deterministic
+  4xx responses. The additive health envelope preserves the legacy `data`
+  array, but mixed-harness rows are machine-labeled compatibility-only and
+  non-comparative; rich analytics are partitioned under
+  `consultations.byHarness`.
 - Newly installed Claude hook configurations register asynchronous
   `InstructionsLoaded` capture for all load reasons. Shell and Python hooks
   persist only `file_path`, `memory_type`, `load_reason`, and supplied optional

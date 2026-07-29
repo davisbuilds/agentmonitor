@@ -360,6 +360,14 @@ export interface SkillHealthRow {
   misfireRate: number | null;
 }
 
+export interface SkillHealthCompatibilityRow extends SkillHealthRow {
+  /** The row uses the phase-1 session-start window and must not be consumed as
+   *  rich consultation analytics when multiple harnesses are pooled. */
+  compatibilityOnly: boolean;
+  /** False for mixed-harness rows because detection semantics differ. */
+  crossHarnessComparable: boolean;
+}
+
 export type SkillConsultationClass =
   | 'first_read'
   | 'rehydration_after_compaction'
@@ -402,6 +410,11 @@ export interface SkillConsultationRow {
   };
 }
 
+export interface SkillConsultationComparability {
+  status: 'single_harness' | 'comparable' | 'not_directly_comparable';
+  limitingEvidence: string[];
+}
+
 export interface SkillConsultationAnalytics {
   asOf: string;
   windowSemantics: {
@@ -416,16 +429,21 @@ export interface SkillConsultationAnalytics {
     detectionSemantics: 'explicit_skill_tool' | 'concrete_skill_path';
     skills: SkillConsultationRow[];
   }>;
-  comparability: {
-    status: 'single_harness' | 'comparable' | 'not_directly_comparable';
-    limitingEvidence: string[];
-  };
+  comparability: SkillConsultationComparability;
 }
 
 export interface SkillHealthDataSemantics {
   data: 'phase_1_compatibility';
   window: 'session_start_legacy';
+  compatibilityOnly: boolean;
   crossHarnessComparable: boolean;
+}
+
+export interface SkillHealthResponse {
+  data: SkillHealthCompatibilityRow[];
+  coverage: AnalyticsCoverage;
+  dataSemantics: SkillHealthDataSemantics;
+  consultations: SkillConsultationAnalytics;
 }
 
 export type SkillExpectedRealizationHarness = 'claude' | 'codex';
@@ -509,6 +527,86 @@ export interface SkillExpectedRealization
   policyArtifacts: SkillExpectedPolicyArtifact[];
   contentHash: string;
 }
+
+export interface ExpectedRealizationValidationIssue {
+  path: string;
+  code: string;
+  message: string;
+}
+
+export type ExpectedRealizationCreateResponse =
+  | {
+      ok: true;
+      status: 'created' | 'replayed';
+      realization: SkillExpectedRealization;
+    }
+  | {
+      ok: false;
+      status: 'invalid';
+      code: 'invalid_expected_realization';
+      issues: ExpectedRealizationValidationIssue[];
+    }
+  | {
+      ok: false;
+      status: 'conflict';
+      code: 'expected_realization_content_conflict';
+      existingContentHash: string;
+    };
+
+export type ExpectedRealizationAssociationResponse =
+  | {
+      ok: true;
+      status: 'associated' | 'replayed';
+      sessionId: string;
+      realizationId: string;
+    }
+  | {
+      ok: false;
+      status: 'not_found';
+      code: 'session_not_found' | 'expected_realization_not_found';
+    }
+  | {
+      ok: false;
+      status: 'invalid';
+      code: 'invalid_association';
+      issues: ExpectedRealizationValidationIssue[];
+    }
+  | {
+      ok: false;
+      status: 'unprocessable';
+      code: 'expected_realization_harness_mismatch';
+      sessionHarness: string;
+      realizationHarness: string;
+    }
+  | {
+      ok: false;
+      status: 'conflict';
+      code: 'session_expected_realization_conflict';
+      existingRealizationId: string;
+    };
+
+export interface JsonObjectValidationErrorResponse {
+  ok: false;
+  status: 'invalid';
+  code: 'invalid_json_object';
+  issues: ExpectedRealizationValidationIssue[];
+}
+
+export interface ResourceIdMismatchResponse {
+  ok: false;
+  status: 'invalid';
+  code: 'resource_id_mismatch';
+  issues: ExpectedRealizationValidationIssue[];
+}
+
+export type ExpectedRealizationPutResponse =
+  | ExpectedRealizationCreateResponse
+  | JsonObjectValidationErrorResponse
+  | ResourceIdMismatchResponse;
+
+export type ExpectedRealizationAssociationPutResponse =
+  | ExpectedRealizationAssociationResponse
+  | JsonObjectValidationErrorResponse;
 
 export type SkillContextCapability =
   | { observable: true }

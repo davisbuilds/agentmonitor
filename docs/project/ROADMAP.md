@@ -78,7 +78,10 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   session's first reported runtime identity. *Why:* raw reads conflate distinct
   consultation behavior and invite unsafe cross-harness conclusions, while
   current filesystem state is not historical desired-state authority. The
-  additive API resources and the `/app/` panel remain the next review slices.
+  additive v2 resources now expose the bounded per-session oracle plus
+  immutable realization create/replay and one-time association with stable
+  status semantics; mixed legacy health rows are machine-labeled
+  compatibility-only. The `/app/` panel remains the next review slice.
   Spec/plan:
   `docs/specs/2026-07-27-skill-invocation-decomposition-spec.md` and
   `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md`.

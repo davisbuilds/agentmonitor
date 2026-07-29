@@ -51,7 +51,10 @@ Prefer to do it yourself? The manual steps are below.
 - Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
 - Reports per-skill trigger health plus additive, per-harness consultation
   decomposition (first read, post-compaction rehydration, repeat, and
-  unclassifiable evidence) via `/api/v2/analytics/skills/health`.
+  unclassifiable evidence) via `/api/v2/analytics/skills/health`. Mixed-harness
+  compatibility rows are explicitly non-comparative. Bounded v2 resources
+  expose per-session skill context and accept immutable expected realizations
+  plus explicit same-harness session associations.
 
 ## Quick Start
 

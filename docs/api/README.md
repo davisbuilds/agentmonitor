@@ -14,7 +14,8 @@ Used by ingest clients, SSE consumers, provider quota integrations, and the lega
 
 Used by the canonical Svelte app at `/app/`.
 
-- Session browsing: `/api/v2/sessions`, `/api/v2/sessions/:id`, `/api/v2/sessions/:id/messages`, `/api/v2/sessions/:id/children`
+- Session browsing: `/api/v2/sessions`, `/api/v2/sessions/:id`, `/api/v2/sessions/:id/messages`, `/api/v2/sessions/:id/children`, `/api/v2/sessions/:id/skill-context`
+- Skill-context authority: `PUT /api/v2/skills/expected-realizations/:id`, `PUT /api/v2/sessions/:id/expected-skill-realization`
 - Live ops: `/api/v2/live/settings`, `/api/v2/live/sessions`, `/api/v2/live/sessions/:id`, `/api/v2/live/sessions/:id/turns`, `/api/v2/live/sessions/:id/items`, `/api/v2/live/stream`
 - Monitor reads: `/api/v2/monitor/stats`, `/api/v2/monitor/sessions`, `/api/v2/monitor/events`, `/api/v2/monitor/filter-options`, `/api/v2/monitor/tools`, `/api/v2/monitor/sessions/:id`, `/api/v2/monitor/sessions/:id/transcript`
 - Search and analytics: `/api/v2/search`, `/api/v2/analytics/summary`, `/api/v2/analytics/activity`, `/api/v2/analytics/projects`, `/api/v2/analytics/tools`

@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { Database } from 'better-sqlite3';
 import type {
+  ExpectedRealizationAssociationResponse,
+  ExpectedRealizationCreateResponse,
+  ExpectedRealizationValidationIssue,
   SkillExpectedPolicyArtifact,
   SkillExpectedProbePolicyArtifact,
   SkillExpectedRealization,
@@ -32,62 +35,8 @@ const SHA256_PATTERN = /^(?:sha256:)?([a-f0-9]{64})$/i;
 const ISO_TIMESTAMP_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
-export interface ExpectedRealizationValidationIssue {
-  path: string;
-  code: string;
-  message: string;
-}
-
-export type CreateExpectedRealizationResult =
-  | {
-      ok: true;
-      status: 'created' | 'replayed';
-      realization: SkillExpectedRealization;
-    }
-  | {
-      ok: false;
-      status: 'invalid';
-      code: 'invalid_expected_realization';
-      issues: ExpectedRealizationValidationIssue[];
-    }
-  | {
-      ok: false;
-      status: 'conflict';
-      code: 'expected_realization_content_conflict';
-      existingContentHash: string;
-    };
-
-export type AssociateExpectedRealizationResult =
-  | {
-      ok: true;
-      status: 'associated' | 'replayed';
-      sessionId: string;
-      realizationId: string;
-    }
-  | {
-      ok: false;
-      status: 'not_found';
-      code: 'session_not_found' | 'expected_realization_not_found';
-    }
-  | {
-      ok: false;
-      status: 'invalid';
-      code: 'invalid_association';
-      issues: ExpectedRealizationValidationIssue[];
-    }
-  | {
-      ok: false;
-      status: 'unprocessable';
-      code: 'expected_realization_harness_mismatch';
-      sessionHarness: string;
-      realizationHarness: string;
-    }
-  | {
-      ok: false;
-      status: 'conflict';
-      code: 'session_expected_realization_conflict';
-      existingRealizationId: string;
-    };
+export type CreateExpectedRealizationResult = ExpectedRealizationCreateResponse;
+export type AssociateExpectedRealizationResult = ExpectedRealizationAssociationResponse;
 
 type CanonicalExpectedRealization = Omit<SkillExpectedRealization, 'contentHash'>;
 
@@ -800,8 +749,8 @@ export function createExpectedRealization(
 
 export function associateExpectedRealization(
   db: Database,
-  sessionIdInput: string,
-  realizationIdInput: string,
+  sessionIdInput: unknown,
+  realizationIdInput: unknown,
 ): AssociateExpectedRealizationResult {
   const issues: ExpectedRealizationValidationIssue[] = [];
   const sessionId = boundedString(
