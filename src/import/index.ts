@@ -179,11 +179,12 @@ function processFile(
 
 export function runImport(options: ImportOptions): ImportResult {
   const files: ImportFileResult[] = [];
-  const excludePatterns = options.excludePatterns ?? createConfig().sync.excludePatterns;
+  const runtimeConfig = createConfig();
+  const excludePatterns = options.excludePatterns ?? runtimeConfig.sync.excludePatterns;
 
   // Discover files
   const claudeFiles = (options.source === 'claude-code' || options.source === 'all')
-    ? discoverClaudeCodeLogs(options.claudeDir, { excludePatterns })
+    ? discoverClaudeCodeLogs(options.claudeDir ?? runtimeConfig.claudeDir, { excludePatterns })
     : [];
   const codexFiles = (options.source === 'codex' || options.source === 'all')
     ? discoverCodexLogs(options.codexDir, { excludePatterns })

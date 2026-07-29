@@ -26,7 +26,7 @@ const DEBOUNCE_MS = 500;
 type WatchedSource = 'claude' | 'codex';
 
 function getClaudeDir(): string {
-  return path.join(os.homedir(), '.claude');
+  return config.claudeDir;
 }
 
 function getCodexHome(): string {

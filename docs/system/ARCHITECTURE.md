@@ -159,7 +159,10 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 
 `src/watcher/` maintains the v2 session browser from local JSONL history:
 
-- Startup sync scans `~/.claude/projects/**/*.jsonl`, `~/.codex/sessions/**/*.jsonl`, and `~/.gemini/antigravity-cli/conversations/**/*.db`.
+- Startup sync scans
+  `$AGENTMONITOR_CLAUDE_DIR/projects/**/*.jsonl` (default
+  `~/.claude/projects/**/*.jsonl`), `~/.codex/sessions/**/*.jsonl`, and
+  `~/.gemini/antigravity-cli/conversations/**/*.db`.
 - Chokidar watches the Claude and Codex JSONL **directories** (recursively) and the handler filters to `.jsonl`. chokidar dropped glob support in v4, so the earlier `root/**/*.jsonl` patterns matched nothing and no live file events fired — live tailing had silently degraded to startup + periodic resync only. Antigravity DBs are **not** live-tailed yet — they are picked up on startup and each periodic resync (file-watch tailing deferred).
 - The Antigravity browser projection is two writers per session (`src/parser/antigravity-sessions.ts` → `insertParsedSession`, then `src/live/antigravity-adapter.ts` → projector), producing `browsing_sessions`/`messages`/`session_items` at `integration_mode=antigravity-sqlite`, `fidelity=summary` (step-kind labels until per-kind payload internals are decoded).
 - Claude and Codex session parsers also emit an ordered skill-context
@@ -307,6 +310,10 @@ On April 9, 2026, AgentMonitor was pointed at active local Codex sessions export
 - `AGENTMONITOR_PROJECTS_DIR` controls the workspace root used for git branch lookups.
 - If unset, config auto-detects the AgentMonitor repo root from `process.cwd()` ancestry and uses its parent directory.
 - If no repo root is detected, config falls back to the current working directory.
+- `AGENTMONITOR_CLAUDE_DIR` independently controls the Claude data root used by
+  startup sync, watcher resync, historical/automatic import, and session-sync
+  CLI defaults. It defaults to `~/.claude`; explicit `--claude-dir` command
+  flags take precedence.
 
 ## Directory Map
 

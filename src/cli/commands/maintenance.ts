@@ -169,11 +169,12 @@ export function registerMaintenanceCommands(): void {
       rejectExtraPositionals(parsed.positionals, 'amon sync sessions [options]');
       const source = parseSyncSource(parsed.values.get('--source'));
       const dryRun = parsed.flags.has('--dry-run');
-      const claudeDir = parsed.values.get('--claude-dir') ?? path.join(os.homedir(), '.claude');
-      const codexHome = parsed.values.get('--codex-home') ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
       const { createConfig } = await import('../../config.js');
+      const runtimeConfig = createConfig();
+      const claudeDir = parsed.values.get('--claude-dir') ?? runtimeConfig.claudeDir;
+      const codexHome = parsed.values.get('--codex-home') ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
       const { discoverSessionFiles, discoverCodexSessionFiles, syncAllFiles, syncAllCodexFiles } = await import('../../watcher/index.js');
-      const excludePatterns = createConfig().sync.excludePatterns;
+      const excludePatterns = runtimeConfig.sync.excludePatterns;
 
       if (dryRun) {
         const claudeFiles = source === 'claude' || source === 'all'

@@ -143,6 +143,8 @@ Common knobs:
 - `AGENTMONITOR_PORT` / `AGENTMONITOR_HOST` for the TypeScript runtime bind.
 - `AGENTMONITOR_DB_PATH` for the SQLite database location.
 - `AGENTMONITOR_PROJECTS_DIR` for git branch/project resolution.
+- `AGENTMONITOR_CLAUDE_DIR` for Claude JSONL history discovery (the directory
+  containing `projects/`).
 - `AGENTMONITOR_ENABLE_LIVE_TAB` and live capture/redaction flags.
 - `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` for historical discovery/import ignores.
 

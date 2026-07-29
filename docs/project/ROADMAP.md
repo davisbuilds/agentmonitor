@@ -6,6 +6,16 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Configurable Claude history root (2026-07-29) — *What:*
+  `AGENTMONITOR_CLAUDE_DIR` now supplies one Claude data root to startup sync,
+  live and periodic watcher discovery, automatic and historical event import,
+  and `amon sync sessions`; explicit `--claude-dir` flags still win. An isolated
+  real-filesystem regression proves configured history is included while
+  ambient `~/.claude/projects` history is excluded, and the built consultation
+  verifier now exercises startup parsing without suppressing watcher discovery.
+  *Why:* the shipping verifier previously admitted 94 ambient sessions or had
+  to disable all watcher discovery, so alternate installations and runtime
+  probes could not isolate Claude and Codex history symmetrically.
 - Usage overview hot-path optimization (2026-07-16) — *What:* the representative
   30-day built-product read fell from a 229.24 ms warm median to 134.67 ms while
   preserving exact parity with every per-panel Usage endpoint. The overview now

@@ -106,6 +106,12 @@ function resolveProjectsDir(env: EnvMap, cwd: string): string {
   return detectProjectsDir(cwd);
 }
 
+function resolveClaudeDir(env: EnvMap, cwd: string): string {
+  const override = env.AGENTMONITOR_CLAUDE_DIR?.trim();
+  if (override) return path.resolve(cwd, expandTilde(override));
+  return path.join(os.homedir(), '.claude');
+}
+
 function parseQuotaConfig(env: EnvMap): QuotaConfig {
   return {
     codexPollIntervalMs: parseEnvInt(env.AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS, 60_000, 1_000),
@@ -222,6 +228,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     sseHeartbeatMs: parseEnvInt(env.AGENTMONITOR_SSE_HEARTBEAT_MS, 30000, 1000),
     autoImportIntervalMinutes: parseEnvInt(env.AGENTMONITOR_AUTO_IMPORT_MINUTES, 10, 0),
     projectsDir: resolveProjectsDir(env, cwd),
+    claudeDir: resolveClaudeDir(env, cwd),
     quotas: parseQuotaConfig(env),
     contextWindow: {
       codexDefault: parseEnvInt(env.AGENTMONITOR_CODEX_CONTEXT_WINDOW, 256_000, 1),
