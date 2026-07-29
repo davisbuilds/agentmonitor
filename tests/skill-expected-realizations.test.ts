@@ -235,6 +235,22 @@ test('incomplete or caller-labeled policy authority is rejected without writes',
   );
 });
 
+test('model scope accepts an exact model identifier and rejects a version without a model', () => {
+  const exactModel = realization('realization-exact-model');
+  exactModel.policyArtifacts![0]!.model = 'claude-sonnet-5';
+  exactModel.policyArtifacts![0]!.modelVersion = null;
+  const exactModelResult = createExpectedRealization(db, exactModel);
+  assert.equal(exactModelResult.ok, true);
+
+  const versionOnly = realization('realization-version-without-model');
+  versionOnly.policyArtifacts![0]!.model = null;
+  versionOnly.policyArtifacts![0]!.modelVersion = '5';
+  const versionOnlyResult = createExpectedRealization(db, versionOnly);
+  assert.equal(versionOnlyResult.ok, false);
+  if (versionOnlyResult.ok) return;
+  assert.equal(versionOnlyResult.status, 'invalid');
+});
+
 test('calendar-invalid authority timestamps are rejected without writes', () => {
   const invalidValidity = realization('realization-invalid-calendar-validity');
   invalidValidity.validFrom = '2026-02-30T00:00:00Z';

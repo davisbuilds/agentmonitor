@@ -463,12 +463,12 @@ function policyArtifacts(
       issues,
       MAX_ID_LENGTH,
     );
-    if ((model === null) !== (modelVersion === null)) {
+    if (model === null && modelVersion !== null) {
       addIssue(
         issues,
-        `${itemPath}.model`,
+        `${itemPath}.modelVersion`,
         'incomplete_model_identity',
-        'model and modelVersion must both be present or both be null',
+        'modelVersion requires a model identifier',
       );
     }
     const contextWindowIdentity = boundedString(

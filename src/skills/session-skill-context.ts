@@ -395,9 +395,11 @@ function catalogBudget(
       policy.model === null
       || (
         runtime.model !== null
-        && runtime.modelVersion !== null
         && policy.model === runtime.model
-        && policy.modelVersion === runtime.modelVersion
+        && (
+          policy.modelVersion === null
+          || policy.modelVersion === runtime.modelVersion
+        )
       )
     )
   );

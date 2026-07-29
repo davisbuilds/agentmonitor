@@ -192,7 +192,10 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
   invalid authority, incompatible units, and stale policy remain distinct
   unavailable/unknown states rather than inferred zeroes. Codex runtime
   catalogs emitted before the first turn metadata use that session's first
-  reported model and context-window identity.
+  reported model and context-window identity. Because Codex currently reports
+  an exact versioned model identifier but no separate model-version field, a
+  policy can scope to that exact `model`; `modelVersion` is an optional
+  additional qualifier only for harnesses that expose one.
 - Newly installed Claude hook configurations register asynchronous
   `InstructionsLoaded` capture for all load reasons. Shell and Python hooks
   persist only `file_path`, `memory_type`, `load_reason`, and supplied optional

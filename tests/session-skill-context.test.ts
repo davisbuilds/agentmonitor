@@ -589,6 +589,60 @@ test('budget remains unknown for incompatible, stale, mismatched, or absent poli
   });
 });
 
+test('accepts an exact Codex model identifier as model-scoped budget authority', () => {
+  const sessionId = 'budget-model-scope';
+  insertSession(sessionId, 'codex', capabilities({
+    catalog: { observable: true },
+  }));
+  const metadata = runtimeMetadata();
+  const runtime = metadata['runtime'] as Record<string, unknown>;
+  runtime['model'] = 'gpt-5.6-terra';
+  insertObservation({
+    sessionId,
+    ordinal: 1,
+    kind: 'catalog_presentation',
+    observedAt: '2026-07-01T12:00:00.000Z',
+    metadata,
+    entries: [],
+  });
+  assert.equal(
+    createExpectedRealization(
+      db,
+      realization(
+        'expected-budget-model-scope',
+        policy({
+          model: 'gpt-5.6-terra',
+          modelVersion: null,
+        }),
+      ),
+    ).ok,
+    true,
+  );
+  assert.equal(
+    associateExpectedRealization(
+      db,
+      sessionId,
+      'expected-budget-model-scope',
+    ).ok,
+    true,
+  );
+
+  const projected = getSessionSkillContext(db, sessionId);
+  assert.equal(projected?.catalog.observable, true);
+  if (!projected?.catalog.observable) return;
+  assert.deepEqual(projected.catalog.occurrences[0]?.budget, {
+    status: 'available',
+    used: 128,
+    limit: 256,
+    ratio: 0.5,
+    unit: 'utf8_bytes',
+    measurementMethod: 'retained_catalog_block_utf8_bytes/v1',
+    policyArtifactId: 'policy',
+    policyArtifactRevision: 'r1',
+    policyArtifactHash: 'a'.repeat(64),
+  });
+});
+
 test('rejects a content-hashed realization with an incomplete policy artifact', () => {
   const sessionId = 'invalid-policy-realization';
   const realizationId = 'invalid-policy';
