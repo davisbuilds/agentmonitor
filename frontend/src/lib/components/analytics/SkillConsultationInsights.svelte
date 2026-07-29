@@ -1,6 +1,11 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
-  import { agentColor, agentDisplayName, formatNumber } from '../../format';
+  import {
+    agentColor,
+    agentDisplayName,
+    agentHexColor,
+    formatNumber,
+  } from '../../format';
   import type {
     SkillConsultationRow,
     SkillConsultationVersionRow,
@@ -84,7 +89,11 @@
           >
             <div class="flex flex-wrap items-baseline justify-between gap-2 bg-surface-2/50 px-4 py-2.5">
               <div class="flex items-center gap-2">
-                <span class="h-1.5 w-1.5 rounded-full {harness.harness === 'claude' ? 'bg-claude' : 'bg-codex'}" aria-hidden="true"></span>
+                <span
+                  class="h-1.5 w-1.5 rounded-full"
+                  style={`background-color:${agentHexColor(harness.harness)}`}
+                  aria-hidden="true"
+                ></span>
                 <h4
                   id={`skill-harness-${harness.harness}`}
                   class="text-body font-semibold {agentColor(harness.harness)}"
