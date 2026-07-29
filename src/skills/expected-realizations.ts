@@ -20,7 +20,7 @@ const MAX_POLICY_ARTIFACTS = 32;
 const MAX_CANONICAL_PAYLOAD_BYTES = 1_048_576;
 const SHA256_PATTERN = /^(?:sha256:)?([a-f0-9]{64})$/i;
 const ISO_TIMESTAMP_PATTERN =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|([+-])(\d{2}):(\d{2}))$/;
 
 export interface ExpectedRealizationValidationIssue {
   path: string;
@@ -147,8 +147,46 @@ function canonicalTimestamp(
 ): string | null {
   const text = boundedString(value, path, issues, 64);
   if (text === null) return null;
-  if (!ISO_TIMESTAMP_PATTERN.test(text)) {
+  const match = ISO_TIMESTAMP_PATTERN.exec(text);
+  if (!match) {
     addIssue(issues, path, 'invalid_timestamp', 'must be an ISO-8601 timestamp with timezone');
+    return null;
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4]);
+  const minute = Number(match[5]);
+  const second = Number(match[6]);
+  const offsetHour = match[8] === undefined ? 0 : Number(match[8]);
+  const offsetMinute = match[9] === undefined ? 0 : Number(match[9]);
+  const leapYear = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+  const daysInMonth = [
+    31,
+    leapYear ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > (daysInMonth[month - 1] ?? 0) ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59 ||
+    offsetHour > 23 ||
+    offsetMinute > 59
+  ) {
+    addIssue(issues, path, 'invalid_timestamp', 'must contain a valid calendar date and time');
     return null;
   }
   const epoch = Date.parse(text);

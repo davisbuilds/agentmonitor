@@ -235,6 +235,41 @@ test('incomplete or caller-labeled policy authority is rejected without writes',
   );
 });
 
+test('calendar-invalid authority timestamps are rejected without writes', () => {
+  const invalidValidity = realization('realization-invalid-calendar-validity');
+  invalidValidity.validFrom = '2026-02-30T00:00:00Z';
+  const invalidValidityResult = createExpectedRealization(db, invalidValidity);
+  assert.equal(invalidValidityResult.ok, false);
+  if (invalidValidityResult.ok) return;
+  assert.equal(invalidValidityResult.status, 'invalid');
+  assert.ok(invalidValidityResult.issues.some(issue =>
+    issue.path === 'validFrom' && issue.code === 'invalid_timestamp'
+  ));
+
+  const invalidPolicyExpiry = realization('realization-invalid-calendar-policy');
+  invalidPolicyExpiry.policyArtifacts![0]!.expiresAt = '2026-09-31T00:00:00Z';
+  const invalidPolicyResult = createExpectedRealization(db, invalidPolicyExpiry);
+  assert.equal(invalidPolicyResult.ok, false);
+  if (invalidPolicyResult.ok) return;
+  assert.equal(invalidPolicyResult.status, 'invalid');
+  assert.ok(invalidPolicyResult.issues.some(issue =>
+    issue.path === 'policyArtifacts[0].expiresAt' &&
+    issue.code === 'invalid_timestamp'
+  ));
+
+  assert.equal(
+    (db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM skill_expected_realizations
+      WHERE id IN (?, ?)
+    `).get(
+      'realization-invalid-calendar-validity',
+      'realization-invalid-calendar-policy',
+    ) as { count: number }).count,
+    0,
+  );
+});
+
 test('associations require existing same-harness resources and reject rebinding', () => {
   const first = createExpectedRealization(db, realization('realization-association'));
   assert.equal(first.ok, true);
