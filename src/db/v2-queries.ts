@@ -1866,12 +1866,13 @@ function recordHealthInvocation(
  * at each invocation. Computed at query time over existing tool_calls/messages/
  * events rows, so it covers historical sessions with no reingest.
  */
-export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHealthRow[] {
-  const db = getDb();
-  const snapshots = loadCatalogSnapshots();
+function buildAnalyticsSkillsHealth(
+  params: AnalyticsParams,
+  occurrences: ReturnType<typeof selectSkillInvocationOccurrences>,
+  snapshots: CatalogSnapshot[],
+): SkillHealthRow[] {
   const acc = new Map<string, HealthAccumulator>();
   const unpinnedNames = new Set<string>();
-  const occurrences = selectSkillInvocationOccurrences(db, params);
   const explicitInvocations = occurrences.filter(
     occurrence => occurrence.detectionSource === 'explicit_skill_tool',
   );
@@ -1945,6 +1946,13 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
   );
 }
 
+export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHealthRow[] {
+  const db = getDb();
+  const snapshots = loadCatalogSnapshots();
+  const occurrences = selectSkillInvocationOccurrences(db, params);
+  return buildAnalyticsSkillsHealth(params, occurrences, snapshots);
+}
+
 export function getAnalyticsSkillConsultations(
   params: AnalyticsParams = {},
 ): SkillConsultationAnalytics {
@@ -1953,6 +1961,24 @@ export function getAnalyticsSkillConsultations(
     params,
     loadCatalogSnapshots(),
   );
+}
+
+export function getAnalyticsSkillHealthParts(
+  params: AnalyticsParams = {},
+): { data: SkillHealthRow[]; consultations: SkillConsultationAnalytics } {
+  const db = getDb();
+  const snapshots = loadCatalogSnapshots();
+  const occurrences = selectSkillInvocationOccurrences(db, params);
+  return {
+    data: buildAnalyticsSkillsHealth(params, occurrences, snapshots),
+    consultations: getSkillConsultationAnalytics(
+      db,
+      params,
+      snapshots,
+      new Date(),
+      occurrences,
+    ),
+  };
 }
 
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {

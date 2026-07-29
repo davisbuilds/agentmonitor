@@ -28,6 +28,51 @@ async function stopChild(child) {
   }
 }
 
+async function runDojoRuntimeSmoke(baseUrl) {
+  if (process.env['AGENTMONITOR_VERIFY_DOJO_RUNTIME'] !== '1') {
+    return { status: 'not_requested' };
+  }
+
+  const runtimePath = path.resolve(
+    repoRoot,
+    '..',
+    'dojo',
+    'scripts',
+    'skill_health_runtime.py',
+  );
+  if (!fs.existsSync(runtimePath)) {
+    console.log(`Dojo runtime smoke skipped: ${runtimePath} is absent`);
+    return { status: 'skipped_absent' };
+  }
+
+  const healthUrl = `${baseUrl}/api/v2/analytics/skills/health`
+    + '?date_from=2026-07-01&date_to=2026-07-29';
+  const python = [
+    'import importlib.util, json, sys',
+    'spec = importlib.util.spec_from_file_location("skill_health_runtime", sys.argv[1])',
+    'module = importlib.util.module_from_spec(spec)',
+    'spec.loader.exec_module(module)',
+    'rows = module.load_health_rows(url=sys.argv[2], path=None)',
+    'assert any(row.get("name") == "test-strategy" for row in rows)',
+    'print(json.dumps({"rows": len(rows), "test_strategy": True}))',
+  ].join('\n');
+  const child = spawn('python3', ['-c', python, runtimePath, healthUrl], {
+    cwd: repoRoot,
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let output = '';
+  child.stdout.on('data', chunk => {
+    output += chunk;
+  });
+  child.stderr.on('data', chunk => {
+    output += chunk;
+  });
+  const [code] = await once(child, 'exit');
+  assert.equal(code, 0, `Dojo runtime smoke failed\n${output}`);
+  return { status: 'passed', ...JSON.parse(output) };
+}
+
 const tempPrefix = path.join(os.tmpdir(), 'agentmonitor-skill-context-built-');
 const tempDir = fs.mkdtempSync(tempPrefix);
 const resolvedTempDir = path.resolve(tempDir);
@@ -306,6 +351,7 @@ try {
     repeat_no_compaction: 0,
     unclassifiable: 0,
   });
+  const dojoRuntimeSmoke = await runDojoRuntimeSmoke(baseUrl);
 
   const realization = {
     id: 'built-codex-realization',
@@ -396,6 +442,7 @@ try {
       realizationReplay: replayResponse.status,
       association: associateResponse.status,
       context: contextResponse.status,
+      dojoRuntimeSmoke,
     }),
   );
 } finally {

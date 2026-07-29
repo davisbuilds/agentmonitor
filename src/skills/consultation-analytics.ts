@@ -302,11 +302,12 @@ export function getSkillConsultationAnalytics(
   params: AnalyticsParams,
   snapshots: CatalogSnapshot[],
   now = new Date(),
+  selectedOccurrences?: SkillInvocationOccurrence[],
 ): SkillConsultationAnalytics {
   const asOf = now.toISOString();
   const from = utcBoundary(params.date_from, false);
   const toExclusive = utcBoundary(params.date_to, true);
-  const occurrences = selectSkillInvocationOccurrences(db, params);
+  const occurrences = selectedOccurrences ?? selectSkillInvocationOccurrences(db, params);
   const scoped = selectScopedSessions(
     db,
     params,

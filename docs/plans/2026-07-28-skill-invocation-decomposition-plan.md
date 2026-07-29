@@ -3,7 +3,7 @@ date: 2026-07-28
 author: codex-gpt-5
 topic: skill-invocation-decomposition
 stage: plan
-status: draft
+status: complete
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -1199,6 +1199,33 @@ Tasks 1-9
   qualifying file, and the fixed live window has zero unexplained class/count
   differences.
 
+**Completion Evidence — 2026-07-29**
+
+- A consistent SQLite backup of the active 1.4 GB install database began at
+  `user_version=3`. Migration v4 flagged 434 associated Claude/Codex files.
+  Normal sync discovered 415, parsed 407, skipped 8, and reported zero errors,
+  creating 1,667 observations (979 consultations, 227 compactions, 350 catalog
+  presentations, 111 instruction loads) and 17,392 catalog entries.
+- One actively changing rollout was excluded from the idempotence probe. The
+  stable 414-file corpus then parsed 0 and skipped 414. Forced sync parsed 406,
+  skipped 8, reported zero errors, and reproduced exactly 1,667 observation and
+  17,392 entry rows with no orphan observations.
+- For the fixed half-open window `[2026-07-01, 2026-07-28)`, an independent
+  source-file parse compared 394 consultation classifications across 131
+  source-hash-matched sessions with the per-session API oracle: zero missing
+  files, changed sources, missing API projections, or class differences.
+- The initial seven-run warm benchmark measured phase-1 health at 85.5 ms
+  median and the duplicate-ledger enriched path at 165.1 ms (1.93x). Reusing one
+  ledger selection and catalog snapshot preserved exact output and measured
+  88.3 ms versus 102.5 ms (1.16x). Query-plan tests name the expected
+  event-session, observation, skill-time, and catalog-entry indexes; removing
+  `idx_scoe_observation_ordinal` made both its existence and planner tests fail.
+- `pnpm lint`, `pnpm build`, `pnpm test` (752 tests),
+  `pnpm frontend:check`, and the compiled verifier passed. With
+  `AGENTMONITOR_VERIFY_DOJO_RUNTIME=1`, the actual sibling
+  `skill_health_runtime.py` loaded the built endpoint and returned the seeded
+  legacy `test-strategy` row.
+
 ## Risks And Mitigations
 
 - Risk: Harness JSONL shapes change after the audited versions.
@@ -1266,9 +1293,10 @@ Tasks 1-9
 1. Critique closure is complete: a `gpt-5.6-terra` high-effort reviewer returned
    `READY` after the source-selection correction, async-instruction boundary,
    authority/window fixes, and Analytics scope were revised.
-2. Execute Tasks 1-10 in order on
-   `feat/skill-invocation-decomposition`, committing coherent green slices and
-   never pushing without explicit instruction.
-3. Keep the one phase-1 daily correction isolated and fixture-pinned; stop
-   execution if any additional legacy total changes without an explained
-   coverage/source reason.
+2. Tasks 1-10 are complete across the merged implementation slices and
+   `feat/skill-consultation-shipping-validation`; the completion evidence above
+   records the final copied-data, performance, source, built-product, and
+   downstream-consumer checks.
+3. Future work starts from the shipped contract and the measured follow-ups in
+   `docs/project/BACKLOG.md`; it must not reinterpret screening evidence as
+   automatic skill value or removal guidance.

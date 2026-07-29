@@ -17,6 +17,17 @@ let getAnalyticsSkillsDaily: (params?: Record<string, unknown>) => Array<{
   skills: Array<{ skill_name: string; count: number }>;
 }>;
 let getAnalyticsSkillsHealth: (params?: Record<string, unknown>) => SkillHealthRow[];
+let getAnalyticsSkillConsultations: (params?: Record<string, unknown>) => {
+  byHarness: unknown[];
+  comparability: unknown;
+};
+let getAnalyticsSkillHealthParts: (params?: Record<string, unknown>) => {
+  data: SkillHealthRow[];
+  consultations: {
+    byHarness: unknown[];
+    comparability: unknown;
+  };
+};
 let server: Server;
 let baseUrl: string;
 
@@ -93,7 +104,12 @@ before(async () => {
   initSchema();
   db = dbModule.getDb();
   closeDb = dbModule.closeDb;
-  ({ getAnalyticsSkillsDaily, getAnalyticsSkillsHealth } = await import('../src/db/v2-queries.js'));
+  ({
+    getAnalyticsSkillsDaily,
+    getAnalyticsSkillsHealth,
+    getAnalyticsSkillConsultations,
+    getAnalyticsSkillHealthParts,
+  } = await import('../src/db/v2-queries.js'));
 
   // Version snapshot covering the invocation window.
   insertSnapshot('write-spec', '1.0.0', '2026-06-01T00:00:00Z', '2026-07-31T00:00:00Z');
@@ -378,6 +394,15 @@ test('excludes out-of-range invocations but still lists never-fired catalog skil
   assert.equal(rows.get('write-spec')?.neverFired, true);
   assert.equal(rows.has('ghost-skill'), false);
   assert.equal(rows.get('never-used')?.neverFired, true);
+});
+
+test('the batched health path preserves phase-1 and consultation results', () => {
+  const params = { date_from: '2026-07-01', date_to: '2026-07-08' };
+  const batched = getAnalyticsSkillHealthParts(params);
+  const consultations = getAnalyticsSkillConsultations(params);
+  assert.deepEqual(batched.data, getAnalyticsSkillsHealth(params));
+  assert.deepEqual(batched.consultations.byHarness, consultations.byHarness);
+  assert.deepEqual(batched.consultations.comparability, consultations.comparability);
 });
 
 test('GET /api/v2/analytics/skills/health returns the daily-style envelope with health rows', async () => {

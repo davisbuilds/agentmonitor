@@ -381,7 +381,18 @@ pnpm verify:skill-context-built
 It creates and validates a temporary SQLite/runtime root, prevents ambient
 history discovery, chooses an unused loopback port, runs the focused Chromium
 spec against `dist/`, and removes only that temporary root after shutdown. The
-E2E CI job runs it after the general Chromium suite.
+E2E CI job runs it after the general Chromium suite. A local cross-repository
+compatibility smoke can additionally exercise Dojo's actual phase-2 extractor
+against the controlled built server:
+
+```bash
+AGENTMONITOR_VERIFY_DOJO_RUNTIME=1 pnpm verify:skill-context-built
+```
+
+The opt-in smoke imports `../dojo/scripts/skill_health_runtime.py`, calls
+`load_health_rows(url=..., path=None)`, and requires the seeded legacy row. It
+prints an explicit skip when the sibling file is absent and is intentionally
+not enabled in CI because `~/Dev` is not a monorepo.
 
 ## Runtime Artifacts
 
