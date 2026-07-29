@@ -382,10 +382,14 @@ test('GET /api/v2/analytics/skills/health returns the daily-style envelope with 
   assert.equal(res.status, 200);
 
   const body = await res.json() as {
-    data: SkillHealthRow[];
+    data: Array<SkillHealthRow & {
+      compatibilityOnly: boolean;
+      crossHarnessComparable: boolean;
+    }>;
     coverage: unknown;
     dataSemantics: {
       data: string;
+      compatibilityOnly: boolean;
       crossHarnessComparable: boolean;
     };
     consultations: {
@@ -396,7 +400,16 @@ test('GET /api/v2/analytics/skills/health returns the daily-style envelope with 
   assert.ok(Array.isArray(body.data));
   assert.ok(body.coverage);
   assert.equal(body.dataSemantics.data, 'phase_1_compatibility');
+  assert.equal(body.dataSemantics.compatibilityOnly, true);
   assert.equal(body.dataSemantics.crossHarnessComparable, false);
+  assert.ok(body.data.length > 0);
+  for (const row of body.data) {
+    assert.equal(typeof row.name, 'string');
+    assert.equal(typeof row.invocations, 'number');
+    assert.equal(typeof row.neverFired, 'boolean');
+    assert.equal(row.compatibilityOnly, true);
+    assert.equal(row.crossHarnessComparable, false);
+  }
   assert.deepEqual(
     body.consultations.byHarness.map(harness => harness.harness),
     ['claude', 'codex'],
@@ -411,6 +424,46 @@ test('GET /api/v2/analytics/skills/health returns the daily-style envelope with 
   assert.equal(byName.get('test-strategy')?.misfireRate, 0);
   assert.equal(byName.get('deep-research')?.misfireRate, null);
   assert.equal(byName.get('never-used')?.neverFired, true);
+});
+
+test('GET /api/v2/analytics/skills/health labels a single-harness slice as comparable', async () => {
+  const res = await fetch(`${baseUrl}/api/v2/analytics/skills/health?agent=claude`);
+  assert.equal(res.status, 200);
+  const body = await res.json() as {
+    data: Array<{
+      compatibilityOnly: boolean;
+      crossHarnessComparable: boolean;
+    }>;
+    dataSemantics: {
+      data: string;
+      window: string;
+      compatibilityOnly: boolean;
+      crossHarnessComparable: boolean;
+    };
+    consultations: {
+      byHarness: Array<{ harness: string }>;
+      comparability: { status: string; limitingEvidence: string[] };
+    };
+  };
+  assert.ok(body.data.length > 0);
+  assert.ok(body.data.every(row =>
+    row.compatibilityOnly === false
+    && row.crossHarnessComparable === true
+  ));
+  assert.deepEqual(body.dataSemantics, {
+    data: 'phase_1_compatibility',
+    window: 'session_start_legacy',
+    compatibilityOnly: false,
+    crossHarnessComparable: true,
+  });
+  assert.deepEqual(
+    body.consultations.byHarness.map(harness => harness.harness),
+    ['claude'],
+  );
+  assert.deepEqual(body.consultations.comparability, {
+    status: 'single_harness',
+    limitingEvidence: [],
+  });
 });
 
 test('GET /api/v2/analytics/skills/health honors the date range for backfill queries', async () => {

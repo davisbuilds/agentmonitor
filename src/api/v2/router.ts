@@ -60,6 +60,14 @@ import { config } from '../../config.js';
 import { generateInsight } from '../../insights/service.js';
 import { getUsageBudgets } from '../../usage/budgets.js';
 import { getUsageTierFeedback } from '../../usage/tier-feedback.js';
+import { getDb } from '../../db/connection.js';
+import {
+  associateExpectedRealization,
+  createExpectedRealization,
+  type CreateExpectedRealizationResult,
+} from '../../skills/expected-realizations.js';
+import { getSessionSkillContext } from '../../skills/session-skill-context.js';
+import type { SkillHealthResponse } from './types.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -78,6 +86,25 @@ function safeNumber(value: string | undefined): number | undefined {
 
 function safeString(value: string | string[] | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined;
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function expectedRealizationInvalidStatus(
+  result: Extract<CreateExpectedRealizationResult, { status: 'invalid' }>,
+): 400 | 422 {
+  const semanticPolicyIssues = new Set([
+    'policy_harness_mismatch',
+    'unsupported_policy_authority',
+    'incomplete_model_identity',
+    'invalid_freshness_interval',
+    'conflicting_policy_source',
+  ]);
+  return result.issues.some(issue => semanticPolicyIssues.has(issue.code))
+    ? 422
+    : 400;
 }
 
 function readTraceQualityParams(req: Request): {
@@ -158,6 +185,104 @@ v2Router.get('/sessions/:id', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to get session' });
   }
 });
+
+v2Router.get('/sessions/:id/skill-context', (req: Request, res: Response) => {
+  try {
+    const context = getSessionSkillContext(getDb(), req.params['id'] as string);
+    if (!context) {
+      res.status(404).json({
+        error: 'Session not found',
+        code: 'session_not_found',
+      });
+      return;
+    }
+    res.json(context);
+  } catch (err) {
+    console.error('[v2/sessions/:id/skill-context] Error:', err);
+    res.status(500).json({ error: 'Failed to get session skill context' });
+  }
+});
+
+v2Router.put(
+  '/sessions/:id/expected-skill-realization',
+  (req: Request, res: Response) => {
+    try {
+      if (!isJsonObject(req.body)) {
+        res.status(400).json({
+          ok: false,
+          status: 'invalid',
+          code: 'invalid_json_object',
+          issues: [{ path: '', code: 'invalid_object', message: 'must be an object' }],
+        });
+        return;
+      }
+      const result = associateExpectedRealization(
+        getDb(),
+        req.params['id'] as string,
+        req.body['realizationId'],
+      );
+      if (result.ok) {
+        res.status(result.status === 'associated' ? 201 : 200).json(result);
+        return;
+      }
+      const status = result.status === 'invalid'
+        ? 400
+        : result.status === 'not_found'
+          ? 404
+          : result.status === 'conflict'
+            ? 409
+            : 422;
+      res.status(status).json(result);
+    } catch (err) {
+      console.error('[v2/sessions/:id/expected-skill-realization] Error:', err);
+      res.status(500).json({ error: 'Failed to associate expected skill realization' });
+    }
+  },
+);
+
+v2Router.put(
+  '/skills/expected-realizations/:id',
+  (req: Request, res: Response) => {
+    try {
+      if (!isJsonObject(req.body)) {
+        res.status(400).json({
+          ok: false,
+          status: 'invalid',
+          code: 'invalid_json_object',
+          issues: [{ path: '', code: 'invalid_object', message: 'must be an object' }],
+        });
+        return;
+      }
+      const resourceId = req.params['id'] as string;
+      if (req.body['id'] !== resourceId) {
+        res.status(400).json({
+          ok: false,
+          status: 'invalid',
+          code: 'resource_id_mismatch',
+          issues: [{
+            path: 'id',
+            code: 'resource_id_mismatch',
+            message: 'must match the resource ID in the request path',
+          }],
+        });
+        return;
+      }
+      const result = createExpectedRealization(getDb(), req.body);
+      if (result.ok) {
+        res.status(result.status === 'created' ? 201 : 200).json(result);
+        return;
+      }
+      res.status(
+        result.status === 'conflict'
+          ? 409
+          : expectedRealizationInvalidStatus(result),
+      ).json(result);
+    } catch (err) {
+      console.error('[v2/skills/expected-realizations/:id] Error:', err);
+      res.status(500).json({ error: 'Failed to store expected skill realization' });
+    }
+  },
+);
 
 v2Router.get('/sessions/:id/messages', (req: Request, res: Response) => {
   try {
@@ -608,16 +733,23 @@ v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
     refreshSkillCatalogSnapshots();
-    res.json({
-      data: getAnalyticsSkillsHealth(params),
+    const compatibilityOnly = params.agent == null;
+    const response: SkillHealthResponse = {
+      data: getAnalyticsSkillsHealth(params).map(row => ({
+        ...row,
+        compatibilityOnly,
+        crossHarnessComparable: !compatibilityOnly,
+      })),
       coverage: getAnalyticsCoverage(params, 'all_sessions'),
       dataSemantics: {
         data: 'phase_1_compatibility',
         window: 'session_start_legacy',
-        crossHarnessComparable: params.agent != null,
+        compatibilityOnly,
+        crossHarnessComparable: !compatibilityOnly,
       },
       consultations: getAnalyticsSkillConsultations(params),
-    });
+    };
+    res.json(response);
   } catch (err) {
     console.error('[v2/analytics/skills/health] Error:', err);
     res.status(500).json({ error: 'Failed to get skill health' });

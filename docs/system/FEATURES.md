@@ -96,13 +96,27 @@ Product-surface reference for AgentMonitor.
   `unclassifiable`. It also reports eligible-session denominators, project
   breadth, per-version attribution quality, presentation/consultation exposure
   partitions, and structured cross-harness comparability. Claude and Codex are
-  not pooled as directly comparable because their detection semantics differ.
+  not pooled as directly comparable because their detection semantics differ;
+  each mixed-harness phase-1 row is labeled `compatibilityOnly: true` and
+  `crossHarnessComparable: false`, while rich consumers use
+  `consultations.byHarness`.
   The underlying occurrence selector is shared with daily skill analytics:
   Codex OTEL suppresses JSONL fallback only when an in-filter OTEL row contains
   a concrete skill path. Caveats: the phase-1 interrupt heuristic deliberately
   under-counts; Codex remains misfire-ineligible; and historical versions before
   the first catalog snapshot remain approximate.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
+- **Session skill context** (`GET /api/v2/sessions/:id/skill-context`) exposes
+  ordered consultation classifications, catalog presentations and measurements,
+  expected-realization comparisons, policy-backed catalog budget availability,
+  and instruction-load reach without converting missing evidence into zero.
+- External profile authorities can create or replay immutable desired-state
+  evidence with `PUT /api/v2/skills/expected-realizations/:id`, then bind it
+  once to a same-harness session with
+  `PUT /api/v2/sessions/:id/expected-skill-realization`. The resources enforce
+  bounded object payloads and return deterministic `201` create/associate,
+  `200` replay, `400` malformed, `404` dependency, `409` immutable/rebind
+  conflict, and `422` policy/harness mismatch statuses.
 - The `Overview` sub-view supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
 
 ## Usage
@@ -178,6 +192,9 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/sessions/:id/messages/:messageId/pin` | POST | Pin a transcript message using ordinal-stable persistence |
 | `/api/v2/sessions/:id/messages/:messageId/pin` | DELETE | Remove a saved transcript pin |
 | `/api/v2/sessions/:id/activity` | GET | Bucketed transcript activity for session-viewer minimap navigation |
+| `/api/v2/sessions/:id/skill-context` | GET | Bounded ordered consultation, catalog, realization, budget, and instruction evidence |
+| `/api/v2/sessions/:id/expected-skill-realization` | PUT | Idempotently associate one immutable expected realization to a same-harness session |
+| `/api/v2/skills/expected-realizations/:id` | PUT | Create or idempotently replay bounded immutable expected-realization authority |
 | `/api/v2/search` | GET | FTS search with recency/relevance sort and session-context metadata |
 | `/api/v2/analytics/summary` | GET | Capability-aware summary totals and coverage |
 | `/api/v2/analytics/activity` | GET | Daily activity series plus coverage metadata |
