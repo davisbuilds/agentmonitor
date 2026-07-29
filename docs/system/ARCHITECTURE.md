@@ -222,7 +222,8 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
   rehydrations, repeats, unclassifiable coverage, project breadth, version
   breakdowns, and exposure partitions. Mixed Claude/Codex output carries
   `different_detection_semantics` rather than a pooled engagement claim. One
-  health request selects and enriches the ledger once, then folds the same
+  health request performs at most one TTL-scoped filesystem catalog scan,
+  selects and enriches the ledger once, then folds the same catalog and
   occurrences into the phase-1 compatibility rows and richer consultation
   result. Query-plan guards pin event-session reconciliation to
   `idx_events_session_reconcile`, ordered observation reads to

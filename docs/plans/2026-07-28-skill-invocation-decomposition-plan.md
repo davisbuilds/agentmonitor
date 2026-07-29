@@ -1220,7 +1220,7 @@ Tasks 1-9
   88.3 ms versus 102.5 ms (1.16x). Query-plan tests name the expected
   event-session, observation, skill-time, and catalog-entry indexes; removing
   `idx_scoe_observation_ordinal` made both its existence and planner tests fail.
-- `pnpm lint`, `pnpm build`, `pnpm test` (752 tests),
+- `pnpm lint`, `pnpm build`, `pnpm test` (753 tests),
   `pnpm frontend:check`, and the compiled verifier passed. With
   `AGENTMONITOR_VERIFY_DOJO_RUNTIME=1`, the actual sibling
   `skill_health_runtime.py` loaded the built endpoint and returned the seeded

@@ -392,7 +392,9 @@ AGENTMONITOR_VERIFY_DOJO_RUNTIME=1 pnpm verify:skill-context-built
 The opt-in smoke imports `../dojo/scripts/skill_health_runtime.py`, calls
 `load_health_rows(url=..., path=None)`, and requires the seeded legacy row. It
 prints an explicit skip when the sibling file is absent and is intentionally
-not enabled in CI because `~/Dev` is not a monorepo.
+not enabled in CI because `~/Dev` is not a monorepo. It requires `python3`;
+spawn failures and a 15-second loader timeout fail the verifier while preserving
+the normal server/database/temp-root cleanup.
 
 ## Runtime Artifacts
 

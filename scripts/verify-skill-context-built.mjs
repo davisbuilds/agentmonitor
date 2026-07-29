@@ -19,13 +19,53 @@ assert.equal(
 
 async function stopChild(child) {
   if (child.exitCode !== null) return;
-  child.kill('SIGTERM');
   const exited = once(child, 'exit');
-  const timeout = new Promise(resolve => setTimeout(resolve, 5_000, 'timeout'));
-  if (await Promise.race([exited, timeout]) === 'timeout') {
+  child.kill('SIGTERM');
+  let timeoutId;
+  const timeout = new Promise(resolve => {
+    timeoutId = setTimeout(resolve, 5_000, 'timeout');
+  });
+  const result = await Promise.race([
+    exited.then(() => 'exited'),
+    timeout,
+  ]);
+  clearTimeout(timeoutId);
+  if (result === 'timeout') {
+    const killed = once(child, 'exit');
     child.kill('SIGKILL');
-    await once(child, 'exit');
+    await killed;
   }
+}
+
+async function waitForChildExit(child, label, timeoutMs) {
+  const result = await new Promise((resolve, reject) => {
+    let timer;
+    const cleanup = () => {
+      clearTimeout(timer);
+      child.off('error', onError);
+      child.off('exit', onExit);
+    };
+    const onError = error => {
+      cleanup();
+      reject(new Error(`${label} could not start: ${error.message}`, { cause: error }));
+    };
+    const onExit = (code, signal) => {
+      cleanup();
+      resolve({ code, signal, timedOut: false });
+    };
+    timer = setTimeout(() => {
+      cleanup();
+      resolve({ code: null, signal: null, timedOut: true });
+    }, timeoutMs);
+    child.once('error', onError);
+    child.once('exit', onExit);
+  });
+
+  if (result.timedOut) {
+    await stopChild(child);
+    throw new Error(`${label} timed out after ${timeoutMs}ms`);
+  }
+  return result;
 }
 
 async function runDojoRuntimeSmoke(baseUrl) {
@@ -61,16 +101,33 @@ async function runDojoRuntimeSmoke(baseUrl) {
     env: process.env,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
-  let output = '';
+  let stdout = '';
+  let stderr = '';
   child.stdout.on('data', chunk => {
-    output += chunk;
+    stdout += chunk;
   });
   child.stderr.on('data', chunk => {
-    output += chunk;
+    stderr += chunk;
   });
-  const [code] = await once(child, 'exit');
-  assert.equal(code, 0, `Dojo runtime smoke failed\n${output}`);
-  return { status: 'passed', ...JSON.parse(output) };
+  const result = await waitForChildExit(child, 'Dojo runtime smoke', 15_000);
+  assert.equal(
+    result.code,
+    0,
+    `Dojo runtime smoke failed (signal: ${result.signal ?? 'none'})\n${stderr}${stdout}`,
+  );
+  let payload;
+  try {
+    payload = JSON.parse(stdout.trim());
+  } catch (error) {
+    throw new Error(
+      `Dojo runtime smoke returned invalid JSON on stdout\nstdout: ${stdout}\nstderr: ${stderr}`,
+      { cause: error },
+    );
+  }
+  if (stderr && process.env['AGENTMONITOR_VERIFY_DEBUG'] === '1') {
+    console.error(stderr);
+  }
+  return { status: 'passed', ...payload };
 }
 
 const tempPrefix = path.join(os.tmpdir(), 'agentmonitor-skill-context-built-');

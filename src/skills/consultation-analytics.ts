@@ -297,17 +297,22 @@ interface MutableAggregate {
   }>;
 }
 
+export interface SkillConsultationAnalyticsOptions {
+  now?: Date;
+  occurrences?: SkillInvocationOccurrence[];
+}
+
 export function getSkillConsultationAnalytics(
   db: Database.Database,
   params: AnalyticsParams,
   snapshots: CatalogSnapshot[],
-  now = new Date(),
-  selectedOccurrences?: SkillInvocationOccurrence[],
+  options: SkillConsultationAnalyticsOptions = {},
 ): SkillConsultationAnalytics {
+  const now = options.now ?? new Date();
   const asOf = now.toISOString();
   const from = utcBoundary(params.date_from, false);
   const toExclusive = utcBoundary(params.date_to, true);
-  const occurrences = selectedOccurrences ?? selectSkillInvocationOccurrences(db, params);
+  const occurrences = options.occurrences ?? selectSkillInvocationOccurrences(db, params);
   const scoped = selectScopedSessions(
     db,
     params,

@@ -731,8 +731,8 @@ v2Router.get('/analytics/skills/daily', (req: Request, res: Response) => {
 v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    refreshSkillCatalogSnapshots();
-    const health = getAnalyticsSkillHealthParts(params);
+    const catalog = refreshSkillCatalogSnapshots();
+    const health = getAnalyticsSkillHealthParts(params, catalog);
     const consultations = health.consultations;
     const compatibilityOnly =
       consultations.comparability.status === 'not_directly_comparable';
