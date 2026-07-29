@@ -375,12 +375,13 @@ Claude and Codex fixtures:
 
 ```bash
 pnpm build
-node scripts/verify-skill-context-built.mjs
+pnpm verify:skill-context-built
 ```
 
 It creates and validates a temporary SQLite/runtime root, prevents ambient
 history discovery, chooses an unused loopback port, runs the focused Chromium
-spec against `dist/`, and removes only that temporary root after shutdown.
+spec against `dist/`, and removes only that temporary root after shutdown. The
+E2E CI job runs it after the general Chromium suite.
 
 ## Runtime Artifacts
 

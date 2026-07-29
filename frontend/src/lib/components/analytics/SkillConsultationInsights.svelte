@@ -37,7 +37,17 @@
     return `${formatNumber(skill.exposure.presentedWithoutFirstRead)} / ${formatNumber(skill.exposure.jointlyEligiblePresentedSessions)}`;
   }
 
+  function harnessList(harnesses: string[]): string {
+    const names = harnesses.map(agentDisplayName);
+    if (names.length < 2) return names[0] ?? 'Selected harnesses';
+    if (names.length === 2) return `${names[0]} and ${names[1]}`;
+    return `${names.slice(0, -1).join(', ')}, and ${names.at(-1)}`;
+  }
+
   const result = $derived(analytics.skillConsultations);
+  const comparedHarnesses = $derived(
+    harnessList(result?.byHarness.map(harness => harness.harness) ?? []),
+  );
   const hasSkills = $derived(
     result?.byHarness.some((harness) => harness.skills.length > 0) ?? false,
   );
@@ -64,10 +74,13 @@
       </div>
     {:else if result}
       {#if result.comparability.status === 'not_directly_comparable'}
-        <div class="flex items-start gap-2 border-b border-line px-4 py-3 text-meta text-text-muted">
+        <div
+          class="flex items-start gap-2 border-b border-line px-4 py-3 text-meta text-text-muted"
+          data-testid="skill-comparability"
+        >
           <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-warn" aria-hidden="true"></span>
           <p>
-            Claude and Codex are shown separately because their detection semantics differ. Rates are not pooled across harnesses.
+            Consultation evidence for {comparedHarnesses} is shown in separate harness lanes because detection semantics differ. Rates are not pooled across harnesses.
           </p>
         </div>
       {/if}
@@ -152,7 +165,7 @@
 
                         <div>
                           <div class="tabular font-mono text-body text-text">{formatNumber(skill.projectBreadth.distinctObservedProjects)}</div>
-                          <div class="text-meta text-text-faint">projects observed</div>
+                          <div class="text-meta text-text-faint">identified projects</div>
                         </div>
 
                         <div class="col-span-2 lg:col-span-1">
@@ -202,6 +215,11 @@
                               </div>
                             {/each}
                           </div>
+                          {#if skill.projectBreadth.sessions.some(project => project.id === 'unknown')}
+                            <p class="mt-2 text-meta text-text-faint">
+                              Identified project count excludes Unknown.
+                            </p>
+                          {/if}
                         {:else}
                           <p class="text-meta text-text-muted">No first-read project evidence was retained.</p>
                         {/if}

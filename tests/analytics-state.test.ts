@@ -277,3 +277,44 @@ test('buildAnalyticsCsv appends per-harness consultation evidence without changi
     /claude,write-plan,1,2,0.5,1,0,0,1,2,1,1,not_directly_comparable/,
   );
 });
+
+test('buildAnalyticsCsv omits an empty consultation section', () => {
+  const csv = buildAnalyticsCsv({
+    generatedAt: '2026-04-15T12:00:00.000Z',
+    filters: {
+      from: '2026-04-01',
+      to: '2026-04-15',
+      project: '',
+      agent: 'claude',
+    },
+    summary: null,
+    velocity: null,
+    activity: [],
+    projects: [],
+    tools: [],
+    skills: [],
+    skillConsultations: {
+      asOf: '2026-04-15T12:00:00.000Z',
+      windowSemantics: {
+        interval: 'utc_half_open',
+        from: '2026-04-01T00:00:00.000Z',
+        toExclusive: '2026-04-16T00:00:00.000Z',
+        sessionMembership: 'observed_interval_overlap_or_in_window_occurrence',
+        windowMembershipUnobservable: 0,
+      },
+      byHarness: [{
+        harness: 'claude',
+        detectionSemantics: 'explicit_skill_tool',
+        skills: [],
+      }],
+      comparability: {
+        status: 'single_harness',
+        limitingEvidence: [],
+      },
+    },
+    topSessions: [],
+    agents: [],
+  });
+
+  assert.doesNotMatch(csv, /Skill Consultations By Harness/);
+});

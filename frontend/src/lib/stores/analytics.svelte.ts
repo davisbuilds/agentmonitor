@@ -293,6 +293,10 @@ class AnalyticsStore {
     const version = ++this.versions.skillConsultations;
     this.loading.skillConsultations = true;
     this.errors.skillConsultations = null;
+    // Consultation rows carry their own filter denominator. Never retain them
+    // across a new slice when the replacement request may fail.
+    this.skillConsultations = null;
+    this.coverage.skillConsultations = null;
     try {
       const result = await fetchAnalyticsSkillsHealth(this.queryParams);
       if (version !== this.versions.skillConsultations) return;

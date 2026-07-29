@@ -17,16 +17,16 @@ test('Analytics renders per-harness consultation evidence and filter-responsive 
 
   const region = page.getByRole('region', { name: 'Skill consultations' });
   await expect(region).toBeVisible();
-  await expect(
-    region.getByText(
-      'Claude and Codex are shown separately because their detection semantics differ.',
-    ),
-  ).toBeVisible();
+  const comparability = region.getByTestId('skill-comparability');
+  await expect(comparability).toContainText('Rates are not pooled across harnesses.');
 
   const claude = region.locator('section[aria-labelledby="skill-harness-claude"]');
   const codex = region.locator('section[aria-labelledby="skill-harness-codex"]');
   await expect(claude.getByRole('heading', { name: 'Claude' })).toBeVisible();
   await expect(codex.getByRole('heading', { name: 'Codex' })).toBeVisible();
+  for (const harnessName of await region.locator('section h4').allTextContents()) {
+    await expect(comparability).toContainText(harnessName.trim());
+  }
 
   const claudeSkill = claude.locator('details').filter({ hasText: 'test-strategy' });
   const codexSkill = codex.locator('details').filter({ hasText: 'test-strategy' });
@@ -53,11 +53,7 @@ test('Analytics renders per-harness consultation evidence and filter-responsive 
   await page.getByLabel('Filter by agent').selectOption('codex');
   await expect(codex).toBeVisible();
   await expect(claude).toHaveCount(0);
-  await expect(
-    region.getByText(
-      'Claude and Codex are shown separately because their detection semantics differ.',
-    ),
-  ).toHaveCount(0);
+  await expect(region.getByTestId('skill-comparability')).toHaveCount(0);
 
   await page.getByLabel('Filter by agent').selectOption('');
   await expect(claude).toBeVisible();
