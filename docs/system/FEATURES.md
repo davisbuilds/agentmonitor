@@ -105,6 +105,13 @@ Product-surface reference for AgentMonitor.
   a concrete skill path. Caveats: the phase-1 interrupt heuristic deliberately
   under-counts; Codex remains misfire-ineligible; and historical versions before
   the first catalog snapshot remain approximate.
+- The Analytics `Overview` keeps raw phase-1 invocation volume as a separate
+  timeline and adds a **Skill consultations** evidence panel. It shows Claude
+  and Codex in separate lanes with first-read engagement, post-compaction
+  rehydrations, repeats, unclassifiable occurrences, project breadth, catalog
+  exposure gaps, and expandable version/coverage detail. Mixed-harness rates
+  are never pooled, unavailable denominators render with reasons, and the
+  shared agent filter collapses the panel to one harness.
 - Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
 - **Session skill context** (`GET /api/v2/sessions/:id/skill-context`) exposes
   ordered consultation classifications, catalog presentations and measurements,
@@ -117,7 +124,10 @@ Product-surface reference for AgentMonitor.
   bounded object payloads and return deterministic `201` create/associate,
   `200` replay, `400` malformed, `404` dependency, `409` immutable/rebind
   conflict, and `422` policy/harness mismatch statuses.
-- The `Overview` sub-view supports date ranges, project and agent filters, clickable drilldowns, and CSV export for historical review workflows.
+- The `Overview` sub-view supports date ranges, project and agent filters,
+  clickable drilldowns, and CSV export for historical review workflows. Its CSV
+  preserves the raw `Skills By Day` section and adds per-harness consultation
+  rows with class, denominator, project, exposure, and comparability fields.
 
 ## Usage
 

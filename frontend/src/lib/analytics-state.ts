@@ -5,6 +5,7 @@ import type {
   ProjectBreakdown,
   ToolUsageStat,
   SkillUsageDay,
+  SkillConsultationAnalytics,
   TopSessionStat,
   AgentComparisonRow,
 } from './api/client';
@@ -25,6 +26,7 @@ export interface AnalyticsCsvPayload {
   projects: ProjectBreakdown[];
   tools: ToolUsageStat[];
   skills?: SkillUsageDay[];
+  skillConsultations?: SkillConsultationAnalytics | null;
   topSessions: TopSessionStat[];
   agents: AgentComparisonRow[];
 }
@@ -90,6 +92,9 @@ function tableRow(values: Array<string | number | null | undefined>): string {
 export function buildAnalyticsCsv(payload: AnalyticsCsvPayload): string {
   const lines: string[] = ['Section,Metric,Value'];
   const skills = payload.skills ?? [];
+  const skillConsultations = payload.skillConsultations;
+  const consultationHarnesses = skillConsultations?.byHarness
+    .filter(harness => harness.skills.length > 0) ?? [];
 
   lines.push(sectionRow('Meta', 'Generated At', payload.generatedAt));
   lines.push(sectionRow('Filters', 'From', payload.filters.from));
@@ -151,6 +156,33 @@ export function buildAnalyticsCsv(payload: AnalyticsCsvPayload): string {
     for (const day of skills) {
       for (const skill of day.skills) {
         lines.push(tableRow([day.date, skill.skill_name, skill.count]));
+      }
+    }
+  }
+
+  if (skillConsultations && consultationHarnesses.length > 0) {
+    lines.push('');
+    lines.push('Skill Consultations By Harness');
+    lines.push(
+      'Harness,Skill,First Reads,Eligible Sessions,Engagement Rate,Rehydrations,Repeats,Unclassifiable,Observed Projects,Presented Sessions,Presented With First Read,Presented Without First Read,Comparability',
+    );
+    for (const harness of consultationHarnesses) {
+      for (const skill of harness.skills) {
+        lines.push(tableRow([
+          harness.harness,
+          skill.name,
+          skill.classes.first_read,
+          skill.eligibleSessionsInWindow,
+          skill.firstReadEngagementRate,
+          skill.classes.rehydration_after_compaction,
+          skill.classes.repeat_no_compaction,
+          skill.classes.unclassifiable,
+          skill.projectBreadth.distinctObservedProjects,
+          skill.exposure.jointlyEligiblePresentedSessions,
+          skill.exposure.presentedWithFirstRead,
+          skill.exposure.presentedWithoutFirstRead,
+          skillConsultations.comparability.status,
+        ]));
       }
     }
   }

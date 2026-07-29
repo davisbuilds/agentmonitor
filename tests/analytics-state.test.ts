@@ -189,3 +189,132 @@ test('buildAnalyticsCsv emits the skills section when skill usage is present', (
   assert.match(csv, /2026-04-11,github:yeet,1/);
   assert.match(csv, /2026-04-11,first-principles,1/);
 });
+
+test('buildAnalyticsCsv appends per-harness consultation evidence without changing daily skills', () => {
+  const csv = buildAnalyticsCsv({
+    generatedAt: '2026-04-15T12:00:00.000Z',
+    filters: {
+      from: '2026-04-01',
+      to: '2026-04-15',
+      project: '',
+      agent: '',
+    },
+    summary: null,
+    velocity: null,
+    activity: [],
+    projects: [],
+    tools: [],
+    skills: [{
+      date: '2026-04-11',
+      total: 1,
+      skills: [{ skill_name: 'write-plan', count: 1 }],
+    }],
+    skillConsultations: {
+      asOf: '2026-04-15T12:00:00.000Z',
+      windowSemantics: {
+        interval: 'utc_half_open',
+        from: '2026-04-01T00:00:00.000Z',
+        toExclusive: '2026-04-16T00:00:00.000Z',
+        sessionMembership: 'observed_interval_overlap_or_in_window_occurrence',
+        windowMembershipUnobservable: 0,
+      },
+      byHarness: [{
+        harness: 'claude',
+        detectionSemantics: 'explicit_skill_tool',
+        skills: [{
+          name: 'write-plan',
+          harness: 'claude',
+          invocations: 2,
+          classes: {
+            first_read: 1,
+            rehydration_after_compaction: 1,
+            repeat_no_compaction: 0,
+            unclassifiable: 0,
+          },
+          sessionsInWindow: 3,
+          eligibleSessionsInWindow: 2,
+          sessionsWithFirstRead: 1,
+          firstReadEngagementRate: 0.5,
+          ineligibleSessionsByReason: [{
+            reason: 'compaction_visibility_unavailable',
+            sessions: 1,
+          }],
+          projectBreadth: {
+            distinctObservedProjects: 1,
+            sessions: [{ id: 'agentmonitor', label: 'agentmonitor', sessions: 1 }],
+          },
+          versions: [{
+            version: '1.0.0',
+            attribution: 'exact',
+            invocations: 2,
+            classes: {
+              first_read: 1,
+              rehydration_after_compaction: 1,
+              repeat_no_compaction: 0,
+              unclassifiable: 0,
+            },
+          }],
+          exposure: {
+            jointlyEligiblePresentedSessions: 2,
+            presentedWithFirstRead: 1,
+            presentedWithoutFirstRead: 1,
+          },
+        }],
+      }],
+      comparability: {
+        status: 'not_directly_comparable',
+        limitingEvidence: ['different_detection_semantics'],
+      },
+    },
+    topSessions: [],
+    agents: [],
+  });
+
+  assert.match(csv, /Skills By Day\nDate,Skill,Count\n2026-04-11,write-plan,1/);
+  assert.match(csv, /Skill Consultations By Harness/);
+  assert.match(
+    csv,
+    /claude,write-plan,1,2,0.5,1,0,0,1,2,1,1,not_directly_comparable/,
+  );
+});
+
+test('buildAnalyticsCsv omits an empty consultation section', () => {
+  const csv = buildAnalyticsCsv({
+    generatedAt: '2026-04-15T12:00:00.000Z',
+    filters: {
+      from: '2026-04-01',
+      to: '2026-04-15',
+      project: '',
+      agent: 'claude',
+    },
+    summary: null,
+    velocity: null,
+    activity: [],
+    projects: [],
+    tools: [],
+    skills: [],
+    skillConsultations: {
+      asOf: '2026-04-15T12:00:00.000Z',
+      windowSemantics: {
+        interval: 'utc_half_open',
+        from: '2026-04-01T00:00:00.000Z',
+        toExclusive: '2026-04-16T00:00:00.000Z',
+        sessionMembership: 'observed_interval_overlap_or_in_window_occurrence',
+        windowMembershipUnobservable: 0,
+      },
+      byHarness: [{
+        harness: 'claude',
+        detectionSemantics: 'explicit_skill_tool',
+        skills: [],
+      }],
+      comparability: {
+        status: 'single_harness',
+        limitingEvidence: [],
+      },
+    },
+    topSessions: [],
+    agents: [],
+  });
+
+  assert.doesNotMatch(csv, /Skill Consultations By Harness/);
+});

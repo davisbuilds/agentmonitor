@@ -4,6 +4,7 @@ import {
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
   fetchAnalyticsSkillsDaily,
+  fetchAnalyticsSkillsHealth,
   fetchAnalyticsHourOfWeek,
   fetchAnalyticsTopSessions,
   fetchAnalyticsVelocity,
@@ -14,6 +15,7 @@ import {
   type ProjectBreakdown,
   type ToolUsageStat,
   type SkillUsageDay,
+  type SkillConsultationAnalytics,
   type HourOfWeekDataPoint,
   type TopSessionStat,
   type VelocityMetrics,
@@ -32,6 +34,7 @@ type PanelKey =
   | 'projects'
   | 'tools'
   | 'skills'
+  | 'skillConsultations'
   | 'hourOfWeek'
   | 'topSessions'
   | 'velocity'
@@ -51,6 +54,7 @@ class AnalyticsStore {
     projects: 0,
     tools: 0,
     skills: 0,
+    skillConsultations: 0,
     hourOfWeek: 0,
     topSessions: 0,
     velocity: 0,
@@ -73,6 +77,7 @@ class AnalyticsStore {
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
   skillUsageDaily = $state<SkillUsageDay[]>([]);
+  skillConsultations = $state<SkillConsultationAnalytics | null>(null);
   hourOfWeek = $state<HourOfWeekDataPoint[]>([]);
   topSessions = $state<TopSessionStat[]>([]);
   velocity = $state<VelocityMetrics | null>(null);
@@ -84,6 +89,7 @@ class AnalyticsStore {
     projects: null,
     tools: null,
     skills: null,
+    skillConsultations: null,
     hourOfWeek: null,
     topSessions: null,
     velocity: null,
@@ -96,6 +102,7 @@ class AnalyticsStore {
     projects: false,
     tools: false,
     skills: false,
+    skillConsultations: false,
     hourOfWeek: false,
     topSessions: false,
     velocity: false,
@@ -108,6 +115,7 @@ class AnalyticsStore {
     projects: null,
     tools: null,
     skills: null,
+    skillConsultations: null,
     hourOfWeek: null,
     topSessions: null,
     velocity: null,
@@ -173,6 +181,7 @@ class AnalyticsStore {
       this.fetchProjects(),
       this.fetchTools(),
       this.fetchSkills(),
+      this.fetchSkillConsultations(),
       this.fetchHourOfWeek(),
       this.fetchTopSessions(),
       this.fetchVelocity(),
@@ -276,6 +285,30 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.skills) {
         this.loading.skills = false;
+      }
+    }
+  }
+
+  async fetchSkillConsultations(): Promise<void> {
+    const version = ++this.versions.skillConsultations;
+    this.loading.skillConsultations = true;
+    this.errors.skillConsultations = null;
+    // Consultation rows carry their own filter denominator. Never retain them
+    // across a new slice when the replacement request may fail.
+    this.skillConsultations = null;
+    this.coverage.skillConsultations = null;
+    try {
+      const result = await fetchAnalyticsSkillsHealth(this.queryParams);
+      if (version !== this.versions.skillConsultations) return;
+      this.skillConsultations = result.consultations;
+      this.coverage.skillConsultations = result.coverage;
+    } catch (err) {
+      if (version !== this.versions.skillConsultations) return;
+      console.error('Failed to load skill consultation analytics:', err);
+      this.errors.skillConsultations = 'Failed to load skill consultation evidence.';
+    } finally {
+      if (version === this.versions.skillConsultations) {
+        this.loading.skillConsultations = false;
       }
     }
   }
@@ -420,6 +453,7 @@ class AnalyticsStore {
       projects: this.projectBreakdowns,
       tools: this.toolUsage,
       skills: this.skillUsageDaily,
+      skillConsultations: this.skillConsultations,
       topSessions: this.topSessions,
       agents: this.agentComparison,
     });

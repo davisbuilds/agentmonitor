@@ -5,6 +5,7 @@
   import SummaryCards from './SummaryCards.svelte';
   import ActivityTimeline from './ActivityTimeline.svelte';
   import SkillUsageTimeline from './SkillUsageTimeline.svelte';
+  import SkillConsultationInsights from './SkillConsultationInsights.svelte';
   import ProjectBreakdown from './ProjectBreakdown.svelte';
   import ToolUsage from './ToolUsage.svelte';
   import HourOfWeekHeatmap from './HourOfWeekHeatmap.svelte';
@@ -63,6 +64,7 @@
     <div class="space-y-4 xl:col-span-7">
       <ActivityTimeline />
       <SkillUsageTimeline />
+      <SkillConsultationInsights />
       <ProjectBreakdown />
       <HourOfWeekHeatmap />
       <VelocityMetrics />

@@ -53,7 +53,7 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
    *Why:* ordinary import rebuilt enough usage history for the dashboard to look
    plausible, while the independent `watched_files` cache silently skipped the
    deleted transcript-derived rows.
-- Skill consultation decomposition, backend evidence slice (2026-07-28) —
+- Skill consultation decomposition and Analytics evidence (2026-07-29) —
   *What:* Claude and Codex session parsing now preserves ordered consultations,
   compactions, and Codex runtime catalog presentations in an atomic,
   reparse-safe projection. Daily and health analytics share one invocation
@@ -81,7 +81,14 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   additive v2 resources now expose the bounded per-session oracle plus
   immutable realization create/replay and one-time association with stable
   status semantics; mixed legacy health rows are machine-labeled
-  compatibility-only. The `/app/` panel remains the next review slice.
+  compatibility-only. The `/app/` Analytics Overview now preserves raw phase-1
+  invocation volume and adds separate Claude/Codex consultation lanes with
+  first-read denominators, compaction-aware classes, project breadth, catalog
+  exposure gaps, and expandable version/coverage evidence. Its CSV carries the
+  same per-harness boundary. A built-product oracle seeds both parsers into
+  isolated SQLite, exercises the compiled API and realization association
+  contract, and verifies the panel plus agent-filter behavior in Chromium at
+  desktop and narrow widths.
   Spec/plan:
   `docs/specs/2026-07-27-skill-invocation-decomposition-spec.md` and
   `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md`.

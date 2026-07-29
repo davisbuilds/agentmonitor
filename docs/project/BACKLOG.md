@@ -54,6 +54,23 @@ note here. This file stays future-only.
 - **Sketch**: either implement browser opening after health readiness and honor
   the opt-out, or remove the flag in a deliberate compatibility pass.
 
+#### Claude history discovery has no configurable root
+📥 noted
+- **What**: the built skill-context verifier could isolate Codex history with
+  `CODEX_HOME`, but server startup still discovered
+  `~/.claude/projects` through `os.homedir()`. In the first isolated browser
+  probe, 94 ambient Claude sessions joined the one seeded oracle session, so
+  the displayed denominator was `1 / 95`; the verifier now suppresses all
+  watcher discovery with `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS=*`.
+- **Why it matters**: tests and alternate installations cannot point Claude and
+  Codex discovery at parallel temporary roots. They must either alter the
+  process home or disable discovery entirely, which prevents an isolated probe
+  from exercising startup reparse behavior.
+- **Sketch**: add one documented AgentMonitor Claude-history root override,
+  thread it through server startup, import, sync, and watcher paths, and pin
+  parity with the existing `CODEX_HOME` behavior. Noted 2026-07-29 during the
+  built skill-consultation Analytics verifier.
+
 ### Skill trigger health (2026-07-09)
 
 Source: `docs/plans/2026-07-09-skill-trigger-health-plan.md` (phase 1 shipped).
