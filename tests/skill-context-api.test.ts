@@ -61,7 +61,8 @@ before(async () => {
   closeDb = connection.closeDb;
   db.exec(`
     INSERT INTO browsing_sessions (
-      id, project, agent, started_at, ended_at, skill_context_capabilities_json
+      id, project, agent, started_at, ended_at, live_status,
+      skill_context_capabilities_json
     ) VALUES
       (
         'claude-context-session',
@@ -69,6 +70,7 @@ before(async () => {
         'claude',
         '2026-07-10T10:00:00Z',
         '2026-07-10T10:05:00Z',
+        'live',
         '{"orderedConsultations":{"observable":true},"compactionVisibility":{"observable":true},"catalogPresentation":{"observable":false,"reason":"presentation_signal_absent"},"instructionLoads":{"observable":false,"reason":"instruction_load_signal_absent"}}'
       ),
       (
@@ -77,6 +79,7 @@ before(async () => {
         'codex',
         '2026-07-10T11:00:00Z',
         '2026-07-10T11:05:00Z',
+        'ended',
         '{}'
       )
   `);
@@ -124,6 +127,14 @@ test('GET session skill context distinguishes unknown and known unavailable stat
   });
   assert.equal(body.instructions.observable, false);
   assert.equal(body.instructions.reason, 'instruction_load_signal_absent');
+});
+
+test('GET session skill context treats a live projection as active', async () => {
+  const response = await fetch(
+    `${baseUrl}/api/v2/sessions/claude-context-session/skill-context`,
+  );
+  assert.equal(response.status, 200);
+  assert.equal((await response.json() as { active: boolean }).active, true);
 });
 
 test('PUT expected realization validates the resource ID and body shape', async () => {
