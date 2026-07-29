@@ -10,6 +10,16 @@ import type {
   SkillExpectedRealizationProvenance,
   SkillExpectedVendorPolicyArtifact,
 } from '../api/v2/types.js';
+import {
+  insertExpectedRealizationPersistenceRow,
+  insertSessionExpectedRealizationAssociation,
+  selectBrowsingSessionHarness,
+  selectExpectedRealizationHarness,
+  selectExpectedRealizationPersistenceRow,
+  selectSessionExpectedRealizationId,
+  selectSessionExpectedRealizationPersistenceRow,
+  type ExpectedRealizationPersistenceRow,
+} from '../db/v2-queries.js';
 
 const MAX_ID_LENGTH = 256;
 const MAX_TEXT_LENGTH = 512;
@@ -80,11 +90,6 @@ export type AssociateExpectedRealizationResult =
     };
 
 type CanonicalExpectedRealization = Omit<SkillExpectedRealization, 'contentHash'>;
-
-interface ExpectedRealizationRow {
-  payload_json: string;
-  content_hash: string;
-}
 
 interface ValidationSuccess {
   ok: true;
@@ -708,7 +713,9 @@ function validateExpectedRealization(input: unknown): ValidationResult {
   };
 }
 
-function hydrateExpectedRealization(row: ExpectedRealizationRow): SkillExpectedRealization {
+function hydrateExpectedRealization(
+  row: ExpectedRealizationPersistenceRow,
+): SkillExpectedRealization {
   const payload = JSON.parse(row.payload_json) as CanonicalExpectedRealization;
   return { ...payload, contentHash: row.content_hash };
 }
@@ -728,11 +735,10 @@ export function createExpectedRealization(
   }
 
   return db.transaction((): CreateExpectedRealizationResult => {
-    const existing = db.prepare(`
-      SELECT payload_json, content_hash
-      FROM skill_expected_realizations
-      WHERE id = ?
-    `).get(validation.realization.id) as ExpectedRealizationRow | undefined;
+    const existing = selectExpectedRealizationPersistenceRow(
+      db,
+      validation.realization.id,
+    );
     if (existing) {
       if (
         existing.content_hash === validation.realization.contentHash &&
@@ -752,21 +758,16 @@ export function createExpectedRealization(
       };
     }
 
-    db.prepare(`
-      INSERT INTO skill_expected_realizations (
-        id, harness, profile_identity, canonical_revision,
-        valid_from, valid_to, payload_json, content_hash
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      validation.realization.id,
-      validation.realization.harness,
-      validation.realization.profileIdentity,
-      validation.realization.canonicalRevision,
-      validation.realization.validFrom,
-      validation.realization.validTo,
-      validation.canonicalJson,
-      validation.realization.contentHash,
-    );
+    insertExpectedRealizationPersistenceRow(db, {
+      id: validation.realization.id,
+      harness: validation.realization.harness,
+      profileIdentity: validation.realization.profileIdentity,
+      canonicalRevision: validation.realization.canonicalRevision,
+      validFrom: validation.realization.validFrom,
+      validTo: validation.realization.validTo,
+      canonicalJson: validation.canonicalJson,
+      contentHash: validation.realization.contentHash,
+    });
     return {
       ok: true,
       status: 'created',
@@ -803,43 +804,31 @@ export function associateExpectedRealization(
   }
 
   return db.transaction((): AssociateExpectedRealizationResult => {
-    const session = db.prepare(`
-      SELECT agent
-      FROM browsing_sessions
-      WHERE id = ?
-    `).get(sessionId) as { agent: string } | undefined;
-    if (!session) {
+    const sessionHarness = selectBrowsingSessionHarness(db, sessionId);
+    if (sessionHarness === undefined) {
       return { ok: false, status: 'not_found', code: 'session_not_found' };
     }
-    const realization = db.prepare(`
-      SELECT harness
-      FROM skill_expected_realizations
-      WHERE id = ?
-    `).get(realizationId) as { harness: string } | undefined;
-    if (!realization) {
+    const realizationHarness = selectExpectedRealizationHarness(db, realizationId);
+    if (realizationHarness === undefined) {
       return {
         ok: false,
         status: 'not_found',
         code: 'expected_realization_not_found',
       };
     }
-    if (session.agent !== realization.harness) {
+    if (sessionHarness !== realizationHarness) {
       return {
         ok: false,
         status: 'unprocessable',
         code: 'expected_realization_harness_mismatch',
-        sessionHarness: session.agent,
-        realizationHarness: realization.harness,
+        sessionHarness,
+        realizationHarness,
       };
     }
 
-    const existing = db.prepare(`
-      SELECT realization_id
-      FROM session_expected_skill_realizations
-      WHERE session_id = ?
-    `).get(sessionId) as { realization_id: string } | undefined;
-    if (existing) {
-      if (existing.realization_id === realizationId) {
+    const existingRealizationId = selectSessionExpectedRealizationId(db, sessionId);
+    if (existingRealizationId !== undefined) {
+      if (existingRealizationId === realizationId) {
         return {
           ok: true,
           status: 'replayed',
@@ -851,14 +840,11 @@ export function associateExpectedRealization(
         ok: false,
         status: 'conflict',
         code: 'session_expected_realization_conflict',
-        existingRealizationId: existing.realization_id,
+        existingRealizationId,
       };
     }
 
-    db.prepare(`
-      INSERT INTO session_expected_skill_realizations (session_id, realization_id)
-      VALUES (?, ?)
-    `).run(sessionId, realizationId);
+    insertSessionExpectedRealizationAssociation(db, sessionId, realizationId);
     return {
       ok: true,
       status: 'associated',
@@ -872,11 +858,7 @@ export function getExpectedRealization(
   db: Database,
   realizationId: string,
 ): SkillExpectedRealization | null {
-  const row = db.prepare(`
-    SELECT payload_json, content_hash
-    FROM skill_expected_realizations
-    WHERE id = ?
-  `).get(realizationId) as ExpectedRealizationRow | undefined;
+  const row = selectExpectedRealizationPersistenceRow(db, realizationId);
   return row ? hydrateExpectedRealization(row) : null;
 }
 
@@ -884,12 +866,6 @@ export function getSessionExpectedRealization(
   db: Database,
   sessionId: string,
 ): SkillExpectedRealization | null {
-  const row = db.prepare(`
-    SELECT realization.payload_json, realization.content_hash
-    FROM session_expected_skill_realizations association
-    JOIN skill_expected_realizations realization
-      ON realization.id = association.realization_id
-    WHERE association.session_id = ?
-  `).get(sessionId) as ExpectedRealizationRow | undefined;
+  const row = selectSessionExpectedRealizationPersistenceRow(db, sessionId);
   return row ? hydrateExpectedRealization(row) : null;
 }

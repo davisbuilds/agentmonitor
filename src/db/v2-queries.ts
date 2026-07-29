@@ -1,3 +1,4 @@
+import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { config } from '../config.js';
 import {
@@ -2081,6 +2082,116 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
     GROUP BY agent
     ORDER BY message_count DESC, session_count DESC, agent ASC
   `).all(...filter.values) as AgentComparisonRow[];
+}
+
+// --- Expected skill realizations ---
+
+export interface ExpectedRealizationPersistenceRow {
+  payload_json: string;
+  content_hash: string;
+}
+
+export interface ExpectedRealizationPersistenceInput {
+  id: string;
+  harness: string;
+  profileIdentity: string;
+  canonicalRevision: string;
+  validFrom: string;
+  validTo: string | null;
+  canonicalJson: string;
+  contentHash: string;
+}
+
+export function selectExpectedRealizationPersistenceRow(
+  db: Database,
+  realizationId: string,
+): ExpectedRealizationPersistenceRow | undefined {
+  return db.prepare(`
+    SELECT payload_json, content_hash
+    FROM skill_expected_realizations
+    WHERE id = ?
+  `).get(realizationId) as ExpectedRealizationPersistenceRow | undefined;
+}
+
+export function insertExpectedRealizationPersistenceRow(
+  db: Database,
+  input: ExpectedRealizationPersistenceInput,
+): void {
+  db.prepare(`
+    INSERT INTO skill_expected_realizations (
+      id, harness, profile_identity, canonical_revision,
+      valid_from, valid_to, payload_json, content_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.id,
+    input.harness,
+    input.profileIdentity,
+    input.canonicalRevision,
+    input.validFrom,
+    input.validTo,
+    input.canonicalJson,
+    input.contentHash,
+  );
+}
+
+export function selectBrowsingSessionHarness(
+  db: Database,
+  sessionId: string,
+): string | undefined {
+  const row = db.prepare(`
+    SELECT agent
+    FROM browsing_sessions
+    WHERE id = ?
+  `).get(sessionId) as { agent: string } | undefined;
+  return row?.agent;
+}
+
+export function selectExpectedRealizationHarness(
+  db: Database,
+  realizationId: string,
+): string | undefined {
+  const row = db.prepare(`
+    SELECT harness
+    FROM skill_expected_realizations
+    WHERE id = ?
+  `).get(realizationId) as { harness: string } | undefined;
+  return row?.harness;
+}
+
+export function selectSessionExpectedRealizationId(
+  db: Database,
+  sessionId: string,
+): string | undefined {
+  const row = db.prepare(`
+    SELECT realization_id
+    FROM session_expected_skill_realizations
+    WHERE session_id = ?
+  `).get(sessionId) as { realization_id: string } | undefined;
+  return row?.realization_id;
+}
+
+export function insertSessionExpectedRealizationAssociation(
+  db: Database,
+  sessionId: string,
+  realizationId: string,
+): void {
+  db.prepare(`
+    INSERT INTO session_expected_skill_realizations (session_id, realization_id)
+    VALUES (?, ?)
+  `).run(sessionId, realizationId);
+}
+
+export function selectSessionExpectedRealizationPersistenceRow(
+  db: Database,
+  sessionId: string,
+): ExpectedRealizationPersistenceRow | undefined {
+  return db.prepare(`
+    SELECT realization.payload_json, realization.content_hash
+    FROM session_expected_skill_realizations association
+    JOIN skill_expected_realizations realization
+      ON realization.id = association.realization_id
+    WHERE association.session_id = ?
+  `).get(sessionId) as ExpectedRealizationPersistenceRow | undefined;
 }
 
 // --- Usage ---
