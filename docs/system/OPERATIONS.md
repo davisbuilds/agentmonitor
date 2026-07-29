@@ -369,6 +369,19 @@ The CI job runs:
 
 Parity tests are available for manual/shared-runtime verification but are not part of the required CI workflow.
 
+The skill-context built-product oracle verifies compiled parsers, schema,
+server/API behavior, and the Analytics consultation panel against isolated
+Claude and Codex fixtures:
+
+```bash
+pnpm build
+node scripts/verify-skill-context-built.mjs
+```
+
+It creates and validates a temporary SQLite/runtime root, prevents ambient
+history discovery, chooses an unused loopback port, runs the focused Chromium
+spec against `dist/`, and removes only that temporary root after shutdown.
+
 ## Runtime Artifacts
 
 Do not commit: `data/`, `*.db`, generated CSS output in `public/css/output.css`.

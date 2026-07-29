@@ -91,8 +91,8 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Skills</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Claude uses explicit `Skill` calls. Codex is inferred from `SKILL.md` reads in OTEL or JSONL fallback.</p>
+      <h3 class="text-h3">Raw skill invocation volume</h3>
+      <p class="mt-0.5 text-meta text-text-muted">Phase-1 volume: Claude uses explicit `Skill` calls; Codex is inferred from concrete `SKILL.md` reads. Use consultation evidence below for engagement and coverage.</p>
     </div>
     {#if analytics.coverage.skills}
       <span class="tabular font-mono text-meta text-text-faint">{analytics.coverage.skills.included_sessions} sessions in range</span>

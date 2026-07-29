@@ -313,6 +313,80 @@ export interface SkillUsageDay {
   skills: SkillUsageBreakdown[];
 }
 
+export interface SkillConsultationClassCounts {
+  first_read: number;
+  rehydration_after_compaction: number;
+  repeat_no_compaction: number;
+  unclassifiable: number;
+}
+
+export interface SkillConsultationVersionRow {
+  version: string | null;
+  attribution: 'exact' | 'approximate' | 'unknown';
+  invocations: number;
+  classes: SkillConsultationClassCounts;
+}
+
+export interface SkillConsultationRow {
+  name: string;
+  harness: string;
+  invocations: number;
+  classes: SkillConsultationClassCounts;
+  sessionsInWindow: number;
+  eligibleSessionsInWindow: number;
+  sessionsWithFirstRead: number;
+  firstReadEngagementRate: number | null;
+  ineligibleSessionsByReason: Array<{ reason: string; sessions: number }>;
+  projectBreadth: {
+    distinctObservedProjects: number;
+    sessions: Array<{ id: string; label: string; sessions: number }>;
+  };
+  versions: SkillConsultationVersionRow[];
+  exposure: {
+    jointlyEligiblePresentedSessions: number;
+    presentedWithFirstRead: number;
+    presentedWithoutFirstRead: number;
+  };
+}
+
+export interface SkillConsultationAnalytics {
+  asOf: string;
+  windowSemantics: {
+    interval: 'utc_half_open';
+    from: string | null;
+    toExclusive: string | null;
+    sessionMembership: 'observed_interval_overlap_or_in_window_occurrence';
+    windowMembershipUnobservable: number;
+  };
+  byHarness: Array<{
+    harness: string;
+    detectionSemantics: 'explicit_skill_tool' | 'concrete_skill_path';
+    skills: SkillConsultationRow[];
+  }>;
+  comparability: {
+    status: 'single_harness' | 'comparable' | 'not_directly_comparable';
+    limitingEvidence: string[];
+  };
+}
+
+export interface SkillHealthResponse {
+  data: Array<{
+    name: string;
+    invocations: number;
+    neverFired: boolean;
+    compatibilityOnly: boolean;
+    crossHarnessComparable: boolean;
+  }>;
+  coverage: AnalyticsCoverage;
+  dataSemantics: {
+    data: 'phase_1_compatibility';
+    window: 'session_start_legacy';
+    compatibilityOnly: boolean;
+    crossHarnessComparable: boolean;
+  };
+  consultations: SkillConsultationAnalytics;
+}
+
 export interface AnalyticsCapabilityBreakdown {
   full: number;
   summary: number;
@@ -949,6 +1023,11 @@ export async function fetchAnalyticsTools(params: Record<string, string | number
 export async function fetchAnalyticsSkillsDaily(params: Record<string, string | number | undefined> = {}): Promise<{ data: SkillUsageDay[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/skills/daily${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsSkillsDaily');
+}
+
+export async function fetchAnalyticsSkillsHealth(params: Record<string, string | number | undefined> = {}): Promise<SkillHealthResponse> {
+  const res = await fetch(`/api/v2/analytics/skills/health${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsSkillsHealth');
 }
 
 export async function fetchAnalyticsHourOfWeek(params: Record<string, string | number | undefined> = {}): Promise<{ data: HourOfWeekDataPoint[]; coverage: AnalyticsCoverage }> {
