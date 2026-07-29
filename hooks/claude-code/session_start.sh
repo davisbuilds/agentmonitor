@@ -11,6 +11,10 @@ MODEL="$(extract_field model)"
 PROJECT="$(get_project)"
 BRANCH="$(get_branch)"
 SOURCE="$(extract_field source)"
+INSTRUCTION_LOAD_INSTRUMENTED=false
+if [ "${AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED:-0}" = "1" ]; then
+  INSTRUCTION_LOAD_INSTRUMENTED=true
+fi
 
 send_event "$(cat <<EOF
 {
@@ -21,7 +25,10 @@ send_event "$(cat <<EOF
   "branch": "$(json_escape "$BRANCH")",
   "model": "$(json_escape "$MODEL")",
   "source": "hook",
-  "metadata": {"hook_source": "$(json_escape "$SOURCE")"}
+  "metadata": {
+    "hook_source": "$(json_escape "$SOURCE")",
+    "instruction_load_instrumented": $INSTRUCTION_LOAD_INSTRUMENTED
+  }
 }
 EOF
 )"

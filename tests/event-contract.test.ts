@@ -111,7 +111,14 @@ test('normalizeIngestEvent rejects negative cost_usd', () => {
 });
 
 test('normalizeIngestEvent accepts expanded event types', () => {
-  for (const eventType of ['llm_request', 'llm_response', 'file_change', 'git_commit', 'plan_step']) {
+  for (const eventType of [
+    'llm_request',
+    'llm_response',
+    'file_change',
+    'git_commit',
+    'plan_step',
+    'instruction_load',
+  ]) {
     const result = normalizeIngestEvent({
       session_id: 'session-1',
       agent_type: 'claude_code',

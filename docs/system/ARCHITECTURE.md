@@ -114,6 +114,10 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
 - Optional `event_id` for deduplication (unique constraint).
 - `metadata` payload capped by `AGENTMONITOR_MAX_PAYLOAD_KB` with UTF-8 safe truncation.
 - `client_timestamp` for client-supplied timing; `created_at` is server receive time.
+- `instruction_load` is an additive Claude hook event containing only
+  instruction identity and Claude-provided load metadata. Repeated loads remain
+  distinct because the hook omits `event_id`; instruction contents are never
+  read or emitted.
 
 ## Pricing Engine
 
@@ -168,6 +172,12 @@ Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-c
   limits. Claude explicit `Skill` calls and Codex concrete `.../SKILL.md` reads
   still define the phase-1 invocation basis; ordered parser rows only enrich a
   selected occurrence and never create an analytics count.
+- Newly installed Claude hook configurations register asynchronous
+  `InstructionsLoaded` capture for all load reasons. Shell and Python hooks
+  persist only `file_path`, `memory_type`, `load_reason`, and supplied optional
+  path/glob metadata. Their SessionStart command carries an explicit
+  instrumentation marker; missing asynchronous load events remain
+  unobservable rather than proving an empty instruction set.
 - `src/skills/invocation-ledger.ts` is the canonical occurrence selector used by
   both daily and health analytics. It filters Codex OTEL evidence before
   marking a canonical session event-backed, then uses JSONL only as fallback.

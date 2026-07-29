@@ -10,8 +10,15 @@ Canonical ingest contract for `POST /api/events` and `POST /api/events/batch`.
   - `tool_use`
   - `session_start`
   - `session_end`
-  - `response`
   - `error`
+  - `llm_request`
+  - `llm_response`
+  - `response`
+  - `file_change`
+  - `git_commit`
+  - `plan_step`
+  - `user_prompt`
+  - `instruction_load`
 
 ## Optional Fields
 
@@ -49,6 +56,8 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
 - `event_id` is optional.
 - If provided, it is unique.
 - Duplicate `event_id` records are acknowledged and skipped (idempotent ingest).
+- Claude `InstructionsLoaded` hooks intentionally omit `event_id`, so repeated
+  loads of the same file remain separate observations.
 
 ## Payload Truncation
 
@@ -100,3 +109,27 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
   }
 }
 ```
+
+### Claude Instruction-Load Example
+
+```json
+{
+  "session_id": "claude-session-001",
+  "agent_type": "claude_code",
+  "event_type": "instruction_load",
+  "status": "success",
+  "project": "myapp",
+  "source": "hook",
+  "metadata": {
+    "file_path": "/Users/me/Dev/myapp/CLAUDE.md",
+    "memory_type": "Project",
+    "load_reason": "session_start"
+  }
+}
+```
+
+Instruction-load metadata may also contain `globs`, `trigger_file_path`, and
+`parent_file_path` when Claude supplies them. The hook never reads or emits the
+instruction file's contents. Delivery is asynchronous and best-effort; a
+configured SessionStart marker without any received load event does not prove
+an observed-empty instruction set.

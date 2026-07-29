@@ -19,7 +19,11 @@ extract_field() {
     echo "$HOOK_INPUT" | jq -r ".$field // empty" 2>/dev/null
   else
     # Fallback: naive grep for simple top-level string fields
-    echo "$HOOK_INPUT" | grep -o "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed 's/.*: *"//;s/"$//'
+    echo "$HOOK_INPUT" |
+      grep -o "\"$field\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" |
+      head -1 |
+      sed 's/.*: *"//;s/"$//' ||
+      true
   fi
 }
 
@@ -30,6 +34,17 @@ extract_nested() {
     echo "$HOOK_INPUT" | jq -r ".$path // empty" 2>/dev/null
   else
     echo ""
+  fi
+}
+
+# Extract a top-level field while preserving its JSON representation.
+# Without jq, optional structured fields are unavailable rather than guessed.
+extract_json_field() {
+  local field="$1"
+  if command -v jq &>/dev/null; then
+    echo "$HOOK_INPUT" | jq -c --arg field "$field" '.[$field] // null' 2>/dev/null
+  else
+    echo "null"
   fi
 }
 
@@ -58,8 +73,13 @@ json_escape() {
   if command -v jq &>/dev/null; then
     printf '%s' "$s" | jq -Rs '.' 2>/dev/null | sed 's/^"//;s/"$//'
   else
-    # Manual escape: \, ", newline, tab, carriage return
-    printf '%s' "$s" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' -e 's/\t/\\t/g' -e 's/\r/\\r/g'
+    # Bash-native escape: \, ", newline, tab, carriage return.
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\t'/\\t}"
+    s="${s//$'\r'/\\r}"
+    printf '%s' "$s"
   fi
 }
 

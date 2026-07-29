@@ -16,5 +16,9 @@ send_event({
     "project": get_project(),
     "model": extract("model"),
     "source": "hook",
-    "metadata": {"hook_source": extract("source")},
+    "metadata": {
+        "hook_source": extract("source"),
+        "instruction_load_instrumented":
+            os.environ.get("AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED") == "1",
+    },
 })

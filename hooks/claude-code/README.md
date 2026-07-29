@@ -19,6 +19,7 @@ This registers hooks in `~/.claude/settings.json` that fire on:
 | `PostToolUse` | `tool_use` | async |
 | `PreToolUse` (Bash only) | safety check | sync (can block destructive commands) |
 | `UserPromptSubmit` | `user_prompt` | async (non-blocking) |
+| `InstructionsLoaded` (all load reasons) | `instruction_load` | async (non-blocking) |
 
 Start AgentMonitor with `amon serve`, then use Claude Code as normal. View events
 at `https://agentmonitor.localhost`; hooks continue posting directly to
@@ -76,13 +77,24 @@ The installer preserves your existing `statusLine.command` by saving it to `~/.c
 
 ```
 Claude Code fires hook
-  -> pipes JSON to stdin (session_id, tool_name, tool_input, cwd)
+  -> pipes JSON to stdin (event-specific fields plus session_id and cwd)
   -> hook script reads stdin, maps fields to AgentMonitor contract
   -> curl POST to localhost:3141/api/events (fire-and-forget)
   -> event appears in dashboard via SSE
 ```
 
 All telemetry hooks run **async** (non-blocking) so they don't slow down Claude Code. The only sync hook is `PreToolUse` for safety checks on Bash commands.
+
+`InstructionsLoaded` reports the instruction identity and Claude-provided load
+metadata only: `file_path`, `memory_type`, `load_reason`, and optional `globs`,
+`trigger_file_path`, or `parent_file_path`. It never reads or emits instruction
+contents. Each received load is retained separately, including `compact`
+reloads.
+
+Asynchronous delivery is best-effort. The installer marks SessionStart events
+as instruction-load instrumented, but a marked session with no received load
+events remains unobservable; it is not evidence that no instruction files
+loaded.
 
 ## Safety Checks
 
@@ -109,6 +121,7 @@ export AGENTMONITOR_SAFETY=0
 | `post_tool_use.sh` | Maps `PostToolUse` -> `tool_use` event |
 | `pre_tool_use.sh` | Safety checks + event on block |
 | `user_prompt_submit.sh` | Maps `UserPromptSubmit` -> `user_prompt` event |
+| `instructions_loaded.sh` | Maps `InstructionsLoaded` -> content-free `instruction_load` event |
 | `notification.sh` | Maps `Notification` -> `response` event |
 
 ### Python (alternative)
@@ -122,6 +135,7 @@ Located in `python/` subdirectory. Uses only Python stdlib (no pip dependencies)
 | `python/session_end.py` | Maps `Stop` -> `session_end` event |
 | `python/post_tool_use.py` | Maps `PostToolUse` -> `tool_use` event |
 | `python/pre_tool_use.py` | Safety checks + event on block |
+| `python/instructions_loaded.py` | Maps `InstructionsLoaded` -> content-free `instruction_load` event |
 
 ## Manual Installation
 
@@ -136,7 +150,7 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
         "hooks": [
           {
             "type": "command",
-            "command": "/path/to/agentmonitor/hooks/claude-code/session_start.sh",
+            "command": "AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED=1 /path/to/agentmonitor/hooks/claude-code/session_start.sh",
             "timeout": 10,
             "async": true
           }
@@ -168,6 +182,19 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
         ]
       }
     ],
+    "InstructionsLoaded": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/path/to/agentmonitor/hooks/claude-code/instructions_loaded.sh",
+            "timeout": 10,
+            "async": true
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
@@ -187,6 +214,13 @@ If you prefer to configure hooks manually, add this to `~/.claude/settings.json`
 ```
 
 Replace `/path/to/agentmonitor` with the actual path to your AgentMonitor checkout.
+
+The managed installer also adds
+`AGENTMONITOR_INSTRUCTION_LOAD_INSTRUMENTED=1` to its SessionStart command.
+Keep that marker if reproducing the configuration manually so a later
+per-session projection can distinguish newly instrumented sessions from legacy
+sessions. The marker still does not turn missing asynchronous events into an
+observed-empty result.
 
 ## Alternative: OpenTelemetry Mode
 

@@ -154,6 +154,30 @@ test('POST /api/events deduplicates by event_id', async () => {
   assert.equal(events.total, 1);
 });
 
+test('POST /api/events retains repeated instruction loads without an event_id', async () => {
+  const payload = {
+    session_id: 'session-instruction-loads',
+    agent_type: 'claude_code',
+    event_type: 'instruction_load',
+    source: 'hook',
+    metadata: {
+      file_path: '/work/project/CLAUDE.md',
+      memory_type: 'Project',
+      load_reason: 'compact',
+    },
+  };
+
+  const first = await postJson(`${baseUrl}/api/events`, payload);
+  const second = await postJson(`${baseUrl}/api/events`, payload);
+  assert.equal(first.status, 201);
+  assert.equal(second.status, 201);
+
+  const events = await getEvents();
+  assert.equal(events.total, 2);
+  assert.equal(events.events.every(event => event.event_type === 'instruction_load'), true);
+  assert.equal(JSON.stringify(events.events).includes('instruction contents'), false);
+});
+
 test('duplicate event_id does not refresh existing session activity', async () => {
   const sessionId = 'session-dup-no-refresh';
   const payload = {
