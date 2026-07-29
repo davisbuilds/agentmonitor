@@ -733,7 +733,9 @@ v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
     refreshSkillCatalogSnapshots();
-    const compatibilityOnly = params.agent == null;
+    const consultations = getAnalyticsSkillConsultations(params);
+    const compatibilityOnly =
+      consultations.comparability.status === 'not_directly_comparable';
     const response: SkillHealthResponse = {
       data: getAnalyticsSkillsHealth(params).map(row => ({
         ...row,
@@ -747,7 +749,7 @@ v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
         compatibilityOnly,
         crossHarnessComparable: !compatibilityOnly,
       },
-      consultations: getAnalyticsSkillConsultations(params),
+      consultations,
     };
     res.json(response);
   } catch (err) {
