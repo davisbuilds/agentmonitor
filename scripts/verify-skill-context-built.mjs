@@ -93,7 +93,8 @@ async function runDojoRuntimeSmoke(baseUrl) {
     'module = importlib.util.module_from_spec(spec)',
     'spec.loader.exec_module(module)',
     'rows = module.load_health_rows(url=sys.argv[2], path=None)',
-    'assert any(row.get("name") == "test-strategy" for row in rows)',
+    'if not any(row.get("name") == "test-strategy" for row in rows):',
+    '    raise RuntimeError("Dojo runtime response is missing test-strategy")',
     'print(json.dumps({"rows": len(rows), "test_strategy": True}))',
   ].join('\n');
   const child = spawn('python3', ['-c', python, runtimePath, healthUrl], {
