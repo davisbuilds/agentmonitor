@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import { execSync, execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
@@ -498,6 +506,36 @@ describe('Instruction-load telemetry hooks', () => {
     ]);
     assert.equal(payloads.every(payload => payload.event_id === undefined), true);
     assert.equal(JSON.stringify(payloads).includes('must never be emitted'), false);
+  });
+
+  test('shell hook tolerates absent optional fields without jq', async () => {
+    const binDir = mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-no-jq-'));
+    const sourcePath = ENV.PATH ?? '';
+    try {
+      for (const command of ['basename', 'cat', 'curl', 'dirname', 'grep', 'head', 'sed']) {
+        const executable = sourcePath
+          .split(path.delimiter)
+          .map(directory => path.join(directory, command))
+          .find(candidate => existsSync(candidate));
+        assert.ok(executable, `expected ${command} on the test runner PATH`);
+        symlinkSync(realpathSync(executable), path.join(binDir, command));
+      }
+
+      const payloads = await captureHookPayloads([{
+        executable: '/bin/bash',
+        args: [path.join(HOOKS_DIR, 'instructions_loaded.sh')],
+        stdin: makeInstructionsLoadedInput(),
+        env: { PATH: binDir },
+      }]);
+
+      assert.deepEqual(payloads[0]?.metadata, {
+        file_path: '/home/user/my-project/CLAUDE.md',
+        memory_type: 'Project',
+        load_reason: 'session_start',
+      });
+    } finally {
+      rmSync(binDir, { recursive: true, force: true });
+    }
   });
 
   test('Python hook preserves optional load metadata without instruction contents', async () => {
