@@ -587,6 +587,37 @@ export function initSchema(): void {
       ON session_catalog_observation_entries(skill_name);
   `);
 
+  // Immutable desired-state evidence is stored separately from parser-owned
+  // session projections. The session association intentionally has no foreign
+  // key to browsing_sessions: transcript reparse deletes and recreates that row
+  // inside one transaction, while the explicit realization binding must survive.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS skill_expected_realizations (
+      id TEXT PRIMARY KEY,
+      harness TEXT NOT NULL CHECK (harness IN ('claude', 'codex')),
+      profile_identity TEXT NOT NULL,
+      canonical_revision TEXT NOT NULL,
+      valid_from TEXT NOT NULL,
+      valid_to TEXT,
+      payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+      content_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_ser_harness_validity
+      ON skill_expected_realizations(harness, valid_from, valid_to);
+
+    CREATE TABLE IF NOT EXISTS session_expected_skill_realizations (
+      session_id TEXT PRIMARY KEY,
+      realization_id TEXT NOT NULL,
+      associated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY(realization_id) REFERENCES skill_expected_realizations(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sesr_realization
+      ON session_expected_skill_realizations(realization_id);
+  `);
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_turns (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
