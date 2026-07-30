@@ -80,8 +80,8 @@ importers:
         specifier: ^3.4.12
         version: 3.4.12
       marked:
-        specifier: ^15.0.0
-        version: 15.0.12
+        specifier: ^18.0.7
+        version: 18.0.7
     devDependencies:
       '@sveltejs/vite-plugin-svelte':
         specifier: ^7.1.4
@@ -1287,9 +1287,9 @@ packages:
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
 
-  marked@15.0.12:
-    resolution: {integrity: sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==}
-    engines: {node: '>= 18'}
+  marked@18.0.7:
+    resolution: {integrity: sha512-iDVQ5ldaiKXn6b2JroX5kgRfmwgqolW7NpaEzTl1k/2Zh1njIEN9yniyLV/mOvWwtsE8OGgkjsCYvijuPk1dtA==}
+    engines: {node: '>= 20'}
     hasBin: true
 
   math-intrinsics@1.1.0:
@@ -2838,7 +2838,7 @@ snapshots:
     dependencies:
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  marked@15.0.12: {}
+  marked@18.0.7: {}
 
   math-intrinsics@1.1.0: {}
 
