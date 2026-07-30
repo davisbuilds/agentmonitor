@@ -54,23 +54,6 @@ note here. This file stays future-only.
 - **Sketch**: either implement browser opening after health readiness and honor
   the opt-out, or remove the flag in a deliberate compatibility pass.
 
-#### Claude history discovery has no configurable root
-📥 noted
-- **What**: the built skill-context verifier could isolate Codex history with
-  `CODEX_HOME`, but server startup still discovered
-  `~/.claude/projects` through `os.homedir()`. In the first isolated browser
-  probe, 94 ambient Claude sessions joined the one seeded oracle session, so
-  the displayed denominator was `1 / 95`; the verifier now suppresses all
-  watcher discovery with `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS=*`.
-- **Why it matters**: tests and alternate installations cannot point Claude and
-  Codex discovery at parallel temporary roots. They must either alter the
-  process home or disable discovery entirely, which prevents an isolated probe
-  from exercising startup reparse behavior.
-- **Sketch**: add one documented AgentMonitor Claude-history root override,
-  thread it through server startup, import, sync, and watcher paths, and pin
-  parity with the existing `CODEX_HOME` behavior. Noted 2026-07-29 during the
-  built skill-consultation Analytics verifier.
-
 ### Skill trigger health (2026-07-09)
 
 Source: `docs/plans/2026-07-09-skill-trigger-health-plan.md` (phase 1 shipped).
@@ -103,36 +86,20 @@ These are the deferred follow-ups surfaced during and after the build.
   lexical negation in the next prompt (both already scoped out of phase 1);
   measure against real sessions before building ranking on top.
 
-#### Never-fired scan runs un-throttled per health request
+#### Windowed Codex skill-event scan chooses the agent index
 📥 noted
-- **What**: each `/api/v2/analytics/skills/health` request scans the filesystem
-  for never-fired detection, separate from the TTL-throttled snapshot refresh
-  scan.
-- **Why it matters**: minor today; a free cleanup if the skill-extraction
-  unification below happens (thread the single scanned catalog through both).
-
-### Skill extraction unification
-
-#### Unify Claude/Codex skill-invocation extraction between the daily and health queries
-✅ delivered 2026-07-28
-- **What**: Claude `Skill` calls and Codex `.../SKILL.md` reads are identified in
-  two places in `src/db/v2-queries.ts` — `getAnalyticsSkillsDaily` and
-  `getAnalyticsSkillsHealth` — with the Codex event/JSONL blocks (including the
-  session-dedup logic) copy-pasted between them. The copies have already drifted:
-  daily marks a canonical Codex session as OTEL-backed before date filtering,
-  while health marks it afterward. An out-of-window concrete OTEL row can
-  therefore suppress an in-window JSONL row in daily but not health.
-- **Why it matters**: edge-case path handling drifts across the copies; a single
-  parser is one place to fix Codex parsing and keeps the two queries honest.
-- **Sketch**: a shared invocation iterator yielding
-  `{ skillName, timestamp, project, agent, sessionId?, ordinal?, source }`; daily
-  folds into date buckets, health folds into name+version. Guard the refactor with
-  the existing daily tests plus the out-of-window OTEL/in-window JSONL
-  regression. Pulled into
-  `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md` Task 4.
-- **Result**: `src/skills/invocation-ledger.ts` now supplies both analytics
-  paths. OTEL selection is date/project-filtered before JSONL suppression, and
-  the named regression is pinned.
+- **What**: on the 2026-07-29 copied 1.4 GB database,
+  `EXPLAIN QUERY PLAN` for the fixed-window Codex skill-event leg chose
+  low-cardinality `idx_events_agent_type` and a temporary ordering b-tree
+  instead of `idx_events_usage_ts`. After removing the duplicate ledger read,
+  the complete enriched 2026-07-01..27 health query measured a 102.5 ms median
+  over seven warm runs versus 88.3 ms for phase 1 alone.
+- **Why it matters**: current latency is acceptable, but this leg still scales
+  with all retained Codex events and may become the next health-query bottleneck
+  as history grows.
+- **Sketch**: benchmark a purpose-built partial/composite skill-event index
+  against the real predicate and ordering; retain it only if the planner uses it
+  and write cost/storage remain justified.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 

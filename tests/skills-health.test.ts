@@ -17,8 +17,20 @@ let getAnalyticsSkillsDaily: (params?: Record<string, unknown>) => Array<{
   skills: Array<{ skill_name: string; count: number }>;
 }>;
 let getAnalyticsSkillsHealth: (params?: Record<string, unknown>) => SkillHealthRow[];
+let getAnalyticsSkillConsultations: (params?: Record<string, unknown>) => {
+  byHarness: unknown[];
+  comparability: unknown;
+};
+let getAnalyticsSkillHealthParts: (params?: Record<string, unknown>) => {
+  data: SkillHealthRow[];
+  consultations: {
+    byHarness: unknown[];
+    comparability: unknown;
+  };
+};
 let server: Server;
 let baseUrl: string;
+let catalogRoot: string;
 
 function makeCatalogSkill(root: string, name: string, version: string | null): void {
   const dir = path.join(root, name);
@@ -77,7 +89,7 @@ before(async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-health-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
 
-  const catalogRoot = path.join(tempDir, 'catalog');
+  catalogRoot = path.join(tempDir, 'catalog');
   makeCatalogSkill(catalogRoot, 'write-spec', '1.0.0');
   makeCatalogSkill(catalogRoot, 'test-strategy', '1.0.0');
   makeCatalogSkill(catalogRoot, 'never-used', '2.0.0');
@@ -93,7 +105,12 @@ before(async () => {
   initSchema();
   db = dbModule.getDb();
   closeDb = dbModule.closeDb;
-  ({ getAnalyticsSkillsDaily, getAnalyticsSkillsHealth } = await import('../src/db/v2-queries.js'));
+  ({
+    getAnalyticsSkillsDaily,
+    getAnalyticsSkillsHealth,
+    getAnalyticsSkillConsultations,
+    getAnalyticsSkillHealthParts,
+  } = await import('../src/db/v2-queries.js'));
 
   // Version snapshot covering the invocation window.
   insertSnapshot('write-spec', '1.0.0', '2026-06-01T00:00:00Z', '2026-07-31T00:00:00Z');
@@ -380,6 +397,15 @@ test('excludes out-of-range invocations but still lists never-fired catalog skil
   assert.equal(rows.get('never-used')?.neverFired, true);
 });
 
+test('the batched health path preserves phase-1 and consultation results', () => {
+  const params = { date_from: '2026-07-01', date_to: '2026-07-08' };
+  const batched = getAnalyticsSkillHealthParts(params);
+  const consultations = getAnalyticsSkillConsultations(params);
+  assert.deepEqual(batched.data, getAnalyticsSkillsHealth(params));
+  assert.deepEqual(batched.consultations.byHarness, consultations.byHarness);
+  assert.deepEqual(batched.consultations.comparability, consultations.comparability);
+});
+
 test('GET /api/v2/analytics/skills/health returns the daily-style envelope with health rows', async () => {
   const res = await fetch(`${baseUrl}/api/v2/analytics/skills/health`);
   assert.equal(res.status, 200);
@@ -509,4 +535,25 @@ test('GET /api/v2/analytics/skills/health honors the date range for backfill que
   // Claude invocations dated 2026-07-01 are present; the codex read (07-02) is not.
   assert.equal(byName.get('write-spec')?.invocations, 1);
   assert.equal(byName.get('deep-research'), undefined);
+});
+
+test('health reuses the TTL-scoped catalog scan for never-fired rows', async () => {
+  const skillName = 'installed-after-health-refresh';
+  const skillDir = path.join(catalogRoot, skillName);
+  try {
+    const initial = await fetch(`${baseUrl}/api/v2/analytics/skills/health`);
+    assert.equal(initial.status, 200);
+    makeCatalogSkill(catalogRoot, skillName, '1.0.0');
+
+    const withinTtl = await fetch(`${baseUrl}/api/v2/analytics/skills/health`);
+    assert.equal(withinTtl.status, 200);
+    const body = await withinTtl.json() as { data: SkillHealthRow[] };
+    assert.equal(
+      body.data.some(row => row.name === skillName),
+      false,
+      'a second filesystem scan would expose the newly installed skill inside the TTL',
+    );
+  } finally {
+    fs.rmSync(skillDir, { recursive: true, force: true });
+  }
 });

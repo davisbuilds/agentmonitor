@@ -54,7 +54,10 @@ Prefer to do it yourself? The manual steps are below.
   unclassifiable evidence) via `/api/v2/analytics/skills/health`. Mixed-harness
   compatibility rows are explicitly non-comparative. Bounded v2 resources
   expose per-session skill context and accept immutable expected realizations
-  plus explicit same-harness session associations.
+  plus explicit same-harness session associations. Invocation, presentation,
+  and project-breadth signals are screening evidence rather than value or
+  removal recommendations; current filesystem state is not treated as
+  historical runtime truth.
 
 ## Quick Start
 
@@ -140,6 +143,8 @@ Common knobs:
 - `AGENTMONITOR_PORT` / `AGENTMONITOR_HOST` for the TypeScript runtime bind.
 - `AGENTMONITOR_DB_PATH` for the SQLite database location.
 - `AGENTMONITOR_PROJECTS_DIR` for git branch/project resolution.
+- `AGENTMONITOR_CLAUDE_DIR` for Claude JSONL history discovery (the directory
+  containing `projects/`).
 - `AGENTMONITOR_ENABLE_LIVE_TAB` and live capture/redaction flags.
 - `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` for historical discovery/import ignores.
 

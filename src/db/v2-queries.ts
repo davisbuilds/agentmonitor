@@ -5,6 +5,7 @@ import {
   scanSkillCatalogs,
   refreshCatalogSnapshots,
   resolveVersionAt,
+  type CatalogSkill,
   type CatalogSnapshot,
 } from '../skills/catalog.js';
 import type {
@@ -1791,6 +1792,7 @@ function invocationMisfired(boundaries: UserTurnBoundary[] | undefined, invocati
 
 const CATALOG_REFRESH_TTL_MS = 60_000;
 let lastCatalogRefreshMs = 0;
+let lastCatalogScan: CatalogSkill[] | null = null;
 
 /**
  * Stamp the currently-installed skill catalog into the snapshot table, throttled
@@ -1798,11 +1800,18 @@ let lastCatalogRefreshMs = 0;
  * health so version attribution reflects the present install without a startup
  * hook. Filesystem read errors are already swallowed by scanSkillCatalogs.
  */
-export function refreshSkillCatalogSnapshots(nowMs: number = Date.now()): void {
-  if (nowMs - lastCatalogRefreshMs < CATALOG_REFRESH_TTL_MS) return;
+export function refreshSkillCatalogSnapshots(nowMs: number = Date.now()): CatalogSkill[] {
+  if (
+    lastCatalogScan
+    && nowMs - lastCatalogRefreshMs < CATALOG_REFRESH_TTL_MS
+  ) {
+    return lastCatalogScan;
+  }
   lastCatalogRefreshMs = nowMs;
   const skills = scanSkillCatalogs(config.skillCatalogDirs);
+  lastCatalogScan = skills;
   refreshCatalogSnapshots(getDb(), skills, new Date(nowMs).toISOString());
+  return skills;
 }
 
 function loadCatalogSnapshots(): CatalogSnapshot[] {
@@ -1866,12 +1875,13 @@ function recordHealthInvocation(
  * at each invocation. Computed at query time over existing tool_calls/messages/
  * events rows, so it covers historical sessions with no reingest.
  */
-export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHealthRow[] {
-  const db = getDb();
-  const snapshots = loadCatalogSnapshots();
+function buildAnalyticsSkillsHealth(
+  occurrences: ReturnType<typeof selectSkillInvocationOccurrences>,
+  snapshots: CatalogSnapshot[],
+  catalog: CatalogSkill[],
+): SkillHealthRow[] {
   const acc = new Map<string, HealthAccumulator>();
   const unpinnedNames = new Set<string>();
-  const occurrences = selectSkillInvocationOccurrences(db, params);
   const explicitInvocations = occurrences.filter(
     occurrence => occurrence.detectionSource === 'explicit_skill_tool',
   );
@@ -1921,7 +1931,6 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
   // never-fired even while an older version of the same skill has invocations —
   // but a name with any unpinned (null/approximate) invocation is skipped, since
   // that invocation may in fact be the installed version we just can't attribute.
-  const catalog = scanSkillCatalogs(config.skillCatalogDirs);
   for (const skill of catalog) {
     if (acc.has(healthKey(skill.name, skill.version))) continue;
     if (unpinnedNames.has(skill.name)) continue;
@@ -1945,6 +1954,14 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
   );
 }
 
+export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHealthRow[] {
+  const db = getDb();
+  const snapshots = loadCatalogSnapshots();
+  const occurrences = selectSkillInvocationOccurrences(db, params);
+  const catalog = scanSkillCatalogs(config.skillCatalogDirs);
+  return buildAnalyticsSkillsHealth(occurrences, snapshots, catalog);
+}
+
 export function getAnalyticsSkillConsultations(
   params: AnalyticsParams = {},
 ): SkillConsultationAnalytics {
@@ -1953,6 +1970,24 @@ export function getAnalyticsSkillConsultations(
     params,
     loadCatalogSnapshots(),
   );
+}
+
+export function getAnalyticsSkillHealthParts(
+  params: AnalyticsParams = {},
+  catalog: CatalogSkill[] = scanSkillCatalogs(config.skillCatalogDirs),
+): { data: SkillHealthRow[]; consultations: SkillConsultationAnalytics } {
+  const db = getDb();
+  const snapshots = loadCatalogSnapshots();
+  const occurrences = selectSkillInvocationOccurrences(db, params);
+  return {
+    data: buildAnalyticsSkillsHealth(occurrences, snapshots, catalog),
+    consultations: getSkillConsultationAnalytics(
+      db,
+      params,
+      snapshots,
+      { occurrences },
+    ),
+  };
 }
 
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {

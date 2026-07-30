@@ -150,6 +150,7 @@ All optional with sensible defaults:
 | `AGENTMONITOR_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
 | `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
 | `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
+| `AGENTMONITOR_CLAUDE_DIR` | `~/.claude` | Claude data root containing `projects/`; used by startup sync, watcher resync, automatic/historical import, and `amon sync sessions` |
 | `AGENTMONITOR_USAGE_BUDGETS_PATH` | `./config/budgets.json` | Optional local JSON config for read-only usage budget reports |
 | `AGENTMONITOR_WAREHOUSE_DSN` | unset | Postgres DSN for explicit `warehouse publish`; unset disables live publish |
 | `AGENTMONITOR_WAREHOUSE_ACCOUNT` | `local` | Account label published as the warehouse identity grain |
@@ -231,7 +232,10 @@ Current runtime note:
 - `AGENTMONITOR_CODEX_LIVE_MODE=otel-only` is the only implemented Codex mode today.
 - OTEL-only Codex data is suitable for summary observability, not `claude-esp`-style plan/diff/reasoning playback.
 - The `exporter` mode name is reserved for a future richer Codex-side exporter.
-- The session-browser watcher separately follows local Claude JSONL history under `~/.claude/projects` and local Codex history under `~/.codex/sessions`.
+- The session-browser watcher separately follows local Claude JSONL history
+  under `$AGENTMONITOR_CLAUDE_DIR/projects` (default `~/.claude/projects`) and
+  local Codex history under `$CODEX_HOME/sessions` (default
+  `~/.codex/sessions`).
 - The watcher and full historical import both maintain file-hash skip caches, so unchanged files that previously parsed to zero messages/events are not retried on every restart or periodic sync.
 - `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` uses root-relative glob-style patterns. Bare names such as `vercel-plugin` match any path segment; path patterns such as `nested/sessions` match that subtree relative to the watched root.
 
@@ -251,6 +255,8 @@ pnpm cli -- costs recalc --dry-run         # Preview cost backfill
 
 `--source antigravity` also accepts `--antigravity-dir <path>` to point at a
 non-default `antigravity-cli` root (default `~/.gemini/antigravity-cli`).
+Claude import and session sync accept `--claude-dir <path>` as a command-local
+override; otherwise both use `AGENTMONITOR_CLAUDE_DIR`.
 
 Operational notes:
 
@@ -381,7 +387,20 @@ pnpm verify:skill-context-built
 It creates and validates a temporary SQLite/runtime root, prevents ambient
 history discovery, chooses an unused loopback port, runs the focused Chromium
 spec against `dist/`, and removes only that temporary root after shutdown. The
-E2E CI job runs it after the general Chromium suite.
+E2E CI job runs it after the general Chromium suite. A local cross-repository
+compatibility smoke can additionally exercise Dojo's actual phase-2 extractor
+against the controlled built server:
+
+```bash
+AGENTMONITOR_VERIFY_DOJO_RUNTIME=1 pnpm verify:skill-context-built
+```
+
+The opt-in smoke imports `../dojo/scripts/skill_health_runtime.py`, calls
+`load_health_rows(url=..., path=None)`, and requires the seeded legacy row. It
+prints an explicit skip when the sibling file is absent and is intentionally
+not enabled in CI because `~/Dev` is not a monorepo. It requires `python3`;
+spawn failures and a 15-second loader timeout fail the verifier while preserving
+the normal server/database/temp-root cleanup.
 
 ## Runtime Artifacts
 
