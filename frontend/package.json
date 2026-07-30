@@ -21,7 +21,7 @@
   "dependencies": {
     "@fontsource-variable/geist-mono": "^5.2.8",
     "@fontsource-variable/mona-sans": "^5.2.8",
-    "marked": "^15.0.0",
+    "marked": "^18.0.7",
     "dompurify": "^3.4.12"
   }
 }
