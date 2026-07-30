@@ -70,7 +70,13 @@
   );
 
   $effect(() => {
-    const available = result?.byHarness.map(harness => harness.harness) ?? [];
+    if (!result) return;
+    visibleLimit = PAGE_SIZE;
+  });
+
+  $effect(() => {
+    if (!result) return;
+    const available = result.byHarness.map(harness => harness.harness);
     if (filters.skillHarness && !available.includes(filters.skillHarness)) {
       filters.setSkillHarness('');
     }

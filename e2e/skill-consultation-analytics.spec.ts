@@ -18,8 +18,8 @@ test('Analytics keeps consultation overview bounded and provides a filterable ex
   const preview = page.getByRole('region', { name: 'Skill consultations' });
   await expect(preview).toBeVisible();
   await expect(preview.locator('details')).toHaveCount(0);
-  await expect(preview.getByTestId('skill-preview-row')).toHaveCount(2);
-  await expect(preview.getByRole('link', { name: /Explore all 2 skills/ })).toBeVisible();
+  await expect(preview.getByTestId('skill-preview-row')).toHaveCount(6);
+  await expect(preview.getByRole('link', { name: /Explore all 37 skills/ })).toBeVisible();
 
   await preview.screenshot({
     path: path.join(artifactDir, 'skill-consultations-preview-desktop.png'),
@@ -29,7 +29,7 @@ test('Analytics keeps consultation overview bounded and provides a filterable ex
     path: path.join(artifactDir, 'skill-consultations-preview-narrow.png'),
   });
   await page.setViewportSize({ width: 1280, height: 720 });
-  await preview.getByRole('link', { name: /Explore all 2 skills/ }).click();
+  await preview.getByRole('link', { name: /Explore all 37 skills/ }).click();
   await expect(page).toHaveURL(/#analytics\?.*view=skills/);
 
   const region = page.getByRole('region', { name: 'Skill consultation explorer' });
@@ -74,10 +74,17 @@ test('Analytics keeps consultation overview bounded and provides a filterable ex
   await expect(page).not.toHaveURL(/skill=/);
   await expect(claude).toBeVisible();
   await expect(codex).toBeVisible();
+  await expect(region.locator('details')).toHaveCount(30);
+  await region.getByRole('button', { name: 'Show 7 more' }).click();
+  await expect(region.locator('details')).toHaveCount(37);
 
   await region.screenshot({
     path: path.join(artifactDir, 'skill-consultations-explorer-desktop.png'),
   });
+
+  await page.getByLabel('Filter by agent').selectOption('claude');
+  await expect(region.locator('details')).toHaveCount(30);
+  await expect(region.getByRole('button', { name: 'Show 6 more' })).toBeVisible();
 
   await page.getByLabel('Filter by agent').selectOption('codex');
   await expect(codex).toBeVisible();
@@ -88,4 +95,19 @@ test('Analytics keeps consultation overview bounded and provides a filterable ex
   await region.screenshot({
     path: path.join(artifactDir, 'skill-consultations-explorer-narrow.png'),
   });
+});
+
+test('Skills preserves a deep-linked harness while consultation data loads', async ({
+  page,
+}) => {
+  await page.goto(
+    `${baseUrl}/app/#analytics?view=skills&from=2026-07-01&to=2026-07-29&harness=codex`,
+  );
+
+  const region = page.getByRole('region', { name: 'Skill consultation explorer' });
+  await expect(region).toBeVisible();
+  await expect(page).toHaveURL(/harness=codex/);
+  await expect(region.getByRole('button', { name: 'Codex' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(region.locator('section[aria-labelledby="skill-harness-codex"]')).toBeVisible();
+  await expect(region.locator('section[aria-labelledby="skill-harness-claude"]')).toHaveCount(0);
 });
