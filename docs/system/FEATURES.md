@@ -102,9 +102,13 @@ Product-surface reference for AgentMonitor.
   `consultations.byHarness`.
   The underlying occurrence selector is shared with daily skill analytics:
   Codex OTEL suppresses JSONL fallback only when an in-filter OTEL row contains
-  a concrete skill path. Caveats: the phase-1 interrupt heuristic deliberately
-  under-counts; Codex remains misfire-ineligible; and historical versions before
-  the first catalog snapshot remain approximate.
+  a concrete skill path, and the health endpoint reuses one selected occurrence
+  set for both legacy and rich folds. Caveats: the phase-1 interrupt heuristic
+  deliberately under-counts; Codex remains misfire-ineligible; and historical
+  versions before the first catalog snapshot remain approximate. Invocation,
+  presentation, and project breadth are screening evidence only—not skill
+  value, placement, or removal recommendations—and current installed files are
+  not used to reconstruct historical runtime state.
 - The Analytics `Overview` keeps raw phase-1 invocation volume as a separate
   timeline and adds a **Skill consultations** evidence panel. It shows Claude
   and Codex in separate lanes with first-read engagement, post-compaction

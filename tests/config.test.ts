@@ -28,6 +28,19 @@ test('createConfig resolves AGENTMONITOR_PROJECTS_DIR relative to cwd', () => {
   assert.equal(config.projectsDir, path.resolve(cwd, '../workspace'));
 });
 
+test('createConfig defaults Claude history to the local Claude home', () => {
+  const config = createConfig({}, repoRoot);
+
+  assert.equal(config.claudeDir, path.join(os.homedir(), '.claude'));
+});
+
+test('createConfig resolves AGENTMONITOR_CLAUDE_DIR relative to cwd', () => {
+  const cwd = path.join(repoRoot, 'dist');
+  const config = createConfig({ AGENTMONITOR_CLAUDE_DIR: '../claude-home' }, cwd);
+
+  assert.equal(config.claudeDir, path.resolve(cwd, '../claude-home'));
+});
+
 test('createConfig parses live tab and privacy settings', () => {
   const config = createConfig({
     AGENTMONITOR_ENABLE_LIVE_TAB: 'false',

@@ -6,6 +6,16 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Configurable Claude history root (2026-07-29) — *What:*
+  `AGENTMONITOR_CLAUDE_DIR` now supplies one Claude data root to startup sync,
+  live and periodic watcher discovery, automatic and historical event import,
+  and `amon sync sessions`; explicit `--claude-dir` flags still win. An isolated
+  real-filesystem regression proves configured history is included while
+  ambient `~/.claude/projects` history is excluded, and the built consultation
+  verifier now exercises startup parsing without suppressing watcher discovery.
+  *Why:* the shipping verifier previously admitted 94 ambient sessions or had
+  to disable all watcher discovery, so alternate installations and runtime
+  probes could not isolate Claude and Codex history symmetrically.
 - Usage overview hot-path optimization (2026-07-16) — *What:* the representative
   30-day built-product read fell from a 229.24 ms warm median to 134.67 ms while
   preserving exact parity with every per-panel Usage endpoint. The overview now
@@ -88,7 +98,14 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   same per-harness boundary. A built-product oracle seeds both parsers into
   isolated SQLite, exercises the compiled API and realization association
   contract, and verifies the panel plus agent-filter behavior in Chromium at
-  desktop and narrow widths.
+  desktop and narrow widths. Final shipping validation on a consistent copy of
+  the 1.4 GB local database migrated 434 associated files, parsed 407 with zero
+  errors, and produced 1,667 ordered observations plus 17,392 catalog entries;
+  a stable second pass was a no-op and forced recovery reproduced the same row
+  counts. Independent source parsing reconciled 394 consultations across 131
+  sessions with zero class differences. Reusing one ledger selection reduced
+  the fixed-window enriched health median from 165.1 ms to 102.5 ms (phase-1
+  median 88.3 ms), and the actual Dojo extractor accepted the built response.
   Spec/plan:
   `docs/specs/2026-07-27-skill-invocation-decomposition-spec.md` and
   `docs/plans/2026-07-28-skill-invocation-decomposition-plan.md`.

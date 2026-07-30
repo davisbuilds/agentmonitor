@@ -30,8 +30,7 @@ import {
   getMonitorSessionWithEvents,
   getMonitorSessionTranscript,
   getAnalyticsSkillsDaily,
-  getAnalyticsSkillsHealth,
-  getAnalyticsSkillConsultations,
+  getAnalyticsSkillHealthParts,
   refreshSkillCatalogSnapshots,
   getUsageSummary,
   getUsageCoverage,
@@ -732,12 +731,13 @@ v2Router.get('/analytics/skills/daily', (req: Request, res: Response) => {
 v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    refreshSkillCatalogSnapshots();
-    const consultations = getAnalyticsSkillConsultations(params);
+    const catalog = refreshSkillCatalogSnapshots();
+    const health = getAnalyticsSkillHealthParts(params, catalog);
+    const consultations = health.consultations;
     const compatibilityOnly =
       consultations.comparability.status === 'not_directly_comparable';
     const response: SkillHealthResponse = {
-      data: getAnalyticsSkillsHealth(params).map(row => ({
+      data: health.data.map(row => ({
         ...row,
         compatibilityOnly,
         crossHarnessComparable: !compatibilityOnly,
