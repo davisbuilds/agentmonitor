@@ -62,25 +62,25 @@
     }
   },
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
+    "better-sqlite3": "^13.0.2",
     "chokidar": "^5.0.0",
     "express": "^5.2.1",
     "pg": "^8.22.0",
-    "portless": "0.15.3",
+    "portless": "0.15.5",
     "uuid": "^14.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "^1.61.1",
-    "@tailwindcss/cli": "^4.3.2",
+    "@playwright/test": "^1.62.0",
+    "@tailwindcss/cli": "^4.3.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.1.0",
+    "@types/node": "^26.1.2",
     "@types/pg": "^8.20.0",
-    "eslint": "^10.6.0",
-    "tailwindcss": "^4.3.2",
-    "tsx": "^4.22.4",
-    "typescript": "^5.9.3",
-    "typescript-eslint": "^8.62.1"
+    "eslint": "^10.8.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.1",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0"
   }
 }
