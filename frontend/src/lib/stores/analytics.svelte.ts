@@ -61,6 +61,7 @@ class AnalyticsStore {
     agents: 0,
   };
   private unsubscribe: (() => void) | null = null;
+  private subscriptionMode: 'overview' | 'consultations' | null = null;
 
   // Shared filters live in the consolidated analytics filter store; the Overview
   // sub-view reads from it and refetches when it changes.
@@ -158,13 +159,25 @@ class AnalyticsStore {
   }
 
   async initialize(): Promise<void> {
-    if (!this.unsubscribe) {
-      this.unsubscribe = analyticsFilters.subscribe(() => {
-        void this.fetchAll();
-      });
-    }
+    this.bindFilterSubscription('overview');
     await analyticsFilters.initialize();
     await this.fetchAll();
+  }
+
+  async initializeSkillConsultations(): Promise<void> {
+    this.bindFilterSubscription('consultations');
+    await analyticsFilters.initialize();
+    await this.fetchSkillConsultations();
+  }
+
+  private bindFilterSubscription(mode: 'overview' | 'consultations'): void {
+    if (this.unsubscribe && this.subscriptionMode === mode) return;
+    this.unsubscribe?.();
+    this.subscriptionMode = mode;
+    this.unsubscribe = analyticsFilters.subscribe(() => {
+      if (mode === 'overview') void this.fetchAll();
+      else void this.fetchSkillConsultations();
+    });
   }
 
   dispose(): void {
@@ -172,6 +185,7 @@ class AnalyticsStore {
       this.unsubscribe();
       this.unsubscribe = null;
     }
+    this.subscriptionMode = null;
   }
 
   async fetchAll(): Promise<void> {

@@ -203,7 +203,7 @@ try {
     ) VALUES ('test-strategy', '1.0.0', '2026-06-01T00:00:00Z', '2026-08-01T00:00:00Z')
   `).run();
 
-  const claudeSkillLine = (timestamp, id) => JSON.stringify({
+  const claudeSkillLine = (timestamp, id, skill = 'test-strategy') => JSON.stringify({
     type: 'assistant',
     cwd: '/work/alpha',
     timestamp,
@@ -213,11 +213,20 @@ try {
         type: 'tool_use',
         id,
         name: 'Skill',
-        input: { skill: 'test-strategy' },
+        input: { skill },
       }],
     },
   });
+  const additionalClaudeSkills = Array.from(
+    { length: 35 },
+    (_, index) => claudeSkillLine(
+      '2026-07-10T09:59:00Z',
+      `claude-fixture-${index + 1}`,
+      `fixture-skill-${String(index + 1).padStart(2, '0')}`,
+    ),
+  );
   const claudeSource = [
+    ...additionalClaudeSkills,
     claudeSkillLine('2026-07-10T10:00:00Z', 'claude-first'),
     claudeSkillLine('2026-07-10T10:01:00Z', 'claude-repeat'),
     JSON.stringify({
@@ -326,7 +335,7 @@ try {
       ORDER BY agent
     `).all(),
     [
-      { agent: 'claude', observations: 4 },
+      { agent: 'claude', observations: 39 },
       { agent: 'codex', observations: 4 },
     ],
     'built parsers must seed the expected context observations before server startup',

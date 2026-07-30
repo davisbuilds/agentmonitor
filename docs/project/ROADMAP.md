@@ -92,10 +92,12 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   immutable realization create/replay and one-time association with stable
   status semantics; mixed legacy health rows are machine-labeled
   compatibility-only. The `/app/` Analytics Overview now preserves raw phase-1
-  invocation volume and adds separate Claude/Codex consultation lanes with
-  first-read denominators, compaction-aware classes, project breadth, catalog
-  exposure gaps, and expandable version/coverage evidence. Its CSV carries the
-  same per-harness boundary. A built-product oracle seeds both parsers into
+  invocation volume and a bounded six-row consultation index; the dedicated
+  Skills sub-view owns harness/name/signal/sort controls, progressive result
+  disclosure, separate Claude/Codex lanes, first-read denominators,
+  compaction-aware classes, project breadth, catalog exposure gaps, and
+  expandable version/coverage evidence. Its CSV carries the same per-harness
+  boundary. A built-product oracle seeds both parsers into
   isolated SQLite, exercises the compiled API and realization association
   contract, and verifies the panel plus agent-filter behavior in Chromium at
   desktop and narrow widths. Final shipping validation on a consistent copy of
@@ -139,7 +141,7 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
 ### Product Polish and Release Confidence
 
-- Continue tightening Monitor, Live, Sessions (Browse / Pinned sub-views), Search, and the consolidated Analytics tab (Overview / Usage / Insights sub-views) around real review and monitoring workflows.
+- Continue tightening Monitor, Live, Sessions (Browse / Pinned sub-views), Search, and the consolidated Analytics tab (Overview / Usage / Skills / Insights / Quality sub-views) around real review and monitoring workflows.
 - The "Instrument Console" Svelte redesign is **shipped (Phases 1–6)**: every `/app/` tab is on the design tokens — foundation (tokens + type + shell), shared primitives, Monitor, Sessions/Search, the consolidated Analytics group, and the Live operator view. IA consolidations: Usage + Insights → Analytics sub-views; Pinned → a Sessions sub-view. Mobile was intentionally deprioritized (laptop-first; agents run on-device).
 - The first-class CLI is **shipped** with `amon` as the preferred executable and `agentmonitor` as an alias. Keep new maintenance and reporting workflows discoverable there before adding more package scripts.
 - Maintain a manual regression checklist for the canonical Svelte app, especially around deep links, long transcripts, live updates, and drawer/navigation behavior.

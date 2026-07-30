@@ -24,9 +24,15 @@ const analyticsFallback: AnalyticsRouteState = {
   model: '',
   provider: '',
   tier: '',
+  skillHarness: '',
+  skillQuery: '',
+  skillSignal: 'all',
+  skillSort: 'volume',
   insightProvider: 'openai',
   insightModel: '',
   kind: '',
+  sessionId: null,
+  traceId: null,
 };
 
 test('parseAppHash defaults to monitor and preserves query params', () => {
@@ -174,6 +180,34 @@ test('analytics route hashes carry only the active view\'s specialized filters',
   assert.equal(insights.insightModel, 'claude');
   assert.equal(insights.kind, 'weekly');
   assert.equal(insights.model, ''); // usage-model not set on insights view
+
+  // Skills view: shared filters survive, unrelated specialized state does not.
+  const skillsHash = buildAnalyticsRouteHash({
+    ...analyticsFallback,
+    view: 'skills',
+    project: 'agentmonitor',
+    agent: 'codex',
+    skillHarness: 'codex',
+    skillQuery: 'test strategy',
+    skillSignal: 'rehydrated',
+    skillSort: 'name',
+    model: 'ignored',
+    traceId: 'ignored',
+  });
+  assert.equal(
+    skillsHash,
+    'analytics?view=skills&from=2026-01-01&to=2026-01-30&project=agentmonitor&agent=codex&harness=codex&skill=test+strategy&signal=rehydrated&sort=name',
+  );
+  const skills = parseAnalyticsRouteHash(`#${skillsHash}`, analyticsFallback);
+  assert.equal(skills.view, 'skills');
+  assert.equal(skills.project, 'agentmonitor');
+  assert.equal(skills.agent, 'codex');
+  assert.equal(skills.skillHarness, 'codex');
+  assert.equal(skills.skillQuery, 'test strategy');
+  assert.equal(skills.skillSignal, 'rehydrated');
+  assert.equal(skills.skillSort, 'name');
+  assert.equal(skills.model, '');
+  assert.equal(skills.traceId, null);
 });
 
 test('search hashes omit default sort and fall back on non-search hashes', () => {

@@ -8,6 +8,8 @@ import {
   buildAnalyticsRouteHash,
   parseAnalyticsRouteHash,
   type AnalyticsRouteState,
+  type AnalyticsSkillSignal,
+  type AnalyticsSkillSort,
   type AnalyticsView,
 } from '../route-state';
 
@@ -34,6 +36,10 @@ export function createDefaultAnalyticsRouteState(now = new Date()): AnalyticsRou
     model: '',
     provider: '',
     tier: '',
+    skillHarness: '',
+    skillQuery: '',
+    skillSignal: 'all',
+    skillSort: 'volume',
     insightProvider: 'openai',
     insightModel: '',
     kind: 'overview',
@@ -69,6 +75,12 @@ class AnalyticsFiltersStore {
   provider = $state('');
   tier = $state('');
 
+  // Skills sub-view specialized filters.
+  skillHarness = $state('');
+  skillQuery = $state('');
+  skillSignal = $state<AnalyticsSkillSignal>('all');
+  skillSort = $state<AnalyticsSkillSort>('volume');
+
   // Insights sub-view specialized filters (provider/model = the LLM that authors
   // the insight; distinct from Usage's billed provider/model).
   insightProvider = $state<InsightProvider>('openai');
@@ -100,6 +112,10 @@ class AnalyticsFiltersStore {
       model: this.model,
       provider: this.provider,
       tier: this.tier,
+      skillHarness: this.skillHarness,
+      skillQuery: this.skillQuery,
+      skillSignal: this.skillSignal,
+      skillSort: this.skillSort,
       insightProvider: this.insightProvider,
       insightModel: this.insightModel,
       kind: this.kind,
@@ -179,6 +195,10 @@ class AnalyticsFiltersStore {
     this.model = state.model;
     this.provider = state.provider;
     this.tier = state.tier;
+    this.skillHarness = state.skillHarness;
+    this.skillQuery = state.skillQuery;
+    this.skillSignal = state.skillSignal;
+    this.skillSort = state.skillSort;
     this.insightProvider = (state.insightProvider as InsightProvider) || 'openai';
     this.insightModel = state.insightModel;
     this.kind = (state.kind as InsightKind) || 'overview';
@@ -274,6 +294,36 @@ class AnalyticsFiltersStore {
     this.tier = tier;
     this.syncHash();
     this.notify();
+  }
+
+  // --- Skills specialized filters (client-side; hash-only, no refetch) ---
+
+  setSkillHarness(harness: string): void {
+    this.skillHarness = harness;
+    this.syncHash();
+  }
+
+  setSkillQuery(query: string): void {
+    this.skillQuery = query;
+    this.syncHash();
+  }
+
+  setSkillSignal(signal: AnalyticsSkillSignal): void {
+    this.skillSignal = signal;
+    this.syncHash();
+  }
+
+  setSkillSort(sort: AnalyticsSkillSort): void {
+    this.skillSort = sort;
+    this.syncHash();
+  }
+
+  clearSkillExplorerFilters(): void {
+    this.skillHarness = '';
+    this.skillQuery = '';
+    this.skillSignal = 'all';
+    this.skillSort = 'volume';
+    this.syncHash();
   }
 
   // --- Insights specialized filters ---

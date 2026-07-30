@@ -3,7 +3,18 @@ export type AppTab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search';
 const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'analytics', 'search']);
 
 /** Sub-views inside the consolidated Analytics tab. */
-export type AnalyticsView = 'overview' | 'usage' | 'insights' | 'quality';
+export type AnalyticsView = 'overview' | 'usage' | 'skills' | 'insights' | 'quality';
+export type AnalyticsSkillSignal =
+  | 'all'
+  | 'first_read'
+  | 'rehydrated'
+  | 'presented_unread'
+  | 'unclassified';
+export type AnalyticsSkillSort =
+  | 'volume'
+  | 'first_read_rate'
+  | 'rehydrations'
+  | 'name';
 
 /** Sub-views inside the Sessions tab (Pinned folded in). */
 export type SessionsView = 'browse' | 'pinned';
@@ -23,6 +34,11 @@ export interface AnalyticsRouteState {
   model: string;
   provider: string;
   tier: string;
+  // Skills sub-view specialized filters.
+  skillHarness: string;
+  skillQuery: string;
+  skillSignal: AnalyticsSkillSignal;
+  skillSort: AnalyticsSkillSort;
   // Insights sub-view specialized filters (provider/model here mean the LLM that
   // authors the insight, distinct from Usage's billed provider/model).
   insightProvider: string;
@@ -118,6 +134,11 @@ export function buildAnalyticsRouteHash(state: AnalyticsRouteState): string {
     if (state.model) params.set('model', state.model);
     if (state.provider) params.set('provider', state.provider);
     if (state.tier) params.set('tier', state.tier);
+  } else if (state.view === 'skills') {
+    if (state.skillHarness) params.set('harness', state.skillHarness);
+    if (state.skillQuery) params.set('skill', state.skillQuery);
+    if (state.skillSignal !== 'all') params.set('signal', state.skillSignal);
+    if (state.skillSort !== 'volume') params.set('sort', state.skillSort);
   } else if (state.view === 'insights') {
     if (state.insightProvider) params.set('provider', state.insightProvider);
     if (state.insightModel) params.set('model', state.insightModel);
@@ -146,9 +167,25 @@ export function parseAnalyticsRouteHash(hash: string, fallback: AnalyticsRouteSt
 
   const params = parsed.params;
   const rawView = params.get('view');
-  const view: AnalyticsView = rawView === 'usage' || rawView === 'insights' || rawView === 'quality'
+  const view: AnalyticsView = rawView === 'usage'
+    || rawView === 'skills'
+    || rawView === 'insights'
+    || rawView === 'quality'
     ? rawView
     : 'overview';
+  const rawSkillSignal = params.get('signal');
+  const skillSignal: AnalyticsSkillSignal = rawSkillSignal === 'first_read'
+    || rawSkillSignal === 'rehydrated'
+    || rawSkillSignal === 'presented_unread'
+    || rawSkillSignal === 'unclassified'
+    ? rawSkillSignal
+    : 'all';
+  const rawSkillSort = params.get('sort');
+  const skillSort: AnalyticsSkillSort = rawSkillSort === 'first_read_rate'
+    || rawSkillSort === 'rehydrations'
+    || rawSkillSort === 'name'
+    ? rawSkillSort
+    : 'volume';
 
   return {
     view,
@@ -159,6 +196,10 @@ export function parseAnalyticsRouteHash(hash: string, fallback: AnalyticsRouteSt
     model: view === 'usage' ? params.get('model') || '' : '',
     provider: view === 'usage' ? params.get('provider') || '' : '',
     tier: view === 'usage' ? params.get('tier') || '' : '',
+    skillHarness: view === 'skills' ? params.get('harness') || '' : '',
+    skillQuery: view === 'skills' ? params.get('skill') || '' : '',
+    skillSignal: view === 'skills' ? skillSignal : 'all',
+    skillSort: view === 'skills' ? skillSort : 'volume',
     insightProvider: view === 'insights' ? params.get('provider') || '' : fallback.insightProvider,
     insightModel: view === 'insights' ? params.get('model') || '' : '',
     kind: view === 'insights' ? params.get('kind') || '' : fallback.kind,
