@@ -4,12 +4,19 @@ Living list of **future** design gaps, tech debt, and better ways to do a thing
 noticed during normal execution. Fix simple, quick, or blocking issues inline;
 capture only durable follow-ups worth revisiting cold. Not a commitment for the
 active task unless explicitly pulled into scope; ROADMAP.md is the higher-bar
-shipped/directional view.
+shipped/directional view. Add an item only when it cannot be fixed inline and
+represents recurring friction, meaningful risk or cost, an unresolved decision,
+or a concrete trigger.
+
+This repository is the canonical owner for its follow-ups; cross-repository work
+belongs with the repository that owns the capability, with links from affected
+repositories only when useful.
 
 Convention: each item has **What** (the friction), **Why or evidence**, and
 optionally **Next** (the smallest action that makes it actionable) or **Revisit
-when** (an intentional external or measurable gate). Status is usually omitted;
-use it only when it clarifies a gate or uncertainty.
+when** (an intentional external or measurable gate). Default state is omitted;
+use **Revisit when** for gates and `State: blocked — <reason>` only when work is
+genuinely blocked externally.
 
 **Cite a number, or say it is a guess.** Any causal or performance claim here —
 "X is slow", "Y causes the flake" — carries a measurement, or is labelled
@@ -18,6 +25,11 @@ turned into work: an unmarked guess about the Analytics fan-out was written here
 believed on re-read, and nearly bought a whole endpoint before a 30-second `curl`
 showed the endpoints return in 1–4ms. The label is the forcing function that makes
 someone run the cheap probe first.
+
+Review this file after a significant shipped slice or at least quarterly: confirm
+each item is still open, refresh dated evidence, promote selected work to a plan,
+convert it to a trigger, or move completed decisions and work to the Roadmap or
+decision history.
 
 When an item ships it **leaves this doc** — record it as a concise what/why
 bullet in `ROADMAP.md` (Completed Highlights) instead of keeping a "resolved"
@@ -30,7 +42,6 @@ note here. This file stays future-only.
 ### Ingestion
 
 #### `src/contracts/event-contract.ts` has no test of its own
-📥 noted
 - **What**: 246 lines of ingestion validation (`normalizeEventType`, `normalizeStatus`,
   `normalizeClientTimestamp`, `getRequiredString`, `getOptionalNonNegativeInt`) with no
   dedicated test file. It's reached indirectly through import/API tests, but its own
@@ -46,7 +57,6 @@ note here. This file stays future-only.
 ### Runtime CLI
 
 #### `amon serve --no-browser` is accepted but has no effect
-📥 noted
 - **What**: the serve parser accepts `--no-browser`, but neither direct nor
   Portless-backed startup opens a browser, so the flag currently changes no
   observable behavior.
@@ -61,7 +71,6 @@ Source: `docs/plans/2026-07-09-skill-trigger-health-plan.md` (phase 1 shipped).
 These are the deferred follow-ups surfaced during and after the build.
 
 #### Version attribution only reaches skills in the installed catalog
-📥 noted
 - **What**: version resolution matched ~1/3 of invoked skills on the live DB (23
   of 73). The rest resolve to `null` — renamed skills (`writing-plans` →
   `write-plan`), non-dojo skills (`yeet`), and project-local / plugin skills that
@@ -74,7 +83,6 @@ These are the deferred follow-ups surfaced during and after the build.
   plugin catalogs; treat name+version identity carefully across sources.
 
 #### Validate (and likely widen) the misfire heuristic before consumers depend on it
-📥 noted
 - **What**: the interrupt-based misfire signal was 0 across all 639 real
   invocations. Plausible (a genuine interrupt right after a skill fires is rare)
   and the heuristic deliberately under-counts, but combined the signal may be too
@@ -88,7 +96,6 @@ These are the deferred follow-ups surfaced during and after the build.
   measure against real sessions before building ranking on top.
 
 #### Windowed Codex skill-event scan chooses the agent index
-📥 noted
 - **What**: on the 2026-07-29 copied 1.4 GB database,
   `EXPLAIN QUERY PLAN` for the fixed-window Codex skill-event leg chose
   low-cardinality `idx_events_agent_type` and a temporary ordering b-tree
@@ -105,7 +112,6 @@ These are the deferred follow-ups surfaced during and after the build.
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 
 #### Legacy v1 session-list N+1
-📥 noted
 - **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the
   per-session correlated-subquery N+1 that v2 `listMonitorSessions` shed.
 - **Why it matters**: left untouched to avoid investing in the deprecated surface.
@@ -114,7 +120,6 @@ These are the deferred follow-ups surfaced during and after the build.
 ### Context occupancy
 
 #### Monitor-card occupancy join not visually verified under live v1 hooks
-📥 noted
 - **What**: the Live inspector (pure v2) renders occupancy end-to-end; the Monitor
   cards read the v1 store and join v2 occupancy by session id. Svelte-checked and
   logically verified, but not screenshotted with a live hook/OTEL-fed active
@@ -124,28 +129,15 @@ These are the deferred follow-ups surfaced during and after the build.
   for Codex.
 
 #### Trajectory sparkline (occupancy gauge Task 8)
-📥 noted
 - **What**: session-lifetime occupancy fill over time with compaction drop-offs,
   in the detail/inspector surface.
 - **Why it matters**: gauge + pill shipped first; this is the fast-follow.
 - **Next**: needs a bounded sample buffer in the projection and a retention
   decision (see `docs/plans/2026-07-07-context-occupancy-gauge-plan.md`).
 
-#### Statusline can't authoritatively set the Claude window
-🗑 dropped
-- **What**: idea was to override the guarded 1M default with a real window from
-  the statusline bridge. The bridge forwards the full payload, but it carries no
-  numeric window/token count — only the boolean `exceeds_200k_tokens`, a usage
-  threshold, not a window size.
-- **Why it matters (dropped)**: `true` merely confirms ≥1M (no-op for the default)
-  and `false` is ambiguous (200K plan vs 1M plan under 200K), so it can't safely
-  set 200K. Real per-plan fidelity needs 200K-vs-1M *plan* detection, which no
-  ingested source exposes. Not worth building as framed.
-
 ### Invocation mode
 
 #### No `mode` filter facet in the Monitor FilterBar
-📥 noted
 - **What**: intentionally scoped out. `mode` lives in `sessions.metadata`
   (json_extract).
 - **Why it matters**: cheap to add if wanted, but a filterable/indexed path would
@@ -154,7 +146,6 @@ These are the deferred follow-ups surfaced during and after the build.
 ### Pricing
 
 #### Processing-service tier is not captured with usage events
-📥 noted
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
   record OpenAI Standard, Priority, Batch, or other processing-service tiers, so
   the registry cannot select service-tier-specific pricing.
@@ -163,7 +154,6 @@ These are the deferred follow-ups surfaced during and after the build.
   tier; do not infer it from the model ID.
 
 #### Claude Sonnet 5 intro pricing expires 2026-08-31
-📥 noted — now guarded by CI, no longer depends on anyone remembering
 - **What**: `claude.json` encodes intro rates ($2/$10, cacheRead $0.20, 5m write
   $2.50). Standard pricing ($3/$15, cacheRead $0.30, 5m write $3.75) takes effect
   2026-09-01.
@@ -177,25 +167,7 @@ These are the deferred follow-ups surfaced during and after the build.
 - **Real fix (still open)**: date-aware rates, so a model can carry a rate schedule
   rather than one set of numbers forever. The guard buys time; it is not the fix.
 
-#### Analytics Overview fan-out is NOT worth batching (measured 2026-07-14)
-🗑 dropped
-- **What**: `AnalyticsPage` fires ~9 independent fetches on mount, which looked
-  like the N-request fan-out `/usage/overview` had just fixed on the Usage page.
-- **Why it was dropped**: measured before building. Every analytics endpoint
-  returns in **1–4ms** against the 122K-row dev DB (~14ms of SQL for the whole
-  page), so there is no serialization cost to reclaim. The Usage win did not come
-  from batching per se — it came from *redundant* work: coverage was recomputed 8
-  times, each materializing 133K rows. Analytics has no equivalent redundancy, so
-  an `/api/v2/analytics/overview` would add a large second read surface to save
-  single-digit milliseconds.
-- **Also corrects an earlier claim**: this fan-out was blamed for the CI flake in
-  `search-analytics-capabilities.spec.ts:119`. It is not the cause. That spec's
-  seeded DB holds two sessions, so its queries are effectively instant; the flake
-  is cold-start timing in the Playwright harness, not query time. Diagnose it
-  there — see below — rather than by adding an endpoint.
-
 #### CI flake: analytics capability banner times out on a cold runner
-📥 noted
 - **What**: `search-analytics-capabilities.spec.ts:119` intermittently exceeds
   Playwright's 5s `expect` timeout waiting for the coverage banner. It passes on
   retry, so CI stays green and it reads as flaky rather than broken.

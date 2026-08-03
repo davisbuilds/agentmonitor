@@ -23,6 +23,8 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 - `docs/api/` — API navigation reference.
 - `docs/project/POSITIONING.md` — what the product is (Archetype B: local-first observability console for coding agents); scope, the Langfuse "collector not backend" stance, and the architectural implications that anchor the foundations work.
 - `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity).
+- `docs/project/DECISIONS.md` — durable decisions that are no longer active
+  follow-ups.
 - `docs/project/CURRENT_STATE.md` — high-change product/runtime notes moved out of the root README.
 - `docs/project/GIT_HISTORY_POLICY.md` — merge-commit + rebase policy (squash disabled) and rationale.
 - `frontend/AGENTS.md` — domain-specific guidance.
@@ -80,5 +82,5 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - **Push back before building.** If a request is incoherent or self-contradictory, or a spec/plan is vague or skips key decisions, stop and interview me — ask clarifying questions and confirm intent before writing code or changing files. Don't guess at scope or comply silently. (Clear, well-scoped requests don't need this.)
 - **Keep docs current.** After a significant change, PR, or completed spec/plan, update any now-stale reference docs under `docs/system/` (and `docs/project/ROADMAP.md`) so they match shipped behavior. Skip this for trivial changes.
 - **Commit logically.** Commit completed work in coherent chunks as you proceed. Push only when explicitly asked.
-- **Log findings in `BACKLOG.md`.** Note design gaps, tech debt, or better approaches you spot mid-task in `docs/project/BACKLOG.md`; fix simple/quick ones inline and call them out.
+- **Log durable follow-ups in `BACKLOG.md`.** Note design gaps, tech debt, or better approaches you spot mid-task in `docs/project/BACKLOG.md`; fix simple, quick, or blocking issues inline and call them out. Add an item only for recurring friction, meaningful risk/cost, an unresolved decision, or a concrete trigger. Record **What / Why or evidence / Next or Revisit when**; keep the backlog future-only, use the capability-owning repository as canonical for cross-repo work, date/source volatile claims (or label a hypothesis), and move shipped work to `docs/project/ROADMAP.md`. Review after a significant shipped slice or at least quarterly.
 - **Re-ground after compaction.** A compaction summary loses precise paths, context, and verification state — before continuing, re-read this project's `AGENTS.md`, its reference docs, and recent commits.
