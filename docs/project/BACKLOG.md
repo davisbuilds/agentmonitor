@@ -1,14 +1,15 @@
-# Improvement Backlog
+# Backlog
 
-Living list of **future** friction points, design gaps, and follow-up actions
-noticed while implementing specs. Lightweight — items get added when they bite,
-removed when they're done or proven not worth doing. Not a commitment for the
+Living list of **future** design gaps, tech debt, and better ways to do a thing
+noticed during normal execution. Fix simple, quick, or blocking issues inline;
+capture only durable follow-ups worth revisiting cold. Not a commitment for the
 active task unless explicitly pulled into scope; ROADMAP.md is the higher-bar
 shipped/directional view.
 
-Convention: each item has **What** (the friction), **Why it matters**, and
-optionally **Sketch** (a one-line implementation thought). Status one of:
-`📥 noted` / `🟡 in-progress` / `🗑 dropped`.
+Convention: each item has **What** (the friction), **Why or evidence**, and
+optionally **Next** (the smallest action that makes it actionable) or **Revisit
+when** (an intentional external or measurable gate). Status is usually omitted;
+use it only when it clarifies a gate or uncertainty.
 
 **Cite a number, or say it is a guess.** Any causal or performance claim here —
 "X is slow", "Y causes the flake" — carries a measurement, or is labelled
@@ -38,7 +39,7 @@ note here. This file stays future-only.
   events. The failure mode matches the one this repo already knows well — a bad
   normalization silently reshapes data into something plausible rather than throwing, so
   it surfaces as wrong numbers on the dashboard, not as an error.
-- **Sketch**: table-driven tests over the `normalize*`/`get*` helpers with malformed,
+- **Next**: table-driven tests over the `normalize*`/`get*` helpers with malformed,
   missing, and out-of-range fields; assert coercion vs. rejection explicitly. Noted
   2026-07-16 during the portfolio TDD-guidance pass.
 
@@ -51,7 +52,7 @@ note here. This file stays future-only.
   observable behavior.
 - **Why it matters**: the flag implies an auto-open default that does not exist,
   which makes the runtime CLI contract misleading.
-- **Sketch**: either implement browser opening after health readiness and honor
+- **Next**: either implement browser opening after health readiness and honor
   the opt-out, or remove the flag in a deliberate compatibility pass.
 
 ### Skill trigger health (2026-07-09)
@@ -69,7 +70,7 @@ These are the deferred follow-ups surfaced during and after the build.
   loop, so this coverage is the ceiling on phase-1 usefulness. Also:
   `versionApproximate` is ~always true today because snapshots are stamped with
   `now`; it only gains signal once the catalog is observed across a real bump.
-- **Sketch**: phase-2 catalog discovery for project-local `.claude/skills` and
+- **Next**: phase-2 catalog discovery for project-local `.claude/skills` and
   plugin catalogs; treat name+version identity carefully across sources.
 
 #### Validate (and likely widen) the misfire heuristic before consumers depend on it
@@ -82,7 +83,7 @@ These are the deferred follow-ups surfaced during and after the build.
   that's structurally near-zero can't. `misfireEligible` now exposes the
   denominator so a min-sample guard is possible, but the signal itself needs
   validation.
-- **Sketch**: widen to interrupt anywhere in the invoking assistant span, or add
+- **Next**: widen to interrupt anywhere in the invoking assistant span, or add
   lexical negation in the next prompt (both already scoped out of phase 1);
   measure against real sessions before building ranking on top.
 
@@ -97,7 +98,7 @@ These are the deferred follow-ups surfaced during and after the build.
 - **Why it matters**: current latency is acceptable, but this leg still scales
   with all retained Codex events and may become the next health-query bottleneck
   as history grows.
-- **Sketch**: benchmark a purpose-built partial/composite skill-event index
+- **Next**: benchmark a purpose-built partial/composite skill-event index
   against the real predicate and ordering; retain it only if the planner uses it
   and write cost/storage remain justified.
 
@@ -108,7 +109,7 @@ These are the deferred follow-ups surfaced during and after the build.
 - **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the
   per-session correlated-subquery N+1 that v2 `listMonitorSessions` shed.
 - **Why it matters**: left untouched to avoid investing in the deprecated surface.
-- **Sketch**: apply the same CTE rewrite if v1 is kept.
+- **Next**: apply the same CTE rewrite if v1 is kept.
 
 ### Context occupancy
 
@@ -127,7 +128,7 @@ These are the deferred follow-ups surfaced during and after the build.
 - **What**: session-lifetime occupancy fill over time with compaction drop-offs,
   in the detail/inspector surface.
 - **Why it matters**: gauge + pill shipped first; this is the fast-follow.
-- **Sketch**: needs a bounded sample buffer in the projection and a retention
+- **Next**: needs a bounded sample buffer in the projection and a retention
   decision (see `docs/plans/2026-07-07-context-occupancy-gauge-plan.md`).
 
 #### Statusline can't authoritatively set the Claude window
@@ -204,5 +205,5 @@ These are the deferred follow-ups surfaced during and after the build.
   are `tool_analytics: full`, so `excluded_sessions` is always 0 and the banner
   cannot flip branches). Most likely first-navigation cost — it is the first test
   in the file — but that is unconfirmed.
-- **Sketch**: instrument the wait before changing the timeout. Raising it would
+- **Next**: instrument the wait before changing the timeout. Raising it would
   hide the cause, and the point is to learn whether first paint is genuinely slow.
