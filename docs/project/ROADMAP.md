@@ -9,9 +9,11 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 - Cache-inclusive unknown-pricing visibility (2026-08-04) — *What:* Top Models now
   offers an All tokens view that includes input, output, cache-read, and cache-write
   traffic; model tables use the same total. The Usage page persistently identifies
-  unknown-priced models, their cache-inclusive observed tokens, and their event count
-  without fabricating a cost. *Why:* a cache-heavy new model can otherwise have $0
-  stored cost before its pricing record arrives and vanish from the default Cost view.
+  pricing-incomplete models, their cache-inclusive observed tokens, and their event count
+  without fabricating a cost. The warning stays visible when a formerly unknown model
+  receives pricing but its historical $0 rows still need `amon costs recalc`. *Why:* a
+  cache-heavy new model can otherwise vanish from the default Cost view before or after
+  its pricing record arrives.
 - Configurable Claude history root (2026-07-29) — *What:*
   `AGENTMONITOR_CLAUDE_DIR` now supplies one Claude data root to startup sync,
   live and periodic watcher discovery, automatic and historical event import,
