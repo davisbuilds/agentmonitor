@@ -51,6 +51,22 @@ describe('usage top models: series selection', () => {
     const points = [day(slice('opus', 5, 0), slice('ghost', 0, 0))];
     assert.deepEqual(rankModels(points, 'cost'), ['opus']);
   });
+
+  test('ranks cache-heavy unknown-priced models by all observed tokens', () => {
+    const points = [day(
+      slice('known-model', 10, 100),
+      {
+        model: 'unknown-model',
+        cost_usd: 0,
+        input_tokens: 1,
+        output_tokens: 1,
+        cache_read_tokens: 10_000,
+        cache_write_tokens: 500,
+      } as ModelDailyPointLike['models'][number],
+    )];
+
+    assert.equal(rankModels(points, 'tokens')[0], 'unknown-model');
+  });
 });
 
 describe('usage top models: color assignment', () => {
