@@ -54,6 +54,17 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.deprecated, false);
     });
 
+    test('finds Claude Opus 5 and applies its published base and cache rates', () => {
+      const pricing = registry.lookup('claude-opus-5');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.inputCostPerToken, 5 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 25 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.5 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 6.25 / 1_000_000);
+      assert.equal(pricing.deprecated, false);
+    });
+
     test('finds Claude Fable 5 with the published per-MTok rates', () => {
       const pricing = registry.lookup('claude-fable-5');
       assert.ok(pricing);
@@ -221,6 +232,15 @@ describe('PricingRegistry', () => {
       assert.equal(c.provider, 'anthropic');
       assert.equal(c.family, 'claude');
       assert.equal(c.tier, 'fable');
+      assert.equal(c.pricing_status, 'known');
+    });
+
+    test('classifies Claude Opus 5 as a known anthropic/opus tier', () => {
+      const c = classifyModel('claude-opus-5');
+      assert.equal(c.canonical_model, 'claude-opus-5');
+      assert.equal(c.provider, 'anthropic');
+      assert.equal(c.family, 'claude');
+      assert.equal(c.tier, 'opus');
       assert.equal(c.pricing_status, 'known');
     });
 
