@@ -145,22 +145,6 @@ These are the deferred follow-ups surfaced during and after the build.
 
 ### Pricing
 
-#### Top Models hides cache-heavy unknown-priced usage in its default view
-- **What**: Top Models defaults to Cost and renders only input + output tokens under
-  its Tokens toggle; cache-read and cache-write tokens are omitted. An unknown-priced
-  model with `cost_usd = 0` consequently appears in neither the Cost chart nor its
-  `Other` segment, even when its cache volume dominates model usage.
-- **Why it matters**: on the live database, `claude-opus-5` had 4,416 events across
-  8 sessions from 2026-07-25 through 2026-08-04: 4,185,757 input + output tokens,
-  1,033,353,152 cache tokens, and no stored cost because the runtime predated its
-  pricing record. It ranked second by the chart's current Tokens definition but was
-  entirely absent from the default Cost chart, masking both model adoption and
-  unpriced spend.
-- **Next**: decide whether the chart's Tokens metric should include cache traffic;
-  independently surface nonzero unknown-priced usage (for example, a visible
-  unpriced-cost state or chart annotation) so $0 does not mean no activity. Add a
-  live-data regression at the usage-overview/chart seam before changing the UI.
-
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
   record OpenAI Standard, Priority, Batch, or other processing-service tiers, so

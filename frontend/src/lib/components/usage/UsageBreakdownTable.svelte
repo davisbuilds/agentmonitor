@@ -36,6 +36,11 @@
     return base;
   }
 
+  function tokenTotal(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): number {
+    const base = row.input_tokens + row.output_tokens;
+    return kind === 'model' ? base + row.cache_read_tokens + row.cache_write_tokens : base;
+  }
+
   function handleSelect(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): void {
     if (kind === 'project' && 'project' in row) {
       void usage.setProject(row.project === 'unknown' ? '' : row.project);
@@ -90,7 +95,7 @@
             <div class="text-right">
               <div class="tabular font-mono text-body text-ok">{formatCost(row.cost_usd)}</div>
               <div class="mt-0.5 tabular font-mono text-meta text-text-faint">
-                {formatNumber(row.input_tokens + row.output_tokens)} tokens
+                {formatNumber(tokenTotal(row))} {kind === 'model' ? 'observed tokens' : 'tokens'}
               </div>
             </div>
           </div>

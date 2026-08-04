@@ -92,12 +92,12 @@
     <div>
       <h3 class="text-h3">Top Models</h3>
       <p class="mt-0.5 text-meta text-text-muted">
-        Model mix by day. Click a day to drill the page into it.
+        Model mix by day. All tokens include cache reads and writes. Click a day to drill the page into it.
       </p>
     </div>
 
     <div class="flex shrink-0 rounded-sm border border-line" role="group" aria-label="Metric">
-      {#each [{ id: 'cost', label: 'Cost' }, { id: 'tokens', label: 'Tokens' }] as option}
+      {#each [{ id: 'cost', label: 'Cost' }, { id: 'tokens', label: 'All tokens' }] as option}
         <button
           class="px-2 py-1 text-meta transition-colors first:rounded-l-sm last:rounded-r-sm
             {metric === option.id ? 'bg-surface-2 text-text' : 'text-text-faint hover:text-text-muted'}"

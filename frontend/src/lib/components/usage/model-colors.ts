@@ -14,6 +14,8 @@ export interface ModelSliceLike {
   cost_usd: number;
   input_tokens: number;
   output_tokens: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
 }
 
 export interface ModelDailyPointLike {
@@ -47,7 +49,9 @@ if (TOP_N > SERIES_COLORS.length) {
 export const METRICS: UsageMetric[] = ['cost', 'tokens'];
 
 export function measure(slice: ModelSliceLike, metric: UsageMetric): number {
-  return metric === 'cost' ? slice.cost_usd : slice.input_tokens + slice.output_tokens;
+  return metric === 'cost'
+    ? slice.cost_usd
+    : slice.input_tokens + slice.output_tokens + (slice.cache_read_tokens ?? 0) + (slice.cache_write_tokens ?? 0);
 }
 
 /** Models ranked over the whole range, so a model keeps its stack slot across days. */
@@ -70,7 +74,7 @@ export function rankModels(points: readonly ModelDailyPointLike[], metric: Usage
  * A model's hue must survive the metric toggle, so colors cannot be handed out by
  * rank — that repaints every survivor the moment the ranking changes. But they also
  * cannot be keyed to the cost ranking alone: a token-heavy, cheap model can enter the
- * Tokens top-N while sitting outside it, and would fall through to Other's gray,
+ * All-tokens top-N while sitting outside it, and would fall through to Other's gray,
  * putting two different categories on one color.
  *
  * So color the union of every metric's top-N — every model that can actually appear —
