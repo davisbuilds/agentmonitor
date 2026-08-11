@@ -13,7 +13,7 @@ test('Analytics keeps consultation overview bounded and provides a filterable ex
   page,
 }) => {
   fs.mkdirSync(artifactDir, { recursive: true });
-  await page.goto(`${baseUrl}/app/#analytics`);
+  await page.goto(`${baseUrl}/app/#analytics?from=2026-07-01&to=2026-07-29`);
 
   const preview = page.getByRole('region', { name: 'Skill consultations' });
   await expect(preview).toBeVisible();
