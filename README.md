@@ -48,6 +48,8 @@ Prefer to do it yourself? The manual steps are below.
 - Exposes a lean local trace-quality view (one trace per session) — a content-free per-session summary plus on-demand observation detail.
 - Provides provider-native quota snapshots through `/api/provider-quotas`.
 - Ships a local operator CLI. The preferred command is `amon`; `agentmonitor` is an equivalent executable alias.
+- Creates validated, single-file SQLite backups through the one-shot
+  `amon database backup` command while the normal WAL runtime remains active.
 - Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
 - Reports per-skill trigger health plus additive, per-harness consultation
   decomposition (first read, post-compaction rehydration, repeat, and
@@ -120,6 +122,7 @@ amon serve --no-portless         # Direct runtime on http://127.0.0.1:3141
 pnpm cli -- --help               # CLI help during local development
 pnpm cli -- health               # Check the local server
 pnpm cli -- sessions list --json # Query session history from SQLite
+pnpm cli -- database backup --output /private/path/agentmonitor.db # Closed SQLite copy
 pnpm cli -- import --dry-run     # Preview historical import
 pnpm lint                        # ESLint
 pnpm test                        # Node test runner suite

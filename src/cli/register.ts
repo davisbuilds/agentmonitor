@@ -1,4 +1,5 @@
 import { listCommands, registerCommand } from './commands.js';
+import { registerDatabaseCommands } from './commands/database.js';
 import { registerHookCommands } from './commands/hooks.js';
 import { registerMaintenanceCommands } from './commands/maintenance.js';
 import { registerReportingCommands } from './commands/reporting.js';
@@ -15,6 +16,7 @@ export function registerAllCommands(): void {
   registered = true;
 
   registerRuntimeCommands();
+  registerDatabaseCommands();
   registerMaintenanceCommands();
   registerSessionLiveCommands();
   registerReportingCommands();

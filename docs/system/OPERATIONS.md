@@ -36,8 +36,8 @@ opening a listener or starting background work and reports the owner PID and
 canonical DB path. Ownership left by a dead process is recovered automatically;
 do not delete the adjacent `.runtime.lock` file while its reported PID is live.
 Different explicit DB paths can run concurrently. One-shot commands such as
-`amon status`, reporting, import, sync, cost recalculation, and warehouse publish
-are intentionally not excluded by runtime ownership.
+`amon status`, reporting, database backup, import, sync, cost recalculation, and
+warehouse publish are intentionally not excluded by runtime ownership.
 
 On bind failure or SIGINT/SIGTERM, the runtime first stops the HTTP listener from
 accepting automatic EventSource reconnects, then stops timers, closes SSE clients
@@ -102,6 +102,7 @@ pnpm cli -- open
 pnpm cli -- import --source claude-code --dry-run
 pnpm cli -- sync sessions --source codex --force
 pnpm cli -- costs recalc --dry-run
+pnpm cli -- database backup --output /private/path/agentmonitor.db
 pnpm cli -- quality traces --json
 pnpm cli -- warehouse publish --dry-run --json
 
@@ -286,20 +287,47 @@ Operational notes:
   build this session-browser projection.
 - Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
 
-### Database recovery safety
+### Database backup and recovery safety
 
-Before any repair that rewrites the install database, stop duplicate runtimes
-and create a consistent SQLite backup:
+Use the one-shot CLI to create an application-consistent, closed SQLite copy
+while the normal WAL writer remains active. The parent directory must already
+exist, be owned by the current user, have no group/other permissions, and not be
+a symlink:
 
 ```bash
-sqlite3 data/agentmonitor.db ".backup 'data/agentmonitor.pre-recovery.db'"
+install -d -m 700 /private/path
+amon database backup \
+  --output /private/path/agentmonitor.db \
+  --json
+
+# Later runs replace only a regular export file through an atomic rename.
+amon database backup \
+  --output /private/path/agentmonitor.db \
+  --replace \
+  --json
+```
+
+The command uses SQLite's online backup API, converts the copy to `DELETE`
+journal mode, runs full `PRAGMA integrity_check` and `foreign_key_check`, and
+publishes a mode-`0600` database only after validation. It refuses relative
+paths, the source DB and its sidecars, symlinks, non-regular existing targets,
+broad parent permissions, stale output WAL/SHM/journal files, and replacement
+without `--replace`. It creates no retention policy and never removes an old
+sidecar on the operator's behalf.
+
+Before a repair that rewrites the install database, stop duplicate runtimes,
+create this backup, and confirm which process still owns the source:
+
+```bash
 lsof -nP data/agentmonitor.db data/agentmonitor.db-wal data/agentmonitor.db-shm
 ```
 
 Keep the DB, WAL, and SHM files together if preserving a raw forensic snapshot;
-copying only the main DB while a writer is active is not a complete snapshot.
-The test runner has a hard interlock that refuses the install DB, but maintenance
-commands are intentionally allowed to mutate an explicitly selected database.
+copying only the live main DB while a writer is active is not a complete
+snapshot. The validated CLI export is a different, self-contained recovery
+artifact. The test runner has a hard interlock that refuses the install DB, but
+maintenance commands are intentionally allowed to mutate an explicitly selected
+database.
 
 ## Trace Quality Reclaim
 
