@@ -62,10 +62,10 @@
     }
   },
   "dependencies": {
-    "better-sqlite3": "^13.0.2",
+    "better-sqlite3": "^13.0.3",
     "chokidar": "^5.0.0",
     "express": "^5.2.1",
-    "pg": "^8.22.0",
+    "pg": "^8.23.0",
     "portless": "0.15.5",
     "uuid": "^14.0.1"
   },
@@ -75,12 +75,12 @@
     "@tailwindcss/cli": "^4.3.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.1.2",
-    "@types/pg": "^8.20.3",
-    "eslint": "^10.8.0",
+    "@types/node": "^26.2.0",
+    "@types/pg": "^8.21.0",
+    "eslint": "^10.8.1",
     "tailwindcss": "^4.3.3",
-    "tsx": "^4.23.5",
+    "tsx": "^4.23.12",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.65.0"
+    "typescript-eslint": "^8.66.0"
   }
 }
