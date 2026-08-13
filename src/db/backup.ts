@@ -80,18 +80,45 @@ function resolveSource(source: string): string {
   return fs.realpathSync(absolute);
 }
 
+function assertDistinctFileIdentity(output: string, protectedPaths: string[]): void {
+  let outputInfo: fs.Stats;
+  try {
+    outputInfo = fs.lstatSync(output);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+  if (outputInfo.isSymbolicLink()) return;
+
+  for (const protectedPath of protectedPaths) {
+    let protectedInfo: fs.Stats;
+    try {
+      protectedInfo = fs.statSync(protectedPath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
+    if (outputInfo.dev === protectedInfo.dev && outputInfo.ino === protectedInfo.ino) {
+      policyFailure('Backup output must not overlap the source database or its sidecars.');
+    }
+  }
+}
+
 function resolveOutput(source: string, requested: string): string {
   if (!path.isAbsolute(requested)) policyFailure('Backup output path must be absolute.');
   const parent = assertPrivateOwnedDirectory(path.dirname(requested));
   const output = path.join(parent, path.basename(requested));
-  const protectedPaths = new Set([
+  const protectedPaths = [
     source,
     `${source}-wal`,
     `${source}-shm`,
     `${source}-journal`,
     `${source}.runtime.lock`,
-  ]);
-  if (protectedPaths.has(output)) policyFailure('Backup output must not overlap the source database or its sidecars.');
+  ];
+  if (protectedPaths.includes(output)) {
+    policyFailure('Backup output must not overlap the source database or its sidecars.');
+  }
+  assertDistinctFileIdentity(output, protectedPaths);
   return output;
 }
 

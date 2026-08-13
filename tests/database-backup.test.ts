@@ -191,6 +191,77 @@ test('database backup refuses an existing export unless replacement is explicit 
   }
 });
 
+test('database backup refuses an existing destination with the source file identity', async () => {
+  const fixture = newFixture('source-identity');
+  const alias = path.join(fixture.outputDir, 'source-hard-link.db');
+  try {
+    fs.linkSync(fixture.source, alias);
+    const sourceBefore = fs.statSync(fixture.source);
+
+    const result = await runCli([
+      '--db-path', fixture.source,
+      'database', 'backup',
+      '--output', alias,
+      '--replace',
+    ]);
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /source database or its sidecars/);
+    assert.equal(fs.statSync(fixture.source).ino, sourceBefore.ino);
+    assert.equal(fs.statSync(alias).ino, sourceBefore.ino);
+    assert.equal(
+      (fixture.writer.prepare('SELECT value FROM backup_canary').get() as { value: string }).value,
+      'captured-before-backup',
+    );
+  } finally {
+    cleanupFixture(fixture);
+  }
+});
+
+test('database backup refuses a case-varied alias of the source on case-insensitive filesystems', async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-database-backup-case-alias-'));
+  const source = path.join(root, 'live.db');
+  const caseVariedOutput = path.join(root, 'LIVE.DB');
+  try {
+    const database = new Database(source);
+    database.exec(`
+      CREATE TABLE backup_canary (value TEXT NOT NULL);
+      INSERT INTO backup_canary (value) VALUES ('must-not-be-replaced');
+    `);
+    database.close();
+
+    if (!fs.existsSync(caseVariedOutput) || fs.statSync(caseVariedOutput).ino !== fs.statSync(source).ino) {
+      t.skip('requires a case-insensitive filesystem');
+      return;
+    }
+    const sourceBefore = fs.statSync(source);
+
+    const result = await runCli([
+      '--db-path', source,
+      'database', 'backup',
+      '--output', caseVariedOutput,
+      '--replace',
+    ]);
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /source database or its sidecars/);
+    assert.equal(fs.statSync(source).ino, sourceBefore.ino);
+    const unchanged = new Database(source, { readonly: true, fileMustExist: true });
+    try {
+      assert.equal(
+        (unchanged.prepare('SELECT value FROM backup_canary').get() as { value: string }).value,
+        'must-not-be-replaced',
+      );
+    } finally {
+      unchanged.close();
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('database backup rejects unsafe destinations without changing their targets', async () => {
   const fixture = newFixture('unsafe');
   try {
