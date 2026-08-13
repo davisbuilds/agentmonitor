@@ -72,7 +72,10 @@ runtime ownership.
 One-shot commands avoid importing `src/server.ts`; they either call shared
 service/query modules directly or, for live HTTP/SSE workflows, call the running
 localhost server. CLI reads for sessions, usage, analytics, and trace quality use
-the same v2 query/service layer that backs the Svelte app. `amon live watch`
+the same v2 query/service layer that backs the Svelte app. `amon database backup`
+opens a separate read-only connection and uses SQLite's online backup API so the
+active WAL writer need not stop; `src/db/backup.ts` privately stages, closes,
+fully validates, and atomically publishes the single-file copy. `amon live watch`
 connects to `/api/v2/live/stream` and exits unavailable when no server is
 running.
 
@@ -95,6 +98,8 @@ SQLite via `better-sqlite3` with WAL mode.
 
 - All SQL lives in `src/db/queries.ts` (no ad-hoc DB logic in route handlers).
 - Schema initialization and backward-compatible migrations in `src/db/schema.ts`.
+- Application-consistent export lives in `src/db/backup.ts`; it never copies a
+  live main/WAL/SHM set and never publishes before integrity validation.
 - Indexes on `created_at`, `session_id`, `event_type`, `tool_name`, `agent_type`, `model`.
 
 ## SSE Broadcasting

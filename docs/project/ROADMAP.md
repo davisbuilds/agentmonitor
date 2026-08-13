@@ -6,6 +6,15 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Application-consistent database export (2026-08-13) — *What:* the one-shot
+  `amon database backup --output <absolute-path>` command now uses SQLite's
+  online backup API alongside the active WAL runtime, stages the copy under a
+  private parent, converts it to a self-contained `DELETE`-journal database,
+  runs full integrity and foreign-key checks, and atomically publishes mode
+  `0600`. Replacement is explicit; source/sidecar overlap, symlinks, broad
+  parents, stale destination sidecars, and non-regular targets fail closed.
+  *Why:* copying the live main DB without its WAL is inconsistent, while an ops
+  backup job needs one validated artifact without stopping observability.
 - Cache-inclusive unknown-pricing visibility (2026-08-04) — *What:* Top Models now
   offers an All tokens view that includes input, output, cache-read, and cache-write
   traffic; model tables use the same total. The Usage page persistently identifies
