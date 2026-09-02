@@ -2416,6 +2416,12 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilt
     conditions.push(`datetime(${timestampExpr}) < datetime(?, '+1 day')`);
     values.push(params.date_to);
   }
+  // Segregate batch-imported benchmark runs from real-activity aggregates unless
+  // the caller opts in. A NULL source predates the column default and is never a
+  // benchmark row, so keep it.
+  if (!params.include_benchmark) {
+    conditions.push(`(${alias}.source IS NULL OR ${alias}.source != 'benchmark')`);
+  }
 
   return {
     conditions,

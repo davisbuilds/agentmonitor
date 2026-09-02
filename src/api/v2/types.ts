@@ -1445,6 +1445,12 @@ export interface UsageParams {
   provider?: string;
   tier?: string;
   limit?: number;
+  /**
+   * Include batch-imported benchmark events (source='benchmark') in the result.
+   * Off by default: benchmark runs are segregated so a bake-off does not pollute
+   * real-activity cost/usage aggregates. See the 'benchmark' EventSource.
+   */
+  include_benchmark?: boolean;
 }
 
 export interface TraceQualityTraceListParams {

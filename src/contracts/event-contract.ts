@@ -24,6 +24,10 @@ const _EVENT_SOURCES = [
   'hook',
   'otel',
   'import',
+  // Batch-imported external benchmark runs (openbench results.jsonl). Segregated
+  // from the default cost/usage/analytics aggregates so a bake-off does not
+  // pollute real-activity numbers; opt in via UsageParams.include_benchmark.
+  'benchmark',
 ] as const;
 
 const EVENT_TYPE_SET = new Set<string>(EVENT_TYPES);
