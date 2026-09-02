@@ -538,6 +538,7 @@ function readAnalyticsParams(req: Request): {
   model?: string;
   provider?: string;
   tier?: string;
+  include_benchmark?: boolean;
   limit?: number;
 } {
   return {
@@ -548,6 +549,7 @@ function readAnalyticsParams(req: Request): {
     model: req.query.model as string | undefined,
     provider: req.query.provider as string | undefined,
     tier: req.query.tier as string | undefined,
+    include_benchmark: req.query.include_benchmark === 'true',
     limit: safeInt(req.query.limit as string),
   };
 }

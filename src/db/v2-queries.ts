@@ -75,7 +75,7 @@ import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
-import { excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
+import { excludeBenchmarkUsageCondition, excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
 import { getSkillConsultationAnalytics } from '../skills/consultation-analytics.js';
 
@@ -1434,7 +1434,10 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   const db = getDb();
   updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
 
-  const conditions: string[] = [];
+  // The Monitor is the live-activity view: batch-imported benchmark rows are
+  // always excluded from its aggregates (no opt-in), and benchmark sessions are
+  // marked ended at insert so they never reach the live session lists/counts.
+  const conditions: string[] = [excludeBenchmarkUsageCondition('e')];
   const values: unknown[] = [];
 
   if (params.agent) {
@@ -2416,6 +2419,12 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilt
     conditions.push(`datetime(${timestampExpr}) < datetime(?, '+1 day')`);
     values.push(params.date_to);
   }
+  // Segregate batch-imported benchmark runs from real-activity aggregates unless
+  // the caller opts in. A NULL source predates the column default and is never a
+  // benchmark row, so keep it.
+  if (!params.include_benchmark) {
+    conditions.push(`(${alias}.source IS NULL OR ${alias}.source != 'benchmark')`);
+  }
 
   return {
     conditions,
@@ -3354,8 +3363,12 @@ export function getUsageTopSessions(
 export function getUsageFacets(params: UsageParams = {}): UsageFacets {
   const db = getDb();
   // Only dates constrain the SQL here; project/agent are applied per-facet in JS
-  // below, alongside the classification filters SQL cannot express.
-  const filter = buildUsageFilterState({ date_from: params.date_from, date_to: params.date_to }, 'e');
+  // below, alongside the classification filters SQL cannot express. Carry the
+  // benchmark opt-in so facets stay consistent with the other usage panels.
+  const filter = buildUsageFilterState(
+    { date_from: params.date_from, date_to: params.date_to, include_benchmark: params.include_benchmark },
+    'e',
+  );
   const where = [
     ...filter.conditions,
     usageMetricsCondition('e'),

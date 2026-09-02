@@ -491,17 +491,17 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Sonnet 5 (introductory pricing, in effect through 2026-08-31) ──────
+  // ─── Sonnet 5 (standard pricing; introductory rates lapsed 2026-08-31) ──
   describe('Claude Sonnet 5', () => {
-    test('resolves with introductory per-MTok rates ($2/$10, cacheRead $0.20, 5m write $2.50)', () => {
+    test('resolves with standard per-MTok rates ($3/$15, cacheRead $0.30, 5m write $3.75)', () => {
       const pricing = registry.lookup('claude-sonnet-5');
       assert.ok(pricing);
       assert.equal(pricing.provider, 'anthropic');
       assert.equal(pricing.deprecated, false);
-      assert.equal(pricing.inputCostPerToken, 2 / 1_000_000);
-      assert.equal(pricing.outputCostPerToken, 10 / 1_000_000);
-      assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
-      assert.equal(pricing.cacheWriteCostPerToken, 2.5 / 1_000_000);
+      assert.equal(pricing.inputCostPerToken, 3 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 15 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.3 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 3.75 / 1_000_000);
     });
 
     test('classifies as a known anthropic/sonnet tier', () => {
@@ -512,7 +512,7 @@ describe('PricingRegistry', () => {
       assert.equal(c.pricing_status, 'known');
     });
 
-    test('calculates cost at introductory rates', () => {
+    test('calculates cost at standard rates', () => {
       const cost = registry.calculate('claude-sonnet-5', {
         input: 100_000,
         output: 50_000,
@@ -520,8 +520,8 @@ describe('PricingRegistry', () => {
         cacheWrite: 10_000,
       });
       assert.ok(cost !== null);
-      // 100K*$2 + 50K*$10 + 500K*$0.20 + 10K*$2.50 (per MTok)
-      const expected = 0.2 + 0.5 + 0.1 + 0.025;
+      // 100K*$3 + 50K*$15 + 500K*$0.30 + 10K*$3.75 (per MTok)
+      const expected = 0.3 + 0.75 + 0.15 + 0.0375;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
     });
   });
@@ -630,6 +630,47 @@ describe('PricingRegistry', () => {
 
     test('returns null for an unknown model', () => {
       assert.equal(registry.effectiveRates('not-a-model', { input: 1, output: 1 }), null);
+    });
+  });
+
+  // OpenRouter-routed benchmark models (openbench bake-off). Rates are the
+  // OpenRouter 2026-08-27 snapshot embedded in
+  // _forks/openbench/experiments/analyze_cost.py; reasoning tokens are billed at
+  // the output rate, the vendor convention, so callers fold reasoning into
+  // `output` before calling calculate().
+  describe('OpenRouter benchmark models', () => {
+    test('prices glm-5.3-flash across all four token classes', () => {
+      const cost = registry.calculate('glm-5.3-flash', {
+        input: 1_000_000,
+        output: 1_000_000,
+        cacheRead: 1_000_000,
+        cacheWrite: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      // 0.075 in + 0.25 out + 0.015 cacheRead + 0.075 cacheWrite
+      assert.ok(Math.abs(cost - (0.075 + 0.25 + 0.015 + 0.075)) < 1e-9, `got ${cost}`);
+    });
+
+    test('prices deepseek-v4-flash-0731', () => {
+      const cost = registry.calculate('deepseek-v4-flash-0731', {
+        input: 1_000_000,
+        output: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      assert.ok(Math.abs(cost - (0.06 + 0.12)) < 1e-9, `got ${cost}`);
+    });
+
+    test('prices minimax-m3', () => {
+      const cost = registry.calculate('minimax-m3', {
+        input: 1_000_000,
+        output: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      assert.ok(Math.abs(cost - (0.3 + 1.2)) < 1e-9, `got ${cost}`);
+    });
+
+    test('resolves the OpenRouter slug alias to the bench model id', () => {
+      assert.equal(registry.resolve('minimax/minimax-m3')?.canonicalModel, 'minimax-m3');
     });
   });
 });

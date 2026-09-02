@@ -100,7 +100,7 @@ export class PricingRegistry {
     // Works in dev (tsx: src/pricing/) and prod (dist/pricing/ after copy)
     const dataDir = path.join(__dirname, 'data');
 
-    for (const file of ['claude.json', 'codex.json', 'gemini.json']) {
+    for (const file of ['claude.json', 'codex.json', 'gemini.json', 'openrouter.json']) {
       try {
         const raw = readFileSync(path.join(dataDir, file), 'utf-8');
         const data = JSON.parse(raw) as PricingDataFile;

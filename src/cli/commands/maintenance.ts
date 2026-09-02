@@ -155,6 +155,51 @@ export function registerMaintenanceCommands(): void {
   });
 
   registerCommand({
+    name: 'import benchmark',
+    group: 'Data Commands',
+    summary: 'Import an openbench results.jsonl as segregated benchmark events',
+    usage: 'import benchmark <path/to/results.jsonl> [--dry-run]',
+    examples: [
+      'import benchmark data/run-2026-08-29/results.jsonl',
+      'import benchmark results.jsonl --dry-run --json',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set(['--dry-run']));
+      const [file, ...extra] = parsed.positionals;
+      if (!file) {
+        throw invalidUsage('Missing results.jsonl path. Usage: amon import benchmark <path> [--dry-run]');
+      }
+      rejectExtraPositionals(extra, 'amon import benchmark <path> [--dry-run]');
+
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb } = await import('../../db/connection.js');
+      const { importBenchmarkResults } = await import('../../import/benchmark.js');
+      initSchema();
+      try {
+        const result = importBenchmarkResults(file, { dryRun: parsed.flags.has('--dry-run') });
+        printSummary(ctx, 'Benchmark import results', {
+          dry_run: parsed.flags.has('--dry-run'),
+          file: result.file,
+          rows_read: result.rowsRead,
+          events_imported: result.eventsImported,
+          duplicates: result.duplicates,
+          costs_backfilled: result.costsBackfilled,
+          skipped: result.skipped,
+          unpriced_models: result.unpricedModels.join(', ') || '(none)',
+        });
+        if (result.unpricedModels.length > 0) {
+          throw partialSuccess(
+            `Imported with ${result.unpricedModels.length} unpriced model(s) billed as null: `
+            + `${result.unpricedModels.join(', ')}. Add rates to src/pricing/data/openrouter.json.`,
+          );
+        }
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'sync sessions',
     group: 'Data Commands',
     summary: 'Sync Claude and Codex session-browser files',
