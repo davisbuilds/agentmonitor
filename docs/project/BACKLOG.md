@@ -54,6 +54,47 @@ note here. This file stays future-only.
   missing, and out-of-range fields; assert coercion vs. rejection explicitly. Noted
   2026-07-16 during the portfolio TDD-guidance pass.
 
+#### Benchmark segregation is v2-only; v1 `getStats` still includes benchmark rows
+- **What**: the `source='benchmark'` opt-in exclusion (shipped 2026-09-02) lives
+  at the v2 usage seam (`buildUsageFilterState`), so the canonical `/app` usage,
+  analytics, and insights surfaces exclude benchmark rows by default. The legacy
+  v1 `getStats`/cost aggregates in `src/db/queries.ts` do **not** filter on
+  source, so the transitional `/` dashboard and any v1 cost totals still fold
+  benchmark cells in.
+- **Why it matters**: a large bake-off would inflate the legacy dashboard's
+  totals. Low urgency because `/` is on the reduction path (see ROADMAP) and the
+  live Monitor is unaffected (benchmark is batch/historical, never a live source).
+- **Next / Revisit when**: reducing the legacy surface, or the first time a
+  benchmark import visibly skews a v1 number. Either extend the exclusion to the
+  v1 aggregates or accept it as a known legacy gap. Noted 2026-09-02.
+
+#### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
+- **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
+  deepseek-v4-flash-0731, minimax-m3) and the codex/claude daily drivers, but
+  surfaces `laguna-s-2.1` and `nemotron-3-ultra` as unpriced (billed null, loud
+  non-zero exit) in current runs.
+- **Why it matters / evidence**: `laguna-s-2.1` is routed `:free` in
+  `_forks/openbench/obench/bridge/config.yaml` yet the fork's root `prices.json`
+  lists 0.1/0.2 — free-vs-paid is genuinely ambiguous, so a rate was **not**
+  guessed. `nemotron-3-ultra` has no authoritative source in the fork at all.
+- **Next / Revisit when**: these models re-enter a run whose costs matter. Confirm
+  the tier (free → 0, or the paid OpenRouter rate) from a live
+  `openrouter.ai/api/v1/models` pull, then add entries to
+  `src/pricing/data/openrouter.json`. Noted 2026-09-02.
+
+#### `v2-queries.ts` holds a NUL byte that silently blinds `grep`/`rg`
+- **What**: line ~1836 builds a composite key as `` `${name}\x00${version}` ``.
+  The literal NUL makes ripgrep and grep treat the whole file as binary, so a
+  plain `grep`/`rg` for any symbol below that line (all the `getUsage*` functions)
+  returns **nothing** with no error — the "absence is a claim about the
+  instrument" trap. Cost real time during the 2026-09-02 benchmark work.
+- **Why it matters**: the file is 3.5k lines and central; a silent search miss
+  here reads as "the function doesn't exist."
+- **Next / Revisit when**: touching that key construction. Options: replace the
+  NUL delimiter with a printable sentinel (e.g. `\x1f`/`␟`), or build the key
+  via `String.fromCharCode(0)` so no NUL sits in the source bytes. Low urgency;
+  primarily a tooling-legibility hazard. Noted 2026-09-02.
+
 ### Runtime CLI
 
 #### `amon serve --no-browser` is accepted but has no effect
@@ -179,3 +220,29 @@ These are the deferred follow-ups surfaced during and after the build.
   in the file — but that is unconfirmed.
 - **Next**: instrument the wait before changing the timeout. Raising it would
   hide the cause, and the point is to learn whether first paint is genuinely slow.
+
+#### OTEL metrics without token/cost deltas are silently dropped
+- **What**: `POST /api/otel/v1/metrics` (`src/api/otel.ts`) only persists a
+  metric when it carries a token or cost delta (`if (!hasTokens && !hasCost)
+  continue;`). Operational counters that carry a status/label but no
+  tokens/cost — e.g. Codex's `codex.memory.startup` counter, whose `status` tag
+  is `skipped_rate_limit` / success / etc. — are discarded on ingest, so nothing
+  about them ever reaches the DB.
+- **Why it matters**: agentmonitor is the local observability console for Codex,
+  yet it cannot answer operational questions like "is Codex's memory
+  consolidation running, and if not, why is it skipping?" The counter is exported
+  to `127.0.0.1:3141` and thrown away. Diagnosing a real Codex consolidation
+  stall (2026-08-30) had to fall back to reading the Codex binary + source
+  because the console was blind to the signal it was already receiving. This is
+  the "absence is a claim about the instrument" trap: an empty query looked like
+  "never happened" when the ingest path had dropped it.
+- **Evidence**: `src/api/otel.ts` metrics handler; Codex emits
+  `codex.memory.startup` via `session_telemetry.counter` (metric, not
+  token/cost). Confirmed `metadata LIKE '%codex.memory%'` returns 0 rows in
+  `data/agentmonitor.db` despite Codex exporting it.
+- **Next / options**: persist label-only / gauge / counter metrics as a
+  first-class metric event (not a synthetic `llm_response`), keyed by metric name
+  + attributes, so status-tagged operational counters are queryable. At minimum,
+  stop silently dropping non-token metrics — record them with their attributes.
+- **Revisit when**: adding any Codex operational observability (consolidation
+  health, rate-limit skips) to the console.

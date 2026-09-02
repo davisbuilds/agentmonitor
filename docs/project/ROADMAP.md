@@ -6,6 +6,18 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Benchmark ingest for openbench runs (2026-09-02) — *What:* a `benchmark`
+  EventSource and `amon import benchmark <results.jsonl>` map each openbench cell
+  to one aggregate `llm_response` event keyed on `run_id` (idempotent), tagged
+  `source='benchmark'` and segregated from the default cost/usage/analytics
+  aggregates (opt in via `UsageParams.include_benchmark`) at the shared
+  `buildUsageFilterState` seam so all 14 usage queries inherit it. Cost prefers a
+  row's captured `cost_usd`, else derives from the pricing tables (reasoning-effort
+  suffixes stripped for codex daily-driver comparators); unpriced models are
+  surfaced loudly instead of billed as null. Added `openrouter.json` pricing for
+  glm-5.3-flash, deepseek-v4-flash-0731, minimax-m3. *Why:* the benchmark stream is
+  a first-party data source whose trusted token accounting the console could not
+  see; `CODEX_HOME` isolation left no JSONL/OTEL for the live or import paths.
 - Application-consistent database export (2026-08-13) — *What:* the one-shot
   `amon database backup --output <absolute-path>` command now uses SQLite's
   online backup API alongside the active WAL runtime, stages the copy under a
