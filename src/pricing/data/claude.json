@@ -79,10 +79,10 @@
       "aliases": [
         "claude-sonnet-5-latest"
       ],
-      "inputCostPerMTok": 2,
-      "outputCostPerMTok": 10,
-      "cacheReadCostPerMTok": 0.2,
-      "cacheWriteCostPerMTok": 2.5,
+      "inputCostPerMTok": 3,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.3,
+      "cacheWriteCostPerMTok": 3.75,
       "deprecated": false
     },
     "claude-sonnet-4-6": {

@@ -491,17 +491,17 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Sonnet 5 (introductory pricing, in effect through 2026-08-31) ──────
+  // ─── Sonnet 5 (standard pricing; introductory rates lapsed 2026-08-31) ──
   describe('Claude Sonnet 5', () => {
-    test('resolves with introductory per-MTok rates ($2/$10, cacheRead $0.20, 5m write $2.50)', () => {
+    test('resolves with standard per-MTok rates ($3/$15, cacheRead $0.30, 5m write $3.75)', () => {
       const pricing = registry.lookup('claude-sonnet-5');
       assert.ok(pricing);
       assert.equal(pricing.provider, 'anthropic');
       assert.equal(pricing.deprecated, false);
-      assert.equal(pricing.inputCostPerToken, 2 / 1_000_000);
-      assert.equal(pricing.outputCostPerToken, 10 / 1_000_000);
-      assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
-      assert.equal(pricing.cacheWriteCostPerToken, 2.5 / 1_000_000);
+      assert.equal(pricing.inputCostPerToken, 3 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 15 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.3 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 3.75 / 1_000_000);
     });
 
     test('classifies as a known anthropic/sonnet tier', () => {
@@ -512,7 +512,7 @@ describe('PricingRegistry', () => {
       assert.equal(c.pricing_status, 'known');
     });
 
-    test('calculates cost at introductory rates', () => {
+    test('calculates cost at standard rates', () => {
       const cost = registry.calculate('claude-sonnet-5', {
         input: 100_000,
         output: 50_000,
@@ -520,8 +520,8 @@ describe('PricingRegistry', () => {
         cacheWrite: 10_000,
       });
       assert.ok(cost !== null);
-      // 100K*$2 + 50K*$10 + 500K*$0.20 + 10K*$2.50 (per MTok)
-      const expected = 0.2 + 0.5 + 0.1 + 0.025;
+      // 100K*$3 + 50K*$15 + 500K*$0.30 + 10K*$3.75 (per MTok)
+      const expected = 0.3 + 0.75 + 0.15 + 0.0375;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
     });
   });
