@@ -1836,7 +1836,12 @@ interface HealthAccumulator {
 }
 
 function healthKey(name: string, version: string | null): string {
-  return `${name} ${version ?? ''}`;
+  // NUL joins name+version into a collision-free composite Map key (no
+  // printable char can appear in either half to forge the boundary). Built
+  // via fromCharCode so no literal NUL sits in the source bytes: a literal
+  // one makes grep/rg treat this 3.5k-line file as binary and silently
+  // return nothing for every symbol below it.
+  return `${name}${String.fromCharCode(0)}${version ?? ''}`;
 }
 
 function recordHealthInvocation(

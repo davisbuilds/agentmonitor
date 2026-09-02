@@ -85,18 +85,22 @@ note here. This file stays future-only.
   `openrouter.ai/api/v1/models` pull, then add entries to
   `src/pricing/data/openrouter.json`. Noted 2026-09-02.
 
-#### `v2-queries.ts` holds a NUL byte that silently blinds `grep`/`rg`
-- **What**: line ~1836 builds a composite key as `` `${name}\x00${version}` ``.
-  The literal NUL makes ripgrep and grep treat the whole file as binary, so a
-  plain `grep`/`rg` for any symbol below that line (all the `getUsage*` functions)
-  returns **nothing** with no error — the "absence is a claim about the
-  instrument" trap. Cost real time during the 2026-09-02 benchmark work.
-- **Why it matters**: the file is 3.5k lines and central; a silent search miss
-  here reads as "the function doesn't exist."
-- **Next / Revisit when**: touching that key construction. Options: replace the
-  NUL delimiter with a printable sentinel (e.g. `\x1f`/`␟`), or build the key
-  via `String.fromCharCode(0)` so no NUL sits in the source bytes. Low urgency;
-  primarily a tooling-legibility hazard. Noted 2026-09-02.
+#### No UI surfaces the benchmark bake-off (ingest shipped, consumer missing)
+- **What**: `amon import benchmark` (PR #103) ingests openbench `results.jsonl`
+  as `source='benchmark'` events, correctly segregated out of every default
+  usage/analytics/Monitor surface. But nothing *renders* them: the only way to
+  see a bake-off today is to hand-call `/api/v2/usage/*?include_benchmark=true`.
+  The comparison the ingest exists to enable — daily-driver Claude/Codex vs.
+  OpenRouter models on cost-per-task, tokens, and success/score — has no view.
+- **Why it matters**: this is the downstream half of the feature; without it the
+  pipeline delivers no operator value. The segregation seam (`include_benchmark`
+  on `UsageParams` + the HTTP query param) and per-cell metadata (task, trial,
+  score, success, token_basis) are already in place to build against.
+- **Next / Revisit when**: prioritized as the next benchmark slice. A
+  benchmark-inclusive mode on the Usage/Analytics `/app/` surface (or a dedicated
+  panel) grouping by model with cost-per-task / tokens / score / success columns.
+  Scope the view before building — decide the axes and grouping from a real run.
+  Noted 2026-09-02, deferred behind a security/perf/tooling pass.
 
 ### Runtime CLI
 
