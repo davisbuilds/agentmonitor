@@ -183,6 +183,7 @@ export function registerMaintenanceCommands(): void {
           rows_read: result.rowsRead,
           events_imported: result.eventsImported,
           duplicates: result.duplicates,
+          costs_backfilled: result.costsBackfilled,
           skipped: result.skipped,
           unpriced_models: result.unpricedModels.join(', ') || '(none)',
         });

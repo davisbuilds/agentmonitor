@@ -538,7 +538,12 @@ export function insertEvent(event: {
 
     const row = db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid) as EventRow;
 
-    if (row.agent_type === 'codex') {
+    // Benchmark cells carry harness='codex' but are batch-imported historical
+    // runs, not live activity. Projecting them writes browsing_sessions/turns/
+    // items that the Analytics and /api/v2/live surfaces read, so skip the live
+    // projection entirely — segregation must cover this path too, not just the
+    // Monitor's `sessions` aggregates.
+    if (row.agent_type === 'codex' && !isBenchmark) {
       syncCodexSummaryLiveEvent(db, row);
     }
 
@@ -551,6 +556,27 @@ export function insertEvent(event: {
     }
     throw err;
   }
+}
+
+/**
+ * Backfill a benchmark cell's cost after its model gains a price. Benchmark
+ * re-imports hit the duplicate early-return in `insertEvent`, so a row first
+ * stored with `cost_usd = NULL` (unpriced at import time) would otherwise keep
+ * billing as $0 even once rates are added — the "$0 rather than raising" trap.
+ * Updates only null-cost benchmark rows so a real captured cost is never
+ * clobbered; returns true when a row was updated.
+ */
+export function backfillBenchmarkCost(eventId: string, cost: number): boolean {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE events SET cost_usd = ?
+    WHERE event_id = ? AND source = 'benchmark' AND cost_usd IS NULL
+  `).run(cost, eventId);
+  if (result.changes > 0) {
+    markStatsDirty();
+    return true;
+  }
+  return false;
 }
 
 export function getEvents(filters: {

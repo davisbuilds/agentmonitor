@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
+import type Database from 'better-sqlite3';
 import type { importBenchmarkResults as ImportBenchmarkResults } from '../src/import/benchmark.js';
 import type { getEvents as GetEvents } from '../src/db/queries.js';
 
@@ -10,6 +11,7 @@ let tempDir = '';
 let closeDb: (() => void) | null = null;
 let importBenchmarkResults: typeof ImportBenchmarkResults;
 let getEvents: typeof GetEvents;
+let getDb: () => Database.Database;
 
 function writeResults(rows: object[]): string {
   const file = path.join(tempDir, `results-${Math.random().toString(36).slice(2)}.jsonl`);
@@ -57,6 +59,7 @@ before(async () => {
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');
   closeDb = dbModule.closeDb;
+  getDb = dbModule.getDb;
   initSchema();
   assert.equal(dbModule.getDb().name, path.join(tempDir, 'test.db'));
 
@@ -119,5 +122,50 @@ describe('importBenchmarkResults', () => {
     const result = importBenchmarkResults(file, { dryRun: true });
     assert.equal(result.eventsImported, 1);
     assert.equal(getEvents({ source: 'benchmark' }).events.length, before);
+  });
+
+  test('does not project codex benchmark cells into the live session browser', () => {
+    const runId = 'codex:task-live:minimax-m3:trial1';
+    const file = writeResults([{ ...minimaxRow, run_id: runId }]);
+    importBenchmarkResults(file);
+
+    const browsing = getDb()
+      .prepare('SELECT COUNT(*) AS n FROM browsing_sessions WHERE id = ?')
+      .get(runId) as { n: number };
+    assert.equal(browsing.n, 0, 'codex benchmark row must not create a browsing_sessions projection');
+  });
+
+  test('re-import backfills a benchmark cost that was null at first import', () => {
+    const runId = 'codex:task-backfill:mystery-model:trial1';
+    // First import: model unpriced and the row carries no cost -> stored as null.
+    const first = writeResults([
+      { run_id: runId, harness: 'codex', model: 'mystery-model', tokens_input_uncached: 500, tokens_output: 100, cost_usd: null },
+    ]);
+    importBenchmarkResults(first);
+    const stored = getEvents({ source: 'benchmark' }).events.find(e => e.session_id === runId);
+    assert.ok(stored);
+    assert.equal(stored.cost_usd, null, 'cost is null while the model is unpriced');
+
+    // Re-run once a cost resolves (rates added / row now carries cost_usd).
+    const second = writeResults([
+      { run_id: runId, harness: 'codex', model: 'mystery-model', tokens_input_uncached: 500, tokens_output: 100, cost_usd: 0.42 },
+    ]);
+    const result = importBenchmarkResults(second);
+    assert.equal(result.duplicates, 1, 'the run_id already exists');
+    assert.equal(result.costsBackfilled, 1, 'the previously-null cost is backfilled');
+
+    const refreshed = getEvents({ source: 'benchmark' }).events.find(e => e.session_id === runId);
+    assert.ok(Math.abs((refreshed?.cost_usd ?? 0) - 0.42) < 1e-9, `expected backfilled 0.42, got ${refreshed?.cost_usd}`);
+  });
+
+  test('skips non-object JSON rows instead of aborting the whole import', () => {
+    const goodRow = { ...minimaxRow, run_id: 'codex:task-good:minimax-m3:trial1' };
+    const file = path.join(tempDir, 'nonobject.jsonl');
+    // `null`, an array, and a bare number are all valid JSON but not benchmark rows.
+    fs.writeFileSync(file, ['null', '[1,2,3]', '42', JSON.stringify(goodRow)].join('\n') + '\n');
+    const result = importBenchmarkResults(file);
+    assert.equal(result.rowsRead, 4);
+    assert.equal(result.skipped, 3, 'the three non-object rows are skipped');
+    assert.equal(result.eventsImported, 1, 'the valid row still imports');
   });
 });

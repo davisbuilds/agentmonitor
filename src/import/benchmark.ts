@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { insertEvent } from '../db/queries.js';
+import { backfillBenchmarkCost, insertEvent } from '../db/queries.js';
 import { pricingRegistry } from '../pricing/index.js';
 
 /**
@@ -23,6 +23,8 @@ export interface BenchmarkImportResult {
   rowsRead: number;
   eventsImported: number;
   duplicates: number;
+  /** Duplicate cells whose previously-null cost was backfilled from a now-resolved price. */
+  costsBackfilled: number;
   skipped: number;
   /** Distinct bench model strings that resolved to no price (billed as null). */
   unpricedModels: string[];
@@ -111,6 +113,7 @@ export function importBenchmarkResults(
     rowsRead: 0,
     eventsImported: 0,
     duplicates: 0,
+    costsBackfilled: 0,
     skipped: 0,
     unpricedModels: [],
   };
@@ -124,7 +127,15 @@ export function importBenchmarkResults(
 
     let row: BenchmarkRow;
     try {
-      row = JSON.parse(trimmed) as BenchmarkRow;
+      const parsed: unknown = JSON.parse(trimmed);
+      // Valid JSON that is not a plain object (`null`, an array, a bare scalar)
+      // would throw on the first property access and abort the whole file after
+      // earlier rows have committed. Reject it as a skip instead.
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        result.skipped += 1;
+        continue;
+      }
+      row = parsed as BenchmarkRow;
     } catch {
       result.skipped += 1;
       continue;
@@ -190,6 +201,12 @@ export function importBenchmarkResults(
       result.eventsImported += 1;
     } else {
       result.duplicates += 1;
+      // A re-import after rates were added: the cell already exists (so insert is
+      // skipped) but its stored cost may still be null. Backfill the now-resolved
+      // price so usage stops summing it as $0.
+      if (cost !== null && backfillBenchmarkCost(runId, cost)) {
+        result.costsBackfilled += 1;
+      }
     }
   }
 
