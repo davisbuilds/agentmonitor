@@ -632,6 +632,47 @@ describe('PricingRegistry', () => {
       assert.equal(registry.effectiveRates('not-a-model', { input: 1, output: 1 }), null);
     });
   });
+
+  // OpenRouter-routed benchmark models (openbench bake-off). Rates are the
+  // OpenRouter 2026-08-27 snapshot embedded in
+  // _forks/openbench/experiments/analyze_cost.py; reasoning tokens are billed at
+  // the output rate, the vendor convention, so callers fold reasoning into
+  // `output` before calling calculate().
+  describe('OpenRouter benchmark models', () => {
+    test('prices glm-5.3-flash across all four token classes', () => {
+      const cost = registry.calculate('glm-5.3-flash', {
+        input: 1_000_000,
+        output: 1_000_000,
+        cacheRead: 1_000_000,
+        cacheWrite: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      // 0.075 in + 0.25 out + 0.015 cacheRead + 0.075 cacheWrite
+      assert.ok(Math.abs(cost - (0.075 + 0.25 + 0.015 + 0.075)) < 1e-9, `got ${cost}`);
+    });
+
+    test('prices deepseek-v4-flash-0731', () => {
+      const cost = registry.calculate('deepseek-v4-flash-0731', {
+        input: 1_000_000,
+        output: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      assert.ok(Math.abs(cost - (0.06 + 0.12)) < 1e-9, `got ${cost}`);
+    });
+
+    test('prices minimax-m3', () => {
+      const cost = registry.calculate('minimax-m3', {
+        input: 1_000_000,
+        output: 1_000_000,
+      });
+      assert.ok(cost !== null);
+      assert.ok(Math.abs(cost - (0.3 + 1.2)) < 1e-9, `got ${cost}`);
+    });
+
+    test('resolves the OpenRouter slug alias to the bench model id', () => {
+      assert.equal(registry.resolve('minimax/minimax-m3')?.canonicalModel, 'minimax-m3');
+    });
+  });
 });
 
 // ─── Integration tests: pricing in ingestion pipeline ────────────────────
