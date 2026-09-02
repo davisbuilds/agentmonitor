@@ -54,19 +54,22 @@ note here. This file stays future-only.
   missing, and out-of-range fields; assert coercion vs. rejection explicitly. Noted
   2026-07-16 during the portfolio TDD-guidance pass.
 
-#### Benchmark segregation is v2-only; v1 `getStats` still includes benchmark rows
-- **What**: the `source='benchmark'` opt-in exclusion (shipped 2026-09-02) lives
-  at the v2 usage seam (`buildUsageFilterState`), so the canonical `/app` usage,
-  analytics, and insights surfaces exclude benchmark rows by default. The legacy
-  v1 `getStats`/cost aggregates in `src/db/queries.ts` do **not** filter on
-  source, so the transitional `/` dashboard and any v1 cost totals still fold
-  benchmark cells in.
-- **Why it matters**: a large bake-off would inflate the legacy dashboard's
-  totals. Low urgency because `/` is on the reduction path (see ROADMAP) and the
-  live Monitor is unaffected (benchmark is batch/historical, never a live source).
-- **Next / Revisit when**: reducing the legacy surface, or the first time a
-  benchmark import visibly skews a v1 number. Either extend the exclusion to the
-  v1 aggregates or accept it as a known legacy gap. Noted 2026-09-02.
+#### Benchmark cells still count toward lifetime `total_sessions`
+- **What**: benchmark segregation now covers the event-level aggregates on both
+  the v2 Monitor (`getMonitorStats`) and v1 (`getStats`) — cost, tokens, event
+  counts, and tool/agent/model breakdowns all exclude `source='benchmark'` — and
+  benchmark sessions are marked `ended` at insert so they stay out of the live
+  session lists and the active/live/active-agent counts. The one residual is the
+  lifetime `total_sessions` tally: it `COUNT(*)`s the `sessions` table with no
+  source predicate, so ended benchmark sessions inflate it.
+- **Why it matters**: minor and cosmetic — a large bake-off adds N to a lifetime
+  "sessions ever observed" number; every live and cost/usage surface is already
+  clean. `sessions` has no `source` column, so a clean exclusion would need one
+  (mirroring `events.source`) or a correlated `EXISTS` over events.
+- **Next / Revisit when**: the count visibly misleads, or a future
+  `include_benchmark` toggle is wanted on the Monitor. Add a `sessions.source`
+  column (migration + `upsertSession`) and filter the count. Noted 2026-09-02;
+  updated after the PR #103 review fixes.
 
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,

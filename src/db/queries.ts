@@ -9,7 +9,7 @@ import type {
   EventSource,
   NormalizedIngestEvent,
 } from '../contracts/event-contract.js';
-import { excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
+import { excludeBenchmarkUsageCondition, excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
 
 // --- Agents ---
 
@@ -431,6 +431,11 @@ export function insertEvent(event: {
 }): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
+  // Benchmark cells are batch-imported historical runs, never live activity, so
+  // they must not drive live-session lifecycle: no git-branch resolution against
+  // the task name, and the session is marked ended immediately so it stays out of
+  // the Monitor's live lists and active/live/agent counts.
+  const isBenchmark = event.source === 'benchmark';
   if (event.event_id) {
     const existing = db.prepare('SELECT id FROM events WHERE event_id = ?').get(event.event_id) as { id: number } | undefined;
     if (existing) return null;
@@ -452,7 +457,7 @@ export function insertEvent(event: {
   // Resolve git branch from project directory and keep session branch fresh.
   // Recent live imports can carry stale branch metadata from session start, so
   // refresh the session-level branch from current repo HEAD when possible.
-  if (event.project && (event.source !== 'import' || !isHistoricalImport)) {
+  if (event.project && !isBenchmark && (event.source !== 'import' || !isHistoricalImport)) {
     const gitBranch = resolveGitBranch(event.project);
     if (gitBranch) {
       if (!event.branch) {
@@ -523,8 +528,8 @@ export function insertEvent(event: {
       }
     }
 
-    // Keep clearly historical imports out of active lists.
-    if (isHistoricalImport) {
+    // Keep clearly historical imports and benchmark cells out of active lists.
+    if (isHistoricalImport || isBenchmark) {
       db.prepare(`
         UPDATE sessions SET status = 'ended', ended_at = COALESCE(ended_at, datetime('now'))
         WHERE id = ? AND status != 'ended'
@@ -644,7 +649,7 @@ export interface Stats {
 export function getStats(filters?: { agentType?: string; since?: string }): Stats {
   const db = getDb();
   updateIdleSessions(config.sessionTimeoutMinutes);
-  const conditions: string[] = [];
+  const conditions: string[] = [excludeBenchmarkUsageCondition('e')];
   const params: unknown[] = [];
 
   if (filters?.agentType) {

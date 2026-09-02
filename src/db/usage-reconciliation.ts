@@ -33,6 +33,17 @@ export function excludeOverlappingCodexOtelUsageCondition(alias: string): string
   return `NOT ${overlappingCodexOtelUsageCondition(alias)}`;
 }
 
+/**
+ * Keep batch-imported benchmark rows (source='benchmark') out of an event-level
+ * aggregate. A NULL source predates the column default and is never a benchmark
+ * row, so it is retained. Used by the Monitor stats aggregates, which — unlike
+ * the v2 usage layer's buildUsageFilterState — have no opt-in and always exclude
+ * benchmark, because the Monitor is the live-activity view.
+ */
+export function excludeBenchmarkUsageCondition(alias: string): string {
+  return `(${alias}.source IS NULL OR ${alias}.source != 'benchmark')`;
+}
+
 export function reconciledUsageSum(alias: string, column: string): string {
   return `COALESCE(SUM(CASE WHEN ${overlappingCodexOtelUsageCondition(alias)} THEN 0 ELSE COALESCE(${alias}.${column}, 0) END), 0)`;
 }
