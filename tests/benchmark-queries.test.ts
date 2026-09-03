@@ -37,6 +37,8 @@ interface CellOpts {
   workspace_changed?: boolean | null;
   token_basis?: string | null;
   usage_evidence_grade?: string | null;
+  ranking_eligible?: boolean | null;
+  ranking_exclusion_reason?: string | null;
 }
 
 function cell(o: CellOpts): void {
@@ -69,6 +71,8 @@ function cell(o: CellOpts): void {
       workspace_changed: o.workspace_changed ?? null,
       token_basis: o.token_basis ?? null,
       usage_evidence_grade: o.usage_evidence_grade ?? null,
+      usage_ranking_eligible: o.ranking_eligible ?? null,
+      usage_ranking_exclusion_reason: o.ranking_exclusion_reason ?? null,
     },
   });
 }
@@ -114,7 +118,9 @@ before(async () => {
   // denominator (2) would compute max(0, 2 - 3) = 0 and silently hide the gap.
   cell({ runId: 's4-M-p1', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'p', trial: 1, score: 0.7, cost: 0.10, cost_source: 'litellm' });
   cell({ runId: 's4-M-p2', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'p', trial: 2, score: 0.7, cost: 0.10, cost_source: 'litellm' });
-  cell({ runId: 's4-M-q1', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'q', trial: 1, score: 0.7, cost: 0.10, cost_source: 'litellm' });
+  // One cell's usage was excluded from ranking upstream (openbench) — the arm
+  // must surface as ineligible with the reason (mirrored, not re-derived).
+  cell({ runId: 's4-M-q1', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'q', trial: 1, score: 0.7, cost: 0.10, cost_source: 'litellm', ranking_eligible: false, ranking_exclusion_reason: 'usage_unavailable' });
 
   // A real-activity event that must never appear in benchmark queries or move Usage.
   insertEvent({
@@ -203,6 +209,18 @@ describe('getBenchmarkStudy — arm aggregation + frontier', () => {
     const m = detail.arms.find(a => a.canonical_model === 'multi')!;
     assert.equal(m.n, 3, 'three scored cells present');
     assert.equal(m.excluded_trials, 1, 'the missing (q, trial 2) cell is an excluded trial');
+  });
+
+  test('surfaces upstream ranking-eligibility per arm (mirrored, not re-derived)', () => {
+    const arms = getBenchmarkStudy('sha4').arms;
+    const m = arms.find(a => a.canonical_model === 'multi')!;
+    assert.equal(m.ranking_eligible, false, 'an excluded cell makes the arm ranking-ineligible');
+    assert.equal(m.ranking_exclusion_reason, 'usage_unavailable', 'first exclusion reason surfaced');
+
+    // An arm with no excluded cells stays eligible with no reason.
+    const clean = getBenchmarkStudy('sha1').arms.find(a => a.canonical_model === 'mid')!;
+    assert.equal(clean.ranking_eligible, true);
+    assert.equal(clean.ranking_exclusion_reason, null);
   });
 
   test('unpriced arm: cost/trial null, verdict unreliable, off the frontier', () => {

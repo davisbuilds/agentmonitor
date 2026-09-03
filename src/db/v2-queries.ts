@@ -3753,6 +3753,7 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
     const reasoning_effort = typeof m0.reasoning_effort === 'string' && m0.reasoning_effort ? m0.reasoning_effort : null;
     const scored = cs.map(c => c.m.score).filter((s): s is number => typeof s === 'number');
     const anyUnpriced = cs.some(c => c.cost_usd == null);
+    const ineligibleCells = cs.filter(c => c.m.usage_ranking_eligible === false);
     const isOpen = typeof m0.is_open_model === 'boolean' ? m0.is_open_model : null;
     // Prefer openbench's authoritative is_open_model; fall back to pricing-table
     // provenance only when absent. An `unknown` provider (unpriced model) is
@@ -3782,6 +3783,10 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
       noop_trials: cs.filter(c => c.m.success === true && c.m.workspace_changed === false).length,
       token_basis: firstString(cs, 'token_basis'),
       usage_evidence_grade: firstString(cs, 'usage_evidence_grade'),
+      // Ranking eligibility from openbench (mirrored, not re-derived): the arm is
+      // eligible unless a cell was explicitly excluded. Surface the first reason.
+      ranking_eligible: !ineligibleCells.length,
+      ranking_exclusion_reason: firstString(ineligibleCells, 'usage_ranking_exclusion_reason'),
     });
   }
 

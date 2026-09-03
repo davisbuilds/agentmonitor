@@ -58,6 +58,10 @@ interface BenchmarkRow {
   tokens_reasoning?: unknown;
   token_basis?: unknown;
   usage_evidence_grade?: unknown;
+  // Ranking eligibility computed upstream by openbench (obench/usage_evidence.py).
+  // amon consumes these verbatim — it does not re-derive the policy.
+  usage_ranking_eligible?: unknown;
+  usage_ranking_exclusion_reason?: unknown;
   cost_usd?: unknown;
   cost_source?: unknown;
   harness_version?: unknown;
@@ -255,6 +259,9 @@ export function importBenchmarkResults(
         tokens_reasoning: num(row.tokens_reasoning),
         token_basis: str(row.token_basis),
         usage_evidence_grade: str(row.usage_evidence_grade),
+        // Upstream ranking-eligibility verdict (mirrored, not re-derived).
+        usage_ranking_eligible: typeof row.usage_ranking_eligible === 'boolean' ? row.usage_ranking_eligible : null,
+        usage_ranking_exclusion_reason: str(row.usage_ranking_exclusion_reason) ?? null,
         cost_source: str(row.cost_source),
         // success with no workspace change = a no-op trial (honesty flag).
         workspace_changed: typeof row.workspace_changed === 'boolean' ? row.workspace_changed : null,

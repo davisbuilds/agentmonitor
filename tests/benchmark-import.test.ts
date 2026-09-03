@@ -216,6 +216,38 @@ describe('importBenchmarkResults', () => {
     assert.equal(m.suite, 'my-suite');
   });
 
+  test('captures openbench usage-evidence grade and ranking-eligibility verbatim', () => {
+    const runId = 'codex:task-ue:gpt-5.6-terra:trial1';
+    const file = writeResults([{
+      run_id: runId, harness: 'codex', model: 'gpt-5.6-terra',
+      task: 'task-ue', trial: 1, tokens_input_uncached: 1000, tokens_output: 100,
+      study: 'ue-suite', study_sha256: 'sha-ue', suite: 'ue-suite',
+      usage_evidence_grade: 'proxy_measured',
+      usage_ranking_eligible: false,
+      usage_ranking_exclusion_reason: 'usage_unavailable',
+    }]);
+    importBenchmarkResults(file);
+
+    const m = meta(runId);
+    assert.equal(m.usage_evidence_grade, 'proxy_measured');
+    assert.equal(m.usage_ranking_eligible, false, 'ranking-eligibility mirrored, not re-derived');
+    assert.equal(m.usage_ranking_exclusion_reason, 'usage_unavailable');
+  });
+
+  test('ranking-eligibility fields default to null when openbench omits them', () => {
+    const runId = 'codex:task-noue:minimax-m3:trial1';
+    const file = writeResults([{
+      run_id: runId, harness: 'codex', model: 'minimax-m3',
+      task: 'task-noue', trial: 1, tokens_input_uncached: 10, tokens_output: 5,
+      study: 'noue-suite', study_sha256: 'sha-noue',
+    }]);
+    importBenchmarkResults(file);
+
+    const m = meta(runId);
+    assert.equal(m.usage_ranking_eligible, null);
+    assert.equal(m.usage_ranking_exclusion_reason, null);
+  });
+
   test('legacy fallback: no openbench identity fields → derive from parent dir + strip suffix', () => {
     const runId = 'codex:legacy:minimax-m3:trial1';
     // A pre-field row: no study/study_sha256/canonical_model/reasoning_effort.

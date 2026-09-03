@@ -85,6 +85,13 @@
     for (const a of d.arms.filter(a => a.excluded_trials > 0)) {
       out.push(`${a.label}: only ${a.n} of ${d.expected_trials} trials — small sample.`);
     }
+    for (const a of d.arms.filter(a => !a.ranking_eligible)) {
+      out.push(`${a.label}: usage excluded from ranking${a.ranking_exclusion_reason ? ` — ${a.ranking_exclusion_reason}` : ''}.`);
+    }
+    // Token usage not backed by the vendor's own numbers is a weaker basis.
+    for (const a of d.arms.filter(a => a.usage_evidence_grade && a.usage_evidence_grade !== 'vendor_reported')) {
+      out.push(`${a.label}: token usage graded "${a.usage_evidence_grade}", not vendor-reported.`);
+    }
     return out;
   });
 </script>
@@ -136,6 +143,7 @@
                   {#if arm.cost_basis !== 'captured'}<Badge tone={basisTone[arm.cost_basis]}>{arm.cost_basis}</Badge>{/if}
                   {#if arm.excluded_trials > 0}<Badge tone="warn" title="fewer trials than the study max">n={arm.n}</Badge>{/if}
                   {#if arm.noop_trials > 0}<Badge tone="warn" title="success with no workspace change">{arm.noop_trials} no-op</Badge>{/if}
+                  {#if !arm.ranking_eligible}<Badge tone="warn" title={arm.ranking_exclusion_reason ?? 'usage excluded from ranking'}>ineligible</Badge>{/if}
                 </span>
               {/if}
             {/snippet}
