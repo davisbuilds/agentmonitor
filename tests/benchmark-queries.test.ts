@@ -100,6 +100,11 @@ before(async () => {
   // Study s2: a single unpriced arm.
   cell({ runId: 's2-E-1', study_id: 'sha2', study: 's2-2026-09-03', suite: 's2', canonical: 'mystery', is_open: true, task: 'u', trial: 1, score: 0.6, cost: null });
 
+  // Study s3: native fallback when is_open_model is absent (legacy rows). A
+  // first-party priced model → native; an unknown/unpriced model → routed.
+  cell({ runId: 's3-F-1', study_id: 'sha3', study: 's3-2026-09-03', suite: 's3', canonical: 'gpt-5-mini', is_open: null, task: 'v', trial: 1, score: 0.9, cost: 0.10 });
+  cell({ runId: 's3-G-1', study_id: 'sha3', study: 's3-2026-09-03', suite: 's3', canonical: 'no-such-model-xyz', is_open: null, task: 'v', trial: 1, score: 0.9, cost: null });
+
   // A real-activity event that must never appear in benchmark queries or move Usage.
   insertEvent({
     event_id: 'real-1', session_id: 'real', agent_type: 'claude_code', event_type: 'llm_response',
@@ -119,9 +124,9 @@ after(() => {
 });
 
 describe('getBenchmarkStudies', () => {
-  test('lists both studies with arm counts and cost basis, benchmark-only', () => {
+  test('lists studies with arm counts and cost basis, benchmark-only', () => {
     const studies = getBenchmarkStudies();
-    assert.equal(studies.length, 2, 'exactly the two benchmark studies (no real-activity)');
+    assert.equal(studies.length, 3, 'exactly the benchmark studies (no real-activity)');
 
     const s1 = studies.find(s => s.study_id === 'sha1');
     assert.ok(s1);
@@ -166,6 +171,12 @@ describe('getBenchmarkStudy — arm aggregation + frontier', () => {
     assert.equal(armOf('mid').native, false, 'is_open_model true → routed');
   });
 
+  test('native fallback (is_open_model absent): first-party → native, unknown → routed', () => {
+    const arms = getBenchmarkStudy('sha3').arms;
+    assert.equal(arms.find(a => a.canonical_model === 'gpt-5-mini')!.native, true, 'priced first-party → native');
+    assert.equal(arms.find(a => a.canonical_model === 'no-such-model-xyz')!.native, false, 'unknown/unpriced → routed, never over-claim hollow');
+  });
+
   test('surfaces honesty flags independent of verdict', () => {
     const detail = getBenchmarkStudy('sha1');
     assert.equal(detail.expected_trials, 2, 'max trial index seen in the study');
@@ -194,7 +205,7 @@ describe('benchmark segregation (read side)', () => {
 describe('benchmark v2 routes', () => {
   test('GET /api/v2/benchmarks lists studies', async () => {
     const body = await (await fetch(`${baseUrl}/api/v2/benchmarks`)).json() as { data: BenchmarkStudySummary[] };
-    assert.equal(body.data.length, 2);
+    assert.equal(body.data.length, 3);
     assert.ok(body.data.some(s => s.study_id === 'sha1'));
   });
 

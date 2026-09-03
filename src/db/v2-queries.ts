@@ -3749,9 +3749,12 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
     const scored = cs.map(c => c.m.score).filter((s): s is number => typeof s === 'number');
     const anyUnpriced = cs.some(c => c.cost_usd == null);
     const isOpen = typeof m0.is_open_model === 'boolean' ? m0.is_open_model : null;
+    // Prefer openbench's authoritative is_open_model; fall back to pricing-table
+    // provenance only when absent. An `unknown` provider (unpriced model) is
+    // treated as routed, NOT first-party — so hollow markers never over-claim.
     const native = isOpen === false ? true
       : isOpen === true ? false
-      : classifyModelForUsage(canonical_model).provider !== 'openrouter';
+      : ['openai', 'anthropic', 'google'].includes(classifyModelForUsage(canonical_model).provider);
 
     arms.push({
       canonical_model,
