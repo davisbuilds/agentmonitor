@@ -116,6 +116,17 @@ describe('benchmark Monitor segregation', () => {
   });
 });
 
+describe('benchmark v1 legacy stats segregation', () => {
+  test('lifetime total_sessions excludes benchmark sessions', async () => {
+    const { getStats } = await import('../src/db/queries.js');
+    const stats = getStats();
+    // The `sessions` table holds both the real and the (ended) benchmark session.
+    // The lifetime tally must count only real-activity sessions — a bake-off must
+    // not inflate "sessions ever observed".
+    assert.equal(stats.total_sessions, 1, 'benchmark session must not inflate total_sessions');
+  });
+});
+
 describe('benchmark opt-in through the usage HTTP API', () => {
   test('?include_benchmark=true reaches the query layer', async () => {
     const off = await (await fetch(`${baseUrl}/api/v2/usage/summary`)).json();
