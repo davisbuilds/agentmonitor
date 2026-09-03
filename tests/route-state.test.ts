@@ -52,6 +52,14 @@ test('buildAppHash omits monitor hash and serializes params', () => {
   assert.equal(buildAppHash('search', { q: 'quota reset', project: 'agentmonitor' }), 'search?q=quota+reset&project=agentmonitor');
 });
 
+test('benchmarks is a routable tab that carries a selected study', () => {
+  assert.equal(parseAppHash('#benchmarks').tab, 'benchmarks');
+  assert.equal(buildAppHash('benchmarks', { study: 'sha-abc' }), 'benchmarks?study=sha-abc');
+  const parsed = parseAppHash('#benchmarks?study=sha-abc');
+  assert.equal(parsed.tab, 'benchmarks');
+  assert.equal(parsed.params.get('study'), 'sha-abc');
+});
+
 test('sessions hashes round-trip selected session and filters', () => {
   const state = {
     view: 'browse' as const,

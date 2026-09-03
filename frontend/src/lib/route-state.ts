@@ -1,6 +1,6 @@
-export type AppTab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search';
+export type AppTab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search' | 'benchmarks';
 
-const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'analytics', 'search']);
+const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'analytics', 'search', 'benchmarks']);
 
 /** Sub-views inside the consolidated Analytics tab. */
 export type AnalyticsView = 'overview' | 'usage' | 'skills' | 'insights' | 'quality';

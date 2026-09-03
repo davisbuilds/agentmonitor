@@ -158,25 +158,28 @@ export function registerMaintenanceCommands(): void {
     name: 'import benchmark',
     group: 'Data Commands',
     summary: 'Import an openbench results.jsonl as segregated benchmark events',
-    usage: 'import benchmark <path/to/results.jsonl> [--dry-run]',
+    usage: 'import benchmark <path/to/results.jsonl> [--study <label>] [--dry-run]',
     examples: [
       'import benchmark data/run-2026-08-29/results.jsonl',
       'import benchmark results.jsonl --dry-run --json',
     ],
     async handler(ctx, args) {
-      const parsed = parseOptionSet(args, new Set(), new Set(['--dry-run']));
+      const parsed = parseOptionSet(args, new Set(['--study']), new Set(['--dry-run']));
       const [file, ...extra] = parsed.positionals;
       if (!file) {
-        throw invalidUsage('Missing results.jsonl path. Usage: amon import benchmark <path> [--dry-run]');
+        throw invalidUsage('Missing results.jsonl path. Usage: amon import benchmark <path> [--study <label>] [--dry-run]');
       }
-      rejectExtraPositionals(extra, 'amon import benchmark <path> [--dry-run]');
+      rejectExtraPositionals(extra, 'amon import benchmark <path> [--study <label>] [--dry-run]');
 
       const { initSchema } = await import('../../db/schema.js');
       const { closeDb } = await import('../../db/connection.js');
       const { importBenchmarkResults } = await import('../../import/benchmark.js');
       initSchema();
       try {
-        const result = importBenchmarkResults(file, { dryRun: parsed.flags.has('--dry-run') });
+        const result = importBenchmarkResults(file, {
+          dryRun: parsed.flags.has('--dry-run'),
+          study: parsed.values.get('--study'),
+        });
         printSummary(ctx, 'Benchmark import results', {
           dry_run: parsed.flags.has('--dry-run'),
           file: result.file,

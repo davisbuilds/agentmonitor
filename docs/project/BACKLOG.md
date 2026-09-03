@@ -85,22 +85,23 @@ note here. This file stays future-only.
   `openrouter.ai/api/v1/models` pull, then add entries to
   `src/pricing/data/openrouter.json`. Noted 2026-09-02.
 
-#### No UI surfaces the benchmark bake-off (ingest shipped, consumer missing)
-- **What**: `amon import benchmark` (PR #103) ingests openbench `results.jsonl`
-  as `source='benchmark'` events, correctly segregated out of every default
-  usage/analytics/Monitor surface. But nothing *renders* them: the only way to
-  see a bake-off today is to hand-call `/api/v2/usage/*?include_benchmark=true`.
-  The comparison the ingest exists to enable — daily-driver Claude/Codex vs.
-  OpenRouter models on cost-per-task, tokens, and success/score — has no view.
-- **Why it matters**: this is the downstream half of the feature; without it the
-  pipeline delivers no operator value. The segregation seam (`include_benchmark`
-  on `UsageParams` + the HTTP query param) and per-cell metadata (task, trial,
-  score, success, token_basis) are already in place to build against.
-- **Next / Revisit when**: prioritized as the next benchmark slice. A
-  benchmark-inclusive mode on the Usage/Analytics `/app/` surface (or a dedicated
-  panel) grouping by model with cost-per-task / tokens / score / success columns.
-  Scope the view before building — decide the axes and grouping from a real run.
-  Noted 2026-09-02, deferred behind a security/perf/tooling pass.
+#### Benchmark frontier chart + shared chart primitives (P3), artifact export (P4)
+- **What**: the Benchmarks tab (P1 data/queries + P2 arm-ladder UI) **shipped**
+  2026-09-03 (PR #106; see ROADMAP). What remains is the visual frontier and an
+  export: **P3** — a cost×score Pareto scatter (frontier polyline, domination
+  connectors, hollow native markers, hover-drill) built on *shared* inline-SVG
+  chart primitives (`ui/chart/scales.ts` log/linear scales + a `PlotFrame`
+  component), with the CostDashboard "Spend Over Time" timeline refactored onto
+  them as a second consumer to validate the abstraction. **P4** (optional) — a
+  self-contained artifact export mirroring the claude.ai Pareto artifact.
+- **Why it matters**: the ladder + honesty panel already deliver the comparison;
+  the scatter is the at-a-glance frontier read, and factoring the primitives out
+  of the one-off CostDashboard SVG is a reuse win rather than a third hand-rolled
+  chart. Not blocking — pure enhancement.
+- **Next / Revisit when**: build P3 when the frontier visual is wanted; spec
+  `docs/specs/2026-09-02-benchmark-comparison-view-spec.md` (P3/P4 sections).
+  Watch openbench #5 (per-attempt cost) — landing it would drop the "cost is a
+  floor" honesty caveat. Noted 2026-09-02, updated 2026-09-03.
 
 ### Runtime CLI
 

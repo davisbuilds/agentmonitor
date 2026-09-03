@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { backfillBenchmarkCost, insertEvent } from '../db/queries.js';
 import { pricingRegistry } from '../pricing/index.js';
 
@@ -16,6 +17,11 @@ import { pricingRegistry } from '../pricing/index.js';
 
 export interface BenchmarkImportOptions {
   dryRun?: boolean;
+  /**
+   * Manual study override (escape hatch / legacy grouping). Sets both the grouping
+   * key and the display slug to this label, overriding the row's own identity.
+   */
+  study?: string;
 }
 
 export interface BenchmarkImportResult {
@@ -56,6 +62,30 @@ interface BenchmarkRow {
   cost_source?: unknown;
   harness_version?: unknown;
   score?: unknown;
+  workspace_changed?: unknown;
+  // Identity fields emitted by openbench (feat/results-row-study-identity).
+  // Preferred over amon's legacy derivations when present.
+  canonical_model?: unknown;
+  reasoning_effort?: unknown;
+  is_open_model?: unknown;
+  study?: unknown;
+  study_sha256?: unknown;
+  suite?: unknown;
+}
+
+/**
+ * Split a glued codex model string into `(canonical, effort)`. Legacy fallback
+ * only — openbench now emits `canonical_model` + `reasoning_effort` directly.
+ */
+function splitEffort(model: string): { canonical: string; effort: string | undefined } {
+  const lastDash = model.lastIndexOf('-');
+  if (lastDash > 0) {
+    const suffix = model.slice(lastDash + 1);
+    if (EFFORT_SUFFIXES.includes(suffix)) {
+      return { canonical: model.slice(0, lastDash), effort: suffix };
+    }
+  }
+  return { canonical: model, effort: undefined };
 }
 
 // Reasoning-effort suffixes openbench appends to a codex model string
@@ -119,6 +149,16 @@ export function importBenchmarkResults(
   };
   const unpriced = new Set<string>();
 
+  // Legacy study fallback for pre-field rows: the results.jsonl's parent dir name
+  // (e.g. `am-consistency-pareto-2026-08-29`), else the file's own basename.
+  // Resolve first so relative inputs derive their *real* containing directory —
+  // a bare `results.jsonl` or a parent-relative `../results.jsonl` would otherwise
+  // yield the literal `.`/`..` segment and merge unrelated runs under one key. The
+  // basename fallback only trips at the filesystem root, where there is no parent.
+  const resolved = path.resolve(filePath);
+  const parentDir = path.basename(path.dirname(resolved));
+  const legacyStudy = parentDir || path.basename(resolved).replace(/\.[^.]*$/, '');
+
   const contents = readFileSync(filePath, 'utf-8');
   for (const line of contents.split('\n')) {
     const trimmed = line.trim();
@@ -152,6 +192,26 @@ export function importBenchmarkResults(
     const cost = resolveBenchmarkCost(row);
     if (cost === null) unpriced.add(model);
 
+    // Study identity: prefer the manual override, then openbench's own fields,
+    // then the legacy parent-dir fallback. study_id (= study_sha256) is the exact
+    // per-run grouping key; study is the human slug label.
+    const studyId = options.study ?? str(row.study_sha256) ?? legacyStudy;
+    const study = options.study ?? str(row.study) ?? legacyStudy;
+
+    // Namespace the persisted event/session key by study. `run_id` is only unique
+    // *within* one bake-off (harness:task:model:trial), so two studies rerunning
+    // the same cell share a run_id; keying events on run_id alone would drop the
+    // second study's cells as duplicates. Prefixing with study_id keeps
+    // idempotence within a study while separating reruns. The faithful run_id is
+    // preserved in metadata.
+    const eventId = `${studyId}::${runId}`;
+
+    // Model identity: prefer openbench's split, else strip the effort suffix.
+    const split = splitEffort(model);
+    const canonicalModel = str(row.canonical_model) ?? split.canonical;
+    const reasoningEffort = str(row.reasoning_effort) ?? split.effort ?? null;
+    const isOpenModel = typeof row.is_open_model === 'boolean' ? row.is_open_model : null;
+
     if (options.dryRun) {
       // Count would-be inserts without touching the DB. Duplicate detection is
       // not available in dry-run; report everything as importable.
@@ -163,8 +223,8 @@ export function importBenchmarkResults(
     const isError = row.success === false || (typeof row.error === 'string' && row.error.length > 0);
 
     const event = insertEvent({
-      event_id: runId,
-      session_id: runId,
+      event_id: eventId,
+      session_id: eventId,
       agent_type: harness,
       event_type: 'llm_response',
       status: isError ? 'error' : 'success',
@@ -176,6 +236,8 @@ export function importBenchmarkResults(
       cache_write_tokens: num(row.tokens_cache_write),
       cost_usd: cost,
       source: 'benchmark',
+      study_id: studyId,
+      study,
       duration_ms: durationMs,
       client_timestamp: str(row.ts_iso),
       metadata: {
@@ -194,6 +256,13 @@ export function importBenchmarkResults(
         token_basis: str(row.token_basis),
         usage_evidence_grade: str(row.usage_evidence_grade),
         cost_source: str(row.cost_source),
+        // success with no workspace change = a no-op trial (honesty flag).
+        workspace_changed: typeof row.workspace_changed === 'boolean' ? row.workspace_changed : null,
+        // Arm/model identity (study_id/study live in their own columns).
+        canonical_model: canonicalModel,
+        reasoning_effort: reasoningEffort,
+        is_open_model: isOpenModel,
+        suite: str(row.suite) ?? null,
       },
     });
 
@@ -201,10 +270,12 @@ export function importBenchmarkResults(
       result.eventsImported += 1;
     } else {
       result.duplicates += 1;
-      // A re-import after rates were added: the cell already exists (so insert is
-      // skipped) but its stored cost may still be null. Backfill the now-resolved
-      // price so usage stops summing it as $0.
-      if (cost !== null && backfillBenchmarkCost(runId, cost)) {
+      // A duplicate is now a re-import of the *same* study+cell (identical
+      // namespaced event_id), whose stored row already carries the correct study
+      // and metadata. The one thing that can still change is a cost that was null
+      // when the model was unpriced: backfill it once rates are added, so usage
+      // stops summing it as $0.
+      if (cost !== null && backfillBenchmarkCost(eventId, cost)) {
         result.costsBackfilled += 1;
       }
     }

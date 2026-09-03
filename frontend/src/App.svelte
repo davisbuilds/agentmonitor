@@ -20,6 +20,7 @@
   import SearchPage from './lib/components/search/SearchPage.svelte';
   import CommandPalette from './lib/components/command-palette/CommandPalette.svelte';
   import AnalyticsShell from './lib/components/analytics/AnalyticsShell.svelte';
+  import BenchmarksPage from './lib/components/benchmarks/BenchmarksPage.svelte';
 
   const tab = $derived(getTab());
   const commandPaletteOpen = $derived(isCommandPaletteOpen());
@@ -32,6 +33,7 @@
       { id: 'monitor', label: 'Monitor' },
       { id: 'sessions', label: 'Sessions' },
       { id: 'analytics', label: 'Analytics' },
+      { id: 'benchmarks', label: 'Benchmarks' },
       { id: 'search', label: 'Search' },
     ];
     if (liveSettings.enabled) {
@@ -131,6 +133,8 @@
     <SessionsShell />
   {:else if tab === 'analytics'}
     <AnalyticsShell />
+  {:else if tab === 'benchmarks'}
+    <BenchmarksPage />
   {:else if tab === 'search'}
     <SearchPage />
   {/if}

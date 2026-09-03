@@ -957,6 +957,59 @@ export interface UsageModelDailyPoint {
   models: UsageModelBreakdown[];
 }
 
+// ── Benchmarks (segregated bake-off comparison; the one benchmark-inclusive
+// surface). See docs/specs/2026-09-02-benchmark-comparison-view-spec.md. ──
+
+export type BenchmarkCostBasis = 'captured' | 'derived' | 'unpriced';
+export type BenchmarkVerdict =
+  | 'value-pick' | 'on-frontier' | 'dominated' | 'trivial-only' | 'unreliable';
+
+/** One row in the Studies list — a single bake-off run. */
+export interface BenchmarkStudySummary {
+  study_id: string;              // exact per-run key (= openbench study_sha256)
+  study: string;                 // display slug
+  suite: string | null;          // config-level slug
+  arm_count: number;
+  cell_count: number;
+  tasks: string[];
+  date_from: string | null;
+  date_to: string | null;
+  total_cost_usd: number | null; // null if any arm unpriced
+  cost_basis: BenchmarkCostBasis;
+}
+
+/** One arm (model + effort) aggregated across its trials. */
+export interface BenchmarkArm {
+  canonical_model: string;
+  reasoning_effort: string | null;
+  label: string;
+  n: number;
+  mean_score: number;
+  cost_per_trial: number | null; // null if any cell unpriced
+  cost_basis: BenchmarkCostBasis;
+  mean_t_agent_s: number;
+  cache_reads: number;
+  native: boolean;
+  // frontier geometry (computed):
+  pareto: boolean;
+  dominated_by: string | null;
+  verdict: BenchmarkVerdict;
+  // honesty flags:
+  excluded_trials: number;
+  noop_trials: number;
+  token_basis: string | null;
+  usage_evidence_grade: string | null;
+}
+
+export interface BenchmarkStudyDetail {
+  study_id: string;
+  study: string;
+  suite: string | null;
+  tasks: string[];
+  expected_trials: number;
+  arms: BenchmarkArm[];
+}
+
 /** Option lists for the five Usage filter dropdowns. */
 export interface UsageFacets {
   projects: string[];

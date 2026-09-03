@@ -1201,3 +1201,62 @@ export async function fetchV2Agents(): Promise<{ data: string[] }> {
   const res = await fetch('/api/v2/agents');
   return checkedJson(res, 'fetchV2Agents');
 }
+
+// --- Benchmarks (segregated bake-off comparison) ---
+// Mirrors src/api/v2/types.ts. The one benchmark-inclusive read surface.
+
+export type BenchmarkCostBasis = 'captured' | 'derived' | 'unpriced';
+export type BenchmarkVerdict =
+  | 'value-pick' | 'on-frontier' | 'dominated' | 'trivial-only' | 'unreliable';
+
+export interface BenchmarkStudySummary {
+  study_id: string;
+  study: string;
+  suite: string | null;
+  arm_count: number;
+  cell_count: number;
+  tasks: string[];
+  date_from: string | null;
+  date_to: string | null;
+  total_cost_usd: number | null;
+  cost_basis: BenchmarkCostBasis;
+}
+
+export interface BenchmarkArm {
+  canonical_model: string;
+  reasoning_effort: string | null;
+  label: string;
+  n: number;
+  mean_score: number;
+  cost_per_trial: number | null;
+  cost_basis: BenchmarkCostBasis;
+  mean_t_agent_s: number;
+  cache_reads: number;
+  native: boolean;
+  pareto: boolean;
+  dominated_by: string | null;
+  verdict: BenchmarkVerdict;
+  excluded_trials: number;
+  noop_trials: number;
+  token_basis: string | null;
+  usage_evidence_grade: string | null;
+}
+
+export interface BenchmarkStudyDetail {
+  study_id: string;
+  study: string;
+  suite: string | null;
+  tasks: string[];
+  expected_trials: number;
+  arms: BenchmarkArm[];
+}
+
+export async function fetchBenchmarkStudies(): Promise<{ data: BenchmarkStudySummary[] }> {
+  const res = await fetch('/api/v2/benchmarks');
+  return checkedJson(res, 'fetchBenchmarkStudies');
+}
+
+export async function fetchBenchmarkStudy(studyId: string): Promise<BenchmarkStudyDetail> {
+  const res = await fetch(`/api/v2/benchmarks/${encodeURIComponent(studyId)}`);
+  return checkedJson(res, 'fetchBenchmarkStudy');
+}

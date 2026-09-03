@@ -428,6 +428,9 @@ export function insertEvent(event: {
   cache_write_tokens?: number;
   source?: string;
   mode?: 'interactive' | 'headless';
+  /** Benchmark study grouping (source='benchmark' only). study_id = exact per-run key. */
+  study_id?: string;
+  study?: string;
 }): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
@@ -489,8 +492,9 @@ export function insertEvent(event: {
     const result = db.prepare(`
       INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
         tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp,
-        metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)
+        metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source,
+        study_id, study)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       event.event_id || null,
       event.session_id,
@@ -510,7 +514,9 @@ export function insertEvent(event: {
       event.cost_usd ?? null,
       event.cache_read_tokens ?? 0,
       event.cache_write_tokens ?? 0,
-      event.source || 'api'
+      event.source || 'api',
+      event.study_id ?? null,
+      event.study ?? null
     );
 
     if (result.changes === 0) return null; // duplicate event_id
