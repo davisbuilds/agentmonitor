@@ -10,8 +10,10 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   fixes. (1) The last benchmark-segregation leak: v1 `getStats` lifetime
   `total_sessions` `COUNT(*)`d the `sessions` table with no source predicate, so
   ended benchmark cells inflated it — now a correlated `NOT EXISTS` over
-  benchmark events (v2 analytics already counts `browsing_sessions`, which
-  benchmark cells never project into, so it was already clean). (2) `amon serve
+  benchmark events, plus a v6 data migration that sweeps the event-less
+  `sessions` rows the v5 legacy-benchmark cleanup orphans (they have no event
+  left to correlate against). v2 analytics already counts `browsing_sessions`,
+  which benchmark cells never project into, so it was already clean. (2) `amon serve
   --no-browser` was accepted but never opened a browser on either the direct or
   Portless path — removed the misleading flag so it now fails loudly as an
   unknown option rather than lying about a no-op. (3) Closed the

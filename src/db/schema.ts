@@ -815,7 +815,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 5;
+const DATA_SCHEMA_VERSION = 6;
 
 /**
  * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
@@ -836,6 +836,7 @@ export function runDataMigrations(db: Database): void {
     if (current < 3) invalidateCodexImportsForModelAttribution(db);
     if (current < 4) invalidateSessionFilesForSkillContext(db);
     if (current < 5) deleteLegacyBenchmarkRows(db);
+    if (current < 6) deleteOrphanedSessions(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run();
@@ -851,6 +852,33 @@ export function runDataMigrations(db: Database): void {
  * These rows exist only in pre-release dev DBs; drop them so a re-import restores
  * each study cleanly under the namespaced key.
  */
+/**
+ * v6 — the v5 cleanup deletes legacy benchmark *events* but leaves their
+ * `sessions` rows behind. `sessions` is written only by `upsertSession` (from
+ * `insertEvent`), so every session row is created alongside an event; a session
+ * with zero events can therefore only be one whose events were deleted — i.e. a
+ * v5-orphaned benchmark cell. Left in place they still inflate the lifetime
+ * `total_sessions` tally (there is no benchmark event left to correlate against).
+ * Sweep event-less session rows. Runs as its own version so it also repairs DBs
+ * that already advanced to v5 with the events-only delete.
+ */
+function deleteOrphanedSessions(db: Database): void {
+  const hasSessions = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sessions'"
+  ).get();
+  const hasEvents = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+  ).get();
+  if (!hasSessions || !hasEvents) return;
+  const result = db.prepare(`
+    DELETE FROM sessions
+    WHERE NOT EXISTS (SELECT 1 FROM events e WHERE e.session_id = sessions.id)
+  `).run();
+  if (result.changes > 0) {
+    console.log(`[migration] orphaned sessions: removed ${result.changes} event-less session row(s)`);
+  }
+}
+
 function deleteLegacyBenchmarkRows(db: Database): void {
   const hasEvents = db.prepare(
     "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
