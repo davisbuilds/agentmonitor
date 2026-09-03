@@ -428,6 +428,9 @@ export function insertEvent(event: {
   cache_write_tokens?: number;
   source?: string;
   mode?: 'interactive' | 'headless';
+  /** Benchmark study grouping (source='benchmark' only). study_id = exact per-run key. */
+  study_id?: string;
+  study?: string;
 }): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
@@ -489,8 +492,9 @@ export function insertEvent(event: {
     const result = db.prepare(`
       INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
         tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp,
-        metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?)
+        metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source,
+        study_id, study)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       event.event_id || null,
       event.session_id,
@@ -510,7 +514,9 @@ export function insertEvent(event: {
       event.cost_usd ?? null,
       event.cache_read_tokens ?? 0,
       event.cache_write_tokens ?? 0,
-      event.source || 'api'
+      event.source || 'api',
+      event.study_id ?? null,
+      event.study ?? null
     );
 
     if (result.changes === 0) return null; // duplicate event_id
@@ -577,6 +583,22 @@ export function backfillBenchmarkCost(eventId: string, cost: number): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * Backfill a benchmark cell's study grouping after re-import. Legacy benchmark
+ * rows (imported before study columns existed, or from openbench output predating
+ * the study fields) have `study_id = NULL`; a re-import of a file that now carries
+ * identity should adopt it. Updates only null-study benchmark rows so a real
+ * grouping is never overwritten; returns true when a row was updated.
+ */
+export function backfillBenchmarkStudy(eventId: string, studyId: string, study: string | null): boolean {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE events SET study_id = ?, study = ?
+    WHERE event_id = ? AND source = 'benchmark' AND study_id IS NULL
+  `).run(studyId, study, eventId);
+  return result.changes > 0;
 }
 
 export function getEvents(filters: {

@@ -19,6 +19,27 @@ function writeResults(rows: object[]): string {
   return file;
 }
 
+// Write results.jsonl into a named study directory, so the legacy parent-dir
+// derivation has a deterministic name to fall back to.
+function writeResultsInDir(dirName: string, rows: object[]): string {
+  const dir = path.join(tempDir, dirName);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'results.jsonl');
+  fs.writeFileSync(file, rows.map(r => JSON.stringify(r)).join('\n') + '\n');
+  return file;
+}
+
+function studyCols(eventId: string): { study_id: string | null; study: string | null } {
+  return getDb()
+    .prepare('SELECT study_id, study FROM events WHERE event_id = ?')
+    .get(eventId) as { study_id: string | null; study: string | null };
+}
+
+function meta(eventId: string): Record<string, unknown> {
+  const row = getDb().prepare('SELECT metadata FROM events WHERE event_id = ?').get(eventId) as { metadata: string };
+  return JSON.parse(row.metadata) as Record<string, unknown>;
+}
+
 const minimaxRow = {
   run_id: 'codex:task-a:minimax-m3:trial1',
   harness: 'codex',
@@ -156,6 +177,92 @@ describe('importBenchmarkResults', () => {
 
     const refreshed = getEvents({ source: 'benchmark' }).events.find(e => e.session_id === runId);
     assert.ok(Math.abs((refreshed?.cost_usd ?? 0) - 0.42) < 1e-9, `expected backfilled 0.42, got ${refreshed?.cost_usd}`);
+  });
+
+  test('reads study + model identity straight from openbench row fields', () => {
+    const runId = 'codex:task-id:gpt-5.6-terra-xhigh:trial1';
+    const file = writeResults([{
+      run_id: runId, harness: 'codex', model: 'gpt-5.6-terra-xhigh',
+      task: 'task-id', trial: 1, tokens_input_uncached: 1000, tokens_output: 100,
+      canonical_model: 'gpt-5.6-terra', reasoning_effort: 'xhigh', is_open_model: false,
+      study: 'my-suite-2026-09-03', study_sha256: 'sha-abc123', suite: 'my-suite',
+    }]);
+    importBenchmarkResults(file);
+
+    const cols = studyCols(runId);
+    assert.equal(cols.study_id, 'sha-abc123', 'study_id = openbench study_sha256 (grouping key)');
+    assert.equal(cols.study, 'my-suite-2026-09-03', 'study slug is the display label');
+
+    const m = meta(runId);
+    assert.equal(m.canonical_model, 'gpt-5.6-terra');
+    assert.equal(m.reasoning_effort, 'xhigh');
+    assert.equal(m.is_open_model, false);
+    assert.equal(m.suite, 'my-suite');
+  });
+
+  test('legacy fallback: no openbench identity fields → derive from parent dir + strip suffix', () => {
+    const runId = 'codex:legacy:minimax-m3:trial1';
+    // A pre-field row: no study/study_sha256/canonical_model/reasoning_effort.
+    const file = writeResultsInDir('legacy-study-2026-09-03', [{
+      run_id: runId, harness: 'codex', model: 'gpt-5.6-terra-xhigh',
+      task: 'legacy', trial: 1, tokens_input_uncached: 1000, tokens_output: 100,
+    }]);
+    importBenchmarkResults(file);
+
+    const cols = studyCols(runId);
+    assert.equal(cols.study_id, 'legacy-study-2026-09-03', 'legacy study_id falls back to parent dir');
+    assert.equal(cols.study, 'legacy-study-2026-09-03', 'legacy slug falls back to parent dir');
+
+    const m = meta(runId);
+    assert.equal(m.canonical_model, 'gpt-5.6-terra', 'effort suffix stripped as legacy fallback');
+    assert.equal(m.reasoning_effort, 'xhigh', 'recognized suffix recovered');
+  });
+
+  test('two same-day runs of one suite (same slug, different sha) are two studies', () => {
+    const fileA = writeResults([{
+      run_id: 'codex:t:glm-5.3-flash:trial1', harness: 'codex', model: 'glm-5.3-flash', task: 't', trial: 1,
+      tokens_input_uncached: 10, tokens_output: 5,
+      study: 'dup-suite-2026-09-03', study_sha256: 'sha-runA', suite: 'dup-suite',
+    }]);
+    const fileB = writeResults([{
+      run_id: 'codex:t:glm-5.3-flash:trial1-b', harness: 'codex', model: 'glm-5.3-flash', task: 't', trial: 1,
+      tokens_input_uncached: 10, tokens_output: 5,
+      study: 'dup-suite-2026-09-03', study_sha256: 'sha-runB', suite: 'dup-suite',
+    }]);
+    importBenchmarkResults(fileA);
+    importBenchmarkResults(fileB);
+
+    assert.equal(studyCols('codex:t:glm-5.3-flash:trial1').study_id, 'sha-runA');
+    assert.equal(studyCols('codex:t:glm-5.3-flash:trial1-b').study_id, 'sha-runB');
+    const distinct = getDb().prepare(
+      "SELECT COUNT(DISTINCT study_id) AS n FROM events WHERE study = 'dup-suite-2026-09-03'"
+    ).get() as { n: number };
+    assert.equal(distinct.n, 2, 'same slug, two grouping keys');
+  });
+
+  test('re-import backfills study identity onto a legacy null-study row', () => {
+    const runId = 'codex:bf:minimax-m3:trial1';
+    // First import with no identity → study_id null.
+    const legacy = writeResults([{
+      run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'bf', trial: 1,
+      tokens_input_uncached: 10, tokens_output: 5,
+    }]);
+    // Force the null-study state by importing from a bare path whose parent is tempDir;
+    // then re-import the same run with real identity fields.
+    importBenchmarkResults(legacy);
+    // Simulate the row having been stored before study columns existed.
+    getDb().prepare('UPDATE events SET study_id = NULL, study = NULL WHERE event_id = ?').run(runId);
+
+    const withId = writeResults([{
+      run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'bf', trial: 1,
+      tokens_input_uncached: 10, tokens_output: 5,
+      study: 'bf-suite-2026-09-03', study_sha256: 'sha-bf', suite: 'bf-suite',
+    }]);
+    const result = importBenchmarkResults(withId);
+    assert.equal(result.duplicates, 1);
+    const cols = studyCols(runId);
+    assert.equal(cols.study_id, 'sha-bf', 'null study_id backfilled on re-import');
+    assert.equal(cols.study, 'bf-suite-2026-09-03');
   });
 
   test('skips non-object JSON rows instead of aborting the whole import', () => {

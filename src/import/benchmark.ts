@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { backfillBenchmarkCost, insertEvent } from '../db/queries.js';
+import path from 'node:path';
+import { backfillBenchmarkCost, backfillBenchmarkStudy, insertEvent } from '../db/queries.js';
 import { pricingRegistry } from '../pricing/index.js';
 
 /**
@@ -16,6 +17,11 @@ import { pricingRegistry } from '../pricing/index.js';
 
 export interface BenchmarkImportOptions {
   dryRun?: boolean;
+  /**
+   * Manual study override (escape hatch / legacy grouping). Sets both the grouping
+   * key and the display slug to this label, overriding the row's own identity.
+   */
+  study?: string;
 }
 
 export interface BenchmarkImportResult {
@@ -56,6 +62,29 @@ interface BenchmarkRow {
   cost_source?: unknown;
   harness_version?: unknown;
   score?: unknown;
+  // Identity fields emitted by openbench (feat/results-row-study-identity).
+  // Preferred over amon's legacy derivations when present.
+  canonical_model?: unknown;
+  reasoning_effort?: unknown;
+  is_open_model?: unknown;
+  study?: unknown;
+  study_sha256?: unknown;
+  suite?: unknown;
+}
+
+/**
+ * Split a glued codex model string into `(canonical, effort)`. Legacy fallback
+ * only — openbench now emits `canonical_model` + `reasoning_effort` directly.
+ */
+function splitEffort(model: string): { canonical: string; effort: string | undefined } {
+  const lastDash = model.lastIndexOf('-');
+  if (lastDash > 0) {
+    const suffix = model.slice(lastDash + 1);
+    if (EFFORT_SUFFIXES.includes(suffix)) {
+      return { canonical: model.slice(0, lastDash), effort: suffix };
+    }
+  }
+  return { canonical: model, effort: undefined };
 }
 
 // Reasoning-effort suffixes openbench appends to a codex model string
@@ -119,6 +148,11 @@ export function importBenchmarkResults(
   };
   const unpriced = new Set<string>();
 
+  // Legacy study fallback for pre-field rows: the results.jsonl's parent dir name
+  // (e.g. `am-consistency-pareto-2026-08-29`), else the file's own basename.
+  const legacyStudy = path.basename(path.dirname(filePath))
+    || path.basename(filePath).replace(/\.[^.]*$/, '');
+
   const contents = readFileSync(filePath, 'utf-8');
   for (const line of contents.split('\n')) {
     const trimmed = line.trim();
@@ -152,6 +186,18 @@ export function importBenchmarkResults(
     const cost = resolveBenchmarkCost(row);
     if (cost === null) unpriced.add(model);
 
+    // Study identity: prefer the manual override, then openbench's own fields,
+    // then the legacy parent-dir fallback. study_id (= study_sha256) is the exact
+    // per-run grouping key; study is the human slug label.
+    const studyId = options.study ?? str(row.study_sha256) ?? legacyStudy;
+    const study = options.study ?? str(row.study) ?? legacyStudy;
+
+    // Model identity: prefer openbench's split, else strip the effort suffix.
+    const split = splitEffort(model);
+    const canonicalModel = str(row.canonical_model) ?? split.canonical;
+    const reasoningEffort = str(row.reasoning_effort) ?? split.effort ?? null;
+    const isOpenModel = typeof row.is_open_model === 'boolean' ? row.is_open_model : null;
+
     if (options.dryRun) {
       // Count would-be inserts without touching the DB. Duplicate detection is
       // not available in dry-run; report everything as importable.
@@ -176,6 +222,8 @@ export function importBenchmarkResults(
       cache_write_tokens: num(row.tokens_cache_write),
       cost_usd: cost,
       source: 'benchmark',
+      study_id: studyId,
+      study,
       duration_ms: durationMs,
       client_timestamp: str(row.ts_iso),
       metadata: {
@@ -194,6 +242,11 @@ export function importBenchmarkResults(
         token_basis: str(row.token_basis),
         usage_evidence_grade: str(row.usage_evidence_grade),
         cost_source: str(row.cost_source),
+        // Arm/model identity (study_id/study live in their own columns).
+        canonical_model: canonicalModel,
+        reasoning_effort: reasoningEffort,
+        is_open_model: isOpenModel,
+        suite: str(row.suite) ?? null,
       },
     });
 
@@ -201,12 +254,14 @@ export function importBenchmarkResults(
       result.eventsImported += 1;
     } else {
       result.duplicates += 1;
-      // A re-import after rates were added: the cell already exists (so insert is
-      // skipped) but its stored cost may still be null. Backfill the now-resolved
-      // price so usage stops summing it as $0.
+      // A re-import after rates/identity were added: the cell already exists (so
+      // insert is skipped) but its stored cost/study may still be null. Backfill
+      // the now-resolved values so usage stops summing $0 and the row joins its
+      // study.
       if (cost !== null && backfillBenchmarkCost(runId, cost)) {
         result.costsBackfilled += 1;
       }
+      backfillBenchmarkStudy(runId, studyId, study);
     }
   }
 

@@ -118,7 +118,9 @@ export function initSchema(): void {
       cost_usd REAL,
       cache_read_tokens INTEGER DEFAULT 0,
       cache_write_tokens INTEGER DEFAULT 0,
-      source TEXT DEFAULT 'api'
+      source TEXT DEFAULT 'api',
+      study_id TEXT,
+      study TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
@@ -197,6 +199,16 @@ export function initSchema(): void {
   if (!eventColumns.has('source')) {
     db.exec("ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'api'");
   }
+  // Benchmark study grouping (source='benchmark' rows only; null elsewhere).
+  // study_id = openbench study_sha256 (exact per-run key, the grouping key);
+  // study = the human slug label. See docs/specs/2026-09-02-benchmark-comparison-view-spec.md.
+  if (!eventColumns.has('study_id')) {
+    db.exec('ALTER TABLE events ADD COLUMN study_id TEXT');
+  }
+  if (!eventColumns.has('study')) {
+    db.exec('ALTER TABLE events ADD COLUMN study TEXT');
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_events_study_id ON events(study_id) WHERE study_id IS NOT NULL');
 
   const providerQuotaColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(provider_quotas)`).all() as Array<{ name: string }>).map(col => col.name)
