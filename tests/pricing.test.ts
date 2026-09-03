@@ -491,17 +491,18 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Sonnet 5 (standard pricing; introductory rates lapsed 2026-08-31) ──
+  // ─── Sonnet 5 ($2/$10 — the launch "introductory" rate was made permanent;
+  //     the scheduled 2026-09-01 rise to $3/$15 was cancelled by Anthropic) ──
   describe('Claude Sonnet 5', () => {
-    test('resolves with standard per-MTok rates ($3/$15, cacheRead $0.30, 5m write $3.75)', () => {
+    test('resolves with the permanent per-MTok rates ($2/$10, cacheRead $0.20, 5m write $2.50)', () => {
       const pricing = registry.lookup('claude-sonnet-5');
       assert.ok(pricing);
       assert.equal(pricing.provider, 'anthropic');
       assert.equal(pricing.deprecated, false);
-      assert.equal(pricing.inputCostPerToken, 3 / 1_000_000);
-      assert.equal(pricing.outputCostPerToken, 15 / 1_000_000);
-      assert.equal(pricing.cacheReadCostPerToken, 0.3 / 1_000_000);
-      assert.equal(pricing.cacheWriteCostPerToken, 3.75 / 1_000_000);
+      assert.equal(pricing.inputCostPerToken, 2 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 10 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 2.5 / 1_000_000);
     });
 
     test('classifies as a known anthropic/sonnet tier', () => {
@@ -512,7 +513,7 @@ describe('PricingRegistry', () => {
       assert.equal(c.pricing_status, 'known');
     });
 
-    test('calculates cost at standard rates', () => {
+    test('calculates cost at the permanent rates', () => {
       const cost = registry.calculate('claude-sonnet-5', {
         input: 100_000,
         output: 50_000,
@@ -520,19 +521,19 @@ describe('PricingRegistry', () => {
         cacheWrite: 10_000,
       });
       assert.ok(cost !== null);
-      // 100K*$3 + 50K*$15 + 500K*$0.30 + 10K*$3.75 (per MTok)
-      const expected = 0.3 + 0.75 + 0.15 + 0.0375;
+      // 100K*$2 + 50K*$10 + 500K*$0.20 + 10K*$2.50 (per MTok)
+      const expected = 0.2 + 0.5 + 0.1 + 0.025;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
     });
   });
 
   // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
   describe('tiered prompt-size pricing', () => {
-    test('GPT-5.6 tiers bill cache writes and apply full-request long-context rates above 272K', () => {
+    test('GPT-5.6 tiers apply full-request long-context rates above 272K (OpenAI bills no cache write)', () => {
       const cases = [
-        { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 6.25], long: [10, 45, 1, 12.5] },
-        { model: 'gpt-5.6-terra', base: [2.5, 15, 0.25, 3.125], long: [5, 22.5, 0.5, 6.25] },
-        { model: 'gpt-5.6-luna', base: [1, 6, 0.1, 1.25], long: [2, 9, 0.2, 2.5] },
+        { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 0], long: [10, 45, 1, 0] },
+        { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 0], long: [4, 18, 0.4, 0] },
+        { model: 'gpt-5.6-luna', base: [0.2, 1.2, 0.02, 0], long: [0.4, 1.8, 0.04, 0] },
       ] as const;
 
       for (const { model, base, long } of cases) {
