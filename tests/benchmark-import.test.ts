@@ -29,15 +29,24 @@ function writeResultsInDir(dirName: string, rows: object[]): string {
   return file;
 }
 
-function studyCols(eventId: string): { study_id: string | null; study: string | null } {
-  return getDb()
-    .prepare('SELECT study_id, study FROM events WHERE event_id = ?')
-    .get(eventId) as { study_id: string | null; study: string | null };
+// Persisted event_id is namespaced `${study_id}::${run_id}`, so resolve the row
+// by the run_id suffix (unique within these single-study fixtures).
+function benchRow(runId: string): { event_id: string; study_id: string | null; study: string | null; metadata: string } {
+  const rows = getDb()
+    .prepare("SELECT event_id, study_id, study, metadata FROM events WHERE source = 'benchmark'")
+    .all() as Array<{ event_id: string; study_id: string | null; study: string | null; metadata: string }>;
+  const hit = rows.find(r => r.event_id.endsWith(`::${runId}`));
+  if (!hit) throw new Error(`no benchmark row for run_id ${runId}`);
+  return hit;
 }
 
-function meta(eventId: string): Record<string, unknown> {
-  const row = getDb().prepare('SELECT metadata FROM events WHERE event_id = ?').get(eventId) as { metadata: string };
-  return JSON.parse(row.metadata) as Record<string, unknown>;
+function studyCols(runId: string): { study_id: string | null; study: string | null } {
+  const { study_id, study } = benchRow(runId);
+  return { study_id, study };
+}
+
+function meta(runId: string): Record<string, unknown> {
+  return JSON.parse(benchRow(runId).metadata) as Record<string, unknown>;
 }
 
 const minimaxRow = {
@@ -109,7 +118,10 @@ describe('importBenchmarkResults', () => {
     const minimax = events.find(e => e.model === 'minimax-m3');
     assert.ok(minimax);
     assert.equal(minimax.source, 'benchmark');
-    assert.equal(minimax.session_id, 'codex:task-a:minimax-m3:trial1');
+    // event/session id is namespaced `${study_id}::${run_id}`; the faithful run_id
+    // is preserved in metadata.
+    assert.ok(minimax.session_id.endsWith('::codex:task-a:minimax-m3:trial1'));
+    assert.equal(JSON.parse(minimax.metadata as string).run_id, 'codex:task-a:minimax-m3:trial1');
     // 1M input * 0.30/MTok + 1M output * 1.20/MTok
     assert.ok(Math.abs((minimax.cost_usd ?? 0) - 1.5) < 1e-9, `got ${minimax.cost_usd}`);
 
@@ -163,7 +175,7 @@ describe('importBenchmarkResults', () => {
       { run_id: runId, harness: 'codex', model: 'mystery-model', tokens_input_uncached: 500, tokens_output: 100, cost_usd: null },
     ]);
     importBenchmarkResults(first);
-    const stored = getEvents({ source: 'benchmark' }).events.find(e => e.session_id === runId);
+    const stored = getEvents({ source: 'benchmark' }).events.find(e => e.session_id.endsWith(`::${runId}`));
     assert.ok(stored);
     assert.equal(stored.cost_usd, null, 'cost is null while the model is unpriced');
 
@@ -175,7 +187,7 @@ describe('importBenchmarkResults', () => {
     assert.equal(result.duplicates, 1, 'the run_id already exists');
     assert.equal(result.costsBackfilled, 1, 'the previously-null cost is backfilled');
 
-    const refreshed = getEvents({ source: 'benchmark' }).events.find(e => e.session_id === runId);
+    const refreshed = getEvents({ source: 'benchmark' }).events.find(e => e.session_id.endsWith(`::${runId}`));
     assert.ok(Math.abs((refreshed?.cost_usd ?? 0) - 0.42) < 1e-9, `expected backfilled 0.42, got ${refreshed?.cost_usd}`);
   });
 
@@ -218,51 +230,46 @@ describe('importBenchmarkResults', () => {
     assert.equal(m.reasoning_effort, 'xhigh', 'recognized suffix recovered');
   });
 
-  test('two same-day runs of one suite (same slug, different sha) are two studies', () => {
-    const fileA = writeResults([{
-      run_id: 'codex:t:glm-5.3-flash:trial1', harness: 'codex', model: 'glm-5.3-flash', task: 't', trial: 1,
-      tokens_input_uncached: 10, tokens_output: 5,
-      study: 'dup-suite-2026-09-03', study_sha256: 'sha-runA', suite: 'dup-suite',
-    }]);
-    const fileB = writeResults([{
-      run_id: 'codex:t:glm-5.3-flash:trial1-b', harness: 'codex', model: 'glm-5.3-flash', task: 't', trial: 1,
-      tokens_input_uncached: 10, tokens_output: 5,
-      study: 'dup-suite-2026-09-03', study_sha256: 'sha-runB', suite: 'dup-suite',
-    }]);
-    importBenchmarkResults(fileA);
-    importBenchmarkResults(fileB);
+  test('bare-filename import falls back to the filename, not "."', () => {
+    const runId = 'codex:bare:minimax-m3:trial1';
+    const prevCwd = process.cwd();
+    try {
+      process.chdir(tempDir);
+      fs.writeFileSync('bare.jsonl', JSON.stringify({ run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'bare', trial: 1, tokens_input_uncached: 10, tokens_output: 5 }) + '\n');
+      importBenchmarkResults('bare.jsonl');
+    } finally {
+      process.chdir(prevCwd);
+    }
+    assert.equal(studyCols(runId).study_id, 'bare', 'parent dir "." falls back to the filename, not merging as "."');
+  });
 
-    assert.equal(studyCols('codex:t:glm-5.3-flash:trial1').study_id, 'sha-runA');
-    assert.equal(studyCols('codex:t:glm-5.3-flash:trial1-b').study_id, 'sha-runB');
+  test('two runs of one suite with the same run_id are two studies (event_id namespaced)', () => {
+    // openbench reruns produce the SAME run_id (harness:task:model:trial); only
+    // study_sha256 differs. Keying events on run_id alone would drop run B.
+    const runId = 'codex:t:glm-5.3-flash:trial1';
+    const base = { run_id: runId, harness: 'codex', model: 'glm-5.3-flash', task: 't', trial: 1, tokens_input_uncached: 10, tokens_output: 5, study: 'dup-suite-2026-09-03', suite: 'dup-suite' };
+    const a = importBenchmarkResults(writeResults([{ ...base, study_sha256: 'sha-runA' }]));
+    const b = importBenchmarkResults(writeResults([{ ...base, study_sha256: 'sha-runB' }]));
+
+    assert.equal(a.eventsImported, 1);
+    assert.equal(b.eventsImported, 1, 'same run_id in a different study is not a duplicate');
+    assert.equal(b.duplicates, 0);
+
+    const byId = (eid: string) => getDb().prepare('SELECT study_id FROM events WHERE event_id = ?').get(eid) as { study_id: string } | undefined;
+    assert.equal(byId(`sha-runA::${runId}`)?.study_id, 'sha-runA');
+    assert.equal(byId(`sha-runB::${runId}`)?.study_id, 'sha-runB');
     const distinct = getDb().prepare(
       "SELECT COUNT(DISTINCT study_id) AS n FROM events WHERE study = 'dup-suite-2026-09-03'"
     ).get() as { n: number };
-    assert.equal(distinct.n, 2, 'same slug, two grouping keys');
+    assert.equal(distinct.n, 2, 'same slug, two grouping keys, both cells kept');
   });
 
-  test('re-import backfills study identity onto a legacy null-study row', () => {
-    const runId = 'codex:bf:minimax-m3:trial1';
-    // First import with no identity → study_id null.
-    const legacy = writeResults([{
-      run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'bf', trial: 1,
-      tokens_input_uncached: 10, tokens_output: 5,
-    }]);
-    // Force the null-study state by importing from a bare path whose parent is tempDir;
-    // then re-import the same run with real identity fields.
-    importBenchmarkResults(legacy);
-    // Simulate the row having been stored before study columns existed.
-    getDb().prepare('UPDATE events SET study_id = NULL, study = NULL WHERE event_id = ?').run(runId);
-
-    const withId = writeResults([{
-      run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'bf', trial: 1,
-      tokens_input_uncached: 10, tokens_output: 5,
-      study: 'bf-suite-2026-09-03', study_sha256: 'sha-bf', suite: 'bf-suite',
-    }]);
-    const result = importBenchmarkResults(withId);
-    assert.equal(result.duplicates, 1);
-    const cols = studyCols(runId);
-    assert.equal(cols.study_id, 'sha-bf', 'null study_id backfilled on re-import');
-    assert.equal(cols.study, 'bf-suite-2026-09-03');
+  test('re-importing the same study is idempotent', () => {
+    const row = { run_id: 'codex:idem:minimax-m3:trial1', harness: 'codex', model: 'minimax-m3', task: 'idem', trial: 1, tokens_input_uncached: 10, tokens_output: 5, study: 'idem-suite', study_sha256: 'sha-idem', suite: 'idem-suite' };
+    assert.equal(importBenchmarkResults(writeResults([row])).eventsImported, 1);
+    const second = importBenchmarkResults(writeResults([row]));
+    assert.equal(second.eventsImported, 0);
+    assert.equal(second.duplicates, 1, 'same study + run_id → duplicate');
   });
 
   test('skips non-object JSON rows instead of aborting the whole import', () => {

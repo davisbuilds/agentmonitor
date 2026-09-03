@@ -585,22 +585,6 @@ export function backfillBenchmarkCost(eventId: string, cost: number): boolean {
   return false;
 }
 
-/**
- * Backfill a benchmark cell's study grouping after re-import. Legacy benchmark
- * rows (imported before study columns existed, or from openbench output predating
- * the study fields) have `study_id = NULL`; a re-import of a file that now carries
- * identity should adopt it. Updates only null-study benchmark rows so a real
- * grouping is never overwritten; returns true when a row was updated.
- */
-export function backfillBenchmarkStudy(eventId: string, studyId: string, study: string | null): boolean {
-  const db = getDb();
-  const result = db.prepare(`
-    UPDATE events SET study_id = ?, study = ?
-    WHERE event_id = ? AND source = 'benchmark' AND study_id IS NULL
-  `).run(studyId, study, eventId);
-  return result.changes > 0;
-}
-
 export function getEvents(filters: {
   limit?: number;
   offset?: number;

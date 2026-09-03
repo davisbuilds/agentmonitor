@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { backfillBenchmarkCost, backfillBenchmarkStudy, insertEvent } from '../db/queries.js';
+import { backfillBenchmarkCost, insertEvent } from '../db/queries.js';
 import { pricingRegistry } from '../pricing/index.js';
 
 /**
@@ -150,9 +150,13 @@ export function importBenchmarkResults(
   const unpriced = new Set<string>();
 
   // Legacy study fallback for pre-field rows: the results.jsonl's parent dir name
-  // (e.g. `am-consistency-pareto-2026-08-29`), else the file's own basename.
-  const legacyStudy = path.basename(path.dirname(filePath))
-    || path.basename(filePath).replace(/\.[^.]*$/, '');
+  // (e.g. `am-consistency-pareto-2026-08-29`), else the file's own basename. Guard
+  // the bare-filename form (`import benchmark results.jsonl`), where dirname is `.`
+  // and basename(`.`) is a truthy `.` that would merge unrelated runs into one.
+  const parentDir = path.basename(path.dirname(filePath));
+  const legacyStudy = parentDir && parentDir !== '.' && parentDir !== path.sep
+    ? parentDir
+    : path.basename(filePath).replace(/\.[^.]*$/, '');
 
   const contents = readFileSync(filePath, 'utf-8');
   for (const line of contents.split('\n')) {
@@ -193,6 +197,14 @@ export function importBenchmarkResults(
     const studyId = options.study ?? str(row.study_sha256) ?? legacyStudy;
     const study = options.study ?? str(row.study) ?? legacyStudy;
 
+    // Namespace the persisted event/session key by study. `run_id` is only unique
+    // *within* one bake-off (harness:task:model:trial), so two studies rerunning
+    // the same cell share a run_id; keying events on run_id alone would drop the
+    // second study's cells as duplicates. Prefixing with study_id keeps
+    // idempotence within a study while separating reruns. The faithful run_id is
+    // preserved in metadata.
+    const eventId = `${studyId}::${runId}`;
+
     // Model identity: prefer openbench's split, else strip the effort suffix.
     const split = splitEffort(model);
     const canonicalModel = str(row.canonical_model) ?? split.canonical;
@@ -210,8 +222,8 @@ export function importBenchmarkResults(
     const isError = row.success === false || (typeof row.error === 'string' && row.error.length > 0);
 
     const event = insertEvent({
-      event_id: runId,
-      session_id: runId,
+      event_id: eventId,
+      session_id: eventId,
       agent_type: harness,
       event_type: 'llm_response',
       status: isError ? 'error' : 'success',
@@ -257,14 +269,14 @@ export function importBenchmarkResults(
       result.eventsImported += 1;
     } else {
       result.duplicates += 1;
-      // A re-import after rates/identity were added: the cell already exists (so
-      // insert is skipped) but its stored cost/study may still be null. Backfill
-      // the now-resolved values so usage stops summing $0 and the row joins its
-      // study.
-      if (cost !== null && backfillBenchmarkCost(runId, cost)) {
+      // A duplicate is now a re-import of the *same* study+cell (identical
+      // namespaced event_id), whose stored row already carries the correct study
+      // and metadata. The one thing that can still change is a cost that was null
+      // when the model was unpriced: backfill it once rates are added, so usage
+      // stops summing it as $0.
+      if (cost !== null && backfillBenchmarkCost(eventId, cost)) {
         result.costsBackfilled += 1;
       }
-      backfillBenchmarkStudy(runId, studyId, study);
     }
   }
 

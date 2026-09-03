@@ -94,6 +94,9 @@ before(async () => {
   cell({ runId: 's1-B-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 1, score: 0.8, cost: 0.10, cost_source: 'litellm' });
   cell({ runId: 's1-B-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 2, score: 0.8, cost: 0.10, cost_source: 'litellm', success: true, workspace_changed: false });
   cell({ runId: 's1-C-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'gpt-native', effort: 'high', is_open: false, task: 't', trial: 1, score: 1.0, cost: 0.50, cost_source: null });
+  // A second gpt-native attempt that failed (unscored) — must count as an excluded
+  // trial, not be hidden by the raw cell count. Keeps n=1, mean_score=1.0.
+  cell({ runId: 's1-C-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'gpt-native', effort: 'high', is_open: false, task: 't', trial: 2, score: null, cost: 0.50, cost_source: null });
   cell({ runId: 's1-D-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'bad', is_open: true, task: 't', trial: 1, score: 0.5, cost: 0.60, cost_source: null });
   cell({ runId: 's1-D-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'bad', is_open: true, task: 't', trial: 2, score: 0.5, cost: 0.60, cost_source: null });
 
@@ -133,9 +136,9 @@ describe('getBenchmarkStudies', () => {
     assert.equal(s1.study, 's1-2026-09-03');
     assert.equal(s1.suite, 's1');
     assert.equal(s1.arm_count, 4);
-    assert.equal(s1.cell_count, 7);
+    assert.equal(s1.cell_count, 8);
     assert.equal(s1.cost_basis, 'derived', 'mixed captured/derived → derived');
-    assert.ok(Math.abs((s1.total_cost_usd ?? -1) - (0.02 * 2 + 0.10 * 2 + 0.50 + 0.60 * 2)) < 1e-9);
+    assert.ok(Math.abs((s1.total_cost_usd ?? -1) - (0.02 * 2 + 0.10 * 2 + 0.50 * 2 + 0.60 * 2)) < 1e-9);
 
     const s2 = studies.find(s => s.study_id === 'sha2');
     assert.ok(s2);
@@ -180,7 +183,8 @@ describe('getBenchmarkStudy — arm aggregation + frontier', () => {
   test('surfaces honesty flags independent of verdict', () => {
     const detail = getBenchmarkStudy('sha1');
     assert.equal(detail.expected_trials, 2, 'max trial index seen in the study');
-    assert.equal(armOf('gpt-native').excluded_trials, 1, 'n=1 while expected=2');
+    assert.equal(armOf('gpt-native').n, 1, 'only the scored attempt counts toward n');
+    assert.equal(armOf('gpt-native').excluded_trials, 1, 'the unscored 2nd attempt is an excluded trial, not hidden');
     assert.equal(armOf('mid').noop_trials, 1, 'one success with no workspace change');
     assert.equal(armOf('cheap').noop_trials, 0);
   });

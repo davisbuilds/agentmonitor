@@ -21,6 +21,8 @@ class BenchmarksStore {
   detail = $state<BenchmarkStudyDetail | null>(null);
   detailLoading = $state(false);
   detailError = $state<string | null>(null);
+  /** Bumped per detail request; a slower earlier response is discarded. */
+  private detailRequest = 0;
 
   async loadStudies(): Promise<void> {
     this.loading = true;
@@ -37,20 +39,25 @@ class BenchmarksStore {
   async select(studyId: string | null): Promise<void> {
     this.selectedStudyId = studyId;
     this.writeHash(studyId);
+    const req = ++this.detailRequest;
     if (!studyId) {
       this.detail = null;
       this.detailError = null;
+      this.detailLoading = false;
       return;
     }
     this.detailLoading = true;
     this.detailError = null;
     try {
-      this.detail = await fetchBenchmarkStudy(studyId);
+      const detail = await fetchBenchmarkStudy(studyId);
+      if (req !== this.detailRequest) return; // a newer selection superseded this one
+      this.detail = detail;
     } catch (err) {
+      if (req !== this.detailRequest) return;
       this.detailError = err instanceof Error ? err.message : 'Failed to load study';
       this.detail = null;
     } finally {
-      this.detailLoading = false;
+      if (req === this.detailRequest) this.detailLoading = false;
     }
   }
 

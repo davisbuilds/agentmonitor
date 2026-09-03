@@ -3770,7 +3770,10 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
       pareto: false,
       dominated_by: null,
       verdict: 'on-frontier',
-      excluded_trials: Math.max(0, expected_trials - cs.length),
+      // Count *scored* cells: an unscored failure (rate-limited / errored) is
+      // effectively an excluded trial, and the mean already averages only scored
+      // cells — so subtract n, not the raw cell count, or the honesty flag hides it.
+      excluded_trials: Math.max(0, expected_trials - scored.length),
       noop_trials: cs.filter(c => c.m.success === true && c.m.workspace_changed === false).length,
       token_basis: firstString(cs, 'token_basis'),
       usage_evidence_grade: firstString(cs, 'usage_evidence_grade'),
