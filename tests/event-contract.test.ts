@@ -155,3 +155,73 @@ test('normalizeIngestEvent leaves source undefined when not provided', () => {
   if (!result.ok) return;
   assert.equal(result.event.source, undefined);
 });
+
+test('normalizeIngestEvent rejects a non-object body', () => {
+  for (const body of [null, 42, 'nope', ['a'], undefined] as const) {
+    const result = normalizeIngestEvent(body);
+    assert.equal(result.ok, false, `Expected ${JSON.stringify(body)} to be rejected`);
+    if (result.ok) return;
+    assert.deepEqual(result.errors, [{ field: 'body', message: 'must be a JSON object' }]);
+  }
+});
+
+test('normalizeIngestEvent trims surrounding whitespace on string fields', () => {
+  const result = normalizeIngestEvent({
+    session_id: '  session-1  ',
+    agent_type: '\tcodex\n',
+    event_type: 'tool_use',
+    tool_name: '  Bash  ',
+    project: '  alpha  ',
+  });
+
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.event.session_id, 'session-1');
+  assert.equal(result.event.agent_type, 'codex');
+  assert.equal(result.event.tool_name, 'Bash');
+  assert.equal(result.event.project, 'alpha');
+});
+
+test('normalizeIngestEvent rejects a whitespace-only required field', () => {
+  const result = normalizeIngestEvent({
+    session_id: '   ',
+    agent_type: 'codex',
+    event_type: 'tool_use',
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.ok(
+    result.errors.some(e => e.field === 'session_id' && /non-empty/.test(e.message)),
+    'expected a non-empty-string error for session_id',
+  );
+});
+
+test('normalizeIngestEvent rejects an unparseable client_timestamp and keeps other errors', () => {
+  const result = normalizeIngestEvent({
+    session_id: 'session-1',
+    agent_type: 'codex',
+    event_type: 'tool_use',
+    client_timestamp: 'not-a-date',
+    duration_ms: -5,
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  // Errors aggregate — the whole payload is validated, not just the first failure.
+  assert.ok(result.errors.some(e => e.field === 'client_timestamp'), 'timestamp error present');
+  assert.ok(result.errors.some(e => e.field === 'duration_ms'), 'duration error present');
+});
+
+test('normalizeIngestEvent rejects a non-string client_timestamp', () => {
+  const result = normalizeIngestEvent({
+    session_id: 'session-1',
+    agent_type: 'codex',
+    event_type: 'tool_use',
+    client_timestamp: 1739880000000,
+  });
+
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.ok(result.errors.some(e => e.field === 'client_timestamp'));
+});

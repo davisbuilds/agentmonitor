@@ -41,36 +41,6 @@ note here. This file stays future-only.
 
 ### Ingestion
 
-#### `src/contracts/event-contract.ts` has no test of its own
-- **What**: 246 lines of ingestion validation (`normalizeEventType`, `normalizeStatus`,
-  `normalizeClientTimestamp`, `getRequiredString`, `getOptionalNonNegativeInt`) with no
-  dedicated test file. It's reached indirectly through import/API tests, but its own
-  coercion branches aren't pinned.
-- **Why it matters**: this is the boundary where untrusted hook payloads become typed
-  events. The failure mode matches the one this repo already knows well — a bad
-  normalization silently reshapes data into something plausible rather than throwing, so
-  it surfaces as wrong numbers on the dashboard, not as an error.
-- **Next**: table-driven tests over the `normalize*`/`get*` helpers with malformed,
-  missing, and out-of-range fields; assert coercion vs. rejection explicitly. Noted
-  2026-07-16 during the portfolio TDD-guidance pass.
-
-#### Benchmark cells still count toward lifetime `total_sessions`
-- **What**: benchmark segregation now covers the event-level aggregates on both
-  the v2 Monitor (`getMonitorStats`) and v1 (`getStats`) — cost, tokens, event
-  counts, and tool/agent/model breakdowns all exclude `source='benchmark'` — and
-  benchmark sessions are marked `ended` at insert so they stay out of the live
-  session lists and the active/live/active-agent counts. The one residual is the
-  lifetime `total_sessions` tally: it `COUNT(*)`s the `sessions` table with no
-  source predicate, so ended benchmark sessions inflate it.
-- **Why it matters**: minor and cosmetic — a large bake-off adds N to a lifetime
-  "sessions ever observed" number; every live and cost/usage surface is already
-  clean. `sessions` has no `source` column, so a clean exclusion would need one
-  (mirroring `events.source`) or a correlated `EXISTS` over events.
-- **Next / Revisit when**: the count visibly misleads, or a future
-  `include_benchmark` toggle is wanted on the Monitor. Add a `sessions.source`
-  column (migration + `upsertSession`) and filter the count. Noted 2026-09-02;
-  updated after the PR #103 review fixes.
-
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
   deepseek-v4-flash-0731, minimax-m3) and the codex/claude daily drivers, but
@@ -102,17 +72,6 @@ note here. This file stays future-only.
   `docs/specs/2026-09-02-benchmark-comparison-view-spec.md` (P3/P4 sections).
   Watch openbench #5 (per-attempt cost) — landing it would drop the "cost is a
   floor" honesty caveat. Noted 2026-09-02, updated 2026-09-03.
-
-### Runtime CLI
-
-#### `amon serve --no-browser` is accepted but has no effect
-- **What**: the serve parser accepts `--no-browser`, but neither direct nor
-  Portless-backed startup opens a browser, so the flag currently changes no
-  observable behavior.
-- **Why it matters**: the flag implies an auto-open default that does not exist,
-  which makes the runtime CLI contract misleading.
-- **Next**: either implement browser opening after health readiness and honor
-  the opt-out, or remove the flag in a deliberate compatibility pass.
 
 ### Skill trigger health (2026-07-09)
 
@@ -202,19 +161,21 @@ These are the deferred follow-ups surfaced during and after the build.
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
 
-#### Claude Sonnet 5 intro pricing expires 2026-08-31
-- **What**: `claude.json` encodes intro rates ($2/$10, cacheRead $0.20, 5m write
-  $2.50). Standard pricing ($3/$15, cacheRead $0.30, 5m write $3.75) takes effect
-  2026-09-01.
-- **Why it matters**: the engine has no date-awareness, so this is a manual data
-  bump on that date. (Sonnet 5's newer tokenizer emits ~30% more tokens; cost
-  reflects reported tokens, so no engine change needed.)
-- **Guard**: `tests/pricing-expiry.test.ts` fails the build from 2026-09-01 if the
-  registry still returns intro rates, with the replacement values in the message.
-  A silent 33% under-count is exactly the dist-pricing failure mode — wrong money,
-  no error — so it gets a deadline instead of a memory.
-- **Real fix (still open)**: date-aware rates, so a model can carry a rate schedule
-  rather than one set of numbers forever. The guard buys time; it is not the fix.
+#### Pricing engine has no date-awareness (rate schedules)
+- **What**: `calculate()` selects rates by prompt-size tier but not by date, so a
+  model carries one set of numbers forever. A rate that changes on a date (an
+  intro period ending, a provider price cut) requires a manual `*.json` bump on
+  the day, tracked only by a hardcoded deadline test.
+- **Why it matters**: a lapsed rate is a silent money bug — the same shape as the
+  dist-pricing incident (wrong cost, no error, plausible dashboard). The
+  Sonnet-5 intro→standard transition (handled manually in `ed1bf70`, 2026-09-01)
+  was the most recent instance; `tests/pricing-expiry.test.ts` is the deadline
+  guard pattern. The guard buys time; it is not the fix.
+- **Next / Revisit when**: the next dated rate change is known in advance, or the
+  manual-bump toil recurs. Let a model carry a rate schedule (`{ from, rates }[]`)
+  and select the entry effective at the event's timestamp; migrate the
+  deadline-guarded rates onto it. Noted 2026-07 (Sonnet 5 expiry); reframed
+  2026-09-03 after the manual bump shipped.
 
 #### CI flake: analytics capability banner times out on a cold runner
 - **What**: `search-analytics-capabilities.spec.ts:119` intermittently exceeds

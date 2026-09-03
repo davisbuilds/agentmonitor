@@ -708,8 +708,17 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
   ).get() as { count: number }).count;
 
+  // Exclude benchmark sessions from the lifetime tally. `sessions` has no source
+  // column, and benchmark cells own their session_id namespace, so a session with
+  // any benchmark event is entirely a bake-off cell — filter via a correlated
+  // NOT EXISTS (events.session_id is indexed). Cost/token/event totals and the
+  // active/live/agent counts are already benchmark-clean elsewhere; this was the
+  // one residual leak. See docs/project/ROADMAP.md.
   const totalSessions = (db.prepare(
-    `SELECT COUNT(*) as count FROM sessions`
+    `SELECT COUNT(*) as count FROM sessions s
+     WHERE NOT EXISTS (
+       SELECT 1 FROM events e WHERE e.session_id = s.id AND e.source = 'benchmark'
+     )`
   ).get() as { count: number }).count;
   const liveSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions WHERE status != 'ended'`

@@ -268,15 +268,22 @@ describe('importBenchmarkResults', () => {
     });
     const nullRows = (): number =>
       (db.prepare("SELECT COUNT(*) AS n FROM events WHERE source = 'benchmark' AND study_id IS NULL").get() as { n: number }).n;
+    const sessionRows = (id: string): number =>
+      (db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE id = ?').get(id) as { n: number }).n;
     assert.equal(nullRows(), 1, 'legacy NULL-study benchmark row present before migration');
+    assert.equal(sessionRows('legacy:run:1'), 1, 'legacy benchmark session present before migration');
 
-    // Re-run the versioned data migration from before the v5 cleanup.
+    // Re-run the versioned data migration from before the v5/v6 cleanup.
     db.pragma('user_version = 4');
     runDataMigrations(db);
 
     assert.equal(nullRows(), 0, 'legacy NULL-study benchmark row deleted');
+    // Deleting the events orphans their session rows; those must be swept too or
+    // they keep inflating total_sessions (nothing left to correlate against).
+    assert.equal(sessionRows('legacy:run:1'), 0, 'orphaned legacy benchmark session deleted');
     const kept = (db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = 'sha-keep::run:1'").get() as { n: number }).n;
     assert.equal(kept, 1, 'namespaced row preserved');
+    assert.equal(sessionRows('sha-keep::run:1'), 1, 'a session that still has events is preserved');
   });
 
   test('two runs of one suite with the same run_id are two studies (event_id namespaced)', () => {

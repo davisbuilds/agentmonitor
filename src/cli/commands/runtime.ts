@@ -25,7 +25,7 @@ function setServeEnv(ctx: CliContext, args: string[]): {
   const parsed = parseOptionSet(
     args,
     new Set(['--host', '--port']),
-    new Set(['--no-browser', '--no-import', '--no-portless', '--no-watch']),
+    new Set(['--no-import', '--no-portless', '--no-watch']),
   );
   rejectExtraPositionals(parsed.positionals, 'amon serve [--host <host>] [--port <port>] [--no-portless]');
   const host = parsed.values.get('--host');

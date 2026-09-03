@@ -77,7 +77,7 @@ describe('cache-inclusive input backfill migration', () => {
     const before = getRow('openai-old');
     // runDataMigrations advances the counter to the current DATA_SCHEMA_VERSION
     // (bumped to 4 when skill-context session backfill was added).
-    assert.equal(db.pragma('user_version', { simple: true }), 5);
+    assert.equal(db.pragma('user_version', { simple: true }), 6);
 
     // Re-running without resetting the guard must short-circuit — no second
     // subtraction of the already-netted cached tokens.

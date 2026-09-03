@@ -6,6 +6,23 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Small correctness/tooling sweep (2026-09-03) — *What:* three self-contained
+  fixes. (1) The last benchmark-segregation leak: v1 `getStats` lifetime
+  `total_sessions` `COUNT(*)`d the `sessions` table with no source predicate, so
+  ended benchmark cells inflated it — now a correlated `NOT EXISTS` over
+  benchmark events, plus a v6 data migration that sweeps the event-less
+  `sessions` rows the v5 legacy-benchmark cleanup orphans (they have no event
+  left to correlate against). v2 analytics already counts `browsing_sessions`,
+  which benchmark cells never project into, so it was already clean. (2) `amon serve
+  --no-browser` was accepted but never opened a browser on either the direct or
+  Portless path — removed the misleading flag so it now fails loudly as an
+  unknown option rather than lying about a no-op. (3) Closed the
+  `src/contracts/event-contract.ts` coverage gaps (non-object body, string
+  trimming, whitespace-only required fields, unparseable/non-string
+  `client_timestamp`, error aggregation) on top of the existing suite. *Why:*
+  small debt with real failure modes — a bake-off silently inflating a lifetime
+  count, a flag that misrepresents the CLI contract, and the untrusted-payload
+  boundary whose coercion branches weren't pinned.
 - Benchmark comparison view — Benchmarks tab (2026-09-03) — *What:* the consumer
   half of the benchmark pipeline (PR #106). A dedicated `/app/` Benchmarks tab
   renders the segregated bake-off: a studies list drilling into a per-arm ladder

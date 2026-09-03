@@ -207,6 +207,15 @@ test('invalid numeric reporting filters exit with invalid usage', async () => {
   assert.match(result.stderr, /Invalid --min-score: nope/);
 });
 
+test('serve rejects the removed --no-browser flag instead of silently accepting it', async () => {
+  // serve never opened a browser, so --no-browser was a no-op that misrepresented
+  // the contract. It is now unknown and must fail loudly rather than lie.
+  const result = await runCli(['serve', '--no-browser', '--no-portless']);
+
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /Unknown option: --no-browser/);
+});
+
 test('import dry-run reports parse results without writing events or import state', async () => {
   fs.writeFileSync(
     path.join(claudeDir, 'projects', 'project-a', 'dry-run-session.jsonl'),

@@ -41,7 +41,7 @@ test('the GPT-5.6 model-attribution migration invalidates only Codex event impor
     { source: 'claude-code', file_hash: 'claude-hash' },
     { source: 'codex', file_hash: '' },
   ]);
-  assert.equal(db.pragma('user_version', { simple: true }), 5);
+  assert.equal(db.pragma('user_version', { simple: true }), 6);
 
   db.prepare("UPDATE import_state SET file_hash = 'restored' WHERE source = 'codex'").run();
   runDataMigrations(db);
