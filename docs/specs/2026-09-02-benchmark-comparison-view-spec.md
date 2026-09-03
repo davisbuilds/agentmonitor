@@ -282,8 +282,10 @@ class from the read side).
   `getBenchmarkStudies` / `getBenchmarkStudy` with arm aggregation + Pareto/
   verdict + honesty flags; `GET /api/v2/benchmarks[/:studyId]`; `--study`
   override. Shipped behind no UI.
-- **P2 — Benchmarks tab shell.** Route wiring, studies list, study-detail ladder
-  (DataTable + Bar + verdict Badges) + honesty panel. Usable without the chart.
+- **P2 — Benchmarks tab shell. ✅ SHIPPED** (`e5ef0d7`). `benchmarks` tab +
+  `#benchmarks?study=` route; studies list; study-detail ladder (DataTable + Bar +
+  verdict Badges + ◯native/●routed) + auto-generated honesty panel. Playwright-
+  validated against three real openbench studies. Usable without the chart.
 - **P3 — frontier chart + shared primitives.** `ui/chart/scales.ts` +
   `PlotFrame.svelte`; `BenchmarkFrontier.svelte` on top of them + interactivity
   (hover/click drill-in); refactor CostDashboard's timeline onto the same
