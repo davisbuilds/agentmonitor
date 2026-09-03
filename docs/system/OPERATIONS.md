@@ -249,7 +249,7 @@ pnpm cli -- import --source claude-code    # Claude Code JSONL logs
 pnpm cli -- import --source codex          # Codex session files
 pnpm cli -- import --source antigravity    # Antigravity CLI conversation DBs (~/.gemini/antigravity-cli)
 pnpm cli -- import --dry-run               # Preview without writing
-pnpm cli -- import benchmark <results.jsonl>  # Import an openbench results.jsonl as segregated benchmark events
+pnpm cli -- import benchmark <results.jsonl> [--study <label>]  # Import an openbench results.jsonl as segregated benchmark events
 pnpm cli -- sync sessions --source claude  # Rebuild browsing_sessions/messages/tool_calls from Claude JSONL
 pnpm cli -- sync sessions --source codex   # Rebuild browsing_sessions/messages/tool_calls from Codex JSONL
 pnpm cli -- costs recalc --dry-run         # Preview cost backfill
@@ -266,7 +266,7 @@ Operational notes:
 - Full imports update `import_state` even when a file produced zero events, so unchanged unsupported/non-interactive files are skipped on later full imports.
 - Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
 - `pnpm cli -- import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm cli -- sync sessions --source codex --force` when transcript-derived analytics such as inferred skill usage need to be backfilled.
-- `import benchmark <results.jsonl>` ingests external openbench runs (codex/claude harnesses driving OpenRouter models through the LiteLLM bridge) as `source='benchmark'` events, one aggregate `llm_response` per cell keyed on `run_id` (idempotent re-import; `--dry-run` previews). These are **segregated** from the default cost/usage/analytics aggregates — pass `include_benchmark` on the usage API to include them. Because `CODEX_HOME` is ephemeral per cell, there is no transcript, so benchmark cells populate usage/cost but not the session browser. Cost prefers a row's captured `cost_usd`, else derives from the pricing tables; models with no rate are reported as unpriced (non-zero exit) rather than billed as null — add rates to `src/pricing/data/openrouter.json`.
+- `import benchmark <results.jsonl> [--study <label>]` ingests external openbench runs (codex/claude harnesses driving OpenRouter models through the LiteLLM bridge) as `source='benchmark'` events, one aggregate `llm_response` per cell keyed on `run_id` (idempotent re-import; `--dry-run` previews). Study + model identity are read from openbench's own row fields (`study`/`study_sha256`/`suite`/`canonical_model`/`reasoning_effort`/`is_open_model`); `--study <label>` overrides the grouping (escape hatch / pre-field files, which otherwise fall back to the parent-dir name). These are **segregated** from the default cost/usage/analytics aggregates — pass `include_benchmark` on the usage API to include them, or use the dedicated `GET /api/v2/benchmarks[/:studyId]` surface. Because `CODEX_HOME` is ephemeral per cell, there is no transcript, so benchmark cells populate usage/cost but not the session browser. Cost prefers a row's captured `cost_usd`, else derives from the pricing tables; models with no rate are reported as unpriced (non-zero exit) rather than billed as null — add rates to `src/pricing/data/openrouter.json`.
 - `watched_files` is independent of the session-browser tables. If
   `browsing_sessions`, `messages`, or `tool_calls` are restored, cleared, or
   otherwise fall behind while the hashes remain, ordinary startup considers

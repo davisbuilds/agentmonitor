@@ -236,6 +236,8 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/usage/tiers` | GET | Usage attribution grouped by provider-neutral model tier |
 | `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
 | `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
+| `/api/v2/benchmarks` | GET | Benchmark studies (bake-off runs), grouped by `study_id` — arm/cell counts, cost basis |
+| `/api/v2/benchmarks/:studyId` | GET | One study's per-arm aggregates: Pareto frontier, verdicts, honesty flags (the one benchmark-inclusive read surface) |
 | `/api/v2/usage/budgets` | GET | Read-only budget state from optional local budget config |
 | `/api/v2/usage/tier-feedback` | GET | Human-reviewed advisory tier feedback from usage evidence |
 | `/api/v2/trace-quality/traces` | GET | Lean trace list (one per session) from `session_trace_summary` with `session_id`/`project`/`agent`/date filters, aggregates, pagination, and coverage |

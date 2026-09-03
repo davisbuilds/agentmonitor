@@ -1,6 +1,6 @@
 ---
 title: Benchmark comparison view (Benchmarks tab)
-status: draft
+status: in-progress
 created: 2026-09-02
 owner: davis
 related:
@@ -275,14 +275,13 @@ class from the read side).
 
 ## Phasing
 
-- **P1 — data + queries (backend, TDD).** `study_id`/`study` columns + migration +
-  index; ingest reads the upstream `study_sha256`/`study`/`suite`/
-  `canonical_model`/`reasoning_effort` fields (legacy fallback for old rows) +
-  duplicate backfill; `getBenchmarkStudies` / `getBenchmarkStudy` with arm
-  aggregation + frontier geometry + honesty flags. v2 routes. Shippable behind no
-  UI. **Depends on** openbench `feat/results-row-study-identity` landing; can
-  start against the field names now (legacy path is exercised by existing fixture
-  files that lack them).
+- **P1 — data + queries (backend, TDD). ✅ SHIPPED** (`a578209`, `86972f0`).
+  `study_id`/`study` columns + migration + index; ingest reads the upstream
+  `study_sha256`/`study`/`suite`/`canonical_model`/`reasoning_effort`/
+  `is_open_model` fields (legacy fallback for old rows) + duplicate backfill;
+  `getBenchmarkStudies` / `getBenchmarkStudy` with arm aggregation + Pareto/
+  verdict + honesty flags; `GET /api/v2/benchmarks[/:studyId]`; `--study`
+  override. Shipped behind no UI.
 - **P2 — Benchmarks tab shell.** Route wiring, studies list, study-detail ladder
   (DataTable + Bar + verdict Badges) + honesty panel. Usable without the chart.
 - **P3 — frontier chart + shared primitives.** `ui/chart/scales.ts` +
