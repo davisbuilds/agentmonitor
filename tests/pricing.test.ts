@@ -529,11 +529,14 @@ describe('PricingRegistry', () => {
 
   // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
   describe('tiered prompt-size pricing', () => {
-    test('GPT-5.6 tiers apply full-request long-context rates above 272K (OpenAI bills no cache write)', () => {
+    // OpenAI has no separate cache-write surcharge: the parser subtracts
+    // cache-write tokens from tokens_in, so their rate must equal the input rate
+    // (not Anthropic's 1.25x, and not 0 — which would make them free).
+    test('GPT-5.6 tiers bill cache writes at the input rate and apply long-context rates above 272K', () => {
       const cases = [
-        { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 0], long: [10, 45, 1, 0] },
-        { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 0], long: [4, 18, 0.4, 0] },
-        { model: 'gpt-5.6-luna', base: [0.2, 1.2, 0.02, 0], long: [0.4, 1.8, 0.04, 0] },
+        { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 5], long: [10, 45, 1, 10] },
+        { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 2], long: [4, 18, 0.4, 4] },
+        { model: 'gpt-5.6-luna', base: [0.2, 1.2, 0.02, 0.2], long: [0.4, 1.8, 0.04, 0.4] },
       ] as const;
 
       for (const { model, base, long } of cases) {

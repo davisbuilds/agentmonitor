@@ -9,7 +9,7 @@
       "inputCostPerMTok": 5,
       "outputCostPerMTok": 30,
       "cacheReadCostPerMTok": 0.5,
-      "cacheWriteCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 5,
       "deprecated": false,
       "tiers": [
         {
@@ -17,7 +17,7 @@
           "inputCostPerMTok": 10,
           "outputCostPerMTok": 45,
           "cacheReadCostPerMTok": 1,
-          "cacheWriteCostPerMTok": 0
+          "cacheWriteCostPerMTok": 10
         }
       ]
     },
@@ -26,7 +26,7 @@
       "inputCostPerMTok": 2,
       "outputCostPerMTok": 12,
       "cacheReadCostPerMTok": 0.2,
-      "cacheWriteCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 2,
       "deprecated": false,
       "tiers": [
         {
@@ -34,7 +34,7 @@
           "inputCostPerMTok": 4,
           "outputCostPerMTok": 18,
           "cacheReadCostPerMTok": 0.4,
-          "cacheWriteCostPerMTok": 0
+          "cacheWriteCostPerMTok": 4
         }
       ]
     },
@@ -43,7 +43,7 @@
       "inputCostPerMTok": 0.2,
       "outputCostPerMTok": 1.2,
       "cacheReadCostPerMTok": 0.02,
-      "cacheWriteCostPerMTok": 0,
+      "cacheWriteCostPerMTok": 0.2,
       "deprecated": false,
       "tiers": [
         {
@@ -51,7 +51,7 @@
           "inputCostPerMTok": 0.4,
           "outputCostPerMTok": 1.8,
           "cacheReadCostPerMTok": 0.04,
-          "cacheWriteCostPerMTok": 0
+          "cacheWriteCostPerMTok": 0.4
         }
       ]
     },
