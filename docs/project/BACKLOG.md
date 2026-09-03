@@ -96,11 +96,17 @@ note here. This file stays future-only.
   pipeline delivers no operator value. The segregation seam (`include_benchmark`
   on `UsageParams` + the HTTP query param) and per-cell metadata (task, trial,
   score, success, token_basis) are already in place to build against.
-- **Next / Revisit when**: prioritized as the next benchmark slice. A
-  benchmark-inclusive mode on the Usage/Analytics `/app/` surface (or a dedicated
-  panel) grouping by model with cost-per-task / tokens / score / success columns.
-  Scope the view before building — decide the axes and grouping from a real run.
-  Noted 2026-09-02, deferred behind a security/perf/tooling pass.
+- **Next / Revisit when**: **specced** —
+  `docs/specs/2026-09-02-benchmark-comparison-view-spec.md` (draft): dedicated
+  Benchmarks tab, Pareto frontier (cost×score) + arm ladder + auto-generated
+  honesty panel. **Blocked on** openbench `feat/results-row-study-identity`
+  landing, which emits per-row `study`/`study_sha256`/`suite`/`canonical_model`/
+  `reasoning_effort`/`is_open_model` — the spec consumes those directly and
+  deletes the study-derivation + effort-suffix workarounds. P1 (data + queries)
+  can start against the field names now (legacy fallback covers pre-field
+  fixtures). Watch openbench #4 (usage_evidence_grade) + #5 (per-attempt cost) —
+  #5 would drop the "cost is a floor" honesty caveat. Noted 2026-09-02, spec
+  2026-09-03.
 
 ### Runtime CLI
 
