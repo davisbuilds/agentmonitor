@@ -48,6 +48,8 @@ import {
   deleteInsight,
   getDistinctProjects,
   getDistinctAgents,
+  getBenchmarkStudies,
+  getBenchmarkStudy,
 } from '../../db/v2-queries.js';
 import {
   getSessionTraceDetail,
@@ -826,6 +828,30 @@ v2Router.get('/usage/facets', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/usage/facets] Error:', err);
     res.status(500).json({ error: 'Failed to get usage facets' });
+  }
+});
+
+// Benchmarks — the one benchmark-inclusive surface (segregated bake-off view).
+v2Router.get('/benchmarks', (_req: Request, res: Response) => {
+  try {
+    res.json({ data: getBenchmarkStudies() });
+  } catch (err) {
+    console.error('[v2/benchmarks] Error:', err);
+    res.status(500).json({ error: 'Failed to list benchmark studies' });
+  }
+});
+
+v2Router.get('/benchmarks/:studyId', (req: Request, res: Response) => {
+  try {
+    const detail = getBenchmarkStudy(req.params['studyId'] as string);
+    if (detail.arms.length === 0) {
+      res.status(404).json({ error: 'Benchmark study not found' });
+      return;
+    }
+    res.json(detail);
+  } catch (err) {
+    console.error('[v2/benchmarks/:studyId] Error:', err);
+    res.status(500).json({ error: 'Failed to get benchmark study' });
   }
 });
 

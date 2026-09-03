@@ -62,6 +62,7 @@ interface BenchmarkRow {
   cost_source?: unknown;
   harness_version?: unknown;
   score?: unknown;
+  workspace_changed?: unknown;
   // Identity fields emitted by openbench (feat/results-row-study-identity).
   // Preferred over amon's legacy derivations when present.
   canonical_model?: unknown;
@@ -242,6 +243,8 @@ export function importBenchmarkResults(
         token_basis: str(row.token_basis),
         usage_evidence_grade: str(row.usage_evidence_grade),
         cost_source: str(row.cost_source),
+        // success with no workspace change = a no-op trial (honesty flag).
+        workspace_changed: typeof row.workspace_changed === 'boolean' ? row.workspace_changed : null,
         // Arm/model identity (study_id/study live in their own columns).
         canonical_model: canonicalModel,
         reasoning_effort: reasoningEffort,

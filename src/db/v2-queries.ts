@@ -70,6 +70,10 @@ import type {
   GenerateInsightParams,
   SearchResultRow,
   PinsListParams,
+  BenchmarkStudySummary,
+  BenchmarkStudyDetail,
+  BenchmarkArm,
+  BenchmarkCostBasis,
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
@@ -3606,4 +3610,179 @@ export function getDistinctAgents(): string[] {
     'SELECT DISTINCT agent FROM browsing_sessions ORDER BY agent'
   ).all() as Array<{ agent: string }>;
   return rows.map(r => r.agent);
+}
+
+// ── Benchmarks (segregated bake-off comparison) ──────────────────────────────
+// The ONE benchmark-inclusive surface: these read `source='benchmark'` in
+// explicitly and never route through `buildUsageFilterState`, which keeps every
+// other surface benchmark-excluding. See
+// docs/specs/2026-09-02-benchmark-comparison-view-spec.md.
+
+/** Mean-score floor below which an arm is treated as not really engaging the task. */
+const BENCH_ENGAGE_FLOOR = 0.5;
+
+interface BenchCell {
+  study: string | null;
+  cost_usd: number | null;
+  cache_read_tokens: number | null;
+  duration_ms: number | null;
+  client_timestamp: string | null;
+  project: string | null;
+  m: Record<string, unknown>;
+}
+
+function parseBenchMeta(metadata: string | null): Record<string, unknown> {
+  if (!metadata) return {};
+  try {
+    const v: unknown = JSON.parse(metadata);
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function benchCostBasis(cells: BenchCell[]): BenchmarkCostBasis {
+  if (cells.some(c => c.cost_usd == null)) return 'unpriced';
+  return cells.every(c => Boolean(c.m.cost_source)) ? 'captured' : 'derived';
+}
+
+function firstString(cells: BenchCell[], key: string): string | null {
+  const hit = cells.map(c => c.m[key]).find(v => typeof v === 'string' && v.length > 0);
+  return (hit as string) ?? null;
+}
+
+export function getBenchmarkStudies(): BenchmarkStudySummary[] {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT study_id, study, cost_usd, cache_read_tokens, duration_ms, client_timestamp, project, metadata
+    FROM events WHERE source = 'benchmark' AND study_id IS NOT NULL
+  `).all() as Array<{ study_id: string; study: string | null; cost_usd: number | null; cache_read_tokens: number | null; duration_ms: number | null; client_timestamp: string | null; project: string | null; metadata: string | null }>;
+
+  const byStudy = new Map<string, BenchCell[]>();
+  for (const r of rows) {
+    const cell: BenchCell = { study: r.study, cost_usd: r.cost_usd, cache_read_tokens: r.cache_read_tokens, duration_ms: r.duration_ms, client_timestamp: r.client_timestamp, project: r.project, m: parseBenchMeta(r.metadata) };
+    const arr = byStudy.get(r.study_id) ?? [];
+    arr.push(cell);
+    byStudy.set(r.study_id, arr);
+  }
+
+  const out: BenchmarkStudySummary[] = [];
+  for (const [study_id, cells] of byStudy) {
+    const arms = new Set(cells.map(c => `${String(c.m.canonical_model ?? '')}${String(c.m.reasoning_effort ?? '')}`));
+    const stamps = cells.map(c => c.client_timestamp).filter((s): s is string => Boolean(s)).sort();
+    const anyUnpriced = cells.some(c => c.cost_usd == null);
+    out.push({
+      study_id,
+      study: cells.find(c => c.study)?.study ?? study_id,
+      suite: firstString(cells, 'suite'),
+      arm_count: arms.size,
+      cell_count: cells.length,
+      tasks: [...new Set(cells.map(c => c.project).filter((t): t is string => Boolean(t)))].sort(),
+      date_from: stamps[0] ?? null,
+      date_to: stamps[stamps.length - 1] ?? null,
+      total_cost_usd: anyUnpriced ? null : cells.reduce((s, c) => s + (c.cost_usd ?? 0), 0),
+      cost_basis: benchCostBasis(cells),
+    });
+  }
+  out.sort((a, b) => (b.date_to ?? '').localeCompare(a.date_to ?? '') || a.study.localeCompare(b.study));
+  return out;
+}
+
+/** Fill pareto / dominated_by / verdict in place from (mean_score, cost_per_trial). */
+function computeBenchmarkFrontier(arms: BenchmarkArm[]): void {
+  type Priced = BenchmarkArm & { cost_per_trial: number };
+  const priced = arms.filter((a): a is Priced => a.cost_per_trial != null);
+
+  for (const a of priced) {
+    const dominators = priced.filter(b =>
+      b !== a
+      && b.mean_score >= a.mean_score && b.cost_per_trial <= a.cost_per_trial
+      && (b.mean_score > a.mean_score || b.cost_per_trial < a.cost_per_trial));
+    a.pareto = dominators.length === 0;
+    if (dominators.length > 0) {
+      // Connector points to the cheapest arm that beats it (tie: highest score).
+      dominators.sort((x, y) => x.cost_per_trial - y.cost_per_trial || y.mean_score - x.mean_score);
+      a.dominated_by = dominators[0].canonical_model;
+    }
+  }
+
+  // value-pick: the engaging arm with the best score-per-dollar.
+  let vp: Priced | null = null;
+  for (const a of priced) {
+    if (a.mean_score <= BENCH_ENGAGE_FLOOR || a.cost_per_trial <= 0) continue;
+    if (!vp || a.mean_score / a.cost_per_trial > vp.mean_score / vp.cost_per_trial) vp = a;
+  }
+
+  for (const a of arms) {
+    if (a.cost_per_trial == null) { a.verdict = 'unreliable'; a.pareto = false; continue; }
+    if (a === vp) a.verdict = 'value-pick';
+    else if (a.pareto && a.mean_score <= BENCH_ENGAGE_FLOOR) a.verdict = 'trivial-only';
+    else if (a.pareto) a.verdict = 'on-frontier';
+    else a.verdict = 'dominated';
+  }
+}
+
+export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT study, cost_usd, cache_read_tokens, duration_ms, client_timestamp, project, metadata
+    FROM events WHERE source = 'benchmark' AND study_id = ?
+  `).all(studyId) as Array<{ study: string | null; cost_usd: number | null; cache_read_tokens: number | null; duration_ms: number | null; client_timestamp: string | null; project: string | null; metadata: string | null }>;
+
+  const cells: BenchCell[] = rows.map(r => ({ study: r.study, cost_usd: r.cost_usd, cache_read_tokens: r.cache_read_tokens, duration_ms: r.duration_ms, client_timestamp: r.client_timestamp, project: r.project, m: parseBenchMeta(r.metadata) }));
+  const trials = cells.map(c => Number(c.m.trial)).filter(t => Number.isFinite(t));
+  const expected_trials = trials.length ? Math.max(...trials) : 0;
+
+  const groups = new Map<string, BenchCell[]>();
+  for (const c of cells) {
+    const key = `${String(c.m.canonical_model ?? '')}${String(c.m.reasoning_effort ?? '')}`;
+    const arr = groups.get(key) ?? [];
+    arr.push(c);
+    groups.set(key, arr);
+  }
+
+  const arms: BenchmarkArm[] = [];
+  for (const cs of groups.values()) {
+    const m0 = cs[0].m;
+    const canonical_model = String(m0.canonical_model ?? '');
+    const reasoning_effort = typeof m0.reasoning_effort === 'string' && m0.reasoning_effort ? m0.reasoning_effort : null;
+    const scored = cs.map(c => c.m.score).filter((s): s is number => typeof s === 'number');
+    const anyUnpriced = cs.some(c => c.cost_usd == null);
+    const isOpen = typeof m0.is_open_model === 'boolean' ? m0.is_open_model : null;
+    const native = isOpen === false ? true
+      : isOpen === true ? false
+      : classifyModelForUsage(canonical_model).provider !== 'openrouter';
+
+    arms.push({
+      canonical_model,
+      reasoning_effort,
+      label: reasoning_effort ? `${canonical_model} (${reasoning_effort})` : canonical_model,
+      n: scored.length,
+      mean_score: scored.length ? scored.reduce((a, b) => a + b, 0) / scored.length : 0,
+      cost_per_trial: anyUnpriced ? null : cs.reduce((a, c) => a + (c.cost_usd ?? 0), 0) / cs.length,
+      cost_basis: benchCostBasis(cs),
+      mean_t_agent_s: cs.reduce((a, c) => a + (c.duration_ms ?? 0), 0) / cs.length / 1000,
+      cache_reads: cs.reduce((a, c) => a + (c.cache_read_tokens ?? 0), 0),
+      native,
+      pareto: false,
+      dominated_by: null,
+      verdict: 'on-frontier',
+      excluded_trials: Math.max(0, expected_trials - cs.length),
+      noop_trials: cs.filter(c => c.m.success === true && c.m.workspace_changed === false).length,
+      token_basis: firstString(cs, 'token_basis'),
+      usage_evidence_grade: firstString(cs, 'usage_evidence_grade'),
+    });
+  }
+
+  computeBenchmarkFrontier(arms);
+  arms.sort((a, b) => b.mean_score - a.mean_score || (a.cost_per_trial ?? Infinity) - (b.cost_per_trial ?? Infinity));
+
+  return {
+    study_id: studyId,
+    study: cells.find(c => c.study)?.study ?? studyId,
+    suite: firstString(cells, 'suite'),
+    tasks: [...new Set(cells.map(c => c.project).filter((t): t is string => Boolean(t)))].sort(),
+    expected_trials,
+    arms,
+  };
 }
