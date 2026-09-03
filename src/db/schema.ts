@@ -336,14 +336,16 @@ export function initSchema(): void {
         cost_usd REAL,
         cache_read_tokens INTEGER DEFAULT 0,
         cache_write_tokens INTEGER DEFAULT 0,
-        source TEXT DEFAULT 'api'
+        source TEXT DEFAULT 'api',
+        study_id TEXT,
+        study TEXT
       );
 
       INSERT INTO events_migrated (
         id, event_id, schema_version, session_id, agent_type, event_type, tool_name,
         status, tokens_in, tokens_out, branch, project, duration_ms,
         created_at, client_timestamp, metadata, payload_truncated,
-        model, cost_usd, cache_read_tokens, cache_write_tokens, source
+        model, cost_usd, cache_read_tokens, cache_write_tokens, source, study_id, study
       )
       SELECT
         id, event_id, schema_version, session_id, agent_type, event_type, tool_name,
@@ -351,12 +353,13 @@ export function initSchema(): void {
         created_at, client_timestamp, metadata, payload_truncated,
         model, cost_usd,
         COALESCE(cache_read_tokens, 0), COALESCE(cache_write_tokens, 0),
-        COALESCE(source, 'api')
+        COALESCE(source, 'api'), study_id, study
       FROM events;
 
       DROP TABLE events;
       ALTER TABLE events_migrated RENAME TO events;
 
+      CREATE INDEX IF NOT EXISTS idx_events_study_id ON events(study_id) WHERE study_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
       CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
       CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
@@ -812,7 +815,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 4;
+const DATA_SCHEMA_VERSION = 5;
 
 /**
  * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
@@ -832,9 +835,33 @@ export function runDataMigrations(db: Database): void {
     if (current < 2) backfillOccupancyOnUpgrade(db);
     if (current < 3) invalidateCodexImportsForModelAttribution(db);
     if (current < 4) invalidateSessionFilesForSkillContext(db);
+    if (current < 5) deleteLegacyBenchmarkRows(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run();
+}
+
+/**
+ * v5 — benchmark events were briefly keyed on the bare `run_id` before the
+ * importer began namespacing them as `${study_id}::${run_id}`. Those legacy rows
+ * carry no `study_id` (the importer now always sets one), so re-importing a file
+ * inserts a fresh namespaced row *alongside* the orphan rather than replacing it,
+ * and `include_benchmark` usage would count both — doubling tokens and cost while
+ * the orphan stays invisible to the study queries (which require `study_id`).
+ * These rows exist only in pre-release dev DBs; drop them so a re-import restores
+ * each study cleanly under the namespaced key.
+ */
+function deleteLegacyBenchmarkRows(db: Database): void {
+  const hasEvents = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+  ).get();
+  if (!hasEvents) return;
+  const result = db.prepare(
+    "DELETE FROM events WHERE source = 'benchmark' AND study_id IS NULL"
+  ).run();
+  if (result.changes > 0) {
+    console.log(`[migration] benchmark namespacing: removed ${result.changes} pre-namespacing benchmark row(s)`);
+  }
 }
 
 /**

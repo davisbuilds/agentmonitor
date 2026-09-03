@@ -5,12 +5,15 @@ import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
 import type Database from 'better-sqlite3';
 import type { importBenchmarkResults as ImportBenchmarkResults } from '../src/import/benchmark.js';
-import type { getEvents as GetEvents } from '../src/db/queries.js';
+import type { getEvents as GetEvents, insertEvent as InsertEvent } from '../src/db/queries.js';
+import type { runDataMigrations as RunDataMigrations } from '../src/db/schema.js';
 
 let tempDir = '';
 let closeDb: (() => void) | null = null;
 let importBenchmarkResults: typeof ImportBenchmarkResults;
 let getEvents: typeof GetEvents;
+let insertEvent: typeof InsertEvent;
+let runDataMigrations: typeof RunDataMigrations;
 let getDb: () => Database.Database;
 
 function writeResults(rows: object[]): string {
@@ -94,7 +97,8 @@ before(async () => {
   assert.equal(dbModule.getDb().name, path.join(tempDir, 'test.db'));
 
   ({ importBenchmarkResults } = await import('../src/import/benchmark.js'));
-  ({ getEvents } = await import('../src/db/queries.js'));
+  ({ getEvents, insertEvent } = await import('../src/db/queries.js'));
+  ({ runDataMigrations } = await import('../src/db/schema.js'));
 });
 
 after(() => {
@@ -230,17 +234,49 @@ describe('importBenchmarkResults', () => {
     assert.equal(m.reasoning_effort, 'xhigh', 'recognized suffix recovered');
   });
 
-  test('bare-filename import falls back to the filename, not "."', () => {
+  test('bare/relative path resolves to its real containing directory, not "." or ".."', () => {
     const runId = 'codex:bare:minimax-m3:trial1';
     const prevCwd = process.cwd();
     try {
       process.chdir(tempDir);
       fs.writeFileSync('bare.jsonl', JSON.stringify({ run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'bare', trial: 1, tokens_input_uncached: 10, tokens_output: 5 }) + '\n');
+      // A bare or parent-relative path must resolve to the real directory the
+      // file lives in — never the literal '.' or '..' segment, which would merge
+      // unrelated runs under one meaningless study key.
       importBenchmarkResults('bare.jsonl');
     } finally {
       process.chdir(prevCwd);
     }
-    assert.equal(studyCols(runId).study_id, 'bare', 'parent dir "." falls back to the filename, not merging as "."');
+    assert.equal(studyCols(runId).study_id, path.basename(tempDir), 'resolves to the containing dir name');
+  });
+
+  test('data migration deletes pre-namespacing benchmark rows (study_id NULL) so re-import cannot double-count', () => {
+    const db = getDb();
+    // A legacy benchmark row: keyed on the bare run_id, no study_id column set.
+    // Re-importing its file now inserts a fresh `${study_id}::${run_id}` row, so
+    // the orphan must be removed or include_benchmark usage double-counts it.
+    insertEvent({
+      event_id: 'legacy:run:1', session_id: 'legacy:run:1', agent_type: 'codex',
+      event_type: 'llm_response', status: 'success', model: 'minimax-m3',
+      tokens_in: 10, tokens_out: 5, cost_usd: 0.01, source: 'benchmark', metadata: null,
+    });
+    insertEvent({
+      event_id: 'sha-keep::run:1', session_id: 'sha-keep::run:1', agent_type: 'codex',
+      event_type: 'llm_response', status: 'success', model: 'minimax-m3',
+      tokens_in: 10, tokens_out: 5, cost_usd: 0.01, source: 'benchmark',
+      study_id: 'sha-keep', study: 'keep', metadata: null,
+    });
+    const nullRows = (): number =>
+      (db.prepare("SELECT COUNT(*) AS n FROM events WHERE source = 'benchmark' AND study_id IS NULL").get() as { n: number }).n;
+    assert.equal(nullRows(), 1, 'legacy NULL-study benchmark row present before migration');
+
+    // Re-run the versioned data migration from before the v5 cleanup.
+    db.pragma('user_version = 4');
+    runDataMigrations(db);
+
+    assert.equal(nullRows(), 0, 'legacy NULL-study benchmark row deleted');
+    const kept = (db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = 'sha-keep::run:1'").get() as { n: number }).n;
+    assert.equal(kept, 1, 'namespaced row preserved');
   });
 
   test('two runs of one suite with the same run_id are two studies (event_id namespaced)', () => {

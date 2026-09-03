@@ -3730,8 +3730,13 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
   `).all(studyId) as Array<{ study: string | null; cost_usd: number | null; cache_read_tokens: number | null; duration_ms: number | null; client_timestamp: string | null; project: string | null; metadata: string | null }>;
 
   const cells: BenchCell[] = rows.map(r => ({ study: r.study, cost_usd: r.cost_usd, cache_read_tokens: r.cache_read_tokens, duration_ms: r.duration_ms, client_timestamp: r.client_timestamp, project: r.project, m: parseBenchMeta(r.metadata) }));
-  const trials = cells.map(c => Number(c.m.trial)).filter(t => Number.isFinite(t));
-  const expected_trials = trials.length ? Math.max(...trials) : 0;
+  // Expected cells per arm = the full task×trial grid, not the max trial index.
+  // A multi-task study runs every arm against every (task, trial) combination, so
+  // the max trial index alone under-counts and hides missing cells in the
+  // excluded-trials honesty flag below.
+  const distinctTasks = new Set(cells.map(c => c.project).filter((t): t is string => Boolean(t)));
+  const distinctTrials = new Set(cells.map(c => Number(c.m.trial)).filter(t => Number.isFinite(t)));
+  const expected_trials = Math.max(distinctTasks.size, 1) * distinctTrials.size;
 
   const groups = new Map<string, BenchCell[]>();
   for (const c of cells) {

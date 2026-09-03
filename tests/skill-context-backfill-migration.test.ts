@@ -28,7 +28,7 @@ test('v4 invalidates eligible watched session files exactly once', () => {
   `);
 
   runDataMigrations(db);
-  assert.equal(db.pragma('user_version', { simple: true }), 4);
+  assert.equal(db.pragma('user_version', { simple: true }), 5);
   assert.deepEqual(
     db.prepare('SELECT file_path, file_hash FROM watched_files ORDER BY file_path').all(),
     [

@@ -65,7 +65,11 @@ class BenchmarksStore {
   syncFromHash(): void {
     if (typeof window === 'undefined') return;
     const parsed = parseAppHash(window.location.hash);
-    const studyId = parsed.tab === 'benchmarks' ? parsed.params.get('study') : null;
+    // Another tab owns the hash — leave selection and URL untouched. Reacting here
+    // would call select(null) → writeHash(null) and rewrite the destination hash
+    // back to #benchmarks, desyncing the shell from the address bar.
+    if (parsed.tab !== 'benchmarks') return;
+    const studyId = parsed.params.get('study');
     if (studyId !== this.selectedStudyId) void this.select(studyId);
   }
 

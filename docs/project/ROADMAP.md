@@ -6,6 +6,25 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Benchmark comparison view — Benchmarks tab (2026-09-03) — *What:* the consumer
+  half of the benchmark pipeline (PR #106). A dedicated `/app/` Benchmarks tab
+  renders the segregated bake-off: a studies list drilling into a per-arm ladder
+  with Pareto verdicts (value-pick / on-frontier / trivial-only / dominated /
+  unreliable), native-vs-routed markers, and an auto-generated honesty panel
+  (unpriced/derived cost basis, no-op trials, excluded-trial small-sample
+  warnings). Backed by `getBenchmarkStudies`/`getBenchmarkStudy` and the
+  `GET /api/v2/benchmarks[/:studyId]` routes — the one benchmark-inclusive read
+  surface, grouping cells by `study_id` and never routing through
+  `buildUsageFilterState`. Study + model identity come from openbench's own row
+  fields (`study`/`study_sha256`/`suite`/`canonical_model`/`reasoning_effort`/
+  `is_open_model`), with parent-dir/effort-suffix derivation only as a legacy
+  fallback. Persisted `event_id` is namespaced `${study_id}::${run_id}` so
+  cross-study reruns (which share a `run_id`) are not dropped as duplicates; a v5
+  data migration drops pre-namespacing rows. *Why:* the ingest (below) delivered
+  no operator value without a view; this is the comparison the pipeline exists to
+  enable. The frontier scatter chart + shared inline-SVG chart primitives (P3)
+  and an artifact export (P4) remain in `BACKLOG.md`. Spec:
+  `docs/specs/2026-09-02-benchmark-comparison-view-spec.md`.
 - Benchmark ingest for openbench runs (2026-09-02) — *What:* a `benchmark`
   EventSource and `amon import benchmark <results.jsonl>` map each openbench cell
   to one aggregate `llm_response` event keyed on `run_id` (idempotent), tagged

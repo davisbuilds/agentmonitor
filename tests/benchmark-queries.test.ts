@@ -108,6 +108,14 @@ before(async () => {
   cell({ runId: 's3-F-1', study_id: 'sha3', study: 's3-2026-09-03', suite: 's3', canonical: 'gpt-5-mini', is_open: null, task: 'v', trial: 1, score: 0.9, cost: 0.10 });
   cell({ runId: 's3-G-1', study_id: 'sha3', study: 's3-2026-09-03', suite: 's3', canonical: 'no-such-model-xyz', is_open: null, task: 'v', trial: 1, score: 0.9, cost: null });
 
+  // Study s4: a multi-task study (tasks p + q, trials 1 + 2 → four cells/arm).
+  // Arm 'multi' is missing (q, trial 2), so it has 3 scored cells against an
+  // expected grid of 4 — the excluded flag must catch it. The max-trial-index
+  // denominator (2) would compute max(0, 2 - 3) = 0 and silently hide the gap.
+  cell({ runId: 's4-M-p1', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'p', trial: 1, score: 0.7, cost: 0.10, cost_source: 'litellm' });
+  cell({ runId: 's4-M-p2', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'p', trial: 2, score: 0.7, cost: 0.10, cost_source: 'litellm' });
+  cell({ runId: 's4-M-q1', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'q', trial: 1, score: 0.7, cost: 0.10, cost_source: 'litellm' });
+
   // A real-activity event that must never appear in benchmark queries or move Usage.
   insertEvent({
     event_id: 'real-1', session_id: 'real', agent_type: 'claude_code', event_type: 'llm_response',
@@ -129,7 +137,7 @@ after(() => {
 describe('getBenchmarkStudies', () => {
   test('lists studies with arm counts and cost basis, benchmark-only', () => {
     const studies = getBenchmarkStudies();
-    assert.equal(studies.length, 3, 'exactly the benchmark studies (no real-activity)');
+    assert.equal(studies.length, 4, 'exactly the benchmark studies (no real-activity)');
 
     const s1 = studies.find(s => s.study_id === 'sha1');
     assert.ok(s1);
@@ -182,11 +190,19 @@ describe('getBenchmarkStudy — arm aggregation + frontier', () => {
 
   test('surfaces honesty flags independent of verdict', () => {
     const detail = getBenchmarkStudy('sha1');
-    assert.equal(detail.expected_trials, 2, 'max trial index seen in the study');
+    assert.equal(detail.expected_trials, 2, 'one task × two trials = two cells/arm');
     assert.equal(armOf('gpt-native').n, 1, 'only the scored attempt counts toward n');
     assert.equal(armOf('gpt-native').excluded_trials, 1, 'the unscored 2nd attempt is an excluded trial, not hidden');
     assert.equal(armOf('mid').noop_trials, 1, 'one success with no workspace change');
     assert.equal(armOf('cheap').noop_trials, 0);
+  });
+
+  test('excluded_trials counts every task×trial cell, not just the max trial index', () => {
+    const detail = getBenchmarkStudy('sha4');
+    assert.equal(detail.expected_trials, 4, 'two tasks × two trials = four cells/arm');
+    const m = detail.arms.find(a => a.canonical_model === 'multi')!;
+    assert.equal(m.n, 3, 'three scored cells present');
+    assert.equal(m.excluded_trials, 1, 'the missing (q, trial 2) cell is an excluded trial');
   });
 
   test('unpriced arm: cost/trial null, verdict unreliable, off the frontier', () => {
@@ -209,7 +225,7 @@ describe('benchmark segregation (read side)', () => {
 describe('benchmark v2 routes', () => {
   test('GET /api/v2/benchmarks lists studies', async () => {
     const body = await (await fetch(`${baseUrl}/api/v2/benchmarks`)).json() as { data: BenchmarkStudySummary[] };
-    assert.equal(body.data.length, 3);
+    assert.equal(body.data.length, 4);
     assert.ok(body.data.some(s => s.study_id === 'sha1'));
   });
 

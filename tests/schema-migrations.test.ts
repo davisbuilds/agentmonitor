@@ -75,6 +75,8 @@ test('initSchema upgrades legacy event and provider quota tables in place', () =
     'cache_read_tokens',
     'cache_write_tokens',
     'source',
+    'study_id',
+    'study',
   ]) {
     assert.ok(eventColumns.has(column), `missing migrated events.${column}`);
   }

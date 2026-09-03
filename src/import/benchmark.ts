@@ -150,13 +150,14 @@ export function importBenchmarkResults(
   const unpriced = new Set<string>();
 
   // Legacy study fallback for pre-field rows: the results.jsonl's parent dir name
-  // (e.g. `am-consistency-pareto-2026-08-29`), else the file's own basename. Guard
-  // the bare-filename form (`import benchmark results.jsonl`), where dirname is `.`
-  // and basename(`.`) is a truthy `.` that would merge unrelated runs into one.
-  const parentDir = path.basename(path.dirname(filePath));
-  const legacyStudy = parentDir && parentDir !== '.' && parentDir !== path.sep
-    ? parentDir
-    : path.basename(filePath).replace(/\.[^.]*$/, '');
+  // (e.g. `am-consistency-pareto-2026-08-29`), else the file's own basename.
+  // Resolve first so relative inputs derive their *real* containing directory —
+  // a bare `results.jsonl` or a parent-relative `../results.jsonl` would otherwise
+  // yield the literal `.`/`..` segment and merge unrelated runs under one key. The
+  // basename fallback only trips at the filesystem root, where there is no parent.
+  const resolved = path.resolve(filePath);
+  const parentDir = path.basename(path.dirname(resolved));
+  const legacyStudy = parentDir || path.basename(resolved).replace(/\.[^.]*$/, '');
 
   const contents = readFileSync(filePath, 'utf-8');
   for (const line of contents.split('\n')) {

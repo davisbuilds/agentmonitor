@@ -41,6 +41,15 @@
   function score(v: number): string {
     return v.toFixed(3);
   }
+  // Two runs of one suite on the same day share a slug but not a study_id; show a
+  // date + short id line so reruns are distinguishable in the list.
+  function shortId(id: string): string {
+    return id.length > 10 ? `${id.slice(0, 8)}…` : id;
+  }
+  function studySubline(s: { study_id: string; date_from: string | null }): string {
+    const day = s.date_from ? s.date_from.slice(0, 10) : null;
+    return day ? `${shortId(s.study_id)} · ${day}` : shortId(s.study_id);
+  }
 
   const studyColumns = [
     { key: 'study', label: 'Study' },
@@ -167,7 +176,10 @@
           >
             {#snippet cell(s, column)}
               {#if column.key === 'study'}
-                <span class="text-text">{s.study}</span>
+                <div class="flex flex-col">
+                  <span class="text-text">{s.study}</span>
+                  <span class="text-meta text-text-faint font-mono">{studySubline(s)}</span>
+                </div>
               {:else if column.key === 'suite'}
                 <span class="text-text-muted">{s.suite ?? '—'}</span>
               {:else if column.key === 'arm_count'}
