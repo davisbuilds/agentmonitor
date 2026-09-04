@@ -51,18 +51,51 @@ function metricsPayload(
 beforeEach(() => resetCumulativeState());
 
 describe('parseOtelMetrics classification', () => {
-  test('an outcome/state-tagged Codex counter is captured as an operational metric', () => {
+  test('an allowlisted Codex counter is captured, with attrs projected to outcomes only', () => {
+    // Live Codex emits codex.memory.startup with a pile of descriptive labels
+    // (app.version/auth_mode/model/originator/session_source) that fragment the
+    // series. Only the outcome attribute is kept, so the metric collapses to the
+    // one series that answers "did startup skip, and why".
     const result = parseOtelMetrics(metricsPayload('codex', 'sess-op', [
-      { name: 'codex.memory.startup', points: [{ value: 1, attributes: [attr('state', 'skipped_rate_limit')] }] },
+      { name: 'codex.memory.startup', points: [{ value: 1, attributes: [
+        attr('state', 'skipped_rate_limit'),
+        attr('app.version', '0.153.2'),
+        attr('auth_mode', 'Chatgpt'),
+        attr('model', 'gpt-5.6-luna'),
+        attr('originator', 'codex-tui'),
+        attr('session_source', 'cli'),
+      ] }] },
     ]));
     assert.equal(result.operational.length, 1);
     const m = result.operational[0];
     assert.equal(m.metric_name, 'codex.memory.startup');
     assert.equal(m.session_id, 'sess-op');
-    assert.equal(m.agent_type, 'codex');
-    assert.deepEqual(m.attrs, { state: 'skipped_rate_limit' });
+    assert.deepEqual(m.attrs, { state: 'skipped_rate_limit' }); // descriptive labels stripped
     assert.equal(m.value, 1);
     assert.equal(result.usage.length, 0);
+  });
+
+  test('an error/fallback name-signal metric is admitted even outside the memory prefix', () => {
+    const result = parseOtelMetrics(metricsPayload('codex', 'sess-e', [
+      { name: 'codex.db.error', points: [{ value: 1, attributes: [attr('reason', 'locked')] }] },
+      { name: 'codex.sqlite.fallback.count', points: [{ value: 1, attributes: [attr('status', 'failed')] }] },
+    ]));
+    assert.deepEqual(result.operational.map(m => m.metric_name).sort(), ['codex.db.error', 'codex.sqlite.fallback.count']);
+  });
+
+  test('high-cardinality internal counters are dropped, not stored', () => {
+    // shadow_selection (internal skill-routing A/B eval) and sqlite plumbing both
+    // carry a `status`/`outcome` attr but are not operator-actionable — the exact
+    // noise that would bloat the store. Not in the allowlist → dropped (tallied).
+    const result = parseOtelMetrics(metricsPayload('codex', 'sess-n', [
+      { name: 'codex.skills.shadow_selection', points: [{ value: 1, attributes: [attr('method', 'bm25_v1'), attr('status', 'selected')] }] },
+      { name: 'codex.sqlite.init.count', points: [{ value: 1, attributes: [attr('status', 'success')] }] },
+      { name: 'codex.skill.injected', points: [{ value: 1, attributes: [attr('status', 'ok'), attr('skill', 'deep-research')] }] },
+    ]));
+    assert.equal(result.operational.length, 0);
+    assert.equal(result.dropped['codex.skills.shadow_selection'], 1);
+    assert.equal(result.dropped['codex.sqlite.init.count'], 1);
+    assert.equal(result.dropped['codex.skill.injected'], 1);
   });
 
   test('a *.duration_ms timing is dropped (tallied), never operational', () => {
