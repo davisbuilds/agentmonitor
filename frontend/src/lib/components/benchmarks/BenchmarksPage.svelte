@@ -2,9 +2,19 @@
   import { onMount } from 'svelte';
   import { benchmarksStore } from '../../stores/benchmarks.svelte';
   import { Panel, SectionHeader, DataTable, Badge, Bar, Button, EmptyState } from '../ui';
-  import type { BenchmarkVerdict, BenchmarkCostBasis } from '../../api/client';
+  import BenchmarkFrontier from './BenchmarkFrontier.svelte';
+  import type { BenchmarkVerdict, BenchmarkCostBasis, BenchmarkArm } from '../../api/client';
 
   const store = benchmarksStore;
+
+  // Clicking a frontier marker drills into the matching ladder row: highlight it
+  // and scroll it into view. Keyed by arm label (unique within a study).
+  let focusedArm = $state<string | null>(null);
+  function focusArm(arm: BenchmarkArm): void {
+    focusedArm = arm.label;
+    const row = document.querySelector(`[data-arm-row="${CSS.escape(arm.label)}"]`);
+    row?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
 
   onMount(() => {
     void store.loadStudies();
@@ -118,8 +128,21 @@
       </SectionHeader>
 
       <div class="flex-1 overflow-y-auto">
+        {#if d.arms.some((a) => a.cost_per_trial != null && a.cost_per_trial > 0)}
+          <Panel title="The frontier" subtitle="Cost per trial (log) vs mean score; the dashed line is the Pareto front. Click a marker to find its row." class="mb-4">
+            <BenchmarkFrontier arms={d.arms} onselect={focusArm} />
+          </Panel>
+        {/if}
+
         <Panel title="The ladder" subtitle="Arms ranked by score; frontier verdicts and honesty flags computed from the run" padded={false}>
-          <DataTable columns={armColumns} rows={d.arms} rowKey={(a) => a.label} empty="No arms">
+          <DataTable
+            columns={armColumns}
+            rows={d.arms}
+            rowKey={(a) => a.label}
+            rowClass={(a) => (focusedArm === a.label ? 'bg-accent/12' : '')}
+            rowAttrs={(a) => ({ 'data-arm-row': a.label })}
+            empty="No arms"
+          >
             {#snippet cell(arm, column)}
               {#if column.key === 'label'}
                 <span class="text-text">{arm.label}</span>

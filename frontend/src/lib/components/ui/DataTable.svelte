@@ -18,6 +18,10 @@
     /** Custom cell renderer; falls back to row[column.key]. */
     cell?: Snippet<[Row, Column]>;
     onrowclick?: (row: Row) => void;
+    /** Extra classes applied to a row's `<tr>` (e.g. a highlight). */
+    rowClass?: (row: Row) => string;
+    /** Extra attributes spread onto a row's `<tr>` (e.g. a scroll anchor). */
+    rowAttrs?: (row: Row) => Record<string, string | undefined>;
     empty?: string;
     stickyHeader?: boolean;
     class?: string;
@@ -29,6 +33,8 @@
     rowKey,
     cell,
     onrowclick,
+    rowClass,
+    rowAttrs,
     empty = 'No data.',
     stickyHeader = true,
     class: klass = '',
@@ -65,8 +71,9 @@
       {:else}
         {#each rows as row, index (rowKey(row, index))}
           <tr
-            class="border-b border-line/60 last:border-0 {onrowclick ? 'cursor-pointer hover:bg-surface-2' : ''}"
+            class="border-b border-line/60 last:border-0 {onrowclick ? 'cursor-pointer hover:bg-surface-2' : ''} {rowClass?.(row) ?? ''}"
             onclick={onrowclick ? () => onrowclick(row) : undefined}
+            {...rowAttrs?.(row)}
           >
             {#each columns as column}
               <td
