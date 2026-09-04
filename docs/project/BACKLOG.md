@@ -153,6 +153,26 @@ These are the deferred follow-ups surfaced during and after the build.
 
 ### Pricing
 
+#### A few current vendor models are still unpriced ($0-bill risk)
+- **What**: the 2026-09-03 live-page audit (which confirmed ~40 existing rates,
+  corrected Sonnet 5 + gpt-5.6 luna/terra, and **added** the newer Gemini Flash
+  line — 3.6/3.7/3.8 Flash, 3.5 Flash-Lite, 2.5 Flash-Lite) still leaves a couple
+  unpriced: `claude-fable-5-1` (Fable 5.1, cacheRead 0.025× = $0.25/MTok) and
+  `gpt-5.6-cyber` ($12.50/$75). An unpriced model bills as **$0**, the silent
+  under-report failure mode.
+- **Why it matters**: only bites if one of these appears in the data, but when it
+  does it is invisible (no error, plausible dashboard). Two date-dependent rates
+  now sit in the index and will silently drift without date-awareness (below):
+  the added **Gemini 3.6/3.7/3.8 Flash carry a promo $0.75 in / $3.75 out that
+  reverts to $1.50 / $7.50 on 2027-01-01**, and `gpt-5.6-sol` shows a promo $4/$20
+  ("through 2026-11-21") on the OpenAI page while aggregators list $5/$30 — we
+  kept list ($5/$30); captured `cost_usd` covers benchmark actuals, so the table
+  only affects the unpriced-fallback estimate.
+- **Next / Revisit when**: add fable-5-1 / gpt-5.6-cyber the moment usage shows
+  them unpriced (watch the "unknown-priced tokens" surface). The Gemini Flash and
+  sol promos are the date-aware case (below) — before 2027-01-01, bump Gemini
+  Flash to $1.50/$7.50 (or land date-aware rates). Noted 2026-09-03.
+
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
   record OpenAI Standard, Priority, Batch, or other processing-service tiers, so
