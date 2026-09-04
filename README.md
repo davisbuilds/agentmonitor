@@ -46,6 +46,7 @@ Prefer to do it yourself? The manual steps are below.
 - Streams live updates over SSE for dashboards and operator views.
 - Exposes canonical app APIs under `/api/v2/*`.
 - Exposes a lean local trace-quality view (one trace per session) — a content-free per-session summary plus on-demand observation detail.
+- Surfaces segregated benchmark bake-offs (openbench `results.jsonl` imports) at `/api/v2/benchmarks[/:studyId]` and the `/app/` Benchmarks tab. Each study returns per-arm rows with Pareto `verdict`, `mean_score`, `cost_per_trial`/`cost_basis`, `native`, and honesty flags — `excluded_trials`, `noop_trials`, and openbench's own usage-evidence verdict (`usage_evidence_grade`, plus tri-state `ranking_eligible` and `ranking_exclusion_reason`) consumed verbatim, not re-derived.
 - Provides provider-native quota snapshots through `/api/provider-quotas`.
 - Ships a local operator CLI. The preferred command is `amon`; `agentmonitor` is an equivalent executable alias.
 - Creates validated, single-file SQLite backups through the one-shot

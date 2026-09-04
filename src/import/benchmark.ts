@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { backfillBenchmarkCost, insertEvent } from '../db/queries.js';
+import { backfillBenchmarkCost, backfillBenchmarkEvidence, insertEvent } from '../db/queries.js';
 import { pricingRegistry } from '../pricing/index.js';
 
 /**
@@ -58,6 +58,10 @@ interface BenchmarkRow {
   tokens_reasoning?: unknown;
   token_basis?: unknown;
   usage_evidence_grade?: unknown;
+  // Ranking eligibility computed upstream by openbench (obench/usage_evidence.py).
+  // amon consumes these verbatim — it does not re-derive the policy.
+  usage_ranking_eligible?: unknown;
+  usage_ranking_exclusion_reason?: unknown;
   cost_usd?: unknown;
   cost_source?: unknown;
   harness_version?: unknown;
@@ -211,6 +215,9 @@ export function importBenchmarkResults(
     const canonicalModel = str(row.canonical_model) ?? split.canonical;
     const reasoningEffort = str(row.reasoning_effort) ?? split.effort ?? null;
     const isOpenModel = typeof row.is_open_model === 'boolean' ? row.is_open_model : null;
+    // openbench's ranking-eligibility verdict (mirrored, not re-derived).
+    const rankingEligible = typeof row.usage_ranking_eligible === 'boolean' ? row.usage_ranking_eligible : null;
+    const rankingExclusionReason = str(row.usage_ranking_exclusion_reason) ?? null;
 
     if (options.dryRun) {
       // Count would-be inserts without touching the DB. Duplicate detection is
@@ -255,6 +262,9 @@ export function importBenchmarkResults(
         tokens_reasoning: num(row.tokens_reasoning),
         token_basis: str(row.token_basis),
         usage_evidence_grade: str(row.usage_evidence_grade),
+        // Upstream ranking-eligibility verdict (mirrored, not re-derived).
+        usage_ranking_eligible: rankingEligible,
+        usage_ranking_exclusion_reason: rankingExclusionReason,
         cost_source: str(row.cost_source),
         // success with no workspace change = a no-op trial (honesty flag).
         workspace_changed: typeof row.workspace_changed === 'boolean' ? row.workspace_changed : null,
@@ -270,13 +280,18 @@ export function importBenchmarkResults(
       result.eventsImported += 1;
     } else {
       result.duplicates += 1;
-      // A duplicate is now a re-import of the *same* study+cell (identical
-      // namespaced event_id), whose stored row already carries the correct study
-      // and metadata. The one thing that can still change is a cost that was null
-      // when the model was unpriced: backfill it once rates are added, so usage
-      // stops summing it as $0.
+      // A duplicate is a re-import of the *same* study+cell (identical namespaced
+      // event_id). Two things can still change on the stored row: (1) a cost that
+      // was null when the model was unpriced — backfill once rates are added so
+      // usage stops summing it as $0; (2) ranking-eligibility metadata absent on a
+      // cell imported before those fields existed — backfill it (only when the row
+      // predates the field), so upgrading + re-importing surfaces the verdict
+      // without deleting rows.
       if (cost !== null && backfillBenchmarkCost(eventId, cost)) {
         result.costsBackfilled += 1;
+      }
+      if (rankingEligible !== null) {
+        backfillBenchmarkEvidence(eventId, rankingEligible, rankingExclusionReason);
       }
     }
   }

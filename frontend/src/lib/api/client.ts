@@ -1240,6 +1240,8 @@ export interface BenchmarkArm {
   noop_trials: number;
   token_basis: string | null;
   usage_evidence_grade: string | null;
+  ranking_eligible: boolean | null;
+  ranking_exclusion_reason: string | null;
 }
 
 export interface BenchmarkStudyDetail {

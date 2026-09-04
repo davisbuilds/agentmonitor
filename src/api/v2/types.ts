@@ -999,6 +999,11 @@ export interface BenchmarkArm {
   noop_trials: number;
   token_basis: string | null;
   usage_evidence_grade: string | null;
+  // Upstream ranking eligibility (openbench), tri-state: false = a cell was
+  // excluded from ranking (reason in ranking_exclusion_reason); true = every cell
+  // explicitly eligible; null = unknown (legacy rows / field omitted).
+  ranking_eligible: boolean | null;
+  ranking_exclusion_reason: string | null;
 }
 
 export interface BenchmarkStudyDetail {
