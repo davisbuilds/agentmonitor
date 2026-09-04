@@ -6,6 +6,28 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Date-aware pricing (rate schedules) (2026-09-04) — *What:* the pricing engine
+  can now price an event by the rate in force when it happened, not just by
+  prompt-size tier. A model may carry an optional `schedule` of `{ from, ...rates }`
+  periods (each with its own optional `tiers`) on top of its inline base rates;
+  `calculate()` / `effectiveRates()` take an optional `at` timestamp (Date / epoch
+  ms / ISO string) and select the period effective at that instant (`from`
+  inclusive) before tier selection. Every reprice path threads the event's own
+  timestamp (`client_timestamp ?? created_at`) — live ingestion, `amon costs
+  recalc`, the cache-inclusive backfill migration, Codex/Antigravity import, and
+  v2 cache-savings estimation — so re-running recalc after a boundary does not
+  retroactively reprice pre-boundary rows; an omitted/unparseable `at` prices at
+  the current wall clock. First use: the Gemini 3.6/3.7/3.8 Flash launch promo
+  ($0.75/$3.75) now carries a schedule entry that flips to list ($1.50/$7.50,
+  cacheRead $0.15) on 2027-01-01 automatically, replacing the manual-bump-on-the-day
+  toil the deadline-guard test only bought time against. Models with no `schedule`
+  keep exactly one period, so date selection is a no-op for them. Mechanism +
+  data only; the two still-unpriced vendor models (`claude-fable-5-1`,
+  `gpt-5.6-cyber`) remain a separate follow-up pending verified rate cards. *Why:*
+  a lapsed rate is a silent money bug of the same shape as the dist-pricing
+  incident (wrong cost, no error, plausible dashboard); this retires the
+  manual-bump class rather than patching one more instance. Tests:
+  `tests/pricing-date-schedule.test.ts` (boundary-inclusive edge mutation-verified).
 - Small correctness/tooling sweep (2026-09-03) — *What:* three self-contained
   fixes. (1) The last benchmark-segregation leak: v1 `getStats` lifetime
   `total_sessions` `COUNT(*)`d the `sessions` table with no source predicate, so

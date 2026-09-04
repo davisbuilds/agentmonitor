@@ -8,7 +8,17 @@
       "outputCostPerMTok": 3.75,
       "cacheReadCostPerMTok": 0.075,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "schedule": [
+        {
+          "from": "2027-01-01",
+          "note": "Launch promo ($0.75/$3.75) reverts to list on 2027-01-01.",
+          "inputCostPerMTok": 1.5,
+          "outputCostPerMTok": 7.5,
+          "cacheReadCostPerMTok": 0.15,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gemini-3.7-flash": {
       "aliases": [],
@@ -16,7 +26,17 @@
       "outputCostPerMTok": 3.75,
       "cacheReadCostPerMTok": 0.075,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "schedule": [
+        {
+          "from": "2027-01-01",
+          "note": "Launch promo ($0.75/$3.75) reverts to list on 2027-01-01.",
+          "inputCostPerMTok": 1.5,
+          "outputCostPerMTok": 7.5,
+          "cacheReadCostPerMTok": 0.15,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gemini-3.6-flash": {
       "aliases": [],
@@ -24,7 +44,17 @@
       "outputCostPerMTok": 3.75,
       "cacheReadCostPerMTok": 0.075,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "schedule": [
+        {
+          "from": "2027-01-01",
+          "note": "Launch promo ($0.75/$3.75) reverts to list on 2027-01-01.",
+          "inputCostPerMTok": 1.5,
+          "outputCostPerMTok": 7.5,
+          "cacheReadCostPerMTok": 0.15,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gemini-3.5-flash-lite": {
       "aliases": [],

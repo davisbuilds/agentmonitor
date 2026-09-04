@@ -18,10 +18,21 @@ interface PricingDataTier extends PricingDataRates {
   abovePromptTokens: number;
 }
 
+// A dated rate change: from `from` (inclusive ISO date) onward, these rates (and
+// their own optional prompt-size tiers) replace the model's inline base rates.
+// Used for promos that revert and provider price changes with a known date.
+interface PricingDataSchedulePeriod extends PricingDataRates {
+  from: string;
+  tiers?: PricingDataTier[];
+  /** Free-form provenance; ignored by the loader. */
+  note?: string;
+}
+
 interface PricingDataModel extends PricingDataRates {
   aliases?: string[];
   deprecated: boolean;
   tiers?: PricingDataTier[];
+  schedule?: PricingDataSchedulePeriod[];
 }
 
 interface PricingDataFile {
@@ -41,11 +52,28 @@ export interface PricingTier extends PricingRates {
   abovePromptTokens: number;
 }
 
+/**
+ * A dated rate period: from `from` (epoch ms; -Infinity for the base period)
+ * onward, `rates` (tier-selected by `tiers` when present) are in force until a
+ * later period supersedes them.
+ */
+export interface RatePeriod {
+  from: number;
+  rates: PricingRates;
+  tiers?: PricingTier[];
+}
+
 export interface ModelPricing extends PricingRates {
   provider: string;
   deprecated: boolean;
   /** Higher prompt-size bands, ascending by threshold. Absent for flat models. */
   tiers?: PricingTier[];
+  /**
+   * Dated rate periods ascending by `from`; `periods[0]` is the base period
+   * (from -Infinity) built from the inline rates. A model with no `schedule`
+   * has exactly one period, so the date selection is a no-op for it.
+   */
+  periods: RatePeriod[];
 }
 
 export interface TokenCounts {
@@ -73,15 +101,62 @@ function toPerToken(rates: PricingDataRates): PricingRates {
   };
 }
 
-// Pick the effective rates for a request. Flat models (no `tiers`) always use
-// their base rates. Tiered models select by the request's prompt size — the
-// input context, i.e. uncached input + cache reads + cache writes — applying the
-// highest band whose threshold the prompt strictly exceeds (boundaries are exclusive).
-function selectRates(pricing: ModelPricing, tokens: TokenCounts): PricingRates {
-  if (!pricing.tiers || pricing.tiers.length === 0) return pricing;
+// Convert prompt-size bands to per-token rates, ascending by threshold. Returns
+// undefined for a flat model so callers can leave `tiers` unset.
+function buildTiers(tiers?: PricingDataTier[]): PricingTier[] | undefined {
+  if (!tiers || tiers.length === 0) return undefined;
+  return tiers
+    .map(tier => ({ ...toPerToken(tier), abovePromptTokens: tier.abovePromptTokens }))
+    .sort((a, b) => a.abovePromptTokens - b.abovePromptTokens);
+}
+
+// Build the dated rate periods: the inline rates form the base period (from
+// -Infinity), and each `schedule` entry adds a later period. Sorted ascending
+// by `from`; entries with an unparseable `from` are dropped rather than
+// silently mispricing every event from the epoch.
+function buildPeriods(model: PricingDataModel, baseTiers?: PricingTier[]): RatePeriod[] {
+  const base: RatePeriod = { from: -Infinity, rates: toPerToken(model), tiers: baseTiers };
+  const scheduled: RatePeriod[] = (model.schedule ?? [])
+    .map(period => ({ from: Date.parse(period.from), rates: toPerToken(period), tiers: buildTiers(period.tiers) }))
+    .filter(period => Number.isFinite(period.from));
+  return [base, ...scheduled].sort((a, b) => a.from - b.from);
+}
+
+/** A point in time to price at: a Date, epoch ms, or ISO string. */
+export type PricingDate = Date | number | string;
+
+// Resolve an `at` argument to epoch ms. Omitted or unparseable → now, so a
+// missing/garbled event timestamp prices at the current period rather than
+// silently jumping to a scheduled future rate.
+function resolveAtMs(at?: PricingDate | null): number {
+  if (at == null) return Date.now();
+  if (at instanceof Date) return at.getTime();
+  if (typeof at === 'number') return at;
+  const ms = Date.parse(at);
+  return Number.isFinite(ms) ? ms : Date.now();
+}
+
+// Pick the rate period in force at `atMs`: the latest period whose `from` is
+// at or before that instant (boundaries are inclusive). `periods` is sorted
+// ascending and `periods[0]` is from -Infinity, so this always resolves.
+function selectPeriod(pricing: ModelPricing, atMs: number): RatePeriod {
+  let period = pricing.periods[0];
+  for (const candidate of pricing.periods) {
+    if (candidate.from <= atMs) period = candidate;
+  }
+  return period;
+}
+
+// Pick the effective rates for a request. Selects the dated period first, then
+// the prompt-size tier within it: flat periods use their base rates; tiered
+// periods apply the highest band whose threshold the prompt strictly exceeds
+// (boundaries exclusive). Prompt size = uncached input + cache reads + writes.
+function selectRates(pricing: ModelPricing, tokens: TokenCounts, atMs: number): PricingRates {
+  const period = selectPeriod(pricing, atMs);
+  if (!period.tiers || period.tiers.length === 0) return period.rates;
   const promptTokens = tokens.input + (tokens.cacheRead ?? 0) + (tokens.cacheWrite ?? 0);
-  let rates: PricingRates = pricing;
-  for (const tier of pricing.tiers) {
+  let rates: PricingRates = period.rates;
+  for (const tier of period.tiers) {
     if (promptTokens > tier.abovePromptTokens) rates = tier;
   }
   return rates;
@@ -113,17 +188,15 @@ export class PricingRegistry {
 
   private loadProvider(data: PricingDataFile): void {
     for (const [canonicalName, model] of Object.entries(data.models)) {
+      const baseTiers = buildTiers(model.tiers);
       const pricing: ModelPricing = {
         ...toPerToken(model),
         provider: data.provider,
         deprecated: model.deprecated,
+        periods: buildPeriods(model, baseTiers),
       };
 
-      if (model.tiers && model.tiers.length > 0) {
-        pricing.tiers = model.tiers
-          .map(tier => ({ ...toPerToken(tier), abovePromptTokens: tier.abovePromptTokens }))
-          .sort((a, b) => a.abovePromptTokens - b.abovePromptTokens);
-      }
+      if (baseTiers) pricing.tiers = baseTiers;
 
       this.models.set(canonicalName, pricing);
 
@@ -176,14 +249,16 @@ export class PricingRegistry {
   }
 
   /**
-   * Calculate cost in USD for a set of token counts.
-   * Returns null if the model is not found.
+   * Calculate cost in USD for a set of token counts, priced at the rates in
+   * force at `at` (a Date, epoch ms, or ISO string). Pass the event's own
+   * timestamp so a dated rate change is applied by when the event happened;
+   * omit it to price at the current period. Returns null if the model is not found.
    */
-  calculate(model: string, tokens: TokenCounts): number | null {
+  calculate(model: string, tokens: TokenCounts, at?: PricingDate | null): number | null {
     const pricing = this.lookup(model);
     if (!pricing) return null;
 
-    const rates = selectRates(pricing, tokens);
+    const rates = selectRates(pricing, tokens, resolveAtMs(at));
     return (tokens.input * rates.inputCostPerToken)
       + (tokens.output * rates.outputCostPerToken)
       + ((tokens.cacheRead ?? 0) * rates.cacheReadCostPerToken)
@@ -191,15 +266,16 @@ export class PricingRegistry {
   }
 
   /**
-   * Resolve the effective per-token rates for a request, tier-selected by prompt
-   * size (uncached `input` + `cacheRead` + `cacheWrite`). Flat models return their base rates.
-   * Returns null when the model is unknown. Use this anywhere a cost/savings
-   * figure must agree with `calculate()` on long-context tiered pricing.
+   * Resolve the effective per-token rates for a request, selected by date (`at`)
+   * then tier-selected by prompt size (uncached `input` + `cacheRead` +
+   * `cacheWrite`). Flat models return their base rates. Returns null when the
+   * model is unknown. Use this anywhere a cost/savings figure must agree with
+   * `calculate()` on long-context tiered or dated pricing.
    */
-  effectiveRates(model: string, tokens: TokenCounts): PricingRates | null {
+  effectiveRates(model: string, tokens: TokenCounts, at?: PricingDate | null): PricingRates | null {
     const pricing = this.lookup(model);
     if (!pricing) return null;
-    return selectRates(pricing, tokens);
+    return selectRates(pricing, tokens, resolveAtMs(at));
   }
 
   /**

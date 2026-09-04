@@ -175,7 +175,7 @@ export function parseAntigravityFile(
       const b = deriveBillingTokens(gm.usage);
       const model = gm.model ?? sessionModel;
       const cost = model
-        ? pricingRegistry.calculate(model, { input: b.tokensIn, output: b.tokensOut, cacheRead: b.cacheReadTokens })
+        ? pricingRegistry.calculate(model, { input: b.tokensIn, output: b.tokensOut, cacheRead: b.cacheReadTokens }, iso(firstTs))
         : null;
       events.push({
         event_id: eventId(sessionId, `gen:${i}`),
