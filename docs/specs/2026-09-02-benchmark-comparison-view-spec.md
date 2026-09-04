@@ -1,6 +1,6 @@
 ---
 title: Benchmark comparison view (Benchmarks tab)
-status: in-progress
+status: complete
 created: 2026-09-02
 owner: davis
 related:
@@ -286,10 +286,18 @@ class from the read side).
   `#benchmarks?study=` route; studies list; study-detail ladder (DataTable + Bar +
   verdict Badges + ◯native/●routed) + auto-generated honesty panel. Playwright-
   validated against three real openbench studies. Usable without the chart.
-- **P3 — frontier chart + shared primitives.** `ui/chart/scales.ts` +
-  `PlotFrame.svelte`; `BenchmarkFrontier.svelte` on top of them + interactivity
-  (hover/click drill-in); refactor CostDashboard's timeline onto the same
-  primitives as the second-consumer validation (behavior preserved).
+- **P3 — frontier chart + shared primitives. ✅ SHIPPED** (2026-09-04).
+  `ui/chart/scales.ts` (pure `linearScale`/`log10Scale` + nice-tick + `formatUsd`,
+  unit-tested & mutation-verified) + `ui/chart/layout.ts` + tokenized
+  `PlotFrame.svelte` (frame only). `BenchmarkFrontier.svelte` draws marks on top:
+  Pareto polyline (`arm.pareto`), domination connectors (matched on
+  `canonical_model` via `dominated_by`), hollow ◯ native / filled ● routed
+  markers, hover tooltip, and click-drill that highlights + scrolls to the arm's
+  ladder row (added optional `rowClass`/`rowAttrs` to `DataTable`). Pure geometry
+  lives in `benchmarks/frontier-geometry.ts` so it is testable without a DOM.
+  Unpriced arms are held off the cost axis and named in a legend note. The
+  CostDashboard "Spend Over Time" timeline was refactored onto `linearScale` as
+  the second-consumer validation (algebraically identical, behavior preserved).
 - **P4 (optional) — export to artifact.** "Publish study" emits the standalone
   frontier page (the artifact format), app as source of truth. Nice symmetry;
   not required.
