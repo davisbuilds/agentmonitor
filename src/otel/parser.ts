@@ -966,13 +966,37 @@ function isNoiseMetric(name: string): boolean {
   return /\.duration_ms$|_ms$|_bytes$|\.bytes$/.test(name);
 }
 
-// The inclusion principle (not a name allowlist): a metric is operational when
-// its datapoint carries an outcome/state attribute — the label that answers
-// "what happened". Auto-admits new outcome counters; keeps value-only gauges out.
+// Operator-actionable metric families we store. A curated allowlist rather than
+// a broad "any outcome attribute" heuristic: live Codex tags `status`/`outcome`
+// on many internal counters (skill-routing A/B evals, sqlite plumbing) that are
+// pure bloat for a local console. Default-deny — unknown families are dropped
+// (and tallied for visibility) until deliberately added here.
+//   - prefixes: consolidation health (the motivating signal)
+//   - name signal: failure/degradation counters wherever they live in the tree
+const OPERATIONAL_PREFIXES = ['codex.memory.', 'codex.memories.'];
+const OPERATIONAL_NAME_SIGNAL = /retry|error|fallback/;
+
+function isOperationalMetric(name: string): boolean {
+  return OPERATIONAL_PREFIXES.some(prefix => name.startsWith(prefix))
+    || OPERATIONAL_NAME_SIGNAL.test(name);
+}
+
+// Attributes worth storing: the outcome/state labels that give a counter meaning.
+// Everything else (app.version, model, originator, session_source, method, db
+// paths, …) is descriptive and only fragments the series, so it is projected
+// away — this is what keeps codex.memory.startup one clean {state} series.
 const OUTCOME_ATTR_KEYS = new Set([
   'state', 'status', 'outcome', 'result', 'reason',
   'error.type', 'error_type', 'fallback_reason', 'failure_reason',
 ]);
+
+function projectAttrs(attrs: Record<string, string | number | boolean>): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  for (const key of Object.keys(attrs)) {
+    if (OUTCOME_ATTR_KEYS.has(key)) out[key] = attrs[key];
+  }
+  return out;
+}
 
 function attributeValue(v: OtelAnyValue): string | number | boolean | undefined {
   if (v.stringValue !== undefined) return v.stringValue;
@@ -990,13 +1014,6 @@ function attributesToObject(attrs: OtelKeyValue[] | undefined): Record<string, s
     if (value !== undefined) out[kv.key] = value;
   }
   return out;
-}
-
-function hasOutcomeAttr(attrs: Record<string, string | number | boolean>): boolean {
-  for (const key of Object.keys(attrs)) {
-    if (OUTCOME_ATTR_KEYS.has(key)) return true;
-  }
-  return false;
 }
 
 // Stable signature over the outcome-bearing attributes, so each (name, attrs)
@@ -1089,11 +1106,16 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
           // ── Noise: latency/size ──
           if (isNoiseMetric(metricName)) { drop(metricName); continue; }
 
-          // ── Bucket A operational: outcome/state-tagged counter ──
-          const attrs = attributesToObject(dp.attributes);
-          if (!hasOutcomeAttr(attrs)) { drop(metricName); continue; }
+          // ── Bucket A operational: curated operator-actionable families only ──
+          if (!isOperationalMetric(metricName)) { drop(metricName); continue; }
+          const fullAttrs = attributesToObject(dp.attributes);
+          const attrs = projectAttrs(fullAttrs);
 
-          const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(attrs)}|${seriesStart}`;
+          // Key the cumulative→delta identity on the FULL attributes so two real
+          // OTLP series that share the projected outcome but differ in a
+          // projected-away label (model, method, …) diff against their own series,
+          // not each other. Storage still collapses to the projected attrs.
+          const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(fullAttrs)}|${seriesStart}`;
           const delta = isCumulative ? computeDelta(opKey, rawValue) : rawValue;
           if (delta <= 0) continue;
 

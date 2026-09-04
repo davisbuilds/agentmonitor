@@ -51,18 +51,51 @@ function metricsPayload(
 beforeEach(() => resetCumulativeState());
 
 describe('parseOtelMetrics classification', () => {
-  test('an outcome/state-tagged Codex counter is captured as an operational metric', () => {
+  test('an allowlisted Codex counter is captured, with attrs projected to outcomes only', () => {
+    // Live Codex emits codex.memory.startup with a pile of descriptive labels
+    // (app.version/auth_mode/model/originator/session_source) that fragment the
+    // series. Only the outcome attribute is kept, so the metric collapses to the
+    // one series that answers "did startup skip, and why".
     const result = parseOtelMetrics(metricsPayload('codex', 'sess-op', [
-      { name: 'codex.memory.startup', points: [{ value: 1, attributes: [attr('state', 'skipped_rate_limit')] }] },
+      { name: 'codex.memory.startup', points: [{ value: 1, attributes: [
+        attr('state', 'skipped_rate_limit'),
+        attr('app.version', '0.153.2'),
+        attr('auth_mode', 'Chatgpt'),
+        attr('model', 'gpt-5.6-luna'),
+        attr('originator', 'codex-tui'),
+        attr('session_source', 'cli'),
+      ] }] },
     ]));
     assert.equal(result.operational.length, 1);
     const m = result.operational[0];
     assert.equal(m.metric_name, 'codex.memory.startup');
     assert.equal(m.session_id, 'sess-op');
-    assert.equal(m.agent_type, 'codex');
-    assert.deepEqual(m.attrs, { state: 'skipped_rate_limit' });
+    assert.deepEqual(m.attrs, { state: 'skipped_rate_limit' }); // descriptive labels stripped
     assert.equal(m.value, 1);
     assert.equal(result.usage.length, 0);
+  });
+
+  test('an error/fallback name-signal metric is admitted even outside the memory prefix', () => {
+    const result = parseOtelMetrics(metricsPayload('codex', 'sess-e', [
+      { name: 'codex.db.error', points: [{ value: 1, attributes: [attr('reason', 'locked')] }] },
+      { name: 'codex.sqlite.fallback.count', points: [{ value: 1, attributes: [attr('status', 'failed')] }] },
+    ]));
+    assert.deepEqual(result.operational.map(m => m.metric_name).sort(), ['codex.db.error', 'codex.sqlite.fallback.count']);
+  });
+
+  test('high-cardinality internal counters are dropped, not stored', () => {
+    // shadow_selection (internal skill-routing A/B eval) and sqlite plumbing both
+    // carry a `status`/`outcome` attr but are not operator-actionable — the exact
+    // noise that would bloat the store. Not in the allowlist → dropped (tallied).
+    const result = parseOtelMetrics(metricsPayload('codex', 'sess-n', [
+      { name: 'codex.skills.shadow_selection', points: [{ value: 1, attributes: [attr('method', 'bm25_v1'), attr('status', 'selected')] }] },
+      { name: 'codex.sqlite.init.count', points: [{ value: 1, attributes: [attr('status', 'success')] }] },
+      { name: 'codex.skill.injected', points: [{ value: 1, attributes: [attr('status', 'ok'), attr('skill', 'deep-research')] }] },
+    ]));
+    assert.equal(result.operational.length, 0);
+    assert.equal(result.dropped['codex.skills.shadow_selection'], 1);
+    assert.equal(result.dropped['codex.sqlite.init.count'], 1);
+    assert.equal(result.dropped['codex.skill.injected'], 1);
   });
 
   test('a *.duration_ms timing is dropped (tallied), never operational', () => {
@@ -134,6 +167,27 @@ describe('parseOtelMetrics classification', () => {
     const p2 = parseOtelMetrics(metricsPayload('codex', 'unknown', [{ ...opts, startNano: '200' }]));
     assert.equal(p2.operational.length, 1); // restart → fresh series
     assert.equal(p2.operational[0].value, 1); // the new process's startup is recorded, not swallowed
+  });
+
+  test('cumulative series that differ only in a projected-away label track independently', () => {
+    // Two real OTLP series share the stored outcome {state:ok} but differ in a
+    // label we project away (model). Their cumulative values must be diffed
+    // against their OWN series, not against each other — else the second is
+    // reported as (7-5)=2 instead of its true first-seen 7.
+    const mk = (model: string, value: number) => ({
+      name: 'codex.memory.startup', cumulative: true, startNano: '500',
+      points: [{ value, attributes: [attr('state', 'ok'), attr('model', model)] }],
+    });
+    const first = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('luna', 5)]));
+    const second = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('terra', 7)]));
+    assert.equal(first.operational[0].value, 5);
+    assert.equal(second.operational[0].value, 7); // its own series' first sighting, not 7-5
+    // Both stored under the projected {state:ok}, model dropped.
+    assert.deepEqual(first.operational[0].attrs, { state: 'ok' });
+    assert.deepEqual(second.operational[0].attrs, { state: 'ok' });
+    // A later export of the luna series diffs against luna's 5, not terra's 7.
+    const third = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('luna', 8)]));
+    assert.equal(third.operational[0].value, 3); // 8 - 5
   });
 
   test('distinct outcome states are tracked as separate cumulative series', () => {
