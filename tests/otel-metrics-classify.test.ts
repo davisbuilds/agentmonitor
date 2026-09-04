@@ -169,6 +169,27 @@ describe('parseOtelMetrics classification', () => {
     assert.equal(p2.operational[0].value, 1); // the new process's startup is recorded, not swallowed
   });
 
+  test('cumulative series that differ only in a projected-away label track independently', () => {
+    // Two real OTLP series share the stored outcome {state:ok} but differ in a
+    // label we project away (model). Their cumulative values must be diffed
+    // against their OWN series, not against each other — else the second is
+    // reported as (7-5)=2 instead of its true first-seen 7.
+    const mk = (model: string, value: number) => ({
+      name: 'codex.memory.startup', cumulative: true, startNano: '500',
+      points: [{ value, attributes: [attr('state', 'ok'), attr('model', model)] }],
+    });
+    const first = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('luna', 5)]));
+    const second = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('terra', 7)]));
+    assert.equal(first.operational[0].value, 5);
+    assert.equal(second.operational[0].value, 7); // its own series' first sighting, not 7-5
+    // Both stored under the projected {state:ok}, model dropped.
+    assert.deepEqual(first.operational[0].attrs, { state: 'ok' });
+    assert.deepEqual(second.operational[0].attrs, { state: 'ok' });
+    // A later export of the luna series diffs against luna's 5, not terra's 7.
+    const third = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('luna', 8)]));
+    assert.equal(third.operational[0].value, 3); // 8 - 5
+  });
+
   test('distinct outcome states are tracked as separate cumulative series', () => {
     parseOtelMetrics(metricsPayload('codex', 'sess-d', [
       { name: 'codex.memory.startup', cumulative: true, points: [

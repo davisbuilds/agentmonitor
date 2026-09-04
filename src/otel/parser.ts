@@ -1108,9 +1108,14 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
 
           // ── Bucket A operational: curated operator-actionable families only ──
           if (!isOperationalMetric(metricName)) { drop(metricName); continue; }
-          const attrs = projectAttrs(attributesToObject(dp.attributes));
+          const fullAttrs = attributesToObject(dp.attributes);
+          const attrs = projectAttrs(fullAttrs);
 
-          const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(attrs)}|${seriesStart}`;
+          // Key the cumulative→delta identity on the FULL attributes so two real
+          // OTLP series that share the projected outcome but differ in a
+          // projected-away label (model, method, …) diff against their own series,
+          // not each other. Storage still collapses to the projected attrs.
+          const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(fullAttrs)}|${seriesStart}`;
           const delta = isCumulative ? computeDelta(opKey, rawValue) : rawValue;
           if (delta <= 0) continue;
 
