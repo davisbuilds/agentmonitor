@@ -19,6 +19,12 @@
     margin?: Partial<ChartMargins>;
     /** Accessible description of the plotted marks. */
     ariaLabel?: string;
+    /**
+     * ARIA role for the <svg>. Default `img` suits a static chart. A chart with
+     * focusable marks (e.g. drill-in buttons) must pass `group`, since `img`
+     * flattens descendants and hides the interactive controls from AT.
+     */
+    role?: 'img' | 'group';
     class?: string;
     children?: Snippet;
   }
@@ -34,6 +40,7 @@
     yTitle,
     margin,
     ariaLabel,
+    role = 'img',
     class: klass = '',
     children,
   }: Props = $props();
@@ -46,7 +53,7 @@
   viewBox="0 0 {layout.width} {layout.height}"
   class="w-full {klass}"
   style="aspect-ratio: {layout.width} / {layout.height}"
-  role="img"
+  {role}
   aria-label={ariaLabel}
 >
   <!-- horizontal gridlines + y tick labels -->

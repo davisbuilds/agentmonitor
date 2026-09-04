@@ -42,10 +42,11 @@ const FIXTURE: BenchmarkArm[] = [
 
 const RANGES = { xRange: [0, 100] as const, yRange: [100, 0] as const };
 
-test('isPlottable requires a positive priced cost', () => {
+test('isPlottable admits any priced arm including a free $0, but not a null cost', () => {
   assert.equal(isPlottable(FIXTURE[0]), true); // luna, $0.479
-  assert.equal(isPlottable(FIXTURE[4]), false); // nemotron, null
-  assert.equal(isPlottable(arm({ canonical_model: 'x', label: 'x', mean_score: 1, cost_per_trial: 0, pareto: false, dominated_by: null })), false);
+  assert.equal(isPlottable(FIXTURE[4]), false); // nemotron, null → off-axis
+  // A genuinely free route is priced ($0) and belongs on the axis (left edge).
+  assert.equal(isPlottable(arm({ canonical_model: 'x', label: 'x', mean_score: 1, cost_per_trial: 0, pareto: false, dominated_by: null })), true);
 });
 
 test('unpriced arms are held off the cost axis, not dropped', () => {
@@ -85,6 +86,45 @@ test('x grows with cost and y is inverted (score 1 at the top)', () => {
 test('cost axis brackets to whole decades so ticks land on the plot edges', () => {
   const g = computeFrontier(FIXTURE, RANGES);
   assert.deepEqual(g.costDomain, [0.01, 10]); // min 0.022 → 0.01, max 1.108 → 10
+});
+
+test('a free ($0) arm is plotted at the left edge, not treated as unpriced', () => {
+  const g = computeFrontier(
+    [
+      arm({ canonical_model: 'free-model', label: 'free-model', mean_score: 0.9, cost_per_trial: 0, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'paid', label: 'paid', mean_score: 0.9, cost_per_trial: 0.5, pareto: false, dominated_by: 'free-model' }),
+    ],
+    RANGES,
+  );
+  assert.equal(g.points.length, 2); // both priced
+  assert.deepEqual(g.free.map((a) => a.label), ['free-model']);
+  assert.deepEqual(g.unpriced, []); // $0 is not "unpriced"
+  const freePt = g.points.find((p) => p.arm.label === 'free-model')!;
+  assert.equal(freePt.x, RANGES.xRange[0]); // pinned to the left edge
+  assert.ok(g.frontier.some((p) => p.arm.label === 'free-model')); // still on the front
+  // The free arm dominates the paid one and gets the connector.
+  assert.deepEqual(
+    g.connectors.map((c) => [c.from.arm.label, c.to.arm.label]),
+    [['paid', 'free-model']],
+  );
+});
+
+test('connector links to the effort that actually dominates, not the first frontier match', () => {
+  // Two efforts share canonical_model 'm'; the expensive high-score effort is
+  // listed first. x is dominated by the cheap low-score effort only. The
+  // connector must reach m(low), not the first frontier candidate m(high).
+  const g = computeFrontier(
+    [
+      arm({ canonical_model: 'm', label: 'm (high)', reasoning_effort: 'high', mean_score: 1.0, cost_per_trial: 0.5, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'm', label: 'm (low)', reasoning_effort: 'low', mean_score: 0.5, cost_per_trial: 0.02, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'x', label: 'x', mean_score: 0.4, cost_per_trial: 0.1, pareto: false, dominated_by: 'm' }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(
+    g.connectors.map((c) => [c.from.arm.label, c.to.arm.label]),
+    [['x', 'm (low)']],
+  );
 });
 
 test('a single priced arm is bracketed to its enclosing decade, not collapsed', () => {

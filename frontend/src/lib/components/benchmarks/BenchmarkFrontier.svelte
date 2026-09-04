@@ -59,6 +59,7 @@
     formatY={(v) => v.toFixed(1)}
     xTitle="$/trial (log scale)"
     yTitle="Mean score"
+    role="group"
     ariaLabel="Cost versus score frontier: {geometry.points.length} priced arms"
   >
     <!-- domination connectors (dominated arm → its dominator) -->
@@ -148,6 +149,9 @@
       >Pareto frontier
     </span>
     <span>◯ native · ● routed</span>
+    {#if geometry.free.length > 0}
+      <span>{geometry.free.length} free ($0) arm(s) pinned to the left edge: {geometry.free.map((a) => a.label).join(', ')}</span>
+    {/if}
     {#if geometry.unpriced.length > 0}
       <span>{geometry.unpriced.length} unpriced arm(s) not shown: {geometry.unpriced.map((a) => a.label).join(', ')}</span>
     {/if}
