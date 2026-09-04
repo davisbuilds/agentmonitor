@@ -617,6 +617,19 @@ describe('PricingRegistry', () => {
       // 1M*$1.50 + 1M*$0.15, no doubling
       assert.ok(Math.abs(cost - (1.5 + 0.15)) < 0.0001, `got ${cost}`);
     });
+
+    // Newer Gemini Flash models must be priced, not silently billed as $0.
+    test('newer Gemini Flash / Flash-Lite models resolve to real rates', () => {
+      const flashPromo = registry.lookup('gemini-3.8-flash');
+      assert.ok(flashPromo, 'gemini-3.8-flash missing from registry');
+      // Promotional rate through 2026-12-31 (reverts to $1.50 in — no date-awareness yet).
+      assert.equal(flashPromo.inputCostPerToken, 0.75 / 1_000_000);
+      assert.equal(flashPromo.outputCostPerToken, 3.75 / 1_000_000);
+      for (const m of ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite']) {
+        const p = registry.lookup(m);
+        assert.ok(p && p.inputCostPerToken > 0, `${m} must be priced`);
+      }
+    });
   });
 
   // effectiveRates exposes the same tier selection to non-calculate() consumers
