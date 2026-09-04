@@ -95,8 +95,10 @@ before(async () => {
   // D bad/routed (dominated).
   cell({ runId: 's1-A-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'cheap', is_open: true, task: 't', trial: 1, score: 0.2, cost: 0.02, cost_source: null });
   cell({ runId: 's1-A-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'cheap', is_open: true, task: 't', trial: 2, score: 0.2, cost: 0.02, cost_source: null });
-  cell({ runId: 's1-B-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 1, score: 0.8, cost: 0.10, cost_source: 'litellm' });
-  cell({ runId: 's1-B-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 2, score: 0.8, cost: 0.10, cost_source: 'litellm', success: true, workspace_changed: false });
+  // 'mid': every cell explicitly ranking-eligible → arm eligible=true; mixed
+  // evidence grades (vendor_reported + estimated) → arm reports the weakest.
+  cell({ runId: 's1-B-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 1, score: 0.8, cost: 0.10, cost_source: 'litellm', ranking_eligible: true, usage_evidence_grade: 'vendor_reported' });
+  cell({ runId: 's1-B-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 2, score: 0.8, cost: 0.10, cost_source: 'litellm', success: true, workspace_changed: false, ranking_eligible: true, usage_evidence_grade: 'estimated' });
   cell({ runId: 's1-C-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'gpt-native', effort: 'high', is_open: false, task: 't', trial: 1, score: 1.0, cost: 0.50, cost_source: null });
   // A second gpt-native attempt that failed (unscored) — must count as an excluded
   // trial, not be hidden by the raw cell count. Keeps n=1, mean_score=1.0.
@@ -211,16 +213,26 @@ describe('getBenchmarkStudy — arm aggregation + frontier', () => {
     assert.equal(m.excluded_trials, 1, 'the missing (q, trial 2) cell is an excluded trial');
   });
 
-  test('surfaces upstream ranking-eligibility per arm (mirrored, not re-derived)', () => {
-    const arms = getBenchmarkStudy('sha4').arms;
-    const m = arms.find(a => a.canonical_model === 'multi')!;
+  test('surfaces upstream ranking-eligibility per arm as a tri-state (mirrored, not re-derived)', () => {
+    const m = getBenchmarkStudy('sha4').arms.find(a => a.canonical_model === 'multi')!;
     assert.equal(m.ranking_eligible, false, 'an excluded cell makes the arm ranking-ineligible');
     assert.equal(m.ranking_exclusion_reason, 'usage_unavailable', 'first exclusion reason surfaced');
 
-    // An arm with no excluded cells stays eligible with no reason.
-    const clean = getBenchmarkStudy('sha1').arms.find(a => a.canonical_model === 'mid')!;
-    assert.equal(clean.ranking_eligible, true);
-    assert.equal(clean.ranking_exclusion_reason, null);
+    const s1 = getBenchmarkStudy('sha1').arms;
+    const eligible = s1.find(a => a.canonical_model === 'mid')!;
+    assert.equal(eligible.ranking_eligible, true, 'every cell explicitly eligible → true');
+    assert.equal(eligible.ranking_exclusion_reason, null);
+
+    // No cell reported eligibility → unknown (null), never a fabricated true.
+    const unknown = s1.find(a => a.canonical_model === 'cheap')!;
+    assert.equal(unknown.ranking_eligible, null, 'legacy/omitted eligibility stays unknown');
+  });
+
+  test('arm reports its weakest usage-evidence grade, not an arbitrary cell', () => {
+    // 'mid' spans vendor_reported + estimated; the weaker (estimated) must win so
+    // the honesty panel does not hide a soft basis behind a strong one.
+    const mid = getBenchmarkStudy('sha1').arms.find(a => a.canonical_model === 'mid')!;
+    assert.equal(mid.usage_evidence_grade, 'estimated');
   });
 
   test('unpriced arm: cost/trial null, verdict unreliable, off the frontier', () => {

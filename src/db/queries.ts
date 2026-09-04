@@ -585,6 +585,39 @@ export function backfillBenchmarkCost(eventId: string, cost: number): boolean {
   return false;
 }
 
+/**
+ * Backfill a benchmark cell's ranking-eligibility metadata after re-import from a
+ * file that now carries openbench's `usage_ranking_eligible` /
+ * `usage_ranking_exclusion_reason`. Re-imports hit the duplicate early-return in
+ * `insertEvent`, so a cell first stored before these fields existed would never
+ * surface its eligibility without deleting the row. Updates only rows that lack
+ * the field (json_extract → NULL for an absent key), so a genuine verdict is
+ * never clobbered; returns true when a row was updated. Callers pass a real
+ * verdict (eligible !== null) — there is nothing to backfill otherwise.
+ */
+export function backfillBenchmarkEvidence(
+  eventId: string,
+  eligible: boolean,
+  reason: string | null,
+): boolean {
+  const db = getDb();
+  const result = db.prepare(`
+    UPDATE events
+    SET metadata = json_set(
+      COALESCE(NULLIF(metadata, ''), '{}'),
+      '$.usage_ranking_eligible', json(@eligible),
+      '$.usage_ranking_exclusion_reason', @reason
+    )
+    WHERE event_id = @id AND source = 'benchmark'
+      AND json_extract(metadata, '$.usage_ranking_eligible') IS NULL
+  `).run({ id: eventId, eligible: eligible ? 'true' : 'false', reason });
+  if (result.changes > 0) {
+    markStatsDirty();
+    return true;
+  }
+  return false;
+}
+
 export function getEvents(filters: {
   limit?: number;
   offset?: number;

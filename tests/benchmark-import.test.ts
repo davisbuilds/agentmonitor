@@ -234,6 +234,23 @@ describe('importBenchmarkResults', () => {
     assert.equal(m.usage_ranking_exclusion_reason, 'usage_unavailable');
   });
 
+  test('re-import backfills ranking-eligibility onto a cell imported before the fields existed', () => {
+    const runId = 'codex:task-bf:minimax-m3:trial1';
+    const base = { run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'task-bf', trial: 1, tokens_input_uncached: 10, tokens_output: 5, study: 'bf-suite', study_sha256: 'sha-bf' };
+    // First import predates the ranking fields → stored null.
+    importBenchmarkResults(writeResults([base]));
+    assert.equal(meta(runId).usage_ranking_eligible, null);
+
+    // Re-import the same cell, now carrying openbench's verdict. It is a duplicate
+    // (same study+run), so the value must arrive via the backfill path.
+    const second = importBenchmarkResults(writeResults([{ ...base, usage_ranking_eligible: false, usage_ranking_exclusion_reason: 'usage_unavailable' }]));
+    assert.equal(second.duplicates, 1, 'same study+run → duplicate');
+
+    const m = meta(runId);
+    assert.equal(m.usage_ranking_eligible, false, 'verdict backfilled onto the pre-upgrade row');
+    assert.equal(m.usage_ranking_exclusion_reason, 'usage_unavailable');
+  });
+
   test('ranking-eligibility fields default to null when openbench omits them', () => {
     const runId = 'codex:task-noue:minimax-m3:trial1';
     const file = writeResults([{

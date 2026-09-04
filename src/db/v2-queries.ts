@@ -3651,6 +3651,41 @@ function firstString(cells: BenchCell[], key: string): string | null {
   return (hit as string) ?? null;
 }
 
+// Usage-evidence grades from weakest to strongest. An arm spanning mixed grades
+// must report its *weakest* cell so the honesty panel never hides a soft basis
+// behind a stronger one. Unknown grade strings sort as moderately weak.
+const GRADE_WEAKNESS: Record<string, number> = {
+  vendor_reported: 0,
+  proxy_measured: 1,
+  estimated: 2,
+  usage_unavailable: 3,
+};
+
+function weakestEvidenceGrade(cells: BenchCell[]): string | null {
+  let worst: string | null = null;
+  let worstRank = -1;
+  for (const c of cells) {
+    const g = c.m.usage_evidence_grade;
+    if (typeof g !== 'string' || !g) continue;
+    const rank = GRADE_WEAKNESS[g] ?? 2;
+    if (rank > worstRank) { worstRank = rank; worst = g; }
+  }
+  return worst;
+}
+
+/**
+ * Aggregate per-cell ranking eligibility into an arm-level tri-state, mirroring
+ * openbench (never re-deriving): any explicitly-excluded cell makes the arm
+ * ineligible (false); an arm whose cells are *all* explicitly eligible is true;
+ * anything else — legacy rows or omitted fields — stays unknown (null) rather
+ * than fabricating an upstream approval.
+ */
+function aggregateRankingEligible(cells: BenchCell[]): boolean | null {
+  if (cells.some(c => c.m.usage_ranking_eligible === false)) return false;
+  if (cells.length > 0 && cells.every(c => c.m.usage_ranking_eligible === true)) return true;
+  return null;
+}
+
 export function getBenchmarkStudies(): BenchmarkStudySummary[] {
   const db = getDb();
   const rows = db.prepare(`
@@ -3782,10 +3817,11 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
       excluded_trials: Math.max(0, expected_trials - scored.length),
       noop_trials: cs.filter(c => c.m.success === true && c.m.workspace_changed === false).length,
       token_basis: firstString(cs, 'token_basis'),
-      usage_evidence_grade: firstString(cs, 'usage_evidence_grade'),
-      // Ranking eligibility from openbench (mirrored, not re-derived): the arm is
-      // eligible unless a cell was explicitly excluded. Surface the first reason.
-      ranking_eligible: !ineligibleCells.length,
+      usage_evidence_grade: weakestEvidenceGrade(cs),
+      // Ranking eligibility from openbench (mirrored, not re-derived): tri-state —
+      // false if any cell was excluded, true only if every cell is explicitly
+      // eligible, else null (unknown). Surface the first exclusion reason.
+      ranking_eligible: aggregateRankingEligible(cs),
       ranking_exclusion_reason: firstString(ineligibleCells, 'usage_ranking_exclusion_reason'),
     });
   }
