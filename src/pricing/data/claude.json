@@ -1,6 +1,6 @@
 {
   "provider": "anthropic",
-  "lastUpdated": "2026-08-04T00:00:00Z",
+  "lastUpdated": "2026-09-03T00:00:00Z",
   "models": {
     "claude-fable-5": {
       "aliases": [],
@@ -79,10 +79,10 @@
       "aliases": [
         "claude-sonnet-5-latest"
       ],
-      "inputCostPerMTok": 3,
-      "outputCostPerMTok": 15,
-      "cacheReadCostPerMTok": 0.3,
-      "cacheWriteCostPerMTok": 3.75,
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.2,
+      "cacheWriteCostPerMTok": 2.5,
       "deprecated": false
     },
     "claude-sonnet-4-6": {

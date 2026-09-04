@@ -464,10 +464,10 @@ describe('Codex log parser', () => {
       'turn_context',
       'turn_context',
     ]);
-    // Terra: 60K uncached * $2.50 + 40K cached * $0.25 + 20K output * $15.
-    assert.ok(Math.abs((responses[0].cost_usd as number) - 0.46) < 0.0001);
-    // Luna delta: 30K uncached * $1 + 20K cached * $0.10 + 10K output * $6.
-    assert.ok(Math.abs((responses[1].cost_usd as number) - 0.092) < 0.0001);
+    // Terra: 60K uncached * $2 + 40K cached * $0.20 + 20K output * $12 = $0.368.
+    assert.ok(Math.abs((responses[0].cost_usd as number) - 0.368) < 0.0001);
+    // Luna delta: 30K uncached * $0.20 + 20K cached * $0.02 + 10K output * $1.20 = $0.0184.
+    assert.ok(Math.abs((responses[1].cost_usd as number) - 0.0184) < 0.0001);
   });
 
   test('parses response_item apply_patch as tool_use event', () => {
@@ -820,16 +820,17 @@ describe('Import orchestrator integration', () => {
         WHERE session_id = 'session-model-refresh' AND event_type = 'llm_response'
       `).get() as { model: string; cost_usd: number };
       assert.equal(after.model, 'gpt-5.6-terra');
-      assert.ok(Math.abs(after.cost_usd - 0.46) < 0.0001);
+      // Terra: 60K*$2 + 40K*$0.20 + 20K*$12 = $0.368.
+      assert.ok(Math.abs(after.cost_usd - 0.368) < 0.0001);
 
       const summary = getDb().prepare(`
         SELECT primary_model, cost_usd FROM session_trace_summary WHERE session_id = 'session-model-refresh'
       `).get() as { primary_model: string; cost_usd: number };
       assert.equal(summary.primary_model, 'gpt-5.6-terra');
-      assert.ok(Math.abs(summary.cost_usd - 0.46) < 0.0001);
+      assert.ok(Math.abs(summary.cost_usd - 0.368) < 0.0001);
 
       const statsAfter = getStatsForBroadcast();
-      assert.ok(Math.abs(statsAfter.total_cost_usd - 0.46) < 0.0001);
+      assert.ok(Math.abs(statsAfter.total_cost_usd - 0.368) < 0.0001);
       assert.equal(statsAfter.model_breakdown['gpt-5.6-sol'], undefined);
       assert.equal(statsAfter.model_breakdown['gpt-5.6-terra'], 3);
     } finally {

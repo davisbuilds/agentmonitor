@@ -1103,8 +1103,8 @@ describe('Codex OTLP integration', () => {
     assert.equal(events.events[0].tokens_in, 50_000);
     assert.equal(events.events[0].cache_read_tokens, 40_000);
     assert.equal(events.events[0].cache_write_tokens, 10_000);
-    // 50K*$2.50 + 40K*$0.25 + 10K*$3.125 + 20K*$15 = $0.46625.
-    assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.46625) < 0.0001);
+    // 50K*$2 + 40K*$0.20 + 10K*$2 (cache write bills at the input rate) + 20K*$12 = $0.368.
+    assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.368) < 0.0001);
   });
 
   test('keeps normalized Claude cache-write body tokens additive to net input', async () => {
