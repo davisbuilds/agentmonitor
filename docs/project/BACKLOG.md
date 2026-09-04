@@ -191,28 +191,13 @@ These are the deferred follow-ups surfaced during and after the build.
 - **Next**: instrument the wait before changing the timeout. Raising it would
   hide the cause, and the point is to learn whether first paint is genuinely slow.
 
-#### OTEL metrics without token/cost deltas are silently dropped
-- **What**: `POST /api/otel/v1/metrics` (`src/api/otel.ts`) only persists a
-  metric when it carries a token or cost delta (`if (!hasTokens && !hasCost)
-  continue;`). Operational counters that carry a status/label but no
-  tokens/cost — e.g. Codex's `codex.memory.startup` counter, whose `status` tag
-  is `skipped_rate_limit` / success / etc. — are discarded on ingest, so nothing
-  about them ever reaches the DB.
-- **Why it matters**: agentmonitor is the local observability console for Codex,
-  yet it cannot answer operational questions like "is Codex's memory
-  consolidation running, and if not, why is it skipping?" The counter is exported
-  to `127.0.0.1:3141` and thrown away. Diagnosing a real Codex consolidation
-  stall (2026-08-30) had to fall back to reading the Codex binary + source
-  because the console was blind to the signal it was already receiving. This is
-  the "absence is a claim about the instrument" trap: an empty query looked like
-  "never happened" when the ingest path had dropped it.
-- **Evidence**: `src/api/otel.ts` metrics handler; Codex emits
-  `codex.memory.startup` via `session_telemetry.counter` (metric, not
-  token/cost). Confirmed `metadata LIKE '%codex.memory%'` returns 0 rows in
-  `data/agentmonitor.db` despite Codex exporting it.
-- **Next / options**: persist label-only / gauge / counter metrics as a
-  first-class metric event (not a synthetic `llm_response`), keyed by metric name
-  + attributes, so status-tagged operational counters are queryable. At minimum,
-  stop silently dropping non-token metrics — record them with their attributes.
-- **Revisit when**: adding any Codex operational observability (consolidation
-  health, rate-limit skips) to the console.
+#### Operational metrics UI surface (follow-up to the shipped ingestion)
+- **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
+  `GET /api/v2/metrics` (shipped 2026-09-04, see ROADMAP), but there is no `/app/`
+  surface yet — no Codex consolidation-health panel or rate-limit-skip view.
+- **Why it matters**: the data is queryable but an operator still has to hit the
+  API by hand. A small Monitor/Analytics panel ("is memory consolidation running,
+  and which states is it hitting?") is the payoff that motivated the ingestion.
+- **Next / Revisit when**: building Codex operational observability into the
+  console. The read shape (name×attrs → occurrences/last-seen) is already there;
+  this is a frontend consumer. Noted 2026-09-04.

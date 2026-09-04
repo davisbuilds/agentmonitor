@@ -68,6 +68,7 @@ import {
   type CreateExpectedRealizationResult,
 } from '../../skills/expected-realizations.js';
 import { getSessionSkillContext } from '../../skills/session-skill-context.js';
+import { getOperationalMetricSummary } from '../../db/otel-metrics.js';
 import type { SkillHealthResponse } from './types.js';
 
 export const v2Router = Router();
@@ -170,6 +171,25 @@ v2Router.get('/sessions', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/sessions] Error:', err);
     res.status(500).json({ error: 'Failed to list sessions' });
+  }
+});
+
+// Operational OTEL metrics (Bucket A): outcome/state-tagged counters like
+// codex.memory.startup{state=...}. Grouped by name×attrs so a caller can answer
+// "is Codex memory consolidation running, and what states is it hitting?".
+v2Router.get('/metrics', (req: Request, res: Response) => {
+  try {
+    const summary = getOperationalMetricSummary({
+      namePrefix: req.query.name_prefix as string | undefined,
+      agentType: req.query.agent as string | undefined,
+      sessionId: req.query.session_id as string | undefined,
+      since: req.query.since as string | undefined,
+      limit: safeInt(req.query.limit as string),
+    });
+    res.json({ metrics: summary });
+  } catch (err) {
+    console.error('[v2/metrics] Error:', err);
+    res.status(500).json({ error: 'Failed to read operational metrics' });
   }
 });
 

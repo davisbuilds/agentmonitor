@@ -886,6 +886,35 @@ export interface ParsedMetricDelta {
   cost_usd_delta: number;
 }
 
+/**
+ * A Bucket A operational metric: an outcome/state-tagged counter (e.g.
+ * codex.memory.startup{state=skipped_rate_limit}) destined for the otel_metrics
+ * table, not the events pipeline. Carries no tokens/cost.
+ */
+export interface ParsedOperationalMetric {
+  session_id: string;
+  agent_type: string;
+  metric_name: string;
+  attrs: Record<string, string | number | boolean>;
+  value: number;
+  temporality: 'delta' | 'gauge';
+  client_timestamp?: string;
+}
+
+/**
+ * The classified result of a metrics payload:
+ *  - `usage`: Claude Code token/cost deltas (→ synthetic llm_response, unchanged)
+ *  - `operational`: Bucket A counters (→ otel_metrics)
+ *  - `dropped`: metric name → count of datapoints not stored (timings, sizes,
+ *    unrecognized). Intake visibility so we are never blind to the stream again.
+ *    Deliberately-skipped token/cost metrics are NOT tallied here (handled, not unknown).
+ */
+export interface ParsedMetrics {
+  usage: ParsedMetricDelta[];
+  operational: ParsedOperationalMetric[];
+  dropped: Record<string, number>;
+}
+
 function getDataPointValue(dp: OtelNumberDataPoint): number {
   if (dp.asDouble !== undefined) return dp.asDouble;
   if (dp.asInt !== undefined) {
@@ -920,10 +949,69 @@ const COST_METRICS = new Set([
   'gen_ai.client.cost.usage',
 ]);
 
-export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetricDelta[] {
-  const results: ParsedMetricDelta[] = [];
+// Token/cost metrics we RECOGNIZE but deliberately do not store: for Codex,
+// logs (codex.sse_event response.completed) are the authoritative token/cost
+// source, so ingesting these as billable would double-count. Skipped silently
+// (not tallied as "dropped/unknown"). Claude Code's `*.token.usage`/`*.cost.usage`
+// are handled by the usage sets above and are unaffected.
+function isRecognizedTokenCostMetric(name: string): boolean {
+  return /token_usage|cost_microusd/.test(name)
+    || /_tokens$/.test(name)
+    || name.startsWith('codex.usage.');
+}
 
-  if (!payload.resourceMetrics) return results;
+// Noise for a local operations console: latency histograms and size gauges.
+// "How fast / how big", not "did it happen / why". Dropped (tallied), never stored.
+function isNoiseMetric(name: string): boolean {
+  return /\.duration_ms$|_ms$|_bytes$|\.bytes$/.test(name);
+}
+
+// The inclusion principle (not a name allowlist): a metric is operational when
+// its datapoint carries an outcome/state attribute — the label that answers
+// "what happened". Auto-admits new outcome counters; keeps value-only gauges out.
+const OUTCOME_ATTR_KEYS = new Set([
+  'state', 'status', 'outcome', 'result', 'reason',
+  'error.type', 'error_type', 'fallback_reason', 'failure_reason',
+]);
+
+function attributeValue(v: OtelAnyValue): string | number | boolean | undefined {
+  if (v.stringValue !== undefined) return v.stringValue;
+  if (v.boolValue !== undefined) return v.boolValue;
+  if (v.doubleValue !== undefined) return v.doubleValue;
+  if (v.intValue !== undefined) return typeof v.intValue === 'number' ? v.intValue : parseInt(v.intValue, 10);
+  return undefined;
+}
+
+function attributesToObject(attrs: OtelKeyValue[] | undefined): Record<string, string | number | boolean> {
+  const out: Record<string, string | number | boolean> = {};
+  if (!attrs) return out;
+  for (const kv of attrs) {
+    const value = attributeValue(kv.value);
+    if (value !== undefined) out[kv.key] = value;
+  }
+  return out;
+}
+
+function hasOutcomeAttr(attrs: Record<string, string | number | boolean>): boolean {
+  for (const key of Object.keys(attrs)) {
+    if (OUTCOME_ATTR_KEYS.has(key)) return true;
+  }
+  return false;
+}
+
+// Stable signature over the outcome-bearing attributes, so each (name, attrs)
+// series converts cumulative→delta independently.
+function attrsSignature(attrs: Record<string, string | number | boolean>): string {
+  return Object.keys(attrs).sort().map(k => `${k}=${attrs[k]}`).join('&');
+}
+
+export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
+  const usage: ParsedMetricDelta[] = [];
+  const operational: ParsedOperationalMetric[] = [];
+  const dropped: Record<string, number> = {};
+  const drop = (name: string) => { dropped[name] = (dropped[name] ?? 0) + 1; };
+
+  if (!payload.resourceMetrics) return { usage, operational, dropped };
 
   for (const rm of payload.resourceMetrics) {
     const resourceAttrs = rm.resource?.attributes;
@@ -943,21 +1031,23 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetricDelta
         const metricName = metric.name ?? '';
         const dataPoints = metric.sum?.dataPoints ?? metric.gauge?.dataPoints ?? [];
         const isCumulative = metric.sum?.aggregationTemporality === 2;
+        const isGauge = !metric.sum && !!metric.gauge;
+        const isUsage = TOKEN_METRICS.has(metricName) || COST_METRICS.has(metricName);
 
         for (const dp of dataPoints) {
           const rawValue = getDataPointValue(dp);
-          const model = getAttr(dp.attributes, 'model')
-            ?? getAttr(dp.attributes, 'gen_ai.request.model')
-            ?? getAttr(resourceAttrs, 'model');
-          const tokenType = getAttr(dp.attributes, 'type')
-            ?? getAttr(dp.attributes, 'token.type');
 
-          const cacheKey = `${sessionId}|${agentType}|${metricName}|${model ?? ''}|${tokenType ?? ''}`;
-          const delta = isCumulative ? computeDelta(cacheKey, rawValue) : rawValue;
+          // ── Claude Code token/cost usage → synthetic llm_response (unchanged) ──
+          if (isUsage) {
+            const model = getAttr(dp.attributes, 'model')
+              ?? getAttr(dp.attributes, 'gen_ai.request.model')
+              ?? getAttr(resourceAttrs, 'model');
+            const tokenType = getAttr(dp.attributes, 'type')
+              ?? getAttr(dp.attributes, 'token.type');
+            const cacheKey = `${sessionId}|${agentType}|${metricName}|${model ?? ''}|${tokenType ?? ''}`;
+            const delta = isCumulative ? computeDelta(cacheKey, rawValue) : rawValue;
+            if (delta <= 0) continue;
 
-          if (delta <= 0) continue;
-
-          if (TOKEN_METRICS.has(metricName)) {
             const entry: ParsedMetricDelta = {
               session_id: sessionId,
               agent_type: agentType,
@@ -968,47 +1058,53 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetricDelta
               cache_write_delta: 0,
               cost_usd_delta: 0,
             };
-
-            switch (tokenType) {
-              case 'input':
-                entry.tokens_in_delta = delta;
-                break;
-              case 'output':
-                entry.tokens_out_delta = delta;
-                break;
-              case 'cacheRead':
-              case 'cache_read':
-                entry.cache_read_delta = delta;
-                break;
-              case 'cacheCreation':
-              case 'cache_creation':
-              case 'cache_write':
-                entry.cache_write_delta = delta;
-                break;
-              default:
-                // Unknown token type — default to input
-                entry.tokens_in_delta = delta;
+            if (COST_METRICS.has(metricName)) {
+              entry.cost_usd_delta = delta;
+            } else {
+              switch (tokenType) {
+                case 'input': entry.tokens_in_delta = delta; break;
+                case 'output': entry.tokens_out_delta = delta; break;
+                case 'cacheRead':
+                case 'cache_read': entry.cache_read_delta = delta; break;
+                case 'cacheCreation':
+                case 'cache_creation':
+                case 'cache_write': entry.cache_write_delta = delta; break;
+                default: entry.tokens_in_delta = delta; // unknown token type → input
+              }
             }
-
-            results.push(entry);
-          } else if (COST_METRICS.has(metricName)) {
-            results.push({
-              session_id: sessionId,
-              agent_type: agentType,
-              model: model ?? undefined,
-              tokens_in_delta: 0,
-              tokens_out_delta: 0,
-              cache_read_delta: 0,
-              cache_write_delta: 0,
-              cost_usd_delta: delta,
-            });
+            usage.push(entry);
+            continue;
           }
+
+          // ── Recognized token/cost metric we intentionally do not store ──
+          if (isRecognizedTokenCostMetric(metricName)) continue;
+
+          // ── Noise: latency/size ──
+          if (isNoiseMetric(metricName)) { drop(metricName); continue; }
+
+          // ── Bucket A operational: outcome/state-tagged counter ──
+          const attrs = attributesToObject(dp.attributes);
+          if (!hasOutcomeAttr(attrs)) { drop(metricName); continue; }
+
+          const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(attrs)}`;
+          const delta = isCumulative ? computeDelta(opKey, rawValue) : rawValue;
+          if (delta <= 0) continue;
+
+          operational.push({
+            session_id: sessionId,
+            agent_type: agentType,
+            metric_name: metricName,
+            attrs,
+            value: delta,
+            temporality: isGauge ? 'gauge' : 'delta',
+            client_timestamp: nanoToIso(dp.timeUnixNano),
+          });
         }
       }
     }
   }
 
-  return results;
+  return { usage, operational, dropped };
 }
 
 // Exposed for testing — reset cumulative state

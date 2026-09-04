@@ -3,6 +3,9 @@ import test, { before, after, describe } from 'node:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type BetterSqlite3 from 'better-sqlite3';
+import type * as OtelMetricsModule from '../src/db/otel-metrics.ts';
+import type * as QueriesModule from '../src/db/queries.ts';
 
 // Operational-metrics store: insert lands in `otel_metrics`, reads aggregate by
 // name×attrs, and — the load-bearing guard — a metric row never reaches the
@@ -10,10 +13,10 @@ import path from 'node:path';
 // so config.ts snapshots the temp path (see AGENTS.md testing note).
 
 let closeDb: () => void;
-let getDb: () => import('better-sqlite3').Database;
-let insertOperationalMetrics: typeof import('../src/db/otel-metrics.js').insertOperationalMetrics;
-let getOperationalMetricSummary: typeof import('../src/db/otel-metrics.js').getOperationalMetricSummary;
-let getStats: typeof import('../src/db/queries.js').getStats;
+let getDb: () => BetterSqlite3.Database;
+let insertOperationalMetrics: typeof OtelMetricsModule.insertOperationalMetrics;
+let getOperationalMetricSummary: typeof OtelMetricsModule.getOperationalMetricSummary;
+let getStats: typeof QueriesModule.getStats;
 let tempDir: string;
 
 before(async () => {
