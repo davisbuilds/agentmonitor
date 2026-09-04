@@ -60,7 +60,7 @@
     xTitle="$/trial (log scale)"
     yTitle="Mean score"
     role="group"
-    class="max-w-[560px]"
+    class="mx-auto max-w-[560px]"
     ariaLabel="Cost versus score frontier: {geometry.points.length} priced arms"
   >
     <!-- domination connectors (dominated arm → its dominator) -->
