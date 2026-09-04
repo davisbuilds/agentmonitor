@@ -207,6 +207,7 @@ Product-surface reference for AgentMonitor.
 | `/api/v2/live/sessions/:id/turns` | GET | Normalized live turns |
 | `/api/v2/live/sessions/:id/items` | GET | Normalized live items |
 | `/api/v2/live/stream` | GET | Dedicated live SSE stream |
+| `/api/v2/metrics` | GET | Operational OTEL metrics (Bucket A) grouped by name×attrs — occurrences, summed value, last-seen; filters `name_prefix`/`agent`/`session_id`/`since`/`limit` |
 | `/api/v2/pins` | GET | List pinned transcript moments, optionally filtered by project |
 | `/api/v2/sessions/:id/pins` | GET | List pinned messages for a specific session |
 | `/api/v2/sessions/:id/messages/:messageId/pin` | POST | Pin a transcript message using ordinal-stable persistence |

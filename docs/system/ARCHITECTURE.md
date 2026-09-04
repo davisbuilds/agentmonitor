@@ -92,6 +92,7 @@ SQLite via `better-sqlite3` with WAL mode.
 | `events` | Individual tool use, prompt, and lifecycle events with cost data |
 | `import_state` | Tracks imported files to prevent duplicate backfills |
 | `watched_files` | Tracks session-browser sync state for parsed, skipped, and erroring JSONL files |
+| `otel_metrics` | Operational OTEL metrics (Bucket A: outcome/state-tagged counters like `codex.memory.startup{state=...}`). Deliberately separate from `events` — carries no tokens/cost and must never reach usage/count aggregates (see [OTEL Parser](#otel-parser-and-metrics)) |
 | `trace_quality_*` | Local trace-quality projection: traces, observations, scores, prompt refs + join, projection state, and export state (see [Trace Quality](#trace-quality)) |
 
 ### Key Patterns
@@ -281,7 +282,19 @@ semantics.
 
 ## OTEL Parser
 
+<a id="otel-parser-and-metrics"></a>
 `src/otel/parser.ts` converts OTLP JSON payloads (logs, metrics) into normalized events for the standard ingest pipeline.
+
+### OTEL metrics classification
+
+`parseOtelMetrics` classifies every metric datapoint into one of four outcomes, returning `{ usage, operational, dropped }`:
+
+- **usage** — Claude Code token/cost metrics (`claude_code.token.usage` / `.cost.usage`, `gen_ai.client.*`). Emitted as synthetic `llm_response` events so the existing pipeline aggregates them. Unchanged.
+- **operational (Bucket A)** — outcome/state-tagged counters, inserted into the `otel_metrics` table (never `events`). The inclusion rule is a *principle, not a name allowlist*: a datapoint is operational when it carries an outcome attribute (`state`/`status`/`outcome`/`result`/`reason`/`error_type`/`fallback_reason`/…) and is not a timing/size/token metric. This auto-admits new outcome counters (e.g. the whole `codex.memory.*` consolidation family) while keeping value-only gauges out. Cumulative counters convert to per-export deltas keyed by name×attrs so each state series tracks independently.
+- **skipped token/cost** — Codex token/cost *metrics* (`codex.turn.token_usage.*`, `codex.turn.cost_microusd`, `codex.usage.*`, any `*_tokens`) are recognized and **deliberately not stored**: Codex token/cost is **logs-authoritative** (`codex.sse_event` → `response.completed`), so ingesting the metrics too would double-count (reconciliation dedupes otel-vs-import, not otel-logs-vs-otel-metrics). This is an intentional, documented exclusion — not the accidental name-mismatch it replaced. Claude Code, which has no equivalent logs usage path, keeps metrics as its token/cost source.
+- **dropped** — timings (`*.duration_ms`), sizes (`*_bytes`), and unrecognized/outcome-less metrics. Tallied by name (not stored) and logged as a throttled aggregate at the ingest boundary for intake visibility, so the metric stream is never again silently invisible ("an absence is a claim about the instrument"). The high-volume `*.duration_ms` timing family is the bulk of Codex's metric namespace and the reason a blanket "store everything" is not viable.
+
+`GET /api/v2/metrics` reads the operational store grouped by name×attrs (occurrences, summed value, last-seen), which answers questions like "is Codex memory consolidation running, and which states is it hitting?".
 
 ### Codex Telemetry Capability Matrix
 
@@ -298,6 +311,7 @@ Codex should be thought of as having multiple telemetry surfaces, not one monoli
 | Provider quota state | `codex app-server` JSON-RPC | Captured | AgentMonitor polls the local app-server for native Codex quota windows and reset times for the monitor header. |
 | Full Thread/Turn/Item lifecycle | `codex app-server` JSON-RPC | Not integrated yet | App-server quota polling now exists, but transcript-grade Codex parity is still not using the richer item lifecycle stream. |
 | Persisted local rollout state | Codex local session/state files | Import-only today | Local Codex session import exists, but the live v2 path still centers on OTEL rather than direct local-state projection. |
+| Operational metrics (memory consolidation, retries, fallbacks) | `codex.*` OTLP metrics → `/api/otel/v1/metrics` | Captured (Bucket A) | Outcome/state-tagged counters (e.g. `codex.memory.startup{state=skipped_rate_limit}`) land in `otel_metrics` and read via `GET /api/v2/metrics`. Latency/size metrics and token/cost metrics are excluded (token/cost is logs-authoritative). Rollout files do **not** carry metrics — the Codex binary's metric registry is the authoritative catalog. |
 
 Planning implication: current AgentMonitor Codex fidelity limits should be treated as implementation limits of the current parser/projector, not as the hard ceiling of Codex telemetry itself.
 

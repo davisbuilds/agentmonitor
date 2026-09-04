@@ -571,6 +571,32 @@ describe('POST /api/otel/v1/metrics', () => {
     assert.equal(inputEvent.event_type, 'llm_response');
   });
 
+  test('operational Codex counter lands in otel_metrics and GET /api/v2/metrics, not events', async () => {
+    const payload = buildMetricsPayload({
+      serviceName: 'codex',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-op-e2e' } }],
+      metrics: [{
+        name: 'codex.memory.startup',
+        dataPoints: [{ value: 1, attributes: [{ key: 'state', value: { stringValue: 'skipped_rate_limit' } }] }],
+        aggregationTemporality: 1,
+      }],
+    });
+    const post = await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal(post.status, 200);
+
+    const read = await fetch(`${baseUrl}/api/v2/metrics?name_prefix=codex.memory.`);
+    assert.equal(read.status, 200);
+    const body = await read.json() as { metrics: Array<{ metric_name: string; attrs: { state: string }; occurrences: number }> };
+    const row = body.metrics.find(m => m.metric_name === 'codex.memory.startup');
+    assert.ok(row, 'operational metric should be queryable via /api/v2/metrics');
+    assert.equal(row.attrs.state, 'skipped_rate_limit');
+    assert.equal(row.occurrences, 1);
+
+    // It must NOT have become an event (no billable/count pollution).
+    const events = await getEvents('agent_type=codex');
+    assert.equal(events.events.some(e => e.session_id === 'sess-op-e2e'), false);
+  });
+
   test('ingests cost delta metrics', async () => {
     // Build with asDouble since cost is fractional
     const rawPayload = {

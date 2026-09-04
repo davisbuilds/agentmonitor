@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { insertEvent } from '../db/queries.js';
+import { insertOperationalMetrics } from '../db/otel-metrics.js';
 import { broadcaster } from '../sse/emitter.js';
 import { coerceJsonLikeBody } from './json-body.js';
 import {
@@ -11,6 +12,29 @@ import {
 import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
 
 export const otelRouter = Router();
+
+// Intake visibility for dropped metrics. The metrics endpoint used to silently
+// discard everything it did not recognize; that blindness hid the Codex
+// operational-counter gap for months ("an absence is a claim about the
+// instrument"). We now keep a throttled aggregate tally of what we drop — names
+// only, never datapoints — so the stream is observable without bloating anything.
+const droppedTally = new Map<string, number>();
+let lastDropFlush = 0;
+const DROP_FLUSH_INTERVAL_MS = 60_000;
+
+function recordDropped(dropped: Record<string, number>): void {
+  for (const [name, count] of Object.entries(dropped)) {
+    droppedTally.set(name, (droppedTally.get(name) ?? 0) + count);
+  }
+  const now = Date.now();
+  if (droppedTally.size > 0 && now - lastDropFlush >= DROP_FLUSH_INTERVAL_MS) {
+    const top = [...droppedTally.entries()].sort((a, b) => b[1] - a[1]).slice(0, 15);
+    console.warn(`[otel] dropped ${top.reduce((s, [, c]) => s + c, 0)} unstored metric datapoints since last flush: `
+      + top.map(([n, c]) => `${n}×${c}`).join(', '));
+    droppedTally.clear();
+    lastDropFlush = now;
+  }
+}
 
 // Content-Type guard: JSON only (415 for protobuf)
 function requireJson(req: Request, res: Response): boolean {
@@ -57,17 +81,13 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Invalid OTEL JSON payload' });
     return;
   }
-  const deltas = parseOtelMetrics(payload as OtelMetricsPayload);
+  const { usage, operational, dropped } = parseOtelMetrics(payload as OtelMetricsPayload);
 
-  for (const delta of deltas) {
-    // Emit a synthetic llm_response event carrying the metric delta values.
-    // This lets the existing event pipeline aggregate tokens/cost per session.
-    const hasTokens = delta.tokens_in_delta > 0 || delta.tokens_out_delta > 0
-      || delta.cache_read_delta > 0 || delta.cache_write_delta > 0;
+  // Token/cost usage metrics (Claude Code OTEL) → synthetic llm_response, so the
+  // existing event pipeline aggregates tokens/cost per session. Codex token/cost
+  // metrics are deliberately not here — logs are authoritative (see parser).
+  for (const delta of usage) {
     const hasCost = delta.cost_usd_delta > 0;
-
-    if (!hasTokens && !hasCost) continue;
-
     const row = insertEvent({
       session_id: delta.session_id,
       agent_type: delta.agent_type,
@@ -88,6 +108,11 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
       safelyMaintainTraceSummaryForEvent(row.id, 'otel metric ingest');
     }
   }
+
+  // Bucket A operational metrics → dedicated otel_metrics table (never events).
+  if (operational.length > 0) insertOperationalMetrics(operational);
+
+  recordDropped(dropped);
 
   res.status(200).json({});
 });

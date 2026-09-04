@@ -173,6 +173,30 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
   `);
 
+  // Operational OTEL metrics (Bucket A: outcome/state-tagged counters like
+  // codex.memory.startup{state=...}, retries, fallbacks). Deliberately a
+  // separate table, not events: it carries no tokens/cost and must never reach
+  // the ~50 COUNT(*)/event_type aggregates over `events`. Token/cost metrics do
+  // NOT land here — Claude Code usage stays a synthetic llm_response, Codex
+  // token/cost is logs-authoritative. See docs/system/ARCHITECTURE.md.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS otel_metrics (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      agent_type TEXT NOT NULL,
+      metric_name TEXT NOT NULL,
+      attrs TEXT,
+      value REAL NOT NULL,
+      temporality TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      client_timestamp TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_otel_metrics_name ON otel_metrics(metric_name, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_otel_metrics_session ON otel_metrics(session_id);
+    CREATE INDEX IF NOT EXISTS idx_otel_metrics_created ON otel_metrics(created_at DESC);
+  `);
+
   // Backward-compatible schema updates for existing local databases.
   const eventColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(events)`).all() as Array<{ name: string }>).map(col => col.name)

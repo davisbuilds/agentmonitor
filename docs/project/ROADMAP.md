@@ -6,6 +6,33 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Operational OTEL metrics ingestion (2026-09-04) — *What:* the `/api/otel/v1/metrics`
+  endpoint stopped silently dropping everything it didn't recognize. Root cause
+  was deeper than the backlog's framing (the `!hasTokens && !hasCost` route guard):
+  `parseOtelMetrics` only ever emitted deltas for 6 hardcoded token/cost names —
+  none of which exist in Codex 0.153.2 — so Codex's entire metric stream (posted
+  to us per `~/.codex/config.toml`) was discarded in the parser. Now `parseOtelMetrics`
+  classifies each datapoint into **usage** (Claude Code token/cost → synthetic
+  `llm_response`, unchanged), **operational** (Bucket A: outcome/state-tagged
+  counters like `codex.memory.startup{state=...}` → new dedicated `otel_metrics`
+  table, read via `GET /api/v2/metrics` grouped by name×attrs), **skipped**
+  (Codex token/cost metrics — deliberately not stored because logs are
+  authoritative; storing would double-count), and **dropped** (timings/sizes/
+  unrecognized — tallied by name and logged as a throttled aggregate for intake
+  visibility). Inclusion is a principle, not a name allowlist: a metric is
+  operational when its datapoint carries an outcome attribute and isn't a
+  timing/size/token metric — auto-admitting new outcome counters while keeping the
+  high-volume `*.duration_ms` family (the original DB-bloat culprit) out.
+  Dedicated table, not `events`, chosen after measuring ~50 COUNT(*)/event_type
+  aggregates a metric row would otherwise leak into. *Why:* agentmonitor is the
+  local observability console for Codex yet couldn't answer "is memory
+  consolidation running, and why is it skipping?" — a real 2026-08-30 stall had
+  to be diagnosed by reading the Codex binary. Verified against the actual metric
+  catalog enumerated from the Codex 0.153.2 binary (`strings`), since rollout
+  files don't carry metrics. Also confirmed via the real DB that Codex token/cost
+  stays accurate (OTEL logs + JSONL import, within a few % daily). Tests:
+  `tests/otel-metrics-classify.test.ts`, `tests/otel-metrics-store.test.ts`, plus
+  an end-to-end POST→`/api/v2/metrics` case. UI surface is a tracked follow-up.
 - Date-aware pricing (rate schedules) (2026-09-04) — *What:* the pricing engine
   can now price an event by the rate in force when it happened, not just by
   prompt-size tier. A model may carry an optional `schedule` of `{ from, ...rates }`
