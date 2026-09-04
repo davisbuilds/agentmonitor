@@ -23,6 +23,23 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   small debt with real failure modes — a bake-off silently inflating a lifetime
   count, a flag that misrepresents the CLI contract, and the untrusted-payload
   boundary whose coercion branches weren't pinned.
+- Benchmark frontier chart + shared chart primitives (2026-09-04) — *What:* P3 of
+  the Benchmarks tab. A cost×score Pareto scatter (`BenchmarkFrontier.svelte`):
+  log10 `$/trial` x-axis, linear `[0,1]` score y-axis, a dashed polyline through
+  the backend-computed Pareto arms (`arm.pareto`), faint domination connectors
+  (dominated arm → its dominator, matched on `canonical_model` via
+  `dominated_by`), hollow ◯ native / filled ● routed markers, hover tooltip, and
+  click-to-drill that highlights and scrolls to the arm's ladder row. Unpriced
+  arms (no positive `cost_per_trial`) are held off the cost axis and named in a
+  legend note — never silently dropped. Built on new *shared* inline-SVG
+  primitives — `ui/chart/scales.ts` (pure `linearScale`/`log10Scale` + nice-tick
+  + `formatUsd`, unit-tested and mutation-verified), `ui/chart/layout.ts`, and a
+  tokenized `ui/chart/PlotFrame.svelte` (frame only, no marks) — validated as a
+  real abstraction by refactoring the Monitor CostDashboard "Spend Over Time"
+  timeline onto `linearScale` (behavior preserved, algebraically identical). The
+  frontier geometry is a pure `frontier-geometry.ts` module so it is testable
+  without a DOM. Only P4 (artifact export) remains deferred. Spec:
+  `docs/specs/2026-09-02-benchmark-comparison-view-spec.md`.
 - Benchmark comparison view — Benchmarks tab (2026-09-03) — *What:* the consumer
   half of the benchmark pipeline (PR #106). A dedicated `/app/` Benchmarks tab
   renders the segregated bake-off: a studies list drilling into a per-arm ladder
@@ -40,8 +57,8 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
   data migration drops pre-namespacing rows. *Why:* the ingest (below) delivered
   no operator value without a view; this is the comparison the pipeline exists to
   enable. The frontier scatter chart + shared inline-SVG chart primitives (P3)
-  and an artifact export (P4) remain in `BACKLOG.md`. Spec:
-  `docs/specs/2026-09-02-benchmark-comparison-view-spec.md`.
+  shipped 2026-09-04 (above); only the artifact export (P4) remains in
+  `BACKLOG.md`. Spec: `docs/specs/2026-09-02-benchmark-comparison-view-spec.md`.
 - Benchmark ingest for openbench runs (2026-09-02) — *What:* a `benchmark`
   EventSource and `amon import benchmark <results.jsonl>` map each openbench cell
   to one aggregate `llm_response` event keyed on `run_id` (idempotent), tagged

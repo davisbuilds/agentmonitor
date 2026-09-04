@@ -3,6 +3,7 @@
   import { getCostWindow, setCostWindow } from '../../stores/monitor.svelte';
   import { COST_WINDOW_OPTIONS, formatMonitorCost, shortModelName, type CostWindow } from '../../monitor-analytics';
   import { Panel, SubTabs, Stat, Bar } from '../ui';
+  import { linearScale } from '../ui/chart';
 
   interface Props {
     onwindowchange: () => void;
@@ -20,14 +21,15 @@
   const maxModelCost = $derived.by(() => Math.max(...(costData?.by_model || []).map((item) => item.cost), 0.01));
   const maxProjectCost = $derived.by(() => Math.max(...(costData?.by_project || []).map((item) => item.cost), 0.01));
   const maxTimelineCost = $derived.by(() => Math.max(...(costData?.timeline || []).map((item) => item.cost), 0.001));
+  // Uses the shared linear scale (same primitive as the benchmark frontier) so
+  // the two SVG charts agree on domain→viewBox mapping. The sparkline keeps its
+  // axis-free 0..100 look: x over the bucket index, y inverted over cost.
   const timelinePoints = $derived.by(() => {
     if (!costData || costData.timeline.length < 2) return '';
+    const xScale = linearScale([0, costData.timeline.length - 1], [0, 100]);
+    const yScale = linearScale([0, maxTimelineCost], [100, 0]);
     return costData.timeline
-      .map((bucket, index) => {
-        const x = (index / Math.max(costData.timeline.length - 1, 1)) * 100;
-        const y = 100 - ((bucket.cost / maxTimelineCost) * 100);
-        return `${x},${y}`;
-      })
+      .map((bucket, index) => `${xScale(index)},${yScale(bucket.cost)}`)
       .join(' ');
   });
 

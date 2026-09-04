@@ -55,23 +55,20 @@ note here. This file stays future-only.
   `openrouter.ai/api/v1/models` pull, then add entries to
   `src/pricing/data/openrouter.json`. Noted 2026-09-02.
 
-#### Benchmark frontier chart + shared chart primitives (P3), artifact export (P4)
-- **What**: the Benchmarks tab (P1 data/queries + P2 arm-ladder UI) **shipped**
-  2026-09-03 (PR #106; see ROADMAP). What remains is the visual frontier and an
-  export: **P3** — a cost×score Pareto scatter (frontier polyline, domination
-  connectors, hollow native markers, hover-drill) built on *shared* inline-SVG
-  chart primitives (`ui/chart/scales.ts` log/linear scales + a `PlotFrame`
-  component), with the CostDashboard "Spend Over Time" timeline refactored onto
-  them as a second consumer to validate the abstraction. **P4** (optional) — a
-  self-contained artifact export mirroring the claude.ai Pareto artifact.
-- **Why it matters**: the ladder + honesty panel already deliver the comparison;
-  the scatter is the at-a-glance frontier read, and factoring the primitives out
-  of the one-off CostDashboard SVG is a reuse win rather than a third hand-rolled
-  chart. Not blocking — pure enhancement.
-- **Next / Revisit when**: build P3 when the frontier visual is wanted; spec
-  `docs/specs/2026-09-02-benchmark-comparison-view-spec.md` (P3/P4 sections).
-  Watch openbench #5 (per-attempt cost) — landing it would drop the "cost is a
-  floor" honesty caveat. Noted 2026-09-02, updated 2026-09-03.
+#### Benchmark artifact export (P4)
+- **What**: P1 data/queries + P2 arm-ladder UI **shipped** 2026-09-03 (PR #106);
+  **P3** frontier chart + shared inline-SVG primitives (`ui/chart/scales.ts`,
+  `layout.ts`, `PlotFrame.svelte`, `BenchmarkFrontier.svelte`, CostDashboard
+  refactored onto `linearScale`) **shipped** 2026-09-04 (see ROADMAP). What
+  remains is **P4** (optional) — a self-contained "Publish study" artifact export
+  mirroring the claude.ai Pareto artifact, with the app as source of truth.
+- **Why it matters**: the ladder + honesty panel + frontier now deliver the full
+  in-app comparison; the export is only a shareable-snapshot convenience. Not
+  blocking — pure enhancement.
+- **Next / Revisit when**: build P4 if a shareable standalone study page is
+  wanted; spec `docs/specs/2026-09-02-benchmark-comparison-view-spec.md` (P4
+  section). Watch openbench #5 (per-attempt cost) — landing it would drop the
+  "cost is a floor" honesty caveat. Noted 2026-09-02, updated 2026-09-04.
 
 ### Skill trigger health (2026-07-09)
 
