@@ -127,13 +127,17 @@ function resolveBenchmarkCost(row: BenchmarkRow): number | null {
     cacheRead: num(row.tokens_cache_read),
     cacheWrite: num(row.tokens_cache_write),
   };
-  const direct = pricingRegistry.calculate(model, tokens);
+  // Price the fallback estimate at the cell's own run time, so importing a
+  // pre-revert benchmark after a scheduled rate change still derives the
+  // promo-era cost the experiment actually incurred.
+  const at = str(row.ts_iso);
+  const direct = pricingRegistry.calculate(model, tokens, at);
   if (direct !== null) return direct;
 
   // Retry against the base model with an effort suffix stripped.
   const lastDash = model.lastIndexOf('-');
   if (lastDash > 0 && EFFORT_SUFFIXES.includes(model.slice(lastDash + 1))) {
-    return pricingRegistry.calculate(model.slice(0, lastDash), tokens);
+    return pricingRegistry.calculate(model.slice(0, lastDash), tokens, at);
   }
   return null;
 }

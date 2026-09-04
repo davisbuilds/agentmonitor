@@ -125,6 +125,19 @@ function buildPeriods(model: PricingDataModel, baseTiers?: PricingTier[]): RateP
 /** A point in time to price at: a Date, epoch ms, or ISO string. */
 export type PricingDate = Date | number | string;
 
+// SQLite stores `created_at` as the zone-less form `YYYY-MM-DD HH:MM:SS` but the
+// value is UTC (written by CURRENT_TIMESTAMP). Node's Date parses that separator
+// form in the host's LOCAL timezone, so on a non-UTC install an event within the
+// UTC offset of a rate boundary would land in the wrong period. Normalize the
+// bare SQLite datetime to an explicit-UTC ISO string; anything already carrying a
+// zone (client_timestamp is ISO with `Z`/offset) or not matching is left as-is.
+const SQLITE_UTC = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/;
+
+export function normalizeSqliteTimestamp(value: string): string {
+  const match = SQLITE_UTC.exec(value.trim());
+  return match ? `${match[1]}T${match[2]}Z` : value;
+}
+
 // Resolve an `at` argument to epoch ms. Omitted or unparseable → now, so a
 // missing/garbled event timestamp prices at the current period rather than
 // silently jumping to a scheduled future rate.
@@ -132,7 +145,7 @@ function resolveAtMs(at?: PricingDate | null): number {
   if (at == null) return Date.now();
   if (at instanceof Date) return at.getTime();
   if (typeof at === 'number') return at;
-  const ms = Date.parse(at);
+  const ms = Date.parse(normalizeSqliteTimestamp(at));
   return Number.isFinite(ms) ? ms : Date.now();
 }
 

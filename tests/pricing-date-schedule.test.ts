@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
 
-import { pricingRegistry } from '../src/pricing/index.js';
+import { pricingRegistry, normalizeSqliteTimestamp } from '../src/pricing/index.js';
 
 /**
  * Date-aware pricing (rate schedules).
@@ -69,12 +69,34 @@ describe('pricing: date-aware rate schedules', () => {
     assert.equal(pricingRegistry.calculate('claude-sonnet-5', ONE_M_INPUT), 2); // omitted date
   });
 
-  test('an omitted date prices at the current wall-clock period (promo today, pre-2027)', () => {
+  test('an omitted date prices at the current wall-clock period', () => {
     // Guards the default path callers hit when no event timestamp is threaded.
-    assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT), 0.75);
+    // Asserted against "price at now" rather than a hard-coded rate so this test
+    // does not itself become a dated guard that flips on 2027-01-01 — the exact
+    // fragility this feature removes.
+    const omitted = pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT);
+    const explicitNow = pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, Date.now());
+    assert.equal(omitted, explicitNow);
   });
 
   test('an unparseable timestamp does not crash — it falls back to the current period', () => {
-    assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, 'not-a-date'), 0.75);
+    const junk = pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, 'not-a-date');
+    const explicitNow = pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, Date.now());
+    assert.equal(junk, explicitNow);
+  });
+
+  test('a zone-less SQLite created_at is read as UTC, not host-local time', () => {
+    // SQLite CURRENT_TIMESTAMP writes `YYYY-MM-DD HH:MM:SS` with no zone but means
+    // UTC; Node would otherwise parse it in the host TZ and misassign events near
+    // a boundary. This is host-independent: the bare form must resolve to the same
+    // instant as its explicit-Z equivalent regardless of where CI runs.
+    assert.equal(normalizeSqliteTimestamp('2027-01-01 00:00:00'), '2027-01-01T00:00:00Z');
+    assert.equal(normalizeSqliteTimestamp('2026-12-31 23:59:59.500'), '2026-12-31T23:59:59.500Z');
+    // Already-zoned ISO (client_timestamp) and non-datetime strings pass through.
+    assert.equal(normalizeSqliteTimestamp('2026-10-01T00:00:00Z'), '2026-10-01T00:00:00Z');
+    assert.equal(normalizeSqliteTimestamp('not-a-date'), 'not-a-date');
+    // The bare boundary time prices at the reverted rate — as UTC, not local.
+    assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, '2027-01-01 00:00:00'), 1.5);
+    assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, '2026-12-31 23:59:59'), 0.75);
   });
 });
