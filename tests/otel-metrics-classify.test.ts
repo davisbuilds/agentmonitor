@@ -21,7 +21,7 @@ function attr(key: string, str: string) {
 function metricsPayload(
   service: string,
   sessionId: string,
-  metrics: Array<{ name: string; cumulative?: boolean; gauge?: boolean; points: Point[] }>,
+  metrics: Array<{ name: string; cumulative?: boolean; gauge?: boolean; startNano?: string; points: Point[] }>,
 ) {
   return {
     resourceMetrics: [{
@@ -37,6 +37,7 @@ function metricsPayload(
             asInt: String(p.value),
             attributes: p.attributes ?? [],
             timeUnixNano: '1756900000000000000',
+            startTimeUnixNano: m.startNano ?? '1756000000000000000',
           }));
           return m.gauge
             ? { name: m.name, gauge: { dataPoints } }
@@ -116,6 +117,23 @@ describe('parseOtelMetrics classification', () => {
     ]));
     assert.equal(second.operational[0].value, 2); // 3 - 1
     assert.equal(second.operational[0].temporality, 'delta');
+  });
+
+  test('a cumulative producer restart (new startTimeUnixNano) re-emits the current value', () => {
+    // Sessionless/process-level Codex counters reuse their derived key across
+    // process restarts. Without folding in startTimeUnixNano, a repeated
+    // cumulative `=1` after restart diffs against the previous process's stored 1
+    // → delta 0 → silently swallowed, hiding every later startup outcome.
+    const opts = { name: 'codex.memory.startup', cumulative: true, points: [{ value: 1, attributes: [attr('state', 'skipped_rate_limit')] }] };
+    const p1 = parseOtelMetrics(metricsPayload('codex', 'unknown', [{ ...opts, startNano: '100' }]));
+    assert.equal(p1.operational[0].value, 1); // process 1, first sighting
+
+    const p1again = parseOtelMetrics(metricsPayload('codex', 'unknown', [{ ...opts, startNano: '100' }]));
+    assert.equal(p1again.operational.length, 0); // same series, unchanged cumulative → no delta
+
+    const p2 = parseOtelMetrics(metricsPayload('codex', 'unknown', [{ ...opts, startNano: '200' }]));
+    assert.equal(p2.operational.length, 1); // restart → fresh series
+    assert.equal(p2.operational[0].value, 1); // the new process's startup is recorded, not swallowed
   });
 
   test('distinct outcome states are tracked as separate cumulative series', () => {

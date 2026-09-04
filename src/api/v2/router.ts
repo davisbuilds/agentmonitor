@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import {
+  getOperationalMetricSummary,
   listBrowsingSessions,
   getBrowsingSession,
   getSessionChildren,
@@ -68,7 +69,6 @@ import {
   type CreateExpectedRealizationResult,
 } from '../../skills/expected-realizations.js';
 import { getSessionSkillContext } from '../../skills/session-skill-context.js';
-import { getOperationalMetricSummary } from '../../db/otel-metrics.js';
 import type { SkillHealthResponse } from './types.js';
 
 export const v2Router = Router();

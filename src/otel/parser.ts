@@ -1036,6 +1036,13 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
 
         for (const dp of dataPoints) {
           const rawValue = getDataPointValue(dp);
+          // startTimeUnixNano marks the start of a cumulative series; it changes
+          // when the producer restarts and its counter resets. Folding it into the
+          // series key means a restart begins a fresh series, so the first export
+          // after a restart is emitted as-is instead of being diffed against (and
+          // swallowed by) the previous process's stale value — the failure mode
+          // for sessionless/process-level Codex counters that reuse a key.
+          const seriesStart = dp.startTimeUnixNano ?? '';
 
           // ── Claude Code token/cost usage → synthetic llm_response (unchanged) ──
           if (isUsage) {
@@ -1044,7 +1051,7 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
               ?? getAttr(resourceAttrs, 'model');
             const tokenType = getAttr(dp.attributes, 'type')
               ?? getAttr(dp.attributes, 'token.type');
-            const cacheKey = `${sessionId}|${agentType}|${metricName}|${model ?? ''}|${tokenType ?? ''}`;
+            const cacheKey = `${sessionId}|${agentType}|${metricName}|${model ?? ''}|${tokenType ?? ''}|${seriesStart}`;
             const delta = isCumulative ? computeDelta(cacheKey, rawValue) : rawValue;
             if (delta <= 0) continue;
 
@@ -1086,7 +1093,7 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
           const attrs = attributesToObject(dp.attributes);
           if (!hasOutcomeAttr(attrs)) { drop(metricName); continue; }
 
-          const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(attrs)}`;
+          const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(attrs)}|${seriesStart}`;
           const delta = isCumulative ? computeDelta(opKey, rawValue) : rawValue;
           if (delta <= 0) continue;
 

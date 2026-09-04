@@ -3839,3 +3839,90 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
     arms,
   };
 }
+
+// ─── Operational OTEL metrics (Bucket A) read surface ───────────────────────
+// Backs GET /api/v2/metrics. Ingestion (insert) lives in src/db/otel-metrics.ts;
+// v2 read SQL stays here per the v1/v2 query-ownership split.
+
+export interface OperationalMetricQuery {
+  /** Prefix match on metric_name, e.g. "codex.memory." */
+  namePrefix?: string;
+  agentType?: string;
+  sessionId?: string;
+  /** Lower bound on the event time (client_timestamp else created_at). */
+  since?: string;
+  limit?: number;
+}
+
+/**
+ * Aggregated operational-metric view: one row per (metric_name, attrs), with the
+ * occurrence count, summed value, and last-seen time. This answers "is
+ * codex.memory consolidation running, and what states is it hitting?" — attrs is
+ * grouped verbatim so `state=skipped_rate_limit` vs `succeeded` split.
+ */
+export interface OperationalMetricSummaryRow {
+  metric_name: string;
+  attrs: Record<string, unknown> | null;
+  occurrences: number;
+  total_value: number;
+  last_seen: string;
+}
+
+export function getOperationalMetricSummary(query: OperationalMetricQuery = {}): OperationalMetricSummaryRow[] {
+  const db = getDb();
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+
+  // client_timestamp is ISO-with-zone ("...T..Z"); created_at is SQLite's
+  // space-formatted local-of-UTC. Normalize the coalesced time with datetime()
+  // everywhere it is compared/aggregated so `since` and last-seen ordering are
+  // real time comparisons, not lexicographic string compares across two formats.
+  const eventTime = "datetime(COALESCE(client_timestamp, created_at))";
+
+  if (query.namePrefix) {
+    conditions.push('metric_name LIKE ?');
+    values.push(`${query.namePrefix}%`);
+  }
+  if (query.agentType) {
+    conditions.push('agent_type = ?');
+    values.push(query.agentType);
+  }
+  if (query.sessionId) {
+    conditions.push('session_id = ?');
+    values.push(query.sessionId);
+  }
+  if (query.since) {
+    conditions.push(`${eventTime} >= datetime(?)`);
+    values.push(query.since);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const limit = Number.isFinite(query.limit) && (query.limit as number) > 0 ? Math.trunc(query.limit as number) : 200;
+
+  const rows = db.prepare(`
+    SELECT metric_name,
+           attrs,
+           COUNT(*) AS occurrences,
+           SUM(value) AS total_value,
+           MAX(${eventTime}) AS last_seen
+    FROM otel_metrics
+    ${where}
+    GROUP BY metric_name, attrs
+    ORDER BY last_seen DESC
+    LIMIT ?
+  `).all(...values, limit) as Array<{
+    metric_name: string;
+    attrs: string | null;
+    occurrences: number;
+    total_value: number;
+    last_seen: string;
+  }>;
+
+  return rows.map(row => ({
+    metric_name: row.metric_name,
+    attrs: row.attrs ? (JSON.parse(row.attrs) as Record<string, unknown>) : null,
+    occurrences: row.occurrences,
+    total_value: row.total_value,
+    last_seen: row.last_seen,
+  }));
+}
