@@ -112,7 +112,7 @@ export function refreshImportedCodexEventModel(
         output: event.tokens_out,
         cacheRead: event.cache_read_tokens,
         cacheWrite: event.cache_write_tokens,
-      })
+      }, event.client_timestamp)
     : null;
 
   const row = getDb().prepare(`
@@ -482,7 +482,7 @@ export function insertEvent(event: {
         output: event.tokens_out,
         cacheRead: event.cache_read_tokens,
         cacheWrite: event.cache_write_tokens,
-      });
+      }, event.client_timestamp);
     }
   }
 

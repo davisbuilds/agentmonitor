@@ -225,7 +225,7 @@ export function parseCodexFile(
             input: deltaInputUncached,
             output: deltaOut,
             cacheRead: deltaCacheRead,
-          })
+          }, line.timestamp)
         : undefined;
 
       events.push({

@@ -2671,15 +2671,16 @@ function selectUsageCostTotal(params: UsageParams = {}): number {
 }
 
 function estimateCacheSavings(row: UsageRow): number {
-  // Use the same tier-selected rates `calculate()` billed this event at, so a
-  // long-context Gemini request (prompt > 200K) reports savings against its
-  // doubled long-context input rate, not the base rate.
+  // Use the same date- and tier-selected rates `calculate()` billed this event
+  // at, so a long-context Gemini request (prompt > 200K) reports savings against
+  // its doubled long-context input rate, and a scheduled promo/revert reports
+  // against the rate in force when the event happened — not today's table.
   const rates = pricingRegistry.effectiveRates(row.model, {
     input: row.tokens_in,
     output: row.tokens_out,
     cacheRead: row.cache_read_tokens,
     cacheWrite: row.cache_write_tokens,
-  });
+  }, row.timestamp);
   if (!rates) return 0;
   return (
     row.cache_read_tokens * (rates.inputCostPerToken - rates.cacheReadCostPerToken)

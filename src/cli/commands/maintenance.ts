@@ -290,7 +290,8 @@ export function registerMaintenanceCommands(): void {
       try {
         const db = getDb();
         const events = db.prepare(`
-          SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd
+          SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd,
+                 created_at, client_timestamp
           FROM events
           WHERE model IS NOT NULL
             AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
@@ -302,6 +303,8 @@ export function registerMaintenanceCommands(): void {
           cache_read_tokens: number;
           cache_write_tokens: number;
           cost_usd: number | null;
+          created_at: string;
+          client_timestamp: string | null;
         }>;
         const update = db.prepare('UPDATE events SET cost_usd = ? WHERE id = ?');
         let updated = 0;
@@ -314,7 +317,7 @@ export function registerMaintenanceCommands(): void {
               output: event.tokens_out,
               cacheRead: event.cache_read_tokens,
               cacheWrite: event.cache_write_tokens,
-            });
+            }, event.client_timestamp ?? event.created_at);
             if (cost === null) {
               unknownModel++;
               continue;

@@ -971,7 +971,8 @@ function backfillOccupancyOnUpgrade(db: Database): void {
  */
 function backfillCacheInclusiveInputTokens(db: Database): void {
   const rows = db.prepare(`
-    SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens
+    SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+           created_at, client_timestamp
     FROM events
     WHERE model IS NOT NULL AND cache_read_tokens > 0
   `).all() as Array<{
@@ -981,6 +982,8 @@ function backfillCacheInclusiveInputTokens(db: Database): void {
     tokens_out: number;
     cache_read_tokens: number;
     cache_write_tokens: number;
+    created_at: string;
+    client_timestamp: string | null;
   }>;
 
   const update = db.prepare('UPDATE events SET tokens_in = ?, cost_usd = ? WHERE id = ?');
@@ -1001,7 +1004,7 @@ function backfillCacheInclusiveInputTokens(db: Database): void {
       output: row.tokens_out,
       cacheRead: row.cache_read_tokens,
       cacheWrite: row.cache_write_tokens,
-    });
+    }, row.client_timestamp ?? row.created_at);
     update.run(netIn, cost, row.id);
     corrected++;
   }

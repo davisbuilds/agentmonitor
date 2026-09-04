@@ -158,17 +158,17 @@ These are the deferred follow-ups surfaced during and after the build.
   `gpt-5.6-cyber` ($12.50/$75). An unpriced model bills as **$0**, the silent
   under-report failure mode.
 - **Why it matters**: only bites if one of these appears in the data, but when it
-  does it is invisible (no error, plausible dashboard). Two date-dependent rates
-  now sit in the index and will silently drift without date-awareness (below):
-  the added **Gemini 3.6/3.7/3.8 Flash carry a promo $0.75 in / $3.75 out that
-  reverts to $1.50 / $7.50 on 2027-01-01**, and `gpt-5.6-sol` shows a promo $4/$20
-  ("through 2026-11-21") on the OpenAI page while aggregators list $5/$30 — we
-  kept list ($5/$30); captured `cost_usd` covers benchmark actuals, so the table
-  only affects the unpriced-fallback estimate.
+  does it is invisible (no error, plausible dashboard). The Gemini 3.6/3.7/3.8
+  Flash promo→list revert (2027-01-01) is now handled by date-aware rate
+  schedules (shipped 2026-09-04, see ROADMAP), so it no longer needs a manual
+  bump. `gpt-5.6-sol` shows a promo $4/$20 ("through 2026-11-21") on the OpenAI
+  page while aggregators list $5/$30 — we kept list ($5/$30); captured `cost_usd`
+  covers benchmark actuals, so the table only affects the unpriced-fallback
+  estimate (a `schedule` entry could encode the sol promo too if we choose to).
 - **Next / Revisit when**: add fable-5-1 / gpt-5.6-cyber the moment usage shows
-  them unpriced (watch the "unknown-priced tokens" surface). The Gemini Flash and
-  sol promos are the date-aware case (below) — before 2027-01-01, bump Gemini
-  Flash to $1.50/$7.50 (or land date-aware rates). Noted 2026-09-03.
+  them unpriced (watch the "unknown-priced tokens" surface) — blocked only on a
+  verified rate card (fable-5-1's output rate is unrecorded; do not guess it).
+  Noted 2026-09-03; date-schedule mechanism landed 2026-09-04.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
@@ -177,22 +177,6 @@ These are the deferred follow-ups surfaced during and after the build.
 - **Why it matters**: GPT-5.6 Priority prices differ from standard rates. Standard
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
-
-#### Pricing engine has no date-awareness (rate schedules)
-- **What**: `calculate()` selects rates by prompt-size tier but not by date, so a
-  model carries one set of numbers forever. A rate that changes on a date (an
-  intro period ending, a provider price cut) requires a manual `*.json` bump on
-  the day, tracked only by a hardcoded deadline test.
-- **Why it matters**: a lapsed rate is a silent money bug — the same shape as the
-  dist-pricing incident (wrong cost, no error, plausible dashboard). The
-  Sonnet-5 intro→standard transition (handled manually in `ed1bf70`, 2026-09-01)
-  was the most recent instance; `tests/pricing-expiry.test.ts` is the deadline
-  guard pattern. The guard buys time; it is not the fix.
-- **Next / Revisit when**: the next dated rate change is known in advance, or the
-  manual-bump toil recurs. Let a model carry a rate schedule (`{ from, rates }[]`)
-  and select the entry effective at the event's timestamp; migrate the
-  deadline-guarded rates onto it. Noted 2026-07 (Sonnet 5 expiry); reframed
-  2026-09-03 after the manual bump shipped.
 
 #### CI flake: analytics capability banner times out on a cold runner
 - **What**: `search-analytics-capabilities.spec.ts:119` intermittently exceeds
