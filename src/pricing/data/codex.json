@@ -1,7 +1,24 @@
 {
   "provider": "openai",
-  "lastUpdated": "2026-09-03T00:00:00Z",
+  "lastUpdated": "2026-09-10T00:00:00Z",
   "models": {
+    "gpt-6-astra": {
+      "aliases": [],
+      "inputCostPerMTok": 10,
+      "outputCostPerMTok": 50,
+      "cacheReadCostPerMTok": 1,
+      "cacheWriteCostPerMTok": 12.5,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 20,
+          "outputCostPerMTok": 75,
+          "cacheReadCostPerMTok": 2,
+          "cacheWriteCostPerMTok": 25
+        }
+      ]
+    },
     "gpt-5.6-sol": {
       "aliases": [
         "gpt-5.6"

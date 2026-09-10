@@ -529,11 +529,16 @@ describe('PricingRegistry', () => {
 
   // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
   describe('tiered prompt-size pricing', () => {
-    // OpenAI has no separate cache-write surcharge: the parser subtracts
-    // cache-write tokens from tokens_in, so their rate must equal the input rate
-    // (not Anthropic's 1.25x, and not 0 — which would make them free).
-    test('GPT-5.6 tiers bill cache writes at the input rate and apply long-context rates above 272K', () => {
+    // The parser subtracts cache-write tokens from tokens_in, so the cache-write
+    // rate reflects what OpenAI charges for those tokens. Through gpt-5.6 that
+    // equaled the input rate (no surcharge). gpt-6-astra is the first OpenAI
+    // model with a genuine 1.25x cache-write surcharge ($12.50 vs $10 input),
+    // like Anthropic's structure — so cache-write must NOT be forced to the input
+    // rate here. (Codex does not currently emit cache-write tokens, so this rate
+    // is catalog accuracy rather than a charge applied to live Codex data today.)
+    test('GPT tiers bill cache writes at their documented rate and apply long-context rates above 272K', () => {
       const cases = [
+        { model: 'gpt-6-astra', base: [10, 50, 1, 12.5], long: [20, 75, 2, 25] },
         { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 5], long: [10, 45, 1, 10] },
         { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 2], long: [4, 18, 0.4, 4] },
         { model: 'gpt-5.6-luna', base: [0.2, 1.2, 0.02, 0.2], long: [0.4, 1.8, 0.04, 0.4] },
