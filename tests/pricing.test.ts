@@ -227,6 +227,15 @@ describe('PricingRegistry', () => {
       assert.equal(classifyModel('gpt-5.6-luna').tier, 'luna');
     });
 
+    test('classifies gpt-6-astra as its own tier, not the generic standard rollup', () => {
+      const c = classifyModel('gpt-6-astra');
+      assert.equal(c.provider, 'openai');
+      assert.equal(c.tier, 'astra');
+      // Guard the regression Codex flagged: without the named case it would fall
+      // through `gpt-` → 'standard' and vanish from tier facets/filters.
+      assert.notEqual(c.tier, 'standard');
+    });
+
     test('classifies Claude Fable 5 as a known anthropic/fable tier', () => {
       const c = classifyModel('claude-fable-5');
       assert.equal(c.provider, 'anthropic');
