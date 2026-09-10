@@ -7,7 +7,7 @@
 3. The SSE emitter broadcasts new events and stats to connected dashboard clients.
 4. The canonical Svelte app at `/app/` consumes the `/api/v2/*` app contract, including Monitor reads under `/api/v2/monitor/*`.
 5. The `amon` / `agentmonitor` CLI provides local runtime, maintenance, reporting, and hook-helper workflows over the same runtime and data layers.
-6. The legacy vanilla JS dashboard at `/` remains a transitional compatibility surface.
+6. `/app/` is the sole human-facing surface; `/` redirects to it. (The legacy vanilla-JS dashboard was removed 2026-09-10.)
 7. Historical sessions can be backfilled via the import pipeline.
 
 ## Canonical Surface
@@ -15,7 +15,7 @@
 - Canonical frontend: Svelte SPA served at `/app/`.
 - Canonical application contract: `/api/v2/*`.
 - Canonical local operator command: `amon`; `agentmonitor` is an equivalent executable alias.
-- Transitional compatibility surface: legacy dashboard at `/`.
+- The legacy static `/` dashboard was removed 2026-09-10; `/` now redirects to `/app/`.
 - New product work should prefer Svelte + v2, and carry forward durable v1 localhost behavior only where it still adds operator value.
 
 ## Active Decision Records
@@ -42,7 +42,7 @@ Express route handlers in `src/api/`:
 | `transcripts.ts` | `GET /api/sessions/:id` (transcript) | Session transcript aggregation |
 
 Routes are composed in `src/api/router.ts`.
-V1 routes remain important for ingest, SSE, provider quota, and legacy dashboard compatibility, but `/api/v2/*` is the canonical contract for the long-term app surface.
+V1 routes remain important for ingest, SSE, and provider quota, but `/api/v2/*` is the canonical contract for the long-term app surface. The v1 *read* endpoints (`GET /api/events|stats|sessions|filter-options`) no longer have a product consumer since the legacy dashboard's removal, but are retained because the `tests/parity/*` harness and ingestion-readback tests exercise them.
 
 ## TypeScript Runtime And CLI
 
@@ -353,7 +353,6 @@ src/runtime.ts            # Shared TS runtime startup used by server and CLI
 src/sse/                  # SSE client management and fan-out
 src/util/                 # Utilities (git branch detection)
 frontend/dist/            # Built Svelte SPA served at /app by the TS runtime
-public/                   # Dashboard HTML, JS components, CSS
 hooks/claude-code/        # Claude Code integration hooks (bash + Python)
 hooks/codex/              # Codex OTEL integration docs
 scripts/                  # Seed, import, benchmark, cost recalculation

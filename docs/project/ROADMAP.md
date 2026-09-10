@@ -6,6 +6,27 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Legacy `/` dashboard removed + Monitor SSE reconnect refetch (2026-09-10) —
+  *What:* two outcomes of a legacy-surface-reduction review. (1) The legacy
+  static HTML/vanilla-JS dashboard (`public/`, its `src/input.css` Tailwind
+  pipeline, and the `css:build`/`css:watch` scripts) was deleted; `/` now
+  unconditionally redirects to `/app/`, and the vestigial `createApp({
+  serveStatic })` option was removed (per the no-op-`--no-browser` precedent).
+  The v1 *read* endpoints (`GET /api/events|stats|sessions|filter-options`) were
+  **kept** — they have no product consumer now, but the `tests/parity/*` v1↔v2
+  harness and ingestion-readback tests still exercise them, so removing them is a
+  separate "retire v1 parity" effort, not dead-code deletion. (2) The Monitor's
+  live store now refetches authoritative REST state on SSE reconnect: the v1
+  `/api/stream` has no replay, so events emitted while the connection was dropped
+  (e.g. laptop sleep) silently undercounted the feed and token/cost totals until
+  the next reload trigger. A `reconnectSignal` (bumped on `onopen` after a drop,
+  not on initial connect) drives a `$effect` → `reload()`, mirroring the existing
+  auto-import refetch. *Why:* the dashboard was an unused surface coupling `/app/`
+  usage to nothing; the SSE gap was a real reliability papercut on the surface
+  that IS used daily — both fixed without touching the ingestion contract or the
+  v2 stream. The larger v1→v2 SSE migration was evaluated and **declined** (poor
+  ROI: net-flat complexity, and it would introduce replay double-counting since
+  the Monitor store has no event dedup).
 - Operational OTEL metrics ingestion (2026-09-04) — *What:* the `/api/otel/v1/metrics`
   endpoint stopped silently dropping everything it didn't recognize. Root cause
   was deeper than the backlog's framing (the `!hasTokens && !hasCost` route guard):
@@ -251,8 +272,8 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
 ## Now
 
-- Reduce remaining legacy `/` dashboard reliance now that the Svelte app and `/api/v2/*` contract are the clear product center.
-- Keep only the durable v1 localhost behavior that still serves ingest, SSE, provider quota, or legacy compatibility needs.
+- The legacy `/` dashboard is removed (2026-09-10); `/app/` + `/api/v2/*` are the product center. Remaining v1 reduction is the read endpoints (parity-harness-only now) and the Monitor's `/api/stream` SSE dependency.
+- Keep only the durable v1 localhost behavior that still serves ingest, SSE, or provider quota needs.
 - Improve the Live surface, especially around fidelity boundaries, session noise, and operator clarity when data is summary-only.
 - Use the shipped `amon` / `agentmonitor` CLI as the primary operator command surface for runtime checks, maintenance, and local reporting.
 
@@ -260,9 +281,10 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
 ### Legacy Surface Reduction
 
-- Define cutover gates for replacing or redirecting the legacy `/` dashboard with the Svelte app.
-- Preserve v1 endpoints intentionally where they support ingest clients, SSE compatibility, provider quota bridge behavior, or low-risk legacy access.
-- Remove legacy-only UI paths once the Svelte app covers the corresponding operator workflows and manual regression checks are stable.
+- The legacy `/` dashboard UI is **removed** (2026-09-10); `/` redirects to `/app/`.
+- Preserve v1 endpoints intentionally where they support ingest clients, SSE compatibility, or provider quota bridge behavior.
+- The v1 *read* endpoints (`GET /api/events|stats|sessions|filter-options`) now have no product consumer, but are retained because the `tests/parity/*` harness and ingestion-readback tests exercise them. Retiring them is a deliberate "retire v1 parity" effort: re-point those tests onto v2/DB reads first.
+- The Monitor still depends on v1 `/api/stream` SSE. A v1→v2 SSE migration was evaluated and declined as poor ROI (see Completed Highlights, 2026-09-10); revisit only if the two broadcasters' upkeep becomes a real cost.
 
 ### Live Fidelity and Operator Clarity
 
@@ -286,7 +308,7 @@ Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
 ## Next
 
-- Define and verify parity gates for retiring or sharply reducing reliance on the legacy `/` dashboard.
+- If retiring the v1 read endpoints, re-point the `tests/parity/*` and ingestion-readback suites onto v2/DB reads first (the last remaining consumers).
 - Tighten v2 contract coverage and runtime testing for the TypeScript backend.
 - Keep improving session browsing, search, analytics, and live inspection where real operator workflows expose gaps.
 - Make integration behavior and capture/redaction settings easier to understand from the product surface, CLI, and docs.

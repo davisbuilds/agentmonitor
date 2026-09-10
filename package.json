@@ -12,7 +12,7 @@
   "scripts": {
     "cli": "tsx src/cli.ts",
     "dev": "tsx watch src/server.ts",
-    "build": "tsc && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && rm -rf dist/pricing/data && cp -r src/pricing/data dist/pricing/data && node scripts/check-pricing-dist.mjs && pnpm run css:build && pnpm run frontend:build",
+    "build": "tsc && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\" && rm -rf dist/pricing/data && cp -r src/pricing/data dist/pricing/data && node scripts/check-pricing-dist.mjs && pnpm run frontend:build",
     "prepack": "pnpm build",
     "start": "node dist/server.js",
     "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts' 'scripts/**/*.ts'",
@@ -26,8 +26,6 @@
     "verify:skill-context-built": "node scripts/verify-skill-context-built.mjs",
     "reparse:sessions": "tsx scripts/reparse-sessions.ts",
     "reparse:codex-sessions": "tsx scripts/reparse-codex-sessions.ts",
-    "css:build": "tailwindcss -i src/input.css -o public/css/output.css --minify",
-    "css:watch": "tailwindcss -i src/input.css -o public/css/output.css --watch",
     "seed": "tsx scripts/seed.ts",
     "bench:ingest": "tsx scripts/benchmark-ingest.ts",
     "bench:storage": "tsx scripts/storage-bench.ts",

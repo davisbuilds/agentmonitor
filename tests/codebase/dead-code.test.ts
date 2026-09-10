@@ -17,7 +17,6 @@ const SKIP_DIRS = new Set([
   '.git',
   'dist',
   'docs',
-  'public',
   'data',
 ]);
 

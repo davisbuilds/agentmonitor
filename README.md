@@ -103,20 +103,17 @@ pnpm frontend:dev
 Open:
 
 - `http://127.0.0.1:5173/app/` for Vite-powered frontend development.
-- `http://127.0.0.1:3141/app/` for the Express-served canonical app.
-- `http://127.0.0.1:3141/` only for direct legacy dashboard compatibility work.
+- `http://127.0.0.1:3141/app/` for the Express-served canonical app (`/` redirects here).
 
 If you want the Express-served `/app/` to refresh as you edit frontend code, run
-`pnpm frontend:watch`. Run `pnpm css:watch` only when touching shared Tailwind
-output for the legacy dashboard or built `/app/`.
+`pnpm frontend:watch`.
 
 ## Common Commands
 
 ```bash
 pnpm dev                         # TS server in watch mode
 pnpm frontend:dev                # Svelte/Vite dev server
-pnpm css:watch                   # Shared Tailwind output watcher
-pnpm build                       # TS build + CSS + frontend build
+pnpm build                       # TS build + frontend build
 pnpm start                       # Run compiled server
 amon serve                       # Compiled runtime at https://agentmonitor.localhost
 amon serve --no-portless         # Direct runtime on http://127.0.0.1:3141
@@ -182,7 +179,6 @@ src/runtime.ts        Shared TypeScript runtime startup used by server and CLI
 src/sse/              SSE client management and fan-out
 src/watcher/          Session-history watcher and sync
 frontend/             Svelte 5 `/app/` frontend
-public/               Legacy dashboard assets
 hooks/                Claude Code and Codex integration setup
 tests/                Node test runner suite
 docs/                 System, project, API, and plan docs

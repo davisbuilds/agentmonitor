@@ -51,7 +51,6 @@ restart safe even when a dashboard stream was connected during shutdown.
 pnpm install
 pnpm dev          # terminal 1: server in watch mode
 pnpm frontend:dev # terminal 2: Svelte app at :5173 with API proxy
-pnpm css:watch    # optional terminal 3: shared Tailwind output for legacy / and built /app/
 ```
 
 Open `http://127.0.0.1:3141/app/` or `http://127.0.0.1:5173/app/` in this
@@ -434,7 +433,7 @@ the normal server/database/temp-root cleanup.
 
 ## Runtime Artifacts
 
-Do not commit: `data/`, `*.db`, generated CSS output in `public/css/output.css`.
+Do not commit: `data/`, `*.db`.
 
 ## Manual Live Verification
 

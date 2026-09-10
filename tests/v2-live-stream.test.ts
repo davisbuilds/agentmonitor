@@ -30,7 +30,7 @@ before(async () => {
   initSchema();
   liveBroadcaster.resetForTests();
 
-  const app = createApp({ serveStatic: false });
+  const app = createApp();
   await new Promise<void>((resolve) => {
     server = app.listen(0, '127.0.0.1', () => {
       const address = server.address();

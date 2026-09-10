@@ -5,8 +5,8 @@ maintainers but too detailed for the root README.
 
 ## Product Surface
 
-- The Svelte app is the product surface to extend. The legacy `/` dashboard is still served, but should not define new behavior.
-- The Svelte Monitor read path uses `/api/v2/monitor/*`; v1 remains for ingest, SSE, provider quotas, and legacy dashboard compatibility.
+- The Svelte app is the sole product surface; `/` redirects to `/app/`. (The legacy static `/` dashboard was removed 2026-09-10.)
+- The Svelte Monitor read path uses `/api/v2/monitor/*`; v1 remains for ingest, SSE, and provider quotas. Its v1 read endpoints (`GET /api/events|stats|sessions|filter-options`) are retained only for the parity + ingestion-readback test suites.
 - The Monitor header uses provider-native quota data only. AgentMonitor polls Codex quotas directly from the local Codex app-server and ingests Claude subscriber quota data through the official Claude Code statusline payload bridge.
 
 ## Sessions And Search

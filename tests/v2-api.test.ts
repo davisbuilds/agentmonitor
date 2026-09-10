@@ -351,7 +351,7 @@ before(async () => {
 
   // Start server
   const { createApp } = await import('../src/app.js');
-  const app = createApp({ serveStatic: false });
+  const app = createApp();
   server = app.listen(0);
   const addr = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${addr.port}`;

@@ -4,7 +4,7 @@ AgentMonitor currently exposes two API layers.
 
 ## v1 Compatibility Surface
 
-Used by ingest clients, SSE consumers, provider quota integrations, and the legacy dashboard compatibility surface.
+Used by ingest clients, SSE consumers, and provider quota integrations. The v1 read endpoints (`GET /api/events|stats|sessions|filter-options`) no longer have a product consumer since the legacy dashboard's removal (2026-09-10) and are retained only for the parity + ingestion-readback test suites.
 
 - Event ingest contract: [event-contract.md](event-contract.md)
 - Main endpoints: `/api/events`, `/api/events/batch`, `/api/stats`, `/api/sessions`, `/api/stream`, `/api/otel/v1/*`

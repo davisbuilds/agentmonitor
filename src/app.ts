@@ -3,14 +3,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { apiRouter } from './api/router.js';
 
-export interface CreateAppOptions {
-  serveStatic?: boolean;
-}
-
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const publicDir = path.join(__dirname, '..', 'public');
 
-export function createApp(options: CreateAppOptions = {}): Express {
+export function createApp(): Express {
   const app = express();
   const jsonLikeContentTypes = ['application/json', 'application/*+json', 'text/plain'];
 
@@ -35,20 +30,11 @@ export function createApp(options: CreateAppOptions = {}): Express {
     next(err);
   });
 
-  // Portless owns the friendly human-facing origin. Preserve the legacy `/`
-  // surface on direct loopback access while making the named origin land on
-  // the canonical Svelte app.
-  app.get('/', (req: Request, res: Response, next: NextFunction) => {
-    if (req.hostname.toLowerCase() === 'agentmonitor.localhost') {
-      res.redirect(302, '/app/');
-      return;
-    }
-    next();
+  // The Svelte app at /app is the only human-facing surface; the root redirects
+  // to it. (The legacy static `/` dashboard was removed 2026-09-10.)
+  app.get('/', (_req: Request, res: Response) => {
+    res.redirect(302, '/app/');
   });
-
-  if (options.serveStatic !== false) {
-    app.use(express.static(publicDir));
-  }
 
   // Serve Svelte SPA at /app (frontend/dist)
   const svelteDir = path.join(__dirname, '..', 'frontend', 'dist');
