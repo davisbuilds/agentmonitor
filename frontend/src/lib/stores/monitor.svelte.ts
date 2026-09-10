@@ -86,6 +86,15 @@ export async function refreshOccupancy(): Promise<void> {
 let autoImportSignal = $state(0);
 export function getAutoImportSignal(): number { return autoImportSignal; }
 
+// Bumped when the SSE stream reconnects after a drop (e.g. laptop sleep). The v1
+// `/api/stream` has no replay, so events emitted during the gap are lost from the
+// incremental store; Monitor watches this signal and refetches authoritative
+// state from REST to close the gap. Not bumped on the initial connect (mount
+// already loads).
+let reconnectSignal = $state(0);
+export function getReconnectSignal(): number { return reconnectSignal; }
+export function signalReconnect(): void { reconnectSignal++; }
+
 export function handleSessionUpdate(update: Record<string, unknown>): void {
   if (update.type === 'idle_check') {
     sessions = sessions.map(s => {
