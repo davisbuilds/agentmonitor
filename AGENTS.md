@@ -5,8 +5,8 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 ## Project Snapshot
 
 - Backend: Node.js + TypeScript + Express + SQLite (`better-sqlite3`).
-- Svelte 5 frontend: Vite SPA served at `/app/` — canonical product surface.
-- Legacy frontend: static HTML + vanilla JS at `/` — transitional compatibility surface only.
+- Svelte 5 frontend: Vite SPA served at `/app/` — the sole human-facing surface. `/` redirects to `/app/`.
+- The legacy static HTML/vanilla-JS dashboard (`public/`) was removed 2026-09-10. Its v1 read endpoints (`GET /api/events|stats|sessions|filter-options`) remain — no product consumer, but the `tests/parity/*` harness and ingestion-readback tests still exercise them.
 - Transport: HTTP ingestion + Server-Sent Events for live updates.
 - Session ingestion: chokidar file-watcher discovers `~/.claude/projects/**/*.jsonl` automatically.
 - Default bind: `127.0.0.1:3141`.
@@ -36,7 +36,6 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 pnpm install
 pnpm dev          # terminal 1: server in watch mode
 pnpm frontend:dev # terminal 2: Svelte at :5173 with API proxy
-pnpm css:watch    # terminal 3: shared Tailwind output (optional)
 
 pnpm build
 pnpm link --global
@@ -49,12 +48,11 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 
 - Keep TypeScript ESM import style consistent (existing `.js` extension pattern in TS imports).
 - Keep v1 SQL in `src/db/queries.ts`, v2 SQL in `src/db/v2-queries.ts`. Keep v2 route handlers in `src/api/v2/router.ts`.
-- Prefer extending the Svelte `/app/` product path and v2 contracts over adding new behavior to the legacy `/` dashboard.
+- Prefer extending the Svelte `/app/` product path and v2 contracts; do not add new behavior to the v1 read endpoints (they are retained only for ingestion clients, SSE, provider quotas, and the parity test harness).
 - Keep Portless at the human-facing `amon serve` boundary. Do not route hook or
   OTEL ingestion away from the fixed `127.0.0.1:3141` backend.
 - If API response shape changes, update `README.md` in the same change.
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start; `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
-- **Dashboard bootstrap hard-depends on `GET /api/events`**: `public/js/app.js` parses stats, events, and sessions together before loading cost/tool sections. If `GET /api/events` returns non-JSON (e.g. 405 HTML), `reloadData()` throws and cost/tool panels stay blank even when `/api/stats/cost` has data.
 - **Codex OTEL drop-out**: if Codex terminal activity is visible but `source=otel` stops updating, verify Codex is exporting OTLP to `127.0.0.1:3141` and not a stale endpoint (e.g. an old `:3142` runtime config).
 - **Provider quotas**: Monitor header uses provider-native snapshots only. Codex from local `codex app-server`; Claude requires the statusline bridge or renders as unavailable rather than estimated.
 - **Every gate reads `src/`; only the built server reads `dist/`**: `pnpm test` (tsx), `pnpm dev` (tsx) and `pnpm lint` all run from source. `amon serve` — how the tool is actually used — loads `dist/`. So a bug in what the build *emits* passes lint, build, and test simultaneously. This shipped stale pricing tables for five months (`cp -r` nesting into `dist/pricing/data/data/`), and an unpriced model bills as **$0 rather than raising**, so the dashboard stayed plausible while under-reporting the top models. `scripts/check-pricing-dist.mjs` guards that one case; the class is wider — any non-TS asset the build copies has this shape. If a bug reproduces for the user but not in tests, check whether they run the built path while you are testing `src/`.

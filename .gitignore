@@ -3,7 +3,6 @@ node_modules/
 
 # build artifacts
 dist/
-public/css/output.css
 *.tsbuildinfo
 *.pnpm-store/
 

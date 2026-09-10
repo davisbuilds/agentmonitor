@@ -17,6 +17,7 @@
     getFilterOptions,
     setFilterOptions,
     getAutoImportSignal,
+    getReconnectSignal,
     refreshOccupancy,
   } from '../../stores/monitor.svelte';
   import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions } from '../../api/client';
@@ -96,6 +97,18 @@
     const signal = getAutoImportSignal();
     if (signal !== lastAutoImportSignal) {
       lastAutoImportSignal = signal;
+      void reload(getFilters());
+    }
+  });
+
+  // Refetch after an SSE reconnect: the v1 stream has no replay, so events that
+  // landed while the connection was dropped (e.g. laptop sleep) never reached the
+  // incremental store. Guarded against the initial run so mount doesn't double-load.
+  let lastReconnectSignal = getReconnectSignal();
+  $effect(() => {
+    const signal = getReconnectSignal();
+    if (signal !== lastReconnectSignal) {
+      lastReconnectSignal = signal;
       void reload(getFilters());
     }
   });

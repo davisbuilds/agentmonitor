@@ -37,7 +37,7 @@ before(async () => {
   closeDb();
   removeDbFiles();
 
-  server = createApp({ serveStatic: false }).listen(0);
+  server = createApp().listen(0);
   await once(server, 'listening');
   const address = server.address() as AddressInfo | null;
   if (!address || typeof address === 'string') {

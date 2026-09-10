@@ -728,7 +728,7 @@ before(async () => {
   closeDb = dbModule.closeDb as () => void;
 
   initSchema();
-  server = createApp({ serveStatic: false }).listen(0);
+  server = createApp().listen(0);
   await once(server, 'listening');
 
   const address = server.address() as AddressInfo | null;

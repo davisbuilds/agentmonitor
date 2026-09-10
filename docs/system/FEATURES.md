@@ -6,8 +6,7 @@ Product-surface reference for AgentMonitor.
 
 - Canonical product surface: Svelte app at `/app/`.
 - Canonical application contract: `/api/v2/*`.
-- Transitional compatibility surface: legacy dashboard at direct loopback `/`;
-  the Portless root redirects to `/app/`.
+- `/` redirects to `/app/`. (The legacy static `/` dashboard was removed 2026-09-10.)
 - Local operator CLI: `amon`, with `agentmonitor` as an equivalent executable alias.
 
 ## Operator CLI
@@ -23,7 +22,6 @@ Product-surface reference for AgentMonitor.
 ## Real-Time Dashboard
 
 - The Svelte `Monitor` tab is the canonical real-time operator surface.
-- The legacy dashboard at `/` remains available for compatibility, but should not define new product behavior.
 - Agent cards showing active sessions, tool usage, and token counts.
 - Invocation-mode indicator: sessions run headlessly (`claude -p` / `codex exec`) show a muted `headless` pill on the agent card and a `Mode` row in session detail; interactive sessions show no pill. Antigravity/Gemini emit no such signal and are always unmarked. The `mode` field (`interactive` | `headless` | `null`) is exposed on `/api/v2/monitor/sessions` and `/api/v2/monitor/sessions/:id`.
 - Live event feed with filtering by agent type, event type, tool name, model, and branch.
@@ -253,7 +251,7 @@ Product-surface reference for AgentMonitor.
 | `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |
 | `/api/otel/v1/metrics` | POST | OTLP JSON metric ingestion |
 
-V1 endpoints remain active for ingest, SSE, provider quota, and legacy dashboard compatibility, but the long-term product contract is `/api/v2/*`.
+V1 endpoints remain active for ingest, SSE, and provider quota, but the long-term product contract is `/api/v2/*`. The v1 read endpoints (`GET /api/events|stats|sessions|filter-options`) have no product consumer since the legacy dashboard's removal (2026-09-10) and are retained only for the parity + ingestion-readback test suites.
 
 ## SSE Event Types
 

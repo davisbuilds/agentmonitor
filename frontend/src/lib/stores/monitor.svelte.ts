@@ -34,7 +34,23 @@ export function incrementEvent(event: AgentEvent): void {
 // --- Events ---
 let events = $state<AgentEvent[]>([]);
 export function getEvents(): AgentEvent[] { return events; }
-export function setEvents(e: AgentEvent[]): void { events = e; }
+export function setEvents(e: AgentEvent[]): void {
+  // A reload (mount / auto-import / reconnect) replaces the feed with an
+  // authoritative REST snapshot. But the resumed SSE handler can prepend a live
+  // event newer than the snapshot while the query is in flight; a blind replace
+  // would drop it. Preserve any current events newer than the snapshot's
+  // high-water mark, then dedup by id (an event may appear in both the snapshot
+  // and the live prepend) and keep the most-recent 200.
+  const snapshotMaxId = e.reduce((max, ev) => Math.max(max, ev.id), 0);
+  const newerLive = events.filter(ev => ev.id > snapshotMaxId);
+  if (newerLive.length === 0) {
+    events = e.slice(0, 200);
+    return;
+  }
+  const byId = new Map<number, AgentEvent>();
+  for (const ev of [...e, ...newerLive]) byId.set(ev.id, ev);
+  events = Array.from(byId.values()).sort((a, b) => b.id - a.id).slice(0, 200);
+}
 export function addEvent(event: AgentEvent): void {
   events = [event, ...events].slice(0, 200);
 }
@@ -85,6 +101,15 @@ export async function refreshOccupancy(): Promise<void> {
 // without a manual page reload.
 let autoImportSignal = $state(0);
 export function getAutoImportSignal(): number { return autoImportSignal; }
+
+// Bumped when the SSE stream reconnects after a drop (e.g. laptop sleep). The v1
+// `/api/stream` has no replay, so events emitted during the gap are lost from the
+// incremental store; Monitor watches this signal and refetches authoritative
+// state from REST to close the gap. Not bumped on the initial connect (mount
+// already loads).
+let reconnectSignal = $state(0);
+export function getReconnectSignal(): number { return reconnectSignal; }
+export function signalReconnect(): void { reconnectSignal++; }
 
 export function handleSessionUpdate(update: Record<string, unknown>): void {
   if (update.type === 'idle_check') {

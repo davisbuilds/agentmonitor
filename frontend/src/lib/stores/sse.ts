@@ -1,9 +1,12 @@
-import { setStats, incrementEvent, addEvent, handleSessionUpdate, handleEventForSession, setConnectionStatus, setQuotaMonitor } from './monitor.svelte';
+import { setStats, incrementEvent, addEvent, handleSessionUpdate, handleEventForSession, setConnectionStatus, setQuotaMonitor, signalReconnect } from './monitor.svelte';
 import type { AgentEvent, Stats } from '../api/client';
 
 let source: EventSource | null = null;
 let reconnectDelay = 1000;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+// True once the stream has dropped, so the next `onopen` is a *re*connect (which
+// missed events during the gap) rather than the initial connect (mount loads).
+let droppedSinceOpen = false;
 
 export function connectSSE(): void {
   if (source) source.close();
@@ -14,6 +17,10 @@ export function connectSSE(): void {
   source.onopen = () => {
     reconnectDelay = 1000;
     setConnectionStatus('connected');
+    if (droppedSinceOpen) {
+      droppedSinceOpen = false;
+      signalReconnect();
+    }
   };
 
   source.onmessage = (e) => {
@@ -32,6 +39,7 @@ export function connectSSE(): void {
 
   source.onerror = () => {
     source?.close();
+    droppedSinceOpen = true;
     setConnectionStatus('disconnected');
     scheduleReconnect();
   };

@@ -85,7 +85,7 @@ before(async () => {
   `);
 
   const { createApp } = await import('../src/app.js');
-  server = createApp({ serveStatic: false }).listen(0);
+  server = createApp().listen(0);
   const { port } = server.address() as AddressInfo;
   baseUrl = `http://127.0.0.1:${port}`;
 });
