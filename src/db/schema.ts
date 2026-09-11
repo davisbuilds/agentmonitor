@@ -899,7 +899,7 @@ function deleteOrphanedSessions(db: Database): void {
     WHERE NOT EXISTS (SELECT 1 FROM events e WHERE e.session_id = sessions.id)
   `).run();
   if (result.changes > 0) {
-    console.log(`[migration] orphaned sessions: removed ${result.changes} event-less session row(s)`);
+    console.error(`[migration] orphaned sessions: removed ${result.changes} event-less session row(s)`);
   }
 }
 
@@ -912,7 +912,7 @@ function deleteLegacyBenchmarkRows(db: Database): void {
     "DELETE FROM events WHERE source = 'benchmark' AND study_id IS NULL"
   ).run();
   if (result.changes > 0) {
-    console.log(`[migration] benchmark namespacing: removed ${result.changes} pre-namespacing benchmark row(s)`);
+    console.error(`[migration] benchmark namespacing: removed ${result.changes} pre-namespacing benchmark row(s)`);
   }
 }
 
@@ -934,7 +934,7 @@ function invalidateSessionFilesForSkillContext(db: Database): void {
   `).run();
 
   if (result.changes > 0) {
-    console.log(`[migration] skill context: flagged ${result.changes} session file(s) for reparse`);
+    console.error(`[migration] skill context: flagged ${result.changes} session file(s) for reparse`);
   }
 }
 
@@ -953,7 +953,7 @@ function invalidateCodexImportsForModelAttribution(db: Database): void {
   `).run();
 
   if (result.changes > 0) {
-    console.log(`[migration] Codex model attribution: flagged ${result.changes} event import file(s) for refresh`);
+    console.error(`[migration] Codex model attribution: flagged ${result.changes} event import file(s) for refresh`);
   }
 }
 
@@ -982,7 +982,7 @@ function backfillOccupancyOnUpgrade(db: Database): void {
   `).run();
 
   if (result.changes > 0) {
-    console.log(`[migration] occupancy backfill: flagged ${result.changes} session file(s) for reparse`);
+    console.error(`[migration] occupancy backfill: flagged ${result.changes} session file(s) for reparse`);
   }
 }
 
@@ -1034,6 +1034,6 @@ function backfillCacheInclusiveInputTokens(db: Database): void {
   }
 
   if (corrected > 0) {
-    console.log(`[migration] cache-inclusive input fix: corrected ${corrected} OpenAI/Codex events`);
+    console.error(`[migration] cache-inclusive input fix: corrected ${corrected} OpenAI/Codex events`);
   }
 }

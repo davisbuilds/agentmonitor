@@ -69,6 +69,7 @@ pnpm test:watch         # Watch-mode self-contained test runner
 pnpm test:parity:ts     # Run isolated TypeScript parity tests (temp server + temp DB)
 pnpm test:v2:contract:ts # Run isolated black-box tests for the canonical TS /api/v2 contract
 pnpm test:parity:ts:live # Run parity tests against a running TS server on :3141
+pnpm cli -- ops metrics # Operational OTEL metrics (name×attrs counters), --json for agents
 pnpm frontend:check     # svelte-check (type-checks /app/, does not run it)
 pnpm frontend:test      # Vitest unit tests for /app/ stores + pure lib logic
 pnpm lint               # ESLint
