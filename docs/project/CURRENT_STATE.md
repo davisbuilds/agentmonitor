@@ -11,7 +11,9 @@ maintainers but too detailed for the root README.
   SSE and warms it before the HTTP listener starts. Event writes invalidate the
   snapshot; timestamp-first metric-only covering reconciliation plus benchmark
   subtraction keep the synchronous refresh bounded without changing the
-  event/count contract. The covering index also serves the canonical windowed
+  event/count contract. Monitor session reads use the same expiry updater as the
+  cached stats path, so an active-to-idle/ended transition invalidates that
+  snapshot immediately. The covering index also serves the canonical windowed
   Usage row selector.
   The Monitor cost panels reuse `/api/v2/usage/overview` in one request and
   finish before tool analytics begins, avoiding a queue of independent

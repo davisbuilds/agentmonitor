@@ -79,7 +79,7 @@ import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
-import { getStatsForBroadcast } from './queries.js';
+import { getStatsForBroadcast, updateIdleSessions } from './queries.js';
 import {
   excludeBenchmarkUsageCondition,
   excludeOverlappingCodexOtelUsageCondition,
@@ -1155,24 +1155,9 @@ export function getMonitorToolStats(params: UsageParams = {}): MonitorToolStat[]
   }));
 }
 
-function updateMonitorSessionStatuses(timeoutMinutes: number): void {
-  const db = getDb();
-  db.prepare(`
-    UPDATE sessions SET status = 'idle'
-    WHERE status = 'active'
-    AND last_event_at < datetime('now', ? || ' minutes')
-  `).run(`-${timeoutMinutes}`);
-
-  db.prepare(`
-    UPDATE sessions SET status = 'ended', ended_at = datetime('now')
-    WHERE status = 'idle'
-    AND last_event_at < datetime('now', ? || ' minutes')
-  `).run(`-${timeoutMinutes * 2}`);
-}
-
 export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessions: MonitorSessionRow[]; total: number } {
   const db = getDb();
-  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+  updateIdleSessions(config.sessionTimeoutMinutes);
 
   const conditions: string[] = [];
   const values: unknown[] = [];
@@ -1454,7 +1439,7 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   }
 
   const db = getDb();
-  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+  updateIdleSessions(config.sessionTimeoutMinutes);
 
   // The Monitor is the live-activity view: batch-imported benchmark rows are
   // always excluded from its aggregates (no opt-in), and benchmark sessions are
@@ -1598,7 +1583,7 @@ export function getMonitorSessionWithEvents(sessionId: string, eventLimit = 10):
   events: MonitorEventRow[];
 } {
   const db = getDb();
-  updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
+  updateIdleSessions(config.sessionTimeoutMinutes);
   const limit = Math.min(Math.max(eventLimit, 0), 500);
 
   const session = db.prepare(`
