@@ -22,7 +22,15 @@ test('resolveSince converts a relative shorthand to now - duration', () => {
 
 test('resolveSince passes through an absolute ISO value and undefined', () => {
   assert.equal(resolveSince('2026-09-01T00:00:00Z'), '2026-09-01T00:00:00Z');
+  assert.equal(resolveSince('2026-09-11 10:00:00'), '2026-09-11 10:00:00');
   assert.equal(resolveSince(undefined), undefined);
+});
+
+test('resolveSince rejects a malformed --since instead of silently matching nothing', () => {
+  // A typo'd absolute value would make SQLite datetime() return NULL, yielding
+  // an empty result that falsely implies no events occurred.
+  assert.throws(() => resolveSince('notadate'), /--since/);
+  assert.throws(() => resolveSince('2026-13-40'), /--since/);
 });
 
 // --- Pure formatter behavior (the TDD unit) -------------------------------
@@ -111,6 +119,12 @@ test('ops metrics renders a table by default', async () => {
   const { stdout } = await runCli(['ops', 'metrics', '--name-prefix', 'codex.memory.']);
   assert.match(stdout, /METRIC_NAME/);
   assert.match(stdout, /state=succeeded/);
+});
+
+test('ops metrics rejects a malformed --since with a non-zero exit', async () => {
+  const { exitCode, stderr } = await runCli(['ops', 'metrics', '--since', 'notadate']);
+  assert.notEqual(exitCode, 0);
+  assert.match(stderr, /--since/);
 });
 
 test('ops metrics --since applies a relative window end-to-end', async () => {

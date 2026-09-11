@@ -22,9 +22,17 @@ const UNIT_MS: Record<string, number> = {
 export function resolveSince(value: string | undefined, now: number = Date.now()): string | undefined {
   if (value == null) return undefined;
   const match = RELATIVE_SINCE_RE.exec(value);
-  if (!match) return value;
-  const amount = Number(match[1]);
-  return new Date(now - amount * UNIT_MS[match[2]]).toISOString();
+  if (match) {
+    const amount = Number(match[1]);
+    return new Date(now - amount * UNIT_MS[match[2]]).toISOString();
+  }
+  // A non-relative value is an absolute timestamp. Reject anything unparsable:
+  // SQLite datetime() would evaluate it to NULL and return an empty result,
+  // falsely implying no operational events occurred.
+  if (Number.isNaN(Date.parse(value))) {
+    throw invalidUsage(`Invalid --since: ${value} (use an ISO timestamp or a relative window like 1h, 30m, 7d)`);
+  }
+  return value;
 }
 
 export function registerOpsCommands(): void {
