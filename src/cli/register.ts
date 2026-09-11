@@ -2,6 +2,7 @@ import { listCommands, registerCommand } from './commands.js';
 import { registerDatabaseCommands } from './commands/database.js';
 import { registerHookCommands } from './commands/hooks.js';
 import { registerMaintenanceCommands } from './commands/maintenance.js';
+import { registerOpsCommands } from './commands/ops.js';
 import { registerReportingCommands } from './commands/reporting.js';
 import { registerRuntimeCommands } from './commands/runtime.js';
 import { registerSessionLiveCommands } from './commands/sessions-live.js';
@@ -20,6 +21,7 @@ export function registerAllCommands(): void {
   registerMaintenanceCommands();
   registerSessionLiveCommands();
   registerReportingCommands();
+  registerOpsCommands();
   registerHookCommands();
   registerWarehouseCommands();
 

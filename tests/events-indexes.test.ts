@@ -78,6 +78,13 @@ test('covering composite event indexes exist', () => {
   assert.ok(names.has('idx_events_session_cost'), 'idx_events_session_cost should exist');
   assert.ok(names.has('idx_events_created_model'), 'idx_events_created_model should exist');
   assert.ok(names.has('idx_events_session_reconcile'), 'idx_events_session_reconcile should exist');
+  assert.ok(
+    names.has('idx_events_codex_import_usage_session_ts'),
+    'idx_events_codex_import_usage_session_ts should exist',
+  );
+  assert.ok(names.has('idx_events_usage_covering'), 'idx_events_usage_covering should exist');
+  assert.ok(names.has('idx_events_benchmark_monitor'), 'idx_events_benchmark_monitor should exist');
+  assert.ok(names.has('idx_events_created_at_order'), 'idx_events_created_at_order should exist');
   assert.ok(names.has('idx_events_created_at'), 'idx_events_created_at should remain');
   assert.ok(names.has('idx_events_tool_name'), 'idx_events_tool_name should remain');
 });
@@ -106,4 +113,98 @@ test('event-session reconciliation uses the dedicated composite index', () => {
     /idx_events_session_reconcile/,
     `expected event-session reconciliation index, got: ${plan}`,
   );
+});
+
+test('Codex usage reconciliation seeks imported rows by session and normalized timestamp', () => {
+  const plan = queryPlan(
+    `SELECT id FROM events imported_usage
+     WHERE imported_usage.session_id = ?
+       AND imported_usage.agent_type = 'codex'
+       AND imported_usage.source = 'import'
+       AND (
+         COALESCE(imported_usage.cost_usd, 0) > 0
+         OR COALESCE(imported_usage.tokens_in, 0) > 0
+         OR COALESCE(imported_usage.tokens_out, 0) > 0
+         OR COALESCE(imported_usage.cache_read_tokens, 0) > 0
+         OR COALESCE(imported_usage.cache_write_tokens, 0) > 0
+       )
+       AND datetime(COALESCE(imported_usage.client_timestamp, imported_usage.created_at)) >= ?`,
+    'session-1',
+    '2026-05-01',
+  );
+  assert.match(
+    plan,
+    /idx_events_codex_import_usage_session_ts \(session_id=\? AND <expr>>\?\)/,
+    `expected a session+timestamp range seek, got: ${plan}`,
+  );
+});
+
+test('recent Monitor events stream from the normalized created-at order index', () => {
+  const plan = queryPlan(
+    `SELECT * FROM events
+     WHERE source IS NULL OR source != 'benchmark'
+     ORDER BY datetime(created_at) DESC, id DESC
+     LIMIT ?`,
+    100,
+  );
+  assert.match(plan, /idx_events_created_at_order/, `expected normalized order index, got: ${plan}`);
+  assert.doesNotMatch(plan, /TEMP B-TREE/, `expected no temporary ordering b-tree, got: ${plan}`);
+});
+
+test('Monitor usage totals scan the metric-only covering index', () => {
+  const plan = queryPlan(
+    `SELECT SUM(e.tokens_in), SUM(e.tokens_out), SUM(e.cost_usd)
+     FROM events e
+     WHERE (e.source IS NULL OR e.source != 'benchmark')
+       AND (
+         COALESCE(e.cost_usd, 0) > 0
+         OR COALESCE(e.tokens_in, 0) > 0
+         OR COALESCE(e.tokens_out, 0) > 0
+         OR COALESCE(e.cache_read_tokens, 0) > 0
+         OR COALESCE(e.cache_write_tokens, 0) > 0
+       )`,
+  );
+  assert.match(plan, /COVERING INDEX idx_events_usage_covering/, `expected Monitor usage covering index, got: ${plan}`);
+});
+
+test('Usage row selection range-seeks the metric-only covering index', () => {
+  const plan = queryPlan(
+    `SELECT
+       e.session_id,
+       COALESCE(NULLIF(e.source, ''), 'api') as source,
+       COALESCE(NULLIF(e.project, ''), 'unknown') as project,
+       e.agent_type,
+       COALESCE(NULLIF(e.model, ''), 'unknown') as model,
+       COALESCE(e.cost_usd, 0) as cost_usd,
+       COALESCE(e.tokens_in, 0) as tokens_in,
+       COALESCE(e.tokens_out, 0) as tokens_out,
+       COALESCE(e.cache_read_tokens, 0) as cache_read_tokens,
+       COALESCE(e.cache_write_tokens, 0) as cache_write_tokens,
+       COALESCE(e.client_timestamp, e.created_at) as timestamp
+     FROM events e
+     WHERE datetime(COALESCE(e.client_timestamp, e.created_at)) >= datetime(?)
+       AND (e.source IS NULL OR e.source != 'benchmark')
+       AND (
+         COALESCE(e.cost_usd, 0) > 0
+         OR COALESCE(e.tokens_in, 0) > 0
+         OR COALESCE(e.tokens_out, 0) > 0
+         OR COALESCE(e.cache_read_tokens, 0) > 0
+         OR COALESCE(e.cache_write_tokens, 0) > 0
+       )`,
+    '2026-07-13',
+  );
+  assert.match(
+    plan,
+    /SEARCH e USING COVERING INDEX idx_events_usage_covering \(<expr>>\?\)/,
+    `expected Usage timestamp range seek on the covering index, got: ${plan}`,
+  );
+});
+
+test('benchmark subtraction seeks the benchmark-only Monitor index', () => {
+  const plan = queryPlan(
+    `SELECT session_id, agent_type, tool_name, model
+     FROM events
+     WHERE source = 'benchmark'`,
+  );
+  assert.match(plan, /COVERING INDEX idx_events_benchmark_monitor/, `expected benchmark Monitor index, got: ${plan}`);
 });

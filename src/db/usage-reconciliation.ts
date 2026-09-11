@@ -1,4 +1,4 @@
-function usageMetricPresenceCondition(alias: string): string {
+export function usageMetricPresenceCondition(alias: string): string {
   return `(
     COALESCE(${alias}.cost_usd, 0) > 0
     OR COALESCE(${alias}.tokens_in, 0) > 0
@@ -42,8 +42,4 @@ export function excludeOverlappingCodexOtelUsageCondition(alias: string): string
  */
 export function excludeBenchmarkUsageCondition(alias: string): string {
   return `(${alias}.source IS NULL OR ${alias}.source != 'benchmark')`;
-}
-
-export function reconciledUsageSum(alias: string, column: string): string {
-  return `COALESCE(SUM(CASE WHEN ${overlappingCodexOtelUsageCondition(alias)} THEN 0 ELSE COALESCE(${alias}.${column}, 0) END), 0)`;
 }
