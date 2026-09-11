@@ -507,6 +507,21 @@ Task 6 merged
 
 ## Risks And Mitigations
 
+### First PR implementation status (2026-09-11)
+
+- Tasks 1-3 are implemented on `feat/agent-first-cli-usage-parity`.
+- The original installed-CLI workload reproduced five lock failures across eight
+  concurrent reads. The regression was observed red while a WAL writer held a
+  transaction, then passed after the read bootstrap change.
+- The built CLI completed 40/40 repeated concurrent reads with empty stderr.
+- `usage overview --json` and `usage facets --json` deep-match their owning v2
+  query functions on a non-empty fixture.
+- Unsupported reporting filters now exit 2 instead of being silently ignored, and
+  each command's help lists its accepted filters.
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (893 tests).
+- Task 4 remains open until the PR is published, Codex review findings are handled,
+  and the unmerged PR is handed to the user.
+
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
   it. Signal: concurrent tests become slow or intermittently approach the timeout.
   Mitigation: measure child duration and avoid repeated lock-requiring startup work

@@ -15,9 +15,13 @@ Product-surface reference for AgentMonitor.
   `https://agentmonitor.localhost`, direct-only startup, health checks, status
   reporting, and opening the canonical app.
 - Maintenance commands cover historical import, session-browser sync, cost recalculation, and the opt-in trace-quality reclaim (`pnpm reclaim:trace-quality`).
-- Read commands cover sessions, pinned messages, live views, usage, analytics, trace-quality reports, and operational OTEL metrics (`ops metrics`, the CLI reader for the `/api/v2/metrics` surface).
+- Read commands cover sessions, pinned messages, live views, usage, analytics, trace-quality reports, and operational OTEL metrics (`ops metrics`, the CLI reader for the `/api/v2/metrics` surface). `usage overview` exposes the exact eight-rollup Usage-page payload and coverage contract in one query; `usage facets` exposes the same five self-excluding filter lists as the UI.
 - Hook helpers print Codex OTEL configuration and wrap the Claude Code hook installer.
-- Human output is terminal-safe; `--json` is available for scripts and automation.
+- Human output is terminal-safe; finite reads expose stable structured data with
+  `--json` on stdout, live watch emits NDJSON, and diagnostics stay on stderr.
+  Reporting commands reject unsupported filters rather than accepting no-op
+  input, and current local databases take a read-only startup path so multiple
+  agents can query alongside the WAL writer.
 
 ## Real-Time Dashboard
 

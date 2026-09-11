@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import Database from 'better-sqlite3';
 import pkg from '../package.json' with { type: 'json' };
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -22,6 +24,22 @@ function runBuiltCli(args: string[]): string {
   });
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return result.stdout;
+}
+
+function runBuiltCliAsync(args: string[]): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [DIST_CLI, ...args], {
+      cwd: ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer | string) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk: Buffer | string) => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', status => resolve({ status, stdout, stderr }));
+  });
 }
 
 function isExecutable(mode: number): boolean {
@@ -100,6 +118,99 @@ test('built CLI runs when invoked through package bin symlinks', (t) => {
       assert.equal(help.status, 0, help.stderr || help.stdout);
       assert.match(help.stdout, new RegExp(`Usage: ${name} \\[global flags\\] <command> \\[args\\]`));
     }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('built reporting CLI supports eight concurrent reads of one database', async (t) => {
+  if (!requireBuiltCli(t)) return;
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-concurrent-'));
+  const dbPath = path.join(tempDir, 'agentmonitor.db');
+  try {
+    runBuiltCli(['--db-path', dbPath, 'analytics', 'summary', '--json']);
+
+    const results = await Promise.all(Array.from({ length: 8 }, () => (
+      runBuiltCliAsync(['--db-path', dbPath, 'analytics', 'summary', '--json'])
+    )));
+
+    for (const [index, result] of results.entries()) {
+      assert.equal(result.status, 0, `child ${index + 1}: ${result.stderr || result.stdout}`);
+      assert.equal(result.stderr, '', `child ${index + 1} wrote diagnostics`);
+      const payload = JSON.parse(result.stdout) as { total_sessions?: number; coverage?: unknown };
+      assert.equal(typeof payload.total_sessions, 'number', `child ${index + 1} returned the wrong JSON contract`);
+      assert.ok(payload.coverage, `child ${index + 1} omitted coverage`);
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('built local read command families remain readable while the server holds a write transaction', async (t) => {
+  if (!requireBuiltCli(t)) return;
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-writer-'));
+  const dbPath = path.join(tempDir, 'agentmonitor.db');
+  let writer: Database.Database | undefined;
+  try {
+    runBuiltCli(['--db-path', dbPath, 'analytics', 'summary', '--json']);
+    writer = new Database(dbPath);
+    writer.pragma('journal_mode = WAL');
+    writer.exec('BEGIN IMMEDIATE');
+
+    const reads = [
+      runBuiltCliAsync(['--db-path', dbPath, 'analytics', 'summary', '--json']),
+      runBuiltCliAsync(['--db-path', dbPath, 'sessions', 'list', '--json']),
+      runBuiltCliAsync(['--db-path', dbPath, 'ops', 'metrics', '--json']),
+    ];
+    const allReads = Promise.all(reads);
+    const completedWhileLocked = await Promise.race([
+      allReads.then(results => ({ completed: true as const, results })),
+      new Promise<{ completed: false }>(resolve => setTimeout(() => resolve({ completed: false }), 2_000)),
+    ]);
+
+    writer.exec('ROLLBACK');
+    writer.close();
+    writer = undefined;
+
+    const results = completedWhileLocked.completed ? completedWhileLocked.results : await allReads;
+    assert.equal(completedWhileLocked.completed, true, 'read commands waited on a writer instead of using the WAL read path');
+    for (const result of results) {
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(result.stderr, '');
+      assert.doesNotThrow(() => JSON.parse(result.stdout));
+    }
+  } finally {
+    if (writer?.inTransaction) writer.exec('ROLLBACK');
+    writer?.close();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('concurrent built local reads initialize an older database before querying', async (t) => {
+  if (!requireBuiltCli(t)) return;
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-upgrade-'));
+  const dbPath = path.join(tempDir, 'agentmonitor.db');
+  try {
+    runBuiltCli(['--db-path', dbPath, 'analytics', 'summary', '--json']);
+    const db = new Database(dbPath);
+    db.pragma('user_version = 6');
+    db.close();
+
+    const results = await Promise.all(Array.from({ length: 4 }, () => (
+      runBuiltCliAsync(['--db-path', dbPath, 'analytics', 'summary', '--json'])
+    )));
+    for (const result of results) {
+      assert.equal(result.status, 0, result.stderr || result.stdout);
+      assert.equal(result.stderr, '');
+      assert.equal(typeof (JSON.parse(result.stdout) as { total_sessions?: number }).total_sessions, 'number');
+    }
+
+    const upgraded = new Database(dbPath, { readonly: true });
+    assert.equal(upgraded.pragma('user_version', { simple: true }), 7);
+    upgraded.close();
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

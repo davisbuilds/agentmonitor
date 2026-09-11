@@ -899,7 +899,21 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 6;
+const DATA_SCHEMA_VERSION = 7;
+
+/**
+ * Prepare a database for a read-only CLI command without replaying the full
+ * schema DDL on every process. initSchema() advances user_version only after
+ * every table/column/index guard and data migration succeeds, so the marker is
+ * also the read fast-path boundary. A missing or older database still takes the
+ * complete initialization path before any query runs.
+ */
+export function ensureSchemaForRead(): void {
+  const db = getDb();
+  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+  if (current >= DATA_SCHEMA_VERSION) return;
+  initSchema();
+}
 
 /**
  * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
@@ -921,6 +935,8 @@ export function runDataMigrations(db: Database): void {
     if (current < 4) invalidateSessionFilesForSkillContext(db);
     if (current < 5) deleteLegacyBenchmarkRows(db);
     if (current < 6) deleteOrphanedSessions(db);
+    // v7 introduces no data correction. It marks databases that completed the
+    // full structural initialization required by ensureSchemaForRead().
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run();
