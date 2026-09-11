@@ -15,7 +15,7 @@ Product-surface reference for AgentMonitor.
   `https://agentmonitor.localhost`, direct-only startup, health checks, status
   reporting, and opening the canonical app.
 - Maintenance commands cover historical import, session-browser sync, cost recalculation, and the opt-in trace-quality reclaim (`pnpm reclaim:trace-quality`).
-- Read commands cover sessions, pinned messages, live views, usage, analytics, and trace-quality reports.
+- Read commands cover sessions, pinned messages, live views, usage, analytics, trace-quality reports, and operational OTEL metrics (`ops metrics`, the CLI reader for the `/api/v2/metrics` surface).
 - Hook helpers print Codex OTEL configuration and wrap the Claude Code hook installer.
 - Human output is terminal-safe; `--json` is available for scripts and automation.
 

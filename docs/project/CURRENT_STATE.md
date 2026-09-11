@@ -7,6 +7,17 @@ maintainers but too detailed for the root README.
 
 - The Svelte app is the sole product surface; `/` redirects to `/app/`. (The legacy static `/` dashboard was removed 2026-09-10.)
 - The Svelte Monitor read path uses `/api/v2/monitor/*`; v1 remains for ingest, SSE, and provider quotas. Its v1 read endpoints (`GET /api/events|stats|sessions|filter-options`) are retained only for the parity + ingestion-readback test suites.
+- The default Monitor stats read shares the write-invalidated snapshot used by
+  SSE and warms it before the HTTP listener starts. Event writes invalidate the
+  snapshot; timestamp-first metric-only covering reconciliation plus benchmark
+  subtraction keep the synchronous refresh bounded without changing the
+  event/count contract. Monitor session reads use the same expiry updater as the
+  cached stats path, so an active-to-idle/ended transition invalidates that
+  snapshot immediately. The covering index also serves the canonical windowed
+  Usage row selector.
+  The Monitor cost panels reuse `/api/v2/usage/overview` in one request and
+  finish before tool analytics begins, avoiding a queue of independent
+  full-history reads on the single SQLite thread.
 - The Monitor header uses provider-native quota data only. AgentMonitor polls Codex quotas directly from the local Codex app-server and ingests Claude subscriber quota data through the official Claude Code statusline payload bridge.
 
 ## Sessions And Search

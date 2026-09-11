@@ -179,8 +179,8 @@ test('usage tab loads its rollups from /usage/overview, not per-panel endpoints'
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/overview')).toBe(true);
 
   // /usage/overview reuses one scan of the events table for every rollup. The granular endpoints
-  // still exist (the Monitor cost card uses them), so a per-panel fetch could creep back in here
-  // and cost nothing but latency — this pins the Usage page to the batched call.
+  // remain public reads, so a per-panel fetch could creep back in here and cost nothing but
+  // latency — this pins the Usage page to the batched call.
   for (const panel of ['summary', 'daily', 'projects', 'models', 'models/daily', 'tiers', 'agents', 'top-sessions', 'coverage']) {
     expect(requestedPaths).not.toContain(`/api/v2/usage/${panel}`);
   }
@@ -199,7 +199,7 @@ test('monitor filters use the v2 monitor endpoint instead of v1 filter options',
   expect(requestedPaths).not.toContain('/api/filter-options');
 });
 
-test('monitor cost card uses v2 usage APIs instead of v1 cost stats', async ({ page }) => {
+test('monitor cost card uses one v2 usage overview instead of per-panel or v1 cost reads', async ({ page }) => {
   const requestedPaths: string[] = [];
   page.on('request', (request) => {
     requestedPaths.push(new URL(request.url()).pathname);
@@ -208,9 +208,10 @@ test('monitor cost card uses v2 usage APIs instead of v1 cost stats', async ({ p
   await page.goto(`${baseUrl}/app/#monitor`);
 
   await expect(page.getByText('Cost Overview')).toBeVisible();
-  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/daily')).toBe(true);
-  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/projects')).toBe(true);
-  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/models')).toBe(true);
+  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/overview')).toBe(true);
+  expect(requestedPaths).not.toContain('/api/v2/usage/daily');
+  expect(requestedPaths).not.toContain('/api/v2/usage/projects');
+  expect(requestedPaths).not.toContain('/api/v2/usage/models');
   expect(requestedPaths).not.toContain('/api/stats/cost');
 });
 

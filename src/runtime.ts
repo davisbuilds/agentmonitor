@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import { config } from './config.js';
 import { closeDb } from './db/connection.js';
 import { initSchema } from './db/schema.js';
-import { updateIdleSessions } from './db/queries.js';
+import { getStatsForBroadcast, updateIdleSessions } from './db/queries.js';
 import { startStatsBroadcast, stopStatsBroadcast } from './api/stream.js';
 import { liveBroadcaster } from './api/v2/live-stream.js';
 import { broadcaster } from './sse/emitter.js';
@@ -99,6 +99,13 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
   try {
     initSchema();
     ensureSessionTraceSummaryBackfill();
+
+    // Build the all-time Monitor snapshot before accepting HTTP work. The
+    // underlying better-sqlite3 query is synchronous; leaving its first cold
+    // run to the dashboard would queue health and every other request behind
+    // it. Subsequent event writes invalidate this cache, and the hot indexed
+    // refresh stays bounded.
+    getStatsForBroadcast();
 
     const app = createApp();
     server = app.listen(config.port, config.host);

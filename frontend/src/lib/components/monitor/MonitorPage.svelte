@@ -29,13 +29,17 @@
   let { onfilterchange }: Props = $props();
 
   async function loadAnalytics(filters: Record<string, string> = {}) {
-    const analyticsResults = await Promise.allSettled([
-      fetchCostData(buildCostFilters(filters, getCostWindow())).then(setCostData),
-      fetchToolStats(filters).then(setToolStats),
-    ]);
-    for (const result of analyticsResults) {
-      if (result.status === 'rejected') {
-        console.error('Failed to load monitor analytics:', result.reason);
+    // Each request performs synchronous SQLite work on the server. Sending both
+    // together queues them back-to-back on the event loop, preventing health or
+    // ingestion requests from running between panels on a large database.
+    for (const load of [
+      () => fetchCostData(buildCostFilters(filters, getCostWindow())).then(setCostData),
+      () => fetchToolStats(filters).then(setToolStats),
+    ]) {
+      try {
+        await load();
+      } catch (error) {
+        console.error('Failed to load monitor analytics:', error);
       }
     }
   }

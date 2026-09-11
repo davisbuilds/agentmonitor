@@ -880,24 +880,23 @@ export async function fetchFilterOptions(): Promise<FilterOptions> {
 
 export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
   const params = monitorCostFiltersToUsageParams(filters);
-  const [daily, projects, models] = await Promise.all([
-    fetchUsageDaily(params),
-    fetchUsageProjects(params),
-    fetchUsageModels(params),
-  ]);
+  // Monitor needs the same daily/project/model slices already returned by the
+  // Usage overview. Reuse its one-scan contract instead of queueing three
+  // synchronous SQLite scans on the server's event loop during every reload.
+  const overview = await fetchUsageOverview(params);
 
   return {
-    timeline: daily.data.map((item) => ({
+    timeline: overview.daily.map((item) => ({
       date: item.date,
       cost: item.cost_usd,
     })),
-    by_project: projects.data.map((item) => ({
+    by_project: overview.projects.map((item) => ({
       project: item.project,
       cost: item.cost_usd,
       session_count: item.session_count,
       event_count: item.usage_events,
     })),
-    by_model: models.data.map((item) => ({
+    by_model: overview.models.map((item) => ({
       model: item.model,
       cost: item.cost_usd,
     })),
