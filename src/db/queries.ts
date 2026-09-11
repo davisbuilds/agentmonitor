@@ -9,7 +9,11 @@ import type {
   EventSource,
   NormalizedIngestEvent,
 } from '../contracts/event-contract.js';
-import { excludeBenchmarkUsageCondition, excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
+import {
+  excludeBenchmarkUsageCondition,
+  excludeOverlappingCodexOtelUsageCondition,
+  usageMetricPresenceCondition,
+} from './usage-reconciliation.js';
 
 // --- Agents ---
 
@@ -711,6 +715,17 @@ export interface Stats {
   branches: string[];
 }
 
+function subtractBreakdownRows(
+  allRows: Array<{ key: string; count: number }>,
+  excludedRows: Array<{ key: string; count: number }>,
+): Record<string, number> {
+  const excluded = new Map(excludedRows.map(row => [row.key, row.count]));
+  return Object.fromEntries(allRows
+    .map(row => [row.key, row.count - (excluded.get(row.key) ?? 0)] as const)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1]));
+}
+
 export function getStats(filters?: { agentType?: string; since?: string }): Stats {
   const db = getDb();
   updateIdleSessions(config.sessionTimeoutMinutes);
@@ -728,14 +743,25 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const totals = db.prepare(`
+  // Count every matching event, including an overlapping OTEL usage row, but
+  // exclude that row from token/cost totals. Keeping reconciliation in WHERE
+  // evaluates its timestamp lookup once per event instead of repeating the
+  // same correlated EXISTS independently for all three SUM expressions.
+  const hasFilters = Boolean(filters?.agentType || filters?.since);
+  const totalEvents = hasFilters
+    ? (db.prepare(`SELECT COUNT(*) as count FROM events e ${where}`).get(...params) as { count: number }).count
+    : (db.prepare('SELECT COUNT(*) as count FROM events').get() as { count: number }).count
+      - (db.prepare("SELECT COUNT(*) as count FROM events WHERE source = 'benchmark'").get() as { count: number }).count;
+  const usageWhere = `${where}
+    AND ${usageMetricPresenceCondition('e')}
+    AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
+  const usageTotals = db.prepare(`
     SELECT
-      COUNT(*) as total_events,
-      ${reconciledUsageSum('e', 'tokens_in')} as total_tokens_in,
-      ${reconciledUsageSum('e', 'tokens_out')} as total_tokens_out,
-      ${reconciledUsageSum('e', 'cost_usd')} as total_cost_usd
-    FROM events e ${where}
-  `).get(...params) as { total_events: number; total_tokens_in: number; total_tokens_out: number; total_cost_usd: number };
+      COALESCE(SUM(e.tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(e.tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(e.cost_usd), 0) as total_cost_usd
+    FROM events e ${usageWhere}
+  `).get(...params) as { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number };
 
   const activeSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
@@ -760,38 +786,38 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     `SELECT COUNT(DISTINCT agent_type) as count FROM sessions WHERE status != 'ended'`
   ).get() as { count: number }).count;
 
-  const toolRows = db.prepare(`
-    SELECT tool_name, COUNT(*) as count FROM events e
-    ${where.replace('WHERE', conditions.length ? 'WHERE' : '')}
-    ${conditions.length > 0 ? 'AND' : 'WHERE'} tool_name IS NOT NULL
-    GROUP BY tool_name ORDER BY count DESC
-  `).all(...params) as { tool_name: string; count: number }[];
-
-  const toolBreakdown: Record<string, number> = {};
-  for (const row of toolRows) {
-    toolBreakdown[row.tool_name] = row.count;
-  }
-
-  const agentRows = db.prepare(`
-    SELECT agent_type, COUNT(*) as count FROM events e ${where}
-    GROUP BY agent_type ORDER BY count DESC
-  `).all(...params) as { agent_type: string; count: number }[];
-
-  const agentBreakdown: Record<string, number> = {};
-  for (const row of agentRows) {
-    agentBreakdown[row.agent_type] = row.count;
-  }
-
-  const modelRows = db.prepare(`
-    SELECT model, COUNT(*) as count FROM events e
-    ${where.replace('WHERE', conditions.length ? 'WHERE' : '')}
-    ${conditions.length > 0 ? 'AND' : 'WHERE'} model IS NOT NULL
-    GROUP BY model ORDER BY count DESC
-  `).all(...params) as { model: string; count: number }[];
-
-  const modelBreakdown: Record<string, number> = {};
-  for (const row of modelRows) {
-    modelBreakdown[row.model] = row.count;
+  let toolBreakdown: Record<string, number>;
+  let agentBreakdown: Record<string, number>;
+  let modelBreakdown: Record<string, number>;
+  if (hasFilters) {
+    const toolRows = db.prepare(`
+      SELECT tool_name as key, COUNT(*) as count FROM events e
+      ${where} AND tool_name IS NOT NULL
+      GROUP BY tool_name ORDER BY count DESC
+    `).all(...params) as Array<{ key: string; count: number }>;
+    const agentRows = db.prepare(`
+      SELECT agent_type as key, COUNT(*) as count FROM events e ${where}
+      GROUP BY agent_type ORDER BY count DESC
+    `).all(...params) as Array<{ key: string; count: number }>;
+    const modelRows = db.prepare(`
+      SELECT model as key, COUNT(*) as count FROM events e
+      ${where} AND model IS NOT NULL
+      GROUP BY model ORDER BY count DESC
+    `).all(...params) as Array<{ key: string; count: number }>;
+    toolBreakdown = subtractBreakdownRows(toolRows, []);
+    agentBreakdown = subtractBreakdownRows(agentRows, []);
+    modelBreakdown = subtractBreakdownRows(modelRows, []);
+  } else {
+    const dimensionRows = (column: 'tool_name' | 'agent_type' | 'model', benchmarkOnly: boolean) => db.prepare(`
+      SELECT ${column} as key, COUNT(*) as count
+      FROM events
+      WHERE ${benchmarkOnly ? "source = 'benchmark' AND " : ''}${column} IS NOT NULL
+      GROUP BY ${column}
+      ORDER BY count DESC
+    `).all() as Array<{ key: string; count: number }>;
+    toolBreakdown = subtractBreakdownRows(dimensionRows('tool_name', false), dimensionRows('tool_name', true));
+    agentBreakdown = subtractBreakdownRows(dimensionRows('agent_type', false), dimensionRows('agent_type', true));
+    modelBreakdown = subtractBreakdownRows(dimensionRows('model', false), dimensionRows('model', true));
   }
 
   const branchRows = db.prepare(`
@@ -799,14 +825,14 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   `).all() as { branch: string }[];
 
   return {
-    total_events: totals.total_events,
+    total_events: totalEvents,
     active_sessions: activeSessions,
     total_sessions: totalSessions,
     live_sessions: liveSessions,
     active_agents: activeAgents,
-    total_tokens_in: totals.total_tokens_in,
-    total_tokens_out: totals.total_tokens_out,
-    total_cost_usd: totals.total_cost_usd,
+    total_tokens_in: usageTotals.total_tokens_in,
+    total_tokens_out: usageTotals.total_tokens_out,
+    total_cost_usd: usageTotals.total_cost_usd,
     tool_breakdown: toolBreakdown,
     agent_breakdown: agentBreakdown,
     model_breakdown: modelBreakdown,

@@ -6,6 +6,29 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Monitor read-path stall repair (2026-09-11) — *What:* the default v2 Monitor
+  stats read now reuses the write-invalidated SSE snapshot, startup warms that
+  snapshot before accepting HTTP work, and Codex OTEL/import usage
+  reconciliation uses a partial session+normalized-timestamp index. The totals
+  query evaluates reconciliation once per event rather than independently for
+  each token/cost sum. A normalized-timestamp-first, metric-only covering index
+  keeps both the stats sums and canonical Usage row selector off the
+  metadata-heavy events table. Default dimension counts use their existing
+  covering indexes and subtract the tiny benchmark slice through a dedicated
+  benchmark index. A matching normalized-time order index also lets the recent
+  event feed return its first page without sorting the full event table.
+  Monitor cost loading now consumes the existing one-scan Usage overview instead
+  of issuing three separate full usage reads, then yields before requesting tool
+  analytics. *Why:* on a copied 697K-event live database, opening Monitor pinned
+  the synchronous SQLite thread and made `/api/health` time out: stats took about
+  16 seconds and recent events about 2.7 seconds. The exact concurrent
+  stats+health reproduction now returns health in about 0.35-1.1 seconds and
+  stats in about 0.4-1.2 seconds after the one-time index build (0.85 seconds on
+  the final live invalidated-cache probe); recent events fell to about 0.2
+  seconds cold and 1 ms warm. The same covering index brought the copied
+  60-day Usage overview from a 6.6-second live read to a 338 ms warm median.
+  Totals were compared exactly before/after, and query-plan regressions pin the
+  critical indexes.
 - Legacy `/` dashboard removed + Monitor SSE reconnect refetch (2026-09-10) —
   *What:* two outcomes of a legacy-surface-reduction review. (1) The legacy
   static HTML/vanilla-JS dashboard (`public/`, its `src/input.css` Tailwind

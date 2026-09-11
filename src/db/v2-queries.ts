@@ -79,7 +79,12 @@ import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
-import { excludeBenchmarkUsageCondition, excludeOverlappingCodexOtelUsageCondition, reconciledUsageSum } from './usage-reconciliation.js';
+import { getStatsForBroadcast } from './queries.js';
+import {
+  excludeBenchmarkUsageCondition,
+  excludeOverlappingCodexOtelUsageCondition,
+  usageMetricPresenceCondition,
+} from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
 import { getSkillConsultationAnalytics } from '../skills/consultation-analytics.js';
 
@@ -1435,6 +1440,19 @@ function listMonitorProviderQuotas(): MonitorQuotaSnapshot[] {
 }
 
 export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
+  if (!params.agent && !params.since) {
+    // The default Monitor and the SSE broadcaster need the same all-time
+    // snapshot. Reuse the write-invalidated cache instead of running two copies
+    // of the full-history query on the synchronous SQLite connection.
+    const stats = getStatsForBroadcast();
+    const quotaMonitor = listMonitorProviderQuotas();
+    return {
+      ...stats,
+      quota_monitor: quotaMonitor,
+      usage_monitor: quotaMonitor,
+    };
+  }
+
   const db = getDb();
   updateMonitorSessionStatuses(config.sessionTimeoutMinutes);
 
@@ -1454,15 +1472,22 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const totals = db.prepare(`
+  // Event count retains overlapping OTEL rows; usage totals reconcile them
+  // away. Put the reconciliation predicate in WHERE so SQLite performs its
+  // session+timestamp lookup once per candidate row, not once per SUM column.
+  const totalEvents = (db.prepare(`
+    SELECT COUNT(*) as total_events FROM events e ${where}
+  `).get(...values) as { total_events: number }).total_events;
+  const usageWhere = `${where}
+    AND ${usageMetricPresenceCondition('e')}
+    AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
+  const usageTotals = db.prepare(`
     SELECT
-      COUNT(*) as total_events,
-      ${reconciledUsageSum('e', 'tokens_in')} as total_tokens_in,
-      ${reconciledUsageSum('e', 'tokens_out')} as total_tokens_out,
-      ${reconciledUsageSum('e', 'cost_usd')} as total_cost_usd
-    FROM events e ${where}
+      COALESCE(SUM(e.tokens_in), 0) as total_tokens_in,
+      COALESCE(SUM(e.tokens_out), 0) as total_tokens_out,
+      COALESCE(SUM(e.cost_usd), 0) as total_cost_usd
+    FROM events e ${usageWhere}
   `).get(...values) as {
-    total_events: number;
     total_tokens_in: number;
     total_tokens_out: number;
     total_cost_usd: number;
@@ -1509,14 +1534,14 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
 
   const quotaMonitor = listMonitorProviderQuotas();
   return {
-    total_events: totals.total_events,
+    total_events: totalEvents,
     active_sessions: activeSessions,
     total_sessions: totalSessions,
     live_sessions: liveSessions,
     active_agents: activeAgents,
-    total_tokens_in: totals.total_tokens_in,
-    total_tokens_out: totals.total_tokens_out,
-    total_cost_usd: totals.total_cost_usd,
+    total_tokens_in: usageTotals.total_tokens_in,
+    total_tokens_out: usageTotals.total_tokens_out,
+    total_cost_usd: usageTotals.total_cost_usd,
     tool_breakdown: toolBreakdown,
     agent_breakdown: agentBreakdown,
     model_breakdown: modelBreakdown,

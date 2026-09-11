@@ -416,6 +416,25 @@ export function initSchema(): void {
   //   falls back to seeking idx_events_agent_type (agent_type=?), matching every
   //   Codex row, turning the full-history stats aggregate into an O(n^2) scan
   //   (measured ~95s per run on ~440k events; ~0.2s with this index).
+  // - idx_events_codex_import_usage_session_ts narrows that same reconciliation
+  //   lookup to metric-bearing imported Codex rows at or after the OTEL event.
+  //   Long sessions now contain tens of thousands of imported events, so the
+  //   older session/agent/source index still left SQLite scanning and parsing
+  //   every imported timestamp for each candidate OTEL row. The partial
+  //   expression index turns it into a session+timestamp range seek while
+  //   indexing only the rows the reconciliation predicate can match.
+  // - idx_events_created_at_order matches listMonitorEvents' normalized sort.
+  //   created_at contains both SQLite and ISO timestamp forms, so the ORDER BY
+  //   must retain datetime() normalization; indexing that exact expression
+  //   avoids sorting the complete event table to return the newest page.
+  // - idx_events_usage_covering covers the metric-bearing, non-benchmark rows
+  //   needed by both lifetime Monitor sums and the canonical Usage row selector.
+  //   Its normalized timestamp prefix supports window range seeks; the remaining
+  //   columns keep those reads off the metadata-heavy events table.
+  // - idx_events_benchmark_monitor makes the default lifetime counts and
+  //   dimension breakdowns cheap to compute as all rows minus the small,
+  //   segregated benchmark slice. Its session_id prefix after source also
+  //   accelerates the benchmark-session exclusion in total_sessions.
   //
   // - idx_events_usage_ts is an EXPRESSION index, and the expression must stay
   //   character-identical to usageTimestampExpr()/the date predicate in
@@ -438,6 +457,47 @@ export function initSchema(): void {
       ON events(created_at, model, tokens_in, tokens_out, cost_usd);
     CREATE INDEX IF NOT EXISTS idx_events_session_reconcile
       ON events(session_id, agent_type, source);
+    CREATE INDEX IF NOT EXISTS idx_events_codex_import_usage_session_ts
+      ON events(session_id, datetime(COALESCE(client_timestamp, created_at)))
+      WHERE agent_type = 'codex'
+        AND source = 'import'
+        AND (
+          COALESCE(cost_usd, 0) > 0
+          OR COALESCE(tokens_in, 0) > 0
+          OR COALESCE(tokens_out, 0) > 0
+          OR COALESCE(cache_read_tokens, 0) > 0
+          OR COALESCE(cache_write_tokens, 0) > 0
+        );
+    DROP INDEX IF EXISTS idx_events_monitor_usage;
+    CREATE INDEX IF NOT EXISTS idx_events_usage_covering
+      ON events(
+        datetime(COALESCE(client_timestamp, created_at)),
+        agent_type,
+        source,
+        session_id,
+        project,
+        model,
+        client_timestamp,
+        created_at,
+        cost_usd,
+        tokens_in,
+        tokens_out,
+        cache_read_tokens,
+        cache_write_tokens
+      )
+      WHERE (source IS NULL OR source != 'benchmark')
+        AND (
+          COALESCE(cost_usd, 0) > 0
+          OR COALESCE(tokens_in, 0) > 0
+          OR COALESCE(tokens_out, 0) > 0
+          OR COALESCE(cache_read_tokens, 0) > 0
+          OR COALESCE(cache_write_tokens, 0) > 0
+        );
+    CREATE INDEX IF NOT EXISTS idx_events_benchmark_monitor
+      ON events(source, session_id, agent_type, tool_name, model)
+      WHERE source = 'benchmark';
+    CREATE INDEX IF NOT EXISTS idx_events_created_at_order
+      ON events(datetime(created_at) DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_events_usage_ts
       ON events(datetime(COALESCE(client_timestamp, created_at)));
   `);
