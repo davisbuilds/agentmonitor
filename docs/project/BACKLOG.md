@@ -116,6 +116,24 @@ These are the deferred follow-ups surfaced during and after the build.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 
+#### Usage overview has crossed the persisted-rollup trigger
+- **What**: the event-derived `/api/v2/usage/overview` still materializes each
+  matching usage event in JavaScript for its eight exact rollups. The 2026-07-16
+  roadmap explicitly set a 150 ms warm trigger for revisiting a session-grained
+  derived store.
+- **Why it matters / evidence**: during the 2026-09-11 Monitor stall repair, the
+  60-day overview on an application-consistent copy of the 697K-event live
+  database first took 6.6 seconds cold. A timestamp-first covering usage index
+  reduced it to a 338 ms warm median (832 ms first read), while Monitor now
+  issues one overview instead of three per-panel usage reads and yields before
+  tool analytics. This remains above the recorded 150 ms threshold and is no
+  longer a hypothetical multi-million-row concern, but no longer causes the
+  health-timeout incident that prompted this repair.
+- **Next**: benchmark the existing session-grained `(day, agent, model, project,
+  session_id)` derived-store proposal against exact overview response parity,
+  write amplification, rebuild/recovery behavior, and retention. Keep source
+  events authoritative. Noted 2026-09-11.
+
 #### Legacy v1 session-list N+1
 - **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the
   per-session correlated-subquery N+1 that v2 `listMonitorSessions` shed.

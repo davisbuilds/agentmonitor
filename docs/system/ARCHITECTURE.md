@@ -101,7 +101,12 @@ SQLite via `better-sqlite3` with WAL mode.
 - Schema initialization and backward-compatible migrations in `src/db/schema.ts`.
 - Application-consistent export lives in `src/db/backup.ts`; it never copies a
   live main/WAL/SHM set and never publishes before integrity validation.
-- Indexes on `created_at`, `session_id`, `event_type`, `tool_name`, `agent_type`, `model`.
+- Indexes on `created_at`, `session_id`, `event_type`, `tool_name`, `agent_type`,
+  and `model`, plus expression indexes for normalized event ordering and a
+  timestamp-first covering index for metric-bearing usage rows. Codex
+  OTEL/import usage reconciliation uses a partial
+  `(session_id, normalized timestamp)` index so an all-history aggregate does not
+  rescan every imported event in a long session for each OTEL candidate.
 
 ## SSE Broadcasting
 
