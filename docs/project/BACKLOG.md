@@ -201,3 +201,23 @@ These are the deferred follow-ups surfaced during and after the build.
 - **Next / Revisit when**: building Codex operational observability into the
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
+
+### Frontend testing
+
+#### Extend Vitest coverage beyond the store/pure layer
+- **What**: the Vitest harness (added 2026-09-11) covers the Monitor store, the
+  reconnect/SSE signalling, and the pure `lib/*.ts` helpers (`format`,
+  `monitor-session-merge`). It does **not** yet cover: component mounting +
+  `$derived`/`$effect` reactivity (needs `@testing-library/svelte` +
+  `flushSync`/`$effect.root`), or the remaining pure modules
+  (`monitor-analytics`, `frontier-geometry`, `session-roles`,
+  `session-capabilities`, `skill-consultation-view`, the `*-state.ts` helpers).
+- **Why it matters**: chart geometry (`frontier-geometry`) and the cost-window
+  logic (`monitor-analytics`) are exactly the silent-render-plausible-but-wrong
+  class this project guards; they are pure and cheap to cover. Component tests
+  are the larger lift and only worth it where a component holds real logic.
+- **Next / Revisit when**: fold in the remaining pure modules opportunistically
+  when touching them; stand up `@testing-library/svelte` the first time a
+  component's behavior (not just its markup) needs a regression guard. No
+  coverage threshold is enforced yet — add one only once the surface is broad
+  enough that a number is meaningful. Noted 2026-09-11.
