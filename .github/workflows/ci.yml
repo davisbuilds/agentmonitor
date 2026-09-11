@@ -48,6 +48,11 @@ jobs:
       - name: Svelte check
         run: pnpm frontend:check
 
+      # Vitest compiles the rune-bearing `.svelte.ts` stores; covers the /app/
+      # store + pure-logic layer that svelte-check type-checks but never runs.
+      - name: Frontend unit tests
+        run: pnpm frontend:test
+
       - name: Build
         run: pnpm build
 
