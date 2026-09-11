@@ -6,7 +6,24 @@ import { Writable } from 'node:stream';
 import test, { before } from 'node:test';
 
 import { formatAttrs, formatOpsMetrics } from '../src/cli/formatters/ops.js';
+import { resolveSince } from '../src/cli/commands/ops.js';
 import type { OperationalMetricSummaryRow } from '../src/db/v2-queries.js';
+
+// --- Relative --since resolution (pure) -----------------------------------
+
+test('resolveSince converts a relative shorthand to now - duration', () => {
+  const now = Date.parse('2026-09-11T12:00:00.000Z');
+  assert.equal(resolveSince('1h', now), '2026-09-11T11:00:00.000Z');
+  assert.equal(resolveSince('30m', now), '2026-09-11T11:30:00.000Z');
+  assert.equal(resolveSince('7d', now), '2026-09-04T12:00:00.000Z');
+  assert.equal(resolveSince('2w', now), '2026-08-28T12:00:00.000Z');
+  assert.equal(resolveSince('90s', now), '2026-09-11T11:58:30.000Z');
+});
+
+test('resolveSince passes through an absolute ISO value and undefined', () => {
+  assert.equal(resolveSince('2026-09-01T00:00:00Z'), '2026-09-01T00:00:00Z');
+  assert.equal(resolveSince(undefined), undefined);
+});
 
 // --- Pure formatter behavior (the TDD unit) -------------------------------
 
@@ -94,4 +111,25 @@ test('ops metrics renders a table by default', async () => {
   const { stdout } = await runCli(['ops', 'metrics', '--name-prefix', 'codex.memory.']);
   assert.match(stdout, /METRIC_NAME/);
   assert.match(stdout, /state=succeeded/);
+});
+
+test('ops metrics --since applies a relative window end-to-end', async () => {
+  const { getDb } = await import('../src/db/connection.js');
+  const db = getDb();
+  const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString().replace('T', ' ').replace(/\..*/, '');
+  const insert = db.prepare(`
+    INSERT INTO otel_metrics (session_id, agent_type, metric_name, attrs, value, temporality, created_at, client_timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insert.run('s3', 'codex', 'ops.window.probe', JSON.stringify({ age: 'recent' }), 1, 'delta', iso(60_000), null); // 1m ago
+  insert.run('s3', 'codex', 'ops.window.probe', JSON.stringify({ age: 'stale' }), 1, 'delta', iso(2 * 86_400_000), null); // 2d ago
+
+  const recent = await runCli(['ops', 'metrics', '--name-prefix', 'ops.window.probe', '--since', '1h', '--json']);
+  const recentMetrics = (JSON.parse(recent.stdout) as { metrics: OperationalMetricSummaryRow[] }).metrics;
+  assert.equal(recentMetrics.length, 1);
+  assert.equal((recentMetrics[0].attrs as { age?: string }).age, 'recent');
+
+  const wide = await runCli(['ops', 'metrics', '--name-prefix', 'ops.window.probe', '--since', '3d', '--json']);
+  const wideMetrics = (JSON.parse(wide.stdout) as { metrics: OperationalMetricSummaryRow[] }).metrics;
+  assert.equal(wideMetrics.length, 2);
 });
