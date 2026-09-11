@@ -59,7 +59,7 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 
 ## Testing
 
-- **Pre-push** (matches required CI): `pnpm lint`, `pnpm build`, `pnpm test`. Run `pnpm frontend:check` (svelte-check) if Svelte/frontend TS touched.
+- **Pre-push** (matches required CI): `pnpm lint`, `pnpm build`, `pnpm test`. If Svelte/frontend TS touched, also run `pnpm frontend:check` (svelte-check) and `pnpm frontend:test` (Vitest — unit tests for the `/app/` stores + pure logic, in the `frontend/` workspace; `svelte-check` only type-checks, it never runs the rune code).
 - **TDD**: red/green for new features, major refactors, and large changes. The red step must fail for the behavior you're about to fix, not merely because a symbol is missing — write the signature first, then a test that fails on the behavior (see "Never trust a test you haven't watched fail" below). Skip the red step for code with no behavior to assert, and cover it after. For smaller edits, still run the relevant existing tests before wrapping up.
 - **E2E**: `pnpm exec playwright test`.
 - **Sanity**: `GET /api/health`.

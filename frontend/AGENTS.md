@@ -15,6 +15,12 @@ See root `AGENTS.md` for project overview, API contract (V2 endpoints this app c
 
 - Build: `pnpm frontend:build` (output at `frontend/dist/`, served at `/app/`)
 - Dev: `pnpm frontend:dev` (Vite dev server at `:5173` with API proxy to `:3141`)
+- Unit test: `pnpm frontend:test` (Vitest, run from root) — covers the stores +
+  pure `lib/*.ts` logic. Runs through the Svelte plugin so `.svelte.ts` `$state`
+  compiles as it does in the build. Test files are `src/**/*.test.ts`; module
+  singletons are reset per test with `vi.resetModules()`. Component-mount +
+  `$derived`/`$effect` reactivity coverage is deferred (would add
+  `@testing-library/svelte` + `flushSync`).
 
 ## Code Map
 
