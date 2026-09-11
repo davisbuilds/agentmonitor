@@ -195,7 +195,6 @@ accepted-but-ignored flags.
 
 - Modify: `src/cli/commands/reporting.ts`
 - Test: `tests/cli-contracts.test.ts`
-- Test: `tests/cli-core.test.ts`
 
 **Dependencies**
 
@@ -220,10 +219,9 @@ Task 1
 **Implementation Steps**
 
 1. Replace `commonParams()` with small parsers for Usage, Analytics, and trace-list
-   contracts, parameterized only where a command genuinely supports pagination or
-   specialized quality filters.
-2. Validate dates through `parseDateOption`; keep numeric validation for limits,
-   offsets, and score bounds.
+   contracts, parameterized only where a command genuinely supports pagination.
+2. Validate dates through `parseDateOption`; keep numeric validation for limits and
+   offsets.
 3. Update every reporting command's usage/help string to list all accepted filters.
 4. Add negative tests showing `analytics tools --limit 1` and unrelated Usage/
    Quality flags fail with exit 2 and no stdout unless the command implements them.
@@ -232,14 +230,14 @@ Task 1
 
 **Verification**
 
-- Run: `node --import tsx --test tests/cli-contracts.test.ts tests/cli-core.test.ts`
+- Run: `node --import tsx --test tests/cli-contracts.test.ts`
 - Expect: supported filters reach the query payload; unsupported flags exit 2 with
   no stdout; command help exactly names the supported options.
 
 **Test Discovery Verified**
 
-- `package.json:19` discovers both literal `tests/*.test.ts` files.
-- Literal proof: the verification command names both changed test files.
+- `package.json:19` discovers `tests/cli-contracts.test.ts`.
+- Literal proof: the verification command names the changed test file.
 
 **Done When**
 
@@ -518,9 +516,15 @@ Task 6 merged
   query functions on a non-empty fixture.
 - Unsupported reporting filters now exit 2 instead of being silently ignored, and
   each command's help lists its accepted filters.
-- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (893 tests).
-- Task 4 remains open until the PR is published, Codex review findings are handled,
-  and the unmerged PR is handed to the user.
+- A findings-first local review caught and fixed two related gaps: concurrent
+  migration runners could reuse a stale version and double-apply the v1 token
+  correction, and configured usage budgets did not use the shared read bootstrap.
+  Both fixes have multi-process or fresh-database regressions.
+- Codex Cloud review was requested on PR #123, but the service rejected the run
+  because the account's code-review usage limit was reached. It created no review
+  and no review threads; this external review criterion remains blocked.
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (895 tests).
+- Task 4 implementation is complete. The PR remains unmerged for user review.
 
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
   it. Signal: concurrent tests become slow or intermittently approach the timeout.

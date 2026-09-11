@@ -197,9 +197,14 @@ export function registerReportingCommands(): void {
     usage: 'usage budgets [--json]',
     async handler(ctx, args) {
       rejectOptions(args);
-      const { getUsageBudgets } = await import('../../usage/budgets.js');
-      const budgets = getUsageBudgets();
-      writeReport(ctx, budgets, formatRows(budgets.data as unknown as Array<Record<string, unknown>>, ['name', 'spent_usd', 'limit_usd', 'state']));
+      const { closeDb } = await initReadDb();
+      try {
+        const { getUsageBudgets } = await import('../../usage/budgets.js');
+        const budgets = getUsageBudgets();
+        writeReport(ctx, budgets, formatRows(budgets.data as unknown as Array<Record<string, unknown>>, ['name', 'spent_usd', 'limit_usd', 'state']));
+      } finally {
+        closeDb();
+      }
     },
   });
 

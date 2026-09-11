@@ -921,14 +921,15 @@ export function ensureSchemaForRead(): void {
  * cannot leave a partially-migrated table (which would risk double-correction).
  */
 export function runDataMigrations(db: Database): void {
-  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
-  if (current >= DATA_SCHEMA_VERSION) return;
+  const observedVersion = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+  if (observedVersion >= DATA_SCHEMA_VERSION) return;
 
-  // Apply the data changes and advance the version counter in one transaction.
-  // PRAGMA user_version is itself transactional, so a crash mid-migration rolls
-  // back both — there is no window where rows are corrected but the version is
-  // not yet bumped (which would re-run and double-subtract on restart).
+  // Re-read the version after acquiring the write transaction. Another process
+  // may have completed the migration while this connection was waiting, and v1
+  // is deliberately non-idempotent.
   const run = db.transaction(() => {
+    const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+    if (current >= DATA_SCHEMA_VERSION) return;
     if (current < 1) backfillCacheInclusiveInputTokens(db);
     if (current < 2) backfillOccupancyOnUpgrade(db);
     if (current < 3) invalidateCodexImportsForModelAttribution(db);
@@ -939,7 +940,7 @@ export function runDataMigrations(db: Database): void {
     // full structural initialization required by ensureSchemaForRead().
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
-  run();
+  run.immediate();
 }
 
 /**

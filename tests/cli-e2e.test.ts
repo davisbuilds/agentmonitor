@@ -26,10 +26,14 @@ function runBuiltCli(args: string[]): string {
   return result.stdout;
 }
 
-function runBuiltCliAsync(args: string[]): Promise<{ status: number | null; stdout: string; stderr: string }> {
+function runBuiltCliAsync(
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<{ status: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [DIST_CLI, ...args], {
       cwd: ROOT,
+      env,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -211,6 +215,30 @@ test('concurrent built local reads initialize an older database before querying'
     const upgraded = new Database(dbPath, { readonly: true });
     assert.equal(upgraded.pragma('user_version', { simple: true }), 7);
     upgraded.close();
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('built usage budgets initializes a fresh database when budget evaluation needs usage', async (t) => {
+  if (!requireBuiltCli(t)) return;
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-budgets-'));
+  const dbPath = path.join(tempDir, 'agentmonitor.db');
+  const budgetsPath = path.join(tempDir, 'budgets.json');
+  try {
+    fs.writeFileSync(budgetsPath, JSON.stringify({
+      budgets: [{ name: 'Agent budget', period: 'all_time', limit_usd: 10 }],
+    }));
+    const result = await runBuiltCliAsync(
+      ['--db-path', dbPath, 'usage', 'budgets', '--json'],
+      { ...process.env, AGENTMONITOR_USAGE_BUDGETS_PATH: budgetsPath },
+    );
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.equal(result.stderr, '');
+    const payload = JSON.parse(result.stdout) as { data?: Array<{ name?: string }> };
+    assert.equal(payload.data?.[0]?.name, 'Agent budget');
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
   }

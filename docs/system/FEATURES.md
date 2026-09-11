@@ -20,8 +20,8 @@ Product-surface reference for AgentMonitor.
 - Human output is terminal-safe; finite reads expose stable structured data with
   `--json` on stdout, live watch emits NDJSON, and diagnostics stay on stderr.
   Reporting commands reject unsupported filters rather than accepting no-op
-  input, and current local databases take a read-only startup path so multiple
-  agents can query alongside the WAL writer.
+  input. Current local databases skip repeated schema DDL, so multiple agents
+  can query alongside the WAL writer.
 
 ## Real-Time Dashboard
 
