@@ -5,13 +5,7 @@ import { effectiveBaseUrl } from '../http.js';
 import { formatLiveItems, formatLiveSessions, formatMessages, formatPins, formatSessionDetail, formatSessionRows } from '../formatters/sessions.js';
 import { writeJson, writeStdout } from '../output.js';
 import type { CliContext } from '../output.js';
-
-async function initDb() {
-  const { initSchema } = await import('../../db/schema.js');
-  const { closeDb } = await import('../../db/connection.js');
-  initSchema();
-  return { closeDb };
-}
+import { initReadDb } from '../db.js';
 
 function parseListFilters(args: string[]) {
   const parsed = parseOptionSet(
@@ -150,7 +144,7 @@ export function registerSessionLiveCommands(): void {
     async handler(ctx, args) {
       const { parsed, params } = parseListFilters(args);
       if (parsed.positionals.length > 0) throw invalidUsage('Usage: amon sessions list [options]');
-      const { closeDb } = await initDb();
+      const { closeDb } = await initReadDb();
       try {
         const { listBrowsingSessions } = await import('../../db/v2-queries.js');
         const result = listBrowsingSessions(params);
@@ -169,7 +163,7 @@ export function registerSessionLiveCommands(): void {
     examples: ['sessions show abc123 --json'],
     async handler(ctx, args) {
       const id = requireOne(args, 'amon sessions show <id>');
-      const { closeDb } = await initDb();
+      const { closeDb } = await initReadDb();
       try {
         const { getBrowsingSession } = await import('../../db/v2-queries.js');
         const session = getBrowsingSession(id);
@@ -199,7 +193,7 @@ export function registerSessionLiveCommands(): void {
         limit: parseIntegerOption(parsed.values.get('--limit'), '--limit'),
         around_ordinal: parseIntegerOption(parsed.values.get('--around-ordinal'), '--around-ordinal'),
       };
-      const { closeDb } = await initDb();
+      const { closeDb } = await initReadDb();
       try {
         const { getBrowsingSession, getSessionMessages } = await import('../../db/v2-queries.js');
         if (!getBrowsingSession(id)) throw notFound(`Session not found: ${id}`);
@@ -219,7 +213,7 @@ export function registerSessionLiveCommands(): void {
     examples: ['sessions search "rate limit" --sort relevance --json'],
     async handler(ctx, args) {
       const params = parseSearchFilters(args);
-      const { closeDb } = await initDb();
+      const { closeDb } = await initReadDb();
       try {
         const { searchMessages } = await import('../../db/v2-queries.js');
         const result = searchMessages(params);
@@ -262,7 +256,7 @@ export function registerSessionLiveCommands(): void {
     async handler(ctx, args) {
       const parsed = parseOptionSet(args, new Set(['--project']), new Set());
       if (parsed.positionals.length > 0) throw invalidUsage('Usage: amon pins list [options]');
-      const { closeDb } = await initDb();
+      const { closeDb } = await initReadDb();
       try {
         const { listPinnedMessages } = await import('../../db/v2-queries.js');
         const pins = listPinnedMessages({ project: parsed.values.get('--project') });
@@ -286,7 +280,7 @@ export function registerSessionLiveCommands(): void {
         new Set(['--active-only']),
       );
       if (parsed.positionals.length > 0) throw invalidUsage('Usage: amon live sessions [options]');
-      const { closeDb } = await initDb();
+      const { closeDb } = await initReadDb();
       try {
         const { listLiveSessions } = await import('../../db/v2-queries.js');
         const result = listLiveSessions({
@@ -314,7 +308,7 @@ export function registerSessionLiveCommands(): void {
     async handler(ctx, args) {
       const parsed = parseOptionSet(args, new Set(['--limit', '--cursor', '--kinds']), new Set());
       const id = requireOne(parsed.positionals, 'amon live items <id> [options]');
-      const { closeDb } = await initDb();
+      const { closeDb } = await initReadDb();
       try {
         const { getLiveSession, getSessionItems } = await import('../../db/v2-queries.js');
         if (!getLiveSession(id)) throw notFound(`Live session not found: ${id}`);

@@ -114,9 +114,11 @@ pnpm cli -- sessions search "deploy model"
 pnpm cli -- live watch
 pnpm cli -- live watch --kinds user_message,tool_call
 
-pnpm cli -- usage summary --days 7
-pnpm cli -- analytics tools --limit 20
-pnpm cli -- quality findings --severity high
+pnpm cli -- usage overview --date-from 2026-09-01 --json
+pnpm cli -- usage facets --project agentmonitor --json
+pnpm cli -- usage summary --date-from 2026-09-01 --project agentmonitor
+pnpm cli -- analytics tools --date-from 2026-09-01 --agent codex
+pnpm cli -- quality traces --project agentmonitor --limit 20
 
 pnpm cli -- hooks install claude --dry-run
 pnpm cli -- hooks print-codex-config
@@ -136,6 +138,15 @@ amon serve           # https://agentmonitor.localhost, backed by 127.0.0.1:3141
 The legacy package scripts remain compatibility wrappers. Prefer the CLI for new
 operator docs and automation because it has consistent global flags such as
 `--db-path`, `--url`, `--json`, `--plain`, `--quiet`, and `--no-input`.
+
+For agent and script consumption, finite read commands emit their complete data
+contract with `--json` on stdout and reserve stderr for diagnostics. `usage
+overview` matches the Usage page's optimized one-scan payload: summary, daily,
+project, model, model-by-day, tier, agent, and top-session rollups plus coverage.
+`usage facets` returns the page's five self-excluding filter lists. Use each
+command's `--help` as the authority for accepted filters; unsupported filters
+exit 2 instead of being ignored. Local read commands can run concurrently with
+the server's WAL writer and with other CLI readers.
 
 ## Environment Variables
 

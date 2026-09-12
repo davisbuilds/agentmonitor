@@ -3,6 +3,7 @@ import { registerCommand } from '../commands.js';
 import { invalidUsage } from '../errors.js';
 import { formatOpsMetrics } from '../formatters/ops.js';
 import { writeJson, writeStdout } from '../output.js';
+import { initReadDb } from '../db.js';
 
 const RELATIVE_SINCE_RE = /^(\d+)(s|m|h|d|w)$/;
 const UNIT_MS: Record<string, number> = {
@@ -57,9 +58,7 @@ export function registerOpsCommands(): void {
         limit: parseIntegerOption(parsed.values.get('--limit'), '--limit'),
       };
 
-      const { initSchema } = await import('../../db/schema.js');
-      const { closeDb } = await import('../../db/connection.js');
-      initSchema();
+      const { closeDb } = await initReadDb();
       try {
         const { getOperationalMetricSummary } = await import('../../db/v2-queries.js');
         const metrics = getOperationalMetricSummary(query);

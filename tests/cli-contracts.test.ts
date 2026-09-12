@@ -199,12 +199,95 @@ test('reporting commands preserve JSON data and coverage contracts', async () =>
   assert.equal(typeof tracesJson.coverage?.matching_traces, 'number');
 });
 
-test('invalid numeric reporting filters exit with invalid usage', async () => {
-  const result = await runCli(['quality', 'traces', '--min-score', 'nope']);
+test('usage overview and facets preserve the exact UI query contracts', async () => {
+  const params = {
+    date_from: '2026-06-15',
+    date_to: '2026-06-15',
+    project: 'agentmonitor',
+    agent: 'codex',
+    model: 'gpt-5.4',
+    provider: 'openai',
+    tier: 'standard',
+  };
+  const args = [
+    '--date-from', params.date_from,
+    '--date-to', params.date_to,
+    '--project', params.project,
+    '--agent', params.agent,
+    '--model', params.model,
+    '--provider', params.provider,
+    '--tier', params.tier,
+    '--json',
+  ];
+
+  const overview = await runCli(['usage', 'overview', ...args]);
+  assert.equal(overview.exitCode, 0, overview.stderr);
+  assert.equal(overview.stderr, '');
+
+  const facets = await runCli(['usage', 'facets', ...args]);
+  assert.equal(facets.exitCode, 0, facets.stderr);
+  assert.equal(facets.stderr, '');
+
+  const { getUsageFacets, getUsageOverview } = await import('../src/db/v2-queries.js');
+  const overviewJson = JSON.parse(overview.stdout) as ReturnType<typeof getUsageOverview>;
+  const facetsJson = JSON.parse(facets.stdout) as ReturnType<typeof getUsageFacets>;
+  assert.deepEqual(overviewJson, getUsageOverview(params));
+  assert.deepEqual(facetsJson, getUsageFacets(params));
+  assert.equal(overviewJson.summary.total_usage_events, 2);
+  assert.equal(overviewJson.models[0]?.model, 'gpt-5.4');
+  assert.deepEqual(facetsJson.projects, ['agentmonitor']);
+  assert.deepEqual(facetsJson.models, ['gpt-5.4']);
+  assert.deepEqual(Object.keys(overviewJson).sort(), [
+    'agents', 'coverage', 'daily', 'models', 'models_daily', 'projects', 'summary', 'tiers', 'top_sessions',
+  ]);
+  assert.deepEqual(Object.keys(facetsJson).sort(), [
+    'agents', 'models', 'projects', 'providers', 'tiers',
+  ]);
+});
+
+test('reporting commands reject unsupported filters instead of ignoring them', async () => {
+  const analytics = await runCli(['analytics', 'tools', '--limit', '1']);
+  assert.equal(analytics.exitCode, 2);
+  assert.equal(analytics.stdout, '');
+  assert.match(analytics.stderr, /Unknown option: --limit/);
+
+  const quality = await runCli(['quality', 'traces', '--min-score', '0']);
+  assert.equal(quality.exitCode, 2);
+  assert.equal(quality.stdout, '');
+  assert.match(quality.stderr, /Unknown option: --min-score/);
+
+  const budgets = await runCli(['usage', 'budgets', '--project', 'agentmonitor']);
+  assert.equal(budgets.exitCode, 2);
+  assert.equal(budgets.stdout, '');
+  assert.match(budgets.stderr, /Unknown option: --project/);
+});
+
+test('reporting help names every supported filter', async () => {
+  const overview = await runCli(['usage', 'overview', '--help']);
+  assert.equal(overview.exitCode, 0, overview.stderr);
+  for (const flag of ['--date-from', '--date-to', '--project', '--agent', '--model', '--provider', '--tier', '--json']) {
+    assert.match(overview.stdout, new RegExp(flag));
+  }
+
+  const topSessions = await runCli(['analytics', 'top-sessions', '--help']);
+  assert.equal(topSessions.exitCode, 0, topSessions.stderr);
+  for (const flag of ['--date-from', '--date-to', '--project', '--agent', '--limit', '--json']) {
+    assert.match(topSessions.stdout, new RegExp(flag));
+  }
+
+  const quality = await runCli(['quality', 'traces', '--help']);
+  assert.equal(quality.exitCode, 0, quality.stderr);
+  for (const flag of ['--date-from', '--date-to', '--project', '--agent', '--session-id', '--limit', '--offset', '--json']) {
+    assert.match(quality.stdout, new RegExp(flag));
+  }
+});
+
+test('invalid date reporting filters exit with invalid usage', async () => {
+  const result = await runCli(['usage', 'overview', '--date-from', 'not-a-date']);
 
   assert.equal(result.exitCode, 2);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /Invalid --min-score: nope/);
+  assert.match(result.stderr, /Invalid --date-from: not-a-date/);
 });
 
 test('serve rejects the removed --no-browser flag instead of silently accepting it', async () => {

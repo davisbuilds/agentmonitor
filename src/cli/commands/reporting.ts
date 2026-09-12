@@ -1,79 +1,66 @@
-import { parseIntegerOption, parseOptionSet } from '../args.js';
+import { parseDateOption, parseIntegerOption, parseOptionSet } from '../args.js';
 import { registerCommand } from '../commands.js';
 import { invalidUsage } from '../errors.js';
-import { formatCurrency, formatRows, formatUsageSummary } from '../formatters/reporting.js';
+import { formatCurrency, formatRows, formatUsageFacets, formatUsageOverview, formatUsageSummary } from '../formatters/reporting.js';
 import { writeJson, writeStdout } from '../output.js';
 import type { CliContext } from '../output.js';
+import { initReadDb } from '../db.js';
+import type { AnalyticsParams, TraceQualityTraceListParams, UsageParams } from '../../api/v2/types.js';
 
-function parseNumberOption(value: string | undefined, flag: string): number | undefined {
-  if (value == null) return undefined;
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw invalidUsage(`Invalid ${flag}: ${value}`);
-  return parsed;
+const USAGE_FLAGS = new Set([
+  '--date-from', '--date-to', '--project', '--agent', '--model', '--provider', '--tier',
+]);
+const ANALYTICS_FLAGS = new Set(['--date-from', '--date-to', '--project', '--agent']);
+const QUALITY_TRACE_FLAGS = new Set([
+  '--date-from', '--date-to', '--project', '--agent', '--session-id', '--limit', '--offset',
+]);
+
+function parseValues(args: string[], valueFlags: Set<string>) {
+  const parsed = parseOptionSet(args, valueFlags, new Set());
+  if (parsed.positionals.length > 0) throw invalidUsage(`Unexpected argument: ${parsed.positionals[0]}`);
+  return parsed.values;
 }
 
-function commonParams(args: string[]) {
-  const parsed = parseOptionSet(
-    args,
-    new Set([
-      '--date-from',
-      '--date-to',
-      '--project',
-      '--agent',
-      '--model',
-      '--provider',
-      '--tier',
-      '--limit',
-      '--offset',
-      '--session-id',
-      '--status',
-      '--observation-type',
-      '--tool',
-      '--tool-name',
-      '--score-name',
-      '--min-score',
-      '--max-score',
-      '--kind',
-      '--severity',
-      '--trace-id',
-      '--observation-id',
-      '--target-type',
-    ]),
-    new Set(['--exclude-low-coverage']),
-  );
-  if (parsed.positionals.length > 0) throw invalidUsage(`Unexpected argument: ${parsed.positionals[0]}`);
+function parseUsageParams(args: string[]): UsageParams {
+  const values = parseValues(args, USAGE_FLAGS);
   return {
-    date_from: parsed.values.get('--date-from'),
-    date_to: parsed.values.get('--date-to'),
-    project: parsed.values.get('--project'),
-    agent: parsed.values.get('--agent'),
-    model: parsed.values.get('--model'),
-    provider: parsed.values.get('--provider'),
-    tier: parsed.values.get('--tier'),
-    limit: parseIntegerOption(parsed.values.get('--limit'), '--limit'),
-    offset: parseIntegerOption(parsed.values.get('--offset'), '--offset'),
-    session_id: parsed.values.get('--session-id'),
-    status: parsed.values.get('--status'),
-    observation_type: parsed.values.get('--observation-type'),
-    tool: parsed.values.get('--tool'),
-    tool_name: parsed.values.get('--tool-name'),
-    score_name: parsed.values.get('--score-name'),
-    min_score: parseNumberOption(parsed.values.get('--min-score'), '--min-score'),
-    max_score: parseNumberOption(parsed.values.get('--max-score'), '--max-score'),
-    kind: parsed.values.get('--kind'),
-    severity: parsed.values.get('--severity'),
-    trace_id: parsed.values.get('--trace-id'),
-    observation_id: parsed.values.get('--observation-id'),
-    target_type: parsed.values.get('--target-type'),
-    exclude_low_coverage: parsed.flags.has('--exclude-low-coverage'),
+    date_from: parseDateOption(values.get('--date-from'), '--date-from'),
+    date_to: parseDateOption(values.get('--date-to'), '--date-to'),
+    project: values.get('--project'),
+    agent: values.get('--agent'),
+    model: values.get('--model'),
+    provider: values.get('--provider'),
+    tier: values.get('--tier'),
   };
 }
 
-async function initDb() {
-  const { initSchema } = await import('../../db/schema.js');
-  const { closeDb } = await import('../../db/connection.js');
-  initSchema();
-  return { closeDb };
+function parseAnalyticsParams(args: string[], withLimit = false): AnalyticsParams {
+  const flags = withLimit ? new Set([...ANALYTICS_FLAGS, '--limit']) : ANALYTICS_FLAGS;
+  const values = parseValues(args, flags);
+  return {
+    date_from: parseDateOption(values.get('--date-from'), '--date-from'),
+    date_to: parseDateOption(values.get('--date-to'), '--date-to'),
+    project: values.get('--project'),
+    agent: values.get('--agent'),
+    limit: withLimit ? parseIntegerOption(values.get('--limit'), '--limit') : undefined,
+  };
+}
+
+function parseQualityTraceParams(args: string[]): TraceQualityTraceListParams {
+  const values = parseValues(args, QUALITY_TRACE_FLAGS);
+  return {
+    date_from: parseDateOption(values.get('--date-from'), '--date-from'),
+    date_to: parseDateOption(values.get('--date-to'), '--date-to'),
+    project: values.get('--project'),
+    agent: values.get('--agent'),
+    session_id: values.get('--session-id'),
+    limit: parseIntegerOption(values.get('--limit'), '--limit'),
+    offset: parseIntegerOption(values.get('--offset'), '--offset'),
+  };
+}
+
+function rejectOptions(args: string[]): void {
+  parseValues(args, new Set());
 }
 
 function writeReport(ctx: CliContext, value: unknown, human: string): void {
@@ -81,15 +68,56 @@ function writeReport(ctx: CliContext, value: unknown, human: string): void {
   else writeStdout(ctx, human);
 }
 
+const USAGE_FILTER_HELP = '[--date-from <date>] [--date-to <date>] [--project <name>] [--agent <type>] [--model <name>] [--provider <name>] [--tier <name>]';
+const ANALYTICS_FILTER_HELP = '[--date-from <date>] [--date-to <date>] [--project <name>] [--agent <type>]';
+
 export function registerReportingCommands(): void {
+  registerCommand({
+    name: 'usage overview',
+    group: 'Usage Commands',
+    summary: 'Show every Usage-page rollup from one scan',
+    usage: `usage overview ${USAGE_FILTER_HELP} [--json]`,
+    examples: ['usage overview --date-from 2026-09-01 --json', 'usage overview --project agentmonitor --agent codex --json'],
+    async handler(ctx, args) {
+      const params = parseUsageParams(args);
+      const { closeDb } = await initReadDb();
+      try {
+        const { getUsageOverview } = await import('../../db/v2-queries.js');
+        const overview = getUsageOverview(params);
+        writeReport(ctx, overview, formatUsageOverview(overview));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'usage facets',
+    group: 'Usage Commands',
+    summary: 'Show self-excluding Usage filter values',
+    usage: `usage facets ${USAGE_FILTER_HELP} [--json]`,
+    examples: ['usage facets --json', 'usage facets --project agentmonitor --json'],
+    async handler(ctx, args) {
+      const params = parseUsageParams(args);
+      const { closeDb } = await initReadDb();
+      try {
+        const { getUsageFacets } = await import('../../db/v2-queries.js');
+        const facets = getUsageFacets(params);
+        writeReport(ctx, facets, formatUsageFacets(facets));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
   registerCommand({
     name: 'usage summary',
     group: 'Usage Commands',
     summary: 'Show usage cost and token totals',
-    usage: 'usage summary [--date-from <date>] [--project <name>] [--json]',
+    usage: `usage summary ${USAGE_FILTER_HELP} [--json]`,
     async handler(ctx, args) {
-      const params = commonParams(args);
-      const { closeDb } = await initDb();
+      const params = parseUsageParams(args);
+      const { closeDb } = await initReadDb();
       try {
         const { getUsageSummary } = await import('../../db/v2-queries.js');
         const summary = getUsageSummary(params);
@@ -104,10 +132,10 @@ export function registerReportingCommands(): void {
     name: 'usage daily',
     group: 'Usage Commands',
     summary: 'Show daily usage costs',
-    usage: 'usage daily [--date-from <date>] [--date-to <date>] [--json]',
+    usage: `usage daily ${USAGE_FILTER_HELP} [--json]`,
     async handler(ctx, args) {
-      const params = commonParams(args);
-      const { closeDb } = await initDb();
+      const params = parseUsageParams(args);
+      const { closeDb } = await initReadDb();
       try {
         const { getUsageCoverage, getUsageDaily } = await import('../../db/v2-queries.js');
         const payload = { data: getUsageDaily(params), coverage: getUsageCoverage(params) };
@@ -126,10 +154,10 @@ export function registerReportingCommands(): void {
       name,
       group: 'Usage Commands',
       summary,
-      usage: `${name} [--date-from <date>] [--json]`,
+      usage: `${name} ${USAGE_FILTER_HELP} [--json]`,
       async handler(ctx, args) {
-        const params = commonParams(args);
-        const { closeDb } = await initDb();
+        const params = parseUsageParams(args);
+        const { closeDb } = await initReadDb();
         try {
           const queries = await import('../../db/v2-queries.js');
           const data = queries[getter](params);
@@ -147,10 +175,10 @@ export function registerReportingCommands(): void {
     name: 'usage statusline',
     group: 'Usage Commands',
     summary: 'Print a one-line cost summary',
-    usage: 'usage statusline [--plain]',
+    usage: `usage statusline ${USAGE_FILTER_HELP} [--plain]`,
     async handler(ctx, args) {
-      const params = commonParams(args);
-      const { closeDb } = await initDb();
+      const params = parseUsageParams(args);
+      const { closeDb } = await initReadDb();
       try {
         const { getUsageSummary } = await import('../../db/v2-queries.js');
         const summary = getUsageSummary(params);
@@ -168,10 +196,15 @@ export function registerReportingCommands(): void {
     summary: 'Show read-only usage budget state',
     usage: 'usage budgets [--json]',
     async handler(ctx, args) {
-      commonParams(args);
-      const { getUsageBudgets } = await import('../../usage/budgets.js');
-      const budgets = getUsageBudgets();
-      writeReport(ctx, budgets, formatRows(budgets.data as unknown as Array<Record<string, unknown>>, ['name', 'spent_usd', 'limit_usd', 'state']));
+      rejectOptions(args);
+      const { closeDb } = await initReadDb();
+      try {
+        const { getUsageBudgets } = await import('../../usage/budgets.js');
+        const budgets = getUsageBudgets();
+        writeReport(ctx, budgets, formatRows(budgets.data as unknown as Array<Record<string, unknown>>, ['name', 'spent_usd', 'limit_usd', 'state']));
+      } finally {
+        closeDb();
+      }
     },
   });
 
@@ -179,10 +212,10 @@ export function registerReportingCommands(): void {
     name: 'usage tier-feedback',
     group: 'Usage Commands',
     summary: 'Show advisory model-tier feedback',
-    usage: 'usage tier-feedback [--date-from <date>] [--json]',
+    usage: `usage tier-feedback ${USAGE_FILTER_HELP} [--json]`,
     async handler(ctx, args) {
-      const params = commonParams(args);
-      const { closeDb } = await initDb();
+      const params = parseUsageParams(args);
+      const { closeDb } = await initReadDb();
       try {
         const { getUsageTierFeedback } = await import('../../usage/tier-feedback.js');
         const report = getUsageTierFeedback(params);
@@ -202,10 +235,10 @@ export function registerReportingCommands(): void {
       name,
       group: 'Analytics Commands',
       summary,
-      usage: `${name} [--date-from <date>] [--json]`,
+      usage: `${name} ${ANALYTICS_FILTER_HELP}${name === 'analytics top-sessions' ? ' [--limit <n>]' : ''} [--json]`,
       async handler(ctx, args) {
-        const params = commonParams(args);
-        const { closeDb } = await initDb();
+        const params = parseAnalyticsParams(args, name === 'analytics top-sessions');
+        const { closeDb } = await initReadDb();
         try {
           const queries = await import('../../db/v2-queries.js');
           const data = queries[getter](params);
@@ -225,10 +258,10 @@ export function registerReportingCommands(): void {
     name: 'quality traces',
     group: 'Quality Commands',
     summary: 'List trace-quality traces (one per session, from the lean summary)',
-    usage: 'quality traces [--session-id <id>] [--limit <n>] [--json]',
+    usage: 'quality traces [--date-from <date>] [--date-to <date>] [--project <name>] [--agent <type>] [--session-id <id>] [--limit <n>] [--offset <n>] [--json]',
     async handler(ctx, args) {
-      const params = commonParams(args);
-      const { closeDb } = await initDb();
+      const params = parseQualityTraceParams(args);
+      const { closeDb } = await initReadDb();
       try {
         const { ensureSessionTraceSummaryBackfill } = await import('../../trace-quality/summary.js');
         const { listSessionTraces } = await import('../../trace-quality/on-demand.js');

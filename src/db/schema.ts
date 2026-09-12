@@ -20,15 +20,25 @@ function sqlStringList(values: readonly string[]): string {
  * seam is repaired before the parents disappear on either path.
  */
 export function ensureTraceQualityExportStateFkFree(db: Database): void {
-  const sql = (db.prepare(
+  const readTableSql = () => (db.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='trace_quality_export_state'",
   ).get() as { sql: string } | undefined)?.sql;
-  if (!sql || !/REFERENCES\s+trace_quality_(traces|observations)/i.test(sql)) return;
+  const hasLegacyForeignKeys = (sql: string | undefined) => (
+    sql != null && /REFERENCES\s+trace_quality_(traces|observations)/i.test(sql)
+  );
+  const sql = readTableSql();
+  if (!hasLegacyForeignKeys(sql)) return;
 
   const foreignKeys = Number(db.pragma('foreign_keys', { simple: true }));
   db.pragma('foreign_keys = OFF');
   try {
-    db.exec('BEGIN');
+    db.exec('BEGIN IMMEDIATE');
+    // Another process may have repaired the table while this connection waited
+    // for the write slot. Recheck under the lock before rebuilding it.
+    if (!hasLegacyForeignKeys(readTableSql())) {
+      db.exec('COMMIT');
+      return;
+    }
     // Build the FK-free replacement under a temp name (so the old indexes keep
     // their names until the original is dropped), copy rows, swap, re-index.
     db.exec(`
@@ -64,16 +74,14 @@ export function ensureTraceQualityExportStateFkFree(db: Database): void {
     `);
     db.exec('COMMIT');
   } catch (err) {
-    db.exec('ROLLBACK');
+    if (db.inTransaction) db.exec('ROLLBACK');
     throw err;
   } finally {
     db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`);
   }
 }
 
-export function initSchema(): void {
-  const db = getDb();
-
+function initSchemaLocked(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -779,10 +787,6 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_tq_export_external_trace ON trace_quality_export_state(provider, external_trace_id);
   `);
 
-  // Repair the export seam on existing DBs: drop its legacy FKs to the removed
-  // warehouse tables so it stays usable after the reclaim drops those parents.
-  ensureTraceQualityExportStateFkFree(db);
-
   // Lean, content-free, export-shaped per-session trace summary (trace-quality
   // reframe). One row per session; the full observation tree is projected
   // on-demand rather than persisted. Columns map to medallion's
@@ -897,9 +901,37 @@ export function initSchema(): void {
   runDataMigrations(db);
 }
 
+/**
+ * Initialize or upgrade the schema while holding SQLite's write slot for the
+ * full structural guard pass. This prevents concurrent processes from both
+ * observing an additive column as absent and issuing the same ALTER TABLE.
+ */
+export function initSchema(): void {
+  const db = getDb();
+  // This repair must toggle foreign_keys outside a transaction. It acquires and
+  // rechecks under its own immediate transaction when a legacy table exists.
+  ensureTraceQualityExportStateFkFree(db);
+  const initialize = db.transaction(() => initSchemaLocked(db));
+  initialize.immediate();
+}
+
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 6;
+const DATA_SCHEMA_VERSION = 7;
+
+/**
+ * Prepare a database for a read-only CLI command without replaying the full
+ * schema DDL on every process. initSchema() advances user_version only after
+ * every table/column/index guard and data migration succeeds, so the marker is
+ * also the read fast-path boundary. A missing or older database still takes the
+ * complete initialization path before any query runs.
+ */
+export function ensureSchemaForRead(): void {
+  const db = getDb();
+  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+  if (current >= DATA_SCHEMA_VERSION) return;
+  initSchema();
+}
 
 /**
  * Apply one-shot, idempotent data corrections guarded by PRAGMA user_version.
@@ -907,23 +939,26 @@ const DATA_SCHEMA_VERSION = 6;
  * cannot leave a partially-migrated table (which would risk double-correction).
  */
 export function runDataMigrations(db: Database): void {
-  const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
-  if (current >= DATA_SCHEMA_VERSION) return;
+  const observedVersion = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+  if (observedVersion >= DATA_SCHEMA_VERSION) return;
 
-  // Apply the data changes and advance the version counter in one transaction.
-  // PRAGMA user_version is itself transactional, so a crash mid-migration rolls
-  // back both — there is no window where rows are corrected but the version is
-  // not yet bumped (which would re-run and double-subtract on restart).
+  // Re-read the version after acquiring the write transaction. Another process
+  // may have completed the migration while this connection was waiting, and v1
+  // is deliberately non-idempotent.
   const run = db.transaction(() => {
+    const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
+    if (current >= DATA_SCHEMA_VERSION) return;
     if (current < 1) backfillCacheInclusiveInputTokens(db);
     if (current < 2) backfillOccupancyOnUpgrade(db);
     if (current < 3) invalidateCodexImportsForModelAttribution(db);
     if (current < 4) invalidateSessionFilesForSkillContext(db);
     if (current < 5) deleteLegacyBenchmarkRows(db);
     if (current < 6) deleteOrphanedSessions(db);
+    // v7 introduces no data correction. It marks databases that completed the
+    // full structural initialization required by ensureSchemaForRead().
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
-  run();
+  run.immediate();
 }
 
 /**

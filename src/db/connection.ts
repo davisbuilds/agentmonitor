@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { resolveDbPath } from '../db-path.js';
 
 let db: Database.Database | undefined;
+const SQLITE_BUSY_TIMEOUT_MS = 30_000;
 
 /**
  * Under the test runner, refuse to open the install database.
@@ -34,8 +35,13 @@ export function getDb(): Database.Database {
       fs.mkdirSync(dbDir, { recursive: true });
     }
 
-    db = new Database(config.dbPath);
-    db.pragma('journal_mode = WAL');
+    db = new Database(config.dbPath, { timeout: SQLITE_BUSY_TIMEOUT_MS });
+    // Configure contention handling before any pragma that may need a lock.
+    // Re-applying journal_mode=WAL from every short-lived CLI process can queue
+    // behind the running server's writer even when the database is already WAL.
+    db.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
+    const journalMode = db.pragma('journal_mode', { simple: true });
+    if (journalMode !== 'wal') db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
     db.pragma('foreign_keys = ON');
     db.pragma('cache_size = -64000'); // 64MB
