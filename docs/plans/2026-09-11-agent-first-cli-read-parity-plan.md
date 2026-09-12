@@ -33,9 +33,11 @@ The contract comes from the 2026-09-11 conversation and live repository mapping:
 ### In Scope
 
 - Preserve a durable inventory of current UI read contracts and CLI coverage.
-- First PR: concurrent read reliability, exact `usage overview` and `usage facets`
-  commands, command-specific reporting filters/help, tests, and operator docs.
-- Later PRs: complete Analytics, then saved analysis artifacts, then remaining
+- First PR (merged as `9184e04`): concurrent read reliability, exact `usage
+  overview` and `usage facets` commands, command-specific reporting filters/help,
+  tests, and operator docs.
+- Second PR: complete Analytics leaf parity and add an agent-oriented composite
+  overview. Later PRs cover saved analysis artifacts, then remaining
   session/live/monitor operational reads.
 - Use the same query/service functions as the v2 routes so CLI and UI data semantics
   cannot drift through duplicate SQL.
@@ -361,12 +363,17 @@ Tasks 1-3
 
 **Objective**
 
-Expose the seven Analytics UI contracts still missing from the CLI.
+Expose the seven Analytics UI contracts still missing from the CLI, plus one
+composite command that avoids ten separate CLI process launches for agent workflows.
 
 **Files**
 
 - Modify: `src/cli/commands/reporting.ts`
 - Modify: `src/cli/formatters/reporting.ts`
+- Create: `src/analytics/responses.ts`
+- Modify: `src/api/v2/router.ts`
+- Modify: `src/api/v2/types.ts`
+- Modify: `src/db/v2-queries.ts`
 - Test: `tests/cli-contracts.test.ts`
 - Modify: `README.md`
 - Modify: `docs/system/OPERATIONS.md`
@@ -389,6 +396,9 @@ First PR merged after user review
 2. Add nested `analytics skills daily` and `analytics skills health` commands.
 3. Preserve each endpoint's exact coverage/data-semantics envelope under `--json`.
 4. Apply the explicit Analytics filter parser from Task 2 and add exact-shape tests.
+5. Add `analytics overview`, with the ten endpoint payloads under stable snake-case
+   keys and a scoped `--top-sessions-limit`; share response assembly with the HTTP
+   routes so skill-health compatibility semantics cannot drift.
 
 **Verification**
 
@@ -404,6 +414,8 @@ First PR merged after user review
 
 - Every Analytics overview and Skills read used by the UI has a discoverable command
   whose JSON equals the owning query/service result for a non-empty fixture.
+- One `amon analytics overview --json` invocation returns all ten contracts, and
+  changing `--top-sessions-limit` does not change any non-top-session rollup.
 
 ### Task 6: Add saved-analysis artifact reads in the third PR
 
@@ -506,7 +518,7 @@ Task 6 merged
 
 ## Risks And Mitigations
 
-### First PR implementation status (2026-09-11)
+### First PR implementation status (merged 2026-09-12)
 
 - Tasks 1-3 are implemented on `feat/agent-first-cli-usage-parity`.
 - The original installed-CLI workload reproduced five lock failures across eight
@@ -528,7 +540,31 @@ Task 6 merged
   fixed by serializing the full guard pass and rechecking the special trace export
   repair under its own write lock.
 - Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (896 tests).
-- Task 4 implementation is complete. The PR remains unmerged for user review.
+- Task 4 is complete. PR #123 merged as `9184e04` and local `main` was synced.
+
+### Second PR implementation status (2026-09-12)
+
+- Task 5 is implemented on `feat/agent-first-cli-analytics-parity` pending review.
+- The seven missing leaf commands preserve their owning response contracts:
+  `analytics activity`, `projects`, `agents`, `velocity`, `hour-of-week`, `skills
+  daily`, and `skills health`.
+- `analytics overview --json` composes all ten Analytics-page reads in one process.
+  It reuses the all-session coverage result across its array and skill-health
+  envelopes and accepts the explicit `--top-sessions-limit` option for its
+  top-session rollup.
+- HTTP routes and CLI commands share response builders, including the special skill
+  health compatibility and consultation envelope.
+- Codex reviewed `db1f176` and found one P2: without a transaction, a concurrent
+  writer could make later rollups observe a newer SQLite snapshot than summary and
+  its reused coverage. A real concurrent-writer regression reproduced mixed totals
+  (`12, 13, 13, 13, 15, 15`), and the composite now refreshes the catalog first,
+  then evaluates every database read inside one transaction snapshot.
+- Current implemented parity is 21 of 42 UI read contracts, with 21 remaining:
+  Analytics is 10/10 and Usage is 2/2. The composite overview is a convenience
+  command and is not counted as an additional UI contract.
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (899 tests),
+  plus a built-artifact overview smoke with ten keys, 168 hour buckets, and empty
+  stderr.
 
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
   it. Signal: concurrent tests become slow or intermittently approach the timeout.

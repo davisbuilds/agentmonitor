@@ -1,7 +1,7 @@
 import { parseDateOption, parseIntegerOption, parseOptionSet } from '../args.js';
 import { registerCommand } from '../commands.js';
 import { invalidUsage } from '../errors.js';
-import { formatCurrency, formatRows, formatUsageFacets, formatUsageOverview, formatUsageSummary } from '../formatters/reporting.js';
+import { formatAnalyticsOverview, formatCurrency, formatRows, formatUsageFacets, formatUsageOverview, formatUsageSummary } from '../formatters/reporting.js';
 import { writeJson, writeStdout } from '../output.js';
 import type { CliContext } from '../output.js';
 import { initReadDb } from '../db.js';
@@ -34,15 +34,18 @@ function parseUsageParams(args: string[]): UsageParams {
   };
 }
 
-function parseAnalyticsParams(args: string[], withLimit = false): AnalyticsParams {
-  const flags = withLimit ? new Set([...ANALYTICS_FLAGS, '--limit']) : ANALYTICS_FLAGS;
+function parseAnalyticsParams(
+  args: string[],
+  limitFlag?: '--limit' | '--top-sessions-limit',
+): AnalyticsParams {
+  const flags = limitFlag ? new Set([...ANALYTICS_FLAGS, limitFlag]) : ANALYTICS_FLAGS;
   const values = parseValues(args, flags);
   return {
     date_from: parseDateOption(values.get('--date-from'), '--date-from'),
     date_to: parseDateOption(values.get('--date-to'), '--date-to'),
     project: values.get('--project'),
     agent: values.get('--agent'),
-    limit: withLimit ? parseIntegerOption(values.get('--limit'), '--limit') : undefined,
+    limit: limitFlag ? parseIntegerOption(values.get(limitFlag), limitFlag) : undefined,
   };
 }
 
@@ -226,10 +229,39 @@ export function registerReportingCommands(): void {
     },
   });
 
+  registerCommand({
+    name: 'analytics overview',
+    group: 'Analytics Commands',
+    summary: 'Show every Analytics-page read contract in one document',
+    usage: `analytics overview ${ANALYTICS_FILTER_HELP} [--top-sessions-limit <n>] [--json]`,
+    examples: [
+      'analytics overview --json',
+      'analytics overview --project agentmonitor --agent codex --top-sessions-limit 20 --json',
+    ],
+    async handler(ctx, args) {
+      const params = parseAnalyticsParams(args, '--top-sessions-limit');
+      const { closeDb } = await initReadDb();
+      try {
+        const { getAnalyticsOverview } = await import('../../analytics/responses.js');
+        const overview = getAnalyticsOverview(params);
+        writeReport(ctx, overview, formatAnalyticsOverview(overview));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
   for (const [name, summary, getter, columns] of [
-    ['analytics summary', 'Show historical session analytics summary', 'getAnalyticsSummary', ['total_sessions', 'total_messages', 'total_user_messages']],
-    ['analytics tools', 'Show tool analytics', 'getAnalyticsTools', ['tool_name', 'category', 'count']],
-    ['analytics top-sessions', 'Show top historical sessions', 'getAnalyticsTopSessions', ['id', 'project', 'agent', 'message_count', 'tool_call_count']],
+    ['analytics summary', 'Show historical session analytics summary', 'getAnalyticsSummaryResponse', ['total_sessions', 'total_messages', 'total_user_messages']],
+    ['analytics activity', 'Show daily session and message activity', 'getAnalyticsActivityResponse', ['date', 'sessions', 'messages', 'user_messages']],
+    ['analytics projects', 'Show analytics grouped by project', 'getAnalyticsProjectsResponse', ['project', 'session_count', 'message_count', 'user_message_count']],
+    ['analytics tools', 'Show tool analytics', 'getAnalyticsToolsResponse', ['tool_name', 'category', 'count']],
+    ['analytics skills daily', 'Show daily skill invocation analytics', 'getAnalyticsSkillsDailyResponse', ['date', 'total', 'skills']],
+    ['analytics skills health', 'Show skill invocation health and comparability', 'getAnalyticsSkillHealthResponse', ['name', 'version', 'invocations', 'neverFired', 'misfireRate', 'compatibilityOnly']],
+    ['analytics hour-of-week', 'Show the 7x24 historical activity grid', 'getAnalyticsHourOfWeekResponse', ['day_of_week', 'hour_of_day', 'session_count', 'message_count']],
+    ['analytics top-sessions', 'Show top historical sessions', 'getAnalyticsTopSessionsResponse', ['id', 'project', 'agent', 'message_count', 'tool_call_count']],
+    ['analytics velocity', 'Show session and message pace metrics', 'getAnalyticsVelocityResponse', ['total_sessions', 'total_messages', 'active_days', 'sessions_per_active_day', 'messages_per_active_day']],
+    ['analytics agents', 'Show analytics grouped by agent', 'getAnalyticsAgentsResponse', ['agent', 'session_count', 'message_count', 'average_messages_per_session']],
   ] as const) {
     registerCommand({
       name,
@@ -237,15 +269,17 @@ export function registerReportingCommands(): void {
       summary,
       usage: `${name} ${ANALYTICS_FILTER_HELP}${name === 'analytics top-sessions' ? ' [--limit <n>]' : ''} [--json]`,
       async handler(ctx, args) {
-        const params = parseAnalyticsParams(args, name === 'analytics top-sessions');
+        const params = parseAnalyticsParams(args, name === 'analytics top-sessions' ? '--limit' : undefined);
         const { closeDb } = await initReadDb();
         try {
-          const queries = await import('../../db/v2-queries.js');
-          const data = queries[getter](params);
-          const payload = Array.isArray(data) ? { data, coverage: queries.getAnalyticsCoverage(params, name === 'analytics tools' ? 'tool_analytics_capable' : 'all_sessions') } : data;
+          const responses = await import('../../analytics/responses.js');
+          const payload = (responses[getter] as (value: AnalyticsParams) => unknown)(params);
+          const data = typeof payload === 'object' && payload !== null && 'data' in payload
+            ? (payload as { data: unknown }).data
+            : payload;
           const human = Array.isArray(data)
-            ? formatRows(data as unknown as Array<Record<string, unknown>>, columns as unknown as string[])
-            : formatRows([data as unknown as Record<string, unknown>], columns as unknown as string[]);
+            ? formatRows(data as Array<Record<string, unknown>>, columns as unknown as string[])
+            : formatRows([data as Record<string, unknown>], columns as unknown as string[]);
           writeReport(ctx, payload, human);
         } finally {
           closeDb();

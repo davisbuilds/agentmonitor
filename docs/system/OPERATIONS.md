@@ -117,7 +117,9 @@ pnpm cli -- live watch --kinds user_message,tool_call
 pnpm cli -- usage overview --date-from 2026-09-01 --json
 pnpm cli -- usage facets --project agentmonitor --json
 pnpm cli -- usage summary --date-from 2026-09-01 --project agentmonitor
+pnpm cli -- analytics overview --date-from 2026-09-01 --top-sessions-limit 20 --json
 pnpm cli -- analytics tools --date-from 2026-09-01 --agent codex
+pnpm cli -- analytics skills health --project agentmonitor --json
 pnpm cli -- quality traces --project agentmonitor --limit 20
 
 pnpm cli -- hooks install claude --dry-run
@@ -143,6 +145,13 @@ For agent and script consumption, finite read commands emit their complete data
 contract with `--json` on stdout and reserve stderr for diagnostics. `usage
 overview` matches the Usage page's optimized one-scan payload: summary, daily,
 project, model, model-by-day, tier, agent, and top-session rollups plus coverage.
+`analytics overview` returns all ten Analytics-page contracts in one process:
+summary, activity, projects, tools, daily skill usage, skill health, the
+hour-of-week grid, top sessions, velocity, and agent comparison. Its
+`--top-sessions-limit` option applies only to that nested rollup. The same shared
+date/project/agent filters are available on the individual `analytics activity`,
+`projects`, `agents`, `velocity`, `hour-of-week`, `skills daily`, and `skills
+health` commands.
 `usage facets` returns the page's five self-excluding filter lists. Use each
 command's `--help` as the authority for accepted filters; unsupported filters
 exit 2 instead of being ignored. Local read commands can run concurrently with

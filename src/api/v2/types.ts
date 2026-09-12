@@ -861,6 +861,25 @@ export interface AgentComparisonRow {
   last_started_at: string | null;
 }
 
+export interface AnalyticsDataResponse<T> {
+  data: T[];
+  coverage: AnalyticsCoverage;
+}
+
+/** Every read contract consumed by the Analytics page, in one CLI-friendly payload. */
+export interface AnalyticsOverview {
+  summary: AnalyticsSummary;
+  activity: AnalyticsDataResponse<ActivityDataPoint>;
+  projects: AnalyticsDataResponse<ProjectBreakdown>;
+  tools: AnalyticsDataResponse<ToolUsageStat>;
+  skills_daily: AnalyticsDataResponse<SkillUsageDay>;
+  skills_health: SkillHealthResponse;
+  hour_of_week: AnalyticsDataResponse<HourOfWeekDataPoint>;
+  top_sessions: AnalyticsDataResponse<TopSessionStat>;
+  velocity: VelocityMetrics;
+  agents: AnalyticsDataResponse<AgentComparisonRow>;
+}
+
 export interface UsageSourceBreakdown {
   source: string;
   event_count: number;
