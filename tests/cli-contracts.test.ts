@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -348,6 +349,77 @@ test('analytics overview returns all UI contracts and scopes its top-session lim
   };
   assert.equal(limitedPayload.summary.total_sessions, 2);
   assert.equal(limitedPayload.top_sessions.data.length, 1);
+});
+
+test('analytics overview reads every rollup from one SQLite snapshot', async () => {
+  const { getAnalyticsOverview } = await import('../src/analytics/responses.js');
+  const { refreshSkillCatalogSnapshots } = await import('../src/db/v2-queries.js');
+  refreshSkillCatalogSnapshots();
+
+  const writerScript = `
+    import Database from 'better-sqlite3';
+    const db = new Database(process.env.AGENTMONITOR_TEST_DB);
+    db.pragma('journal_mode = WAL');
+    db.pragma('busy_timeout = 5000');
+    const insert = db.prepare(\`
+      INSERT INTO browsing_sessions (
+        id, project, agent, started_at, message_count, user_message_count,
+        integration_mode, fidelity, capabilities_json
+      ) VALUES (?, 'agentmonitor', 'codex', '2026-06-15T12:00:00.000Z', 1, 1,
+        'claude-jsonl', 'summary',
+        '{"tool_analytics":"none","history":"summary","search":"summary","live_items":"summary"}')
+    \`);
+    process.stdout.write('ready\\n');
+    for (let i = 0; i < 300; i += 1) {
+      insert.run(\`concurrent-session-\${i}\`);
+      await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    db.close();
+  `;
+  const writer = spawn(process.execPath, ['--input-type=module', '--eval', writerScript], {
+    cwd: process.cwd(),
+    env: { ...process.env, AGENTMONITOR_TEST_DB: dbPath },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const writerErrors: Buffer[] = [];
+  writer.stderr.on('data', chunk => writerErrors.push(Buffer.from(chunk)));
+  await new Promise<void>((resolve, reject) => {
+    writer.once('error', reject);
+    writer.stdout.once('data', () => resolve());
+  });
+
+  let mismatch: number[] | null = null;
+  try {
+    while (writer.exitCode === null) {
+      const overview = getAnalyticsOverview({
+        date_from: '2026-06-15',
+        date_to: '2026-06-15',
+        project: 'agentmonitor',
+        agent: 'codex',
+      });
+      const totals = [
+        overview.summary.total_sessions,
+        overview.summary.coverage.matching_sessions,
+        overview.activity.data.reduce((sum, row) => sum + row.sessions, 0),
+        overview.projects.data.reduce((sum, row) => sum + row.session_count, 0),
+        overview.velocity.total_sessions,
+        overview.agents.data.reduce((sum, row) => sum + row.session_count, 0),
+      ];
+      if (!totals.every(total => total === totals[0])) {
+        mismatch = totals;
+        break;
+      }
+      await new Promise(resolve => setImmediate(resolve));
+    }
+  } finally {
+    if (writer.exitCode === null) {
+      writer.kill();
+      await new Promise<void>(resolve => writer.once('close', () => resolve()));
+    }
+  }
+
+  assert.equal(Buffer.concat(writerErrors).toString(), '');
+  assert.equal(mismatch, null, `overview mixed SQLite snapshots: ${mismatch?.join(', ')}`);
 });
 
 test('reporting commands reject unsupported filters instead of ignoring them', async () => {

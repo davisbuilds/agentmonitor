@@ -12,6 +12,7 @@ import {
   getAnalyticsVelocity,
   refreshSkillCatalogSnapshots,
 } from '../db/v2-queries.js';
+import { getDb } from '../db/connection.js';
 import type {
   ActivityDataPoint,
   AgentComparisonRow,
@@ -64,8 +65,8 @@ export function getAnalyticsSkillsDailyResponse(
 function buildAnalyticsSkillHealthResponse(
   params: AnalyticsParams,
   coverage: AnalyticsCoverage,
+  catalog: ReturnType<typeof refreshSkillCatalogSnapshots>,
 ): SkillHealthResponse {
-  const catalog = refreshSkillCatalogSnapshots();
   const health = getAnalyticsSkillHealthParts(params, catalog);
   const compatibilityOnly = health.consultations.comparability.status === 'not_directly_comparable';
 
@@ -87,7 +88,12 @@ function buildAnalyticsSkillHealthResponse(
 }
 
 export function getAnalyticsSkillHealthResponse(params: AnalyticsParams = {}): SkillHealthResponse {
-  return buildAnalyticsSkillHealthResponse(params, getAnalyticsCoverage(params, 'all_sessions'));
+  const catalog = refreshSkillCatalogSnapshots();
+  return buildAnalyticsSkillHealthResponse(
+    params,
+    getAnalyticsCoverage(params, 'all_sessions'),
+    catalog,
+  );
 }
 
 export function getAnalyticsHourOfWeekResponse(
@@ -113,20 +119,23 @@ export function getAnalyticsVelocityResponse(params: AnalyticsParams = {}): Velo
 }
 
 export function getAnalyticsOverview(params: AnalyticsParams = {}): AnalyticsOverview {
-  const summary = getAnalyticsSummaryResponse(params);
-  const allSessionsCoverage = summary.coverage;
-  const toolCoverage = getAnalyticsCoverage(params, 'tool_analytics_capable');
+  const catalog = refreshSkillCatalogSnapshots();
+  return getDb().transaction(() => {
+    const summary = getAnalyticsSummaryResponse(params);
+    const allSessionsCoverage = summary.coverage;
+    const toolCoverage = getAnalyticsCoverage(params, 'tool_analytics_capable');
 
-  return {
-    summary,
-    activity: response(getAnalyticsActivity(params), allSessionsCoverage),
-    projects: response(getAnalyticsProjects(params), allSessionsCoverage),
-    tools: response(getAnalyticsTools(params), toolCoverage),
-    skills_daily: response(getAnalyticsSkillsDaily(params), allSessionsCoverage),
-    skills_health: buildAnalyticsSkillHealthResponse(params, allSessionsCoverage),
-    hour_of_week: response(getAnalyticsHourOfWeek(params), allSessionsCoverage),
-    top_sessions: response(getAnalyticsTopSessions(params), allSessionsCoverage),
-    velocity: getAnalyticsVelocityResponse(params),
-    agents: response(getAnalyticsAgents(params), allSessionsCoverage),
-  };
+    return {
+      summary,
+      activity: response(getAnalyticsActivity(params), allSessionsCoverage),
+      projects: response(getAnalyticsProjects(params), allSessionsCoverage),
+      tools: response(getAnalyticsTools(params), toolCoverage),
+      skills_daily: response(getAnalyticsSkillsDaily(params), allSessionsCoverage),
+      skills_health: buildAnalyticsSkillHealthResponse(params, allSessionsCoverage, catalog),
+      hour_of_week: response(getAnalyticsHourOfWeek(params), allSessionsCoverage),
+      top_sessions: response(getAnalyticsTopSessions(params), allSessionsCoverage),
+      velocity: getAnalyticsVelocityResponse(params),
+      agents: response(getAnalyticsAgents(params), allSessionsCoverage),
+    };
+  })();
 }

@@ -554,10 +554,15 @@ Task 6 merged
   top-session rollup.
 - HTTP routes and CLI commands share response builders, including the special skill
   health compatibility and consultation envelope.
+- Codex reviewed `db1f176` and found one P2: without a transaction, a concurrent
+  writer could make later rollups observe a newer SQLite snapshot than summary and
+  its reused coverage. A real concurrent-writer regression reproduced mixed totals
+  (`12, 13, 13, 13, 15, 15`), and the composite now refreshes the catalog first,
+  then evaluates every database read inside one transaction snapshot.
 - Current implemented parity is 21 of 42 UI read contracts, with 21 remaining:
   Analytics is 10/10 and Usage is 2/2. The composite overview is a convenience
   command and is not counted as an additional UI contract.
-- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (898 tests),
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (899 tests),
   plus a built-artifact overview smoke with ten keys, 168 hour buckets, and empty
   stderr.
 
