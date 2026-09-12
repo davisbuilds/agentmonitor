@@ -121,6 +121,7 @@ pnpm cli -- --help               # CLI help during local development
 pnpm cli -- health               # Check the local server
 pnpm cli -- sessions list --json # Query session history from SQLite
 pnpm cli -- usage overview --json # Read every Usage-page rollup in one JSON document
+pnpm cli -- analytics overview --json # Read every Analytics-page contract in one JSON document
 pnpm cli -- database backup --output /private/path/agentmonitor.db # Closed SQLite copy
 pnpm cli -- import --dry-run     # Preview historical import
 pnpm lint                        # ESLint

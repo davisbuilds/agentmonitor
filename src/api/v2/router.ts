@@ -14,15 +14,6 @@ import {
   getSessionTurns,
   getSessionItems,
   searchMessages,
-  getAnalyticsSummary,
-  getAnalyticsActivity,
-  getAnalyticsCoverage,
-  getAnalyticsHourOfWeek,
-  getAnalyticsTopSessions,
-  getAnalyticsVelocity,
-  getAnalyticsAgents,
-  getAnalyticsProjects,
-  getAnalyticsTools,
   getMonitorToolStats,
   listMonitorSessions,
   listMonitorEvents,
@@ -30,9 +21,6 @@ import {
   getMonitorFilterOptions,
   getMonitorSessionWithEvents,
   getMonitorSessionTranscript,
-  getAnalyticsSkillsDaily,
-  getAnalyticsSkillHealthParts,
-  refreshSkillCatalogSnapshots,
   getUsageSummary,
   getUsageCoverage,
   getUsageDaily,
@@ -53,6 +41,18 @@ import {
   getBenchmarkStudy,
 } from '../../db/v2-queries.js';
 import {
+  getAnalyticsActivityResponse,
+  getAnalyticsAgentsResponse,
+  getAnalyticsHourOfWeekResponse,
+  getAnalyticsProjectsResponse,
+  getAnalyticsSkillHealthResponse,
+  getAnalyticsSkillsDailyResponse,
+  getAnalyticsSummaryResponse,
+  getAnalyticsToolsResponse,
+  getAnalyticsTopSessionsResponse,
+  getAnalyticsVelocityResponse,
+} from '../../analytics/responses.js';
+import {
   getSessionTraceDetail,
   listSessionObservations,
   listSessionTraces,
@@ -69,7 +69,6 @@ import {
   type CreateExpectedRealizationResult,
 } from '../../skills/expected-realizations.js';
 import { getSessionSkillContext } from '../../skills/session-skill-context.js';
-import type { SkillHealthResponse } from './types.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -587,7 +586,7 @@ function isInsightProvider(value: unknown): value is 'openai' | 'anthropic' | 'g
 v2Router.get('/analytics/summary', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json(getAnalyticsSummary(params));
+    res.json(getAnalyticsSummaryResponse(params));
   } catch (err) {
     console.error('[v2/analytics/summary] Error:', err);
     res.status(500).json({ error: 'Failed to get analytics summary' });
@@ -597,10 +596,7 @@ v2Router.get('/analytics/summary', (req: Request, res: Response) => {
 v2Router.get('/analytics/activity', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json({
-      data: getAnalyticsActivity(params),
-      coverage: getAnalyticsCoverage(params, 'all_sessions'),
-    });
+    res.json(getAnalyticsActivityResponse(params));
   } catch (err) {
     console.error('[v2/analytics/activity] Error:', err);
     res.status(500).json({ error: 'Failed to get activity data' });
@@ -610,10 +606,7 @@ v2Router.get('/analytics/activity', (req: Request, res: Response) => {
 v2Router.get('/analytics/projects', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json({
-      data: getAnalyticsProjects(params),
-      coverage: getAnalyticsCoverage(params, 'all_sessions'),
-    });
+    res.json(getAnalyticsProjectsResponse(params));
   } catch (err) {
     console.error('[v2/analytics/projects] Error:', err);
     res.status(500).json({ error: 'Failed to get project data' });
@@ -623,10 +616,7 @@ v2Router.get('/analytics/projects', (req: Request, res: Response) => {
 v2Router.get('/analytics/tools', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json({
-      data: getAnalyticsTools(params),
-      coverage: getAnalyticsCoverage(params, 'tool_analytics_capable'),
-    });
+    res.json(getAnalyticsToolsResponse(params));
   } catch (err) {
     console.error('[v2/analytics/tools] Error:', err);
     res.status(500).json({ error: 'Failed to get tool data' });
@@ -742,10 +732,7 @@ v2Router.get('/monitor/sessions/:id', (req: Request, res: Response) => {
 v2Router.get('/analytics/skills/daily', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json({
-      data: getAnalyticsSkillsDaily(params),
-      coverage: getAnalyticsCoverage(params, 'all_sessions'),
-    });
+    res.json(getAnalyticsSkillsDailyResponse(params));
   } catch (err) {
     console.error('[v2/analytics/skills/daily] Error:', err);
     res.status(500).json({ error: 'Failed to get skill analytics' });
@@ -755,27 +742,7 @@ v2Router.get('/analytics/skills/daily', (req: Request, res: Response) => {
 v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    const catalog = refreshSkillCatalogSnapshots();
-    const health = getAnalyticsSkillHealthParts(params, catalog);
-    const consultations = health.consultations;
-    const compatibilityOnly =
-      consultations.comparability.status === 'not_directly_comparable';
-    const response: SkillHealthResponse = {
-      data: health.data.map(row => ({
-        ...row,
-        compatibilityOnly,
-        crossHarnessComparable: !compatibilityOnly,
-      })),
-      coverage: getAnalyticsCoverage(params, 'all_sessions'),
-      dataSemantics: {
-        data: 'phase_1_compatibility',
-        window: 'session_start_legacy',
-        compatibilityOnly,
-        crossHarnessComparable: !compatibilityOnly,
-      },
-      consultations,
-    };
-    res.json(response);
+    res.json(getAnalyticsSkillHealthResponse(params));
   } catch (err) {
     console.error('[v2/analytics/skills/health] Error:', err);
     res.status(500).json({ error: 'Failed to get skill health' });
@@ -785,10 +752,7 @@ v2Router.get('/analytics/skills/health', (req: Request, res: Response) => {
 v2Router.get('/analytics/hour-of-week', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json({
-      data: getAnalyticsHourOfWeek(params),
-      coverage: getAnalyticsCoverage(params, 'all_sessions'),
-    });
+    res.json(getAnalyticsHourOfWeekResponse(params));
   } catch (err) {
     console.error('[v2/analytics/hour-of-week] Error:', err);
     res.status(500).json({ error: 'Failed to get hour-of-week analytics' });
@@ -798,10 +762,7 @@ v2Router.get('/analytics/hour-of-week', (req: Request, res: Response) => {
 v2Router.get('/analytics/top-sessions', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json({
-      data: getAnalyticsTopSessions(params),
-      coverage: getAnalyticsCoverage(params, 'all_sessions'),
-    });
+    res.json(getAnalyticsTopSessionsResponse(params));
   } catch (err) {
     console.error('[v2/analytics/top-sessions] Error:', err);
     res.status(500).json({ error: 'Failed to get top sessions analytics' });
@@ -811,7 +772,7 @@ v2Router.get('/analytics/top-sessions', (req: Request, res: Response) => {
 v2Router.get('/analytics/velocity', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json(getAnalyticsVelocity(params));
+    res.json(getAnalyticsVelocityResponse(params));
   } catch (err) {
     console.error('[v2/analytics/velocity] Error:', err);
     res.status(500).json({ error: 'Failed to get velocity analytics' });
@@ -821,10 +782,7 @@ v2Router.get('/analytics/velocity', (req: Request, res: Response) => {
 v2Router.get('/analytics/agents', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    res.json({
-      data: getAnalyticsAgents(params),
-      coverage: getAnalyticsCoverage(params, 'all_sessions'),
-    });
+    res.json(getAnalyticsAgentsResponse(params));
   } catch (err) {
     console.error('[v2/analytics/agents] Error:', err);
     res.status(500).json({ error: 'Failed to get agent analytics' });

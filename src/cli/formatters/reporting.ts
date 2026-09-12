@@ -1,5 +1,5 @@
 import { formatTable, sanitizeTerminal } from '../output.js';
-import type { UsageFacets, UsageOverview } from '../../api/v2/types.js';
+import type { AnalyticsOverview, UsageFacets, UsageOverview } from '../../api/v2/types.js';
 
 export function formatCurrency(value: number | null | undefined): string {
   return `$${(value ?? 0).toFixed(4)}`;
@@ -24,6 +24,19 @@ export function formatUsageOverview(overview: UsageOverview): string {
     `Tiers: ${overview.tiers.length}`,
     `Agents: ${overview.agents.length}`,
     `Top sessions: ${overview.top_sessions.length}`,
+  ].join('\n');
+}
+
+export function formatAnalyticsOverview(overview: AnalyticsOverview): string {
+  return [
+    `Sessions: ${overview.summary.total_sessions}`,
+    `Messages: ${overview.summary.total_messages}`,
+    `Activity days: ${overview.activity.data.length}`,
+    `Projects: ${overview.projects.data.length}`,
+    `Tools: ${overview.tools.data.length}`,
+    `Skills: ${overview.skills_health.data.length}`,
+    `Top sessions: ${overview.top_sessions.data.length}`,
+    `Agents: ${overview.agents.data.length}`,
   ].join('\n');
 }
 
