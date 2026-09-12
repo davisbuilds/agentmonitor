@@ -130,6 +130,7 @@ without transient `SQLITE_BUSY`/`database is locked` failures.
   `src/cli/commands/reporting.ts`
 - Modify, if the shared read initializer is extracted: `src/cli/commands/sessions-live.ts`
 - Test: `tests/cli-e2e.test.ts`
+- Test: `tests/schema-concurrency.test.ts`
 
 **Dependencies**
 
@@ -520,10 +521,13 @@ Task 6 merged
   migration runners could reuse a stale version and double-apply the v1 token
   correction, and configured usage budgets did not use the shared read bootstrap.
   Both fixes have multi-process or fresh-database regressions.
-- Codex Cloud review was requested on PR #123, but the service rejected the run
-  because the account's code-review usage limit was reached. It created no review
-  and no review threads; this external review criterion remains blocked.
-- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (895 tests).
+- The first Codex Cloud request was rejected because the account's review usage
+  limit was reached. A 2026-09-12 rerun reviewed commit `2d79714` and found one P2:
+  additive structural guards ran before migration serialization. The failure was
+  reproduced with two processes racing on `browsing_sessions.live_status`, then
+  fixed by serializing the full guard pass and rechecking the special trace export
+  repair under its own write lock.
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (896 tests).
 - Task 4 implementation is complete. The PR remains unmerged for user review.
 
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
@@ -547,6 +551,7 @@ Task 6 merged
 | Requirement | Proof command | Expected signal |
 | --- | --- | --- |
 | Concurrent local reads | Concurrent built-CLI E2E test, five repetitions | 40/40 child reads exit 0 with valid JSON and empty stderr |
+| Concurrent structural upgrades | Two-process schema concurrency regression | Both legacy upgrades exit 0; additive columns exist once |
 | Unsupported flags fail closed | CLI contract negative tests | Exit 2, empty stdout, named unknown option |
 | Help is discoverable | CLI core/help tests and built help smoke | Every accepted reporting filter appears in command help |
 | Usage overview parity | Seeded deep-equality contract test | All eight rollups and coverage equal `getUsageOverview()` |

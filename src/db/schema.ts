@@ -20,15 +20,25 @@ function sqlStringList(values: readonly string[]): string {
  * seam is repaired before the parents disappear on either path.
  */
 export function ensureTraceQualityExportStateFkFree(db: Database): void {
-  const sql = (db.prepare(
+  const readTableSql = () => (db.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='trace_quality_export_state'",
   ).get() as { sql: string } | undefined)?.sql;
-  if (!sql || !/REFERENCES\s+trace_quality_(traces|observations)/i.test(sql)) return;
+  const hasLegacyForeignKeys = (sql: string | undefined) => (
+    sql != null && /REFERENCES\s+trace_quality_(traces|observations)/i.test(sql)
+  );
+  const sql = readTableSql();
+  if (!hasLegacyForeignKeys(sql)) return;
 
   const foreignKeys = Number(db.pragma('foreign_keys', { simple: true }));
   db.pragma('foreign_keys = OFF');
   try {
-    db.exec('BEGIN');
+    db.exec('BEGIN IMMEDIATE');
+    // Another process may have repaired the table while this connection waited
+    // for the write slot. Recheck under the lock before rebuilding it.
+    if (!hasLegacyForeignKeys(readTableSql())) {
+      db.exec('COMMIT');
+      return;
+    }
     // Build the FK-free replacement under a temp name (so the old indexes keep
     // their names until the original is dropped), copy rows, swap, re-index.
     db.exec(`
@@ -64,16 +74,14 @@ export function ensureTraceQualityExportStateFkFree(db: Database): void {
     `);
     db.exec('COMMIT');
   } catch (err) {
-    db.exec('ROLLBACK');
+    if (db.inTransaction) db.exec('ROLLBACK');
     throw err;
   } finally {
     db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`);
   }
 }
 
-export function initSchema(): void {
-  const db = getDb();
-
+function initSchemaLocked(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -779,10 +787,6 @@ export function initSchema(): void {
     CREATE INDEX IF NOT EXISTS idx_tq_export_external_trace ON trace_quality_export_state(provider, external_trace_id);
   `);
 
-  // Repair the export seam on existing DBs: drop its legacy FKs to the removed
-  // warehouse tables so it stays usable after the reclaim drops those parents.
-  ensureTraceQualityExportStateFkFree(db);
-
   // Lean, content-free, export-shaped per-session trace summary (trace-quality
   // reframe). One row per session; the full observation tree is projected
   // on-demand rather than persisted. Columns map to medallion's
@@ -895,6 +899,20 @@ export function initSchema(): void {
   `);
 
   runDataMigrations(db);
+}
+
+/**
+ * Initialize or upgrade the schema while holding SQLite's write slot for the
+ * full structural guard pass. This prevents concurrent processes from both
+ * observing an additive column as absent and issuing the same ALTER TABLE.
+ */
+export function initSchema(): void {
+  const db = getDb();
+  // This repair must toggle foreign_keys outside a transaction. It acquires and
+  // rechecks under its own immediate transaction when a legacy table exists.
+  ensureTraceQualityExportStateFkFree(db);
+  const initialize = db.transaction(() => initSchemaLocked(db));
+  initialize.immediate();
 }
 
 // Schema-version counter for one-shot data corrections (distinct from the

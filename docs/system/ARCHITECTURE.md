@@ -73,9 +73,10 @@ One-shot commands avoid importing `src/server.ts`; they either call shared
 service/query modules directly or, for live HTTP/SSE workflows, call the running
 localhost server. CLI reads for sessions, usage, analytics, and trace quality use
 the same v2 query/service layer that backs the Svelte app. A read command fully
-initializes a missing or older database, then uses the `user_version` readiness
-marker to avoid replaying schema DDL on every short-lived process. That leaves
-current-database reads on SQLite's WAL read path while the server or another
+initializes a missing or older database under one immediate transaction, which
+serializes additive column guards across processes. It then uses the `user_version`
+readiness marker to avoid replaying schema DDL on every short-lived process. That
+leaves current-database reads on SQLite's WAL read path while the server or another
 process holds the writer. `amon database backup`
 opens a separate read-only connection and uses SQLite's online backup API so the
 active WAL writer need not stop; `src/db/backup.ts` privately stages, closes,
