@@ -255,12 +255,16 @@ export function getSessionTraceDetail(traceId: string): { trace: TraceQualityTra
 }
 
 /** Re-grain a session's projection observations under one synthesized session trace. */
-function mapProjectedObservation(obs: ProjectedTraceQualityObservation, traceId: string): TraceQualityObservation {
+function mapProjectedObservation(
+  obs: ProjectedTraceQualityObservation,
+  traceId: string,
+  fallbackCreatedAt: string,
+): TraceQualityObservation {
   const { metadata_json, ...rest } = obs as ProjectedTraceQualityObservation & { metadata_json: string };
   return {
     ...rest,
     trace_id: traceId,
-    created_at: obs.started_at ?? new Date().toISOString(),
+    created_at: obs.started_at ?? fallbackCreatedAt,
     metadata: parseJsonRecord(metadata_json),
   };
 }
@@ -307,7 +311,7 @@ export function listSessionObservations(
   // (the projection's own per-event trace grouping is ignored — that mis-grain
   // is what the lean view exists to fix). Order matches the persisted endpoint.
   const observations = projection.observations
-    .map(obs => mapProjectedObservation(obs, traceId))
+    .map(obs => mapProjectedObservation(obs, traceId, row.updated_at))
     .sort((a, b) => {
       const at = a.started_at ?? a.created_at;
       const bt = b.started_at ?? b.created_at;

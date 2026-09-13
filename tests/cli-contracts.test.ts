@@ -67,10 +67,12 @@ beforeEach(() => {
     DELETE FROM tool_calls;
     DELETE FROM messages;
     DELETE FROM browsing_sessions;
+    DELETE FROM insights;
     DELETE FROM events;
     DELETE FROM import_state;
   `);
   seedContractData();
+  seedArtifactData();
 });
 
 function seedContractData(): void {
@@ -164,6 +166,71 @@ function seedContractData(): void {
     null,
   );
 
+}
+
+function seedArtifactData(): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO insights (
+      kind, title, prompt, content, date_from, date_to, project, agent, provider, model,
+      analytics_summary_json, analytics_coverage_json, usage_summary_json, usage_coverage_json, input_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'overview',
+    'Contract insight',
+    'Summarize the contract fixture.',
+    '# Contract insight\n\nThe fixture is healthy.',
+    '2026-06-15',
+    '2026-06-15',
+    'agentmonitor',
+    'codex',
+    'openai',
+    'gpt-5.4',
+    JSON.stringify({ total_sessions: 1, total_messages: 2 }),
+    JSON.stringify({ matching_sessions: 1 }),
+    JSON.stringify({ total_cost_usd: 0.001 }),
+    JSON.stringify({ matching_events: 2 }),
+    JSON.stringify({ analytics_activity: [], usage_daily: [] }),
+  );
+}
+
+function seedBenchmarkData(): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out,
+      project, created_at, client_timestamp, model, cost_usd, source, study_id, study, duration_ms, metadata
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'benchmark-contract-1',
+    'benchmark-contract-1',
+    'codex',
+    'llm_response',
+    'success',
+    100,
+    50,
+    'artifact-task',
+    '2026-06-15 12:00:00',
+    '2026-06-15T12:00:00.000Z',
+    'gpt-5.4',
+    0.01,
+    'benchmark',
+    'contract-study-id',
+    'contract-study',
+    1000,
+    JSON.stringify({
+      task: 'artifact-task',
+      trial: 1,
+      score: 0.9,
+      success: true,
+      canonical_model: 'gpt-5.4',
+      reasoning_effort: 'high',
+      is_open_model: false,
+      suite: 'contract-suite',
+      cost_source: 'captured',
+      workspace_changed: true,
+    }),
+  );
 }
 
 function countRows(table: string): number {
@@ -292,6 +359,111 @@ test('all Analytics UI reads have exact CLI JSON contracts', async () => {
   assert.equal((expected.get('hour-of-week') as { data: unknown[] }).data.length, 168);
   assert.equal((expected.get('skills daily') as { data: unknown[] }).data.length, 1);
   assert.equal((expected.get('skills health') as { data: unknown[] }).data.length, 1);
+});
+
+test('trace detail and observations preserve the exact UI query contracts', async () => {
+  const traces = await runCli(['quality', 'traces', '--json']);
+  assert.equal(traces.exitCode, 0, traces.stderr);
+  const traceId = (JSON.parse(traces.stdout) as { data: Array<{ id: string }> }).data[0]?.id;
+  assert.ok(traceId, 'fixture should project a trace');
+
+  const detail = await runCli(['quality', 'trace', traceId, '--json']);
+  assert.equal(detail.exitCode, 0, detail.stderr);
+  assert.equal(detail.stderr, '');
+
+  const observations = await runCli([
+    'quality', 'observations', traceId, '--limit', '1', '--offset', '1', '--json',
+  ]);
+  assert.equal(observations.exitCode, 0, observations.stderr);
+  assert.equal(observations.stderr, '');
+
+  const quality = await import('../src/trace-quality/on-demand.js');
+  assert.deepEqual(JSON.parse(detail.stdout), quality.getSessionTraceDetail(traceId));
+  assert.deepEqual(
+    JSON.parse(observations.stdout),
+    quality.listSessionObservations(traceId, { limit: 1, offset: 1 }),
+  );
+  assert.ok((JSON.parse(observations.stdout) as { total: number }).total > 1);
+
+  for (const command of ['trace', 'observations']) {
+    const missing = await runCli(['quality', command, 'missing-trace', '--json']);
+    assert.equal(missing.exitCode, 4, `${command}: ${missing.stderr}`);
+    assert.equal(missing.stdout, '');
+    assert.match(missing.stderr, /Trace not found/);
+  }
+});
+
+test('insight reads preserve the exact UI query contracts', async () => {
+  const params = {
+    date_from: '2026-06-15',
+    date_to: '2026-06-15',
+    project: 'agentmonitor',
+    agent: 'codex',
+    kind: 'overview' as const,
+    limit: 1,
+  };
+  const list = await runCli([
+    'insights', 'list',
+    '--date-from', params.date_from,
+    '--date-to', params.date_to,
+    '--project', params.project,
+    '--agent', params.agent,
+    '--kind', params.kind,
+    '--limit', String(params.limit),
+    '--json',
+  ]);
+  assert.equal(list.exitCode, 0, list.stderr);
+  assert.equal(list.stderr, '');
+
+  const { getInsight } = await import('../src/db/v2-queries.js');
+  const { getInsightsListResponse } = await import('../src/insights/responses.js');
+  const expectedList = getInsightsListResponse(params);
+  assert.deepEqual(JSON.parse(list.stdout), expectedList);
+  assert.equal(expectedList.data.length, 1);
+
+  const insightId = expectedList.data[0]!.id;
+  const show = await runCli(['insights', 'show', String(insightId), '--json']);
+  assert.equal(show.exitCode, 0, show.stderr);
+  assert.deepEqual(JSON.parse(show.stdout), getInsight(insightId));
+
+  const invalidKind = await runCli(['insights', 'list', '--kind', 'invalid']);
+  assert.equal(invalidKind.exitCode, 2);
+  assert.match(invalidKind.stderr, /Invalid --kind: invalid/);
+
+  const missing = await runCli(['insights', 'show', '999999', '--json']);
+  assert.equal(missing.exitCode, 4);
+  assert.equal(missing.stdout, '');
+  assert.match(missing.stderr, /Insight not found/);
+});
+
+test('benchmark and metadata reads preserve the exact UI query contracts', async () => {
+  seedBenchmarkData();
+  const { getBenchmarkStudies, getBenchmarkStudy, getDistinctProjects, getDistinctAgents } =
+    await import('../src/db/v2-queries.js');
+
+  const studies = await runCli(['benchmarks', 'list', '--json']);
+  assert.equal(studies.exitCode, 0, studies.stderr);
+  assert.deepEqual(JSON.parse(studies.stdout), { data: getBenchmarkStudies() });
+  assert.equal((JSON.parse(studies.stdout) as { data: unknown[] }).data.length, 1);
+
+  const study = await runCli(['benchmarks', 'show', 'contract-study-id', '--json']);
+  assert.equal(study.exitCode, 0, study.stderr);
+  assert.deepEqual(JSON.parse(study.stdout), getBenchmarkStudy('contract-study-id'));
+
+  const missing = await runCli(['benchmarks', 'show', 'missing-study', '--json']);
+  assert.equal(missing.exitCode, 4);
+  assert.equal(missing.stdout, '');
+  assert.match(missing.stderr, /Benchmark study not found/);
+
+  const projects = await runCli(['projects', 'list', '--json']);
+  assert.equal(projects.exitCode, 0, projects.stderr);
+  assert.deepEqual(JSON.parse(projects.stdout), { data: getDistinctProjects() });
+  assert.deepEqual(JSON.parse(projects.stdout), { data: ['agentmonitor'] });
+
+  const agents = await runCli(['agents', 'list', '--json']);
+  assert.equal(agents.exitCode, 0, agents.stderr);
+  assert.deepEqual(JSON.parse(agents.stdout), { data: getDistinctAgents() });
+  assert.deepEqual(JSON.parse(agents.stdout), { data: ['codex'] });
 });
 
 test('analytics overview returns all UI contracts and scopes its top-session limit', async () => {
@@ -442,6 +614,16 @@ test('reporting commands reject unsupported filters instead of ignoring them', a
   assert.equal(budgets.exitCode, 2);
   assert.equal(budgets.stdout, '');
   assert.match(budgets.stderr, /Unknown option: --project/);
+
+  const metadata = await runCli(['projects', 'list', '--project', 'agentmonitor']);
+  assert.equal(metadata.exitCode, 2);
+  assert.equal(metadata.stdout, '');
+  assert.match(metadata.stderr, /Unknown option: --project/);
+
+  const benchmark = await runCli(['benchmarks', 'list', '--limit', '1']);
+  assert.equal(benchmark.exitCode, 2);
+  assert.equal(benchmark.stdout, '');
+  assert.match(benchmark.stderr, /Unknown option: --limit/);
 });
 
 test('reporting help names every supported filter', async () => {
@@ -450,7 +632,8 @@ test('reporting help names every supported filter', async () => {
   for (const command of [
     'analytics overview', 'analytics activity', 'analytics projects', 'analytics agents',
     'analytics velocity', 'analytics hour-of-week', 'analytics skills daily',
-    'analytics skills health',
+    'analytics skills health', 'quality trace', 'quality observations', 'insights list',
+    'insights show', 'benchmarks list', 'benchmarks show', 'projects list', 'agents list',
   ]) {
     assert.match(root.stdout, new RegExp(command));
   }
@@ -483,6 +666,22 @@ test('reporting help names every supported filter', async () => {
   assert.equal(quality.exitCode, 0, quality.stderr);
   for (const flag of ['--date-from', '--date-to', '--project', '--agent', '--session-id', '--limit', '--offset', '--json']) {
     assert.match(quality.stdout, new RegExp(flag));
+  }
+
+  const observations = await runCli(['quality', 'observations', '--help']);
+  assert.equal(observations.exitCode, 0, observations.stderr);
+  for (const flag of ['--limit', '--offset', '--json']) {
+    assert.match(observations.stdout, new RegExp(flag));
+  }
+
+  const trace = await runCli(['quality', 'trace', '--help']);
+  assert.equal(trace.exitCode, 0, trace.stderr);
+  assert.match(trace.stdout, /quality trace <id> \[--json\]/);
+
+  const insights = await runCli(['insights', 'list', '--help']);
+  assert.equal(insights.exitCode, 0, insights.stderr);
+  for (const flag of ['--date-from', '--date-to', '--project', '--agent', '--kind', '--limit', '--json']) {
+    assert.match(insights.stdout, new RegExp(flag));
   }
 });
 
