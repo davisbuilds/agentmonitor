@@ -262,3 +262,44 @@ test('monitor watch preserves the legacy Monitor SSE schema as NDJSON and forwar
     globalThis.fetch = originalFetch;
   }
 });
+
+test('watch commands map connection failures to unavailable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError('fetch failed');
+  };
+
+  try {
+    for (const command of [['live', 'watch'], ['monitor', 'watch']]) {
+      const result = await runCli(['--url', 'http://127.0.0.1:3999', ...command]);
+      assert.equal(result.exitCode, 3, `${command.join(' ')}: ${result.stderr}`);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /Cannot reach http:\/\/127\.0\.0\.1:3999/);
+      assert.doesNotMatch(result.stderr, /unexpected error/i);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('watch commands map interrupted response streams to unavailable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('socket reset'));
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  try {
+    const result = await runCli(['--url', 'http://127.0.0.1:3999', 'monitor', 'watch']);
+    assert.equal(result.exitCode, 3, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Stream from http:\/\/127\.0\.0\.1:3999\/api\/stream failed/);
+    assert.doesNotMatch(result.stderr, /unexpected error/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

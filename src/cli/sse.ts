@@ -8,7 +8,12 @@ export async function streamSseData(
   url: URL,
   shouldWrite: (data: string) => boolean = () => true,
 ): Promise<void> {
-  const res = await fetch(url);
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch {
+    throw unavailable(`Cannot reach ${url.toString()}`);
+  }
   if (!res.ok || !res.body) {
     throw unavailable(`${url.toString()} returned ${res.status}`);
   }
@@ -22,14 +27,27 @@ export async function streamSseData(
     if (shouldWrite(data)) writeStdout(ctx, data);
   }
 
-  for await (const chunk of res.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let newlineIndex = buffer.indexOf('\n');
-    while (newlineIndex !== -1) {
-      processLine(buffer.slice(0, newlineIndex));
-      buffer = buffer.slice(newlineIndex + 1);
-      newlineIndex = buffer.indexOf('\n');
+  const reader = res.body.getReader();
+  try {
+    while (true) {
+      let read: ReadableStreamReadResult<Uint8Array>;
+      try {
+        read = await reader.read();
+      } catch {
+        throw unavailable(`Stream from ${url.toString()} failed`);
+      }
+      if (read.done) break;
+
+      buffer += decoder.decode(read.value, { stream: true });
+      let newlineIndex = buffer.indexOf('\n');
+      while (newlineIndex !== -1) {
+        processLine(buffer.slice(0, newlineIndex));
+        buffer = buffer.slice(newlineIndex + 1);
+        newlineIndex = buffer.indexOf('\n');
+      }
     }
+  } finally {
+    reader.releaseLock();
   }
   buffer += decoder.decode();
   if (buffer) processLine(buffer);
