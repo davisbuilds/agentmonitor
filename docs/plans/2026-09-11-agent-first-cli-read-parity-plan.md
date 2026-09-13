@@ -610,9 +610,13 @@ Task 6 merged
 - Focused command and stream tests pass. A mutation that forced Monitor event
   offset to `1` made the exact-contract test fail before the correct forwarding
   was restored.
-- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (905 tests).
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (907 tests).
   A built-artifact smoke parsed JSON from all 13 new finite commands and verified
   missing Monitor detail exits 4.
+- Codex reviewed PR head `26d6248` and found one P2: rejected fetches escaped the
+  shared SSE helper as unexpected exit 1 failures. Connection and interrupted-body
+  regressions were observed red, then both watch commands were fixed to report
+  unavailable exit 3 through the shared transport seam.
 
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
   it. Signal: concurrent tests become slow or intermittently approach the timeout.
