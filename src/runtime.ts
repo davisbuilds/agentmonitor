@@ -98,7 +98,10 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
 
   try {
     initSchema();
-    ensureSessionTraceSummaryBackfill();
+    const rebuiltTraceSummaries = ensureSessionTraceSummaryBackfill();
+    if (rebuiltTraceSummaries > 0) {
+      console.log(`[trace-quality] (re)built ${rebuiltTraceSummaries} session trace summaries`);
+    }
 
     // Build the all-time Monitor snapshot before accepting HTTP work. The
     // underlying better-sqlite3 query is synchronous; leaving its first cold

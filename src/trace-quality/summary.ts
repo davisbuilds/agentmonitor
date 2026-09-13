@@ -421,7 +421,7 @@ export function maintainSessionTraceSummary(sessionId: string): void {
  * sessions exist (i.e. an existing DB upgrading into the reframe). Self-healing
  * and idempotent: once populated it is a single cheap probe.
  */
-export function ensureSessionTraceSummaryBackfill(): void {
+export function ensureSessionTraceSummaryBackfill(): number {
   const db = getDb();
   // Re-backfill when the table is empty (but sessions exist) OR when any row is
   // incompletely migrated: a stale projection_version, or a NULL trace_id that a
@@ -433,13 +433,12 @@ export function ensureSessionTraceSummaryBackfill(): void {
     `SELECT COUNT(*) AS c FROM session_trace_summary
      WHERE projection_version IS NOT ? OR trace_id IS NULL`,
   ).get(SESSION_TRACE_SUMMARY_VERSION) as { c: number }).c;
-  if (total > 0 && incomplete === 0) return; // fully migrated
+  if (total > 0 && incomplete === 0) return 0; // fully migrated
 
   const hasSessions =
     db.prepare('SELECT 1 FROM browsing_sessions LIMIT 1').get() ?? db.prepare('SELECT 1 FROM events LIMIT 1').get();
-  if (!hasSessions) return;
-  const count = backfillSessionTraceSummaries(db);
-  if (count > 0) console.log(`[trace-quality] (re)built ${count} session trace summaries (${SESSION_TRACE_SUMMARY_VERSION})`);
+  if (!hasSessions) return 0;
+  return backfillSessionTraceSummaries(db);
 }
 
 /** One-shot/idempotent backfill of every session's summary. */

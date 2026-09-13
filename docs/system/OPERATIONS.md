@@ -121,6 +121,14 @@ pnpm cli -- analytics overview --date-from 2026-09-01 --top-sessions-limit 20 --
 pnpm cli -- analytics tools --date-from 2026-09-01 --agent codex
 pnpm cli -- analytics skills health --project agentmonitor --json
 pnpm cli -- quality traces --project agentmonitor --limit 20
+pnpm cli -- quality trace <trace-id> --json
+pnpm cli -- quality observations <trace-id> --limit 100 --offset 0 --json
+pnpm cli -- insights list --kind workflow --project agentmonitor --json
+pnpm cli -- insights show <insight-id> --json
+pnpm cli -- benchmarks list --json
+pnpm cli -- benchmarks show <study-id> --json
+pnpm cli -- projects list --json
+pnpm cli -- agents list --json
 
 pnpm cli -- hooks install claude --dry-run
 pnpm cli -- hooks print-codex-config
@@ -156,6 +164,14 @@ health` commands.
 command's `--help` as the authority for accepted filters; unsupported filters
 exit 2 instead of being ignored. Local read commands can run concurrently with
 the server's WAL writer and with other CLI readers.
+
+Saved-analysis reads use the same response contracts as the Svelte app and v2
+API. `quality trace` and `quality observations` expose trace detail and paginated
+observations; `insights list` includes the generation-availability envelope and
+`insights show` returns one persisted insight; `benchmarks list` and `benchmarks
+show` expose benchmark summaries and per-arm detail. `projects list` and `agents
+list` return the shared metadata values used by UI filters. Missing trace,
+insight, and benchmark detail exits 4 with no data on stdout.
 
 ## Environment Variables
 

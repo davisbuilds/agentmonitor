@@ -32,7 +32,6 @@ import {
   getUsageTiers,
   getUsageAgents,
   getUsageTopSessions,
-  listInsights,
   getInsight,
   deleteInsight,
   getDistinctProjects,
@@ -60,6 +59,7 @@ import {
 import { liveStreamRouter } from './live-stream.js';
 import { config } from '../../config.js';
 import { generateInsight } from '../../insights/service.js';
+import { getInsightsListResponse } from '../../insights/responses.js';
 import { getUsageBudgets } from '../../usage/budgets.js';
 import { getUsageTierFeedback } from '../../usage/tier-feedback.js';
 import { getDb } from '../../db/connection.js';
@@ -1015,33 +1015,14 @@ v2Router.get('/insights', (req: Request, res: Response) => {
       kind = kindQuery;
     }
 
-    res.json({
-      data: listInsights({
-        date_from: req.query.date_from as string | undefined,
-        date_to: req.query.date_to as string | undefined,
-        project: req.query.project as string | undefined,
-        agent: req.query.agent as string | undefined,
-        kind,
-        limit: safeInt(req.query.limit as string),
-      }),
-      generation: {
-        default_provider: config.insights.provider,
-        providers: {
-          openai: {
-            configured: config.insights.providers.openai.apiKey != null,
-            default_model: config.insights.providers.openai.model,
-          },
-          anthropic: {
-            configured: config.insights.providers.anthropic.apiKey != null,
-            default_model: config.insights.providers.anthropic.model,
-          },
-          gemini: {
-            configured: config.insights.providers.gemini.apiKey != null,
-            default_model: config.insights.providers.gemini.model,
-          },
-        },
-      },
-    });
+    res.json(getInsightsListResponse({
+      date_from: req.query.date_from as string | undefined,
+      date_to: req.query.date_to as string | undefined,
+      project: req.query.project as string | undefined,
+      agent: req.query.agent as string | undefined,
+      kind,
+      limit: safeInt(req.query.limit as string),
+    }));
   } catch (err) {
     console.error('[v2/insights] Error:', err);
     res.status(500).json({ error: 'Failed to list insights' });
