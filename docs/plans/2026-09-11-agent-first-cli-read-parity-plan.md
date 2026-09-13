@@ -36,9 +36,9 @@ The contract comes from the 2026-09-11 conversation and live repository mapping:
 - First PR (merged as `9184e04`): concurrent read reliability, exact `usage
   overview` and `usage facets` commands, command-specific reporting filters/help,
   tests, and operator docs.
-- Second PR: complete Analytics leaf parity and add an agent-oriented composite
-  overview. Later PRs cover saved analysis artifacts, then remaining
-  session/live/monitor operational reads.
+- Second PR (merged as `c0e588f`): complete Analytics leaf parity and add an
+  agent-oriented composite overview. The third PR covers saved analysis artifacts;
+  the final slice covers remaining session/live/monitor operational reads.
 - Use the same query/service functions as the v2 routes so CLI and UI data semantics
   cannot drift through duplicate SQL.
 
@@ -48,7 +48,7 @@ The contract comes from the 2026-09-11 conversation and live repository mapping:
 - A generic raw HTTP/API passthrough command.
 - New analytics calculations or response fields.
 - Benchmark ingestion changes; only benchmark reads belong to a later slice.
-- Merging the first PR without user review.
+- Merging an active implementation PR without user review.
 
 ## Assumptions And Constraints
 
@@ -63,7 +63,7 @@ The contract comes from the 2026-09-11 conversation and live repository mapping:
   requiring the HTTP server.
 - Existing stdout/stderr separation and exit codes 0-5 remain stable.
 - Required pre-push gates are `pnpm lint`, `pnpm build`, and `pnpm test`.
-- The first PR is the only review point in this session. Queue Codex review after
+- Each implementation PR is a logical review point. Queue Codex review after
   opening it, address all actionable findings, then stop before merge.
 
 ## Current Parity Map
@@ -542,9 +542,9 @@ Task 6 merged
 - Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (896 tests).
 - Task 4 is complete. PR #123 merged as `9184e04` and local `main` was synced.
 
-### Second PR implementation status (2026-09-12)
+### Second PR implementation status (merged 2026-09-12)
 
-- Task 5 is implemented on `feat/agent-first-cli-analytics-parity` pending review.
+- Task 5 shipped in PR #124 as merge commit `c0e588f`.
 - The seven missing leaf commands preserve their owning response contracts:
   `analytics activity`, `projects`, `agents`, `velocity`, `hour-of-week`, `skills
   daily`, and `skills health`.
@@ -565,6 +565,25 @@ Task 6 merged
 - Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (899 tests),
   plus a built-artifact overview smoke with ten keys, 168 hour buckets, and empty
   stderr.
+
+### Third PR implementation status (2026-09-13)
+
+- Task 6 is implemented on `feat/agent-first-cli-artifact-parity` pending review.
+- `quality trace <id>` and paginated `quality observations <id>` expose the exact
+  trace-detail and observation envelopes and self-heal missing summary rows without
+  contaminating JSON stdout with backfill logging.
+- `insights list` and `insights show <id>` expose saved analysis. The HTTP router
+  and CLI now share the list response builder, including provider configuration
+  availability.
+- `benchmarks list`, `benchmarks show <study-id>`, `projects list`, and `agents
+  list` call the same database query functions as their v2 routes.
+- Missing trace, insight, and benchmark detail exits 4; unsupported options exit 2.
+- Current implemented parity is 28 of 42 UI read contracts, with 14 remaining.
+  The insight detail command exposes an existing v2 detail route for agent use but
+  is not counted because the current UI selects a complete row from the list.
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (902 tests),
+  plus a built-artifact smoke covering seven JSON reads, silent trace-summary
+  self-healing, and root-help discovery.
 
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
   it. Signal: concurrent tests become slow or intermittently approach the timeout.
@@ -593,14 +612,17 @@ Task 6 merged
 | Usage overview parity | Seeded deep-equality contract test | All eight rollups and coverage equal `getUsageOverview()` |
 | Usage facets parity | Seeded deep-equality contract test | All five arrays equal `getUsageFacets()` under filters |
 | Built artifact is authoritative | `pnpm build` plus `dist/cli.js` smokes | New commands appear and JSON parses from built CLI |
+| Saved artifact parity | Seeded CLI contract tests | Trace, insight, benchmark, and metadata JSON deep-equal their owning response/query functions |
+| Missing artifact behavior | CLI contract negative tests | Missing trace, insight, and benchmark detail exit 4 with empty stdout |
 | Regression safety | `pnpm lint && pnpm build && pnpm test` | All required gates pass |
-| First review stop | GitHub PR/review-thread query | Codex complete, zero unresolved actionable threads, PR open/unmerged |
+| Active review stop | GitHub PR/review-thread query | Codex complete, zero unresolved actionable threads, PR open/unmerged |
 
 ## Handoff
 
-Execution begins on `feat/agent-first-cli-usage-parity`. Complete Tasks 1-4 in the
-first PR, queue Codex review, address findings, and stop before merge for user review.
-Tasks 5-7 remain the ordered workoff sequence for later PRs and should be re-grounded
-against the current Svelte call graph before execution.
+Tasks 1-5 are merged. Task 6 is the active third PR on
+`feat/agent-first-cli-artifact-parity`: complete validation, queue Codex review,
+address findings, and stop before merge for user review. After it merges, re-ground
+the Svelte call graph and complete Task 7 for the remaining session, Live, and
+Monitor contracts.
 
 Plan complete and saved to docs/plans/2026-09-11-agent-first-cli-read-parity-plan.md.
