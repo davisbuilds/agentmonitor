@@ -111,8 +111,23 @@ pnpm cli -- warehouse publish --dry-run --json
 pnpm cli -- sessions list --json
 pnpm cli -- sessions show <session-id>
 pnpm cli -- sessions search "deploy model"
+pnpm cli -- sessions activity <session-id> --json
+pnpm cli -- sessions children <session-id> --json
+pnpm cli -- sessions pins <session-id> --json
+pnpm cli -- live settings --json
+pnpm cli -- live show <session-id> --json
+pnpm cli -- live turns <session-id> --json
 pnpm cli -- live watch
 pnpm cli -- live watch --kinds user_message,tool_call
+
+pnpm cli -- monitor stats --agent codex --since 2026-09-01 --json
+pnpm cli -- monitor events --tool-name Bash --limit 100 --offset 0 --json
+pnpm cli -- monitor sessions --exclude-status ended --project agentmonitor --json
+pnpm cli -- monitor filter-options --json
+pnpm cli -- monitor tools --project agentmonitor --date-from 2026-09-01 --json
+pnpm cli -- monitor show <session-id> --event-limit 100 --json
+pnpm cli -- monitor transcript <session-id> --json
+pnpm cli -- monitor watch --agent codex --event-type tool_use
 
 pnpm cli -- usage overview --date-from 2026-09-01 --json
 pnpm cli -- usage facets --project agentmonitor --json
@@ -172,6 +187,17 @@ observations; `insights list` includes the generation-availability envelope and
 show` expose benchmark summaries and per-arm detail. `projects list` and `agents
 list` return the shared metadata values used by UI filters. Missing trace,
 insight, and benchmark detail exits 4 with no data on stdout.
+
+Operational reads retain the three schemas used by the app. `sessions
+activity|children|pins` read the browsing-session projection; `live
+settings|show|turns` read Live state; and `monitor
+stats|events|sessions|filter-options|tools|show|transcript` read the Monitor
+projection. `monitor watch` streams the `/api/stream` data fields as NDJSON and
+accepts the stream's `agent_type` and `event_type` filters through `--agent` and
+`--event-type`. `live watch` remains the separate `/api/v2/live/stream` reader.
+These commands complete exact CLI coverage for the 42 read contracts called by
+the current Svelte app. An unknown detail record exits 4; `sessions children`
+preserves the API's empty-list result for an unknown parent.
 
 ## Environment Variables
 

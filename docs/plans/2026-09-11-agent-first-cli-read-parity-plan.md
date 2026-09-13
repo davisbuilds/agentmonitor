@@ -37,8 +37,10 @@ The contract comes from the 2026-09-11 conversation and live repository mapping:
   overview` and `usage facets` commands, command-specific reporting filters/help,
   tests, and operator docs.
 - Second PR (merged as `c0e588f`): complete Analytics leaf parity and add an
-  agent-oriented composite overview. The third PR covers saved analysis artifacts;
-  the final slice covers remaining session/live/monitor operational reads.
+  agent-oriented composite overview.
+- Third PR (merged as `be54050`): add saved-analysis artifact and shared metadata
+  reads.
+- Final PR: close the remaining session, Live, and Monitor operational reads.
 - Use the same query/service functions as the v2 routes so CLI and UI data semantics
   cannot drift through duplicate SQL.
 
@@ -566,10 +568,9 @@ Task 6 merged
   plus a built-artifact overview smoke with ten keys, 168 hour buckets, and empty
   stderr.
 
-### Third PR implementation status (2026-09-13)
+### Third PR implementation status (merged 2026-09-13)
 
-- Task 6 is implemented in PR #125 on `feat/agent-first-cli-artifact-parity`,
-  pending user review.
+- Task 6 shipped in PR #125 as merge commit `be54050`.
 - `quality trace <id>` and paginated `quality observations <id>` expose the exact
   trace-detail and observation envelopes and self-heal missing summary rows without
   contaminating JSON stdout with backfill logging.
@@ -587,6 +588,31 @@ Task 6 merged
   self-healing, and root-help discovery.
 - Codex reviewed PR head `f8ea5ae` and found no major issues; the review produced
   no review threads.
+
+### Final PR implementation status (2026-09-13)
+
+- Task 7 is implemented on `feat/agent-first-cli-operational-parity`.
+- `sessions activity`, `sessions children`, and `sessions pins` expose the three
+  remaining browsing-session contracts. Unknown activity/pin detail exits 4;
+  children preserves the API's empty result for an unknown parent.
+- `live settings`, `live show`, and `live turns` expose the remaining Live
+  contracts. HTTP and CLI settings share one response builder.
+- `monitor stats`, `monitor events`, `monitor sessions`, `monitor filter-options`,
+  `monitor tools`, `monitor show`, and `monitor transcript` call the same database
+  queries as the seven v2 Monitor REST reads.
+- `monitor watch` exposes the legacy `/api/stream` contract as NDJSON. It shares
+  split-chunk-safe SSE framing with `live watch` while preserving each stream's
+  filters and payload schema.
+- The re-grounded Svelte call graph has 42 unique reads, and all 42 now have exact
+  CLI equivalents. Monitor cost remains covered by `usage overview`, Monitor
+  context occupancy by `live sessions`, and the v2 Live stream by `live watch`;
+  these shared reads are counted once.
+- Focused command and stream tests pass. A mutation that forced Monitor event
+  offset to `1` made the exact-contract test fail before the correct forwarding
+  was restored.
+- Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (905 tests).
+  A built-artifact smoke parsed JSON from all 13 new finite commands and verified
+  missing Monitor detail exits 4.
 
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
   it. Signal: concurrent tests become slow or intermittently approach the timeout.
@@ -617,15 +643,17 @@ Task 6 merged
 | Built artifact is authoritative | `pnpm build` plus `dist/cli.js` smokes | New commands appear and JSON parses from built CLI |
 | Saved artifact parity | Seeded CLI contract tests | Trace, insight, benchmark, and metadata JSON deep-equal their owning response/query functions |
 | Missing artifact behavior | CLI contract negative tests | Missing trace, insight, and benchmark detail exit 4 with empty stdout |
+| Operational read parity | Seeded CLI contract tests | Session, Live, and Monitor JSON deep-equal their owning response/query functions |
+| Stream parity | Split-chunk command tests | Live and Monitor SSE data fields remain intact as NDJSON and filters reach the correct stream |
+| Complete UI read parity | Re-grounded Svelte call graph plus CLI help/contracts | 42/42 unique UI read contracts have exact CLI equivalents |
 | Regression safety | `pnpm lint && pnpm build && pnpm test` | All required gates pass |
 | Active review stop | GitHub PR/review-thread query | Codex complete, zero unresolved actionable threads, PR open/unmerged |
 
 ## Handoff
 
-Tasks 1-5 are merged. Task 6 is the active third PR on
-`feat/agent-first-cli-artifact-parity`: complete validation, queue Codex review,
-address findings, and stop before merge for user review. After it merges, re-ground
-the Svelte call graph and complete Task 7 for the remaining session, Live, and
-Monitor contracts.
+Tasks 1-6 are merged through PR #125 (`be54050`). Task 7 is implemented on
+`feat/agent-first-cli-operational-parity`: complete full validation, open the final
+PR, queue one Codex review, address any actionable threads, and stop before merge
+for user review.
 
 Plan complete and saved to docs/plans/2026-09-11-agent-first-cli-read-parity-plan.md.
