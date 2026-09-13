@@ -568,7 +568,8 @@ Task 6 merged
 
 ### Third PR implementation status (2026-09-13)
 
-- Task 6 is implemented on `feat/agent-first-cli-artifact-parity` pending review.
+- Task 6 is implemented in PR #125 on `feat/agent-first-cli-artifact-parity`,
+  pending user review.
 - `quality trace <id>` and paginated `quality observations <id>` expose the exact
   trace-detail and observation envelopes and self-heal missing summary rows without
   contaminating JSON stdout with backfill logging.
@@ -584,6 +585,8 @@ Task 6 merged
 - Required gates pass: `pnpm lint`, `pnpm build`, and `pnpm test` (902 tests),
   plus a built-artifact smoke covering seven JSON reads, silent trace-summary
   self-healing, and root-help discovery.
+- Codex reviewed PR head `f8ea5ae` and found no major issues; the review produced
+  no review threads.
 
 - Risk: a longer busy timeout could hide schema-startup contention rather than remove
   it. Signal: concurrent tests become slow or intermittently approach the timeout.
