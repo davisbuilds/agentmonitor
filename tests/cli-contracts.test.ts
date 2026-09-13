@@ -64,9 +64,13 @@ beforeEach(() => {
   );
   activeDb.exec(`
     DELETE FROM session_trace_summary;
+    DELETE FROM pinned_messages;
     DELETE FROM tool_calls;
     DELETE FROM messages;
+    DELETE FROM session_items;
+    DELETE FROM session_turns;
     DELETE FROM browsing_sessions;
+    DELETE FROM sessions;
     DELETE FROM insights;
     DELETE FROM events;
     DELETE FROM import_state;
@@ -230,6 +234,100 @@ function seedBenchmarkData(): void {
       cost_source: 'captured',
       workspace_changed: true,
     }),
+  );
+}
+
+function seedSessionAndLiveDetailData(): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO browsing_sessions (
+      id, project, agent, first_message, started_at, ended_at, message_count,
+      user_message_count, parent_session_id, relationship_type, integration_mode,
+      fidelity, capabilities_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'contract-child',
+    'agentmonitor',
+    'codex',
+    'Child contract session',
+    '2026-06-15T10:05:00.000Z',
+    '2026-06-15T10:06:00.000Z',
+    1,
+    1,
+    'contract-session',
+    'subagent',
+    'claude-jsonl',
+    'summary',
+    '{"tool_analytics":"none","history":"summary","search":"summary","live_items":"summary"}',
+  );
+
+  const messageId = Number((db.prepare(
+    'SELECT id FROM messages WHERE session_id = ? ORDER BY ordinal LIMIT 1',
+  ).get('contract-session') as { id: number }).id);
+  db.prepare(`
+    INSERT INTO pinned_messages (session_id, message_id, message_ordinal, created_at)
+    VALUES (?, ?, ?, ?)
+  `).run('contract-session', messageId, 0, '2026-06-15T10:02:00.000Z');
+
+  db.prepare(`
+    INSERT INTO session_turns (
+      session_id, agent_type, source_turn_id, status, title, started_at, ended_at, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'contract-session',
+    'codex',
+    'turn-contract-1',
+    'completed',
+    'Contract turn',
+    '2026-06-15T10:00:00.000Z',
+    '2026-06-15T10:01:00.000Z',
+    '2026-06-15T10:00:00.000Z',
+  );
+
+}
+
+function seedMonitorData(): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO sessions (
+      id, agent_id, agent_type, project, branch, status, started_at, last_event_at, metadata
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'contract-session',
+    'codex-agent',
+    'codex',
+    'agentmonitor',
+    'main',
+    'active',
+    '2026-06-15T10:00:00.000Z',
+    '2026-06-15T10:02:00.000Z',
+    '{"mode":"headless"}',
+  );
+
+  db.prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, tool_name, status, tokens_in,
+      tokens_out, branch, project, duration_ms, created_at, client_timestamp,
+      metadata, model, cost_usd, source
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'evt-monitor-tool',
+    'contract-session',
+    'codex',
+    'tool_use',
+    'Bash',
+    'success',
+    5,
+    2,
+    'main',
+    'agentmonitor',
+    25,
+    '2026-06-15 10:02:00',
+    '2026-06-15T10:02:00.000Z',
+    '{"command":"pwd"}',
+    'gpt-5.4',
+    0.0001,
+    'api',
   );
 }
 
@@ -466,6 +564,143 @@ test('benchmark and metadata reads preserve the exact UI query contracts', async
   assert.deepEqual(JSON.parse(agents.stdout), { data: ['codex'] });
 });
 
+test('remaining session and Live reads preserve the exact UI query contracts', async () => {
+  seedSessionAndLiveDetailData();
+  const queries = await import('../src/db/v2-queries.js');
+
+  const activity = await runCli(['sessions', 'activity', 'contract-session', '--json']);
+  assert.equal(activity.exitCode, 0, activity.stderr);
+  assert.deepEqual(JSON.parse(activity.stdout), queries.getSessionActivity('contract-session'));
+  assert.ok((JSON.parse(activity.stdout) as { total_messages: number }).total_messages > 0);
+
+  const children = await runCli(['sessions', 'children', 'contract-session', '--json']);
+  assert.equal(children.exitCode, 0, children.stderr);
+  assert.deepEqual(JSON.parse(children.stdout), { data: queries.getSessionChildren('contract-session') });
+  assert.equal((JSON.parse(children.stdout) as { data: unknown[] }).data.length, 1);
+
+  const pins = await runCli(['sessions', 'pins', 'contract-session', '--json']);
+  assert.equal(pins.exitCode, 0, pins.stderr);
+  assert.deepEqual(
+    JSON.parse(pins.stdout),
+    { data: queries.listPinnedMessages({ session_id: 'contract-session' }) },
+  );
+  assert.equal((JSON.parse(pins.stdout) as { data: unknown[] }).data.length, 1);
+
+  const settings = await runCli(['live', 'settings', '--json']);
+  assert.equal(settings.exitCode, 0, settings.stderr);
+  const { getLiveSettingsResponse } = await import('../src/live/responses.js');
+  assert.deepEqual(JSON.parse(settings.stdout), getLiveSettingsResponse());
+
+  const liveSession = await runCli(['live', 'show', 'contract-session', '--json']);
+  assert.equal(liveSession.exitCode, 0, liveSession.stderr);
+  assert.deepEqual(JSON.parse(liveSession.stdout), queries.getLiveSession('contract-session'));
+
+  const turns = await runCli(['live', 'turns', 'contract-session', '--json']);
+  assert.equal(turns.exitCode, 0, turns.stderr);
+  assert.deepEqual(JSON.parse(turns.stdout), { data: queries.getSessionTurns('contract-session') });
+  assert.equal((JSON.parse(turns.stdout) as { data: unknown[] }).data.length, 1);
+
+  for (const command of [
+    ['sessions', 'activity'],
+    ['sessions', 'pins'],
+    ['live', 'show'],
+    ['live', 'turns'],
+  ]) {
+    const missing = await runCli([...command, 'missing-session', '--json']);
+    assert.equal(missing.exitCode, 4, `${command.join(' ')}: ${missing.stderr}`);
+    assert.equal(missing.stdout, '');
+    assert.match(missing.stderr, /Session not found/);
+  }
+});
+
+test('all Monitor REST reads preserve the exact UI query contracts', async () => {
+  seedMonitorData();
+  const queries = await import('../src/db/v2-queries.js');
+
+  const statsParams = { agent: 'codex', since: '2026-06-15' };
+  const stats = await runCli(['monitor', 'stats', '--agent', 'codex', '--since', '2026-06-15', '--json']);
+  assert.equal(stats.exitCode, 0, stats.stderr);
+  assert.deepEqual(JSON.parse(stats.stdout), queries.getMonitorStats(statsParams));
+  assert.ok((JSON.parse(stats.stdout) as { total_events: number }).total_events > 0);
+
+  const eventParams = {
+    agent: 'codex',
+    event_type: 'tool_use',
+    tool_name: 'Bash',
+    session_id: 'contract-session',
+    branch: 'main',
+    model: 'gpt-5.4',
+    source: 'api',
+    since: '2026-06-15',
+    until: '2026-06-16',
+    limit: 1,
+    offset: 0,
+  };
+  const events = await runCli([
+    'monitor', 'events', '--agent', eventParams.agent, '--event-type', eventParams.event_type,
+    '--tool-name', eventParams.tool_name, '--session-id', eventParams.session_id,
+    '--branch', eventParams.branch, '--model', eventParams.model, '--source', eventParams.source,
+    '--since', eventParams.since, '--until', eventParams.until,
+    '--limit', String(eventParams.limit), '--offset', String(eventParams.offset), '--json',
+  ]);
+  assert.equal(events.exitCode, 0, events.stderr);
+  assert.deepEqual(JSON.parse(events.stdout), queries.listMonitorEvents(eventParams));
+  assert.equal((JSON.parse(events.stdout) as { events: unknown[] }).events.length, 1);
+
+  const sessionParams = {
+    exclude_status: 'active',
+    project: 'agentmonitor',
+    agent: 'codex',
+    date_from: '2026-06-15',
+    date_to: '2026-06-16',
+    limit: 1,
+  };
+  const sessions = await runCli([
+    'monitor', 'sessions', '--exclude-status', sessionParams.exclude_status,
+    '--project', sessionParams.project, '--agent', sessionParams.agent,
+    '--date-from', sessionParams.date_from, '--date-to', sessionParams.date_to,
+    '--limit', String(sessionParams.limit), '--json',
+  ]);
+  assert.equal(sessions.exitCode, 0, sessions.stderr);
+  assert.deepEqual(JSON.parse(sessions.stdout), queries.listMonitorSessions(sessionParams));
+  assert.equal((JSON.parse(sessions.stdout) as { sessions: unknown[] }).sessions.length, 1);
+
+  const filters = await runCli(['monitor', 'filter-options', '--json']);
+  assert.equal(filters.exitCode, 0, filters.stderr);
+  assert.deepEqual(JSON.parse(filters.stdout), queries.getMonitorFilterOptions());
+  assert.ok((JSON.parse(filters.stdout) as { tool_names: string[] }).tool_names.includes('Bash'));
+
+  const toolParams = {
+    project: 'agentmonitor',
+    agent: 'codex',
+    date_from: '2026-06-15',
+    date_to: '2026-06-16',
+  };
+  const tools = await runCli([
+    'monitor', 'tools', '--project', toolParams.project, '--agent', toolParams.agent,
+    '--date-from', toolParams.date_from, '--date-to', toolParams.date_to, '--json',
+  ]);
+  assert.equal(tools.exitCode, 0, tools.stderr);
+  assert.deepEqual(JSON.parse(tools.stdout), { tools: queries.getMonitorToolStats(toolParams) });
+  assert.equal((JSON.parse(tools.stdout) as { tools: unknown[] }).tools.length, 1);
+
+  const detail = await runCli(['monitor', 'show', 'contract-session', '--event-limit', '1', '--json']);
+  assert.equal(detail.exitCode, 0, detail.stderr);
+  assert.deepEqual(JSON.parse(detail.stdout), queries.getMonitorSessionWithEvents('contract-session', 1));
+  assert.equal((JSON.parse(detail.stdout) as { events: unknown[] }).events.length, 1);
+
+  const transcript = await runCli(['monitor', 'transcript', 'contract-session', '--json']);
+  assert.equal(transcript.exitCode, 0, transcript.stderr);
+  assert.deepEqual(JSON.parse(transcript.stdout), queries.getMonitorSessionTranscript('contract-session'));
+  assert.ok((JSON.parse(transcript.stdout) as { entries: unknown[] }).entries.length > 0);
+
+  for (const command of ['show', 'transcript']) {
+    const missing = await runCli(['monitor', command, 'missing-session', '--json']);
+    assert.equal(missing.exitCode, 4, `${command}: ${missing.stderr}`);
+    assert.equal(missing.stdout, '');
+  }
+});
+
 test('analytics overview returns all UI contracts and scopes its top-session limit', async () => {
   getDb().prepare(`
     INSERT INTO browsing_sessions (
@@ -624,6 +859,16 @@ test('reporting commands reject unsupported filters instead of ignoring them', a
   assert.equal(benchmark.exitCode, 2);
   assert.equal(benchmark.stdout, '');
   assert.match(benchmark.stderr, /Unknown option: --limit/);
+
+  const activity = await runCli(['sessions', 'activity', 'contract-session', '--limit', '1']);
+  assert.equal(activity.exitCode, 2);
+  assert.equal(activity.stdout, '');
+  assert.match(activity.stderr, /Unknown option: --limit/);
+
+  const monitorFilters = await runCli(['monitor', 'filter-options', '--agent', 'codex']);
+  assert.equal(monitorFilters.exitCode, 2);
+  assert.equal(monitorFilters.stdout, '');
+  assert.match(monitorFilters.stderr, /Unknown option: --agent/);
 });
 
 test('reporting help names every supported filter', async () => {
@@ -634,6 +879,10 @@ test('reporting help names every supported filter', async () => {
     'analytics velocity', 'analytics hour-of-week', 'analytics skills daily',
     'analytics skills health', 'quality trace', 'quality observations', 'insights list',
     'insights show', 'benchmarks list', 'benchmarks show', 'projects list', 'agents list',
+    'sessions activity', 'sessions children', 'sessions pins', 'live settings', 'live show',
+    'live turns', 'monitor stats', 'monitor events', 'monitor sessions',
+    'monitor filter-options', 'monitor tools', 'monitor show', 'monitor transcript',
+    'monitor watch',
   ]) {
     assert.match(root.stdout, new RegExp(command));
   }
@@ -682,6 +931,24 @@ test('reporting help names every supported filter', async () => {
   assert.equal(insights.exitCode, 0, insights.stderr);
   for (const flag of ['--date-from', '--date-to', '--project', '--agent', '--kind', '--limit', '--json']) {
     assert.match(insights.stdout, new RegExp(flag));
+  }
+
+  const monitorEvents = await runCli(['monitor', 'events', '--help']);
+  assert.equal(monitorEvents.exitCode, 0, monitorEvents.stderr);
+  for (const flag of [
+    '--agent', '--event-type', '--tool-name', '--session-id', '--branch', '--model',
+    '--source', '--since', '--until', '--limit', '--offset', '--json',
+  ]) {
+    assert.match(monitorEvents.stdout, new RegExp(flag));
+  }
+
+  const monitorSessions = await runCli(['monitor', 'sessions', '--help']);
+  assert.equal(monitorSessions.exitCode, 0, monitorSessions.stderr);
+  for (const flag of [
+    '--status', '--exclude-status', '--project', '--agent', '--date-from', '--date-to',
+    '--limit', '--json',
+  ]) {
+    assert.match(monitorSessions.stdout, new RegExp(flag));
   }
 });
 

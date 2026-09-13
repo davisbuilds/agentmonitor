@@ -222,3 +222,43 @@ test('live watch filters SSE payloads by live item kind', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('monitor watch preserves the legacy Monitor SSE schema as NDJSON and forwards filters', async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let requestedUrl = '';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: event\n'));
+        controller.enqueue(encoder.encode('data: {"type":"event","pay'));
+        controller.enqueue(encoder.encode('load":{"id":7}}\n\n'));
+        controller.enqueue(encoder.encode('event: stats\ndata: {"type":"stats","payload":{"total_events":1}}\n\n'));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  try {
+    const result = await runCli([
+      '--url', 'http://127.0.0.1:3999',
+      'monitor', 'watch', '--agent', 'codex', '--event-type', 'tool_use',
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.equal(
+      result.stdout,
+      '{"type":"event","payload":{"id":7}}\n'
+      + '{"type":"stats","payload":{"total_events":1}}\n',
+    );
+    const url = new URL(requestedUrl);
+    assert.equal(url.pathname, '/api/stream');
+    assert.equal(url.searchParams.get('agent_type'), 'codex');
+    assert.equal(url.searchParams.get('event_type'), 'tool_use');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

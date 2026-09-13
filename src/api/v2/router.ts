@@ -57,7 +57,6 @@ import {
   listSessionTraces,
 } from '../../trace-quality/on-demand.js';
 import { liveStreamRouter } from './live-stream.js';
-import { config } from '../../config.js';
 import { generateInsight } from '../../insights/service.js';
 import { getInsightsListResponse } from '../../insights/responses.js';
 import { getUsageBudgets } from '../../usage/budgets.js';
@@ -69,6 +68,7 @@ import {
   type CreateExpectedRealizationResult,
 } from '../../skills/expected-realizations.js';
 import { getSessionSkillContext } from '../../skills/session-skill-context.js';
+import { getLiveSettingsResponse } from '../../live/responses.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -440,16 +440,7 @@ function splitKinds(value: string | undefined): string[] | undefined {
 }
 
 v2Router.get('/live/settings', (_req: Request, res: Response) => {
-  res.json({
-    enabled: config.live.enabled,
-    codex_mode: config.live.codexMode,
-    capture: {
-      prompts: config.live.capture.prompts,
-      reasoning: config.live.capture.reasoning,
-      tool_arguments: config.live.capture.toolArguments,
-    },
-    diff_payload_max_bytes: config.live.diffPayloadMaxBytes,
-  });
+  res.json(getLiveSettingsResponse());
 });
 
 v2Router.get('/live/sessions', (req: Request, res: Response) => {
