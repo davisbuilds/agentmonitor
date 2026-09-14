@@ -6,6 +6,24 @@ Directional roadmap for AgentMonitor. This is a planning snapshot, not a release
 
 Concise record of shipped work that has left `BACKLOG.md`. Newest first.
 
+- Usage coverage denominator optimization (2026-09-13) — *What:* the composite
+  Usage overview now counts its all-event coverage denominator from a dedicated
+  normalized-time covering index, then subtracts only the small set of
+  overlapping Codex OTEL usage rows through the existing metric-only index. It
+  preserves exact source counts and detects the edge case where reconciliation
+  removes every in-range row for a session. The overview executes its component
+  reads in one SQLite snapshot. *Why:* profiling a frozen 697K-event database
+  showed that folding 61,915 usage rows cost about 50-80 ms; the dominant work
+  was grouping 430,102 matching events only to reconstruct counts in JavaScript.
+  On the copied 2026-07-15..2026-09-13 dataset, the complete source-level
+  overview improved from a 309.32 ms warm median to 220.99 ms (28.6%) with
+  canonical JSON parity; the built HTTP path measured 227.14 ms over seven warm
+  runs. The new index uses about 64.5 MB and added 12.7% to a synthetic 10K-row
+  bulk insert, avoiding the invalidation, recovery, pricing, and cross-process
+  lifecycle required by a sibling derived database. The old 150 ms figure
+  remains a historical local benchmark trigger, not a product latency contract;
+  revisit a disposable derived store when observed CLI/UI latency or
+  multi-million-row scaling justifies that lifecycle.
 - Monitor read-path stall repair (2026-09-11) — *What:* the default v2 Monitor
   stats read now reuses the write-invalidated SSE snapshot, startup warms that
   snapshot before accepting HTTP work, and Codex OTEL/import usage

@@ -83,6 +83,10 @@ test('covering composite event indexes exist', () => {
     'idx_events_codex_import_usage_session_ts should exist',
   );
   assert.ok(names.has('idx_events_usage_covering'), 'idx_events_usage_covering should exist');
+  assert.ok(
+    names.has('idx_events_usage_matching_covering'),
+    'idx_events_usage_matching_covering should exist',
+  );
   assert.ok(names.has('idx_events_benchmark_monitor'), 'idx_events_benchmark_monitor should exist');
   assert.ok(names.has('idx_events_created_at_order'), 'idx_events_created_at_order should exist');
   assert.ok(names.has('idx_events_created_at'), 'idx_events_created_at should remain');
@@ -197,6 +201,21 @@ test('Usage row selection range-seeks the metric-only covering index', () => {
     plan,
     /SEARCH e USING COVERING INDEX idx_events_usage_covering \(<expr>>\?\)/,
     `expected Usage timestamp range seek on the covering index, got: ${plan}`,
+  );
+});
+
+test('Usage matching coverage range-seeks an all-event covering index', () => {
+  const plan = queryPlan(
+    `SELECT COUNT(*), COUNT(DISTINCT e.session_id)
+     FROM events e
+     WHERE datetime(COALESCE(e.client_timestamp, e.created_at)) >= datetime(?)
+       AND (e.source IS NULL OR e.source != 'benchmark')`,
+    '2026-07-13',
+  );
+  assert.match(
+    plan,
+    /SEARCH e USING COVERING INDEX idx_events_usage_matching_covering \(<expr>>\?\)/,
+    `expected Usage matching coverage to use its covering index, got: ${plan}`,
   );
 });
 

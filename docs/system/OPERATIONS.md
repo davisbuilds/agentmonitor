@@ -242,13 +242,14 @@ an optional median budget is missed:
 
 ```bash
 pnpm bench:usage -- --date-from 2026-06-17 --date-to 2026-07-16 --runs 5
-pnpm bench:usage -- --date-from 2026-06-17 --date-to 2026-07-16 --runs 5 --max-median-ms 150
 ```
 
 Use `--base-url` or `AGENTMONITOR_BASE_URL` for a non-default server. The default
 is `http://127.0.0.1:3141`; `--warmups` defaults to one. Every sample consumes and
 validates the JSON response, so the timing includes HTTP serialization rather
-than measuring only a SQL fragment.
+than measuring only a SQL fragment. `--max-median-ms` can enforce a local budget
+when a named machine, date range, and baseline make that threshold meaningful;
+there is no repository-wide latency constant.
 
 ## Hook Installation
 

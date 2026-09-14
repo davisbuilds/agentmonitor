@@ -12,7 +12,7 @@ function usageTimestampExpression(alias: string): string {
   return `datetime(COALESCE(${alias}.client_timestamp, ${alias}.created_at))`;
 }
 
-function overlappingCodexOtelUsageCondition(alias: string): string {
+export function overlappingCodexOtelUsageCondition(alias: string): string {
   return `(
     ${alias}.agent_type = 'codex'
     AND ${alias}.source = 'otel'

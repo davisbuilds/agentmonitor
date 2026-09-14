@@ -808,6 +808,115 @@ describe('GET /api/v2/usage/overview', () => {
     assert.deepEqual(body.coverage, summary.coverage);
     assert.deepEqual(body.summary.coverage, summary.coverage);
   });
+
+  test('keeps the optimized coverage path valid when benchmark rows are included', async () => {
+    const res = await fetch(
+      `${baseUrl}/api/v2/usage/overview?date_from=2026-04-01&date_to=2026-04-04&include_benchmark=true`,
+    );
+    assert.equal(res.status, 200);
+    const body = await res.json() as { coverage: { matching_events: number } };
+    assert.equal(body.coverage.matching_events, 7);
+  });
+
+  test('merges legacy null and empty sources into the api coverage bucket', async () => {
+    const { getDb } = await import('../src/db/connection.js');
+    const db = getDb();
+    const insert = db.prepare(`
+      INSERT INTO events (
+        event_id, session_id, agent_type, event_type, status,
+        client_timestamp, source
+      ) VALUES (?, ?, 'claude_code', 'assistant', 'success', ?, ?)
+    `);
+    const eventIds = [
+      'usage-source-null',
+      'usage-source-empty',
+      'usage-source-api',
+    ];
+
+    try {
+      insert.run(eventIds[0], 'usage-source-null-session', '2026-06-10T10:00:00Z', null);
+      insert.run(eventIds[1], 'usage-source-empty-session', '2026-06-10T10:01:00Z', '');
+      insert.run(eventIds[2], 'usage-source-api-session', '2026-06-10T10:02:00Z', 'api');
+
+      const res = await fetch(
+        `${baseUrl}/api/v2/usage/overview?date_from=2026-06-10&date_to=2026-06-10`,
+      );
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        coverage: {
+          matching_events: number;
+          source_breakdown: Array<{ source: string; event_count: number }>;
+        };
+      };
+
+      assert.equal(body.coverage.matching_events, 3);
+      assert.deepEqual(
+        body.coverage.source_breakdown.map(row => [row.source, row.event_count]),
+        [['api', 3]],
+      );
+    } finally {
+      db.prepare('DELETE FROM events WHERE event_id IN (?, ?, ?)').run(...eventIds);
+    }
+  });
+
+  test('removes a session when every in-range event is overlapping OTEL usage', async () => {
+    const { insertEvent } = await import('../src/db/queries.js');
+    const { getDb } = await import('../src/db/connection.js');
+    const eventIds = ['usage-vanishing-otel', 'usage-vanishing-import'];
+
+    try {
+      insertEvent({
+        event_id: eventIds[0],
+        session_id: 'usage-vanishing-session',
+        agent_type: 'codex',
+        event_type: 'assistant',
+        status: 'success',
+        project: 'vanishing',
+        model: 'gpt-5.4',
+        tokens_in: 100,
+        tokens_out: 10,
+        cost_usd: 1,
+        client_timestamp: '2026-06-01T10:00:00Z',
+        source: 'otel',
+      });
+      // The later authoritative import makes the OTEL event overlap, but sits
+      // outside the requested day. The optimized denominator must therefore
+      // remove the session itself, not only subtract one event.
+      insertEvent({
+        event_id: eventIds[1],
+        session_id: 'usage-vanishing-session',
+        agent_type: 'codex',
+        event_type: 'assistant',
+        status: 'success',
+        project: 'vanishing',
+        model: 'gpt-5.4',
+        tokens_in: 100,
+        tokens_out: 10,
+        cost_usd: 1,
+        client_timestamp: '2026-06-02T10:00:00Z',
+        source: 'import',
+      });
+
+      const res = await fetch(
+        `${baseUrl}/api/v2/usage/overview?date_from=2026-06-01&date_to=2026-06-01`,
+      );
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        coverage: {
+          matching_events: number;
+          matching_sessions: number;
+          source_breakdown: unknown[];
+        };
+      };
+
+      assert.equal(body.coverage.matching_events, 0);
+      assert.equal(body.coverage.matching_sessions, 0);
+      assert.deepEqual(body.coverage.source_breakdown, []);
+    } finally {
+      const db = getDb();
+      db.prepare('DELETE FROM events WHERE event_id IN (?, ?)').run(...eventIds);
+    }
+  });
 });
 
 describe('GET /api/v2/usage/facets', () => {
