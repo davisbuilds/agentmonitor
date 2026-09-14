@@ -2839,6 +2839,7 @@ function selectUsageMatchingAggregate(params: UsageParams = {}): UsageMatchingAg
   const db = getDb();
   const baseFilter = buildUsageFilterState(params, 'e');
   const baseWhere = baseFilter.conditions.join(' AND ');
+  const sourceExpr = `COALESCE(NULLIF(e.source, ''), 'api')`;
 
   const totals = db.prepare(`
     SELECT
@@ -2850,11 +2851,11 @@ function selectUsageMatchingAggregate(params: UsageParams = {}): UsageMatchingAg
 
   const sourceEventCounts = db.prepare(`
     SELECT
-      COALESCE(NULLIF(e.source, ''), 'api') as source,
+      ${sourceExpr} as source,
       COUNT(*) as event_count
     FROM events e
     ${baseWhere ? `WHERE ${baseWhere}` : ''}
-    GROUP BY source
+    GROUP BY ${sourceExpr}
   `).all(...baseFilter.values) as Array<{ source: string; event_count: number }>;
 
   const excludedFilter = buildUsageFilterState(params, 'e');

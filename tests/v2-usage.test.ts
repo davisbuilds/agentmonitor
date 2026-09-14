@@ -818,6 +818,47 @@ describe('GET /api/v2/usage/overview', () => {
     assert.equal(body.coverage.matching_events, 7);
   });
 
+  test('merges legacy null and empty sources into the api coverage bucket', async () => {
+    const { getDb } = await import('../src/db/connection.js');
+    const db = getDb();
+    const insert = db.prepare(`
+      INSERT INTO events (
+        event_id, session_id, agent_type, event_type, status,
+        client_timestamp, source
+      ) VALUES (?, ?, 'claude_code', 'assistant', 'success', ?, ?)
+    `);
+    const eventIds = [
+      'usage-source-null',
+      'usage-source-empty',
+      'usage-source-api',
+    ];
+
+    try {
+      insert.run(eventIds[0], 'usage-source-null-session', '2026-06-10T10:00:00Z', null);
+      insert.run(eventIds[1], 'usage-source-empty-session', '2026-06-10T10:01:00Z', '');
+      insert.run(eventIds[2], 'usage-source-api-session', '2026-06-10T10:02:00Z', 'api');
+
+      const res = await fetch(
+        `${baseUrl}/api/v2/usage/overview?date_from=2026-06-10&date_to=2026-06-10`,
+      );
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        coverage: {
+          matching_events: number;
+          source_breakdown: Array<{ source: string; event_count: number }>;
+        };
+      };
+
+      assert.equal(body.coverage.matching_events, 3);
+      assert.deepEqual(
+        body.coverage.source_breakdown.map(row => [row.source, row.event_count]),
+        [['api', 3]],
+      );
+    } finally {
+      db.prepare('DELETE FROM events WHERE event_id IN (?, ?, ?)').run(...eventIds);
+    }
+  });
+
   test('removes a session when every in-range event is overlapping OTEL usage', async () => {
     const { insertEvent } = await import('../src/db/queries.js');
     const { getDb } = await import('../src/db/connection.js');
