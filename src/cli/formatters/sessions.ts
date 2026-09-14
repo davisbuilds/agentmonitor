@@ -1,4 +1,13 @@
-import type { BrowsingSessionRow, LiveItemRow, LiveSessionRow, MessageRow, PinnedMessageRow } from '../../api/v2/types.js';
+import type {
+  BrowsingSessionRow,
+  LiveItemRow,
+  LiveSessionRow,
+  LiveSettings,
+  LiveTurnRow,
+  MessageRow,
+  PinnedMessageRow,
+  SessionActivity,
+} from '../../api/v2/types.js';
 import { formatTable, sanitizeTerminal } from '../output.js';
 
 function short(value: string | null | undefined, max = 36): string {
@@ -57,6 +66,17 @@ export function formatPins(rows: PinnedMessageRow[]): string {
   ]);
 }
 
+export function formatSessionActivity(activity: SessionActivity): string {
+  return [
+    `Messages: ${activity.total_messages}`,
+    `Buckets: ${activity.bucket_count}`,
+    `Timestamped: ${activity.timestamped_messages}`,
+    `Untimestamped: ${activity.untimestamped_messages}`,
+    `Navigation: ${sanitizeTerminal(activity.navigation_basis)}`,
+    `Range: ${sanitizeTerminal(activity.first_timestamp ?? '-')} to ${sanitizeTerminal(activity.last_timestamp ?? '-')}`,
+  ].join('\n');
+}
+
 export function formatLiveSessions(rows: LiveSessionRow[]): string {
   if (rows.length === 0) return '(no live sessions)';
   return formatTable([
@@ -77,4 +97,30 @@ export function formatLiveItems(rows: LiveItemRow[]): string {
   return rows.map(row => {
     return `#${row.id} ${sanitizeTerminal(row.kind)} ${sanitizeTerminal(row.status ?? '-')}\n${short(row.payload_json, 1000)}`;
   }).join('\n\n');
+}
+
+export function formatLiveSettings(settings: LiveSettings): string {
+  return [
+    `Enabled: ${settings.enabled}`,
+    `Codex mode: ${sanitizeTerminal(settings.codex_mode)}`,
+    `Capture prompts: ${settings.capture.prompts}`,
+    `Capture reasoning: ${settings.capture.reasoning}`,
+    `Capture tool arguments: ${settings.capture.tool_arguments}`,
+    `Diff payload max bytes: ${settings.diff_payload_max_bytes}`,
+  ].join('\n');
+}
+
+export function formatLiveTurns(rows: LiveTurnRow[]): string {
+  if (rows.length === 0) return '(no live turns)';
+  return formatTable([
+    ['ID', 'SOURCE TURN', 'STATUS', 'TITLE', 'STARTED', 'ENDED'],
+    ...rows.map(row => [
+      String(row.id),
+      short(row.source_turn_id, 28),
+      short(row.status, 12),
+      short(row.title, 36),
+      short(row.started_at, 20),
+      short(row.ended_at, 20),
+    ]),
+  ]);
 }

@@ -222,3 +222,84 @@ test('live watch filters SSE payloads by live item kind', async () => {
     globalThis.fetch = originalFetch;
   }
 });
+
+test('monitor watch preserves the legacy Monitor SSE schema as NDJSON and forwards filters', async () => {
+  const originalFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  let requestedUrl = '';
+  globalThis.fetch = async (input) => {
+    requestedUrl = String(input);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(encoder.encode('event: event\n'));
+        controller.enqueue(encoder.encode('data: {"type":"event","pay'));
+        controller.enqueue(encoder.encode('load":{"id":7}}\n\n'));
+        controller.enqueue(encoder.encode('event: stats\ndata: {"type":"stats","payload":{"total_events":1}}\n\n'));
+        controller.close();
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  try {
+    const result = await runCli([
+      '--url', 'http://127.0.0.1:3999',
+      'monitor', 'watch', '--agent', 'codex', '--event-type', 'tool_use',
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.equal(
+      result.stdout,
+      '{"type":"event","payload":{"id":7}}\n'
+      + '{"type":"stats","payload":{"total_events":1}}\n',
+    );
+    const url = new URL(requestedUrl);
+    assert.equal(url.pathname, '/api/stream');
+    assert.equal(url.searchParams.get('agent_type'), 'codex');
+    assert.equal(url.searchParams.get('event_type'), 'tool_use');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('watch commands map connection failures to unavailable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError('fetch failed');
+  };
+
+  try {
+    for (const command of [['live', 'watch'], ['monitor', 'watch']]) {
+      const result = await runCli(['--url', 'http://127.0.0.1:3999', ...command]);
+      assert.equal(result.exitCode, 3, `${command.join(' ')}: ${result.stderr}`);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /Cannot reach http:\/\/127\.0\.0\.1:3999/);
+      assert.doesNotMatch(result.stderr, /unexpected error/i);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('watch commands map interrupted response streams to unavailable', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error('socket reset'));
+      },
+    });
+    return new Response(stream, { status: 200 });
+  };
+
+  try {
+    const result = await runCli(['--url', 'http://127.0.0.1:3999', 'monitor', 'watch']);
+    assert.equal(result.exitCode, 3, result.stderr);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Stream from http:\/\/127\.0\.0\.1:3999\/api\/stream failed/);
+    assert.doesNotMatch(result.stderr, /unexpected error/i);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});

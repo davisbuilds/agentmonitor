@@ -44,6 +44,17 @@ export interface BrowsingSessionDbRow
 
 export type LiveSessionRow = BrowsingSessionRow;
 
+export interface LiveSettings {
+  enabled: boolean;
+  codex_mode: 'otel-only' | 'exporter';
+  capture: {
+    prompts: boolean;
+    reasoning: boolean;
+    tool_arguments: boolean;
+  };
+  diff_payload_max_bytes: number;
+}
+
 export interface LiveTurnRow {
   id: number;
   session_id: string;

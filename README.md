@@ -120,6 +120,10 @@ amon serve --no-portless         # Direct runtime on http://127.0.0.1:3141
 pnpm cli -- --help               # CLI help during local development
 pnpm cli -- health               # Check the local server
 pnpm cli -- sessions list --json # Query session history from SQLite
+pnpm cli -- sessions activity <session-id> --json # Read the session minimap contract
+pnpm cli -- live settings --json # Read Live capture and integration settings
+pnpm cli -- monitor stats --json # Read Monitor aggregate state
+pnpm cli -- monitor watch        # Stream Monitor events as NDJSON
 pnpm cli -- usage overview --json # Read every Usage-page rollup in one JSON document
 pnpm cli -- analytics overview --json # Read every Analytics-page contract in one JSON document
 pnpm cli -- quality trace <trace-id> --json # Read trace detail for agent analysis

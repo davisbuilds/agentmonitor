@@ -2,10 +2,21 @@ import { parseIntegerOption, parseOptionSet, requireOne } from '../args.js';
 import { registerCommand } from '../commands.js';
 import { invalidUsage, notFound } from '../errors.js';
 import { effectiveBaseUrl } from '../http.js';
-import { formatLiveItems, formatLiveSessions, formatMessages, formatPins, formatSessionDetail, formatSessionRows } from '../formatters/sessions.js';
+import {
+  formatLiveItems,
+  formatLiveSessions,
+  formatLiveSettings,
+  formatLiveTurns,
+  formatMessages,
+  formatPins,
+  formatSessionActivity,
+  formatSessionDetail,
+  formatSessionRows,
+} from '../formatters/sessions.js';
 import { writeJson, writeStdout } from '../output.js';
 import type { CliContext } from '../output.js';
 import { initReadDb } from '../db.js';
+import { streamSseData } from '../sse.js';
 
 function parseListFilters(args: string[]) {
   const parsed = parseOptionSet(
@@ -108,30 +119,7 @@ async function streamLive(
   const url = new URL(`${base}/api/v2/live/stream`);
   if (sessionId) url.searchParams.set('session_id', sessionId);
   if (sinceNow) url.searchParams.set('since', String(Number.MAX_SAFE_INTEGER));
-  const res = await fetch(url);
-  if (!res.ok || !res.body) {
-    const { unavailable } = await import('../errors.js');
-    throw unavailable(`${url.toString()} returned ${res.status}`);
-  }
-  const decoder = new TextDecoder();
-  let buffer = '';
-  function processLine(line: string): void {
-    const normalized = line.endsWith('\r') ? line.slice(0, -1) : line;
-    if (!normalized.startsWith('data: ')) return;
-    const data = normalized.slice('data: '.length);
-    if (shouldWriteLiveData(data, kindFilter)) writeStdout(ctx, data);
-  }
-  for await (const chunk of res.body) {
-    buffer += decoder.decode(chunk, { stream: true });
-    let newlineIndex = buffer.indexOf('\n');
-    while (newlineIndex !== -1) {
-      processLine(buffer.slice(0, newlineIndex));
-      buffer = buffer.slice(newlineIndex + 1);
-      newlineIndex = buffer.indexOf('\n');
-    }
-  }
-  buffer += decoder.decode();
-  if (buffer) processLine(buffer);
+  await streamSseData(ctx, url, data => shouldWriteLiveData(data, kindFilter));
 }
 
 export function registerSessionLiveCommands(): void {
@@ -248,6 +236,65 @@ export function registerSessionLiveCommands(): void {
   });
 
   registerCommand({
+    name: 'sessions activity',
+    group: 'Session Commands',
+    summary: 'Show one session activity map',
+    usage: 'sessions activity <id> [--json]',
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set());
+      const id = requireOne(parsed.positionals, 'amon sessions activity <id>');
+      const { closeDb } = await initReadDb();
+      try {
+        const { getBrowsingSession, getSessionActivity } = await import('../../db/v2-queries.js');
+        if (!getBrowsingSession(id)) throw notFound(`Session not found: ${id}`);
+        const result = getSessionActivity(id);
+        writeFormatted(ctx, result, formatSessionActivity(result));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'sessions children',
+    group: 'Session Commands',
+    summary: 'List child sessions for one session',
+    usage: 'sessions children <id> [--json]',
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set());
+      const id = requireOne(parsed.positionals, 'amon sessions children <id>');
+      const { closeDb } = await initReadDb();
+      try {
+        const { getSessionChildren } = await import('../../db/v2-queries.js');
+        const data = getSessionChildren(id);
+        writeFormatted(ctx, { data }, formatSessionRows(data));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'sessions pins',
+    group: 'Session Commands',
+    summary: 'List pinned moments for one session',
+    usage: 'sessions pins <id> [--json]',
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set());
+      const id = requireOne(parsed.positionals, 'amon sessions pins <id>');
+      const { closeDb } = await initReadDb();
+      try {
+        const { getBrowsingSession, listPinnedMessages } = await import('../../db/v2-queries.js');
+        if (!getBrowsingSession(id)) throw notFound(`Session not found: ${id}`);
+        const data = listPinnedMessages({ session_id: id });
+        writeFormatted(ctx, { data }, formatPins(data));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'pins list',
     group: 'Session Commands',
     summary: 'List pinned transcript moments',
@@ -318,6 +365,60 @@ export function registerSessionLiveCommands(): void {
           kinds: parsed.values.get('--kinds')?.split(',').map(value => value.trim()).filter(Boolean),
         });
         writeFormatted(ctx, result, formatLiveItems(result.data));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'live settings',
+    group: 'Live Commands',
+    summary: 'Show Live capture and integration settings',
+    usage: 'live settings [--json]',
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set());
+      if (parsed.positionals.length > 0) throw invalidUsage(`Unexpected argument: ${parsed.positionals[0]}`);
+      const { getLiveSettingsResponse } = await import('../../live/responses.js');
+      const result = getLiveSettingsResponse();
+      writeFormatted(ctx, result, formatLiveSettings(result));
+    },
+  });
+
+  registerCommand({
+    name: 'live show',
+    group: 'Live Commands',
+    summary: 'Show one live-projected session',
+    usage: 'live show <id> [--json]',
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set());
+      const id = requireOne(parsed.positionals, 'amon live show <id>');
+      const { closeDb } = await initReadDb();
+      try {
+        const { getLiveSession } = await import('../../db/v2-queries.js');
+        const result = getLiveSession(id);
+        if (!result) throw notFound(`Session not found: ${id}`);
+        writeFormatted(ctx, result, formatSessionDetail(result));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'live turns',
+    group: 'Live Commands',
+    summary: 'List turns for one live-projected session',
+    usage: 'live turns <id> [--json]',
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set());
+      const id = requireOne(parsed.positionals, 'amon live turns <id>');
+      const { closeDb } = await initReadDb();
+      try {
+        const { getLiveSession, getSessionTurns } = await import('../../db/v2-queries.js');
+        if (!getLiveSession(id)) throw notFound(`Session not found: ${id}`);
+        const data = getSessionTurns(id);
+        writeFormatted(ctx, { data }, formatLiveTurns(data));
       } finally {
         closeDb();
       }

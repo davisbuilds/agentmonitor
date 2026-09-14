@@ -3,6 +3,7 @@ import { registerDatabaseCommands } from './commands/database.js';
 import { registerArtifactCommands } from './commands/artifacts.js';
 import { registerHookCommands } from './commands/hooks.js';
 import { registerMaintenanceCommands } from './commands/maintenance.js';
+import { registerMonitorCommands } from './commands/monitor.js';
 import { registerOpsCommands } from './commands/ops.js';
 import { registerReportingCommands } from './commands/reporting.js';
 import { registerRuntimeCommands } from './commands/runtime.js';
@@ -23,6 +24,7 @@ export function registerAllCommands(): void {
   registerSessionLiveCommands();
   registerReportingCommands();
   registerArtifactCommands();
+  registerMonitorCommands();
   registerOpsCommands();
   registerHookCommands();
   registerWarehouseCommands();
