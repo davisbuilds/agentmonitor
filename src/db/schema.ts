@@ -439,6 +439,10 @@ function initSchemaLocked(db: Database): void {
   //   needed by both lifetime Monitor sums and the canonical Usage row selector.
   //   Its normalized timestamp prefix supports window range seeks; the remaining
   //   columns keep those reads off the metadata-heavy events table.
+  // - idx_events_usage_matching_covering serves Usage coverage's broader
+  //   denominator, which includes events without token/cost metrics. Project and
+  //   agent stay in the index so filtered coverage does not fall back to the
+  //   metadata-heavy events table.
   // - idx_events_benchmark_monitor makes the default lifetime counts and
   //   dimension breakdowns cheap to compute as all rows minus the small,
   //   segregated benchmark slice. Its session_id prefix after source also
@@ -501,6 +505,15 @@ function initSchemaLocked(db: Database): void {
           OR COALESCE(cache_read_tokens, 0) > 0
           OR COALESCE(cache_write_tokens, 0) > 0
         );
+    CREATE INDEX IF NOT EXISTS idx_events_usage_matching_covering
+      ON events(
+        datetime(COALESCE(client_timestamp, created_at)),
+        source,
+        session_id,
+        project,
+        agent_type
+      )
+      WHERE (source IS NULL OR source != 'benchmark');
     CREATE INDEX IF NOT EXISTS idx_events_benchmark_monitor
       ON events(source, session_id, agent_type, tool_name, model)
       WHERE source = 'benchmark';

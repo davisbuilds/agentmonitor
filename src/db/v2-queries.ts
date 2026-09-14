@@ -83,6 +83,7 @@ import { getStatsForBroadcast, updateIdleSessions } from './queries.js';
 import {
   excludeBenchmarkUsageCondition,
   excludeOverlappingCodexOtelUsageCondition,
+  overlappingCodexOtelUsageCondition,
   usageMetricPresenceCondition,
 } from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
@@ -2734,6 +2735,12 @@ interface UsageMatchingGroup {
   event_count: number;
 }
 
+interface UsageMatchingAggregate {
+  matching_events: number;
+  matching_sessions: number;
+  source_event_counts: Array<{ source: string; event_count: number }>;
+}
+
 function isUsageCoverageGroup(
   group: UsageCoverageGroup | UsageMatchingGroup,
 ): group is UsageCoverageGroup {
@@ -2815,6 +2822,92 @@ function selectUsageMatchingGroups(params: UsageParams = {}): UsageMatchingGroup
   return rows.filter(row => usageClassificationMatches(row.model, params));
 }
 
+/**
+ * The overview already owns the usage-bearing rows, so its coverage query only
+ * needs the broader matching-event denominator. For the common path without a
+ * registry-backed model/provider/tier filter, count the denominator directly
+ * from the all-event covering index instead of grouping every session in SQL
+ * and reconstructing the same totals in JavaScript.
+ *
+ * Reconciliation is intentionally split out: only metric-bearing Codex OTEL
+ * rows can overlap an authoritative import row. Counting the broad population
+ * without that correlated EXISTS lets SQLite stay index-only, then the small
+ * overlap set is subtracted exactly. A session disappears only when every
+ * matching row was excluded, which the bounded survivor EXISTS preserves.
+ */
+function selectUsageMatchingAggregate(params: UsageParams = {}): UsageMatchingAggregate {
+  const db = getDb();
+  const baseFilter = buildUsageFilterState(params, 'e');
+  const baseWhere = baseFilter.conditions.join(' AND ');
+
+  const totals = db.prepare(`
+    SELECT
+      COUNT(*) as matching_events,
+      COUNT(DISTINCT e.session_id) as matching_sessions
+    FROM events e
+    ${baseWhere ? `WHERE ${baseWhere}` : ''}
+  `).get(...baseFilter.values) as { matching_events: number; matching_sessions: number };
+
+  const sourceEventCounts = db.prepare(`
+    SELECT
+      COALESCE(NULLIF(e.source, ''), 'api') as source,
+      COUNT(*) as event_count
+    FROM events e
+    ${baseWhere ? `WHERE ${baseWhere}` : ''}
+    GROUP BY source
+  `).all(...baseFilter.values) as Array<{ source: string; event_count: number }>;
+
+  const excludedFilter = buildUsageFilterState(params, 'e');
+  const survivorFilter = buildUsageFilterState(params, 'survivor');
+  const excludedWhere = [
+    ...excludedFilter.conditions,
+    // source='otel' makes this logically redundant when benchmark rows are
+    // included, but spelling the partial-index predicate lets SQLite prove that
+    // idx_events_usage_covering is a valid forced plan in both modes.
+    `(e.source IS NULL OR e.source != 'benchmark')`,
+    `e.agent_type = 'codex'`,
+    `e.source = 'otel'`,
+    usageMetricsCondition('e'),
+    overlappingCodexOtelUsageCondition('e'),
+  ].join(' AND ');
+  const survivorWhere = [
+    `survivor.session_id = excluded.session_id`,
+    ...survivorFilter.conditions,
+    excludeOverlappingCodexOtelUsageCondition('survivor'),
+  ].join(' AND ');
+
+  const excluded = db.prepare(`
+    WITH excluded AS MATERIALIZED (
+      SELECT e.session_id, COUNT(*) as event_count
+      FROM events e INDEXED BY idx_events_usage_covering
+      WHERE ${excludedWhere}
+      GROUP BY e.session_id
+    )
+    SELECT
+      COALESCE(SUM(excluded.event_count), 0) as excluded_events,
+      COALESCE(SUM(CASE WHEN EXISTS (
+        SELECT 1
+        FROM events survivor
+        WHERE ${survivorWhere}
+        LIMIT 1
+      ) THEN 0 ELSE 1 END), 0) as vanished_sessions
+    FROM excluded
+  `).get(
+    ...excludedFilter.values,
+    ...survivorFilter.values,
+  ) as { excluded_events: number; vanished_sessions: number };
+
+  return {
+    matching_events: Math.max(0, totals.matching_events - excluded.excluded_events),
+    matching_sessions: Math.max(0, totals.matching_sessions - excluded.vanished_sessions),
+    source_event_counts: sourceEventCounts
+      .map(row => row.source === 'otel'
+        ? { ...row, event_count: Math.max(0, row.event_count - excluded.excluded_events) }
+        : row)
+      .filter(row => row.event_count > 0),
+  };
+}
+
 function usageRowsToCoverageGroups(usageRows: UsageRow[]): UsageCoverageGroup[] {
   const groups = new Map<string, UsageCoverageGroup>();
   for (const row of usageRows) {
@@ -2849,14 +2942,38 @@ function usageRowsToCoverageGroups(usageRows: UsageRow[]): UsageCoverageGroup[] 
 }
 
 export function getUsageCoverage(params: UsageParams = {}, usageRows?: UsageRow[]): UsageCoverage {
-  const groups = usageRows ? selectUsageMatchingGroups(params) : selectUsageCoverageGroups(params);
+  const matchingAggregate = usageRows && !hasUsageClassificationFilter(params)
+    ? selectUsageMatchingAggregate(params)
+    : null;
+  const groups = matchingAggregate
+    ? []
+    : usageRows
+      ? selectUsageMatchingGroups(params)
+      : selectUsageCoverageGroups(params);
 
   const matchingSessions = new Set<string>();
   const usageSessions = new Set<string>();
   const sources = new Map<string, UsageSourceBreakdown & { usageSessionIds: Set<string> }>();
 
-  let matchingEvents = 0;
+  let matchingEvents = matchingAggregate?.matching_events ?? 0;
   let usageEvents = 0;
+
+  if (matchingAggregate) {
+    for (const row of matchingAggregate.source_event_counts) {
+      sources.set(row.source, {
+        source: row.source,
+        event_count: row.event_count,
+        usage_event_count: 0,
+        session_count: 0,
+        cost_usd: 0,
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        usageSessionIds: new Set<string>(),
+      });
+    }
+  }
 
   for (const group of groups) {
     matchingEvents += group.event_count;
@@ -2931,7 +3048,7 @@ export function getUsageCoverage(params: UsageParams = {}, usageRows?: UsageRow[
     matching_events: matchingEvents,
     usage_events: usageEvents,
     missing_usage_events: Math.max(0, matchingEvents - usageEvents),
-    matching_sessions: matchingSessions.size,
+    matching_sessions: matchingAggregate?.matching_sessions ?? matchingSessions.size,
     usage_sessions: usageSessions.size,
     sources_with_usage: sourceBreakdown.filter(row => row.usage_event_count > 0).length,
     source_breakdown: sourceBreakdown,
@@ -3441,20 +3558,23 @@ export function getUsageFacets(params: UsageParams = {}): UsageFacets {
  * scan, one coverage, all rollups.
  */
 export function getUsageOverview(params: UsageParams = {}): UsageOverview {
-  const usageRows = selectUsageRows(params);
-  const coverage = getUsageCoverage(params, usageRows);
+  const db = getDb();
+  return db.transaction(() => {
+    const usageRows = selectUsageRows(params);
+    const coverage = getUsageCoverage(params, usageRows);
 
-  return {
-    summary: getUsageSummary(params, usageRows, coverage),
-    daily: getUsageDaily(params, usageRows),
-    projects: getUsageProjects(params, usageRows),
-    models: getUsageModels(params, usageRows),
-    models_daily: getUsageModelsDaily(params, usageRows),
-    tiers: getUsageTiers(params, usageRows),
-    agents: getUsageAgents(params, usageRows),
-    top_sessions: getUsageTopSessions(params, usageRows),
-    coverage,
-  };
+    return {
+      summary: getUsageSummary(params, usageRows, coverage),
+      daily: getUsageDaily(params, usageRows),
+      projects: getUsageProjects(params, usageRows),
+      models: getUsageModels(params, usageRows),
+      models_daily: getUsageModelsDaily(params, usageRows),
+      tiers: getUsageTiers(params, usageRows),
+      agents: getUsageAgents(params, usageRows),
+      top_sessions: getUsageTopSessions(params, usageRows),
+      coverage,
+    };
+  })();
 }
 
 // --- Insights ---
