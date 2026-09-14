@@ -1,264 +1,161 @@
 # Features
 
-Product-surface reference for AgentMonitor.
+This document describes AgentMonitor's observable product behavior and the limits
+that users and agents must preserve. Exact endpoints and response types live in
+the v2 route/query source and [API index](../api/README.md).
 
-## Canonical Surface
+## Canonical Product Surface
 
-- Canonical product surface: Svelte app at `/app/`.
-- Canonical application contract: `/api/v2/*`.
-- `/` redirects to `/app/`. (The legacy static `/` dashboard was removed 2026-09-10.)
-- Local operator CLI: `amon`, with `agentmonitor` as an equivalent executable alias.
+- The Svelte SPA at `/app/` is the sole human-facing surface; `/` redirects there.
+- Monitor, Live, Sessions, Search, and Analytics are the primary workflows.
+- Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
+  one shared date/project/agent filter context.
+- Deep links preserve the active view and selected session, message, or trace where
+  applicable.
 
-## Operator CLI
+## Agent-First CLI
 
-- Runtime commands cover Portless-backed server startup at
-  `https://agentmonitor.localhost`, direct-only startup, health checks, status
-  reporting, and opening the canonical app.
-- Maintenance commands cover historical import, session-browser sync, cost recalculation, and the opt-in trace-quality reclaim (`pnpm reclaim:trace-quality`).
-- Read commands cover sessions, pinned messages, live views, Monitor state, usage, analytics, trace-quality reports, saved insights, benchmark studies, shared project/agent metadata, and operational OTEL metrics (`ops metrics`, the CLI reader for the `/api/v2/metrics` surface). `usage overview` exposes the exact eight-rollup Usage-page payload and coverage contract in one query; `usage facets` exposes the same five self-excluding filter lists as the UI. All ten Analytics-page reads have exact leaf commands, and `analytics overview` returns those contracts together for agent workflows without ten CLI launches. Trace detail/observations, persisted insight reads, benchmark list/detail, and filter metadata preserve their v2 response shapes under `--json`; missing detail exits 4. Browsing-session, Live, and Monitor commands preserve their distinct UI contracts, including the dedicated Live stream and legacy Monitor stream. The CLI has exact equivalents for all 42 read contracts called by the current Svelte app.
-- Hook helpers print Codex OTEL configuration and wrap the Claude Code hook installer.
-- Human output is terminal-safe; finite reads expose stable structured data with
-  `--json` on stdout, live watch emits NDJSON, and diagnostics stay on stderr.
-  Reporting commands reject unsupported filters rather than accepting no-op
-  input. Current local databases skip repeated schema DDL, so multiple agents
-  can query alongside the WAL writer.
+`amon` exposes the same local data needed by automated consumers: runtime health,
+sessions, live activity, search, analytics, usage, insights, benchmarks, trace
+quality, operational metrics, budgets, tier feedback, database maintenance, and
+imports. `agentmonitor` is an executable alias.
 
-## Real-Time Dashboard
+Read commands default to concise human output and provide stable `--json` output
+for agents. Filter semantics and data-selection rules are shared with v2 wherever
+the command represents a UI read. Use `amon --help` and subcommand help as the
+current command contract.
 
-- The Svelte `Monitor` tab is the canonical real-time operator surface.
-- Agent cards showing active sessions, tool usage, and token counts.
-- Invocation-mode indicator: sessions run headlessly (`claude -p` / `codex exec`) show a muted `headless` pill on the agent card and a `Mode` row in session detail; interactive sessions show no pill. Antigravity/Gemini emit no such signal and are always unmarked. The `mode` field (`interactive` | `headless` | `null`) is exposed on `/api/v2/monitor/sessions` and `/api/v2/monitor/sessions/:id`.
-- Live event feed with filtering by agent type, event type, tool name, model, and branch.
-- Stats bar with aggregate counters and cost totals.
-- Cost dashboard with breakdowns by model, project, and timeline.
-- Tool analytics showing usage patterns across sessions.
-- Usage monitor with per-agent token/cost limits and rolling windows.
+## Monitor And Live
 
-## Session Management
+Monitor provides current sessions, recent events, aggregate stats, tool activity,
+provider-native quota snapshots, and context-window occupancy. It consumes the v2
+Monitor reads and the shared SSE stream.
 
-- Session lifecycle: `active` → `idle` (5 min) → `ended` (10 min).
-- Session detail view with event timeline and transcript.
-- The Svelte `Sessions` viewer includes a transcript activity minimap that can jump into long conversations without requiring the full transcript to be preloaded.
-- Transcript turns are attributed as `You` (human input), the agent name (`Claude`/`Codex`, for assistant turns), or `Tool` (tool-result turns, which Claude Code stores under the `user` role). An author dropdown filters the loaded window to any one of these (or all), with a "loaded" count making the windowing explicit.
-- Messages can be pinned for later review. Pinned moments live in the **Pinned sub-view of the Sessions tab** (Browse / Pinned SubTabs); "Open In Session" reopens them on Browse at the corresponding transcript ordinal. Legacy `#pinned` deep links redirect to `#sessions?view=pinned`.
-- Claude Code `session_end` transitions to `idle` (not `ended`) so cards linger in Active Agents.
-- Filter sessions by status, agent type, and project.
-- The Browse list requests `GET /api/v2/sessions?exclude_empty=true`, hiding telemetry-only sessions with no browsable transcript (history capability `none`) — these previously surfaced as "Local command activity" rows that opened to an empty viewer. The `exclude_empty` param is opt-in and adjusts both the result set and the `total` count.
+Live exposes normalized sessions, turns, items, and a dedicated live stream. Its
+fidelity is explicit:
 
-## Live Ops Tab
+- Claude session files can provide transcript-capable live detail.
+- Codex OTEL provides summary-oriented live activity, including response-completion
+  token and cost data. Historical Codex JSONL import enriches later analysis but is
+  not the sole usage source.
+- Antigravity supports historical summary import and has no live projection.
 
-- Svelte `Live` tab with a dedicated session tree, live item stream, and inspector panel.
-- Live item model supports message, reasoning, tool call, and tool result records today.
-- Dedicated live SSE stream at `/api/v2/live/stream` separate from the Monitor SSE contract.
-- Live settings endpoint at `/api/v2/live/settings` exposes whether the tab is enabled, the current Codex mode, and capture/redaction settings.
-- Claude live mode is full-fidelity relative to current AgentMonitor sources because it is driven by Claude JSONL session files.
-- Codex `otel-only` mode is summary-only and should not be treated as equivalent to Claude live fidelity.
-- **Context-window occupancy**: live Claude and Codex sessions report current window fill — `context_used_tokens`, `context_window_tokens`, and derived `context_pct` — on `/api/v2/live/sessions`. The numerator is the most recent request's prompt size (Claude: latest assistant turn `input + cache_read + cache_creation`; Codex: latest `last_token_usage.input_tokens`), so it drops after a compaction rather than only rising. The window resolves from Codex's reported `model_context_window` (else a configurable ~256K default) or a 1M Claude default, guarded against `>100%`. Rendered as a compact `ContextPill` on Monitor cards and a full used/window/percent readout in the Live inspector + session-detail drawer; `null` (absent) when unavailable, never a `0%` placeholder. The `/context` category breakdown is intentionally not reproduced (not present in any ingested source); Antigravity carries no occupancy data. Occupancy is written by any parse that yields `context_used_tokens` — live turns, plus the initial watcher sync and historical import when a session's file is (re)parsed. Because the watcher skips files whose hash is unchanged, sessions synced into an existing database *before* this feature are backfilled automatically by a one-shot migration on the first startup after upgrade — it flags those Claude/Codex session files for a single reparse — so no manual `amon reparse` is needed; fresh databases and any new/changed session populate on parse.
+Context occupancy is absent when the source cannot support it. Its numerator is
+the latest request's prompt size, so compaction can lower the displayed value; the
+product never substitutes a misleading `0%` for missing evidence.
 
-## Multi-Agent Support
+## Sessions, Search, And Pins
 
-| Agent | Integration | Token/Cost Data |
-|-------|------------|-----------------|
-| Claude Code | Shell/Python hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, `Stop`, `InstructionsLoaded`) | Yes (via hooks) |
-| Codex | OTEL JSON exporter (`logs`, `metrics`) | Via import backfill |
-| Antigravity CLI | Historical import of conversation SQLite DBs (protobuf decode; no OTEL/live) | Yes (via import; summary session fidelity) |
-| Generic | HTTP API (`POST /api/events`) | If provided in payload |
+- Session browsing provides incremental transcript loading, child-session context,
+  tool calls, metadata, and an activity minimap for long sessions.
+- Search supports recency and relevance ordering and includes enough session
+  context to navigate directly to the matching ordinal.
+- Pinned transcript moments use session-plus-ordinal identity so they survive
+  re-imports that replace internal row IDs.
+- The global `Cmd/Ctrl+K` palette searches recent sessions and transcript matches
+  from any tab.
 
-## Privacy And Capture Controls
+## Analytics And Skill Evidence
 
-- `AGENTMONITOR_ENABLE_LIVE_TAB` controls whether the `Live` tab is exposed in the Svelte app.
-- `AGENTMONITOR_LIVE_CAPTURE_PROMPTS=false` redacts live user-message payloads.
-- `AGENTMONITOR_LIVE_CAPTURE_REASONING=false` redacts live reasoning payloads.
-- `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS=false` redacts tool-call input arguments while retaining the tool name.
-- `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` is the payload cap for diff-style live records as richer agents are added.
+Analytics covers activity over time, projects, agents, tools, hour-of-week patterns,
+velocity, and high-volume sessions. Capability metadata distinguishes all-session
+aggregates from tool or transcript analysis that excludes unsupported sources.
 
-## Cost Tracking
+Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of
+`SKILL.md`. Shell variables and glob paths do not count as named skills. Skill
+health distinguishes first reads, post-compaction rehydration, repeats without
+compaction, and unclassifiable observations by harness. Claude and Codex evidence
+is not pooled as directly comparable because the observation mechanisms differ.
 
-- Per-model pricing tables (JSON data files for Claude, Codex, Gemini families).
-- GPT-5.6 Sol/Terra/Luna standard API pricing, including the `gpt-5.6` → Sol alias, 90%-discounted cache reads, 1.25x cache writes, and full-request long-context rates above 272K input tokens.
-- Automatic cost calculation on ingest from token counts.
-- Codex JSONL usage is attributed from each turn's recorded model rather than the machine's current config; a one-shot upgrade refresh corrects explicit historical turn attribution and its trace-summary rollups.
-- Cost breakdowns by model, project, and time period.
-- Historical cost recalculation via `amon costs recalc`; `pnpm recalculate-costs` remains a compatibility wrapper.
+Invocation, presentation, project breadth, and version attribution are screening
+evidence. They do not by themselves prove skill value, correct placement, or a
+reason to remove a skill. Missing denominators remain unavailable with a reason
+rather than becoming zero.
 
-## Analytics
+External profile authorities may attach bounded, immutable expected-realization
+evidence to a compatible session. The session view then compares desired context
+with observed consultation and instruction evidence without rewriting history.
 
-> The Svelte app consolidates historical Analytics, Usage, Skills, Insights, and Quality into a **single `Analytics` tab** with **Overview / Usage / Skills / Insights / Quality** sub-views (SubTabs). A shared filter bar drives `date / project / agent` across all five sub-views; per-view specialized filters stay local (Usage: model/provider/tier; Skills: harness/name/signal/sort; Insights: kind + authoring provider/model). Deep links use one `#analytics?view=…` hash; legacy `#usage` / `#insights` links redirect. The backend `/api/v2/analytics/*`, `/api/v2/usage/*`, and `/api/v2/insights/*` contracts are unchanged.
+## Usage And Cost
 
-- Historical analytics live under `/api/v2/analytics/*` and are intended for the canonical Svelte app.
-- Summary, activity, project, hour-of-week, top-session, velocity, and per-agent analytics aggregate across all matching sessions.
-- Tool analytics remain capability-aware and intentionally exclude sessions whose projection contract does not expose tool analytics.
-- Skill analytics now include explicit Claude `Skill` tool calls plus inferred Codex skill reads from `.../SKILL.md` commands captured through OTEL or Codex JSONL fallback. Both the legacy `exec_command` and newer `exec` Codex tool names are recognized; shell variables and globs such as `$skill/SKILL.md` and `*/SKILL.md` are not treated as skill names.
-- **Skill trigger health** (`/api/v2/analytics/skills/health`) retains its
-  phase-1 `data` rows (invocation count, last-invoked, misfire rate,
-  never-fired, and point-in-time version attribution) and adds
-  `dataSemantics` plus `consultations`. The richer result is grouped by harness
-  and logical skill, and separates `first_read`,
-  `rehydration_after_compaction`, `repeat_no_compaction`, and
-  `unclassifiable`. It also reports eligible-session denominators, project
-  breadth, per-version attribution quality, presentation/consultation exposure
-  partitions, and structured cross-harness comparability. Claude and Codex are
-  not pooled as directly comparable because their detection semantics differ;
-  each mixed-harness phase-1 row is labeled `compatibilityOnly: true` and
-  `crossHarnessComparable: false`, while rich consumers use
-  `consultations.byHarness`.
-  The underlying occurrence selector is shared with daily skill analytics:
-  Codex OTEL suppresses JSONL fallback only when an in-filter OTEL row contains
-  a concrete skill path, and the health endpoint reuses one selected occurrence
-  set for both legacy and rich folds. Caveats: the phase-1 interrupt heuristic
-  deliberately under-counts; Codex remains misfire-ineligible; and historical
-  versions before the first catalog snapshot remain approximate. Invocation,
-  presentation, and project breadth are screening evidence only—not skill
-  value, placement, or removal recommendations—and current installed files are
-  not used to reconstruct historical runtime state.
-- The Analytics `Overview` keeps raw phase-1 invocation volume as a separate
-  timeline and a bounded **Skill consultations** index. The index summarizes
-  each selected harness and shows at most six high-volume rows, so project and
-  velocity panels remain near the top of the page.
-- The dedicated `Skills` sub-view (`#analytics?view=skills`) is the complete
-  consultation evidence ledger. It filters by runtime-derived harness, skill
-  name, observed signal, and sort order; progressively reveals large result
-  sets; and keeps expandable first-read, post-compaction, repeat,
-  unclassifiable, project, catalog-exposure, version, and coverage evidence.
-  Mixed-harness rates are never pooled, unavailable denominators render with
-  reasons, and the shared agent filter collapses the explorer to one harness.
-- Analytics responses include coverage metadata so the UI can disclose when a slice is all-session versus capability-limited.
-- **Session skill context** (`GET /api/v2/sessions/:id/skill-context`) exposes
-  ordered consultation classifications, catalog presentations and measurements,
-  expected-realization comparisons, policy-backed catalog budget availability,
-  and instruction-load reach without converting missing evidence into zero.
-- External profile authorities can create or replay immutable desired-state
-  evidence with `PUT /api/v2/skills/expected-realizations/:id`, then bind it
-  once to a same-harness session with
-  `PUT /api/v2/sessions/:id/expected-skill-realization`. The resources enforce
-  bounded object payloads and return deterministic `201` create/associate,
-  `200` replay, `400` malformed, `404` dependency, `409` immutable/rebind
-  conflict, and `422` policy/harness mismatch statuses.
-- The `Overview` sub-view supports date ranges, project and agent filters,
-  clickable drilldowns, and CSV export for historical review workflows. Its CSV
-  preserves the raw `Skills By Day` section and adds per-harness consultation
-  rows with class, denominator, project, exposure, and comparability fields.
+Usage is event-derived and includes totals, daily series, project/model/tier/agent
+attribution, model mix, and top sessions. Shared filters cover date, project, agent,
+model, provider, and provider-neutral tier.
 
-## Usage
+- Stored `cost_usd` remains the authoritative event cost. Cache savings are an
+  estimate from current pricing metadata and disclose incomplete pricing coverage.
+- Input, output, cache-read, and cache-write tokens remain separate. Model views can
+  show all four buckets.
+- Unknown and deprecated models stay visible. A persistent warning identifies
+  unpriced use or known pricing that has not yet been applied to zero-cost history.
+- Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates;
+  raw events remain available in session and monitor history.
+- Benchmark events are excluded from normal usage, analytics, and Monitor totals.
+  Benchmark-aware reads can opt into them explicitly.
+- Usage responses disclose when matching events lack token or cost data.
 
-- Historical usage lives under `/api/v2/usage/*` and is event-derived rather than transcript-derived.
-- Summary totals, daily series, project/model/tier/agent attribution, and top-session views all use cost/token-bearing event rows as their source of truth.
-- Codex aggregate usage reconciles overlapping telemetry sources: when a Codex session has imported JSONL usage and OTEL usage rows, imported usage is treated as authoritative and overlapping OTEL usage rows are ignored for rollups. Raw events remain queryable in monitor/session history.
-- Usage models are classified at query time into canonical model, provider, family, tier, lifecycle, and pricing-status fields. Unknown and deprecated models remain visible in responses.
-- The Usage page’s Top Models **All tokens** view includes input, output, cache-read, and cache-write traffic. A persistent pricing warning names affected models and their observed token volume when pricing is unknown or known pricing has not yet been applied to historical zero-cost rows; it keeps cost totals explicitly non-estimated and directs the operator to `amon costs recalc` for the latter state.
-- Usage endpoints accept optional `model`, `provider`, and `tier` filters in addition to date, project, and agent filters. Classification filters are applied consistently before summary, daily, attribution, tier, agent, and top-session panels aggregate.
-- Batch-imported benchmark events (`source='benchmark'`, from `amon import benchmark`) are **excluded** from every usage/analytics aggregate by default so an openbench bake-off does not skew real-activity numbers. Pass `include_benchmark` (query param on `/api/v2/usage/*`, or `UsageParams.include_benchmark`) to opt them in; the exclusion is applied once at the shared usage-filter seam, so all usage panels honor it uniformly. The Monitor is the live-activity view and **always** excludes benchmark (no opt-in): its cost/token/event totals and tool/agent/model breakdowns filter `source='benchmark'`, and benchmark sessions are marked `ended` at insert so they never appear as live sessions. A `harness='codex'` benchmark cell also skips the Codex live projection, so it never surfaces on the Analytics or `/api/v2/live` surfaces.
-- Usage summary includes `prior_total_cost_usd` and `cost_delta_pct` for the immediately preceding same-length date range when a valid current range is supplied.
-- Usage budget reports live at `/api/v2/usage/budgets`. They read an optional local JSON config, reuse usage filters to compute current spend, and return alert states without blocking or enforcing agent activity.
-- Usage tier feedback lives at `/api/v2/usage/tier-feedback`. It returns deterministic, evidence-bearing advisory findings for human review and does not auto-apply model or tier changes.
-- Stored `cost_usd` is authoritative for event cost. Cache hit rate and estimated cache savings are derived estimates from current pricing metadata and are coverage-limited when pricing is unknown.
-- Usage responses include coverage metadata so the UI can disclose when matching events exist but carry no cost or token data.
-- The `Usage` sub-view supports the shared date/project/agent filters plus provider, tier, and model facets, session drill-in when transcript history exists, and CSV export.
+Read-only budgets use an optional local JSON configuration and report alert state
+without blocking agents or hooks. See [usage-budgets.md](usage-budgets.md).
 
-## Trace Quality
-
-- The **lean** trace-quality view (reframe, 2026-06): one trace per session,
-  served from the content-free `session_trace_summary` rollup, with detail
-  projected **on-demand** and never persisted. The old persisted warehouse
-  (traces/observations/scores/prompts/findings) was removed — that eval depth is
-  deferred to the export (Langfuse/medallion). See [trace-quality.md](trace-quality.md).
-- Local trace-quality APIs live under `/api/v2/trace-quality/*` and are isolated from legacy monitor endpoints.
-- Trace lists support `session_id`, `project`, `agent`, and date filters with deterministic pagination; rows carry aggregate token/cost/latency totals, telemetry coverage, and a derived quality scalar.
-- Observation detail is projected on-demand (one trace per session, every event/item an observation) in both flat deterministic ordering and a nested parent/child tree.
-- List/detail responses include read coverage (matching traces, included traces, usage-bearing vs missing-usage observations, a human-readable note) computed over the full filtered set, not just the page.
-- The Svelte app exposes a **Quality** sub-view under Analytics: the per-trace **Explorer** — a trace list with coverage badges and a selected-trace inspector (aggregate stats, expandable observation tree read from the loaded detail, payload-policy-safe input/output summaries). Deep-linkable via `#analytics?view=quality&trace=<id>`. Drill-in links from Usage/Analytics top sessions, Live session detail, the Session browser, and Search results open it scoped to a session (`&session=<id>`, which overrides the date filter and auto-opens a lone trace).
+Tier feedback derives deterministic findings from usage totals, model attribution,
+top sessions, and content-free browsing metadata. It never reads message content,
+changes models, edits prompts, enforces budgets, or modifies agent policy. Its
+findings always require human review before any routing or policy change.
 
 ## Insights
 
-- Historical insights live under `/api/v2/insights/*` and persist generated outputs rather than recalculating them on page load.
-- Each saved insight carries its generation scope: kind, date range, project filter, and agent filter.
-- Each saved insight also persists the analytics summary, usage summary, and both coverage contracts used to generate it.
-- The `Insights` sub-view supports the shared date/project/agent filters plus authoring provider/model and insight-kind targeting, with optional prompt steering.
-- New insight generation supports OpenAI, Anthropic, and Gemini providers with provider-specific API keys and model overrides.
-- The UI keeps scope and coverage visible so generated text is never detached from the underlying data limits.
+Insights are generated on demand and persisted with their exact date, project, and
+agent scope plus the analytics/usage coverage used to produce them. OpenAI,
+Anthropic, and Gemini providers are optional; local monitoring works without any
+provider API key. Generated text remains visibly attached to its scope and evidence
+limits.
 
-## Search And Navigation
+## Trace Quality
 
-- Historical search lives under `/api/v2/search` and now supports both recency and relevance sort modes.
-- Search responses include session agent/project/timestamp context in addition to the transcript snippet and ordinal target.
-- The Svelte `Search` tab debounces queries, falls back to recent sessions when the query is empty, and keeps ordinal-based session navigation intact.
-- The Svelte app exposes a global command palette on `Cmd/Ctrl+K` for jumping into recent sessions or transcript matches from any tab.
+Quality presents one lean trace per session from the content-free session summary.
+Observation trees are projected on demand from local source rows and are not stored
+as a second trace warehouse. List and detail views disclose usage and telemetry
+coverage over the full filtered set. Drill-ins from Usage, Analytics, Live,
+Sessions, and Search can open the relevant trace.
 
-## Historical Import
+Deep scoring, prompt management, and persisted observation/eval storage remain
+outside the local product boundary. See [trace-quality.md](trace-quality.md).
 
-- Claude Code JSONL conversation log import.
-- Codex session file import.
-- File-hash tracking prevents duplicate backfills.
-- Supports `--from`, `--to` date filters and `--dry-run` mode.
-- CLI entrypoints are `amon import` for event history and `amon sync sessions` for session-browser rows. Existing package scripts remain compatibility wrappers.
+## Benchmarks And Operational Metrics
 
-## API Surface
+Imported benchmark studies remain segregated from personal activity and usage
+totals. Benchmark reads expose study arms, cost/quality evidence, eligibility, and
+Pareto comparisons without promoting estimated or incomplete evidence to a stronger
+grade.
 
-| Endpoint | Method | Purpose |
-|----------|--------|---------|
-| `/api/events` | POST | Ingest single event |
-| `/api/events/batch` | POST | Ingest event batch |
-| `/api/events` | GET | Query events with filters |
-| `/api/stats` | GET | Aggregate counters and breakdowns |
-| `/api/stats/cost` | GET | Cost breakdowns by model/project/timeline |
-| `/api/sessions` | GET | List sessions with filters |
-| `/api/sessions/:id` | GET | Session detail + transcript |
-| `/api/stream` | GET | SSE stream (event, stats, session_update) |
-| `/api/v2/live/settings` | GET | Live-tab enablement and capture metadata |
-| `/api/v2/live/sessions` | GET | Live session index with fidelity/status fields |
-| `/api/v2/live/sessions/:id/turns` | GET | Normalized live turns |
-| `/api/v2/live/sessions/:id/items` | GET | Normalized live items |
-| `/api/v2/live/stream` | GET | Dedicated live SSE stream |
-| `/api/v2/metrics` | GET | Operational OTEL metrics (Bucket A) grouped by name×attrs — occurrences, summed value, last-seen; filters `name_prefix`/`agent`/`session_id`/`since`/`limit` |
-| `/api/v2/pins` | GET | List pinned transcript moments, optionally filtered by project |
-| `/api/v2/sessions/:id/pins` | GET | List pinned messages for a specific session |
-| `/api/v2/sessions/:id/messages/:messageId/pin` | POST | Pin a transcript message using ordinal-stable persistence |
-| `/api/v2/sessions/:id/messages/:messageId/pin` | DELETE | Remove a saved transcript pin |
-| `/api/v2/sessions/:id/activity` | GET | Bucketed transcript activity for session-viewer minimap navigation |
-| `/api/v2/sessions/:id/skill-context` | GET | Bounded ordered consultation, catalog, realization, budget, and instruction evidence |
-| `/api/v2/sessions/:id/expected-skill-realization` | PUT | Idempotently associate one immutable expected realization to a same-harness session |
-| `/api/v2/skills/expected-realizations/:id` | PUT | Create or idempotently replay bounded immutable expected-realization authority |
-| `/api/v2/search` | GET | FTS search with recency/relevance sort and session-context metadata |
-| `/api/v2/analytics/summary` | GET | Capability-aware summary totals and coverage |
-| `/api/v2/analytics/activity` | GET | Daily activity series plus coverage metadata |
-| `/api/v2/analytics/projects` | GET | Per-project message/session breakdowns |
-| `/api/v2/analytics/tools` | GET | Tool-analytics-capable tool usage breakdowns |
-| `/api/v2/analytics/skills/daily` | GET | Daily explicit/inferred skill invocation breakdowns |
-| `/api/v2/analytics/skills/health` | GET | Compatible phase-1 health rows plus per-harness consultation classes, eligibility, project breadth, versions, exposure, and comparability |
-| `/api/v2/analytics/hour-of-week` | GET | 7x24 historical activity heatmap data |
-| `/api/v2/analytics/top-sessions` | GET | Highest-volume sessions for review workflows |
-| `/api/v2/analytics/velocity` | GET | Pace metrics across active and calendar day spans |
-| `/api/v2/analytics/agents` | GET | Per-agent comparison rows for analytics UI |
-| `/api/v2/usage/overview` | GET | Every Usage panel from one shared usage-row selection plus one coverage aggregate; what the Usage page loads |
-| `/api/v2/usage/facets` | GET | Option lists for the five Usage filter dropdowns |
-| `/api/v2/usage/summary` | GET | Event-derived usage totals, prior-period comparison, and coverage metadata |
-| `/api/v2/usage/daily` | GET | Daily event-derived usage series plus coverage metadata |
-| `/api/v2/usage/projects` | GET | Usage attribution grouped by project |
-| `/api/v2/usage/models` | GET | Usage attribution grouped by model |
-| `/api/v2/usage/models/daily` | GET | Per-day model mix over a gap-filled date axis; backs the Top Models chart |
-| `/api/v2/usage/tiers` | GET | Usage attribution grouped by provider-neutral model tier |
-| `/api/v2/usage/agents` | GET | Usage attribution grouped by agent type |
-| `/api/v2/usage/top-sessions` | GET | Highest-cost usage sessions with browsing-session availability |
-| `/api/v2/benchmarks` | GET | Benchmark studies (bake-off runs), grouped by `study_id` — arm/cell counts, cost basis |
-| `/api/v2/benchmarks/:studyId` | GET | One study's per-arm aggregates: Pareto frontier, verdicts, honesty flags (the one benchmark-inclusive read surface) |
-| `/api/v2/usage/budgets` | GET | Read-only budget state from optional local budget config |
-| `/api/v2/usage/tier-feedback` | GET | Human-reviewed advisory tier feedback from usage evidence |
-| `/api/v2/trace-quality/traces` | GET | Lean trace list (one per session) from `session_trace_summary` with `session_id`/`project`/`agent`/date filters, aggregates, pagination, and coverage |
-| `/api/v2/trace-quality/traces/:id` | GET | Summary-backed detail for one session trace |
-| `/api/v2/trace-quality/traces/:id/observations` | GET | Flat and nested observation tree, projected on-demand |
-| `/api/v2/insights` | GET | List persisted insights for the current historical slice |
-| `/api/v2/insights/:id` | GET | Fetch a single persisted insight |
-| `/api/v2/insights/generate` | POST | Generate and persist a new insight from analytics + usage data |
-| `/api/v2/insights/:id` | DELETE | Remove a persisted insight |
-| `/api/health` | GET | Service health check |
-| `/api/filter-options` | GET | Distinct filterable field values |
-| `/api/otel/v1/logs` | POST | OTLP JSON log ingestion |
-| `/api/otel/v1/metrics` | POST | OTLP JSON metric ingestion |
+Operational OTEL metrics are stored separately from events and exposed to the CLI
+and v2 API as name-and-attribute aggregates. They carry no tokens or cost and never
+enter activity or usage totals.
 
-V1 endpoints remain active for ingest, SSE, and provider quota, but the long-term product contract is `/api/v2/*`. The v1 read endpoints (`GET /api/events|stats|sessions|filter-options`) have no product consumer since the legacy dashboard's removal (2026-09-10) and are retained only for the parity + ingestion-readback test suites.
+## Privacy And Capture Controls
 
-## SSE Event Types
+- Live prompt, reasoning, and tool-argument capture can each be disabled.
+- Tool names and structural evidence can remain visible while sensitive arguments
+  are redacted.
+- Instruction-load telemetry records file identity and provider metadata; the hook
+  does not read or emit instruction contents.
+- Trace-quality list rows and aggregate warehouse exports are content-free.
+- Insight generation is the sole product path that sends an analysis request to a
+  configured external model provider.
 
-- `event`: New agent event ingested.
-- `stats`: Updated aggregate statistics.
-- `session_update`: Session status change.
+## Historical Import And Recovery
+
+Claude Code, Codex, Antigravity, and benchmark sources can be imported through the
+CLI. Hash tracking makes normal reruns idempotent; date filters, dry runs, and
+forced recovery are available where appropriate.
+
+Event import and session-browser reconstruction are separate. Losing browser tables
+requires a forced session sync from source files; event import alone cannot restore
+messages, tool calls, or inferred-skill history. Detailed procedures live in
+[OPERATIONS.md](OPERATIONS.md).
+
+## Compatibility Boundary
+
+V1 remains active for ingestion, provider quotas, shared SSE, and reads still used
+by parity/ingestion-readback tests. New product and CLI read work belongs on v2.
+Retiring the remaining v1 reads requires moving their test consumers first.

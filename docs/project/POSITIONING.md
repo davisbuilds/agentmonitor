@@ -1,123 +1,109 @@
 ---
 date: 2026-06-29
+updated: 2026-09-14
 status: living
 source: conversation
 ---
 
-# Positioning — What AgentMonitor Is
+# Positioning: What AgentMonitor Is
 
-> A living reference for the product's center of gravity. Use it to decide what
-> belongs in the product, what to defer, and how the data model and runtime
-> should be shaped. When a scope question comes up, answer it here first.
+Use this reference to decide what belongs in AgentMonitor, what should remain a
+small local projection, and what should be deferred to another system.
 
-## One line
+## Product Center
 
-AgentMonitor is a **local-first observability console for coding agents**: it
-reconstructs live activity, cost, quota, and session quality for Claude Code and
-Codex from the artifacts those agents already produce — **with no
-instrumentation**.
+AgentMonitor is a local-first observability console for coding agents. It
+reconstructs live activity, historical sessions, usage, cost, quota, and session
+quality from artifacts and export surfaces that Claude Code, Codex, and compatible
+agents already provide.
 
-## Archetype
+“Agent-native” means AgentMonitor does not require an SDK call embedded inside the
+third-party agent or the application it edits. Collection still uses explicit
+integration surfaces: Claude hooks, Codex OTLP, local session files, and importers.
 
-There are two archetypes in this space, and most tools pick one:
+The primary user is a developer operating coding agents who needs to understand
+what is running, what happened, what it cost, and how trustworthy the available
+evidence is.
 
-- **Archive / browser** — look back at what agents did; breadth across many
-  agents; full-text search; historical browsing. (e.g. `agentsview`.)
-- **Observability console** — watch agents live; measure cost, quota, and
-  quality as they run. (e.g. Langfuse + a Datadog-style dashboard.)
+## What AgentMonitor Owns
 
-**AgentMonitor is the observability console (Archetype B).** Breadth-of-agents
-archival is explicitly *not* our game. The reason past mental models felt
-scattered is that the codebase drifted into doing both at once — which is also
-why it carries three overlapping representations of "what the agent did"
-(`events`, the browse v2 tables, and `trace_quality_*`). Committing to Archetype
-B is what lets the data model converge.
+1. **Agent-native collection.** Translate hooks, OTLP, session files, and imported
+   artifacts into one local model without modifying the agents themselves.
+2. **Coding-agent semantics.** Sessions, turns, tools, file activity, compaction,
+   invocation mode, context occupancy, model usage, and provider-native quotas.
+3. **Local operational UX.** A continuously useful Svelte console, SQLite store,
+   agent-first CLI, and simple localhost runtime.
+4. **Evidence honesty.** Make transcript, tool, usage, pricing, and source coverage
+   explicit instead of treating absent evidence as zero or complete fidelity.
+5. **Lean derived views.** Build rebuildable summaries and on-demand projections
+   that make local operation fast without becoming a second authoritative store.
 
-## Who it's for
+Historical browsing and search remain in scope because operators need them to
+explain current behavior and review completed work. Breadth across every possible
+agent and permanent archival for its own sake are not the product center.
 
-Developers who **run** coding agents and want to see what they're doing, what
-they cost, and how well they're working — *operators of agents*, not builders of
-LLM apps.
+## Collector, Console, And External Depth
 
-This is the crucial contrast with Langfuse: a Langfuse user instruments an LLM
-application **they own and control**. Our "workload" is third-party agents
-(Claude Code, Codex) we **cannot modify**. We can't add an SDK call inside them.
+General LLM-observability backends such as Langfuse assume an application can emit
+SDK or OpenTelemetry traces into a dedicated backend. AgentMonitor begins one layer
+earlier: third-party coding agents are the workload, and their available artifacts
+are uneven.
 
-## The Langfuse question — why this is not reinventing the wheel
+AgentMonitor therefore owns collection and the lightweight local console. It does
+not recreate a full eval platform, prompt-management system, or persisted trace
+warehouse.
 
-Langfuse can be self-hosted, so the fair question is "why not just run Langfuse?"
-Because it solves a different problem at a different layer:
+The 2026 trace-quality reframe implemented this boundary:
 
-- **Langfuse** is a backend you *instrument your own code into* (SDK / OpenTelemetry
-  spans emitted from your application), self-hosted as a multi-container stack
-  (Postgres + ClickHouse + Redis + web + worker). It is an ops deployment, and it
-  assumes you control the code being traced.
-- **The coding agents are not our code.** AgentMonitor's core trick is
-  **zero-instrumentation, agent-native ingestion**: watching `~/.claude/projects/**`
-  session files, Claude Code hooks, and Codex OTEL export, then reconstructing
-  observability from what the agents already leave behind.
+- local quality stores one content-free summary per session;
+- observation detail is projected on demand from existing event and session rows;
+- the old persisted trace/observation/score/prompt warehouse was removed;
+- `amon warehouse publish` optionally exports content-free session aggregates to
+  AgentMonitor's own Postgres schema; and
+- deeper trace/observation/eval export remains deferred through the separate
+  Langfuse-oriented export-state seam.
 
-### What only we can build (the moat — invest here)
-
-1. **Zero-instrumentation, agent-native ingestion.** No SDK, no code changes;
-   the agents themselves are the source.
-2. **Coding-agent domain model.** Sessions, turns, tool calls, file edits,
-   lines added/removed, compaction events, outcomes, provider quota/plan state,
-   and coding-agent pricing — not generic LLM spans.
-3. **Local-first desktop UX.** One binary, one SQLite file, runs all day in the
-   background. No Docker, no Postgres/ClickHouse/Redis to operate.
-4. **Provider-native quota & cost** for Claude/Codex plans specifically.
-
-### What Langfuse already nails (do not reinvent — defer to it)
-
-Deep trace/observation/score storage, eval frameworks, prompt management, and
-large-scale trace visualization. Our elaborate local `trace_quality_*` machinery
-is the part that *is* reinventing Langfuse — and it is currently ~half the
-database.
-
-### The pattern: collector, not backend
-
-Think **Vector / OpenTelemetry Collector, but for coding agents** — the
-agent-native collector plus a lightweight local console, with an **optional
-forward to a heavyweight backend** (Langfuse, or any OTel sink) for users who
-want deep eval/trace tooling. **The collector is the moat; the backend is
-pluggable.** The export seam already exists in the schema
-(`trace_quality_export_state`, `provider = langfuse`) — lean into it instead of
-growing a homegrown eval warehouse.
+The local product must remain fully useful without Postgres, Langfuse, or a model
+provider API key.
 
 ## Scope
 
-### In scope (own it)
+### Own
 
-- Agent-native ingestion (hooks, OTEL, file-watch) and historical import.
-- The coding-agent domain model and session browsing.
-- The live console (Monitor / Live / SSE), cost, quota, and core usage analytics.
-- A **lean** local trace/quality view — enough to understand a session locally.
-- Optional **export** to Langfuse / OTel-compatible backends.
+- Claude Code and Codex depth, plus integrations that map cleanly to the same model.
+- Hook, OTLP, file-watch, and historical-import ingestion.
+- Monitor and Live workflows, session browsing, search, usage, cost, quota,
+  analytics, skill evidence, benchmarks, and lean trace inspection.
+- Provider-specific fidelity and pricing semantics.
+- A single local TypeScript runtime and canonical SQLite store.
+- Optional, explicit, privacy-bounded exports.
 
-### Out of scope (defer or don't reinvent)
+### Defer Or Decline
 
-- A full local eval/scoring engine, prompt-management system, or large-scale
-  trace warehouse → defer to Langfuse via export.
-- Breadth across dozens of agents (the archive archetype) → keep Claude Code +
-  Codex depth.
-- Multi-user/team server or hosted SaaS.
+- A full local eval/scoring engine, prompt registry, or large trace warehouse.
+- A hosted, multi-tenant service or team control plane.
+- Universal archive breadth that dilutes the supported-agent fidelity model.
+- Automatic policy, model-routing, or budget enforcement based solely on local
+  analytics or advisory feedback.
+- A second backend implementation maintained at parity with TypeScript.
 
-## Architectural implications
+## Architectural Consequences
 
-So the foundations follow from the positioning rather than the other way around:
+- Raw events and parsed session history are authoritative. Summaries, analytics,
+  and trace views remain derived and rebuildable.
+- Source fidelity is part of the contract. Summary-only telemetry cannot render as
+  transcript-complete evidence.
+- CLI and UI reads share v2 domain/query boundaries so agents can retrieve the same
+  data a person sees.
+- SQLite remains the local operational store. Exports are optional boundaries, not
+  runtime dependencies.
+- New work should strengthen collection, operational understanding, and evidence
+  quality before expanding backend depth or agent breadth.
 
-- **Source of truth = the event/observation stream.** The browse tables and
-  trace-quality are *derived, rebuildable projections*, kept lean — not a second
-  persisted warehouse.
-- **Trace-quality stays a lightweight local projection** sized for the dashboard;
-  depth is **exported, not stored forever**. (Directly addresses the
-  `trace_quality_*` bloat and the mis-grained projection.)
-- **One runtime, one canonical local store** (SQLite). Interop happens via
-  OTel/Langfuse export, not a homegrown eval stack.
+## Non-Goals
 
-## Non-goals
-
-- Not a Langfuse competitor, and not an LLM-app tracing SDK.
-- Not a hosted or multi-tenant service.
-- Not a universal many-agent archive.
+- Competing with general-purpose LLM tracing/eval backends.
+- Requiring users to instrument the applications their agents edit.
+- Treating personal coding-agent telemetry as organization-wide adoption data.
+- Turning advisory analytics into autonomous enforcement without a separate,
+  explicit design and human decision.

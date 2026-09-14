@@ -1,64 +1,65 @@
-# Git History and Branch Hygiene
+# Git History And Branch Hygiene
 
-Last updated: July 7, 2026
+This document records the intended history policy. GitHub is authoritative for the
+current remote settings; verify it before a merge-policy decision that depends on
+the exact configuration.
 
-## Repository Merge Settings
+Last verified against `davisbuilds/agentmonitor`: 2026-09-14.
 
-Configured on GitHub repository `davisbuilds/agentmonitor`:
+## Intended Policy
 
-- `allow_squash_merge`: `false`
-- `allow_merge_commit`: `true`
-- `allow_rebase_merge`: `true`
-- `delete_branch_on_merge`: `true`
-- `merge_commit_title`: `PR_TITLE`
-- `merge_commit_message`: `PR_BODY`
+- Preserve meaningful commit boundaries. Squash merging stays disabled.
+- Use a merge commit by default so the PR remains a discoverable boundary.
+- Rebase and merge when the branch already contains clean, reviewable commits and a
+  linear history is materially clearer.
+- Clean up WIP/fixup commits before merge because individual commits reach `main`.
+- Delete merged remote branches.
 
-Result:
+## Current GitHub Settings
 
-- PR branches retain their full commit history when merged.
-- `main` receives either a merge commit (preserving the PR boundary) or rebased commits (linear history), depending on which strategy the merger picks for that PR.
-- Squash merging is disabled — full per-commit history is preserved.
-- Merged remote branches are auto-deleted.
+The live values on the verification date were:
 
-## Merge Strategy
+| Setting | Value |
+| --- | --- |
+| Merge commits | enabled |
+| Rebase merges | enabled |
+| Squash merges | disabled |
+| Delete branch on merge | enabled |
+| `merge_commit_title` | `MERGE_MESSAGE` |
+| `merge_commit_message` | `PR_TITLE` |
 
-Merge commits and rebase merges are both allowed; squash merges are disabled — this repo tracks architectural work and regressions through focused, staged commits, and squashing would hide those logical boundaries.
-
-- **Default — merge commit.** Preserves the PR as a discoverable boundary in `main`'s history, and keeps the intermediate commits addressable for archaeology, bisecting, and rollback. Best when the PR contains multiple meaningful commits.
-- **Rebase merge.** Use when the PR's commits are clean and the linear history reads better without an extra merge node. Avoid if the PR's commits are noisy (WIP, fixups) — clean them up locally first.
-- **Authoring expectation.** Because squash is gone, individual PR commits land in `main`. Keep PR commit messages tidy: meaningful subjects, no WIP markers, no fixup chains. Squash or reword locally before opening the PR if needed.
-
-## CI Gates
-
-GitHub Actions workflow: `.github/workflows/ci.yml`
-
-Required merge gates on `main`:
-
-- `Lint, Build, Test`
-- review conversations must be resolved
-- approving review count: `0`
-
-That workflow runs:
-
-- `pnpm install --frozen-lockfile`
-- `pnpm lint`
-- `pnpm build`
-- `pnpm test`
-
-Manual/non-required checks:
-
-- `pnpm test:parity:ts` for isolated TypeScript parity coverage when changing shared HTTP/API behavior
-- `pnpm test:v2:contract:ts` when changing the canonical Svelte/v2 API contract on the TypeScript runtime
-
-## Recommended Ongoing Hygiene
-
-1. Create short-lived feature branches from `main`.
-2. Open PRs early; keep them focused.
-3. Tidy your PR commit history *before* merging — reword/squash locally so what lands on `main` reads cleanly.
-4. Pick **Create a merge commit** by default; pick **Rebase and merge** when linear history is materially better. Merge only after the required GitHub check passes.
-5. Periodically prune local branches:
+Query them directly:
 
 ```bash
-git fetch --prune
-git branch --merged main | grep -v ' main$' | xargs -n 1 git branch -d
+gh api repos/davisbuilds/agentmonitor \
+  --jq '{allow_squash_merge,allow_merge_commit,allow_rebase_merge,delete_branch_on_merge,merge_commit_title,merge_commit_message}'
 ```
+
+## Main Protection
+
+The live protected requirements on the verification date were:
+
+- strict required checks: `Lint, Build, Test` and `E2E (Playwright)`;
+- review conversations must be resolved; and
+- required approving reviews: `0`.
+
+Query them directly:
+
+```bash
+gh api repos/davisbuilds/agentmonitor/branches/main/protection \
+  --jq '{strict:.required_status_checks.strict,contexts:.required_status_checks.contexts,conversations:.required_conversation_resolution.enabled,approvals:.required_pull_request_reviews.required_approving_review_count}'
+```
+
+Workflow source remains authoritative for what each job executes. The primary CI
+workflow is [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml); security
+and workflow-analysis jobs are defined separately.
+
+## Working Hygiene
+
+1. Create a short-lived branch from current `main`.
+2. Commit coherent units with reviewable messages.
+3. Run the repository's required local checks before pushing.
+4. Resolve review threads and required checks before merging.
+5. Use merge commit by default; choose rebase when the branch history already reads
+   cleanly without a PR merge node.
+6. Fetch with pruning and remove local branches already merged into `main`.

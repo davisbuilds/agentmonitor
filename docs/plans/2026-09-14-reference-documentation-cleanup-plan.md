@@ -403,7 +403,7 @@ Tasks 1, 2, and 4
 
 **Verification**
 
-- Run: `rg -n 'currently ~half the database|three overlapping representations|150 ms warm trigger|cards read the v1 store|CURRENT_STATE\.md' docs/project AGENTS.md README.md docs/README.md`
+- Run: `rg -n 'currently ~half the database|three overlapping representations|150 ms warm trigger|cards read the v1 store|CURRENT_STATE\.md' docs/project/*.md AGENTS.md README.md docs/README.md --glob '!docs/project/CURRENT_STATE.md'`
 - Expect: no stale claims or retired-document links remain.
 - Run: `gh api repos/davisbuilds/agentmonitor --jq '{allow_squash_merge,allow_merge_commit,allow_rebase_merge,delete_branch_on_merge,merge_commit_title,merge_commit_message}'`
 - Expect: the observed settings match the dated policy snapshot.
@@ -498,9 +498,9 @@ Tasks 2-5
 | Requirement | Proof command | Expected signal |
 | --- | --- | --- |
 | Floating backlog work is preserved and old branch pruned | `git show --stat cc37681 && git branch --all --list '*clone-mining-agentsview-findings*'` | Backlog commit changes `docs/project/BACKLOG.md`; branch query is empty |
-| Retired references are fully removed | `rg -n 'CURRENT_STATE\.md|tier-feedback\.md' --glob '!docs/archive/**' .` | No matches |
+| Retired references are fully removed | `rg -n 'CURRENT_STATE\.md|tier-feedback\.md' AGENTS.md README.md docs/README.md docs/system docs/project --glob '!docs/plans/**'` | No matches |
 | Event source contract is closed and tested | `pnpm exec tsx --test tests/event-contract.test.ts` | Known values pass and unknown source fails validation |
-| Known stale architecture/product claims are gone | `rg -n 'trace_quality_\*|All SQL lives|Via import backfill|legacy compatibility dashboard' docs README.md` | No stale matches |
+| Known stale architecture/product claims are gone | `rg -n 'trace_quality_\*|All SQL lives|Via import backfill|legacy compatibility dashboard' docs/system README.md` | No stale matches |
 | Remote policy snapshot is current | `gh api` commands in Task 5 | Values equal the documented 2026-09-14 snapshot |
 | Links and lifecycle are sound | tracked-link scan plus `python3 ~/Dev/ops/scripts/archive_docs.py agentmonitor` | No broken tracked links; active plan remains active |
 | Repository quality gates pass | `pnpm lint && pnpm build && pnpm test` | All commands exit zero |
