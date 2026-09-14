@@ -3,7 +3,7 @@ date: 2026-09-11
 author: gpt-6-codex
 topic: agent-first-cli-read-parity
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -40,7 +40,7 @@ The contract comes from the 2026-09-11 conversation and live repository mapping:
   agent-oriented composite overview.
 - Third PR (merged as `be54050`): add saved-analysis artifact and shared metadata
   reads.
-- Final PR: close the remaining session, Live, and Monitor operational reads.
+- Final PR (merged as `d2f1670`): close the remaining session, Live, and Monitor operational reads.
 - Use the same query/service functions as the v2 routes so CLI and UI data semantics
   cannot drift through duplicate SQL.
 
@@ -653,11 +653,10 @@ Task 6 merged
 | Regression safety | `pnpm lint && pnpm build && pnpm test` | All required gates pass |
 | Active review stop | GitHub PR/review-thread query | Codex complete, zero unresolved actionable threads, PR open/unmerged |
 
-## Handoff
+## Completion
 
-Tasks 1-6 are merged through PR #125 (`be54050`). Task 7 is implemented on
-`feat/agent-first-cli-operational-parity`: complete full validation, open the final
-PR, queue one Codex review, address any actionable threads, and stop before merge
-for user review.
+All seven tasks shipped through PR #126 (`d2f1670`). The final Codex review finding
+was addressed before merge, and the resulting CLI exposes exact equivalents for all
+42 UI read contracts.
 
 Plan complete and saved to docs/plans/2026-09-11-agent-first-cli-read-parity-plan.md.

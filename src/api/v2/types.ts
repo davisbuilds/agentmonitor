@@ -988,7 +988,7 @@ export interface UsageModelDailyPoint {
 }
 
 // ── Benchmarks (segregated bake-off comparison; the one benchmark-inclusive
-// surface). See docs/specs/2026-09-02-benchmark-comparison-view-spec.md. ──
+// surface). ──
 
 export type BenchmarkCostBasis = 'captured' | 'derived' | 'unpriced';
 export type BenchmarkVerdict =

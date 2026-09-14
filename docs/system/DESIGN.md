@@ -4,9 +4,7 @@ The design language for the Svelte `/app/` surface. Tokens are defined in
 `frontend/src/app.css` as a Tailwind v4 `@theme` block (they generate utilities **and**
 expose CSS vars). This doc is the human-readable source of truth; `app.css` is the machine one.
 
-Rollout is phased — see `docs/plans/2026-05-25-svelte-ui-redesign-implementation.md`. Until a
-component is migrated it may still use raw `gray-*`/`blue-*` utilities; new and migrated code
-must use the tokens below.
+New and migrated components must use the tokens below.
 
 ## Principle
 

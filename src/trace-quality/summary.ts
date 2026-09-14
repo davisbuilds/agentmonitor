@@ -1,7 +1,7 @@
 /**
  * session_trace_summary — the lean, content-free, export-shaped per-session
  * rollup that replaces the persisted trace/observation warehouse for list and
- * aggregate views (see docs/specs/2026-06-29-trace-quality-reframe-spec.md).
+ * aggregate views (see docs/system/trace-quality.md).
  *
  * One row per session: token/cost/latency rollups, telemetry coverage, and a
  * single derived quality scalar. No message text — this row is safe to export

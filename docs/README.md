@@ -40,4 +40,4 @@ This folder holds the long-form reference material that does not belong in the r
 - Active specs: [specs/](specs)
 - Active implementation plans: [plans/](plans)
 - Research notes: [research/](research)
-- Historical plans and ADRs: [archive/](archive)
+- Historical designs, specs, and plans: local gitignored `docs/archive/`
