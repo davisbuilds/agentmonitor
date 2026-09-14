@@ -66,14 +66,13 @@ note here. This file stays future-only.
   in-app comparison; the export is only a shareable-snapshot convenience. Not
   blocking — pure enhancement.
 - **Next / Revisit when**: build P4 if a shareable standalone study page is
-  wanted; spec `docs/specs/2026-09-02-benchmark-comparison-view-spec.md` (P4
-  section). Watch openbench #5 (per-attempt cost) — landing it would drop the
+  wanted. Watch openbench #5 (per-attempt cost) — landing it would drop the
   "cost is a floor" honesty caveat. Noted 2026-09-02, updated 2026-09-04.
 
 ### Skill trigger health (2026-07-09)
 
-Source: `docs/plans/2026-07-09-skill-trigger-health-plan.md` (phase 1 shipped).
-These are the deferred follow-ups surfaced during and after the build.
+Phase 1 shipped. These are the deferred follow-ups surfaced during and after
+the build.
 
 #### Version attribution only reaches skills in the installed catalog
 - **What**: version resolution matched ~1/3 of invoked skills on the live DB (23
@@ -156,7 +155,7 @@ These are the deferred follow-ups surfaced during and after the build.
   in the detail/inspector surface.
 - **Why it matters**: gauge + pill shipped first; this is the fast-follow.
 - **Next**: needs a bounded sample buffer in the projection and a retention
-  decision (see `docs/plans/2026-07-07-context-occupancy-gauge-plan.md`).
+  decision.
 
 ### Invocation mode
 

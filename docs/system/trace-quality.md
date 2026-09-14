@@ -151,4 +151,3 @@ separate from the aggregate warehouse export.
 - Positioning (collector-not-backend, why the depth is deferred): [../project/POSITIONING.md](../project/POSITIONING.md)
 - Product surface and endpoint catalog: [FEATURES.md](FEATURES.md)
 - Schema and data flow: [ARCHITECTURE.md](ARCHITECTURE.md#trace-quality)
-- Reframe spec: [../specs/2026-06-29-trace-quality-reframe-spec.md](../specs/2026-06-29-trace-quality-reframe-spec.md)

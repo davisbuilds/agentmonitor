@@ -233,7 +233,7 @@ function initSchemaLocked(db: Database): void {
   }
   // Benchmark study grouping (source='benchmark' rows only; null elsewhere).
   // study_id = openbench study_sha256 (exact per-run key, the grouping key);
-  // study = the human slug label. See docs/specs/2026-09-02-benchmark-comparison-view-spec.md.
+  // study = the human slug label.
   if (!eventColumns.has('study_id')) {
     db.exec('ALTER TABLE events ADD COLUMN study_id TEXT');
   }

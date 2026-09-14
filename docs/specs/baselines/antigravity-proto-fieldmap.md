@@ -9,9 +9,8 @@ source: binary-extraction
 # Antigravity Proto Field Map (Baseline)
 
 Authoritative field numbers for decoding Antigravity CLI conversation databases
-(`~/.gemini/antigravity-cli/conversations/<uuid>.db`). Realizes Task 1 of
-`docs/plans/2026-07-01-antigravity-cli-import-plan.md` and gates spec criterion #7
-(descriptor-pinned, not reverse-engineered).
+(`~/.gemini/antigravity-cli/conversations/<uuid>.db`). This baseline pins the
+descriptors used by the shipped importer so they are not reverse-engineered at runtime.
 
 ## Provenance
 

@@ -3747,8 +3747,7 @@ export function getDistinctAgents(): string[] {
 // ── Benchmarks (segregated bake-off comparison) ──────────────────────────────
 // The ONE benchmark-inclusive surface: these read `source='benchmark'` in
 // explicitly and never route through `buildUsageFilterState`, which keeps every
-// other surface benchmark-excluding. See
-// docs/specs/2026-09-02-benchmark-comparison-view-spec.md.
+// other surface benchmark-excluding.
 
 /** Mean-score floor below which an arm is treated as not really engaging the task. */
 const BENCH_ENGAGE_FLOOR = 0.5;
