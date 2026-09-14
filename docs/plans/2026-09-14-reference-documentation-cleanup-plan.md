@@ -3,7 +3,7 @@ date: 2026-09-14
 author: gpt-6
 topic: reference-documentation-cleanup
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -507,8 +507,20 @@ Tasks 2-5
 
 ## Handoff
 
-1. Execute Tasks 2-6 in this session, committing coherent documentation and
-   contract units as they pass their focused verification.
-2. Review the complete branch diff against the authority model and verification
-   matrix.
-3. Push and open a PR when requested, then address review findings before merge.
+Completed on `docs/reference-docs-cleanup`:
+
+- `cc37681` preserves the floating clone-mining backlog additions; the obsolete
+  local and remote branch pointers were pruned.
+- `2d60082` closes and documents the event-source enum after a red/green focused
+  contract test.
+- `0328cf3` sharpens documentation ownership, removes the two redundant references,
+  corrects known drift, and reduces the tracked reference set by 973 net lines.
+- The archive dry run reported `0 archivable, 0 need triage`; the tracked-link scan
+  reported zero missing or untracked targets.
+- `pnpm lint`, `pnpm build`, and all 912 `pnpm test` tests passed on 2026-09-14.
+
+The plan remains tracked during the normal settling buffer. A later documentation
+archive pass can move it into the local gitignored archive after it becomes
+eligible.
+
+Plan complete and saved to `docs/plans/2026-09-14-reference-documentation-cleanup-plan.md`.
