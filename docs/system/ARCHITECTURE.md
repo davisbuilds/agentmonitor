@@ -1,370 +1,186 @@
 # Architecture
 
-## High-Level Flow
+This document describes AgentMonitor's system shape, data ownership, and durable
+invariants. Exact routes, columns, and module exports remain authoritative in
+source.
 
-1. Agent hooks (Claude Code) or OTEL exporters (Codex) send events via HTTP to the ingest API.
-2. Events are validated, normalized, and stored in SQLite.
-3. The SSE emitter broadcasts new events and stats to connected dashboard clients.
-4. The canonical Svelte app at `/app/` consumes the `/api/v2/*` app contract, including Monitor reads under `/api/v2/monitor/*`.
-5. The `amon` / `agentmonitor` CLI provides local runtime, maintenance, reporting, and hook-helper workflows over the same runtime and data layers.
-6. `/app/` is the sole human-facing surface; `/` redirects to it. (The legacy vanilla-JS dashboard was removed 2026-09-10.)
-7. Historical sessions can be backfilled via the import pipeline.
+## System Flow
 
-## Canonical Surface
+```text
+Claude hooks ───────┐
+Codex OTLP ─────────┼─> ingest/normalization ─> SQLite ─> v1/v2 reads ─> Svelte /app/
+session JSONL/DBs ──┘                         │                 └──────> amon CLI
+                                              └─> SSE ─────────> Monitor / Live
+```
 
-- Canonical frontend: Svelte SPA served at `/app/`.
-- Canonical application contract: `/api/v2/*`.
-- Canonical local operator command: `amon`; `agentmonitor` is an equivalent executable alias.
-- The legacy static `/` dashboard was removed 2026-09-10; `/` now redirects to `/app/`.
-- New product work should prefer Svelte + v2, and carry forward durable v1 localhost behavior only where it still adds operator value.
+1. Claude hooks, Codex OTLP exporters, generic clients, and historical importers
+   produce normalized events or session-browser projections.
+2. SQLite stores authoritative local event history, parsed session history,
+   operational metrics, provider quota snapshots, and small derived summaries.
+3. `/api/v2/*` serves the canonical Svelte application and agent-first CLI reads.
+4. SSE carries current activity to Monitor and Live without making the stream an
+   authoritative store.
 
-## Active Decision Records
+## Product And Runtime Boundaries
 
-- `2026-02-24`: [Rust Backend Spike Before Desktop Packaging](../archive/adr/2026-02-24-rust-backend-spike-decision-record.md) — **superseded 2026-06-29**: the project standardized on the TypeScript runtime and removed the Rust backend. See [POSITIONING.md](../project/POSITIONING.md).
+- The Svelte SPA at `/app/` is the sole human-facing product surface. `/` redirects
+  to it.
+- `/api/v2/*` is the canonical application read contract. V1 remains for event and
+  OTLP ingestion, provider quota bridges, shared SSE, and legacy reads still used by
+  parity and ingestion-readback tests.
+- `amon` is the preferred local operator command; `agentmonitor` is an equivalent
+  executable alias.
+- The TypeScript/Node runtime on `127.0.0.1:3141` is the single backend. The removed
+  Rust spike is preserved in Git history; current positioning lives in
+  [POSITIONING.md](../project/POSITIONING.md).
+- `amon serve` runs that backend and normally exposes
+  `https://agentmonitor.localhost` through the pinned Portless CLI. Hooks, OTLP,
+  and direct API clients continue to use the fixed loopback backend.
 
-## Runtime
+`src/runtime.ts` owns startup and shutdown. It acquires exclusive ownership of the
+canonical database path before opening HTTP or starting background work. A second
+runtime targeting the same database fails early; separate database paths may run
+concurrently. Bind failure and shutdown stop listeners, timers, SSE clients,
+watchers, quota work, and SQLite before releasing ownership.
 
-The TypeScript/Node runtime on `127.0.0.1:3141` is the single backend. An earlier Rust reimplementation under `rust-backend/` (axum + tokio + rusqlite) was evaluated as an alternate runtime and **removed on 2026-06-29** once the project committed to TypeScript (see [POSITIONING.md](../project/POSITIONING.md)). This app is I/O- and SQLite-bound, so the real performance wins come from schema and query design, not the host language; maintaining a second backend at parity was not worth its cost.
+## API And CLI Boundaries
 
-## API Layer
+- V1 routes are composed in [`src/api/router.ts`](../../src/api/router.ts).
+- V2 routes are composed in [`src/api/v2/router.ts`](../../src/api/v2/router.ts).
+- V1 SQL stays in `src/db/queries.ts`; v2 reads and aggregates stay in
+  `src/db/v2-queries.ts`. Route handlers should coordinate these modules rather
+  than embed query logic.
+- The external event-ingest contract is defined by
+  [`src/contracts/event-contract.ts`](../../src/contracts/event-contract.ts) and
+  documented in [event-contract.md](../api/event-contract.md).
+- `src/cli.ts` is the executable entrypoint. One-shot commands call shared service
+  or query modules directly; commands that require live HTTP or SSE contact the
+  running server. This keeps CLI and UI reads on the same domain contracts.
 
-Express route handlers in `src/api/`:
+Exact endpoint and command inventories change with source. Use the route files
+above and `amon --help` rather than copying lists into this document.
 
-| Route File | Endpoints | Purpose |
-|------------|-----------|---------|
-| `events.ts` | `POST /api/events`, `POST /api/events/batch`, `GET /api/events` | Event ingest (single + batch) and query |
-| `stats.ts` | `GET /api/stats`, `GET /api/stats/cost` | Aggregate counters and cost breakdowns |
-| `sessions.ts` | `GET /api/sessions`, `GET /api/sessions/:id` | Session listing and detail |
-| `stream.ts` | `GET /api/stream` | SSE endpoint with filters and backpressure |
-| `health.ts` | `GET /api/health` | Service health check |
-| `otel.ts` | `POST /api/otel/v1/logs`, `POST /api/otel/v1/metrics`, `POST /api/otel/v1/traces` | OTLP JSON ingestion |
-| `filter-options.ts` | `GET /api/filter-options` | Distinct values for filterable fields |
-| `transcripts.ts` | `GET /api/sessions/:id` (transcript) | Session transcript aggregation |
+## Storage Ownership
 
-Routes are composed in `src/api/router.ts`.
-V1 routes remain important for ingest, SSE, and provider quota, but `/api/v2/*` is the canonical contract for the long-term app surface. The v1 *read* endpoints (`GET /api/events|stats|sessions|filter-options`) no longer have a product consumer since the legacy dashboard's removal, but are retained because the `tests/parity/*` harness and ingestion-readback tests exercise them.
+SQLite runs in WAL mode. The schema and compatible migrations live in
+[`src/db/schema.ts`](../../src/db/schema.ts). The important ownership groups are:
 
-## TypeScript Runtime And CLI
+- **Event history:** normalized events, session lifecycle, agent identity, import
+  state, and deduplication.
+- **Session browser:** browsing sessions, messages, turns, items, tool calls,
+  watcher checkpoints, pins, and skill-context evidence derived from local
+  transcript sources.
+- **Operational state:** content-free OTEL metrics and provider-native quota
+  snapshots. Operational metrics never enter usage or event-count aggregates.
+- **Lean trace quality:** one content-free `session_trace_summary` per session and
+  `trace_quality_export_state`. Observation trees are projected from source rows on
+  demand; the removed trace/observation/score/prompt warehouse is not recreated.
+- **Persisted insight output:** generated insights retain the scope and coverage
+  evidence used to create them.
 
-`src/runtime.ts` owns TypeScript runtime startup: Express app construction,
-server listen, watcher startup, periodic imports, provider-quota polling, stats
-broadcasting, and shutdown wiring. `src/server.ts` is a thin executable wrapper
-around that shared runtime. `amon serve` uses the same runtime module so CLI and
-`pnpm start` do not diverge. By default, `amon serve` launches that runtime
-through the pinned Portless CLI with a fixed upstream port of `3141`, producing
-`https://agentmonitor.localhost`; `--no-portless` starts the shared runtime
-directly. Portless owns only the human-facing origin. Hook, OTEL, CLI HTTP, and
-parity clients continue to use the loopback backend directly.
+Source events and parsed session rows remain authoritative. Derived summaries must
+be rebuildable and must never silently replace their inputs.
 
-Before schema initialization or HTTP/background startup, the shared runtime
-acquires exclusive ownership for the canonical SQLite path. Ownership is scoped
-to the DB rather than the package install, so isolated alternate DBs can run
-concurrently while a second runtime targeting the same DB fails before it starts
-a listener, watcher, importer, broadcaster, or quota poller. Dead-process state
-is recovered automatically. Startup resolves only after the HTTP bind succeeds;
-bind failure and SIGINT/SIGTERM/programmatic shutdown share one teardown path
-that stops the HTTP listener from accepting reconnects, stops timers, closes both
-SSE client registries and their idle sockets, awaits quota and Chokidar work,
-closes SQLite, then releases DB ownership. One-shot CLI commands do not acquire
-runtime ownership.
+### Database Safety
 
-`src/cli.ts` is the executable entrypoint for both `amon` and `agentmonitor`.
-One-shot commands avoid importing `src/server.ts`; they either call shared
-service/query modules directly or, for live HTTP/SSE workflows, call the running
-localhost server. CLI reads for sessions, usage, analytics, and trace quality use
-the same v2 query/service layer that backs the Svelte app. A read command fully
-initializes a missing or older database under one immediate transaction, which
-serializes additive column guards across processes. It then uses the `user_version`
-readiness marker to avoid replaying schema DDL on every short-lived process. That
-leaves current-database reads on SQLite's WAL read path while the server or another
-process holds the writer. `amon database backup`
-opens a separate read-only connection and uses SQLite's online backup API so the
-active WAL writer need not stop; `src/db/backup.ts` privately stages, closes,
-fully validates, and atomically publishes the single-file copy. `amon live watch`
-connects to `/api/v2/live/stream` and exits unavailable when no server is
-running.
+- Current-schema reads use SQLite's WAL read path while the server may hold the
+  writer. Missing or older databases initialize under an immediate transaction and
+  use `PRAGMA user_version` as the readiness marker.
+- `amon database backup` uses SQLite's online backup API through a separate
+  connection, validates the staged database, and publishes it atomically. Copying
+  the live main/WAL/SHM files is not a supported backup procedure.
+- Event import state and session-browser watcher state protect different tables.
+  Re-importing events cannot reconstruct missing messages or tool calls when
+  watcher hashes say files were already parsed. The recovery path is
+  `amon sync sessions --source all --force` after preserving the database.
 
-## Database Layer
+Operational procedures live in [OPERATIONS.md](OPERATIONS.md).
 
-SQLite via `better-sqlite3` with WAL mode.
+## Ingestion And Session Projection
 
-### Tables
+### Events
 
-| Table | Purpose |
-|-------|---------|
-| `agents` | Registered agent identities and last-seen timestamps |
-| `sessions` | Session lifecycle (active → idle → ended) with metadata |
-| `events` | Individual tool use, prompt, and lifecycle events with cost data |
-| `import_state` | Tracks imported files to prevent duplicate backfills |
-| `watched_files` | Tracks session-browser sync state for parsed, skipped, and erroring JSONL files |
-| `otel_metrics` | Operational OTEL metrics (Bucket A: outcome/state-tagged counters like `codex.memory.startup{state=...}`). Deliberately separate from `events` — carries no tokens/cost and must never reach usage/count aggregates (see [OTEL Parser](#otel-parser-and-metrics)) |
-| `trace_quality_*` | Local trace-quality projection: traces, observations, scores, prompt refs + join, projection state, and export state (see [Trace Quality](#trace-quality)) |
+Event producers pass through `normalizeIngestEvent` before insertion. The contract
+enforces required identifiers, closed event/status/source enums, non-negative
+usage fields, timestamp normalization, UTF-8-safe payload limits, and optional
+`event_id` deduplication. `created_at` is server receive time;
+`client_timestamp` is producer time.
 
-### Key Patterns
+### Historical Sources
 
-- All SQL lives in `src/db/queries.ts` (no ad-hoc DB logic in route handlers).
-- Schema initialization and backward-compatible migrations in `src/db/schema.ts`.
-- Application-consistent export lives in `src/db/backup.ts`; it never copies a
-  live main/WAL/SHM set and never publishes before integrity validation.
-- Indexes on `created_at`, `session_id`, `event_type`, `tool_name`, `agent_type`,
-  and `model`, plus expression indexes for normalized event ordering and a
-  timestamp-first covering index for metric-bearing usage rows. Codex
-  OTEL/import usage reconciliation uses a partial
-  `(session_id, normalized timestamp)` index so an all-history aggregate does not
-  rescan every imported event in a long session for each OTEL candidate.
+`src/import/` maps Claude Code JSONL, Codex session JSONL, Antigravity conversation
+databases, and explicit benchmark results into the local model. Import hashes make
+normal reruns idempotent; `--force` is the deliberate recovery path. Benchmark
+events use `source='benchmark'` and remain excluded from normal activity and usage
+aggregates unless a benchmark-aware read explicitly includes them.
 
-## SSE Broadcasting
+### Session Browser And Live
 
-`src/sse/emitter.ts` manages connected clients:
+`src/watcher/` discovers and reparses supported local session files. Parsed session
+history is persisted independently from event import so transcripts, turns, tool
+calls, search, and skill analytics can be rebuilt from their source files.
 
-- Fan-out of `event`, `stats`, and `session_update` messages.
-- Configurable max client limit (`AGENTMONITOR_MAX_SSE_CLIENTS`).
-- Heartbeat keep-alive (`AGENTMONITOR_SSE_HEARTBEAT_MS`).
-- Returns `503` when max client limit is reached.
+Live adapters under `src/live/` normalize current sessions and declare fidelity:
 
-## Event Contract
+- Claude JSONL provides transcript-capable live detail where the local file exposes
+  it.
+- Codex `otel-only` is summary-oriented. It must not be presented as transcript
+  parity with Claude.
+- Antigravity is historical import only.
 
-Defined in `src/contracts/event-contract.ts` and documented in `docs/api/event-contract.md`:
+Context occupancy uses the latest request's prompt size, so it may drop after
+compaction. Codex uses its reported context window when present and otherwise a
+configured default; Claude uses the guarded default documented in
+[DECISIONS.md](../project/DECISIONS.md). Missing evidence renders as unavailable,
+not zero.
 
-- Required fields: `session_id`, `agent_type`, `event_type`.
-- Optional `event_id` for deduplication (unique constraint).
-- `metadata` payload capped by `AGENTMONITOR_MAX_PAYLOAD_KB` with UTF-8 safe truncation.
-- `client_timestamp` for client-supplied timing; `created_at` is server receive time.
-- `instruction_load` is an additive Claude hook event containing only
-  instruction identity and Claude-provided load metadata. Repeated loads remain
-  distinct because the hook omits `event_id`; instruction contents are never
-  read or emitted.
+## Usage, Pricing, And Analytics
 
-## Pricing Engine
+Stored `cost_usd` is authoritative for an event. Pricing metadata supplies costs
+at ingestion/recalculation time and supports model aliases, date-aware schedules,
+and prompt-size tiers. The build must copy pricing data into `dist/`; the built
+asset check protects this source-versus-runtime boundary.
 
-`src/pricing/` calculates per-event costs:
+The token-bucket invariant is load-bearing: `tokens_in` stores uncached prompt
+tokens, while `cache_read_tokens` and `cache_write_tokens` are separate additive
+buckets. Codex sources that report cache-inclusive input are normalized before
+storage to prevent cached tokens from being billed twice.
 
-- `PricingRegistry` loads JSON pricing data files for each model family (Claude, Codex, Gemini).
-- `PricingRegistry.resolve(model)` returns canonical model IDs after provider-prefix stripping and alias lookup.
-- **Prompt-size tiers**: a model may carry an optional `tiers` array (higher rate bands keyed by `abovePromptTokens`). `calculate()` selects the effective rates by the request's full prompt size (uncached `input` + `cacheRead` + `cacheWrite`, applying the highest band strictly exceeded), then bills every token class at those rates. This covers Google long-context tiering (e.g. Gemini 3.1 Pro / 2.5 Pro above 200K) and GPT-5.6's full-request rates above 272K. GPT-5.6 also prices cache writes at 1.25x uncached input and cache reads at a 90% discount; Sol, Terra, and Luna are canonical classifier tiers, with `gpt-5.6` resolving to Sol. Flat models are unchanged. New tiers change only newly-computed costs — existing `cost_usd` rows update on maintenance recalc unless a source-specific migration explicitly refreshes them.
-- **Date-aware rate schedules**: a model may carry an optional `schedule` of `{ from, ...rates }` periods (each with its own optional `tiers`) on top of its inline base rates. The inline rates form the base period (effective from `-Infinity`); each `schedule` entry adds a later period effective from its `from` date **inclusive**. `calculate()` / `effectiveRates()` take an optional `at` argument (a `Date`, epoch ms, or ISO string) and select the period in force at that instant *before* the prompt-size tier selection, so an event is priced by the rate that was live when it happened — not by whatever the table says today. Callers thread the event's own timestamp (`client_timestamp ?? created_at`, and benchmark cells their `ts_iso`); an omitted or unparseable `at` prices at the current wall clock. A zone-less SQLite `created_at` (`YYYY-MM-DD HH:MM:SS`, written as UTC by `CURRENT_TIMESTAMP`) is normalized to explicit UTC before parsing so events near a boundary are not misassigned on non-UTC hosts. This is how a launch promo that reverts on a known date is encoded without a manual bump: the Gemini 3.6/3.7/3.8 Flash promo ($0.75 in / $3.75 out) carries a schedule entry that flips to list ($1.50 / $7.50, cacheRead $0.15) on 2027-01-01. Every reprice path passes the timestamp (`amon costs recalc`, the cache-inclusive backfill migration, live ingestion, Codex/Antigravity import, v2 cache-savings estimation), so re-running recalc after a boundary does not retroactively reprice pre-boundary rows. Models with no `schedule` have a single base period, making the date selection a no-op for them.
-- `model-classification.ts` maps raw model names to provider, family, provider-neutral tier, lifecycle, and pricing-status metadata for v2 usage reporting.
-- `context-windows.ts` resolves a session's context-window size (denominator) and computes occupancy (`used`/`window`/`pct`) for the live occupancy gauge: Claude defaults to 1M, Codex uses its reported `model_context_window` else a configurable `AGENTMONITOR_CODEX_CONTEXT_WINDOW` (~256K), with an over-window guard so `pct` never exceeds 100. The numerator (most recent request's prompt size) is extracted by the parsers onto `ParsedSessionMetadata` and persisted on `browsing_sessions` (`context_used_tokens`/`context_window_tokens`) by both the live adapters and `insertParsedSession` (the watcher initial-sync / historical-parse path), which share the resolver so occupancy is written on boot/import as well as on live turns; `mapBrowsingSessionRow` surfaces it (plus derived `context_pct`) on `/api/v2/live/sessions`. A session shows occupancy whenever its file is parsed and yields a `context_used_tokens`. The watcher skips files whose hash is unchanged, so databases synced before this feature are backfilled by a one-shot data migration (`runDataMigrations`, guarded by `PRAGMA user_version`) that invalidates the `watched_files` hash for null-occupancy Claude/Codex sessions on the first startup after upgrade — the normal startup sync then reparses them once and fills the columns; fresh databases and any new/changed session populate on parse.
-- Cost computed from `tokens_in`, `tokens_out`, `cache_read_tokens`, `cache_write_tokens`.
-- **Token-bucket invariant**: `tokens_in` is the uncached (full-rate) prompt portion; `cache_read_tokens` and `cache_write_tokens` are separate additive, non-overlapping portions. Anthropic reports `input_tokens` already net, but OpenAI/Codex report it cache-inclusive, so the Codex importer (`src/import/codex.ts`) subtracts cached reads and the OTEL log-record path (`src/otel/parser.ts`) subtracts both OpenAI cached reads and GPT-5.6 cache writes before storing `tokens_in`. Violating this double-bills cached tokens at the full input rate, the cause of historically inflated Codex/gpt-5.x spend.
-- **Codex model attribution**: historical JSONL import tracks `turn_context.payload.model` and applies that model to the following token delta, so model switches within one session retain their actual Sol/Terra/Luna attribution. Top-level `config.toml` is only a fallback for older logs without `turn_context`. Data migration v3 invalidates Codex event-import hashes once; the subsequent normal auto-import narrowly refreshes model and derived cost on deterministic duplicate events marked as turn-context-backed, then re-derives their `session_trace_summary`. Config-only legacy events are never relabeled from today's setting.
-- Historical rows predating that fix are repaired once by the `user_version`-guarded data migration in `src/db/schema.ts` (`runDataMigrations` → `backfillCacheInclusiveInputTokens`), which re-normalizes OpenAI/Google `tokens_in` and recomputes `cost_usd` atomically on next startup.
-- Costs stored as `cost_usd` on each event row.
-- V2 usage keeps stored `cost_usd` authoritative. Cache hit rate, estimated cache savings, classification filters, tier rollups, top-session enrichment, and prior-period deltas are derived at query time from filtered usage rows and current pricing metadata.
-- Codex can produce both live OTEL usage and later imported JSONL usage for the same session. Aggregate usage/stat queries reconcile that overlap at read time: imported Codex usage is authoritative, overlapping Codex OTEL usage rows are excluded from token/cost rollups, and the raw event rows remain intact for monitor/session history.
-- Read-only usage budgets are evaluated from an optional local JSON config through the same v2 usage summary/filter path. They report alert states only; no hook enforcement or request blocking is implemented.
-- Tier feedback is generated from usage summaries, model attribution, and top-session metadata only. It does not inspect private message content and returns advisory findings for human review rather than executable model changes.
+Codex can produce both live OTEL usage and later imported JSONL usage for the same
+session. Usage and stats reconcile that overlap at read time: imported usage is
+authoritative for matching timestamps, overlapping OTEL usage is excluded from
+rollups, and raw rows remain available to monitoring and session history.
 
-## Import Pipeline
+Usage, analytics, skill health, budgets, tier feedback, benchmarks, and insights
+are derived from shared v2 query/service boundaries. Responses carry coverage
+metadata when a provider or source cannot support the full requested analysis.
 
-`src/import/` supports historical backfill:
+## Trace Quality And Export
 
-- `claude-code.ts`: Parses Claude Code JSONL conversation logs.
-- `codex.ts`: Parses Codex session JSON files.
-- `antigravity.ts`: Parses Antigravity CLI conversation SQLite DBs (`~/.gemini/antigravity-cli/conversations/**/*.db`). Blobs are plaintext protobuf decoded with descriptor-pinned + empirically-pinned field maps (`src/import/antigravity/`, see `docs/specs/baselines/antigravity-proto-fieldmap.md`). `agent_type="antigravity"`; models classify google/gemini; real per-turn usage/cost comes from the private `CortexGeneratorMetadata` record (cache-inclusive token invariant honored).
-- `benchmark.ts`: Imports openbench `results.jsonl` runs via `amon import benchmark <path>`. Each row is one benchmark cell (a harness invocation against a task+model+trial) mapped to a single aggregate `llm_response` event, tagged `source='benchmark'`. The persisted `event_id`/`session_id` is the composite `${study_id}::${run_id}`, not the bare `run_id`: `run_id` (harness:task:model:trial) is unique only *within* one bake-off, so two studies rerunning the same cell share it — namespacing keeps re-import idempotent within a study while separating reruns across studies (the faithful `run_id` is preserved in metadata). `agent_type` is the row's `harness` (`codex`/`claude`/…) — the same names live sessions carry, so segregation keys on `source`, never `agent_type`. Token tiers map onto the event's uncached/cache-read/cache-write/output split; cost prefers a captured `cost_usd`, else derives from the pricing tables, and unpriced models are surfaced as a non-zero CLI exit rather than billed null; re-importing after rates are added backfills a cell whose cost was stored null (`backfillBenchmarkCost`), so it stops summing as $0. **Study + model identity** come from openbench's own row fields (`study`/`study_sha256`/`suite`/`canonical_model`/`reasoning_effort`/`is_open_model`): `study_id` (= `study_sha256`, the exact per-run grouping key) and `study` (slug) are stored as `events` columns, the rest in metadata; amon derives them (parent-dir study, effort-suffix strip) only as a legacy fallback for pre-field rows. `--study <label>` overrides the grouping. `CODEX_HOME` is ephemeral per cell, so there is no transcript — benchmark cells populate usage/cost but not the session browser, and a `harness='codex'` cell also **skips the live projection** (no `browsing_sessions`/turns/items), keeping the Analytics and `/api/v2/live` surfaces clean. Benchmark rows are **segregated** from the default v2 usage/analytics aggregates at the `buildUsageFilterState` seam (opt in via `UsageParams.include_benchmark`). The dedicated benchmark read surface — `getBenchmarkStudies` / `getBenchmarkStudy` (v2 routes `GET /api/v2/benchmarks[/:studyId]`) — is the one benchmark-inclusive path: it groups cells by `study_id` into per-arm aggregates (Pareto frontier, verdicts, honesty flags) and never routes through `buildUsageFilterState`. Honesty flags include openbench's own usage-evidence verdict — `usage_evidence_grade` (proxy_measured / vendor_reported / estimated / usage_unavailable) and `usage_ranking_eligible` / `usage_ranking_exclusion_reason` — which amon **consumes verbatim, mirroring `obench/usage_evidence.py` rather than re-deriving eligibility**; an arm with any ranking-excluded cell surfaces as ineligible with the reason. The `/app/` Benchmarks tab renders this surface as a per-arm ladder plus a cost×score Pareto frontier scatter (`BenchmarkFrontier.svelte`) built on shared inline-SVG chart primitives (`frontend/src/lib/components/ui/chart/`: pure `scales.ts` + `layout.ts` + a tokenized `PlotFrame.svelte`); the Monitor CostDashboard timeline shares the same `linearScale`.
-- Invocation mode: `claude-code.ts`/`parser/claude-code.ts` read each line's `entrypoint`/`promptSource` and `codex.ts`/`parser/codex-sessions.ts` read `session_meta.originator` (see `src/util/invocation-mode.ts`) to derive an `interactive`/`headless` mode, surfaced as a derived `mode` column by the monitor session queries. The live Claude Monitor stream is hook-sourced (hooks carry no `entrypoint`) and Codex is OTEL-sourced, so `mode` is stamped onto `sessions.metadata.mode` from the session files by three complementary writers, all funneling through `setSessionMode` (a guarded, idempotent UPDATE that never fabricates a row):
-  - the **file watcher** (`syncSessionFileDetailed`/`syncCodexSessionFileDetailed`) stamps it as soon as it parses the JSONL, so a live session gets marked within the debounce window (for Codex it resolves the session UUID from the rollout filename, since the Monitor row is keyed by UUID, not the filename);
-  - the **import path** (`upsertSession` on fresh events, plus `setSessionMode` once per session per file) covers historical backfill and works even when every event is a duplicate, so `amon import --force` fixes sessions imported before this feature existed;
-  - the periodic **auto-import** (`runImport`, 5s after boot then on interval) is the backstop; when it imports or refreshes events it broadcasts `session_update {type:'auto_import', imported, refreshed}` and the Monitor refetches, so the pill appears without a manual reload.
-  A short headless run can finish before its Monitor row exists (hook POST vs. watcher parse race); that window is closed by the next auto-import. Antigravity has no equivalent signal and is left unmarked.
-- `import_state` tracks full-file hashes for completed imports, including files that produced zero events, so unchanged non-importable files are skipped on later full imports.
-- Date-scoped imports intentionally do not update `import_state`, because they only represent a partial view of the file.
-- Import discovery can exclude configured path patterns before hashing or parsing, so known junk subtrees never enter the historical backfill pipeline.
-- `amon import` is the primary operator entrypoint. The older `pnpm run import` script remains a compatibility wrapper.
+Trace quality is a lean view over existing event and session-browser rows. It
+persists a content-free session summary, projects observations on demand, and
+labels source coverage so summary telemetry cannot masquerade as a complete trace.
+The optional aggregate warehouse export publishes allowlisted summary fields to
+AgentMonitor's own Postgres schema. Deeper trace/eval export remains deferred.
 
-## Session Sync
+See [trace-quality.md](trace-quality.md) for the semantic and privacy contract.
 
-`src/watcher/` maintains the v2 session browser from local JSONL history:
+## Streaming
 
-- Startup sync scans
-  `$AGENTMONITOR_CLAUDE_DIR/projects/**/*.jsonl` (default
-  `~/.claude/projects/**/*.jsonl`), `~/.codex/sessions/**/*.jsonl`, and
-  `~/.gemini/antigravity-cli/conversations/**/*.db`.
-- Chokidar watches the Claude and Codex JSONL **directories** (recursively) and the handler filters to `.jsonl`. chokidar dropped glob support in v4, so the earlier `root/**/*.jsonl` patterns matched nothing and no live file events fired — live tailing had silently degraded to startup + periodic resync only. Antigravity DBs are **not** live-tailed yet — they are picked up on startup and each periodic resync (file-watch tailing deferred).
-- The Antigravity browser projection is two writers per session (`src/parser/antigravity-sessions.ts` → `insertParsedSession`, then `src/live/antigravity-adapter.ts` → projector), producing `browsing_sessions`/`messages`/`session_items` at `integration_mode=antigravity-sqlite`, `fidelity=summary` (step-kind labels until per-kind payload internals are decoded).
-- Claude and Codex session parsers also emit an ordered skill-context
-  projection. `session_context_observations` retains consultation, compaction,
-  and runtime catalog-presentation occurrences; normalized catalog entries live
-  in `session_catalog_observation_entries`. The shared
-  `insertParsedSession` transaction replaces these rows alongside messages and
-  tool calls, while `browsing_sessions.project_identity` and
-  `skill_context_capabilities_json` preserve session identity and observability
-  limits. Claude explicit `Skill` calls and Codex concrete `.../SKILL.md` reads
-  still define the phase-1 invocation basis; ordered parser rows only enrich a
-  selected occurrence and never create an analytics count.
-- `skill_expected_realizations` stores bounded, canonicalized, SHA-256-addressed
-  desired-state evidence supplied by an external profile authority. Identical
-  array reorderings replay idempotently; reusing an immutable ID for different
-  content conflicts. `session_expected_skill_realizations` holds an explicit
-  one-realization session binding without a `browsing_sessions` foreign key so
-  parser delete-and-reinsert cycles cannot erase it. Association requires an
-  existing same-harness session and cannot be rebound. No current-filesystem
-  state is used to construct historical expectations.
-- `src/skills/session-skill-context.ts` is the bounded read-side oracle for one
-  selected Claude or Codex browser session. It preserves every ordered catalog
-  presentation and instruction-load occurrence, classifies consultations
-  against compaction generations, and compares each presentation only with an
-  associated realization valid at that occurrence's timestamp. Catalog budget
-  ratios are emitted only when the retained UTF-8-byte measurement and a fresh,
-  integrity-checked policy artifact match the occurrence's harness version,
-  model scope, context-window identity, runtime representation, unit, and
-  measurement method. Missing signals, missing asynchronous hook delivery,
-  invalid or ambiguous authority, incompatible units, and stale policy remain
-  distinct unavailable/unknown states rather than inferred zeroes. Multiple
-  fresh artifacts are filtered for full runtime/unit/method compatibility, and
-  a numeric ratio requires exactly one remaining authority. Codex runtime
-  catalogs emitted before the first turn metadata use that session's first
-  reported model and context-window identity. Because Codex currently reports
-  an exact versioned model identifier but no separate model-version field, a
-  policy can scope to that exact `model`; `modelVersion` is an optional
-  additional qualifier only for harnesses that expose one.
-- The v2 router exposes that oracle at
-  `GET /api/v2/sessions/:id/skill-context`. Immutable realization creation and
-  one-time session association are exposed as bounded `PUT` resources at
-  `/api/v2/skills/expected-realizations/:id` and
-  `/api/v2/sessions/:id/expected-skill-realization`; path identity, immutable
-  content, dependency, harness, and policy-semantic failures have deterministic
-  4xx responses. The additive health envelope preserves the legacy `data`
-  array, but mixed-harness rows are machine-labeled compatibility-only and
-  non-comparative; rich analytics are partitioned under
-  `consultations.byHarness`.
-- Newly installed Claude hook configurations register asynchronous
-  `InstructionsLoaded` capture for all load reasons. Shell and Python hooks
-  persist only `file_path`, `memory_type`, `load_reason`, and supplied optional
-  path/glob metadata. Their SessionStart command carries an explicit
-  instrumentation marker; missing asynchronous load events remain
-  unobservable rather than proving an empty instruction set.
-- `src/skills/invocation-ledger.ts` is the canonical occurrence selector used by
-  both daily and health analytics. It filters Codex OTEL evidence before
-  marking a canonical session event-backed, then uses JSONL only as fallback.
-  `src/skills/consultation-analytics.ts` matches selected occurrences to ordered
-  observations and derives per-harness first reads, post-compaction
-  rehydrations, repeats, unclassifiable coverage, project breadth, version
-  breakdowns, and exposure partitions. Mixed Claude/Codex output carries
-  `different_detection_semantics` rather than a pooled engagement claim. One
-  health request performs at most one TTL-scoped filesystem catalog scan,
-  selects and enriches the ledger once, then folds the same catalog and
-  occurrences into the phase-1 compatibility rows and richer consultation
-  result. Query-plan guards pin event-session reconciliation to
-  `idx_events_session_reconcile`, ordered observation reads to
-  `idx_sco_session_kind_name_ordinal` / `idx_sco_skill_time`, and catalog-entry
-  reads to `idx_scoe_observation_ordinal`.
-- The same exclude-pattern matcher is applied to discovery, watcher events, and periodic resync so ignored paths behave consistently.
-- `watched_files` caches parsed, skipped, and error states by file hash so unchanged files are not reparsed on every periodic resync.
-- Periodic resync still runs as a safety net for missed file-system events and now covers the Claude, Codex, and Antigravity history roots.
-- `amon sync sessions` is the primary manual resync entrypoint. The older reparse scripts remain compatibility wrappers.
-
-## Trace Quality
-
-A **lean**, provider-neutral trace-quality view (reframe, 2026-06): one trace per
-session, derived on demand from existing sources (`events`, `session_items`,
-`session_turns`, `messages`, `tool_calls`) plus a tiny content-free per-session
-rollup. It is **additive**: source rows are never removed or reinterpreted. The
-persisted trace/observation/score/prompt warehouse was removed — that eval depth
-is deferred to Langfuse, while the content-free aggregate exports through the
-explicit warehouse CLI (collector-not-backend; see POSITIONING.md).
-
-- **Storage:** only `session_trace_summary` (one content-free, export-shaped row
-  per session that feeds optional `agentmonitor.runs` publish) and the dormant
-  `trace_quality_export_state` Langfuse seam are persisted. `src/trace-quality/` holds the
-  projection (`projection.ts`), source readers, the on-demand read layer
-  (`on-demand.ts`), the summary derivation/maintenance (`summary.ts`), and the
-  ingest hooks (`service.ts`).
-- **Detail on-demand:** `on-demand.ts` projects a single session's trace +
-  observation tree in memory per request and never stores it; the list is served
-  straight from the summary. Ingest maintains the summary incrementally; a startup
-  guard self-heals incomplete migrations (stale version or NULL `trace_id`).
-- **Honesty:** traces carry a `coverage_json` flag set and reads carry
-  read-coverage metadata (over the full filtered set), so summary-only telemetry
-  (e.g. Codex OTEL) is never presented as full fidelity. Observation
-  `payload_policy` governs raw vs hash vs summary retention.
-- **Read APIs:** `/api/v2/trace-quality/{traces, traces/:id, traces/:id/observations}`
-  (handlers in `src/api/v2/router.ts`, reads in `src/trace-quality/on-demand.ts`).
-- **Reclaim:** existing DBs drop the old warehouse tables and VACUUM via the
-  explicit, opt-in `pnpm reclaim:trace-quality` (never run at startup).
-- **Export seam:** `trace_quality_export_state` (+ `langfuse` provider enum) is the
-  seam for the **deferred** export — medallion for the summary aggregate, Langfuse
-  for trace/eval depth. Nothing leaves localhost until that adapter is built.
-
-See [trace-quality.md](trace-quality.md) for the full model, taxonomy, and
-semantics.
-
-## OTEL Parser
-
-<a id="otel-parser-and-metrics"></a>
-`src/otel/parser.ts` converts OTLP JSON payloads (logs, metrics) into normalized events for the standard ingest pipeline.
-
-### OTEL metrics classification
-
-`parseOtelMetrics` classifies every metric datapoint into one of four outcomes, returning `{ usage, operational, dropped }`:
-
-- **usage** — Claude Code token/cost metrics (`claude_code.token.usage` / `.cost.usage`, `gen_ai.client.*`). Emitted as synthetic `llm_response` events so the existing pipeline aggregates them. Unchanged.
-- **operational (Bucket A)** — operator-actionable counters, inserted into the `otel_metrics` table (never `events`). Admission is a **curated default-deny allowlist**, not a broad heuristic: consolidation-health families by prefix (`codex.memory.`/`codex.memories.`) plus failure/degradation counters by name signal (`retry`/`error`/`fallback`). Live Codex tags `status`/`outcome` on many *internal* counters — skill-routing A/B evals (`codex.skills.shadow_selection`), sqlite plumbing (`codex.sqlite.*`) — so an "any outcome attribute" rule admitted ~80% noise; the allowlist keeps the store to operator signal, and unknown families are dropped-with-tally until deliberately added. Stored attributes are **projected to the outcome keys only** (`state`/`status`/`outcome`/`result`/`reason`/`error_type`/`fallback_reason`/…); descriptive labels (`app.version`, `model`, `originator`, `session_source`, `method`, …) are dropped so a counter collapses to the one series that carries meaning. Cumulative counters convert to per-export deltas keyed by name×projected-attrs×`startTimeUnixNano`, so distinct outcome states track independently and a producer restart (new start time) begins a fresh series instead of being swallowed by the previous process's stale value.
-- **skipped token/cost** — Codex token/cost *metrics* (`codex.turn.token_usage.*`, `codex.turn.cost_microusd`, `codex.usage.*`, any `*_tokens`) are recognized and **deliberately not stored**: Codex token/cost is **logs-authoritative** (`codex.sse_event` → `response.completed`), so ingesting the metrics too would double-count (reconciliation dedupes otel-vs-import, not otel-logs-vs-otel-metrics). This is an intentional, documented exclusion — not the accidental name-mismatch it replaced. Claude Code, which has no equivalent logs usage path, keeps metrics as its token/cost source.
-- **dropped** — timings (`*.duration_ms`), sizes (`*_bytes`), and unrecognized/outcome-less metrics. Tallied by name (not stored) and logged as a throttled aggregate at the ingest boundary for intake visibility, so the metric stream is never again silently invisible ("an absence is a claim about the instrument"). The high-volume `*.duration_ms` timing family is the bulk of Codex's metric namespace and the reason a blanket "store everything" is not viable.
-
-`GET /api/v2/metrics` reads the operational store grouped by name×attrs (occurrences, summed value, last-seen), which answers questions like "is Codex memory consolidation running, and which states is it hitting?".
-
-### Codex Telemetry Capability Matrix
-
-Codex should be thought of as having multiple telemetry surfaces, not one monolithic "OTEL only" story.
-
-| Surface | Upstream source | Current AgentMonitor status | Notes |
-|---------|------------------|-----------------------------|-------|
-| Session bootstrap metadata | `codex.conversation_starts` OTEL event | Captured | Startup metadata such as provider, reasoning effort, sandbox policy, and MCP server list can now flow into normalized events. |
-| User prompts | `codex.user_prompt`, `codex.user_message`, `codex.response` user items | Captured | Prompt text is retained when present and projected into live summary sessions. |
-| Tool decisions and tool results | `codex.tool_decision`, `codex.tool_result` OTEL events | Captured | Tool call metadata, call ids, parsed arguments, outputs, success state, and MCP origin metadata are now preserved and projected more honestly. |
-| Response completion usage | `codex.sse_event` with `event.kind=response.completed` | Captured | Response-complete token usage and related metadata can populate `llm_response` rows without waiting for backfill. |
-| Response item typing | `codex.response`, `codex.event_msg` payload types | Partially captured | Assistant messages, reasoning, shell-call style responses, and tool-result style outputs can be projected when the OTEL payload includes enough structure. |
-| Websocket request and response lifecycle | `codex.websocket_request`, `codex.websocket_event` | Partially captured | Request/error/response classification is available, and low-value websocket lifecycle markers are now filtered at ingest, but this is still not full transcript-grade data. |
-| Provider quota state | `codex app-server` JSON-RPC | Captured | AgentMonitor polls the local app-server for native Codex quota windows and reset times for the monitor header. |
-| Full Thread/Turn/Item lifecycle | `codex app-server` JSON-RPC | Not integrated yet | App-server quota polling now exists, but transcript-grade Codex parity is still not using the richer item lifecycle stream. |
-| Persisted local rollout state | Codex local session/state files | Import-only today | Local Codex session import exists, but the live v2 path still centers on OTEL rather than direct local-state projection. |
-| Operational metrics (memory consolidation, retries, fallbacks) | `codex.*` OTLP metrics → `/api/otel/v1/metrics` | Captured (Bucket A) | Outcome/state-tagged counters (e.g. `codex.memory.startup{state=skipped_rate_limit}`) land in `otel_metrics` and read via `GET /api/v2/metrics`. Latency/size metrics and token/cost metrics are excluded (token/cost is logs-authoritative). Rollout files do **not** carry metrics — the Codex binary's metric registry is the authoritative catalog. |
-
-Planning implication: current AgentMonitor Codex fidelity limits should be treated as implementation limits of the current parser/projector, not as the hard ceiling of Codex telemetry itself.
-
-### Codex Live Validation Notes
-
-On April 9, 2026, AgentMonitor was pointed at active local Codex sessions exporting to `/api/otel/v1/logs` on the TypeScript runtime. That live validation pass changed the practical assessment of the current OTEL path:
-
-- The current OTEL stream is materially useful for `codex.user_prompt`, `codex.tool_decision`, `codex.tool_result`, `codex.sse_event`, and `codex.websocket_request`.
-- The dominant live volume is still `codex.websocket_event`, especially `response.output_text.delta` and related response lifecycle events.
-- In the sampled local stream, websocket delta rows did not carry transcript text, response item typing, or client timestamps that would let AgentMonitor reconstruct a reliable Thread/Turn/Item transcript from OTEL alone.
-- AgentMonitor now drops the known empty websocket lifecycle markers at ingest instead of storing them as generic `response` rows, while keeping `response.failed` errors and `codex.sse_event response.completed` usage signals.
-- The widened parser/live adapter is therefore still worthwhile because it improves prompt, tool, and completion-summary fidelity, but the remaining transcript ceiling is now a source-data ceiling for the current OTEL export, not just a parser omission.
-- The practical follow-up for transcript-grade Codex parity is app-server or richer local-state integration, not continued stretching of the current websocket-event summary path.
+The shared SSE broadcaster carries `event`, `stats`, and `session_update` messages.
+The Live surface has a separate v2 stream. Both enforce connection limits,
+heartbeats, disconnect cleanup, and backpressure behavior; neither replaces stored
+state. Exact stream routes and payload wiring live in their route and emitter
+modules.
 
 ## Runtime Path Resolution
 
-- `AGENTMONITOR_PROJECTS_DIR` controls the workspace root used for git branch lookups.
-- If unset, config auto-detects the AgentMonitor repo root from `process.cwd()` ancestry and uses its parent directory.
-- If no repo root is detected, config falls back to the current working directory.
-- `AGENTMONITOR_CLAUDE_DIR` independently controls the Claude data root used by
-  startup sync, watcher resync, historical/automatic import, and session-sync
-  CLI defaults. It defaults to `~/.claude`; explicit `--claude-dir` command
-  flags take precedence.
+- The default database follows the package installation, so invoking `amon` from a
+  different working directory does not silently select a new database.
+- `AGENTMONITOR_DB_PATH` explicitly selects another database.
+- `AGENTMONITOR_PROJECTS_DIR` controls the workspace root used for git identity.
+- `AGENTMONITOR_CLAUDE_DIR` controls Claude discovery and import independently.
 
-## Directory Map
-
-```text
-src/api/                  # HTTP route handlers
-src/cli/                  # Local operator CLI command modules
-src/cli.ts                # CLI executable entrypoint for amon and agentmonitor
-src/contracts/            # TypeScript event types and validation
-src/db/                   # Schema, queries, connection management
-src/import/               # Historical log importers
-src/otel/                 # OTLP JSON parser
-src/trace-quality/        # Local trace-quality projection, scores, prompts, findings
-src/pricing/              # Cost calculation + JSON pricing data
-src/runtime-ownership.ts  # DB-scoped long-running runtime ownership
-src/runtime.ts            # Shared TS runtime startup used by server and CLI
-src/sse/                  # SSE client management and fan-out
-src/util/                 # Utilities (git branch detection)
-frontend/dist/            # Built Svelte SPA served at /app by the TS runtime
-hooks/claude-code/        # Claude Code integration hooks (bash + Python)
-hooks/codex/              # Codex OTEL integration docs
-scripts/                  # Seed, import, benchmark, cost recalculation
-tests/                    # Node test runner suite
-```
+Current configuration parsing and defaults live in
+[`src/config.ts`](../../src/config.ts); common operator settings are explained in
+[OPERATIONS.md](OPERATIONS.md).

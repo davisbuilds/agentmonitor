@@ -1,17 +1,18 @@
 # Operations
 
-This document owns local development, runtime commands, environment variables, and testing workflow.
+This document owns local setup, runtime operation, integrations, recovery, and
+verification procedures. Use `amon --help` for the exact command surface and
+[`src/config.ts`](../../src/config.ts) for exact environment parsing and defaults.
 
-Related docs:
+Related references:
 
-- Root overview and fastest setup: [../../README.md](../../README.md)
-- Product/capability reference: [FEATURES.md](FEATURES.md)
-- Architecture and code map: [ARCHITECTURE.md](ARCHITECTURE.md)
-- API navigation: [../api/README.md](../api/README.md)
-- Claude Code integration details: [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md)
-- Codex integration details: [../../hooks/codex/README.md](../../hooks/codex/README.md)
+- Product behavior: [FEATURES.md](FEATURES.md)
+- Architecture and data ownership: [ARCHITECTURE.md](ARCHITECTURE.md)
+- API ownership: [../api/README.md](../api/README.md)
+- Claude integration: [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md)
+- Codex integration: [../../hooks/codex/README.md](../../hooks/codex/README.md)
 
-## Operator Startup
+## Built Product
 
 ```bash
 pnpm build
@@ -19,239 +20,81 @@ pnpm link --global
 amon serve
 ```
 
-`amon serve` is the single launcher for the built product. It runs Express on
-the fixed `127.0.0.1:3141` backend and uses the pinned, package-local Portless
-CLI to expose `https://agentmonitor.localhost`. The named root redirects to
-`/app/`; direct `http://127.0.0.1:3141/` retains the legacy compatibility
-dashboard. Hooks, OTEL exporters, and direct API clients stay on `:3141`.
+`amon serve` runs Express on the fixed `127.0.0.1:3141` backend and normally uses
+the pinned package-local Portless CLI to expose
+`https://agentmonitor.localhost`. Both roots redirect to `/app/`. Hooks, OTLP
+exporters, and direct API clients remain on `:3141`.
 
-Portless starts its HTTPS proxy automatically and may request local-CA trust on
-first use. `amon serve --no-portless` bypasses the named HTTPS origin and starts
-only the direct backend. Ctrl-C shuts down the runtime and removes its Portless
-route.
+`amon serve --no-portless` starts the direct backend without the named HTTPS
+origin. Ctrl-C shuts down the runtime and removes its Portless route.
 
-Long-running startup is exclusive per resolved SQLite database. If another live
-`amon serve` or `pnpm start` already owns that DB, startup exits non-zero before
-opening a listener or starting background work and reports the owner PID and
-canonical DB path. Ownership left by a dead process is recovered automatically;
-do not delete the adjacent `.runtime.lock` file while its reported PID is live.
-Different explicit DB paths can run concurrently. One-shot commands such as
-`amon status`, reporting, database backup, import, sync, cost recalculation, and
-warehouse publish are intentionally not excluded by runtime ownership.
+### Runtime Ownership
 
-On bind failure or SIGINT/SIGTERM, the runtime first stops the HTTP listener from
-accepting automatic EventSource reconnects, then stops timers, closes SSE clients
-and their idle sockets, awaits in-flight quota polling and the file watcher,
-closes SQLite, and releases ownership. This ordering makes an immediate same-DB
-restart safe even when a dashboard stream was connected during shutdown.
+Long-running startup is exclusive per resolved SQLite database. A competing
+runtime targeting the same database exits before HTTP and background work and
+reports the owning PID and path. Dead-process state recovers automatically. Do not
+delete an adjacent `.runtime.lock` while its reported PID is live.
+
+Different explicit database paths may run concurrently. One-shot reads, backup,
+import, sync, recalculation, and warehouse publication do not acquire runtime
+ownership. Shutdown stops HTTP reconnects, timers, SSE clients, quota work,
+watchers, and SQLite before releasing the lock, allowing an immediate restart.
 
 ## Source Development
 
 ```bash
 pnpm install
-pnpm dev          # terminal 1: server in watch mode
-pnpm frontend:dev # terminal 2: Svelte app at :5173 with API proxy
+pnpm dev          # TypeScript server with watch mode
+pnpm frontend:dev # Svelte HMR server with API proxy
 ```
 
-Open `http://127.0.0.1:3141/app/` or `http://127.0.0.1:5173/app/` in this
-source/HMR workflow.
+Open `http://127.0.0.1:3141/app/` for the backend-served app or
+`http://127.0.0.1:5173/app/` for the frontend HMR path.
 
-## Useful Commands
+During development, `pnpm cli -- ...` runs the TypeScript CLI entrypoint. After a
+build/link, use `amon ...`. `agentmonitor` is an equivalent executable alias.
+Finite read commands support `--json` for stable machine consumption and reserve
+stderr for diagnostics. Unsupported flags fail instead of being ignored.
 
-```bash
-pnpm build              # TypeScript build + CSS build
-pnpm start              # Run compiled server from dist/
-pnpm cli -- --help      # AgentMonitor CLI help during local development
-pnpm cli -- health      # Check the local TypeScript server
-pnpm cli -- sessions list --json # Query session history from SQLite
-pnpm test               # Run self-contained TypeScript tests (excludes parity)
-pnpm test:watch         # Watch-mode self-contained test runner
-pnpm test:parity:ts     # Run isolated TypeScript parity tests (temp server + temp DB)
-pnpm test:v2:contract:ts # Run isolated black-box tests for the canonical TS /api/v2 contract
-pnpm test:parity:ts:live # Run parity tests against a running TS server on :3141
-pnpm cli -- ops metrics # Operational OTEL metrics (name×attrs counters), --json for agents
-pnpm frontend:check     # svelte-check (type-checks /app/, does not run it)
-pnpm frontend:test      # Vitest unit tests for /app/ stores + pure lib logic
-pnpm lint               # ESLint
-pnpm seed               # Send demo events (server must be running)
-pnpm run import         # Import historical sessions
-pnpm reclaim:trace-quality # Drop the old trace-quality warehouse tables + VACUUM (opt-in)
-pnpm reparse:sessions   # Force reparse Claude session-browser history
-pnpm reparse:codex-sessions # Force reparse Codex session-browser history
-pnpm bench:ingest       # Ingest throughput benchmark
-pnpm bench:storage      # Storage and analytics-query baseline
-pnpm bench:usage        # Running-server Usage overview latency benchmark
-pnpm recalculate-costs  # Recalculate costs from pricing data
-```
-
-## AgentMonitor CLI
-
-The package exposes two equivalent executables after build or installation:
-`amon` and `agentmonitor`. Use `amon` as the short preferred form in examples;
-`agentmonitor` exists for explicitness and package-name discoverability.
-
-During local development, use `pnpm cli -- ...` to run the TypeScript entrypoint
-without installing the package:
+Use help at the level being automated:
 
 ```bash
 pnpm cli -- --help
-pnpm cli -- serve
-pnpm cli -- serve --no-portless
-pnpm cli -- health --url http://127.0.0.1:3141
-pnpm cli -- status --json
-pnpm cli -- open
-
-pnpm cli -- import --source claude-code --dry-run
-pnpm cli -- sync sessions --source codex --force
-pnpm cli -- costs recalc --dry-run
-pnpm cli -- database backup --output /private/path/agentmonitor.db
-pnpm cli -- quality traces --json
-pnpm cli -- warehouse publish --dry-run --json
-
-pnpm cli -- sessions list --json
-pnpm cli -- sessions show <session-id>
-pnpm cli -- sessions search "deploy model"
-pnpm cli -- sessions activity <session-id> --json
-pnpm cli -- sessions children <session-id> --json
-pnpm cli -- sessions pins <session-id> --json
-pnpm cli -- live settings --json
-pnpm cli -- live show <session-id> --json
-pnpm cli -- live turns <session-id> --json
-pnpm cli -- live watch
-pnpm cli -- live watch --kinds user_message,tool_call
-
-pnpm cli -- monitor stats --agent codex --since 2026-09-01 --json
-pnpm cli -- monitor events --tool-name Bash --limit 100 --offset 0 --json
-pnpm cli -- monitor sessions --exclude-status ended --project agentmonitor --json
-pnpm cli -- monitor filter-options --json
-pnpm cli -- monitor tools --project agentmonitor --date-from 2026-09-01 --json
-pnpm cli -- monitor show <session-id> --event-limit 100 --json
-pnpm cli -- monitor transcript <session-id> --json
-pnpm cli -- monitor watch --agent codex --event-type tool_use
-
-pnpm cli -- usage overview --date-from 2026-09-01 --json
-pnpm cli -- usage facets --project agentmonitor --json
-pnpm cli -- usage summary --date-from 2026-09-01 --project agentmonitor
-pnpm cli -- analytics overview --date-from 2026-09-01 --top-sessions-limit 20 --json
-pnpm cli -- analytics tools --date-from 2026-09-01 --agent codex
-pnpm cli -- analytics skills health --project agentmonitor --json
-pnpm cli -- quality traces --project agentmonitor --limit 20
-pnpm cli -- quality trace <trace-id> --json
-pnpm cli -- quality observations <trace-id> --limit 100 --offset 0 --json
-pnpm cli -- insights list --kind workflow --project agentmonitor --json
-pnpm cli -- insights show <insight-id> --json
-pnpm cli -- benchmarks list --json
-pnpm cli -- benchmarks show <study-id> --json
-pnpm cli -- projects list --json
-pnpm cli -- agents list --json
-
-pnpm cli -- hooks install claude --dry-run
-pnpm cli -- hooks print-codex-config
+pnpm cli -- usage --help
+pnpm cli -- analytics --help
+amon --help
 ```
 
-Built package examples:
+Package scripts remain compatibility wrappers for older workflows. Prefer the CLI
+for new operator documentation and automation.
 
-```bash
-pnpm build
-node --import tsx --test tests/cli-e2e.test.ts
-./dist/cli.js --help
-amon --help          # after installing or linking the package
-agentmonitor --help  # equivalent alias after installing or linking the package
-amon serve           # https://agentmonitor.localhost, backed by 127.0.0.1:3141
-```
+## Common Configuration
 
-The legacy package scripts remain compatibility wrappers. Prefer the CLI for new
-operator docs and automation because it has consistent global flags such as
-`--db-path`, `--url`, `--json`, `--plain`, `--quiet`, and `--no-input`.
+All configuration is optional. [`src/config.ts`](../../src/config.ts) is the
+complete authority; [`.env.example`](../../.env.example) provides a practical
+local-runtime starting point. Common controls include:
 
-For agent and script consumption, finite read commands emit their complete data
-contract with `--json` on stdout and reserve stderr for diagnostics. `usage
-overview` matches the Usage page's optimized one-scan payload: summary, daily,
-project, model, model-by-day, tier, agent, and top-session rollups plus coverage.
-`analytics overview` returns all ten Analytics-page contracts in one process:
-summary, activity, projects, tools, daily skill usage, skill health, the
-hour-of-week grid, top sessions, velocity, and agent comparison. Its
-`--top-sessions-limit` option applies only to that nested rollup. The same shared
-date/project/agent filters are available on the individual `analytics activity`,
-`projects`, `agents`, `velocity`, `hour-of-week`, `skills daily`, and `skills
-health` commands.
-`usage facets` returns the page's five self-excluding filter lists. Use each
-command's `--help` as the authority for accepted filters; unsupported filters
-exit 2 instead of being ignored. Local read commands can run concurrently with
-the server's WAL writer and with other CLI readers.
+| Concern | Variables |
+| --- | --- |
+| Listener and database | `AGENTMONITOR_HOST`, `AGENTMONITOR_PORT`, `AGENTMONITOR_DB_PATH` |
+| Event/SSE limits | `AGENTMONITOR_MAX_PAYLOAD_KB`, `AGENTMONITOR_SESSION_TIMEOUT`, `AGENTMONITOR_MAX_FEED`, `AGENTMONITOR_STATS_INTERVAL`, `AGENTMONITOR_MAX_SSE_CLIENTS`, `AGENTMONITOR_SSE_HEARTBEAT_MS` |
+| Discovery and sync | `AGENTMONITOR_PROJECTS_DIR`, `AGENTMONITOR_CLAUDE_DIR`, `AGENTMONITOR_AUTO_IMPORT_MINUTES`, `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` |
+| Live fidelity/privacy | `AGENTMONITOR_ENABLE_LIVE_TAB`, `AGENTMONITOR_CODEX_LIVE_MODE`, `AGENTMONITOR_CODEX_CONTEXT_WINDOW`, `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `AGENTMONITOR_LIVE_CAPTURE_REASONING`, `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`, `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` |
+| Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
+| Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
+| Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
+| Aggregate warehouse | `AGENTMONITOR_WAREHOUSE_DSN`, `AGENTMONITOR_WAREHOUSE_ACCOUNT`, `AGENTMONITOR_WAREHOUSE_SCHEMA`, `AGENTMONITOR_WAREHOUSE_BI_ROLE` |
 
-Saved-analysis reads use the same response contracts as the Svelte app and v2
-API. `quality trace` and `quality observations` expose trace detail and paginated
-observations; `insights list` includes the generation-availability envelope and
-`insights show` returns one persisted insight; `benchmarks list` and `benchmarks
-show` expose benchmark summaries and per-arm detail. `projects list` and `agents
-list` return the shared metadata values used by UI filters. Missing trace,
-insight, and benchmark detail exits 4 with no data on stdout.
+The default database follows the package installation rather than the invoking
+shell directory. An explicit relative `AGENTMONITOR_DB_PATH` resolves against the
+working directory.
 
-Operational reads retain the three schemas used by the app. `sessions
-activity|children|pins` read the browsing-session projection; `live
-settings|show|turns` read Live state; and `monitor
-stats|events|sessions|filter-options|tools|show|transcript` read the Monitor
-projection. `monitor watch` streams the `/api/stream` data fields as NDJSON and
-accepts the stream's `agent_type` and `event_type` filters through `--agent` and
-`--event-type`. `live watch` remains the separate `/api/v2/live/stream` reader.
-These commands complete exact CLI coverage for the 42 read contracts called by
-the current Svelte app. An unknown detail record exits 4; `sessions children`
-preserves the API's empty-list result for an unknown parent.
+Insight generation additionally uses `AGENTMONITOR_INSIGHTS_PROVIDER` and the
+selected provider's API-key, model, and optional base-URL variables. The accepted
+aliases and defaults are intentionally source-owned because provider configuration
+changes more frequently than the monitoring runtime.
 
-## Environment Variables
-
-All optional with sensible defaults:
-
-| Variable | Default | Used For |
-|----------|---------|----------|
-| `AGENTMONITOR_PORT` | `3141` | HTTP listen port |
-| `AGENTMONITOR_HOST` | `127.0.0.1` | HTTP bind address |
-| `AGENTMONITOR_DB_PATH` | `<install-root>/data/agentmonitor.db` | SQLite database path. The default follows the install, not the shell, so `amon serve` reads the same DB from any directory. A value set here is used as given — a relative one is resolved against the working directory. |
-| `AGENTMONITOR_MAX_PAYLOAD_KB` | `10` | Max metadata payload size |
-| `AGENTMONITOR_SESSION_TIMEOUT` | `5` | Minutes before session goes idle |
-| `AGENTMONITOR_MAX_FEED` | `200` | Max events in feed |
-| `AGENTMONITOR_STATS_INTERVAL` | `5000` | Stats broadcast interval (ms) |
-| `AGENTMONITOR_MAX_SSE_CLIENTS` | `50` | Max concurrent SSE connections |
-| `AGENTMONITOR_SSE_HEARTBEAT_MS` | `30000` | SSE heartbeat interval (ms) |
-| `AGENTMONITOR_PROJECTS_DIR` | auto-detected from cwd ancestry | Workspace root used for git branch resolution |
-| `AGENTMONITOR_CLAUDE_DIR` | `~/.claude` | Claude data root containing `projects/`; used by startup sync, watcher resync, automatic/historical import, and `amon sync sessions` |
-| `AGENTMONITOR_USAGE_BUDGETS_PATH` | `./config/budgets.json` | Optional local JSON config for read-only usage budget reports |
-| `AGENTMONITOR_WAREHOUSE_DSN` | unset | Postgres DSN for explicit `warehouse publish`; unset disables live publish |
-| `AGENTMONITOR_WAREHOUSE_ACCOUNT` | `local` | Account label published as the warehouse identity grain |
-| `AGENTMONITOR_WAREHOUSE_SCHEMA` | `agentmonitor` | Postgres schema for `runs` and `publish_run` |
-| `AGENTMONITOR_WAREHOUSE_BI_ROLE` | `medallion_bi` | Optional BI read role granted on the `agentmonitor` schema when present |
-| `AGENTMONITOR_ENABLE_LIVE_TAB` | `true` | Shows the Svelte `Live` tab |
-| `AGENTMONITOR_CODEX_LIVE_MODE` | `otel-only` | Codex live fidelity mode (`otel-only`, reserved `exporter`) |
-| `AGENTMONITOR_LIVE_CAPTURE_PROMPTS` | `true` | Capture or redact live prompt payloads |
-| `AGENTMONITOR_LIVE_CAPTURE_REASONING` | `true` | Capture or redact live reasoning payloads |
-| `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS` | `true` | Capture or redact tool-call input arguments |
-| `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` | `32768` | Payload cap for diff-style live records |
-| `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` | unset | Comma-separated path patterns to ignore during historical discovery, import, and watcher resync |
-| `AGENTMONITOR_SKILL_CATALOG_DIRS` | `~/.claude/skills`, `$CODEX_HOME/skills` | Path-delimited (`:`) installed skill catalogs scanned for version attribution and never-fired detection by `/api/v2/analytics/skills/health` |
-
-Ingest benchmark overrides: `AGENTMONITOR_BENCH_URL`, `AGENTMONITOR_BENCH_MODE`,
-`AGENTMONITOR_BENCH_EVENTS`, `AGENTMONITOR_BENCH_CONCURRENCY`,
-`AGENTMONITOR_BENCH_BATCH_SIZE`.
-
-## Performance Benchmarks
-
-Run the Usage benchmark against an already-running source or built server. It is
-read-only, reports warmup and measured samples separately, and exits nonzero when
-an optional median budget is missed:
-
-```bash
-pnpm bench:usage -- --date-from 2026-06-17 --date-to 2026-07-16 --runs 5
-```
-
-Use `--base-url` or `AGENTMONITOR_BASE_URL` for a non-default server. The default
-is `http://127.0.0.1:3141`; `--warmups` defaults to one. Every sample consumes and
-validates the JSON response, so the timing includes HTTP serialization rather
-than measuring only a SQL fragment. `--max-median-ms` can enforce a local budget
-when a named machine, date range, and baseline make that threshold meaningful;
-there is no repository-wide latency constant.
-
-## Hook Installation
+## Integration Setup
 
 ### Claude Code
 
@@ -260,255 +103,171 @@ pnpm cli -- hooks install claude --dry-run
 pnpm cli -- hooks install claude --force
 ```
 
-The underlying installer remains available as
-`./hooks/claude-code/install.sh`. Restart Claude Code after installing. See
-[../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) for
-details. Current installs include asynchronous, content-free
-`InstructionsLoaded` telemetry for session-start, lazy, include, and
-post-compaction loads. Re-run the installer to add it to an older hook
-configuration.
+Restart Claude Code after installation. The hook emits asynchronous, content-free
+instruction-load metadata in addition to lifecycle and tool events. It never reads
+or emits instruction file contents. See the dedicated hook README for current hook
+names and payload details.
 
 ### Codex
-
-Print the recommended `~/.codex/config.toml` snippet:
 
 ```bash
 pnpm cli -- hooks print-codex-config
 ```
 
-The output is equivalent to:
+The generated `~/.codex/config.toml` snippet points JSON OTLP logs and metrics to
+the direct backend. Start AgentMonitor before the Codex session. If Codex terminal
+activity is visible but `source=otel` stops updating, confirm the configured
+endpoint is `127.0.0.1:3141` rather than a stale port.
 
-```toml
-[otel]
-log_user_prompt = true
+Codex `otel-only` mode is summary-oriented. It provides live activity and usage,
+while the separate local-session watcher supplies historical transcript-derived
+data where available. It does not claim Claude-equivalent live transcript,
+reasoning, or diff fidelity.
 
-[otel.exporter.otlp-http]
-endpoint = "http://localhost:3141/api/otel/v1/logs"
-protocol = "json"
+## Import And Session Recovery
 
-[otel.metrics_exporter.otlp-http]
-endpoint = "http://localhost:3141/api/otel/v1/metrics"
-protocol = "json"
-```
+Use `amon import --help`, `amon import benchmark --help`, and
+`amon sync sessions --help` for the current flags. The important distinction is:
 
-The dev server must be running before starting a Codex session.
+- `amon import` reconstructs event history and cost-bearing rows.
+- `amon sync sessions` reconstructs browsing sessions, messages, turns, items, tool
+  calls, and transcript-derived analytics.
 
-Current runtime note:
+`import_state` and `watched_files` protect those paths independently. If browser
+tables are restored, cleared, or fall behind while watcher hashes survive, normal
+startup treats unchanged files as current. Startup warns when a discoverable
+Claude/Codex transcript is cached as parsed but lacks its browser projection.
 
-- `AGENTMONITOR_CODEX_LIVE_MODE=otel-only` is the only implemented Codex mode today.
-- OTEL-only Codex data is suitable for summary observability, not `claude-esp`-style plan/diff/reasoning playback.
-- The `exporter` mode name is reserved for a future richer Codex-side exporter.
-- The session-browser watcher separately follows local Claude JSONL history
-  under `$AGENTMONITOR_CLAUDE_DIR/projects` (default `~/.claude/projects`) and
-  local Codex history under `$CODEX_HOME/sessions` (default
-  `~/.codex/sessions`).
-- The watcher and full historical import both maintain file-hash skip caches, so unchanged files that previously parsed to zero messages/events are not retried on every restart or periodic sync.
-- `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` uses root-relative glob-style patterns. Bare names such as `vercel-plugin` match any path segment; path patterns such as `nested/sessions` match that subtree relative to the watched root.
-
-For full setup and behavior notes, use [../../hooks/claude-code/README.md](../../hooks/claude-code/README.md) and [../../hooks/codex/README.md](../../hooks/codex/README.md).
-
-## Historical Import
+Preserve the database, then rebuild browser history explicitly:
 
 ```bash
-pnpm cli -- import --source claude-code    # Claude Code JSONL logs
-pnpm cli -- import --source codex          # Codex session files
-pnpm cli -- import --source antigravity    # Antigravity CLI conversation DBs (~/.gemini/antigravity-cli)
-pnpm cli -- import --dry-run               # Preview without writing
-pnpm cli -- import benchmark <results.jsonl> [--study <label>]  # Import an openbench results.jsonl as segregated benchmark events
-pnpm cli -- sync sessions --source claude  # Rebuild browsing_sessions/messages/tool_calls from Claude JSONL
-pnpm cli -- sync sessions --source codex   # Rebuild browsing_sessions/messages/tool_calls from Codex JSONL
-pnpm cli -- costs recalc --dry-run         # Preview cost backfill
+amon sync sessions --source all --force
 ```
 
-`--source antigravity` also accepts `--antigravity-dir <path>` to point at a
-non-default `antigravity-cli` root (default `~/.gemini/antigravity-cli`).
-Claude import and session sync accept `--claude-dir <path>` as a command-local
-override; otherwise both use `AGENTMONITOR_CLAUDE_DIR`.
+`amon import --force` cannot restore tool-call or inferred-skill history. Date
+scoped imports intentionally do not update whole-file skip state. Benchmark import
+creates segregated `source='benchmark'` rows; it does not fabricate transcripts for
+ephemeral benchmark runs.
 
-Operational notes:
+## Database Backup And Repair Safety
 
-- `pnpm run import`, `pnpm reparse:sessions`, `pnpm reparse:codex-sessions`, and `pnpm recalculate-costs` remain compatibility wrappers around the CLI commands.
-- Full imports update `import_state` even when a file produced zero events, so unchanged unsupported/non-interactive files are skipped on later full imports.
-- Date-scoped imports intentionally do not update the skip cache because they only process part of each file.
-- `pnpm cli -- import --source codex --force` refreshes event history and cost backfill, but it does not rebuild Codex session-browser `tool_calls`; use `pnpm cli -- sync sessions --source codex --force` when transcript-derived analytics such as inferred skill usage need to be backfilled.
-- `import benchmark <results.jsonl> [--study <label>]` ingests external openbench runs (codex/claude harnesses driving OpenRouter models through the LiteLLM bridge) as `source='benchmark'` events, one aggregate `llm_response` per cell keyed on the composite `${study_id}::${run_id}` — `run_id` is unique only within a bake-off, so namespacing keeps re-import idempotent within a study while separating reruns across studies (idempotent re-import; `--dry-run` previews). Study + model identity are read from openbench's own row fields (`study`/`study_sha256`/`suite`/`canonical_model`/`reasoning_effort`/`is_open_model`); `--study <label>` overrides the grouping (escape hatch / pre-field files, which otherwise fall back to the parent-dir name). These are **segregated** from the default cost/usage/analytics aggregates — pass `include_benchmark` on the usage API to include them, or use the dedicated `GET /api/v2/benchmarks[/:studyId]` surface. Because `CODEX_HOME` is ephemeral per cell, there is no transcript, so benchmark cells populate usage/cost but not the session browser. Cost prefers a row's captured `cost_usd`, else derives from the pricing tables; models with no rate are reported as unpriced (non-zero exit) rather than billed as null — add rates to `src/pricing/data/openrouter.json`.
-- `watched_files` is independent of the session-browser tables. If
-  `browsing_sessions`, `messages`, or `tool_calls` are restored, cleared, or
-  otherwise fall behind while the hashes remain, ordinary startup considers
-  unchanged JSONLs current. Startup emits a read-only warning when a currently
-  discoverable Claude/Codex transcript is cached as `parsed` but has no matching
-  `browsing_sessions.file_path`; stale files, excluded files, errors, and
-  intentionally skipped transcripts do not trigger it. Back up the database,
-  then run
-  `pnpm cli -- sync sessions --source all --force` to rebuild those derived rows.
-- Antigravity has no `sync sessions` CLI subcommand: `import --source antigravity` writes events/usage/cost, and the running watcher projects the session-browser rows (`browsing_sessions` + `messages` + `session_items`, `integration_mode=antigravity-sqlite`, `fidelity=summary`) on startup and every periodic resync. There is no live file-tailing yet — new conversations appear on the next resync. Antigravity DBs are discovered recursively under `~/.gemini/antigravity-cli/conversations/**/*.db`.
-- If historical rows still have `cost_usd = NULL` even though they already have `model` and token counts, rerun `pnpm cli -- costs recalc`; that backfills stale imports after pricing-data updates or importer fixes.
-- Re-importing does **not** repair token counts on rows already in the DB: `insertEvent` dedups by `event_id` and skips existing rows (insert-only, no general upsert), and `--force` only bypasses the file-hash skip. One-shot corrections to already-stored rows must go through a `runDataMigrations` step in `src/db/schema.ts`. The narrow exception is Codex model attribution: deterministic duplicate import rows backed by an explicit JSONL `turn_context` may refresh only `model` and derived `cost_usd`, followed by a `session_trace_summary` rebuild; config-only legacy rows remain untouched.
-- The cache-inclusive `tokens_in` repair (OpenAI/Codex rows that overstated cost by billing cached tokens at the full input rate) runs automatically once on next startup via the `user_version`-guarded migration; no manual command is needed. It re-normalizes `tokens_in` and recomputes `cost_usd` for OpenAI/Google rows and leaves Anthropic untouched.
-- The GPT-5.6 upgrade runs another one-shot migration: Codex event-import hashes are invalidated, then the normal auto-import reparses those files and refreshes explicit per-turn model/cost attribution. Import output reports `events_refreshed`; no manual re-import is required when auto-import is enabled. With `--no-import` or a disabled auto-import interval, run `pnpm cli -- import --source codex --force` once after upgrading.
-- Skill-context projection migration v4 clears the `watched_files` hash once
-  for file-backed Claude and Codex sessions. The next normal startup sync
-  reparses those transcripts and fills ordered consultation, compaction, and
-  Codex catalog-presentation evidence. If startup sync is disabled, run
-  `pnpm cli -- sync sessions --source all --force`; event import alone does not
-  build this session-browser projection.
-- Excluded paths are ignored before hashing or parsing, and they do not create `import_state` or `watched_files` rows.
-
-### Database backup and recovery safety
-
-Use the one-shot CLI to create an application-consistent, closed SQLite copy
-while the normal WAL writer remains active. The parent directory must already
-exist, be owned by the current user, have no group/other permissions, and not be
-a symlink:
+Create an application-consistent backup while the WAL writer remains active:
 
 ```bash
-install -d -m 700 /private/path
-amon database backup \
-  --output /private/path/agentmonitor.db \
-  --json
-
-# Later runs replace only a regular export file through an atomic rename.
-amon database backup \
-  --output /private/path/agentmonitor.db \
-  --replace \
-  --json
+amon database backup --output /absolute/private/path/agentmonitor.db
 ```
 
-The command uses SQLite's online backup API, converts the copy to `DELETE`
-journal mode, runs full `PRAGMA integrity_check` and `foreign_key_check`, and
-publishes a mode-`0600` database only after validation. It refuses relative
-paths, the source DB and its sidecars, symlinks, non-regular existing targets,
-broad parent permissions, stale output WAL/SHM/journal files, and replacement
-without `--replace`. It creates no retention policy and never removes an old
-sidecar on the operator's behalf.
+The command requires an absolute regular-file destination, refuses source/sidecar
+paths and unsafe replacements, creates a mode-`0600` staged database through
+SQLite's online backup API, validates it, and publishes it atomically. Use
+`--replace` to replace an existing valid target. AgentMonitor does not choose a
+backup schedule or retention policy.
 
-Before a repair that rewrites the install database, stop duplicate runtimes,
-create this backup, and confirm which process still owns the source:
+Before a repair that rewrites the install database, stop duplicate runtimes, create
+the backup, and inspect ownership:
 
 ```bash
 lsof -nP data/agentmonitor.db data/agentmonitor.db-wal data/agentmonitor.db-shm
 ```
 
-Keep the DB, WAL, and SHM files together if preserving a raw forensic snapshot;
-copying only the live main DB while a writer is active is not a complete
-snapshot. The validated CLI export is a different, self-contained recovery
-artifact. The test runner has a hard interlock that refuses the install DB, but
-maintenance commands are intentionally allowed to mutate an explicitly selected
-database.
+A raw forensic snapshot must keep the database, WAL, and SHM together. Copying a
+live main database alone is incomplete. Tests refuse to open the install database,
+but maintenance commands may mutate an explicitly selected database.
 
-## Trace Quality Reclaim
+## Trace-Quality Reclaim
 
-The trace-quality reframe (2026-06) removed the persisted trace/observation/score
-/prompt warehouse; detail is now projected on-demand and only the lean
-`session_trace_summary` is stored. An existing database keeps the old tables until
-you reclaim them with an explicit, opt-in one-shot:
+The lean trace-quality model no longer uses the old persisted trace, observation,
+score, prompt, and projection tables. Existing databases retain them until the
+operator runs the explicit reclaim:
 
 ```bash
-pnpm reclaim:trace-quality --dry-run  # report which warehouse tables would be dropped + row counts
-pnpm reclaim:trace-quality            # DROP them + VACUUM to return the freed pages (~900 MB)
+pnpm reclaim:trace-quality --dry-run
+pnpm reclaim:trace-quality
 ```
 
-Operational notes:
+The live command drops the obsolete derived tables and runs `VACUUM`; it may need
+temporary free space comparable to the database and a brief exclusive lock. It is
+never run during normal startup. Source events and session-browser rows remain
+untouched, while `session_trace_summary` and `trace_quality_export_state` remain.
 
-- It drops `trace_quality_{traces,observations,scores,prompt_refs,observation_prompts,projection_state}` and VACUUMs. The dormant `trace_quality_export_state` seam and `session_trace_summary` are kept.
-- It is **never run at startup** — a normal upgrade never rewrites a live DB. Run it when convenient; VACUUM needs a brief exclusive lock and temporary free disk (~the DB size).
-- The dropped data is a pure derived projection: source `events`, `browsing_sessions`, `messages`, `session_items`, `session_turns`, and `tool_calls` are untouched, so the lean view is fully reconstructable.
-- The summary self-heals on startup (`ensureSessionTraceSummaryBackfill` re-backfills any row at a stale version or with a NULL `trace_id`).
-- The aggregate warehouse export is now the explicit `warehouse publish` command below. Langfuse trace/eval depth is still deferred; no `AGENTMONITOR_LANGFUSE_*` env vars ship yet. See [trace-quality.md](trace-quality.md#warehouse-aggregate-export).
+## Aggregate Warehouse Export
 
-## Warehouse Export
-
-`amon warehouse publish` publishes the content-free `session_trace_summary`
-aggregate to a shared Postgres warehouse. It is opt-in and CLI-only: normal
-server startup, ingest, imports, and local dashboard use never require Postgres.
+`amon warehouse publish` optionally publishes content-free
+`session_trace_summary` rows to AgentMonitor's own Postgres schema. Normal startup,
+ingestion, imports, and the local UI do not require Postgres.
 
 ```bash
-pnpm cli -- warehouse publish --dry-run --json
-AGENTMONITOR_WAREHOUSE_DSN=postgresql://... pnpm cli -- warehouse publish
-pnpm cli -- warehouse publish --date-from 2026-06-01 --date-to 2026-06-30
+amon warehouse publish --dry-run --json
+AGENTMONITOR_WAREHOUSE_DSN=postgresql://... amon warehouse publish
 ```
 
-Contract:
+The live path upserts one row per `(account, session_id)` and records a publication
+lineage row. Re-publication does not retract a warehouse row when local data is
+later deleted. `--dry-run` needs no DSN and opens no Postgres connection.
+`--min-batch` prevents accidental tiny publishes but is not a privacy threshold.
+Changing the account label can duplicate BI identity and emits a warning.
 
-- Live publish writes to `<schema>.runs` (default `agentmonitor.runs`) with one
-  row per `(account, session_id)` and upserts on that key. It never removes a
-  warehouse row if a local session is later redacted or deleted; tombstones are a
-  separate future follow-up.
-- Each invocation appends `<schema>.publish_run` lineage with the effective
-  `account`, date window, published/suppressed counts, AgentMonitor version, and
-  BI grant status.
-- `AGENTMONITOR_WAREHOUSE_BI_ROLE` defaults to `medallion_bi`. The command checks
-  `pg_roles` before granting and reports `grant_skipped` when the role is absent,
-  so a fresh local Postgres can still publish successfully.
-- `--dry-run` does not require `AGENTMONITOR_WAREHOUSE_DSN`; it prints planned
-  SQL/counts and does not import or connect to `pg`.
-- `--account` overrides the configured account label and emits a warning because
-  re-publishing the same sessions under a different account can double-count in
-  BI aggregates.
-- `--min-batch` is only an operator guard against accidental tiny publishes. It
-  is not a privacy control; this export is a per-session fact, not a k-anonymous
-  aggregate.
+The mapped row is restricted to the content-free allowlist described in
+[trace-quality.md](trace-quality.md). Langfuse trace/eval depth remains a separate
+deferred path.
 
-Before mapping rows, the command runs the same summary self-heal as
-`quality traces`; if any `session_trace_summary` row is stale or missing
-`trace_id`, it can re-backfill all sessions from local source tables.
+## Performance Measurement
 
-## CI
+`pnpm bench:usage` measures the complete running-server Usage overview path,
+including JSON serialization and validation. It separates warmup from measured
+samples and can enforce a locally chosen `--max-median-ms` when the machine,
+database snapshot, and date range are named. The repository has no universal
+latency constant.
 
-GitHub Actions workflow: `.github/workflows/ci.yml`
+Use the workspace measurement guide before making a decision from a benchmark.
+Record the entrypoint, dataset/window, host, warmup policy, sample count, and
+whether the server was source or built.
 
-Current required check on `main` branch protection:
+## Verification
 
-- `Lint, Build, Test`
+The pre-push checks are:
 
-The CI job runs, in order:
+```bash
+pnpm lint
+pnpm build
+pnpm test
+```
 
-- `pnpm install --frozen-lockfile`
-- `pnpm lint`
-- `pnpm frontend:check` (svelte-check)
-- `pnpm frontend:test` (Vitest unit tests for the `/app/` stores + pure logic)
-- `pnpm build`
-- `pnpm test`
+If frontend TypeScript or Svelte changes, also run:
 
-Parity tests are available for manual/shared-runtime verification but are not part of the required CI workflow.
+```bash
+pnpm frontend:check
+pnpm frontend:test
+```
 
-The skill-context built-product oracle verifies compiled parsers, schema,
-server/API behavior, and the Analytics consultation preview/explorer against
-isolated Claude and Codex fixtures:
+Main branch protection currently requires `Lint, Build, Test` and
+`E2E (Playwright)`. The CI workflow also runs a Gitleaks job. Current workflow
+definitions and live branch protection are authoritative; see
+[GIT_HISTORY_POLICY.md](../project/GIT_HISTORY_POLICY.md) for the verification
+commands.
+
+Parity and v2 contract commands remain available for focused API work. The
+skill-context built-product oracle runs compiled parsers, schema, API, and browser
+behavior against isolated Claude and Codex fixtures:
 
 ```bash
 pnpm build
 pnpm verify:skill-context-built
 ```
 
-It creates and validates a temporary SQLite/runtime root, prevents ambient
-history discovery, chooses an unused loopback port, runs the focused Chromium
-spec against `dist/`, and removes only that temporary root after shutdown. The
-E2E CI job runs it after the general Chromium suite. A local cross-repository
-compatibility smoke can additionally exercise Dojo's actual phase-2 extractor
-against the controlled built server:
+Set `AGENTMONITOR_VERIFY_DOJO_RUNTIME=1` to add the optional local cross-repository
+Dojo extractor smoke when that sibling checkout is present. It is not a CI
+dependency because `~/Dev` is not a monorepo.
 
-```bash
-AGENTMONITOR_VERIFY_DOJO_RUNTIME=1 pnpm verify:skill-context-built
-```
+## Manual Built-Product Check
 
-The opt-in smoke imports `../dojo/scripts/skill_health_runtime.py`, calls
-`load_health_rows(url=..., path=None)`, and requires the seeded legacy row. It
-prints an explicit skip when the sibling file is absent and is intentionally
-not enabled in CI because `~/Dev` is not a monorepo. It requires `python3`;
-spawn failures and a 15-second loader timeout fail the verifier while preserving
-the normal server/database/temp-root cleanup.
+1. Run `pnpm build`, then `amon serve`.
+2. Open `https://agentmonitor.localhost` and confirm the root redirects to `/app/`.
+3. Confirm capture settings match the Live banner.
+4. Start a Claude or Codex session and verify new activity appears without a full
+   page reload.
+5. When capture is disabled, confirm payloads render redacted.
+6. Treat Codex `otel-only` sessions as summary-oriented.
 
-## Runtime Artifacts
-
-Do not commit: `data/`, `*.db`.
-
-## Manual Live Verification
-
-1. Run `pnpm build`, then start the built runtime with `amon serve`.
-2. Open `https://agentmonitor.localhost` and confirm it redirects to `/app/` and
-   the `Live` tab appears when `AGENTMONITOR_ENABLE_LIVE_TAB=true`.
-3. Confirm the live settings banner matches your env for prompt, reasoning, and tool-argument capture.
-4. Start a Claude session and verify new items appear without a full page reload.
-5. If prompts or reasoning are disabled, confirm the inspector shows redacted payloads rather than raw content.
-6. For Codex, treat `otel-only` sessions as summary-only until a richer exporter-backed path exists.
+Runtime databases and related artifacts (`data/`, `*.db`, WAL/SHM files) must not
+be committed.

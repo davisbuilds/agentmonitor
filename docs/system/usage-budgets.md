@@ -2,6 +2,9 @@
 
 AgentMonitor can report read-only budget state from an optional local JSON file. Budgets reuse the same event-derived usage summary and filters as `/api/v2/usage/summary`.
 
+The config parser and response implementation are authoritative in source. This
+document owns the operator-facing JSON shape and the non-enforcement boundary.
+
 Default config path:
 
 ```text

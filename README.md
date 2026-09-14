@@ -203,15 +203,15 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 - Architecture and code organization: [docs/system/ARCHITECTURE.md](docs/system/ARCHITECTURE.md)
 - Local trace-quality layer: [docs/system/trace-quality.md](docs/system/trace-quality.md)
 - API docs and contracts: [docs/api/README.md](docs/api/README.md)
-- Current product/runtime state: [docs/project/CURRENT_STATE.md](docs/project/CURRENT_STATE.md)
 - Roadmap and project direction: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
+- Future work and revisit triggers: [docs/project/BACKLOG.md](docs/project/BACKLOG.md)
+- Durable decisions: [docs/project/DECISIONS.md](docs/project/DECISIONS.md)
 - Contributor workflow: [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ## Current Boundaries
 
 - Canonical product surface is Svelte `/app/` plus `/api/v2/*`.
-- Legacy `/` remains on direct loopback access for compatibility; the Portless
-  root redirects to `/app/`.
+- Both the direct and Portless roots redirect to the canonical `/app/` surface.
 - TypeScript on `127.0.0.1:3141` is the runtime.
 - Codex `otel-only` live data is summary-oriented; transcript-grade parity needs richer local-state integration.
 - AI insight generation is optional and the only path that needs provider API keys.

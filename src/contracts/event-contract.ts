@@ -32,6 +32,7 @@ const _EVENT_SOURCES = [
 
 const EVENT_TYPE_SET = new Set<string>(EVENT_TYPES);
 const EVENT_STATUS_SET = new Set<string>(EVENT_STATUSES);
+const EVENT_SOURCE_SET = new Set<string>(_EVENT_SOURCES);
 
 export type EventType = (typeof EVENT_TYPES)[number];
 export type EventStatus = (typeof EVENT_STATUSES)[number];
@@ -107,6 +108,23 @@ function getOptionalString(
 
   const value = raw.trim();
   return value || undefined;
+}
+
+function normalizeSource(
+  input: Record<string, unknown>,
+  errors: ContractValidationError[],
+): EventSource | undefined {
+  const value = getOptionalString(input, 'source', errors);
+  if (value === undefined) return undefined;
+
+  if (!EVENT_SOURCE_SET.has(value)) {
+    errors.push({
+      field: 'source',
+      message: `must be one of: ${_EVENT_SOURCES.join(', ')}`,
+    });
+  }
+
+  return value as EventSource;
 }
 
 function getOptionalNonNegativeInt(
@@ -219,7 +237,7 @@ export function normalizeIngestEvent(input: unknown): NormalizeEventResult {
   const cacheWriteTokens = getOptionalNonNegativeInt(input, 'cache_write_tokens', errors) ?? 0;
   const costUsd = getOptionalNonNegativeNumber(input, 'cost_usd', errors);
   const clientTimestamp = normalizeClientTimestamp(input, errors);
-  const source = getOptionalString(input, 'source', errors) as EventSource | undefined;
+  const source = normalizeSource(input, errors);
 
   if (errors.length > 0) {
     return { ok: false, errors };

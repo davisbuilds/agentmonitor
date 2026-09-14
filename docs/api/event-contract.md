@@ -29,11 +29,20 @@ Canonical ingest contract for `POST /api/events` and `POST /api/events/batch`.
   - default for `event_type=error`: `error`
 - `tokens_in` (non-negative integer, default `0`)
 - `tokens_out` (non-negative integer, default `0`)
+- `cache_read_tokens` (non-negative integer, default `0`)
+- `cache_write_tokens` (non-negative integer, default `0`)
+- `model` (string)
+- `cost_usd` (non-negative number)
 - `branch` (string)
 - `project` (string)
 - `duration_ms` (non-negative integer)
 - `metadata` (any JSON value or string)
 - `client_timestamp` (ISO timestamp string)
+- `source` (enum): `api`, `hook`, `otel`, `import`, `benchmark`
+
+String values are trimmed. Empty optional strings become absent; empty required
+strings are rejected. Unknown enum values and negative numeric values are
+rejected with field-specific validation errors.
 
 ## Timestamp Semantics
 
@@ -80,8 +89,13 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
   "status": "success",
   "tokens_in": 118,
   "tokens_out": 460,
+  "cache_read_tokens": 82,
+  "cache_write_tokens": 12,
+  "model": "claude-sonnet-4-6",
+  "cost_usd": 0.0045,
   "project": "myapp",
   "branch": "feature/auth",
+  "source": "hook",
   "duration_ms": 840,
   "client_timestamp": "2026-02-18T18:06:41.231Z",
   "metadata": {
@@ -101,8 +115,10 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
   "status": "success",
   "tokens_in": 640,
   "tokens_out": 2104,
+  "model": "gpt-5.6-sol",
   "project": "frontend",
   "branch": "redesign-nav",
+  "source": "otel",
   "client_timestamp": "2026-02-18T18:06:45.019Z",
   "metadata": {
     "type": "turn_complete"

@@ -34,6 +34,7 @@ OKLCH, cool-tinted. Generated utilities: `bg-*`, `text-*`, `border-*`, etc.
 | `--color-danger` | `bg-danger` | Error / over-threshold / removed. |
 | `--color-claude` | `text-claude` | Provider identity only (warm amber). |
 | `--color-codex` | `text-codex` | Provider identity only (neutral). |
+| `--color-antigravity` | `text-antigravity` | Provider identity only (Gemini violet). |
 
 Rules: one primary accent per surface; status colors only encode status; provider hues only
 identify a provider. Don't reintroduce `sky`/`purple`/`orange`/`yellow`/raw `gray-*` as text.

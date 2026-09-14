@@ -31,9 +31,9 @@ each item is still open, refresh dated evidence, promote selected work to a plan
 convert it to a trigger, or move completed decisions and work to the Roadmap or
 decision history.
 
-When an item ships it **leaves this doc** — record it as a concise what/why
-bullet in `ROADMAP.md` (Completed Highlights) instead of keeping a "resolved"
-note here. This file stays future-only.
+When an item ships it **leaves this doc**. Record it in `ROADMAP.md` when it is a
+recent milestone that changes current direction; otherwise let its PR and commits
+hold the detailed history. Do not keep a resolved section here.
 
 ---
 
@@ -115,23 +115,30 @@ the build.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 
-#### Usage overview has crossed the persisted-rollup trigger
-- **What**: the event-derived `/api/v2/usage/overview` still materializes each
-  matching usage event in JavaScript for its eight exact rollups. The 2026-07-16
-  roadmap explicitly set a 150 ms warm trigger for revisiting a session-grained
-  derived store.
-- **Why it matters / evidence**: during the 2026-09-11 Monitor stall repair, the
-  60-day overview on an application-consistent copy of the 697K-event live
-  database first took 6.6 seconds cold. A timestamp-first covering usage index
-  reduced it to a 338 ms warm median (832 ms first read), while Monitor now
-  issues one overview instead of three per-panel usage reads and yields before
-  tool analytics. This remains above the recorded 150 ms threshold and is no
-  longer a hypothetical multi-million-row concern, but no longer causes the
-  health-timeout incident that prompted this repair.
-- **Next**: benchmark the existing session-grained `(day, agent, model, project,
-  session_id)` derived-store proposal against exact overview response parity,
-  write amplification, rebuild/recovery behavior, and retention. Keep source
-  events authoritative. Noted 2026-09-11.
+#### Usage overview derived store remains a measured fallback
+- **What**: the event-derived `/api/v2/usage/overview` still folds matching usage
+  rows in JavaScript for its exact rollups, but the 2026-09-13 source-count
+  optimization removed the dominant full-window grouping cost. The earlier
+  150 ms warm figure was a local revisit trigger, not a product SLO.
+- **Why it matters / evidence**: on the named 697K-event, 60-day snapshot, the
+  final source-level overview improved from a 309.32 ms warm median to 220.99 ms;
+  the built HTTP path measured 227.14 ms over seven warm runs. The earlier repair
+  had already reduced a 6.6 second cold read and stopped Monitor from issuing
+  redundant per-panel reads. Current latency is usable, while the query remains a
+  plausible scaling target if observed CLI/UI latency rises with retained history.
+- **Next / Revisit when**: revisit a session-grained `(day, agent, model, project,
+  session_id)` derived store when representative user-facing latency becomes a
+  recurring problem or retained history materially changes the curve. Require
+  exact overview parity, bounded write/storage cost, and explicit rebuild/recovery;
+  keep source events authoritative. Updated 2026-09-14. **Reference implementation**:
+  a cross-repo clone-mining report flagged that `agentsview` ships this exact
+  pattern — a *disposable sibling* SQLite DB (`usage-cache-vX.db`) holding unpriced
+  message facts + timezone-aware daily rollups + narrow dedup exceptions, giving
+  sub-15ms overview queries without touching the authoritative archive (report:
+  `~/Dev/tokenmaxxing/research/reports/clone-pattern-mining-agentsview-2026-09-13.md`,
+  pattern 2; agentsview `internal/db/usage_cache_schema.go`). Worth a look when
+  building the derived store — the disposable-sibling framing (rebuildable, never
+  authoritative) directly addresses the rebuild/recovery and parity concerns above.
 
 #### Legacy v1 session-list N+1
 - **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the
@@ -141,12 +148,12 @@ the build.
 
 ### Context occupancy
 
-#### Monitor-card occupancy join not visually verified under live v1 hooks
-- **What**: the Live inspector (pure v2) renders occupancy end-to-end; the Monitor
-  cards read the v1 store and join v2 occupancy by session id. Svelte-checked and
-  logically verified, but not screenshotted with a live hook/OTEL-fed active
-  session (the scratch server had 0 active v1 sessions). The Codex id mismatch (v1
-  OTEL UUID vs v2 rollout filename) is aliased in `refreshOccupancy`.
+#### Monitor-card occupancy join not visually verified with a live session
+- **What**: the Live inspector and Monitor reads use v2. Monitor separately joins
+  occupancy from the Live session projection by session id. This is Svelte-checked
+  and logically verified but was not screenshotted with a live hook/OTEL-fed active
+  session. Codex's Monitor UUID and Live rollout identity are aliased during the
+  occupancy refresh.
 - **Why it matters**: confirm the join renders on a real running card, especially
   for Codex.
 
@@ -195,6 +202,8 @@ the build.
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
 
+### Reliability And Observability
+
 #### CI flake: analytics capability banner times out on a cold runner
 - **What**: `search-analytics-capabilities.spec.ts:119` intermittently exceeds
   Playwright's 5s `expect` timeout waiting for the coverage banner. It passes on
@@ -238,3 +247,46 @@ the build.
   component's behavior (not just its markup) needs a regression guard. No
   coverage threshold is enforced yet — add one only once the surface is broad
   enough that a number is meaningful. Noted 2026-09-11.
+
+### Cross-repo pattern-mining candidates (agentsview, 2026-09-13)
+
+Flagged by a clone-mining report comparing `agentsview` (a Go/Svelte local
+AI-agent session aggregator — same archetype as agentmonitor) against this repo:
+`~/Dev/tokenmaxxing/research/reports/clone-pattern-mining-agentsview-2026-09-13.md`.
+The report is agent-generated and was **not** independently verified against
+agentmonitor's current code, so each item below is a **hypothesis to confirm**
+before acting — the cited agentmonitor files/pains are the report's claims.
+
+#### Watcher re-reads whole appending JSONL transcripts (safe-resume checkpoints)
+- **What**: the report claims the ingestion watcher re-reads/re-hashes full JSONL
+  transcript files on each turn instead of resuming from the appended delta.
+  `agentsview` uses persistent safe-resume checkpoints — inode/mtime/change-time
+  gating plus a bounded 128 KiB trailing-anchor digest — to read only new bytes on
+  multi-hundred-MB logs (report pattern 1; agentsview `internal/sync/checkpoint.go`).
+- **Why it matters / evidence**: report-sourced; cites `src/watcher/index.ts`,
+  `src/db/schema.ts`. Unconfirmed — verify the watcher actually re-reads whole files
+  today before treating this as a defect.
+- **Next / Revisit when**: confirm the re-read behavior in `src/watcher/index.ts`;
+  if real and large logs are a live cost, port the checkpoint + tail-anchor scheme.
+
+#### Session project identity fragments across ephemeral git worktrees
+- **What**: the report claims sessions run in ephemeral agent worktrees resolve to
+  the worktree branch leaf rather than the canonical parent repo, fragmenting a
+  project's sessions. `agentsview` resolves `.git` gitfiles → `commondir` and
+  recovers deleted ephemeral worktrees from surviving ancestors/`.git/worktrees/`
+  (report pattern 3; agentsview `internal/parser/project.go`).
+- **Why it matters / evidence**: report-sourced; cites `src/util/project-identity.ts`,
+  `src/parser/{claude-code,codex-sessions}.ts`. Unconfirmed.
+- **Next / Revisit when**: confirm project-identity handling of worktree gitfiles;
+  if sessions genuinely fragment, add canonical-parent resolution + sibling recovery.
+
+#### Inline base64 tool-result images bloat the store
+- **What**: the report claims multi-MB base64 image data URIs from browser/screenshot
+  tools are stored inline, bloating SQLite and UI serialization. `agentsview` strips
+  them to a compact descriptor (`agentsview_image`) with SHA-256 + byte count (report
+  pattern 5; agentsview `internal/db/tool_result_images.go`).
+- **Why it matters / evidence**: report-sourced; cites `src/contracts/event-contract.ts`,
+  `src/parser/claude-code.ts`. Unconfirmed — verify whether inline base64 images
+  actually reach the store today.
+- **Next / Revisit when**: confirm via a real session containing tool images; if they
+  land inline, strip to an `image_ref` descriptor in `normalizeEvent`.

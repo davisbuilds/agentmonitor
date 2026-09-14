@@ -15,18 +15,23 @@ Real-time localhost dashboard and session browser for monitoring AI agent activi
 
 ## Documentation Map
 
-- `docs/system/ARCHITECTURE.md` — high-level flow, canonical surface, route map, DB schema, SSE broadcasting, event contract, pricing engine, import pipeline, session sync, OTEL parser + Codex telemetry capability matrix, runtime path resolution, directory map.
-- `docs/system/FEATURES.md` — product surface, full v1/v2 API endpoint catalog, SSE event types, capture/redaction controls, analytics/usage/insights/search.
-- `docs/system/OPERATIONS.md` — local dev, full command catalog, all `AGENTMONITOR_*` env vars, Claude Code + Codex hook install, historical import, CI gates, runtime artifacts, manual live verification.
+Source, tests, `amon --help`, and live GitHub settings are authoritative for exact
+routes, response types, flags, configuration parsing, schema details, and remote
+repository settings. The tracked references below preserve the intent, boundaries,
+and procedures that those executable surfaces do not explain on their own.
+
+- `docs/system/ARCHITECTURE.md` — system topology, data ownership, critical invariants, and recovery relationships.
+- `docs/system/FEATURES.md` — user-visible behavior plus fidelity, coverage, privacy, and human-review boundaries.
+- `docs/system/OPERATIONS.md` — local setup, runtime operation, integrations, backup/recovery, and verification workflows.
 - `docs/system/DESIGN.md` — Svelte `/app/` design system ("Instrument Console"): color/type/space/radius tokens, layout language, accessibility floor. Tokens live in `frontend/src/app.css` `@theme`.
-- `docs/system/trace-quality.md` — local trace-quality layer: trace/observation model, observation taxonomy, coverage/payload-policy honesty, scores, prompt attribution, findings taxonomy, UI surface, and the deferred (ingestion-API) Langfuse export.
-- `docs/api/` — API navigation reference.
+- `docs/system/trace-quality.md` — lean local trace/observation projection, coverage and payload-policy honesty, aggregate warehouse export, and deferred Langfuse depth.
+- `docs/api/` — API ownership and externally consumed ingest semantics; exact routes remain source-owned.
 - `docs/project/POSITIONING.md` — what the product is (Archetype B: local-first observability console for coding agents); scope, the Langfuse "collector not backend" stance, and the architectural implications that anchor the foundations work.
-- `docs/project/ROADMAP.md` — direction (legacy `/` reduction, Live fidelity).
+- `docs/project/ROADMAP.md` — current direction and a concise record of recent milestones.
 - `docs/project/DECISIONS.md` — durable decisions that are no longer active
   follow-ups.
-- `docs/project/CURRENT_STATE.md` — high-change product/runtime notes moved out of the root README.
-- `docs/project/GIT_HISTORY_POLICY.md` — merge-commit + rebase policy (squash disabled) and rationale.
+- `docs/project/BACKLOG.md` — future-only work with evidence and revisit triggers.
+- `docs/project/GIT_HISTORY_POLICY.md` — intended merge/history policy, current verification method, and rationale.
 - `frontend/AGENTS.md` — domain-specific guidance.
 - `hooks/claude-code/README.md`, `hooks/codex/README.md` — hook setup details.
 
