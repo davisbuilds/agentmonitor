@@ -39,6 +39,21 @@ hold the detailed history. Do not keep a resolved section here.
 
 ## Open
 
+### Repair historical offset-free summary projection timestamps
+
+- **What**: older Codex summary projections copied SQLite UTC `events.created_at`
+  without a timezone marker when no client timestamp existed. The adapter now
+  marks that known fallback as UTC for new projections, but existing session
+  starts are retained by COALESCE and are not repaired by subsequent events.
+- **Why or evidence**: regression in `tests/codex-adapter.test.ts` reproduced
+  the missing marker on 2026-09-15. Client timestamps are a separate provenance
+  class and cannot be repaired from the integration-mode label alone.
+- **Next**: design a dry-run repair that proves the selected projection timestamp
+  came from a specific event with absent client time and matching database time;
+  require a preserved backup and reviewed row counts before apply. Cover sessions,
+  turns and items, retain unknown/conflicting rows, and prove replay and rollback.
+  Do not reset unrelated JSONL projections or re-count messages through replay.
+
 ### Ingestion
 
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)

@@ -59,6 +59,33 @@ function makeEventRow(overrides: Partial<EventRow> & Pick<EventRow, 'id' | 'sess
   };
 }
 
+test('summary projections mark database fallback time as UTC without guessing client offsets', () => {
+  const db = getDb();
+  for (const [index, clientTimestamp, expected] of [
+    [0, null, '2026-03-24T12:00:00Z'],
+    [1, '2026-03-24T08:00:00-04:00', '2026-03-24T08:00:00-04:00'],
+    [2, '2026-03-24 08:00:00', '2026-03-24 08:00:00'],
+  ] as const) {
+    const row = makeEventRow({
+      id: 900 + index, session_id: `timestamp-control-${index}`, event_type: 'user_prompt',
+      created_at: '2026-03-24 12:00:00', metadata: JSON.stringify({ message: 'fixture' }),
+    });
+    // The existing fixture builder defaults null via ??; set it explicitly.
+    row.client_timestamp = clientTimestamp;
+    const result = syncCodexSummaryLiveEvent(db, row);
+    assert.equal(result.last_item_at, expected);
+    const session = db.prepare('SELECT started_at FROM browsing_sessions WHERE id = ?')
+      .get(row.session_id) as { started_at: string };
+    const turn = db.prepare('SELECT started_at FROM session_turns WHERE session_id = ?')
+      .get(row.session_id) as { started_at: string };
+    const item = db.prepare('SELECT created_at FROM session_items WHERE session_id = ?')
+      .get(row.session_id) as { created_at: string };
+    assert.equal(session.started_at, expected);
+    assert.equal(turn.started_at, expected);
+    assert.equal(item.created_at, expected);
+  }
+});
+
 test('syncCodexSummaryLiveEvent creates summary session, turn, and user item for OTEL prompt events', () => {
   const db = getDb();
   const row = makeEventRow({
