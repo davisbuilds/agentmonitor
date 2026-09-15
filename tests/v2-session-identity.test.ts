@@ -112,3 +112,19 @@ test('OTEL aliases reconcile just like import aliases, without treating unknown 
     update.run('codex-import', uuid);
   }
 });
+
+test('rollout-shaped IDs with nonnumeric timestamps remain distinct', async () => {
+  const { getDb } = await import('../src/db/connection.js');
+  const db = getDb();
+  const malformed = `rollout-abcd-ef-ghTij-kl-mn-${uuid}`;
+  try {
+    db.prepare(`INSERT INTO browsing_sessions (id, agent, integration_mode, started_at)
+      VALUES (?, 'codex', 'codex-jsonl', '2026-03-01T09:00:00Z')`).run(malformed);
+    const result = await list();
+    assert.equal(result.total, 8);
+    assert.ok(result.data.some(row => row.id === malformed));
+    assert.ok(result.data.some(row => row.id === rollout));
+  } finally {
+    db.prepare('DELETE FROM browsing_sessions WHERE id = ?').run(malformed);
+  }
+});

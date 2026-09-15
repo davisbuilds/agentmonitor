@@ -161,7 +161,8 @@ function decodeTimeCursor(cursor: string | undefined): TimeCursor | null {
 // alias; arbitrary IDs and future integrations must remain separate.
 const codexUuidGlob = [8, 4, 4, 4, 12]
   .map(length => '[0-9a-fA-F]'.repeat(length)).join('-');
-const codexRolloutGlob = `rollout-????-??-??T??-??-??-${codexUuidGlob}`;
+const codexRolloutTimestampGlob = 'dddd-dd-ddTdd-dd-dd'.replaceAll('d', '[0-9]');
+const codexRolloutGlob = `rollout-${codexRolloutTimestampGlob}-${codexUuidGlob}`;
 const sessionListCte = `WITH ranked_sessions AS (
   SELECT *, ROW_NUMBER() OVER (
     PARTITION BY agent, CASE
