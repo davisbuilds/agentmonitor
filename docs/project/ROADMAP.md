@@ -6,6 +6,9 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Summary timestamp integrity (2026-09-15):** database-time fallbacks retain
+  explicit UTC markers; an opt-in, digest-checked historical repair covers proven
+  session/turn/item timestamps with rollback, replay and non-target-data checks.
 - **Agent-first CLI read parity (2026-09-13, PR #126):** the CLI now exposes all
   current Svelte read contracts, including Monitor, Analytics, Usage, Insights,
   Benchmarks, Trace Quality, live/session detail, and operational metadata through
