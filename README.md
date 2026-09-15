@@ -140,6 +140,16 @@ pnpm reparse:sessions                # Compatibility wrapper for `amon sync sess
 pnpm reparse:codex-sessions          # Compatibility wrapper for `amon sync sessions`
 ```
 
+Session-list identity: `/api/v2/sessions` and `amon sessions list` collapse known
+Codex rollout/UUID projection aliases, preferring JSONL history (then the highest
+message count, with ID as a stable tie-breaker). Selection happens before filters
+and pagination; fields and dates belong to that selected projection. Original
+detail URLs remain valid and no stored history is removed. Summary-only sessions
+remain visible unless `exclude_empty=true` is requested. List totals are not
+usage-session totals: usage counts distinct usage-bearing event session IDs in
+the event-time window; browser history may include subagents and omit transcripts
+that were never projected. Unknown ID formats/integrations are not guessed at.
+
 Full command, config, parity, import, benchmark, and runtime notes live in
 [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md).
 

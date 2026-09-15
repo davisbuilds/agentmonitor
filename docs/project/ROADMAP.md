@@ -6,6 +6,11 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Session-list identity (2026-09-15):** Sessions API/CLI reads reconcile known
+  Codex JSONL/import/OTEL aliases before filtering and pagination, preserving
+  original detail links and all stored history. Usage and browser coverage remain
+  explicitly distinct.
+
 - **Summary timestamp integrity (2026-09-15):** database-time fallbacks retain
   explicit UTC markers; an opt-in, digest-checked historical repair covers proven
   session/turn/item timestamps with rollback, replay and non-target-data checks.

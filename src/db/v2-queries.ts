@@ -154,6 +154,27 @@ function decodeTimeCursor(cursor: string | undefined): TimeCursor | null {
   return { sort_at: cursor, id: '\uffff' };
 }
 
+// The JSONL watcher keys browser history by rollout basename, while import/OTEL
+// use the native UUID. Preserve both stored projections and their detail URLs,
+// but select one representative before any list filters or pagination. Only
+// recognized producer modes and the exact rollout/UUID grammar establish an
+// alias; arbitrary IDs and future integrations must remain separate.
+const codexUuidGlob = [8, 4, 4, 4, 12]
+  .map(length => '[0-9a-fA-F]'.repeat(length)).join('-');
+const codexRolloutGlob = `rollout-????-??-??T??-??-??-${codexUuidGlob}`;
+const sessionListCte = `WITH ranked_sessions AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY agent, CASE
+      WHEN agent = 'codex' AND integration_mode = 'codex-jsonl'
+        AND id GLOB '${codexRolloutGlob}' THEN 'codex:' || lower(substr(id, -36))
+      WHEN agent = 'codex' AND integration_mode IN ('codex-import', 'codex-otel')
+        AND id GLOB '${codexUuidGlob}' THEN 'codex:' || lower(id)
+      ELSE 'row:' || id END
+    ORDER BY CASE WHEN integration_mode = 'codex-jsonl' THEN 0 ELSE 1 END,
+      message_count DESC, id ASC
+  ) AS identity_rank FROM browsing_sessions
+), listed_sessions AS (SELECT * FROM ranked_sessions WHERE identity_rank = 1)`;
+
 export function listBrowsingSessions(params: SessionsListParams = {}): SessionsResult {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
@@ -197,7 +218,7 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
   const filterValues = [...values];
 
   const total = (db.prepare(
-    `SELECT COUNT(*) as c FROM browsing_sessions ${filterWhere}`
+    `${sessionListCte} SELECT COUNT(*) as c FROM listed_sessions ${filterWhere}`
   ).get(...filterValues) as CountResult).c;
 
   const cursor = decodeTimeCursor(params.cursor);
@@ -210,7 +231,7 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
 
   values.push(limit);
   const data = (db.prepare(
-    `SELECT * FROM browsing_sessions ${where} ORDER BY started_at DESC, id DESC LIMIT ?`
+    `${sessionListCte} SELECT * FROM listed_sessions ${where} ORDER BY started_at DESC, id DESC LIMIT ?`
   ).all(...values) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 
   // Build cursor from last item
