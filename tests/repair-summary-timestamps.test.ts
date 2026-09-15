@@ -59,6 +59,16 @@ test('client time, transcript projections and missing event lineage are never re
   }
 });
 
+test('default API events qualify only with absent client time and matching lineage', () => {
+  const db = fixture();
+  try {
+    db.exec("UPDATE events SET source='api'; UPDATE browsing_sessions SET integration_mode='codex-summary';");
+    assert.equal(repairSummaryTimestamps(db).changes, 6);
+    db.exec('UPDATE events SET client_timestamp=created_at');
+    assert.equal(repairSummaryTimestamps(db).changes, 0);
+  } finally { db.close(); }
+});
+
 test('stale preview refuses changes and SQL failure rolls the whole repair back', () => {
   const db = fixture();
   try {

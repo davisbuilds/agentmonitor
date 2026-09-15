@@ -32,7 +32,7 @@ function inventory(db: Database.Database) {
       bySource.set(key, [...(bySource.get(key) ?? []), event]);
     }
     const fallback = (e: Event) => e.client_timestamp === null && e.agent_type === 'codex'
-      && ['otel', 'import', 'hook'].includes(e.source) && NAIVE.test(e.created_at);
+      && ['otel', 'import', 'hook', 'api'].includes(e.source) && NAIVE.test(e.created_at);
     const linked = new Map<number, Event>();
     for (const turn of turns) {
       const matches = bySource.get(turn.source_turn_id) ?? [];
