@@ -174,6 +174,34 @@ A raw forensic snapshot must keep the database, WAL, and SHM together. Copying a
 live main database alone is incomplete. Tests refuse to open the install database,
 but maintenance commands may mutate an explicitly selected database.
 
+### Historical summary timestamp repair
+
+`scripts/repair-summary-timestamps.ts` repairs only offset-free UTC database-time
+fallbacks with matching event/turn lineage. It excludes file-backed/transcript
+projections, client-supplied timestamps and ambiguous matches. It changes no
+event rows, message counts, payloads or identities. Session start additionally
+must match the first source event; this conservative rule can leave old fields
+unresolved. It is not a blanket timezone conversion or a replay of ingestion.
+
+Stop all writers and preserve a validated SQLite backup first. Restore that backup
+to a disposable file and rehearse there before applying to the install database.
+Use absolute paths; preview opens the database read-only and prints only counts
+and a candidate digest, not session identifiers or contents:
+
+```sh
+pnpm exec tsx scripts/repair-summary-timestamps.ts --db /absolute/database.db
+pnpm exec tsx scripts/repair-summary-timestamps.ts --db /absolute/database.db \
+  --apply --expect-digest <digest-from-reviewed-preview>
+```
+
+Apply re-inventories under an immediate transaction and refuses a mismatched
+digest. Any write failure rolls back the whole repair. The digest is a drift
+guard, not proof of a backup or writer shutdown; those remain operator duties.
+Verify integrity, compare all non-target columns with the backup, and check that
+changed values differ only by the UTC marker/ISO separator. A repeated preview
+must report zero eligible changes; `unresolvedFields` may remain nonzero. Restart
+the newly built runtime afterward so new fallbacks keep their timezone marker.
+
 ## Trace-Quality Reclaim
 
 The lean trace-quality model no longer uses the old persisted trace, observation,

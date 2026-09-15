@@ -39,6 +39,17 @@ hold the detailed history. Do not keep a resolved section here.
 
 ## Open
 
+### Explicit provenance for unresolved historical timestamps
+
+- **What**: the conservative timestamp repair leaves fields without matching
+  event/turn lineage unchanged. Current integration-mode labels alone cannot
+  establish whether those timestamps denote producer time or observation time.
+- **Why or evidence**: the repair's `unresolvedFields` counter and refusal cases
+  in `tests/repair-summary-timestamps.test.ts` make this limitation explicit.
+- **Revisit when**: a consumer needs those excluded historical dates. Establish
+  stronger source evidence or expose unknown provenance explicitly; do not loosen
+  the repair predicates merely to drive the unresolved count to zero.
+
 ### Ingestion
 
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)

@@ -106,6 +106,13 @@ usage fields, timestamp normalization, UTF-8-safe payload limits, and optional
 `event_id` deduplication. `created_at` is server receive time;
 `client_timestamp` is producer time.
 
+Codex summary projections preserve producer timestamps when present. Their
+fallback is the event's database creation time: the known SQLite UTC format is
+rendered with an explicit `Z` before projecting sessions, turns and items. That
+fallback denotes observation time, not necessarily when work began. Existing
+offset-free projections are not rewritten automatically, and arbitrary naive
+producer timestamps must not be relabeled UTC based on appearance alone.
+
 ### Historical Sources
 
 `src/import/` maps Claude Code JSONL, Codex session JSONL, Antigravity conversation
