@@ -39,6 +39,23 @@ hold the detailed history. Do not keep a resolved section here.
 
 ## Open
 
+### Consistent session identity and parent/child coverage across read surfaces
+
+- **What**: Sessions lists now reconcile known Codex rollout/UUID aliases, but
+  Analytics, Live, Search and projection storage still have distinct identity
+  semantics. Claude child-agent transcript IDs also need explicit, reliable
+  parent linkage rather than a pooled conversation count.
+- **Why or evidence**: the Codex watcher uses a rollout basename, whereas the
+  summary adapter uses event session IDs. Claude child-agent files can carry an
+  embedded parent session ID that differs from their filename. Event history can
+  outlive the source transcripts and browser projections; forcing a file resync
+  cannot recover absent files. See `tests/v2-session-identity.test.ts` for the
+  bounded list guarantee, not a claim that all read surfaces are reconciled.
+- **Next**: define persisted provider-native identity plus child-agent identity
+  and coverage provenance; preserve existing links and pins during any migration.
+  Expose usage-only versus browsable coverage explicitly without fabricating
+  transcripts, and audit each aggregate before calling its count conversations.
+
 ### Explicit provenance for unresolved historical timestamps
 
 - **What**: the conservative timestamp repair leaves fields without matching
