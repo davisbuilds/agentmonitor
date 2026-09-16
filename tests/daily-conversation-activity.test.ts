@@ -113,3 +113,42 @@ test('DST boundaries and future harness labels retain explicit date and classifi
     { date: '2026-09-12', agent: 'unknown', classification: 'unclassified', count: 1 },
   ]);
 });
+
+test('daily evidence uses timestamp index seeks rather than scanning historical content', async () => {
+  const { getDb } = await import('../src/db/connection.js');
+  const { getDailyConversationActivity } = await import('../src/db/v2-queries.js');
+  const db = getDb(), prepare = db.prepare;
+  let plan: string[] = [];
+  // Observe the actual statement and bound values; do not substitute query results.
+  Object.defineProperty(db, 'prepare', { configurable: true, value: (sql: string) => {
+    const statement = prepare.call(db, sql);
+    if (sql.includes('all_browser AS')) {
+      const iterate = statement.iterate.bind(statement);
+      Object.defineProperty(statement, 'iterate', { value: (...args: unknown[]) => {
+        plan = (prepare.call(db, `EXPLAIN QUERY PLAN ${sql}`).all(...args) as { detail: string }[]).map(r => r.detail);
+        return iterate(...args);
+      } });
+    }
+    return statement;
+  } });
+  try { getDailyConversationActivity('2026-09-15', '2026-09-15'); }
+  finally { Object.defineProperty(db, 'prepare', { value: prepare, configurable: true }); }
+  assert.ok(plan.some(p => /SEARCH events.*idx_events_daily_activity.*<expr>>\? AND <expr><\?/.test(p)), plan.join('\n'));
+  assert.ok(plan.some(p => /SEARCH m.*idx_messages_daily_activity.*<expr>>\? AND <expr><\?/.test(p)), plan.join('\n'));
+  assert.ok(!plan.some(p => /MERGE \(UNION\)|UNION USING TEMP B-TREE/.test(p)), 'cap must not wait for an all-history distinct set');
+});
+
+test('dense historical evidence is excluded from empty windows and capped without a partial result', async () => {
+  const { getDb } = await import('../src/db/connection.js');
+  const db = getDb();
+  assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
+  const insert = db.prepare(`INSERT INTO events(session_id,agent_type,event_type,source,client_timestamp)
+    VALUES ('dense-history','codex','user_prompt','api','2024-01-01T12:00:00Z')`);
+  db.transaction(() => { for (let i = 0; i < 200005; i++) insert.run(); })();
+  const empty = await fetch(`${base}/api/v2/activity/daily?since=2024-02-01&until=2024-02-01`);
+  assert.equal(empty.status, 200);
+  assert.deepEqual((await empty.json()).data, []);
+  const dense = await fetch(`${base}/api/v2/activity/daily?since=2024-01-01&until=2024-01-01`);
+  assert.equal(dense.status, 503);
+  assert.equal((await dense.json()).code, 'activity_unavailable');
+});

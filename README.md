@@ -8,7 +8,9 @@
 `unresolved_timestamps`, and `data` rows of `{date, agent, classification, count}`.
 Only `since` and `until` are accepted, with at most 31 days; invalid queries
 return 400. An empty successful result has `data: []`. A query exceeding 200,000
-deduplicated evidence rows returns a sanitized 503; narrow the window and retry.
+evidence rows returns a sanitized 503; narrow the window and retry. Date predicates
+seek timestamp-leading indexes in both evidence arms. Rows stream without building
+an all-history distinct set; identity/day deduplication happens within the bounded read.
 
 Counts are distinct identities with dated messages, user prompts, tool activity
 or usage evidence that day, not identities created that day or hours worked.

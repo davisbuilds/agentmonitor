@@ -77,6 +77,7 @@ import type {
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
+import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
 import { getStatsForBroadcast, updateIdleSessions } from './queries.js';
@@ -188,14 +189,6 @@ function observedBrowserIdentity(): string {
     ELSE id END`;
 }
 
-// SQLite-generated created_at has a known UTC basis. Producer and browser
-// timestamps require an explicit offset; do not coerce arbitrary naive dates.
-function observedInstant(column: string): string {
-  return `CASE WHEN ${column} GLOB '*Z'
-    OR (${column} GLOB '*[+-][0-9][0-9]:[0-9][0-9]' AND ${column} NOT GLOB '*-00:00')
-    THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${column}) END`;
-}
-
 const activityClass = `CASE WHEN b.relationship_type = 'subagent' THEN 'delegated'
   WHEN b.relationship_type = 'internal' THEN 'internal'
   WHEN b.relationship_type = 'conversation' AND b.has_user_evidence THEN 'conversation'
@@ -290,6 +283,13 @@ export function getDailyConversationActivity(since: string, until: string) {
   const db = getDb();
   const from = `${since}T00:00:00.000Z`;
   const through = new Date(Date.parse(`${until}T00:00:00Z`) + 2 * 86400000).toISOString();
+  const eventEvidence = `SELECT
+    CASE WHEN agent_type = 'claude_code' THEN 'claude' ELSE agent_type END,
+    CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}'
+      THEN lower(session_id) ELSE session_id END,
+    ${activityEventInstant('events')}
+    FROM events INDEXED BY idx_events_daily_activity WHERE ${excludeBenchmarkUsageCondition('events')}
+      AND (event_type IN ('user_prompt', 'tool_use') OR ${usageMetricPresenceCondition('events')})`;
   // Read every recognized projection's dated evidence, but classify and count
   // the canonical identity once. Avoid the inventory's all-history event rollup.
   const query = `${sessionListCte}, all_browser AS (
@@ -301,30 +301,28 @@ export function getDailyConversationActivity(since: string, until: string) {
     FROM all_browser a WHERE identity_rank = 1
   ), evidence AS (
     SELECT b.agent, b.session_id, ${observedInstant('m.timestamp')} AS instant
-      FROM all_browser b JOIN messages m ON m.session_id = b.id
+      FROM messages m INDEXED BY idx_messages_daily_activity
+      JOIN all_browser b ON m.session_id = b.id
       WHERE m.role IN ('user', 'assistant', 'tool')
+        AND (${observedInstant('m.timestamp')} IS NULL
+          OR (${observedInstant('m.timestamp')} >= ? AND ${observedInstant('m.timestamp')} < ?))
         AND (${observedInstant('m.timestamp')} IS NULL OR b.instant IS NULL
           OR ${observedInstant('m.timestamp')} >= b.instant)
-    UNION
-    SELECT CASE WHEN agent_type = 'claude_code' THEN 'claude' ELSE agent_type END,
-      CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}'
-        THEN lower(session_id) ELSE session_id END,
-      CASE WHEN client_timestamp IS NULL AND source != 'import'
-        THEN strftime('%Y-%m-%dT%H:%M:%fZ', created_at)
-        ELSE ${observedInstant('client_timestamp')} END
-      FROM events INDEXED BY idx_events_daily_activity WHERE ${excludeBenchmarkUsageCondition('events')}
-        AND (event_type IN ('user_prompt', 'tool_use') OR ${usageMetricPresenceCondition('events')})
+    UNION ALL
+    ${eventEvidence}
+      AND ${activityEventInstant('events')} >= ? AND ${activityEventInstant('events')} < ?
+    UNION ALL
+    ${eventEvidence} AND ${activityEventInstant('events')} IS NULL
   ) SELECT e.agent || ':' || e.session_id AS id, e.agent,
       ${activityClass} AS activity_class, e.instant
       FROM evidence e LEFT JOIN browser b ON b.agent=e.agent AND b.session_id=e.session_id
-      WHERE (e.instant IS NULL OR (e.instant >= ? AND e.instant < ?))
-        AND (e.instant IS NULL OR b.instant IS NULL OR e.instant >= b.instant)
+      WHERE (e.instant IS NULL OR b.instant IS NULL OR e.instant >= b.instant)
       LIMIT 200001`;
   const format = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
   const groups = new Map<string, Set<string>>();
   let examined = 0;
   let unresolved = 0;
-  for (const row of db.prepare(query).iterate(from, through) as Iterable<{ id: string; agent: string; activity_class: string; instant: string | null }>) {
+  for (const row of db.prepare(query).iterate(from, through, from, through) as Iterable<{ id: string; agent: string; activity_class: string; instant: string | null }>) {
     if (++examined > 200000) throw new Error('Activity evidence limit exceeded; narrow the window');
     if (row.instant === null) { unresolved++; continue; }
     const day = format.format(new Date(row.instant));

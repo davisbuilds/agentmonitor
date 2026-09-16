@@ -1,6 +1,7 @@
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { pricingRegistry } from '../pricing/index.js';
+import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import {
   TRACE_QUALITY_EXPORT_PROVIDERS,
   TRACE_QUALITY_EXPORT_STATUSES,
@@ -533,7 +534,7 @@ function initSchemaLocked(db: Database): void {
       ON events(source, session_id, agent_type, tool_name, model)
       WHERE source = 'benchmark';
     CREATE INDEX IF NOT EXISTS idx_events_daily_activity
-      ON events(agent_type, session_id, source, client_timestamp, created_at)
+      ON events(${activityEventInstant()}, agent_type, session_id, source, client_timestamp, created_at)
       WHERE (source IS NULL OR source != 'benchmark')
         AND (event_type IN ('user_prompt', 'tool_use')
           OR (COALESCE(cost_usd, 0) > 0 OR COALESCE(tokens_in, 0) > 0
@@ -629,7 +630,8 @@ function initSchemaLocked(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_messages_session_ordinal ON messages(session_id, ordinal);
     CREATE INDEX IF NOT EXISTS idx_messages_session_role ON messages(session_id, role);
-    CREATE INDEX IF NOT EXISTS idx_messages_daily_activity ON messages(session_id, timestamp, role);
+    CREATE INDEX IF NOT EXISTS idx_messages_daily_activity
+      ON messages(${observedInstant('timestamp')}, session_id, role, timestamp);
   `);
 
   db.exec(`
