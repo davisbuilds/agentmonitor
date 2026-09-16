@@ -82,6 +82,13 @@ export function ensureTraceQualityExportStateFkFree(db: Database): void {
 }
 
 function initSchemaLocked(db: Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS execution_receipts (
+    producer TEXT NOT NULL, execution_id TEXT NOT NULL, run_id TEXT NOT NULL,
+    agent TEXT NOT NULL, role TEXT NOT NULL, started_at TEXT NOT NULL,
+    finished_at TEXT, exit_code INTEGER,
+    PRIMARY KEY (producer, execution_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_execution_receipts_started ON execution_receipts(started_at);`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS agents (
       id TEXT PRIMARY KEY,
@@ -514,6 +521,14 @@ function initSchemaLocked(db: Database): void {
         agent_type
       )
       WHERE (source IS NULL OR source != 'benchmark');
+    -- Observed identity reads need raw timestamp provenance and usage presence,
+    -- not metadata blobs. Keep their all-history grouping on a covering index.
+    CREATE INDEX IF NOT EXISTS idx_events_observed_identity
+      ON events(agent_type, session_id, source, client_timestamp, created_at,
+        CASE WHEN COALESCE(cost_usd, 0) > 0 OR COALESCE(tokens_in, 0) > 0
+          OR COALESCE(tokens_out, 0) > 0 OR COALESCE(cache_read_tokens, 0) > 0
+          OR COALESCE(cache_write_tokens, 0) > 0 THEN 1 ELSE 0 END)
+      WHERE (source IS NULL OR source != 'benchmark');
     CREATE INDEX IF NOT EXISTS idx_events_benchmark_monitor
       ON events(source, session_id, agent_type, tool_name, model)
       WHERE source = 'benchmark';
@@ -930,7 +945,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 7;
+const DATA_SCHEMA_VERSION = 8;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -967,8 +982,8 @@ export function runDataMigrations(db: Database): void {
     if (current < 4) invalidateSessionFilesForSkillContext(db);
     if (current < 5) deleteLegacyBenchmarkRows(db);
     if (current < 6) deleteOrphanedSessions(db);
-    // v7 introduces no data correction. It marks databases that completed the
-    // full structural initialization required by ensureSchemaForRead().
+    // v7/v8 introduce no data correction. v8 adds the execution receipt ledger
+    // and observed-identity covering index before marking structural readiness.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

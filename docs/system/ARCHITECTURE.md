@@ -72,6 +72,9 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   transcript sources.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots. Operational metrics never enter usage or event-count aggregates.
+- **Execution receipts:** opt-in host-authored launcher attempts, imported from a
+  private spool into a separate ledger. They never create native sessions, usage
+  events or trace summaries; see [the contract](../api/execution-receipts.md).
 - **Lean trace quality:** one content-free `session_trace_summary` per session and
   `trace_quality_export_state`. Observation trees are projected from source rows on
   demand; the removed trace/observation/score/prompt warehouse is not recreated.
@@ -135,6 +138,15 @@ tie-breaker. Reconciliation precedes date/project/message filters and pagination
 so a later summary observation cannot reintroduce a second session. Other reads
 retain their own projection/usage semantics; this is not a storage migration or
 a universal identity reconciliation across Analytics, Live, and Search.
+
+The additive `/api/v2/activity/sessions` read reconciles ordinary event evidence
+with browser identities without requiring a transcript. It normalizes the known
+`claude_code` event / `claude` browser labels, reuses the conservative Codex alias
+grammar, and exposes usage, event, browser and readable-transcript evidence
+separately. No new persistent summary is created. It preserves projected browser
+starts where present; otherwise it uses first timed event evidence. Unknown
+timezone evidence remains unresolved. This observed inventory includes subagents
+and does not claim complete capture, execution counts, or billing completeness.
 
 Live adapters under `src/live/` normalize current sessions and declare fidelity:
 

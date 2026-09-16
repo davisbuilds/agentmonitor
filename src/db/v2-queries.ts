@@ -176,6 +176,103 @@ const sessionListCte = `WITH ranked_sessions AS (
   ) AS identity_rank FROM browsing_sessions
 ), listed_sessions AS (SELECT * FROM ranked_sessions WHERE identity_rank = 1)`;
 
+// Keys deliberately distinguish unrecognized browser projections from native
+// Codex UUIDs. An arbitrary producer mode is not evidence of an alias.
+function observedBrowserIdentity(): string {
+  return `CASE
+    WHEN agent = 'codex' AND integration_mode = 'codex-jsonl'
+      AND id GLOB '${codexRolloutGlob}' THEN lower(substr(id, -36))
+    WHEN agent = 'codex' AND integration_mode IN ('codex-import', 'codex-otel')
+      AND id GLOB '${codexUuidGlob}' THEN lower(id)
+    WHEN agent = 'codex' THEN 'projection:' || id
+    ELSE id END`;
+}
+
+// SQLite-generated created_at has a known UTC basis. Producer and browser
+// timestamps require an explicit offset; do not coerce arbitrary naive dates.
+function observedInstant(column: string): string {
+  return `CASE WHEN ${column} GLOB '*Z'
+    OR (${column} GLOB '*[+-][0-9][0-9]:[0-9][0-9]' AND ${column} NOT GLOB '*-00:00')
+    THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${column}) END`;
+}
+
+const observedSessionsCte = `${sessionListCte},
+  browser AS (
+    SELECT *, ${observedBrowserIdentity()} AS session_id,
+      ${observedInstant('started_at')} AS instant
+    FROM listed_sessions
+  ), event_evidence AS (
+    SELECT CASE WHEN agent_type = 'claude_code' THEN 'claude' ELSE agent_type END AS agent,
+      CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}'
+        THEN lower(session_id) ELSE session_id END AS session_id,
+      MIN(CASE WHEN client_timestamp IS NULL
+        THEN strftime('%Y-%m-%dT%H:%M:%fZ', created_at)
+        ELSE ${observedInstant('client_timestamp')} END) AS instant,
+      MAX(CASE WHEN ${usageMetricPresenceCondition('events')} THEN 1 ELSE 0 END) AS has_usage
+    FROM events WHERE ${excludeBenchmarkUsageCondition('events')}
+    GROUP BY agent, 2
+  ), identities AS (
+    SELECT agent, session_id FROM browser UNION SELECT agent, session_id FROM event_evidence
+  ), observed AS MATERIALIZED (
+    SELECT i.agent || ':' || i.session_id AS id, i.agent, i.session_id,
+      CASE WHEN b.started_at IS NOT NULL THEN b.instant ELSE e.instant END AS started_at,
+      CASE WHEN b.started_at IS NOT NULL THEN 'projected_start' ELSE 'first_event' END AS time_basis,
+      b.id IS NOT NULL AS has_browser_history, e.session_id IS NOT NULL AS has_events,
+      COALESCE(e.has_usage, 0) AS has_usage,
+      (b.id IS NOT NULL AND ${analyticsCapabilityExpr('history', 'b')} != 'none'
+        AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = b.id)) AS transcript_available,
+      b.integration_mode, b.fidelity
+    FROM identities i
+    LEFT JOIN browser b ON b.agent = i.agent AND b.session_id = i.session_id
+    LEFT JOIN event_evidence e ON e.agent = i.agent AND e.session_id = i.session_id
+  )`;
+
+export function listObservedSessions(params: { limit?: number; offset?: number; agent?: string; date_from?: string; date_to?: string } = {}) {
+  const db = getDb();
+  const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
+  const offset = Math.max(params.offset ?? 0, 0);
+  const conditions: string[] = [];
+  const values: (string | number)[] = [];
+  if (params.agent) { conditions.push('agent = ?'); values.push(params.agent); }
+  // Unresolved timestamps are reported independently of date filters, so a
+  // consumer can never mistake their exclusion for complete date coverage.
+  if (params.date_from) { conditions.push('started_at >= ?'); values.push(`${params.date_from}T00:00:00.000Z`); }
+  if (params.date_to) {
+    conditions.push('started_at < ?');
+    values.push(new Date(Date.parse(`${params.date_to}T00:00:00Z`) + 86400000).toISOString());
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = db.prepare(`${observedSessionsCte}, filtered AS MATERIALIZED (
+      SELECT * FROM observed ${where}
+    ), page AS (
+      SELECT * FROM filtered ORDER BY started_at DESC, id ASC LIMIT ? OFFSET ?
+    ), stats AS (
+      SELECT (SELECT COUNT(*) FROM filtered) AS total,
+        (SELECT COUNT(*) FROM observed WHERE started_at IS NULL
+          ${params.agent ? 'AND agent = ?' : ''}) AS unresolved
+    ) SELECT page.*, stats.total, stats.unresolved FROM stats LEFT JOIN page ON 1
+    ORDER BY page.started_at DESC, page.id ASC`)
+    .all(...values, limit, offset, ...(params.agent ? [params.agent] : [])) as {
+      id: string; agent: string; session_id: string; started_at: string | null;
+      time_basis: string; has_browser_history: number; has_events: number;
+      has_usage: number; transcript_available: number;
+      integration_mode: string | null; fidelity: string | null;
+      total: number; unresolved: number;
+    }[];
+  const { total, unresolved } = rows[0];
+  const data = rows.filter(row => row.id !== null).map(row => ({
+    id: row.id, agent: row.agent, session_id: row.session_id, started_at: row.started_at,
+    time_basis: row.time_basis, integration_mode: row.integration_mode, fidelity: row.fidelity,
+    has_browser_history: Boolean(row.has_browser_history), has_events: Boolean(row.has_events),
+    has_usage: Boolean(row.has_usage), transcript_available: Boolean(row.transcript_available),
+  }));
+  return {
+    schema_version: 'observed-sessions.v1',
+    data, total, limit, offset, next_offset: offset + data.length < total ? offset + data.length : null,
+    unresolved_timestamps: unresolved, capture_coverage: 'unknown',
+  };
+}
+
 export function listBrowsingSessions(params: SessionsListParams = {}): SessionsResult {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
@@ -251,6 +348,30 @@ export function getBrowsingSession(id: string): BrowsingSessionRow | undefined {
   const db = getDb();
   const row = db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(id) as BrowsingSessionDbRow | undefined;
   return row ? mapBrowsingSessionRow(row) : undefined;
+}
+
+export function listObservedExecutions(params: { limit?: number; offset?: number; agent?: string; date_from?: string; date_to?: string } = {}) {
+  const db = getDb();
+  const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
+  const offset = Math.max(params.offset ?? 0, 0);
+  const clauses: string[] = [];
+  const values: (string | number)[] = [];
+  if (params.agent) { clauses.push('agent = ?'); values.push(params.agent); }
+  if (params.date_from) { clauses.push('started_at >= ?'); values.push(`${params.date_from}T00:00:00.000Z`); }
+  if (params.date_to) {
+    clauses.push('started_at < ?');
+    values.push(new Date(Date.parse(`${params.date_to}T00:00:00Z`) + 86400000).toISOString());
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  const total = (db.prepare(`SELECT COUNT(*) AS c FROM execution_receipts ${where}`).get(...values) as CountResult).c;
+  const data = db.prepare(`SELECT producer || ':' || execution_id AS id, execution_id,
+    run_id, producer, agent, role, started_at, finished_at, exit_code,
+    CASE WHEN finished_at IS NULL THEN 'unconfirmed'
+      WHEN exit_code = 0 THEN 'succeeded' ELSE 'failed' END AS outcome
+    FROM execution_receipts ${where} ORDER BY started_at DESC, producer, execution_id LIMIT ? OFFSET ?`)
+    .all(...values, limit, offset);
+  return { schema_version: 'observed-executions.v1', data, total, limit, offset,
+    next_offset: offset + data.length < total ? offset + data.length : null, capture_coverage: 'unknown' };
 }
 
 export function getSessionChildren(parentId: string): BrowsingSessionRow[] {
