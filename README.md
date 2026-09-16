@@ -20,7 +20,8 @@ Rows expose harness-scoped `id`, source `session_id`, `agent`, UTC `started_at`
 `integration_mode`/`fidelity`. Transcript availability means retained readable
 message content, not that the original source file still exists. Counts include
 separately identified subagents and are neither execution counts nor usage totals.
-Known Codex aliases reconcile before filtering; benchmark events are excluded.
+Known Codex aliases, including API/hook-generated `codex-summary` UUIDs,
+reconcile before filtering; benchmark events are excluded.
 Dates use the selected browser start when present, otherwise first timed event
 evidence—not necessarily the actual beginning of work. Unresolved timestamps are
 counted across the requested agent's inventory, independently of date filters.

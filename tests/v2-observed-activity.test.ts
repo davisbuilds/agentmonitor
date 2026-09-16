@@ -102,6 +102,35 @@ test('known aliases reconcile before date filtering and preserve projected date'
   assert.equal((await list('?agent=codex&date_from=2026-03-04')).total, 0);
 });
 
+test('ingested Codex API and hook summaries share native identity, including later JSONL history', async () => {
+  const { getDb } = await import('../src/db/connection.js');
+  const { insertEvent } = await import('../src/db/queries.js');
+  const db = getDb();
+  const native = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const history = `rollout-2026-03-01T09-00-00-${native}`;
+  for (const source of ['api', 'hook', undefined] as const) {
+    try {
+      insertEvent({ session_id: native, agent_type: 'codex', event_type: 'api_request',
+        source, status: 'success', tokens_in: 10, tokens_out: 0, metadata: {},
+        client_timestamp: '2026-03-02T09:00:00Z' });
+      assert.equal(db.prepare('SELECT integration_mode FROM browsing_sessions WHERE id = ?').get(native)?.integration_mode, 'codex-summary');
+      const result = await list('?agent=codex');
+      assert.equal(result.total, 2, `${source ?? 'default'}: one existing and one new identity`);
+      const row = result.data.find((item: { session_id: string }) => item.session_id === native);
+      assert.equal(row.has_events, true);
+      assert.equal(row.has_browser_history, true);
+      assert.equal(row.has_usage, true);
+      db.prepare("INSERT INTO browsing_sessions (id, agent, integration_mode, started_at) VALUES (?, 'codex', 'codex-jsonl', '2026-03-01T09:00:00Z')").run(history);
+      const withHistory = await list('?agent=codex');
+      assert.equal(withHistory.total, 2, 'later transcript must not duplicate the generated summary');
+      assert.equal(withHistory.data.find((item: { session_id: string }) => item.session_id === native).started_at, '2026-03-01T09:00:00.000Z');
+    } finally {
+      db.prepare('DELETE FROM events WHERE session_id = ?').run(native);
+      db.prepare('DELETE FROM browsing_sessions WHERE id IN (?, ?)').run(native, history);
+    }
+  }
+});
+
 test('naive source timestamps remain unresolved, and tied pages enumerate exactly once', async () => {
   const unresolved = await list('?agent=antigravity');
   assert.equal(unresolved.data[0].started_at, null);

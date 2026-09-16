@@ -168,7 +168,7 @@ const sessionListCte = `WITH ranked_sessions AS (
     PARTITION BY agent, CASE
       WHEN agent = 'codex' AND integration_mode = 'codex-jsonl'
         AND id GLOB '${codexRolloutGlob}' THEN 'codex:' || lower(substr(id, -36))
-      WHEN agent = 'codex' AND integration_mode IN ('codex-import', 'codex-otel')
+      WHEN agent = 'codex' AND integration_mode IN ('codex-import', 'codex-otel', 'codex-summary')
         AND id GLOB '${codexUuidGlob}' THEN 'codex:' || lower(id)
       ELSE 'row:' || id END
     ORDER BY CASE WHEN integration_mode = 'codex-jsonl' THEN 0 ELSE 1 END,
@@ -182,7 +182,7 @@ function observedBrowserIdentity(): string {
   return `CASE
     WHEN agent = 'codex' AND integration_mode = 'codex-jsonl'
       AND id GLOB '${codexRolloutGlob}' THEN lower(substr(id, -36))
-    WHEN agent = 'codex' AND integration_mode IN ('codex-import', 'codex-otel')
+    WHEN agent = 'codex' AND integration_mode IN ('codex-import', 'codex-otel', 'codex-summary')
       AND id GLOB '${codexUuidGlob}' THEN lower(id)
     WHEN agent = 'codex' THEN 'projection:' || id
     ELSE id END`;

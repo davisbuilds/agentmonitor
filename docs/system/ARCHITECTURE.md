@@ -131,7 +131,8 @@ history is persisted independently from event import so transcripts, turns, tool
 calls, search, and skill analytics can be rebuilt from their source files.
 
 Codex browser history has two existing identities: JSONL rollout basenames and
-native UUIDs from import/OTEL. Session-list reads reconcile recognized aliases
+native UUIDs from import/OTEL and API/hook-generated `codex-summary` rows.
+Session-list reads reconcile recognized aliases
 without rewriting either projection, messages, pins, or detail links. The JSONL
 representative wins; multiple JSONL projections use message count then ID as the
 tie-breaker. Reconciliation precedes date/project/message filters and pagination,
