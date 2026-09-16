@@ -16,6 +16,7 @@ import { broadcaster } from '../sse/emitter.js';
 import { liveBroadcaster } from '../api/v2/live-stream.js';
 import { config } from '../config.js';
 import { shouldExcludePath } from '../util/path-excludes.js';
+import { syncExecutionReceipts } from '../import/executions.js';
 
 let watcher: FSWatcher | undefined;
 let resyncTimer: ReturnType<typeof setInterval> | undefined;
@@ -134,6 +135,13 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
 
   // Initial sync on startup
   const db = getDb();
+  const syncExecutions = () => {
+    const result = syncExecutionReceipts(db, config.executionSpoolDir);
+    if (result.imported || result.errors) {
+      console.log(`[watcher] Execution receipts: ${result.imported} imported, ${result.errors} errors`);
+    }
+  };
+  syncExecutions();
   console.log('[watcher] Starting initial sync...');
   const stats = syncAllFiles(db, claudeDir, { excludePatterns: config.sync.excludePatterns });
   console.log(`[watcher] Initial sync complete: ${stats.parsed} parsed, ${stats.skipped} skipped, ${stats.errors} errors (${stats.total} total files)`);
@@ -200,6 +208,7 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   // Periodic re-sync every 15 minutes to catch anything missed
   const RESYNC_INTERVAL_MS = 15 * 60_000;
   resyncTimer = setInterval(() => {
+    syncExecutions();
     const claudeStats = syncAllFiles(db, claudeDir, { excludePatterns: config.sync.excludePatterns });
     const codexStats = syncAllCodexFiles(db, codexHome, { excludePatterns: config.sync.excludePatterns });
     const antigravityStats = syncAllAntigravityFiles(db, overrides?.antigravityDir, { excludePatterns: config.sync.excludePatterns });

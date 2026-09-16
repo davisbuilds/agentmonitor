@@ -229,6 +229,8 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     autoImportIntervalMinutes: parseEnvInt(env.AGENTMONITOR_AUTO_IMPORT_MINUTES, 10, 0),
     projectsDir: resolveProjectsDir(env, cwd),
     claudeDir: resolveClaudeDir(env, cwd),
+    executionSpoolDir: env.AGENTMONITOR_EXECUTIONS_DIR
+      ? path.resolve(cwd, expandTilde(env.AGENTMONITOR_EXECUTIONS_DIR)) : undefined,
     quotas: parseQuotaConfig(env),
     contextWindow: {
       codexDefault: parseEnvInt(env.AGENTMONITOR_CODEX_CONTEXT_WINDOW, 256_000, 1),

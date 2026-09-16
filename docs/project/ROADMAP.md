@@ -1,5 +1,9 @@
 # Roadmap
 
+- Added a content-free observed-session API that reconciles event and browser
+  evidence, including event-only sessions, with explicit transcript/usage coverage.
+  Existing browser and billing semantics remain unchanged.
+
 Directional snapshot for AgentMonitor. The Roadmap owns current direction and a
 small set of recent milestones. Detailed shipped history belongs to commits and
 pull requests; current behavior belongs to the system references.

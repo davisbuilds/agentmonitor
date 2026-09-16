@@ -2,6 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import {
   getOperationalMetricSummary,
   listBrowsingSessions,
+  listObservedSessions,
+  listObservedExecutions,
   getBrowsingSession,
   getSessionChildren,
   getSessionMessages,
@@ -151,6 +153,39 @@ function readTraceQualityParams(req: Request): {
 }
 
 // --- Sessions ---
+
+for (const [route, query] of [
+  ['/activity/sessions', listObservedSessions],
+  ['/activity/executions', listObservedExecutions],
+] as const) {
+  v2Router.get(route, (req: Request, res: Response) => {
+    const allowed = new Set(['limit', 'offset', 'agent', 'date_from', 'date_to']);
+    const invalid = Object.entries(req.query).some(([key, value]) => {
+      if (!allowed.has(key) || typeof value !== 'string') return true;
+      if (key === 'limit' || key === 'offset') {
+        return !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))
+          || Number(value) < (key === 'limit' ? 1 : 0)
+          || Number(value) > (key === 'limit' ? 500 : 1_000_000);
+      }
+      if (key === 'agent') return !/^[a-zA-Z0-9_-]{1,64}$/.test(value);
+      return !/^\d{4}-\d{2}-\d{2}$/.test(value)
+        || !Number.isFinite(Date.parse(value)) || new Date(value).toISOString().slice(0, 10) !== value;
+    });
+    if (invalid || (req.query.date_from && req.query.date_to && req.query.date_from > req.query.date_to)) {
+      res.status(400).json({ error: 'Invalid activity query', code: 'invalid_query' });
+      return;
+    }
+    try {
+      res.json(query({
+        limit: safeInt(req.query.limit as string), offset: safeInt(req.query.offset as string),
+        agent: req.query.agent as string | undefined,
+        date_from: req.query.date_from as string | undefined, date_to: req.query.date_to as string | undefined,
+      }));
+    } catch {
+      res.status(500).json({ error: 'Failed to list observed activity', code: 'activity_unavailable' });
+    }
+  });
+}
 
 v2Router.get('/sessions', (req: Request, res: Response) => {
   try {
