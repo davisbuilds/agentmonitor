@@ -14,6 +14,7 @@ test('Codex native source evidence distinguishes conversations, delegation and i
   assert.equal(parse({ source: { subagent: 'compact' } }).relationship_type, 'internal');
   assert.equal(parse({ source: { subagent: 'memory_consolidation' } }).relationship_type, 'internal');
   assert.equal(parse({ source: 'future-source' }).relationship_type, null);
+  assert.equal(parse({ source: { subagent: 'future-source' } }).relationship_type, null);
   assert.equal(parse({ originator: 'codex-tui' }).relationship_type, null,
     'originator is shared by internal jobs and is not classification evidence');
 });

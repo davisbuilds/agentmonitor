@@ -160,7 +160,8 @@ export function parseCodexSessionMessages(
       if (spawn || line.payload['thread_source'] === 'subagent') {
         relationshipType = 'subagent';
         parentSessionId = typeof parent === 'string' && parent ? parent : null;
-      } else if (subagent !== undefined) {
+      } else if (typeof subagent === 'string'
+        && ['compact', 'memory_consolidation', 'memory_extraction'].includes(subagent)) {
         relationshipType = 'internal';
       } else if (typeof source === 'string' && ['cli', 'vscode', 'exec'].includes(source)) {
         relationshipType = 'conversation';
