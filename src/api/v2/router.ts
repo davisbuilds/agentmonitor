@@ -3,6 +3,7 @@ import {
   getOperationalMetricSummary,
   listBrowsingSessions,
   listObservedSessions,
+  getDailyConversationActivity,
   listObservedExecutions,
   getBrowsingSession,
   getSessionChildren,
@@ -153,6 +154,21 @@ function readTraceQualityParams(req: Request): {
 }
 
 // --- Sessions ---
+
+v2Router.get('/activity/daily', (req: Request, res: Response) => {
+  const { since, until } = req.query;
+  const validDate = (value: unknown): value is string => typeof value === 'string'
+    && /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value))
+    && new Date(value).toISOString().slice(0, 10) === value;
+  if (Object.keys(req.query).some(key => !['since', 'until'].includes(key))
+    || !validDate(since) || !validDate(until) || since > until
+    || Date.parse(until) - Date.parse(since) > 30 * 86400000) {
+    res.status(400).json({ error: 'Choose an ordered window of at most 31 days', code: 'invalid_query' });
+    return;
+  }
+  try { res.json(getDailyConversationActivity(since, until)); }
+  catch { res.status(503).json({ error: 'Daily activity unavailable; narrow the window or retry', code: 'activity_unavailable' }); }
+});
 
 for (const [route, query] of [
   ['/activity/sessions', listObservedSessions],

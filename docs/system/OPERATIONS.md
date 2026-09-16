@@ -42,6 +42,14 @@ watchers, and SQLite before releasing the lock, allowing an immediate restart.
 
 ## Source Development
 
+After upgrading the Codex lineage parser, preserve a closed database backup and
+rehearse `amon sync sessions --source codex --force` on a separate database path
+before reparsing the live projection. Unchanged files otherwise retain their old
+null lineage; deploying the binary alone cannot classify that historical data.
+Unknown source shapes remain unclassified. Reparse reads native files but never
+modifies them. Daily activity is documented in the README; inspect its aggregate
+response separately from the older created-identity inventory.
+
 ```bash
 pnpm install
 pnpm dev          # TypeScript server with watch mode
