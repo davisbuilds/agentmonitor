@@ -10,6 +10,11 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Daily activity accounting (2026-09-16):** an aggregate-only read distinguishes
+  daily active conversations, delegated agents, internal jobs and unclassified
+  evidence. Codex native lineage and creation time survive parsing; retained
+  projections require deliberate reparse after upgrade.
+
 - **Session-list identity (2026-09-15):** Sessions API/CLI reads reconcile known
   Codex JSONL/import/OTEL aliases before filtering and pagination, preserving
   original detail links and all stored history. Usage and browser coverage remain

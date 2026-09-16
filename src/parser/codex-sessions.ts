@@ -119,6 +119,8 @@ export function parseCodexSessionMessages(
   let userMessageCount = 0;
   let cwd: string | null = null;
   let originator: string | undefined;
+  let parentSessionId: string | null = null;
+  let relationshipType: string | null = null;
   let harnessVersion: string | null = null;
   let initialModel: string | null = null;
   let initialContextWindowReported: number | undefined;
@@ -149,7 +151,20 @@ export function parseCodexSessionMessages(
     if (line.type === 'session_meta' && line.payload) {
       cwd = (line.payload.cwd as string) ?? null;
       startedAt = line.payload.timestamp ?? line.timestamp ?? null;
+      endedAt = startedAt;
       originator = line.payload.originator;
+      const source = line.payload['source'];
+      const subagent = asRecord(source)?.['subagent'];
+      const spawn = asRecord(asRecord(subagent)?.['thread_spawn']);
+      const parent = spawn?.['parent_thread_id'] ?? line.payload['parent_thread_id'];
+      if (spawn || line.payload['thread_source'] === 'subagent') {
+        relationshipType = 'subagent';
+        parentSessionId = typeof parent === 'string' && parent ? parent : null;
+      } else if (subagent !== undefined) {
+        relationshipType = 'internal';
+      } else if (typeof source === 'string' && ['cli', 'vscode', 'exec'].includes(source)) {
+        relationshipType = 'conversation';
+      }
       harnessVersion = typeof line.payload['cli_version'] === 'string'
         ? line.payload['cli_version']
         : null;
@@ -240,7 +255,9 @@ export function parseCodexSessionMessages(
   for (const { line, ordinal } of lines) {
     const timestamp = line.timestamp ?? null;
     if (timestamp) {
-      if (!startedAt || timestamp < startedAt) startedAt = timestamp;
+      // Forks may retain older messages. The native creation timestamp wins;
+      // inherited context is still browsable but must not backdate the thread.
+      if (!startedAt) startedAt = timestamp;
       if (!endedAt || timestamp > endedAt) endedAt = timestamp;
     }
 
@@ -414,8 +431,8 @@ export function parseCodexSessionMessages(
       ended_at: endedAt,
       message_count: messages.length,
       user_message_count: userMessageCount,
-      parent_session_id: null,
-      relationship_type: null,
+      parent_session_id: parentSessionId,
+      relationship_type: relationshipType,
       mode: codexInvocationMode(originator),
       context_used_tokens: contextUsedTokens,
       context_window_reported: contextWindowReported,

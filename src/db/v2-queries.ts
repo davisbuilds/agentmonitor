@@ -196,6 +196,16 @@ function observedInstant(column: string): string {
     THEN strftime('%Y-%m-%dT%H:%M:%fZ', ${column}) END`;
 }
 
+const activityClass = `CASE WHEN b.relationship_type = 'subagent' THEN 'delegated'
+  WHEN b.relationship_type = 'internal' THEN 'internal'
+  WHEN b.relationship_type = 'conversation' AND b.has_user_evidence THEN 'conversation'
+  WHEN b.agent = 'claude' AND b.integration_mode = 'claude-jsonl'
+    AND b.parent_session_id IS NULL AND b.relationship_type IS NULL
+    AND b.has_user_evidence THEN 'conversation'
+  WHEN b.agent = 'antigravity' AND b.integration_mode = 'antigravity-sqlite'
+    AND b.parent_session_id IS NULL AND b.has_user_evidence THEN 'conversation'
+  ELSE 'unclassified' END`;
+
 const observedSessionsCte = `${sessionListCte},
   browser AS (
     SELECT *, ${observedBrowserIdentity()} AS session_id,
@@ -271,6 +281,66 @@ export function listObservedSessions(params: { limit?: number; offset?: number; 
     data, total, limit, offset, next_offset: offset + data.length < total ? offset + data.length : null,
     unresolved_timestamps: unresolved, capture_coverage: 'unknown',
   };
+}
+
+/** Distinct identities with dated work, not sessions created or interval interpolation.
+ * Fixed New York day contract; callers collect at most 31 days per request.
+ */
+export function getDailyConversationActivity(since: string, until: string) {
+  const db = getDb();
+  const from = `${since}T00:00:00.000Z`;
+  const through = new Date(Date.parse(`${until}T00:00:00Z`) + 2 * 86400000).toISOString();
+  // Read every recognized projection's dated evidence, but classify and count
+  // the canonical identity once. Avoid the inventory's all-history event rollup.
+  const query = `${sessionListCte}, all_browser AS (
+    SELECT *, ${observedBrowserIdentity()} AS session_id,
+      ${observedInstant('started_at')} AS instant FROM ranked_sessions
+  ), browser AS MATERIALIZED (
+    SELECT a.*, EXISTS (SELECT 1 FROM all_browser sibling JOIN messages m ON m.session_id=sibling.id
+      WHERE sibling.agent=a.agent AND sibling.session_id=a.session_id AND m.role='user') AS has_user_evidence
+    FROM all_browser a WHERE identity_rank = 1
+  ), evidence AS (
+    SELECT b.agent, b.session_id, ${observedInstant('m.timestamp')} AS instant
+      FROM all_browser b JOIN messages m ON m.session_id = b.id
+      WHERE m.role IN ('user', 'assistant', 'tool')
+        AND (${observedInstant('m.timestamp')} IS NULL OR b.instant IS NULL
+          OR ${observedInstant('m.timestamp')} >= b.instant)
+    UNION
+    SELECT CASE WHEN agent_type = 'claude_code' THEN 'claude' ELSE agent_type END,
+      CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}'
+        THEN lower(session_id) ELSE session_id END,
+      CASE WHEN client_timestamp IS NULL AND source != 'import'
+        THEN strftime('%Y-%m-%dT%H:%M:%fZ', created_at)
+        ELSE ${observedInstant('client_timestamp')} END
+      FROM events INDEXED BY idx_events_daily_activity WHERE ${excludeBenchmarkUsageCondition('events')}
+        AND (event_type IN ('user_prompt', 'tool_use') OR ${usageMetricPresenceCondition('events')})
+  ) SELECT e.agent || ':' || e.session_id AS id, e.agent,
+      ${activityClass} AS activity_class, e.instant
+      FROM evidence e LEFT JOIN browser b ON b.agent=e.agent AND b.session_id=e.session_id
+      WHERE (e.instant IS NULL OR (e.instant >= ? AND e.instant < ?))
+        AND (e.instant IS NULL OR b.instant IS NULL OR e.instant >= b.instant)
+      LIMIT 200001`;
+  const format = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
+  const groups = new Map<string, Set<string>>();
+  let examined = 0;
+  let unresolved = 0;
+  for (const row of db.prepare(query).iterate(from, through) as Iterable<{ id: string; agent: string; activity_class: string; instant: string | null }>) {
+    if (++examined > 200000) throw new Error('Activity evidence limit exceeded; narrow the window');
+    if (row.instant === null) { unresolved++; continue; }
+    const day = format.format(new Date(row.instant));
+    if (day < since || day > until) continue;
+    const agent = ['codex', 'claude', 'antigravity'].includes(row.agent) ? row.agent : 'unknown';
+    const key = JSON.stringify([day, agent, row.activity_class]);
+    const identities = groups.get(key) ?? new Set<string>();
+    identities.add(row.id);
+    groups.set(key, identities);
+  }
+  return { schema_version: 'daily-conversations.v1', since, until,
+    timezone: 'America/New_York', capture_coverage: 'unknown', unresolved_timestamps: unresolved,
+    data: [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([key, ids]) => {
+      const [date, agent, classification] = JSON.parse(key) as string[];
+      return { date, agent, classification, count: ids.size };
+    }) };
 }
 
 export function listBrowsingSessions(params: SessionsListParams = {}): SessionsResult {

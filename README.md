@@ -1,5 +1,29 @@
 # AgentMonitor
 
+### Daily conversation activity
+
+`GET /api/v2/activity/daily?since=2026-09-01&until=2026-09-15` returns
+`schema_version: daily-conversations.v1`, the echoed inclusive dates,
+`timezone: America/New_York`, `capture_coverage: unknown`,
+`unresolved_timestamps`, and `data` rows of `{date, agent, classification, count}`.
+Only `since` and `until` are accepted, with at most 31 days; invalid queries
+return 400. An empty successful result has `data: []`. A query exceeding 200,000
+deduplicated evidence rows returns a sanitized 503; narrow the window and retry.
+
+Counts are distinct identities with dated messages, user prompts, tool activity
+or usage evidence that day, not identities created that day or hours worked.
+Recognized aliases contribute evidence once per identity/day. Native source and
+lineage separate `conversation`, `delegated`, `internal`, and `unclassified`;
+conversation classification also requires retained user-message evidence.
+Creation/startup alone is not activity. Unknown identities do not become user
+conversations, and inherited messages before native creation do not backdate work.
+Undated evidence is excluded from daily counts and reported independently of the
+requested dates. Empty counts do not prove complete capture or no work. No IDs,
+prompts, transcript text or paths are exposed. Existing inventory APIs are unchanged.
+Unrecognized harness labels are grouped as `unknown` without merging their identities.
+Schema 9 adds content-free covering indexes; preserve a backup before upgrade and
+reparse existing Codex projections to populate lineage (see Operations).
+
 ### Observed session inventory
 
 Independent launcher attempts are available at `/api/v2/activity/executions`.

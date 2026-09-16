@@ -149,6 +149,15 @@ starts where present; otherwise it uses first timed event evidence. Unknown
 timezone evidence remains unresolved. This observed inventory includes subagents
 and does not claim complete capture, execution counts, or billing completeness.
 
+Daily activity is a separate aggregate read, not another session inventory.
+It uses dated work on each local day, canonicalizes recognized aliases, and keeps
+native conversations, delegated agents, internal jobs and unclassified evidence
+distinct. Codex parsing retains native source/parent lineage and honors creation
+time despite inherited fork history. Positive user-message evidence is required
+for conversation classification; telemetry-only identities stay unclassified.
+Unknown timestamp counts and capture limitations travel with the response. The
+bounded daily read does not change billing, delete projections, or export content.
+
 Live adapters under `src/live/` normalize current sessions and declare fidelity:
 
 - Claude JSONL provides transcript-capable live detail where the local file exposes

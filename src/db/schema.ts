@@ -532,6 +532,13 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_benchmark_monitor
       ON events(source, session_id, agent_type, tool_name, model)
       WHERE source = 'benchmark';
+    CREATE INDEX IF NOT EXISTS idx_events_daily_activity
+      ON events(agent_type, session_id, source, client_timestamp, created_at)
+      WHERE (source IS NULL OR source != 'benchmark')
+        AND (event_type IN ('user_prompt', 'tool_use')
+          OR (COALESCE(cost_usd, 0) > 0 OR COALESCE(tokens_in, 0) > 0
+          OR COALESCE(tokens_out, 0) > 0 OR COALESCE(cache_read_tokens, 0) > 0
+          OR COALESCE(cache_write_tokens, 0) > 0));
     CREATE INDEX IF NOT EXISTS idx_events_created_at_order
       ON events(datetime(created_at) DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_events_usage_ts
@@ -622,6 +629,7 @@ function initSchemaLocked(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_messages_session_ordinal ON messages(session_id, ordinal);
     CREATE INDEX IF NOT EXISTS idx_messages_session_role ON messages(session_id, role);
+    CREATE INDEX IF NOT EXISTS idx_messages_daily_activity ON messages(session_id, timestamp, role);
   `);
 
   db.exec(`
@@ -945,7 +953,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 8;
+const DATA_SCHEMA_VERSION = 9;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -982,8 +990,8 @@ export function runDataMigrations(db: Database): void {
     if (current < 4) invalidateSessionFilesForSkillContext(db);
     if (current < 5) deleteLegacyBenchmarkRows(db);
     if (current < 6) deleteOrphanedSessions(db);
-    // v7/v8 introduce no data correction. v8 adds the execution receipt ledger
-    // and observed-identity covering index before marking structural readiness.
+    // v7/v8/v9 introduce no data correction. v8 adds the receipt ledger and
+    // observed-identity index; v9 adds content-free daily activity indexes.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
