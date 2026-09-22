@@ -90,17 +90,26 @@ export function repairClaudeImportUsage(
       continue; // an unreadable transcript leaves its rows unrepairable, not wrong
     }
     for (const event of parsed) {
-      if (!event.event_id) continue;
-      if (corrections.has(event.event_id)) {
-        corrections.set(event.event_id, null); // claimed twice: ambiguous
-        continue;
-      }
-      corrections.set(event.event_id, [
+      const buckets: Buckets = [
         event.tokens_in ?? 0,
         event.tokens_out ?? 0,
         event.cache_read_tokens ?? 0,
         event.cache_write_tokens ?? 0,
-      ]);
+      ];
+      // Index under both ids a line can be stored as: the current one, and the
+      // positional id every row imported before the uuid change still carries.
+      // Legacy ids are the ones that collide between a transcript and its
+      // child-agent file, so the ambiguity rule does its work here.
+      // A line without a uuid derives both ids identically; indexing it twice
+      // would mark it as claimed by two files and refuse to repair it.
+      for (const id of new Set([event.event_id, event.legacy_event_id])) {
+        if (!id) continue;
+        if (corrections.has(id)) {
+          corrections.set(id, null); // claimed twice: ambiguous
+          continue;
+        }
+        corrections.set(id, buckets);
+      }
     }
   }
 

@@ -425,9 +425,10 @@ the build.
   per-content-block billing fix) can only correct rows whose transcript still
   exists. Rows whose source file is gone keep the inflated usage the old
   importer wrote.
-- **Why or evidence**: the first dry run on the development store reported
-  82,112 matched rows, 14,690 correctable ($2,421 and 3.5B tokens reclaimed),
-  284 ambiguous, and **75,195 rows with no surviving transcript**. A separate estimate that groups
+- **Why or evidence**: a dry run on the development store (2026-09-22, after
+  ids moved onto the producer's `uuid`) reported 83,147 matched rows, 14,857
+  correctable ($2,451 and 3.6B tokens reclaimed), 284 ambiguous, and **75,195
+  rows with no surviving transcript**. A separate estimate that groups
   identical usage tuples within a session put total inflation near $8.2k, so
   roughly $5.7k sits in rows with no local evidence left to check them against.
   Historical cost views stay wrong by an unknown-but-bounded amount.
@@ -536,6 +537,32 @@ the build.
   in the file — but that is unconfirmed.
 - **Next**: instrument the wait before changing the timeout. Raising it would
   hide the cause, and the point is to learn whether first paint is genuinely slow.
+
+#### CI flake: dense daily-activity test resets its connection under load
+- **What**: `tests/daily-conversation-activity.test.ts:141` ("dense historical
+  evidence is excluded from empty windows and capped without a partial result")
+  intermittently fails on CI with `TypeError: fetch failed` /
+  `read ECONNRESET` after ~6.8s, instead of asserting anything. The socket dies
+  mid-request; the test never reaches its expectations.
+- **Why or evidence**: observed 2026-09-22 on `feat/imported-event-identity` —
+  failed at `c714b8b`, **passed** at `aa43fb4` (a superset of that commit),
+  failed at `d517a10`, then the same job re-run on `d517a10` with no code change
+  **succeeded**. That rerun is what establishes nondeterminism. The test passes
+  3/3 locally and has no reference to the import path those commits changed.
+  Distinct from the analytics capability banner flake above.
+- **Cause is unknown.** The reset lands on the request following a 200,005-row
+  insert, which is consistent with a server- or socket-level timeout on a heavy
+  scan — but that is a *hypothesis, unmeasured*. Also unexplained: two failures
+  in three runs on one branch while recent main runs show none, so an elevated
+  rate on longer suites cannot be ruled out.
+- **Next**: instrument before touching any timeout. Time the insert separately
+  from the request on a runner, and check whether the server logs a completed
+  response for the request that resets — that distinguishes a slow scan from a
+  client-side abort. Note the row count is not arbitrary: the evidence cap is
+  hardcoded at `src/db/v2-queries.ts:326` (200000), so the test must exceed it.
+  Making that limit injectable would let the test assert the same cap semantics
+  with a fraction of the rows, which is likely the cheaper fix than tuning
+  timeouts.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { once } from 'node:events';
 import fs from 'node:fs';
 import os from 'os';
@@ -170,6 +171,65 @@ describe('Claude Code log parser', () => {
       twoTurns.reduce((total, event) => total + (event.tokens_out ?? 0), 0),
       usage.output_tokens * 2,
     );
+  });
+
+  test('does not collide with a child-agent transcript at the same line index', () => {
+    // A child-agent transcript embeds its PARENT's sessionId, and legacy ids were
+    // derived from (sessionId, line index) — so line N of each file minted the
+    // same id and whichever imported second was dropped by dedup.
+    const sessionId = 'parent-session-uuid';
+    const parent = writeJsonl(`${sessionId}.jsonl`, [
+      { type: 'assistant', sessionId, uuid: 'uuid-parent-0', timestamp: '2026-02-01T10:00:00Z', message: { id: 'msg_p', usage: { input_tokens: 5, output_tokens: 7 } } },
+      { type: 'assistant', sessionId, uuid: 'uuid-parent-1', timestamp: '2026-02-01T10:01:00Z', message: { id: 'msg_p2', usage: { input_tokens: 3, output_tokens: 4 } } },
+    ]);
+    const child = writeJsonl('agent-child123.jsonl', [
+      { type: 'assistant', sessionId, isSidechain: true, agentId: 'child123', uuid: 'uuid-child-0', timestamp: '2026-02-01T10:02:00Z', message: { id: 'msg_c', usage: { input_tokens: 9, output_tokens: 11 } } },
+    ]);
+
+    const parentIds = new Set(parseClaudeCodeFile(parent).map(e => e.event_id));
+    const childIds = parseClaudeCodeFile(child).map(e => e.event_id);
+
+    assert.equal(childIds.filter(id => parentIds.has(id)).length, 0);
+    // The id follows the line's own uuid, so it survives reordering and appends.
+    assert.deepEqual(parseClaudeCodeFile(child).map(e => e.event_id), childIds);
+  });
+
+  test('keeps uuid-less child-agent lines distinct from the parent', () => {
+    // The positional fallback still applies to lines without a uuid. Deriving it
+    // from the reported sessionId would recreate the original collision for those
+    // lines, since a child-agent transcript reports its parent's session. No
+    // child-agent line lacks a uuid in current local data (0 of 3,590 measured
+    // 2026-09-22), so this guards a latent case rather than an observed one.
+    const sessionId = 'fallback-session-uuid';
+    const parent = writeJsonl(`${sessionId}.jsonl`, [
+      { type: 'assistant', sessionId, timestamp: '2026-02-01T10:00:00Z', message: { id: 'mp', usage: { input_tokens: 1, output_tokens: 2 } } },
+    ]);
+    const child = writeJsonl('agent-nouuid.jsonl', [
+      { type: 'assistant', sessionId, isSidechain: true, agentId: 'nouuid', timestamp: '2026-02-01T10:01:00Z', message: { id: 'mc', usage: { input_tokens: 3, output_tokens: 4 } } },
+    ]);
+
+    const [parentEvent] = parseClaudeCodeFile(parent);
+    const [childEvent] = parseClaudeCodeFile(child);
+
+    assert.notEqual(childEvent.event_id, parentEvent.event_id);
+    // The parent's fallback must stay byte-identical to the legacy scheme, or the
+    // bridge that recognizes its already-imported rows stops matching.
+    assert.equal(parentEvent.event_id, parentEvent.legacy_event_id);
+  });
+
+  test('records the originating agent on child-agent events', () => {
+    const sessionId = 'attr-session-uuid';
+    const child = writeJsonl('agent-attr456.jsonl', [
+      { type: 'assistant', sessionId, isSidechain: true, agentId: 'attr456', uuid: 'uuid-attr-0', timestamp: '2026-02-01T10:00:00Z', message: { id: 'msg_a', usage: { input_tokens: 1, output_tokens: 2 } } },
+    ]);
+
+    const [event] = parseClaudeCodeFile(child);
+    // Cost accrues against the conversation that spawned the work...
+    assert.equal(event.session_id, sessionId);
+    // ...but the work stays attributable to its own agent transcript.
+    const metadata = event.metadata as Record<string, unknown>;
+    assert.equal(metadata.agent_id, 'attr456');
+    assert.equal(metadata.agent_transcript, 'agent-attr456');
   });
 
   test('generates deterministic event_id for dedup', () => {
@@ -817,6 +877,104 @@ describe('Import orchestrator integration', () => {
     // All events are duplicates since event_ids match
     assert.equal(result2.totalDuplicates, 2);
     assert.equal(result2.totalEventsImported, 0);
+  });
+
+  test('does not re-insert events already stored under the legacy id scheme', async () => {
+    // Production rows were written with ids derived from (sessionId, line index).
+    // Changing the derivation must not make those events look new: auto-import
+    // re-parses any changed file every few minutes, so a missed bridge would
+    // duplicate a live session's whole history, not just forced re-imports.
+    const { runImport } = await import('../src/import/index.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-legacy-id-'));
+    const sessionId = 'legacy-session-uuid';
+    fs.mkdirSync(path.join(dir, 'projects', 'proj'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'projects', 'proj', `${sessionId}.jsonl`), [
+      JSON.stringify({ type: 'assistant', sessionId, uuid: 'uuid-legacy-0', timestamp: '2026-02-01T10:00:00Z', message: { id: 'm0', usage: { input_tokens: 10, output_tokens: 20 } } }),
+      JSON.stringify({ type: 'assistant', sessionId, uuid: 'uuid-legacy-1', timestamp: '2026-02-01T10:01:00Z', message: { id: 'm1', usage: { input_tokens: 30, output_tokens: 40 } } }),
+    ].join('\n'));
+
+    if (!getDb) throw new Error('Database not initialized');
+    const insert = getDb().prepare(`
+      INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out, source)
+      VALUES (?, ?, 'claude_code', 'llm_response', 'success', 0, 0, 'import')
+    `);
+    for (let i = 0; i < 2; i++) {
+      const legacy = `import-cc-${crypto.createHash('sha256').update(`claude-code:${sessionId}:${i}`).digest('hex').slice(0, 32)}`;
+      insert.run(legacy, sessionId);
+    }
+
+    const result = runImport({ source: 'claude-code', claudeDir: dir, force: true });
+    assert.equal(result.totalEventsImported, 0, 'legacy-keyed rows must still deduplicate');
+    assert.equal(result.totalDuplicates, 2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('recovers child-agent events whose parent rows are stored under legacy ids', async () => {
+    // The production shape: the parent was imported before the id change, so its
+    // rows carry legacy ids, and the child's legacy ids are byte-identical to
+    // them. The child must not claim that identity, or its events are suppressed
+    // as duplicates — which is how child-agent usage went missing in the first
+    // place, and what a forced re-import is meant to recover.
+    const { runImport } = await import('../src/import/index.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-child-recovery-'));
+    const sessionId = 'recovery-parent-uuid';
+    const projDir = path.join(dir, 'projects', 'proj');
+    fs.mkdirSync(path.join(projDir, sessionId, 'subagents'), { recursive: true });
+    fs.writeFileSync(path.join(projDir, `${sessionId}.jsonl`), [
+      JSON.stringify({ type: 'assistant', sessionId, uuid: 'uuid-rp-0', timestamp: '2026-02-01T10:00:00Z', message: { id: 'mrp0', usage: { input_tokens: 10, output_tokens: 20 } } }),
+      JSON.stringify({ type: 'assistant', sessionId, uuid: 'uuid-rp-1', timestamp: '2026-02-01T10:01:00Z', message: { id: 'mrp1', usage: { input_tokens: 10, output_tokens: 20 } } }),
+    ].join('\n'));
+    fs.writeFileSync(path.join(projDir, sessionId, 'subagents', 'agent-recovered.jsonl'), [
+      JSON.stringify({ type: 'assistant', sessionId, isSidechain: true, agentId: 'recovered', uuid: 'uuid-rk-0', timestamp: '2026-02-01T10:02:00Z', message: { id: 'mrk0', usage: { input_tokens: 7, output_tokens: 8 } } }),
+      JSON.stringify({ type: 'assistant', sessionId, isSidechain: true, agentId: 'recovered', uuid: 'uuid-rk-1', timestamp: '2026-02-01T10:03:00Z', message: { id: 'mrk1', usage: { input_tokens: 7, output_tokens: 8 } } }),
+    ].join('\n'));
+
+    if (!getDb) throw new Error('Database not initialized');
+    const insert = getDb().prepare(`
+      INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out, source)
+      VALUES (?, ?, 'claude_code', 'llm_response', 'success', 0, 0, 'import')
+    `);
+    for (let i = 0; i < 2; i++) {
+      const legacy = `import-cc-${crypto.createHash('sha256').update(`claude-code:${sessionId}:${i}`).digest('hex').slice(0, 32)}`;
+      insert.run(legacy, sessionId);
+    }
+
+    const result = runImport({ source: 'claude-code', claudeDir: dir, force: true });
+    assert.equal(result.totalEventsImported, 2, 'the two child events are recovered');
+    assert.equal(result.totalDuplicates, 2, 'the parent stays bridged to its legacy rows');
+
+    const agentRows = getDb()
+      .prepare("SELECT COUNT(*) AS c FROM events WHERE json_extract(metadata, '$.agent_id') = 'recovered'")
+      .get() as { c: number };
+    assert.equal(agentRows.c, 2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('imports child-agent events even though the parent owns the legacy ids', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-child-import-'));
+    const sessionId = 'child-parent-uuid';
+    const projDir = path.join(dir, 'projects', 'proj');
+    fs.mkdirSync(path.join(projDir, sessionId, 'subagents'), { recursive: true });
+    fs.writeFileSync(path.join(projDir, `${sessionId}.jsonl`), [
+      JSON.stringify({ type: 'assistant', sessionId, uuid: 'uuid-pp-0', timestamp: '2026-02-01T10:00:00Z', message: { id: 'mp0', usage: { input_tokens: 10, output_tokens: 20 } } }),
+      JSON.stringify({ type: 'assistant', sessionId, uuid: 'uuid-pp-1', timestamp: '2026-02-01T10:01:00Z', message: { id: 'mp1', usage: { input_tokens: 10, output_tokens: 20 } } }),
+    ].join('\n'));
+    fs.writeFileSync(path.join(projDir, sessionId, 'subagents', 'agent-kid.jsonl'), [
+      JSON.stringify({ type: 'assistant', sessionId, isSidechain: true, agentId: 'kid', uuid: 'uuid-kid-0', timestamp: '2026-02-01T10:02:00Z', message: { id: 'mk0', usage: { input_tokens: 7, output_tokens: 8 } } }),
+      JSON.stringify({ type: 'assistant', sessionId, isSidechain: true, agentId: 'kid', uuid: 'uuid-kid-1', timestamp: '2026-02-01T10:03:00Z', message: { id: 'mk1', usage: { input_tokens: 7, output_tokens: 8 } } }),
+    ].join('\n'));
+
+    const first = runImport({ source: 'claude-code', claudeDir: dir });
+    assert.equal(first.totalEventsImported, 4, 'both transcripts contribute their own events');
+
+    // The parent must still deduplicate with its child present: an ownership rule
+    // keyed on "is this sessionId claimed twice" would strip the parent's bridge
+    // and re-insert its whole history.
+    const second = runImport({ source: 'claude-code', claudeDir: dir, force: true });
+    assert.equal(second.totalEventsImported, 0);
+    assert.equal(second.totalDuplicates, 4);
+    fs.rmSync(dir, { recursive: true, force: true });
   });
 
   test('forced Codex re-import corrects explicit per-turn model attribution and refreshes its summary', async () => {

@@ -1,10 +1,11 @@
 import fs from 'fs';
+import path from 'path';
 import { getDb } from '../db/connection.js';
-import { insertEvent, refreshImportedCodexEventModel, setSessionMode } from '../db/queries.js';
+import { eventIdExists, insertEvent, refreshImportedCodexEventModel, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
+import type { ParsedImportEvent } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashFile as hashCodexFile } from './codex.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
-import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 
@@ -76,8 +77,9 @@ function setImportState(filePath: string, hash: string, size: number, source: st
 // ─── Core import logic ──────────────────────────────────────────────────
 
 function importEvents(
-  events: NormalizedIngestEvent[],
+  events: ParsedImportEvent[],
   dryRun: boolean,
+  bridgeLegacyIds = false,
 ): { imported: number; refreshed: number; duplicates: number } {
   let imported = 0;
   let refreshed = 0;
@@ -95,6 +97,12 @@ function importEvents(
 
   for (const event of events) {
     if (event.mode) sessionModes.set(event.session_id, event.mode);
+    // This file owns the identity the positional scheme gave its events, so a
+    // row already stored under that id is this same event under the old scheme.
+    if (bridgeLegacyIds && event.legacy_event_id && eventIdExists(event.legacy_event_id)) {
+      duplicates++;
+      continue;
+    }
     const row = insertEvent(event);
     if (row) {
       imported++;
@@ -153,8 +161,20 @@ function processFile(
         ? parseCodexFile(filePath, { from: options.from, to: options.to, codexDir: options.codexDir })
         : parseAntigravityFile(filePath, { from: options.from, to: options.to });
 
-  // Import events
-  const { imported, refreshed, duplicates } = importEvents(events, options.dryRun ?? false);
+  // Import events. A transcript is named after its session, so it owns the ids
+  // the positional scheme minted for its lines and can recognize its own rows
+  // from before the id change. A child-agent transcript reports its parent's
+  // session under a different filename, so those ids are not its to claim —
+  // without this distinction its events collide with the parent's and are
+  // dropped, which is what kept child-agent usage out of the store.
+  const ownsLegacyIdentity = source === 'claude-code'
+    && events.length > 0
+    && path.basename(filePath, '.jsonl') === events[0].session_id;
+  const { imported, refreshed, duplicates } = importEvents(
+    events,
+    options.dryRun ?? false,
+    ownsLegacyIdentity,
+  );
 
   // Record import state (unless dry run or date-scoped import).
   // Date-scoped imports are partial — caching the hash would cause a later
