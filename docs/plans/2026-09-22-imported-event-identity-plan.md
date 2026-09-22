@@ -3,7 +3,7 @@ date: 2026-09-22
 author: claude-opus-5
 topic: imported-event-identity
 stage: plan
-status: draft
+status: in-progress
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -63,6 +63,14 @@ their parent's event ids".
   pre-check in Task 2 cannot race a concurrent writer for the same rows.
 - Recovering the back catalogue requires `amon import --force`; `import_state`
   already records these files as seen.
+- **Tasks 1 and 2 must ship together** (established 2026-09-22 while
+  implementing, correcting this plan's original sequencing note). `processFile`
+  (`src/import/index.ts:129-172`) fully re-parses any file whose hash changed
+  and re-inserts its events, and auto-import runs every
+  `autoImportIntervalMinutes` (default 10). Task 1 alone would therefore
+  duplicate the entire stored history of every *active* transcript within
+  minutes, with no `--force` involved. This was observed directly: landing
+  Task 1 turned the legacy-scheme regression test red until Task 2 landed.
 
 ## Map Before You Cut
 
@@ -401,8 +409,18 @@ Task 1, Task 2
 
 ## Handoff
 
-Execution has not started. Task 1 and Task 4 are independent and can land
-together; Task 2 is the one that carries the data risk and should be reviewed on
-its own. The forced re-import in Task 5 is an operator action, deliberately not
-automated, and stays deferred until the user chooses to run it — as does
-`amon costs repair-claude-usage --apply`.
+**Tasks 1, 2 and 3 are implemented** on `feat/imported-event-identity` and
+verified against the real transcript pair: 0 of 267 child-agent events now
+collide with their parent, where previously all 267 did, and every child event
+carries its agent attribution. Lint, build and the full suite (951 tests) pass.
+
+**Task 4 (Codex `ordinal`) is deferred to its own PR.** It needs the same legacy
+bridge applied to `import-cdx-` ids, which is a separate source and a separate
+review surface; nothing in Tasks 1-3 depends on it, and Codex has no observed
+collision today.
+
+**Task 5 remains open.** The forced re-import is an operator action, deliberately
+not automated, and stays deferred until the user chooses to run it — as does
+`amon costs repair-claude-usage --apply`. Until that forced re-import runs, the
+back catalogue of child-agent usage stays unimported; only newly changed
+transcripts pick it up.

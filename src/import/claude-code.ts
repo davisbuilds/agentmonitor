@@ -26,6 +26,9 @@ interface ClaudeCodeMessage {
 interface ClaudeCodeLogLine {
   type?: string;
   sessionId?: string;
+  uuid?: string;          // producer-supplied, unique per line; present on every billable line
+  agentId?: string;       // child-agent transcripts only
+  isSidechain?: boolean;
   model?: string;
   costUSD?: number;
   usage?: ClaudeCodeUsage;
@@ -74,16 +77,28 @@ export function discoverClaudeCodeLogs(
 
 // ─── Parse a single JSONL file ──────────────────────────────────────────
 
+/**
+ * An event plus the id the positional scheme would have given it. The importer
+ * uses `legacy_event_id` to recognize rows stored before ids moved onto the
+ * producer's `uuid`; it is never persisted.
+ */
+export type ParsedImportEvent = NormalizedIngestEvent & { legacy_event_id?: string };
+
 export function parseClaudeCodeFile(
   filePath: string,
   options?: { from?: Date; to?: Date },
-): NormalizedIngestEvent[] {
-  const events: NormalizedIngestEvent[] = [];
+): ParsedImportEvent[] {
+  const events: ParsedImportEvent[] = [];
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
 
   // Extract session ID from filename (session UUID) or from first line
   const fileBasename = path.basename(filePath, '.jsonl');
+
+  // A transcript is named after its session; a child-agent transcript is named
+  // `agent-<id>.jsonl` and reports its PARENT's sessionId. Its work is billed to
+  // the parent conversation, but stays attributable to its own agent.
+  const childAgentTranscript = fileBasename.startsWith('agent-');
 
   // Track cumulative cost for delta calculation
   let prevCostUSD = 0;
@@ -155,15 +170,29 @@ export function parseClaudeCodeFile(
       status = 'error';
     }
 
-    // Deterministic event_id for dedup on re-import
-    const eventId = crypto
+    // Deterministic event_id for dedup on re-import. The producer's own per-line
+    // `uuid` is unique across every transcript, including child-agent files that
+    // repeat the parent's sessionId, so prefer it. Lines without one (summaries
+    // and other non-billable types) keep the positional derivation.
+    const legacyEventId = `import-cc-${crypto
       .createHash('sha256')
       .update(`claude-code:${sessionId}:${i}`)
       .digest('hex')
-      .slice(0, 32);
+      .slice(0, 32)}`;
+    const eventId = line.uuid
+      ? `import-ccu-${crypto
+          .createHash('sha256')
+          .update(`claude-code:uuid:${line.uuid}`)
+          .digest('hex')
+          .slice(0, 32)}`
+      : legacyEventId;
 
     // Build metadata with content for transcript enrichment
     const metadataObj: Record<string, unknown> = {};
+    if (childAgentTranscript) {
+      metadataObj.agent_id = line.agentId ?? fileBasename.slice('agent-'.length);
+      metadataObj.agent_transcript = fileBasename;
+    }
     if (typeof line.error === 'string') metadataObj.error = line.error;
     else if (line.error?.message) metadataObj.error = line.error.message;
 
@@ -215,8 +244,9 @@ export function parseClaudeCodeFile(
       metadataObj.content_preview = outputStr.slice(0, 500);
     }
 
-    const event: NormalizedIngestEvent = {
-      event_id: `import-cc-${eventId}`,
+    const event: ParsedImportEvent = {
+      event_id: eventId,
+      legacy_event_id: legacyEventId,
       session_id: sessionId,
       agent_type: 'claude_code',
       event_type: eventType,

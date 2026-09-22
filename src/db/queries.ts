@@ -412,6 +412,15 @@ function truncateMetadata(metadata: unknown): { value: string; truncated: boolea
   };
 }
 
+/**
+ * Whether an event is already stored under this id. Used by the importer to
+ * recognize rows written before Claude ids moved onto the producer's `uuid`,
+ * so a derivation change does not make existing events look new.
+ */
+export function eventIdExists(eventId: string): boolean {
+  return getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(eventId) !== undefined;
+}
+
 export function insertEvent(event: {
   event_id?: string;
   session_id: string;
