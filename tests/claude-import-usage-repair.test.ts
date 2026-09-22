@@ -12,6 +12,7 @@ process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 const { initSchema } = await import('../src/db/schema.js');
 const { closeDb, getDb } = await import('../src/db/connection.js');
 const { repairClaudeImportUsage } = await import('../src/import/claude-usage-repair.js');
+const { maintainSessionTraceSummary } = await import('../src/trace-quality/summary.js');
 
 const USAGE = {
   input_tokens: 2,
@@ -155,5 +156,66 @@ describe('Claude import usage repair', () => {
     assert.ok(report.rows_without_transcript >= 3,
       'rows with no source file must be counted, not silently skipped');
     assert.deepEqual(totals(sessionId), before, 'unrepairable rows stay untouched');
+  });
+
+  test('refuses rows whose event id is claimed by more than one transcript', () => {
+    // A Claude child-agent transcript embeds its PARENT's sessionId, and event
+    // ids are derived from (sessionId, line index) — so a subagent file and its
+    // parent mint identical ids for the same line number. Correcting such a row
+    // from whichever file sorts later would write another transcript's tokens.
+    const sessionId = 'sess-ambiguous';
+    const claudeDir = claudeDirFor(sessionId);
+    writeTranscript(claudeDir, sessionId);
+    const subagentDir = path.join(claudeDir, 'projects', '-Users-someone-project', sessionId, 'subagents');
+    fs.mkdirSync(subagentDir, { recursive: true });
+    fs.writeFileSync(path.join(subagentDir, 'agent-child.jsonl'), [
+      JSON.stringify({
+        type: 'assistant',
+        sessionId, // the parent's id, as real child-agent transcripts carry
+        isSidechain: true,
+        timestamp: '2026-02-01T10:05:00Z',
+        message: { id: 'msg_02Child', model: MODEL, usage: { input_tokens: 7, output_tokens: 9 }, content: [{ type: 'text', text: 'child' }] },
+      }),
+    ].join('\n'));
+    seedInflatedRows(sessionId, 3);
+    // Line 0 is the colliding one: both transcripts mint this id.
+    const collidingId = `import-cc-${crypto.createHash('sha256')
+      .update(`claude-code:${sessionId}:0`).digest('hex').slice(0, 32)}`;
+    const before = getDb()
+      .prepare('SELECT tokens_in, tokens_out, cost_usd FROM events WHERE event_id = ?')
+      .get(collidingId);
+
+    const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+    assert.ok(report.rows_ambiguous >= 1, 'colliding event ids must be reported');
+    assert.deepEqual(
+      getDb().prepare('SELECT tokens_in, tokens_out, cost_usd FROM events WHERE event_id = ?').get(collidingId),
+      before,
+      'the contested row keeps its own values rather than the child transcript\'s',
+    );
+    // Lines 1 and 2 are claimed by one transcript only, so they are still repaired.
+    assert.equal(report.rows_corrected, 2);
+  });
+
+  test('re-derives the persisted trace summary for repaired sessions', () => {
+    // session_trace_summary stores its own token/cost rollup, and both the
+    // trace-quality API and warehouse export read it directly. Leaving it stale
+    // would keep serving the inflated numbers after the events were fixed.
+    const sessionId = 'sess-summary';
+    const claudeDir = claudeDirFor(sessionId);
+    writeTranscript(claudeDir, sessionId);
+    seedInflatedRows(sessionId, 3);
+    maintainSessionTraceSummary(sessionId);
+    const stale = getDb()
+      .prepare('SELECT tokens_out FROM session_trace_summary WHERE session_id = ?')
+      .get(sessionId) as { tokens_out: number } | undefined;
+    assert.equal(stale?.tokens_out, USAGE.output_tokens * 3, 'summary starts from the inflated rows');
+
+    repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+    const fresh = getDb()
+      .prepare('SELECT tokens_out FROM session_trace_summary WHERE session_id = ?')
+      .get(sessionId) as { tokens_out: number };
+    assert.equal(fresh.tokens_out, USAGE.output_tokens, 'summary follows the repaired events');
   });
 });

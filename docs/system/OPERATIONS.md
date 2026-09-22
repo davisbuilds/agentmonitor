@@ -232,13 +232,24 @@ keeps its event and loses only the usage it double-counted, so transcripts,
 event history and tool-call projections are unchanged. Re-running finds nothing
 further to correct.
 
-Coverage is bounded by which transcripts still exist. Event history outlives the
-files it came from, and rows whose transcript is gone have no source to check
-against — the report counts them as `rows_without_transcript` and leaves them
-untouched rather than guessing. On the development store at the time of the fix,
-16,551 of 86,002 matched rows were corrected while 75,195 rows had no surviving
-transcript, so a repaired database can still carry inflated historical cost that
-no local evidence can settle.
+Applying also re-derives `session_trace_summary` for every repaired session:
+that rollup stores its own token and cost totals, the trace-quality API and
+warehouse export read it directly, and startup backfill skips rows already at
+the current projection version.
+
+Two classes of row are reported rather than repaired, because neither has an
+unambiguous source:
+
+- `rows_without_transcript` — the file is gone. Event history outlives its
+  transcripts, and a missing source is not evidence of anything.
+- `rows_ambiguous` — more than one transcript mints the same `event_id`. A
+  child-agent transcript embeds its parent's `sessionId` and ids derive from
+  (session, line index), so parent and child collide on the same line number.
+
+On the development store at the time of the fix, 14,690 of 82,112 matched rows
+were correctable, 284 were ambiguous, and 75,195 rows had no surviving
+transcript — so a repaired database can still carry inflated historical cost
+that no local evidence can settle.
 
 ## Trace-Quality Reclaim
 

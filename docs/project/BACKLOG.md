@@ -405,8 +405,8 @@ the build.
   exists. Rows whose source file is gone keep the inflated usage the old
   importer wrote.
 - **Why or evidence**: the first dry run on the development store reported
-  86,002 matched rows, 16,551 corrected ($2,496 and 3.5B tokens reclaimed), and
-  **75,195 rows with no surviving transcript**. A separate estimate that groups
+  82,112 matched rows, 14,690 correctable ($2,421 and 3.5B tokens reclaimed),
+  284 ambiguous, and **75,195 rows with no surviving transcript**. A separate estimate that groups
   identical usage tuples within a session put total inflation near $8.2k, so
   roughly $5.7k sits in rows with no local evidence left to check them against.
   Historical cost views stay wrong by an unknown-but-bounded amount.
