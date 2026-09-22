@@ -420,6 +420,25 @@ the build.
   deliberate plan — id-derivation version marker, or a one-time remap — not a
   drive-by edit. Related: [Consistent session identity](#consistent-session-identity-and-parentchild-coverage-across-read-surfaces).
 
+#### Codex event ids are positional, and a change to the emitted set re-keys history
+- **What**: `src/import/codex.ts` derives ids from a counter over *emitted*
+  events. Changing which events are emitted re-keys every stored row, so the
+  next import stops matching them and duplicates the history. Unlike the Claude
+  importer there is no legacy-id bridge to absorb such a change.
+- **Why or evidence**: measured 2026-09-22 while evaluating a switch to the
+  producer's `ordinal`, which was **rejected** — the counter advances only on
+  emitted events, so noise lines do not shift ids (verified byte-identical
+  against a noisy fixture), the producer ordinal and computed index agree across
+  120 real rollouts, and no rollout shares a `session_meta` id, so Codex has no
+  collision to fix. Switching would have re-keyed 73,963 rows for no measured
+  gain. Two mutation-tested guards now make an accidental change loud:
+  `skipped, malformed and zero-delta lines do not shift later event ids` and
+  `pins the Codex event-id derivation against accidental re-keying`.
+- **Revisit when**: Codex starts rewriting or compacting rollout files, or a
+  derivation change becomes genuinely necessary. Either way it needs a legacy-id
+  bridge first, mirroring `src/import/index.ts`'s ownership rule; do not simply
+  update the pinned expectation.
+
 #### Imported Claude rows with no surviving transcript stay inflated
 - **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
   per-content-block billing fix) can only correct rows whose transcript still

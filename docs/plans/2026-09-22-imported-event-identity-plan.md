@@ -270,12 +270,41 @@ Task 1
 - Every event from a child-agent fixture is attributable to its agent file
   through metadata alone.
 
-### Task 4: Use the producer's ordinal for Codex
+### Task 4: Use the producer's ordinal for Codex — SUPERSEDED
 
 **Objective**
 
-Replace the locally computed Codex event index with the producer-supplied
-`ordinal`, which is stable against skipped and malformed lines.
+Originally: replace the locally computed Codex event index with the
+producer-supplied `ordinal`. **Outcome (2026-09-22): not implemented — the
+premise was wrong.** The objective is now to keep the positional derivation and
+guard it.
+
+This task assumed the local counter was fragile where `ordinal` is stable. It is
+not: `eventIndex` advances only when an event is actually *emitted*
+(`src/import/codex.ts:214` returns before the increment on a zero delta), so
+malformed lines, blank lines, unknown record types and zero-delta token counts
+all leave later ids untouched. Verified against a noisy fixture — later ids are
+byte-identical to the clean run — and across 120 real rollouts, where the
+producer's `ordinal` and the computed index agree exactly, with no blank or
+malformed lines and no duplicate ordinals. No rollout shares a `session_meta`
+id with another (60 of 60 distinct), and Codex has no child-transcript
+equivalent, so the collision that motivated the Claude change cannot occur here.
+
+Switching would therefore re-key all 73,963 stored `import-cdx-` rows, on a
+source auto-import re-parses continuously, for no measured benefit. The one real
+hazard is a *code* change to which events are emitted, which would silently
+re-key history the same way. That is now guarded by two tests rather than a
+migration: one proving noise lines do not shift ids, one pinning the literal
+derivation. Both were mutation-tested, and they catch different accidents — the
+emit-set change and the formula change respectively.
+
+Revisit only if Codex begins rewriting or compacting rollout files, or if a
+deliberate derivation change becomes necessary — in which case it needs a
+legacy-id bridge like the Claude importer's.
+
+**Files**
+
+- Modify: `tests/import.test.ts` (guards only; no source change)
 
 **Files**
 
@@ -404,7 +433,8 @@ Task 1, Task 2
 | Child-agent events are recoverable | `node --import tsx --test tests/import.test.ts` | Child fixture inserts its full event count despite existing parent legacy ids |
 | A parent transcript with a child present still dedupes | `node --import tsx --test tests/import.test.ts` | Forced re-import of the parent inserts 0 events while its child is discoverable |
 | Child-agent attribution is preserved | `node --import tsx --test tests/import.test.ts` | Metadata carries the agent id; `session_id` is the parent's |
-| Codex ids follow producer ordinals | `node --import tsx --test tests/import.test.ts` | Ids unchanged by a malformed line earlier in the rollout |
+| Codex ids survive noise lines (Task 4, superseded) | `node --import tsx --test tests/import.test.ts` | Ids byte-identical to a clean rollout despite malformed, blank, unknown and zero-delta lines |
+| Codex derivation cannot change unnoticed | `node --import tsx --test tests/import.test.ts` | Pinned literal ids fail if the formula or emitted set changes |
 | Repair still matches legacy rows | `node --import tsx --test tests/claude-import-usage-repair.test.ts` | Legacy-keyed row matched; ambiguity guard still reports contested rows |
 | No regression across the suite | `pnpm lint && pnpm build && pnpm test` | Lint and build clean; full suite passes |
 | Recovery volume is bounded before applying | `amon import --source claude-code --dry-run --json` on a restored backup | Reported insert count matches the expected child-agent backlog |
@@ -416,10 +446,9 @@ verified against the real transcript pair: 0 of 267 child-agent events now
 collide with their parent, where previously all 267 did, and every child event
 carries its agent attribution. Lint, build and the full suite (951 tests) pass.
 
-**Task 4 (Codex `ordinal`) is deferred to its own PR.** It needs the same legacy
-bridge applied to `import-cdx-` ids, which is a separate source and a separate
-review surface; nothing in Tasks 1-3 depends on it, and Codex has no observed
-collision today.
+**Task 4 is closed as superseded**, not implemented — see the task for the
+measurements that overturned its premise. Codex keeps its positional ids, now
+guarded by two mutation-tested invariants.
 
 **Task 5's repair-compatibility step landed early**, in the same PR as Tasks
 1-3. Codex review caught that changing the derivation silently broke
