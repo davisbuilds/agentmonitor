@@ -419,7 +419,12 @@ bridge applied to `import-cdx-` ids, which is a separate source and a separate
 review surface; nothing in Tasks 1-3 depends on it, and Codex has no observed
 collision today.
 
-**Task 5 remains open.** The forced re-import is an operator action, deliberately
+**Task 5's repair-compatibility step landed early**, in the same PR as Tasks
+1-3. Codex review caught that changing the derivation silently broke
+`repairClaudeImportUsage`: on the live store it fell from 82,112 matched rows
+and 14,690 correctable to 26,590 and 30, reclassifying the rest as having no
+transcript. Corrections are now indexed under both ids. The rest of **Task 5
+remains open.** The forced re-import is an operator action, deliberately
 not automated, and stays deferred until the user chooses to run it — as does
 `amon costs repair-claude-usage --apply`. Until that forced re-import runs, the
 back catalogue of child-agent usage stays unimported; only newly changed

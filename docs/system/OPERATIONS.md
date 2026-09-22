@@ -246,7 +246,12 @@ unambiguous source:
   child-agent transcript embeds its parent's `sessionId` and ids derive from
   (session, line index), so parent and child collide on the same line number.
 
-On the development store at the time of the fix, 14,690 of 82,112 matched rows
+Repair matches a stored row under either identity scheme: the current id,
+derived from the transcript line's own `uuid`, and the positional id every row
+imported before that change still carries. A row keyed the old way is therefore
+still repairable.
+
+On the development store at the time of the fix, 14,857 of 83,147 matched rows
 were correctable, 284 were ambiguous, and 75,195 rows had no surviving
 transcript — so a repaired database can still carry inflated historical cost
 that no local evidence can settle.

@@ -158,6 +158,46 @@ describe('Claude import usage repair', () => {
     assert.deepEqual(totals(sessionId), before, 'unrepairable rows stay untouched');
   });
 
+  test('still matches rows stored under the legacy positional id', () => {
+    // Ids moved onto the producer's uuid, but every row imported before that
+    // change is keyed by the positional scheme. Indexing corrections only by the
+    // new id would silently reclassify all of that repairable history as
+    // "no surviving transcript" and leave its inflated usage in place.
+    const sessionId = 'sess-legacy-keyed';
+    const claudeDir = claudeDirFor(sessionId);
+    const dir = path.join(claudeDir, 'projects', '-Users-someone-project');
+    fs.mkdirSync(dir, { recursive: true });
+    const line = (content: unknown, uuid: string) => JSON.stringify({
+      type: 'assistant',
+      sessionId,
+      uuid,
+      timestamp: '2026-02-01T10:00:00Z',
+      message: { id: 'msg_01Turn', model: MODEL, usage: USAGE, content },
+    });
+    fs.writeFileSync(path.join(dir, `${sessionId}.jsonl`), [
+      line([{ type: 'thinking', thinking: 'deciding' }], 'uuid-lk-0'),
+      line([{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }], 'uuid-lk-1'),
+      line([{ type: 'text', text: 'done' }], 'uuid-lk-2'),
+    ].join('\n'));
+    // The orphan count is global to the database, and earlier tests leave rows
+    // behind, so compare against a baseline rather than expecting zero.
+    const baselineOrphans = repairClaudeImportUsage(getDb(), { claudeDir, apply: false })
+      .rows_without_transcript;
+    seedInflatedRows(sessionId, 3); // stored under legacy ids, as production is
+
+    const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+    assert.equal(report.rows_corrected, 2, 'the two repeat lines are still repairable');
+    assert.equal(
+      report.rows_without_transcript,
+      baselineOrphans,
+      'legacy-keyed rows must not be reclassified as having no transcript',
+    );
+    const after = totals(sessionId);
+    assert.equal(after.rows, 3);
+    assert.equal(after.tokens_out, USAGE.output_tokens);
+  });
+
   test('refuses rows whose event id is claimed by more than one transcript', () => {
     // A Claude child-agent transcript embeds its PARENT's sessionId, and event
     // ids are derived from (sessionId, line index) — so a subagent file and its

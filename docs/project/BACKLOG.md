@@ -425,9 +425,10 @@ the build.
   per-content-block billing fix) can only correct rows whose transcript still
   exists. Rows whose source file is gone keep the inflated usage the old
   importer wrote.
-- **Why or evidence**: the first dry run on the development store reported
-  82,112 matched rows, 14,690 correctable ($2,421 and 3.5B tokens reclaimed),
-  284 ambiguous, and **75,195 rows with no surviving transcript**. A separate estimate that groups
+- **Why or evidence**: a dry run on the development store (2026-09-22, after
+  ids moved onto the producer's `uuid`) reported 83,147 matched rows, 14,857
+  correctable ($2,451 and 3.6B tokens reclaimed), 284 ambiguous, and **75,195
+  rows with no surviving transcript**. A separate estimate that groups
   identical usage tuples within a session put total inflation near $8.2k, so
   roughly $5.7k sits in rows with no local evidence left to check them against.
   Historical cost views stay wrong by an unknown-but-bounded amount.
