@@ -55,7 +55,7 @@ their parent's event ids".
   backup. It touches no credential, authority, remote, or concurrency boundary,
   so the high-risk addendum's capability and effective-runtime tables would be
   label-shaped rather than evidence. Choosing the rejected remap option instead
-  — rewriting 354,813 stored `event_id` values — would flip this to `high`.
+  — rewriting every stored imported `event_id` — would flip this to `high`.
 - `uuid` and `ordinal` are undocumented producer fields and may change without
   notice. The derivation therefore keeps the positional scheme as a fallback
   rather than depending on either field being present.
@@ -74,23 +74,22 @@ their parent's event ids".
 
 ## Map Before You Cut
 
-Measured on this host on 2026-09-22 (26 top-level Claude transcripts, 28
-child-agent files, ~83.6k lines; 20 Codex rollouts, 34,950 lines):
+Measured on a local store on 2026-09-22 (a few dozen Claude transcripts and
+child-agent files; a sample of Codex rollouts):
 
-- **Every billable Claude line carries a unique `uuid`.** 30,094 of 30,094
-  usage-bearing lines have one, including all 1,906 in child-agent files, with
-  zero reuse anywhere in the corpus. `uuid` is absent on ~32% of lines overall
-  (non-billable types), so a fallback is still required.
-- **The collision is confined to child-agent files.** Zero `sessionId` values
-  are claimed by more than one top-level transcript, so the legacy derivation
-  was unambiguous there. Child-agent files embed the parent's `sessionId`, and
-  on one measured session 267 of 267 child events collided with parent ids,
-  dropping 7.2M tokens.
-- **A transcript is named after its session.** All 26 top-level files have
-  `basename == sessionId`; 0 of 28 child-agent files do. This is what makes
+- **Every billable Claude line carries a unique `uuid`.** Every usage-bearing
+  line sampled has one, child-agent files included, with zero reuse anywhere in
+  the sample. `uuid` is absent on roughly a third of lines overall (non-billable
+  types), so a fallback is still required.
+- **The collision is confined to child-agent files.** No `sessionId` is claimed
+  by more than one top-level transcript, so the legacy derivation was
+  unambiguous there. Child-agent files embed the parent's `sessionId`, and in a
+  sampled session every child event collided with a parent id.
+- **A transcript is named after its session.** Every top-level file sampled has
+  `basename == sessionId`; no child-agent file does. This is what makes
   legacy-identity ownership decidable per file in Task 2.
-- **Stored identity today**: 354,813 `import-cc-` rows, 73,963 `import-cdx-`,
-  527,125 NULL (hook/OTEL rows, which never carried ids).
+- **Stored identity today**: imported Claude and Codex rows carry their
+  respective prefixes; hook and OTEL rows carry no `event_id` at all.
 - **Codex supplies `ordinal` on 100% of lines** and the importer never reads it.
 - The data path is: `parseClaudeCodeFile` mints `event_id`
   (`src/import/claude-code.ts:158-163`) → `runImport` iterates per file
@@ -284,14 +283,13 @@ not: `eventIndex` advances only when an event is actually *emitted*
 (`src/import/codex.ts:214` returns before the increment on a zero delta), so
 malformed lines, blank lines, unknown record types and zero-delta token counts
 all leave later ids untouched. Verified against a noisy fixture — later ids are
-byte-identical to the clean run — and across 120 real rollouts, where the
+byte-identical to the clean run — and across a sample of real rollouts, where the
 producer's `ordinal` and the computed index agree exactly, with no blank or
-malformed lines and no duplicate ordinals. No rollout shares a `session_meta`
-id with another (60 of 60 distinct), and Codex has no child-transcript
-equivalent, so the collision that motivated the Claude change cannot occur here.
+malformed lines and no duplicate ordinals. No sampled rollout shares a
+`session_meta` id with another, and Codex has no child-transcript equivalent, so the collision that motivated the Claude change cannot occur here.
 
-Switching would therefore re-key all 73,963 stored `import-cdx-` rows, on a
-source auto-import re-parses continuously, for no measured benefit. The one real
+Switching would therefore re-key every stored `import-cdx-` row, on a source
+auto-import re-parses continuously, for no measured benefit. The one real
 hazard is a *code* change to which events are emitted, which would silently
 re-key history the same way. That is now guarded by two tests rather than a
 migration: one proving noise lines do not shift ids, one pinning the literal
@@ -321,7 +319,7 @@ None
   `eventIndex` counter, and the file contains no reference to `ordinal`.
 - `src/parser/codex-sessions.ts:136-146` likewise computes its own
   `sourceOrdinal`, incrementing on malformed lines and skipping blank ones.
-- Every sampled Codex line (34,950 of 34,950) carries `ordinal`.
+- Every sampled Codex line carries `ordinal`.
 
 **Implementation Steps**
 
@@ -394,8 +392,8 @@ Task 1, Task 2
 **Done When**
 
 - Repair matches legacy-keyed rows at the same rate as before the change
-  (82,112 matched on the live store, within the drift of any new imports), and
-  the recovery procedure is documented.
+  (the matched population is unchanged by the derivation switch, within the
+  drift of any new imports), and the recovery procedure is documented.
 
 ## Risks And Mitigations
 
@@ -450,18 +448,19 @@ carries its agent attribution. Lint, build and the full suite (951 tests) pass.
 measurements that overturned its premise. Codex keeps its positional ids, now
 guarded by two mutation-tested invariants.
 
-All tasks are closed: 1-3 implemented (PR #138), 4 superseded by measurement
-(PR #139), 5 complete — its repair-compatibility step landed early and both
-operator actions were run on 2026-09-22 (see OPERATIONS.md for the measured
-outcome). Remaining residual inflation is tracked in BACKLOG.md.
+All tasks are closed. Tasks 1-3 were implemented in PR #138; Task 4 was
+superseded by the measurements recorded in its own section (PR #139); Task 5 is
+complete.
 
-**Task 5's repair-compatibility step landed early**, in the same PR as Tasks
-1-3. Codex review caught that changing the derivation silently broke
-`repairClaudeImportUsage`: on the live store it fell from 82,112 matched rows
-and 14,690 correctable to 26,590 and 30, reclassifying the rest as having no
-transcript. Corrections are now indexed under both ids. The rest of **Task 5
-remains open.** The forced re-import is an operator action, deliberately
-not automated, and stays deferred until the user chooses to run it — as does
-`amon costs repair-claude-usage --apply`. Until that forced re-import runs, the
-back catalogue of child-agent usage stays unimported; only newly changed
-transcripts pick it up.
+Task 5's repair-compatibility step landed early, in the same PR as Tasks 1-3,
+because Codex review caught that changing the derivation silently broke
+`repairClaudeImportUsage` — it stopped recognizing rows keyed the old way and
+reclassified most of them as having no transcript, reporting a fraction of the
+repairable population while still exiting cleanly. Corrections are now indexed
+under both ids.
+
+Both operator actions ran on 2026-09-22 after a validated backup and a rehearsal
+on a copy: the forced re-import recovered the child-agent back catalogue, and
+`amon costs repair-claude-usage --apply` corrected the inflated historical rows.
+OPERATIONS.md documents the procedure and the expected shape of each report.
+The residual inflation the repair cannot reach is tracked in BACKLOG.md.
