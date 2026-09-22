@@ -399,6 +399,26 @@ the build.
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
 
+#### Imported Claude rows with no surviving transcript stay inflated
+- **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
+  per-content-block billing fix) can only correct rows whose transcript still
+  exists. Rows whose source file is gone keep the inflated usage the old
+  importer wrote.
+- **Why or evidence**: the first dry run on the development store reported
+  86,002 matched rows, 16,551 corrected ($2,496 and 3.5B tokens reclaimed), and
+  **75,195 rows with no surviving transcript**. A separate estimate that groups
+  identical usage tuples within a session put total inflation near $8.2k, so
+  roughly $5.7k sits in rows with no local evidence left to check them against.
+  Historical cost views stay wrong by an unknown-but-bounded amount.
+- **Next / Revisit when**: decide deliberately between three options — leave and
+  disclose (cheapest, but every historical cost view silently overstates), a
+  heuristic collapse of identical `(session, timestamp, usage)` tuples (recovers
+  most of the remainder but *will* over-collapse genuinely identical turns, so
+  it trades a known overstatement for an unmeasured understatement), or a
+  provenance marker that labels pre-fix imported rows as unreliable in the UI.
+  Do not run a heuristic collapse without first measuring how often distinct
+  turns legitimately share a usage tuple.
+
 #### Bedrock-style and `[1m]` model IDs never resolve (silent $0)
 - **What**: `PricingRegistry.normalize` (`src/pricing/index.ts:227`) strips only
   `anthropic/`, `openai/`, `google/` prefixes. `anthropic.claude-…-v1:0`,

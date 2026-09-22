@@ -210,6 +210,36 @@ changed values differ only by the UTC marker/ISO separator. A repeated preview
 must report zero eligible changes; `unresolvedFields` may remain nonzero. Restart
 the newly built runtime afterward so new fallbacks keep their timezone marker.
 
+### Imported Claude usage repair
+
+Until 2026-09-22 the Claude Code importer billed one event per assistant JSONL
+line. Claude writes one line per content block and repeats the turn's `usage` on
+each, so affected turns were counted two to five times, and cost followed the
+tokens. New imports are correct; rows already stored are not, because `event_id`
+is per line and dedup skips them on re-import.
+
+`amon costs repair-claude-usage` re-parses the discoverable transcripts and
+aligns each stored row to what its line should have contributed. It reports by
+default and writes only with `--apply`:
+
+```sh
+amon costs repair-claude-usage --json          # preview, no writes
+amon costs repair-claude-usage --apply
+```
+
+Take a validated backup first (see above). Rows are never deleted: a repeat line
+keeps its event and loses only the usage it double-counted, so transcripts,
+event history and tool-call projections are unchanged. Re-running finds nothing
+further to correct.
+
+Coverage is bounded by which transcripts still exist. Event history outlives the
+files it came from, and rows whose transcript is gone have no source to check
+against — the report counts them as `rows_without_transcript` and leaves them
+untouched rather than guessing. On the development store at the time of the fix,
+16,551 of 86,002 matched rows were corrected while 75,195 rows had no surviving
+transcript, so a repaired database can still carry inflated historical cost that
+no local evidence can settle.
+
 ## Trace-Quality Reclaim
 
 The lean trace-quality model no longer uses the old persisted trace, observation,
