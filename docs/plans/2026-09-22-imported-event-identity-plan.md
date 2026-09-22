@@ -134,8 +134,10 @@ None
 2. When `line.uuid` is a non-empty string, derive the id from
    `claude-code:uuid:${line.uuid}` under a distinct prefix (`import-ccu-`), so
    the scheme in use is legible from the stored value.
-3. When `uuid` is absent, keep the existing positional derivation and prefix
-   unchanged, so non-billable legacy lines keep their current identity.
+3. When `uuid` is absent, keep the positional derivation. For a transcript this
+   stays byte-identical to the legacy id, which the Task 2 bridge depends on;
+   for a child-agent file key it on the transcript instead of the reported
+   session, or uuid-less child lines recreate the original collision.
 4. Leave the `message.id` usage-dedupe from PR #137 untouched; it governs which
    line carries usage, not which id the line gets.
 

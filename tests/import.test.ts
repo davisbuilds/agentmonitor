@@ -194,6 +194,29 @@ describe('Claude Code log parser', () => {
     assert.deepEqual(parseClaudeCodeFile(child).map(e => e.event_id), childIds);
   });
 
+  test('keeps uuid-less child-agent lines distinct from the parent', () => {
+    // The positional fallback still applies to lines without a uuid. Deriving it
+    // from the reported sessionId would recreate the original collision for those
+    // lines, since a child-agent transcript reports its parent's session. No
+    // child-agent line lacks a uuid in current local data (0 of 3,590 measured
+    // 2026-09-22), so this guards a latent case rather than an observed one.
+    const sessionId = 'fallback-session-uuid';
+    const parent = writeJsonl(`${sessionId}.jsonl`, [
+      { type: 'assistant', sessionId, timestamp: '2026-02-01T10:00:00Z', message: { id: 'mp', usage: { input_tokens: 1, output_tokens: 2 } } },
+    ]);
+    const child = writeJsonl('agent-nouuid.jsonl', [
+      { type: 'assistant', sessionId, isSidechain: true, agentId: 'nouuid', timestamp: '2026-02-01T10:01:00Z', message: { id: 'mc', usage: { input_tokens: 3, output_tokens: 4 } } },
+    ]);
+
+    const [parentEvent] = parseClaudeCodeFile(parent);
+    const [childEvent] = parseClaudeCodeFile(child);
+
+    assert.notEqual(childEvent.event_id, parentEvent.event_id);
+    // The parent's fallback must stay byte-identical to the legacy scheme, or the
+    // bridge that recognizes its already-imported rows stops matching.
+    assert.equal(parentEvent.event_id, parentEvent.legacy_event_id);
+  });
+
   test('records the originating agent on child-agent events', () => {
     const sessionId = 'attr-session-uuid';
     const child = writeJsonl('agent-attr456.jsonl', [

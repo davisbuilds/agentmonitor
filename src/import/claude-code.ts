@@ -179,13 +179,25 @@ export function parseClaudeCodeFile(
       .update(`claude-code:${sessionId}:${i}`)
       .digest('hex')
       .slice(0, 32)}`;
+    // The positional fallback keys on the transcript rather than the reported
+    // session: a child-agent file reports its parent's session, so deriving from
+    // that would recreate the collision for lines without a uuid. A transcript is
+    // named after its session, so its own fallback stays byte-identical to the
+    // legacy id — which the importer's bridge depends on to recognize its rows.
+    const positionalEventId = childAgentTranscript
+      ? `import-cca-${crypto
+          .createHash('sha256')
+          .update(`claude-code:transcript:${fileBasename}:${i}`)
+          .digest('hex')
+          .slice(0, 32)}`
+      : legacyEventId;
     const eventId = line.uuid
       ? `import-ccu-${crypto
           .createHash('sha256')
           .update(`claude-code:uuid:${line.uuid}`)
           .digest('hex')
           .slice(0, 32)}`
-      : legacyEventId;
+      : positionalEventId;
 
     // Build metadata with content for transcript enrichment
     const metadataObj: Record<string, unknown> = {};
