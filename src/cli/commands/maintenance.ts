@@ -275,6 +275,44 @@ export function registerMaintenanceCommands(): void {
   });
 
   registerCommand({
+    name: 'costs repair-claude-usage',
+    group: 'Data Commands',
+    summary: 'Correct imported Claude events billed once per content block',
+    // Reports by default: this rewrites stored history, so writing is opt-in
+    // through --apply rather than opt-out through --dry-run.
+    usage: 'costs repair-claude-usage [--apply] [--claude-dir <path>]',
+    examples: [
+      'costs repair-claude-usage --json',
+      'costs repair-claude-usage --apply',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--claude-dir']), new Set(['--apply']));
+      rejectExtraPositionals(parsed.positionals, 'amon costs repair-claude-usage [--apply]');
+      const { createConfig } = await import('../../config.js');
+      const runtimeConfig = createConfig();
+      const claudeDir = parsed.values.get('--claude-dir') ?? runtimeConfig.claudeDir;
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb, getDb } = await import('../../db/connection.js');
+      const { repairClaudeImportUsage } = await import('../../import/claude-usage-repair.js');
+      initSchema();
+      try {
+        const report = repairClaudeImportUsage(getDb(), {
+          claudeDir,
+          apply: parsed.flags.has('--apply'),
+          excludePatterns: runtimeConfig.sync.excludePatterns,
+        });
+        printSummary(
+          ctx,
+          report.apply ? 'Claude import usage repair' : 'Claude import usage repair preview',
+          report,
+        );
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'costs recalc',
     group: 'Data Commands',
     summary: 'Recalculate event costs from pricing metadata',

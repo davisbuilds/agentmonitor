@@ -124,6 +124,54 @@ describe('Claude Code log parser', () => {
     assert.equal(events[0].cache_write_tokens, 800);
   });
 
+  test('bills one assistant turn once when it spans several content blocks', () => {
+    // Claude Code writes one assistant line per content block (thinking,
+    // tool_use, text). Every line of a turn repeats the same `message.id` and
+    // the same cumulative `usage`, so counting each line bills the turn twice
+    // or more. Across 40 local transcripts, all 8,874 multi-line message IDs
+    // carried byte-identical usage, so the turn's real cost is one line's.
+    const usage = {
+      input_tokens: 2,
+      output_tokens: 254,
+      cache_read_input_tokens: 21503,
+      cache_creation_input_tokens: 23573,
+    };
+    const line = (content: unknown) => ({
+      type: 'assistant',
+      sessionId: 'sess-blocks',
+      timestamp: '2026-02-01T10:00:00Z',
+      message: { id: 'msg_01SplitAcrossBlocks', model: 'claude-sonnet-4-5-20250929', usage, content },
+    });
+    const filePath = writeJsonl('sess-blocks.jsonl', [
+      line([{ type: 'thinking', thinking: 'deciding' }]),
+      line([{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }]),
+      line([{ type: 'text', text: 'done' }]),
+    ]);
+
+    const events = parseClaudeCodeFile(filePath);
+
+    // Every line stays an event: the transcript and event history are unchanged.
+    assert.equal(events.length, 3);
+
+    const sum = (field: 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens') =>
+      events.reduce((total, event) => total + (event[field] ?? 0), 0);
+    assert.equal(sum('tokens_in'), usage.input_tokens);
+    assert.equal(sum('tokens_out'), usage.output_tokens);
+    assert.equal(sum('cache_read_tokens'), usage.cache_read_input_tokens);
+    assert.equal(sum('cache_write_tokens'), usage.cache_creation_input_tokens);
+
+    // A distinct turn bills separately even with identical usage.
+    const second = writeJsonl('sess-blocks-2.jsonl', [
+      line([{ type: 'text', text: 'first' }]),
+      { ...line([{ type: 'text', text: 'second' }]), message: { id: 'msg_02Second', usage } },
+    ]);
+    const twoTurns = parseClaudeCodeFile(second);
+    assert.equal(
+      twoTurns.reduce((total, event) => total + (event.tokens_out ?? 0), 0),
+      usage.output_tokens * 2,
+    );
+  });
+
   test('generates deterministic event_id for dedup', () => {
     const filePath = writeJsonl('sess-dedup.jsonl', [
       { type: 'tool_use', sessionId: 'sess-dedup', name: 'Bash', timestamp: '2026-02-01T10:00:00Z' },

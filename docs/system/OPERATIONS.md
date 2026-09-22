@@ -210,6 +210,47 @@ changed values differ only by the UTC marker/ISO separator. A repeated preview
 must report zero eligible changes; `unresolvedFields` may remain nonzero. Restart
 the newly built runtime afterward so new fallbacks keep their timezone marker.
 
+### Imported Claude usage repair
+
+Until 2026-09-22 the Claude Code importer billed one event per assistant JSONL
+line. Claude writes one line per content block and repeats the turn's `usage` on
+each, so affected turns were counted two to five times, and cost followed the
+tokens. New imports are correct; rows already stored are not, because `event_id`
+is per line and dedup skips them on re-import.
+
+`amon costs repair-claude-usage` re-parses the discoverable transcripts and
+aligns each stored row to what its line should have contributed. It reports by
+default and writes only with `--apply`:
+
+```sh
+amon costs repair-claude-usage --json          # preview, no writes
+amon costs repair-claude-usage --apply
+```
+
+Take a validated backup first (see above). Rows are never deleted: a repeat line
+keeps its event and loses only the usage it double-counted, so transcripts,
+event history and tool-call projections are unchanged. Re-running finds nothing
+further to correct.
+
+Applying also re-derives `session_trace_summary` for every repaired session:
+that rollup stores its own token and cost totals, the trace-quality API and
+warehouse export read it directly, and startup backfill skips rows already at
+the current projection version.
+
+Two classes of row are reported rather than repaired, because neither has an
+unambiguous source:
+
+- `rows_without_transcript` — the file is gone. Event history outlives its
+  transcripts, and a missing source is not evidence of anything.
+- `rows_ambiguous` — more than one transcript mints the same `event_id`. A
+  child-agent transcript embeds its parent's `sessionId` and ids derive from
+  (session, line index), so parent and child collide on the same line number.
+
+On the development store at the time of the fix, 14,690 of 82,112 matched rows
+were correctable, 284 were ambiguous, and 75,195 rows had no surviving
+transcript — so a repaired database can still carry inflated historical cost
+that no local evidence can settle.
+
 ## Trace-Quality Reclaim
 
 The lean trace-quality model no longer uses the old persisted trace, observation,
