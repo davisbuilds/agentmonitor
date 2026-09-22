@@ -251,10 +251,29 @@ derived from the transcript line's own `uuid`, and the positional id every row
 imported before that change still carries. A row keyed the old way is therefore
 still repairable.
 
-On the development store at the time of the fix, 14,857 of 83,147 matched rows
-were correctable, 284 were ambiguous, and 75,195 rows had no surviving
-transcript — so a repaired database can still carry inflated historical cost
-that no local evidence can settle.
+Recovering child-agent usage that the old id scheme dropped is a separate step,
+and it must precede the repair:
+
+```sh
+amon import --source claude-code --force   # recover, then repair
+```
+
+`import_state` records those transcripts as seen, so only `--force` revisits
+them. Expect totals to **rise** here: this imports events that were never
+stored.
+
+Both were run against the development store on 2026-09-22, after a validated
+backup and a rehearsal on a copy. The forced import found 88,037 events, bridged
+84,391 as duplicates and imported 3,646 — recovering 3,590 child-agent rows
+($28.14) that had never been stored. The repair then corrected 14,925 of 87,243
+matched rows, reclaiming $2,465.32 and 3.59B tokens, and re-derived 25 session
+summaries. Net effect on total stored cost: $24,777.45 to $22,342.15. A second
+run of each is a no-op, and `PRAGMA integrity_check` stayed `ok` with the server
+live throughout.
+
+284 rows remain ambiguous and 75,195 have no surviving transcript, so the
+database still carries inflated historical cost that no local evidence can
+settle.
 
 ## Trace-Quality Reclaim
 

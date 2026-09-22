@@ -3,7 +3,7 @@ date: 2026-09-22
 author: claude-opus-5
 topic: imported-event-identity
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -449,6 +449,11 @@ carries its agent attribution. Lint, build and the full suite (951 tests) pass.
 **Task 4 is closed as superseded**, not implemented — see the task for the
 measurements that overturned its premise. Codex keeps its positional ids, now
 guarded by two mutation-tested invariants.
+
+All tasks are closed: 1-3 implemented (PR #138), 4 superseded by measurement
+(PR #139), 5 complete — its repair-compatibility step landed early and both
+operator actions were run on 2026-09-22 (see OPERATIONS.md for the measured
+outcome). Remaining residual inflation is tracked in BACKLOG.md.
 
 **Task 5's repair-compatibility step landed early**, in the same PR as Tasks
 1-3. Codex review caught that changing the derivation silently broke
