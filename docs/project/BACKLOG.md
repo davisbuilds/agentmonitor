@@ -538,6 +538,32 @@ the build.
 - **Next**: instrument the wait before changing the timeout. Raising it would
   hide the cause, and the point is to learn whether first paint is genuinely slow.
 
+#### CI flake: dense daily-activity test resets its connection under load
+- **What**: `tests/daily-conversation-activity.test.ts:141` ("dense historical
+  evidence is excluded from empty windows and capped without a partial result")
+  intermittently fails on CI with `TypeError: fetch failed` /
+  `read ECONNRESET` after ~6.8s, instead of asserting anything. The socket dies
+  mid-request; the test never reaches its expectations.
+- **Why or evidence**: observed 2026-09-22 on `feat/imported-event-identity` —
+  failed at `c714b8b`, **passed** at `aa43fb4` (a superset of that commit),
+  failed at `d517a10`, then the same job re-run on `d517a10` with no code change
+  **succeeded**. That rerun is what establishes nondeterminism. The test passes
+  3/3 locally and has no reference to the import path those commits changed.
+  Distinct from the analytics capability banner flake above.
+- **Cause is unknown.** The reset lands on the request following a 200,005-row
+  insert, which is consistent with a server- or socket-level timeout on a heavy
+  scan — but that is a *hypothesis, unmeasured*. Also unexplained: two failures
+  in three runs on one branch while recent main runs show none, so an elevated
+  rate on longer suites cannot be ruled out.
+- **Next**: instrument before touching any timeout. Time the insert separately
+  from the request on a runner, and check whether the server logs a completed
+  response for the request that resets — that distinguishes a slow scan from a
+  client-side abort. Note the row count is not arbitrary: the evidence cap is
+  hardcoded at `src/db/v2-queries.ts:326` (200000), so the test must exceed it.
+  Making that limit injectable would let the test assert the same cap semantics
+  with a fraction of the rows, which is likely the cheaper fix than tuning
+  timeouts.
+
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
   `GET /api/v2/metrics` (shipped 2026-09-04, see ROADMAP), but there is no `/app/`
