@@ -399,6 +399,27 @@ the build.
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
 
+#### Child-agent transcripts collide with their parent's event ids, so their usage never imports
+- **What**: `parseClaudeCodeFile` derives `event_id` from
+  `claude-code:<sessionId>:<line index>`, and a child-agent transcript
+  (`projects/<project>/<session>/subagents/agent-*.jsonl`) embeds its **parent's**
+  `sessionId`. Parent and child therefore mint identical ids for the same line
+  number, and `insertEvent` returns early on an existing `event_id` — so
+  whichever file imports second has those events silently dropped.
+- **Why or evidence**: measured 2026-09-22 on a local session — **267 of 267**
+  child-agent events collided with parent ids, dropping 7.2M tokens for that one
+  session. The live store shows 284 rows the usage repair flags as
+  `rows_ambiguous` for the same reason. This is an under-count in the opposite
+  direction from the per-content-block over-count fixed in this branch, and the
+  two do not cancel: they hit different sessions by different amounts. Surfaced
+  by Codex review on PR #137.
+- **Next**: make `event_id` include file identity (e.g. the transcript's
+  basename or a path hash) so parent and child cannot collide. Note the
+  migration cost before doing it: every existing imported row's id changes, so
+  re-import would insert duplicates rather than dedupe against history. Needs a
+  deliberate plan — id-derivation version marker, or a one-time remap — not a
+  drive-by edit. Related: [Consistent session identity](#consistent-session-identity-and-parentchild-coverage-across-read-surfaces).
+
 #### Imported Claude rows with no surviving transcript stay inflated
 - **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
   per-content-block billing fix) can only correct rows whose transcript still
