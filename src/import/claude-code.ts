@@ -16,6 +16,7 @@ interface ClaudeCodeUsage {
 }
 
 interface ClaudeCodeMessage {
+  id?: string;            // stable per assistant turn; repeats across its content blocks
   model?: string;
   usage?: ClaudeCodeUsage;
   content?: unknown;
@@ -87,6 +88,12 @@ export function parseClaudeCodeFile(
   // Track cumulative cost for delta calculation
   let prevCostUSD = 0;
 
+  // Assistant turns are written one line per content block (thinking, tool_use,
+  // text), every line repeating the same `message.id` and the same cumulative
+  // `usage`. Only the first line of a turn carries its usage into events; the
+  // rest would re-bill tokens the turn already spent.
+  const billedMessageIds = new Set<string>();
+
   for (let i = 0; i < lines.length; i++) {
     let line: ClaudeCodeLogLine;
     try {
@@ -127,11 +134,16 @@ export function parseClaudeCodeFile(
       prevCostUSD = line.costUSD;
     }
 
-    // Extract token counts
-    const tokensIn = usage?.input_tokens ?? 0;
-    const tokensOut = usage?.output_tokens ?? 0;
-    const cacheRead = usage?.cache_read_input_tokens ?? 0;
-    const cacheWrite = usage?.cache_creation_input_tokens ?? 0;
+    // Extract token counts, once per assistant turn (see billedMessageIds).
+    // Lines without a message id keep per-line accounting.
+    const messageId = msg?.id;
+    const alreadyBilled = messageId !== undefined && billedMessageIds.has(messageId);
+    if (messageId !== undefined && usage) billedMessageIds.add(messageId);
+
+    const tokensIn = alreadyBilled ? 0 : usage?.input_tokens ?? 0;
+    const tokensOut = alreadyBilled ? 0 : usage?.output_tokens ?? 0;
+    const cacheRead = alreadyBilled ? 0 : usage?.cache_read_input_tokens ?? 0;
+    const cacheWrite = alreadyBilled ? 0 : usage?.cache_creation_input_tokens ?? 0;
 
     // Extract project (basename of cwd) and branch
     const project = line.cwd ? path.basename(line.cwd) : undefined;
@@ -215,7 +227,7 @@ export function parseClaudeCodeFile(
       cache_read_tokens: cacheRead,
       cache_write_tokens: cacheWrite,
       model,
-      cost_usd: costDelta && costDelta > 0 ? costDelta : undefined,
+      cost_usd: !alreadyBilled && costDelta && costDelta > 0 ? costDelta : undefined,
       duration_ms: line.duration_ms ?? line.durationMs,
       project,
       branch,
