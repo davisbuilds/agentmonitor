@@ -11,6 +11,9 @@ const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 // or ISO without a suffix. Both are UTC by this app's storage convention.
 const ZONELESS_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
 
+// Every zone offset in use is a whole number of quarter-hours.
+const QUARTER_HOUR_MS = 15 * 60 * 1000;
+
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
 function partsFormatter(zone: string): Intl.DateTimeFormat {
@@ -38,13 +41,6 @@ function wallClock(instantMs: number, zone: string): WallClock {
     hour: Number(fields.hour), minute: Number(fields.minute), second: Number(fields.second),
     weekday: fields.weekday,
   };
-}
-
-/** How far the zone's wall clock is ahead of UTC at an instant. */
-function zoneOffsetMs(instantMs: number, zone: string): number {
-  const w = wallClock(instantMs, zone);
-  const wallAsUtc = Date.UTC(w.year, w.month - 1, w.day, w.hour, w.minute, w.second);
-  return wallAsUtc - Math.floor(instantMs / 1000) * 1000;
 }
 
 function pad(value: number): string {
@@ -77,7 +73,6 @@ function parseStoredTimestamp(value: string): Date | null {
 // in one UTC quarter-hour share a local day. Memoizing on that block turns a
 // per-row Intl call (about 2µs) into a map lookup for the bulk bucketing that
 // usage reads do over every row.
-const QUARTER_HOUR_MS = 15 * 60 * 1000;
 const DAY_CACHE_LIMIT = 50_000;
 const dayCaches = new Map<string, Map<number, string>>();
 
@@ -116,16 +111,30 @@ export function localWeekdayHour(
 }
 
 /**
- * The UTC instant at which a local day begins. Solved from the zone's offset at
- * that midnight, re-checked once so a DST change near midnight still lands.
+ * The UTC instant at which a local day begins: the first instant whose local
+ * date is `day`. Usually local midnight, but a zone that springs forward at
+ * midnight (Havana, for one) skips 00:00, and the day starts at 01:00.
+ *
+ * Offsets are whole quarter-hours, so every day boundary sits on the UTC
+ * quarter-hour grid, and the local date never decreases as instants advance.
+ * A binary search over the quarter-hours within ±14 hours of UTC midnight
+ * (the widest offsets in use) finds the boundary exactly.
  */
 export function localDayStart(day: string, zone = reportingTimeZone()): string {
   const [year, month, date] = day.split('-').map(Number);
   const midnightAsUtc = Date.UTC(year, month - 1, date);
-  let instant = midnightAsUtc - zoneOffsetMs(midnightAsUtc, zone);
-  const corrected = midnightAsUtc - zoneOffsetMs(instant, zone);
-  if (corrected !== instant) instant = corrected;
-  return new Date(instant).toISOString();
+  const dayAt = (quarter: number): string => {
+    const w = wallClock(quarter * QUARTER_HOUR_MS, zone);
+    return `${w.year}-${pad(w.month)}-${pad(w.day)}`;
+  };
+  let lo = Math.floor((midnightAsUtc - 14 * 3_600_000) / QUARTER_HOUR_MS);
+  let hi = Math.ceil((midnightAsUtc + 14 * 3_600_000) / QUARTER_HOUR_MS);
+  while (lo < hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (dayAt(mid) < day) lo = mid + 1;
+    else hi = mid;
+  }
+  return new Date(lo * QUARTER_HOUR_MS).toISOString();
 }
 
 /** The UTC instant at which the local day after `day` begins (23 or 25 hours on DST days). */

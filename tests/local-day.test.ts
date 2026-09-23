@@ -61,6 +61,14 @@ describe('local day bounds', () => {
     assert.equal(localDayEndExclusive('2026-03-08', NY), '2026-03-09T04:00:00.000Z');
   });
 
+  test('a day whose midnight is skipped starts at its first real instant', () => {
+    // Havana springs forward at 00:00 on 2026-03-08: 23:59 CST on Mar 7 is
+    // followed by 01:00 CDT on Mar 8, so Mar 8 begins at 05:00Z and Mar 7 ends there.
+    assert.equal(localDayStart('2026-03-08', 'America/Havana'), '2026-03-08T05:00:00.000Z');
+    assert.equal(localDayEndExclusive('2026-03-07', 'America/Havana'), '2026-03-08T05:00:00.000Z');
+    assert.equal(localDayStart('2026-03-07', 'America/Havana'), '2026-03-07T05:00:00.000Z');
+  });
+
   test('the fall-back day is 25 hours long', () => {
     assert.equal(localDayStart('2026-11-01', NY), '2026-11-01T04:00:00.000Z');
     assert.equal(localDayEndExclusive('2026-11-01', NY), '2026-11-02T05:00:00.000Z');

@@ -168,3 +168,17 @@ describe('trace quality selects local days', () => {
     assert.deepEqual(ids, ['evt-early', 'evt-late']);
   });
 });
+
+describe('local-day filters stay indexable', () => {
+  // The exact predicate buildAnalyticsFilterState and listBrowsingSessions emit.
+  for (const column of ['started_at', 'bs.started_at']) {
+    test(`datetime(${column}) ranges search an index rather than scan`, () => {
+      const plan = getDb().prepare(`
+        EXPLAIN QUERY PLAN SELECT id FROM browsing_sessions bs
+        WHERE datetime(${column}) >= datetime(?) AND datetime(${column}) < datetime(?)
+      `).all('2026-09-09T15:00:00.000Z', '2026-09-10T15:00:00.000Z') as Array<{ detail: string }>;
+      const detail = plan.map(row => row.detail).join(' | ');
+      assert.match(detail, /SEARCH .* USING INDEX idx_bs_started_instant/, detail);
+    });
+  }
+});
