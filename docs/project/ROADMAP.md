@@ -10,6 +10,13 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Local-time days (2026-09-23, PR #142):** every user-facing day is a local
+  day in one reporting zone (`AGENTMONITOR_TIMEZONE`, default the host's).
+  Date filters, daily buckets, active-day counts, the heatmap, skill and
+  trace-quality windows, budgets and daily activity all share
+  `src/util/local-day.ts`, replacing a mix of UTC-day reads and a hardcoded
+  `America/New_York`. The warehouse export keeps UTC days by design.
+
 - **Pricing and read-surface correctness (2026-09-23, PRs #140-#141):** Claude
   Opus 5.5 and Fable 5.1 are priced (both off the 0.1x cache-read convention),
   and `amon costs recalc --missing-only` backfills rows imported before a model
