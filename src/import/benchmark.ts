@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { backfillBenchmarkCost, backfillBenchmarkEvidence, insertEvent } from '../db/queries.js';
+import type { CostSource } from '../pricing/cost-provenance.js';
 import { pricingRegistry } from '../pricing/index.js';
 
 /**
@@ -113,9 +114,9 @@ function str(value: unknown): string | undefined {
  * model is unpriced, so callers can surface it loudly rather than bill it as $0.
  * Mirrors `_forks/openbench/experiments/analyze_cost.py:effective_row_cost`.
  */
-function resolveBenchmarkCost(row: BenchmarkRow): number | null {
+function resolveBenchmarkCost(row: BenchmarkRow): { cost: number; source: CostSource } | null {
   if (typeof row.cost_usd === 'number' && Number.isFinite(row.cost_usd)) {
-    return row.cost_usd;
+    return { cost: row.cost_usd, source: 'reported' };
   }
   const model = str(row.model);
   if (!model) return null;
@@ -132,12 +133,13 @@ function resolveBenchmarkCost(row: BenchmarkRow): number | null {
   // promo-era cost the experiment actually incurred.
   const at = str(row.ts_iso);
   const direct = pricingRegistry.calculate(model, tokens, at);
-  if (direct !== null) return direct;
+  if (direct !== null) return { cost: direct, source: 'estimated' };
 
   // Retry against the base model with an effort suffix stripped.
   const lastDash = model.lastIndexOf('-');
   if (lastDash > 0 && EFFORT_SUFFIXES.includes(model.slice(lastDash + 1))) {
-    return pricingRegistry.calculate(model.slice(0, lastDash), tokens, at);
+    const base = pricingRegistry.calculate(model.slice(0, lastDash), tokens, at);
+    if (base !== null) return { cost: base, source: 'estimated' };
   }
   return null;
 }
@@ -197,8 +199,8 @@ export function importBenchmarkResults(
       continue;
     }
 
-    const cost = resolveBenchmarkCost(row);
-    if (cost === null) unpriced.add(model);
+    const priced = resolveBenchmarkCost(row);
+    if (priced === null) unpriced.add(model);
 
     // Study identity: prefer the manual override, then openbench's own fields,
     // then the legacy parent-dir fallback. study_id (= study_sha256) is the exact
@@ -245,7 +247,8 @@ export function importBenchmarkResults(
       tokens_out: num(row.tokens_output),
       cache_read_tokens: num(row.tokens_cache_read),
       cache_write_tokens: num(row.tokens_cache_write),
-      cost_usd: cost,
+      cost_usd: priced?.cost ?? null,
+      cost_source: priced?.source,
       source: 'benchmark',
       study_id: studyId,
       study,
@@ -291,7 +294,7 @@ export function importBenchmarkResults(
       // cell imported before those fields existed — backfill it (only when the row
       // predates the field), so upgrading + re-importing surfaces the verdict
       // without deleting rows.
-      if (cost !== null && backfillBenchmarkCost(eventId, cost)) {
+      if (priced !== null && backfillBenchmarkCost(eventId, priced.cost, priced.source)) {
         result.costsBackfilled += 1;
       }
       if (rankingEligible !== null) {

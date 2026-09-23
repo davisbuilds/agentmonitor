@@ -17,13 +17,19 @@ const { maintainSessionTraceSummary } = await import('../src/trace-quality/summa
 const MODEL = 'claude-sonnet-5';
 const TABLE_COST = 2;
 
-function seed(sessionId: string, eventId: string, cost: number | null, source = 'import'): void {
+function seed(
+  sessionId: string,
+  eventId: string,
+  cost: number | null,
+  source = 'import',
+  costSource: 'reported' | 'estimated' | null = null,
+): void {
   getDb().prepare(`
     INSERT INTO events (event_id, session_id, agent_type, event_type, status,
       tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, model, cost_usd,
-      source, client_timestamp)
-    VALUES (?, ?, 'claude_code', 'llm_response', 'success', 1000000, 0, 0, 0, ?, ?, ?, '2026-09-20T10:00:00Z')
-  `).run(eventId, sessionId, MODEL, cost, source);
+      source, client_timestamp, cost_source)
+    VALUES (?, ?, 'claude_code', 'llm_response', 'success', 1000000, 0, 0, 0, ?, ?, ?, '2026-09-20T10:00:00Z', ?)
+  `).run(eventId, sessionId, MODEL, cost, source, costSource);
 }
 
 function costOf(eventId: string): number | null {
@@ -63,7 +69,7 @@ describe('recalculateEventCosts', () => {
   });
 
   test('a full recalc still re-derives existing estimates', () => {
-    seed('s-full', 'stale-estimate', 0.5);
+    seed('s-full', 'stale-estimate', 0.5, 'import', 'estimated');
 
     const report = recalculateEventCosts(getDb(), { apply: true });
 

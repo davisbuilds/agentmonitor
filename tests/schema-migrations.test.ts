@@ -77,6 +77,7 @@ test('initSchema upgrades legacy event and provider quota tables in place', () =
     'source',
     'study_id',
     'study',
+    'cost_source',
   ]) {
     assert.ok(eventColumns.has(column), `missing migrated events.${column}`);
   }

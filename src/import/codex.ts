@@ -239,6 +239,7 @@ export function parseCodexFile(
         cache_read_tokens: deltaCacheRead,
         model: currentModel,
         cost_usd: costUsd ?? undefined,
+        cost_source: costUsd != null ? 'estimated' : undefined,
         project,
         client_timestamp: line.timestamp,
         metadata: {

@@ -888,6 +888,50 @@ describe('POST /api/otel/v1/metrics', () => {
     assert.equal(events.events[0].event_type, 'llm_response');
   });
 
+  test('a token metric carries no cost of its own when Claude reports cost on its cost metric', async () => {
+    // Claude Code exports token counts and cost as separate metrics. Pricing
+    // the token rows from our tables as well billed the same usage twice.
+    const model = { key: 'model', value: { stringValue: 'claude-sonnet-5' } };
+    const payload = {
+      resourceMetrics: [{
+        resource: {
+          attributes: [
+            { key: 'service.name', value: { stringValue: 'claude_code' } },
+            { key: 'gen_ai.session.id', value: { stringValue: 'sess-metric-cost' } },
+          ],
+        },
+        scopeMetrics: [{
+          metrics: [
+            {
+              name: 'claude_code.token.usage',
+              sum: {
+                dataPoints: [{ asInt: '1000000', attributes: [{ key: 'type', value: { stringValue: 'input' } }, model], timeUnixNano: '1700000000000000000' }],
+                isMonotonic: true,
+                aggregationTemporality: 1,
+              },
+            },
+            {
+              name: 'claude_code.cost.usage',
+              sum: {
+                dataPoints: [{ asDouble: 1.75, attributes: [model], timeUnixNano: '1700000000000000000' }],
+                isMonotonic: true,
+                aggregationTemporality: 1,
+              },
+            },
+          ],
+        }],
+      }],
+    };
+
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    const events = (await getEvents()).events;
+    const total = events.reduce((sum, e) => sum + Number(e.cost_usd ?? 0), 0);
+    assert.equal(total, 1.75, 'only the reported cost counts');
+    const tokenRow = events.find(e => Number(e.tokens_in) === 1_000_000);
+    assert.equal(tokenRow?.cost_usd, 0);
+    assert.equal(tokenRow?.cost_source, 'reported', 'a later recalc must not price it either');
+  });
+
   test('handles cumulative metrics with delta conversion', async () => {
     // Reset the cumulative state between tests by importing the parser
     const { resetCumulativeState } = await import('../src/otel/parser.js');
