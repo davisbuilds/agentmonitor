@@ -188,11 +188,17 @@ function extractAnyValue(v: OtelAnyValue): unknown {
   return undefined;
 }
 
-function nanoToIso(nanos: string | undefined): string | undefined {
-  if (!nanos) return undefined;
-  const ms = Math.floor(Number(BigInt(nanos) / BigInt(1_000_000)));
-  if (Number.isNaN(ms) || ms <= 0) return undefined;
-  return new Date(ms).toISOString();
+function nanoToIso(nanos: string | number | undefined): string | undefined {
+  // OTLP JSON sends uint64 as a string, though some exporters send a number.
+  // Anything else means "no time", not a BigInt SyntaxError that fails the batch.
+  let ms: number;
+  if (typeof nanos === 'number') ms = Math.floor(nanos / 1_000_000);
+  else if (typeof nanos === 'string' && /^\d+$/.test(nanos)) ms = Number(BigInt(nanos) / BigInt(1_000_000));
+  else return undefined;
+  const date = new Date(ms);
+  // Past the Date range (±8.64e15 ms), toISOString would throw a RangeError.
+  if (ms <= 0 || Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString();
 }
 
 function asString(value: unknown): string | undefined {
