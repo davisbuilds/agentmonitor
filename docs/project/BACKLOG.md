@@ -75,9 +75,8 @@ hold the detailed history. Do not keep a resolved section here.
   surfaces `laguna-s-2.1` and `nemotron-3-ultra` as unpriced (billed null, loud
   non-zero exit) in current runs.
 - **Why it matters / evidence**: `laguna-s-2.1` is routed `:free` in
-  `_forks/openbench/obench/bridge/config.yaml` yet the fork's root `prices.json`
-  lists 0.1/0.2 — free-vs-paid is genuinely ambiguous, so a rate was **not**
-  guessed. `nemotron-3-ultra` has no authoritative source in the fork at all.
+  the comparator harness's own bridge config yet its root `prices.json` lists
+  0.1/0.2 — free-vs-paid is genuinely ambiguous, so a rate was **not** guessed. `nemotron-3-ultra` has no authoritative source in the fork at all.
 - **Next / Revisit when**: these models re-enter a run whose costs matter. Confirm
   the tier (free → 0, or the paid OpenRouter rate) from a live
   `openrouter.ai/api/v1/models` pull, then add entries to
@@ -250,9 +249,9 @@ the build.
   a cross-repo clone-mining report flagged that `agentsview` ships this exact
   pattern — a *disposable sibling* SQLite DB (`usage-cache-vX.db`) holding unpriced
   message facts + timezone-aware daily rollups + narrow dedup exceptions, giving
-  sub-15ms overview queries without touching the authoritative archive (report:
-  `~/Dev/tokenmaxxing/research/reports/clone-pattern-mining-agentsview-2026-09-13.md`,
-  pattern 2; agentsview `internal/db/usage_cache_schema.go`). Worth a look when
+  sub-15ms overview queries without touching the authoritative archive (report
+  pattern 2, held outside this repository; agentsview
+  `internal/db/usage_cache_schema.go`). Worth a look when
   building the derived store — the disposable-sibling framing (rebuildable, never
   authoritative) directly addresses the rebuild/recovery and parity concerns above.
 
@@ -406,10 +405,10 @@ the build.
   `sessionId`. Parent and child therefore mint identical ids for the same line
   number, and `insertEvent` returns early on an existing `event_id` — so
   whichever file imports second has those events silently dropped.
-- **Why or evidence**: measured 2026-09-22 on a local session — **267 of 267**
-  child-agent events collided with parent ids, dropping 7.2M tokens for that one
-  session. The live store shows 284 rows the usage repair flags as
-  `rows_ambiguous` for the same reason. This is an under-count in the opposite
+- **Why or evidence**: measured 2026-09-22 — **every** child-agent event in a
+  sampled session collided with a parent id, so none of that session's delegated
+  usage was ever stored. A local store shows a small population of rows the
+  usage repair flags as `rows_ambiguous` for the same reason. This is an under-count in the opposite
   direction from the per-content-block over-count fixed in this branch, and the
   two do not cancel: they hit different sessions by different amounts. Surfaced
   by Codex review on PR #137.
@@ -420,20 +419,43 @@ the build.
   deliberate plan — id-derivation version marker, or a one-time remap — not a
   drive-by edit. Related: [Consistent session identity](#consistent-session-identity-and-parentchild-coverage-across-read-surfaces).
 
+#### Codex event ids are positional, and a change to the emitted set re-keys history
+- **What**: `src/import/codex.ts` derives ids from a counter over *emitted*
+  events. Changing which events are emitted re-keys every stored row, so the
+  next import stops matching them and duplicates the history. Unlike the Claude
+  importer there is no legacy-id bridge to absorb such a change.
+- **Why or evidence**: measured 2026-09-22 while evaluating a switch to the
+  producer's `ordinal`, which was **rejected** — the counter advances only on
+  emitted events, so noise lines do not shift ids (verified byte-identical
+  against a noisy fixture), the producer ordinal and computed index agree across
+  120 real rollouts, and no rollout shares a `session_meta` id, so Codex has no
+  collision to fix. Switching would have re-keyed every stored Codex import row
+  for no measured gain. Two mutation-tested guards now make an accidental change loud:
+  `skipped, malformed and zero-delta lines do not shift later event ids` and
+  `pins the Codex event-id derivation against accidental re-keying`.
+- **Revisit when**: Codex starts rewriting or compacting rollout files, or a
+  derivation change becomes genuinely necessary. Either way it needs a legacy-id
+  bridge first, mirroring `src/import/index.ts`'s ownership rule; do not simply
+  update the pinned expectation.
+
 #### Imported Claude rows with no surviving transcript stay inflated
 - **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
   per-content-block billing fix) can only correct rows whose transcript still
   exists. Rows whose source file is gone keep the inflated usage the old
   importer wrote.
-- **Why or evidence**: a dry run on the development store (2026-09-22, after
-  ids moved onto the producer's `uuid`) reported 83,147 matched rows, 14,857
-  correctable ($2,451 and 3.6B tokens reclaimed), 284 ambiguous, and **75,195
-  rows with no surviving transcript**. A separate estimate that groups
-  identical usage tuples within a session put total inflation near $8.2k, so
-  roughly $5.7k sits in rows with no local evidence left to check them against.
-  Historical cost views stay wrong by an unknown-but-bounded amount.
-- **Next / Revisit when**: decide deliberately between three options — leave and
-  disclose (cheapest, but every historical cost view silently overstates), a
+- **Why or evidence**: the repair was **applied** on a local store 2026-09-22
+  and corrected roughly one matched row in six, re-deriving a summary per
+  affected session. What it could not reach remains: a small set of ambiguous
+  rows, and **a large majority of pre-fix imported rows whose transcript is
+  gone** — several times the repairable population. A separate estimate that groups
+  identical usage tuples within a session suggested the reachable repair
+  recovers only about a third of the total inflation, leaving the rest in rows
+  with no local evidence left to check them against. Historical cost views stay
+  wrong by an unknown-but-bounded amount.
+- **Next / Revisit when**: now the only remaining inflation, so this is the whole
+  question rather than part of it. Decide deliberately between three options —
+  leave and disclose (cheapest, but every historical cost view silently
+  overstates), a
   heuristic collapse of identical `(session, timestamp, usage)` tuples (recovers
   most of the remainder but *will* over-collapse genuinely identical turns, so
   it trades a known overstatement for an unmeasured understatement), or a
@@ -738,9 +760,9 @@ the build.
 ### Cross-repo pattern-mining candidates (agentsview, 2026-09-13)
 
 Flagged by a clone-mining report comparing `agentsview` (a Go/Svelte local
-AI-agent session aggregator — same archetype as agentmonitor) against this repo:
-`~/Dev/tokenmaxxing/research/reports/clone-pattern-mining-agentsview-2026-09-13.md`.
-The report is agent-generated and was **not** independently verified against
+AI-agent session aggregator — same archetype as agentmonitor) against this repo.
+The report is held outside this repository and is agent-generated; it was **not**
+independently verified against
 agentmonitor's current code, so each item below is a **hypothesis to confirm**
 before acting — the cited agentmonitor files/pains are the report's claims.
 

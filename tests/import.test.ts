@@ -541,6 +541,76 @@ describe('Codex log parser', () => {
     assert.ok(Math.abs((tokenEvent.cost_usd as number) - 0.812) < 0.0001);
   });
 
+  test('skipped, malformed and zero-delta lines do not shift later event ids', () => {
+    // Codex ids are positional, but the counter advances only when an event is
+    // actually emitted, so anything the importer passes over leaves later ids
+    // untouched. That is what makes the positional scheme safe to keep here,
+    // unlike Claude's, where a child transcript reused the parent's session.
+    const meta = {
+      type: 'session_meta',
+      timestamp: '2026-02-01T11:00:00Z',
+      payload: { id: 'cdx-ordinal-noise', cwd: '/p', timestamp: '2026-02-01T11:00:00Z' },
+    };
+    const tokenCount = (minute: number, input: number, output: number) => ({
+      type: 'event_msg',
+      timestamp: `2026-02-01T11:0${minute}:00Z`,
+      payload: { type: 'token_count', info: { total_token_usage: { input_tokens: input, output_tokens: output } } },
+    });
+
+    const clean = writeJsonl('cdx-noise-clean.jsonl', [meta, tokenCount(1, 100, 10), tokenCount(2, 200, 20)]);
+
+    const noisyPath = path.join(tmpDir, 'cdx-noise-dirty.jsonl');
+    fs.writeFileSync(noisyPath, [
+      JSON.stringify(meta),
+      JSON.stringify(tokenCount(1, 100, 10)),
+      '{ this is not json',
+      '',
+      JSON.stringify({ type: 'some_future_record', payload: { x: 1 } }),
+      JSON.stringify(tokenCount(2, 100, 10)), // zero delta: emitted nothing
+      JSON.stringify(tokenCount(3, 200, 20)),
+    ].join('\n'));
+
+    const idsOf = (file: string) => parseCodexFile(file)
+      .filter(event => event.event_type === 'llm_response')
+      .map(event => event.event_id);
+
+    assert.deepEqual(idsOf(noisyPath), idsOf(clean));
+  });
+
+  test('pins the Codex event-id derivation against accidental re-keying', () => {
+    // These literals are deliberate. Codex event ids are derived from a counter
+    // over emitted events, so changing WHICH events are emitted silently re-keys
+    // every stored row: on the next import the old rows no longer match and the
+    // whole history duplicates. 73,963 import-cdx- rows carry these ids today.
+    // If this test fails, the derivation changed — that needs a legacy-id bridge
+    // like the Claude importer's, not a new expected value here.
+    const filePath = writeJsonl('cdx-id-pin.jsonl', [
+      {
+        type: 'session_meta',
+        timestamp: '2026-02-01T11:00:00Z',
+        payload: { id: 'sess-ord', cwd: '/p', timestamp: '2026-02-01T11:00:00Z' },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T11:01:00Z',
+        payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100, output_tokens: 10 } } },
+      },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T11:02:00Z',
+        payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 200, output_tokens: 20 } } },
+      },
+    ]);
+
+    const ids = parseCodexFile(filePath)
+      .filter(event => event.event_type === 'llm_response')
+      .map(event => event.event_id);
+    assert.deepEqual(ids, [
+      'import-cdx-e1fd5253737221ab00979a1130d978b7',
+      'import-cdx-2fac3397d00a64ddee4b15772656ad37',
+    ]);
+  });
+
   test('attributes each Codex token delta to the model in the active turn context', () => {
     fs.writeFileSync(path.join(tmpDir, 'config.toml'), 'model = "gpt-5.6-sol"\n');
 

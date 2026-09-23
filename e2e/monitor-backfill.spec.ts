@@ -72,7 +72,7 @@ test.beforeAll(async () => {
     'arch/codex-telemetry-convergence',
     'agentmonitor',
     `${seedDay} 11:45:00`,
-    JSON.stringify({ file_path: '/Users/dg-mac-mini/Dev/agentmonitor/README.md', lines_added: 12 }),
+    JSON.stringify({ file_path: '/Users/example/Dev/agentmonitor/README.md', lines_added: 12 }),
     0.75,
     'api',
   );

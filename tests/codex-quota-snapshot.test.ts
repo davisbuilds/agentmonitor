@@ -52,7 +52,7 @@ test('fetchCodexQuotaSnapshot parses rate limits from the JSON-RPC peer', async 
         },
         emitStdout: (write) => {
           write('{"id":1,"result":{"userAgent":"fake"}}');
-          write('{"id":2,"result":{"account":{"email":"ndgee7@gmail.com","planType":"plus"}}}');
+          write('{"id":2,"result":{"account":{"email":"operator@example.com","planType":"plus"}}}');
           write(
             '{"id":3,"result":{"rateLimits":{"limitId":"codex","limitName":null,"primary":{"usedPercent":24,"windowDurationMins":300,"resetsAt":1780063813},"secondary":{"usedPercent":57,"windowDurationMins":10080,"resetsAt":1780188058},"credits":{"hasCredits":true,"unlimited":false,"balance":"825.62"},"planType":"plus","rateLimitReachedType":null}}}',
           );
@@ -62,7 +62,7 @@ test('fetchCodexQuotaSnapshot parses rate limits from the JSON-RPC peer', async 
 
   assert.equal(snapshot.status, 'available');
   assert.equal(snapshot.provider, 'codex');
-  assert.equal(snapshot.account_label, 'ndgee7@gmail.com');
+  assert.equal(snapshot.account_label, 'operator@example.com');
   assert.equal(snapshot.plan_type, 'plus');
   assert.equal(snapshot.limit_id, 'codex');
   assert.equal(snapshot.primary?.used_percent, 24);

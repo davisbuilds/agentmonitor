@@ -45,7 +45,7 @@ function makeEventRow(overrides: Partial<EventRow> & Pick<EventRow, 'id' | 'sess
     tokens_in: overrides.tokens_in ?? 0,
     tokens_out: overrides.tokens_out ?? 0,
     branch: overrides.branch ?? null,
-    project: overrides.project ?? '/Users/dg-mac-mini/Dev/agentmonitor',
+    project: overrides.project ?? '/Users/example/Dev/agentmonitor',
     duration_ms: overrides.duration_ms ?? null,
     created_at: overrides.created_at ?? '2026-03-24 12:00:00',
     client_timestamp: overrides.client_timestamp ?? '2026-03-24T12:00:00.000Z',

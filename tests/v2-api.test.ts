@@ -160,7 +160,7 @@ before(async () => {
       payload: {
         id: '019d0000-0000-0000-0000-000000000001',
         timestamp: '2026-03-08T11:00:00Z',
-        cwd: '/Users/dg-mac-mini/Dev/agentmonitor',
+        cwd: '/Users/example/Dev/agentmonitor',
       },
     },
     {
@@ -170,8 +170,8 @@ before(async () => {
         type: 'function_call',
         name: 'exec_command',
         arguments: JSON.stringify({
-          cmd: "sed -n '1,220p' /Users/dg-mac-mini/.agents/skills/first-principles/SKILL.md",
-          workdir: '/Users/dg-mac-mini/Dev/agentmonitor',
+          cmd: "sed -n '1,220p' /Users/example/.agents/skills/first-principles/SKILL.md",
+          workdir: '/Users/example/Dev/agentmonitor',
         }),
       },
     },
@@ -220,8 +220,8 @@ before(async () => {
     metadata: {
       otel_event_name: 'codex.tool_result',
       arguments: {
-        cmd: "sed -n '1,220p' /Users/dg-mac-mini/.agents/skills/brainstorming/SKILL.md",
-        workdir: '/Users/dg-mac-mini/Dev/agentmonitor',
+        cmd: "sed -n '1,220p' /Users/example/.agents/skills/brainstorming/SKILL.md",
+        workdir: '/Users/example/Dev/agentmonitor',
       },
     },
     source: 'otel',

@@ -251,10 +251,37 @@ derived from the transcript line's own `uuid`, and the positional id every row
 imported before that change still carries. A row keyed the old way is therefore
 still repairable.
 
-On the development store at the time of the fix, 14,857 of 83,147 matched rows
-were correctable, 284 were ambiguous, and 75,195 rows had no surviving
-transcript — so a repaired database can still carry inflated historical cost
-that no local evidence can settle.
+Recovering child-agent usage that the old id scheme dropped is a separate step,
+and it must precede the repair:
+
+```sh
+amon import --source claude-code --force   # recover, then repair
+```
+
+`import_state` records those transcripts as seen, so only `--force` revisits
+them. Expect totals to **rise** here: this imports events that were never
+stored.
+
+Both were exercised on a local store on 2026-09-22, after a validated backup and
+a full rehearsal on a copy of it. Expected shape, which is what to check against
+your own run rather than a specific total:
+
+- the forced import bridges the overwhelming majority of events as duplicates
+  and imports only the child-agent rows that the old scheme dropped;
+- the repair corrects roughly one matched row in six, reclaiming the usage those
+  repeat lines double-counted, and re-derives a summary per affected session;
+- a second run of either is a no-op, and `PRAGMA integrity_check` stays `ok`.
+
+Both ran safely with the server live, so stopping it is not required; a backup
+still is.
+
+The repair cannot reach two classes of row, so a repaired database still carries
+inflated historical cost that no local evidence can settle. The report counts
+them separately: `rows_ambiguous` (an id claimed by more than one transcript)
+and `rows_without_transcript` (the source file is gone). On the store used
+above the second class was the large majority of pre-fix imported rows —
+unrepairable evidence typically outnumbers repairable by several times over,
+because event history outlives the transcripts it came from.
 
 ## Trace-Quality Reclaim
 

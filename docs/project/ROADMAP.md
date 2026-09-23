@@ -10,6 +10,19 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Imported event identity (2026-09-22, PRs #137-#139):** Claude Code imports
+  bill one event per assistant turn rather than one per content block, and
+  imported events are keyed on the transcript line's own identifier instead of
+  its position. A child-agent transcript reports its parent's session, so the old
+  positional scheme minted colliding ids and dropped delegated-agent usage
+  entirely; those events now import, attributed to the parent conversation and
+  tagged with their agent. Rows imported under the old scheme keep deduplicating
+  through an ownership rule rather than a migration. `amon costs
+  repair-claude-usage` corrects already-stored inflation and re-derives affected
+  session summaries; rows whose transcript is gone are reported, not guessed at.
+  Codex ids were measured and deliberately left positional, with two guards
+  against accidental re-keying.
+
 - **Daily activity accounting (2026-09-16):** an aggregate-only read distinguishes
   daily active conversations, delegated agents, internal jobs and unclassified
   evidence. Codex native lineage and creation time survive parsing; retained
