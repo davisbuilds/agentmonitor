@@ -288,6 +288,19 @@ export function listObservedSessions(params: { limit?: number; offset?: number; 
 /** Distinct identities with dated work, not sessions created or interval interpolation.
  * Fixed New York day contract; callers collect at most 31 days per request.
  */
+/** Rows daily activity may examine before it refuses rather than return a partial count. */
+export const DAILY_ACTIVITY_EVIDENCE_LIMIT = 200_000;
+let dailyActivityEvidenceLimitOverride: number | null = null;
+
+/**
+ * Lower the evidence cap for a test; null restores it. Exceeding the real cap
+ * takes 200k rows, and inserting that many blocks an in-process test server
+ * past its keep-alive timeout, which resets the next request on slow runners.
+ */
+export function setDailyActivityEvidenceLimitForTests(limit: number | null): void {
+  dailyActivityEvidenceLimitOverride = limit;
+}
+
 export function getDailyConversationActivity(since: string, until: string) {
   const db = getDb();
   const from = localDayStart(since);
@@ -326,12 +339,13 @@ export function getDailyConversationActivity(since: string, until: string) {
       ${activityClass} AS activity_class, e.instant
       FROM evidence e LEFT JOIN browser b ON b.agent=e.agent AND b.session_id=e.session_id
       WHERE (e.instant IS NULL OR b.instant IS NULL OR e.instant >= b.instant)
-      LIMIT 200001`;
+      LIMIT ?`;
   const groups = new Map<string, Set<string>>();
   let examined = 0;
   let unresolved = 0;
-  for (const row of db.prepare(query).iterate(from, through, from, through) as Iterable<{ id: string; agent: string; activity_class: string; instant: string | null }>) {
-    if (++examined > 200000) throw new Error('Activity evidence limit exceeded; narrow the window');
+  const limit = dailyActivityEvidenceLimitOverride ?? DAILY_ACTIVITY_EVIDENCE_LIMIT;
+  for (const row of db.prepare(query).iterate(from, through, from, through, limit + 1) as Iterable<{ id: string; agent: string; activity_class: string; instant: string | null }>) {
+    if (++examined > limit) throw new Error('Activity evidence limit exceeded; narrow the window');
     if (row.instant === null) { unresolved++; continue; }
     const day = localDayOf(row.instant);
     if (!day) { unresolved++; continue; }

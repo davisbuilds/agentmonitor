@@ -145,13 +145,23 @@ test('dense historical evidence is excluded from empty windows and capped withou
   const { getDb } = await import('../src/db/connection.js');
   const db = getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
-  const insert = db.prepare(`INSERT INTO events(session_id,agent_type,event_type,source,client_timestamp)
-    VALUES ('dense-history','codex','user_prompt','api','2024-01-01T12:00:00Z')`);
-  db.transaction(() => { for (let i = 0; i < 200005; i++) insert.run(); })();
-  const empty = await fetch(`${base}/api/v2/activity/daily?since=2024-02-01&until=2024-02-01`);
-  assert.equal(empty.status, 200);
-  assert.deepEqual((await empty.json()).data, []);
-  const dense = await fetch(`${base}/api/v2/activity/daily?since=2024-01-01&until=2024-01-01`);
-  assert.equal(dense.status, 503);
-  assert.equal((await dense.json()).code, 'activity_unavailable');
+  const q = await import('../src/db/v2-queries.js');
+  assert.equal(q.DAILY_ACTIVITY_EVIDENCE_LIMIT, 200_000);
+  // Exceed a lowered cap rather than the real one: 200k inserts block this
+  // in-process server past its keep-alive timeout and reset the next fetch.
+  const limit = 100;
+  q.setDailyActivityEvidenceLimitForTests(limit);
+  try {
+    const insert = db.prepare(`INSERT INTO events(session_id,agent_type,event_type,source,client_timestamp)
+      VALUES ('dense-history','codex','user_prompt','api','2024-01-01T12:00:00Z')`);
+    db.transaction(() => { for (let i = 0; i < limit + 5; i++) insert.run(); })();
+    const empty = await fetch(`${base}/api/v2/activity/daily?since=2024-02-01&until=2024-02-01`);
+    assert.equal(empty.status, 200);
+    assert.deepEqual((await empty.json()).data, []);
+    const dense = await fetch(`${base}/api/v2/activity/daily?since=2024-01-01&until=2024-01-01`);
+    assert.equal(dense.status, 503);
+    assert.equal((await dense.json()).code, 'activity_unavailable');
+  } finally {
+    q.setDailyActivityEvidenceLimitForTests(null);
+  }
 });

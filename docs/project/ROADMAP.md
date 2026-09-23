@@ -18,7 +18,11 @@ pull requests; current behavior belongs to the system references.
   malformed OTLP timestamps no longer throw. Also fixed: hooks now work in repos
   with no commits, a full `costs recalc` keeps captured benchmark costs,
   `formatNumber` moves to the next unit when rounding reaches 1000, and each
-  Antigravity generation is timestamped and priced at its own time.
+  Antigravity generation is timestamped and priced at its own time. The most
+  frequent CI flake is fixed at its measured cause: 200k synchronous inserts
+  blocked the in-process test server past Node's 5s keep-alive timeout, so
+  the next `fetch` reused a dead socket. The test now lowers the evidence cap
+  instead.
 
 - **Local-time days (2026-09-23, PR #142):** every user-facing day is a local
   day in one reporting zone (`AGENTMONITOR_TIMEZONE`, default the host's).
