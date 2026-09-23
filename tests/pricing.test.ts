@@ -260,6 +260,15 @@ describe('PricingRegistry', () => {
       assert.notEqual(c.tier, 'standard');
     });
 
+    test('classifies GPT-6 Sol and Luna by tier, apart from their GPT-5.6 namesakes', () => {
+      for (const [model, tier] of [['gpt-6-sol', 'sol'], ['gpt-6-luna', 'luna']] as const) {
+        const c = classifyModel(model);
+        assert.equal(c.canonical_model, model, 'resolves to its own rate card, not a 5.6 alias');
+        assert.equal(c.tier, tier);
+        assert.equal(c.pricing_status, 'known');
+      }
+    });
+
     test('classifies Claude Fable 5 as a known anthropic/fable tier', () => {
       const c = classifyModel('claude-fable-5');
       assert.equal(c.provider, 'anthropic');
@@ -572,6 +581,8 @@ describe('PricingRegistry', () => {
     test('GPT tiers bill cache writes at their documented rate and apply long-context rates above 272K', () => {
       const cases = [
         { model: 'gpt-6-astra', base: [10, 50, 1, 12.5], long: [20, 75, 2, 25] },
+        { model: 'gpt-6-sol', base: [2, 10, 0.2, 2.5], long: [4, 15, 0.4, 5] },
+        { model: 'gpt-6-luna', base: [0.1, 0.5, 0.01, 0.125], long: [0.2, 0.75, 0.02, 0.25] },
         { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 5], long: [10, 45, 1, 10] },
         { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 2], long: [4, 18, 0.4, 4] },
         { model: 'gpt-5.6-luna', base: [0.2, 1.2, 0.02, 0.2], long: [0.4, 1.8, 0.04, 0.4] },
