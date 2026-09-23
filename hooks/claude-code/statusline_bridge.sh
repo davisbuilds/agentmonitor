@@ -7,6 +7,8 @@ AGENTMONITOR_URL="${AGENTMONITOR_URL:-http://127.0.0.1:3141}"
 
 payload="$(cat)"
 
+# Fire and forget: the statusline renders on every update, so a slow server
+# must never delay it. Detached from our stdout, which the agent waits on.
 if [[ -n "$payload" ]]; then
   curl -fsS \
     -m 1 \
@@ -14,7 +16,7 @@ if [[ -n "$payload" ]]; then
     -H 'Content-Type: application/json' \
     --data-binary "$payload" \
     "$AGENTMONITOR_URL/api/provider-quotas/claude/statusline" \
-    >/dev/null 2>&1 || true
+    </dev/null >/dev/null 2>&1 &
 fi
 
 if [[ -f "$FORWARD_FILE" ]]; then

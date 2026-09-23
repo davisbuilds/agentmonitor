@@ -193,11 +193,24 @@ function enrichWithOrderedObservations(
   }
 }
 
+function increment(counts: Map<string, number>, key: string): void {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+/** Consume one count for `key`; false when none remain. */
+function take(counts: Map<string, number>, key: string): boolean {
+  const remaining = counts.get(key) ?? 0;
+  if (remaining === 0) return false;
+  counts.set(key, remaining - 1);
+  return true;
+}
+
 /**
  * Canonical phase-1 invocation selection.
  *
- * Codex OTEL rows suppress JSONL rows only after the OTEL row passes project
- * and date filters and yields at least one concrete skill path. This matches
+ * Codex OTEL reads suppress JSONL reads of the same skill in the same session,
+ * one for one, and only after the OTEL row passes project and date filters and
+ * yields at least one concrete skill path. This matches
  * health's historical behavior and intentionally corrects daily's old
  * out-of-window suppression bug.
  */
@@ -315,7 +328,11 @@ export function selectSkillInvocationOccurrences(
       metadata: string | null;
     }>;
 
-    const codexSessionsWithEvents = new Set<string>();
+    // OTEL is authoritative per (session, skill): JSONL contributes only the
+    // reads OTEL did not report. Suppressing by session alone dropped every
+    // JSONL-only skill in a session with any OTEL skill read.
+    const otelReadsBySkill = new Map<string, number>();
+    const otelReadsByCommand = new Map<string, number>();
     for (const row of eventRows) {
       if (params.project && row.project !== params.project) continue;
       if (!row.timestamp || !isDateWithinRange(localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10), params)) continue;
@@ -324,9 +341,10 @@ export function selectSkillInvocationOccurrences(
       const skillNames = extractCodexSkillNamesFromCommand(command);
       if (skillNames.length === 0) continue;
       const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
-      codexSessionsWithEvents.add(canonicalSessionId);
       const commandFingerprint = fingerprintCodexCommand(command);
       for (const skillName of skillNames) {
+        increment(otelReadsBySkill, `${canonicalSessionId}|${skillName}`);
+        increment(otelReadsByCommand, `${canonicalSessionId}|${skillName}|${commandFingerprint}`);
         occurrences.push({
           skillName,
           timestamp: row.timestamp,
@@ -385,16 +403,16 @@ export function selectSkillInvocationOccurrences(
       input_json: string | null;
     }>;
 
+    const jsonlReads: Array<typeof occurrences[number] & { matched: boolean }> = [];
     for (const row of jsonlRows) {
-      const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
-      if (codexSessionsWithEvents.has(canonicalSessionId)) continue;
       if (params.project && row.project !== params.project) continue;
       if (!row.timestamp || !isDateWithinRange(localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10), params)) continue;
       const command = extractCodexCommandFromInputJson(row.input_json);
       if (!command) continue;
+      const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
       const commandFingerprint = fingerprintCodexCommand(command);
       for (const skillName of extractCodexSkillNamesFromCommand(command)) {
-        occurrences.push({
+        jsonlReads.push({
           skillName,
           timestamp: row.timestamp,
           project: row.project,
@@ -405,8 +423,24 @@ export function selectSkillInvocationOccurrences(
           toolUseId: null,
           detectionSource: 'codex_jsonl',
           commandFingerprint,
+          matched: false,
         });
       }
+    }
+
+    // Pair exact command matches first, then spend any remaining OTEL reads of
+    // the same skill on the rest. The command text alone is not identity: newer
+    // rollouts record `exec` as JS wrapping the command OTEL reports bare.
+    for (const read of jsonlReads) {
+      const skillKey = `${read.canonicalSessionId}|${read.skillName}`;
+      if (take(otelReadsByCommand, `${skillKey}|${read.commandFingerprint}`)) {
+        take(otelReadsBySkill, skillKey);
+        read.matched = true;
+      }
+    }
+    for (const { matched, ...read } of jsonlReads) {
+      if (matched || take(otelReadsBySkill, `${read.canonicalSessionId}|${read.skillName}`)) continue;
+      occurrences.push(read);
     }
   }
 

@@ -1,11 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    fetchBrowsingSessions,
-    fetchV2Projects,
-    fetchV2Agents,
-    type BrowsingSession,
-  } from '../../api/client';
+  import { fetchV2Projects, fetchV2Agents } from '../../api/client';
   import { timeAgo, agentHexColor } from '../../format';
   import { getSessionPreviewText } from '../../session-text';
   import {
@@ -13,16 +8,12 @@
     getPendingSessionNavigationVersion,
   } from '../../stores/router.svelte';
   import { buildSessionsHash, parseSessionsHash } from '../../route-state';
+  import { SessionList } from '../../stores/session-list.svelte';
   import SessionViewer from './SessionViewer.svelte';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import { SectionHeader, Select, Badge, EmptyState, Button } from '../ui';
 
-  let sessions = $state<BrowsingSession[]>([]);
-  let total = $state(0);
-  let loading = $state(true);
-  let error = $state<string | null>(null);
-  let cursor = $state<string | undefined>();
-  let hasMore = $state(false);
+  const list = new SessionList();
 
   // Filters
   let projects = $state<string[]>([]);
@@ -35,7 +26,6 @@
   let selectedMessageOrdinal = $state<number | null>(null);
   let previousSelections = $state<Array<{ sessionId: string; messageOrdinal: number | null }>>([]);
 
-  const PAGE_SIZE = 25;
   const pendingNavigationVersion = $derived(getPendingSessionNavigationVersion());
 
   function currentRouteState() {
@@ -113,44 +103,18 @@
     filterProject = next.project;
     filterAgent = next.agent;
     applyRouteSelection(next.sessionId, next.messageOrdinal);
-    if (filtersChanged && shouldLoadSessions) {
-      cursor = undefined;
-      void loadSessions();
-    }
+    if (filtersChanged && shouldLoadSessions) void loadSessions();
   }
 
-  async function loadSessions(append = false) {
-    loading = true;
-    error = null;
-    try {
-      const params: Record<string, string | number> = { limit: PAGE_SIZE, exclude_empty: 'true' };
-      if (filterProject) params.project = filterProject;
-      if (filterAgent) params.agent = filterAgent;
-      if (append && cursor) params.cursor = cursor;
-
-      const res = await fetchBrowsingSessions(params);
-      if (append) {
-        sessions = [...sessions, ...res.data];
-      } else {
-        sessions = res.data;
-      }
-      total = res.total;
-      cursor = res.cursor;
-      hasMore = !!res.cursor && res.data.length === PAGE_SIZE;
-    } catch (err) {
-      console.error('Failed to load sessions:', err);
-      error = 'Failed to load sessions. Check that the server is running.';
-    } finally {
-      loading = false;
-    }
+  function loadSessions(append = false) {
+    return list.load({ project: filterProject, agent: filterAgent, append });
   }
 
   function handleFilterChange() {
-    cursor = undefined;
     previousSelections = [];
     selectSessionState(null, null);
     syncHash(true);
-    loadSessions();
+    void loadSessions();
   }
 
   function selectSession(id: string) {
@@ -202,7 +166,7 @@
 {:else}
   <main class="flex-1 min-h-0 overflow-hidden flex flex-col p-4 sm:p-6">
     <!-- Filters -->
-    <SectionHeader title="Sessions" count={`${total} total`}>
+    <SectionHeader title="Sessions" count={`${list.total} total`}>
       {#snippet actions()}
         <Select
           bind:value={filterProject}
@@ -224,7 +188,7 @@
     <!-- Session List -->
     <div class="min-h-0 flex-1 overflow-y-auto">
       <div class="divide-y divide-line/60">
-        {#each sessions as session (session.id)}
+        {#each list.sessions as session (session.id)}
           <button
             class="group w-full rounded-sm px-2 py-2.5 text-left transition-colors hover:bg-surface"
             onclick={() => selectSession(session.id)}
@@ -254,22 +218,22 @@
         {/each}
       </div>
 
-      {#if loading}
+      {#if list.loading}
         <div class="py-8 text-center text-meta text-text-muted">Loading sessions…</div>
-      {:else if error}
-        <EmptyState title={error}>
+      {:else if list.error}
+        <EmptyState title={list.error}>
           {#snippet action()}
             <Button variant="neutral" size="sm" onclick={() => loadSessions()}>Retry</Button>
           {/snippet}
         </EmptyState>
-      {:else if sessions.length === 0}
+      {:else if list.sessions.length === 0}
         <EmptyState
           title="No sessions found."
           description="Sessions are discovered from ~/.claude/projects/ JSONL files."
         />
       {/if}
 
-      {#if hasMore && !loading}
+      {#if list.hasMore && !list.loading}
         <div class="py-3 text-center">
           <Button variant="ghost" size="sm" onclick={() => loadSessions(true)}>Load more</Button>
         </div>
