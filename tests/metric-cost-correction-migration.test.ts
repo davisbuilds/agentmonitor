@@ -20,12 +20,12 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-function insert(eventId: string, tokensIn: number, cost: number, metadata: string): void {
+function insert(eventId: string, tokensIn: number, cost: number, metadata: string, sessionId = 's-metric', createdAt = '2026-09-04 20:33:44'): void {
   getDb().prepare(`
     INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out,
-      model, cost_usd, source, metadata)
-    VALUES (?, 's-metric', 'claude_code', 'llm_response', 'success', ?, 0, 'claude-sonnet-5', ?, 'otel', ?)
-  `).run(eventId, tokensIn, cost, metadata);
+      model, cost_usd, source, metadata, created_at)
+    VALUES (?, ?, 'claude_code', 'llm_response', 'success', ?, 0, 'claude-sonnet-5', ?, 'otel', ?, ?)
+  `).run(eventId, sessionId, tokensIn, cost, metadata, createdAt);
 }
 
 test('v10 clears the table estimate a Claude token metric row billed on top of the cost metric', () => {
@@ -34,6 +34,10 @@ test('v10 clears the table estimate a Claude token metric row billed on top of t
   insert('metric-tokens', 1_000_000, 2, metric);
   insert('metric-cost', 0, 1.75, metric);
   insert('log-usage', 1_000_000, 2, '{}');
+  // Token-only exports: no cost metric arrived, so the estimate is the only cost.
+  insert('tokens-only', 1_000_000, 2, metric, 's-tokens-only');
+  // A cost metric from another export interval does not cover this token row.
+  insert('other-interval', 1_000_000, 2, metric, 's-metric', '2026-09-04 21:00:00');
 
   db.pragma('user_version = 9');
   runDataMigrations(db);
@@ -44,5 +48,7 @@ test('v10 clears the table estimate a Claude token metric row billed on top of t
   assert.deepEqual(rows['metric-tokens'], [0, 'reported']);
   assert.deepEqual(rows['metric-cost'], [1.75, null], 'the reported cost itself is untouched');
   assert.deepEqual(rows['log-usage'], [2, null], 'rows outside the metric path are untouched');
+  assert.deepEqual(rows['tokens-only'], [2, null], 'no companion cost metric, so the estimate stays');
+  assert.deepEqual(rows['other-interval'], [2, null], 'a cost metric from another interval does not cover it');
   assert.equal(db.pragma('user_version', { simple: true }), 10);
 });

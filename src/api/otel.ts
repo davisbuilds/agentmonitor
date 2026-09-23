@@ -127,8 +127,11 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
   // Token/cost usage metrics (Claude Code OTEL) → synthetic llm_response, so the
   // existing event pipeline aggregates tokens/cost per session. Codex token/cost
   // metrics are deliberately not here — logs are authoritative (see parser).
-  // Claude reports cost on its own cost metric, so a token row's cost is a
-  // reported zero rather than a table estimate that would bill the usage twice.
+  // Claude reports cost on its own cost metric, exported in the same batch as
+  // the token metric. Where the batch carries that cost for a session and model,
+  // the token rows' cost is a reported zero, since an estimate would bill the
+  // usage twice. A token-only export has no reported cost, so it is estimated.
+  const reportedCost = new Set(usage.filter(d => d.cost_usd_delta > 0).map(d => `${d.session_id}|${d.model ?? ''}`));
   const admission = new OtlpAdmission();
   admission.refuse(refused.count, `${refused.metrics.join(', ')} value must be a finite non-negative number`);
   for (const delta of usage) {
@@ -142,7 +145,9 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
       tokens_out: delta.tokens_out_delta,
       cache_read_tokens: delta.cache_read_delta,
       cache_write_tokens: delta.cache_write_delta,
-      cost_usd: delta.cost_usd_delta,
+      cost_usd: delta.cost_usd_delta > 0 || reportedCost.has(`${delta.session_id}|${delta.model ?? ''}`)
+        ? delta.cost_usd_delta
+        : undefined,
       model: delta.model,
       metadata: { _synthetic: true, _source: 'otel_metric' },
       source: 'otel',

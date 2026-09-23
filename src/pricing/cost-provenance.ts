@@ -31,8 +31,8 @@ function sameCost(a: number, b: number): boolean {
 /**
  * Label cost rows written before provenance was recorded. Returns rows labelled.
  *
- * Producers that never send a cost (the Codex and Antigravity importers, Codex
- * OTEL) wrote estimates, even where a later rate correction means the stored
+ * Producers that never send a cost (the Codex and Antigravity importers) wrote
+ * estimates, even where a later rate correction means the stored
  * value no longer matches the tables. A benchmark cost is the captured bill.
  * Everywhere else a producer may have sent its own figure, and the row does not
  * say whether it did, so a cost equal to what the tables give at the event's
@@ -46,8 +46,7 @@ export function attributeCostSources(db: Database): number {
     let labelled = db.prepare(`
       UPDATE events SET cost_source = 'estimated'
       WHERE ${UNATTRIBUTED}
-        AND ((source = 'import' AND agent_type IN ('codex', 'antigravity'))
-          OR (source = 'otel' AND agent_type = 'codex'))
+        AND source = 'import' AND agent_type IN ('codex', 'antigravity')
     `).run().changes;
     labelled += db.prepare(`
       UPDATE events SET cost_source = 'reported' WHERE ${UNATTRIBUTED} AND source = 'benchmark'

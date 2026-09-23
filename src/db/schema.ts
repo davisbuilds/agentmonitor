@@ -1031,8 +1031,9 @@ export function runDataMigrations(db: Database): void {
  * v10 — Claude Code exports token counts and cost as separate metrics, and each
  * became its own synthetic event. The token rows were also priced from our
  * tables, so the same usage was billed once as Claude's reported cost and again
- * as our estimate. A token row's cost is now a reported zero; correct the rows
- * stored before that.
+ * as our estimate. Clear the estimate only where the reported cost is there: a
+ * cost-metric row for the same session and model from the same export (stored
+ * within seconds). A token-only export keeps its estimate, its only cost.
  */
 function clearMetricTokenRowEstimates(db: Database): void {
   const hasEvents = db.prepare(
@@ -1045,6 +1046,17 @@ function clearMetricTokenRowEstimates(db: Database): void {
       AND json_extract(metadata, '$._source') = 'otel_metric'
       AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
       AND cost_usd IS NOT NULL AND cost_usd != 0
+      AND EXISTS (
+        SELECT 1 FROM events cost_row
+        WHERE cost_row.session_id = events.session_id
+          AND cost_row.model IS events.model
+          AND cost_row.source = 'otel'
+          AND json_extract(cost_row.metadata, '$._source') = 'otel_metric'
+          AND cost_row.tokens_in = 0 AND cost_row.tokens_out = 0
+          AND COALESCE(cost_row.cache_read_tokens, 0) = 0 AND COALESCE(cost_row.cache_write_tokens, 0) = 0
+          AND cost_row.cost_usd > 0
+          AND ABS(julianday(cost_row.created_at) - julianday(events.created_at)) * 86400 <= 5
+      )
   `).run();
   if (result.changes > 0) {
     console.error(`[migration] metric token rows: cleared ${result.changes} double-billed cost estimate(s)`);

@@ -16,8 +16,8 @@ pull requests; current behavior belongs to the system references.
   rate no longer risks overwriting captured costs. Startup prices any usage
   stored while its model had no rate, so a pricing update fixes its own $0 rows
   on the restart that ships it. Claude token-metric rows no longer add an
-  estimate on top of Claude's reported cost metric (a v10 migration corrects
-  rows already stored).
+  estimate on top of a reported cost metric from the same export (a v10
+  migration corrects stored rows that have that companion).
 
 - **Skill counts, hook latency, Sessions races, GPT-6 pricing (2026-09-23):**
   a Codex skill seen only in the JSONL rollout now counts even when OTEL saw

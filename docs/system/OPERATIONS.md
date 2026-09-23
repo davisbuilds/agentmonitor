@@ -321,7 +321,7 @@ changes in the same transaction, so a failed run rolls back whole.
 
 Cost rows written before provenance was recorded are labelled on first startup
 (or by a recalc). Producers that never send a cost (the Codex and Antigravity
-importers, Codex OTEL) are estimates. Benchmark costs are reported. Elsewhere
+importers) are estimates. Benchmark costs are reported. Elsewhere
 a stored cost equal to the tables at the event's time is taken as an estimate
 and any other as reported. Ambiguity resolves toward `reported`: a mislabelled
 estimate just stays stale, while a mislabelled reported cost could be

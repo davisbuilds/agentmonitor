@@ -191,8 +191,9 @@ figure it is: `reported` by the producer, which a recalc never rewrites, or
 Pricing metadata supplies estimates at ingestion/recalculation time and supports
 model aliases, date-aware schedules, and prompt-size tiers. Rates load once from
 the build, and startup prices any usage rows stored while their model had no
-rate. Claude Code reports cost on its own cost metric, so its token-metric rows
-carry a reported zero rather than a second, estimated cost. The build must copy pricing data into `dist/`; the built
+rate. Claude Code reports cost on its own cost metric, so a token-metric row whose
+export also carries that cost gets a reported zero rather than a second,
+estimated cost. A token-only export is still estimated. The build must copy pricing data into `dist/`; the built
 asset check protects this source-versus-runtime boundary.
 
 The token-bucket invariant is load-bearing: `tokens_in` stores uncached prompt

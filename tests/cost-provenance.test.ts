@@ -125,11 +125,19 @@ describe('cost provenance', () => {
     test('producers that never send a cost are estimates, even when rates have changed since', () => {
       legacy('codex-import', 0.5, { source: 'import', agent: 'codex' });
       legacy('antigravity-import', 0.5, { source: 'import', agent: 'antigravity' });
-      legacy('codex-otel', 0.5, { source: 'otel', agent: 'codex' });
       attributeCostSources(getDb());
-      for (const id of ['codex-import', 'antigravity-import', 'codex-otel']) {
+      for (const id of ['codex-import', 'antigravity-import']) {
         assert.equal(rowOf(id).cost_source, 'estimated', id);
       }
+    });
+
+    test('a Codex OTEL cost may be the producer\'s own, so it takes the table comparison', () => {
+      // The OTLP parser reads gen_ai.usage.cost for any service.
+      legacy('codex-otel-sent', 0.5, { source: 'otel', agent: 'codex' });
+      legacy('codex-otel-priced', TABLE_COST, { source: 'otel', agent: 'codex' });
+      attributeCostSources(getDb());
+      assert.equal(rowOf('codex-otel-sent').cost_source, 'reported');
+      assert.equal(rowOf('codex-otel-priced').cost_source, 'estimated');
     });
 
     test('a benchmark cost is reported', () => {

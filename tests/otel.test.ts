@@ -932,6 +932,21 @@ describe('POST /api/otel/v1/metrics', () => {
     assert.equal(tokenRow?.cost_source, 'reported', 'a later recalc must not price it either');
   });
 
+  test('a token metric with no accompanying cost metric is still priced from the tables', async () => {
+    const payload = buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-tokens-only' } }],
+      metrics: [{
+        name: 'claude_code.token.usage',
+        dataPoints: [{ value: 1_000_000, attributes: [{ key: 'type', value: { stringValue: 'input' } }, { key: 'model', value: { stringValue: 'claude-sonnet-5' } }] }],
+      }],
+    });
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    const [row] = (await getEvents()).events;
+    assert.equal(row.cost_usd, 2);
+    assert.equal(row.cost_source, 'estimated');
+  });
+
   test('handles cumulative metrics with delta conversion', async () => {
     // Reset the cumulative state between tests by importing the parser
     const { resetCumulativeState } = await import('../src/otel/parser.js');
