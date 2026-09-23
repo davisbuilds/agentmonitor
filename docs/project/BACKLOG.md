@@ -306,24 +306,20 @@ the build.
 ### Pricing
 
 #### A few current vendor models are still unpriced ($0-bill risk)
-- **What**: the 2026-09-03 live-page audit (which confirmed ~40 existing rates,
-  corrected Sonnet 5 + gpt-5.6 luna/terra, and **added** the newer Gemini Flash
-  line — 3.6/3.7/3.8 Flash, 3.5 Flash-Lite, 2.5 Flash-Lite) still leaves a couple
-  unpriced: `claude-fable-5-1` (Fable 5.1, cacheRead 0.025× = $0.25/MTok) and
-  `gpt-5.6-cyber` ($12.50/$75). An unpriced model bills as **$0**, the silent
-  under-report failure mode.
-- **Why it matters**: only bites if one of these appears in the data, but when it
-  does it is invisible (no error, plausible dashboard). The Gemini 3.6/3.7/3.8
-  Flash promo→list revert (2027-01-01) is now handled by date-aware rate
-  schedules (shipped 2026-09-04, see ROADMAP), so it no longer needs a manual
-  bump. `gpt-5.6-sol` shows a promo $4/$20 ("through 2026-11-21") on the OpenAI
-  page while aggregators list $5/$30 — we kept list ($5/$30); captured `cost_usd`
-  covers benchmark actuals, so the table only affects the unpriced-fallback
-  estimate (a `schedule` entry could encode the sol promo too if we choose to).
-- **Next / Revisit when**: add fable-5-1 / gpt-5.6-cyber the moment usage shows
-  them unpriced (watch the "unknown-priced tokens" surface) — blocked only on a
-  verified rate card (fable-5-1's output rate is unrecorded; do not guess it).
-  Noted 2026-09-03; date-schedule mechanism landed 2026-09-04.
+- **What**: `gpt-5.6-cyber` ($12.50/$75) is still unpriced, and an unpriced
+  model bills as **$0** — the silent under-report failure mode. Claude Opus 5.5
+  and Fable 5.1 were priced 2026-09-23 from the live pricing page, after Fable
+  5.1 usage had already landed at $0; both break the 0.1x cache-read convention
+  (0.05x and 0.025x), so a rate card cannot be derived from the input price.
+- **Why it matters**: only bites if the model appears in the data, but when it
+  does it is invisible (no error, plausible dashboard). `gpt-5.6-sol` shows a
+  promo $4/$20 ("through 2026-11-21") on the OpenAI page while aggregators list
+  $5/$30 — we kept list ($5/$30); a `schedule` entry could encode the promo.
+- **Next / Revisit when**: add a model the moment the "unknown-priced tokens"
+  surface shows it, from the vendor's live page (never from a multiplier), then
+  backfill with `amon costs recalc --missing-only` (OPERATIONS.md). A check that
+  fails when recent usage carries an unpriced model would catch the next launch
+  before the rows accumulate.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
@@ -453,7 +449,10 @@ the build.
   provider cost (promo, discount, rounding) is destroyed and unrecoverable
   without re-import.
 - **Next**: skip `source='benchmark'` in the recalc statement, or gate it behind
-  an explicit `--include-benchmark`. Complements the existing recalc-clobber
+  an explicit `--include-benchmark`. `--missing-only` (2026-09-23) is already
+  safe for benchmark rows: it skips every row with a captured cost and prices
+  only uncosted ones, which is the same table fallback `resolveBenchmarkCost`
+  applies at import. Only the bare full recalc still clobbers them. Complements the existing recalc-clobber
   caution in the memory notes, which covers captured costs generally.
 
 #### Antigravity generations all inherit the session's first timestamp
