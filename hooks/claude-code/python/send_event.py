@@ -8,10 +8,9 @@ Usage:
 
 import json
 import os
+import subprocess
 import sys
-import urllib.request
 from pathlib import Path
-from threading import Thread
 
 AGENTMONITOR_URL = os.environ.get("AGENTMONITOR_URL", "http://127.0.0.1:3141")
 
@@ -58,22 +57,37 @@ def get_project() -> str:
     return Path(cwd).name if cwd else ""
 
 
-def send_event(payload: dict) -> None:
-    """POST an event payload to AgentMonitor. Fire-and-forget (threaded)."""
-    def _post():
-        try:
-            data = json.dumps(payload).encode("utf-8")
-            req = urllib.request.Request(
-                f"{AGENTMONITOR_URL}/api/events",
-                data=data,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
-            urllib.request.urlopen(req, timeout=5)
-        except Exception:
-            pass  # fire-and-forget
+# The POST runs in a detached child so the hook can exit at once, the way the
+# shell hooks background curl. A thread cannot do this: the interpreter kills
+# daemon threads on exit, so it had to wait (up to 2s) for a slow server.
+_POST_CHILD = """
+import sys, urllib.request
+try:
+    urllib.request.urlopen(urllib.request.Request(
+        sys.argv[1], data=sys.stdin.buffer.read(),
+        headers={"Content-Type": "application/json"}, method="POST",
+    ), timeout=5)
+except Exception:
+    pass
+"""
 
-    thread = Thread(target=_post, daemon=True)
-    thread.start()
-    # Give the request a moment to fire before the process exits
-    thread.join(timeout=2)
+
+def send_event(payload: dict) -> None:
+    """POST an event payload to AgentMonitor. Fire-and-forget (detached child)."""
+    try:
+        detach = (
+            {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
+            if sys.platform == "win32"
+            else {"start_new_session": True}
+        )
+        child = subprocess.Popen(
+            [sys.executable, "-c", _POST_CHILD, f"{AGENTMONITOR_URL}/api/events"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **detach,
+        )
+        child.stdin.write(json.dumps(payload).encode("utf-8"))
+        child.stdin.close()
+    except Exception:
+        pass  # fire-and-forget

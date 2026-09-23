@@ -608,3 +608,95 @@ describe('Instruction-load telemetry hooks', () => {
     );
   });
 });
+
+// A server that accepts a request, reads its body, and never answers: the case
+// where a slow-but-reachable AgentMonitor used to stall the agent. A refused
+// connection is fast either way, so it proves nothing here.
+async function withStalledServer<T>(fn: (url: string, bodies: string[]) => Promise<T>): Promise<T> {
+  const bodies: string[] = [];
+  const held: Array<{ destroy: () => void }> = [];
+  const server = createServer((request) => {
+    const chunks: Buffer[] = [];
+    request.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    request.on('end', () => bodies.push(Buffer.concat(chunks).toString('utf8')));
+    held.push(request.socket);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    return await fn(url, bodies);
+  } finally {
+    for (const socket of held) socket.destroy();
+    server.closeAllConnections();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}
+
+/** Run a hook and time it until its stdout closes, which is what the agent waits on. */
+function timeUntilOutputCloses(
+  executable: string,
+  args: string[],
+  stdin: string,
+  env: Record<string, string>,
+): Promise<{ ms: number; stdout: string }> {
+  return new Promise((resolve, reject) => {
+    const started = performance.now();
+    const child = spawn(executable, args, { env: { ...ENV, ...env }, stdio: ['pipe', 'pipe', 'ignore'] });
+    let stdout = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.on('error', reject);
+    child.on('close', () => resolve({ ms: performance.now() - started, stdout }));
+    child.stdin.end(stdin);
+  });
+}
+
+async function waitFor(condition: () => boolean, timeoutMs = 3_000): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!condition()) {
+    if (performance.now() > deadline) throw new Error('condition not met in time');
+    await new Promise(resolve => setTimeout(resolve, 20));
+  }
+}
+
+// Well under the old stalls (1s statusline timeout, 2s Python join) and well
+// over a normal process start.
+const HOT_PATH_BUDGET_MS = 600;
+
+describe('Hooks never make the agent wait on a slow server', () => {
+  test('the statusline bridge renders without waiting for its POST', async () => {
+    const claudeDir = mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-statusline-hot-'));
+    try {
+      writeFileSync(path.join(claudeDir, 'agentmonitor-statusline-forward.txt'), 'cat');
+      await withStalledServer(async (url, bodies) => {
+        const payload = JSON.stringify({ session_id: 'statusline-hot', rate_limits: {} });
+        const run = await timeUntilOutputCloses('bash', [path.join(HOOKS_DIR, 'statusline_bridge.sh')], payload, {
+          AGENTMONITOR_URL: url,
+          CLAUDE_CONFIG_DIR: claudeDir,
+        });
+        assert.ok(run.ms < HOT_PATH_BUDGET_MS, `statusline took ${Math.round(run.ms)}ms`);
+        assert.equal(run.stdout, payload, 'the forwarded statusline still renders');
+        await waitFor(() => bodies.length === 1);
+        assert.equal(bodies[0], payload, 'the quota snapshot is still delivered');
+      });
+    } finally {
+      rmSync(claudeDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a Python hook returns without waiting for its POST, and the event still arrives', async (t) => {
+    try {
+      execSync('python3 --version', { timeout: 5000 });
+    } catch {
+      t.skip('python3 not found');
+      return;
+    }
+    await withStalledServer(async (url, bodies) => {
+      const run = await timeUntilOutputCloses('python3', [path.join(PYTHON_DIR, 'post_tool_use.py')],
+        makePostToolUseInput('Bash', { command: 'ls' }), { AGENTMONITOR_URL: url });
+      assert.ok(run.ms < HOT_PATH_BUDGET_MS, `post_tool_use.py took ${Math.round(run.ms)}ms`);
+      await waitFor(() => bodies.length === 1);
+      assert.equal(JSON.parse(bodies[0]).event_type, 'tool_use');
+    });
+  });
+});
