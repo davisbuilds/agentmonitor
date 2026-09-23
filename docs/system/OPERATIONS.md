@@ -283,6 +283,25 @@ above the second class was the large majority of pre-fix imported rows —
 unrepairable evidence typically outnumbers repairable by several times over,
 because event history outlives the transcripts it came from.
 
+### Pricing a newly released model
+
+An unpriced model bills as **$0**, not as an error, so rows imported before its
+rate card lands keep a NULL cost after the table is updated. Backfill only those
+rows:
+
+```bash
+amon costs recalc --missing-only --dry-run --json   # report what would be priced
+amon costs recalc --missing-only                    # apply
+```
+
+`--missing-only` touches rows with no cost at all, so captured provider costs
+and existing estimates are left alone. In the same transaction it re-derives
+the cached trace summary of every non-benchmark session it changes, so a failed
+run rolls back whole and a rerun picks up where it stopped. A bare `amon costs recalc` instead re-derives **every**
+row's cost from the current tables, overwriting captured costs (including
+benchmark rows); reach for it only when a published rate itself changed, and
+dry-run it first.
+
 ## Trace-Quality Reclaim
 
 The lean trace-quality model no longer uses the old persisted trace, observation,
