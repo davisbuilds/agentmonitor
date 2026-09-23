@@ -31,6 +31,12 @@ export class SessionList {
     const token = ++this.requestToken;
     this.loading = true;
     this.error = null;
+    if (!append) {
+      // A new query starts a new pagination; a failed one must not leave the
+      // previous query's cursor behind for "Load more" to page from.
+      this.cursor = undefined;
+      this.hasMore = false;
+    }
     try {
       const params: Record<string, string | number> = { limit: this.pageSize, exclude_empty: 'true' };
       if (project) params.project = project;

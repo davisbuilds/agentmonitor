@@ -64,6 +64,29 @@ describe('SessionList ignores responses to superseded requests', () => {
     expect(list.sessions).toEqual([]);
   });
 
+  it('a failed filter change does not leave the old filter\'s pagination live', async () => {
+    const { fetchPage, pending } = controlledFetch();
+    const list = new SessionList(fetchPage, 1);
+    const originalError = console.error;
+    console.error = () => {};
+    try {
+      const first = list.load({ project: 'alpha', agent: '' });
+      pending[0].resolve(page(['alpha-1'], 'c-alpha'));
+      await first;
+      expect(list.hasMore).toBe(true);
+
+      const second = list.load({ project: 'beta', agent: '' });
+      pending[1].reject(new Error('network'));
+      await second;
+      expect(list.hasMore).toBe(false);
+
+      void list.load({ project: 'beta', agent: '', append: true });
+      expect(pending[2].params.cursor).toBeUndefined();
+    } finally {
+      console.error = originalError;
+    }
+  });
+
   it('does not report a superseded request\'s failure', async () => {
     const { fetchPage, pending } = controlledFetch();
     const list = new SessionList(fetchPage, 2);
