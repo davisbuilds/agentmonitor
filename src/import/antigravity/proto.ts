@@ -15,6 +15,7 @@ import {
   USAGE_METADATA_FIELDS,
   GEN_METADATA_WRAPPER_FIELD,
   GENERATOR_METADATA_FIELDS,
+  GENERATOR_TIMING_TIMESTAMP_FIELD,
   CORTEX_USAGE_FIELDS,
 } from './fieldmap.js';
 
@@ -203,6 +204,8 @@ export interface GeneratorMetadata {
   /** Model id, e.g. "gemini-pro-default" (falls back to the display string). */
   model?: string;
   usage?: CortexUsage;
+  /** When this generation ran (epoch ms), from its own Timestamp. */
+  timestampMs?: number;
 }
 
 /**
@@ -234,7 +237,19 @@ export function decodeGeneratorMetadata(blob: Buffer): GeneratorMetadata {
       answerTokens: getVarint(u, CORTEX_USAGE_FIELDS.answerTokens) ?? 0,
     };
   }
-  return { model, usage };
+  return { model, usage, timestampMs: decodeGenerationTimestampMs(gm) };
+}
+
+function decodeGenerationTimestampMs(gm: Map<number, ProtoField[]>): number | undefined {
+  const timing = getBytes(gm, GENERATOR_METADATA_FIELDS.timing);
+  const stamp = timing && getBytes(decodeMessage(timing), GENERATOR_TIMING_TIMESTAMP_FIELD);
+  if (!stamp) return undefined;
+  const fields = decodeMessage(stamp);
+  const secs = getVarint(fields, 1);
+  // Same plausibility window as step timestamps: a misread field is not a time.
+  if (secs === undefined || secs < 1_000_000_000 || secs > 4_000_000_000) return undefined;
+  const nanos = getVarint(fields, 2) ?? 0;
+  return secs * 1000 + Math.floor(nanos / 1_000_000);
 }
 
 export interface BillingTokens {

@@ -217,7 +217,9 @@ AgentMonitor runs locally without secrets. `.env` is optional because every
 
 Common knobs:
 
-- `AGENTMONITOR_PORT` / `AGENTMONITOR_HOST` for the TypeScript runtime bind.
+- `AGENTMONITOR_PORT` / `AGENTMONITOR_HOST` for the TypeScript runtime bind. On a
+  loopback bind the API answers only loopback host names, and writes from other
+  web origins get `403` (see [event-contract.md](docs/api/event-contract.md#browser-requests)).
 - `AGENTMONITOR_DB_PATH` for the SQLite database location.
 - `AGENTMONITOR_PROJECTS_DIR` for git branch/project resolution.
 - `AGENTMONITOR_CLAUDE_DIR` for Claude JSONL history discovery (the directory

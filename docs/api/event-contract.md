@@ -75,6 +75,16 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
 - `payload_truncated` is stored on events (`0` or `1`).
 - For large object metadata, key fields (for example `command`, `file_path`) are preserved in a compact summary.
 
+## Browser Requests
+
+Ingest clients (hooks, OTLP exporters, the CLI) send no `Origin` header. A write
+to any `/api` route that carries a foreign `Origin`, or the opaque `null` origin,
+is refused with `403 {"error":"forbidden","reason":"origin"}`, so a web page
+cannot forge events. The app's own page (loopback or `*.localhost`, or the
+server's own host when bound beyond loopback) is allowed. A loopback-bound server
+also refuses any request whose `Host` is not a loopback name
+(`"reason":"host"`), which defeats DNS rebinding.
+
 ## Canonical Examples
 
 ### Claude Code Example

@@ -58,12 +58,17 @@ get_project() {
 }
 
 # Derive git branch from cwd
+# Callers assign under `set -e`, so a git failure must never escape: it would
+# kill the hook before it sends anything.
 get_branch() {
   local cwd
   cwd="$(extract_field cwd)"
-  if [ -n "$cwd" ] && [ -d "$cwd/.git" ] || git -C "$cwd" rev-parse --git-dir &>/dev/null 2>&1; then
-    git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null
-  fi
+  [ -n "$cwd" ] || return 0
+  # symbolic-ref names the branch even before the first commit, where rev-parse
+  # exits 128; a detached HEAD falls through to rev-parse's "HEAD".
+  git -C "$cwd" symbolic-ref --short -q HEAD 2>/dev/null \
+    || git -C "$cwd" rev-parse --abbrev-ref HEAD 2>/dev/null \
+    || true
 }
 
 # Escape a string for safe embedding in a JSON value.

@@ -53,6 +53,10 @@ watchers, quota work, and SQLite before releasing ownership.
 - The external event-ingest contract is defined by
   [`src/contracts/event-contract.ts`](../../src/contracts/event-contract.ts) and
   documented in [event-contract.md](../api/event-contract.md).
+- [`src/api/local-origin.ts`](../../src/api/local-origin.ts) guards every `/api`
+  request: writes with a foreign `Origin` and, on a loopback bind, any request with
+  a non-loopback `Host` are refused. Local clients stay trusted; web pages do not.
+  Its error handler answers unhandled errors with a bare 500, never a stack trace.
 - `src/cli.ts` is the executable entrypoint. One-shot commands call shared service
   or query modules directly; commands that require live HTTP or SSE contact the
   running server. This keeps CLI and UI reads on the same domain contracts.

@@ -10,6 +10,20 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Browser-safe local API and quick fixes (2026-09-23):** web pages can no
+  longer write to the local server. Writes with a foreign `Origin` get `403`, and
+  a loopback-bound server refuses non-loopback `Host` names, which blocks DNS
+  rebinding. Local clients stay trusted, including their ability to end a
+  session. Unhandled errors return a bare 500 rather than a stack trace, and
+  malformed OTLP timestamps no longer throw. Also fixed: hooks now work in repos
+  with no commits, a full `costs recalc` keeps captured benchmark costs,
+  `formatNumber` moves to the next unit when rounding reaches 1000, and each
+  Antigravity generation is timestamped and priced at its own time. The most
+  frequent CI flake is fixed at its measured cause: 200k synchronous inserts
+  blocked the in-process test server past Node's 5s keep-alive timeout, so
+  the next `fetch` reused a dead socket. The test now lowers the evidence cap
+  instead.
+
 - **Local-time days (2026-09-23, PR #142):** every user-facing day is a local
   day in one reporting zone (`AGENTMONITOR_TIMEZONE`, default the host's).
   Date filters, daily buckets, active-day counts, the heatmap, skill and

@@ -113,6 +113,7 @@ interface CapturedHookPayload {
   agent_type: string;
   event_type: string;
   project?: string;
+  branch?: string;
   metadata?: Record<string, unknown>;
 }
 
@@ -240,6 +241,28 @@ function validatePayloadShape(eventType: string, fields: Record<string, unknown>
 }
 
 describe('Shell hook scripts', () => {
+  test('hooks report events from a repository with no commits yet', async () => {
+    // An unborn HEAD makes `git rev-parse --abbrev-ref HEAD` exit 128, which
+    // under `set -e` used to kill the hook before it sent anything.
+    const repo = mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-unborn-'));
+    try {
+      execFileSync('git', ['init', '-q', '-b', 'trunk', repo]);
+      const inRepo = (payload: string) => JSON.stringify({ ...JSON.parse(payload), cwd: repo });
+      const payloads = await captureHookPayloads([
+        { executable: 'bash', args: [path.join(HOOKS_DIR, 'session_start.sh')], stdin: inRepo(makeSessionStartInput()) },
+        {
+          executable: 'bash',
+          args: [path.join(HOOKS_DIR, 'post_tool_use.sh')],
+          stdin: inRepo(makePostToolUseInput('Bash', { command: 'npm test' })),
+        },
+        { executable: 'bash', args: [path.join(HOOKS_DIR, 'session_end.sh')], stdin: inRepo(makeStopInput()) },
+      ]);
+      assert.deepEqual(payloads.map(payload => payload.branch), ['trunk', 'trunk', 'trunk']);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
+  });
+
   test('session_start.sh exits 0', () => {
     const result = runShellHook('session_start.sh', makeSessionStartInput());
     assert.equal(result.exitCode, 0, `stderr: ${result.stderr}`);

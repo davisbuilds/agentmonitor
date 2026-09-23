@@ -174,8 +174,11 @@ export function parseAntigravityFile(
       if (!gm.usage) return;
       const b = deriveBillingTokens(gm.usage);
       const model = gm.model ?? sessionModel;
+      // Stamp and price each generation at its own time, so spend lands when
+      // it happened and a rate change mid-session picks the right period.
+      const at = iso(gm.timestampMs ?? firstTs);
       const cost = model
-        ? pricingRegistry.calculate(model, { input: b.tokensIn, output: b.tokensOut, cacheRead: b.cacheReadTokens }, iso(firstTs))
+        ? pricingRegistry.calculate(model, { input: b.tokensIn, output: b.tokensOut, cacheRead: b.cacheReadTokens }, at)
         : null;
       events.push({
         event_id: eventId(sessionId, `gen:${i}`),
@@ -188,7 +191,7 @@ export function parseAntigravityFile(
         cache_read_tokens: b.cacheReadTokens,
         model,
         cost_usd: cost ?? undefined,
-        client_timestamp: iso(firstTs),
+        client_timestamp: at,
         metadata: { _source: 'antigravity_db', thoughts_tokens: b.thoughtsTokens },
         source: 'import',
       });

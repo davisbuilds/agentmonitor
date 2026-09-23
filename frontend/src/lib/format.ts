@@ -22,10 +22,23 @@ export function formatCost(n: number | null | undefined): string {
   return '$' + n.toFixed(2);
 }
 
+const NUMBER_UNITS = [
+  { value: 1_000, suffix: 'K' },
+  { value: 1_000_000, suffix: 'M' },
+  { value: 1_000_000_000, suffix: 'B' },
+];
+
 export function formatNumber(n: number): string {
-  if (n >= 1_000_000_000) return (n / 1_000_000_000).toFixed(1) + 'B';
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  // Round before settling on a unit: 999,950 rounds to 1000.0K, which must
+  // read as 1.0M.
+  for (let i = NUMBER_UNITS.length - 1; i >= 0; i--) {
+    const unit = NUMBER_UNITS[i];
+    if (n < unit.value) continue;
+    const rounded = (n / unit.value).toFixed(1);
+    const next = NUMBER_UNITS[i + 1];
+    if (next && Number(rounded) >= 1_000) return (n / next.value).toFixed(1) + next.suffix;
+    return rounded + unit.suffix;
+  }
   return n.toLocaleString();
 }
 

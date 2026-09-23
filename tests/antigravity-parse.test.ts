@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { parseAntigravityFile, stepKindToEvent, discoverAntigravityLogs } from '../src/import/antigravity.js';
+import { pricingRegistry } from '../src/pricing/index.js';
 
 // --- minimal protobuf encoder (deterministic fixtures) ---
 function varint(n: number): number[] {
@@ -34,6 +35,15 @@ const genmeta = (model: string, u: Record<number, number>) =>
   buf(lField(1, [
     ...sField(19, model),
     ...lField(4, [...vField(1, u[1]), ...vField(2, u[2]), ...vField(3, u[3]), ...vField(5, u[5]), ...vField(9, u[9]), ...vField(10, u[10])]),
+  ]));
+
+// A generation's own time: wrapper(1) → CortexGeneratorMetadata → field 9 →
+// field 4, a protobuf Timestamp { seconds(1), nanos(2) }.
+const timedGenmeta = (model: string, u: Record<number, number>, secs: number, nanos: number) =>
+  buf(lField(1, [
+    ...sField(19, model),
+    ...lField(4, [...vField(1, u[1]), ...vField(2, u[2]), ...vField(3, u[3]), ...vField(5, u[5]), ...vField(9, u[9]), ...vField(10, u[10])]),
+    ...lField(9, [...lField(4, [...vField(1, secs), ...vField(2, nanos)])]),
   ]));
 
 function buildFixture(uuid: string): string {
@@ -85,6 +95,40 @@ test('parseAntigravityFile: llm_response carries cache-net tokens + cost from Co
   assert.equal(llm!.cache_read_tokens, 8000); // cached, not folded into tokens_in
   assert.equal((llm!.metadata as { thoughts_tokens: number }).thoughts_tokens, 2500);
   assert.ok(llm!.cost_usd !== undefined && llm!.cost_usd > 0, 'priced (gemini-pro-default)');
+});
+
+test('parseAntigravityFile: each generation is stamped and priced at its own time', () => {
+  // The session opens on the last promo day; its second generation runs after
+  // the 2027-01-01 revert to list price, so it must price at the list rate.
+  const opened = Date.UTC(2026, 11, 31, 23, 59) / 1000;
+  const second = Date.UTC(2027, 0, 1, 0, 5) / 1000;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agr-'));
+  const dbPath = path.join(dir, '44444444-0000-0000-0000-000000000000.db');
+  const db = new Database(dbPath);
+  db.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+  db.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+  db.prepare('INSERT INTO steps(idx,step_type,status,step_payload,metadata) VALUES (?,?,?,?,?)')
+    .run(0, 14, 3, step(14, 19), meta(opened));
+  const usage = { 1: 1020, 2: 1_000_000, 3: 0, 5: 0, 9: 0, 10: 0 };
+  const insGen = db.prepare('INSERT INTO gen_metadata(idx,data) VALUES (?,?)');
+  insGen.run(0, timedGenmeta('gemini-3.8-flash', usage, opened, 250_000_000));
+  insGen.run(1, timedGenmeta('gemini-3.8-flash', usage, second, 500_000_000));
+  insGen.run(2, genmeta('gemini-3.8-flash', usage)); // no timestamp recorded
+  db.close();
+
+  const llm = parseAntigravityFile(dbPath).filter((e) => e.event_type === 'llm_response');
+  const openedIso = new Date(opened * 1000).toISOString();
+  assert.deepEqual(llm.map((e) => e.client_timestamp), [
+    new Date(opened * 1000 + 250).toISOString(),
+    new Date(second * 1000 + 500).toISOString(),
+    openedIso, // falls back to the session's first activity
+  ]);
+
+  const tokens = { input: 1020 + 1_000_000, output: 0, cacheRead: 0 }; // system + input
+  const promo = pricingRegistry.calculate('gemini-3.8-flash', tokens, openedIso);
+  const list = pricingRegistry.calculate('gemini-3.8-flash', tokens, new Date(second * 1000).toISOString());
+  assert.notEqual(promo, list, 'the fixture straddles a rate change');
+  assert.deepEqual(llm.map((e) => e.cost_usd), [promo, list, promo]);
 });
 
 test('discoverAntigravityLogs: finds conversation DBs nested under subdirectories', () => {

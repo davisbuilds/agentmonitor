@@ -2,11 +2,14 @@ import express, { type Express, type NextFunction, type Request, type Response }
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { apiRouter } from './api/router.js';
+import { apiErrorHandler, localOriginGuard } from './api/local-origin.js';
+import { config } from './config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export function createApp(): Express {
+export function createApp({ bindHost = config.host }: { bindHost?: string } = {}): Express {
   const app = express();
+  app.use('/api', localOriginGuard({ bindHost }));
   const jsonLikeContentTypes = ['application/json', 'application/*+json', 'text/plain'];
 
   // Parse ingest routes as raw text first so handlers can recover from
@@ -42,6 +45,8 @@ export function createApp(): Express {
   app.get('/app/{*path}', (_req: Request, res: Response) => {
     res.sendFile(path.join(svelteDir, 'index.html'));
   });
+
+  app.use(apiErrorHandler);
 
   return app;
 }

@@ -36,7 +36,10 @@ interface CostRow {
   client_timestamp: string | null;
 }
 
-/** Re-derive event costs from the pricing tables, pricing each row at its own time. */
+/**
+ * Re-derive event costs from the pricing tables, pricing each row at its own
+ * time. Benchmark rows that carry a cost are never touched.
+ */
 export function recalculateEventCosts(db: Database, options: CostRecalcOptions): CostRecalcReport {
   const missingOnly = options.missingOnly ?? false;
   const events = db.prepare(`
@@ -46,6 +49,9 @@ export function recalculateEventCosts(db: Database, options: CostRecalcOptions):
     WHERE model IS NOT NULL
       AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
       ${missingOnly ? 'AND cost_usd IS NULL' : ''}
+      -- A benchmark cost is the provider's captured bill, which the tables can
+      -- only estimate; import keeps it as authoritative, and so does recalc.
+      AND NOT (source = 'benchmark' AND cost_usd IS NOT NULL)
   `).all() as CostRow[];
 
   const update = db.prepare('UPDATE events SET cost_usd = ? WHERE id = ?');
