@@ -30,6 +30,15 @@ describe('localDayOf', () => {
     assert.equal(localDayOf('2026-09-10T23:30:00-04:00', TOKYO), '2026-09-11');
   });
 
+  test('splits at local midnight in a quarter-hour-offset zone, cached or not', () => {
+    // Kathmandu is UTC+05:45, so its midnight is 18:15Z. Ask twice so the
+    // second answer comes from the quarter-hour memo.
+    for (let pass = 0; pass < 2; pass++) {
+      assert.equal(localDayOf('2026-09-10T18:14:59.999Z', 'Asia/Kathmandu'), '2026-09-10');
+      assert.equal(localDayOf('2026-09-10T18:15:00.000Z', 'Asia/Kathmandu'), '2026-09-11');
+    }
+  });
+
   test('returns a bare day unchanged rather than reading it as UTC midnight', () => {
     // new Date('2026-09-10') is UTC midnight, which is Sep 9 west of UTC.
     assert.equal(localDayOf('2026-09-10', NY), '2026-09-10');

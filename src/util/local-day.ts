@@ -73,14 +73,33 @@ function parseStoredTimestamp(value: string): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+// Every zone offset in use is a whole multiple of 15 minutes, so all instants
+// in one UTC quarter-hour share a local day. Memoizing on that block turns a
+// per-row Intl call (about 2µs) into a map lookup for the bulk bucketing that
+// usage reads do over every row.
+const QUARTER_HOUR_MS = 15 * 60 * 1000;
+const DAY_CACHE_LIMIT = 50_000;
+const dayCaches = new Map<string, Map<number, string>>();
+
 /** The local calendar day (`YYYY-MM-DD`) a timestamp falls on. */
 export function localDayOf(timestamp: string, zone = reportingTimeZone()): string | null {
   // A bare day already is a calendar day; parsing it would read UTC midnight.
   if (isBareDay(timestamp)) return timestamp;
   const parsed = parseStoredTimestamp(timestamp);
   if (!parsed) return null;
+  const block = Math.floor(parsed.getTime() / QUARTER_HOUR_MS);
+  let cache = dayCaches.get(zone);
+  if (!cache) {
+    cache = new Map();
+    dayCaches.set(zone, cache);
+  }
+  const cached = cache.get(block);
+  if (cached) return cached;
   const w = wallClock(parsed.getTime(), zone);
-  return `${w.year}-${pad(w.month)}-${pad(w.day)}`;
+  const day = `${w.year}-${pad(w.month)}-${pad(w.day)}`;
+  if (cache.size >= DAY_CACHE_LIMIT) cache.clear();
+  cache.set(block, day);
+  return day;
 }
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
