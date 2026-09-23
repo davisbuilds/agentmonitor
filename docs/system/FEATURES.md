@@ -63,8 +63,8 @@ product never substitutes a misleading `0%` for missing evidence.
 
 ## Analytics And Skill Evidence
 
-Analytics covers activity over time, projects, agents, tools, hour-of-week patterns,
-velocity, and high-volume sessions. Capability metadata distinguishes all-session
+Analytics covers activity over time, projects, agents, tools, hour-of-week patterns
+(bucketed in the host's local time), velocity, and high-volume sessions. Capability metadata distinguishes all-session
 aggregates from tool or transcript analysis that excludes unsupported sources.
 
 Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of
@@ -96,8 +96,11 @@ model, provider, and provider-neutral tier.
   unpriced use or known pricing that has not yet been applied to zero-cost history.
 - Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates;
   raw events remain available in session and monitor history.
-- Benchmark events are excluded from normal usage, analytics, and Monitor totals.
-  Benchmark-aware reads can opt into them explicitly.
+- Benchmark events are excluded from normal usage, analytics, and the Monitor's
+  totals, event feed, and session list.
+  Benchmark-aware reads can opt into them explicitly. Usage and analytics reads
+  reject an unparseable `date_from`/`date_to` with a 400 rather than reporting
+  an empty window.
 - Usage responses disclose when matching events lack token or cost data.
 
 Read-only budgets use an optional local JSON configuration and report alert state

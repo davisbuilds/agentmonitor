@@ -360,10 +360,11 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     values.push(params.date_from);
   }
   if (params.date_to) {
-    // Include the full day
+    // Include the full day. Step in UTC: a local-calendar step is 23 hours on a
+    // spring-forward day and would drop that day's last hour.
     conditions.push('started_at < ?');
     const nextDay = new Date(params.date_to);
-    nextDay.setDate(nextDay.getDate() + 1);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
     values.push(nextDay.toISOString().split('T')[0]);
   }
   if (params.min_messages != null) {
@@ -1029,7 +1030,11 @@ function qualifyColumn(alias: string | undefined, column: string): string {
   return alias ? `${alias}.${column}` : column;
 }
 
-function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string): AnalyticsFilterState {
+function buildAnalyticsFilterState(
+  params: AnalyticsParams = {},
+  alias?: string,
+  options: { localDays?: boolean } = {},
+): AnalyticsFilterState {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
@@ -1041,12 +1046,18 @@ function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string)
     conditions.push(`${qualifyColumn(alias, 'agent')} = ?`);
     values.push(params.agent);
   }
+  // Windows are UTC calendar days unless a caller buckets by local time, in
+  // which case the selected days must be local too or edge rows land on the
+  // neighboring day's buckets.
+  const startedAt = qualifyColumn(alias, 'started_at');
   if (params.date_from) {
-    conditions.push(`${qualifyColumn(alias, 'started_at')} >= ?`);
+    conditions.push(options.localDays ? `date(${startedAt}, 'localtime') >= date(?)` : `${startedAt} >= ?`);
     values.push(params.date_from);
   }
   if (params.date_to) {
-    conditions.push(`${qualifyColumn(alias, 'started_at')} < date(?, '+1 day')`);
+    conditions.push(options.localDays
+      ? `date(${startedAt}, 'localtime') <= date(?)`
+      : `${startedAt} < date(?, '+1 day')`);
     values.push(params.date_to);
   }
 
@@ -1367,6 +1378,8 @@ export function getMonitorToolStats(params: UsageParams = {}): MonitorToolStat[]
   }));
 }
 
+export const MONITOR_SESSIONS_MAX_LIMIT = 500;
+
 export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessions: MonitorSessionRow[]; total: number } {
   const db = getDb();
   updateIdleSessions(config.sessionTimeoutMinutes);
@@ -1398,11 +1411,20 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
     conditions.push(`datetime(s.last_event_at) < datetime(?, '+1 day')`);
     values.push(params.date_to);
   }
+  // A session made only of benchmark rows is a batch import, not live activity.
+  conditions.push(`(
+    NOT EXISTS (SELECT 1 FROM events b WHERE b.session_id = s.id AND b.source = 'benchmark')
+    OR EXISTS (SELECT 1 FROM events r WHERE r.session_id = s.id AND ${excludeBenchmarkUsageCondition('r')})
+  )`);
 
+  // The Monitor page sends limit=0 to mean "every live session", so a
+  // non-positive limit takes the ceiling rather than being clamped to one.
   const requestedLimit = Number.isFinite(params.limit) ? Math.trunc(params.limit as number) : 50;
-  const applyLimit = requestedLimit > 0;
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const queryValues = applyLimit ? [...values, requestedLimit] : values;
+  const limit = requestedLimit > 0
+    ? Math.min(requestedLimit, MONITOR_SESSIONS_MAX_LIMIT)
+    : MONITOR_SESSIONS_MAX_LIMIT;
+  const where = `WHERE ${conditions.join(' AND ')}`;
+  const queryValues = [...values, limit];
 
   // Page the sessions first, then compute all seven event aggregates in a single
   // grouped pass restricted to that page, instead of running seven correlated
@@ -1419,7 +1441,7 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
         CASE s.status WHEN 'active' THEN 0 WHEN 'idle' THEN 1 ELSE 2 END,
         datetime(s.last_event_at) DESC,
         s.id DESC
-      ${applyLimit ? 'LIMIT ?' : ''}
+      LIMIT ?
     ),
     agg AS (
       SELECT
@@ -1444,6 +1466,7 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
         END) AS lines_removed
       FROM events e
       WHERE e.session_id IN (SELECT id FROM page)
+        AND ${excludeBenchmarkUsageCondition('e')}
       GROUP BY e.session_id
     )
     SELECT
@@ -1499,6 +1522,10 @@ export function listMonitorEvents(params: MonitorEventsParams = {}): { events: M
   if (params.source) {
     conditions.push('source = ?');
     values.push(params.source);
+  } else {
+    // An explicit source filter decides for itself; otherwise the Monitor feed
+    // is live activity and keeps batch-imported benchmark rows out.
+    conditions.push(excludeBenchmarkUsageCondition('events'));
   }
   if (params.since) {
     conditions.push('created_at >= datetime(?)');
@@ -2226,11 +2253,13 @@ export function getAnalyticsSkillHealthParts(
 
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
   const db = getDb();
-  const filter = buildAnalyticsFilterState(params);
+  const filter = buildAnalyticsFilterState(params, undefined, { localDays: true });
+  // Bucket in the host's local time: the view is labeled local, and this is a
+  // local-first app, so the server's zone is the operator's zone.
   const rows = db.prepare(`
     SELECT
-      ((CAST(strftime('%w', started_at) AS INTEGER) + 6) % 7) as day_of_week,
-      CAST(strftime('%H', started_at) AS INTEGER) as hour_of_day,
+      ((CAST(strftime('%w', started_at, 'localtime') AS INTEGER) + 6) % 7) as day_of_week,
+      CAST(strftime('%H', started_at, 'localtime') AS INTEGER) as hour_of_day,
       COUNT(*) as session_count,
       COALESCE(SUM(message_count), 0) as message_count,
       COALESCE(SUM(user_message_count), 0) as user_message_count

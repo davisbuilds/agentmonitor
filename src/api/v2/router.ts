@@ -76,6 +76,30 @@ import { getLiveSettingsResponse } from '../../live/responses.js';
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
 
+// A bare date, or the full ISO timestamp the Monitor sends for its cost window.
+const DATE_PARAM = /^(\d{4}-\d{2}-\d{2})(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
+
+function isValidDateParam(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  const match = DATE_PARAM.exec(value);
+  if (!match || !Number.isFinite(Date.parse(value))) return false;
+  // Date.parse rolls impossible days over (2026-02-30 → March 2), so require the
+  // calendar date to survive a round trip.
+  return new Date(`${match[1]}T00:00:00Z`).toISOString().slice(0, 10) === match[1];
+}
+
+// SQLite reads an unparseable date as NULL, which filters out every row, so a
+// typo would render as "no usage" rather than an error. Refuse it instead.
+v2Router.use(['/usage', '/analytics'], (req: Request, res: Response, next) => {
+  for (const key of ['date_from', 'date_to'] as const) {
+    if (req.query[key] !== undefined && !isValidDateParam(req.query[key])) {
+      res.status(400).json({ error: `Invalid ${key}: expected YYYY-MM-DD or an ISO timestamp`, code: 'invalid_query' });
+      return;
+    }
+  }
+  next();
+});
+
 function safeInt(value: string | undefined): number | undefined {
   if (value == null) return undefined;
   const n = parseInt(value, 10);

@@ -1380,7 +1380,17 @@ describe('GET /api/v2/analytics/skills/daily', () => {
 
 describe('GET /api/v2/analytics/hour-of-week', () => {
   test('returns a full 7x24 heatmap grid with session/message counts', async () => {
-    const res = await fetch(`${baseUrl}/api/v2/analytics/hour-of-week`);
+    // Buckets follow the host zone; pin it so the seeded 10:00Z session lands
+    // on Sunday 10:00 wherever this runs. Local-time bucketing itself is covered
+    // in v2-read-surface-correctness.test.ts.
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'UTC';
+    let res: Response;
+    try {
+      res = await fetch(`${baseUrl}/api/v2/analytics/hour-of-week`);
+    } finally {
+      process.env.TZ = previousTz;
+    }
     assert.equal(res.status, 200);
     const body = await res.json() as {
       data: Array<{
