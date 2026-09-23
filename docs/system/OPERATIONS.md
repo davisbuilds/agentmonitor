@@ -304,9 +304,10 @@ amon costs recalc --missing-only                    # apply
 and existing estimates are left alone. In the same transaction it re-derives
 the cached trace summary of every non-benchmark session it changes, so a failed
 run rolls back whole and a rerun picks up where it stopped. A bare `amon costs recalc` instead re-derives **every**
-row's cost from the current tables, overwriting captured costs (including
-benchmark rows); reach for it only when a published rate itself changed, and
-dry-run it first.
+row's cost from the current tables, overwriting captured costs from every
+other source; reach for it only when a published rate itself changed, and
+dry-run it first. Benchmark rows that carry a cost are always left alone: that
+cost is the provider's own bill, which the tables can only estimate.
 
 ## Trace-Quality Reclaim
 
