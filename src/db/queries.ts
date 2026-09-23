@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { getDb } from './connection.js';
+import type { CostSource } from '../pricing/cost-provenance.js';
 import { config } from '../config.js';
 import { syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
 import { pricingRegistry } from '../pricing/index.js';
@@ -123,7 +124,13 @@ export function refreshImportedCodexEventModel(
   const row = getDb().prepare(`
     UPDATE events
     SET model = @model,
-        cost_usd = CASE WHEN @hasUsage = 1 THEN @cost ELSE cost_usd END
+        cost_usd = CASE WHEN @hasUsage = 1 THEN @cost ELSE cost_usd END,
+        -- The Codex importer prices from our tables, so its costs are estimates.
+        cost_source = CASE
+          WHEN @hasUsage = 0 THEN cost_source
+          WHEN @cost IS NULL THEN NULL
+          ELSE 'estimated'
+        END
     WHERE event_id = @eventId
       AND source = 'import'
       AND agent_type = 'codex'
@@ -445,6 +452,8 @@ export function insertEvent(event: {
   /** Benchmark study grouping (source='benchmark' only). study_id = exact per-run key. */
   study_id?: string;
   study?: string;
+  /** Who produced `cost_usd`; defaults to 'reported' when a cost is supplied. */
+  cost_source?: CostSource;
 }): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
@@ -479,16 +488,20 @@ export function insertEvent(event: {
     : null;
   if (gitBranch && !event.branch) event.branch = gitBranch;
 
+  // A supplied cost is the producer's own figure unless the caller priced it
+  // from our tables; one we calculate here is an estimate.
+  let costSource: CostSource | null = event.cost_usd === undefined || event.cost_usd === null
+    ? null
+    : event.cost_source ?? 'reported';
   // Auto-calculate cost if model + tokens present but cost not provided
-  if (event.model && (event.tokens_in > 0 || event.tokens_out > 0)) {
-    if (event.cost_usd === undefined || event.cost_usd === null) {
-      event.cost_usd = pricingRegistry.calculate(event.model, {
-        input: event.tokens_in,
-        output: event.tokens_out,
-        cacheRead: event.cache_read_tokens,
-        cacheWrite: event.cache_write_tokens,
-      }, event.client_timestamp);
-    }
+  if (event.model && (event.tokens_in > 0 || event.tokens_out > 0) && costSource === null) {
+    event.cost_usd = pricingRegistry.calculate(event.model, {
+      input: event.tokens_in,
+      output: event.tokens_out,
+      cacheRead: event.cache_read_tokens,
+      cacheWrite: event.cache_write_tokens,
+    }, event.client_timestamp);
+    if (event.cost_usd !== null) costSource = 'estimated';
   }
 
   const metadata = truncateMetadata(event.metadata);
@@ -516,8 +529,8 @@ export function insertEvent(event: {
         INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
           tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp,
           metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source,
-          study_id, study)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          study_id, study, cost_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         event.event_id || null,
         event.session_id,
@@ -539,7 +552,8 @@ export function insertEvent(event: {
         event.cache_write_tokens ?? 0,
         event.source || 'api',
         event.study_id ?? null,
-        event.study ?? null
+        event.study ?? null,
+        costSource
       );
     } catch (err: unknown) {
       // UNIQUE constraint violation = duplicate event_id (a concurrent writer
@@ -605,12 +619,12 @@ export function insertEvent(event: {
  * Updates only null-cost benchmark rows so a real captured cost is never
  * clobbered; returns true when a row was updated.
  */
-export function backfillBenchmarkCost(eventId: string, cost: number): boolean {
+export function backfillBenchmarkCost(eventId: string, cost: number, costSource: CostSource): boolean {
   const db = getDb();
   const result = db.prepare(`
-    UPDATE events SET cost_usd = ?
+    UPDATE events SET cost_usd = ?, cost_source = ?
     WHERE event_id = ? AND source = 'benchmark' AND cost_usd IS NULL
-  `).run(cost, eventId);
+  `).run(cost, costSource, eventId);
   if (result.changes > 0) {
     markStatsDirty();
     return true;

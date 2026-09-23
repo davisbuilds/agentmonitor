@@ -248,10 +248,11 @@ the build.
   effect today, since Codex emits no cache-write tokens; reconcile before it
   does. That page also confirms `gpt-6-astra`'s $12.50 cache write.
 - **Next / Revisit when**: add a model the moment the "unknown-priced tokens"
-  surface shows it, from the vendor's live page (never from a multiplier), then
-  backfill with `amon costs recalc --missing-only` (OPERATIONS.md). A check that
-  fails when recent usage carries an unpriced model would catch the next launch
-  before the rows accumulate.
+  surface shows it, from the vendor's live page (never from a multiplier).
+  Startup prices its stored usage on the restart that ships the rate, so no
+  manual backfill is needed. What is still missing is the signal: a check that
+  fails, or a Monitor warning, when recent usage carries an unpriced model would
+  catch the next launch before the $0 rows pile up.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not

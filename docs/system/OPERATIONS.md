@@ -291,23 +291,41 @@ because event history outlives the transcripts it came from.
 
 ### Pricing a newly released model
 
-An unpriced model bills as **$0**, not as an error, so rows imported before its
-rate card lands keep a NULL cost after the table is updated. Backfill only those
-rows:
+An unpriced model bills as **$0**, not as an error, and its rows keep a NULL
+cost. Rates load once from the build, so a pricing update reaches the server
+only with a rebuild and restart, and every `amon serve` startup prices those
+NULL-cost usage rows before it starts accepting requests. Adding a model therefore
+needs no manual backfill. A one-shot command does the same thing without a restart:
 
 ```bash
 amon costs recalc --missing-only --dry-run --json   # report what would be priced
 amon costs recalc --missing-only                    # apply
 ```
 
-`--missing-only` touches rows with no cost at all, so captured provider costs
-and existing estimates are left alone. In the same transaction it re-derives
-the cached trace summary of every non-benchmark session it changes, so a failed
-run rolls back whole and a rerun picks up where it stopped. A bare `amon costs recalc` instead re-derives **every**
-row's cost from the current tables, overwriting captured costs from every
-other source; reach for it only when a published rate itself changed, and
-dry-run it first. Benchmark rows that carry a cost are always left alone: that
-cost is the provider's own bill, which the tables can only estimate.
+### Cost provenance and correcting a rate
+
+Each stored cost records its `cost_source`. `reported` is the producer's own
+figure: a captured benchmark bill, Claude Code's cost attribute or cost metric,
+or any cost an API client sends. `estimated` came from our pricing tables. A
+recalc only ever rewrites `estimated` rows and fills NULL ones. It never touches
+`reported`. When a published rate turns out to be wrong, fix the table and run
+a full recalc:
+
+```bash
+amon costs recalc --dry-run --json   # labels, then reports, then rolls back
+amon costs recalc
+```
+
+The recalc re-derives the cached trace summary of every non-benchmark session it
+changes in the same transaction, so a failed run rolls back whole.
+
+Cost rows written before provenance was recorded are labelled on first startup
+(or by a recalc). Producers that never send a cost (the Codex and Antigravity
+importers) are estimates. Benchmark costs are reported. Elsewhere
+a stored cost equal to the tables at the event's time is taken as an estimate
+and any other as reported. Ambiguity resolves toward `reported`: a mislabelled
+estimate just stays stale, while a mislabelled reported cost could be
+overwritten.
 
 ## Trace-Quality Reclaim
 

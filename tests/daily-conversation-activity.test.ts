@@ -24,7 +24,7 @@ before(async () => {
   // Simulate the preceding schema: a read upgrade must install both indexes.
   db.exec('DROP INDEX idx_events_daily_activity; DROP INDEX idx_messages_daily_activity; PRAGMA user_version=8');
   (await import('../src/db/schema.js')).ensureSchemaForRead();
-  assert.equal(db.pragma('user_version', { simple: true }), 9);
+  assert.equal(db.pragma('user_version', { simple: true }), 10);
   assert.equal((db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name IN ('idx_events_daily_activity','idx_messages_daily_activity')").get() as { n: number }).n, 2);
   const browser = db.prepare(`INSERT INTO browsing_sessions
     (id,agent,integration_mode,relationship_type,started_at)

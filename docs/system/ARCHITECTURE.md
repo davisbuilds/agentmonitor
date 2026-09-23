@@ -185,9 +185,15 @@ not zero.
 
 ## Usage, Pricing, And Analytics
 
-Stored `cost_usd` is authoritative for an event. Pricing metadata supplies costs
-at ingestion/recalculation time and supports model aliases, date-aware schedules,
-and prompt-size tiers. The build must copy pricing data into `dist/`; the built
+Stored `cost_usd` is authoritative for an event, and `cost_source` says whose
+figure it is: `reported` by the producer, which a recalc never rewrites, or
+`estimated` from pricing metadata, which a recalc re-derives when rates change.
+Pricing metadata supplies estimates at ingestion/recalculation time and supports
+model aliases, date-aware schedules, and prompt-size tiers. Rates load once from
+the build, and startup prices any usage rows stored while their model had no
+rate. Claude Code reports cost on its own cost metric, so a token-metric row whose
+export also carries that cost gets a reported zero rather than a second,
+estimated cost. A token-only export is still estimated. The build must copy pricing data into `dist/`; the built
 asset check protects this source-versus-runtime boundary.
 
 The token-bucket invariant is load-bearing: `tokens_in` stores uncached prompt

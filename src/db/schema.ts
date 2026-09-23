@@ -136,7 +136,8 @@ function initSchemaLocked(db: Database): void {
       cache_write_tokens INTEGER DEFAULT 0,
       source TEXT DEFAULT 'api',
       study_id TEXT,
-      study TEXT
+      study TEXT,
+      cost_source TEXT CHECK (cost_source IN ('reported', 'estimated'))
     );
 
     CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
@@ -247,6 +248,12 @@ function initSchemaLocked(db: Database): void {
   }
   if (!eventColumns.has('study')) {
     db.exec('ALTER TABLE events ADD COLUMN study TEXT');
+  }
+  // Where a stored cost came from: 'reported' by its producer (never rewritten
+  // by recalc) or 'estimated' from the pricing tables (re-derivable). NULL while
+  // the row has no cost.
+  if (!eventColumns.has('cost_source')) {
+    db.exec("ALTER TABLE events ADD COLUMN cost_source TEXT CHECK (cost_source IN ('reported', 'estimated'))");
   }
   db.exec('CREATE INDEX IF NOT EXISTS idx_events_study_id ON events(study_id) WHERE study_id IS NOT NULL');
 
@@ -378,14 +385,16 @@ function initSchemaLocked(db: Database): void {
         cache_write_tokens INTEGER DEFAULT 0,
         source TEXT DEFAULT 'api',
         study_id TEXT,
-        study TEXT
+        study TEXT,
+        cost_source TEXT CHECK (cost_source IN ('reported', 'estimated'))
       );
 
       INSERT INTO events_migrated (
         id, event_id, schema_version, session_id, agent_type, event_type, tool_name,
         status, tokens_in, tokens_out, branch, project, duration_ms,
         created_at, client_timestamp, metadata, payload_truncated,
-        model, cost_usd, cache_read_tokens, cache_write_tokens, source, study_id, study
+        model, cost_usd, cache_read_tokens, cache_write_tokens, source, study_id, study,
+        cost_source
       )
       SELECT
         id, event_id, schema_version, session_id, agent_type, event_type, tool_name,
@@ -393,7 +402,8 @@ function initSchemaLocked(db: Database): void {
         created_at, client_timestamp, metadata, payload_truncated,
         model, cost_usd,
         COALESCE(cache_read_tokens, 0), COALESCE(cache_write_tokens, 0),
-        COALESCE(source, 'api'), study_id, study
+        COALESCE(source, 'api'), study_id, study,
+        cost_source
       FROM events;
 
       DROP TABLE events;
@@ -407,6 +417,19 @@ function initSchemaLocked(db: Database): void {
       CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
     `);
   }
+
+  // Cost bookkeeping that runs on every startup (src/pricing/cost-provenance.ts)
+  // looks only at usage rows still missing a cost and cost rows still missing a
+  // provenance label. Both sets are tiny in steady state; these partial indexes
+  // keep finding them from scanning the whole table. Each WHERE clause must stay
+  // identical to its query's, or SQLite will not use the index.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_events_cost_pending ON events(id)
+      WHERE cost_usd IS NULL AND model IS NOT NULL
+        AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0);
+    CREATE INDEX IF NOT EXISTS idx_events_cost_unattributed ON events(id)
+      WHERE cost_usd IS NOT NULL AND cost_source IS NULL;
+  `);
 
   // Event index hygiene (schema-storage-rebalance Phase 1).
   // - Replace the bare session_id index with a covering composite so the monitor
@@ -959,7 +982,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 9;
+const DATA_SCHEMA_VERSION = 10;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -998,9 +1021,46 @@ export function runDataMigrations(db: Database): void {
     if (current < 6) deleteOrphanedSessions(db);
     // v7/v8/v9 introduce no data correction. v8 adds the receipt ledger and
     // observed-identity index; v9 adds content-free daily activity indexes.
+    if (current < 10) clearMetricTokenRowEstimates(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v10 — Claude Code exports token counts and cost as separate metrics, and each
+ * became its own synthetic event. The token rows were also priced from our
+ * tables, so the same usage was billed once as Claude's reported cost and again
+ * as our estimate. Clear the estimate only where the reported cost is there: a
+ * cost-metric row for the same session and model from the same export (stored
+ * within seconds). A token-only export keeps its estimate, its only cost.
+ */
+function clearMetricTokenRowEstimates(db: Database): void {
+  const hasEvents = db.prepare(
+    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'events'"
+  ).get();
+  if (!hasEvents) return;
+  const result = db.prepare(`
+    UPDATE events SET cost_usd = 0, cost_source = 'reported'
+    WHERE source = 'otel'
+      AND json_extract(metadata, '$._source') = 'otel_metric'
+      AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
+      AND cost_usd IS NOT NULL AND cost_usd != 0
+      AND EXISTS (
+        SELECT 1 FROM events cost_row
+        WHERE cost_row.session_id = events.session_id
+          AND cost_row.model IS events.model
+          AND cost_row.source = 'otel'
+          AND json_extract(cost_row.metadata, '$._source') = 'otel_metric'
+          AND cost_row.tokens_in = 0 AND cost_row.tokens_out = 0
+          AND COALESCE(cost_row.cache_read_tokens, 0) = 0 AND COALESCE(cost_row.cache_write_tokens, 0) = 0
+          AND cost_row.cost_usd > 0
+          AND ABS(julianday(cost_row.created_at) - julianday(events.created_at)) * 86400 <= 5
+      )
+  `).run();
+  if (result.changes > 0) {
+    console.error(`[migration] metric token rows: cleared ${result.changes} double-billed cost estimate(s)`);
+  }
 }
 
 /**

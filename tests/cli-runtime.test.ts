@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import test from 'node:test';
+import Database from 'better-sqlite3';
 
 interface CliRun {
   status: number | null;
@@ -261,6 +262,50 @@ test('serve starts a runtime that health and status can inspect', async () => {
 
   assert.match(stdout, new RegExp(`AgentMonitor listening on http://127\\.0\\.0\\.1:${port}`));
   assert.equal(stderr, '');
+});
+
+test('serve prices usage rows that have no cost yet and labels older costs before listening', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-runtime-costs-'));
+  const dbPath = path.join(tempDir, 'runtime.db');
+  const env = { ...process.env, AGENTMONITOR_DB_PATH: dbPath, AGENTMONITOR_AUTO_IMPORT_MINUTES: '0' };
+  try {
+    // First start creates the schema.
+    const port = await allocatePort();
+    const first = spawnDirectServe(env, port);
+    try {
+      await waitForHealth(`http://127.0.0.1:${port}`, first);
+    } finally {
+      await stopChild(first);
+    }
+
+    // A model priced after its usage landed, and a cost from before provenance.
+    const seed = new Database(dbPath);
+    const insert = seed.prepare(`
+      INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out,
+        model, cost_usd, source, client_timestamp)
+      VALUES (?, 's-startup', 'claude_code', 'llm_response', 'success', 1000000, 0, 'claude-sonnet-5', ?, 'import', '2026-09-20T10:00:00Z')
+    `);
+    insert.run('unpriced', null);
+    insert.run('unlabelled', 2);
+    seed.close();
+
+    const secondPort = await allocatePort();
+    const second = spawnDirectServe(env, secondPort);
+    try {
+      await waitForHealth(`http://127.0.0.1:${secondPort}`, second);
+      const check = new Database(dbPath, { readonly: true });
+      const rows = check.prepare('SELECT event_id, cost_usd, cost_source FROM events ORDER BY event_id').all();
+      check.close();
+      assert.deepEqual(rows, [
+        { event_id: 'unlabelled', cost_usd: 2, cost_source: 'estimated' },
+        { event_id: 'unpriced', cost_usd: 2, cost_source: 'estimated' },
+      ]);
+    } finally {
+      await stopChild(second);
+    }
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 });
 
 test('serve rejects a second live runtime targeting the same database', async () => {

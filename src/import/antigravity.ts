@@ -191,6 +191,7 @@ export function parseAntigravityFile(
         cache_read_tokens: b.cacheReadTokens,
         model,
         cost_usd: cost ?? undefined,
+        cost_source: cost != null ? 'estimated' : undefined,
         client_timestamp: at,
         metadata: { _source: 'antigravity_db', thoughts_tokens: b.thoughtsTokens },
         source: 'import',

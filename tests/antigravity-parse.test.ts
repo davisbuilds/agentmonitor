@@ -95,6 +95,7 @@ test('parseAntigravityFile: llm_response carries cache-net tokens + cost from Co
   assert.equal(llm!.cache_read_tokens, 8000); // cached, not folded into tokens_in
   assert.equal((llm!.metadata as { thoughts_tokens: number }).thoughts_tokens, 2500);
   assert.ok(llm!.cost_usd !== undefined && llm!.cost_usd > 0, 'priced (gemini-pro-default)');
+  assert.equal(llm!.cost_source, 'estimated', 'priced from our tables, not reported by Antigravity');
 });
 
 test('parseAntigravityFile: each generation is stamped and priced at its own time', () => {

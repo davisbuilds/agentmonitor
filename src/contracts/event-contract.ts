@@ -1,3 +1,5 @@
+import type { CostSource } from '../pricing/cost-provenance.js';
+
 const EVENT_TYPES = [
   'tool_use',
   'session_start',
@@ -61,6 +63,9 @@ export interface NormalizedIngestEvent {
   // constant carried on events so the session upsert can persist it; see
   // src/util/invocation-mode.ts.
   mode?: 'interactive' | 'headless';
+  // Internal: set by importers that priced the row from our tables. The public
+  // contract never reads it from input, so a client's own cost is 'reported'.
+  cost_source?: CostSource;
 }
 
 export interface ContractValidationError {

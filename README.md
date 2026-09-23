@@ -237,6 +237,10 @@ for the full environment table.
 - Codex OTEL setup: [hooks/codex/README.md](hooks/codex/README.md)
 - Claude Code quota bridge: [hooks/claude-code/README.md#claude-statusline-quota-bridge](hooks/claude-code/README.md#claude-statusline-quota-bridge)
 - Generic ingest contract: [docs/api/event-contract.md](docs/api/event-contract.md)
+- Stored events carry `cost_source` alongside `cost_usd`: `reported` for a cost
+  the producer sent, `estimated` for one priced from AgentMonitor's tables
+  ([contract](docs/api/event-contract.md)). Only estimates are re-derived when
+  rates change.
 - OTLP ingest (`POST /api/otel/v1/logs`, `/v1/metrics`) answers `{}` when every
   record is stored, or OTLP's partial-success shape when some fail the ingest
   contract: `{"partialSuccess":{"rejectedLogRecords":1,"errorMessage":"..."}}`

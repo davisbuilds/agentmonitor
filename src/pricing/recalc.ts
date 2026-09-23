@@ -1,13 +1,13 @@
 import type { Database } from 'better-sqlite3';
 import { pricingRegistry } from './index.js';
+import { attributeCostSources } from './cost-provenance.js';
 import { maintainSessionTraceSummary } from '../trace-quality/summary.js';
 
 export interface CostRecalcOptions {
   apply: boolean;
   /**
-   * Only price rows that have no cost yet. This is the safe backfill after a
-   * model gains a rate card: rows already carrying a cost, including captured
-   * provider costs, are left alone.
+   * Only price rows that have no cost yet: the backfill after a model gains a
+   * rate card. The server runs it on every startup.
    */
   missingOnly?: boolean;
 }
@@ -19,6 +19,8 @@ export type CostRecalcReport = {
   updated: number;
   unchanged: number;
   unknown_model: number;
+  /** Pre-provenance cost rows labelled before recalculating (or, dry, that would be). */
+  costs_attributed: number;
   sessions_resummarized: number;
 };
 
@@ -36,25 +38,51 @@ interface CostRow {
   client_timestamp: string | null;
 }
 
+const DRY_RUN_ROLLBACK = Symbol('dry-run rollback');
+
 /**
  * Re-derive event costs from the pricing tables, pricing each row at its own
- * time. Benchmark rows that carry a cost are never touched.
+ * time. Only rows with no cost or an estimated one are candidates: a reported
+ * cost is the producer's figure and is never rewritten. Cost rows that predate
+ * provenance are labelled first, so none is mistaken for an estimate. A dry run
+ * does the same labelling inside a transaction it rolls back, so its report
+ * matches what applying would do.
  */
 export function recalculateEventCosts(db: Database, options: CostRecalcOptions): CostRecalcReport {
+  if (options.apply) return recalculate(db, options);
+  let report: CostRecalcReport | undefined;
+  try {
+    db.transaction(() => {
+      report = recalculate(db, options);
+      throw DRY_RUN_ROLLBACK;
+    })();
+  } catch (err) {
+    if (err !== DRY_RUN_ROLLBACK) throw err;
+  }
+  return report!;
+}
+
+function recalculate(db: Database, options: CostRecalcOptions): CostRecalcReport {
   const missingOnly = options.missingOnly ?? false;
+  const costsAttributed = attributeCostSources(db);
+  // The missing-only WHERE must match idx_events_cost_pending (src/db/schema.ts)
+  // so the startup backfill finds its handful of rows without a table scan.
   const events = db.prepare(`
     SELECT id, session_id, source, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
            cost_usd, created_at, client_timestamp
     FROM events
-    WHERE model IS NOT NULL
+    WHERE cost_usd IS NULL AND model IS NOT NULL
       AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
-      ${missingOnly ? 'AND cost_usd IS NULL' : ''}
-      -- A benchmark cost is the provider's captured bill, which the tables can
-      -- only estimate; import keeps it as authoritative, and so does recalc.
-      AND NOT (source = 'benchmark' AND cost_usd IS NOT NULL)
+    ${missingOnly ? '' : `
+    UNION ALL
+    SELECT id, session_id, source, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+           cost_usd, created_at, client_timestamp
+    FROM events
+    WHERE cost_source = 'estimated' AND model IS NOT NULL
+      AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)`}
   `).all() as CostRow[];
 
-  const update = db.prepare('UPDATE events SET cost_usd = ? WHERE id = ?');
+  const update = db.prepare("UPDATE events SET cost_usd = ?, cost_source = 'estimated' WHERE id = ?");
   const touchedSessions = new Set<string>();
   let updated = 0;
   let unchanged = 0;
@@ -100,6 +128,7 @@ export function recalculateEventCosts(db: Database, options: CostRecalcOptions):
     updated,
     unchanged,
     unknown_model: unknownModel,
+    costs_attributed: costsAttributed,
     sessions_resummarized: touchedSessions.size,
   };
 }

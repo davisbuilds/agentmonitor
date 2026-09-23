@@ -405,6 +405,21 @@ describe('Codex log parser', () => {
     assert.equal(meta.cwd, '/home/user/project');
   });
 
+  test('labels the costs it prices from the tables as estimates', () => {
+    const filePath = writeJsonl('codex-estimated.jsonl', [
+      { type: 'session_meta', timestamp: '2026-02-01T10:00:00Z', payload: { id: 'cdx-est', cwd: '/tmp', timestamp: '2026-02-01T10:00:00Z' } },
+      { type: 'turn_context', timestamp: '2026-02-01T10:00:30Z', payload: { model: 'gpt-5.6-terra' } },
+      {
+        type: 'event_msg',
+        timestamp: '2026-02-01T10:01:00Z',
+        payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 2500, output_tokens: 600 } } },
+      },
+    ]);
+    const tokenEvent = parseCodexFile(filePath).find(e => e.event_type === 'llm_response');
+    assert.ok(tokenEvent?.cost_usd && tokenEvent.cost_usd > 0);
+    assert.equal(tokenEvent.cost_source, 'estimated');
+  });
+
   test('parses event_msg token_count as llm_response with delta tokens', () => {
     const filePath = writeJsonl('codex-tok.jsonl', [
       {
@@ -1109,6 +1124,44 @@ describe('Import orchestrator integration', () => {
       assert.ok(Math.abs(statsAfter.total_cost_usd - 0.368) < 0.0001);
       assert.equal(statsAfter.model_breakdown['gpt-5.6-sol'], undefined);
       assert.equal(statsAfter.model_breakdown['gpt-5.6-terra'], 3);
+    } finally {
+      fs.rmSync(isolatedCodexDir, { recursive: true, force: true });
+    }
+  });
+
+  test('a Codex model refresh that prices a formerly unpriced row labels it an estimate', async () => {
+    const isolatedCodexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-codex-refresh-label-'));
+    const sessionsDir = path.join(isolatedCodexDir, 'sessions', '2026', '07', '12');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(path.join(isolatedCodexDir, 'config.toml'), 'model = "unpriced-model"\n');
+    const filePath = path.join(sessionsDir, 'refresh-label.jsonl');
+    const sessionMeta = JSON.stringify({
+      type: 'session_meta',
+      timestamp: '2026-07-12T11:00:00Z',
+      payload: { id: 'session-refresh-label', cwd: '/tmp', timestamp: '2026-07-12T11:00:00Z' },
+    });
+    const tokenCount = JSON.stringify({
+      type: 'event_msg',
+      timestamp: '2026-07-12T11:01:00Z',
+      payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 100_000, output_tokens: 20_000 } } },
+    });
+    const labelOf = () => getDb!().prepare(`
+      SELECT cost_usd, cost_source FROM events
+      WHERE session_id = 'session-refresh-label' AND event_type = 'llm_response'
+    `).get() as { cost_usd: number | null; cost_source: string | null };
+
+    try {
+      const { runImport } = await import('../src/import/index.js');
+      fs.writeFileSync(filePath, [sessionMeta, tokenCount].join('\n'));
+      runImport({ source: 'codex', codexDir: isolatedCodexDir });
+      assert.deepEqual(labelOf(), { cost_usd: null, cost_source: null });
+
+      const turnContext = JSON.stringify({ type: 'turn_context', payload: { model: 'gpt-5.6-terra' } });
+      fs.writeFileSync(filePath, [sessionMeta, turnContext, tokenCount].join('\n'));
+      runImport({ source: 'codex', codexDir: isolatedCodexDir, force: true });
+      const after = labelOf();
+      assert.ok(after.cost_usd !== null && after.cost_usd > 0);
+      assert.equal(after.cost_source, 'estimated');
     } finally {
       fs.rmSync(isolatedCodexDir, { recursive: true, force: true });
     }

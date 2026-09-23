@@ -1,7 +1,7 @@
 import { once } from 'node:events';
 import type { Server } from 'node:http';
 import { config } from './config.js';
-import { closeDb } from './db/connection.js';
+import { closeDb, getDb } from './db/connection.js';
 import { initSchema } from './db/schema.js';
 import { getStatsForBroadcast, updateIdleSessions } from './db/queries.js';
 import { startStatsBroadcast, stopStatsBroadcast } from './api/stream.js';
@@ -13,6 +13,7 @@ import { startProviderQuotaPolling, stopProviderQuotaPolling } from './provider-
 import { acquireRuntimeOwnership } from './runtime-ownership.js';
 import { startWatcher, stopWatcher } from './watcher/service.js';
 import { ensureSessionTraceSummaryBackfill } from './trace-quality/summary.js';
+import { recalculateEventCosts } from './pricing/recalc.js';
 
 export interface RuntimeOptions {
   noWatch?: boolean;
@@ -101,6 +102,17 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
     const rebuiltTraceSummaries = ensureSessionTraceSummaryBackfill();
     if (rebuiltTraceSummaries > 0) {
       console.log(`[trace-quality] (re)built ${rebuiltTraceSummaries} session trace summaries`);
+    }
+
+    // Rates load once, from this build. Price any usage stored while its model
+    // had no rate card (it billed as $0), so a pricing update takes effect on
+    // the restart that ships it rather than waiting for a manual recalc.
+    const costs = recalculateEventCosts(getDb(), { apply: true, missingOnly: true });
+    if (costs.costs_attributed > 0) {
+      console.log(`[pricing] labelled the source of ${costs.costs_attributed} existing cost(s)`);
+    }
+    if (costs.updated > 0) {
+      console.log(`[pricing] priced ${costs.updated} usage row(s) that had no cost`);
     }
 
     // Build the all-time Monitor snapshot before accepting HTTP work. The

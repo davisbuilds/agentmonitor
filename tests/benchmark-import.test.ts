@@ -128,6 +128,8 @@ describe('importBenchmarkResults', () => {
     assert.equal(JSON.parse(minimax.metadata as string).run_id, 'codex:task-a:minimax-m3:trial1');
     // 1M input * 0.30/MTok + 1M output * 1.20/MTok
     assert.ok(Math.abs((minimax.cost_usd ?? 0) - 1.5) < 1e-9, `got ${minimax.cost_usd}`);
+    // No captured cost on the row, so the table price is an estimate.
+    assert.equal((minimax as { cost_source?: string }).cost_source, 'estimated');
 
     // Effort-suffix stripped so the codex base model resolves to a real price.
     const codex = events.find(e => e.model === 'gpt-5.6-terra-xhigh');
@@ -193,6 +195,7 @@ describe('importBenchmarkResults', () => {
 
     const refreshed = getEvents({ source: 'benchmark' }).events.find(e => e.session_id.endsWith(`::${runId}`));
     assert.ok(Math.abs((refreshed?.cost_usd ?? 0) - 0.42) < 1e-9, `expected backfilled 0.42, got ${refreshed?.cost_usd}`);
+    assert.equal((refreshed as { cost_source?: string }).cost_source, 'reported', 'a captured cost is the provider bill');
   });
 
   test('reads study + model identity straight from openbench row fields', () => {
