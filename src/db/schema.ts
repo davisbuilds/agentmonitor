@@ -574,6 +574,10 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_bs_project ON browsing_sessions(project);
     CREATE INDEX IF NOT EXISTS idx_bs_agent ON browsing_sessions(agent);
     CREATE INDEX IF NOT EXISTS idx_bs_started_at ON browsing_sessions(started_at);
+    -- Date filters compare datetime(started_at): stored values mix ':00Z' and
+    -- ':00.000Z', which do not string-compare in instant order. This index keeps
+    -- that comparison a range search instead of a full scan.
+    CREATE INDEX IF NOT EXISTS idx_bs_started_instant ON browsing_sessions(datetime(started_at));
   `);
 
   const browsingSessionColumns = new Set<string>(

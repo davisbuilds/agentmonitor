@@ -1,0 +1,108 @@
+import assert from 'node:assert/strict';
+import test, { describe } from 'node:test';
+
+import {
+  dateParamLowerBound,
+  dateParamUpperExclusive,
+  localDayEndExclusive,
+  localDayOf,
+  localDayStart,
+  localWeekdayHour,
+} from '../src/util/local-day.js';
+import { resolveReportingTimeZone } from '../src/util/time-zone.js';
+
+const NY = 'America/New_York';
+const TOKYO = 'Asia/Tokyo';
+
+describe('localDayOf', () => {
+  test('a late-evening instant belongs to the local day, not the UTC one', () => {
+    assert.equal(localDayOf('2026-09-11T02:00:00Z', NY), '2026-09-10');
+    assert.equal(localDayOf('2026-09-10T20:00:00Z', TOKYO), '2026-09-11');
+  });
+
+  test('reads SQLite zone-less timestamps as UTC, whatever the host zone', () => {
+    assert.equal(localDayOf('2026-09-11 02:00:00', NY), '2026-09-10');
+    assert.equal(localDayOf('2026-09-11T02:00:00', NY), '2026-09-10');
+  });
+
+  test('honors an explicit offset', () => {
+    assert.equal(localDayOf('2026-09-10T23:30:00-04:00', NY), '2026-09-10');
+    assert.equal(localDayOf('2026-09-10T23:30:00-04:00', TOKYO), '2026-09-11');
+  });
+
+  test('splits at local midnight in a quarter-hour-offset zone, cached or not', () => {
+    // Kathmandu is UTC+05:45, so its midnight is 18:15Z. Ask twice so the
+    // second answer comes from the quarter-hour memo.
+    for (let pass = 0; pass < 2; pass++) {
+      assert.equal(localDayOf('2026-09-10T18:14:59.999Z', 'Asia/Kathmandu'), '2026-09-10');
+      assert.equal(localDayOf('2026-09-10T18:15:00.000Z', 'Asia/Kathmandu'), '2026-09-11');
+    }
+  });
+
+  test('returns a bare day unchanged rather than reading it as UTC midnight', () => {
+    // new Date('2026-09-10') is UTC midnight, which is Sep 9 west of UTC.
+    assert.equal(localDayOf('2026-09-10', NY), '2026-09-10');
+  });
+
+  test('returns null for an unparseable timestamp', () => {
+    assert.equal(localDayOf('not-a-time', NY), null);
+  });
+});
+
+describe('local day bounds', () => {
+  test('an ordinary day runs between two local midnights', () => {
+    assert.equal(localDayStart('2026-09-10', NY), '2026-09-10T04:00:00.000Z');
+    assert.equal(localDayEndExclusive('2026-09-10', NY), '2026-09-11T04:00:00.000Z');
+    assert.equal(localDayStart('2026-09-10', TOKYO), '2026-09-09T15:00:00.000Z');
+  });
+
+  test('the spring-forward day is 23 hours long', () => {
+    assert.equal(localDayStart('2026-03-08', NY), '2026-03-08T05:00:00.000Z');
+    assert.equal(localDayEndExclusive('2026-03-08', NY), '2026-03-09T04:00:00.000Z');
+  });
+
+  test('a day whose midnight is skipped starts at its first real instant', () => {
+    // Havana springs forward at 00:00 on 2026-03-08: 23:59 CST on Mar 7 is
+    // followed by 01:00 CDT on Mar 8, so Mar 8 begins at 05:00Z and Mar 7 ends there.
+    assert.equal(localDayStart('2026-03-08', 'America/Havana'), '2026-03-08T05:00:00.000Z');
+    assert.equal(localDayEndExclusive('2026-03-07', 'America/Havana'), '2026-03-08T05:00:00.000Z');
+    assert.equal(localDayStart('2026-03-07', 'America/Havana'), '2026-03-07T05:00:00.000Z');
+  });
+
+  test('the fall-back day is 25 hours long', () => {
+    assert.equal(localDayStart('2026-11-01', NY), '2026-11-01T04:00:00.000Z');
+    assert.equal(localDayEndExclusive('2026-11-01', NY), '2026-11-02T05:00:00.000Z');
+  });
+});
+
+describe('date params', () => {
+  test('a bare day becomes its local midnights', () => {
+    assert.equal(dateParamLowerBound('2026-09-10', NY), '2026-09-10T04:00:00.000Z');
+    assert.equal(dateParamUpperExclusive('2026-09-10', NY), '2026-09-11T04:00:00.000Z');
+  });
+
+  test('a timestamp stays an instant, the upper bound covering its whole second', () => {
+    assert.equal(dateParamLowerBound('2026-09-15T12:34:56.789Z', NY), '2026-09-15T12:34:56.789Z');
+    assert.equal(dateParamUpperExclusive('2026-09-15T12:34:56.789Z', NY), '2026-09-15T12:34:57.000Z');
+  });
+});
+
+describe('localWeekdayHour', () => {
+  test('buckets by local weekday (Monday = 0) and hour', () => {
+    // Friday 02:00 UTC is Thursday 22:00 EDT.
+    assert.deepEqual(localWeekdayHour('2026-09-11T02:00:00Z', NY), { weekday: 3, hour: 22 });
+    assert.deepEqual(localWeekdayHour('2026-09-11T02:00:00Z', TOKYO), { weekday: 4, hour: 11 });
+  });
+});
+
+describe('resolveReportingTimeZone', () => {
+  test('uses a valid configured zone', () => {
+    assert.equal(resolveReportingTimeZone({ AGENTMONITOR_TIMEZONE: TOKYO }), TOKYO);
+  });
+
+  test('falls back to the host zone when unset or invalid', () => {
+    const host = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    assert.equal(resolveReportingTimeZone({}), host);
+    assert.equal(resolveReportingTimeZone({ AGENTMONITOR_TIMEZONE: 'Not/AZone' }), host);
+  });
+});

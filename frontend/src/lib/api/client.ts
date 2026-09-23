@@ -352,7 +352,7 @@ export interface SkillConsultationRow {
 export interface SkillConsultationAnalytics {
   asOf: string;
   windowSemantics: {
-    interval: 'utc_half_open';
+    interval: 'local_day_half_open';
     from: string | null;
     toExclusive: string | null;
     sessionMembership: 'observed_interval_overlap_or_in_window_occurrence';

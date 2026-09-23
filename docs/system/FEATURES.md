@@ -63,8 +63,8 @@ product never substitutes a misleading `0%` for missing evidence.
 
 ## Analytics And Skill Evidence
 
-Analytics covers activity over time, projects, agents, tools, hour-of-week patterns
-(bucketed in the host's local time), velocity, and high-volume sessions. Capability metadata distinguishes all-session
+Analytics covers activity over time, projects, agents, tools, hour-of-week patterns,
+velocity, and high-volume sessions. Capability metadata distinguishes all-session
 aggregates from tool or transcript analysis that excludes unsupported sources.
 
 Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of
@@ -101,6 +101,11 @@ model, provider, and provider-neutral tier.
   Benchmark-aware reads can opt into them explicitly. Usage and analytics reads
   reject an unparseable `date_from`/`date_to` with a 400 rather than reporting
   an empty window.
+- Every user-facing day is a local day in the reporting zone (the host's, or
+  `AGENTMONITOR_TIMEZONE`): a bare `date_from`/`date_to` selects local calendar
+  days, and daily charts, active-day counts, the Hour-of-Week heatmap, skill
+  and trace-quality windows, and budget periods all bucket the same way. The
+  aggregate warehouse export is the exception and keeps UTC days.
 - Usage responses disclose when matching events lack token or cost data.
 
 Read-only budgets use an optional local JSON configuration and report alert state

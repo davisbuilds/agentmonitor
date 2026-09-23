@@ -8,6 +8,7 @@ import {
   extractExplicitSkillName,
   fingerprintCodexCommand,
 } from './invocation-detection.js';
+import { dateParamLowerBound, dateParamUpperExclusive, localDayOf } from '../util/local-day.js';
 
 export type SkillInvocationDetectionSource =
   | 'explicit_skill_tool'
@@ -38,18 +39,13 @@ export interface SkillInvocationOccurrence {
   };
 }
 
+/** Whether a local day falls inside the requested (local) date range. */
 function isDateWithinRange(date: string, params: AnalyticsParams): boolean {
   if (params.date_from && date < params.date_from) return false;
   if (params.date_to && date > params.date_to) return false;
   return true;
 }
 
-function nextUtcDate(date: string): string | null {
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  parsed.setUTCDate(parsed.getUTCDate() + 1);
-  return parsed.toISOString().slice(0, 10);
-}
 
 function assignOccurrenceIndexes(
   occurrences: Omit<
@@ -112,14 +108,14 @@ function enrichWithOrderedObservations(
       values.push(params.agent);
     }
     if (params.date_from) {
-      filters.push('observation.observed_at >= ?');
-      values.push(params.date_from);
+      filters.push('datetime(observation.observed_at) >= datetime(?)');
+      values.push(dateParamLowerBound(params.date_from));
     }
     const observationToExclusive = params.date_to
-      ? nextUtcDate(params.date_to)
+      ? dateParamUpperExclusive(params.date_to)
       : null;
     if (observationToExclusive) {
-      filters.push('observation.observed_at < ?');
+      filters.push('datetime(observation.observed_at) < datetime(?)');
       values.push(observationToExclusive);
     }
     rows.push(...db.prepare(`
@@ -228,12 +224,12 @@ export function selectSkillInvocationOccurrences(
     explicitValues.push(params.agent);
   }
   if (params.date_from) {
-    explicitFilters.push('COALESCE(m.timestamp, bs.started_at) >= ?');
-    explicitValues.push(params.date_from);
+    explicitFilters.push('datetime(COALESCE(m.timestamp, bs.started_at)) >= datetime(?)');
+    explicitValues.push(dateParamLowerBound(params.date_from));
   }
-  const explicitToExclusive = params.date_to ? nextUtcDate(params.date_to) : null;
+  const explicitToExclusive = params.date_to ? dateParamUpperExclusive(params.date_to) : null;
   if (explicitToExclusive) {
-    explicitFilters.push('COALESCE(m.timestamp, bs.started_at) < ?');
+    explicitFilters.push('datetime(COALESCE(m.timestamp, bs.started_at)) < datetime(?)');
     explicitValues.push(explicitToExclusive);
   }
   const explicitRows = db.prepare(`
@@ -263,7 +259,7 @@ export function selectSkillInvocationOccurrences(
   for (const row of explicitRows) {
     if (params.project && row.project !== params.project) continue;
     if (params.agent && row.agent !== params.agent) continue;
-    if (!row.timestamp || !isDateWithinRange(row.timestamp.slice(0, 10), params)) continue;
+    if (!row.timestamp || !isDateWithinRange(localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10), params)) continue;
     const skillName = extractExplicitSkillName(row.input_json);
     if (!skillName) continue;
     occurrences.push({
@@ -294,9 +290,9 @@ export function selectSkillInvocationOccurrences(
     }
     if (params.date_from) {
       eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)');
-      eventValues.push(params.date_from);
+      eventValues.push(dateParamLowerBound(params.date_from));
     }
-    const eventToExclusive = params.date_to ? nextUtcDate(params.date_to) : null;
+    const eventToExclusive = params.date_to ? dateParamUpperExclusive(params.date_to) : null;
     if (eventToExclusive) {
       eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) < datetime(?)');
       eventValues.push(eventToExclusive);
@@ -322,7 +318,7 @@ export function selectSkillInvocationOccurrences(
     const codexSessionsWithEvents = new Set<string>();
     for (const row of eventRows) {
       if (params.project && row.project !== params.project) continue;
-      if (!row.timestamp || !isDateWithinRange(row.timestamp.slice(0, 10), params)) continue;
+      if (!row.timestamp || !isDateWithinRange(localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10), params)) continue;
       const command = extractCodexCommandFromEventMetadata(row.metadata);
       if (!command) continue;
       const skillNames = extractCodexSkillNamesFromCommand(command);
@@ -359,12 +355,12 @@ export function selectSkillInvocationOccurrences(
       jsonlValues.push(params.project);
     }
     if (params.date_from) {
-      jsonlFilters.push('COALESCE(m.timestamp, bs.started_at) >= ?');
-      jsonlValues.push(params.date_from);
+      jsonlFilters.push('datetime(COALESCE(m.timestamp, bs.started_at)) >= datetime(?)');
+      jsonlValues.push(dateParamLowerBound(params.date_from));
     }
-    const jsonlToExclusive = params.date_to ? nextUtcDate(params.date_to) : null;
+    const jsonlToExclusive = params.date_to ? dateParamUpperExclusive(params.date_to) : null;
     if (jsonlToExclusive) {
-      jsonlFilters.push('COALESCE(m.timestamp, bs.started_at) < ?');
+      jsonlFilters.push('datetime(COALESCE(m.timestamp, bs.started_at)) < datetime(?)');
       jsonlValues.push(jsonlToExclusive);
     }
     const jsonlRows = db.prepare(`
@@ -393,7 +389,7 @@ export function selectSkillInvocationOccurrences(
       const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
       if (codexSessionsWithEvents.has(canonicalSessionId)) continue;
       if (params.project && row.project !== params.project) continue;
-      if (!row.timestamp || !isDateWithinRange(row.timestamp.slice(0, 10), params)) continue;
+      if (!row.timestamp || !isDateWithinRange(localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10), params)) continue;
       const command = extractCodexCommandFromInputJson(row.input_json);
       if (!command) continue;
       const commandFingerprint = fingerprintCodexCommand(command);

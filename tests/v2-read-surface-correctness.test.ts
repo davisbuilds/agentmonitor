@@ -14,6 +14,7 @@ const { initSchema } = await import('../src/db/schema.js');
 const { closeDb, getDb } = await import('../src/db/connection.js');
 const { insertEvent } = await import('../src/db/queries.js');
 const { createApp } = await import('../src/app.js');
+const { setReportingTimeZoneForTests } = await import('../src/util/local-day.js');
 
 let server: Server;
 let baseUrl = '';
@@ -127,23 +128,21 @@ describe('usage and analytics reject unparseable dates', () => {
 
 describe('date_to covers the whole calendar day across DST', () => {
   test('a session late on a spring-forward day is inside date_to under a US zone', async () => {
-    const previousTz = process.env.TZ;
-    process.env.TZ = 'America/Los_Angeles';
+    setReportingTimeZoneForTests('America/Los_Angeles');
     try {
       seedBrowsingSession('dst-session', '2026-03-08T23:30:00Z');
       const { listBrowsingSessions } = await import('../src/db/v2-queries.js');
       const result = listBrowsingSessions({ project: 'read-surface', date_to: '2026-03-08' });
       assert.ok(result.data.some(s => s.id === 'dst-session'));
     } finally {
-      process.env.TZ = previousTz;
+      setReportingTimeZoneForTests(null);
     }
   });
 });
 
 describe('Hour-of-Week buckets by local time, matching its label', () => {
   test('a UTC early-morning session lands on the previous local evening', async () => {
-    const previousTz = process.env.TZ;
-    process.env.TZ = 'America/New_York';
+    setReportingTimeZoneForTests('America/New_York');
     try {
       // 2026-09-11 02:00Z is Friday 02:00 UTC but Thursday 22:00 EDT.
       seedBrowsingSession('how-session', '2026-09-11T02:00:00Z', 7);
@@ -155,13 +154,12 @@ describe('Hour-of-Week buckets by local time, matching its label', () => {
       assert.equal(thursday22?.message_count, 7);
       assert.equal(friday02?.message_count, 0);
     } finally {
-      process.env.TZ = previousTz;
+      setReportingTimeZoneForTests(null);
     }
   });
 
   test('its date window selects local calendar days, matching the buckets', async () => {
-    const previousTz = process.env.TZ;
-    process.env.TZ = 'America/Los_Angeles';
+    setReportingTimeZoneForTests('America/Los_Angeles');
     try {
       // Wednesday 2026-09-09 20:00 PDT: inside the UTC day 2026-09-10, outside the local one.
       seedBrowsingSession('how-prev-evening', '2026-09-10T03:00:00Z', 3, 'heatmap-window');
@@ -172,7 +170,7 @@ describe('Hour-of-Week buckets by local time, matching its label', () => {
       const plotted = grid.filter(p => p.message_count > 0).map(p => [p.day_of_week, p.hour_of_day, p.message_count]);
       assert.deepEqual(plotted, [[3, 23, 5]]);
     } finally {
-      process.env.TZ = previousTz;
+      setReportingTimeZoneForTests(null);
     }
   });
 });

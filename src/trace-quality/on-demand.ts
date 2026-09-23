@@ -26,19 +26,11 @@ import {
 } from './projection.js';
 import { readTraceQualityProjectionInputForSession } from './source-readers.js';
 import type { TraceQualityCoverage } from './types.js';
-
-/** Shift a `YYYY-MM-DD` date string by whole days (UTC). */
-function addDaysToDateString(date: string, days: number): string | null {
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  parsed.setUTCDate(parsed.getUTCDate() + days);
-  return parsed.toISOString().slice(0, 10);
-}
+import { dateParamLowerBound, dateParamUpperExclusive } from '../util/local-day.js';
 
 /**
- * Append date-range conditions, treating a date-only `date_to` as the exclusive
- * next day so timestamped rows on that day are included (not dropped by a bare
- * `<= 'YYYY-MM-DD'`).
+ * Append date-range conditions. Bare dates are the operator's local days, so a
+ * date-only `date_to` runs through that local day's end.
  */
 function appendDateRangeConditions(
   conditions: string[],
@@ -49,17 +41,11 @@ function appendDateRangeConditions(
 ): void {
   if (dateFrom) {
     conditions.push(`datetime(${column}) >= datetime(?)`);
-    values.push(dateFrom);
+    values.push(dateParamLowerBound(dateFrom));
   }
   if (dateTo) {
-    const nextDay = /^\d{4}-\d{2}-\d{2}$/.test(dateTo) ? addDaysToDateString(dateTo, 1) : null;
-    if (nextDay) {
-      conditions.push(`datetime(${column}) < datetime(?)`);
-      values.push(nextDay);
-    } else {
-      conditions.push(`datetime(${column}) <= datetime(?)`);
-      values.push(dateTo);
-    }
+    conditions.push(`datetime(${column}) < datetime(?)`);
+    values.push(dateParamUpperExclusive(dateTo));
   }
 }
 

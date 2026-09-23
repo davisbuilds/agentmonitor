@@ -3,6 +3,7 @@ import type { AnalyticsParams, SkillConsultationAnalytics, SkillConsultationClas
 import { resolveVersionAt, type CatalogSnapshot } from './catalog.js';
 import { extractCanonicalCodexSessionId } from './invocation-detection.js';
 import { selectSkillInvocationOccurrences, type SkillInvocationOccurrence } from './invocation-ledger.js';
+import { dateParamLowerBound, dateParamUpperExclusive } from '../util/local-day.js';
 
 interface SessionRow {
   id: string;
@@ -31,12 +32,11 @@ const emptyClasses = (): SkillConsultationClassCounts => ({
   unclassifiable: 0,
 });
 
-function utcBoundary(date: string | undefined, addDay: boolean): string | null {
+/** A window edge as a UTC instant: a bare date is the operator's local midnight. */
+function windowBoundary(date: string | undefined, end: boolean): string | null {
   if (!date) return null;
-  const parsed = new Date(`${date}T00:00:00.000Z`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  if (addDay) parsed.setUTCDate(parsed.getUTCDate() + 1);
-  return parsed.toISOString();
+  const bound = end ? dateParamUpperExclusive(date) : dateParamLowerBound(date);
+  return Number.isNaN(Date.parse(bound)) ? null : bound;
 }
 
 function capability(
@@ -203,17 +203,17 @@ function selectScopedSessions(
   const intervalClauses = ['started_at IS NOT NULL'];
   const intervalValues: unknown[] = [];
   if (toExclusive) {
-    intervalClauses.push('started_at < ?');
-    intervalValues.push(toExclusive.slice(0, 10));
+    intervalClauses.push('datetime(started_at) < datetime(?)');
+    intervalValues.push(toExclusive);
   }
   if (from) {
     intervalClauses.push(`
-      CASE
+      datetime(CASE
         WHEN live_status IN ('live', 'active', 'available') THEN ?
         ELSE COALESCE(ended_at, last_item_at, ?)
-      END >= ?
+      END) >= datetime(?)
     `);
-    intervalValues.push(asOf, asOf, from.slice(0, 10));
+    intervalValues.push(asOf, asOf, from);
   }
   const byInterval = selectSessions(
     db,
@@ -310,8 +310,8 @@ export function getSkillConsultationAnalytics(
 ): SkillConsultationAnalytics {
   const now = options.now ?? new Date();
   const asOf = now.toISOString();
-  const from = utcBoundary(params.date_from, false);
-  const toExclusive = utcBoundary(params.date_to, true);
+  const from = windowBoundary(params.date_from, false);
+  const toExclusive = windowBoundary(params.date_to, true);
   const occurrences = options.occurrences ?? selectSkillInvocationOccurrences(db, params);
   const scoped = selectScopedSessions(
     db,
@@ -451,7 +451,7 @@ export function getSkillConsultationAnalytics(
   return {
     asOf,
     windowSemantics: {
-      interval: 'utc_half_open',
+      interval: 'local_day_half_open',
       from,
       toExclusive,
       sessionMembership: 'observed_interval_overlap_or_in_window_occurrence',

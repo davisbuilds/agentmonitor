@@ -13,6 +13,9 @@ let base: string;
 let closeDb: () => void;
 before(async () => {
   process.env.AGENTMONITOR_DB_PATH = path.join(dir, 'test.db');
+  // These fixtures encode America/New_York days and DST boundaries, the zone
+  // this read was built against. Pin it so the suite reads the same on any host.
+  process.env.AGENTMONITOR_TIMEZONE = 'America/New_York';
   const connection = await import('../src/db/connection.js');
   closeDb = connection.closeDb;
   (await import('../src/db/schema.js')).initSchema();

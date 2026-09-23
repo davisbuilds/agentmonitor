@@ -394,20 +394,18 @@ the build.
   Do not run a heuristic collapse without first measuring how often distinct
   turns legitimately share a usage tuple.
 
-#### Analytics date windows are UTC days, except the heatmap's
-- **What**: every usage and analytics read selects `date_from`/`date_to` as UTC
-  calendar days (`buildAnalyticsFilterState`, `buildUsageFilterState`), but the
-  Hour-of-Week heatmap selects and buckets by the host's local days (2026-09-23,
-  PR #141), because a UTC window under local buckets plots edge sessions on
-  the neighboring day.
-- **Why or evidence**: west or east of UTC, one date range now covers slightly
-  different sessions on the heatmap than on the panels beside it — up to the
-  zone offset at each end. Budget windows have the inverse mismatch (see the
-  budget entry below), so the product has no single answer to "which day is
-  this?".
-- **Next**: decide one contract — probably local days everywhere, since the app
-  is local-first and the operator reads dates in their own zone — then move the
-  usage/analytics filters (and budgets) onto it together.
+#### The warehouse export still buckets UTC days
+- **What**: every user-facing day is now a local day in the reporting zone
+  (2026-09-23), but `src/warehouse/*` still derives its `day` column from the
+  UTC date, so an exported day and the same day in the app can hold different
+  rows near midnight.
+- **Why or evidence**: kept deliberately. The export writes into a persisted
+  Postgres table, so switching its basis would leave earlier rows on UTC days
+  and new rows on local days in one table, a mismatch no reader could detect.
+- **Next / Revisit when**: a warehouse consumer compares daily totals against
+  the app. Then decide between re-exporting history on local days and recording
+  the zone per row; either needs a migration of the existing table, not just a
+  code change.
 
 #### Bedrock-style and `[1m]` model IDs never resolve (silent $0)
 - **What**: `PricingRegistry.normalize` (`src/pricing/index.ts:227`) strips only
@@ -423,20 +421,6 @@ the build.
   trailing `[1m]` before lookup (or add explicit aliases), with a normalization
   test per spelling. Distinct from the unpriced-model item above, which is a
   missing rate card rather than a normalization gap.
-
-#### Budget windows use local calendar dates against UTC SQL
-- **What**: `localDateString`/`periodRange` (`src/usage/budgets.ts:152`) build
-  day/week/month bounds from host-local `getFullYear/getMonth/getDate`, but
-  `buildUsageFilterState` (`src/db/v2-queries.ts:2645`) compares via SQLite
-  `datetime()`, which reads a bare `YYYY-MM-DD` as UTC midnight.
-- **Why or evidence**: reproduced 2026-09-22 — under
-  `TZ=America/Los_Angeles`, a $5 event at `2026-09-22T19:30:00-07:00` (still
-  "today" locally) reported `spent_usd: 0` for that day's budget. West of UTC the
-  window is shifted by the offset, so a spend cap can under-report evening spend
-  and fail to trip while spilling the prior day in. No budgets are configured
-  locally today, so this is latent until one is.
-- **Next**: compute budget bounds in UTC (or make the comparison zone-aware) so
-  the window matches how timestamps are stored.
 
 #### `costs recalc` overwrites benchmark rows' authoritative captured cost
 - **What**: the recalc query (`src/cli/commands/maintenance.ts:292`) rewrites

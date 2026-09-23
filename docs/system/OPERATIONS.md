@@ -91,7 +91,13 @@ local-runtime starting point. Common controls include:
 | Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
 | Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
 | Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
+| Reporting zone | `AGENTMONITOR_TIMEZONE` |
 | Aggregate warehouse | `AGENTMONITOR_WAREHOUSE_DSN`, `AGENTMONITOR_WAREHOUSE_ACCOUNT`, `AGENTMONITOR_WAREHOUSE_SCHEMA`, `AGENTMONITOR_WAREHOUSE_BI_ROLE` |
+
+`AGENTMONITOR_TIMEZONE` names the IANA zone (for example `America/New_York`) that
+every user-facing day is reported in. It defaults to the host's zone; an invalid
+name falls back to the host's rather than failing startup. The aggregate warehouse
+export ignores it and keeps UTC days, so rows already exported stay comparable.
 
 The default database follows the package installation rather than the invoking
 shell directory. An explicit relative `AGENTMONITOR_DB_PATH` resolves against the
