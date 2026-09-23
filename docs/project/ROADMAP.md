@@ -10,6 +10,14 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Pricing and read-surface correctness (2026-09-23, PRs #140-#141):** Claude
+  Opus 5.5 and Fable 5.1 are priced (both off the 0.1x cache-read convention),
+  and `amon costs recalc --missing-only` backfills rows imported before a model
+  had a rate card without touching captured costs. The Monitor feed and session
+  list now exclude benchmark rows, usage/analytics reject unparseable dates
+  instead of reporting $0, the Monitor's `limit=0` takes a ceiling, the session
+  browser's `date_to` survives DST, and Hour-of-Week buckets by local time.
+
 - **Imported event identity (2026-09-22, PRs #137-#139):** Claude Code imports
   bill one event per assistant turn rather than one per content block, and
   imported events are keyed on the transcript line's own identifier instead of
