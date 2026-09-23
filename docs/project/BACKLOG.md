@@ -398,6 +398,21 @@ the build.
   Do not run a heuristic collapse without first measuring how often distinct
   turns legitimately share a usage tuple.
 
+#### Analytics date windows are UTC days, except the heatmap's
+- **What**: every usage and analytics read selects `date_from`/`date_to` as UTC
+  calendar days (`buildAnalyticsFilterState`, `buildUsageFilterState`), but the
+  Hour-of-Week heatmap selects and buckets by the host's local days (2026-09-23,
+  PR #141), because a UTC window under local buckets plots edge sessions on
+  the neighboring day.
+- **Why or evidence**: west or east of UTC, one date range now covers slightly
+  different sessions on the heatmap than on the panels beside it — up to the
+  zone offset at each end. Budget windows have the inverse mismatch (see the
+  budget entry below), so the product has no single answer to "which day is
+  this?".
+- **Next**: decide one contract — probably local days everywhere, since the app
+  is local-first and the operator reads dates in their own zone — then move the
+  usage/analytics filters (and budgets) onto it together.
+
 #### Bedrock-style and `[1m]` model IDs never resolve (silent $0)
 - **What**: `PricingRegistry.normalize` (`src/pricing/index.ts:227`) strips only
   `anthropic/`, `openai/`, `google/` prefixes. `anthropic.claude-…-v1:0`,

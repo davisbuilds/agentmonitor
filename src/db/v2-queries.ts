@@ -1030,7 +1030,11 @@ function qualifyColumn(alias: string | undefined, column: string): string {
   return alias ? `${alias}.${column}` : column;
 }
 
-function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string): AnalyticsFilterState {
+function buildAnalyticsFilterState(
+  params: AnalyticsParams = {},
+  alias?: string,
+  options: { localDays?: boolean } = {},
+): AnalyticsFilterState {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
@@ -1042,12 +1046,18 @@ function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string)
     conditions.push(`${qualifyColumn(alias, 'agent')} = ?`);
     values.push(params.agent);
   }
+  // Windows are UTC calendar days unless a caller buckets by local time, in
+  // which case the selected days must be local too or edge rows land on the
+  // neighboring day's buckets.
+  const startedAt = qualifyColumn(alias, 'started_at');
   if (params.date_from) {
-    conditions.push(`${qualifyColumn(alias, 'started_at')} >= ?`);
+    conditions.push(options.localDays ? `date(${startedAt}, 'localtime') >= date(?)` : `${startedAt} >= ?`);
     values.push(params.date_from);
   }
   if (params.date_to) {
-    conditions.push(`${qualifyColumn(alias, 'started_at')} < date(?, '+1 day')`);
+    conditions.push(options.localDays
+      ? `date(${startedAt}, 'localtime') <= date(?)`
+      : `${startedAt} < date(?, '+1 day')`);
     values.push(params.date_to);
   }
 
@@ -2243,7 +2253,7 @@ export function getAnalyticsSkillHealthParts(
 
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
   const db = getDb();
-  const filter = buildAnalyticsFilterState(params);
+  const filter = buildAnalyticsFilterState(params, undefined, { localDays: true });
   // Bucket in the host's local time: the view is labeled local, and this is a
   // local-first app, so the server's zone is the operator's zone.
   const rows = db.prepare(`

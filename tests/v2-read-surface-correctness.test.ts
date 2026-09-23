@@ -23,11 +23,11 @@ async function getJson<T>(route: string): Promise<{ status: number; body: T }> {
   return { status: res.status, body: await res.json() as T };
 }
 
-function seedBrowsingSession(id: string, startedAt: string, messages = 1): void {
+function seedBrowsingSession(id: string, startedAt: string, messages = 1, project = 'read-surface'): void {
   getDb().prepare(`
     INSERT INTO browsing_sessions (id, project, agent, started_at, ended_at, message_count, user_message_count)
-    VALUES (?, 'read-surface', 'claude', ?, ?, ?, 0)
-  `).run(id, startedAt, startedAt, messages);
+    VALUES (?, ?, 'claude', ?, ?, ?, 0)
+  `).run(id, project, startedAt, startedAt, messages);
 }
 
 before(async () => {
@@ -154,6 +154,23 @@ describe('Hour-of-Week buckets by local time, matching its label', () => {
       const friday02 = grid.find(p => p.day_of_week === 4 && p.hour_of_day === 2);
       assert.equal(thursday22?.message_count, 7);
       assert.equal(friday02?.message_count, 0);
+    } finally {
+      process.env.TZ = previousTz;
+    }
+  });
+
+  test('its date window selects local calendar days, matching the buckets', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      // Wednesday 2026-09-09 20:00 PDT: inside the UTC day 2026-09-10, outside the local one.
+      seedBrowsingSession('how-prev-evening', '2026-09-10T03:00:00Z', 3, 'heatmap-window');
+      // Thursday 2026-09-10 23:00 PDT: outside the UTC day, inside the local one.
+      seedBrowsingSession('how-late-local', '2026-09-11T06:00:00Z', 5, 'heatmap-window');
+      const { getAnalyticsHourOfWeek } = await import('../src/db/v2-queries.js');
+      const grid = getAnalyticsHourOfWeek({ project: 'heatmap-window', date_from: '2026-09-10', date_to: '2026-09-10' });
+      const plotted = grid.filter(p => p.message_count > 0).map(p => [p.day_of_week, p.hour_of_day, p.message_count]);
+      assert.deepEqual(plotted, [[3, 23, 5]]);
     } finally {
       process.env.TZ = previousTz;
     }
