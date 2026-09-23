@@ -295,8 +295,9 @@ amon costs recalc --missing-only                    # apply
 ```
 
 `--missing-only` touches rows with no cost at all, so captured provider costs
-and existing estimates are left alone, and it re-derives the cached summary of
-every session it changes. A bare `amon costs recalc` instead re-derives **every**
+and existing estimates are left alone. In the same transaction it re-derives
+the cached trace summary of every non-benchmark session it changes, so a failed
+run rolls back whole and a rerun picks up where it stopped. A bare `amon costs recalc` instead re-derives **every**
 row's cost from the current tables, overwriting captured costs (including
 benchmark rows); reach for it only when a published rate itself changed, and
 dry-run it first.

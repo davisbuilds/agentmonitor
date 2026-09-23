@@ -25,6 +25,7 @@ export type CostRecalcReport = {
 interface CostRow {
   id: number;
   session_id: string;
+  source: string | null;
   model: string;
   tokens_in: number;
   tokens_out: number;
@@ -39,7 +40,7 @@ interface CostRow {
 export function recalculateEventCosts(db: Database, options: CostRecalcOptions): CostRecalcReport {
   const missingOnly = options.missingOnly ?? false;
   const events = db.prepare(`
-    SELECT id, session_id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+    SELECT id, session_id, source, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
            cost_usd, created_at, client_timestamp
     FROM events
     WHERE model IS NOT NULL
@@ -73,15 +74,18 @@ export function recalculateEventCosts(db: Database, options: CostRecalcOptions):
       }
       if (options.apply) {
         update.run(rounded, event.id);
-        touchedSessions.add(event.session_id);
+        // Benchmark sessions never get a trace summary; the benchmarks API is
+        // the only surface that includes them.
+        if (event.source !== 'benchmark') touchedSessions.add(event.session_id);
       }
       updated++;
     }
-  })();
 
-  // session_trace_summary caches each session's cost, so re-derive it for every
-  // session whose events changed or it keeps serving the old total.
-  for (const sessionId of touchedSessions) maintainSessionTraceSummary(sessionId);
+    // session_trace_summary caches each session's cost, so re-derive it for
+    // every session whose events changed. Inside the transaction: if a summary
+    // fails, the costs roll back too, and a retry still finds the rows to redo.
+    for (const sessionId of touchedSessions) maintainSessionTraceSummary(sessionId);
+  })();
 
   return {
     dry_run: !options.apply,

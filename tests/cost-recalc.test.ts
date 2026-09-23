@@ -82,6 +82,35 @@ describe('recalculateEventCosts', () => {
     assert.equal(report.sessions_resummarized, 1);
   });
 
+  test('prices an uncosted benchmark row without giving its session a trace summary', () => {
+    // Benchmark import never maintains trace summaries: the benchmarks API is
+    // the only surface that includes them.
+    seed('s-bench', 'bench-unpriced', null, 'benchmark');
+
+    const report = recalculateEventCosts(getDb(), { apply: true, missingOnly: true });
+
+    assert.equal(costOf('bench-unpriced'), TABLE_COST);
+    assert.equal(summaryCost('s-bench'), undefined);
+    assert.equal(report.sessions_resummarized, 0);
+  });
+
+  test('a failed summary refresh rolls the cost update back so a retry can finish it', () => {
+    seed('s-atomic', 'unpriced', null);
+    const db = getDb();
+    db.exec('ALTER TABLE session_trace_summary RENAME TO session_trace_summary_hidden');
+    try {
+      assert.throws(() => recalculateEventCosts(db, { apply: true, missingOnly: true }));
+      assert.equal(costOf('unpriced'), null);
+    } finally {
+      db.exec('ALTER TABLE session_trace_summary_hidden RENAME TO session_trace_summary');
+    }
+
+    const retry = recalculateEventCosts(db, { apply: true, missingOnly: true });
+    assert.equal(costOf('unpriced'), TABLE_COST);
+    assert.equal(summaryCost('s-atomic'), TABLE_COST);
+    assert.equal(retry.sessions_resummarized, 1);
+  });
+
   test('a dry run reports the change without writing it', () => {
     seed('s-dry', 'unpriced', null);
 
