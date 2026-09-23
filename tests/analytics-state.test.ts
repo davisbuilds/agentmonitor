@@ -212,7 +212,7 @@ test('buildAnalyticsCsv appends per-harness consultation evidence without changi
     skillConsultations: {
       asOf: '2026-04-15T12:00:00.000Z',
       windowSemantics: {
-        interval: 'utc_half_open',
+        interval: 'local_day_half_open',
         from: '2026-04-01T00:00:00.000Z',
         toExclusive: '2026-04-16T00:00:00.000Z',
         sessionMembership: 'observed_interval_overlap_or_in_window_occurrence',
@@ -296,7 +296,7 @@ test('buildAnalyticsCsv omits an empty consultation section', () => {
     skillConsultations: {
       asOf: '2026-04-15T12:00:00.000Z',
       windowSemantics: {
-        interval: 'utc_half_open',
+        interval: 'local_day_half_open',
         from: '2026-04-01T00:00:00.000Z',
         toExclusive: '2026-04-16T00:00:00.000Z',
         sessionMembership: 'observed_interval_overlap_or_in_window_occurrence',

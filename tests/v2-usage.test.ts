@@ -37,6 +37,9 @@ function makeSession(sessionId: string, project: string, startDate: string): str
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-usage-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
+  // Fixtures are authored as UTC instants; report their days in UTC so this
+  // suite reads the same on any host. Local-day behavior has its own suite.
+  process.env.AGENTMONITOR_TIMEZONE = 'UTC';
 
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');

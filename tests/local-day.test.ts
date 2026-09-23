@@ -30,6 +30,11 @@ describe('localDayOf', () => {
     assert.equal(localDayOf('2026-09-10T23:30:00-04:00', TOKYO), '2026-09-11');
   });
 
+  test('returns a bare day unchanged rather than reading it as UTC midnight', () => {
+    // new Date('2026-09-10') is UTC midnight, which is Sep 9 west of UTC.
+    assert.equal(localDayOf('2026-09-10', NY), '2026-09-10');
+  });
+
   test('returns null for an unparseable timestamp', () => {
     assert.equal(localDayOf('not-a-time', NY), null);
   });

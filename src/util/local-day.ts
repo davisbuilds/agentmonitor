@@ -51,16 +51,23 @@ function pad(value: number): string {
   return String(value).padStart(2, '0');
 }
 
+let zoneOverride: string | null = null;
+
 export function reportingTimeZone(): string {
-  return config.reportingTimeZone;
+  return zoneOverride ?? config.reportingTimeZone;
 }
 
-export function isBareDay(value: string): boolean {
+/** Report days in another zone for the duration of a test; null restores config. */
+export function setReportingTimeZoneForTests(zone: string | null): void {
+  zoneOverride = zone;
+}
+
+function isBareDay(value: string): boolean {
   return DAY_PATTERN.test(value);
 }
 
 /** Parse a stored timestamp. Zone-less values are UTC. */
-export function parseStoredTimestamp(value: string): Date | null {
+function parseStoredTimestamp(value: string): Date | null {
   const normalized = ZONELESS_PATTERN.test(value) ? `${value.replace(' ', 'T')}Z` : value;
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
@@ -68,6 +75,8 @@ export function parseStoredTimestamp(value: string): Date | null {
 
 /** The local calendar day (`YYYY-MM-DD`) a timestamp falls on. */
 export function localDayOf(timestamp: string, zone = reportingTimeZone()): string | null {
+  // A bare day already is a calendar day; parsing it would read UTC midnight.
+  if (isBareDay(timestamp)) return timestamp;
   const parsed = parseStoredTimestamp(timestamp);
   if (!parsed) return null;
   const w = wallClock(parsed.getTime(), zone);

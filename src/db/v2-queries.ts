@@ -89,6 +89,15 @@ import {
 } from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
 import { getSkillConsultationAnalytics } from '../skills/consultation-analytics.js';
+import {
+  dateParamLowerBound,
+  dateParamUpperExclusive,
+  localDayEndExclusive,
+  localDayOf,
+  localDayStart,
+  localWeekdayHour,
+  reportingTimeZone,
+} from '../util/local-day.js';
 
 function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
   return {
@@ -239,10 +248,10 @@ export function listObservedSessions(params: { limit?: number; offset?: number; 
   if (params.agent) { conditions.push('agent = ?'); values.push(params.agent); }
   // Unresolved timestamps are reported independently of date filters, so a
   // consumer can never mistake their exclusion for complete date coverage.
-  if (params.date_from) { conditions.push('started_at >= ?'); values.push(`${params.date_from}T00:00:00.000Z`); }
+  if (params.date_from) { conditions.push('started_at >= ?'); values.push(dateParamLowerBound(params.date_from)); }
   if (params.date_to) {
     conditions.push('started_at < ?');
-    values.push(new Date(Date.parse(`${params.date_to}T00:00:00Z`) + 86400000).toISOString());
+    values.push(dateParamUpperExclusive(params.date_to));
   }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
   const rows = db.prepare(`${observedSessionsCte}, filtered AS MATERIALIZED (
@@ -281,8 +290,8 @@ export function listObservedSessions(params: { limit?: number; offset?: number; 
  */
 export function getDailyConversationActivity(since: string, until: string) {
   const db = getDb();
-  const from = `${since}T00:00:00.000Z`;
-  const through = new Date(Date.parse(`${until}T00:00:00Z`) + 2 * 86400000).toISOString();
+  const from = localDayStart(since);
+  const through = localDayEndExclusive(until);
   const eventEvidence = `SELECT
     CASE WHEN agent_type = 'claude_code' THEN 'claude' ELSE agent_type END,
     CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}'
@@ -318,14 +327,14 @@ export function getDailyConversationActivity(since: string, until: string) {
       FROM evidence e LEFT JOIN browser b ON b.agent=e.agent AND b.session_id=e.session_id
       WHERE (e.instant IS NULL OR b.instant IS NULL OR e.instant >= b.instant)
       LIMIT 200001`;
-  const format = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' });
   const groups = new Map<string, Set<string>>();
   let examined = 0;
   let unresolved = 0;
   for (const row of db.prepare(query).iterate(from, through, from, through) as Iterable<{ id: string; agent: string; activity_class: string; instant: string | null }>) {
     if (++examined > 200000) throw new Error('Activity evidence limit exceeded; narrow the window');
     if (row.instant === null) { unresolved++; continue; }
-    const day = format.format(new Date(row.instant));
+    const day = localDayOf(row.instant);
+    if (!day) { unresolved++; continue; }
     if (day < since || day > until) continue;
     const agent = ['codex', 'claude', 'antigravity'].includes(row.agent) ? row.agent : 'unknown';
     const key = JSON.stringify([day, agent, row.activity_class]);
@@ -334,7 +343,7 @@ export function getDailyConversationActivity(since: string, until: string) {
     groups.set(key, identities);
   }
   return { schema_version: 'daily-conversations.v1', since, until,
-    timezone: 'America/New_York', capture_coverage: 'unknown', unresolved_timestamps: unresolved,
+    timezone: reportingTimeZone(), capture_coverage: 'unknown', unresolved_timestamps: unresolved,
     data: [...groups].sort(([a], [b]) => a.localeCompare(b)).map(([key, ids]) => {
       const [date, agent, classification] = JSON.parse(key) as string[];
       return { date, agent, classification, count: ids.size };
@@ -356,16 +365,13 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     values.push(params.agent);
   }
   if (params.date_from) {
-    conditions.push('started_at >= ?');
-    values.push(params.date_from);
+    conditions.push('datetime(started_at) >= datetime(?)');
+    values.push(dateParamLowerBound(params.date_from));
   }
   if (params.date_to) {
-    // Include the full day. Step in UTC: a local-calendar step is 23 hours on a
-    // spring-forward day and would drop that day's last hour.
-    conditions.push('started_at < ?');
-    const nextDay = new Date(params.date_to);
-    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
-    values.push(nextDay.toISOString().split('T')[0]);
+    // Through the end of the local day, however long DST makes it.
+    conditions.push('datetime(started_at) < datetime(?)');
+    values.push(dateParamUpperExclusive(params.date_to));
   }
   if (params.min_messages != null) {
     conditions.push('message_count >= ?');
@@ -426,10 +432,10 @@ export function listObservedExecutions(params: { limit?: number; offset?: number
   const clauses: string[] = [];
   const values: (string | number)[] = [];
   if (params.agent) { clauses.push('agent = ?'); values.push(params.agent); }
-  if (params.date_from) { clauses.push('started_at >= ?'); values.push(`${params.date_from}T00:00:00.000Z`); }
+  if (params.date_from) { clauses.push('started_at >= ?'); values.push(dateParamLowerBound(params.date_from)); }
   if (params.date_to) {
     clauses.push('started_at < ?');
-    values.push(new Date(Date.parse(`${params.date_to}T00:00:00Z`) + 86400000).toISOString());
+    values.push(dateParamUpperExclusive(params.date_to));
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   const total = (db.prepare(`SELECT COUNT(*) AS c FROM execution_receipts ${where}`).get(...values) as CountResult).c;
@@ -1030,11 +1036,7 @@ function qualifyColumn(alias: string | undefined, column: string): string {
   return alias ? `${alias}.${column}` : column;
 }
 
-function buildAnalyticsFilterState(
-  params: AnalyticsParams = {},
-  alias?: string,
-  options: { localDays?: boolean } = {},
-): AnalyticsFilterState {
+function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string): AnalyticsFilterState {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
@@ -1046,19 +1048,15 @@ function buildAnalyticsFilterState(
     conditions.push(`${qualifyColumn(alias, 'agent')} = ?`);
     values.push(params.agent);
   }
-  // Windows are UTC calendar days unless a caller buckets by local time, in
-  // which case the selected days must be local too or edge rows land on the
-  // neighboring day's buckets.
+  // Bare dates are the operator's local days (see src/util/local-day.ts).
   const startedAt = qualifyColumn(alias, 'started_at');
   if (params.date_from) {
-    conditions.push(options.localDays ? `date(${startedAt}, 'localtime') >= date(?)` : `${startedAt} >= ?`);
-    values.push(params.date_from);
+    conditions.push(`datetime(${startedAt}) >= datetime(?)`);
+    values.push(dateParamLowerBound(params.date_from));
   }
   if (params.date_to) {
-    conditions.push(options.localDays
-      ? `date(${startedAt}, 'localtime') <= date(?)`
-      : `${startedAt} < date(?, '+1 day')`);
-    values.push(params.date_to);
+    conditions.push(`datetime(${startedAt}) < datetime(?)`);
+    values.push(dateParamUpperExclusive(params.date_to));
   }
 
   return {
@@ -1106,8 +1104,8 @@ function roundMetric(value: number): number {
 
 function inclusiveDateSpanDays(earliest: string | null, latest: string | null): number {
   if (!earliest || !latest) return 0;
-  const earliestDate = new Date(`${earliest.slice(0, 10)}T00:00:00.000Z`);
-  const latestDate = new Date(`${latest.slice(0, 10)}T00:00:00.000Z`);
+  const earliestDate = new Date(`${localDayOf(earliest) ?? earliest.slice(0, 10)}T00:00:00.000Z`);
+  const latestDate = new Date(`${localDayOf(latest) ?? latest.slice(0, 10)}T00:00:00.000Z`);
   return Math.max(1, Math.round(
     (latestDate.getTime() - earliestDate.getTime()) / 86_400_000
   ) + 1);
@@ -1287,17 +1285,24 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
 
-  return db.prepare(`
-    SELECT
-      date(started_at) as date,
-      COUNT(*) as sessions,
-      COALESCE(SUM(message_count), 0) as messages,
-      COALESCE(SUM(user_message_count), 0) as user_messages
+  const rows = db.prepare(`
+    SELECT started_at, message_count, user_message_count
     FROM browsing_sessions
     ${filter.where}
-    GROUP BY date(started_at)
-    ORDER BY date
-  `).all(...filter.values) as ActivityDataPoint[];
+  `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
+
+  // Bucket in JS: a local day cannot be expressed in SQLite for a configured zone.
+  const byDate = new Map<string, ActivityDataPoint>();
+  for (const row of rows) {
+    const date = row.started_at ? localDayOf(row.started_at) : null;
+    if (!date) continue;
+    const point = byDate.get(date) ?? { date, sessions: 0, messages: 0, user_messages: 0 };
+    point.sessions += 1;
+    point.messages += row.message_count ?? 0;
+    point.user_messages += row.user_message_count ?? 0;
+    byDate.set(date, point);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
 }
 
 export function getAnalyticsProjects(params: AnalyticsParams = {}): ProjectBreakdown[] {
@@ -1405,11 +1410,11 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   }
   if (params.date_from) {
     conditions.push('datetime(s.last_event_at) >= datetime(?)');
-    values.push(params.date_from);
+    values.push(dateParamLowerBound(params.date_from));
   }
   if (params.date_to) {
-    conditions.push(`datetime(s.last_event_at) < datetime(?, '+1 day')`);
-    values.push(params.date_to);
+    conditions.push('datetime(s.last_event_at) < datetime(?)');
+    values.push(dateParamUpperExclusive(params.date_to));
   }
   // A session made only of benchmark rows is a batch import, not live activity.
   conditions.push(`(
@@ -1947,7 +1952,7 @@ export function getAnalyticsSkillsDaily(params: AnalyticsParams = {}): SkillUsag
   const days = new Map<string, SkillAccumulator>();
 
   for (const occurrence of selectSkillInvocationOccurrences(getDb(), params)) {
-    addSkillCount(days, occurrence.timestamp.slice(0, 10), occurrence.skillName);
+    addSkillCount(days, localDayOf(occurrence.timestamp) ?? occurrence.timestamp.slice(0, 10), occurrence.skillName);
   }
 
   return [...days.entries()]
@@ -2253,21 +2258,28 @@ export function getAnalyticsSkillHealthParts(
 
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
   const db = getDb();
-  const filter = buildAnalyticsFilterState(params, undefined, { localDays: true });
-  // Bucket in the host's local time: the view is labeled local, and this is a
-  // local-first app, so the server's zone is the operator's zone.
-  const rows = db.prepare(`
-    SELECT
-      ((CAST(strftime('%w', started_at, 'localtime') AS INTEGER) + 6) % 7) as day_of_week,
-      CAST(strftime('%H', started_at, 'localtime') AS INTEGER) as hour_of_day,
-      COUNT(*) as session_count,
-      COALESCE(SUM(message_count), 0) as message_count,
-      COALESCE(SUM(user_message_count), 0) as user_message_count
+  const filter = buildAnalyticsFilterState(params);
+  const sessions = db.prepare(`
+    SELECT started_at, message_count, user_message_count
     FROM browsing_sessions
     ${filter.where}
-    GROUP BY day_of_week, hour_of_day
-    ORDER BY day_of_week, hour_of_day
-  `).all(...filter.values) as HourOfWeekDataPoint[];
+  `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
+
+  // Bucket by the operator's local weekday and hour, the view's labeled axes.
+  const buckets = new Map<string, HourOfWeekDataPoint>();
+  for (const session of sessions) {
+    const cell = session.started_at ? localWeekdayHour(session.started_at) : null;
+    if (!cell) continue;
+    const key = `${cell.weekday}:${cell.hour}`;
+    const point = buckets.get(key) ?? {
+      day_of_week: cell.weekday, hour_of_day: cell.hour, session_count: 0, message_count: 0, user_message_count: 0,
+    };
+    point.session_count += 1;
+    point.message_count += session.message_count ?? 0;
+    point.user_message_count += session.user_message_count ?? 0;
+    buckets.set(key, point);
+  }
+  const rows = [...buckets.values()];
 
   const byBucket = new Map(rows.map(row => [`${row.day_of_week}:${row.hour_of_day}`, row]));
   const grid: HourOfWeekDataPoint[] = [];
@@ -2322,7 +2334,6 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
       COUNT(*) as total_sessions,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
-      COUNT(DISTINCT date(started_at)) as active_days,
       MIN(started_at) as earliest,
       MAX(started_at) as latest
     FROM browsing_sessions
@@ -2331,14 +2342,18 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
     total_sessions: number;
     total_messages: number;
     total_user_messages: number;
-    active_days: number;
     earliest: string | null;
     latest: string | null;
   };
+  const activeDays = new Set(
+    (db.prepare(`SELECT started_at FROM browsing_sessions ${filter.where}`).all(...filter.values) as Array<{ started_at: string | null }>)
+      .map(session => (session.started_at ? localDayOf(session.started_at) : null))
+      .filter((day): day is string => day !== null),
+  ).size;
 
   const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
 
-  const safeActiveDays = Math.max(row.active_days, 1);
+  const safeActiveDays = Math.max(activeDays, 1);
   const safeSpanDays = Math.max(spanDays, 1);
   const safeSessions = Math.max(row.total_sessions, 1);
 
@@ -2346,7 +2361,7 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
     total_sessions: row.total_sessions,
     total_messages: row.total_messages,
     total_user_messages: row.total_user_messages,
-    active_days: row.total_sessions > 0 ? row.active_days : 0,
+    active_days: row.total_sessions > 0 ? activeDays : 0,
     span_days: spanDays,
     sessions_per_active_day: row.total_sessions > 0 ? roundMetric(row.total_sessions / safeActiveDays) : 0,
     messages_per_active_day: row.total_sessions > 0 ? roundMetric(row.total_messages / safeActiveDays) : 0,
@@ -2673,11 +2688,11 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilt
   }
   if (params.date_from) {
     conditions.push(`datetime(${timestampExpr}) >= datetime(?)`);
-    values.push(params.date_from);
+    values.push(dateParamLowerBound(params.date_from));
   }
   if (params.date_to) {
-    conditions.push(`datetime(${timestampExpr}) < datetime(?, '+1 day')`);
-    values.push(params.date_to);
+    conditions.push(`datetime(${timestampExpr}) < datetime(?)`);
+    values.push(dateParamUpperExclusive(params.date_to));
   }
   // Segregate batch-imported benchmark runs from real-activity aggregates unless
   // the caller opts in. A NULL source predates the column default and is never a
@@ -2828,7 +2843,7 @@ function usageRowsToSummaryValues(rows: UsageRow[]): {
     if (row.timestamp) {
       if (!earliest || row.timestamp < earliest) earliest = row.timestamp;
       if (!latest || row.timestamp > latest) latest = row.timestamp;
-      const date = row.timestamp.slice(0, 10);
+      const date = localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10);
       days.set(date, (days.get(date) ?? 0) + row.cost_usd);
     }
   }
@@ -2947,8 +2962,9 @@ function resolveUsageDateBounds(
   // The monitor UI sends full ISO timestamps (e.g. 2026-06-02T12:02:29.756Z);
   // enumerateDateRange needs bare YYYY-MM-DD or it yields an Invalid Date and
   // the whole daily series comes back empty.
-  const from = params.date_from?.slice(0, 10) ?? earliest?.slice(0, 10) ?? null;
-  const to = params.date_to?.slice(0, 10) ?? latest?.slice(0, 10) ?? null;
+  const dayOf = (value: string | null | undefined) => (value ? localDayOf(value) : null);
+  const from = dayOf(params.date_from) ?? dayOf(earliest);
+  const to = dayOf(params.date_to) ?? dayOf(latest);
   if (!from || !to || from > to) {
     return { from: null, to: null };
   }
@@ -3376,7 +3392,7 @@ export function getUsageDaily(
   const days = new Map<string, UsageAccumulator>();
   for (const row of usageRows) {
     if (!row.timestamp) continue;
-    const date = row.timestamp.slice(0, 10);
+    const date = localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10);
     const acc = days.get(date) ?? createUsageAccumulator();
     addUsageRow(acc, row, row.classification);
     days.set(date, acc);
@@ -3472,7 +3488,7 @@ export function getUsageModelsDaily(
   const days = new Map<string, Map<string, UsageAccumulator>>();
   for (const row of usageRows) {
     if (!row.timestamp) continue;
-    const date = row.timestamp.slice(0, 10);
+    const date = localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10);
     const models = days.get(date) ?? new Map<string, UsageAccumulator>();
     const acc = models.get(row.model) ?? createUsageAccumulator();
     addUsageRow(acc, row, row.classification);

@@ -9,6 +9,9 @@ import type { getAnalyticsSkillConsultations as getAnalyticsSkillConsultationsTy
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amon-consultations-'));
 process.env['AGENTMONITOR_DB_PATH'] = path.join(tempDir, 'test.db');
 process.env['AGENTMONITOR_SKILL_DIRS'] = path.join(tempDir, 'skills');
+// Fixtures are authored as UTC instants; local-day windows are covered in
+// local-time-days.test.ts.
+process.env['AGENTMONITOR_TIMEZONE'] = 'UTC';
 
 let getDb: typeof getDbType;
 let closeDb: typeof closeDbType;

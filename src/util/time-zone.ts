@@ -1,6 +1,6 @@
 type EnvMap = Record<string, string | undefined>;
 
-export function isValidTimeZone(zone: string): boolean {
+function isValidTimeZone(zone: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: zone });
     return true;
