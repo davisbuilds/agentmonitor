@@ -241,3 +241,19 @@ test('normalizeIngestEvent rejects a non-string client_timestamp', () => {
   if (result.ok) return;
   assert.ok(result.errors.some(e => e.field === 'client_timestamp'));
 });
+
+test('normalizeIngestEvent rejects non-finite cost_usd', () => {
+  // JSON.parse('1e400') is Infinity: one such row makes every SUM(cost_usd)
+  // containing it Infinity for good. NaN would be stored as NULL, silently.
+  for (const cost_usd of [JSON.parse('1e400') as number, -Infinity, Number.NaN]) {
+    const result = normalizeIngestEvent({
+      session_id: 'session-1',
+      agent_type: 'claude_code',
+      event_type: 'llm_response',
+      cost_usd,
+    });
+    assert.equal(result.ok, false, `accepted cost_usd=${cost_usd}`);
+    if (result.ok) continue;
+    assert.deepEqual(result.errors.map(err => err.field), ['cost_usd']);
+  }
+});

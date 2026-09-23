@@ -148,8 +148,8 @@ function getOptionalNonNegativeNumber(
 ): number | undefined {
   const raw = input[field];
   if (raw === undefined || raw === null) return undefined;
-  if (typeof raw !== 'number' || raw < 0) {
-    errors.push({ field, message: 'must be a non-negative number when provided' });
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw < 0) {
+    errors.push({ field, message: 'must be a finite non-negative number when provided' });
     return undefined;
   }
   return raw;

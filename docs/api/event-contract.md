@@ -32,7 +32,7 @@ Canonical ingest contract for `POST /api/events` and `POST /api/events/batch`.
 - `cache_read_tokens` (non-negative integer, default `0`)
 - `cache_write_tokens` (non-negative integer, default `0`)
 - `model` (string)
-- `cost_usd` (non-negative number)
+- `cost_usd` (finite non-negative number)
 - `branch` (string)
 - `project` (string)
 - `duration_ms` (non-negative integer)
