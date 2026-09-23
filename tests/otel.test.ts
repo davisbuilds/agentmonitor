@@ -611,6 +611,90 @@ describe('OTLP events meet the ingest contract', () => {
   });
 });
 
+describe('OTLP exporter retries do not double-count', () => {
+  const usageRecord = (timestamp: string) => ({
+    eventName: 'codex.sse_event',
+    attributes: [
+      { key: 'event.kind', value: { stringValue: 'response.completed' } },
+      { key: 'event.timestamp', value: { stringValue: timestamp } },
+      { key: 'input_token_count', value: { intValue: 1000 } },
+      { key: 'output_token_count', value: { intValue: 50 } },
+    ],
+  });
+  const codexLogs = (records: Array<ReturnType<typeof usageRecord> & { timeUnixNano?: string }>) => buildLogPayload({
+    serviceName: 'codex_cli_rs',
+    resourceAttrs: [{ key: 'conversation.id', value: { stringValue: 'sess-retry' } }],
+    logRecords: records,
+  });
+
+  test('a resent log batch is stored once', async () => {
+    // Shaped like real Codex output: no timeUnixNano, time in event.timestamp.
+    const payload = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+      // A duplicate is not a refusal: the retry still gets a clean success.
+      assert.deepEqual(await res.json(), {});
+    }
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tokens_in, 1000);
+  });
+
+  test('a retry re-serialized with its keys reordered is still one delivery', async () => {
+    // A collector in the path may re-encode the batch; key order is not identity.
+    const payload = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
+    const reversed = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(reversed);
+      if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).reverse().map(([k, v]) => [k, reversed(v)]));
+      }
+      return value;
+    };
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, reversed(payload));
+    assert.equal((await getEvents()).total, 1);
+  });
+
+  test('records that differ only in their event time are both stored', async () => {
+    // Codex never sets timeUnixNano; its time lives in event.timestamp.
+    const payload = codexLogs([
+      { ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' },
+      { ...usageRecord('2026-09-23T12:00:00.001Z'), timeUnixNano: '0' },
+    ]);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('a record with no time at all is never collapsed', async () => {
+    // Without any timestamp a retry and a genuine repeat look identical, so
+    // keep both rather than risk dropping real usage.
+    const record = { ...usageRecord(''), timeUnixNano: '0' };
+    record.attributes = record.attributes.filter(attr => attr.key !== 'event.timestamp');
+    const payload = codexLogs([record]);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('a resent delta metric is stored once; the next interval is not', async () => {
+    const payload = buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'session.id', value: { stringValue: 'sess-metric-retry' } }],
+      metrics: [{
+        name: 'claude_code.token.usage',
+        dataPoints: [{ value: 400, attributes: [{ key: 'type', value: { stringValue: 'input' } }] }],
+      }],
+    });
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal((await getEvents()).total, 1);
+
+    const nextInterval = JSON.parse(JSON.stringify(payload).replace('"1700000000000000000"', '"1700000060000000000"'));
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, nextInterval);
+    assert.equal((await getEvents()).total, 2);
+  });
+});
+
 describe('POST /api/otel/v1/metrics', () => {
   test('returns 415 for protobuf content-type', async () => {
     const res = await postProtobuf(`${baseUrl}/api/otel/v1/metrics`);

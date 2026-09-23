@@ -85,6 +85,13 @@ stored. The reply is OTLP's partial-success shape, e.g.
 `rejectedDataPoints` for metrics, and `{}` when nothing was refused. A
 fractional OTLP latency is rounded to whole milliseconds rather than refused.
 
+Exporters resend a batch on timeout or reset, so each OTLP log record and usage
+data point gets a derived `event_id` (`otel-log-…`/`otel-metric-…`, a hash of the
+record and its resource with keys sorted) and a resend is stored once. A record
+with no time at all (no `timeUnixNano`, `observedTimeUnixNano`, or
+`event.timestamp` attribute) gets no key, because a retry and a genuine repeat
+would be indistinguishable.
+
 ## Browser Requests
 
 Ingest clients (hooks, OTLP exporters, the CLI) send no `Origin` header. A write

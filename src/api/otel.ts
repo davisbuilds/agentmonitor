@@ -124,6 +124,7 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
   for (const delta of usage) {
     const hasCost = delta.cost_usd_delta > 0;
     const event = admission.admit({
+      event_id: delta.event_id,
       session_id: delta.session_id,
       agent_type: delta.agent_type,
       event_type: 'llm_response',

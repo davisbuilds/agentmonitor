@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
 
 // ─── OTLP JSON types (subset we care about) ────────────────────────────
@@ -24,6 +25,7 @@ interface OtelResource {
 
 interface OtelLogRecord {
   timeUnixNano?: string;
+  observedTimeUnixNano?: string;
   body?: OtelAnyValue;
   attributes?: OtelKeyValue[];
   severityText?: string;
@@ -186,6 +188,40 @@ function extractAnyValue(v: OtelAnyValue): unknown {
     return v.arrayValue.values.map(extractAnyValue);
   }
   return undefined;
+}
+
+// ─── Retry identity ─────────────────────────────────────────────────────
+//
+// OTLP exporters resend a whole batch on timeout or connection reset, and every
+// resend used to insert fresh rows. A retry carries byte-for-byte the same
+// record, so a hash of the record (with its resource) is a stable event_id that
+// collapses retries through insertEvent's event_id dedup. Only records that
+// carry a time get one: without a time, a retry and a genuine repeat of the
+// same event are indistinguishable, and dropping real usage is the worse error.
+
+/** JSON with object keys sorted, so a re-serialized retry hashes the same. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+function retryKey(kind: 'log' | 'metric', identity: unknown): string {
+  return `otel-${kind}-${crypto.createHash('sha256').update(canonicalJson(identity)).digest('hex').slice(0, 32)}`;
+}
+
+function hasNanos(value: string | number | undefined): boolean {
+  return value !== undefined && !/^0*$/.test(String(value));
+}
+
+/** Codex never sets timeUnixNano; its time is the event.timestamp attribute. */
+function logRecordHasTime(record: OtelLogRecord): boolean {
+  return hasNanos(record.timeUnixNano)
+    || hasNanos(record.observedTimeUnixNano)
+    || Boolean(getAttr(record.attributes, 'event.timestamp'));
 }
 
 function nanoToIso(nanos: string | number | undefined): string | undefined {
@@ -833,6 +869,9 @@ function parseLogRecord(
   ) ? 'error' : 'success';
 
   return {
+    event_id: logRecordHasTime(logRecord)
+      ? retryKey('log', { resource: resourceAttrs ?? [], record: logRecord })
+      : undefined,
     session_id: sessionId,
     agent_type: agentType,
     event_type: eventType,
@@ -882,6 +921,8 @@ export function parseOtelLogs(payload: OtelLogsPayload): NormalizedIngestEvent[]
 const cumulativeState = new Map<string, number>();
 
 export interface ParsedMetricDelta {
+  /** Stable per data point, so a resent export collapses; absent without a time. */
+  event_id?: string;
   session_id: string;
   agent_type: string;
   model?: string;
@@ -1079,6 +1120,9 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
             if (delta <= 0) continue;
 
             const entry: ParsedMetricDelta = {
+              event_id: hasNanos(dp.timeUnixNano)
+                ? retryKey('metric', { resource: resourceAttrs ?? [], metric: metricName, point: dp })
+                : undefined,
               session_id: sessionId,
               agent_type: agentType,
               model: model ?? undefined,
