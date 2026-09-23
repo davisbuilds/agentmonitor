@@ -71,6 +71,13 @@ honors the invariant), `tokens_out = output` (includes reasoning), `thoughts =
 thinking` (informational lane). Field numbers live in `fieldmap.ts`
 (`CORTEX_USAGE_FIELDS`); the decoder is `proto.ts::decodeGeneratorMetadata`.
 
+**Generation time (pinned 2026-09-23):** `CortexGeneratorMetadata` field **9** →
+field **4** is a `google.protobuf.Timestamp` (`seconds` 1, `nanos` 2). It was present
+in all 71 local generation records, increases across each session's generations,
+and matches the second of the corresponding `planner_response` step. The importer
+stamps and prices each `llm_response` at this time, falling back to the session's
+first step time when it is absent.
+
 ## Pinned: token usage schema — `google.cloud.aiplatform.master.UsageMetadata`
 
 Authoritative schema (used for the request config in practice; see the

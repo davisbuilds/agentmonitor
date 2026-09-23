@@ -44,7 +44,16 @@ export const GENERATOR_METADATA_FIELDS = {
   usage: 4, // the CortexUsage sub-message
   model: 19, // string, e.g. "gemini-pro-default"
   modelDisplay: 21, // string, e.g. "Gemini 3.1 Pro (High)"
+  timing: 9, // sub-message holding the generation's own Timestamp (below)
 } as const;
+
+/**
+ * Field of the `timing` sub-message holding a google.protobuf.Timestamp
+ * { seconds(1), nanos(2) }. Empirically pinned 2026-09-23 against all 71 local
+ * generation records: present in every one, increasing across a session's
+ * generations, and equal to the second of its planner_response step.
+ */
+export const GENERATOR_TIMING_TIMESTAMP_FIELD = 4;
 
 /** CortexUsage sub-message (empirically pinned). All int varints. */
 export const CORTEX_USAGE_FIELDS = {
