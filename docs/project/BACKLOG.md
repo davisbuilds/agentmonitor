@@ -96,63 +96,6 @@ hold the detailed history. Do not keep a resolved section here.
   wanted. Watch openbench #5 (per-attempt cost) — landing it would drop the
   "cost is a floor" honesty caveat. Noted 2026-09-02, updated 2026-09-04.
 
-#### OTLP ingestion bypasses the event contract (negative usage is storable)
-- **What**: `src/api/otel.ts:63` inserts parser output straight through
-  `insertEvent` without `normalizeIngestEvent`, so the contract's non-negative
-  invariant does not apply to the OTLP path. A log record carrying a negative
-  `gen_ai.usage.input_tokens`/`output_tokens`/`gen_ai.usage.cost` stores those
-  values verbatim.
-- **Why or evidence**: reproduced 2026-09-22 — a crafted record with
-  `{input_tokens: -999999, output_tokens: -50, cost: -500.75}` stored and
-  aggregated to exactly those negatives, which drags `SUM()` totals down and can
-  mask real spend. ARCHITECTURE.md names the contract as *the* external
-  ingest boundary, so this is an invariant gap, not a missing nicety.
-- **Next**: route OTLP-derived events through `normalizeIngestEvent`, or clamp
-  token/cost fields before insert; cover with a red test that asserts a negative
-  attribute is rejected or clamped.
-
-#### Non-finite cost values poison every downstream SUM
-- **What**: `src/contracts/event-contract.ts:144` (`getOptionalNonNegativeNumber`)
-  tests `typeof raw !== 'number' || raw < 0` but never `Number.isFinite`, so
-  `cost_usd: 1e400` (JSON-parses to `Infinity`) passes validation on the public
-  `POST /api/events` path.
-- **Why or evidence**: reproduced 2026-09-22 — one accepted row made
-  `SELECT SUM(cost_usd)` return `Infinity` permanently for every scope containing
-  it (session, project, model, total). `NaN` is separately coerced to `NULL` by
-  better-sqlite3, silently dropping the value instead of refusing it.
-- **Next**: reject non-finite numbers in the contract helper
-  (`!Number.isFinite(raw) || raw < 0`) and add a contract test for `Infinity`,
-  `-Infinity`, and `NaN`.
-
-#### OTLP events carry no dedup key, so exporter retries double-count
-- **What**: `parseLogRecord`/`parseOtelMetrics` never set `event_id`, and the
-  dedup branch in `src/db/queries.ts:446` only runs `if (event.event_id)`. OTLP
-  exporters retry on timeout or connection reset by design, and each retry
-  inserts fresh rows.
-- **Why or evidence**: reproduced 2026-09-22 — replaying one identical parsed log
-  record twice produced 2 rows and doubled `tokens_in`/`cost_usd` for a single
-  logical delivery. The v1 HTTP contract documents `event_id` dedup; the OTLP
-  path silently has none.
-- **Next**: derive a stable `event_id` for OTLP records (hash of trace/span id
-  plus timestamp and metric name) so retries collapse the way documented
-  ingestion does.
-
-#### `insertEvent` is not transactional, leaving orphan sessions
-- **What**: `src/db/queries.ts:415` calls `upsertAgent`/`upsertSession` (each
-  committing immediately), then a session UPDATE, cost calculation, and finally
-  the `events` INSERT. Any throw in that span — a constraint violation, or
-  `SQLITE_BUSY` under concurrent hook/OTEL/watcher/auto-import writers — leaves a
-  committed `sessions` row with no event.
-- **Why or evidence**: reproduced 2026-09-22 against a scratch DB (forced
-  constraint failure): session row present, zero events. The `v6`
-  `deleteOrphanedSessions` migration (`src/db/schema.ts:1022`) sweeps this class
-  once but is `user_version`-gated, so it never prevents recurrence; orphans
-  inflate `total_sessions`/`active_sessions` indefinitely.
-- **Next**: wrap the body from `upsertAgent` through the final INSERT in a single
-  `db.transaction(...)`; also guard the post-insert `syncCodexSummaryLiveEvent`
-  so a projection failure cannot 500 a write that already committed or skip
-  `markStatsDirty()`.
-
 ### Skill trigger health (2026-07-09)
 
 Phase 1 shipped. These are the deferred follow-ups surfaced during and after
@@ -196,6 +139,21 @@ the build.
 - **Next**: benchmark a purpose-built partial/composite skill-event index
   against the real predicate and ordering; retain it only if the planner uses it
   and write cost/storage remain justified.
+
+#### Codex OTEL events carry no producer time
+- **What**: Codex's OTLP log appender never sets `timeUnixNano`. The event time
+  is only in the `event.timestamp` attribute (`codex-rs/otel/src/events/shared.rs`),
+  which `parseLogRecord` does not read, so `client_timestamp` is NULL and every
+  read falls back to `created_at` (server receive time).
+- **Why or evidence**: measured 2026-09-23 on the live DB: all but one OTEL row
+  lacks `client_timestamp`. The error is the exporter's batch delay (seconds),
+  so the effect on daily views is small, but ordering within a batch and any
+  per-event latency math use arrival time.
+- **Next**: fall back to `event.timestamp`, then `observedTimeUnixNano`, in
+  `parseLogRecord`. First check the Codex OTEL/JSONL overlap suppression, which
+  compares timestamps, still pairs rows once OTEL rows carry producer time.
+  Related: OTLP operational metrics (`otel_metrics`) have no retry dedup yet,
+  unlike usage metrics.
 
 #### Codex OTEL suppression drops unrelated JSONL skill invocations
 - **What**: `src/skills/invocation-ledger.ts:322` keys

@@ -32,7 +32,7 @@ Canonical ingest contract for `POST /api/events` and `POST /api/events/batch`.
 - `cache_read_tokens` (non-negative integer, default `0`)
 - `cache_write_tokens` (non-negative integer, default `0`)
 - `model` (string)
-- `cost_usd` (non-negative number)
+- `cost_usd` (finite non-negative number)
 - `branch` (string)
 - `project` (string)
 - `duration_ms` (non-negative integer)
@@ -74,6 +74,25 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
 - Truncation is UTF-8 byte-safe.
 - `payload_truncated` is stored on events (`0` or `1`).
 - For large object metadata, key fields (for example `command`, `file_path`) are preserved in a compact summary.
+
+## OTLP Ingestion
+
+Events derived from OTLP logs and usage metrics are held to this same contract
+before they are stored. A record that fails it (for example a negative token
+count or a non-finite cost) is dropped on its own, and the rest of the batch is
+stored. A usage metric datapoint with a negative or non-finite value is refused
+the same way, before cumulative-to-delta conversion, so it never becomes the
+baseline the next sample is diffed against. The reply is OTLP's partial-success shape, e.g.
+`{"partialSuccess":{"rejectedLogRecords":1,"errorMessage":"..."}}` for logs or
+`rejectedDataPoints` for metrics, and `{}` when nothing was refused. A
+fractional OTLP latency is rounded to whole milliseconds rather than refused.
+
+Exporters resend a batch on timeout or reset, so each OTLP log record and usage
+data point gets a derived `event_id` (`otel-log-…`/`otel-metric-…`, a hash of the
+record with its resource and instrumentation scope, keys sorted) and a resend is stored once. A record
+with no time at all (no `timeUnixNano`, `observedTimeUnixNano`, or
+`event.timestamp` attribute) gets no key, because a retry and a genuine repeat
+would be indistinguishable.
 
 ## Browser Requests
 

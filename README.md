@@ -237,6 +237,11 @@ for the full environment table.
 - Codex OTEL setup: [hooks/codex/README.md](hooks/codex/README.md)
 - Claude Code quota bridge: [hooks/claude-code/README.md#claude-statusline-quota-bridge](hooks/claude-code/README.md#claude-statusline-quota-bridge)
 - Generic ingest contract: [docs/api/event-contract.md](docs/api/event-contract.md)
+- OTLP ingest (`POST /api/otel/v1/logs`, `/v1/metrics`) answers `{}` when every
+  record is stored, or OTLP's partial-success shape when some fail the ingest
+  contract: `{"partialSuccess":{"rejectedLogRecords":1,"errorMessage":"..."}}`
+  (`rejectedDataPoints` for metrics). A resent batch is stored once
+  ([details](docs/api/event-contract.md#otlp-ingestion)).
 - Historical import and runtime behavior: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
 
 ## Code Layout

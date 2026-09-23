@@ -107,11 +107,18 @@ Operational procedures live in [OPERATIONS.md](OPERATIONS.md).
 
 ### Events
 
-Event producers pass through `normalizeIngestEvent` before insertion. The contract
-enforces required identifiers, closed event/status/source enums, non-negative
-usage fields, timestamp normalization, UTF-8-safe payload limits, and optional
-`event_id` deduplication. `created_at` is server receive time;
+Event producers pass through `normalizeIngestEvent` before insertion; that
+includes events derived from OTLP logs and usage metrics. The contract
+enforces required identifiers, closed event/status/source enums, finite
+non-negative usage fields, timestamp normalization, UTF-8-safe payload limits,
+and optional `event_id` deduplication. OTLP records get a derived `event_id` so
+exporter retries collapse. `created_at` is server receive time;
 `client_timestamp` is producer time.
+
+`insertEvent` writes the agent, session, and event in one transaction, so a
+failed insert never leaves a session with no event. The Codex live projection
+runs after that commit; if it fails, the failure is logged and the stored event
+still stands.
 
 Codex summary projections preserve producer timestamps when present. Their
 fallback is the event's database creation time: the known SQLite UTC format is

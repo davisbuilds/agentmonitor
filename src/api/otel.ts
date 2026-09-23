@@ -10,6 +10,7 @@ import {
   type OtelMetricsPayload,
 } from '../otel/parser.js';
 import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
+import { normalizeIngestEvent, type NormalizedIngestEvent } from '../contracts/event-contract.js';
 
 export const otelRouter = Router();
 
@@ -36,6 +37,44 @@ function recordDropped(dropped: Record<string, number>): void {
   }
 }
 
+/**
+ * Hold every OTLP-derived event to the same contract as `POST /api/events`, so
+ * a negative or non-finite token or cost value cannot reach storage and drag
+ * SUM() totals. A latency is the one field rounded rather than refused: OTLP
+ * carries it as a double, and a fractional millisecond is not bad data.
+ */
+class OtlpAdmission {
+  rejected = 0;
+  private readonly problems = new Set<string>();
+
+  admit(candidate: NormalizedIngestEvent): NormalizedIngestEvent | null {
+    const duration = candidate.duration_ms;
+    const input = typeof duration === 'number' && Number.isFinite(duration)
+      ? { ...candidate, duration_ms: Math.round(duration) }
+      : candidate;
+    const result = normalizeIngestEvent(input);
+    if (result.ok) return result.event;
+    this.rejected++;
+    for (const error of result.errors) this.problems.add(`${error.field} ${error.message}`);
+    return null;
+  }
+
+  /** Count records the parser refused before they became events. */
+  refuse(count: number, problem: string): void {
+    if (count === 0) return;
+    this.rejected += count;
+    this.problems.add(problem);
+  }
+
+  /** OTLP's partial-success response, or the plain `{}` when nothing was refused. */
+  response(rejectedField: 'rejectedLogRecords' | 'rejectedDataPoints'): Record<string, unknown> {
+    if (this.rejected === 0) return {};
+    const errorMessage = `Refused by the ingest contract: ${[...this.problems].join('; ')}`;
+    console.warn(`[otel] ${errorMessage} (${this.rejected} ${rejectedField === 'rejectedLogRecords' ? 'log records' : 'data points'})`);
+    return { partialSuccess: { [rejectedField]: this.rejected, errorMessage } };
+  }
+}
+
 // Content-Type guard: JSON only (415 for protobuf)
 function requireJson(req: Request, res: Response): boolean {
   const ct = req.headers['content-type'] ?? '';
@@ -59,8 +98,11 @@ otelRouter.post('/v1/logs', (req: Request, res: Response) => {
     return;
   }
   const events = parseOtelLogs(payload as OtelLogsPayload);
+  const admission = new OtlpAdmission();
 
-  for (const event of events) {
+  for (const parsed of events) {
+    const event = admission.admit(parsed);
+    if (!event) continue;
     const row = insertEvent(event);
     if (row) {
       broadcaster.broadcast('event', row as unknown as Record<string, unknown>);
@@ -68,8 +110,7 @@ otelRouter.post('/v1/logs', (req: Request, res: Response) => {
     }
   }
 
-  // OTLP-compliant: empty object = success
-  res.status(200).json({});
+  res.status(200).json(admission.response('rejectedLogRecords'));
 });
 
 // POST /api/otel/v1/metrics
@@ -81,14 +122,17 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Invalid OTEL JSON payload' });
     return;
   }
-  const { usage, operational, dropped } = parseOtelMetrics(payload as OtelMetricsPayload);
+  const { usage, operational, dropped, refused } = parseOtelMetrics(payload as OtelMetricsPayload);
 
   // Token/cost usage metrics (Claude Code OTEL) → synthetic llm_response, so the
   // existing event pipeline aggregates tokens/cost per session. Codex token/cost
   // metrics are deliberately not here — logs are authoritative (see parser).
+  const admission = new OtlpAdmission();
+  admission.refuse(refused.count, `${refused.metrics.join(', ')} value must be a finite non-negative number`);
   for (const delta of usage) {
     const hasCost = delta.cost_usd_delta > 0;
-    const row = insertEvent({
+    const event = admission.admit({
+      event_id: delta.event_id,
       session_id: delta.session_id,
       agent_type: delta.agent_type,
       event_type: 'llm_response',
@@ -102,6 +146,8 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
       metadata: { _synthetic: true, _source: 'otel_metric' },
       source: 'otel',
     });
+    if (!event) continue;
+    const row = insertEvent(event);
 
     if (row) {
       broadcaster.broadcast('event', row as unknown as Record<string, unknown>);
@@ -114,7 +160,7 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
 
   recordDropped(dropped);
 
-  res.status(200).json({});
+  res.status(200).json(admission.response('rejectedDataPoints'));
 });
 
 // POST /api/otel/v1/traces — stub for future implementation

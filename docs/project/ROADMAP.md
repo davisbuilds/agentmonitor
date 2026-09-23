@@ -10,6 +10,14 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Ingest integrity (2026-09-23):** OTLP events now go through the same ingest
+  contract as everything else. A record with a negative or non-finite token or
+  cost value is refused on its own and reported in OTLP's `partialSuccess`
+  reply. The contract also rejects an infinite `cost_usd`. Exporter retries
+  collapse through a derived `event_id` instead of double-counting.
+  `insertEvent` is all-or-nothing, so a failed insert can't leave a session with
+  no event.
+
 - **Browser-safe local API and quick fixes (2026-09-23):** web pages can no
   longer write to the local server. Writes with a foreign `Origin` get `403`, and
   a loopback-bound server refuses non-loopback `Host` names, which blocks DNS

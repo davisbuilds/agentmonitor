@@ -1,3 +1,4 @@
+import type Database from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { config } from '../config.js';
 import { syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
@@ -457,11 +458,11 @@ export function insertEvent(event: {
     if (existing) return null;
   }
 
-  const agentId = `${event.agent_type}-default`;
-  upsertAgent(agentId, event.agent_type);
-  upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch, event.mode);
+  // Everything that reads outside the database happens before the write
+  // transaction: resolving a branch may run `git`, and a subprocess must never
+  // hold SQLite's write lock.
 
-  // Backfill project/branch from session if missing on this event
+  // Backfill project/branch from the session if missing on this event.
   if (!event.project || !event.branch) {
     const session = db.prepare('SELECT project, branch FROM sessions WHERE id = ?').get(event.session_id) as { project: string | null; branch: string | null } | undefined;
     if (session) {
@@ -473,19 +474,10 @@ export function insertEvent(event: {
   // Resolve git branch from project directory and keep session branch fresh.
   // Recent live imports can carry stale branch metadata from session start, so
   // refresh the session-level branch from current repo HEAD when possible.
-  if (event.project && !isBenchmark && (event.source !== 'import' || !isHistoricalImport)) {
-    const gitBranch = resolveGitBranch(event.project);
-    if (gitBranch) {
-      if (!event.branch) {
-        event.branch = gitBranch;
-      }
-      db.prepare(`
-        UPDATE sessions
-        SET branch = ?
-        WHERE id = ? AND (branch IS NULL OR branch != ?)
-      `).run(gitBranch, event.session_id, gitBranch);
-    }
-  }
+  const gitBranch = event.project && !isBenchmark && (event.source !== 'import' || !isHistoricalImport)
+    ? resolveGitBranch(event.project)
+    : null;
+  if (gitBranch && !event.branch) event.branch = gitBranch;
 
   // Auto-calculate cost if model + tokens present but cost not provided
   if (event.model && (event.tokens_in > 0 || event.tokens_out > 0)) {
@@ -501,36 +493,62 @@ export function insertEvent(event: {
 
   const metadata = truncateMetadata(event.metadata);
 
-  try {
-    const result = db.prepare(`
-      INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
-        tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp,
-        metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source,
-        study_id, study)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      event.event_id || null,
-      event.session_id,
-      event.agent_type,
-      event.event_type,
-      event.tool_name || null,
-      event.status,
-      event.tokens_in,
-      event.tokens_out,
-      event.branch || null,
-      event.project || null,
-      event.duration_ms || null,
-      event.client_timestamp || null,
-      metadata.value,
-      metadata.truncated ? 1 : 0,
-      event.model || null,
-      event.cost_usd ?? null,
-      event.cache_read_tokens ?? 0,
-      event.cache_write_tokens ?? 0,
-      event.source || 'api',
-      event.study_id ?? null,
-      event.study ?? null
-    );
+  // One transaction from the session upsert to the event row: a failure in
+  // between (a constraint, or SQLITE_BUSY under concurrent writers) used to
+  // leave a committed session with no event, inflating session counts for
+  // good. Nested inside a caller's transaction this becomes a savepoint.
+  const row = db.transaction((): EventRow | null => {
+    const agentId = `${event.agent_type}-default`;
+    upsertAgent(agentId, event.agent_type);
+    upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch, event.mode);
+
+    if (gitBranch) {
+      db.prepare(`
+        UPDATE sessions
+        SET branch = ?
+        WHERE id = ? AND (branch IS NULL OR branch != ?)
+      `).run(gitBranch, event.session_id, gitBranch);
+    }
+
+    let result: Database.RunResult;
+    try {
+      result = db.prepare(`
+        INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
+          tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp,
+          metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source,
+          study_id, study)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        event.event_id || null,
+        event.session_id,
+        event.agent_type,
+        event.event_type,
+        event.tool_name || null,
+        event.status,
+        event.tokens_in,
+        event.tokens_out,
+        event.branch || null,
+        event.project || null,
+        event.duration_ms || null,
+        event.client_timestamp || null,
+        metadata.value,
+        metadata.truncated ? 1 : 0,
+        event.model || null,
+        event.cost_usd ?? null,
+        event.cache_read_tokens ?? 0,
+        event.cache_write_tokens ?? 0,
+        event.source || 'api',
+        event.study_id ?? null,
+        event.study ?? null
+      );
+    } catch (err: unknown) {
+      // UNIQUE constraint violation = duplicate event_id (a concurrent writer
+      // won the race past the pre-check), silently skip
+      if (err instanceof Error && err.message.includes('UNIQUE constraint failed: events.event_id')) {
+        return null;
+      }
+      throw err;
+    }
 
     if (result.changes === 0) return null; // duplicate event_id
 
@@ -555,26 +573,28 @@ export function insertEvent(event: {
       `).run(event.session_id);
     }
 
-    const row = db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid) as EventRow;
+    return db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid) as EventRow;
+  })();
 
-    // Benchmark cells carry harness='codex' but are batch-imported historical
-    // runs, not live activity. Projecting them writes browsing_sessions/turns/
-    // items that the Analytics and /api/v2/live surfaces read, so skip the live
-    // projection entirely — segregation must cover this path too, not just the
-    // Monitor's `sessions` aggregates.
-    if (row.agent_type === 'codex' && !isBenchmark) {
+  if (!row) return null;
+  markStatsDirty(); // event (and its session-status side effects) changed totals
+
+  // Benchmark cells carry harness='codex' but are batch-imported historical
+  // runs, not live activity. Projecting them writes browsing_sessions/turns/
+  // items that the Analytics and /api/v2/live surfaces read, so skip the live
+  // projection entirely — segregation must cover this path too, not just the
+  // Monitor's `sessions` aggregates.
+  if (row.agent_type === 'codex' && !isBenchmark) {
+    // The event is committed; a projection failure is logged, never reported
+    // to the client as a failed write.
+    try {
       syncCodexSummaryLiveEvent(db, row);
+    } catch (err) {
+      console.error(`[ingest] Codex live projection failed for event ${row.id}:`, err);
     }
-
-    markStatsDirty(); // event (and its session-status side effects) changed totals
-    return row;
-  } catch (err: unknown) {
-    // UNIQUE constraint violation = duplicate event_id, silently skip
-    if (err instanceof Error && err.message.includes('UNIQUE constraint failed: events.event_id')) {
-      return null;
-    }
-    throw err;
   }
+
+  return row;
 }
 
 /**

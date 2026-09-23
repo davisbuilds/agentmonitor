@@ -515,6 +515,259 @@ describe('POST /api/otel/v1/logs', () => {
 
 // ─── Metrics endpoint tests ────────────────────────────────────────────
 
+describe('OTLP events meet the ingest contract', () => {
+  test('a record with negative usage is rejected, and the rest of the batch still lands', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-contract' } }],
+      logRecords: [
+        {
+          eventName: 'claude_code.api_request',
+          attributes: [
+            { key: 'gen_ai.request.model', value: { stringValue: 'claude-sonnet-5' } },
+            { key: 'gen_ai.usage.input_tokens', value: { intValue: -999999 } },
+            { key: 'gen_ai.usage.cost', value: { doubleValue: -500.75 } },
+          ],
+        },
+        {
+          eventName: 'claude_code.api_request',
+          attributes: [
+            { key: 'gen_ai.request.model', value: { stringValue: 'claude-sonnet-5' } },
+            { key: 'gen_ai.usage.input_tokens', value: { intValue: 100 } },
+          ],
+        },
+      ],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal(res.status, 200);
+    // OTLP's own partial-success shape, so the exporter can report the loss.
+    const body = await res.json() as { partialSuccess?: { rejectedLogRecords?: number; errorMessage?: string } };
+    assert.equal(body.partialSuccess?.rejectedLogRecords, 1);
+    assert.match(body.partialSuccess?.errorMessage ?? '', /tokens_in/);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tokens_in, 100);
+  });
+
+  test('a non-finite cost is rejected rather than poisoning every SUM', async () => {
+    const payload = JSON.stringify(buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-inf' } }],
+      logRecords: [{
+        eventName: 'claude_code.api_request',
+        attributes: [{ key: 'gen_ai.usage.cost', value: { doubleValue: 7 } }],
+      }],
+    })).replace('"doubleValue":7', '"doubleValue":1e400');
+
+    const res = await postRawJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json() as { partialSuccess?: { rejectedLogRecords?: number } }).partialSuccess?.rejectedLogRecords, 1);
+    assert.equal((await getEvents()).total, 0);
+  });
+
+  test('a fractional latency is rounded, not grounds to drop the record', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-latency' } }],
+      logRecords: [{
+        eventName: 'claude_code.tool_result',
+        attributes: [
+          { key: 'gen_ai.tool.name', value: { stringValue: 'Bash' } },
+          { key: 'duration_ms', value: { doubleValue: 123.6 } },
+        ],
+      }],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.deepEqual(await res.json(), {});
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].duration_ms, 124);
+  });
+
+  test('a clean batch still answers with an empty object', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-clean' } }],
+      logRecords: [{ eventName: 'claude_code.api_request', attributes: [] }],
+    });
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.deepEqual(await res.json(), {});
+  });
+
+  test('a non-finite usage datapoint is rejected', async () => {
+    const payload = JSON.stringify(buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-metric-inf' } }],
+      metrics: [{ name: 'claude_code.cost.usage', dataPoints: [{ value: 7 }] }],
+    })).replace('"asInt":"7"', '"asDouble":1e400');
+
+    const res = await postRawJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json() as { partialSuccess?: { rejectedDataPoints?: number } }).partialSuccess?.rejectedDataPoints, 1);
+    assert.equal((await getEvents()).total, 0);
+  });
+
+  test('a negative usage datapoint is refused and reported, not silently skipped', async () => {
+    const payload = buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-metric-neg' } }],
+      metrics: [{ name: 'claude_code.cost.usage', dataPoints: [{ value: -5 }] }],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { partialSuccess?: { rejectedDataPoints?: number; errorMessage?: string } };
+    assert.equal(body.partialSuccess?.rejectedDataPoints, 1);
+    assert.match(body.partialSuccess?.errorMessage ?? '', /claude_code\.cost\.usage/);
+    assert.equal((await getEvents()).total, 0);
+  });
+
+  test('a refused cumulative sample does not inflate the next delta', async () => {
+    const cumulative = (value: number) => buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-metric-cum-neg' } }],
+      metrics: [{
+        name: 'claude_code.token.usage',
+        aggregationTemporality: 2,
+        dataPoints: [{ value, attributes: [{ key: 'type', value: { stringValue: 'input' } }] }],
+      }],
+    });
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, cumulative(100));
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, cumulative(-50));
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, cumulative(150));
+
+    const events = await getEvents();
+    const total = events.events.reduce((sum: number, e: { tokens_in: number }) => sum + e.tokens_in, 0);
+    assert.equal(total, 150, 'the counter only ever reached 150');
+  });
+});
+
+describe('OTLP exporter retries do not double-count', () => {
+  const usageRecord = (timestamp: string) => ({
+    eventName: 'codex.sse_event',
+    attributes: [
+      { key: 'event.kind', value: { stringValue: 'response.completed' } },
+      { key: 'event.timestamp', value: { stringValue: timestamp } },
+      { key: 'input_token_count', value: { intValue: 1000 } },
+      { key: 'output_token_count', value: { intValue: 50 } },
+    ],
+  });
+  const codexLogs = (records: Array<ReturnType<typeof usageRecord> & { timeUnixNano?: string }>) => buildLogPayload({
+    serviceName: 'codex_cli_rs',
+    resourceAttrs: [{ key: 'conversation.id', value: { stringValue: 'sess-retry' } }],
+    logRecords: records,
+  });
+
+  test('a resent log batch is stored once', async () => {
+    // Shaped like real Codex output: no timeUnixNano, time in event.timestamp.
+    const payload = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+      // A duplicate is not a refusal: the retry still gets a clean success.
+      assert.deepEqual(await res.json(), {});
+    }
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tokens_in, 1000);
+  });
+
+  test('a retry re-serialized with its keys reordered is still one delivery', async () => {
+    // A collector in the path may re-encode the batch; key order is not identity.
+    const payload = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
+    const reversed = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(reversed);
+      if (value !== null && typeof value === 'object') {
+        return Object.fromEntries(Object.entries(value).reverse().map(([k, v]) => [k, reversed(v)]));
+      }
+      return value;
+    };
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, reversed(payload));
+    assert.equal((await getEvents()).total, 1);
+  });
+
+  test('records that differ only in their event time are both stored', async () => {
+    // Codex never sets timeUnixNano; its time lives in event.timestamp.
+    const payload = codexLogs([
+      { ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' },
+      { ...usageRecord('2026-09-23T12:00:00.001Z'), timeUnixNano: '0' },
+    ]);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('a record with no time at all is never collapsed', async () => {
+    // Without any timestamp a retry and a genuine repeat look identical, so
+    // keep both rather than risk dropping real usage.
+    const record = { ...usageRecord(''), timeUnixNano: '0' };
+    record.attributes = record.attributes.filter(attr => attr.key !== 'event.timestamp');
+    const payload = codexLogs([record]);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('identical records from two instrumentation scopes are both stored', async () => {
+    const base = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
+    const [scope] = base.resourceLogs[0].scopeLogs;
+    const payload = {
+      resourceLogs: [{
+        ...base.resourceLogs[0],
+        scopeLogs: [
+          { scope: { name: 'codex_otel', version: '1' }, ...scope },
+          { scope: { name: 'codex_otel_mirror', version: '1' }, ...scope },
+        ],
+      }],
+    };
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('identical data points from two instrumentation scopes are both stored', async () => {
+    const base = buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'session.id', value: { stringValue: 'sess-metric-scopes' } }],
+      metrics: [{
+        name: 'claude_code.token.usage',
+        dataPoints: [{ value: 400, attributes: [{ key: 'type', value: { stringValue: 'input' } }] }],
+      }],
+    });
+    const [scope] = base.resourceMetrics[0].scopeMetrics;
+    const payload = {
+      resourceMetrics: [{
+        ...base.resourceMetrics[0],
+        scopeMetrics: [
+          { scope: { name: 'a' }, ...scope },
+          { scope: { name: 'b' }, ...scope },
+        ],
+      }],
+    };
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('a resent delta metric is stored once; the next interval is not', async () => {
+    const payload = buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'session.id', value: { stringValue: 'sess-metric-retry' } }],
+      metrics: [{
+        name: 'claude_code.token.usage',
+        dataPoints: [{ value: 400, attributes: [{ key: 'type', value: { stringValue: 'input' } }] }],
+      }],
+    });
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal((await getEvents()).total, 1);
+
+    const nextInterval = JSON.parse(JSON.stringify(payload).replace('"1700000000000000000"', '"1700000060000000000"'));
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, nextInterval);
+    assert.equal((await getEvents()).total, 2);
+  });
+});
+
 describe('POST /api/otel/v1/metrics', () => {
   test('returns 415 for protobuf content-type', async () => {
     const res = await postProtobuf(`${baseUrl}/api/otel/v1/metrics`);
