@@ -75,6 +75,16 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
 - `payload_truncated` is stored on events (`0` or `1`).
 - For large object metadata, key fields (for example `command`, `file_path`) are preserved in a compact summary.
 
+## OTLP Ingestion
+
+Events derived from OTLP logs and usage metrics are held to this same contract
+before they are stored. A record that fails it (for example a negative token
+count or a non-finite cost) is dropped on its own, and the rest of the batch is
+stored. The reply is OTLP's partial-success shape, e.g.
+`{"partialSuccess":{"rejectedLogRecords":1,"errorMessage":"..."}}` for logs or
+`rejectedDataPoints` for metrics, and `{}` when nothing was refused. A
+fractional OTLP latency is rounded to whole milliseconds rather than refused.
+
 ## Browser Requests
 
 Ingest clients (hooks, OTLP exporters, the CLI) send no `Origin` header. A write

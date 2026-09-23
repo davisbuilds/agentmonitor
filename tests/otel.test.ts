@@ -515,6 +515,102 @@ describe('POST /api/otel/v1/logs', () => {
 
 // ─── Metrics endpoint tests ────────────────────────────────────────────
 
+describe('OTLP events meet the ingest contract', () => {
+  test('a record with negative usage is rejected, and the rest of the batch still lands', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-contract' } }],
+      logRecords: [
+        {
+          eventName: 'claude_code.api_request',
+          attributes: [
+            { key: 'gen_ai.request.model', value: { stringValue: 'claude-sonnet-5' } },
+            { key: 'gen_ai.usage.input_tokens', value: { intValue: -999999 } },
+            { key: 'gen_ai.usage.cost', value: { doubleValue: -500.75 } },
+          ],
+        },
+        {
+          eventName: 'claude_code.api_request',
+          attributes: [
+            { key: 'gen_ai.request.model', value: { stringValue: 'claude-sonnet-5' } },
+            { key: 'gen_ai.usage.input_tokens', value: { intValue: 100 } },
+          ],
+        },
+      ],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal(res.status, 200);
+    // OTLP's own partial-success shape, so the exporter can report the loss.
+    const body = await res.json() as { partialSuccess?: { rejectedLogRecords?: number; errorMessage?: string } };
+    assert.equal(body.partialSuccess?.rejectedLogRecords, 1);
+    assert.match(body.partialSuccess?.errorMessage ?? '', /tokens_in/);
+
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].tokens_in, 100);
+  });
+
+  test('a non-finite cost is rejected rather than poisoning every SUM', async () => {
+    const payload = JSON.stringify(buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-inf' } }],
+      logRecords: [{
+        eventName: 'claude_code.api_request',
+        attributes: [{ key: 'gen_ai.usage.cost', value: { doubleValue: 7 } }],
+      }],
+    })).replace('"doubleValue":7', '"doubleValue":1e400');
+
+    const res = await postRawJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json() as { partialSuccess?: { rejectedLogRecords?: number } }).partialSuccess?.rejectedLogRecords, 1);
+    assert.equal((await getEvents()).total, 0);
+  });
+
+  test('a fractional latency is rounded, not grounds to drop the record', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-latency' } }],
+      logRecords: [{
+        eventName: 'claude_code.tool_result',
+        attributes: [
+          { key: 'gen_ai.tool.name', value: { stringValue: 'Bash' } },
+          { key: 'duration_ms', value: { doubleValue: 123.6 } },
+        ],
+      }],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.deepEqual(await res.json(), {});
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].duration_ms, 124);
+  });
+
+  test('a clean batch still answers with an empty object', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-clean' } }],
+      logRecords: [{ eventName: 'claude_code.api_request', attributes: [] }],
+    });
+    const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.deepEqual(await res.json(), {});
+  });
+
+  test('a non-finite usage datapoint is rejected', async () => {
+    const payload = JSON.stringify(buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-metric-inf' } }],
+      metrics: [{ name: 'claude_code.cost.usage', dataPoints: [{ value: 7 }] }],
+    })).replace('"asInt":"7"', '"asDouble":1e400');
+
+    const res = await postRawJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal(res.status, 200);
+    assert.equal((await res.json() as { partialSuccess?: { rejectedDataPoints?: number } }).partialSuccess?.rejectedDataPoints, 1);
+    assert.equal((await getEvents()).total, 0);
+  });
+});
+
 describe('POST /api/otel/v1/metrics', () => {
   test('returns 415 for protobuf content-type', async () => {
     const res = await postProtobuf(`${baseUrl}/api/otel/v1/metrics`);
