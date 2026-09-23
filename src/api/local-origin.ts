@@ -4,14 +4,30 @@ import type { NextFunction, Request, RequestHandler, Response } from 'express';
 // question for any Origin-bearing write is whether the page is the app itself.
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
+/**
+ * Canonical hostname for a bind address, Host value, or URL hostname. The
+ * WHATWG parser normalizes every IP spelling (`127.1`, `0:0:0:0:0:0:0:1`,
+ * `::ffff:127.0.0.1`), so the loopback test sees one form for each address.
+ */
+function canonicalHostname(hostname: string): string | null {
+  const bare = hostname.replace(/^\[|\]$/g, '');
+  try {
+    return new URL(`http://${bare.includes(':') ? `[${bare}]` : bare}`).hostname.replace(/\.$/, '');
+  } catch {
+    return null;
+  }
+}
+
 /** Loopback addresses and `localhost` names, which only this machine can reach. */
 function isLocalHostname(hostname: string): boolean {
-  const name = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  const name = canonicalHostname(hostname);
+  if (name === null) return false;
   return name === 'localhost'
     || name.endsWith('.localhost')
-    || name === '::1'
     || /^127(\.\d{1,3}){3}$/.test(name)
-    || /^::ffff:127(\.\d{1,3}){3}$/.test(name);
+    || name === '[::1]'
+    // IPv4-mapped 127.0.0.0/8, which the parser writes in hex (::ffff:7f00:1).
+    || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(name);
 }
 
 /** The hostname part of a Host header value, which may carry a port or IPv6 brackets. */

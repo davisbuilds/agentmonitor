@@ -133,6 +133,26 @@ describe('a loopback-bound server answers only loopback host names', () => {
   }
 });
 
+describe('loopback is recognized however it is spelled', () => {
+  // Node binds `--host 0:0:0:0:0:0:0:1` to ::1; reading it as an external
+  // bind would silently drop the rebinding check.
+  for (const bindHost of ['0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '127.1', 'LOCALHOST']) {
+    test(`a server bound to ${bindHost} still refuses a rebound Host`, async () => {
+      const { server, port } = await listen(createApp({ bindHost }));
+      servers.push(server);
+      const reply = await send(port, 'GET', '/api/health', { Host: 'evil.example.com:3141' });
+      assert.equal(reply.status, 403);
+    });
+  }
+
+  for (const host of ['[0:0:0:0:0:0:0:1]:3141', '[::ffff:127.0.0.1]:3141', 'localhost.:3141']) {
+    test(`Host ${host} is served`, async () => {
+      const reply = await send(loopbackPort, 'GET', '/api/health', { Host: host });
+      assert.equal(reply.status, 200);
+    });
+  }
+});
+
 describe('a server bound beyond loopback', () => {
   test('serves whatever Host it is reached by', async () => {
     const reply = await send(wildcardPort, 'GET', '/api/health', { Host: '192.168.1.20:3141' });
