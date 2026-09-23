@@ -137,24 +137,6 @@ hold the detailed history. Do not keep a resolved section here.
   plus timestamp and metric name) so retries collapse the way documented
   ingestion does.
 
-#### Browser-reachable unauthenticated writes to the local ingest surface
-- **What**: `src/app.ts:10` accepts `text/plain` for `/api/events` and
-  `/api/otel`, which is a CORS-safelisted content type, and no Origin/Host check
-  exists anywhere in the server. Any page the operator visits can blind-POST
-  fabricated events to `127.0.0.1:3141`. Chained with
-  `isHistoricalImportedEvent` (`src/db/queries.ts:307`), a forged
-  `{session_id, source:'import'}` body with no `client_timestamp` also forces an
-  arbitrary session to `status='ended'`.
-- **Why or evidence**: reproduced 2026-09-22 — a cross-origin request with
-  `Content-Type: text/plain` and `Origin: https://evil.example.com` returned
-  `201` and wrote; a forged import event flipped a live session to `ended` with
-  no ownership check. The write lands regardless of whether the attacker page can
-  read the response, so same-origin read blocking is not mitigation.
-- **Next**: validate `Origin`/`Host` against loopback on the ingest routes, or
-  drop `text/plain` from accepted ingest content types; decide deliberately
-  whether the public contract should ever be able to end a session it did not
-  create. Also reduces DNS-rebinding exposure.
-
 #### `insertEvent` is not transactional, leaving orphan sessions
 - **What**: `src/db/queries.ts:415` calls `upsertAgent`/`upsertSession` (each
   committing immediately), then a session UPDATE, cost calculation, and finally
@@ -422,34 +404,6 @@ the build.
   test per spelling. Distinct from the unpriced-model item above, which is a
   missing rate card rather than a normalization gap.
 
-#### `costs recalc` overwrites benchmark rows' authoritative captured cost
-- **What**: the recalc query (`src/cli/commands/maintenance.ts:292`) rewrites
-  `cost_usd` for every event with usage and has no `source != 'benchmark'`
-  exemption, unlike the read paths and unlike `resolveBenchmarkCost`
-  (`src/import/benchmark.ts:109`), whose own docstring calls the captured
-  provider cost authoritative.
-- **Why or evidence**: reproduced 2026-09-22 — a benchmark event with captured
-  `cost_usd=1.5` became `3` (the local-table estimate) after one recalc run. Real
-  provider cost (promo, discount, rounding) is destroyed and unrecoverable
-  without re-import.
-- **Next**: skip `source='benchmark'` in the recalc statement, or gate it behind
-  an explicit `--include-benchmark`. `--missing-only` (2026-09-23) is already
-  safe for benchmark rows: it skips every row with a captured cost and prices
-  only uncosted ones, which is the same table fallback `resolveBenchmarkCost`
-  applies at import. Only the bare full recalc still clobbers them. Complements the existing recalc-clobber
-  caution in the memory notes, which covers captured costs generally.
-
-#### Antigravity generations all inherit the session's first timestamp
-- **What**: `src/import/antigravity.ts:113` computes `firstTs` once and reuses
-  `iso(firstTs)` as both `client_timestamp` and the pricing `at` for every
-  generation in the session loop.
-- **Why or evidence**: reproduced 2026-09-22 with a fixture straddling the
-  `2027-01-01` Gemini Flash promo revert in `src/pricing/data/gemini.json`: both
-  generations priced at `1.125` instead of the later one's correct `2.25`. Two
-  consequences — cost-over-time views bunch all Antigravity spend at session
-  start, and date-aware rate schedules select the wrong period.
-- **Next**: carry each generation's own step timestamp into both fields.
-
 #### `gpt-6-astra` charges for cache writes against file convention (unverified)
 - **What**: `src/pricing/data/codex.json:5` gives `gpt-6-astra`
   `cacheWriteCostPerMTok: 12.5`, the only non-zero cache-write rate among the
@@ -533,20 +487,6 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
-#### Hooks abort on repositories with no commits yet
-- **What**: `get_branch` in `hooks/claude-code/send_event.sh:64` ends with
-  `git rev-parse --abbrev-ref HEAD`, which exits 128 on an unborn HEAD. Because
-  `BRANCH="$(get_branch)"` is a bare assignment under `set -euo pipefail`, the
-  hook script dies before `send_event` runs.
-- **Why or evidence**: reproduced 2026-09-22 — piping a payload to
-  `post_tool_use.sh` in a freshly `git init`-ed repo printed nothing, exited 128,
-  and fired no curl (`bash -x` shows the script ending right after
-  `+ BRANCH=HEAD`). Affects `session_start.sh`, `session_end.sh`,
-  `post_tool_use.sh`: every event is dropped for a repo's whole pre-first-commit
-  life, exactly the new-project case the tool should capture best.
-- **Next**: `BRANCH="$(get_branch || true)"` or end the function with a
-  `|| true` / `echo "${branch:-}"` so git failure never escapes.
-
 #### Statusline bridge and the Python hook block the agent's hot path
 - **What**: `hooks/claude-code/statusline_bridge.sh:11` runs curl in the
   foreground with `-m 1` on every statusline render, and
@@ -559,18 +499,6 @@ the build.
   slow-but-reachable server is the bad case; a down server is fast.
 - **Next**: background the statusline curl or drop its timeout to ~150–250ms, and
   bring the Python sender to true fire-and-forget parity with the shell hooks.
-
-#### Malformed OTLP timestamps return a 500 with a full stack trace
-- **What**: `nanoToIso` (`src/otel/parser.ts:191`) calls `BigInt(nanos)`
-  unguarded from `src/api/otel.ts:61,84`; a non-numeric `timeUnixNano` throws a
-  `SyntaxError` past the app's only error middleware (which special-cases
-  body-parser JSON errors) to Express's default handler.
-- **Why or evidence**: reproduced 2026-09-22 — `POST /api/otel/v1/logs` with
-  `timeUnixNano: "not-a-number"` returned 500 including absolute server paths;
-  `NODE_ENV` is set nowhere in the repo, so Express stays in verbose dev error
-  mode. The process itself survived (`/api/health` still 200).
-- **Next**: return `undefined` from `nanoToIso` on parse failure, and set
-  `NODE_ENV=production` for `amon serve`.
 
 #### Hook safety heuristics under-match and should be documented as best-effort
 - **What**: the destructive-command filter
@@ -668,16 +596,6 @@ the build.
   position.
 - **Next**: copy the `++requestToken` pattern from `usage.svelte.ts`'s
   `fetchAll` and bail when stale.
-
-#### `formatNumber` rounds past its unit boundary
-- **What**: `frontend/src/lib/format.ts:25` picks the unit before rounding, so
-  values just under a boundary render in the lower unit at four digits.
-- **Why or evidence**: reproduced 2026-09-22 — `formatNumber(999950)` →
-  `"1000.0K"` (expected `"1.0M"`), `formatNumber(999950000)` → `"1000.0M"`.
-  `frontend/src/lib/format.test.ts` asserts only round values, so the boundary
-  band is unguarded.
-- **Next**: round first, then select the tier; add boundary cases to the existing
-  test.
 
 #### `editedFilesBySession` grows for the life of the browser tab
 - **What**: the module-level `Map<string, Set<string>>` at
