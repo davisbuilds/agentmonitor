@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveDbPath } from './db-path.js';
+import { resolveReportingTimeZone } from './util/time-zone.js';
 
 type EnvMap = NodeJS.ProcessEnv;
 
@@ -245,6 +246,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     } satisfies UsageConfig,
     insights: parseInsightsConfig(env),
     warehouse: parseWarehouseConfig(env),
+    reportingTimeZone: resolveReportingTimeZone(env),
   };
 }
 
