@@ -155,19 +155,6 @@ the build.
   Related: OTLP operational metrics (`otel_metrics`) have no retry dedup yet,
   unlike usage metrics.
 
-#### Codex OTEL suppression drops unrelated JSONL skill invocations
-- **What**: `src/skills/invocation-ledger.ts:322` keys
-  `codexSessionsWithEvents` by canonical session id alone, so the presence of
-  *any* qualifying OTEL skill event suppresses *all* JSONL-detected invocations
-  for that session — including entirely different skills.
-- **Why or evidence**: reproduced 2026-09-22 — a session invoking `skill-alpha`
-  (via OTEL) and `skill-beta` (JSONL-only) counted alpha and silently dropped
-  beta. Distinct from the backlogged windowed-scan index item, which is
-  performance; this is undercounting, potentially to zero, in consultation
-  analytics.
-- **Next**: key suppression by `(canonical session, skill name, command
-  fingerprint)` so only genuinely duplicated occurrences collapse.
-
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 
 #### Usage overview derived store remains a measured fallback
@@ -255,6 +242,11 @@ the build.
   does it is invisible (no error, plausible dashboard). `gpt-5.6-sol` shows a
   promo $4/$20 ("through 2026-11-21") on the OpenAI page while aggregators list
   $5/$30 — we kept list ($5/$30); a `schedule` entry could encode the promo.
+  The same page (checked 2026-09-23, when GPT-6 Sol/Luna were added) lists a
+  1.25x cache-write column for every GPT-5.6 and GPT-6 model, while `codex.json`
+  bills GPT-5.6 cache writes at the input rate (commit `84db40b`'s reading). No
+  effect today, since Codex emits no cache-write tokens; reconcile before it
+  does. That page also confirms `gpt-6-astra`'s $12.50 cache write.
 - **Next / Revisit when**: add a model the moment the "unknown-priced tokens"
   surface shows it, from the vendor's live page (never from a multiplier), then
   backfill with `amon costs recalc --missing-only` (OPERATIONS.md). A check that
@@ -362,21 +354,6 @@ the build.
   test per spelling. Distinct from the unpriced-model item above, which is a
   missing rate card rather than a normalization gap.
 
-#### `gpt-6-astra` charges for cache writes against file convention (unverified)
-- **What**: `src/pricing/data/codex.json:5` gives `gpt-6-astra`
-  `cacheWriteCostPerMTok: 12.5`, the only non-zero cache-write rate among the
-  OpenAI-family entries, and its base rates (`10/50/1/12.5`) exactly match
-  `claude-fable-5` in `claude.json`.
-- **Why or evidence**: internal-consistency signal only, 2026-09-22 — every
-  sibling GPT-5.x/o-series entry sets cache write to 0, matching OpenAI's
-  convention of not charging for cache writes. **Not verified against a vendor
-  rate card**, so the copy-paste explanation is a *hypothesis, unmeasured*; the
-  live DB shows `gpt-6-astra` usage, so the exposure is real if the rate is
-  wrong.
-- **Next / Revisit when**: confirm against a published rate card before editing;
-  do not guess the rate. If confirmed a paste error, zero the base and tier
-  cache-write rates.
-
 #### Cache-write TTL tiers are not represented anywhere (unanswered)
 - **What**: nothing in the pricing schema, the OTEL `token.type` handling
   (`src/otel/parser.ts:1093`), or the Claude Code JSONL usage shape distinguishes
@@ -415,19 +392,6 @@ the build.
 - **Next / Revisit when**: building Codex operational observability into the
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
-
-#### Statusline bridge and the Python hook block the agent's hot path
-- **What**: `hooks/claude-code/statusline_bridge.sh:11` runs curl in the
-  foreground with `-m 1` on every statusline render, and
-  `hooks/claude-code/python/send_event.py:76` calls `thread.join(timeout=2)`
-  despite documenting fire-and-forget.
-- **Why or evidence**: measured 2026-09-22 against a listener that accepts but
-  never responds — statusline bridge 1.05–1.12s per render; Python
-  `post_tool_use.py` 2.13s per tool call, versus 0.06s for the shell equivalent
-  (which backgrounds curl) and 0.08s when the connection is refused outright. A
-  slow-but-reachable server is the bad case; a down server is fast.
-- **Next**: background the statusline curl or drop its timeout to ~150–250ms, and
-  bring the Python sender to true fire-and-forget parity with the shell hooks.
 
 #### Hook safety heuristics under-match and should be documented as best-effort
 - **What**: the destructive-command filter
@@ -510,21 +474,6 @@ the build.
   component's behavior (not just its markup) needs a regression guard. No
   coverage threshold is enforced yet — add one only once the surface is broad
   enough that a number is meaningful. Noted 2026-09-11.
-
-#### Sessions page lacks the stale-response guard every other store has
-- **What**: `loadSessions` in
-  `frontend/src/lib/components/sessions/SessionsPage.svelte:122` assigns
-  `sessions`/`total`/`cursor`/`hasMore` with no request token or
-  `AbortController`, unlike `search`, `usage`, `insights`, `trace-quality` and
-  `live`, which all guard.
-- **Why or evidence**: traced 2026-09-22 (not executed — component races are
-  outside the current pure-function Vitest harness). Changing the Project filter
-  then the Agent filter quickly, or a `hashchange` from Back/Forward racing an
-  in-flight load, lets the older response overwrite newer state: the list stops
-  matching the visible filters and `cursor`/`hasMore` can page from the wrong
-  position.
-- **Next**: copy the `++requestToken` pattern from `usage.svelte.ts`'s
-  `fetchAll` and bail when stale.
 
 #### `editedFilesBySession` grows for the life of the browser tab
 - **What**: the module-level `Map<string, Set<string>>` at

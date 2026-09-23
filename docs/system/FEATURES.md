@@ -68,7 +68,10 @@ velocity, and high-volume sessions. Capability metadata distinguishes all-sessio
 aggregates from tool or transcript analysis that excludes unsupported sources.
 
 Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of
-`SKILL.md`. Shell variables and glob paths do not count as named skills. Skill
+`SKILL.md`. Shell variables and glob paths do not count as named skills. A Codex
+read reported by both OTEL and its JSONL rollout counts once: OTEL is
+authoritative per session and skill, and the rollout adds only the reads OTEL
+did not report. Skill
 health distinguishes first reads, post-compaction rehydration, repeats without
 compaction, and unclassifiable observations by harness. Claude and Codex evidence
 is not pooled as directly comparable because the observation mechanisms differ.

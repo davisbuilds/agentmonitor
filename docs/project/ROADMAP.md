@@ -10,6 +10,14 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Skill counts, hook latency, Sessions races, GPT-6 pricing (2026-09-23):**
+  a Codex skill seen only in the JSONL rollout now counts even when OTEL saw
+  other skills in that session; OTEL and rollout reads reconcile one for one per
+  skill. Hooks no longer wait on a slow server: the statusline POST is
+  backgrounded, and the Python sender hands its POST to a detached child (it
+  had waited up to 2s per event). The Sessions list ignores responses to
+  superseded loads. GPT-6 Sol and Luna are priced from OpenAI's rate table.
+
 - **Ingest integrity (2026-09-23):** OTLP events now go through the same ingest
   contract as everything else. A record with a negative or non-finite token or
   cost value is refused on its own and reported in OTLP's `partialSuccess`
