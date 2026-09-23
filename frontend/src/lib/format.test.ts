@@ -44,6 +44,12 @@ describe('formatNumber', () => {
     expect(formatNumber(2_000_000)).toBe('2.0M');
     expect(formatNumber(3_000_000_000)).toBe('3.0B');
   });
+
+  it('promotes a value that rounds up to the next unit', () => {
+    expect(formatNumber(999_949)).toBe('999.9K');
+    expect(formatNumber(999_950)).toBe('1.0M');
+    expect(formatNumber(999_950_000)).toBe('1.0B');
+  });
 });
 
 describe('formatDuration', () => {
