@@ -76,6 +76,30 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.deprecated, false);
     });
 
+    // Both break the 0.1x cache-read convention the older entries follow, so a
+    // rate derived from input price would over-bill every cache hit.
+    test('finds Claude Opus 5.5 with its 0.05x cache-read rate', () => {
+      const pricing = registry.lookup('claude-opus-5-5');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.inputCostPerToken, 4 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 20 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 5 / 1_000_000); // 5-minute cache write
+      assert.equal(pricing.deprecated, false);
+    });
+
+    test('finds Claude Fable 5.1 with its 0.025x cache-read rate', () => {
+      const pricing = registry.lookup('claude-fable-5-1');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.inputCostPerToken, 10 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 50 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.25 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 12.5 / 1_000_000); // 5-minute cache write
+      assert.equal(pricing.deprecated, false);
+    });
+
     test('finds Gemini 3.5 Flash by canonical name and Antigravity aliases', () => {
       const canonical = registry.lookup('gemini-3.5-flash');
       assert.ok(canonical);

@@ -1,13 +1,29 @@
 {
   "provider": "anthropic",
-  "lastUpdated": "2026-09-03T00:00:00Z",
+  "lastUpdated": "2026-09-23T00:00:00Z",
   "models": {
+    "claude-fable-5-1": {
+      "aliases": [],
+      "inputCostPerMTok": 10,
+      "outputCostPerMTok": 50,
+      "cacheReadCostPerMTok": 0.25,
+      "cacheWriteCostPerMTok": 12.5,
+      "deprecated": false
+    },
     "claude-fable-5": {
       "aliases": [],
       "inputCostPerMTok": 10,
       "outputCostPerMTok": 50,
       "cacheReadCostPerMTok": 1,
       "cacheWriteCostPerMTok": 12.5,
+      "deprecated": false
+    },
+    "claude-opus-5-5": {
+      "aliases": [],
+      "inputCostPerMTok": 4,
+      "outputCostPerMTok": 20,
+      "cacheReadCostPerMTok": 0.2,
+      "cacheWriteCostPerMTok": 5,
       "deprecated": false
     },
     "claude-opus-5": {
