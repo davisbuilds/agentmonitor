@@ -32,7 +32,10 @@ Canonical ingest contract for `POST /api/events` and `POST /api/events/batch`.
 - `cache_read_tokens` (non-negative integer, default `0`)
 - `cache_write_tokens` (non-negative integer, default `0`)
 - `model` (string)
-- `cost_usd` (finite non-negative number)
+- `cost_usd` (finite non-negative number). A supplied cost is stored as the
+  producer's figure (`cost_source: "reported"`) and a later recalc never
+  rewrites it. Without one, the server estimates it from its pricing tables
+  when the model is known (`cost_source: "estimated"`).
 - `branch` (string)
 - `project` (string)
 - `duration_ms` (non-negative integer)

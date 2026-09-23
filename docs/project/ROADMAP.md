@@ -10,6 +10,15 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Cost provenance and self-healing prices (2026-09-23):** each stored cost
+  records whether the producer reported it or our tables estimated it
+  (`cost_source`). A recalc only re-derives estimates, so correcting a wrong
+  rate no longer risks overwriting captured costs. Startup prices any usage
+  stored while its model had no rate, so a pricing update fixes its own $0 rows
+  on the restart that ships it. Claude token-metric rows no longer add an
+  estimate on top of Claude's reported cost metric (a v10 migration corrects
+  rows already stored).
+
 - **Skill counts, hook latency, Sessions races, GPT-6 pricing (2026-09-23):**
   a Codex skill seen only in the JSONL rollout now counts even when OTEL saw
   other skills in that session; OTEL and rollout reads reconcile one for one per
