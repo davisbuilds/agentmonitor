@@ -316,68 +316,21 @@ export function registerMaintenanceCommands(): void {
     name: 'costs recalc',
     group: 'Data Commands',
     summary: 'Recalculate event costs from pricing metadata',
-    usage: 'costs recalc [--dry-run]',
-    examples: ['costs recalc --dry-run --json'],
+    usage: 'costs recalc [--dry-run] [--missing-only]',
+    examples: ['costs recalc --missing-only --dry-run --json', 'costs recalc --dry-run --json'],
     async handler(ctx, args) {
-      const parsed = parseOptionSet(args, new Set(), new Set(['--dry-run']));
-      rejectExtraPositionals(parsed.positionals, 'amon costs recalc [--dry-run]');
+      const parsed = parseOptionSet(args, new Set(), new Set(['--dry-run', '--missing-only']));
+      rejectExtraPositionals(parsed.positionals, 'amon costs recalc [--dry-run] [--missing-only]');
       const { initSchema } = await import('../../db/schema.js');
       const { closeDb, getDb } = await import('../../db/connection.js');
-      const { pricingRegistry } = await import('../../pricing/index.js');
+      const { recalculateEventCosts } = await import('../../pricing/recalc.js');
       initSchema();
       try {
-        const db = getDb();
-        const events = db.prepare(`
-          SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd,
-                 created_at, client_timestamp
-          FROM events
-          WHERE model IS NOT NULL
-            AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
-        `).all() as Array<{
-          id: number;
-          model: string;
-          tokens_in: number;
-          tokens_out: number;
-          cache_read_tokens: number;
-          cache_write_tokens: number;
-          cost_usd: number | null;
-          created_at: string;
-          client_timestamp: string | null;
-        }>;
-        const update = db.prepare('UPDATE events SET cost_usd = ? WHERE id = ?');
-        let updated = 0;
-        let unchanged = 0;
-        let unknownModel = 0;
-        const run = db.transaction(() => {
-          for (const event of events) {
-            const cost = pricingRegistry.calculate(event.model, {
-              input: event.tokens_in,
-              output: event.tokens_out,
-              cacheRead: event.cache_read_tokens,
-              cacheWrite: event.cache_write_tokens,
-            }, event.client_timestamp ?? event.created_at);
-            if (cost === null) {
-              unknownModel++;
-              continue;
-            }
-            const rounded = Math.round(cost * 1e10) / 1e10;
-            const existing = event.cost_usd !== null ? Math.round(event.cost_usd * 1e10) / 1e10 : null;
-            if (existing === rounded) {
-              unchanged++;
-              continue;
-            }
-            if (!parsed.flags.has('--dry-run')) update.run(rounded, event.id);
-            updated++;
-          }
+        const report = recalculateEventCosts(getDb(), {
+          apply: !parsed.flags.has('--dry-run'),
+          missingOnly: parsed.flags.has('--missing-only'),
         });
-        run();
-        printSummary(ctx, 'Cost recalculation results', {
-          dry_run: parsed.flags.has('--dry-run'),
-          scanned: events.length,
-          updated,
-          unchanged,
-          unknown_model: unknownModel,
-        });
+        printSummary(ctx, 'Cost recalculation results', report);
       } finally {
         closeDb();
       }
