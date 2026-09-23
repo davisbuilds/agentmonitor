@@ -80,14 +80,16 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
 Events derived from OTLP logs and usage metrics are held to this same contract
 before they are stored. A record that fails it (for example a negative token
 count or a non-finite cost) is dropped on its own, and the rest of the batch is
-stored. The reply is OTLP's partial-success shape, e.g.
+stored. A usage metric datapoint with a negative or non-finite value is refused
+the same way, before cumulative-to-delta conversion, so it never becomes the
+baseline the next sample is diffed against. The reply is OTLP's partial-success shape, e.g.
 `{"partialSuccess":{"rejectedLogRecords":1,"errorMessage":"..."}}` for logs or
 `rejectedDataPoints` for metrics, and `{}` when nothing was refused. A
 fractional OTLP latency is rounded to whole milliseconds rather than refused.
 
 Exporters resend a batch on timeout or reset, so each OTLP log record and usage
 data point gets a derived `event_id` (`otel-log-…`/`otel-metric-…`, a hash of the
-record and its resource with keys sorted) and a resend is stored once. A record
+record with its resource and instrumentation scope, keys sorted) and a resend is stored once. A record
 with no time at all (no `timeUnixNano`, `observedTimeUnixNano`, or
 `event.timestamp` attribute) gets no key, because a retry and a genuine repeat
 would be indistinguishable.

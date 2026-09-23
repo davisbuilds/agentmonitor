@@ -609,6 +609,40 @@ describe('OTLP events meet the ingest contract', () => {
     assert.equal((await res.json() as { partialSuccess?: { rejectedDataPoints?: number } }).partialSuccess?.rejectedDataPoints, 1);
     assert.equal((await getEvents()).total, 0);
   });
+
+  test('a negative usage datapoint is refused and reported, not silently skipped', async () => {
+    const payload = buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-metric-neg' } }],
+      metrics: [{ name: 'claude_code.cost.usage', dataPoints: [{ value: -5 }] }],
+    });
+
+    const res = await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal(res.status, 200);
+    const body = await res.json() as { partialSuccess?: { rejectedDataPoints?: number; errorMessage?: string } };
+    assert.equal(body.partialSuccess?.rejectedDataPoints, 1);
+    assert.match(body.partialSuccess?.errorMessage ?? '', /claude_code\.cost\.usage/);
+    assert.equal((await getEvents()).total, 0);
+  });
+
+  test('a refused cumulative sample does not inflate the next delta', async () => {
+    const cumulative = (value: number) => buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: 'sess-metric-cum-neg' } }],
+      metrics: [{
+        name: 'claude_code.token.usage',
+        aggregationTemporality: 2,
+        dataPoints: [{ value, attributes: [{ key: 'type', value: { stringValue: 'input' } }] }],
+      }],
+    });
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, cumulative(100));
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, cumulative(-50));
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, cumulative(150));
+
+    const events = await getEvents();
+    const total = events.events.reduce((sum: number, e: { tokens_in: number }) => sum + e.tokens_in, 0);
+    assert.equal(total, 150, 'the counter only ever reached 150');
+  });
 });
 
 describe('OTLP exporter retries do not double-count', () => {
@@ -673,6 +707,45 @@ describe('OTLP exporter retries do not double-count', () => {
     const payload = codexLogs([record]);
     await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
     await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('identical records from two instrumentation scopes are both stored', async () => {
+    const base = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
+    const [scope] = base.resourceLogs[0].scopeLogs;
+    const payload = {
+      resourceLogs: [{
+        ...base.resourceLogs[0],
+        scopeLogs: [
+          { scope: { name: 'codex_otel', version: '1' }, ...scope },
+          { scope: { name: 'codex_otel_mirror', version: '1' }, ...scope },
+        ],
+      }],
+    };
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    assert.equal((await getEvents()).total, 2);
+  });
+
+  test('identical data points from two instrumentation scopes are both stored', async () => {
+    const base = buildMetricsPayload({
+      serviceName: 'claude_code',
+      resourceAttrs: [{ key: 'session.id', value: { stringValue: 'sess-metric-scopes' } }],
+      metrics: [{
+        name: 'claude_code.token.usage',
+        dataPoints: [{ value: 400, attributes: [{ key: 'type', value: { stringValue: 'input' } }] }],
+      }],
+    });
+    const [scope] = base.resourceMetrics[0].scopeMetrics;
+    const payload = {
+      resourceMetrics: [{
+        ...base.resourceMetrics[0],
+        scopeMetrics: [
+          { scope: { name: 'a' }, ...scope },
+          { scope: { name: 'b' }, ...scope },
+        ],
+      }],
+    };
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
     assert.equal((await getEvents()).total, 2);
   });
 

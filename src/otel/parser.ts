@@ -31,7 +31,15 @@ interface OtelLogRecord {
   severityText?: string;
 }
 
+/** The instrumentation scope; part of a record's identity for retry dedup. */
+interface OtelScope {
+  name?: string;
+  version?: string;
+  attributes?: OtelKeyValue[];
+}
+
 interface OtelScopeLogs {
+  scope?: OtelScope;
   logRecords?: OtelLogRecord[];
 }
 
@@ -71,6 +79,7 @@ interface OtelMetric {
 }
 
 interface OtelScopeMetrics {
+  scope?: OtelScope;
   metrics?: OtelMetric[];
 }
 
@@ -194,9 +203,10 @@ function extractAnyValue(v: OtelAnyValue): unknown {
 //
 // OTLP exporters resend a whole batch on timeout or connection reset, and every
 // resend used to insert fresh rows. A retry carries byte-for-byte the same
-// record, so a hash of the record (with its resource) is a stable event_id that
-// collapses retries through insertEvent's event_id dedup. Only records that
-// carry a time get one: without a time, a retry and a genuine repeat of the
+// record, so a hash of the record (with its resource and instrumentation scope)
+// is a stable event_id that collapses retries through insertEvent's event_id
+// dedup. Scope is part of it because two scopes may emit identical records.
+// Only records that carry a time get one: without a time, a retry and a genuine repeat of the
 // same event are indistinguishable, and dropping real usage is the worse error.
 
 /** JSON with object keys sorted, so a re-serialized retry hashes the same. */
@@ -547,6 +557,7 @@ function resolveEventType(
 function parseLogRecord(
   logRecord: OtelLogRecord,
   resourceAttrs: OtelKeyValue[] | undefined,
+  scope?: OtelScope,
 ): NormalizedIngestEvent | null {
   const bodyJson = getBodyJson(logRecord.body);
   const payload = getCodexPayload(bodyJson);
@@ -870,7 +881,7 @@ function parseLogRecord(
 
   return {
     event_id: logRecordHasTime(logRecord)
-      ? retryKey('log', { resource: resourceAttrs ?? [], record: logRecord })
+      ? retryKey('log', { resource: resourceAttrs ?? [], scope: scope ?? {}, record: logRecord })
       : undefined,
     session_id: sessionId,
     agent_type: agentType,
@@ -905,7 +916,7 @@ export function parseOtelLogs(payload: OtelLogsPayload): NormalizedIngestEvent[]
       if (!sl.logRecords) continue;
 
       for (const lr of sl.logRecords) {
-        const event = parseLogRecord(lr, resourceAttrs);
+        const event = parseLogRecord(lr, resourceAttrs, sl.scope);
         if (event) events.push(event);
       }
     }
@@ -960,6 +971,12 @@ export interface ParsedMetrics {
   usage: ParsedMetricDelta[];
   operational: ParsedOperationalMetric[];
   dropped: Record<string, number>;
+  /**
+   * Usage datapoints refused before cumulative→delta: a negative or non-finite
+   * token/cost value is bad data, not a counter reset, and must neither be
+   * skipped silently nor become the baseline the next sample diffs against.
+   */
+  refused: { count: number; metrics: string[] };
 }
 
 function getDataPointValue(dp: OtelNumberDataPoint): number {
@@ -1074,8 +1091,9 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
   const operational: ParsedOperationalMetric[] = [];
   const dropped: Record<string, number> = {};
   const drop = (name: string) => { dropped[name] = (dropped[name] ?? 0) + 1; };
+  const refused = { count: 0, metrics: [] as string[] };
 
-  if (!payload.resourceMetrics) return { usage, operational, dropped };
+  if (!payload.resourceMetrics) return { usage, operational, dropped, refused };
 
   for (const rm of payload.resourceMetrics) {
     const resourceAttrs = rm.resource?.attributes;
@@ -1115,13 +1133,18 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
               ?? getAttr(resourceAttrs, 'model');
             const tokenType = getAttr(dp.attributes, 'type')
               ?? getAttr(dp.attributes, 'token.type');
+            if (!Number.isFinite(rawValue) || rawValue < 0) {
+              refused.count++;
+              if (!refused.metrics.includes(metricName)) refused.metrics.push(metricName);
+              continue;
+            }
             const cacheKey = `${sessionId}|${agentType}|${metricName}|${model ?? ''}|${tokenType ?? ''}|${seriesStart}`;
             const delta = isCumulative ? computeDelta(cacheKey, rawValue) : rawValue;
             if (delta <= 0) continue;
 
             const entry: ParsedMetricDelta = {
               event_id: hasNanos(dp.timeUnixNano)
-                ? retryKey('metric', { resource: resourceAttrs ?? [], metric: metricName, point: dp })
+                ? retryKey('metric', { resource: resourceAttrs ?? [], scope: sm.scope ?? {}, metric: metricName, point: dp })
                 : undefined,
               session_id: sessionId,
               agent_type: agentType,
@@ -1183,7 +1206,7 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
     }
   }
 
-  return { usage, operational, dropped };
+  return { usage, operational, dropped, refused };
 }
 
 // Exposed for testing — reset cumulative state

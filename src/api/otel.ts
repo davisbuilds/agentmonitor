@@ -59,6 +59,13 @@ class OtlpAdmission {
     return null;
   }
 
+  /** Count records the parser refused before they became events. */
+  refuse(count: number, problem: string): void {
+    if (count === 0) return;
+    this.rejected += count;
+    this.problems.add(problem);
+  }
+
   /** OTLP's partial-success response, or the plain `{}` when nothing was refused. */
   response(rejectedField: 'rejectedLogRecords' | 'rejectedDataPoints'): Record<string, unknown> {
     if (this.rejected === 0) return {};
@@ -115,12 +122,13 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
     res.status(400).json({ error: 'Invalid OTEL JSON payload' });
     return;
   }
-  const { usage, operational, dropped } = parseOtelMetrics(payload as OtelMetricsPayload);
+  const { usage, operational, dropped, refused } = parseOtelMetrics(payload as OtelMetricsPayload);
 
   // Token/cost usage metrics (Claude Code OTEL) → synthetic llm_response, so the
   // existing event pipeline aggregates tokens/cost per session. Codex token/cost
   // metrics are deliberately not here — logs are authoritative (see parser).
   const admission = new OtlpAdmission();
+  admission.refuse(refused.count, `${refused.metrics.join(', ')} value must be a finite non-negative number`);
   for (const delta of usage) {
     const hasCost = delta.cost_usd_delta > 0;
     const event = admission.admit({
