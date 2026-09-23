@@ -461,7 +461,10 @@ the build.
   Distinct from the analytics capability banner flake above. Seen a third time
   2026-09-23 on `fix/price-current-claude-models` (`b3fb053`, a change to cost
   recalc only), after the same branch's previous head passed — three failures
-  in two days makes this the most frequent red on required CI.
+  in two days makes this the most frequent red on required CI. Fourth time
+  2026-09-23 on `fix/ingest-origin-and-quick-fixes` at a head whose only change
+  from the passing previous head was loopback-hostname parsing, which this
+  test's requests to `127.0.0.1` pass through unchanged.
 - **Cause is unknown.** The reset lands on the request following a 200,005-row
   insert, which is consistent with a server- or socket-level timeout on a heavy
   scan — but that is a *hypothesis, unmeasured*. Also unexplained: two failures
