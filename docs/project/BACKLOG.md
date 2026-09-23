@@ -506,7 +506,10 @@ the build.
   failed at `d517a10`, then the same job re-run on `d517a10` with no code change
   **succeeded**. That rerun is what establishes nondeterminism. The test passes
   3/3 locally and has no reference to the import path those commits changed.
-  Distinct from the analytics capability banner flake above.
+  Distinct from the analytics capability banner flake above. Seen a third time
+  2026-09-23 on `fix/price-current-claude-models` (`b3fb053`, a change to cost
+  recalc only), after the same branch's previous head passed — three failures
+  in two days makes this the most frequent red on required CI.
 - **Cause is unknown.** The reset lands on the request following a 200,005-row
   insert, which is consistent with a server- or socket-level timeout on a heavy
   scan — but that is a *hypothesis, unmeasured*. Also unexplained: two failures
