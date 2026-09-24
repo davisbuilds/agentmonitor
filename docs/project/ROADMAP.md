@@ -10,6 +10,16 @@ pull requests; current behavior belongs to the system references.
 
 ## Recent Milestones
 
+- **Codex import usage repair (2026-09-24):** a Codex subagent that opens
+  with a copy of its parent's history is billed only from its own first turn,
+  where each copied counter used to be billed again. A changed rollout's
+  import rows are reconciled to its parse instead of insert-only, which
+  retires the duplicate rows and stale tokens left behind when Codex rewrote a
+  rollout. `amon costs repair-codex-usage` corrects stored rows with a preview
+  first. It checks every change against Codex's own final counter or its
+  per-request OTEL. Rehearsed on a copy of a local store, it cut the Codex
+  Monitor total by about 45%.
+
 - **Cost provenance and self-healing prices (2026-09-23):** each stored cost
   records whether the producer reported it or our tables estimated it
   (`cost_source`). A recalc only re-derives estimates, so correcting a wrong

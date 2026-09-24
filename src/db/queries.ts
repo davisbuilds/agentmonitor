@@ -86,68 +86,111 @@ export function setSessionMode(sessionId: string, mode: 'interactive' | 'headles
   `).run({ id: sessionId, mode });
 }
 
+/** An imported Codex row as the reconciliation compares it with a parse. */
+export interface ImportedCodexRow {
+  id: number;
+  event_id: string;
+  event_type: string;
+  tool_name: string | null;
+  status: string;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  model: string | null;
+  cost_usd: number | null;
+  client_timestamp: string | null;
+  metadata: string;
+}
+
 /**
- * Refresh a deterministic imported Codex event after its source JSONL gains an
- * authoritative per-turn model. This is deliberately narrower than a general
- * duplicate upsert: only import rows marked as turn_context-backed may change,
- * and only model plus the derived cost are refreshed.
+ * A Codex session's rows minted by the Codex importer. The `import-cdx-` id is
+ * the importer's own namespace; the source and agent predicates keep every
+ * other producer's rows for the same session out of reach.
  */
-export function refreshImportedCodexEventModel(
-  event: NormalizedIngestEvent,
-): { id: number; sessionId: string } | null {
-  if (
-    !event.event_id
-    || event.source !== 'import'
-    || event.agent_type !== 'codex'
-    || !event.model
-    || event.metadata === null
-    || typeof event.metadata !== 'object'
-    || Array.isArray(event.metadata)
-    || (event.metadata as Record<string, unknown>)._model_source !== 'turn_context'
-  ) {
-    return null;
-  }
+export function listImportedCodexRows(sessionId: string): ImportedCodexRow[] {
+  return getDb().prepare(`
+    SELECT id, event_id, event_type, tool_name, status, tokens_in, tokens_out, cache_read_tokens,
+           cache_write_tokens, model, cost_usd, client_timestamp, metadata
+    FROM events
+    WHERE session_id = ? AND source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+  `).all(sessionId) as ImportedCodexRow[];
+}
 
-  const hasUsage = event.tokens_in > 0
-    || event.tokens_out > 0
-    || (event.cache_read_tokens ?? 0) > 0
-    || (event.cache_write_tokens ?? 0) > 0;
-  const cost = hasUsage
-    ? pricingRegistry.calculate(event.model, {
-        input: event.tokens_in,
-        output: event.tokens_out,
-        cacheRead: event.cache_read_tokens,
-        cacheWrite: event.cache_write_tokens,
-      }, event.client_timestamp)
-    : null;
+/** The `metadata` column value `insertEvent` would store for this metadata. */
+export function serializeEventMetadata(metadata: unknown): string {
+  return truncateMetadata(metadata).value;
+}
 
+/**
+ * Rewrite an imported Codex row from a fresh parse, in place: the row keeps its
+ * id and `created_at`. The Codex importer prices from our tables, so a cost it
+ * supplies is an estimate.
+ */
+export function updateImportedCodexRow(id: number, event: NormalizedIngestEvent): EventRow | null {
+  const metadata = truncateMetadata(event.metadata);
   const row = getDb().prepare(`
     UPDATE events
-    SET model = @model,
-        cost_usd = CASE WHEN @hasUsage = 1 THEN @cost ELSE cost_usd END,
-        -- The Codex importer prices from our tables, so its costs are estimates.
-        cost_source = CASE
-          WHEN @hasUsage = 0 THEN cost_source
-          WHEN @cost IS NULL THEN NULL
-          ELSE 'estimated'
-        END
-    WHERE event_id = @eventId
-      AND source = 'import'
-      AND agent_type = 'codex'
-      AND (
-        model IS NOT @model
-        OR (@hasUsage = 1 AND cost_usd IS NOT @cost)
-      )
-    RETURNING id, session_id
+    SET event_type = @eventType, tool_name = @toolName, status = @status,
+        tokens_in = @tokensIn, tokens_out = @tokensOut,
+        cache_read_tokens = @cacheRead, cache_write_tokens = @cacheWrite,
+        model = @model, cost_usd = @cost,
+        cost_source = CASE WHEN @cost IS NULL THEN NULL ELSE 'estimated' END,
+        client_timestamp = @clientTimestamp, metadata = @metadata, payload_truncated = @truncated
+    WHERE id = @id AND source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+    RETURNING *
   `).get({
-    eventId: event.event_id,
-    model: event.model,
-    hasUsage: hasUsage ? 1 : 0,
-    cost,
-  }) as { id: number; session_id: string } | undefined;
-
+    id,
+    eventType: event.event_type,
+    toolName: event.tool_name ?? null,
+    status: event.status,
+    tokensIn: event.tokens_in,
+    tokensOut: event.tokens_out,
+    cacheRead: event.cache_read_tokens ?? 0,
+    cacheWrite: event.cache_write_tokens ?? 0,
+    model: event.model ?? null,
+    cost: event.cost_usd ?? null,
+    clientTimestamp: event.client_timestamp ?? null,
+    metadata: metadata.value,
+    truncated: metadata.truncated ? 1 : 0,
+  }) as EventRow | undefined;
   if (row) markStatsDirty();
-  return row ? { id: row.id, sessionId: row.session_id } : null;
+  return row ?? null;
+}
+
+export function deleteImportedCodexRows(ids: number[]): void {
+  const remove = getDb().prepare(`
+    DELETE FROM events
+    WHERE id = ? AND source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+  `);
+  for (const id of ids) remove.run(id);
+  if (ids.length > 0) markStatsDirty();
+}
+
+/** Every session that holds rows minted by the Codex importer. */
+export function listImportedCodexSessionIds(): string[] {
+  return (getDb().prepare(`
+    SELECT DISTINCT session_id FROM events
+    WHERE source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+  `).all() as Array<{ session_id: string }>).map(row => row.session_id);
+}
+
+/**
+ * Codex's own per-request usage for a session, as its OTEL rows recorded it:
+ * total tokens, and the UTC hours (`YYYY-MM-DDTHH`) that carry any.
+ */
+export function getCodexOtelUsage(sessionId: string): { tokens: number; hours: string[] } {
+  const db = getDb();
+  const usage = `(tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)`;
+  const total = db.prepare(`
+    SELECT COALESCE(SUM(tokens_in + tokens_out + cache_read_tokens + cache_write_tokens), 0) AS tokens
+    FROM events WHERE session_id = ? AND agent_type = 'codex' AND source = 'otel' AND ${usage}
+  `).get(sessionId) as { tokens: number };
+  const hours = db.prepare(`
+    SELECT DISTINCT substr(replace(COALESCE(client_timestamp, created_at), ' ', 'T'), 1, 13) AS hour
+    FROM events WHERE session_id = ? AND agent_type = 'codex' AND source = 'otel' AND ${usage}
+  `).all(sessionId) as Array<{ hour: string }>;
+  return { tokens: total.tokens, hours: hours.map(row => row.hour) };
 }
 
 export interface SessionRow {
@@ -429,6 +472,20 @@ export function eventIdExists(eventId: string): boolean {
   return getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(eventId) !== undefined;
 }
 
+/**
+ * The branch `insertEvent` would record for this event. It may run `git`, so it
+ * must be called outside any write transaction.
+ */
+export function resolveEventGitBranch(event: {
+  project?: string;
+  source?: string;
+  client_timestamp?: string;
+}): string | null {
+  if (!event.project || event.source === 'benchmark') return null;
+  if (event.source === 'import' && isHistoricalImportedEvent(event)) return null;
+  return resolveGitBranch(event.project);
+}
+
 export function insertEvent(event: {
   event_id?: string;
   session_id: string;
@@ -454,7 +511,14 @@ export function insertEvent(event: {
   study?: string;
   /** Who produced `cost_usd`; defaults to 'reported' when a cost is supplied. */
   cost_source?: CostSource;
-}): EventRow | null {
+}, options: {
+  /**
+   * The branch already resolved by `resolveEventGitBranch`. A caller that wraps
+   * this insert in its own transaction passes it so `git` never runs while the
+   * write lock is held.
+   */
+  gitBranch?: string | null;
+} = {}): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
   // Benchmark cells are batch-imported historical runs, never live activity, so
@@ -483,9 +547,7 @@ export function insertEvent(event: {
   // Resolve git branch from project directory and keep session branch fresh.
   // Recent live imports can carry stale branch metadata from session start, so
   // refresh the session-level branch from current repo HEAD when possible.
-  const gitBranch = event.project && !isBenchmark && (event.source !== 'import' || !isHistoricalImport)
-    ? resolveGitBranch(event.project)
-    : null;
+  const gitBranch = options.gitBranch !== undefined ? options.gitBranch : resolveEventGitBranch(event);
   if (gitBranch && !event.branch) event.branch = gitBranch;
 
   // A supplied cost is the producer's own figure unless the caller priced it

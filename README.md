@@ -100,7 +100,11 @@ Prefer to do it yourself? The manual steps are below.
 - Serves the canonical Svelte app at `/app/` for Monitor, Live, Sessions, Analytics (Overview / Usage / Skills / Insights / Quality), and Search.
 - Accepts live ingest from Claude Code hooks, Codex OTEL export, or generic HTTP event producers.
 - Watches local Claude and Codex session history and imports historical sessions into SQLite.
-- Streams live updates over SSE for dashboards and operator views.
+- Streams live updates over SSE (`/api/stream`) for dashboards and operator views.
+  An auto-import that changes anything sends a `session_update` of
+  `{ type: 'auto_import', imported, refreshed, removed }`: the rows it
+  inserted, rewrote, and removed because their Codex rollout no longer
+  produces them.
 - Exposes canonical app APIs under `/api/v2/*`.
 - Exposes a lean local trace-quality view (one trace per session) — a content-free per-session summary plus on-demand observation detail.
 - Surfaces segregated benchmark bake-offs (openbench `results.jsonl` imports) at `/api/v2/benchmarks[/:studyId]` and the `/app/` Benchmarks tab. Each study returns per-arm rows with Pareto `verdict`, `mean_score`, `cost_per_trial`/`cost_basis`, `native`, and honesty flags — `excluded_trials`, `noop_trials`, and openbench's own usage-evidence verdict (`usage_evidence_grade`, plus tri-state `ranking_eligible` and `ranking_exclusion_reason`) consumed verbatim, not re-derived.

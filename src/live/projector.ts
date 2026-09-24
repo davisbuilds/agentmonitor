@@ -153,6 +153,51 @@ export function clearProjectedSessionStream(db: Database.Database, sessionId: st
   db.prepare('DELETE FROM session_turns WHERE session_id = ?').run(sessionId);
 }
 
+/**
+ * Remove the summary-projected turn and item that one source event produced.
+ * Summary projections key both on the event id, so an event that was deleted
+ * or rewritten can be dropped here and, if it still exists, projected again.
+ */
+export function removeProjectedSourceEvent(db: Database.Database, sessionId: string, sourceId: string): void {
+  db.prepare('DELETE FROM session_items WHERE session_id = ? AND source_item_id = ?').run(sessionId, sourceId);
+  db.prepare('DELETE FROM session_turns WHERE session_id = ? AND source_turn_id = ?').run(sessionId, sourceId);
+}
+
+/**
+ * Recount a summary projection's message counters from its items. Summary
+ * projections accumulate the counters by increment, which drifts once items are
+ * removed or projected again.
+ */
+export function recountProjectedSummaryMessages(db: Database.Database, sessionId: string): void {
+  db.prepare(`
+    UPDATE browsing_sessions
+    SET message_count = (
+          SELECT COUNT(*) FROM session_items
+          WHERE session_id = @id AND kind IN ('user_message', 'assistant_message')
+        ),
+        user_message_count = (
+          SELECT COUNT(*) FROM session_items WHERE session_id = @id AND kind = 'user_message'
+        )
+    WHERE id = @id AND fidelity = 'summary'
+  `).run({ id: sessionId });
+}
+
+/**
+ * Projecting one row moves the session's end to that row's time. After rows
+ * are re-projected out of order, put it back at the latest projected turn.
+ */
+export function restoreProjectedSessionBounds(db: Database.Database, sessionId: string): void {
+  db.prepare(`
+    UPDATE browsing_sessions
+    SET ended_at = COALESCE(latest.at, ended_at),
+        last_item_at = COALESCE(latest.at, last_item_at)
+    FROM (
+      SELECT MAX(COALESCE(ended_at, started_at)) AS at FROM session_turns WHERE session_id = @id
+    ) AS latest
+    WHERE id = @id AND fidelity = 'summary'
+  `).run({ id: sessionId });
+}
+
 export function upsertProjectedSessionSnapshot(
   db: Database.Database,
   session: ProjectedSessionSnapshot,
@@ -325,4 +370,23 @@ export function ensureProjectedItem(
 
   insertProjectedItem(db, sessionId, turnId, item);
   return true;
+}
+
+/** The browser row's producer mode, or null when the session has none. */
+export function getBrowsingIntegrationMode(db: Database.Database, sessionId: string): string | null {
+  const row = db.prepare('SELECT integration_mode FROM browsing_sessions WHERE id = ?').get(sessionId) as
+    { integration_mode: string | null } | undefined;
+  return row ? row.integration_mode ?? '' : null;
+}
+
+/** Source ids of a session's projected turns. */
+export function listProjectedTurnSourceIds(db: Database.Database, sessionId: string): string[] {
+  return (db.prepare('SELECT source_turn_id FROM session_turns WHERE session_id = ? AND source_turn_id IS NOT NULL')
+    .all(sessionId) as Array<{ source_turn_id: string }>).map(row => row.source_turn_id);
+}
+
+/** Source ids of a session's projected items. */
+export function listProjectedItemSourceIds(db: Database.Database, sessionId: string): string[] {
+  return (db.prepare('SELECT source_item_id FROM session_items WHERE session_id = ? AND source_item_id IS NOT NULL')
+    .all(sessionId) as Array<{ source_item_id: string }>).map(row => row.source_item_id);
 }
