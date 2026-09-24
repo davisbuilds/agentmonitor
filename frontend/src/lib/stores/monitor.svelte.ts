@@ -2,6 +2,7 @@ import { fetchSessionDetail, fetchLiveSessions, type Stats, type AgentEvent, typ
 import type { CostWindow } from '../monitor-analytics';
 import { parseTimestamp } from '../format';
 import { mergeSessionAggregates } from '../monitor-session-merge';
+import { addEventUsage } from '../monitor-token-totals';
 
 // --- Stats ---
 let stats = $state<Stats>({
@@ -12,7 +13,10 @@ let stats = $state<Stats>({
   active_agents: 0,
   total_tokens_in: 0,
   total_tokens_out: 0,
+  total_cache_read_tokens: 0,
+  total_cache_write_tokens: 0,
   total_cost_usd: 0,
+  usage_by_agent: {},
   tool_breakdown: {},
   agent_breakdown: {},
   model_breakdown: {},
@@ -22,13 +26,7 @@ let stats = $state<Stats>({
 export function getStats(): Stats { return stats; }
 export function setStats(s: Stats): void { stats = s; }
 export function incrementEvent(event: AgentEvent): void {
-  stats = {
-    ...stats,
-    total_events: stats.total_events + 1,
-    total_tokens_in: stats.total_tokens_in + (event.tokens_in || 0),
-    total_tokens_out: stats.total_tokens_out + (event.tokens_out || 0),
-    total_cost_usd: stats.total_cost_usd + (event.cost_usd || 0),
-  };
+  stats = { ...addEventUsage(stats, event), total_events: stats.total_events + 1 };
 }
 
 // --- Events ---

@@ -31,6 +31,12 @@ Monitor provides current sessions, recent events, aggregate stats, tool activity
 provider-native quota snapshots, and context-window occupancy. It consumes the v2
 Monitor reads and the shared SSE stream.
 
+The Monitor's token headline counts every bucket (uncached input, output, cache
+reads and cache writes), which is how Claude's `/stats` and Codex's `/usage`
+count tokens. Its breakdown splits the buckets and each agent. It covers the
+usage recorded on this machine: a harness's account-wide total can include
+other machines and cloud tasks that no local source records.
+
 Live exposes normalized sessions, turns, items, and a dedicated live stream. Its
 fidelity is explicit:
 

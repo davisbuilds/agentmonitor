@@ -183,7 +183,7 @@ pnpm cli -- health               # Check the local server
 pnpm cli -- sessions list --json # Query session history from SQLite
 pnpm cli -- sessions activity <session-id> --json # Read the session minimap contract
 pnpm cli -- live settings --json # Read Live capture and integration settings
-pnpm cli -- monitor stats --json # Read Monitor aggregate state
+pnpm cli -- monitor stats --json # Monitor aggregate state: all four token buckets and a per-agent split
 pnpm cli -- monitor watch        # Stream Monitor events as NDJSON
 pnpm cli -- usage overview --json # Read every Usage-page rollup in one JSON document
 pnpm cli -- analytics overview --json # Read every Analytics-page contract in one JSON document
