@@ -220,6 +220,26 @@ the build.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 
+#### Agent-filtered Monitor reads take seconds
+- **What**: with an agent selected, the Monitor's stats and event reads run
+  uncached, synchronous SQLite work on the server. The unfiltered stats read
+  reuses the broadcast snapshot instead.
+- **Why or evidence**: measured 2026-09-24 over HTTP against a local store of
+  about a million events:
+  - unfiltered stats took about 1 ms;
+  - `stats?agent=codex` took 0.4–3.2 s, and `stats?agent=claude_code` about
+    1.9 s;
+  - `events?agent=codex` took about 3 s.
+
+  The usage sum inside the filtered stats read takes about 0.1 s, through
+  `idx_events_agent_type`. The rest is in its other aggregates (event count,
+  tool, model and agent breakdowns). Their plans are a hypothesis, unmeasured.
+  The filtered bar refreshes at most once per 30 s for this reason.
+- **Next**: take `EXPLAIN QUERY PLAN` and timings for each aggregate in
+  `getMonitorStats` and `listMonitorEvents` under an agent filter. A covering
+  index with `agent_type` leading, or per-agent snapshots cached like the
+  unfiltered one, are the candidates. Measure before choosing.
+
 #### Usage overview derived store remains a measured fallback
 - **What**: the event-derived `/api/v2/usage/overview` still folds matching usage
   rows in JavaScript for its exact rollups, but the 2026-09-13 source-count
