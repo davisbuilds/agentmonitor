@@ -86,3 +86,17 @@ test('monitor headline counts every token, and its breakdown splits buckets and 
   await expect(agents.nth(1)).toContainText('Codex');
   await expect(agents.nth(1)).toContainText('21.1M');
 });
+
+test('the breakdown stays on screen at phone width', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`${baseUrl}/app/`);
+  await page.getByRole('button', { name: /show breakdown/ }).click();
+  const panel = page.getByRole('dialog', { name: 'Token breakdown' });
+  await expect(panel).toBeVisible();
+
+  const box = await panel.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(16);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(390 - 16);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+});

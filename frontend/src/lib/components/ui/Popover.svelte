@@ -27,6 +27,21 @@
   }: Props = $props();
 
   let root = $state<HTMLDivElement>();
+  let panel = $state<HTMLDivElement>();
+
+  // Keep the panel inside the viewport with a 16px gutter. A panel anchored to
+  // a trigger near the edge of a phone screen would otherwise overflow it.
+  const GUTTER = 16;
+  $effect(() => {
+    if (!open || !panel) return;
+    panel.style.transform = '';
+    const rect = panel.getBoundingClientRect();
+    const viewport = document.documentElement.clientWidth;
+    let shift = 0;
+    if (rect.right > viewport - GUTTER) shift = viewport - GUTTER - rect.right;
+    if (rect.left + shift < GUTTER) shift = GUTTER - rect.left;
+    if (shift !== 0) panel.style.transform = `translateX(${shift}px)`;
+  });
 
   function toggle() {
     open = !open;
@@ -47,7 +62,8 @@
   {@render trigger({ toggle, open })}
   {#if open}
     <div
-      class="absolute top-full z-50 mt-2 {align === 'right' ? 'right-0' : 'left-0'} {width} rounded-lg border border-line bg-surface p-3 shadow-overlay"
+      bind:this={panel}
+      class="absolute top-full z-50 mt-2 {align === 'right' ? 'right-0' : 'left-0'} {width} max-w-[calc(100vw-2rem)] rounded-lg border border-line bg-surface p-3 shadow-overlay"
       role="dialog"
       aria-label={label}
     >

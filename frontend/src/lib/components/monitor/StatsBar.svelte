@@ -23,7 +23,7 @@
   <span>Sessions <span class="tabular ml-1 font-mono text-text">{sessionCount}</span></span>
   <span>Agents <span class="tabular ml-1 font-mono text-text">{agentCount}</span></span>
   <span>Cost <span class="tabular ml-1 font-mono text-text">{formatCost(stats.total_cost_usd)}</span></span>
-  <Popover align="left" width="w-80" label="Token breakdown">
+  <Popover align="left" width="w-96" label="Token breakdown">
     {#snippet trigger({ toggle, open })}
       <button
         type="button"
@@ -64,7 +64,7 @@
                 <span class="tabular font-mono text-text">{formatNumber(row.total)}</span>
               </div>
               <div class="tabular font-mono text-text-faint">
-                in {formatNumber(row.usage.tokens_in)} · out {formatNumber(row.usage.tokens_out)} · cache {formatNumber(row.usage.cache_read_tokens)} read · {formatNumber(row.usage.cache_write_tokens)} write
+                in {formatNumber(row.usage.tokens_in)} · out {formatNumber(row.usage.tokens_out)} · read {formatNumber(row.usage.cache_read_tokens)} · write {formatNumber(row.usage.cache_write_tokens)}
               </div>
             </div>
           {/each}
