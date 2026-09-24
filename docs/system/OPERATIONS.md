@@ -40,6 +40,23 @@ import, sync, recalculation, and warehouse publication do not acquire runtime
 ownership. Shutdown stops HTTP reconnects, timers, SSE clients, quota work,
 watchers, and SQLite before releasing the lock, allowing an immediate restart.
 
+**Restart after every rebuild.** A server keeps the code it started with, and a
+one-shot command runs the build now on disk. After a rebuild the two can write the
+same rows in different ways: an unrestarted server once kept billing Claude usage
+the pre-fix way for hours while the fixed importer ran beside it. So the server
+fingerprints its compiled modules and pricing tables at startup and records that
+fingerprint in its `.runtime.lock`. When the build on disk changes:
+
+- the app header shows **Restart needed**;
+- `/api/health` reports `build.stale: true`, with the `started` and `current`
+  fingerprints;
+- the server logs a `[build]` warning once;
+- any CLI command other than `serve` warns on stderr when the server on the same
+  database runs a different build.
+
+The fingerprint hashes content, so rebuilding the same source does not trigger it.
+A server run from source (`pnpm dev`) reports `build.tracked: false`.
+
 ## Source Development
 
 After upgrading the Codex lineage parser, preserve a closed database backup and
