@@ -83,11 +83,16 @@ function importCodex(extra: Record<string, unknown> = {}) {
   return runImport({ source: 'codex', codexDir, ...extra });
 }
 
+before(() => {
+  initSchema();
+  assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
+});
+after(() => {
+  closeDb();
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
 describe('Codex import reconciles a session to its rollout', () => {
-  before(() => {
-    initSchema();
-    assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
-  });
   beforeEach(() => {
     assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
     getDb().exec(`
@@ -96,10 +101,6 @@ describe('Codex import reconciles a session to its rollout', () => {
     `);
     fs.rmSync(codexDir, { recursive: true, force: true });
     fs.mkdirSync(sessionsDir, { recursive: true });
-  });
-  after(() => {
-    closeDb();
-    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   test('a shortened rewrite leaves no row the parse no longer produces', () => {
@@ -310,5 +311,147 @@ describe('Codex import reconciles a session to its rollout', () => {
     assert.equal(result.reconciled, false);
     assert.equal(result.deleted, 0);
     assert.ok(importRows().length >= before);
+  });
+});
+
+// ─── Subagent boundary (SC-01, SC-02) ────────────────────────────────────
+
+/** A UUIDv7 whose leading 48 bits encode `iso`, the way Codex mints ids. */
+function v7(iso: string, tail = '000000000001'): string {
+  const hex = Date.parse(iso).toString(16).padStart(12, '0');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7000-8000-${tail}`;
+}
+const CHILD = v7('2026-07-25T20:53:37Z', '00000000c41d');
+const PARENT = v7('2026-07-20T09:00:00Z', '0000000a4e17');
+const childRollout = () => path.join(sessionsDir, `rollout-2026-07-25T20-53-37-${CHILD}.jsonl`);
+
+const spawnMeta = (source: unknown = { subagent: { thread_spawn: { parent_thread_id: PARENT, depth: 1 } } }): Line => ({
+  type: 'session_meta',
+  timestamp: '2026-07-25T20:53:38Z',
+  payload: { id: CHILD, cwd: '/tmp/codex-usage-fixture', timestamp: '2026-07-25T20:53:37Z', source },
+});
+// Copied history is re-stamped at spawn time; only turn ids tell it apart.
+const turnAt = (issuedIso: string, model = 'gpt-5.6-sol'): Line => ({
+  type: 'turn_context', timestamp: '2026-07-25T20:53:38Z', payload: { model, turn_id: v7(issuedIso, '0000000000aa') },
+});
+const count = (input: number, cached: number, output: number, lastInput = 0): Line => ({
+  type: 'event_msg',
+  timestamp: '2026-07-25T20:53:38Z',
+  payload: {
+    type: 'token_count',
+    info: {
+      total_token_usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output },
+      last_token_usage: { input_tokens: lastInput, cached_input_tokens: 0, output_tokens: 0 },
+    },
+  },
+});
+const copiedPatch: Line = {
+  type: 'response_item', timestamp: '2026-07-25T20:53:38Z',
+  payload: { type: 'custom_tool_call', name: 'apply_patch', input: '*** Begin Patch\n*** Update File: parent.ts\n+p\n*** End Patch' },
+};
+const tokenId = (sessionId: string, index: number) =>
+  `import-cdx-${crypto.createHash('sha256').update(`codex:${sessionId}:token:${index}`).digest('hex').slice(0, 32)}`;
+
+function writeChild(lines: Line[]): string {
+  const file = childRollout();
+  fs.writeFileSync(file, lines.map(l => JSON.stringify(l)).join('\n'));
+  return file;
+}
+const usage = (file: string) => parseCodexFile(file, { codexDir }).filter(e => e.event_type === 'llm_response');
+
+describe('a subagent rollout bills only its own activity', () => {
+  before(() => { fs.mkdirSync(sessionsDir, { recursive: true }); });
+
+  // The parent's history: three requests and one file edit, copied verbatim.
+  const copiedPrefix: Line[] = [
+    turnAt('2026-07-20T09:00:01Z'), count(400_000, 300_000, 4_000, 400_000), copiedPatch,
+    turnAt('2026-07-21T09:00:00Z'), count(900_000, 700_000, 9_000, 500_000), count(1_500_000, 1_200_000, 15_000, 600_000),
+  ];
+
+  test('copied history produces no usage and no file change', () => {
+    const file = writeChild([spawnMeta(), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'), count(1_530_000, 1_225_000, 15_500, 30_000)]);
+    const events = parseCodexFile(file, { codexDir });
+
+    const llm = events.filter(e => e.event_type === 'llm_response');
+    assert.equal(llm.length, 1);
+    assert.equal(llm[0].tokens_in + (llm[0].cache_read_tokens ?? 0), 30_000, 'measured from the last copied counter');
+    assert.equal(llm[0].cache_read_tokens, 25_000);
+    assert.equal(llm[0].tokens_out, 500);
+    assert.equal(events.filter(e => e.event_type === 'tool_use').length, 0, 'the parent\'s edit is not the child\'s');
+    const end = events.find(e => e.event_type === 'session_end')!;
+    assert.equal((end.metadata as Record<string, unknown>)._inherited_counters_skipped, 3);
+  });
+
+  test('the child\'s own events keep the ids they always had', () => {
+    // 3 copied counters and 1 copied edit each took an index, so the child's
+    // first own request is index 4 exactly as before the boundary existed.
+    const file = writeChild([spawnMeta(), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'), count(1_530_000, 1_225_000, 15_500, 30_000)]);
+    assert.deepEqual(usage(file).map(e => e.event_id), [tokenId(CHILD, 4)]);
+  });
+
+  test('the session model comes from the child\'s first own turn', () => {
+    const file = writeChild([spawnMeta(), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z', 'gpt-5.6-terra'), count(1_530_000, 1_225_000, 15_500, 30_000)]);
+    const start = parseCodexFile(file, { codexDir }).find(e => e.event_type === 'session_start')!;
+    assert.equal(start.model, 'gpt-5.6-terra');
+  });
+
+  test('a compacted child keeps billing its own earlier usage', () => {
+    // No copied prefix: the first counter follows the child's own turn and
+    // reports no request of its own, yet its total is the child's own history.
+    const file = writeChild([
+      spawnMeta(), { type: 'compacted', timestamp: '2026-07-25T20:53:38Z', payload: {} },
+      turnAt('2026-07-25T21:10:00Z'), count(3_600_000, 3_100_000, 21_000, 0), count(3_630_000, 3_125_000, 21_100, 30_000),
+    ]);
+    const llm = usage(file);
+    assert.equal(llm.reduce((sum, e) => sum + e.tokens_in + (e.cache_read_tokens ?? 0), 0), 3_630_000);
+  });
+
+  test('a child whose first counter follows its own tool call is billed as before', () => {
+    const file = writeChild([spawnMeta(), turnAt('2026-07-25T20:53:40Z'), copiedPatch, count(230_000, 200_000, 2_000, 230_000)]);
+    const events = parseCodexFile(file, { codexDir });
+    assert.equal(usage(file)[0].tokens_in + (usage(file)[0].cache_read_tokens ?? 0), 230_000);
+    assert.equal(events.filter(e => e.event_type === 'tool_use').length, 1, 'an edit after the boundary is the child\'s');
+  });
+
+  test('a repeated counter just after the boundary adds nothing', () => {
+    const file = writeChild([spawnMeta(), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'), count(1_500_000, 1_200_000, 15_000, 600_000)]);
+    assert.equal(usage(file).length, 0);
+  });
+
+  test('a subagent with no datable turn is billed as before and flagged', () => {
+    const undated = copiedPrefix.map(l => l.type === 'turn_context' ? { ...l, payload: { model: 'gpt-5.6-sol' } } : l);
+    const file = writeChild([spawnMeta(), ...undated]);
+    const events = parseCodexFile(file, { codexDir });
+    assert.equal(events.filter(e => e.event_type === 'llm_response').length, 3);
+    const start = events.find(e => e.event_type === 'session_start')!;
+    assert.equal((start.metadata as Record<string, unknown>)._subagent_boundary, 'unresolved');
+  });
+
+  test('a non-subagent rollout is untouched even with the same shape', () => {
+    const file = writeChild([spawnMeta('cli'), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'), count(1_530_000, 1_225_000, 15_500, 30_000)]);
+    const events = parseCodexFile(file, { codexDir });
+    assert.equal(events.filter(e => e.event_type === 'llm_response').length, 4);
+    assert.equal(events.filter(e => e.event_type === 'tool_use').length, 1);
+    const start = events.find(e => e.event_type === 'session_start')!;
+    assert.equal((start.metadata as Record<string, unknown>)._subagent_boundary, undefined);
+  });
+
+  test('re-importing a child stored before the boundary removes the copied rows and keeps its own row', () => {
+    assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
+    getDb().exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM import_state; DELETE FROM session_items; DELETE FROM session_turns; DELETE FROM browsing_sessions; DELETE FROM session_trace_summary;');
+    for (const f of fs.readdirSync(sessionsDir)) fs.rmSync(path.join(sessionsDir, f));
+    const own = [turnAt('2026-07-25T20:53:40Z'), count(1_530_000, 1_225_000, 15_500, 30_000)];
+    // As the importer stored it before: the same file read as a plain session.
+    writeChild([spawnMeta('cli'), ...copiedPrefix, ...own]);
+    runImport({ source: 'codex', codexDir });
+    const ownRowBefore = getDb().prepare('SELECT id, created_at FROM events WHERE event_id = ?').get(tokenId(CHILD, 4));
+
+    writeChild([spawnMeta(), ...copiedPrefix, ...own]);
+    runImport({ source: 'codex', codexDir });
+
+    const llm = getDb().prepare(`SELECT event_id, tokens_in + cache_read_tokens AS input FROM events WHERE session_id = ? AND event_type = 'llm_response'`).all(CHILD) as Array<{ event_id: string; input: number }>;
+    assert.deepEqual(llm, [{ event_id: tokenId(CHILD, 4), input: 30_000 }]);
+    assert.deepEqual(getDb().prepare('SELECT id, created_at FROM events WHERE event_id = ?').get(tokenId(CHILD, 4)), ownRowBefore);
+    assert.equal((getDb().prepare(`SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND event_type = 'tool_use'`).get(CHILD) as { n: number }).n, 0);
   });
 });

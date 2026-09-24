@@ -390,6 +390,30 @@ Task 1
 - The read-only corpus differential passes: non-subagent files are unchanged,
   and every changed file is `thread_spawn` with parent-matched removed counters.
 
+**Result (2026-09-24)**
+
+- **Fixtures:** all 9 pass. Every kept event's id is byte-identical to before,
+  because skipped counters and edits still advance the index.
+- **The skipped-counter count and the boundary state are recorded on the
+  session's own rows:**
+  - `session_end.metadata._inherited_counters_skipped` holds the count;
+  - `session_start.metadata._subagent_boundary` holds `resolved` or
+    `unresolved`.
+  - So the repair report reads them from the parse, and the boundary helper
+    stays private to the parser.
+- **The session's model comes from the child's first own turn,** not from a
+  copied parent turn.
+- **Mutations:** all 9 go red. The tests were written after the code, so every
+  one was checked against its reintroduced defect before it counted.
+- **Differential over the real corpus,** parsing with `main` and with this
+  branch:
+  - 10 of 359 files change, all `thread_spawn` with a resolved boundary;
+  - 0 non-subagent files change;
+  - every dropped counter matches a parent counter exactly;
+  - every kept usage event is byte-identical, id and values;
+  - the 11 copied parent file edits in one subagent are dropped;
+  - no rollout is unresolved.
+
 ### Task 3: `amon costs repair-codex-usage`
 
 **Objective**
