@@ -68,7 +68,7 @@ the bounty list already tracks.
 All of the evidence in this section was verified on 2026-09-24:
 - host `macbook`;
 - the install database behind the running `dist/` server;
-- Codex CLI rollouts, up to `cli_version` 0.146.x in the corpus.
+- Codex CLI rollouts, `cli_version` 0.94.0 through 0.156.1 in the corpus.
 
 **Data path.** Rollouts flow through three steps:
 1. `runImport` runs every 10 minutes from `src/runtime.ts:38`, or through
@@ -178,6 +178,23 @@ None
 **Done When**
 
 - All gates pass. Any failure stops the plan for a re-plan, not a workaround.
+
+**Result (2026-09-24, host `macbook`, branch head `9e9f40c`)**
+
+All gates passed, and each instrument reproduced its known positive first.
+
+- **Corpus:** Codex 0.94.0–0.156.1.
+  - 10 of 33 `thread_spawn` rollouts change. 47 subagent rollouts exist once
+    review subagents are counted.
+  - Every skipped counter matches a counter in the parent's rollout exactly.
+  - No non-subagent file changes.
+  - No subagent rollout lacks a boundary.
+- **Fidelity:**
+  - The 5 changed subagents with OTEL coverage go from 140–810× OTEL to
+    0.976–0.994×, with no OTEL gap hours.
+  - The 19 unchanged subagents stay at their current 0.92–1.02×.
+- **Magnitude:** the plan's parse cuts stored Codex import cost by about 45%.
+  Orphan rows remain in about 1 in 8 Codex sessions.
 
 ### Task 1: Reconcile a Codex file's import rows to its parse
 
