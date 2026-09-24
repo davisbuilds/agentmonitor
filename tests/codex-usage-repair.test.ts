@@ -289,6 +289,35 @@ describe('Codex usage repair', () => {
     VALUES (?, ?, 'codex', 'llm_response', 'success', 1000, 10, 0, 'otel', '2026-07-25 21:01:00')
   `).run(`otel-${sessionId}`, sessionId);
 
+  test('a subagent\'s session model moves from its parent\'s first turn to its own, classified as such', () => {
+    const parentTurns = copiedPrefix.map(line => (line.type === 'turn_context'
+      ? { ...line, payload: { ...(line.payload as Record<string, unknown>), model: 'gpt-5.5' } }
+      : line));
+    write(CHILD, [meta(CHILD, 'cli'), ...parentTurns, ...childOwn]);
+    importAll();
+    write(CHILD, [meta(CHILD, spawnSource), ...parentTurns, ...childOwn]);
+    const start = () => (getDb().prepare("SELECT model FROM events WHERE session_id = ? AND event_type = 'session_start'").get(CHILD) as { model: string }).model;
+    assert.equal(start(), 'gpt-5.5', 'the fixture must store the parent\'s model');
+    // Only the session_start takes this class: another row's model change is still unexplained.
+    getDb().prepare("UPDATE events SET model = 'gpt-5.5' WHERE session_id = ? AND event_type = 'session_end'").run(CHILD);
+
+    const report = repair(true);
+    assert.equal(report.rows_by_class.subagent_model, 1);
+    assert.equal(report.rows_by_class.unclassified, 1);
+    assert.equal(start(), 'gpt-5.6-sol');
+  });
+
+  test('a plain session\'s changed session model stays unclassified', () => {
+    const id = plain('000000000c9f');
+    write(id, [meta(id), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10)]);
+    importAll();
+    getDb().prepare("UPDATE events SET model = 'gpt-5.5' WHERE session_id = ? AND event_type = 'session_start'").run(id);
+
+    const report = repair(true);
+    assert.equal(report.rows_by_class.subagent_model, 0);
+    assert.equal(report.rows_by_class.unclassified, 1);
+  });
+
   test('a model known only from config.toml is not rewritten when the config changes', () => {
     const id = plain('000000000c0f');
     setConfigModel('gpt-5.6-sol');

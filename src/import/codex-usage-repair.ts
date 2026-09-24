@@ -31,7 +31,7 @@ export interface CodexSubagentOtelCheck {
   otel_gap_hours: number;
 }
 
-type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'annotated' | 'appended' | 'unclassified';
+type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'appended' | 'unclassified';
 
 // A type alias, not an interface: `printSummary` takes `Record<string, unknown>`.
 export type CodexUsageRepairReport = {
@@ -91,6 +91,9 @@ function classifyUpdate(row: ImportedCodexRow, event: NormalizedIngestEvent): Ro
   if (tokens && model && !cost) return 'repriced';
   // The retired model refresh wrote the rollout's cost onto the old tokens.
   if (!tokens && cost) return 'refresh_drift';
+  // A subagent's session model now comes from its own first turn, not its
+  // parent's. Only session_start carries the boundary.
+  if (tokens && cost && !model && metadataOf(event)._subagent_boundary === 'resolved') return 'subagent_model';
   if (tokens && cost && model) return 'annotated';
   return 'unclassified';
 }
@@ -132,7 +135,7 @@ export function repairCodexImportUsage(
     rows_inserted: 0,
     rows_updated: 0,
     rows_deleted: 0,
-    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, annotated: 0, appended: 0, unclassified: 0 },
+    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, subagent_model: 0, annotated: 0, appended: 0, unclassified: 0 },
     tokens_before: 0,
     tokens_after: 0,
     cost_before_usd: 0,
