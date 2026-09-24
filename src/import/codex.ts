@@ -77,10 +77,16 @@ function readCodexModel(codexHome?: string): string | undefined {
 
 export function parseCodexFile(
   filePath: string,
-  options?: { from?: Date; to?: Date; codexDir?: string },
+  options?: {
+    from?: Date;
+    to?: Date;
+    codexDir?: string;
+    /** The file's bytes when the caller already read them, so hash and parse see the same content. */
+    content?: string;
+  },
 ): NormalizedIngestEvent[] {
   const events: NormalizedIngestEvent[] = [];
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const content = options?.content ?? fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
 
   const defaultModel = readCodexModel(options?.codexDir);
@@ -355,6 +361,9 @@ export function parseCodexFile(
 // ─── File hash for import state tracking ────────────────────────────────
 
 export function hashFile(filePath: string): string {
-  const content = fs.readFileSync(filePath);
+  return hashContent(fs.readFileSync(filePath));
+}
+
+export function hashContent(content: Buffer): string {
   return crypto.createHash('sha256').update(content).digest('hex');
 }

@@ -1,13 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db/connection.js';
-import { eventIdExists, insertEvent, refreshImportedCodexEventModel, setSessionMode } from '../db/queries.js';
+import { eventIdExists, insertEvent, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import type { ParsedImportEvent } from './claude-code.js';
-import { discoverCodexLogs, parseCodexFile, hashFile as hashCodexFile } from './codex.js';
+import { discoverCodexLogs, parseCodexFile, hashContent as hashCodexContent } from './codex.js';
+import { reconcileCodexImport } from './codex-reconcile.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
-import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
+import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -31,6 +32,8 @@ export interface ImportFileResult {
   eventsFound: number;
   eventsImported: number;
   eventsRefreshed: number;
+  /** Stored Codex rows removed because the rollout no longer produces them. */
+  eventsRemoved: number;
   skippedDuplicate: number;
   skippedUnchanged: boolean;
 }
@@ -41,6 +44,7 @@ export interface ImportResult {
   totalEventsFound: number;
   totalEventsImported: number;
   totalEventsRefreshed: number;
+  totalEventsRemoved: number;
   totalDuplicates: number;
   skippedFiles: number;
 }
@@ -80,23 +84,15 @@ function importEvents(
   events: ParsedImportEvent[],
   dryRun: boolean,
   bridgeLegacyIds = false,
-): { imported: number; refreshed: number; duplicates: number } {
+): { imported: number; duplicates: number } {
   let imported = 0;
-  let refreshed = 0;
   let duplicates = 0;
 
   if (dryRun) {
-    return { imported: events.length, refreshed: 0, duplicates: 0 };
+    return { imported: events.length, duplicates: 0 };
   }
 
-  // Invocation mode is a session-level constant carried on events. Collect it
-  // here and apply once per session below, so it backfills even when every event
-  // is a duplicate (upsertSession inside insertEvent is skipped on the dup path).
-  const sessionModes = new Map<string, 'interactive' | 'headless'>();
-  const refreshedSessions = new Set<string>();
-
   for (const event of events) {
-    if (event.mode) sessionModes.set(event.session_id, event.mode);
     // This file owns the identity the positional scheme gave its events, so a
     // row already stored under that id is this same event under the old scheme.
     if (bridgeLegacyIds && event.legacy_event_id && eventIdExists(event.legacy_event_id)) {
@@ -109,22 +105,24 @@ function importEvents(
       safelyMaintainTraceSummaryForEvent(row.id, 'historical import');
     } else {
       duplicates++;
-      const refreshedEvent = refreshImportedCodexEventModel(event);
-      if (refreshedEvent) {
-        refreshed++;
-        refreshedSessions.add(refreshedEvent.sessionId);
-      }
     }
   }
 
+  applySessionModes(events);
+  return { imported, duplicates };
+}
+
+// Invocation mode is a session-level constant carried on events. Apply it once
+// per session so it backfills even when every event is a duplicate
+// (upsertSession inside insertEvent is skipped on the duplicate path).
+function applySessionModes(events: ParsedImportEvent[]): void {
+  const sessionModes = new Map<string, 'interactive' | 'headless'>();
+  for (const event of events) {
+    if (event.mode) sessionModes.set(event.session_id, event.mode);
+  }
   for (const [sessionId, mode] of sessionModes) {
     setSessionMode(sessionId, mode);
   }
-  for (const sessionId of refreshedSessions) {
-    safelyMaintainTraceSummaryForSession(sessionId, 'Codex model-attribution refresh');
-  }
-
-  return { imported, refreshed, duplicates };
 }
 
 function processFile(
@@ -132,34 +130,17 @@ function processFile(
   source: 'claude-code' | 'codex' | 'antigravity',
   options: ImportOptions,
 ): ImportFileResult {
-  const stat = fs.statSync(filePath);
-  const hashFn =
-    source === 'claude-code' ? hashClaudeFile : source === 'codex' ? hashCodexFile : hashAntigravityFile;
-  const currentHash = hashFn(filePath);
+  if (source === 'codex') return processCodexFile(filePath, options);
 
-  // Check import state (skip if unchanged, unless --force)
-  if (!options.force) {
-    const state = getImportState(filePath);
-    if (state && state.file_hash === currentHash) {
-      return {
-        path: filePath,
-        source,
-        eventsFound: 0,
-        eventsImported: 0,
-        eventsRefreshed: 0,
-        skippedDuplicate: 0,
-        skippedUnchanged: true,
-      };
-    }
-  }
+  const stat = fs.statSync(filePath);
+  const hashFn = source === 'claude-code' ? hashClaudeFile : hashAntigravityFile;
+  const currentHash = hashFn(filePath);
+  if (isUnchanged(filePath, currentHash, options)) return unchangedResult(filePath, source);
 
   // Parse the file (each source has its own option needs)
-  const events =
-    source === 'claude-code'
-      ? parseClaudeCodeFile(filePath, { from: options.from, to: options.to })
-      : source === 'codex'
-        ? parseCodexFile(filePath, { from: options.from, to: options.to, codexDir: options.codexDir })
-        : parseAntigravityFile(filePath, { from: options.from, to: options.to });
+  const events = source === 'claude-code'
+    ? parseClaudeCodeFile(filePath, { from: options.from, to: options.to })
+    : parseAntigravityFile(filePath, { from: options.from, to: options.to });
 
   // Import events. A transcript is named after its session, so it owns the ids
   // the positional scheme minted for its lines and can recognize its own rows
@@ -170,29 +151,102 @@ function processFile(
   const ownsLegacyIdentity = source === 'claude-code'
     && events.length > 0
     && path.basename(filePath, '.jsonl') === events[0].session_id;
-  const { imported, refreshed, duplicates } = importEvents(
-    events,
-    options.dryRun ?? false,
-    ownsLegacyIdentity,
-  );
-
-  // Record import state (unless dry run or date-scoped import).
-  // Date-scoped imports are partial — caching the hash would cause a later
-  // full import to skip the file, permanently losing the excluded events.
-  const isDateScoped = options.from !== undefined || options.to !== undefined;
-  if (!options.dryRun && !isDateScoped) {
-    setImportState(filePath, currentHash, stat.size, source, imported);
-  }
+  const { imported, duplicates } = importEvents(events, options.dryRun ?? false, ownsLegacyIdentity);
+  recordImportState(filePath, currentHash, stat.size, source, imported, options);
 
   return {
     path: filePath,
     source,
     eventsFound: events.length,
     eventsImported: imported,
-    eventsRefreshed: refreshed,
+    eventsRefreshed: 0,
+    eventsRemoved: 0,
     skippedDuplicate: duplicates,
     skippedUnchanged: false,
   };
+}
+
+/**
+ * A Codex rollout owns its session's import rows, so a changed rollout is
+ * reconciled rather than appended to: its ids are positions in the file, and a
+ * rewrite re-keys them. The file is read once and the recorded hash is of those
+ * exact bytes, so content that changes mid-run is seen as changed next time.
+ */
+function processCodexFile(filePath: string, options: ImportOptions): ImportFileResult {
+  const bytes = fs.readFileSync(filePath);
+  const currentHash = hashCodexContent(bytes);
+  if (isUnchanged(filePath, currentHash, options)) return unchangedResult(filePath, 'codex');
+
+  const events = parseCodexFile(filePath, {
+    from: options.from,
+    to: options.to,
+    codexDir: options.codexDir,
+    content: bytes.toString('utf-8'),
+  });
+  const result: ImportFileResult = {
+    path: filePath,
+    source: 'codex',
+    eventsFound: events.length,
+    eventsImported: 0,
+    eventsRefreshed: 0,
+    eventsRemoved: 0,
+    skippedDuplicate: 0,
+    skippedUnchanged: false,
+  };
+
+  // A date-scoped parse is partial, so it can add rows but never prove one stale.
+  const isDateScoped = options.from !== undefined || options.to !== undefined;
+  const reconciled = options.dryRun || isDateScoped
+    ? null
+    : reconcileCodexImport(events, { apply: true });
+  if (reconciled?.reconciled) {
+    applySessionModes(events);
+    result.eventsImported = reconciled.inserted;
+    result.eventsRefreshed = reconciled.updated;
+    result.eventsRemoved = reconciled.deleted;
+    result.skippedDuplicate = reconciled.unchanged;
+  } else {
+    const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
+    result.eventsImported = imported;
+    result.skippedDuplicate = duplicates;
+  }
+
+  recordImportState(filePath, currentHash, bytes.length, 'codex', result.eventsImported, options);
+  return result;
+}
+
+function isUnchanged(filePath: string, currentHash: string, options: ImportOptions): boolean {
+  if (options.force) return false;
+  const state = getImportState(filePath);
+  return state !== undefined && state.file_hash === currentHash;
+}
+
+function unchangedResult(filePath: string, source: string): ImportFileResult {
+  return {
+    path: filePath,
+    source,
+    eventsFound: 0,
+    eventsImported: 0,
+    eventsRefreshed: 0,
+    eventsRemoved: 0,
+    skippedDuplicate: 0,
+    skippedUnchanged: true,
+  };
+}
+
+// Record import state (unless dry run or date-scoped import). Date-scoped
+// imports are partial — caching the hash would cause a later full import to
+// skip the file, permanently losing the excluded events.
+function recordImportState(
+  filePath: string,
+  hash: string,
+  size: number,
+  source: string,
+  imported: number,
+  options: ImportOptions,
+): void {
+  const isDateScoped = options.from !== undefined || options.to !== undefined;
+  if (!options.dryRun && !isDateScoped) setImportState(filePath, hash, size, source, imported);
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────
@@ -232,6 +286,7 @@ export function runImport(options: ImportOptions): ImportResult {
   let totalEventsFound = 0;
   let totalEventsImported = 0;
   let totalEventsRefreshed = 0;
+  let totalEventsRemoved = 0;
   let totalDuplicates = 0;
   let skippedFiles = 0;
 
@@ -239,6 +294,7 @@ export function runImport(options: ImportOptions): ImportResult {
     totalEventsFound += f.eventsFound;
     totalEventsImported += f.eventsImported;
     totalEventsRefreshed += f.eventsRefreshed;
+    totalEventsRemoved += f.eventsRemoved;
     totalDuplicates += f.skippedDuplicate;
     if (f.skippedUnchanged) skippedFiles++;
   }
@@ -249,6 +305,7 @@ export function runImport(options: ImportOptions): ImportResult {
     totalEventsFound,
     totalEventsImported,
     totalEventsRefreshed,
+    totalEventsRemoved,
     totalDuplicates,
     skippedFiles,
   };

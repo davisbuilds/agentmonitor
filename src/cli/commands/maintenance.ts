@@ -144,6 +144,7 @@ export function registerMaintenanceCommands(): void {
           events_found: result.totalEventsFound,
           events_imported: result.totalEventsImported,
           events_refreshed: result.totalEventsRefreshed,
+          events_removed: result.totalEventsRemoved,
           duplicates: result.totalDuplicates,
           files: result.files,
         };

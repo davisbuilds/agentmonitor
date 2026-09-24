@@ -36,13 +36,14 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
   function autoImportAll() {
     try {
       const result = runImport({ source: 'all' });
-      if (result.totalEventsImported > 0 || result.totalEventsRefreshed > 0) {
-        console.log(`Auto-import: imported ${result.totalEventsImported} and refreshed ${result.totalEventsRefreshed} events from ${result.totalFiles - result.skippedFiles} file(s)`);
+      if (result.totalEventsImported > 0 || result.totalEventsRefreshed > 0 || result.totalEventsRemoved > 0) {
+        console.log(`Auto-import: imported ${result.totalEventsImported}, refreshed ${result.totalEventsRefreshed} and removed ${result.totalEventsRemoved} events from ${result.totalFiles - result.skippedFiles} file(s)`);
         if (broadcaster.clientCount > 0) {
           broadcaster.broadcast('session_update', {
             type: 'auto_import',
             imported: result.totalEventsImported,
             refreshed: result.totalEventsRefreshed,
+            removed: result.totalEventsRemoved,
           });
         }
       }

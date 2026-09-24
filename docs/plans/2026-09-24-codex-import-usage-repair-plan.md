@@ -295,6 +295,27 @@ Task 0
 
 - Every case above passes.
 - Every mutation probe goes red.
+
+**Result (2026-09-24)**
+
+All 13 cases pass. All 14 mutation probes go red, one of them only after the
+other-producers test was strengthened. The implementation differs from the
+steps above in four ways:
+
+- **The git branch is resolved outside the transaction.** `insertEvent` resolves
+  the git branch before it writes, because `git` must never run while the write
+  lock is held. The reconcile therefore resolves it once per session before
+  its transaction and passes it in (`insertEvent(event, { gitBranch })`).
+- **SQL location.** The row SQL lives in `src/db/queries.ts`, following the
+  repository guardrail. The projection SQL lives in `src/live/projector.ts`.
+- **The projection check is scoped to rows this run wrote or deleted.** On the
+  live database, 71 sessions have import rows from before the summary
+  projection existed, with no projected turn. The session-wide check would have
+  rolled back every change to them.
+- **A session whose browser row is a full transcript is left alone.** It is
+  reported unreconciled, because the summary projection overwrites a browser
+  row's `integration_mode`. Measured before the boundary fix, none of the 110
+  sessions the reconciliation changes is in that state.
 - The existing suites `tests/import.test.ts` (including the id pin at `:595`)
   and `tests/codex-adapter.test.ts` stay green.
 

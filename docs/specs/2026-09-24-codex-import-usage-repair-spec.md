@@ -85,9 +85,15 @@ live database is changed.
   - A second apply reports zero changes.
 - **SC-05 Derived state follows the rows.** After a session's rows change:
   - its trace summary cost matches its events;
-  - its Codex summary projection holds exactly one turn and one item per
-    remaining event, an updated row's item carries the row's new tokens and cost,
-    and the projected message counts equal those items;
+  - every row the reconciliation inserts or updates has exactly one projected
+    turn and item carrying its current tokens and cost, and every row it deletes
+    leaves none. The projected message counts then equal the items.
+    - Rows imported before the summary projection existed can lack one (measured
+      2026-09-24: 71 sessions, none of which the repair changes). Those are left
+      as they are.
+    - A session whose browser row is a full transcript projection is not the
+      summary projection's to rewrite, so it is reported unreconciled. None of
+      the sessions the repair changes is in that state.
   - the Monitor cache lives inside the server process, so a separate CLI process
     cannot clear it. The server shows the repaired totals once it restarts.
 - **SC-06 Fidelity against an independent instrument.** Codex OTEL reports each
