@@ -389,7 +389,8 @@ insert-only import as before. A failed session rolls back on its own. It is list
 **Measured shape.** This was rehearsed on 2026-09-24 against a copy of a local
 store and a snapshot of its rollouts:
 - the changed subagents moved from 140–810× OTEL to 0.976–0.994×;
-- every changed plain session landed on its rollout's own counter;
+- every changed plain session landed on its rollout's own counter, apart from
+  the few whose counter restarts mid-session, which that check skips;
 - the Codex Monitor total fell by about 45%;
 - a second apply changed nothing.
 
