@@ -146,6 +146,9 @@ export function parseCodexFile(
   const boundary = findSubagentBoundary(parsedLines);
   const ownFrom = boundary.kind === 'resolved' ? boundary.line : 0;
   let inheritedCountersSkipped = 0;
+  // A cumulative counter that drops has restarted: what it bills after the drop
+  // is new usage, so the rollout's final counter understates the session.
+  let counterResets = 0;
 
   // First pass: extract session metadata
   let sessionId: string | undefined;
@@ -252,6 +255,8 @@ export function parseCodexFile(
       const totalIn = (usage.input_tokens ?? 0);
       const totalOut = (usage.output_tokens ?? 0);
       const totalCacheRead = (usage.cached_input_tokens ?? 0);
+
+      if (totalIn < prevTokensIn || totalOut < prevTokensOut) counterResets++;
 
       // Compute deltas
       const deltaIn = totalIn - prevTokensIn;
@@ -407,6 +412,7 @@ export function parseCodexFile(
         total_cache_read: prevCacheRead,
         _model_source: currentModelSource,
         ...(boundary.kind === 'resolved' ? { _inherited_counters_skipped: inheritedCountersSkipped } : {}),
+        ...(counterResets > 0 ? { _counter_resets: counterResets } : {}),
       },
       source: 'import',
     });

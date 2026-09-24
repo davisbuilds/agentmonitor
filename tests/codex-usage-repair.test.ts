@@ -278,4 +278,114 @@ describe('Codex usage repair', () => {
     assert.equal(check.otel_gap_hours, 0);
     assert.deepEqual(report.sessions_left_without_usage, []);
   });
+
+  const plain = (tail: string) => v7('2026-07-25T20:53:37Z', tail);
+  const setConfigModel = (model: string) => fs.writeFileSync(path.join(codexDir, 'config.toml'), `model = "${model}"\n`);
+  const storedModels = (sessionId: string) => (getDb().prepare(
+    "SELECT DISTINCT model FROM events WHERE session_id = ? AND event_id LIKE 'import-cdx-%' ORDER BY model",
+  ).all(sessionId) as { model: string | null }[]).map(row => row.model);
+  const addOtel = (sessionId: string) => getDb().prepare(`
+    INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out, cache_read_tokens, source, client_timestamp)
+    VALUES (?, ?, 'codex', 'llm_response', 'success', 1000, 10, 0, 'otel', '2026-07-25 21:01:00')
+  `).run(`otel-${sessionId}`, sessionId);
+
+  test('a model known only from config.toml is not rewritten when the config changes', () => {
+    const id = plain('000000000c0f');
+    setConfigModel('gpt-5.6-sol');
+    // No turn_context: the rollout never names its model.
+    write(id, [meta(id), count(1, 6000, 5000, 100)]);
+    importAll();
+    setConfigModel('gpt-6-sol');
+
+    const report = repair(true);
+    assert.equal(report.rows_updated, 0);
+    assert.equal(report.rows_by_class.unclassified, 0);
+    assert.deepEqual(storedModels(id), ['gpt-5.6-sol']);
+  });
+
+  test('a config-model row whose tokens change keeps its stored model and is priced with it', () => {
+    const id = plain('000000000c1f');
+    setConfigModel('gpt-5.6-sol');
+    write(id, [meta(id), count(1, 6000, 5000, 100)]);
+    importAll();
+    setConfigModel('gpt-6-sol');
+    getDb().prepare('UPDATE events SET tokens_in = tokens_in + 7 WHERE event_id = ?').run(llmRow(id, 0));
+
+    const report = repair(true);
+    assert.equal(report.rows_by_class.refresh_drift, 1);
+    assert.equal(report.rows_by_class.unclassified, 0);
+    const row = getDb().prepare('SELECT tokens_in, model, cost_usd FROM events WHERE event_id = ?').get(llmRow(id, 0)) as { tokens_in: number; model: string; cost_usd: number };
+    assert.deepEqual([row.tokens_in, row.model], [1000, 'gpt-5.6-sol']);
+    assert.ok(Math.abs(row.cost_usd - 0.0105) < 1e-12, `priced as gpt-5.6-sol: ${row.cost_usd}`);
+    assert.ok(Math.abs(report.cost_after_usd - 0.0105) < 1e-12, `the report prices it the same way: ${report.cost_after_usd}`);
+  });
+
+  test('a cost that differs only by floating-point rounding is not rewritten', () => {
+    const id = plain('000000000c2f');
+    write(id, [meta(id), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10), count(2, 3000, 1000, 30)]);
+    importAll();
+    const changed = getDb().prepare(
+      "UPDATE events SET cost_usd = cost_usd * (1 + 1e-12) WHERE session_id = ? AND cost_usd > 0",
+    ).run(id).changes;
+    assert.equal(changed, 2, 'the fixture must perturb the priced rows');
+
+    const report = repair(true);
+    assert.deepEqual([report.sessions_changed, report.rows_updated], [0, 0]);
+  });
+
+  test('only a session the repair takes to zero usage is listed as left without usage', () => {
+    const emptied = plain('000000000c3f');
+    const alreadyEmpty = plain('000000000c4f');
+    write(emptied, [meta(emptied), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10)]);
+    write(alreadyEmpty, [meta(alreadyEmpty), turnAt('2026-07-25T20:53:40Z')]);
+    importAll();
+    write(emptied, [meta(emptied), turnAt('2026-07-25T20:53:40Z')]);
+    getDb().prepare("UPDATE events SET client_timestamp = '2026-07-25T22:00:00Z' WHERE session_id = ? AND event_type = 'session_end'").run(alreadyEmpty);
+    addOtel(emptied);
+    addOtel(alreadyEmpty);
+
+    const report = repair(true);
+    assert.equal(report.sessions_changed, 2);
+    assert.deepEqual(report.sessions_left_without_usage, [emptied]);
+  });
+
+  test('a changed plain session is checked against the rollout\'s own final counter', () => {
+    const agrees = plain('000000000c5f');
+    const clamped = plain('000000000c6f');
+    const reset = plain('000000000c7f');
+    const turn = turnAt('2026-07-25T20:53:40Z');
+    write(agrees, [meta(agrees), turn, count(1, 1000, 0, 10), count(2, 3000, 1000, 30)]);
+    // Cached input growing faster than input is clamped, so the rows cannot add up to the counter.
+    write(clamped, [meta(clamped), turn, count(1, 1000, 0, 10), count(2, 1100, 900, 20)]);
+    // The counter drops once: the final counter understates what was billed.
+    write(reset, [meta(reset), turn, count(1, 5000, 0, 50), count(2, 1000, 0, 10), count(3, 3000, 0, 30)]);
+    importAll();
+    for (const id of [agrees, clamped, reset]) {
+      getDb().prepare('UPDATE events SET tokens_in = tokens_in + 7 WHERE event_id = ?').run(llmRow(id, 0));
+    }
+
+    const report = repair(true);
+    assert.equal(report.sessions_changed, 3);
+    assert.equal(report.counter_sessions_checked, 2);
+    assert.equal(report.counter_sessions_reset, 1);
+    assert.deepEqual(report.counter_mismatches, [clamped]);
+    const end = getDb().prepare("SELECT metadata FROM events WHERE session_id = ? AND event_type = 'session_end'").get(reset) as { metadata: string };
+    assert.equal(JSON.parse(end.metadata)._counter_resets, 1);
+  });
+
+  test('subagents are left to the OTEL check, and plain sessions to the counter check', () => {
+    const other = plain('000000000c8f');
+    write(other, [meta(other), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10), count(2, 3000, 1000, 30)]);
+    storeChildAsBefore();
+    assert.ok(usageTotal(CHILD) > 30_500, 'the child must still hold its copied history');
+    getDb().prepare('UPDATE events SET tokens_in = tokens_in + 7 WHERE event_id = ?').run(llmRow(other, 0));
+    addOtel(other);
+    addOtel(CHILD);
+
+    const report = repair(true);
+    assert.equal(report.sessions_changed, 2);
+    assert.equal(report.counter_sessions_checked, 1, 'the child is not compared with a counter that includes its parent');
+    assert.equal(report.otel_sessions_checked, 1, 'only the child is compared with OTEL');
+    assert.deepEqual(report.subagent_otel.map(check => check.session_id), [CHILD]);
+  });
 });

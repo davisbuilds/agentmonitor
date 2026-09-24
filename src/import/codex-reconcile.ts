@@ -18,6 +18,7 @@ import {
   recountProjectedSummaryMessages,
   removeProjectedSourceEvent,
 } from '../live/projector.js';
+import { pricingRegistry } from '../pricing/index.js';
 import { maintainSessionTraceSummary } from '../trace-quality/summary.js';
 
 export interface CodexReconcileCounts {
@@ -50,6 +51,34 @@ const OWN_ID_PREFIX = 'import-cdx-';
 // under the same id must not be rewritten into a summary.
 const SUMMARY_MODES = new Set(['codex-import', 'codex-otel', 'codex-summary']);
 
+/**
+ * Costs are sums of floating-point products, so the same tokens priced by the
+ * same table can differ in the last bits. Such a difference is not a change.
+ */
+export function sameCost(a: number | null | undefined, b: number | null | undefined): boolean {
+  if (a == null || b == null) return (a ?? null) === (b ?? null);
+  return Math.abs(a - b) <= Math.max(1e-9, 1e-6 * Math.abs(b));
+}
+
+/**
+ * The event a stored row is reconciled to. A rollout that never names its
+ * model gets today's `config.toml` model from the parse, which says nothing
+ * about the session: the model stored when it was imported is kept, and a
+ * changed row is priced with it.
+ */
+export function reconciledEvent(row: ImportedCodexRow | undefined, event: NormalizedIngestEvent): NormalizedIngestEvent {
+  const metadata = event.metadata as Record<string, unknown> | undefined;
+  if (!row?.model || metadata?._model_source !== 'config' || row.model === event.model) return event;
+  const cost_usd = event.cost_usd == null
+    ? event.cost_usd
+    : pricingRegistry.calculate(row.model, {
+      input: event.tokens_in,
+      output: event.tokens_out,
+      cacheRead: event.cache_read_tokens ?? 0,
+    }, event.client_timestamp) ?? undefined;
+  return { ...event, model: row.model, cost_usd };
+}
+
 /** True when the stored row already says what the parse says. */
 export function importedRowMatches(row: ImportedCodexRow, event: NormalizedIngestEvent): boolean {
   return row.event_type === event.event_type
@@ -60,7 +89,7 @@ export function importedRowMatches(row: ImportedCodexRow, event: NormalizedInges
     && row.cache_read_tokens === (event.cache_read_tokens ?? 0)
     && row.cache_write_tokens === (event.cache_write_tokens ?? 0)
     && row.model === (event.model ?? null)
-    && row.cost_usd === (event.cost_usd ?? null)
+    && sameCost(row.cost_usd, event.cost_usd)
     && row.client_timestamp === (event.client_timestamp ?? null)
     && row.metadata === serializeEventMetadata(event.metadata);
 }
@@ -120,8 +149,9 @@ export function reconcileCodexImport(
       counts.deleted = stale.length;
       options.onAfterDelete?.();
 
-      for (const event of parsed.values()) {
-        const existing = rows.get(event.event_id!);
+      for (const parsedEvent of parsed.values()) {
+        const existing = rows.get(parsedEvent.event_id!);
+        const event = reconciledEvent(existing, parsedEvent);
         if (!existing) {
           const inserted = insertEvent({ ...event }, { gitBranch });
           if (inserted) {

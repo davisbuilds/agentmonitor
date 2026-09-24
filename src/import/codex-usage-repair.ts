@@ -8,7 +8,7 @@ import {
   type ImportedCodexRow,
 } from '../db/queries.js';
 import { discoverCodexLogs } from './codex.js';
-import { importedRowMatches } from './codex-reconcile.js';
+import { importedRowMatches, reconciledEvent, sameCost } from './codex-reconcile.js';
 import { readCodexRollout, reconcileCodexRollout, type CodexRolloutRead } from './index.js';
 
 export interface CodexUsageRepairOptions {
@@ -53,9 +53,17 @@ export type CodexUsageRepairReport = {
   tokens_after: number;
   cost_before_usd: number;
   cost_after_usd: number;
+  /** Changed non-subagent sessions whose repaired usage was compared with the rollout's own final counter. */
+  counter_sessions_checked: number;
+  /** Changed sessions skipped by that check because their counter drops mid-rollout, so the final counter understates them. */
+  counter_sessions_reset: number;
+  /** Checked sessions whose repaired usage does not equal the rollout's final counter. */
+  counter_mismatches: string[];
+  /** Changed subagent sessions compared with Codex OTEL. A plain session gets the counter check instead. */
   otel_sessions_checked: number;
   otel_ratios_moved_away: number;
   subagent_otel: CodexSubagentOtelCheck[];
+  /** Sessions that had import usage and have none after the repair, so their OTEL rows count again. */
   sessions_left_without_usage: string[];
 };
 
@@ -63,11 +71,6 @@ type Usage = { tokens: number; cost: number };
 
 const tokensOf = (row: { tokens_in: number; tokens_out: number; cache_read_tokens?: number; cache_write_tokens?: number }) =>
   row.tokens_in + row.tokens_out + (row.cache_read_tokens ?? 0) + (row.cache_write_tokens ?? 0);
-
-function sameCost(a: number | null | undefined, b: number | null | undefined): boolean {
-  if (a == null || b == null) return (a ?? null) === (b ?? null);
-  return Math.abs(a - b) <= Math.max(1e-9, 1e-6 * Math.abs(b));
-}
 
 function sameTokens(row: ImportedCodexRow, event: NormalizedIngestEvent): boolean {
   return row.tokens_in === event.tokens_in
@@ -103,8 +106,10 @@ function metadataOf(event: NormalizedIngestEvent | undefined): Record<string, un
  * Every discoverable rollout is reconciled through the same path the importer
  * uses, so a repaired session is exactly what a fresh import would store. A
  * preview runs the same work and rolls it back. Each changed row is classified
- * by the evidence it carries, and every changed session that Codex's own
- * per-request OTEL also covers is checked against it, before and after.
+ * by the evidence it carries, and each changed session is checked against an
+ * instrument outside the parse: a plain session against the rollout's own final
+ * cumulative counter, and a subagent, whose counter includes its parent's,
+ * against Codex's per-request OTEL.
  *
  * Nothing is inferred from absence: a session whose rollout is gone, and a
  * rollout that cannot prove which session it owns, are counted and untouched.
@@ -132,6 +137,9 @@ export function repairCodexImportUsage(
     tokens_after: 0,
     cost_before_usd: 0,
     cost_after_usd: 0,
+    counter_sessions_checked: 0,
+    counter_sessions_reset: 0,
+    counter_mismatches: [],
     otel_sessions_checked: 0,
     otel_ratios_moved_away: 0,
     subagent_otel: [],
@@ -186,6 +194,8 @@ export function repairCodexImportUsage(
       if (event.event_id?.startsWith('import-cdx-') && !parsed.has(event.event_id)) parsed.set(event.event_id, event);
     }
     const storedById = new Map(stored.map(row => [row.event_id, row]));
+    // What the reconcile wrote: a model known only from config keeps its stored value.
+    for (const [id, event] of parsed) parsed.set(id, reconciledEvent(storedById.get(id), event));
     for (const row of stored) {
       const event = parsed.get(row.event_id);
       if (!event) report.rows_by_class[skipped > 0 ? 'copied_history' : 'orphaned']++;
@@ -200,26 +210,36 @@ export function repairCodexImportUsage(
     report.cost_before_usd += before.cost;
     report.cost_after_usd += after.cost;
 
+    if (before.tokens > 0 && after.tokens === 0) report.sessions_left_without_usage.push(counts.session_id!);
+
+    if (start._subagent_boundary === undefined) {
+      // Without a reset, the rows telescope to the counter Codex itself kept.
+      const finalCounter = Number(end.total_tokens_in ?? 0) + Number(end.total_tokens_out ?? 0);
+      if (typeof end._counter_resets === 'number' && end._counter_resets > 0) report.counter_sessions_reset++;
+      else {
+        report.counter_sessions_checked++;
+        if (after.tokens !== finalCounter) report.counter_mismatches.push(counts.session_id!);
+      }
+      continue;
+    }
+
     const otel = getCodexOtelUsage(counts.session_id!);
     if (otel.tokens > 0) {
       report.otel_sessions_checked++;
       const ratioBefore = before.tokens / otel.tokens;
       const ratioAfter = after.tokens / otel.tokens;
       if (Math.abs(ratioAfter - 1) > Math.abs(ratioBefore - 1) + 1e-9) report.otel_ratios_moved_away++;
-      if (after.tokens === 0) report.sessions_left_without_usage.push(counts.session_id!);
-      if (start._subagent_boundary !== undefined) {
-        const otelHours = new Set(otel.hours);
-        const usageHours = new Set([...parsed.values()]
-          .map(e => (tokensOf(e) > 0 ? Date.parse(e.client_timestamp ?? '') : Number.NaN))
-          .filter(ms => Number.isFinite(ms))
-          .map(ms => new Date(ms).toISOString().slice(0, 13)));
-        report.subagent_otel.push({
-          session_id: counts.session_id!,
-          ratio_before: ratioBefore,
-          ratio_after: ratioAfter,
-          otel_gap_hours: [...usageHours].filter(hour => !otelHours.has(hour)).length,
-        });
-      }
+      const otelHours = new Set(otel.hours);
+      const usageHours = new Set([...parsed.values()]
+        .map(e => (tokensOf(e) > 0 ? Date.parse(e.client_timestamp ?? '') : Number.NaN))
+        .filter(ms => Number.isFinite(ms))
+        .map(ms => new Date(ms).toISOString().slice(0, 13)));
+      report.subagent_otel.push({
+        session_id: counts.session_id!,
+        ratio_before: ratioBefore,
+        ratio_after: ratioAfter,
+        otel_gap_hours: [...usageHours].filter(hour => !otelHours.has(hour)).length,
+      });
     }
   }
 
