@@ -349,6 +349,11 @@ export function registerMaintenanceCommands(): void {
         if (report.apply && report.sessions_changed > 0) {
           console.error('Restart the AgentMonitor server so the Monitor shows the repaired totals.');
         }
+        if (report.sessions_failed.length > 0) {
+          throw partialSuccess(
+            `Codex usage repair: ${report.sessions_failed.length} session(s) failed and were left unchanged; rerun to retry them.`,
+          );
+        }
       } finally {
         closeDb();
       }

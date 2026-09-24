@@ -219,6 +219,47 @@ describe('Codex usage repair', () => {
     }
   });
 
+  test('a session whose reconcile fails is reported as failed, not unreadable, and the run continues', async () => {
+    const other = v7('2026-07-25T20:53:37Z', '0000000000ee');
+    write(other, [meta(other), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10), count(2, 3000, 1000, 30), count(3, 6000, 2000, 60)]);
+    storeChildAsBefore();
+    write(other, [meta(other), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10)]);
+    assert.ok(usageTotal(CHILD) > 30_500, 'the child must still hold its copied history');
+    // The child's reconcile fails for a reason that has nothing to do with reading its file.
+    getDb().exec(`
+      CREATE TEMP TRIGGER fail_child_delete BEFORE DELETE ON events WHEN OLD.session_id = '${CHILD}'
+      BEGIN SELECT RAISE(ABORT, 'injected reconcile failure'); END;
+    `);
+    try {
+      const report = repair(true);
+      assert.equal(report.files_unreadable, 0);
+      assert.equal(report.sessions_failed.length, 1);
+      assert.match(report.sessions_failed[0].error, /injected reconcile failure/);
+      assert.equal(report.rows_by_class.orphaned, 2, 'the other session is still repaired');
+      assert.equal(report.rows_by_class.copied_history, 0, 'the failed session is not counted as repaired');
+    } finally {
+      getDb().exec('DROP TRIGGER IF EXISTS fail_child_delete');
+    }
+  });
+
+  test('the CLI exits with partial success when any session fails', async () => {
+    storeChildAsBefore();
+    const { main } = await import('../src/cli.js');
+    const { Writable } = await import('node:stream');
+    const sink = () => new Writable({ write(_chunk, _encoding, done) { done(); } });
+    getDb().exec(`
+      CREATE TEMP TRIGGER fail_child_delete BEFORE DELETE ON events WHEN OLD.session_id = '${CHILD}'
+      BEGIN SELECT RAISE(ABORT, 'injected reconcile failure'); END;
+    `);
+    try {
+      const { partialSuccess } = await import('../src/cli/errors.js');
+      const result = await main(['node', 'amon', 'costs', 'repair-codex-usage', '--apply', '--codex-dir', codexDir, '--json'], { stdout: sink(), stderr: sink() });
+      assert.equal(result.exitCode, partialSuccess('').exitCode);
+    } finally {
+      getDb().exec('DROP TRIGGER IF EXISTS fail_child_delete');
+    }
+  });
+
   test('Codex OTEL usage checks the repair from outside: the child moves toward it', () => {
     storeChildAsBefore();
     // Codex's own per-request telemetry for the child's one request.

@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { Database } from 'better-sqlite3';
 import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import {
@@ -8,7 +9,7 @@ import {
 } from '../db/queries.js';
 import { discoverCodexLogs } from './codex.js';
 import { importedRowMatches } from './codex-reconcile.js';
-import { reconcileCodexRollout } from './index.js';
+import { readCodexRollout, reconcileCodexRollout, type CodexRolloutRead } from './index.js';
 
 export interface CodexUsageRepairOptions {
   /** Root of the Codex installation holding `sessions/`. Defaults to `~/.codex`. */
@@ -16,6 +17,11 @@ export interface CodexUsageRepairOptions {
   /** Write corrections. When false (the default) the scan only reports. */
   apply?: boolean;
   excludePatterns?: string[];
+}
+
+export interface CodexRepairFailure {
+  rollout: string;
+  error: string;
 }
 
 export interface CodexSubagentOtelCheck {
@@ -35,6 +41,8 @@ export type CodexUsageRepairReport = {
   sessions_unreconciled: number;
   sessions_without_rollout: number;
   sessions_changed: number;
+  /** Sessions whose reconcile raised. Each rolled back on its own; rerunning finishes them. */
+  sessions_failed: CodexRepairFailure[];
   subagent_boundaries_unresolved: number;
   inherited_counters_skipped: number;
   rows_inserted: number;
@@ -113,6 +121,7 @@ export function repairCodexImportUsage(
     sessions_unreconciled: 0,
     sessions_without_rollout: 0,
     sessions_changed: 0,
+    sessions_failed: [],
     subagent_boundaries_unresolved: 0,
     inherited_counters_skipped: 0,
     rows_inserted: 0,
@@ -132,15 +141,25 @@ export function repairCodexImportUsage(
   const seenSessions = new Set<string>();
   for (const filePath of discoverCodexLogs(options.codexDir, { excludePatterns: options.excludePatterns })) {
     report.files_scanned++;
+    let read: CodexRolloutRead;
+    try {
+      read = readCodexRollout(filePath);
+    } catch {
+      report.files_unreadable++;
+      continue;
+    }
+    // A failure past this point is not bad input: it is a repair that did not
+    // happen. The session rolled back on its own, so the run continues, and
+    // the failure is reported rather than counted as unreadable.
     let result: ReturnType<typeof reconcileCodexRollout>;
     let stored: ImportedCodexRow[] = [];
     try {
       // What is stored now, read before the reconcile changes it.
-      const peek = reconcileCodexRollout(filePath, { apply: false, codexDir: options.codexDir });
+      const peek = reconcileCodexRollout(filePath, { apply: false, codexDir: options.codexDir }, read);
       if (peek.counts.session_id) stored = listImportedCodexRows(peek.counts.session_id);
-      result = apply ? reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir }) : peek;
-    } catch {
-      report.files_unreadable++;
+      result = apply ? reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir }, read) : peek;
+    } catch (err) {
+      report.sessions_failed.push({ rollout: path.basename(filePath), error: err instanceof Error ? err.message : String(err) });
       continue;
     }
     const { events, counts } = result;

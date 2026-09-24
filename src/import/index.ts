@@ -226,12 +226,12 @@ function appendCodexEvents(
   return result;
 }
 
-interface CodexRolloutRead {
+export interface CodexRolloutRead {
   bytes: Buffer;
   hash: string;
 }
 
-function readCodexRollout(filePath: string): CodexRolloutRead {
+export function readCodexRollout(filePath: string): CodexRolloutRead {
   const bytes = fs.readFileSync(filePath);
   return { bytes, hash: hashCodexContent(bytes) };
 }
@@ -248,11 +248,15 @@ export function reconcileCodexRollout(
   read: CodexRolloutRead = readCodexRollout(filePath),
 ): { events: ParsedImportEvent[]; counts: CodexReconcileCounts } {
   const events = parseCodexFile(filePath, { codexDir: options.codexDir, content: read.bytes.toString('utf-8') });
+  // The mode backfill and the hash commit with the rows: a hash recorded ahead
+  // of a failed backfill would make every later import skip the file.
   const counts = reconcileCodexImport(events, {
     apply: options.apply,
-    onCommit: committed => setImportState(filePath, read.hash, read.bytes.length, 'codex', committed.inserted),
+    onCommit: committed => {
+      applySessionModes(events);
+      setImportState(filePath, read.hash, read.bytes.length, 'codex', committed.inserted);
+    },
   });
-  if (options.apply && counts.reconciled) applySessionModes(events);
   return { events, counts };
 }
 

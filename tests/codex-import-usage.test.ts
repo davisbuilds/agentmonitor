@@ -282,6 +282,34 @@ describe('Codex import reconciles a session to its rollout', () => {
     assert.deepEqual(getDb().prepare('SELECT file_hash FROM import_state WHERE file_path = ?').get(rollout), hashBefore);
   });
 
+  test('the session mode commits with the hash, so a failed mode write is retried', () => {
+    const interactive = (): Line => ({ ...meta(), payload: { ...(meta().payload as object), originator: 'codex-tui' } });
+    writeRollout([interactive(), turn(), counter(1, 1000, 0, 10)]);
+    importCodex();
+    // A session imported before invocation mode existed.
+    getDb().prepare("UPDATE sessions SET metadata = '{}' WHERE id = ?").run(SESSION);
+    const hashBefore = getDb().prepare('SELECT file_hash FROM import_state WHERE file_path = ?').get(rollout);
+    const rowsBefore = importRows();
+
+    // An update-only rewrite: nothing is inserted, so only the mode backfill touches the session.
+    writeRollout([interactive(), turn(), counter(1, 2000, 500, 20)]);
+    getDb().exec(`
+      CREATE TEMP TRIGGER fail_session_mode BEFORE UPDATE OF metadata ON sessions
+      BEGIN SELECT RAISE(ABORT, 'injected mode failure'); END;
+    `);
+    try {
+      assert.throws(() => importCodex(), /injected mode failure/);
+    } finally {
+      getDb().exec('DROP TRIGGER IF EXISTS fail_session_mode');
+    }
+    assert.deepEqual(getDb().prepare('SELECT file_hash FROM import_state WHERE file_path = ?').get(rollout), hashBefore);
+    assert.deepEqual(importRows(), rowsBefore);
+
+    importCodex();
+    const mode = getDb().prepare("SELECT json_extract(metadata, '$.mode') AS mode FROM sessions WHERE id = ?").get(SESSION) as { mode: string };
+    assert.equal(mode.mode, 'interactive', 'the next import retries the backfill instead of skipping the file');
+  });
+
   test('a preview reports what applying would do and writes nothing', () => {
     writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60)]);
     importCodex();
