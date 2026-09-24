@@ -3,6 +3,7 @@ import { invalidUsage } from './errors.js';
 import { commandHelp } from './help.js';
 import type { CliContext } from './output.js';
 import { writeStdout } from './output.js';
+import { warnIfServerBuildDiffers } from './stale-server.js';
 
 export type CommandHandler = (ctx: CliContext, args: string[]) => Promise<void> | void;
 
@@ -57,5 +58,8 @@ export async function dispatchCommand(ctx: CliContext, args: string[]): Promise<
     return;
   }
   applyGlobalEnv(ctx.global);
+  // A one-shot command next to a server on another build is how old code kept
+  // writing rows after a fix shipped. `serve` is that server, so it is exempt.
+  if (found.command.name !== 'serve') warnIfServerBuildDiffers(ctx);
   await found.command.handler(ctx, found.rest);
 }

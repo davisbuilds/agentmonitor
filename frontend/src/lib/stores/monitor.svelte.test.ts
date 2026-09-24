@@ -196,5 +196,19 @@ describe('a filtered stats read in flight', () => {
     store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
     store.endFilteredStatsRead(null);
     expect(store.getStats().total_cost_usd).toBe(3.5);
+describe('server build', () => {
+  it('reports a stale server build, and a restart clears it', () => {
+    expect(store.getServerBuildStale()).toBe(false);
+    store.setServerBuild({ tracked: true, stale: true });
+    expect(store.getServerBuildStale()).toBe(true);
+    store.setServerBuild({ tracked: true, stale: false });
+    expect(store.getServerBuildStale()).toBe(false);
+  });
+
+  it('treats an untracked or missing build as not stale', () => {
+    store.setServerBuild({ tracked: false, stale: true });
+    expect(store.getServerBuildStale()).toBe(false);
+    store.setServerBuild(undefined);
+    expect(store.getServerBuildStale()).toBe(false);
   });
 });

@@ -8,8 +8,10 @@ import test from 'node:test';
 
 import {
   acquireRuntimeOwnership,
+  readRuntimeOwner,
   RuntimeOwnershipError,
 } from '../src/runtime-ownership.js';
+import { staleServerWarning } from '../src/cli/stale-server.js';
 
 function tempRoot(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-runtime-owner-'));
@@ -183,4 +185,48 @@ test('real and symlinked paths to one existing database share ownership', () => 
     owner.release();
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('the live owner of a database is readable, with the build it loaded', () => {
+  const root = tempRoot();
+  const dbPath = path.join(root, 'owned.db');
+  assert.equal(readRuntimeOwner(dbPath), null, 'nobody owns it yet');
+  const owner = acquireRuntimeOwnership(dbPath, { build: 'abc123' });
+  try {
+    const read = readRuntimeOwner(dbPath);
+    assert.deepEqual([read?.pid, read?.build], [process.pid, 'abc123']);
+  } finally {
+    owner.release();
+  }
+  assert.equal(readRuntimeOwner(dbPath), null, 'released ownership is gone');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a dead owner is not reported, and reading creates nothing', () => {
+  const root = tempRoot();
+  const dbPath = path.join(root, 'dead.db');
+  const dead = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
+  fs.writeFileSync(`${dbPath}.runtime.lock`, JSON.stringify({
+    pid: dead.pid, startedAt: new Date().toISOString(), token: 't', dbPath: fs.realpathSync(root) + '/dead.db', build: 'old',
+  }));
+  assert.equal(readRuntimeOwner(dbPath), null);
+  // A lock carried over from another database (copied with the file) is not this database's owner.
+  fs.writeFileSync(`${dbPath}.runtime.lock`, JSON.stringify({
+    pid: process.pid, startedAt: new Date().toISOString(), token: 't', dbPath: '/elsewhere/other.db', build: 'old',
+  }));
+  assert.equal(readRuntimeOwner(dbPath), null);
+  const missing = path.join(root, 'no-such-dir', 'x.db');
+  assert.equal(readRuntimeOwner(missing), null);
+  assert.equal(fs.existsSync(path.dirname(missing)), false);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a command warns only when the server on its database runs another build', () => {
+  const warning = staleServerWarning({ pid: 4242, build: 'old' }, 'new');
+  assert.match(warning ?? '', /4242/);
+  assert.match(warning ?? '', /restart/i);
+  assert.equal(staleServerWarning({ pid: 4242, build: 'same' }, 'same'), null);
+  assert.equal(staleServerWarning(null, 'new'), null, 'no server');
+  assert.equal(staleServerWarning({ pid: 4242, build: null }, 'new'), null, 'a server run from source');
+  assert.equal(staleServerWarning({ pid: 4242, build: 'old' }, null), null, 'a command run from source');
 });

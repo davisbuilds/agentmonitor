@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { broadcaster } from '../sse/emitter.js';
 import { getStatsForBroadcast, getProviderQuotas } from '../db/queries.js';
 import { config } from '../config.js';
+import { serverBuildStatus } from '../build-fingerprint.js';
 
 export const streamRouter = Router();
 
@@ -10,11 +11,18 @@ let statsInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startStatsBroadcast(): void {
   if (statsInterval) return;
+  let staleBuildLogged = false;
   statsInterval = setInterval(() => {
+    const build = serverBuildStatus();
+    if (build.stale && !staleBuildLogged) {
+      staleBuildLogged = true;
+      console.warn(`[build] the build on disk changed since this server started (${build.started} -> ${build.current}). Restart to load it; until then this server keeps running the old code.`);
+    }
     if (broadcaster.clientCount === 0) return;
     const stats = getStatsForBroadcast();
     const quota_monitor = getProviderQuotas();
-    broadcaster.broadcast('stats', { ...stats, quota_monitor, usage_monitor: quota_monitor } as unknown as Record<string, unknown>);
+    const server_build = { tracked: build.tracked, stale: build.stale };
+    broadcaster.broadcast('stats', { ...stats, quota_monitor, usage_monitor: quota_monitor, server_build } as unknown as Record<string, unknown>);
   }, config.statsIntervalMs);
 }
 
