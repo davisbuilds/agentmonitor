@@ -843,14 +843,18 @@ async function checkedJson<T>(res: Response, context: string): Promise<T> {
 
 // V1 endpoints (Monitor tab)
 
-export async function fetchStats(filters: Filters = {}): Promise<Stats> {
+/** The only filters Monitor stats honour: an agent and a start time. */
+export function statsParams(filters: Filters = {}): Record<string, string> {
   const params: Record<string, string> = {};
   if (filters.agent_type) params.agent = filters.agent_type;
   if (filters.agent) params.agent = filters.agent;
   if (filters.since) params.since = filters.since;
   if (filters.date_from) params.since = filters.date_from;
+  return params;
+}
 
-  const res = await fetch(`/api/v2/monitor/stats${qs(params)}`);
+export async function fetchStats(filters: Filters = {}): Promise<Stats> {
+  const res = await fetch(`/api/v2/monitor/stats${qs(statsParams(filters))}`);
   return checkedJson(res, 'fetchStats');
 }
 

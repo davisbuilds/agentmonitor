@@ -1009,6 +1009,9 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
 // dirty (see markStatsDirty). The filtered getStats() path (HTTP /api/stats) is
 // on-demand and stays uncached.
 let cachedBroadcastStats: Stats | null = null;
+// The connection the snapshot was read from. A reopened connection may see
+// writes this process never marked dirty, so its snapshot starts over.
+let cachedBroadcastStatsDb: Database.Database | null = null;
 let broadcastStatsDirty = true;
 
 function markStatsDirty(): void {
@@ -1016,8 +1019,10 @@ function markStatsDirty(): void {
 }
 
 export function getStatsForBroadcast(): Stats {
-  if (broadcastStatsDirty || cachedBroadcastStats === null) {
+  const db = getDb();
+  if (broadcastStatsDirty || cachedBroadcastStats === null || cachedBroadcastStatsDb !== db) {
     cachedBroadcastStats = getStats();
+    cachedBroadcastStatsDb = db;
     broadcastStatsDirty = false;
   }
   return cachedBroadcastStats;
