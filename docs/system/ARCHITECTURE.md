@@ -140,7 +140,9 @@ in the rollout, and Codex can rewrite a rollout. So a changed file is not
 insert-only: the session's import rows are reconciled to the parse in one
 transaction, together with its summary projection, trace summary, invocation
 mode and import hash. Rows from other producers for the same session are never
-touched. A date-scoped import only appends, and a session projected as a full
+touched. A date-scoped import only appends, and so does a rollout with a line
+that does not parse (for example one read mid-write), because a missing line
+would make the rows after it look stale. A session projected as a full
 transcript is left alone.
 
 A `thread_spawn` subagent rollout can open with a copy of its parent's history,

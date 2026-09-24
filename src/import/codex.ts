@@ -124,6 +124,8 @@ export function parseCodexFile(
     codexDir?: string;
     /** The file's bytes when the caller already read them, so hash and parse see the same content. */
     content?: string;
+    /** Filled in with what the parse had to skip. */
+    diagnostics?: { malformedLines: number };
   },
 ): NormalizedIngestEvent[] {
   const events: NormalizedIngestEvent[] = [];
@@ -139,6 +141,7 @@ export function parseCodexFile(
       return null;
     }
   });
+  if (options?.diagnostics) options.diagnostics.malformedLines = parsedLines.filter(line => line === null).length;
   // In a subagent that opens with a copy of its parent's history, lines before
   // the boundary are the parent's: they advance the counters and the event
   // index (so the child's own event ids stay what they always were) but emit

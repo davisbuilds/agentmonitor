@@ -381,7 +381,9 @@ today's config says nothing about an older session.
   timestamps.
 
 A session whose rollout is gone is counted in `sessions_without_rollout` and
-left as stored. A failed session rolls back on its own. It is listed in
+left as stored. A rollout that cannot prove which session it owns, or that has
+a line that does not parse, is counted in `sessions_unreconciled` and gets
+insert-only import as before. A failed session rolls back on its own. It is listed in
 `sessions_failed` and the CLI exits with partial success. Rerunning finishes it.
 
 **Measured shape.** This was rehearsed on 2026-09-24 against a copy of a local

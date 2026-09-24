@@ -233,6 +233,7 @@ describe('Codex usage repair', () => {
     try {
       const report = repair(true);
       assert.equal(report.files_unreadable, 0);
+      assert.equal(report.sessions_without_rollout, 0, 'a failed session still has its rollout');
       assert.equal(report.sessions_failed.length, 1);
       assert.match(report.sessions_failed[0].error, /injected reconcile failure/);
       assert.equal(report.rows_by_class.orphaned, 2, 'the other session is still repaired');

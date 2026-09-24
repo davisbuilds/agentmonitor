@@ -384,6 +384,38 @@ describe('Codex import reconciles a session to its rollout', () => {
     assert.equal(result.deleted, 0);
     assert.ok(importRows().length >= before);
   });
+
+  test('a rollout with a line that does not parse deletes nothing, and a full read then reconciles it', () => {
+    writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60)]);
+    importCodex();
+    const stored = importRows().map(r => r.event_id);
+
+    // Read mid-rewrite: the file is shorter and ends inside a line.
+    const cut = [meta(), turn(), counter(1, 1500, 500, 15)].map(l => JSON.stringify(l)).join('\n');
+    fs.writeFileSync(rollout, `${cut}\n{"type":"event_msg","timestamp":"2026-07`);
+    const partial = importCodex();
+    assert.equal(partial.totalEventsRemoved, 0);
+    assert.deepEqual(stored.filter(id => !importRows().some(r => r.event_id === id)), [], 'no stored row is deleted');
+
+    writeRollout([meta(), turn(), counter(1, 1500, 500, 15)]);
+    importCodex();
+    assert.deepEqual(shape(importRows()), expectedRows());
+  });
+
+  test('reconciling an intermediate row leaves the session ending at its final row', () => {
+    const edit = (body: string): Line => ({ ...patch(1), payload: { ...(patch(1).payload as Record<string, unknown>), input: `*** Begin Patch\n*** Update File: a.ts\n${body}\n*** End Patch` } });
+    writeRollout([meta(), turn(), counter(1, 1000, 0, 10), edit('+x'), counter(3, 6000, 2000, 60)]);
+    importCodex();
+    const bounds = () => getDb().prepare('SELECT ended_at, last_item_at, live_status FROM browsing_sessions WHERE id = ?').get(SESSION);
+    const before = bounds() as { ended_at: string };
+    assert.ok(before.ended_at.startsWith('2026-07-12T10:03'), `the fixture must end at its last line: ${before.ended_at}`);
+
+    // Only the file edit changes.
+    writeRollout([meta(), turn(), counter(1, 1000, 0, 10), edit('+x\n+y'), counter(3, 6000, 2000, 60)]);
+    const result = importCodex();
+    assert.deepEqual([result.totalEventsRefreshed, result.totalEventsImported, result.totalEventsRemoved], [1, 0, 0]);
+    assert.deepEqual(bounds(), before);
+  });
 });
 
 // ─── Subagent boundary (SC-01, SC-02) ────────────────────────────────────

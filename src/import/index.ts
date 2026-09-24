@@ -247,7 +247,15 @@ export function reconcileCodexRollout(
   options: { apply: boolean; codexDir?: string },
   read: CodexRolloutRead = readCodexRollout(filePath),
 ): { events: ParsedImportEvent[]; counts: CodexReconcileCounts } {
-  const events = parseCodexFile(filePath, { codexDir: options.codexDir, content: read.bytes.toString('utf-8') });
+  const diagnostics = { malformedLines: 0 };
+  const events = parseCodexFile(filePath, { codexDir: options.codexDir, content: read.bytes.toString('utf-8'), diagnostics });
+  // A line that does not parse, such as one read mid-write, would make every
+  // row after it look stale. Such a parse cannot prove any row stale, so it
+  // takes the insert-only path.
+  if (diagnostics.malformedLines > 0) {
+    const sessionId = events.find(event => event.event_type === 'session_start')?.session_id ?? null;
+    return { events, counts: { reconciled: false, session_id: sessionId, inserted: 0, updated: 0, deleted: 0, unchanged: 0 } };
+  }
   // The mode backfill and the hash commit with the rows: a hash recorded ahead
   // of a failed backfill would make every later import skip the file.
   const counts = reconcileCodexImport(events, {

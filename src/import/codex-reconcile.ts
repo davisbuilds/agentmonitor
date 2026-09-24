@@ -17,6 +17,7 @@ import {
   listProjectedTurnSourceIds,
   recountProjectedSummaryMessages,
   removeProjectedSourceEvent,
+  restoreProjectedSessionBounds,
 } from '../live/projector.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { maintainSessionTraceSummary } from '../trace-quality/summary.js';
@@ -174,6 +175,7 @@ export function reconcileCodexImport(
 
       if (counts.inserted + counts.updated + counts.deleted > 0) {
         recountProjectedSummaryMessages(db, sessionId);
+        restoreProjectedSessionBounds(db, sessionId);
         maintainSessionTraceSummary(sessionId);
         assertProjectionFollowsRows(sessionId, touched, stale.map(row => row.event_id));
       }

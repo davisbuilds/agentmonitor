@@ -7,7 +7,7 @@ import {
   listImportedCodexSessionIds,
   type ImportedCodexRow,
 } from '../db/queries.js';
-import { discoverCodexLogs } from './codex.js';
+import { discoverCodexLogs, parseCodexFile } from './codex.js';
 import { importedRowMatches, reconciledEvent, sameCost } from './codex-reconcile.js';
 import { readCodexRollout, reconcileCodexRollout, type CodexRolloutRead } from './index.js';
 
@@ -98,6 +98,15 @@ function classifyUpdate(row: ImportedCodexRow, event: NormalizedIngestEvent): Ro
   return 'unclassified';
 }
 
+function sessionIdOf(filePath: string, read: CodexRolloutRead, codexDir: string | undefined): string | null {
+  try {
+    const events = parseCodexFile(filePath, { codexDir, content: read.bytes.toString('utf-8') });
+    return events.find(event => event.event_type === 'session_start')?.session_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function metadataOf(event: NormalizedIngestEvent | undefined): Record<string, unknown> {
   const metadata = event?.metadata;
   return metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata as Record<string, unknown> : {};
@@ -171,6 +180,9 @@ export function repairCodexImportUsage(
       result = apply ? reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir }, read) : peek;
     } catch (err) {
       report.sessions_failed.push({ rollout: path.basename(filePath), error: err instanceof Error ? err.message : String(err) });
+      // Its rollout exists, so the session must not also read as missing one.
+      const failedSession = sessionIdOf(filePath, read, options.codexDir);
+      if (failedSession) seenSessions.add(failedSession);
       continue;
     }
     const { events, counts } = result;

@@ -182,6 +182,22 @@ export function recountProjectedSummaryMessages(db: Database.Database, sessionId
   `).run({ id: sessionId });
 }
 
+/**
+ * Projecting one row moves the session's end to that row's time. After rows
+ * are re-projected out of order, put it back at the latest projected turn.
+ */
+export function restoreProjectedSessionBounds(db: Database.Database, sessionId: string): void {
+  db.prepare(`
+    UPDATE browsing_sessions
+    SET ended_at = COALESCE(latest.at, ended_at),
+        last_item_at = COALESCE(latest.at, last_item_at)
+    FROM (
+      SELECT MAX(COALESCE(ended_at, started_at)) AS at FROM session_turns WHERE session_id = @id
+    ) AS latest
+    WHERE id = @id AND fidelity = 'summary'
+  `).run({ id: sessionId });
+}
+
 export function upsertProjectedSessionSnapshot(
   db: Database.Database,
   session: ProjectedSessionSnapshot,
