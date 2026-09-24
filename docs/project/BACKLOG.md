@@ -69,6 +69,26 @@ hold the detailed history. Do not keep a resolved section here.
 
 ### Ingestion
 
+#### Auto-import re-reads and re-hashes every transcript on every run
+- **What**: `processFile` (`src/import/index.ts`) reads and SHA-256 hashes the
+  whole of every discovered Claude, Codex and Antigravity file on each
+  auto-import (every 10 minutes by default), before it checks `import_state`.
+  Unchanged files cost a full read. `import_state.file_size` is stored but never
+  used to skip one. The run is synchronous, so the server blocks while it hashes.
+- **Why it matters / evidence**: measured 2026-09-24 on this MacBook with the
+  files cached in memory:
+  - Hashing 359 Codex rollouts (about 1 GB; Codex never deletes them) takes
+    0.40–0.44 s per run.
+  - Claude transcripts were capped at about 30 days by `cleanupPeriodDays` until
+    that was raised to 3650. At the current rate (about 234 MB of transcripts
+    and file history per 30 days) they add about 1 s per run for each year kept.
+  - Runs with the files no longer in memory are slower (not measured).
+- **Next**: skip re-reading a file whose size and mtime match the stored state.
+  Keep the full hash for changed files and for `--force`. Store the mtime
+  alongside the size. Land this after the Codex import usage repair, which
+  changes the same path to hash and parse one read of the file
+  (`docs/plans/2026-09-24-codex-import-usage-repair-plan.md`).
+
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
   deepseek-v4-flash-0731, minimax-m3) and the codex/claude daily drivers, but
