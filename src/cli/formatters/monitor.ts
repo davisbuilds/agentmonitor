@@ -13,12 +13,24 @@ function short(value: unknown, max = 36): string {
   return clean.length > max ? `${clean.slice(0, max - 3)}...` : clean;
 }
 
+type TokenBuckets = { in: number; out: number; read: number; write: number };
+
+// Every bucket, cache included, as the UI and the harnesses count tokens.
+const tokenTotal = (b: TokenBuckets) => b.in + b.out + b.read + b.write;
+function tokenLine(b: TokenBuckets): string {
+  return `${tokenTotal(b)} (in ${b.in} / out ${b.out} / cache read ${b.read} / cache write ${b.write})`;
+}
+
 export function formatMonitorStats(stats: MonitorStats): string {
+  const agents = Object.entries(stats.usage_by_agent ?? {})
+    .map(([agent, u]) => ({ agent, buckets: { in: u.tokens_in, out: u.tokens_out, read: u.cache_read_tokens, write: u.cache_write_tokens } }))
+    .sort((a, b) => tokenTotal(b.buckets) - tokenTotal(a.buckets));
   return [
     `Events: ${stats.total_events}`,
     `Sessions: ${stats.total_sessions} total / ${stats.live_sessions} live / ${stats.active_sessions} active`,
     `Agents: ${stats.active_agents}`,
-    `Tokens: ${stats.total_tokens_in} in / ${stats.total_tokens_out} out`,
+    `Tokens: ${tokenLine({ in: stats.total_tokens_in, out: stats.total_tokens_out, read: stats.total_cache_read_tokens ?? 0, write: stats.total_cache_write_tokens ?? 0 })}`,
+    ...agents.map(({ agent, buckets }) => `  ${sanitizeTerminal(agent)}: ${tokenLine(buckets)}`),
     `Cost: $${stats.total_cost_usd.toFixed(4)}`,
   ].join('\n');
 }

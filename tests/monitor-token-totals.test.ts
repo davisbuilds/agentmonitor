@@ -13,6 +13,7 @@ const { closeDb, getDb } = await import('../src/db/connection.js');
 const { getStats, monitorUsageSql } = await import('../src/db/queries.js');
 const { excludeBenchmarkUsageCondition, excludeOverlappingCodexOtelUsageCondition, usageMetricPresenceCondition } = await import('../src/db/usage-reconciliation.js');
 const { getMonitorStats } = await import('../src/db/v2-queries.js');
+const { formatMonitorStats } = await import('../src/cli/formatters/monitor.js');
 
 type Row = {
   id: string; session: string; agent: string; source: string; at: string;
@@ -108,4 +109,19 @@ test('the usage sum scans the covering usage index, not a row-by-row agent index
   const plan = (getDb().prepare(`EXPLAIN QUERY PLAN ${monitorUsageSql(where)}`).all() as Array<{ detail: string }>)
     .map(row => row.detail);
   assert.ok(plan.some(detail => detail.includes('COVERING INDEX idx_events_usage_covering')), plan.join(' | '));
+});
+
+test('amon monitor stats prints the same totals as the UI and JSON, per agent', () => {
+  const lines = formatMonitorStats(getMonitorStats()).split('\n');
+  assert.ok(lines.includes('Tokens: 11031 (in 110 / out 51 / cache read 10070 / cache write 800)'), lines.join('\n'));
+  // Largest agent first, as in the UI.
+  const claude = lines.indexOf('  claude_code: 9843 (in 3 / out 40 / cache read 9000 / cache write 800)');
+  const codex = lines.indexOf('  codex: 1188 (in 107 / out 11 / cache read 1070 / cache write 0)');
+  assert.ok(claude > 0 && codex > claude, lines.join('\n'));
+});
+
+test('amon monitor stats lists agents by size, not by name', () => {
+  const usage = (n: number) => ({ tokens_in: n, tokens_out: 0, cache_read_tokens: 0, cache_write_tokens: 0, cost_usd: 0 });
+  const text = formatMonitorStats({ ...getMonitorStats(), usage_by_agent: { antigravity: usage(1), codex: usage(500) } });
+  assert.ok(text.indexOf('  codex: 500') < text.indexOf('  antigravity: 1'), text);
 });
