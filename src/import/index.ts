@@ -198,19 +198,22 @@ function processCodexFile(filePath: string, options: ImportOptions): ImportFileR
   const isDateScoped = options.from !== undefined || options.to !== undefined;
   const reconciled = options.dryRun || isDateScoped
     ? null
-    : reconcileCodexImport(events, { apply: true });
+    : reconcileCodexImport(events, {
+        apply: true,
+        onCommit: counts => setImportState(filePath, currentHash, bytes.length, 'codex', counts.inserted),
+      });
   if (reconciled?.reconciled) {
     applySessionModes(events);
     result.eventsImported = reconciled.inserted;
     result.eventsRefreshed = reconciled.updated;
     result.eventsRemoved = reconciled.deleted;
     result.skippedDuplicate = reconciled.unchanged;
-  } else {
-    const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
-    result.eventsImported = imported;
-    result.skippedDuplicate = duplicates;
+    return result;
   }
 
+  const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
+  result.eventsImported = imported;
+  result.skippedDuplicate = duplicates;
   recordImportState(filePath, currentHash, bytes.length, 'codex', result.eventsImported, options);
   return result;
 }

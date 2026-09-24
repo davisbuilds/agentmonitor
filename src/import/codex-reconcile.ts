@@ -7,11 +7,13 @@ import {
   resolveEventGitBranch,
   serializeEventMetadata,
   updateImportedCodexRow,
+  type EventRow,
   type ImportedCodexRow,
 } from '../db/queries.js';
-import { syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
+import { codexSummaryItemSourceId, syncCodexSummaryLiveEvent } from '../live/codex-adapter.js';
 import {
   getBrowsingIntegrationMode,
+  listProjectedItemSourceIds,
   listProjectedTurnSourceIds,
   recountProjectedSummaryMessages,
   removeProjectedSourceEvent,
@@ -33,6 +35,13 @@ export interface CodexReconcileOptions {
   apply: boolean;
   /** Test seam: runs inside the session transaction after stale rows are deleted. */
   onAfterDelete?: () => void;
+  /**
+   * Runs inside the session transaction after the rows are written, when
+   * applying. The importer records the file's hash here, so the hash commits
+   * with the rows it describes: two overlapping imports of different snapshots
+   * can then never leave older rows under a newer hash.
+   */
+  onCommit?: (counts: CodexReconcileCounts) => void;
 }
 
 const PREVIEW_ROLLBACK = Symbol('codex-reconcile-preview');
@@ -104,7 +113,7 @@ export function reconcileCodexImport(
   try {
     db.transaction(() => {
       const rows = new Map(listImportedCodexRows(sessionId).map(row => [row.event_id, row]));
-      const touched = new Set<string>();
+      const touched = new Map<string, EventRow>();
       const stale = [...rows.values()].filter(row => !parsed.has(row.event_id));
       deleteImportedCodexRows(stale.map(row => row.id));
       for (const row of stale) removeProjectedSourceEvent(db, sessionId, row.event_id);
@@ -114,9 +123,10 @@ export function reconcileCodexImport(
       for (const event of parsed.values()) {
         const existing = rows.get(event.event_id!);
         if (!existing) {
-          if (insertEvent({ ...event }, { gitBranch })) {
+          const inserted = insertEvent({ ...event }, { gitBranch });
+          if (inserted) {
             counts.inserted++;
-            touched.add(event.event_id!);
+            touched.set(event.event_id!, inserted);
           }
           continue;
         }
@@ -127,7 +137,7 @@ export function reconcileCodexImport(
         const updated = updateImportedCodexRow(existing.id, event);
         if (!updated) continue;
         counts.updated++;
-        touched.add(existing.event_id);
+        touched.set(existing.event_id, updated);
         removeProjectedSourceEvent(db, sessionId, existing.event_id);
         syncCodexSummaryLiveEvent(db, updated);
       }
@@ -138,6 +148,7 @@ export function reconcileCodexImport(
         assertProjectionFollowsRows(sessionId, touched, stale.map(row => row.event_id));
       }
       if (!options.apply) throw PREVIEW_ROLLBACK;
+      options.onCommit?.(counts);
     })();
   } catch (err) {
     if (err !== PREVIEW_ROLLBACK) throw err;
@@ -146,19 +157,27 @@ export function reconcileCodexImport(
 }
 
 /**
- * `insertEvent` logs a projection failure instead of raising it. Inside this
- * transaction that would commit rows without their projection, so check what
- * this run wrote and roll the session back on any mismatch. Rows imported
- * before the summary projection existed can lack one; they are not this run's
- * to project, so only the rows it touched are checked.
+ * `insertEvent` logs a projection failure instead of raising it, and a failure
+ * can land between a turn and its item. Inside this transaction that would
+ * commit rows without their projection, so check what this run wrote, turns and
+ * items both, and roll the session back on any mismatch. An updated row's old
+ * item was removed first, so an item present here carries its current values.
+ * Rows imported before the summary projection existed can lack one; they are
+ * not this run's to project, so only the rows it touched are checked.
  */
-function assertProjectionFollowsRows(sessionId: string, written: Set<string>, deleted: string[]): void {
-  const projected = new Set(listProjectedTurnSourceIds(getDb(), sessionId));
-  const missing = [...written].filter(id => !projected.has(id));
-  const lingering = deleted.filter(id => projected.has(id));
-  if (missing.length > 0 || lingering.length > 0) {
+function assertProjectionFollowsRows(sessionId: string, written: Map<string, EventRow>, deleted: string[]): void {
+  const db = getDb();
+  const turns = new Set(listProjectedTurnSourceIds(db, sessionId));
+  const items = new Set(listProjectedItemSourceIds(db, sessionId));
+  let missing = 0;
+  for (const [eventId, row] of written) {
+    const itemId = codexSummaryItemSourceId(row);
+    if (!turns.has(eventId) || (itemId !== null && !items.has(itemId))) missing++;
+  }
+  const lingering = deleted.filter(id => turns.has(id) || items.has(id)).length;
+  if (missing > 0 || lingering > 0) {
     throw new Error(
-      `Codex projection for ${sessionId} does not follow its rows (${missing.length} missing, ${lingering.length} left behind)`,
+      `Codex projection for ${sessionId} does not follow its rows (${missing} missing, ${lingering} left behind)`,
     );
   }
 }

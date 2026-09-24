@@ -238,6 +238,50 @@ describe('Codex import reconciles a session to its rollout', () => {
     assert.deepEqual(shape(importRows()), expectedRows());
   });
 
+  test('a projected item that fails to write rolls the whole session back', () => {
+    writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60)]);
+    importCodex();
+    const before = importRows();
+    // The rollout grew: rows 3 and 4 are new inserts.
+    writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60), counter(4, 9000, 3000, 90), counter(5, 12_000, 4000, 120)]);
+    // Only a newly inserted row's item fails. Its turn is written first, and
+    // insertEvent logs the item failure and returns the row, so nothing raises
+    // unless the post-write check notices the missing item.
+    const added = `import-cdx-${crypto.createHash('sha256').update(`codex:${SESSION}:token:3`).digest('hex').slice(0, 32)}`;
+    assert.ok(parseCodexFile(rollout, { codexDir }).some(e => e.event_id === added), 'the fixture must insert this row');
+    getDb().exec(`
+      CREATE TEMP TRIGGER fail_codex_item BEFORE INSERT ON session_items
+      WHEN NEW.source_item_id = '${added}'
+      BEGIN SELECT RAISE(ABORT, 'injected item failure'); END;
+    `);
+    try {
+      assert.throws(() => reconcileCodexImport(parseCodexFile(rollout, { codexDir }), { apply: true }), /projection/);
+    } finally {
+      getDb().exec('DROP TRIGGER IF EXISTS fail_codex_item');
+    }
+    assert.deepEqual(importRows(), before);
+  });
+
+  test('the import hash commits with the rows it describes', () => {
+    writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60)]);
+    importCodex();
+    const before = importRows();
+    const hashBefore = getDb().prepare('SELECT file_hash FROM import_state WHERE file_path = ?').get(rollout);
+    writeRollout([meta(), turn(), counter(1, 1500, 500, 15)]);
+    getDb().exec(`
+      CREATE TEMP TRIGGER fail_import_state BEFORE UPDATE ON import_state
+      BEGIN SELECT RAISE(ABORT, 'injected hash failure'); END;
+    `);
+    try {
+      assert.throws(() => importCodex(), /injected hash failure/);
+    } finally {
+      getDb().exec('DROP TRIGGER IF EXISTS fail_import_state');
+    }
+    // Rows and hash are one unit: a newer hash can never describe older rows.
+    assert.deepEqual(importRows(), before);
+    assert.deepEqual(getDb().prepare('SELECT file_hash FROM import_state WHERE file_path = ?').get(rollout), hashBefore);
+  });
+
   test('a preview reports what applying would do and writes nothing', () => {
     writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60)]);
     importCodex();

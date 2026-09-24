@@ -368,3 +368,9 @@ export function listProjectedTurnSourceIds(db: Database.Database, sessionId: str
   return (db.prepare('SELECT source_turn_id FROM session_turns WHERE session_id = ? AND source_turn_id IS NOT NULL')
     .all(sessionId) as Array<{ source_turn_id: string }>).map(row => row.source_turn_id);
 }
+
+/** Source ids of a session's projected items. */
+export function listProjectedItemSourceIds(db: Database.Database, sessionId: string): string[] {
+  return (db.prepare('SELECT source_item_id FROM session_items WHERE session_id = ? AND source_item_id IS NOT NULL')
+    .all(sessionId) as Array<{ source_item_id: string }>).map(row => row.source_item_id);
+}
