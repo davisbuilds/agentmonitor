@@ -196,6 +196,9 @@ describe('a filtered stats read in flight', () => {
     store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
     store.endFilteredStatsRead(null);
     expect(store.getStats().total_cost_usd).toBe(3.5);
+  });
+});
+
 describe('server build', () => {
   it('reports a stale server build, and a restart clears it', () => {
     expect(store.getServerBuildStale()).toBe(false);
