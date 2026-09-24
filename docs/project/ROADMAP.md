@@ -17,8 +17,16 @@ pull requests; current behavior belongs to the system references.
   retires the duplicate rows and stale tokens left behind when Codex rewrote a
   rollout. `amon costs repair-codex-usage` corrects stored rows with a preview
   first. It checks every change against Codex's own final counter or its
-  per-request OTEL. Rehearsed on a copy of a local store, it cut the Codex
-  Monitor total by about 45%.
+  per-request OTEL. Applied to a local store after a rehearsal on a copy, it
+  cut the Codex Monitor total by about 45%. Every changed plain session then
+  equalled Codex's own final counter.
+
+- **Monitor tokens count every bucket (2026-09-24):** the Monitor's token
+  headline now includes cache reads and writes, as Claude's `/stats` and
+  Codex's `/usage` do. Before, it showed uncached input and output only, a few
+  percent of what was processed. A breakdown splits the buckets and each agent
+  and states the machine scope. `amon monitor stats` and the SSE broadcast
+  carry the same figures.
 
 - **Cost provenance and self-healing prices (2026-09-23):** each stored cost
   records whether the producer reported it or our tables estimated it

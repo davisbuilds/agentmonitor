@@ -85,9 +85,9 @@ hold the detailed history. Do not keep a resolved section here.
   - Runs with the files no longer in memory are slower (not measured).
 - **Next**: skip re-reading a file whose size and mtime match the stored state.
   Keep the full hash for changed files and for `--force`. Store the mtime
-  alongside the size. Land this after the Codex import usage repair, which
-  changes the same path to hash and parse one read of the file
-  (`docs/plans/2026-09-24-codex-import-usage-repair-plan.md`).
+  alongside the size. The Codex path already hashes and parses one read of
+  the file (`readCodexRollout`, shipped with the Codex import usage repair), so
+  a skip belongs before that read.
 
 #### Codex subagent boundary rests on the current rollout layout
 - **What**: the importer finds a `thread_spawn` subagent's own activity from

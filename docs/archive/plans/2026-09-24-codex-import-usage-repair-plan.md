@@ -3,9 +3,9 @@ date: 2026-09-24
 author: claude
 topic: codex-import-usage-repair
 stage: plan
-status: in-progress
+status: complete
 source: conversation
-spec: docs/specs/2026-09-24-codex-import-usage-repair-spec.md
+spec: docs/archive/specs/2026-09-24-codex-import-usage-repair-spec.md
 risk_profile: high
 readiness: ready
 ---
@@ -697,6 +697,33 @@ the Task 4 numbers.
 **Done When**
 
 - The live totals match the report, and the user has confirmed.
+
+**Result (2026-09-24, host `macbook`, `main` at `e87f563`)**
+
+Applied and confirmed. The backup was deleted after the user confirmed.
+
+- **Preview:** it matched the rehearsal in every class, except for the rows
+  appended by one session that was resumed after the rollout snapshot.
+- **Apply:**
+  - no failed sessions, `unclassified` 0, `counter_mismatches` empty, and no
+    OTEL ratio moved away from 1;
+  - the Codex Monitor total fell by about 45%;
+  - its change equalled the import change plus the counted-OTEL change, to
+    the cent;
+  - other agents were unchanged.
+- **Second preview:** with the one rollout still being written excluded, the
+  other rollouts reported no changes. After the restart, the server's normal
+  import took in that session's new rows, and a fresh preview reported none.
+- **Final check, from independent angles:**
+  - every rollout's stored rows equal its parse, apart from sessions written in
+    the last seconds;
+  - every plain session equals Codex's own final counter, apart from those same
+    live sessions and the three whose counter restarts;
+  - no subagent keeps a copied or orphaned row, and those with OTEL sit at
+    0.92–1.02×;
+  - non-Codex, Codex OTEL and benchmark rows are identical to the backup;
+  - the deleted rows equal the report's count exactly;
+  - `quick_check` is ok and there are no foreign-key violations.
 
 ## Risks And Mitigations
 

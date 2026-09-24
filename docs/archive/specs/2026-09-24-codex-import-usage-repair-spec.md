@@ -3,7 +3,7 @@ date: 2026-09-24
 author: claude
 topic: codex-import-usage-repair
 stage: spec
-status: in-progress
+status: complete
 source: conversation
 risk_profile: high
 readiness: ready
