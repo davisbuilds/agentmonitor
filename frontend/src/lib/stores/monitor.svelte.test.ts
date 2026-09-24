@@ -93,6 +93,13 @@ describe('incrementEvent — optimistic stats totals', () => {
     expect(s.total_cost_usd).toBe(1.25);
   });
 
+  it('adds cache buckets and the per-agent split too', () => {
+    store.incrementEvent(ev(1, { agent_type: 'claude_code', tokens_in: 1, tokens_out: 2, cache_read_tokens: 300, cache_write_tokens: 40 }));
+    const s = store.getStats();
+    expect([s.total_cache_read_tokens, s.total_cache_write_tokens]).toEqual([300, 40]);
+    expect(s.usage_by_agent.claude_code?.cache_read_tokens).toBe(300);
+  });
+
   it('treats missing token/cost fields as zero', () => {
     store.incrementEvent(ev(1));
     const s = store.getStats();

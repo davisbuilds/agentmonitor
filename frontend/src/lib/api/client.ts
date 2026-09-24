@@ -1,14 +1,27 @@
 // --- V1 API types (existing Monitor tab) ---
 
+/** One agent's usage in a Monitor total. `tokens_in` is uncached input only. */
+export interface MonitorAgentUsage {
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+}
+
 export interface Stats {
   total_events: number;
   active_sessions: number;
   live_sessions: number;
   total_sessions: number;
   active_agents: number;
+  /** Uncached input only; cached input is in `total_cache_read_tokens`. */
   total_tokens_in: number;
   total_tokens_out: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
   total_cost_usd: number;
+  usage_by_agent: Record<string, MonitorAgentUsage>;
   tool_breakdown: Record<string, number>;
   agent_breakdown: Record<string, number>;
   model_breakdown: Record<string, number>;
@@ -56,6 +69,8 @@ export interface AgentEvent {
   status: string;
   tokens_in: number;
   tokens_out: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
   model?: string;
   cost_usd?: number;
   project?: string;

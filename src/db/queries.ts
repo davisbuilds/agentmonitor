@@ -805,15 +805,76 @@ export function listTraceQualityEventSourcesForSession(sessionId: string): Event
 
 // --- Stats ---
 
-export interface Stats {
+/** One agent's usage in a Monitor total. `tokens_in` is uncached input only. */
+export interface MonitorAgentUsage {
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+}
+
+export interface MonitorUsageTotals {
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_cost_usd: number;
+  usage_by_agent: Record<string, MonitorAgentUsage>;
+}
+
+/**
+ * One pass grouped by agent; the totals are the sum of the groups. The unary
+ * `+` keeps SQLite from grouping through an agent_type index that does not
+ * cover the token columns: that plan looks up every row (seconds on a large
+ * store) instead of scanning the covering usage index (milliseconds).
+ */
+export function monitorUsageSql(usageWhere: string): string {
+  return `
+    SELECT
+      e.agent_type as agent_type,
+      COALESCE(SUM(e.tokens_in), 0) as tokens_in,
+      COALESCE(SUM(e.tokens_out), 0) as tokens_out,
+      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+      COALESCE(SUM(e.cost_usd), 0) as cost_usd
+    FROM events e ${usageWhere}
+    GROUP BY +e.agent_type
+  `;
+}
+
+/**
+ * Sum the Monitor's usage rows (`usageWhere` already reconciles overlapping
+ * Codex OTEL away), per agent and in total. The v2 stats read and the SSE
+ * broadcast share this, so the bar they both feed never changes shape.
+ */
+export function sumMonitorUsage(db: Database.Database, usageWhere: string, params: unknown[]): MonitorUsageTotals {
+  const rows = db.prepare(monitorUsageSql(usageWhere)).all(...params) as Array<MonitorAgentUsage & { agent_type: string }>;
+  const totals: MonitorUsageTotals = {
+    total_tokens_in: 0,
+    total_tokens_out: 0,
+    total_cache_read_tokens: 0,
+    total_cache_write_tokens: 0,
+    total_cost_usd: 0,
+    usage_by_agent: {},
+  };
+  for (const { agent_type, ...usage } of rows) {
+    totals.usage_by_agent[agent_type] = usage;
+    totals.total_tokens_in += usage.tokens_in;
+    totals.total_tokens_out += usage.tokens_out;
+    totals.total_cache_read_tokens += usage.cache_read_tokens;
+    totals.total_cache_write_tokens += usage.cache_write_tokens;
+    totals.total_cost_usd += usage.cost_usd;
+  }
+  return totals;
+}
+
+export interface Stats extends MonitorUsageTotals {
   total_events: number;
   active_sessions: number;
   total_sessions: number;
   live_sessions: number;
   active_agents: number;
-  total_tokens_in: number;
-  total_tokens_out: number;
-  total_cost_usd: number;
   tool_breakdown: Record<string, number>;
   agent_breakdown: Record<string, number>;
   model_breakdown: Record<string, number>;
@@ -860,13 +921,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   const usageWhere = `${where}
     AND ${usageMetricPresenceCondition('e')}
     AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
-  const usageTotals = db.prepare(`
-    SELECT
-      COALESCE(SUM(e.tokens_in), 0) as total_tokens_in,
-      COALESCE(SUM(e.tokens_out), 0) as total_tokens_out,
-      COALESCE(SUM(e.cost_usd), 0) as total_cost_usd
-    FROM events e ${usageWhere}
-  `).get(...params) as { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number };
+  const usageTotals = sumMonitorUsage(db, usageWhere, params);
 
   const activeSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
@@ -935,9 +990,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     total_sessions: totalSessions,
     live_sessions: liveSessions,
     active_agents: activeAgents,
-    total_tokens_in: usageTotals.total_tokens_in,
-    total_tokens_out: usageTotals.total_tokens_out,
-    total_cost_usd: usageTotals.total_cost_usd,
+    ...usageTotals,
     tool_breakdown: toolBreakdown,
     agent_breakdown: agentBreakdown,
     model_breakdown: modelBreakdown,
