@@ -56,6 +56,15 @@ export function applyBroadcastStats(s: Stats): void {
   }
   stats = s;
 }
+
+// Whether the server runs an older build than the one on disk. It rides the
+// stats snapshot but is not a stat: it applies whatever the Monitor's filters.
+let serverBuildStale = $state(false);
+export function getServerBuildStale(): boolean { return serverBuildStale; }
+export function setServerBuild(build: Stats['server_build']): void {
+  serverBuildStale = Boolean(build?.tracked && build.stale);
+}
+
 export function incrementEvent(event: AgentEvent): void {
   // A live event is new, so a start-time filter always admits it; an agent filter may not.
   const agent = statsParams(filters).agent;

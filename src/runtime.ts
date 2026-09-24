@@ -11,6 +11,7 @@ import { createApp } from './app.js';
 import { runImport } from './import/index.js';
 import { startProviderQuotaPolling, stopProviderQuotaPolling } from './provider-quotas/service.js';
 import { acquireRuntimeOwnership } from './runtime-ownership.js';
+import { startServerBuildWatch } from './build-fingerprint.js';
 import { startWatcher, stopWatcher } from './watcher/service.js';
 import { ensureSessionTraceSummaryBackfill } from './trace-quality/summary.js';
 import { recalculateEventCosts } from './pricing/recalc.js';
@@ -26,7 +27,10 @@ export interface RuntimeHandle {
 }
 
 export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Promise<RuntimeHandle> {
-  const ownership = acquireRuntimeOwnership(config.dbPath);
+  // Record the build this process loaded before anything can rebuild it, and
+  // publish it in the lock so one-shot commands can tell they differ.
+  const build = startServerBuildWatch();
+  const ownership = acquireRuntimeOwnership(config.dbPath, { build });
   let server: Server | undefined;
   let sessionChecker: ReturnType<typeof setInterval> | undefined;
   let autoImportTimer: ReturnType<typeof setInterval> | undefined;

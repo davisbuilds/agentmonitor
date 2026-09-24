@@ -28,6 +28,8 @@ export interface Stats {
   branches: string[];
   quota_monitor?: QuotaMonitorData[];
   usage_monitor?: QuotaMonitorData[];
+  /** On the SSE stats snapshot only: whether the server runs an older build than the one on disk. */
+  server_build?: { tracked: boolean; stale: boolean };
 }
 
 export interface QuotaMonitorWindow {
