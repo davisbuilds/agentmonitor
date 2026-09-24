@@ -9,6 +9,8 @@
     setEvents,
     setSessions,
     setStats,
+    beginFilteredStatsRead,
+    endFilteredStatsRead,
     setCostData,
     setToolStats,
     setQuotaMonitor,
@@ -123,11 +125,16 @@
     const requested = getFilters();
     filteredStatsInFlight = true;
     lastFilteredStatsAt = Date.now();
+    beginFilteredStatsRead();
     fetchStats(requested)
       .then((next) => {
-        if (JSON.stringify(statsParams(getFilters())) === JSON.stringify(statsParams(requested))) setStats(next);
+        const current = JSON.stringify(statsParams(getFilters())) === JSON.stringify(statsParams(requested));
+        endFilteredStatsRead(current ? next : null);
       })
-      .catch((err) => console.error('Failed to refresh filtered monitor stats:', err))
+      .catch((err) => {
+        endFilteredStatsRead(null);
+        console.error('Failed to refresh filtered monitor stats:', err);
+      })
       .finally(() => { filteredStatsInFlight = false; });
   });
 

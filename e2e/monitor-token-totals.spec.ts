@@ -3,7 +3,7 @@ import { once } from 'node:events';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Server } from 'node:http';
-import { useIsolatedDb } from './isolated-db';
+import { useIsolatedDb } from './isolated-db.js';
 
 let tempDir = '';
 let baseUrl = '';

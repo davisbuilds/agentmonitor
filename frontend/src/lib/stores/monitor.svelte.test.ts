@@ -165,3 +165,36 @@ describe('stats under a Monitor filter', () => {
     expect([s.total_events, s.total_tokens_in, s.total_cost_usd]).toEqual([1, 5, 0.25]);
   });
 });
+
+describe('a filtered stats read in flight', () => {
+  const snapshot = (cost: number) => ({ ...store.getStats(), total_events: 10, total_cost_usd: cost });
+
+  it('keeps matching events that arrive while it is in flight', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.beginFilteredStatsRead();
+    store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
+    store.incrementEvent(ev(2, { agent_type: 'claude_code', cost_usd: 9 }));
+    store.endFilteredStatsRead(snapshot(3));
+    const s = store.getStats();
+    expect([s.total_events, s.total_cost_usd]).toEqual([11, 3.5]);
+  });
+
+  it('does not re-apply them to a later read', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.beginFilteredStatsRead();
+    store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
+    store.endFilteredStatsRead(snapshot(3));
+    store.beginFilteredStatsRead();
+    store.endFilteredStatsRead(snapshot(4));
+    expect(store.getStats().total_cost_usd).toBe(4);
+  });
+
+  it('leaves the totals alone when the read is abandoned', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.setStats(snapshot(3));
+    store.beginFilteredStatsRead();
+    store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
+    store.endFilteredStatsRead(null);
+    expect(store.getStats().total_cost_usd).toBe(3.5);
+  });
+});

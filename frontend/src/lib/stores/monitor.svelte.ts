@@ -28,6 +28,21 @@ export function setStats(s: Stats): void { stats = s; }
 
 let statsRefreshSignal = $state(0);
 export function getStatsRefreshSignal(): number { return statsRefreshSignal; }
+// Matching live events counted while a filtered stats read is in flight. The
+// read's snapshot may predate them, so they are re-applied on top of it.
+let eventsDuringFilteredRead: AgentEvent[] | null = null;
+export function beginFilteredStatsRead(): void { eventsDuringFilteredRead = []; }
+/** Apply a filtered read's snapshot, or abandon the read when `next` is null. */
+export function endFilteredStatsRead(next: Stats | null): void {
+  const arrived = eventsDuringFilteredRead ?? [];
+  eventsDuringFilteredRead = null;
+  if (!next) return;
+  stats = arrived.reduce(
+    (acc, event) => ({ ...addEventUsage(acc, event), total_events: acc.total_events + 1 }),
+    next,
+  );
+}
+
 /**
  * Apply the periodic SSE stats snapshot, which the server always computes
  * unfiltered. Under an agent or start-time filter it would replace the bar's
@@ -45,6 +60,7 @@ export function incrementEvent(event: AgentEvent): void {
   // A live event is new, so a start-time filter always admits it; an agent filter may not.
   const agent = statsParams(filters).agent;
   if (agent && event.agent_type !== agent) return;
+  eventsDuringFilteredRead?.push(event);
   stats = { ...addEventUsage(stats, event), total_events: stats.total_events + 1 };
 }
 
