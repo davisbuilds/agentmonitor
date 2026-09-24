@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { once } from 'node:events';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import type { Server } from 'node:http';
+import { useIsolatedDb } from './isolated-db';
 
 let tempDir = '';
 let baseUrl = '';
@@ -29,8 +29,7 @@ test.beforeAll(async () => {
   if (!fs.existsSync(builtIndex)) {
     throw new Error('frontend/dist/index.html is missing. Run `pnpm build` before Playwright tests.');
   }
-  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-e2e-filtered-stats-'));
-  process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
+  tempDir = await useIsolatedDb('agentmonitor-e2e-filtered-stats-');
 
   const { initSchema } = await import('../src/db/schema.js');
   ({ getDb, closeDb } = await import('../src/db/connection.js'));
