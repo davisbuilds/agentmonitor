@@ -131,3 +131,37 @@ describe('handleSessionUpdate — idle_check', () => {
     expect(store.getAutoImportSignal()).toBe(2);
   });
 });
+
+describe('stats under a Monitor filter', () => {
+  const snapshot = (cost: number) => ({ ...store.getStats(), total_cost_usd: cost });
+
+  it('takes the unfiltered SSE snapshot when no stats filter is set', () => {
+    store.setFilters({ event_type: 'tool_use' }); // narrows lists, not stats
+    store.applyBroadcastStats(snapshot(100));
+    expect(store.getStats().total_cost_usd).toBe(100);
+    expect(store.getStatsRefreshSignal()).toBe(0);
+  });
+
+  it('keeps the filtered totals and asks for a filtered refresh instead', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.setStats(snapshot(3));
+    store.applyBroadcastStats(snapshot(100));
+    expect(store.getStats().total_cost_usd).toBe(3);
+    expect(store.getStatsRefreshSignal()).toBe(1);
+  });
+
+  it('does the same for a start-time filter', () => {
+    store.setFilters({ date_from: '2026-09-01' });
+    store.setStats(snapshot(3));
+    store.applyBroadcastStats(snapshot(100));
+    expect(store.getStats().total_cost_usd).toBe(3);
+  });
+
+  it('adds a live event only when it matches the agent filter', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.incrementEvent(ev(1, { agent_type: 'claude_code', tokens_in: 50, cost_usd: 1 }));
+    store.incrementEvent(ev(2, { agent_type: 'codex', tokens_in: 5, cost_usd: 0.25 }));
+    const s = store.getStats();
+    expect([s.total_events, s.total_tokens_in, s.total_cost_usd]).toEqual([1, 5, 0.25]);
+  });
+});

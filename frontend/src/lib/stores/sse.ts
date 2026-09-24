@@ -1,4 +1,4 @@
-import { setStats, incrementEvent, addEvent, handleSessionUpdate, handleEventForSession, setConnectionStatus, setQuotaMonitor, signalReconnect } from './monitor.svelte';
+import { applyBroadcastStats, incrementEvent, addEvent, handleSessionUpdate, handleEventForSession, setConnectionStatus, setQuotaMonitor, signalReconnect } from './monitor.svelte';
 import type { AgentEvent, Stats } from '../api/client';
 
 let source: EventSource | null = null;
@@ -64,7 +64,7 @@ function dispatch(msg: { type: string; payload: unknown }): void {
     }
     case 'stats': {
       const statsPayload = msg.payload as Stats & { quota_monitor?: unknown[]; usage_monitor?: unknown[] };
-      setStats(statsPayload);
+      applyBroadcastStats(statsPayload);
       if (statsPayload.quota_monitor || statsPayload.usage_monitor) {
         setQuotaMonitor((statsPayload.quota_monitor || statsPayload.usage_monitor) as ReturnType<typeof import('./monitor.svelte').getQuotaMonitor>);
       }

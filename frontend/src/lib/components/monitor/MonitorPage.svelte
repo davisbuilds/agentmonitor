@@ -18,9 +18,10 @@
     setFilterOptions,
     getAutoImportSignal,
     getReconnectSignal,
+    getStatsRefreshSignal,
     refreshOccupancy,
   } from '../../stores/monitor.svelte';
-  import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions } from '../../api/client';
+  import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions, statsParams } from '../../api/client';
   import { buildCostFilters } from '../../monitor-analytics';
 
   interface Props {
@@ -103,6 +104,31 @@
       lastAutoImportSignal = signal;
       void reload(getFilters());
     }
+  });
+
+  // Under an agent or start-time filter the store drops the unfiltered SSE
+  // stats snapshot and asks for this instead. A filtered read is synchronous
+  // SQLite work that can take seconds on a large store, so never overlap one
+  // and take at most one per interval; live events keep the bar current in
+  // between. A response for a filter that has since changed is discarded.
+  const FILTERED_STATS_REFRESH_MS = 30_000;
+  let lastStatsRefreshSignal = getStatsRefreshSignal();
+  let filteredStatsInFlight = false;
+  let lastFilteredStatsAt = 0;
+  $effect(() => {
+    const signal = getStatsRefreshSignal();
+    if (signal === lastStatsRefreshSignal) return;
+    lastStatsRefreshSignal = signal;
+    if (filteredStatsInFlight || Date.now() - lastFilteredStatsAt < FILTERED_STATS_REFRESH_MS) return;
+    const requested = getFilters();
+    filteredStatsInFlight = true;
+    lastFilteredStatsAt = Date.now();
+    fetchStats(requested)
+      .then((next) => {
+        if (JSON.stringify(statsParams(getFilters())) === JSON.stringify(statsParams(requested))) setStats(next);
+      })
+      .catch((err) => console.error('Failed to refresh filtered monitor stats:', err))
+      .finally(() => { filteredStatsInFlight = false; });
   });
 
   // Refetch after an SSE reconnect: the v1 stream has no replay, so events that

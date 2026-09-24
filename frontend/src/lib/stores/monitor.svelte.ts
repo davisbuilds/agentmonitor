@@ -1,4 +1,4 @@
-import { fetchSessionDetail, fetchLiveSessions, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
+import { fetchSessionDetail, fetchLiveSessions, statsParams, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
 import type { CostWindow } from '../monitor-analytics';
 import { parseTimestamp } from '../format';
 import { mergeSessionAggregates } from '../monitor-session-merge';
@@ -25,7 +25,26 @@ let stats = $state<Stats>({
 
 export function getStats(): Stats { return stats; }
 export function setStats(s: Stats): void { stats = s; }
+
+let statsRefreshSignal = $state(0);
+export function getStatsRefreshSignal(): number { return statsRefreshSignal; }
+/**
+ * Apply the periodic SSE stats snapshot, which the server always computes
+ * unfiltered. Under an agent or start-time filter it would replace the bar's
+ * filtered totals with everyone's, so it is dropped and a filtered refresh is
+ * requested instead.
+ */
+export function applyBroadcastStats(s: Stats): void {
+  if (Object.keys(statsParams(filters)).length > 0) {
+    statsRefreshSignal += 1;
+    return;
+  }
+  stats = s;
+}
 export function incrementEvent(event: AgentEvent): void {
+  // A live event is new, so a start-time filter always admits it; an agent filter may not.
+  const agent = statsParams(filters).agent;
+  if (agent && event.agent_type !== agent) return;
   stats = { ...addEventUsage(stats, event), total_events: stats.total_events + 1 };
 }
 
