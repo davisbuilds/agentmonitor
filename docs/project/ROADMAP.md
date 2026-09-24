@@ -18,8 +18,9 @@ pull requests; current behavior belongs to the system references.
   rollout. `amon costs repair-codex-usage` corrects stored rows with a preview
   first. It checks every change against Codex's own final counter or its
   per-request OTEL. Applied to a local store after a rehearsal on a copy, it
-  cut the Codex Monitor total by about 45%. Every changed plain session then
-  equalled Codex's own final counter.
+  cut the Codex Monitor total by about 45%. Every changed plain session whose
+  counter never restarts then equalled Codex's own final counter; the few
+  whose counter restarts mid-session are skipped by that check.
 
 - **Monitor tokens count every bucket (2026-09-24):** the Monitor's token
   headline now includes cache reads and writes, as Claude's `/stats` and
