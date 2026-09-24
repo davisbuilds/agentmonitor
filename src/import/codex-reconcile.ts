@@ -51,7 +51,7 @@ const OWN_ID_PREFIX = 'import-cdx-';
 const SUMMARY_MODES = new Set(['codex-import', 'codex-otel', 'codex-summary']);
 
 /** True when the stored row already says what the parse says. */
-function rowMatches(row: ImportedCodexRow, event: NormalizedIngestEvent): boolean {
+export function importedRowMatches(row: ImportedCodexRow, event: NormalizedIngestEvent): boolean {
   return row.event_type === event.event_type
     && row.tool_name === (event.tool_name ?? null)
     && row.status === event.status
@@ -130,7 +130,7 @@ export function reconcileCodexImport(
           }
           continue;
         }
-        if (rowMatches(existing, event)) {
+        if (importedRowMatches(existing, event)) {
           counts.unchanged++;
           continue;
         }

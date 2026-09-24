@@ -5,7 +5,7 @@ import { eventIdExists, insertEvent, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import type { ParsedImportEvent } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashContent as hashCodexContent } from './codex.js';
-import { reconcileCodexImport } from './codex-reconcile.js';
+import { reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
@@ -173,20 +173,12 @@ function processFile(
  * exact bytes, so content that changes mid-run is seen as changed next time.
  */
 function processCodexFile(filePath: string, options: ImportOptions): ImportFileResult {
-  const bytes = fs.readFileSync(filePath);
-  const currentHash = hashCodexContent(bytes);
-  if (isUnchanged(filePath, currentHash, options)) return unchangedResult(filePath, 'codex');
-
-  const events = parseCodexFile(filePath, {
-    from: options.from,
-    to: options.to,
-    codexDir: options.codexDir,
-    content: bytes.toString('utf-8'),
-  });
+  const read = readCodexRollout(filePath);
+  if (isUnchanged(filePath, read.hash, options)) return unchangedResult(filePath, 'codex');
   const result: ImportFileResult = {
     path: filePath,
     source: 'codex',
-    eventsFound: events.length,
+    eventsFound: 0,
     eventsImported: 0,
     eventsRefreshed: 0,
     eventsRemoved: 0,
@@ -196,26 +188,72 @@ function processCodexFile(filePath: string, options: ImportOptions): ImportFileR
 
   // A date-scoped parse is partial, so it can add rows but never prove one stale.
   const isDateScoped = options.from !== undefined || options.to !== undefined;
-  const reconciled = options.dryRun || isDateScoped
-    ? null
-    : reconcileCodexImport(events, {
-        apply: true,
-        onCommit: counts => setImportState(filePath, currentHash, bytes.length, 'codex', counts.inserted),
-      });
-  if (reconciled?.reconciled) {
-    applySessionModes(events);
-    result.eventsImported = reconciled.inserted;
-    result.eventsRefreshed = reconciled.updated;
-    result.eventsRemoved = reconciled.deleted;
-    result.skippedDuplicate = reconciled.unchanged;
-    return result;
+  if (!options.dryRun && !isDateScoped) {
+    const { events, counts } = reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir }, read);
+    result.eventsFound = events.length;
+    if (counts.reconciled) {
+      result.eventsImported = counts.inserted;
+      result.eventsRefreshed = counts.updated;
+      result.eventsRemoved = counts.deleted;
+      result.skippedDuplicate = counts.unchanged;
+      return result;
+    }
+    return appendCodexEvents(filePath, events, read, options, result);
   }
 
+  const events = parseCodexFile(filePath, {
+    from: options.from,
+    to: options.to,
+    codexDir: options.codexDir,
+    content: read.bytes.toString('utf-8'),
+  });
+  result.eventsFound = events.length;
+  return appendCodexEvents(filePath, events, read, options, result);
+}
+
+/** The insert-only path, for partial parses and sessions a rollout cannot own. */
+function appendCodexEvents(
+  filePath: string,
+  events: ParsedImportEvent[],
+  read: CodexRolloutRead,
+  options: ImportOptions,
+  result: ImportFileResult,
+): ImportFileResult {
   const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
   result.eventsImported = imported;
   result.skippedDuplicate = duplicates;
-  recordImportState(filePath, currentHash, bytes.length, 'codex', result.eventsImported, options);
+  recordImportState(filePath, read.hash, read.bytes.length, 'codex', imported, options);
   return result;
+}
+
+interface CodexRolloutRead {
+  bytes: Buffer;
+  hash: string;
+}
+
+function readCodexRollout(filePath: string): CodexRolloutRead {
+  const bytes = fs.readFileSync(filePath);
+  return { bytes, hash: hashCodexContent(bytes) };
+}
+
+/**
+ * Reconcile the session a rollout owns with one read of the file. When
+ * applying, the file's import hash commits in the same transaction as the rows,
+ * so it always describes the rows that are stored. Shared by the importer and
+ * the usage repair, so the two cannot disagree about what a rollout means.
+ */
+export function reconcileCodexRollout(
+  filePath: string,
+  options: { apply: boolean; codexDir?: string },
+  read: CodexRolloutRead = readCodexRollout(filePath),
+): { events: ParsedImportEvent[]; counts: CodexReconcileCounts } {
+  const events = parseCodexFile(filePath, { codexDir: options.codexDir, content: read.bytes.toString('utf-8') });
+  const counts = reconcileCodexImport(events, {
+    apply: options.apply,
+    onCommit: committed => setImportState(filePath, read.hash, read.bytes.length, 'codex', committed.inserted),
+  });
+  if (options.apply && counts.reconciled) applySessionModes(events);
+  return { events, counts };
 }
 
 function isUnchanged(filePath: string, currentHash: string, options: ImportOptions): boolean {

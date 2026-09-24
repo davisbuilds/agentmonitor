@@ -482,6 +482,38 @@ Task 1, Task 2
 - `pnpm lint`, `pnpm build` and `pnpm test` are green.
 - `amon costs repair-codex-usage --help` shows the command.
 
+**Result (2026-09-24)**
+
+- **Tests:** all 10 pass.
+- **Shared path:** the repair reconciles through the importer's own per-file
+  path (`reconcileCodexRollout`). That path reads the file once and commits the
+  import hash with the rows, so a repaired session is exactly what a fresh
+  import stores.
+- **Classification:** each changed row is classified before it is written:
+  - `copied_history`;
+  - `orphaned`;
+  - `refresh_drift`: the tokens are stale, but the cost already matches the
+    file, which is the retired refresh's signature;
+  - `repriced`;
+  - `annotated`: only non-usage fields differ;
+  - `appended`;
+  - `unclassified`.
+  The class counts add up to the rows the reconcile inserted, updated and
+  deleted.
+- **Report additions:**
+  - `sessions_unreconciled` counts rollouts that cannot own their session, and
+    `files_unreadable` counts rollouts that could not be read. Both are left
+    untouched.
+  - The OTEL check reports its before and after ratios per subagent, with gap
+    hours.
+- **Mutations:** 9 of 10 go red. The survivor runs the hash callback before the
+  preview's rollback. It is an equivalent mutant, because that write happens
+  inside the transaction the preview rolls back, so nothing is recorded either
+  way. A preview that really writes the hash is caught by the preview's table
+  snapshot.
+- **`printSummary`** now renders nested values as JSON instead of
+  `[object Object]`.
+
 ### Task 4: Rehearse on a backup copy
 
 **Objective**

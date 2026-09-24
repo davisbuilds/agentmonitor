@@ -167,6 +167,32 @@ export function deleteImportedCodexRows(ids: number[]): void {
   if (ids.length > 0) markStatsDirty();
 }
 
+/** Every session that holds rows minted by the Codex importer. */
+export function listImportedCodexSessionIds(): string[] {
+  return (getDb().prepare(`
+    SELECT DISTINCT session_id FROM events
+    WHERE source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+  `).all() as Array<{ session_id: string }>).map(row => row.session_id);
+}
+
+/**
+ * Codex's own per-request usage for a session, as its OTEL rows recorded it:
+ * total tokens, and the UTC hours (`YYYY-MM-DDTHH`) that carry any.
+ */
+export function getCodexOtelUsage(sessionId: string): { tokens: number; hours: string[] } {
+  const db = getDb();
+  const usage = `(tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)`;
+  const total = db.prepare(`
+    SELECT COALESCE(SUM(tokens_in + tokens_out + cache_read_tokens + cache_write_tokens), 0) AS tokens
+    FROM events WHERE session_id = ? AND agent_type = 'codex' AND source = 'otel' AND ${usage}
+  `).get(sessionId) as { tokens: number };
+  const hours = db.prepare(`
+    SELECT DISTINCT substr(replace(COALESCE(client_timestamp, created_at), ' ', 'T'), 1, 13) AS hour
+    FROM events WHERE session_id = ? AND agent_type = 'codex' AND source = 'otel' AND ${usage}
+  `).all(sessionId) as Array<{ hour: string }>;
+  return { tokens: total.tokens, hours: hours.map(row => row.hour) };
+}
+
 export interface SessionRow {
   id: string;
   agent_id: string;
