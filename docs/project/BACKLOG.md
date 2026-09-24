@@ -89,6 +89,49 @@ hold the detailed history. Do not keep a resolved section here.
   changes the same path to hash and parse one read of the file
   (`docs/plans/2026-09-24-codex-import-usage-repair-plan.md`).
 
+#### Codex subagent boundary rests on the current rollout layout
+- **What**: the importer finds a `thread_spawn` subagent's own activity from
+  UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out
+  subagent rollouts and mints turn ids today.
+- **Why or evidence**: verified on 2026-09-24 for every `thread_spawn` rollout
+  from Codex 0.94.0 to 0.156.1. All of them had datable turns and a boundary.
+  A layout change would make the parse fall back to billing the whole rollout,
+  as before the fix.
+- **Revisit when**: `amon costs repair-codex-usage` reports
+  `subagent_boundaries_unresolved` above 0, or a new subagent's import/OTEL
+  ratio leaves 0.95–1.02. Re-measure on each Codex minor version that changes
+  subagent behaviour.
+
+#### Long-context tier is chosen per row, not per request
+- **What**: pricing picks the long-context tier from the size of one row's
+  token change. A Codex import row that spans several requests can therefore
+  cross the tier threshold when no single request did.
+- **Why or evidence**: after the subagent boundary fix, such rows are rare.
+  Measured on 2026-09-24, they are about half of 1% of that fix's cost
+  correction.
+- **Next**: price a multi-request span with the tier of its largest request,
+  once `last_token_usage` per request is read. Otherwise leave as is.
+
+#### Codex requests that only OTEL records
+- **What**: Codex's per-request OTEL often sees slightly more usage than the
+  rollout counters. Rollout import is authoritative where the two overlap, so
+  the difference is dropped.
+- **Why or evidence**: measured 2026-09-24 on subagent sessions the repair does
+  not change: they sit at 0.92–1.02× OTEL, mostly below 1. Plain sessions were
+  not measured this way. The cause is a hypothesis, unmeasured: requests that
+  fail or are retried without a counter update.
+- **Next**: compare per-request OTEL ids with rollout counters for one session
+  below 0.95×, before changing any reconciliation.
+
+#### Copied subagent history in the transcript browser (hypothesis)
+- **What**: the session browser and skill/tool analytics parse Codex rollouts
+  separately from the importer. A subagent's copied parent history may appear
+  there as the child's own messages and tool calls.
+- **Why or evidence**: not measured. The importer fix covers usage and file
+  edits only. This surface does not bill cost.
+- **Next**: count a subagent's browser messages and tool calls before and after
+  its boundary line. Fix only if the copied part shows up.
+
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
   deepseek-v4-flash-0731, minimax-m3) and the codex/claude daily drivers, but

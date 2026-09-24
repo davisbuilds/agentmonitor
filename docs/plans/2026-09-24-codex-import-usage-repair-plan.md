@@ -3,7 +3,7 @@ date: 2026-09-24
 author: claude
 topic: codex-import-usage-repair
 stage: plan
-status: draft
+status: in-progress
 source: conversation
 spec: docs/specs/2026-09-24-codex-import-usage-repair-spec.md
 risk_profile: high

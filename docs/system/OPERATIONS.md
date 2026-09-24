@@ -289,6 +289,108 @@ above the second class was the large majority of pre-fix imported rows —
 unrepairable evidence typically outnumbers repairable by several times over,
 because event history outlives the transcripts it came from.
 
+### Imported Codex usage repair
+
+Until 2026-09-24 the Codex importer had two defects that inflated stored usage.
+Stored rows keep both, because import skips an unchanged file, and before this
+fix it only inserted ids it had not seen.
+
+- **Copied subagent history.** A `thread_spawn` subagent's rollout can open with
+  a copy of its parent's history, with the parent's cumulative token counters
+  and file edits re-stamped at spawn time. Each copied counter was billed again,
+  so affected subagents imported hundreds of times what Codex's own OTEL saw.
+- **Rewritten rollouts.** Import ids are positions in the rollout. When Codex
+  rewrites a rollout, the ids move. Insert-only import left the old rows
+  alongside the new ones, and a model refresh wrote the file's cost onto stale
+  tokens.
+
+New imports are correct. A changed rollout's import rows are now reconciled to
+its parse: updated in place, deleted when the parse no longer produces them, or
+inserted. A subagent is billed from its first own turn (see ARCHITECTURE). An
+unchanged file is still skipped, so rows already stored need the repair:
+
+```sh
+amon costs repair-codex-usage --json            # preview, no writes
+amon costs repair-codex-usage --apply
+```
+
+It reconciles every discoverable rollout through the importer's own path, so a
+repaired session is exactly what a fresh import would store. The preview runs
+the same work and rolls it back.
+
+**Procedure:**
+
+1. Take a validated backup (see above).
+2. Rehearse on a copy. Also copy `~/.codex/sessions` and `config.toml` to a
+   scratch Codex directory, so the preview and the apply read identical bytes.
+   Then run:
+
+   ```sh
+   amon database backup --output <private-dir>/rehearsal.db
+   AGENTMONITOR_DB_PATH=<private-dir>/rehearsal.db \
+     amon serve --port 3999 --no-import --no-watch --no-portless
+   ```
+
+   Record `/api/v2/monitor/stats` overall and with `?agent=codex` after this
+   first startup, which prices any missing costs on the copy. Stop the server.
+   Then run the preview and the apply with `--codex-dir <scratch>`, restart the
+   server, and read the same endpoints again.
+3. Stop the live server and verify its port is free. A rollout that grows
+   during the apply is reconciled again by the next import, but the Monitor's
+   stats cache only resets on restart.
+4. Back up the live database again, then preview it and compare the preview
+   with the rehearsal. Then run `--apply`, restart the server, and check that a
+   second preview reports no changes.
+
+**Reading the report.** Each changed row is classified by the evidence it
+carries:
+
+| Class | Meaning |
+|---|---|
+| `copied_history` | a parent's row, dropped from a subagent |
+| `orphaned` | an id the rewritten rollout no longer produces |
+| `refresh_drift` | stale tokens under a cost that already matches the file |
+| `repriced` | same tokens, cost from older rates |
+| `subagent_model` | a subagent's session model, moved from its parent's first turn to its own |
+| `annotated` | only non-usage fields differ |
+| `appended` | new usage since the last import |
+| `unclassified` | none of the above |
+
+**Do not apply while `unclassified` is above 0.** Also check the two outside
+instruments in the report:
+
+- `counter_mismatches` must be empty. Each changed plain session's repaired
+  usage is compared with the final cumulative counter Codex wrote in its own
+  rollout. Rollouts whose counter restarts mid-session are counted in
+  `counter_sessions_reset` and skipped, because their final counter understates
+  what was billed.
+- `subagent_otel` compares each changed subagent with Codex's per-request OTEL,
+  before and after. `otel_ratios_moved_away` must be 0.
+
+A rollout that does not name its model is attributed to the `config.toml`
+model. The repair keeps the model already stored for such rows, because
+today's config says nothing about an older session.
+
+**What to expect in the Monitor:**
+
+- The Codex Monitor total changes by the import change plus the change in
+  counted OTEL rows. Deleting rows can move a session's latest import timestamp
+  earlier, and the OTEL rows after it then count again.
+- Other agents are unchanged.
+- Usage rows can move to other days as they take back their rollout
+  timestamps.
+
+A session whose rollout is gone is counted in `sessions_without_rollout` and
+left as stored. A failed session rolls back on its own. It is listed in
+`sessions_failed` and the CLI exits with partial success. Rerunning finishes it.
+
+**Measured shape.** This was rehearsed on 2026-09-24 against a copy of a local
+store and a snapshot of its rollouts:
+- the changed subagents moved from 140–810× OTEL to 0.976–0.994×;
+- every changed plain session landed on its rollout's own counter;
+- the Codex Monitor total fell by about 45%;
+- a second apply changed nothing.
+
 ### Pricing a newly released model
 
 An unpriced model bills as **$0**, not as an error, and its rows keep a NULL

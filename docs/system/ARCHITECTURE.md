@@ -135,6 +135,23 @@ normal reruns idempotent; `--force` is the deliberate recovery path. Benchmark
 events use `source='benchmark'` and remain excluded from normal activity and usage
 aggregates unless a benchmark-aware read explicitly includes them.
 
+A Codex rollout owns its session's `import-cdx-` rows. Their ids are positions
+in the rollout, and Codex can rewrite a rollout. So a changed file is not
+insert-only: the session's import rows are reconciled to the parse in one
+transaction, together with its summary projection, trace summary, invocation
+mode and import hash. Rows from other producers for the same session are never
+touched. A date-scoped import only appends, and a session projected as a full
+transcript is left alone.
+
+A `thread_spawn` subagent rollout can open with a copy of its parent's history,
+re-stamped at spawn time. The subagent's own activity starts at its first
+`turn_context` whose UUIDv7 `turn_id` time is at or after the session id's time.
+Copied counters and file edits before that line advance the event index but
+emit nothing, so the child's own ids are unchanged. A subagent with no datable
+turn is billed as before and flagged `_subagent_boundary: unresolved`.
+`amon costs repair-codex-usage` applies both rules to rows stored earlier (see
+OPERATIONS).
+
 ### Session Browser And Live
 
 `src/watcher/` discovers and reparses supported local session files. Parsed session
