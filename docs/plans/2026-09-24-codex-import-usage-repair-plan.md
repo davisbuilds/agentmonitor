@@ -564,6 +564,53 @@ Task 3, built into `dist/`
 
 - Every expectation holds. The numbers go to the user in chat, before Task 6.
 
+**Revisions from the first preview**
+
+The first preview on the copy failed the gate and changed both the code and
+these checks:
+
+- Both passes read a snapshot of the rollouts (`--codex-dir`), not the live
+  directory, so a rollout that grows between the preview and the apply
+  cannot make their counts differ.
+- The Codex Monitor change equals the import change plus the change in counted
+  OTEL rows. Deleting rows can move a session's latest import timestamp
+  earlier, and OTEL rows after it then count again. This is not limited to
+  sessions left with no usage.
+- The OTEL ratio gates apply to the subagents the repair changes. A plain
+  session is checked against its rollout's own final cumulative counter
+  (`counter_mismatches` must be empty). The one "moved away" hit in the first
+  preview was a plain session whose changed hours OTEL never covered.
+- Defects found and fixed test-first (`bd47d66`, `fc8ee29`):
+  - a model known only from `config.toml` relabelled old turnless sessions;
+  - float-noise cost differences caused rewrites;
+  - `sessions_left_without_usage` listed sessions that already had none;
+  - a subagent's session model moving to its own first turn was unclassified.
+
+**Result (2026-09-24, host `macbook`, branch head `fc8ee29`)**
+
+All expectations hold.
+
+- **Report:**
+  - no unreadable, unreconciled or failed sessions;
+  - no unresolved boundaries;
+  - `unclassified` 0;
+  - `counter_mismatches` empty across the changed plain sessions. The 3
+    sessions whose counter restarts were skipped; OTEL agrees with their parse
+    within 4%.
+- **Row classes:** `copied_history` 1,996, `orphaned` 879, `refresh_drift`
+  1,098, `annotated` 117, `subagent_model` 1. Nothing inserted or repriced.
+- **Fidelity:** the 5 changed subagents with OTEL go from 140–810× OTEL to
+  0.976–0.994×, with no gap hours. No ratio moves away from 1.
+- **Monitor:**
+  - the Codex total falls by about 45%;
+  - its change equals the import change plus the counted-OTEL change to
+    $0.0001; the OTEL rows that count again offset about 0.3% of the drop;
+  - Claude and other agents are unchanged to the cent.
+- **Idempotence:** the preview's report equals the apply's, and a second
+  apply changes nothing.
+- **Timestamps:** 1,098 usage rows take their rollout timestamps back, so
+  daily Codex charts shift as well as drop.
+
 ### Task 5: Docs, PR and review
 
 **Objective**
