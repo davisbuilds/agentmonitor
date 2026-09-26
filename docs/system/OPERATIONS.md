@@ -255,6 +255,24 @@ keeps its event and loses only the usage it double-counted, so transcripts,
 event history and tool-call projections are unchanged. Re-running finds nothing
 further to correct.
 
+The repair also bills each transcript line once when several rows hold it:
+
+- a line stored under both its uuid id and its positional id keeps the uuid row;
+- a resumed session's transcript repeats its predecessor's lines with the same
+  uuids, and the copy in the transcript it was resumed from keeps the line.
+  Resuming copies the whole history, so the source is the transcript whose
+  lines all appear in the other; when neither contains the other (the original
+  was used again after the resume) both copies are reported as ambiguous;
+- a positional id that a transcript and one of its child agents both minted
+  belongs to the transcript once every child line that bills something has a
+  row of its own. The repair corrects only token and cost columns, so a row the
+  child wrote (its timestamp and model) is zeroed when the transcript's line
+  bills nothing, and is otherwise left ambiguous rather than given the
+  transcript's tokens under the child's provenance.
+
+A row that now bills different, non-zero tokens keeps a reported cost; an
+estimated cost is recomputed from the new tokens.
+
 Applying also re-derives `session_trace_summary` for every repaired session:
 that rollup stores its own token and cost totals, the trace-quality API and
 warehouse export read it directly, and startup backfill skips rows already at
@@ -265,9 +283,12 @@ unambiguous source:
 
 - `rows_without_transcript` — the file is gone. Event history outlives its
   transcripts, and a missing source is not evidence of anything.
-- `rows_ambiguous` — more than one transcript mints the same `event_id`. A
-  child-agent transcript embeds its parent's `sessionId` and ids derive from
-  (session, line index), so parent and child collide on the same line number.
+- `rows_ambiguous` — transcripts disagree on what an `event_id` holds. A
+  child-agent transcript embeds its parent's `sessionId` and positional ids
+  derive from (session, line index), so parent and child collide on the same
+  line number. The id is the parent's once the child's line has a row of its
+  own; until then the row may be the child's only record. A row the child
+  wrote also stays ambiguous when the parent's line bills something.
 
 Repair matches a stored row under either identity scheme: the current id,
 derived from the transcript line's own `uuid`, and the positional id every row
@@ -282,8 +303,11 @@ amon import --source claude-code --force   # recover, then repair
 ```
 
 `import_state` records those transcripts as seen, so only `--force` revisits
-them. Expect totals to **rise** here: this imports events that were never
-stored.
+them. The same holds for transcripts restored from a backup to their original
+paths: `import_state` still has each one at the hash it was imported with, so
+restore first, then force the import. Expect totals to **rise** here: this
+imports events that were never stored, and it gives dropped child lines the
+rows of their own that let the repair settle their collisions.
 
 Both were exercised on a local store on 2026-09-22, after a validated backup and
 a full rehearsal on a copy of it. Expected shape, which is what to check against
@@ -300,7 +324,7 @@ still is.
 
 The repair cannot reach two classes of row, so a repaired database still carries
 inflated historical cost that no local evidence can settle. The report counts
-them separately: `rows_ambiguous` (an id claimed by more than one transcript)
+them separately: `rows_ambiguous` (transcripts that disagree on an id)
 and `rows_without_transcript` (the source file is gone). On the store used
 above the second class was the large majority of pre-fix imported rows —
 unrepairable evidence typically outnumbers repairable by several times over,
