@@ -543,6 +543,32 @@ describe('Claude import usage repair', () => {
         'a second run neither re-bills the copy nor moves the line');
     });
 
+    test('copies whose lineage the transcripts cannot establish are refused as ambiguous', () => {
+      // The original conversation was used again after the resume, so each
+      // transcript holds lines the other lacks, and end times prove nothing
+      // about which copied which. Billing either would guess the session.
+      const original = 'sess-lineage-original';
+      const resumed = 'sess-lineage-continued';
+      const claudeDir = claudeDirFor(original);
+      writeTurns(claudeDir, original, [
+        ['uuid-lineage-0', 'msg_lineage_0', '2026-02-01T10:00:00Z'],
+        ['uuid-lineage-2', 'msg_lineage_2', '2026-02-01T12:00:00Z'],
+      ]);
+      writeTurns(claudeDir, resumed, [
+        ['uuid-lineage-0', 'msg_lineage_0', '2026-02-01T10:00:00Z'],
+        ['uuid-lineage-1', 'msg_lineage_1', '2026-02-01T11:00:00Z'],
+        ['uuid-lineage-3', 'msg_lineage_3', '2026-02-01T11:30:00Z'],
+      ]);
+      seedRow(legacyId(original, 0), original);
+      seedRow(legacyId(resumed, 0), resumed);
+
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+      assert.deepEqual([report.rows_deduplicated, report.rows_ambiguous], [0, 2]);
+      assert.equal(row(legacyId(original, 0)).tokens_out, USAGE.output_tokens);
+      assert.equal(row(legacyId(resumed, 0)).tokens_out, USAGE.output_tokens);
+    });
+
     test('a copied line with only one stored row keeps it', () => {
       // The original transcript's rows are missing, so the copy is the only
       // record of that turn and must not be zeroed.

@@ -95,6 +95,8 @@ export function repairClaudeImportUsage(
   const claims = new Map<string, Claim[]>();
   // Every copy of a producer line (keyed by its uuid id), for billing it once.
   const copiesByLine = new Map<string, LineCopy[]>();
+  // The producer lines each transcript holds, to tell which copied which.
+  const transcriptLines = new Map<string, Set<string>>();
   for (const filePath of discoverClaudeCodeLogs(options.claudeDir, {
     excludePatterns: options.excludePatterns,
   })) {
@@ -105,7 +107,8 @@ export function repairClaudeImportUsage(
     } catch {
       continue; // an unreadable transcript leaves its rows unrepairable, not wrong
     }
-    const transcriptEnd = latestTimestamp(parsed);
+    const lines = new Set<string>();
+    transcriptLines.set(filePath, lines);
     const transcriptName = path.basename(filePath, '.jsonl');
     for (const event of parsed) {
       const buckets: Buckets = [
@@ -136,8 +139,9 @@ export function repairClaudeImportUsage(
       }
       if (isUuidId(event.event_id)) {
         const copies = copiesByLine.get(event.event_id) ?? [];
-        copies.push({ legacyId: event.legacy_event_id, transcriptEnd, filePath });
+        copies.push({ legacyId: event.legacy_event_id, filePath });
         copiesByLine.set(event.event_id, copies);
+        lines.add(event.event_id);
       }
     }
   }
@@ -153,13 +157,17 @@ export function repairClaudeImportUsage(
   const storedIds = new Set(storedRows.keys());
   const corrections = new Map<string, Buckets | null>();
   for (const [id, list] of claims) corrections.set(id, resolveClaims(id, list, storedRows));
-  const duplicates = duplicateLineRows(storedIds, corrections, copiesByLine);
+  const { duplicates, unresolved } = duplicateLineRows(storedIds, corrections, copiesByLine, transcriptLines);
 
   const pending: Array<{ row: StoredRow; corrected: Buckets; cost: number | null }> = [];
   const touchedSessions = new Set<string>();
 
   for (const row of rows) {
     const hasUsage = rowHasUsage(row);
+    if (unresolved.has(row.event_id)) {
+      if (hasUsage) report.rows_ambiguous++;
+      continue;
+    }
     const duplicate = duplicates.has(row.event_id);
     const corrected = duplicate ? ZERO : corrections.get(row.event_id);
     if (corrected === undefined) {
@@ -277,8 +285,6 @@ function resolveClaims(id: string, list: Claim[], storedRows: Map<string, Stored
 /** One transcript's copy of a producer line. */
 interface LineCopy {
   legacyId: string | undefined;
-  /** When the transcript holding this copy last wrote, as epoch ms. */
-  transcriptEnd: number;
   filePath: string;
 }
 
@@ -294,15 +300,6 @@ function rowHasUsage(row: StoredRow): boolean {
   return row.tokens_in > 0 || row.tokens_out > 0 || row.cache_read_tokens > 0 || row.cache_write_tokens > 0;
 }
 
-function latestTimestamp(events: Array<{ client_timestamp?: string }>): number {
-  let latest = -Infinity;
-  for (const event of events) {
-    const time = event.client_timestamp ? Date.parse(event.client_timestamp) : NaN;
-    if (time > latest) latest = time;
-  }
-  return latest;
-}
-
 /**
  * Rows that bill a producer line another row already bills, so the line counts
  * once however many rows hold it. Two histories store a line twice:
@@ -312,32 +309,67 @@ function latestTimestamp(events: Array<{ client_timestamp?: string }>): number {
  * - once per transcript, when a resumed session copies its predecessor's lines
  *   (same uuids, new session) and positional ids differ per file.
  *
- * The row kept is the uuid row when there is one, otherwise the copy in the
- * transcript that finished first: a resumed session's transcript runs past the
- * one it copied. Only lines whose transcripts agree on a non-zero contribution
- * are considered, and only ids no other line claims, so an ambiguous row is
- * never the one kept or the one zeroed.
+ * The row kept is the uuid row when there is one. Otherwise it is the copy in
+ * the transcript every other copy was resumed from: resuming copies the whole
+ * history, so the source's lines all appear in each transcript resumed from it,
+ * which also holds lines of its own. When no transcript is contained that way,
+ * for instance because the original was used again after the resume, the copies
+ * are `unresolved` rather than guessed from timestamps.
+ *
+ * Only lines whose transcripts agree on a non-zero contribution are considered,
+ * and only ids no other line claims, so an ambiguous row is never the one kept
+ * or the one zeroed.
  */
 function duplicateLineRows(
   stored: Set<string>,
   corrections: Map<string, Buckets | null>,
   copiesByLine: Map<string, LineCopy[]>,
-): Set<string> {
+  transcriptLines: Map<string, Set<string>>,
+): { duplicates: Set<string>; unresolved: Set<string> } {
   const duplicates = new Set<string>();
+  const unresolved = new Set<string>();
+  // A resumed transcript shares many lines with its source; compare each pair once.
+  const lineage = new Map<string, boolean>();
+  const isResumedFrom = (resumed: string, source: string): boolean => {
+    const key = `${resumed}\0${source}`;
+    let answer = lineage.get(key);
+    if (answer === undefined) {
+      answer = resumedFrom(transcriptLines.get(resumed), transcriptLines.get(source));
+      lineage.set(key, answer);
+    }
+    return answer;
+  };
+  const eligible = (id: string | undefined, contribution: Buckets): id is string => {
+    if (id === undefined || !stored.has(id)) return false;
+    const claimed = corrections.get(id);
+    return claimed !== undefined && claimed !== null && sameBuckets(claimed, contribution);
+  };
   for (const [uuidId, copies] of copiesByLine) {
     const contribution = corrections.get(uuidId);
     if (!contribution || contribution.every(value => value === 0)) continue;
-    const ordered = [...copies].sort((a, b) =>
-      a.transcriptEnd - b.transcriptEnd || a.filePath.localeCompare(b.filePath));
-    const candidates = [...new Set([uuidId, ...ordered.map(copy => copy.legacyId)])]
-      .filter((id): id is string => id !== undefined && stored.has(id))
-      .filter(id => {
-        const claimed = corrections.get(id);
-        return claimed !== undefined && claimed !== null && sameBuckets(claimed, contribution);
-      });
-    // Every copy but the first is zeroed, including copies an earlier run already
-    // zeroed; otherwise the ordinary correction would re-bill them.
-    for (const id of candidates.slice(1)) duplicates.add(id);
+    const legacy = copies.filter(copy => eligible(copy.legacyId, contribution));
+    const ids = legacy.map(copy => copy.legacyId as string);
+    if (eligible(uuidId, contribution)) {
+      // Every copy but the uuid row is zeroed, including copies an earlier run
+      // already zeroed; otherwise the ordinary correction would re-bill them.
+      for (const id of ids) duplicates.add(id);
+      continue;
+    }
+    if (legacy.length < 2) continue;
+    const sources = legacy.filter(copy => legacy.every(other => other === copy
+      || isResumedFrom(other.filePath, copy.filePath)));
+    if (sources.length !== 1) {
+      for (const id of ids) unresolved.add(id);
+      continue;
+    }
+    for (const id of ids) if (id !== sources[0].legacyId) duplicates.add(id);
   }
-  return duplicates;
+  return { duplicates, unresolved };
+}
+
+/** True when `resumed` holds every line of `source` and lines of its own. */
+function resumedFrom(resumed: Set<string> | undefined, source: Set<string> | undefined): boolean {
+  if (!resumed || !source || resumed.size <= source.size) return false;
+  for (const line of source) if (!resumed.has(line)) return false;
+  return true;
 }

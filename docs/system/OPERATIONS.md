@@ -259,7 +259,10 @@ The repair also bills each transcript line once when several rows hold it:
 
 - a line stored under both its uuid id and its positional id keeps the uuid row;
 - a resumed session's transcript repeats its predecessor's lines with the same
-  uuids, and the copy in the transcript that finished first keeps the line;
+  uuids, and the copy in the transcript it was resumed from keeps the line.
+  Resuming copies the whole history, so the source is the transcript whose
+  lines all appear in the other; when neither contains the other (the original
+  was used again after the resume) both copies are reported as ambiguous;
 - a positional id that a transcript and one of its child agents both minted
   belongs to the transcript once every child line that bills something has a
   row of its own. The repair corrects only token and cost columns, so a row the
