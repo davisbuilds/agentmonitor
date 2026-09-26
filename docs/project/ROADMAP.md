@@ -83,6 +83,15 @@ pull requests; current behavior belongs to the system references.
   instead of reporting $0, the Monitor's `limit=0` takes a ceiling, the session
   browser's `date_to` survives DST, and Hour-of-Week buckets by local time.
 
+- **Recovered Claude transcripts and one-line-one-bill repair (2026-09-26):**
+  transcripts deleted by Claude Code's 30-day cleanup were restored from offsite
+  backups, and `amon costs repair-claude-usage` corrected their repeat-line
+  inflation. The repair now also bills a line once when several rows hold it
+  (both id schemes, a resumed session's copied history, and positional ids a
+  child agent also minted once the child has its own row) and re-estimates the
+  cost of rows whose tokens change. Claude's stored imported total fell by
+  roughly a sixth, and no checkable row is left ambiguous.
+
 - **Imported event identity (2026-09-22, PRs #137-#139):** Claude Code imports
   bill one event per assistant turn rather than one per content block, and
   imported events are keyed on the transcript line's own identifier instead of

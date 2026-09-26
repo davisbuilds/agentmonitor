@@ -255,6 +255,26 @@ keeps its event and loses only the usage it double-counted, so transcripts,
 event history and tool-call projections are unchanged. Re-running finds nothing
 further to correct.
 
+The repair also bills each transcript line once when several rows hold it:
+
+- a line stored under both its uuid id and its positional id keeps the uuid row;
+- a resumed session's transcript repeats its predecessor's lines with the same
+  uuids, and the copy in the transcript that finished first keeps the line;
+- a positional id that a transcript and one of its child agents both minted
+  belongs to the transcript once every child line that bills something has a
+  row of its own. Until then the row may be the child's only record, and it is
+  reported as ambiguous rather than corrected.
+
+A row that now bills different, non-zero tokens keeps a reported cost; an
+estimated cost is recomputed from the new tokens.
+
+Transcripts restored from a backup to their original paths are skipped by
+`amon import` and auto-import: `import_state` still holds each path with the
+hash of the file as it was imported. Child-agent files that the positional
+scheme once dropped entirely stay missing until a forced import, so restore,
+then run `amon import --source claude-code --force` (existing rows deduplicate)
+before the repair.
+
 Applying also re-derives `session_trace_summary` for every repaired session:
 that rollup stores its own token and cost totals, the trace-quality API and
 warehouse export read it directly, and startup backfill skips rows already at

@@ -399,6 +399,12 @@ the build.
   recovers only about a third of the total inflation, leaving the rest in rows
   with no local evidence left to check them against. Historical cost views stay
   wrong by an unknown-but-bounded amount.
+  On 2026-09-26 transcripts restored from offsite backups made mid-July onward
+  checkable again. In those months repeat-line billing was about half of July's
+  checkable imported cost and about a third of August's; the second repair pass
+  corrected them. Backups reach no further back, so the earlier rows are the
+  whole remaining population. That they carry similar inflation is a
+  hypothesis, not a measurement.
 - **Next / Revisit when**: now the only remaining inflation, so this is the whole
   question rather than part of it. Decide deliberately between three options —
   leave and disclose (cheapest, but every historical cost view silently
