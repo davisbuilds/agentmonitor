@@ -358,27 +358,35 @@ describe('Claude import usage repair', () => {
       assert.equal(row(uuidId('uuid-disagree-1')).tokens_out, USAGE.output_tokens, 'the contested row keeps its values');
     });
 
-    test('a positional id a child agent also mints goes to its transcript once the child line has its own row', () => {
-      // Under the positional scheme a child agent's line collided with its
-      // parent's line of the same number, and whichever was imported first kept
-      // the id. When the child won, its line was later stored again under its own
-      // id, so it bills twice while the parent's line bills nothing. The parent
-      // transcript owns its positional ids, and the child is billed elsewhere.
-      const parent = 'sess-collision-parent';
+    // Under the positional scheme a child agent's line collided with its parent's
+    // line of the same number, and whichever was imported first kept the id.
+    // The child's line was later stored again under its own uuid, so the child
+    // is billed elsewhere; what the positional row may hold depends on whose it is.
+    function writeCollision(parent: string, parentLine: Record<string, unknown>) {
       const claudeDir = claudeDirFor(parent);
       const dir = path.join(claudeDir, 'projects', '-Users-someone-project');
       fs.mkdirSync(path.join(dir, parent, 'subagents'), { recursive: true });
-      const parentUsage = { input_tokens: 5, output_tokens: 50, cache_read_input_tokens: 500, cache_creation_input_tokens: 5000 };
       fs.writeFileSync(path.join(dir, `${parent}.jsonl`), JSON.stringify({
-        type: 'assistant', sessionId: parent, timestamp: '2026-02-01T10:00:00Z',
-        message: { id: 'msg_collision_parent', model: MODEL, usage: parentUsage, content: [{ type: 'text', text: 'parent' }] },
+        sessionId: parent, timestamp: '2026-02-01T10:00:00Z', ...parentLine,
       }));
       fs.writeFileSync(path.join(dir, parent, 'subagents', 'agent-collider.jsonl'), JSON.stringify({
-        type: 'assistant', sessionId: parent, uuid: 'uuid-collision-child', isSidechain: true, timestamp: '2026-02-01T10:05:00Z',
-        message: { id: 'msg_collision_child', model: MODEL, usage: USAGE, content: [{ type: 'text', text: 'child' }] },
+        type: 'assistant', sessionId: parent, uuid: `uuid-${parent}-child`, isSidechain: true, timestamp: '2026-02-01T10:05:00Z',
+        message: { id: `msg_${parent}_child`, model: MODEL, usage: USAGE, content: [{ type: 'text', text: 'child' }] },
       }));
-      seedRow(legacyId(parent, 0), parent); // holds the child's usage
-      seedRow(uuidId('uuid-collision-child'), parent);
+      seedRow(uuidId(`uuid-${parent}-child`), parent);
+      seedRow(legacyId(parent, 0), parent);
+      return claudeDir;
+    }
+    const parentUsage = { input_tokens: 5, output_tokens: 50, cache_read_input_tokens: 500, cache_creation_input_tokens: 5000 };
+    const billingParent = {
+      type: 'assistant',
+      message: { id: 'msg_parent', model: MODEL, usage: parentUsage, content: [{ type: 'text', text: 'parent' }] },
+    };
+
+    test('a collision row that is the parent\'s own is corrected to the parent line', () => {
+      const parent = 'sess-collision-parent-row';
+      const claudeDir = writeCollision(parent, billingParent);
+      // The parent's row (its timestamp and model), holding tokens it should not.
       getDb().prepare("UPDATE events SET cost_source = 'estimated' WHERE event_id = ?").run(legacyId(parent, 0));
 
       const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
@@ -394,7 +402,47 @@ describe('Claude import usage repair', () => {
       assert.ok(repriced && repriced !== 0.5);
       assert.ok(Math.abs(row(legacyId(parent, 0)).cost_usd - repriced) < 1e-12,
         'an estimated cost follows the tokens it now bills');
-      assert.equal(row(uuidId('uuid-collision-child')).tokens_out, USAGE.output_tokens, 'the child line is billed once');
+      assert.equal(row(uuidId(`uuid-${parent}-child`)).tokens_out, USAGE.output_tokens, 'the child line is billed once');
+    });
+
+    test('a collision row the child wrote is zeroed when the parent line bills nothing', () => {
+      // The child's usage is billed by its own row, and the parent line has none
+      // to restore, so whoever wrote the row it should hold nothing.
+      const parent = 'sess-collision-child-row-quiet-parent';
+      const claudeDir = writeCollision(parent, { type: 'user', message: { role: 'user', content: 'go' } });
+      getDb().prepare("UPDATE events SET client_timestamp = '2026-02-01T10:05:00Z', cost_source = 'reported' WHERE event_id = ?")
+        .run(legacyId(parent, 0));
+
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+      assert.equal(report.rows_ambiguous, 0);
+      assert.deepEqual(row(legacyId(parent, 0)), { tokens_out: 0, cost_usd: 0 });
+      assert.equal(row(uuidId(`uuid-${parent}-child`)).tokens_out, USAGE.output_tokens, 'the child line is billed once');
+    });
+
+    test('a collision row the child wrote stays ambiguous when the parent line bills something', () => {
+      // Writing the parent's tokens into the child's row would bill them under the
+      // child's timestamp and model; the row's own provenance says it is not the
+      // parent's to correct.
+      const parent = 'sess-collision-child-row';
+      const claudeDir = writeCollision(parent, billingParent);
+      getDb().prepare("UPDATE events SET client_timestamp = '2026-02-01T10:05:00Z' WHERE event_id = ?").run(legacyId(parent, 0));
+
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+      assert.equal(report.rows_ambiguous, 1);
+      assert.deepEqual(row(legacyId(parent, 0)), { tokens_out: USAGE.output_tokens, cost_usd: 0.5 });
+    });
+
+    test('a collision row with the parent\'s timestamp but another model stays ambiguous', () => {
+      const parent = 'sess-collision-other-model';
+      const claudeDir = writeCollision(parent, billingParent);
+      getDb().prepare("UPDATE events SET model = 'claude-haiku-4-5-20251001' WHERE event_id = ?").run(legacyId(parent, 0));
+
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+      assert.equal(report.rows_ambiguous, 1);
+      assert.equal(row(legacyId(parent, 0)).tokens_out, USAGE.output_tokens);
     });
 
     test('a child line that bills nothing needs no row of its own to cede the positional id', () => {

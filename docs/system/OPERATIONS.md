@@ -262,7 +262,10 @@ The repair also bills each transcript line once when several rows hold it:
   uuids, and the copy in the transcript that finished first keeps the line;
 - a positional id that a transcript and one of its child agents both minted
   belongs to the transcript once every child line that bills something has a
-  row of its own.
+  row of its own. The repair corrects only token and cost columns, so a row the
+  child wrote (its timestamp and model) is zeroed when the transcript's line
+  bills nothing, and is otherwise left ambiguous rather than given the
+  transcript's tokens under the child's provenance.
 
 A row that now bills different, non-zero tokens keeps a reported cost; an
 estimated cost is recomputed from the new tokens.
@@ -281,7 +284,8 @@ unambiguous source:
   child-agent transcript embeds its parent's `sessionId` and positional ids
   derive from (session, line index), so parent and child collide on the same
   line number. The id is the parent's once the child's line has a row of its
-  own; until then the row may be the child's only record.
+  own; until then the row may be the child's only record. A row the child
+  wrote also stays ambiguous when the parent's line bills something.
 
 Repair matches a stored row under either identity scheme: the current id,
 derived from the transcript line's own `uuid`, and the positional id every row

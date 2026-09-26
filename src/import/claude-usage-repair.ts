@@ -129,6 +129,8 @@ export function repairClaudeImportUsage(
           // minted for it; a child agent's file reports its parent's session.
           ownsId: transcriptName === event.session_id,
           ownId: id === event.event_id ? undefined : event.event_id,
+          timestamp: event.client_timestamp ?? null,
+          model: event.model ?? null,
         });
         claims.set(id, list);
       }
@@ -147,9 +149,10 @@ export function repairClaudeImportUsage(
     FROM events
     WHERE source = 'import' AND agent_type = 'claude_code' AND event_id IS NOT NULL
   `).all() as StoredRow[];
-  const storedIds = new Set(rows.map(row => row.event_id));
+  const storedRows = new Map(rows.map(row => [row.event_id, row]));
+  const storedIds = new Set(storedRows.keys());
   const corrections = new Map<string, Buckets | null>();
-  for (const [id, list] of claims) corrections.set(id, resolveClaims(id, list, storedIds));
+  for (const [id, list] of claims) corrections.set(id, resolveClaims(id, list, storedRows));
   const duplicates = duplicateLineRows(storedIds, corrections, copiesByLine);
 
   const pending: Array<{ row: StoredRow; corrected: Buckets; cost: number | null }> = [];
@@ -235,6 +238,8 @@ interface Claim {
   ownsId: boolean;
   /** The line's current id, when the claim is on its positional one. */
   ownId: string | undefined;
+  timestamp: string | null;
+  model: string | null;
 }
 
 /**
@@ -246,17 +251,27 @@ interface Claim {
  *   the same line, not a collision — unless the copies disagree.
  * - A positional id minted for a session and also by that session's child
  *   agents belongs to the session once every child line that bills something is
- *   stored under its own id: the row cannot be the only record of the child.
+ *   stored under its own id, so the row cannot be the only record of the child.
+ *   Only token and cost columns are corrected, so a row the child wrote keeps
+ *   the child's timestamp and model: it can be zeroed when the session's line
+ *   bills nothing, but takes the session's tokens only if it is the session's
+ *   own row.
  */
-function resolveClaims(id: string, list: Claim[], storedIds: Set<string>): Buckets | null {
+function resolveClaims(id: string, list: Claim[], storedRows: Map<string, StoredRow>): Buckets | null {
   const [first] = list;
   if (list.length === 1) return first.buckets;
   if (isUuidId(id)) return list.every(claim => sameBuckets(claim.buckets, first.buckets)) ? first.buckets : null;
   const owners = list.filter(claim => claim.ownsId);
+  if (owners.length !== 1) return null;
+  const [owner] = owners;
   const billedElsewhere = list.every(claim => claim.ownsId
     || claim.buckets.every(value => value === 0)
-    || (claim.ownId !== undefined && storedIds.has(claim.ownId)));
-  return owners.length === 1 && billedElsewhere ? owners[0].buckets : null;
+    || (claim.ownId !== undefined && storedRows.has(claim.ownId)));
+  if (!billedElsewhere) return null;
+  if (owner.buckets.every(value => value === 0)) return owner.buckets;
+  const row = storedRows.get(id);
+  const ownersRow = row !== undefined && row.client_timestamp === owner.timestamp && row.model === owner.model;
+  return ownersRow ? owner.buckets : null;
 }
 
 /** One transcript's copy of a producer line. */
