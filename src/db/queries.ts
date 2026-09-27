@@ -1628,19 +1628,31 @@ export interface ClaudeSessionAccounting {
   observed_at: string;
   /** When the process whose totals these are started; the totals cover only it. */
   process_started_at: string;
+  /** How long that process had run when the totals were read; it only grows. */
+  process_duration_ms: number;
   cost_usd: number;
   claude_version: string | null;
 }
 
+/**
+ * Keep a session's latest totals. The bridge posts in the background, so a
+ * sample can arrive after a newer one: it is kept only when its process has run
+ * at least as long as the stored one, or when it comes from a process that
+ * started after the stored sample was read (a restart resets the counters).
+ */
 export function recordClaudeSessionAccounting(snapshot: ClaudeSessionAccounting): void {
   getDb().prepare(`
-    INSERT INTO claude_session_accounting (session_id, observed_at, process_started_at, cost_usd, claude_version)
-    VALUES (@session_id, @observed_at, @process_started_at, @cost_usd, @claude_version)
+    INSERT INTO claude_session_accounting
+      (session_id, observed_at, process_started_at, process_duration_ms, cost_usd, claude_version)
+    VALUES (@session_id, @observed_at, @process_started_at, @process_duration_ms, @cost_usd, @claude_version)
     ON CONFLICT(session_id) DO UPDATE SET
       observed_at = excluded.observed_at,
       process_started_at = excluded.process_started_at,
+      process_duration_ms = excluded.process_duration_ms,
       cost_usd = excluded.cost_usd,
       claude_version = excluded.claude_version
+    WHERE excluded.process_duration_ms >= claude_session_accounting.process_duration_ms
+       OR excluded.process_started_at > claude_session_accounting.observed_at
   `).run(snapshot);
 }
 
@@ -1662,7 +1674,7 @@ export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {
  */
 export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
   const rows = getDb().prepare(`
-    SELECT a.session_id, a.observed_at, a.process_started_at, a.cost_usd, a.claude_version,
+    SELECT a.session_id, a.observed_at, a.process_started_at, a.process_duration_ms, a.cost_usd, a.claude_version,
       COALESCE((
         SELECT SUM(e.cost_usd) FROM events e
         WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'

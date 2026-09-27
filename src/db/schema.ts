@@ -196,6 +196,7 @@ function initSchemaLocked(db: Database): void {
       session_id TEXT PRIMARY KEY,
       observed_at TEXT NOT NULL,
       process_started_at TEXT NOT NULL,
+      process_duration_ms REAL NOT NULL,
       cost_usd REAL NOT NULL,
       claude_version TEXT
     );

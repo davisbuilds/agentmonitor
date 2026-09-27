@@ -486,6 +486,31 @@ describe('Claude import usage repair', () => {
       assert.equal(row(legacyId(sessionId, 0)).tokens_out, USAGE.output_tokens, 'the contested row keeps its values');
     });
 
+    test('disagreeing copies stored only under positional ids are refused, not billed twice', () => {
+      // As above, but both copies were stored positionally. Correcting each
+      // from its own transcript would zero the original's repeat and keep the
+      // copy's first line, billing a response the original already bills.
+      const original = 'sess-disagree-legacy-a-original';
+      const resumed = 'sess-disagree-legacy-b-continued';
+      const claudeDir = claudeDirFor(original);
+      writeTurns(claudeDir, original, [
+        ['uuid-dl-0', 'msg_dl', '2026-02-01T10:00:00Z'],
+        ['uuid-dl-1', 'msg_dl', '2026-02-01T10:00:00Z'],
+      ]);
+      writeTurns(claudeDir, resumed, [
+        ['uuid-dl-1', 'msg_dl', '2026-02-01T10:00:00Z'],
+        ['uuid-dl-2', 'msg_dl_2', '2026-02-01T11:00:00Z'],
+      ]);
+      seedRow(legacyId(original, 1), original);
+      seedRow(legacyId(resumed, 0), resumed);
+
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+      assert.equal(report.rows_ambiguous, 2);
+      assert.equal(row(legacyId(original, 1)).tokens_out, USAGE.output_tokens, 'left as stored');
+      assert.equal(row(legacyId(resumed, 0)).tokens_out, USAGE.output_tokens, 'left as stored');
+    });
+
     test('a copy whose positional id a child-agent transcript also mints is left alone', () => {
       // The resumed session's child agent reports the resumed session id, so its
       // first line mints the same positional id as the copied line. That row may

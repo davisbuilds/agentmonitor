@@ -346,6 +346,17 @@ function duplicateLineRows(
   };
   for (const [uuidId, copies] of copiesByLine) {
     const contribution = corrections.get(uuidId);
+    if (contribution === null) {
+      // The copies disagree on what the line contributes (a copy that starts
+      // partway through a turn), so correcting each on its own could bill the
+      // response twice. Leave every stored copy as it is.
+      for (const copy of copies) {
+        if (copy.legacyId !== undefined && stored.has(copy.legacyId)) {
+          unresolved.add(copy.legacyId);
+        }
+      }
+      continue;
+    }
     if (!contribution || contribution.every(value => value === 0)) continue;
     const legacy = copies.filter(copy => eligible(copy.legacyId, contribution));
     const ids = legacy.map(copy => copy.legacyId as string);

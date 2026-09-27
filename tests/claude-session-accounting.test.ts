@@ -88,6 +88,25 @@ describe('Claude session accounting', () => {
     assert.ok(latest && Date.parse(latest.observed_at) >= secondSent, 'the window ends at the latest observation');
   });
 
+  test('a sample arriving late does not replace a newer one from the same process', async () => {
+    // The bridge posts in the background, so samples can arrive out of order.
+    await statusline({ session_id: 'sess-late', cost: { total_cost_usd: 2, total_duration_ms: 2_000_000 } });
+    await statusline({ session_id: 'sess-late', cost: { total_cost_usd: 1, total_duration_ms: 1_000_000 } });
+
+    const [check] = checkClaudeSessionCosts();
+    assert.equal(check.cost_usd, 2);
+  });
+
+  test('a new process for the same session replaces the old totals', async () => {
+    // A restarted or resumed session starts its counters again from zero.
+    await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 50, total_duration_ms: 1000 } });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 0.5, total_duration_ms: 1 } });
+
+    const [check] = checkClaudeSessionCosts();
+    assert.equal(check.cost_usd, 0.5);
+  });
+
   test('ignores payloads without a session or a cost', async () => {
     await statusline({ cost: { total_cost_usd: 1, total_duration_ms: 1000 } });
     await statusline({ session_id: 'sess-d' });

@@ -69,6 +69,7 @@ function parseClaudeSessionAccounting(payload: unknown, now = Date.now()): Claud
     session_id: data.session_id,
     observed_at: new Date(now).toISOString(),
     process_started_at: new Date(now - duration).toISOString(),
+    process_duration_ms: duration,
     cost_usd: cost,
     claude_version: typeof data.version === 'string' ? data.version : null,
   };
