@@ -104,11 +104,12 @@ export function parseClaudeCodeFile(
   let prevCostUSD = 0;
 
   // Assistant turns are written one line per content block (thinking, tool_use,
-  // text), every line repeating the same `message.id`. Each line records usage
-  // as of its block: input and cache counts are the same throughout, output
-  // grows, and the last line holds the turn's final count. The turn is billed
-  // once, on its first line, with that final usage; the rest would re-bill
-  // tokens the turn already spent.
+  // text), every line repeating the same `message.id` and the turn's input and
+  // cache counts. A main transcript repeats the final output count too, but a
+  // child agent's transcript records output as of each block, so only its last
+  // line holds the final count. The turn is billed once, on its first line,
+  // with the last line's usage; the rest would re-bill tokens the turn already
+  // spent.
   //
   // This is usage per API response, which is what Anthropic bills and what
   // Claude Code's live counters (statusline, `/cost`) add up. Claude Code's

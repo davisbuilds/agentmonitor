@@ -273,10 +273,12 @@ The repair also bills each transcript line once when several rows hold it:
 A row that now bills different, non-zero tokens keeps a reported cost; an
 estimated cost is recomputed from the new tokens.
 
-Each turn is billed with the usage on its **last** line: input and cache counts
-repeat on every line of a turn, but output grows block by block. The importer
-refreshes a turn it stored while the turn was still being written, and the
-repair brings older rows up to the final count.
+Each turn is billed with the usage on its **last** line. Every line of a turn
+repeats its input and cache counts; a main transcript repeats the final output
+count as well, but a child agent's transcript records output block by block, so
+only its last line is final. The importer refreshes a turn it stored while the
+turn was still being written, and the repair brings older rows up to the final
+count.
 
 To check imported cost against Claude Code's own accounting, run
 `amon costs check-claude-sessions`. It compares each session the statusline

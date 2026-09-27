@@ -111,7 +111,8 @@ model, provider, and provider-neutral tier.
   twice as high. `amon costs check-claude-sessions` compares imported cost with
   Claude Code's own running cost for each session the statusline bridge has
   reported; expect a ratio a little under 1, because the harness also pays for
-  calls that never reach a transcript.
+  calls that never reach a transcript (compaction summaries are the likely
+  largest; that attribution is unmeasured).
 - Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates;
   raw events remain available in session and monitor history.
 - Benchmark events are excluded from normal usage, analytics, and the Monitor's
