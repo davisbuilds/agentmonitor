@@ -1,39 +1,31 @@
 # Backlog
 
-Living list of **future** design gaps, tech debt, and better ways to do a thing
-noticed during normal execution. Fix simple, quick, or blocking issues inline;
-capture only durable follow-ups worth revisiting cold. Not a commitment for the
-active task unless explicitly pulled into scope; ROADMAP.md is the higher-bar
-shipped/directional view. Add an item only when it cannot be fixed inline and
-represents recurring friction, meaningful risk or cost, an unresolved decision,
-or a concrete trigger.
+Future-only gaps and opportunities worth revisiting. Capture recurring friction,
+meaningful risk or cost, unresolved decisions, or concrete revisit triggers.
+Fix simple, quick, or blocking issues inline when within the active task's scope.
 
-This repository is the canonical owner for its follow-ups; cross-repository work
-belongs with the repository that owns the capability, with links from affected
-repositories only when useful.
+## Conventions
 
-Convention: each item has **What** (the friction), **Why or evidence**, and
-optionally **Next** (the smallest action that makes it actionable) or **Revisit
-when** (an intentional external or measurable gate). Default state is omitted;
-use **Revisit when** for gates and `State: blocked — <reason>` only when work is
-genuinely blocked externally.
+- **Entry:** state **What** and **Why or evidence**. Add **Next** (a useful first
+  action) or **Revisit when** (a concrete gate) where helpful; no fixed template
+  is required.
+- **Evidence:** date and source volatile claims. Support causal or performance
+  claims with measurements, or label them **hypothesis, unmeasured**.
+- **Delegation:** agents can execute entries directly. Recording a candidate does
+  not expand the active task or select a roadmap priority. Use an issue when
+  persistent discussion or coordination helps; no mandatory graduation step.
+- **Ownership:** keep cross-repository work with the capability-owning repository.
+  If an issue owns the details, retain only a useful linked summary here; avoid
+  parallel checklists. Keep private evidence out of public entries and issues.
+- **Closure:** reconcile affected entries as work lands. Remove resolved concerns,
+  retain unresolved remainders, and preserve durable rationale in its owning
+  reference. Roadmap records selected direction; Git and PRs hold routine shipped
+  history. Revisit the broader list during prioritization or when stale entries
+  impede work.
 
-**Cite a number, or say it is a guess.** Any causal or performance claim here —
-"X is slow", "Y causes the flake" — carries a measurement, or is labelled
-*hypothesis, unmeasured*. Entries get read back later as established fact and
-turned into work: an unmarked guess about the Analytics fan-out was written here,
-believed on re-read, and nearly bought a whole endpoint before a 30-second `curl`
-showed the endpoints return in 1–4ms. The label is the forcing function that makes
-someone run the cheap probe first.
-
-Reconcile an entry when work affects it: refresh its evidence, retain an
-unresolved remainder, or remove it when resolved. Agents can work directly from a
-clear entry; use a GitHub issue when discussion or coordination benefits. Keep
-one detailed owner and a short link where useful. Update Roadmap only when
-selected direction changes. Revisit the broader list during prioritization or
-when stale entries impede work.
-
----
+A past unmeasured Analytics fan-out claim nearly prompted a new endpoint before
+a cheap latency probe disproved it. Keep hypotheses visibly separate from facts
+so later readers know what still needs checking.
 
 ## Open
 
