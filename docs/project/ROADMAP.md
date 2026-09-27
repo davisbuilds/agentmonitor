@@ -1,147 +1,21 @@
 # Roadmap
 
-- Added a content-free observed-session API that reconciles event and browser
-  evidence, including event-only sessions, with explicit transcript/usage coverage.
-  Existing browser and billing semantics remain unchanged.
+AgentMonitor is a local-first observability console for coding agents. This page
+records selected direction and the boundaries that guide it. The
+[Backlog](BACKLOG.md) holds unresolved candidates; Git and PRs hold routine
+shipment detail. [Positioning](POSITIONING.md) explains the product center.
 
-Directional snapshot for AgentMonitor. The Roadmap owns current direction and a
-small set of recent milestones. Detailed shipped history belongs to commits and
-pull requests; current behavior belongs to the system references.
+## Context For Current Direction
 
-## Recent Milestones
-
-- **Codex import usage repair (2026-09-24):** a Codex subagent that opens
-  with a copy of its parent's history is billed only from its own first turn,
-  where each copied counter used to be billed again. A changed rollout's
-  import rows are reconciled to its parse instead of insert-only, which
-  retires the duplicate rows and stale tokens left behind when Codex rewrote a
-  rollout. `amon costs repair-codex-usage` corrects stored rows with a preview
-  first. It checks every change against Codex's own final counter or its
-  per-request OTEL. Applied to a local store after a rehearsal on a copy, it
-  cut the Codex Monitor total by about 45%. Every changed plain session whose
-  counter never restarts then equalled Codex's own final counter; the few
-  whose counter restarts mid-session are skipped by that check.
-
-- **Monitor tokens count every bucket (2026-09-24):** the Monitor's token
-  headline now includes cache reads and writes, as Claude's `/stats` and
-  Codex's `/usage` do. Before, it showed uncached input and output only, a few
-  percent of what was processed. A breakdown splits the buckets and each agent
-  and states the machine scope. `amon monitor stats` and the SSE broadcast
-  carry the same figures.
-
-- **Cost provenance and self-healing prices (2026-09-23):** each stored cost
-  records whether the producer reported it or our tables estimated it
-  (`cost_source`). A recalc only re-derives estimates, so correcting a wrong
-  rate no longer risks overwriting captured costs. Startup prices any usage
-  stored while its model had no rate, so a pricing update fixes its own $0 rows
-  on the restart that ships it. Claude token-metric rows no longer add an
-  estimate on top of a reported cost metric from the same export (a v10
-  migration corrects stored rows that have that companion).
-
-- **Skill counts, hook latency, Sessions races, GPT-6 pricing (2026-09-23):**
-  a Codex skill seen only in the JSONL rollout now counts even when OTEL saw
-  other skills in that session; OTEL and rollout reads reconcile one for one per
-  skill. Hooks no longer wait on a slow server: the statusline POST is
-  backgrounded, and the Python sender hands its POST to a detached child (it
-  had waited up to 2s per event). The Sessions list ignores responses to
-  superseded loads. GPT-6 Sol and Luna are priced from OpenAI's rate table.
-
-- **Ingest integrity (2026-09-23):** OTLP events now go through the same ingest
-  contract as everything else. A record with a negative or non-finite token or
-  cost value is refused on its own and reported in OTLP's `partialSuccess`
-  reply. The contract also rejects an infinite `cost_usd`. Exporter retries
-  collapse through a derived `event_id` instead of double-counting.
-  `insertEvent` is all-or-nothing, so a failed insert can't leave a session with
-  no event.
-
-- **Browser-safe local API and quick fixes (2026-09-23):** web pages can no
-  longer write to the local server. Writes with a foreign `Origin` get `403`, and
-  a loopback-bound server refuses non-loopback `Host` names, which blocks DNS
-  rebinding. Local clients stay trusted, including their ability to end a
-  session. Unhandled errors return a bare 500 rather than a stack trace, and
-  malformed OTLP timestamps no longer throw. Also fixed: hooks now work in repos
-  with no commits, a full `costs recalc` keeps captured benchmark costs,
-  `formatNumber` moves to the next unit when rounding reaches 1000, and each
-  Antigravity generation is timestamped and priced at its own time. The most
-  frequent CI flake is fixed at its measured cause: 200k synchronous inserts
-  blocked the in-process test server past Node's 5s keep-alive timeout, so
-  the next `fetch` reused a dead socket. The test now lowers the evidence cap
-  instead.
-
-- **Local-time days (2026-09-23, PR #142):** every user-facing day is a local
-  day in one reporting zone (`AGENTMONITOR_TIMEZONE`, default the host's).
-  Date filters, daily buckets, active-day counts, the heatmap, skill and
-  trace-quality windows, budgets and daily activity all share
-  `src/util/local-day.ts`, replacing a mix of UTC-day reads and a hardcoded
-  `America/New_York`. The warehouse export keeps UTC days by design.
-
-- **Pricing and read-surface correctness (2026-09-23, PRs #140-#141):** Claude
-  Opus 5.5 and Fable 5.1 are priced (both off the 0.1x cache-read convention),
-  and `amon costs recalc --missing-only` backfills rows imported before a model
-  had a rate card without touching captured costs. The Monitor feed and session
-  list now exclude benchmark rows, usage/analytics reject unparseable dates
-  instead of reporting $0, the Monitor's `limit=0` takes a ceiling, the session
-  browser's `date_to` survives DST, and Hour-of-Week buckets by local time.
-
-- **Recovered Claude transcripts and one-line-one-bill repair (2026-09-26):**
-  transcripts deleted by Claude Code's 30-day cleanup were restored from offsite
-  backups, and `amon costs repair-claude-usage` corrected their repeat-line
-  inflation. The repair now also bills a line once when several rows hold it
-  (both id schemes, a resumed session's copied history, and positional ids a
-  child agent also minted once the child has its own row) and re-estimates the
-  cost of rows whose tokens change. Each turn now bills the usage on its last
-  line, where output is final, and a turn imported mid-write is refreshed.
-  Claude figures are per API response, which Claude Code's live counters agree
-  with and its `/stats` does not (it sums every content-block line); `amon costs
-  check-claude-sessions` compares imported cost with the harness's own running
-  cost per session. Claude's stored imported total fell by roughly a sixth.
-
-- **Imported event identity (2026-09-22, PRs #137-#139):** Claude Code imports
-  bill one event per assistant turn rather than one per content block, and
-  imported events are keyed on the transcript line's own identifier instead of
-  its position. A child-agent transcript reports its parent's session, so the old
-  positional scheme minted colliding ids and dropped delegated-agent usage
-  entirely; those events now import, attributed to the parent conversation and
-  tagged with their agent. Rows imported under the old scheme keep deduplicating
-  through an ownership rule rather than a migration. `amon costs
-  repair-claude-usage` corrects already-stored inflation and re-derives affected
-  session summaries; rows whose transcript is gone are reported, not guessed at.
-  Codex ids were measured and deliberately left positional, with two guards
-  against accidental re-keying.
-
-- **Daily activity accounting (2026-09-16):** an aggregate-only read distinguishes
-  daily active conversations, delegated agents, internal jobs and unclassified
-  evidence. Codex native lineage and creation time survive parsing; retained
-  projections require deliberate reparse after upgrade.
-
-- **Session-list identity (2026-09-15):** Sessions API/CLI reads reconcile known
-  Codex JSONL/import/OTEL aliases before filtering and pagination, preserving
-  original detail links and all stored history. Usage and browser coverage remain
-  explicitly distinct.
-
-- **Summary timestamp integrity (2026-09-15):** database-time fallbacks retain
-  explicit UTC markers; an opt-in, digest-checked historical repair covers proven
-  session/turn/item timestamps with rollback, replay and non-target-data checks.
-- **Agent-first CLI read parity (2026-09-13, PR #126):** the CLI now exposes all
-  current Svelte read contracts, including Monitor, Analytics, Usage, Insights,
-  Benchmarks, Trace Quality, live/session detail, and operational metadata through
-  stable JSON output.
-- **Usage and Monitor scaling (2026-09-11 through 2026-09-13, PRs #122 and #128):**
-  Monitor stopped queueing redundant Usage reads, and the Usage overview gained a
-  timestamp-first source-count path. On the named 697K-event snapshot, the final
-  source-level 60-day overview measured a 220.99 ms warm median and the built HTTP
-  path 227.14 ms. The historical 150 ms figure remains a revisit trigger, not a
-  product SLO.
-- **Canonical Svelte surface (2026-09-10):** the legacy static dashboard was
-  removed; `/` redirects to `/app/`, and Monitor reads use v2 while the remaining v1
-  reads serve test compatibility.
-- **Benchmarks and operational metrics (2026-09-02 through 2026-09-04):** segregated
-  benchmark import/read/UI paths, Pareto comparison, date-aware pricing, and
-  content-free OTEL operational metrics shipped without contaminating personal
-  usage totals.
-- **Lean trace quality and aggregate export (2026-06 through 2026-07):** local trace
-  quality became one summary per session plus on-demand observations; the old
-  warehouse was removed, and optional content-free Postgres publication shipped.
+- Recent import repairs reconcile copied Codex subagent history and rewritten
+  rollouts, and distinguish producer-reported costs from estimates. Claude
+  transcript imports now use producer line identity with a legacy bridge so
+  child-agent usage can be captured without duplicating old rows. These
+  changes make provenance and coverage as important as headline totals.
+- User-facing days use one reporting zone, while the optional warehouse export
+  deliberately keeps UTC days until a consumer justifies a migration. A
+  content-free observed-session inventory reconciles event and browser evidence
+  without claiming that either has complete capture.
 
 ## Now
 
@@ -188,8 +62,8 @@ pull requests; current behavior belongs to the system references.
 
 ## Next
 
-- Ground and rank the open items in [BACKLOG.md](BACKLOG.md), including the newly
-  imported cross-repository pattern hypotheses, before promoting one to a plan.
+- Ground and rank the open items in [BACKLOG.md](BACKLOG.md), including the
+  cross-repository pattern hypotheses, before selecting implementation.
 - Tighten v2 contract and built-runtime coverage where real consumer failures expose
   gaps.
 - Improve integration and capture/redaction explanations in the product and CLI.
@@ -202,8 +76,8 @@ pull requests; current behavior belongs to the system references.
   model.
 - Build the deferred redaction-aware Langfuse depth export if local review workflows
   demonstrate a need for external eval tooling.
-- Let medallion own any conforming assistant/coding-agent warehouse view and keep
-  personal AgentMonitor data outside adoption KPIs.
+- Let aggregate warehouse consumers own conforming assistant/coding-agent views;
+  keep personal AgentMonitor data outside organization adoption KPIs.
 
 ## Working Principles
 

@@ -194,7 +194,8 @@ Live adapters under `src/live/` normalize current sessions and declare fidelity:
   it.
 - Codex `otel-only` is summary-oriented. It must not be presented as transcript
   parity with Claude.
-- Antigravity is historical import only.
+- Antigravity's watcher sync projects summary-fidelity Live sessions from
+  conversation files; this is distinct from transcript-capable Claude detail.
 
 Context occupancy uses the latest request's prompt size, so it may drop after
 compaction. Codex uses its reported context window when present and otherwise a

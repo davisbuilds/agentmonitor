@@ -44,7 +44,8 @@ fidelity is explicit:
 - Codex OTEL provides summary-oriented live activity, including response-completion
   token and cost data. Historical Codex JSONL import enriches later analysis but is
   not the sole usage source.
-- Antigravity supports historical summary import and has no live projection.
+- Antigravity conversation files feed a summary-fidelity Live projection when
+  the watcher syncs them; this does not establish transcript-level parity.
 
 Context occupancy is absent when the source cannot support it. Its numerator is
 the latest request's prompt size, so compaction can lower the displayed value; the

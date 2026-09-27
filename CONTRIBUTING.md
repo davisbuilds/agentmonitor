@@ -1,58 +1,23 @@
 # Contributing
 
-This repository uses a squash-merge workflow to keep `main` history clean and readable.
+Focused bug fixes, integration corrections, tests, accessibility improvements,
+and documentation changes are welcome. Discuss substantial features, new
+dependencies, integrations, or public API/CLI changes before major implementation.
+A clear item in [BACKLOG.md](docs/project/BACKLOG.md) can go straight to a PR;
+use an issue when persistent discussion or coordination helps.
 
-## Workflow
+Agent-assisted contributions are welcome. The submitter should understand the
+change's purpose, important behavior, tradeoffs, and verification limits. A
+prompting diary or human rewrite is not required.
 
-1. Sync local `main`.
-2. Create a feature branch from `main`.
-3. Make focused changes and commit normally.
-4. Push branch and open a pull request.
-5. Merge with **Squash and merge** after quality checks pass.
-6. Let GitHub auto-delete the merged remote branch.
-7. Prune merged local branches periodically.
+Start with [README.md](README.md) and
+[Operations](docs/system/OPERATIONS.md) for setup. Keep a PR focused, describe
+its user-visible effect, and state what was verified or could not be checked.
+The applicable gates depend on the changed surface: see [AGENTS.md](AGENTS.md#testing)
+and the [CI workflow](.github/workflows/ci.yml).
 
-## Branch Naming
-
-Use descriptive prefixes:
-
-- `feat/<name>`
-- `fix/<name>`
-- `chore/<name>`
-- `docs/<name>`
-
-## Commit Guidance
-
-- Keep commits logical and atomic while working on the branch.
-- Use clear, imperative commit messages.
-- It is fine to have multiple commits in one PR; squash merge will combine them on `main`.
-
-## Pull Request Expectations
-
-- Keep PR scope tight (one objective per PR).
-- Include a short summary and test evidence.
-- Ensure quality checks pass before merge:
-  - `pnpm build`
-  - `pnpm test`
-  - Optionally run `pnpm test:parity:ts` when changing shared HTTP/API behavior
-    This uses an isolated temporary server and DB, so it should not pollute local monitor data.
-
-## Local Branch Cleanup
-
-Run periodically:
-
-```bash
-git fetch --prune
-git branch --merged main | grep -v ' main$' | xargs -n 1 git branch -d
-```
-
-## Documentation Hygiene
-
-- Do not hardcode volatile counts in docs.
-- Prefer executable source-of-truth references (for example, `pnpm test`, `README.md`).
-
-## Related Docs
-
-- Git history and branch hygiene config: `docs/project/GIT_HISTORY_POLICY.md`
-- Agent implementation guidance: `AGENTS.md`
-- Project onboarding: `README.md`
+This repository preserves individual commits. The
+[history policy](docs/project/GIT_HISTORY_POLICY.md) explains the intended
+merge strategy; GitHub settings verified on 2026-09-27 disabled squash merges.
+Tidy WIP/fixup commits before submitting. The maintainer merges after applicable
+checks and review conversations are resolved.

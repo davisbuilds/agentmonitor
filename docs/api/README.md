@@ -19,6 +19,7 @@ The Svelte app and agent-first CLI consume v2. Its route families cover Monitor,
 Live, sessions, search, analytics, usage, insights, benchmarks, trace quality,
 operational metrics, pins, skill context, and filter metadata.
 
+- Content-free activity reads and their coverage limits: [activity-contract.md](activity-contract.md)
 - Route source and response wiring: [../../src/api/v2/router.ts](../../src/api/v2/router.ts)
 - Query contracts: [../../src/db/v2-queries.ts](../../src/db/v2-queries.ts)
 
