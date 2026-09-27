@@ -473,6 +473,60 @@ export function eventIdExists(eventId: string): boolean {
 }
 
 /**
+ * Bring an imported row up to date with a later read of the same transcript
+ * line, returning its id when it changed. A transcript can be imported while a
+ * turn is still being written, and the turn's final usage is only on its last
+ * line. Only the transcript that stored the row may refresh it, so a resumed
+ * session's copy of the line cannot rewrite its predecessor's row. A reported
+ * cost is kept; an estimate follows the tokens.
+ */
+export function refreshImportedUsage(event: {
+  event_id: string;
+  session_id: string;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+}): number | null {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT id, session_id, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+           cost_usd, cost_source, model, client_timestamp
+    FROM events WHERE event_id = ? AND source = 'import'
+  `).get(event.event_id) as {
+    id: number; session_id: string; tokens_in: number; tokens_out: number;
+    cache_read_tokens: number; cache_write_tokens: number; cost_usd: number | null;
+    cost_source: CostSource | null; model: string | null; client_timestamp: string | null;
+  } | undefined;
+  if (!row || row.session_id !== event.session_id) return null;
+  const tokens = {
+    input: event.tokens_in,
+    output: event.tokens_out,
+    cacheRead: event.cache_read_tokens ?? 0,
+    cacheWrite: event.cache_write_tokens ?? 0,
+  };
+  if (row.tokens_in === tokens.input && row.tokens_out === tokens.output
+    && row.cache_read_tokens === tokens.cacheRead && row.cache_write_tokens === tokens.cacheWrite) return null;
+
+  let cost = row.cost_usd;
+  let costSource = row.cost_source;
+  if (row.model && (costSource === 'estimated' || cost === null)) {
+    const estimate = pricingRegistry.calculate(row.model, tokens, row.client_timestamp);
+    if (estimate !== null) {
+      cost = estimate;
+      costSource = 'estimated';
+    }
+  }
+  db.prepare(`
+    UPDATE events
+    SET tokens_in = ?, tokens_out = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?, cost_source = ?
+    WHERE id = ?
+  `).run(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, cost, costSource, row.id);
+  markStatsDirty();
+  return row.id;
+}
+
+/**
  * The branch `insertEvent` would record for this event. It may run `git`, so it
  * must be called outside any write transaction.
  */

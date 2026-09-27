@@ -104,20 +104,33 @@ export function parseClaudeCodeFile(
   let prevCostUSD = 0;
 
   // Assistant turns are written one line per content block (thinking, tool_use,
-  // text), every line repeating the same `message.id` and the same cumulative
-  // `usage`. Only the first line of a turn carries its usage into events; the
-  // rest would re-bill tokens the turn already spent.
+  // text), every line repeating the same `message.id`. Each line records usage
+  // as of its block: input and cache counts are the same throughout, output
+  // grows, and the last line holds the turn's final count. The turn is billed
+  // once, on its first line, with that final usage; the rest would re-bill
+  // tokens the turn already spent.
+  //
+  // This is usage per API response, which is what Anthropic bills and what
+  // Claude Code's live counters (statusline, `/cost`) add up. Claude Code's
+  // `/stats` instead sums every line, so it reads about twice as high.
+  const parsed = lines.map(text => {
+    try {
+      return JSON.parse(text) as ClaudeCodeLogLine;
+    } catch {
+      return undefined; // Skip malformed lines
+    }
+  });
+  const finalUsage = new Map<string, NonNullable<ClaudeCodeLogLine['usage']>>();
+  for (const line of parsed) {
+    const usage = line?.usage ?? line?.message?.usage;
+    const messageId = line?.message?.id;
+    if (messageId !== undefined && usage) finalUsage.set(messageId, usage);
+  }
   const billedMessageIds = new Set<string>();
 
   for (let i = 0; i < lines.length; i++) {
-    let line: ClaudeCodeLogLine;
-    try {
-      line = JSON.parse(lines[i]) as ClaudeCodeLogLine;
-    } catch {
-      continue; // Skip malformed lines
-    }
-
-    if (!line.type) continue;
+    const line = parsed[i];
+    if (!line?.type) continue;
 
     const sessionId = line.sessionId ?? fileBasename;
 
@@ -154,11 +167,12 @@ export function parseClaudeCodeFile(
     const messageId = msg?.id;
     const alreadyBilled = messageId !== undefined && billedMessageIds.has(messageId);
     if (messageId !== undefined && usage) billedMessageIds.add(messageId);
+    const turnUsage = usage && messageId !== undefined ? finalUsage.get(messageId) ?? usage : usage;
 
-    const tokensIn = alreadyBilled ? 0 : usage?.input_tokens ?? 0;
-    const tokensOut = alreadyBilled ? 0 : usage?.output_tokens ?? 0;
-    const cacheRead = alreadyBilled ? 0 : usage?.cache_read_input_tokens ?? 0;
-    const cacheWrite = alreadyBilled ? 0 : usage?.cache_creation_input_tokens ?? 0;
+    const tokensIn = alreadyBilled ? 0 : turnUsage?.input_tokens ?? 0;
+    const tokensOut = alreadyBilled ? 0 : turnUsage?.output_tokens ?? 0;
+    const cacheRead = alreadyBilled ? 0 : turnUsage?.cache_read_input_tokens ?? 0;
+    const cacheWrite = alreadyBilled ? 0 : turnUsage?.cache_creation_input_tokens ?? 0;
 
     // Extract project (basename of cwd) and branch
     const project = line.cwd ? path.basename(line.cwd) : undefined;

@@ -173,6 +173,34 @@ describe('Claude Code log parser', () => {
     );
   });
 
+  test('bills a turn with the usage its last line records', () => {
+    // Each line of a turn records usage as of that content block: input and
+    // cache counts are the same on every line, but output keeps growing, so
+    // only the last line has the turn's final output. The turn is billed once,
+    // on its first line, with that final usage.
+    const line = (output: number, content: unknown) => ({
+      type: 'assistant',
+      sessionId: 'sess-growing',
+      timestamp: '2026-02-01T10:00:00Z',
+      message: {
+        id: 'msg_01Growing',
+        model: 'claude-sonnet-4-5-20250929',
+        usage: { input_tokens: 2, output_tokens: output, cache_read_input_tokens: 500, cache_creation_input_tokens: 40 },
+        content,
+      },
+    });
+    const filePath = writeJsonl('sess-growing.jsonl', [
+      line(3, [{ type: 'thinking', thinking: 'deciding' }]),
+      line(120, [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }]),
+      line(254, [{ type: 'text', text: 'done' }]),
+    ]);
+
+    const events = parseClaudeCodeFile(filePath);
+
+    assert.deepEqual(events.map(event => event.tokens_out), [254, 0, 0]);
+    assert.deepEqual(events.map(event => event.cache_read_tokens), [500, 0, 0]);
+  });
+
   test('does not collide with a child-agent transcript at the same line index', () => {
     // A child-agent transcript embeds its PARENT's sessionId, and legacy ids were
     // derived from (sessionId, line index) — so line N of each file minted the
@@ -991,6 +1019,95 @@ describe('Import orchestrator integration', () => {
     const result = runImport({ source: 'claude-code', claudeDir: dir, force: true });
     assert.equal(result.totalEventsImported, 0, 'legacy-keyed rows must still deduplicate');
     assert.equal(result.totalDuplicates, 2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('refreshes a turn imported before its last line was written', async () => {
+    // Auto-import reads live transcripts, so it can store a turn while Claude
+    // Code is still writing it. That row has output only as of the first
+    // blocks; the next import must bring it up to the turn's final usage
+    // instead of skipping it as a duplicate.
+    const { runImport } = await import('../src/import/index.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-refresh-'));
+    const sessionId = 'refresh-session-uuid';
+    const file = path.join(dir, 'projects', 'proj', `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const model = 'claude-sonnet-4-5-20250929';
+    const line = (uuid: string, output: number) => JSON.stringify({
+      type: 'assistant', sessionId, uuid, timestamp: '2026-02-01T10:00:00Z',
+      message: { id: 'msg_refresh', model, usage: { input_tokens: 2, output_tokens: output, cache_read_input_tokens: 500 } },
+    });
+    fs.writeFileSync(file, [line('uuid-refresh-0', 3), line('uuid-refresh-1', 120)].join('\n'));
+    runImport({ source: 'claude-code', claudeDir: dir });
+
+    fs.appendFileSync(file, '\n' + line('uuid-refresh-2', 254));
+    const result = runImport({ source: 'claude-code', claudeDir: dir });
+
+    if (!getDb) throw new Error('Database not initialized');
+    const first = getDb().prepare(`
+      SELECT tokens_out, cost_usd, cost_source FROM events WHERE session_id = ? ORDER BY id LIMIT 1
+    `).get(sessionId) as { tokens_out: number; cost_usd: number; cost_source: string };
+    const { pricingRegistry } = await import('../src/pricing/index.js');
+    assert.equal(result.totalEventsRefreshed, 1);
+    assert.equal(first.tokens_out, 254);
+    assert.equal(first.cost_source, 'estimated');
+    assert.ok(Math.abs(first.cost_usd - (pricingRegistry.calculate(model, { input: 2, output: 254, cacheRead: 500 }, '2026-02-01T10:00:00Z') ?? NaN)) < 1e-12,
+      'the estimate follows the refreshed tokens');
+    const total = getDb().prepare('SELECT SUM(tokens_out) AS out FROM events WHERE session_id = ?').get(sessionId) as { out: number };
+    assert.equal(total.out, 254, 'the turn is still billed once');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('a refresh keeps a reported cost', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-refresh-reported-'));
+    const sessionId = 'refresh-reported-uuid';
+    const file = path.join(dir, 'projects', 'proj', `${sessionId}.jsonl`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const line = (uuid: string, output: number) => JSON.stringify({
+      type: 'assistant', sessionId, uuid, timestamp: '2026-02-01T10:00:00Z',
+      message: { id: 'msg_refresh_reported', model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 2, output_tokens: output } },
+    });
+    fs.writeFileSync(file, line('uuid-reported-0', 3));
+    runImport({ source: 'claude-code', claudeDir: dir });
+    if (!getDb) throw new Error('Database not initialized');
+    getDb().prepare("UPDATE events SET cost_usd = 1.23, cost_source = 'reported' WHERE session_id = ?").run(sessionId);
+
+    fs.appendFileSync(file, '\n' + line('uuid-reported-1', 254));
+    runImport({ source: 'claude-code', claudeDir: dir });
+
+    const first = getDb().prepare('SELECT tokens_out, cost_usd FROM events WHERE session_id = ? ORDER BY id LIMIT 1')
+      .get(sessionId) as { tokens_out: number; cost_usd: number };
+    assert.deepEqual(first, { tokens_out: 254, cost_usd: 1.23 });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('does not refresh a row another transcript stored for the same line', async () => {
+    // A resumed session repeats its predecessor's lines under the same uuids.
+    // The row belongs to whichever transcript stored it; a copy that reads the
+    // line differently must not rewrite it on every import.
+    const { runImport } = await import('../src/import/index.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-refresh-copy-'));
+    const original = 'refresh-original-uuid';
+    const resumed = 'refresh-resumed-uuid';
+    fs.mkdirSync(path.join(dir, 'projects', 'proj'), { recursive: true });
+    const write = (sessionId: string, output: number) => fs.writeFileSync(
+      path.join(dir, 'projects', 'proj', `${sessionId}.jsonl`),
+      JSON.stringify({
+        type: 'assistant', sessionId, uuid: 'uuid-refresh-shared', timestamp: '2026-02-01T10:00:00Z',
+        message: { id: 'msg_refresh_shared', model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 2, output_tokens: output } },
+      }),
+    );
+    write(original, 50);
+    runImport({ source: 'claude-code', claudeDir: dir });
+    write(resumed, 999);
+
+    const result = runImport({ source: 'claude-code', claudeDir: dir });
+
+    if (!getDb) throw new Error('Database not initialized');
+    const rows = getDb().prepare("SELECT session_id, tokens_out FROM events WHERE source = 'import'").all() as Array<{ session_id: string; tokens_out: number }>;
+    assert.equal(result.totalEventsRefreshed, 0);
+    assert.deepEqual(rows.map(r => [r.session_id, r.tokens_out]), [[original, 50]]);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
