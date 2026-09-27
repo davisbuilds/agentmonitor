@@ -1,14 +1,14 @@
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db/connection.js';
-import { eventIdExists, insertEvent, setSessionMode } from '../db/queries.js';
+import { eventIdExists, insertEvent, refreshImportedUsage, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import type { ParsedImportEvent } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashContent as hashCodexContent } from './codex.js';
 import { reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
-import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
+import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -84,12 +84,15 @@ function importEvents(
   events: ParsedImportEvent[],
   dryRun: boolean,
   bridgeLegacyIds = false,
-): { imported: number; duplicates: number } {
+  refreshUsage = false,
+): { imported: number; duplicates: number; refreshed: number } {
   let imported = 0;
   let duplicates = 0;
+  let refreshed = 0;
+  const refreshedSessions = new Set<string>();
 
   if (dryRun) {
-    return { imported: events.length, duplicates: 0 };
+    return { imported: events.length, duplicates: 0, refreshed: 0 };
   }
 
   for (const event of events) {
@@ -103,13 +106,24 @@ function importEvents(
     if (row) {
       imported++;
       safelyMaintainTraceSummaryForEvent(row.id, 'historical import');
+      continue;
+    }
+    // A turn stored while it was still being written gains its final usage.
+    const refreshedId = refreshUsage && event.event_id ? refreshImportedUsage({ ...event, event_id: event.event_id }) : null;
+    if (refreshedId !== null) {
+      refreshed++;
+      refreshedSessions.add(event.session_id);
     } else {
       duplicates++;
     }
   }
 
+  // The summary already counts a refreshed row, so adding it again would
+  // double it; re-derive the session instead.
+  for (const sessionId of refreshedSessions) safelyMaintainTraceSummaryForSession(sessionId, 'import refresh');
+
   applySessionModes(events);
-  return { imported, duplicates };
+  return { imported, duplicates, refreshed };
 }
 
 // Invocation mode is a session-level constant carried on events. Apply it once
@@ -151,7 +165,8 @@ function processFile(
   const ownsLegacyIdentity = source === 'claude-code'
     && events.length > 0
     && path.basename(filePath, '.jsonl') === events[0].session_id;
-  const { imported, duplicates } = importEvents(events, options.dryRun ?? false, ownsLegacyIdentity);
+  const { imported, duplicates, refreshed } = importEvents(
+    events, options.dryRun ?? false, ownsLegacyIdentity, source === 'claude-code');
   recordImportState(filePath, currentHash, stat.size, source, imported, options);
 
   return {
@@ -159,7 +174,7 @@ function processFile(
     source,
     eventsFound: events.length,
     eventsImported: imported,
-    eventsRefreshed: 0,
+    eventsRefreshed: refreshed,
     eventsRemoved: 0,
     skippedDuplicate: duplicates,
     skippedUnchanged: false,

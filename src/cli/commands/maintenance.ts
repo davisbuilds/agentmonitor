@@ -315,6 +315,55 @@ export function registerMaintenanceCommands(): void {
   });
 
   registerCommand({
+    name: 'costs check-claude-sessions',
+    group: 'Data Commands',
+    summary: "Compare imported Claude cost with Claude Code's own running cost per session",
+    usage: 'costs check-claude-sessions [--limit <n>]',
+    examples: [
+      'costs check-claude-sessions',
+      'costs check-claude-sessions --limit 5 --json',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--limit']), new Set());
+      rejectExtraPositionals(parsed.positionals, 'amon costs check-claude-sessions [--limit <n>]');
+      const limitValue = parsed.values.get('--limit');
+      const limit = limitValue === undefined ? 20 : Number(limitValue);
+      if (!Number.isInteger(limit) || limit < 1) throw invalidUsage('--limit must be a positive integer');
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb } = await import('../../db/connection.js');
+      const { checkClaudeSessionCosts } = await import('../../db/queries.js');
+      initSchema();
+      try {
+        const checks = checkClaudeSessionCosts(limit);
+        if (ctx.global.json) {
+          writeJson(ctx, checks);
+          return;
+        }
+        if (checks.length === 0) {
+          writeStdout(ctx, 'No Claude sessions recorded yet. The statusline bridge reports each session\'s running cost.\n');
+          return;
+        }
+        const lines = checks.map(check => [
+          check.session_id.slice(0, 8),
+          `since ${check.process_started_at.slice(0, 16).replace('T', ' ')}`,
+          `harness $${check.cost_usd.toFixed(2)}`,
+          `amon $${check.amon_cost_usd.toFixed(2)}`,
+          check.unpriced_rows > 0
+            ? `ratio n/a (${check.unpriced_rows} unpriced row${check.unpriced_rows === 1 ? '' : 's'})`
+            : check.ratio === null ? 'ratio n/a' : `ratio ${check.ratio.toFixed(2)}`,
+        ].join('  '));
+        writeStdout(ctx, [
+          'Imported Claude cost vs Claude Code\'s running cost (both per API response; expect a ratio a little under 1):',
+          ...lines,
+          '',
+        ].join('\n'));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'costs repair-codex-usage',
     group: 'Data Commands',
     summary: 'Rebuild imported Codex usage from rollouts, dropping copied subagent history and stale rows',

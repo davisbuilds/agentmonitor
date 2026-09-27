@@ -473,6 +473,60 @@ export function eventIdExists(eventId: string): boolean {
 }
 
 /**
+ * Bring an imported row up to date with a later read of the same transcript
+ * line, returning its id when it changed. A transcript can be imported while a
+ * turn is still being written, and the turn's final usage is only on its last
+ * line. Only the transcript that stored the row may refresh it, so a resumed
+ * session's copy of the line cannot rewrite its predecessor's row. A reported
+ * cost is kept; an estimate follows the tokens.
+ */
+export function refreshImportedUsage(event: {
+  event_id: string;
+  session_id: string;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+}): number | null {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT id, session_id, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+           cost_usd, cost_source, model, client_timestamp
+    FROM events WHERE event_id = ? AND source = 'import'
+  `).get(event.event_id) as {
+    id: number; session_id: string; tokens_in: number; tokens_out: number;
+    cache_read_tokens: number; cache_write_tokens: number; cost_usd: number | null;
+    cost_source: CostSource | null; model: string | null; client_timestamp: string | null;
+  } | undefined;
+  if (!row || row.session_id !== event.session_id) return null;
+  const tokens = {
+    input: event.tokens_in,
+    output: event.tokens_out,
+    cacheRead: event.cache_read_tokens ?? 0,
+    cacheWrite: event.cache_write_tokens ?? 0,
+  };
+  if (row.tokens_in === tokens.input && row.tokens_out === tokens.output
+    && row.cache_read_tokens === tokens.cacheRead && row.cache_write_tokens === tokens.cacheWrite) return null;
+
+  let cost = row.cost_usd;
+  let costSource = row.cost_source;
+  if (row.model && (costSource === 'estimated' || cost === null)) {
+    const estimate = pricingRegistry.calculate(row.model, tokens, row.client_timestamp);
+    if (estimate !== null) {
+      cost = estimate;
+      costSource = 'estimated';
+    }
+  }
+  db.prepare(`
+    UPDATE events
+    SET tokens_in = ?, tokens_out = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?, cost_source = ?
+    WHERE id = ?
+  `).run(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, cost, costSource, row.id);
+  markStatsDirty();
+  return row.id;
+}
+
+/**
  * The branch `insertEvent` would record for this event. It may run `git`, so it
  * must be called outside any write transaction.
  */
@@ -1564,4 +1618,94 @@ export function getSessionTranscript(sessionId: string): TranscriptEvent[] {
     WHERE session_id = ?
     ORDER BY created_at ASC, id ASC
   `).all(sessionId) as TranscriptEvent[];
+}
+
+// ─── Claude session accounting ─────────────────────────────────────────
+
+/** Claude Code's running totals for one session, as its statusline reports them. */
+export interface ClaudeSessionAccounting {
+  session_id: string;
+  observed_at: string;
+  /** When the process whose totals these are started; the totals cover only it. */
+  process_started_at: string;
+  /** How long that process had run when the totals were read; it only grows. */
+  process_duration_ms: number;
+  cost_usd: number;
+  claude_version: string | null;
+}
+
+/**
+ * Keep a session's latest totals. The bridge posts in the background, so a
+ * sample can arrive after a newer one, even from the process before a restart.
+ * A sample's process is identified by its start (receipt time less its
+ * duration), which is stable within a process up to delivery delay:
+ *
+ * - a sample from a process that started later replaces the stored one (a
+ *   restart or resume resets the counters);
+ * - one from the same process replaces it only if it has run at least as long;
+ * - one from an older process is dropped.
+ */
+export function recordClaudeSessionAccounting(snapshot: ClaudeSessionAccounting): void {
+  getDb().prepare(`
+    INSERT INTO claude_session_accounting
+      (session_id, observed_at, process_started_at, process_duration_ms, cost_usd, claude_version)
+    VALUES (@session_id, @observed_at, @process_started_at, @process_duration_ms, @cost_usd, @claude_version)
+    ON CONFLICT(session_id) DO UPDATE SET
+      observed_at = excluded.observed_at,
+      process_started_at = excluded.process_started_at,
+      process_duration_ms = excluded.process_duration_ms,
+      cost_usd = excluded.cost_usd,
+      claude_version = excluded.claude_version
+    WHERE (julianday(excluded.process_started_at) - julianday(claude_session_accounting.process_started_at))
+            * 86400000 > @same_process_ms
+       OR (ABS(julianday(excluded.process_started_at) - julianday(claude_session_accounting.process_started_at))
+            * 86400000 <= @same_process_ms
+           AND excluded.process_duration_ms >= claude_session_accounting.process_duration_ms)
+  `).run({ ...snapshot, same_process_ms: SAME_PROCESS_MS });
+}
+
+/** Derived starts within this of each other belong to one process: delivery delay, not a restart. */
+const SAME_PROCESS_MS = 60_000;
+
+/** One session's harness cost beside what amon recorded for the same window. */
+export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {
+  amon_cost_usd: number;
+  /** Imported rows in the window with usage but no cost; any makes the ratio unknowable. */
+  unpriced_rows: number;
+  /** amon's cost over the harness's; null when the harness reports no cost. */
+  ratio: number | null;
+}
+
+/**
+ * The latest sessions' harness cost beside amon's imported cost for the same
+ * session and window. Both count once per API response, so they should agree
+ * closely; amon runs slightly low because the harness also pays for calls that
+ * never reach a transcript, likely compaction above all (unmeasured). A ratio near 2 would mean
+ * imports are counting every content-block line, as Claude Code's `/stats` does.
+ */
+export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
+  const rows = getDb().prepare(`
+    SELECT a.session_id, a.observed_at, a.process_started_at, a.process_duration_ms, a.cost_usd, a.claude_version,
+      COALESCE((
+        SELECT SUM(e.cost_usd) FROM events e
+        WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'
+          AND e.client_timestamp >= a.process_started_at AND e.client_timestamp <= a.observed_at
+      ), 0) AS amon_cost_usd,
+      (
+        SELECT COUNT(*) FROM events e
+        WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'
+          AND e.client_timestamp >= a.process_started_at AND e.client_timestamp <= a.observed_at
+          AND e.cost_usd IS NULL
+          AND (e.tokens_in > 0 OR e.tokens_out > 0 OR e.cache_read_tokens > 0 OR e.cache_write_tokens > 0)
+      ) AS unpriced_rows
+    FROM claude_session_accounting a
+    ORDER BY a.observed_at DESC
+    LIMIT ?
+  `).all(limit) as Array<Omit<ClaudeSessionCostCheck, 'ratio'>>;
+  // An unpriced row bills as NULL and the sum skips it, so the imported cost
+  // would read low; no ratio is better than a falsely reassuring one.
+  return rows.map(row => ({
+    ...row,
+    ratio: row.cost_usd > 0 && row.unpriced_rows === 0 ? row.amon_cost_usd / row.cost_usd : null,
+  }));
 }

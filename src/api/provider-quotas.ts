@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from 'express';
 import {
   getProviderQuotas,
+  recordClaudeSessionAccounting,
+  type ClaudeSessionAccounting,
   upsertProviderQuotaSnapshot,
   type ProviderName,
   type ProviderQuotaSnapshotInput,
@@ -47,11 +49,40 @@ function parseClaudeStatuslinePayload(payload: unknown): ProviderQuotaSnapshotIn
   };
 }
 
+/**
+ * The session's running cost, which Claude Code keeps in memory for the life of
+ * the process and adds to once per API response.
+ */
+function parseClaudeSessionAccounting(payload: unknown, now = Date.now()): ClaudeSessionAccounting | null {
+  if (!payload || typeof payload !== 'object') return null;
+  const data = payload as {
+    session_id?: unknown;
+    version?: unknown;
+    cost?: { total_cost_usd?: unknown; total_duration_ms?: unknown } | null;
+  };
+  const cost = data.cost?.total_cost_usd;
+  const duration = data.cost?.total_duration_ms;
+  if (typeof data.session_id !== 'string' || data.session_id === '') return null;
+  if (typeof cost !== 'number' || !Number.isFinite(cost)) return null;
+  if (typeof duration !== 'number' || !Number.isFinite(duration) || duration < 0) return null;
+  return {
+    session_id: data.session_id,
+    observed_at: new Date(now).toISOString(),
+    process_started_at: new Date(now - duration).toISOString(),
+    process_duration_ms: duration,
+    cost_usd: cost,
+    claude_version: typeof data.version === 'string' ? data.version : null,
+  };
+}
+
 providerQuotasRouter.get('/', (_req: Request, res: Response) => {
   res.json(getProviderQuotas());
 });
 
 providerQuotasRouter.post('/claude/statusline', (req: Request, res: Response) => {
+  const accounting = parseClaudeSessionAccounting(req.body);
+  if (accounting) recordClaudeSessionAccounting(accounting);
+
   const snapshot = parseClaudeStatuslinePayload(req.body);
   if (!snapshot) {
     res.status(202).json({ accepted: false, reason: 'missing rate_limits payload' });
