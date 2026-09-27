@@ -1636,9 +1636,14 @@ export interface ClaudeSessionAccounting {
 
 /**
  * Keep a session's latest totals. The bridge posts in the background, so a
- * sample can arrive after a newer one: it is kept only when its process has run
- * at least as long as the stored one, or when it comes from a process that
- * started after the stored sample was read (a restart resets the counters).
+ * sample can arrive after a newer one, even from the process before a restart.
+ * A sample's process is identified by its start (receipt time less its
+ * duration), which is stable within a process up to delivery delay:
+ *
+ * - a sample from a process that started later replaces the stored one (a
+ *   restart or resume resets the counters);
+ * - one from the same process replaces it only if it has run at least as long;
+ * - one from an older process is dropped.
  */
 export function recordClaudeSessionAccounting(snapshot: ClaudeSessionAccounting): void {
   getDb().prepare(`
@@ -1651,10 +1656,16 @@ export function recordClaudeSessionAccounting(snapshot: ClaudeSessionAccounting)
       process_duration_ms = excluded.process_duration_ms,
       cost_usd = excluded.cost_usd,
       claude_version = excluded.claude_version
-    WHERE excluded.process_duration_ms >= claude_session_accounting.process_duration_ms
-       OR excluded.process_started_at > claude_session_accounting.observed_at
-  `).run(snapshot);
+    WHERE (julianday(excluded.process_started_at) - julianday(claude_session_accounting.process_started_at))
+            * 86400000 > @same_process_ms
+       OR (ABS(julianday(excluded.process_started_at) - julianday(claude_session_accounting.process_started_at))
+            * 86400000 <= @same_process_ms
+           AND excluded.process_duration_ms >= claude_session_accounting.process_duration_ms)
+  `).run({ ...snapshot, same_process_ms: SAME_PROCESS_MS });
 }
+
+/** Derived starts within this of each other belong to one process: delivery delay, not a restart. */
+const SAME_PROCESS_MS = 60_000;
 
 /** One session's harness cost beside what amon recorded for the same window. */
 export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {

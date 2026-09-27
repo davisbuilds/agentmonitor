@@ -89,9 +89,10 @@ describe('Claude session accounting', () => {
   });
 
   test('a sample arriving late does not replace a newer one from the same process', async () => {
-    // The bridge posts in the background, so samples can arrive out of order.
+    // The bridge posts in the background, so samples can arrive out of order:
+    // here a sample read half a second earlier lands after the newer one.
     await statusline({ session_id: 'sess-late', cost: { total_cost_usd: 2, total_duration_ms: 2_000_000 } });
-    await statusline({ session_id: 'sess-late', cost: { total_cost_usd: 1, total_duration_ms: 1_000_000 } });
+    await statusline({ session_id: 'sess-late', cost: { total_cost_usd: 1, total_duration_ms: 1_999_500 } });
 
     const [check] = checkClaudeSessionCosts();
     assert.equal(check.cost_usd, 2);
@@ -99,12 +100,22 @@ describe('Claude session accounting', () => {
 
   test('a new process for the same session replaces the old totals', async () => {
     // A restarted or resumed session starts its counters again from zero.
-    await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 50, total_duration_ms: 1000 } });
-    await new Promise(resolve => setTimeout(resolve, 20));
-    await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 0.5, total_duration_ms: 1 } });
+    await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 50, total_duration_ms: 3_600_000 } });
+    await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 0.5, total_duration_ms: 1000 } });
 
     const [check] = checkClaudeSessionCosts();
     assert.equal(check.cost_usd, 0.5);
+  });
+
+  test('a late sample from the process before a restart is dropped', async () => {
+    // The old process's last sample can still be in flight when the new one
+    // reports. Its longer duration must not win: it belongs to an older process.
+    await statusline({ session_id: 'sess-late-old', cost: { total_cost_usd: 0.5, total_duration_ms: 1000 } });
+    await statusline({ session_id: 'sess-late-old', cost: { total_cost_usd: 50, total_duration_ms: 3_600_000 } });
+    assert.equal(checkClaudeSessionCosts()[0].cost_usd, 0.5);
+
+    await statusline({ session_id: 'sess-late-old', cost: { total_cost_usd: 0.7, total_duration_ms: 2000 } });
+    assert.equal(checkClaudeSessionCosts()[0].cost_usd, 0.7, 'the new process keeps reporting');
   });
 
   test('ignores payloads without a session or a cost', async () => {
