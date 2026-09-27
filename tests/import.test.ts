@@ -201,6 +201,25 @@ describe('Claude Code log parser', () => {
     assert.deepEqual(events.map(event => event.cache_read_tokens), [500, 0, 0]);
   });
 
+  test('a date-scoped parse that starts mid-turn does not bill the turn\'s later lines', () => {
+    // Billing position comes from the whole transcript: a turn whose first line
+    // falls before \`from\` was billed there, so its later lines stay at zero.
+    const line = (timestamp: string, content: unknown) => ({
+      type: 'assistant',
+      sessionId: 'sess-scoped',
+      timestamp,
+      message: { id: 'msg_01Scoped', model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 2, output_tokens: 254 }, content },
+    });
+    const filePath = writeJsonl('sess-scoped.jsonl', [
+      line('2026-02-01T09:59:59Z', [{ type: 'thinking', thinking: 'deciding' }]),
+      line('2026-02-01T10:00:01Z', [{ type: 'text', text: 'done' }]),
+    ]);
+
+    const events = parseClaudeCodeFile(filePath, { from: new Date('2026-02-01T10:00:00Z') });
+
+    assert.deepEqual(events.map(event => event.tokens_out), [0]);
+  });
+
   test('does not collide with a child-agent transcript at the same line index', () => {
     // A child-agent transcript embeds its PARENT's sessionId, and legacy ids were
     // derived from (sessionId, line index) — so line N of each file minted the

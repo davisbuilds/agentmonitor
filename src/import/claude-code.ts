@@ -135,16 +135,6 @@ export function parseClaudeCodeFile(
 
     const sessionId = line.sessionId ?? fileBasename;
 
-    // Apply date filter
-    if (line.timestamp && options?.from) {
-      const ts = new Date(line.timestamp);
-      if (ts < options.from) continue;
-    }
-    if (line.timestamp && options?.to) {
-      const ts = new Date(line.timestamp);
-      if (ts > options.to) continue;
-    }
-
     const eventType = TYPE_MAP[line.type] ?? 'response';
 
     // Extract tool name
@@ -174,6 +164,17 @@ export function parseClaudeCodeFile(
     const tokensOut = alreadyBilled ? 0 : turnUsage?.output_tokens ?? 0;
     const cacheRead = alreadyBilled ? 0 : turnUsage?.cache_read_input_tokens ?? 0;
     const cacheWrite = alreadyBilled ? 0 : turnUsage?.cache_creation_input_tokens ?? 0;
+
+    // Apply the date filter only now: a turn whose first line falls outside
+    // the range was billed there, and its later lines must stay at zero.
+    if (line.timestamp && options?.from) {
+      const ts = new Date(line.timestamp);
+      if (ts < options.from) continue;
+    }
+    if (line.timestamp && options?.to) {
+      const ts = new Date(line.timestamp);
+      if (ts > options.to) continue;
+    }
 
     // Extract project (basename of cwd) and branch
     const project = line.cwd ? path.basename(line.cwd) : undefined;

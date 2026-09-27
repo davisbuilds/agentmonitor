@@ -594,6 +594,28 @@ describe('Claude import usage repair', () => {
       assert.equal(row(legacyId(resumed, 0)).tokens_out, USAGE.output_tokens);
     });
 
+    test('a uuid row the resumed copy stored does not displace the original\'s row', () => {
+      // The original was imported positionally before the id change; the first
+      // uuid-keyed import of the line came from the resumed transcript, so the
+      // uuid row carries the resumed session. The line is the original's.
+      const original = 'sess-mixed-original';
+      const resumed = 'sess-mixed-continued';
+      const claudeDir = claudeDirFor(original);
+      writeTurns(claudeDir, original, [['uuid-mixed-0', 'msg_mixed_0', '2026-02-01T10:00:00Z']]);
+      writeTurns(claudeDir, resumed, [
+        ['uuid-mixed-0', 'msg_mixed_0', '2026-02-01T10:00:00Z'],
+        ['uuid-mixed-1', 'msg_mixed_1', '2026-02-01T11:00:00Z'],
+      ]);
+      seedRow(legacyId(original, 0), original);
+      seedRow(uuidId('uuid-mixed-0'), resumed);
+
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+
+      assert.equal(report.rows_deduplicated, 1);
+      assert.equal(row(legacyId(original, 0)).tokens_out, USAGE.output_tokens, 'the original keeps the line');
+      assert.deepEqual(row(uuidId('uuid-mixed-0')), { tokens_out: 0, cost_usd: 0 });
+    });
+
     test('a copied line with only one stored row keeps it', () => {
       // The original transcript's rows are missing, so the copy is the only
       // record of that turn and must not be zeroed.

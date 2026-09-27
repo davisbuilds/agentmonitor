@@ -139,7 +139,7 @@ export function repairClaudeImportUsage(
       }
       if (isUuidId(event.event_id)) {
         const copies = copiesByLine.get(event.event_id) ?? [];
-        copies.push({ legacyId: event.legacy_event_id, filePath });
+        copies.push({ legacyId: event.legacy_event_id, filePath, sessionId: event.session_id });
         copiesByLine.set(event.event_id, copies);
         lines.add(event.event_id);
       }
@@ -154,10 +154,9 @@ export function repairClaudeImportUsage(
     WHERE source = 'import' AND agent_type = 'claude_code' AND event_id IS NOT NULL
   `).all() as StoredRow[];
   const storedRows = new Map(rows.map(row => [row.event_id, row]));
-  const storedIds = new Set(storedRows.keys());
   const corrections = new Map<string, Buckets | null>();
   for (const [id, list] of claims) corrections.set(id, resolveClaims(id, list, storedRows));
-  const { duplicates, unresolved } = duplicateLineRows(storedIds, corrections, copiesByLine, transcriptLines);
+  const { duplicates, unresolved } = duplicateLineRows(storedRows, corrections, copiesByLine, transcriptLines);
 
   const pending: Array<{ row: StoredRow; corrected: Buckets; cost: number | null }> = [];
   const touchedSessions = new Set<string>();
@@ -286,6 +285,8 @@ function resolveClaims(id: string, list: Claim[], storedRows: Map<string, Stored
 interface LineCopy {
   legacyId: string | undefined;
   filePath: string;
+  /** The session the copy's transcript reports for the line. */
+  sessionId: string;
 }
 
 function isUuidId(id: string | undefined): id is string {
@@ -309,19 +310,21 @@ function rowHasUsage(row: StoredRow): boolean {
  * - once per transcript, when a resumed session copies its predecessor's lines
  *   (same uuids, new session) and positional ids differ per file.
  *
- * The row kept is the uuid row when there is one. Otherwise it is the copy in
- * the transcript every other copy was resumed from: resuming copies the whole
- * history, so the source's lines all appear in each transcript resumed from it,
- * which also holds lines of its own. When no transcript is contained that way,
- * for instance because the original was used again after the resume, the copies
- * are `unresolved` rather than guessed from timestamps.
+ * The row kept is the one that belongs to the transcript the line came from.
+ * Resuming copies the whole history, so the source is the transcript whose
+ * lines all appear in every other transcript holding the line, each of which
+ * also holds lines of its own. The source's uuid row is preferred over its
+ * positional row; a uuid row another transcript stored does not count as the
+ * source's. When no source can be established (the original was used again
+ * after the resume), or the source has no stored row, the copies are
+ * `unresolved` rather than guessed.
  *
  * Only lines whose transcripts agree on a non-zero contribution are considered,
  * and only ids no other line claims, so an ambiguous row is never the one kept
  * or the one zeroed.
  */
 function duplicateLineRows(
-  stored: Set<string>,
+  stored: Map<string, StoredRow>,
   corrections: Map<string, Buckets | null>,
   copiesByLine: Map<string, LineCopy[]>,
   transcriptLines: Map<string, Set<string>>,
@@ -351,29 +354,28 @@ function duplicateLineRows(
       // partway through a turn), so correcting each on its own could bill the
       // response twice. Leave every stored copy as it is.
       for (const copy of copies) {
-        if (copy.legacyId !== undefined && stored.has(copy.legacyId)) {
-          unresolved.add(copy.legacyId);
-        }
+        if (copy.legacyId !== undefined && stored.has(copy.legacyId)) unresolved.add(copy.legacyId);
       }
       continue;
     }
     if (!contribution || contribution.every(value => value === 0)) continue;
-    const legacy = copies.filter(copy => eligible(copy.legacyId, contribution));
-    const ids = legacy.map(copy => copy.legacyId as string);
-    if (eligible(uuidId, contribution)) {
-      // Every copy but the uuid row is zeroed, including copies an earlier run
-      // already zeroed; otherwise the ordinary correction would re-bill them.
-      for (const id of ids) duplicates.add(id);
-      continue;
-    }
-    if (legacy.length < 2) continue;
-    const sources = legacy.filter(copy => legacy.every(other => other === copy
+    const candidates = [...new Set([uuidId, ...copies.map(copy => copy.legacyId)])]
+      .filter((id): id is string => eligible(id, contribution));
+    if (candidates.length < 2) continue;
+
+    const sources = copies.filter(copy => copies.every(other => other === copy
       || isResumedFrom(other.filePath, copy.filePath)));
-    if (sources.length !== 1) {
-      for (const id of ids) unresolved.add(id);
+    const source = sources.length === 1 ? sources[0] : undefined;
+    const kept = source === undefined ? undefined
+      : candidates.find(id => id === uuidId && stored.get(id)!.session_id === source.sessionId)
+        ?? candidates.find(id => id === source.legacyId);
+    if (kept === undefined) {
+      for (const id of candidates) unresolved.add(id);
       continue;
     }
-    for (const id of ids) if (id !== sources[0].legacyId) duplicates.add(id);
+    // Every other copy is zeroed, including copies an earlier run already
+    // zeroed; otherwise the ordinary correction would re-bill them.
+    for (const id of candidates) if (id !== kept) duplicates.add(id);
   }
   return { duplicates, unresolved };
 }
