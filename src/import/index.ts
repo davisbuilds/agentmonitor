@@ -8,7 +8,7 @@ import { discoverCodexLogs, parseCodexFile, hashContent as hashCodexContent } fr
 import { reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
-import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js';
+import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -89,6 +89,7 @@ function importEvents(
   let imported = 0;
   let duplicates = 0;
   let refreshed = 0;
+  const refreshedSessions = new Set<string>();
 
   if (dryRun) {
     return { imported: events.length, duplicates: 0, refreshed: 0 };
@@ -111,11 +112,15 @@ function importEvents(
     const refreshedId = refreshUsage && event.event_id ? refreshImportedUsage({ ...event, event_id: event.event_id }) : null;
     if (refreshedId !== null) {
       refreshed++;
-      safelyMaintainTraceSummaryForEvent(refreshedId, 'historical import');
+      refreshedSessions.add(event.session_id);
     } else {
       duplicates++;
     }
   }
+
+  // The summary already counts a refreshed row, so adding it again would
+  // double it; re-derive the session instead.
+  for (const sessionId of refreshedSessions) safelyMaintainTraceSummaryForSession(sessionId, 'import refresh');
 
   applySessionModes(events);
   return { imported, duplicates, refreshed };

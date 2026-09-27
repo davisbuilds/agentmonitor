@@ -1647,6 +1647,8 @@ export function recordClaudeSessionAccounting(snapshot: ClaudeSessionAccounting)
 /** One session's harness cost beside what amon recorded for the same window. */
 export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {
   amon_cost_usd: number;
+  /** Imported rows in the window with usage but no cost; any makes the ratio unknowable. */
+  unpriced_rows: number;
   /** amon's cost over the harness's; null when the harness reports no cost. */
   ratio: number | null;
 }
@@ -1665,10 +1667,22 @@ export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
         SELECT SUM(e.cost_usd) FROM events e
         WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'
           AND e.client_timestamp >= a.process_started_at AND e.client_timestamp <= a.observed_at
-      ), 0) AS amon_cost_usd
+      ), 0) AS amon_cost_usd,
+      (
+        SELECT COUNT(*) FROM events e
+        WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'
+          AND e.client_timestamp >= a.process_started_at AND e.client_timestamp <= a.observed_at
+          AND e.cost_usd IS NULL
+          AND (e.tokens_in > 0 OR e.tokens_out > 0 OR e.cache_read_tokens > 0 OR e.cache_write_tokens > 0)
+      ) AS unpriced_rows
     FROM claude_session_accounting a
     ORDER BY a.observed_at DESC
     LIMIT ?
   `).all(limit) as Array<Omit<ClaudeSessionCostCheck, 'ratio'>>;
-  return rows.map(row => ({ ...row, ratio: row.cost_usd > 0 ? row.amon_cost_usd / row.cost_usd : null }));
+  // An unpriced row bills as NULL and the sum skips it, so the imported cost
+  // would read low; no ratio is better than a falsely reassuring one.
+  return rows.map(row => ({
+    ...row,
+    ratio: row.cost_usd > 0 && row.unpriced_rows === 0 ? row.amon_cost_usd / row.cost_usd : null,
+  }));
 }

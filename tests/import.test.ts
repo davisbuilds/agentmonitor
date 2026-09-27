@@ -1055,6 +1055,12 @@ describe('Import orchestrator integration', () => {
       'the estimate follows the refreshed tokens');
     const total = getDb().prepare('SELECT SUM(tokens_out) AS out FROM events WHERE session_id = ?').get(sessionId) as { out: number };
     assert.equal(total.out, 254, 'the turn is still billed once');
+    // The session summary keeps its own rollup; the refreshed row must replace
+    // its old contribution rather than be counted a second time.
+    const summary = getDb().prepare('SELECT tokens_out, observation_count FROM session_trace_summary WHERE session_id = ?')
+      .get(sessionId) as { tokens_out: number; observation_count: number };
+    const events = getDb().prepare('SELECT COUNT(*) AS c FROM events WHERE session_id = ?').get(sessionId) as { c: number };
+    assert.deepEqual(summary, { tokens_out: 254, observation_count: events.c });
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

@@ -109,6 +109,29 @@ describe('Claude session accounting', () => {
     const [check] = checkClaudeSessionCosts();
 
     assert.equal(check.amon_cost_usd, 9);
+    assert.equal(check.unpriced_rows, 0);
     assert.equal(check.ratio, 0.9);
+  });
+
+  test('gives no ratio while any imported usage in the window is unpriced', async () => {
+    // An unpriced model bills as NULL, which a sum silently skips, so the
+    // imported cost would read low and the ratio falsely reassuring.
+    await statusline({ session_id: 'sess-f', cost: { total_cost_usd: 10, total_duration_ms: 3_600_000 } });
+    const [{ process_started_at: start }] = checkClaudeSessionCosts();
+    const at = new Date(Date.parse(start) + 60_000).toISOString();
+    seedEvent('sess-f', at, 9);
+    getDb().prepare(`
+      INSERT INTO events (session_id, agent_type, event_type, status, tokens_in, tokens_out, cost_usd, source, client_timestamp)
+      VALUES ('sess-f', 'claude_code', 'llm_response', 'success', 5, 5, NULL, 'import', ?)
+    `).run(at);
+    getDb().prepare(`
+      INSERT INTO events (session_id, agent_type, event_type, status, tokens_in, tokens_out, cost_usd, source, client_timestamp)
+      VALUES ('sess-f', 'claude_code', 'user', 'success', 0, 0, NULL, 'import', ?)
+    `).run(at); // no usage, so nothing to price
+
+    const [check] = checkClaudeSessionCosts();
+
+    assert.equal(check.unpriced_rows, 1);
+    assert.equal(check.ratio, null);
   });
 });

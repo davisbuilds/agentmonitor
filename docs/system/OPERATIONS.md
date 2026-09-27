@@ -284,7 +284,9 @@ To check imported cost against Claude Code's own accounting, run
 `amon costs check-claude-sessions`. It compares each session the statusline
 bridge has reported with the imported cost for the same process window; a
 ratio a little under 1 is expected, and one near 2 would mean lines are being
-counted per content block again.
+counted per content block again. No ratio is given while any imported row in
+the window has usage but no cost (an unpriced model), since the sum would skip
+it and read low.
 
 Applying also re-derives `session_trace_summary` for every repaired session:
 that rollup stores its own token and cost totals, the trace-quality API and

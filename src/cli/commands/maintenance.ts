@@ -348,7 +348,9 @@ export function registerMaintenanceCommands(): void {
           `since ${check.process_started_at.slice(0, 16).replace('T', ' ')}`,
           `harness $${check.cost_usd.toFixed(2)}`,
           `amon $${check.amon_cost_usd.toFixed(2)}`,
-          check.ratio === null ? 'ratio n/a' : `ratio ${check.ratio.toFixed(2)}`,
+          check.unpriced_rows > 0
+            ? `ratio n/a (${check.unpriced_rows} unpriced row${check.unpriced_rows === 1 ? '' : 's'})`
+            : check.ratio === null ? 'ratio n/a' : `ratio ${check.ratio.toFixed(2)}`,
         ].join('  '));
         writeStdout(ctx, [
           'Imported Claude cost vs Claude Code\'s running cost (both per API response; expect a ratio a little under 1):',
