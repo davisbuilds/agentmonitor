@@ -386,6 +386,30 @@ the build.
   Do not run a heuristic collapse without first measuring how often distinct
   turns legitimately share a usage tuple.
 
+#### Imported Claude cost runs below Claude Code's own running cost, cause unsplit
+- **What**: `amon costs check-claude-sessions` compares imported cost with the
+  statusline's `cost.total_cost_usd` for the same session and process window.
+  After the 2026-09-27 repair, the sessions checked read about 10-15% below the
+  harness. The harness also pays for requests that never become transcript
+  turns; which requests, and how much each contributes, is unmeasured.
+- **Why or evidence**: 2026-09-27, one long session: compaction records carry
+  `preTokens`/`postTokens` but no usage or cost, and pricing its compactions
+  from those sizes accounts for roughly 12% (context read from cache) to 55%
+  (read uncached) of that session's gap. The rest is unattributed; side requests
+  (titles, command checks, fetch summaries) are a hypothesis. Until split, a
+  shortfall this size cannot be told apart from a real import gap of the same
+  size.
+- **Next**: keep a history of statusline samples per session (write only when
+  the cost changes) instead of the latest. The harness's cost jump across each
+  compaction's window (`timestamp`, `durationMs`), less the transcript turns in
+  it, is that compaction's measured cost; what remains between compactions is
+  the other requests. Exact alternative: Claude Code's OpenTelemetry log export
+  records every API request with model, tokens and cost; pointing it at amon
+  needs a Claude Code configuration change and a check of how amon ingests
+  those events and whether they identify the request's purpose.
+- **Revisit when**: the ratio drifts outside that band, or a decision rests on
+  the absolute size of Claude cost.
+
 #### The warehouse export still buckets UTC days
 - **What**: every user-facing day is now a local day in the reporting zone
   (2026-09-23), but `src/warehouse/*` still derives its `day` column from the

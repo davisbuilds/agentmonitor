@@ -1680,7 +1680,7 @@ export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {
  * The latest sessions' harness cost beside amon's imported cost for the same
  * session and window. Both count once per API response, so they should agree
  * closely; amon runs slightly low because the harness also pays for calls that
- * never reach a transcript, likely compaction above all (unmeasured). A ratio near 2 would mean
+ * never reach a transcript, such as compaction; the split is unmeasured. A ratio near 2 would mean
  * imports are counting every content-block line, as Claude Code's `/stats` does.
  */
 export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
