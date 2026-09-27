@@ -147,7 +147,7 @@ when stale entries impede work.
 - **What**: P1 data/queries + P2 arm-ladder UI **shipped** 2026-09-03 (PR #106);
   **P3** frontier chart + shared inline-SVG primitives (`ui/chart/scales.ts`,
   `layout.ts`, `PlotFrame.svelte`, `BenchmarkFrontier.svelte`, CostDashboard
-  refactored onto `linearScale`) **shipped** 2026-09-04 (see ROADMAP). What
+  refactored onto `linearScale`) **shipped** 2026-09-04 (`527945b`, `739b177`). What
   remains is **P4** (optional) — a self-contained "Publish study" artifact export
   mirroring the claude.ai Pareto artifact, with the app as source of truth.
 - **Why it matters**: the ladder + honesty panel + frontier now deliver the full
@@ -452,7 +452,8 @@ the build.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
-  `GET /api/v2/metrics` (shipped 2026-09-04, see ROADMAP), but there is no `/app/`
+  `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
+  `src/db/otel-metrics.ts`), but there is no `/app/`
   surface yet — no Codex consolidation-health panel or rate-limit-skip view.
 - **Why it matters**: the data is queryable but an operator still has to hit the
   API by hand. A small Monitor/Analytics panel ("is memory consolidation running,
