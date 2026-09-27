@@ -89,8 +89,12 @@ pull requests; current behavior belongs to the system references.
   inflation. The repair now also bills a line once when several rows hold it
   (both id schemes, a resumed session's copied history, and positional ids a
   child agent also minted once the child has its own row) and re-estimates the
-  cost of rows whose tokens change. Claude's stored imported total fell by
-  roughly a sixth, and no checkable row is left ambiguous.
+  cost of rows whose tokens change. Each turn now bills the usage on its last
+  line, where output is final, and a turn imported mid-write is refreshed.
+  Claude figures are per API response, which Claude Code's live counters agree
+  with and its `/stats` does not (it sums every content-block line); `amon costs
+  check-claude-sessions` compares imported cost with the harness's own running
+  cost per session. Claude's stored imported total fell by roughly a sixth.
 
 - **Imported event identity (2026-09-22, PRs #137-#139):** Claude Code imports
   bill one event per assistant turn rather than one per content block, and

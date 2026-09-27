@@ -103,6 +103,15 @@ model, provider, and provider-neutral tier.
   show all four buckets.
 - Unknown and deprecated models stay visible. A persistent warning identifies
   unpriced use or known pricing that has not yet been applied to zero-cost history.
+- Claude Code token and cost figures are **per API response**: each assistant
+  turn is billed once, with the usage its last transcript line records. That is
+  what Anthropic bills and what Claude Code's live counters (statusline,
+  `/cost`) add up. Claude Code's `/stats` sums every transcript line instead,
+  and a turn is written as one line per content block, so `/stats` reads about
+  twice as high. `amon costs check-claude-sessions` compares imported cost with
+  Claude Code's own running cost for each session the statusline bridge has
+  reported; expect a ratio a little under 1, because the harness also pays for
+  calls that never reach a transcript.
 - Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates;
   raw events remain available in session and monitor history.
 - Benchmark events are excluded from normal usage, analytics, and the Monitor's

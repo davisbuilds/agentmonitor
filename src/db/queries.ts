@@ -1619,3 +1619,56 @@ export function getSessionTranscript(sessionId: string): TranscriptEvent[] {
     ORDER BY created_at ASC, id ASC
   `).all(sessionId) as TranscriptEvent[];
 }
+
+// ─── Claude session accounting ─────────────────────────────────────────
+
+/** Claude Code's running totals for one session, as its statusline reports them. */
+export interface ClaudeSessionAccounting {
+  session_id: string;
+  observed_at: string;
+  /** When the process whose totals these are started; the totals cover only it. */
+  process_started_at: string;
+  cost_usd: number;
+  claude_version: string | null;
+}
+
+export function recordClaudeSessionAccounting(snapshot: ClaudeSessionAccounting): void {
+  getDb().prepare(`
+    INSERT INTO claude_session_accounting (session_id, observed_at, process_started_at, cost_usd, claude_version)
+    VALUES (@session_id, @observed_at, @process_started_at, @cost_usd, @claude_version)
+    ON CONFLICT(session_id) DO UPDATE SET
+      observed_at = excluded.observed_at,
+      process_started_at = excluded.process_started_at,
+      cost_usd = excluded.cost_usd,
+      claude_version = excluded.claude_version
+  `).run(snapshot);
+}
+
+/** One session's harness cost beside what amon recorded for the same window. */
+export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {
+  amon_cost_usd: number;
+  /** amon's cost over the harness's; null when the harness reports no cost. */
+  ratio: number | null;
+}
+
+/**
+ * The latest sessions' harness cost beside amon's imported cost for the same
+ * session and window. Both count once per API response, so they should agree
+ * closely; amon runs slightly low because the harness also pays for calls that
+ * never reach a transcript, such as compaction. A ratio near 2 would mean
+ * imports are counting every content-block line, as Claude Code's `/stats` does.
+ */
+export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
+  const rows = getDb().prepare(`
+    SELECT a.session_id, a.observed_at, a.process_started_at, a.cost_usd, a.claude_version,
+      COALESCE((
+        SELECT SUM(e.cost_usd) FROM events e
+        WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'
+          AND e.client_timestamp >= a.process_started_at AND e.client_timestamp <= a.observed_at
+      ), 0) AS amon_cost_usd
+    FROM claude_session_accounting a
+    ORDER BY a.observed_at DESC
+    LIMIT ?
+  `).all(limit) as Array<Omit<ClaudeSessionCostCheck, 'ratio'>>;
+  return rows.map(row => ({ ...row, ratio: row.cost_usd > 0 ? row.amon_cost_usd / row.cost_usd : null }));
+}

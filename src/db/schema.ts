@@ -188,6 +188,17 @@ function initSchemaLocked(db: Database): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
+
+    -- Claude Code's own running cost for each session, from its statusline
+    -- payload. It is counted in memory once per API response, independently of
+    -- the transcripts imports read, so it checks imported cost.
+    CREATE TABLE IF NOT EXISTS claude_session_accounting (
+      session_id TEXT PRIMARY KEY,
+      observed_at TEXT NOT NULL,
+      process_started_at TEXT NOT NULL,
+      cost_usd REAL NOT NULL,
+      claude_version TEXT
+    );
   `);
 
   // Operational OTEL metrics (Bucket A: outcome/state-tagged counters like

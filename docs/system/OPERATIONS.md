@@ -273,6 +273,17 @@ The repair also bills each transcript line once when several rows hold it:
 A row that now bills different, non-zero tokens keeps a reported cost; an
 estimated cost is recomputed from the new tokens.
 
+Each turn is billed with the usage on its **last** line: input and cache counts
+repeat on every line of a turn, but output grows block by block. The importer
+refreshes a turn it stored while the turn was still being written, and the
+repair brings older rows up to the final count.
+
+To check imported cost against Claude Code's own accounting, run
+`amon costs check-claude-sessions`. It compares each session the statusline
+bridge has reported with the imported cost for the same process window; a
+ratio a little under 1 is expected, and one near 2 would mean lines are being
+counted per content block again.
+
 Applying also re-derives `session_trace_summary` for every repaired session:
 that rollup stores its own token and cost totals, the trace-quality API and
 warehouse export read it directly, and startup backfill skips rows already at
