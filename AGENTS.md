@@ -27,7 +27,7 @@ and procedures that those executable surfaces do not explain on their own.
 - `docs/system/trace-quality.md` — lean local trace/observation projection, coverage and payload-policy honesty, aggregate warehouse export, and deferred Langfuse depth.
 - `docs/api/` — API ownership and externally consumed ingest semantics; exact routes remain source-owned.
 - `docs/project/POSITIONING.md` — what the product is (Archetype B: local-first observability console for coding agents); scope, the Langfuse "collector not backend" stance, and the architectural implications that anchor the foundations work.
-- `docs/project/ROADMAP.md` — current direction and a concise record of recent milestones.
+- `docs/project/ROADMAP.md` — selected direction and milestones needed to explain it.
 - `docs/project/DECISIONS.md` — durable decisions that are no longer active
   follow-ups.
 - `docs/project/BACKLOG.md` — future-only work with evidence and revisit triggers.
@@ -56,7 +56,8 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - Prefer extending the Svelte `/app/` product path and v2 contracts; do not add new behavior to the v1 read endpoints (they are retained only for ingestion clients, SSE, provider quotas, and the parity test harness).
 - Keep Portless at the human-facing `amon serve` boundary. Do not route hook or
   OTEL ingestion away from the fixed `127.0.0.1:3141` backend.
-- If API response shape changes, update `README.md` in the same change.
+- If a public API response shape changes, update the owning contract or reference
+  when its statement changes; route exact shapes through source and tests.
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start; `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
 - **Codex OTEL drop-out**: if Codex terminal activity is visible but `source=otel` stops updating, verify Codex is exporting OTLP to `127.0.0.1:3141` and not a stale endpoint (e.g. an old `:3142` runtime config).
 - **Provider quotas**: Monitor header uses provider-native snapshots only. Codex from local `codex app-server`; Claude requires the statusline bridge or renders as unavailable rather than estimated.
@@ -83,7 +84,7 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 ## Working Agreement
 
 - **Push back before building.** If a request is incoherent or self-contradictory, or a spec/plan is vague or skips key decisions, stop and interview me — ask clarifying questions and confirm intent before writing code or changing files. Don't guess at scope or comply silently. (Clear, well-scoped requests don't need this.)
-- **Keep docs current.** After a significant change, PR, or completed spec/plan, update any now-stale reference docs under `docs/system/` (and `docs/project/ROADMAP.md`) so they match shipped behavior. Skip this for trivial changes.
+- **Keep docs current.** Update the owning reference when a change alters its stated behavior, procedure, contract, or direction. Reconcile an affected Backlog entry as work lands; update Roadmap when selected direction changes.
 - **Commit logically.** Commit completed work in coherent chunks as you proceed. Push only when explicitly asked.
-- **Log durable follow-ups in `BACKLOG.md`.** Note design gaps, tech debt, or better approaches you spot mid-task in `docs/project/BACKLOG.md`; fix simple, quick, or blocking issues inline and call them out. Add an item only for recurring friction, meaningful risk/cost, an unresolved decision, or a concrete trigger. Record **What / Why or evidence / Next or Revisit when**; keep the backlog future-only, use the capability-owning repository as canonical for cross-repo work, date/source volatile claims (or label a hypothesis), and move shipped work to `docs/project/ROADMAP.md`. Review after a significant shipped slice or at least quarterly.
+- **Log durable follow-ups in `BACKLOG.md`.** Fix simple issues inline. For durable work, record What, Why or evidence, and a Next action or Revisit trigger; date volatile claims or mark them as hypotheses. Agents may execute entries directly. Use issues when discussion or coordination helps, keep one detailed owner, and reconcile affected entries as work lands.
 - **Re-ground after compaction.** A compaction summary loses precise paths, context, and verification state — before continuing, re-read this project's `AGENTS.md`, its reference docs, and recent commits.

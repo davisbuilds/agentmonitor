@@ -16,6 +16,7 @@ parsing, schema details, and repository settings.
 
 - API index: [api/README.md](api/README.md)
 - v1 ingest contract: [api/event-contract.md](api/event-contract.md)
+- Content-free activity read semantics: [api/activity-contract.md](api/activity-contract.md)
 
 ## Integrations
 

@@ -1,41 +1,31 @@
 # Backlog
 
-Living list of **future** design gaps, tech debt, and better ways to do a thing
-noticed during normal execution. Fix simple, quick, or blocking issues inline;
-capture only durable follow-ups worth revisiting cold. Not a commitment for the
-active task unless explicitly pulled into scope; ROADMAP.md is the higher-bar
-shipped/directional view. Add an item only when it cannot be fixed inline and
-represents recurring friction, meaningful risk or cost, an unresolved decision,
-or a concrete trigger.
+Future-only gaps and opportunities worth revisiting. Capture recurring friction,
+meaningful risk or cost, unresolved decisions, or concrete revisit triggers.
+Fix simple, quick, or blocking issues inline when within the active task's scope.
 
-This repository is the canonical owner for its follow-ups; cross-repository work
-belongs with the repository that owns the capability, with links from affected
-repositories only when useful.
+## Conventions
 
-Convention: each item has **What** (the friction), **Why or evidence**, and
-optionally **Next** (the smallest action that makes it actionable) or **Revisit
-when** (an intentional external or measurable gate). Default state is omitted;
-use **Revisit when** for gates and `State: blocked — <reason>` only when work is
-genuinely blocked externally.
+- **Entry:** state **What** and **Why or evidence**. Add **Next** (a useful first
+  action) or **Revisit when** (a concrete gate) where helpful; no fixed template
+  is required.
+- **Evidence:** date and source volatile claims. Support causal or performance
+  claims with measurements, or label them **hypothesis, unmeasured**.
+- **Delegation:** agents can execute entries directly. Recording a candidate does
+  not expand the active task or select a roadmap priority. Use an issue when
+  persistent discussion or coordination helps; no mandatory graduation step.
+- **Ownership:** keep cross-repository work with the capability-owning repository.
+  If an issue owns the details, retain only a useful linked summary here; avoid
+  parallel checklists. Keep private evidence out of public entries and issues.
+- **Closure:** reconcile affected entries as work lands. Remove resolved concerns,
+  retain unresolved remainders, and preserve durable rationale in its owning
+  reference. Roadmap records selected direction; Git and PRs hold routine shipped
+  history. Revisit the broader list during prioritization or when stale entries
+  impede work.
 
-**Cite a number, or say it is a guess.** Any causal or performance claim here —
-"X is slow", "Y causes the flake" — carries a measurement, or is labelled
-*hypothesis, unmeasured*. Entries get read back later as established fact and
-turned into work: an unmarked guess about the Analytics fan-out was written here,
-believed on re-read, and nearly bought a whole endpoint before a 30-second `curl`
-showed the endpoints return in 1–4ms. The label is the forcing function that makes
-someone run the cheap probe first.
-
-Review this file after a significant shipped slice or at least quarterly: confirm
-each item is still open, refresh dated evidence, promote selected work to a plan,
-convert it to a trigger, or move completed decisions and work to the Roadmap or
-decision history.
-
-When an item ships it **leaves this doc**. Record it in `ROADMAP.md` when it is a
-recent milestone that changes current direction; otherwise let its PR and commits
-hold the detailed history. Do not keep a resolved section here.
-
----
+A past unmeasured Analytics fan-out claim nearly prompted a new endpoint before
+a cheap latency probe disproved it. Keep hypotheses visibly separate from facts
+so later readers know what still needs checking.
 
 ## Open
 
@@ -149,7 +139,7 @@ hold the detailed history. Do not keep a resolved section here.
 - **What**: P1 data/queries + P2 arm-ladder UI **shipped** 2026-09-03 (PR #106);
   **P3** frontier chart + shared inline-SVG primitives (`ui/chart/scales.ts`,
   `layout.ts`, `PlotFrame.svelte`, `BenchmarkFrontier.svelte`, CostDashboard
-  refactored onto `linearScale`) **shipped** 2026-09-04 (see ROADMAP). What
+  refactored onto `linearScale`) **shipped** 2026-09-04 (`527945b`, `739b177`). What
   remains is **P4** (optional) — a self-contained "Publish study" artifact export
   mirroring the claude.ai Pareto artifact, with the app as source of truth.
 - **Why it matters**: the ladder + honesty panel + frontier now deliver the full
@@ -345,27 +335,6 @@ the build.
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
 
-#### Child-agent transcripts collide with their parent's event ids, so their usage never imports
-- **What**: `parseClaudeCodeFile` derives `event_id` from
-  `claude-code:<sessionId>:<line index>`, and a child-agent transcript
-  (`projects/<project>/<session>/subagents/agent-*.jsonl`) embeds its **parent's**
-  `sessionId`. Parent and child therefore mint identical ids for the same line
-  number, and `insertEvent` returns early on an existing `event_id` — so
-  whichever file imports second has those events silently dropped.
-- **Why or evidence**: measured 2026-09-22 — **every** child-agent event in a
-  sampled session collided with a parent id, so none of that session's delegated
-  usage was ever stored. A local store shows a small population of rows the
-  usage repair flags as `rows_ambiguous` for the same reason. This is an under-count in the opposite
-  direction from the per-content-block over-count fixed in this branch, and the
-  two do not cancel: they hit different sessions by different amounts. Surfaced
-  by Codex review on PR #137.
-- **Next**: make `event_id` include file identity (e.g. the transcript's
-  basename or a path hash) so parent and child cannot collide. Note the
-  migration cost before doing it: every existing imported row's id changes, so
-  re-import would insert duplicates rather than dedupe against history. Needs a
-  deliberate plan — id-derivation version marker, or a one-time remap — not a
-  drive-by edit. Related: [Consistent session identity](#consistent-session-identity-and-parentchild-coverage-across-read-surfaces).
-
 #### Codex event ids are positional, and a change to the emitted set re-keys history
 - **What**: `src/import/codex.ts` derives ids from a counter over *emitted*
   events. Changing which events are emitted re-keys every stored row, so the
@@ -380,10 +349,11 @@ the build.
   for no measured gain. Two mutation-tested guards now make an accidental change loud:
   `skipped, malformed and zero-delta lines do not shift later event ids` and
   `pins the Codex event-id derivation against accidental re-keying`.
-- **Revisit when**: Codex starts rewriting or compacting rollout files, or a
-  derivation change becomes genuinely necessary. Either way it needs a legacy-id
-  bridge first, mirroring `src/import/index.ts`'s ownership rule; do not simply
-  update the pinned expectation.
+- **Revisit when**: a change to the set or order of emitted events makes a
+  derivation change necessary. Rewritten rollout content is already reconciled
+  under the current ids; a derivation change needs a legacy-id bridge first,
+  mirroring `src/import/index.ts`'s ownership rule. Do not simply update the
+  pinned expectation.
 
 #### Imported Claude rows with no surviving transcript stay inflated
 - **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
@@ -474,7 +444,8 @@ the build.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
-  `GET /api/v2/metrics` (shipped 2026-09-04, see ROADMAP), but there is no `/app/`
+  `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
+  `src/db/otel-metrics.ts`), but there is no `/app/`
   surface yet — no Codex consolidation-health panel or rate-limit-skip view.
 - **Why it matters**: the data is queryable but an operator still has to hit the
   API by hand. A small Monitor/Analytics panel ("is memory consolidation running,
@@ -532,18 +503,6 @@ the build.
 - **Why or evidence**: each reproduced or traced 2026-09-22 during the review;
   none has a known user-visible failure today.
 - **Next**: fix opportunistically when touching the owning file.
-
-#### Antigravity live projection is documented as absent but is wired
-- **What**: `docs/system/FEATURES.md:37` and `docs/system/ARCHITECTURE.md:163`
-  state Antigravity has no live projection, but
-  `syncAntigravityLiveSession` (`src/live/antigravity-adapter.ts:49`) is wired
-  into the watcher at `src/watcher/index.ts:312` and performs summary-fidelity
-  live projection, including WAL-aware resync.
-- **Why or evidence**: confirmed 2026-09-22 by tracing the live-wired path. Doc
-  staleness, not a runtime bug — but a consumer reading the fidelity claim would
-  be misled about what Antigravity reports.
-- **Next**: correct both docs to describe summary-fidelity live projection, or
-  state precisely what "no live projection" was meant to exclude (e.g. SSE push).
 
 ### Frontend testing
 
