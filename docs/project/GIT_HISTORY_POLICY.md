@@ -4,7 +4,9 @@ This document records the intended history policy. GitHub is authoritative for t
 current remote settings; verify it before a merge-policy decision that depends on
 the exact configuration.
 
-Last verified against `davisbuilds/agentmonitor`: 2026-09-14.
+Merge settings verified against `davisbuilds/agentmonitor`: 2026-09-27.
+The main-protection snapshot below remains dated 2026-09-14; query it before
+relying on current remote enforcement.
 
 ## Intended Policy
 

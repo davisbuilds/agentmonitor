@@ -73,17 +73,85 @@ function readCodexModel(codexHome?: string): string | undefined {
   }
 }
 
+// ─── Subagent boundary ──────────────────────────────────────────────────
+
+/** Milliseconds encoded in a UUIDv7's leading 48 bits, or null for anything else. */
+function uuidV7Millis(value: unknown): number | null {
+  if (typeof value !== 'string') return null;
+  const match = /^([0-9a-f]{8})-([0-9a-f]{4})-7[0-9a-f]{3}-/i.exec(value);
+  return match ? parseInt(match[1] + match[2], 16) : null;
+}
+
+type SubagentBoundary =
+  | { kind: 'none' }
+  | { kind: 'resolved'; line: number }
+  | { kind: 'unresolved' };
+
+/**
+ * Where a `thread_spawn` subagent's own activity starts in its rollout.
+ *
+ * Codex can open a subagent rollout with a copy of the parent's history, token
+ * counters included, re-stamped with the spawn time, so timestamps cannot mark
+ * where the copy ends. Turn ids are UUIDv7: the child's own first turn is the
+ * first `turn_context` issued at or after the rollout's own session id. A
+ * subagent without such a turn is `unresolved`, and its counters are billed as
+ * before rather than guessed at.
+ */
+function findSubagentBoundary(
+  lines: Array<{ type?: string; payload?: Record<string, unknown> } | null>,
+): SubagentBoundary {
+  const meta = lines.find(line => line?.type === 'session_meta')?.payload;
+  const source = meta?.['source'] as Record<string, unknown> | undefined;
+  const subagent = source && typeof source === 'object' ? source['subagent'] as Record<string, unknown> | undefined : undefined;
+  if (!subagent || typeof subagent !== 'object' || !('thread_spawn' in subagent)) return { kind: 'none' };
+  const spawnedAt = uuidV7Millis(meta?.['id']);
+  if (spawnedAt === null) return { kind: 'unresolved' };
+  const line = lines.findIndex(entry => {
+    if (entry?.type !== 'turn_context') return false;
+    const issuedAt = uuidV7Millis(entry.payload?.['turn_id']);
+    return issuedAt !== null && issuedAt >= spawnedAt;
+  });
+  return line < 0 ? { kind: 'unresolved' } : { kind: 'resolved', line };
+}
+
 // ─── Parse a single JSONL file ──────────────────────────────────────────
 
 export function parseCodexFile(
   filePath: string,
-  options?: { from?: Date; to?: Date; codexDir?: string },
+  options?: {
+    from?: Date;
+    to?: Date;
+    codexDir?: string;
+    /** The file's bytes when the caller already read them, so hash and parse see the same content. */
+    content?: string;
+    /** Filled in with what the parse had to skip. */
+    diagnostics?: { malformedLines: number };
+  },
 ): NormalizedIngestEvent[] {
   const events: NormalizedIngestEvent[] = [];
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const content = options?.content ?? fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
 
   const defaultModel = readCodexModel(options?.codexDir);
+
+  const parsedLines = lines.map(rawLine => {
+    try {
+      return JSON.parse(rawLine) as CodexLogLine;
+    } catch {
+      return null;
+    }
+  });
+  if (options?.diagnostics) options.diagnostics.malformedLines = parsedLines.filter(line => line === null).length;
+  // In a subagent that opens with a copy of its parent's history, lines before
+  // the boundary are the parent's: they advance the counters and the event
+  // index (so the child's own event ids stay what they always were) but emit
+  // nothing.
+  const boundary = findSubagentBoundary(parsedLines);
+  const ownFrom = boundary.kind === 'resolved' ? boundary.line : 0;
+  let inheritedCountersSkipped = 0;
+  // A cumulative counter that drops has restarted: what it bills after the drop
+  // is new usage, so the rollout's final counter understates the session.
+  let counterResets = 0;
 
   // First pass: extract session metadata
   let sessionId: string | undefined;
@@ -92,13 +160,8 @@ export function parseCodexFile(
   let originator: string | undefined;
   let firstTurnModel: string | undefined;
 
-  for (const rawLine of lines) {
-    let line: CodexLogLine;
-    try {
-      line = JSON.parse(rawLine) as CodexLogLine;
-    } catch {
-      continue;
-    }
+  for (const [lineIndex, line] of parsedLines.entries()) {
+    if (!line) continue;
 
     if (line.type === 'session_meta' && !sessionId) {
       sessionId = line.payload.id;
@@ -106,7 +169,10 @@ export function parseCodexFile(
       sessionTimestamp = line.payload.timestamp ?? line.timestamp;
       originator = line.payload.originator;
     }
-    if (line.type === 'turn_context' && !firstTurnModel && typeof line.payload.model === 'string') {
+    if (
+      line.type === 'turn_context' && !firstTurnModel && lineIndex >= ownFrom
+      && typeof line.payload.model === 'string'
+    ) {
       firstTurnModel = line.payload.model;
     }
   }
@@ -141,13 +207,9 @@ export function parseCodexFile(
   let currentModel = defaultModel;
   let currentModelSource: 'turn_context' | 'config' | undefined = defaultModel ? 'config' : undefined;
 
-  for (const rawLine of lines) {
-    let line: CodexLogLine;
-    try {
-      line = JSON.parse(rawLine) as CodexLogLine;
-    } catch {
-      continue;
-    }
+  for (const [lineIndex, line] of parsedLines.entries()) {
+    if (!line) continue;
+    const inherited = lineIndex < ownFrom;
 
     // Generate session_start from session_meta
     if (line.type === 'session_meta') {
@@ -172,6 +234,7 @@ export function parseCodexFile(
           originator,
           cwd,
           _model_source: firstTurnModel ? 'turn_context' : currentModelSource,
+          ...(boundary.kind === 'none' ? {} : { _subagent_boundary: boundary.kind }),
         },
         source: 'import',
       });
@@ -196,6 +259,8 @@ export function parseCodexFile(
       const totalOut = (usage.output_tokens ?? 0);
       const totalCacheRead = (usage.cached_input_tokens ?? 0);
 
+      if (totalIn < prevTokensIn || totalOut < prevTokensOut) counterResets++;
+
       // Compute deltas
       const deltaIn = totalIn - prevTokensIn;
       const deltaOut = totalOut - prevTokensOut;
@@ -212,6 +277,11 @@ export function parseCodexFile(
 
       // Only emit if there's a meaningful delta
       if (deltaIn <= 0 && deltaOut <= 0) continue;
+      if (inherited) {
+        inheritedCountersSkipped++;
+        eventIndex++;
+        continue;
+      }
 
       const eventId = crypto
         .createHash('sha256')
@@ -279,7 +349,9 @@ export function parseCodexFile(
 
       if (patchContent) {
         const patchMeta = parsePatchMeta(patchContent);
-        if (patchMeta) {
+        if (patchMeta && inherited) {
+          eventIndex++;
+        } else if (patchMeta) {
           const eventId = crypto
             .createHash('sha256')
             .update(`codex:${sessionId}:patch:${eventIndex}`)
@@ -342,6 +414,8 @@ export function parseCodexFile(
         total_tokens_out: prevTokensOut,
         total_cache_read: prevCacheRead,
         _model_source: currentModelSource,
+        ...(boundary.kind === 'resolved' ? { _inherited_counters_skipped: inheritedCountersSkipped } : {}),
+        ...(counterResets > 0 ? { _counter_resets: counterResets } : {}),
       },
       source: 'import',
     });
@@ -355,6 +429,9 @@ export function parseCodexFile(
 // ─── File hash for import state tracking ────────────────────────────────
 
 export function hashFile(filePath: string): string {
-  const content = fs.readFileSync(filePath);
+  return hashContent(fs.readFileSync(filePath));
+}
+
+export function hashContent(content: Buffer): string {
   return crypto.createHash('sha256').update(content).digest('hex');
 }

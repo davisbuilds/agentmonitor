@@ -68,8 +68,14 @@ Claude Code statusline payload
   -> hooks/claude-code/statusline_bridge.sh
   -> POST /api/provider-quotas/claude/statusline
   -> AgentMonitor stores native quota snapshot
+  -> and the session's running cost (for `amon costs check-claude-sessions`)
   -> existing statusline command still renders normally
 ```
+
+The running cost is `cost.total_cost_usd`, which Claude Code adds to once per
+API response for the life of the process; AgentMonitor keeps the latest value
+per session with the process start derived from `cost.total_duration_ms`. Only
+those numbers, the session id and the Claude Code version are stored.
 
 The installer preserves your existing `statusLine.command` by saving it to `~/.claude/agentmonitor-statusline-forward.txt` and replacing the live command with the bridge wrapper. Restart Claude Code after installation so the updated statusline command is loaded.
 

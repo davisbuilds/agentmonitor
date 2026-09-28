@@ -31,7 +31,8 @@ function printSummary(ctx: CliContext, title: string, rows: Record<string, unkno
     writeJson(ctx, rows);
     return;
   }
-  const lines = [title, ...Object.entries(rows).map(([key, value]) => `  ${key}: ${String(value)}`)];
+  const render = (value: unknown) => (typeof value === 'object' && value !== null ? JSON.stringify(value) : String(value));
+  const lines = [title, ...Object.entries(rows).map(([key, value]) => `  ${key}: ${render(value)}`)];
   writeStdout(ctx, lines.join('\n'));
 }
 
@@ -144,6 +145,7 @@ export function registerMaintenanceCommands(): void {
           events_found: result.totalEventsFound,
           events_imported: result.totalEventsImported,
           events_refreshed: result.totalEventsRefreshed,
+          events_removed: result.totalEventsRemoved,
           duplicates: result.totalDuplicates,
           files: result.files,
         };
@@ -306,6 +308,101 @@ export function registerMaintenanceCommands(): void {
           report.apply ? 'Claude import usage repair' : 'Claude import usage repair preview',
           report,
         );
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'costs check-claude-sessions',
+    group: 'Data Commands',
+    summary: "Compare imported Claude cost with Claude Code's own running cost per session",
+    usage: 'costs check-claude-sessions [--limit <n>]',
+    examples: [
+      'costs check-claude-sessions',
+      'costs check-claude-sessions --limit 5 --json',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--limit']), new Set());
+      rejectExtraPositionals(parsed.positionals, 'amon costs check-claude-sessions [--limit <n>]');
+      const limitValue = parsed.values.get('--limit');
+      const limit = limitValue === undefined ? 20 : Number(limitValue);
+      if (!Number.isInteger(limit) || limit < 1) throw invalidUsage('--limit must be a positive integer');
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb } = await import('../../db/connection.js');
+      const { checkClaudeSessionCosts } = await import('../../db/queries.js');
+      initSchema();
+      try {
+        const checks = checkClaudeSessionCosts(limit);
+        if (ctx.global.json) {
+          writeJson(ctx, checks);
+          return;
+        }
+        if (checks.length === 0) {
+          writeStdout(ctx, 'No Claude sessions recorded yet. The statusline bridge reports each session\'s running cost.\n');
+          return;
+        }
+        const lines = checks.map(check => [
+          check.session_id.slice(0, 8),
+          `since ${check.process_started_at.slice(0, 16).replace('T', ' ')}`,
+          `harness $${check.cost_usd.toFixed(2)}`,
+          `amon $${check.amon_cost_usd.toFixed(2)}`,
+          check.unpriced_rows > 0
+            ? `ratio n/a (${check.unpriced_rows} unpriced row${check.unpriced_rows === 1 ? '' : 's'})`
+            : check.ratio === null ? 'ratio n/a' : `ratio ${check.ratio.toFixed(2)}`,
+        ].join('  '));
+        writeStdout(ctx, [
+          'Imported Claude cost vs Claude Code\'s running cost (both per API response; expect a ratio a little under 1):',
+          ...lines,
+          '',
+        ].join('\n'));
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'costs repair-codex-usage',
+    group: 'Data Commands',
+    summary: 'Rebuild imported Codex usage from rollouts, dropping copied subagent history and stale rows',
+    // Reports by default: this rewrites stored history, so writing is opt-in
+    // through --apply rather than opt-out through --dry-run.
+    usage: 'costs repair-codex-usage [--apply] [--codex-dir <path>]',
+    examples: [
+      'costs repair-codex-usage --json',
+      'costs repair-codex-usage --apply',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--codex-dir']), new Set(['--apply']));
+      rejectExtraPositionals(parsed.positionals, 'amon costs repair-codex-usage [--apply]');
+      const { createConfig } = await import('../../config.js');
+      const runtimeConfig = createConfig();
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb, getDb } = await import('../../db/connection.js');
+      const { repairCodexImportUsage } = await import('../../import/codex-usage-repair.js');
+      initSchema();
+      try {
+        const report = repairCodexImportUsage(getDb(), {
+          codexDir: parsed.values.get('--codex-dir'),
+          apply: parsed.flags.has('--apply'),
+          excludePatterns: runtimeConfig.sync.excludePatterns,
+        });
+        printSummary(
+          ctx,
+          report.apply ? 'Codex import usage repair' : 'Codex import usage repair preview',
+          report,
+        );
+        // The running server caches Monitor totals in its own process.
+        if (report.apply && report.sessions_changed > 0) {
+          console.error('Restart the AgentMonitor server so the Monitor shows the repaired totals.');
+        }
+        if (report.sessions_failed.length > 0) {
+          throw partialSuccess(
+            `Codex usage repair: ${report.sessions_failed.length} session(s) failed and were left unchanged; rerun to retry them.`,
+          );
+        }
       } finally {
         closeDb();
       }

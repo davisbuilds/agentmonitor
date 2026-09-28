@@ -86,68 +86,111 @@ export function setSessionMode(sessionId: string, mode: 'interactive' | 'headles
   `).run({ id: sessionId, mode });
 }
 
+/** An imported Codex row as the reconciliation compares it with a parse. */
+export interface ImportedCodexRow {
+  id: number;
+  event_id: string;
+  event_type: string;
+  tool_name: string | null;
+  status: string;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  model: string | null;
+  cost_usd: number | null;
+  client_timestamp: string | null;
+  metadata: string;
+}
+
 /**
- * Refresh a deterministic imported Codex event after its source JSONL gains an
- * authoritative per-turn model. This is deliberately narrower than a general
- * duplicate upsert: only import rows marked as turn_context-backed may change,
- * and only model plus the derived cost are refreshed.
+ * A Codex session's rows minted by the Codex importer. The `import-cdx-` id is
+ * the importer's own namespace; the source and agent predicates keep every
+ * other producer's rows for the same session out of reach.
  */
-export function refreshImportedCodexEventModel(
-  event: NormalizedIngestEvent,
-): { id: number; sessionId: string } | null {
-  if (
-    !event.event_id
-    || event.source !== 'import'
-    || event.agent_type !== 'codex'
-    || !event.model
-    || event.metadata === null
-    || typeof event.metadata !== 'object'
-    || Array.isArray(event.metadata)
-    || (event.metadata as Record<string, unknown>)._model_source !== 'turn_context'
-  ) {
-    return null;
-  }
+export function listImportedCodexRows(sessionId: string): ImportedCodexRow[] {
+  return getDb().prepare(`
+    SELECT id, event_id, event_type, tool_name, status, tokens_in, tokens_out, cache_read_tokens,
+           cache_write_tokens, model, cost_usd, client_timestamp, metadata
+    FROM events
+    WHERE session_id = ? AND source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+  `).all(sessionId) as ImportedCodexRow[];
+}
 
-  const hasUsage = event.tokens_in > 0
-    || event.tokens_out > 0
-    || (event.cache_read_tokens ?? 0) > 0
-    || (event.cache_write_tokens ?? 0) > 0;
-  const cost = hasUsage
-    ? pricingRegistry.calculate(event.model, {
-        input: event.tokens_in,
-        output: event.tokens_out,
-        cacheRead: event.cache_read_tokens,
-        cacheWrite: event.cache_write_tokens,
-      }, event.client_timestamp)
-    : null;
+/** The `metadata` column value `insertEvent` would store for this metadata. */
+export function serializeEventMetadata(metadata: unknown): string {
+  return truncateMetadata(metadata).value;
+}
 
+/**
+ * Rewrite an imported Codex row from a fresh parse, in place: the row keeps its
+ * id and `created_at`. The Codex importer prices from our tables, so a cost it
+ * supplies is an estimate.
+ */
+export function updateImportedCodexRow(id: number, event: NormalizedIngestEvent): EventRow | null {
+  const metadata = truncateMetadata(event.metadata);
   const row = getDb().prepare(`
     UPDATE events
-    SET model = @model,
-        cost_usd = CASE WHEN @hasUsage = 1 THEN @cost ELSE cost_usd END,
-        -- The Codex importer prices from our tables, so its costs are estimates.
-        cost_source = CASE
-          WHEN @hasUsage = 0 THEN cost_source
-          WHEN @cost IS NULL THEN NULL
-          ELSE 'estimated'
-        END
-    WHERE event_id = @eventId
-      AND source = 'import'
-      AND agent_type = 'codex'
-      AND (
-        model IS NOT @model
-        OR (@hasUsage = 1 AND cost_usd IS NOT @cost)
-      )
-    RETURNING id, session_id
+    SET event_type = @eventType, tool_name = @toolName, status = @status,
+        tokens_in = @tokensIn, tokens_out = @tokensOut,
+        cache_read_tokens = @cacheRead, cache_write_tokens = @cacheWrite,
+        model = @model, cost_usd = @cost,
+        cost_source = CASE WHEN @cost IS NULL THEN NULL ELSE 'estimated' END,
+        client_timestamp = @clientTimestamp, metadata = @metadata, payload_truncated = @truncated
+    WHERE id = @id AND source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+    RETURNING *
   `).get({
-    eventId: event.event_id,
-    model: event.model,
-    hasUsage: hasUsage ? 1 : 0,
-    cost,
-  }) as { id: number; session_id: string } | undefined;
-
+    id,
+    eventType: event.event_type,
+    toolName: event.tool_name ?? null,
+    status: event.status,
+    tokensIn: event.tokens_in,
+    tokensOut: event.tokens_out,
+    cacheRead: event.cache_read_tokens ?? 0,
+    cacheWrite: event.cache_write_tokens ?? 0,
+    model: event.model ?? null,
+    cost: event.cost_usd ?? null,
+    clientTimestamp: event.client_timestamp ?? null,
+    metadata: metadata.value,
+    truncated: metadata.truncated ? 1 : 0,
+  }) as EventRow | undefined;
   if (row) markStatsDirty();
-  return row ? { id: row.id, sessionId: row.session_id } : null;
+  return row ?? null;
+}
+
+export function deleteImportedCodexRows(ids: number[]): void {
+  const remove = getDb().prepare(`
+    DELETE FROM events
+    WHERE id = ? AND source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+  `);
+  for (const id of ids) remove.run(id);
+  if (ids.length > 0) markStatsDirty();
+}
+
+/** Every session that holds rows minted by the Codex importer. */
+export function listImportedCodexSessionIds(): string[] {
+  return (getDb().prepare(`
+    SELECT DISTINCT session_id FROM events
+    WHERE source = 'import' AND agent_type = 'codex' AND event_id LIKE 'import-cdx-%'
+  `).all() as Array<{ session_id: string }>).map(row => row.session_id);
+}
+
+/**
+ * Codex's own per-request usage for a session, as its OTEL rows recorded it:
+ * total tokens, and the UTC hours (`YYYY-MM-DDTHH`) that carry any.
+ */
+export function getCodexOtelUsage(sessionId: string): { tokens: number; hours: string[] } {
+  const db = getDb();
+  const usage = `(tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)`;
+  const total = db.prepare(`
+    SELECT COALESCE(SUM(tokens_in + tokens_out + cache_read_tokens + cache_write_tokens), 0) AS tokens
+    FROM events WHERE session_id = ? AND agent_type = 'codex' AND source = 'otel' AND ${usage}
+  `).get(sessionId) as { tokens: number };
+  const hours = db.prepare(`
+    SELECT DISTINCT substr(replace(COALESCE(client_timestamp, created_at), ' ', 'T'), 1, 13) AS hour
+    FROM events WHERE session_id = ? AND agent_type = 'codex' AND source = 'otel' AND ${usage}
+  `).all(sessionId) as Array<{ hour: string }>;
+  return { tokens: total.tokens, hours: hours.map(row => row.hour) };
 }
 
 export interface SessionRow {
@@ -429,6 +472,74 @@ export function eventIdExists(eventId: string): boolean {
   return getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(eventId) !== undefined;
 }
 
+/**
+ * Bring an imported row up to date with a later read of the same transcript
+ * line, returning its id when it changed. A transcript can be imported while a
+ * turn is still being written, and the turn's final usage is only on its last
+ * line. Only the transcript that stored the row may refresh it, so a resumed
+ * session's copy of the line cannot rewrite its predecessor's row. A reported
+ * cost is kept; an estimate follows the tokens.
+ */
+export function refreshImportedUsage(event: {
+  event_id: string;
+  session_id: string;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
+}): number | null {
+  const db = getDb();
+  const row = db.prepare(`
+    SELECT id, session_id, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+           cost_usd, cost_source, model, client_timestamp
+    FROM events WHERE event_id = ? AND source = 'import'
+  `).get(event.event_id) as {
+    id: number; session_id: string; tokens_in: number; tokens_out: number;
+    cache_read_tokens: number; cache_write_tokens: number; cost_usd: number | null;
+    cost_source: CostSource | null; model: string | null; client_timestamp: string | null;
+  } | undefined;
+  if (!row || row.session_id !== event.session_id) return null;
+  const tokens = {
+    input: event.tokens_in,
+    output: event.tokens_out,
+    cacheRead: event.cache_read_tokens ?? 0,
+    cacheWrite: event.cache_write_tokens ?? 0,
+  };
+  if (row.tokens_in === tokens.input && row.tokens_out === tokens.output
+    && row.cache_read_tokens === tokens.cacheRead && row.cache_write_tokens === tokens.cacheWrite) return null;
+
+  let cost = row.cost_usd;
+  let costSource = row.cost_source;
+  if (row.model && (costSource === 'estimated' || cost === null)) {
+    const estimate = pricingRegistry.calculate(row.model, tokens, row.client_timestamp);
+    if (estimate !== null) {
+      cost = estimate;
+      costSource = 'estimated';
+    }
+  }
+  db.prepare(`
+    UPDATE events
+    SET tokens_in = ?, tokens_out = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?, cost_source = ?
+    WHERE id = ?
+  `).run(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, cost, costSource, row.id);
+  markStatsDirty();
+  return row.id;
+}
+
+/**
+ * The branch `insertEvent` would record for this event. It may run `git`, so it
+ * must be called outside any write transaction.
+ */
+export function resolveEventGitBranch(event: {
+  project?: string;
+  source?: string;
+  client_timestamp?: string;
+}): string | null {
+  if (!event.project || event.source === 'benchmark') return null;
+  if (event.source === 'import' && isHistoricalImportedEvent(event)) return null;
+  return resolveGitBranch(event.project);
+}
+
 export function insertEvent(event: {
   event_id?: string;
   session_id: string;
@@ -454,7 +565,14 @@ export function insertEvent(event: {
   study?: string;
   /** Who produced `cost_usd`; defaults to 'reported' when a cost is supplied. */
   cost_source?: CostSource;
-}): EventRow | null {
+}, options: {
+  /**
+   * The branch already resolved by `resolveEventGitBranch`. A caller that wraps
+   * this insert in its own transaction passes it so `git` never runs while the
+   * write lock is held.
+   */
+  gitBranch?: string | null;
+} = {}): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
   // Benchmark cells are batch-imported historical runs, never live activity, so
@@ -483,9 +601,7 @@ export function insertEvent(event: {
   // Resolve git branch from project directory and keep session branch fresh.
   // Recent live imports can carry stale branch metadata from session start, so
   // refresh the session-level branch from current repo HEAD when possible.
-  const gitBranch = event.project && !isBenchmark && (event.source !== 'import' || !isHistoricalImport)
-    ? resolveGitBranch(event.project)
-    : null;
+  const gitBranch = options.gitBranch !== undefined ? options.gitBranch : resolveEventGitBranch(event);
   if (gitBranch && !event.branch) event.branch = gitBranch;
 
   // A supplied cost is the producer's own figure unless the caller priced it
@@ -743,15 +859,76 @@ export function listTraceQualityEventSourcesForSession(sessionId: string): Event
 
 // --- Stats ---
 
-export interface Stats {
+/** One agent's usage in a Monitor total. `tokens_in` is uncached input only. */
+export interface MonitorAgentUsage {
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+}
+
+export interface MonitorUsageTotals {
+  total_tokens_in: number;
+  total_tokens_out: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
+  total_cost_usd: number;
+  usage_by_agent: Record<string, MonitorAgentUsage>;
+}
+
+/**
+ * One pass grouped by agent; the totals are the sum of the groups. The unary
+ * `+` keeps SQLite from grouping through an agent_type index that does not
+ * cover the token columns: that plan looks up every row (seconds on a large
+ * store) instead of scanning the covering usage index (milliseconds).
+ */
+export function monitorUsageSql(usageWhere: string): string {
+  return `
+    SELECT
+      e.agent_type as agent_type,
+      COALESCE(SUM(e.tokens_in), 0) as tokens_in,
+      COALESCE(SUM(e.tokens_out), 0) as tokens_out,
+      COALESCE(SUM(e.cache_read_tokens), 0) as cache_read_tokens,
+      COALESCE(SUM(e.cache_write_tokens), 0) as cache_write_tokens,
+      COALESCE(SUM(e.cost_usd), 0) as cost_usd
+    FROM events e ${usageWhere}
+    GROUP BY +e.agent_type
+  `;
+}
+
+/**
+ * Sum the Monitor's usage rows (`usageWhere` already reconciles overlapping
+ * Codex OTEL away), per agent and in total. The v2 stats read and the SSE
+ * broadcast share this, so the bar they both feed never changes shape.
+ */
+export function sumMonitorUsage(db: Database.Database, usageWhere: string, params: unknown[]): MonitorUsageTotals {
+  const rows = db.prepare(monitorUsageSql(usageWhere)).all(...params) as Array<MonitorAgentUsage & { agent_type: string }>;
+  const totals: MonitorUsageTotals = {
+    total_tokens_in: 0,
+    total_tokens_out: 0,
+    total_cache_read_tokens: 0,
+    total_cache_write_tokens: 0,
+    total_cost_usd: 0,
+    usage_by_agent: {},
+  };
+  for (const { agent_type, ...usage } of rows) {
+    totals.usage_by_agent[agent_type] = usage;
+    totals.total_tokens_in += usage.tokens_in;
+    totals.total_tokens_out += usage.tokens_out;
+    totals.total_cache_read_tokens += usage.cache_read_tokens;
+    totals.total_cache_write_tokens += usage.cache_write_tokens;
+    totals.total_cost_usd += usage.cost_usd;
+  }
+  return totals;
+}
+
+export interface Stats extends MonitorUsageTotals {
   total_events: number;
   active_sessions: number;
   total_sessions: number;
   live_sessions: number;
   active_agents: number;
-  total_tokens_in: number;
-  total_tokens_out: number;
-  total_cost_usd: number;
   tool_breakdown: Record<string, number>;
   agent_breakdown: Record<string, number>;
   model_breakdown: Record<string, number>;
@@ -798,13 +975,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   const usageWhere = `${where}
     AND ${usageMetricPresenceCondition('e')}
     AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
-  const usageTotals = db.prepare(`
-    SELECT
-      COALESCE(SUM(e.tokens_in), 0) as total_tokens_in,
-      COALESCE(SUM(e.tokens_out), 0) as total_tokens_out,
-      COALESCE(SUM(e.cost_usd), 0) as total_cost_usd
-    FROM events e ${usageWhere}
-  `).get(...params) as { total_tokens_in: number; total_tokens_out: number; total_cost_usd: number };
+  const usageTotals = sumMonitorUsage(db, usageWhere, params);
 
   const activeSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
@@ -873,9 +1044,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     total_sessions: totalSessions,
     live_sessions: liveSessions,
     active_agents: activeAgents,
-    total_tokens_in: usageTotals.total_tokens_in,
-    total_tokens_out: usageTotals.total_tokens_out,
-    total_cost_usd: usageTotals.total_cost_usd,
+    ...usageTotals,
     tool_breakdown: toolBreakdown,
     agent_breakdown: agentBreakdown,
     model_breakdown: modelBreakdown,
@@ -894,6 +1063,9 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
 // dirty (see markStatsDirty). The filtered getStats() path (HTTP /api/stats) is
 // on-demand and stays uncached.
 let cachedBroadcastStats: Stats | null = null;
+// The connection the snapshot was read from. A reopened connection may see
+// writes this process never marked dirty, so its snapshot starts over.
+let cachedBroadcastStatsDb: Database.Database | null = null;
 let broadcastStatsDirty = true;
 
 function markStatsDirty(): void {
@@ -901,8 +1073,10 @@ function markStatsDirty(): void {
 }
 
 export function getStatsForBroadcast(): Stats {
-  if (broadcastStatsDirty || cachedBroadcastStats === null) {
+  const db = getDb();
+  if (broadcastStatsDirty || cachedBroadcastStats === null || cachedBroadcastStatsDb !== db) {
     cachedBroadcastStats = getStats();
+    cachedBroadcastStatsDb = db;
     broadcastStatsDirty = false;
   }
   return cachedBroadcastStats;
@@ -1444,4 +1618,94 @@ export function getSessionTranscript(sessionId: string): TranscriptEvent[] {
     WHERE session_id = ?
     ORDER BY created_at ASC, id ASC
   `).all(sessionId) as TranscriptEvent[];
+}
+
+// ─── Claude session accounting ─────────────────────────────────────────
+
+/** Claude Code's running totals for one session, as its statusline reports them. */
+export interface ClaudeSessionAccounting {
+  session_id: string;
+  observed_at: string;
+  /** When the process whose totals these are started; the totals cover only it. */
+  process_started_at: string;
+  /** How long that process had run when the totals were read; it only grows. */
+  process_duration_ms: number;
+  cost_usd: number;
+  claude_version: string | null;
+}
+
+/**
+ * Keep a session's latest totals. The bridge posts in the background, so a
+ * sample can arrive after a newer one, even from the process before a restart.
+ * A sample's process is identified by its start (receipt time less its
+ * duration), which is stable within a process up to delivery delay:
+ *
+ * - a sample from a process that started later replaces the stored one (a
+ *   restart or resume resets the counters);
+ * - one from the same process replaces it only if it has run at least as long;
+ * - one from an older process is dropped.
+ */
+export function recordClaudeSessionAccounting(snapshot: ClaudeSessionAccounting): void {
+  getDb().prepare(`
+    INSERT INTO claude_session_accounting
+      (session_id, observed_at, process_started_at, process_duration_ms, cost_usd, claude_version)
+    VALUES (@session_id, @observed_at, @process_started_at, @process_duration_ms, @cost_usd, @claude_version)
+    ON CONFLICT(session_id) DO UPDATE SET
+      observed_at = excluded.observed_at,
+      process_started_at = excluded.process_started_at,
+      process_duration_ms = excluded.process_duration_ms,
+      cost_usd = excluded.cost_usd,
+      claude_version = excluded.claude_version
+    WHERE (julianday(excluded.process_started_at) - julianday(claude_session_accounting.process_started_at))
+            * 86400000 > @same_process_ms
+       OR (ABS(julianday(excluded.process_started_at) - julianday(claude_session_accounting.process_started_at))
+            * 86400000 <= @same_process_ms
+           AND excluded.process_duration_ms >= claude_session_accounting.process_duration_ms)
+  `).run({ ...snapshot, same_process_ms: SAME_PROCESS_MS });
+}
+
+/** Derived starts within this of each other belong to one process: delivery delay, not a restart. */
+const SAME_PROCESS_MS = 60_000;
+
+/** One session's harness cost beside what amon recorded for the same window. */
+export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {
+  amon_cost_usd: number;
+  /** Imported rows in the window with usage but no cost; any makes the ratio unknowable. */
+  unpriced_rows: number;
+  /** amon's cost over the harness's; null when the harness reports no cost. */
+  ratio: number | null;
+}
+
+/**
+ * The latest sessions' harness cost beside amon's imported cost for the same
+ * session and window. Both count once per API response, so they should agree
+ * closely; amon runs slightly low because the harness also pays for calls that
+ * never reach a transcript, likely compaction above all (unmeasured). A ratio near 2 would mean
+ * imports are counting every content-block line, as Claude Code's `/stats` does.
+ */
+export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
+  const rows = getDb().prepare(`
+    SELECT a.session_id, a.observed_at, a.process_started_at, a.process_duration_ms, a.cost_usd, a.claude_version,
+      COALESCE((
+        SELECT SUM(e.cost_usd) FROM events e
+        WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'
+          AND e.client_timestamp >= a.process_started_at AND e.client_timestamp <= a.observed_at
+      ), 0) AS amon_cost_usd,
+      (
+        SELECT COUNT(*) FROM events e
+        WHERE e.session_id = a.session_id AND e.agent_type = 'claude_code' AND e.source = 'import'
+          AND e.client_timestamp >= a.process_started_at AND e.client_timestamp <= a.observed_at
+          AND e.cost_usd IS NULL
+          AND (e.tokens_in > 0 OR e.tokens_out > 0 OR e.cache_read_tokens > 0 OR e.cache_write_tokens > 0)
+      ) AS unpriced_rows
+    FROM claude_session_accounting a
+    ORDER BY a.observed_at DESC
+    LIMIT ?
+  `).all(limit) as Array<Omit<ClaudeSessionCostCheck, 'ratio'>>;
+  // An unpriced row bills as NULL and the sum skips it, so the imported cost
+  // would read low; no ratio is better than a falsely reassuring one.
+  return rows.map(row => ({
+    ...row,
+    ratio: row.cost_usd > 0 && row.unpriced_rows === 0 ? row.amon_cost_usd / row.cost_usd : null,
+  }));
 }

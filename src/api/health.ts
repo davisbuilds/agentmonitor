@@ -2,6 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import fs from 'fs';
 import { config } from '../config.js';
 import { broadcaster } from '../sse/emitter.js';
+import { serverBuildStatus } from '../build-fingerprint.js';
 
 export const healthRouter = Router();
 
@@ -22,5 +23,6 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     uptime: Math.floor((Date.now() - startTime) / 1000),
     db_size_bytes: dbSizeBytes,
     sse_clients: broadcaster.clientCount,
+    build: serverBuildStatus(),
   });
 });

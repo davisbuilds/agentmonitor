@@ -45,3 +45,42 @@ test('Monitor session expiry invalidates the shared stats snapshot', async () =>
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });
+
+test('the shared stats snapshot does not outlive the connection it was read from', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-monitor-stats-cache-reopen-'));
+  process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
+
+  const { closeDb, getDb } = await import('../src/db/connection.js');
+  const { initSchema } = await import('../src/db/schema.js');
+  const { getStatsForBroadcast } = await import('../src/db/queries.js');
+  const Database = (await import('better-sqlite3')).default;
+
+  try {
+    closeDb();
+    initSchema();
+    // `config` snapshots the path on first import, so this file's earlier test
+    // chose it; getDb() has already refused the install database.
+    const dbPath = getDb().name;
+    assert.match(dbPath, /agentmonitor-monitor-stats-cache/);
+    assert.equal(getStatsForBroadcast().total_events, 0);
+
+    // Another writer changes the file while the connection is closed; nothing in
+    // this process marks the snapshot dirty.
+    closeDb();
+    const other = new Database(dbPath);
+    other.prepare(`
+      INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, cost_usd, source)
+      VALUES ('reopen-event', 'reopen-session', 'codex', 'llm_response', 'success', 10, 0.5, 'import')
+    `).run();
+    other.close();
+
+    const reopened = getStatsForBroadcast();
+    assert.equal(reopened.total_events, 1);
+    assert.equal(reopened.total_cost_usd, 0.5);
+  } finally {
+    const opened = getDb().name;
+    closeDb();
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    fs.rmSync(path.dirname(opened), { recursive: true, force: true });
+  }
+});

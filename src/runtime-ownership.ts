@@ -7,6 +7,14 @@ interface OwnershipRecord {
   startedAt: string;
   token: string;
   dbPath: string;
+  /** Fingerprint of the build the runtime loaded; absent when it runs from source. */
+  build?: string | null;
+}
+
+export interface RuntimeOwner {
+  pid: number;
+  startedAt: string;
+  build: string | null;
 }
 
 export interface RuntimeOwnershipHandle {
@@ -102,7 +110,7 @@ function createOwnership(lockPath: string, record: OwnershipRecord): void {
   }
 }
 
-export function acquireRuntimeOwnership(dbPath: string): RuntimeOwnershipHandle {
+export function acquireRuntimeOwnership(dbPath: string, options: { build?: string | null } = {}): RuntimeOwnershipHandle {
   const canonicalPath = canonicalDbPath(dbPath);
   const lockPath = `${canonicalPath}.runtime.lock`;
   const record: OwnershipRecord = {
@@ -110,6 +118,7 @@ export function acquireRuntimeOwnership(dbPath: string): RuntimeOwnershipHandle 
     startedAt: new Date().toISOString(),
     token: crypto.randomUUID(),
     dbPath: canonicalPath,
+    build: options.build ?? null,
   };
 
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -139,4 +148,24 @@ export function acquireRuntimeOwnership(dbPath: string): RuntimeOwnershipHandle 
   }
 
   throw new Error(`Could not acquire runtime ownership for ${canonicalPath}`);
+}
+
+/** The live runtime that owns this database, if any. Reads only; creates nothing. */
+export function readRuntimeOwner(dbPath: string): RuntimeOwner | null {
+  const absolute = path.resolve(dbPath);
+  let dir: string;
+  try {
+    dir = fs.realpathSync.native(path.dirname(absolute));
+  } catch {
+    return null; // the directory does not exist, so nothing owns it
+  }
+  let canonicalPath = path.join(dir, path.basename(absolute));
+  try {
+    canonicalPath = fs.realpathSync.native(canonicalPath);
+  } catch {
+    // The database file need not exist yet; ownership is keyed the same way.
+  }
+  const record = readOwnership(`${canonicalPath}.runtime.lock`);
+  if (!record || record.dbPath !== canonicalPath || !processIsAlive(record.pid)) return null;
+  return { pid: record.pid, startedAt: record.startedAt, build: record.build ?? null };
 }

@@ -1,41 +1,31 @@
 # Backlog
 
-Living list of **future** design gaps, tech debt, and better ways to do a thing
-noticed during normal execution. Fix simple, quick, or blocking issues inline;
-capture only durable follow-ups worth revisiting cold. Not a commitment for the
-active task unless explicitly pulled into scope; ROADMAP.md is the higher-bar
-shipped/directional view. Add an item only when it cannot be fixed inline and
-represents recurring friction, meaningful risk or cost, an unresolved decision,
-or a concrete trigger.
+Future-only gaps and opportunities worth revisiting. Capture recurring friction,
+meaningful risk or cost, unresolved decisions, or concrete revisit triggers.
+Fix simple, quick, or blocking issues inline when within the active task's scope.
 
-This repository is the canonical owner for its follow-ups; cross-repository work
-belongs with the repository that owns the capability, with links from affected
-repositories only when useful.
+## Conventions
 
-Convention: each item has **What** (the friction), **Why or evidence**, and
-optionally **Next** (the smallest action that makes it actionable) or **Revisit
-when** (an intentional external or measurable gate). Default state is omitted;
-use **Revisit when** for gates and `State: blocked — <reason>` only when work is
-genuinely blocked externally.
+- **Entry:** state **What** and **Why or evidence**. Add **Next** (a useful first
+  action) or **Revisit when** (a concrete gate) where helpful; no fixed template
+  is required.
+- **Evidence:** date and source volatile claims. Support causal or performance
+  claims with measurements, or label them **hypothesis, unmeasured**.
+- **Delegation:** agents can execute entries directly. Recording a candidate does
+  not expand the active task or select a roadmap priority. Use an issue when
+  persistent discussion or coordination helps; no mandatory graduation step.
+- **Ownership:** keep cross-repository work with the capability-owning repository.
+  If an issue owns the details, retain only a useful linked summary here; avoid
+  parallel checklists. Keep private evidence out of public entries and issues.
+- **Closure:** reconcile affected entries as work lands. Remove resolved concerns,
+  retain unresolved remainders, and preserve durable rationale in its owning
+  reference. Roadmap records selected direction; Git and PRs hold routine shipped
+  history. Revisit the broader list during prioritization or when stale entries
+  impede work.
 
-**Cite a number, or say it is a guess.** Any causal or performance claim here —
-"X is slow", "Y causes the flake" — carries a measurement, or is labelled
-*hypothesis, unmeasured*. Entries get read back later as established fact and
-turned into work: an unmarked guess about the Analytics fan-out was written here,
-believed on re-read, and nearly bought a whole endpoint before a 30-second `curl`
-showed the endpoints return in 1–4ms. The label is the forcing function that makes
-someone run the cheap probe first.
-
-Review this file after a significant shipped slice or at least quarterly: confirm
-each item is still open, refresh dated evidence, promote selected work to a plan,
-convert it to a trigger, or move completed decisions and work to the Roadmap or
-decision history.
-
-When an item ships it **leaves this doc**. Record it in `ROADMAP.md` when it is a
-recent milestone that changes current direction; otherwise let its PR and commits
-hold the detailed history. Do not keep a resolved section here.
-
----
+A past unmeasured Analytics fan-out claim nearly prompted a new endpoint before
+a cheap latency probe disproved it. Keep hypotheses visibly separate from facts
+so later readers know what still needs checking.
 
 ## Open
 
@@ -69,6 +59,69 @@ hold the detailed history. Do not keep a resolved section here.
 
 ### Ingestion
 
+#### Auto-import re-reads and re-hashes every transcript on every run
+- **What**: `processFile` (`src/import/index.ts`) reads and SHA-256 hashes the
+  whole of every discovered Claude, Codex and Antigravity file on each
+  auto-import (every 10 minutes by default), before it checks `import_state`.
+  Unchanged files cost a full read. `import_state.file_size` is stored but never
+  used to skip one. The run is synchronous, so the server blocks while it hashes.
+- **Why it matters / evidence**: measured 2026-09-24 on this MacBook with the
+  files cached in memory:
+  - Hashing 359 Codex rollouts (about 1 GB; Codex never deletes them) takes
+    0.40–0.44 s per run.
+  - Claude transcripts were capped at about 30 days by `cleanupPeriodDays` until
+    that was raised to 3650. At the current rate (about 234 MB of transcripts
+    and file history per 30 days) they add about 1 s per run for each year kept.
+  - Runs with the files no longer in memory are slower (not measured).
+- **Next**: skip re-reading a file whose size and mtime match the stored state.
+  Keep the full hash for changed files and for `--force`. Store the mtime
+  alongside the size. The Codex path already hashes and parses one read of
+  the file (`readCodexRollout`, shipped with the Codex import usage repair), so
+  a skip belongs before that read.
+
+#### Codex subagent boundary rests on the current rollout layout
+- **What**: the importer finds a `thread_spawn` subagent's own activity from
+  UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out
+  subagent rollouts and mints turn ids today.
+- **Why or evidence**: verified on 2026-09-24 for every `thread_spawn` rollout
+  from Codex 0.94.0 to 0.156.1. All of them had datable turns and a boundary.
+  A layout change would make the parse fall back to billing the whole rollout,
+  as before the fix.
+- **Revisit when**: `amon costs repair-codex-usage` reports
+  `subagent_boundaries_unresolved` above 0, or a new subagent's import/OTEL
+  ratio leaves 0.95–1.02. Re-measure on each Codex minor version that changes
+  subagent behaviour.
+
+#### Long-context tier is chosen per row, not per request
+- **What**: pricing picks the long-context tier from the size of one row's
+  token change. A Codex import row that spans several requests can therefore
+  cross the tier threshold when no single request did.
+- **Why or evidence**: after the subagent boundary fix, such rows are rare.
+  Measured on 2026-09-24, they are about half of 1% of that fix's cost
+  correction.
+- **Next**: price a multi-request span with the tier of its largest request,
+  once `last_token_usage` per request is read. Otherwise leave as is.
+
+#### Codex requests that only OTEL records
+- **What**: Codex's per-request OTEL often sees slightly more usage than the
+  rollout counters. Rollout import is authoritative where the two overlap, so
+  the difference is dropped.
+- **Why or evidence**: measured 2026-09-24 on subagent sessions the repair does
+  not change: they sit at 0.92–1.02× OTEL, mostly below 1. Plain sessions were
+  not measured this way. The cause is a hypothesis, unmeasured: requests that
+  fail or are retried without a counter update.
+- **Next**: compare per-request OTEL ids with rollout counters for one session
+  below 0.95×, before changing any reconciliation.
+
+#### Copied subagent history in the transcript browser (hypothesis)
+- **What**: the session browser and skill/tool analytics parse Codex rollouts
+  separately from the importer. A subagent's copied parent history may appear
+  there as the child's own messages and tool calls.
+- **Why or evidence**: not measured. The importer fix covers usage and file
+  edits only. This surface does not bill cost.
+- **Next**: count a subagent's browser messages and tool calls before and after
+  its boundary line. Fix only if the copied part shows up.
+
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
   deepseek-v4-flash-0731, minimax-m3) and the codex/claude daily drivers, but
@@ -86,7 +139,7 @@ hold the detailed history. Do not keep a resolved section here.
 - **What**: P1 data/queries + P2 arm-ladder UI **shipped** 2026-09-03 (PR #106);
   **P3** frontier chart + shared inline-SVG primitives (`ui/chart/scales.ts`,
   `layout.ts`, `PlotFrame.svelte`, `BenchmarkFrontier.svelte`, CostDashboard
-  refactored onto `linearScale`) **shipped** 2026-09-04 (see ROADMAP). What
+  refactored onto `linearScale`) **shipped** 2026-09-04 (`527945b`, `739b177`). What
   remains is **P4** (optional) — a self-contained "Publish study" artifact export
   mirroring the claude.ai Pareto artifact, with the app as source of truth.
 - **Why it matters**: the ladder + honesty panel + frontier now deliver the full
@@ -156,6 +209,26 @@ the build.
   unlike usage metrics.
 
 ### Analytics rollups (schema-storage-rebalance Phase 2)
+
+#### Agent-filtered Monitor reads take seconds
+- **What**: with an agent selected, the Monitor's stats and event reads run
+  uncached, synchronous SQLite work on the server. The unfiltered stats read
+  reuses the broadcast snapshot instead.
+- **Why or evidence**: measured 2026-09-24 over HTTP against a local store of
+  about a million events:
+  - unfiltered stats took about 1 ms;
+  - `stats?agent=codex` took 0.4–3.2 s, and `stats?agent=claude_code` about
+    1.9 s;
+  - `events?agent=codex` took about 3 s.
+
+  The usage sum inside the filtered stats read takes about 0.1 s, through
+  `idx_events_agent_type`. The rest is in its other aggregates (event count,
+  tool, model and agent breakdowns). Their plans are a hypothesis, unmeasured.
+  The filtered bar refreshes at most once per 30 s for this reason.
+- **Next**: take `EXPLAIN QUERY PLAN` and timings for each aggregate in
+  `getMonitorStats` and `listMonitorEvents` under an agent filter. A covering
+  index with `agent_type` leading, or per-agent snapshots cached like the
+  unfiltered one, are the candidates. Measure before choosing.
 
 #### Usage overview derived store remains a measured fallback
 - **What**: the event-derived `/api/v2/usage/overview` still folds matching usage
@@ -262,27 +335,6 @@ the build.
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
 
-#### Child-agent transcripts collide with their parent's event ids, so their usage never imports
-- **What**: `parseClaudeCodeFile` derives `event_id` from
-  `claude-code:<sessionId>:<line index>`, and a child-agent transcript
-  (`projects/<project>/<session>/subagents/agent-*.jsonl`) embeds its **parent's**
-  `sessionId`. Parent and child therefore mint identical ids for the same line
-  number, and `insertEvent` returns early on an existing `event_id` — so
-  whichever file imports second has those events silently dropped.
-- **Why or evidence**: measured 2026-09-22 — **every** child-agent event in a
-  sampled session collided with a parent id, so none of that session's delegated
-  usage was ever stored. A local store shows a small population of rows the
-  usage repair flags as `rows_ambiguous` for the same reason. This is an under-count in the opposite
-  direction from the per-content-block over-count fixed in this branch, and the
-  two do not cancel: they hit different sessions by different amounts. Surfaced
-  by Codex review on PR #137.
-- **Next**: make `event_id` include file identity (e.g. the transcript's
-  basename or a path hash) so parent and child cannot collide. Note the
-  migration cost before doing it: every existing imported row's id changes, so
-  re-import would insert duplicates rather than dedupe against history. Needs a
-  deliberate plan — id-derivation version marker, or a one-time remap — not a
-  drive-by edit. Related: [Consistent session identity](#consistent-session-identity-and-parentchild-coverage-across-read-surfaces).
-
 #### Codex event ids are positional, and a change to the emitted set re-keys history
 - **What**: `src/import/codex.ts` derives ids from a counter over *emitted*
   events. Changing which events are emitted re-keys every stored row, so the
@@ -297,10 +349,11 @@ the build.
   for no measured gain. Two mutation-tested guards now make an accidental change loud:
   `skipped, malformed and zero-delta lines do not shift later event ids` and
   `pins the Codex event-id derivation against accidental re-keying`.
-- **Revisit when**: Codex starts rewriting or compacting rollout files, or a
-  derivation change becomes genuinely necessary. Either way it needs a legacy-id
-  bridge first, mirroring `src/import/index.ts`'s ownership rule; do not simply
-  update the pinned expectation.
+- **Revisit when**: a change to the set or order of emitted events makes a
+  derivation change necessary. Rewritten rollout content is already reconciled
+  under the current ids; a derivation change needs a legacy-id bridge first,
+  mirroring `src/import/index.ts`'s ownership rule. Do not simply update the
+  pinned expectation.
 
 #### Imported Claude rows with no surviving transcript stay inflated
 - **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
@@ -316,6 +369,12 @@ the build.
   recovers only about a third of the total inflation, leaving the rest in rows
   with no local evidence left to check them against. Historical cost views stay
   wrong by an unknown-but-bounded amount.
+  On 2026-09-26 transcripts restored from offsite backups made mid-July onward
+  checkable again. In those months repeat-line billing was about half of July's
+  checkable imported cost and about a third of August's; the second repair pass
+  corrected them. Backups reach no further back, so the earlier rows are the
+  whole remaining population. That they carry similar inflation is a
+  hypothesis, not a measurement.
 - **Next / Revisit when**: now the only remaining inflation, so this is the whole
   question rather than part of it. Decide deliberately between three options —
   leave and disclose (cheapest, but every historical cost view silently
@@ -385,7 +444,8 @@ the build.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
-  `GET /api/v2/metrics` (shipped 2026-09-04, see ROADMAP), but there is no `/app/`
+  `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
+  `src/db/otel-metrics.ts`), but there is no `/app/`
   surface yet — no Codex consolidation-health panel or rate-limit-skip view.
 - **Why it matters**: the data is queryable but an operator still has to hit the
   API by hand. A small Monitor/Analytics panel ("is memory consolidation running,
@@ -443,18 +503,6 @@ the build.
 - **Why or evidence**: each reproduced or traced 2026-09-22 during the review;
   none has a known user-visible failure today.
 - **Next**: fix opportunistically when touching the owning file.
-
-#### Antigravity live projection is documented as absent but is wired
-- **What**: `docs/system/FEATURES.md:37` and `docs/system/ARCHITECTURE.md:163`
-  state Antigravity has no live projection, but
-  `syncAntigravityLiveSession` (`src/live/antigravity-adapter.ts:49`) is wired
-  into the watcher at `src/watcher/index.ts:312` and performs summary-fidelity
-  live projection, including WAL-aware resync.
-- **Why or evidence**: confirmed 2026-09-22 by tracing the live-wired path. Doc
-  staleness, not a runtime bug — but a consumer reading the fidelity claim would
-  be misled about what Antigravity reports.
-- **Next**: correct both docs to describe summary-fidelity live projection, or
-  state precisely what "no live projection" was meant to exclude (e.g. SSE push).
 
 ### Frontend testing
 

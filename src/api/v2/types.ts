@@ -1,4 +1,5 @@
 import type { ProjectionCapabilities } from '../../live/projector.js';
+import type { MonitorAgentUsage } from '../../db/queries.js';
 import type {
   TraceQualityFindingKind,
   TraceQualityFindingSeverity,
@@ -282,9 +283,13 @@ export interface MonitorStats {
   live_sessions: number;
   total_sessions: number;
   active_agents: number;
+  /** Uncached input only; cached input is in `total_cache_read_tokens`. */
   total_tokens_in: number;
   total_tokens_out: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
   total_cost_usd: number;
+  usage_by_agent: Record<string, MonitorAgentUsage>;
   tool_breakdown: Record<string, number>;
   agent_breakdown: Record<string, number>;
   model_breakdown: Record<string, number>;

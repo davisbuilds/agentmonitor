@@ -93,6 +93,13 @@ describe('incrementEvent — optimistic stats totals', () => {
     expect(s.total_cost_usd).toBe(1.25);
   });
 
+  it('adds cache buckets and the per-agent split too', () => {
+    store.incrementEvent(ev(1, { agent_type: 'claude_code', tokens_in: 1, tokens_out: 2, cache_read_tokens: 300, cache_write_tokens: 40 }));
+    const s = store.getStats();
+    expect([s.total_cache_read_tokens, s.total_cache_write_tokens]).toEqual([300, 40]);
+    expect(s.usage_by_agent.claude_code?.cache_read_tokens).toBe(300);
+  });
+
   it('treats missing token/cost fields as zero', () => {
     store.incrementEvent(ev(1));
     const s = store.getStats();
@@ -122,5 +129,89 @@ describe('handleSessionUpdate — idle_check', () => {
     store.handleSessionUpdate({ type: 'auto_import' });
     store.handleSessionUpdate({ type: 'resync' });
     expect(store.getAutoImportSignal()).toBe(2);
+  });
+});
+
+describe('stats under a Monitor filter', () => {
+  const snapshot = (cost: number) => ({ ...store.getStats(), total_cost_usd: cost });
+
+  it('takes the unfiltered SSE snapshot when no stats filter is set', () => {
+    store.setFilters({ event_type: 'tool_use' }); // narrows lists, not stats
+    store.applyBroadcastStats(snapshot(100));
+    expect(store.getStats().total_cost_usd).toBe(100);
+    expect(store.getStatsRefreshSignal()).toBe(0);
+  });
+
+  it('keeps the filtered totals and asks for a filtered refresh instead', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.setStats(snapshot(3));
+    store.applyBroadcastStats(snapshot(100));
+    expect(store.getStats().total_cost_usd).toBe(3);
+    expect(store.getStatsRefreshSignal()).toBe(1);
+  });
+
+  it('does the same for a start-time filter', () => {
+    store.setFilters({ date_from: '2026-09-01' });
+    store.setStats(snapshot(3));
+    store.applyBroadcastStats(snapshot(100));
+    expect(store.getStats().total_cost_usd).toBe(3);
+  });
+
+  it('adds a live event only when it matches the agent filter', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.incrementEvent(ev(1, { agent_type: 'claude_code', tokens_in: 50, cost_usd: 1 }));
+    store.incrementEvent(ev(2, { agent_type: 'codex', tokens_in: 5, cost_usd: 0.25 }));
+    const s = store.getStats();
+    expect([s.total_events, s.total_tokens_in, s.total_cost_usd]).toEqual([1, 5, 0.25]);
+  });
+});
+
+describe('a filtered stats read in flight', () => {
+  const snapshot = (cost: number) => ({ ...store.getStats(), total_events: 10, total_cost_usd: cost });
+
+  it('keeps matching events that arrive while it is in flight', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.beginFilteredStatsRead();
+    store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
+    store.incrementEvent(ev(2, { agent_type: 'claude_code', cost_usd: 9 }));
+    store.endFilteredStatsRead(snapshot(3));
+    const s = store.getStats();
+    expect([s.total_events, s.total_cost_usd]).toEqual([11, 3.5]);
+  });
+
+  it('does not re-apply them to a later read', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.beginFilteredStatsRead();
+    store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
+    store.endFilteredStatsRead(snapshot(3));
+    store.beginFilteredStatsRead();
+    store.endFilteredStatsRead(snapshot(4));
+    expect(store.getStats().total_cost_usd).toBe(4);
+  });
+
+  it('leaves the totals alone when the read is abandoned', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.setStats(snapshot(3));
+    store.beginFilteredStatsRead();
+    store.incrementEvent(ev(1, { agent_type: 'codex', cost_usd: 0.5 }));
+    store.endFilteredStatsRead(null);
+    expect(store.getStats().total_cost_usd).toBe(3.5);
+  });
+});
+
+describe('server build', () => {
+  it('reports a stale server build, and a restart clears it', () => {
+    expect(store.getServerBuildStale()).toBe(false);
+    store.setServerBuild({ tracked: true, stale: true });
+    expect(store.getServerBuildStale()).toBe(true);
+    store.setServerBuild({ tracked: true, stale: false });
+    expect(store.getServerBuildStale()).toBe(false);
+  });
+
+  it('treats an untracked or missing build as not stale', () => {
+    store.setServerBuild({ tracked: false, stale: true });
+    expect(store.getServerBuildStale()).toBe(false);
+    store.setServerBuild(undefined);
+    expect(store.getServerBuildStale()).toBe(false);
   });
 });

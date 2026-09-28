@@ -40,6 +40,23 @@ import, sync, recalculation, and warehouse publication do not acquire runtime
 ownership. Shutdown stops HTTP reconnects, timers, SSE clients, quota work,
 watchers, and SQLite before releasing the lock, allowing an immediate restart.
 
+**Restart after every rebuild.** A server keeps the code it started with, and a
+one-shot command runs the build now on disk. After a rebuild the two can write the
+same rows in different ways: an unrestarted server once kept billing Claude usage
+the pre-fix way for hours while the fixed importer ran beside it. So the server
+fingerprints its compiled modules and pricing tables at startup and records that
+fingerprint in its `.runtime.lock`. When the build on disk changes:
+
+- the app header shows **Restart needed**;
+- `/api/health` reports `build.stale: true`, with the `started` and `current`
+  fingerprints;
+- the server logs a `[build]` warning once;
+- any CLI command other than `serve` warns on stderr when the server on the same
+  database runs a different build.
+
+The fingerprint hashes content, so rebuilding the same source does not trigger it.
+A server run from source (`pnpm dev`) reports `build.tracked: false`.
+
 ## Source Development
 
 After upgrading the Codex lineage parser, preserve a closed database backup and
@@ -47,8 +64,9 @@ rehearse `amon sync sessions --source codex --force` on a separate database path
 before reparsing the live projection. Unchanged files otherwise retain their old
 null lineage; deploying the binary alone cannot classify that historical data.
 Unknown source shapes remain unclassified. Reparse reads native files but never
-modifies them. Daily activity is documented in the README; inspect its aggregate
-response separately from the older created-identity inventory.
+modifies them. [Daily activity](../api/activity-contract.md#daily-conversation-activity)
+is an aggregate read; inspect its response separately from the older
+created-identity inventory.
 
 ```bash
 pnpm install
@@ -238,6 +256,39 @@ keeps its event and loses only the usage it double-counted, so transcripts,
 event history and tool-call projections are unchanged. Re-running finds nothing
 further to correct.
 
+The repair also bills each transcript line once when several rows hold it:
+
+- a line stored under both its uuid id and its positional id keeps the uuid row;
+- a resumed session's transcript repeats its predecessor's lines with the same
+  uuids, and the copy in the transcript it was resumed from keeps the line.
+  Resuming copies the whole history, so the source is the transcript whose
+  lines all appear in the other; when neither contains the other (the original
+  was used again after the resume) both copies are reported as ambiguous;
+- a positional id that a transcript and one of its child agents both minted
+  belongs to the transcript once every child line that bills something has a
+  row of its own. The repair corrects only token and cost columns, so a row the
+  child wrote (its timestamp and model) is zeroed when the transcript's line
+  bills nothing, and is otherwise left ambiguous rather than given the
+  transcript's tokens under the child's provenance.
+
+A row that now bills different, non-zero tokens keeps a reported cost; an
+estimated cost is recomputed from the new tokens.
+
+Each turn is billed with the usage on its **last** line. Every line of a turn
+repeats its input and cache counts; a main transcript repeats the final output
+count as well, but a child agent's transcript records output block by block, so
+only its last line is final. The importer refreshes a turn it stored while the
+turn was still being written, and the repair brings older rows up to the final
+count.
+
+To check imported cost against Claude Code's own accounting, run
+`amon costs check-claude-sessions`. It compares each session the statusline
+bridge has reported with the imported cost for the same process window; a
+ratio a little under 1 is expected, and one near 2 would mean lines are being
+counted per content block again. No ratio is given while any imported row in
+the window has usage but no cost (an unpriced model), since the sum would skip
+it and read low.
+
 Applying also re-derives `session_trace_summary` for every repaired session:
 that rollup stores its own token and cost totals, the trace-quality API and
 warehouse export read it directly, and startup backfill skips rows already at
@@ -248,9 +299,12 @@ unambiguous source:
 
 - `rows_without_transcript` — the file is gone. Event history outlives its
   transcripts, and a missing source is not evidence of anything.
-- `rows_ambiguous` — more than one transcript mints the same `event_id`. A
-  child-agent transcript embeds its parent's `sessionId` and ids derive from
-  (session, line index), so parent and child collide on the same line number.
+- `rows_ambiguous` — transcripts disagree on what an `event_id` holds. A
+  child-agent transcript embeds its parent's `sessionId` and positional ids
+  derive from (session, line index), so parent and child collide on the same
+  line number. The id is the parent's once the child's line has a row of its
+  own; until then the row may be the child's only record. A row the child
+  wrote also stays ambiguous when the parent's line bills something.
 
 Repair matches a stored row under either identity scheme: the current id,
 derived from the transcript line's own `uuid`, and the positional id every row
@@ -265,8 +319,11 @@ amon import --source claude-code --force   # recover, then repair
 ```
 
 `import_state` records those transcripts as seen, so only `--force` revisits
-them. Expect totals to **rise** here: this imports events that were never
-stored.
+them. The same holds for transcripts restored from a backup to their original
+paths: `import_state` still has each one at the hash it was imported with, so
+restore first, then force the import. Expect totals to **rise** here: this
+imports events that were never stored, and it gives dropped child lines the
+rows of their own that let the repair settle their collisions.
 
 Both were exercised on a local store on 2026-09-22, after a validated backup and
 a full rehearsal on a copy of it. Expected shape, which is what to check against
@@ -283,11 +340,116 @@ still is.
 
 The repair cannot reach two classes of row, so a repaired database still carries
 inflated historical cost that no local evidence can settle. The report counts
-them separately: `rows_ambiguous` (an id claimed by more than one transcript)
+them separately: `rows_ambiguous` (transcripts that disagree on an id)
 and `rows_without_transcript` (the source file is gone). On the store used
 above the second class was the large majority of pre-fix imported rows —
 unrepairable evidence typically outnumbers repairable by several times over,
 because event history outlives the transcripts it came from.
+
+### Imported Codex usage repair
+
+Until 2026-09-24 the Codex importer had two defects that inflated stored usage.
+Stored rows keep both, because import skips an unchanged file, and before this
+fix it only inserted ids it had not seen.
+
+- **Copied subagent history.** A `thread_spawn` subagent's rollout can open with
+  a copy of its parent's history, with the parent's cumulative token counters
+  and file edits re-stamped at spawn time. Each copied counter was billed again,
+  so affected subagents imported hundreds of times what Codex's own OTEL saw.
+- **Rewritten rollouts.** Import ids are positions in the rollout. When Codex
+  rewrites a rollout, the ids move. Insert-only import left the old rows
+  alongside the new ones, and a model refresh wrote the file's cost onto stale
+  tokens.
+
+New imports are correct. A changed rollout's import rows are now reconciled to
+its parse: updated in place, deleted when the parse no longer produces them, or
+inserted. A subagent is billed from its first own turn (see ARCHITECTURE). An
+unchanged file is still skipped, so rows already stored need the repair:
+
+```sh
+amon costs repair-codex-usage --json            # preview, no writes
+amon costs repair-codex-usage --apply
+```
+
+It reconciles every discoverable rollout through the importer's own path, so a
+repaired session is exactly what a fresh import would store. The preview runs
+the same work and rolls it back.
+
+**Procedure:**
+
+1. Take a validated backup (see above).
+2. Rehearse on a copy. Also copy `~/.codex/sessions` and `config.toml` to a
+   scratch Codex directory, so the preview and the apply read identical bytes.
+   Then run:
+
+   ```sh
+   amon database backup --output <private-dir>/rehearsal.db
+   AGENTMONITOR_DB_PATH=<private-dir>/rehearsal.db \
+     amon serve --port 3999 --no-import --no-watch --no-portless
+   ```
+
+   Record `/api/v2/monitor/stats` overall and with `?agent=codex` after this
+   first startup, which prices any missing costs on the copy. Stop the server.
+   Then run the preview and the apply with `--codex-dir <scratch>`, restart the
+   server, and read the same endpoints again.
+3. Stop the live server and verify its port is free. A rollout that grows
+   during the apply is reconciled again by the next import, but the Monitor's
+   stats cache only resets on restart.
+4. Back up the live database again, then preview it and compare the preview
+   with the rehearsal. Then run `--apply`, restart the server, and check that a
+   second preview reports no changes.
+
+**Reading the report.** Each changed row is classified by the evidence it
+carries:
+
+| Class | Meaning |
+|---|---|
+| `copied_history` | a parent's row, dropped from a subagent |
+| `orphaned` | an id the rewritten rollout no longer produces |
+| `refresh_drift` | stale tokens under a cost that already matches the file |
+| `repriced` | same tokens, cost from older rates |
+| `subagent_model` | a subagent's session model, moved from its parent's first turn to its own |
+| `annotated` | only non-usage fields differ |
+| `appended` | new usage since the last import |
+| `unclassified` | none of the above |
+
+**Do not apply while `unclassified` is above 0.** Also check the two outside
+instruments in the report:
+
+- `counter_mismatches` must be empty. Each changed plain session's repaired
+  usage is compared with the final cumulative counter Codex wrote in its own
+  rollout. Rollouts whose counter restarts mid-session are counted in
+  `counter_sessions_reset` and skipped, because their final counter understates
+  what was billed.
+- `subagent_otel` compares each changed subagent with Codex's per-request OTEL,
+  before and after. `otel_ratios_moved_away` must be 0.
+
+A rollout that does not name its model is attributed to the `config.toml`
+model. The repair keeps the model already stored for such rows, because
+today's config says nothing about an older session.
+
+**What to expect in the Monitor:**
+
+- The Codex Monitor total changes by the import change plus the change in
+  counted OTEL rows. Deleting rows can move a session's latest import timestamp
+  earlier, and the OTEL rows after it then count again.
+- Other agents are unchanged.
+- Usage rows can move to other days as they take back their rollout
+  timestamps.
+
+A session whose rollout is gone is counted in `sessions_without_rollout` and
+left as stored. A rollout that cannot prove which session it owns, or that has
+a line that does not parse, is counted in `sessions_unreconciled` and gets
+insert-only import as before. A failed session rolls back on its own. It is listed in
+`sessions_failed` and the CLI exits with partial success. Rerunning finishes it.
+
+**Measured shape.** This was rehearsed on 2026-09-24 against a copy of a local
+store and a snapshot of its rollouts:
+- the changed subagents moved from 140–810× OTEL to 0.976–0.994×;
+- every changed plain session landed on its rollout's own counter, apart from
+  the few whose counter restarts mid-session, which that check skips;
+- the Codex Monitor total fell by about 45%;
+- a second apply changed nothing.
 
 ### Pricing a newly released model
 

@@ -1,20 +1,35 @@
 // --- V1 API types (existing Monitor tab) ---
 
+/** One agent's usage in a Monitor total. `tokens_in` is uncached input only. */
+export interface MonitorAgentUsage {
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  cost_usd: number;
+}
+
 export interface Stats {
   total_events: number;
   active_sessions: number;
   live_sessions: number;
   total_sessions: number;
   active_agents: number;
+  /** Uncached input only; cached input is in `total_cache_read_tokens`. */
   total_tokens_in: number;
   total_tokens_out: number;
+  total_cache_read_tokens: number;
+  total_cache_write_tokens: number;
   total_cost_usd: number;
+  usage_by_agent: Record<string, MonitorAgentUsage>;
   tool_breakdown: Record<string, number>;
   agent_breakdown: Record<string, number>;
   model_breakdown: Record<string, number>;
   branches: string[];
   quota_monitor?: QuotaMonitorData[];
   usage_monitor?: QuotaMonitorData[];
+  /** On the SSE stats snapshot only: whether the server runs an older build than the one on disk. */
+  server_build?: { tracked: boolean; stale: boolean };
 }
 
 export interface QuotaMonitorWindow {
@@ -56,6 +71,8 @@ export interface AgentEvent {
   status: string;
   tokens_in: number;
   tokens_out: number;
+  cache_read_tokens?: number;
+  cache_write_tokens?: number;
   model?: string;
   cost_usd?: number;
   project?: string;
@@ -828,14 +845,18 @@ async function checkedJson<T>(res: Response, context: string): Promise<T> {
 
 // V1 endpoints (Monitor tab)
 
-export async function fetchStats(filters: Filters = {}): Promise<Stats> {
+/** The only filters Monitor stats honour: an agent and a start time. */
+export function statsParams(filters: Filters = {}): Record<string, string> {
   const params: Record<string, string> = {};
   if (filters.agent_type) params.agent = filters.agent_type;
   if (filters.agent) params.agent = filters.agent;
   if (filters.since) params.since = filters.since;
   if (filters.date_from) params.since = filters.date_from;
+  return params;
+}
 
-  const res = await fetch(`/api/v2/monitor/stats${qs(params)}`);
+export async function fetchStats(filters: Filters = {}): Promise<Stats> {
+  const res = await fetch(`/api/v2/monitor/stats${qs(statsParams(filters))}`);
   return checkedJson(res, 'fetchStats');
 }
 

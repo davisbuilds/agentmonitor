@@ -1855,8 +1855,10 @@ describe('existing API regression', () => {
   test('GET /api/health still works', async () => {
     const res = await fetch(`${baseUrl}/api/health`);
     assert.equal(res.status, 200);
-    const body = await res.json() as { status: string };
+    const body = await res.json() as { status: string; build: { tracked: boolean; stale: boolean } };
     assert.equal(body.status, 'ok');
+    // Tests run from source, so there is no built bundle to watch.
+    assert.deepEqual([body.build.tracked, body.build.stale], [false, false]);
   });
 
   test('GET /api/events still works', async () => {

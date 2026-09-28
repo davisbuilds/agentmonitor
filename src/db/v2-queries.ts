@@ -80,7 +80,7 @@ import { pricingRegistry } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
-import { getStatsForBroadcast, updateIdleSessions } from './queries.js';
+import { getStatsForBroadcast, sumMonitorUsage, updateIdleSessions } from './queries.js';
 import {
   excludeBenchmarkUsageCondition,
   excludeOverlappingCodexOtelUsageCondition,
@@ -1724,17 +1724,7 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   const usageWhere = `${where}
     AND ${usageMetricPresenceCondition('e')}
     AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
-  const usageTotals = db.prepare(`
-    SELECT
-      COALESCE(SUM(e.tokens_in), 0) as total_tokens_in,
-      COALESCE(SUM(e.tokens_out), 0) as total_tokens_out,
-      COALESCE(SUM(e.cost_usd), 0) as total_cost_usd
-    FROM events e ${usageWhere}
-  `).get(...values) as {
-    total_tokens_in: number;
-    total_tokens_out: number;
-    total_cost_usd: number;
-  };
+  const usageTotals = sumMonitorUsage(db, usageWhere, values);
 
   const activeSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
@@ -1782,9 +1772,7 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
     total_sessions: totalSessions,
     live_sessions: liveSessions,
     active_agents: activeAgents,
-    total_tokens_in: usageTotals.total_tokens_in,
-    total_tokens_out: usageTotals.total_tokens_out,
-    total_cost_usd: usageTotals.total_cost_usd,
+    ...usageTotals,
     tool_breakdown: toolBreakdown,
     agent_breakdown: agentBreakdown,
     model_breakdown: modelBreakdown,

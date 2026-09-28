@@ -334,6 +334,16 @@ export function normalizeCodexExporterRecord(input: {
   return normalizeCodexItem(input);
 }
 
+/**
+ * The source id of the item the summary projection writes for this row, or
+ * null when the row projects a turn without an item.
+ */
+export function codexSummaryItemSourceId(row: EventRow): string | null {
+  const item = buildCodexSummaryLiveItem(row, parseMetadata(row));
+  if (!item) return null;
+  return item.source_item_id ?? row.event_id ?? `codex-event:${row.id}`;
+}
+
 export function syncCodexSummaryLiveEvent(
   db: Database.Database,
   row: EventRow,

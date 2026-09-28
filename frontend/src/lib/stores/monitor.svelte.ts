@@ -1,7 +1,8 @@
-import { fetchSessionDetail, fetchLiveSessions, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
+import { fetchSessionDetail, fetchLiveSessions, statsParams, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
 import type { CostWindow } from '../monitor-analytics';
 import { parseTimestamp } from '../format';
 import { mergeSessionAggregates } from '../monitor-session-merge';
+import { addEventUsage } from '../monitor-token-totals';
 
 // --- Stats ---
 let stats = $state<Stats>({
@@ -12,7 +13,10 @@ let stats = $state<Stats>({
   active_agents: 0,
   total_tokens_in: 0,
   total_tokens_out: 0,
+  total_cache_read_tokens: 0,
+  total_cache_write_tokens: 0,
   total_cost_usd: 0,
+  usage_by_agent: {},
   tool_breakdown: {},
   agent_breakdown: {},
   model_breakdown: {},
@@ -21,14 +25,52 @@ let stats = $state<Stats>({
 
 export function getStats(): Stats { return stats; }
 export function setStats(s: Stats): void { stats = s; }
+
+let statsRefreshSignal = $state(0);
+export function getStatsRefreshSignal(): number { return statsRefreshSignal; }
+// Matching live events counted while a filtered stats read is in flight. The
+// read's snapshot may predate them, so they are re-applied on top of it.
+let eventsDuringFilteredRead: AgentEvent[] | null = null;
+export function beginFilteredStatsRead(): void { eventsDuringFilteredRead = []; }
+/** Apply a filtered read's snapshot, or abandon the read when `next` is null. */
+export function endFilteredStatsRead(next: Stats | null): void {
+  const arrived = eventsDuringFilteredRead ?? [];
+  eventsDuringFilteredRead = null;
+  if (!next) return;
+  stats = arrived.reduce(
+    (acc, event) => ({ ...addEventUsage(acc, event), total_events: acc.total_events + 1 }),
+    next,
+  );
+}
+
+/**
+ * Apply the periodic SSE stats snapshot, which the server always computes
+ * unfiltered. Under an agent or start-time filter it would replace the bar's
+ * filtered totals with everyone's, so it is dropped and a filtered refresh is
+ * requested instead.
+ */
+export function applyBroadcastStats(s: Stats): void {
+  if (Object.keys(statsParams(filters)).length > 0) {
+    statsRefreshSignal += 1;
+    return;
+  }
+  stats = s;
+}
+
+// Whether the server runs an older build than the one on disk. It rides the
+// stats snapshot but is not a stat: it applies whatever the Monitor's filters.
+let serverBuildStale = $state(false);
+export function getServerBuildStale(): boolean { return serverBuildStale; }
+export function setServerBuild(build: Stats['server_build']): void {
+  serverBuildStale = Boolean(build?.tracked && build.stale);
+}
+
 export function incrementEvent(event: AgentEvent): void {
-  stats = {
-    ...stats,
-    total_events: stats.total_events + 1,
-    total_tokens_in: stats.total_tokens_in + (event.tokens_in || 0),
-    total_tokens_out: stats.total_tokens_out + (event.tokens_out || 0),
-    total_cost_usd: stats.total_cost_usd + (event.cost_usd || 0),
-  };
+  // A live event is new, so a start-time filter always admits it; an agent filter may not.
+  const agent = statsParams(filters).agent;
+  if (agent && event.agent_type !== agent) return;
+  eventsDuringFilteredRead?.push(event);
+  stats = { ...addEventUsage(stats, event), total_events: stats.total_events + 1 };
 }
 
 // --- Events ---

@@ -31,6 +31,12 @@ Monitor provides current sessions, recent events, aggregate stats, tool activity
 provider-native quota snapshots, and context-window occupancy. It consumes the v2
 Monitor reads and the shared SSE stream.
 
+The Monitor's token headline counts every bucket (uncached input, output, cache
+reads and cache writes), which is how Claude's `/stats` and Codex's `/usage`
+count tokens. Its breakdown splits the buckets and each agent. It covers the
+usage recorded on this machine: a harness's account-wide total can include
+other machines and cloud tasks that no local source records.
+
 Live exposes normalized sessions, turns, items, and a dedicated live stream. Its
 fidelity is explicit:
 
@@ -38,7 +44,8 @@ fidelity is explicit:
 - Codex OTEL provides summary-oriented live activity, including response-completion
   token and cost data. Historical Codex JSONL import enriches later analysis but is
   not the sole usage source.
-- Antigravity supports historical summary import and has no live projection.
+- Antigravity conversation files feed a summary-fidelity Live projection when
+  the watcher syncs them; this does not establish transcript-level parity.
 
 Context occupancy is absent when the source cannot support it. Its numerator is
 the latest request's prompt size, so compaction can lower the displayed value; the
@@ -97,6 +104,16 @@ model, provider, and provider-neutral tier.
   show all four buckets.
 - Unknown and deprecated models stay visible. A persistent warning identifies
   unpriced use or known pricing that has not yet been applied to zero-cost history.
+- Claude Code token and cost figures are **per API response**: each assistant
+  turn is billed once, with the usage its last transcript line records. That is
+  what Anthropic bills and what Claude Code's live counters (statusline,
+  `/cost`) add up. Claude Code's `/stats` sums every transcript line instead,
+  and a turn is written as one line per content block, so `/stats` reads about
+  twice as high. `amon costs check-claude-sessions` compares imported cost with
+  Claude Code's own running cost for each session the statusline bridge has
+  reported; expect a ratio a little under 1, because the harness also pays for
+  calls that never reach a transcript (compaction summaries are the likely
+  largest; that attribution is unmeasured).
 - Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates;
   raw events remain available in session and monitor history.
 - Benchmark events are excluded from normal usage, analytics, and the Monitor's
