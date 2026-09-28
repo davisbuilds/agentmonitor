@@ -244,3 +244,7 @@ Start with [docs/README.md](docs/README.md) for the full docs map.
 - TypeScript on `127.0.0.1:3141` is the runtime.
 - Codex `otel-only` live data is summary-oriented; transcript-grade parity needs richer local-state integration.
 - AI insight generation is optional and the only path that needs provider API keys.
+
+## License
+
+[MIT](LICENSE). Third-party material retains its own notices and license terms.
