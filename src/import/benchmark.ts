@@ -76,6 +76,7 @@ interface BenchmarkRow {
   study?: unknown;
   study_sha256?: unknown;
   suite?: unknown;
+  candidate_provenance?: unknown;
 }
 
 /**
@@ -105,6 +106,23 @@ function num(value: unknown): number {
 
 function str(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function record(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown> : undefined;
+}
+
+// Canonical Harbor rows leave the legacy top-level study fields null. Their
+// identity lives in the embedded suite manifest. This reads identity only;
+// OpenBench must verify the sealed run before delivery to this importer.
+function harborStudy(row: BenchmarkRow): { id: string; study: string } | undefined {
+  const provenance = record(row.candidate_provenance);
+  if (provenance?.kind !== 'harbor_job') return undefined;
+  const id = str(provenance.suite_manifest_sha256);
+  const suite = record(record(provenance.suite_manifest)?.suite);
+  const study = str(suite?.id);
+  return id && /^[a-f0-9]{64}$/.test(id) && study ? { id, study } : undefined;
 }
 
 /**
@@ -199,14 +217,24 @@ export function importBenchmarkResults(
       continue;
     }
 
+    const harbor = harborStudy(row);
+    if (record(row.candidate_provenance)?.kind === 'harbor_job' && !harbor
+      && options.study === undefined && !str(row.study_sha256)) {
+      // All canonical files share a suite-runs directory. Falling back to that
+      // name would collapse unrelated suites and silently discard their cells.
+      result.skipped += 1;
+      continue;
+    }
+
     const priced = resolveBenchmarkCost(row);
     if (priced === null) unpriced.add(model);
 
     // Study identity: prefer the manual override, then openbench's own fields,
-    // then the legacy parent-dir fallback. study_id (= study_sha256) is the exact
+    // then Harbor suite provenance, then the legacy parent-dir fallback.
+    // study_id (= study_sha256 or suite_manifest_sha256) is the exact
     // per-run grouping key; study is the human slug label.
-    const studyId = options.study ?? str(row.study_sha256) ?? legacyStudy;
-    const study = options.study ?? str(row.study) ?? legacyStudy;
+    const studyId = options.study ?? str(row.study_sha256) ?? harbor?.id ?? legacyStudy;
+    const study = options.study ?? str(row.study) ?? harbor?.study ?? legacyStudy;
 
     // Namespace the persisted event/session key by study. `run_id` is only unique
     // *within* one bake-off (harness:task:model:trial), so two studies rerunning
@@ -279,7 +307,7 @@ export function importBenchmarkResults(
         canonical_model: canonicalModel,
         reasoning_effort: reasoningEffort,
         is_open_model: isOpenModel,
-        suite: str(row.suite) ?? null,
+        suite: str(row.suite) ?? harbor?.study ?? null,
       },
     });
 

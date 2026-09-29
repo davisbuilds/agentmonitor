@@ -181,6 +181,22 @@ scoped imports intentionally do not update whole-file skip state. Benchmark impo
 creates segregated `source='benchmark'` rows; it does not fabricate transcripts for
 ephemeral benchmark runs.
 
+Benchmark delivery is explicit; the session watcher does not watch OpenBench
+result directories. After a scored campaign finishes, verify its sealed run with
+OpenBench on the execution host, transfer the unchanged results JSONL privately
+to the dashboard host, check its SHA-256 against the verified source, and run
+`amon import benchmark /absolute/path/to/results.jsonl` there. Reimporting the
+same study and cell is idempotent. Check `amon benchmarks list` or the Benchmarks
+page for the expected study and cell count before calling delivery complete.
+Keep qualification controls separate from scored studies.
+
+Canonical Harbor rows use their embedded suite manifest hash as the study key
+and suite ID as the label when top-level study fields are absent. Malformed
+Harbor identities are skipped instead of grouped under the shared `suite-runs`
+directory. Explicit row identity and `--study` retain their precedence; ordinary
+legacy rows retain the directory-name fallback. The importer reads identity but
+does not verify OpenBench's seals or promote results to publishable evidence.
+
 ## Database Backup And Repair Safety
 
 Create an application-consistent backup while the WAL writer remains active:
