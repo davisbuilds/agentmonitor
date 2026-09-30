@@ -33,7 +33,7 @@ parsing, schema details, and repository settings.
 
 ## Project
 
-- Positioning (what this product is): [project/POSITIONING.md](project/POSITIONING.md)
+- Vision and product direction: [project/VISION.md](project/VISION.md)
 - Roadmap: [project/ROADMAP.md](project/ROADMAP.md)
 - Future work: [project/BACKLOG.md](project/BACKLOG.md)
 - Durable decisions: [project/DECISIONS.md](project/DECISIONS.md)

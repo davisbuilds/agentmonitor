@@ -31,11 +31,16 @@ session JSONL/DBs ──┘                         │                 └─�
 - `amon` is the preferred local operator command; `agentmonitor` is an equivalent
   executable alias.
 - The TypeScript/Node runtime on `127.0.0.1:3141` is the single backend. The removed
-  Rust spike is preserved in Git history; current positioning lives in
-  [POSITIONING.md](../project/POSITIONING.md).
+  Rust spike is preserved in Git history; product direction lives in
+  [VISION.md](../project/VISION.md).
 - `amon serve` runs that backend and normally exposes
   `https://agentmonitor.localhost` through the pinned Portless CLI. Hooks, OTLP,
   and direct API clients continue to use the fixed loopback backend.
+
+Core local operation does not depend on Postgres, Langfuse, or a model-provider
+API key. External exports and model-assisted features remain optional. The current
+runtime and storage boundaries stand independently of the longer-term platform
+possibilities described in the vision.
 
 `src/runtime.ts` owns startup and shutdown. It acquires exclusive ownership of the
 canonical database path before opening HTTP or starting background work. A second
