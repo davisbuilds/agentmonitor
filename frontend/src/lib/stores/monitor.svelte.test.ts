@@ -228,15 +228,31 @@ describe('edited-file tracking', () => {
     } as Partial<AgentEvent>);
   }
 
-  it('forgets sessions that leave the session list', () => {
-    store.setSessions([session('s1'), session('s2')]);
+  it('keeps file identity for a session a filter hides and restores', () => {
+    store.setSessions([session('s1')]);
     store.handleEventForSession(edit(1, 's1', '/a.ts'));
-    store.handleEventForSession(edit(2, 's2', '/b.ts'));
-    expect(store.trackedEditedFileSessionCount()).toBe(2);
+    store.setSessions([]);
+    store.setSessions([session('s1', { files_edited: 1 })]);
 
-    store.setSessions([session('s2')]);
+    store.handleEventForSession(edit(2, 's1', '/b.ts'));
 
-    expect(store.trackedEditedFileSessionCount()).toBe(1);
+    expect(store.getSessions()[0].files_edited).toBe(2);
+  });
+
+  it('caps the sessions it tracks, dropping the least recently edited', () => {
+    const cap = store.EDITED_FILE_SESSION_CAP;
+    const ids = Array.from({ length: cap + 1 }, (_, index) => `s${index}`);
+    store.setSessions(ids.map(id => session(id)));
+    ids.forEach((id, index) => {
+      // s0 edits again just before the last session, so s1 is the oldest.
+      if (index === cap) store.handleEventForSession(edit(index * 2 + 1, 's0', '/again.ts'));
+      store.handleEventForSession(edit(index * 2, id, '/a.ts'));
+    });
+
+    expect(store.trackedEditedFileSessionCount()).toBe(cap);
+    store.handleEventForSession(edit(9_999, 's0', '/b.ts'));
+    const s0 = store.getSessions().find(row => row.id === 's0');
+    expect(s0?.files_edited).toBe(3);
   });
 
   it('keeps counting distinct files for a session still listed', () => {

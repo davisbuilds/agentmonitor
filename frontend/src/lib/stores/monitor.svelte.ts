@@ -102,17 +102,14 @@ let sessions = $state<Session[]>([]);
 const sessionBackfillInFlight = new Set<string>();
 const editedFilesBySession = new Map<string, Set<string>>();
 export function getSessions(): Session[] { return sessions; }
-export function setSessions(s: Session[]): void {
-  sessions = s;
-  // The SSE stream lives as long as the tab, so drop file sets for sessions
-  // the bounded list no longer shows; a returning session is backfilled.
-  const listed = new Set(s.map(session => session.id));
-  for (const id of editedFilesBySession.keys()) {
-    if (!listed.has(id)) editedFilesBySession.delete(id);
-  }
-}
+export function setSessions(s: Session[]): void { sessions = s; }
 /** Sessions whose edited-file set is held in memory; for tests. */
 export function trackedEditedFileSessionCount(): number { return editedFilesBySession.size; }
+// The SSE stream lives as long as the tab, so the file sets are capped, least
+// recently edited first. Pruning by the visible list instead would forget a
+// session an agent filter hides and later restores: its count could not grow
+// until a fresh set passed the old aggregate.
+export const EDITED_FILE_SESSION_CAP = 500;
 
 // --- Context-window occupancy (v2 live projection, joined to v1 cards by id) ---
 // Occupancy lives on the v2 browsing_sessions projection, not the v1 Session
@@ -224,7 +221,13 @@ function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
   ) {
     const files = editedFilesBySession.get(session.id) || new Set<string>();
     files.add(metadata.file_path);
+    // Re-insert so Map order runs from least to most recently edited.
+    editedFilesBySession.delete(session.id);
     editedFilesBySession.set(session.id, files);
+    if (editedFilesBySession.size > EDITED_FILE_SESSION_CAP) {
+      const oldest = editedFilesBySession.keys().next().value;
+      if (oldest !== undefined) editedFilesBySession.delete(oldest);
+    }
     next.files_edited = Math.max(session.files_edited || 0, files.size);
   }
 
