@@ -215,3 +215,37 @@ describe('server build', () => {
     expect(store.getServerBuildStale()).toBe(false);
   });
 });
+
+describe('edited-file tracking', () => {
+  function edit(id: number, sessionId: string, filePath: string): AgentEvent {
+    return ev(id, {
+      session_id: sessionId,
+      agent_type: 'claude_code',
+      event_type: 'tool_use',
+      tool_name: 'Edit',
+      created_at: '2026-09-11T00:00:00Z',
+      metadata: JSON.stringify({ file_path: filePath }),
+    } as Partial<AgentEvent>);
+  }
+
+  it('forgets sessions that leave the session list', () => {
+    store.setSessions([session('s1'), session('s2')]);
+    store.handleEventForSession(edit(1, 's1', '/a.ts'));
+    store.handleEventForSession(edit(2, 's2', '/b.ts'));
+    expect(store.trackedEditedFileSessionCount()).toBe(2);
+
+    store.setSessions([session('s2')]);
+
+    expect(store.trackedEditedFileSessionCount()).toBe(1);
+  });
+
+  it('keeps counting distinct files for a session still listed', () => {
+    store.setSessions([session('s1')]);
+    store.handleEventForSession(edit(1, 's1', '/a.ts'));
+    store.setSessions([session('s1', { files_edited: 1 })]);
+    store.handleEventForSession(edit(2, 's1', '/b.ts'));
+    store.handleEventForSession(edit(3, 's1', '/a.ts'));
+
+    expect(store.getSessions()[0].files_edited).toBe(2);
+  });
+});

@@ -102,7 +102,17 @@ let sessions = $state<Session[]>([]);
 const sessionBackfillInFlight = new Set<string>();
 const editedFilesBySession = new Map<string, Set<string>>();
 export function getSessions(): Session[] { return sessions; }
-export function setSessions(s: Session[]): void { sessions = s; }
+export function setSessions(s: Session[]): void {
+  sessions = s;
+  // The SSE stream lives as long as the tab, so drop file sets for sessions
+  // the bounded list no longer shows; a returning session is backfilled.
+  const listed = new Set(s.map(session => session.id));
+  for (const id of editedFilesBySession.keys()) {
+    if (!listed.has(id)) editedFilesBySession.delete(id);
+  }
+}
+/** Sessions whose edited-file set is held in memory; for tests. */
+export function trackedEditedFileSessionCount(): number { return editedFilesBySession.size; }
 
 // --- Context-window occupancy (v2 live projection, joined to v1 cards by id) ---
 // Occupancy lives on the v2 browsing_sessions projection, not the v1 Session
