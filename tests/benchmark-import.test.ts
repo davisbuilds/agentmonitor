@@ -219,6 +219,109 @@ describe('importBenchmarkResults', () => {
     assert.equal(m.suite, 'my-suite');
   });
 
+  test('Harbor suite provenance separates reruns in one directory and survives relocation', () => {
+    const runId = 'codex:harbor-rerun:gpt-6-sol-high:trial1';
+    const row = (hash: string) => ({
+      ...codexRow, run_id: runId, model: 'gpt-6-sol-high',
+      study: null, study_sha256: null, suite: null,
+      canonical_model: null, reasoning_effort: null,
+      candidate_provenance: {
+        kind: 'harbor_job', suite_manifest_sha256: hash,
+        suite_manifest: { schema_version: 1, suite: { id: 'repair-screen', title: 'Repair screen' } },
+      },
+    });
+    for (const hash of ['a'.repeat(64), 'b'.repeat(64)]) {
+      const file = writeResultsInDir('suite-runs', [row(hash)]);
+      assert.equal(importBenchmarkResults(file).eventsImported, 1);
+      const relocated = writeResultsInDir('downloaded-suite-runs', [row(hash)]);
+      assert.equal(importBenchmarkResults(relocated).duplicates, 1);
+      const stored = getDb().prepare('SELECT study_id, study, metadata FROM events WHERE event_id = ?')
+        .get(`${hash}::${runId}`) as { study_id: string; study: string; metadata: string };
+      assert.ok(stored);
+      assert.equal(stored.study_id, hash);
+      assert.equal(stored.study, 'repair-screen');
+      const metadata = JSON.parse(stored.metadata);
+      assert.equal(metadata.suite, 'repair-screen');
+      assert.equal(metadata.canonical_model, 'gpt-6-sol');
+      assert.equal(metadata.reasoning_effort, 'high');
+    }
+  });
+
+  test('explicit row identity and manual override retain precedence over Harbor provenance', () => {
+    const runId = 'codex:harbor-override:gpt-6-sol-high:trial1';
+    const file = writeResults([{
+      ...codexRow, run_id: runId,
+      study: 'explicit-study', study_sha256: 'explicit-hash', suite: 'explicit-suite',
+      candidate_provenance: {
+        kind: 'harbor_job', suite_manifest_sha256: 'c'.repeat(64),
+        suite_manifest: { suite: { id: 'harbor-suite' } },
+      },
+    }]);
+    importBenchmarkResults(file);
+    assert.deepEqual(studyCols(runId), { study_id: 'explicit-hash', study: 'explicit-study' });
+    assert.equal(meta(runId).suite, 'explicit-suite');
+    assert.equal(importBenchmarkResults(file, { study: 'manual-study' }).eventsImported, 1);
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`manual-study::${runId}`));
+  });
+
+  test('re-importing a Harbor file replaces the row the legacy importer keyed by directory', () => {
+    const runId = 'codex:harbor-legacy:gpt-6-sol-high:trial1';
+    const otherRunId = 'codex:harbor-legacy-other:gpt-6-sol-high:trial1';
+    const hash = 'e'.repeat(64);
+    const bare = (id: string) => ({
+      ...codexRow, run_id: id, model: 'gpt-6-sol-high', study: null, study_sha256: null, suite: null,
+    });
+    // Before Harbor identity was read, these rows were keyed by the shared directory.
+    writeResultsInDir('suite-runs', [bare(runId), bare(otherRunId)]);
+    importBenchmarkResults(path.join(tempDir, 'suite-runs', 'results.jsonl'));
+    const legacyId = `suite-runs::${runId}`;
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId));
+
+    const harborRow = {
+      ...bare(runId),
+      candidate_provenance: {
+        kind: 'harbor_job', suite_manifest_sha256: hash,
+        suite_manifest: { suite: { id: 'legacy-screen' } },
+      },
+    };
+    const file = writeResultsInDir('suite-runs', [harborRow]);
+    // A manual study override names its own key, so it must not retire anything.
+    importBenchmarkResults(file, { study: 'manual-legacy' });
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId));
+
+    const result = importBenchmarkResults(file);
+    assert.equal(result.eventsImported, 1);
+    assert.equal(result.legacyRowsReplaced, 1);
+    assert.equal(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId), undefined);
+    assert.equal(getDb().prepare('SELECT 1 FROM sessions WHERE id = ?').get(legacyId), undefined);
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`${hash}::${runId}`));
+    // Another cell from the same directory is not this row's legacy copy.
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`suite-runs::${otherRunId}`));
+
+    const again = importBenchmarkResults(file);
+    assert.equal(again.duplicates, 1);
+    assert.equal(again.legacyRowsReplaced, 0);
+  });
+
+  test('malformed Harbor identity cannot silently fall back to the shared directory name', () => {
+    const invalid = [
+      {},
+      { suite_manifest_sha256: 'not-a-hash', suite_manifest: { suite: { id: 'bad' } } },
+      { suite_manifest_sha256: 'd'.repeat(64), suite_manifest: { suite: [] } },
+    ];
+    for (const [index, provenance] of invalid.entries()) {
+      const file = writeResultsInDir('suite-runs', [{
+        ...codexRow, run_id: `invalid-harbor-${index}`,
+        candidate_provenance: { kind: 'harbor_job', ...provenance },
+      }]);
+      for (const dryRun of [true, false]) {
+        const result = importBenchmarkResults(file, { dryRun });
+        assert.equal(result.skipped, 1);
+        assert.equal(result.eventsImported, 0);
+      }
+    }
+  });
+
   test('captures openbench usage-evidence grade and ranking-eligibility verbatim', () => {
     const runId = 'codex:task-ue:gpt-5.6-terra:trial1';
     const file = writeResults([{
