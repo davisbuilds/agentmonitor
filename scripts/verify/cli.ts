@@ -4,6 +4,7 @@ import { parseArgs } from 'node:util';
 import { scenarios, scenarioById } from './contracts.js';
 import { control, readSession, startSession, stopSession } from './session.js';
 import { runScenario } from './run.js';
+import { probes, runProbe } from './probe.js';
 
 const help = `AgentMonitor development verification (run pnpm build first)
   pnpm --silent verify list [--json]
@@ -13,12 +14,19 @@ const help = `AgentMonitor development verification (run pnpm build first)
   pnpm --silent verify inspect <session-or-evidence-DIR> [--json]
   pnpm --silent verify advance <session-DIR> [--json]
   pnpm --silent verify stop <session-DIR> [--json]
+  pnpm --silent verify probe <health|ingestion|monitor-stats|snapshot> [--db PATH] [--json]
+       [--agent A] [--since ISO] [--runs N] [--url URL] [--timeout-ms N]
+  pnpm --silent verify probe resync <transcript.jsonl> [--db SNAPSHOT] [--append-lines N] [--json]
 
 start keeps a disposable compiled app running for up to one hour.
 run owns and stops its app unless --session is given. Evidence and fixtures
 remain in the OS temp directory until you or the OS remove them.
 Exit: 0 success; 1 verification/cleanup failed; 2 invalid request or blocked.
-No real transcripts, installed database, credentials, or paid model calls.
+Scenarios use no real transcripts, installed database, credentials, or paid
+model calls. Probes read the installed database (the globally linked amon's
+data/agentmonitor.db, or --db) through a read-only connection in a child process
+killed at its deadline; they record counts, timings and plans, not content.
+Only resync writes, and only to a scratch database or a snapshot from this CLI.
 `;
 const abort = new AbortController();
 process.once('SIGINT', () => abort.abort(new Error('Interrupted (SIGINT)')));
@@ -28,15 +36,25 @@ try {
   const { values, positionals } = parseArgs({ options: {
     json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
     session: { type: 'string' }, 'max-api-ms': { type: 'string' }, 'max-ui-ms': { type: 'string' },
+    db: { type: 'string' }, url: { type: 'string' }, agent: { type: 'string' }, since: { type: 'string' },
+    runs: { type: 'string' }, 'append-lines': { type: 'string' }, 'timeout-ms': { type: 'string' },
   }, allowPositionals: true, strict: true });
   json = values.json ?? false;
   if (values.help || positionals.length === 0) { process.stdout.write(help); }
   else {
     const [command, target] = positionals;
-    if (!['list', 'start', 'run', 'inspect', 'advance', 'stop'].includes(command)) throw new Error(`Unknown command: ${command}`);
+    if (!['list', 'start', 'run', 'inspect', 'advance', 'stop', 'probe'].includes(command)) throw new Error(`Unknown command: ${command}`);
     const needsTarget = !['list', 'start'].includes(command);
-    if (positionals.length !== (needsTarget ? 2 : 1)) throw new Error(`Invalid arguments for ${command}; use --help`);
+    const expected = command === 'probe' && target === 'resync' ? 3 : needsTarget ? 2 : 1;
+    if (positionals.length !== expected) throw new Error(`Invalid arguments for ${command}; use --help`);
     if (command !== 'run' && (values.session || values['max-api-ms'] || values['max-ui-ms'])) throw new Error('Run options require run');
+    const probeOptions = ['db', 'url', 'agent', 'since', 'runs', 'append-lines', 'timeout-ms'] as const;
+    if (command !== 'probe' && probeOptions.some(name => values[name] !== undefined)) throw new Error('Probe options require probe');
+    const count = (value: string | undefined, name: string) => {
+      if (value === undefined) return undefined;
+      if (!/^\d+$/.test(value) || Number(value) < 1) throw new Error(`${name} must be a positive integer`);
+      return Number(value);
+    };
     const threshold = (value: string | undefined) => {
       if (value === undefined) return undefined;
       const number = Number(value);
@@ -45,7 +63,17 @@ try {
     };
     let output: unknown;
     switch (command) {
-      case 'list': output = { schema_version: 1, prerequisites: ['pnpm install', 'pnpm build', 'pnpm exec playwright install chromium'], scenarios }; break;
+      case 'list': output = { schema_version: 1, prerequisites: ['pnpm install', 'pnpm build', 'pnpm exec playwright install chromium'], scenarios, probes }; break;
+      case 'probe': {
+        const result = await runProbe(target, {
+          db: values.db, url: values.url, agent: values.agent, since: values.since,
+          runs: count(values.runs, '--runs'), appendLines: count(values['append-lines'], '--append-lines'),
+          timeoutMs: count(values['timeout-ms'], '--timeout-ms'), transcript: positionals[2], signal: abort.signal,
+        });
+        output = result;
+        process.exitCode = result.status === 'observed' ? 0 : 2;
+        break;
+      }
       case 'start': output = await startSession(abort.signal); break;
       case 'run': {
         const scenario = scenarioById(target);
