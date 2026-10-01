@@ -1509,8 +1509,14 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   return { sessions, total: sessions.length };
 }
 
-export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
-  const db = getDb();
+/**
+ * The count and page reads behind the Monitor event feed, shared with plan
+ * tests so they explain the statements the endpoint runs.
+ */
+export function monitorEventsStatements(params: MonitorEventsParams = {}): {
+  count: { sql: string; values: unknown[] };
+  page: { sql: string; values: unknown[] };
+} {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
@@ -1558,12 +1564,24 @@ export function listMonitorEvents(params: MonitorEventsParams = {}): { events: M
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 500);
   const offset = Math.max(params.offset ?? 0, 0);
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM events ${where}`).get(...values) as CountResult).c;
-  const events = db.prepare(`
+  return {
+    count: { sql: `SELECT COUNT(*) as c FROM events ${where}`, values },
+    page: {
+      sql: `
     SELECT * FROM events ${where}
     ORDER BY datetime(created_at) DESC, id DESC
     LIMIT ? OFFSET ?
-  `).all(...values, limit, offset) as MonitorEventRow[];
+  `,
+      values: [...values, limit, offset],
+    },
+  };
+}
+
+export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
+  const db = getDb();
+  const { count, page } = monitorEventsStatements(params);
+  const total = (db.prepare(count.sql).get(...count.values) as CountResult).c;
+  const events = db.prepare(page.sql).all(...page.values) as MonitorEventRow[];
 
   return { events, total };
 }
