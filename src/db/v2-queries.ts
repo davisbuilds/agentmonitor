@@ -1522,7 +1522,7 @@ export function monitorEventsStatements(params: MonitorEventsParams = {}): {
 
   if (params.agent) {
     // The agent filter reads an agent-ordered index newest-first, alone or with
-    // an event type or tool (idx_events_agent_event_order/_tool_order). A model
+    // an event type or tool (idx_events_agent_event_covering/_tool_order). A model
     // or session has no agent-ordered composite, and walking the agent index
     // for a rare or absent value visits every row of the agent (seconds), so the
     // unary `+` lets that filter's own index lead. branch and source have no

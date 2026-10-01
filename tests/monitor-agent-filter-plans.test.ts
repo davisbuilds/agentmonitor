@@ -92,22 +92,26 @@ test('the windowed Codex skill-event read seeks exec tool calls, not every Codex
   const statement = ledger.codexSkillEventStatement({ date_from: '2026-09-01', date_to: '2026-09-30' });
   const detail = plan(statement.sql, statement.values);
   assert.doesNotMatch(detail, /idx_events_agent_type\b/, detail);
-  assert.match(detail, /idx_events_agent_(tool|event)_order \(agent_type=\? AND (tool_name|event_type)=\?\)/, detail);
+  assert.match(detail, /idx_events_agent_(tool_order|event_covering) \(agent_type=\? AND (tool_name|event_type)=\?\)/, detail);
 });
 
 test('an agent with an event type or tool reads that pair newest-first', () => {
   // Walking all of an agent's events finds a rare or absent value only after
   // visiting every row (about 2 s for Codex on a real store), while sorting
   // every match of a common value takes as long. Seeking the pair in time
-  // order serves both.
+  // order serves both. The page's total count must also stay inside the index:
+  // a count that looks up each row to apply the benchmark exclusion took about
+  // 3 s for Codex tool_use events on a real store.
   for (const [filter, index] of [
-    [{ event_type: 'tool_use' }, 'idx_events_agent_event_order'],
+    [{ event_type: 'tool_use' }, 'idx_events_agent_event_covering'],
     [{ tool_name: 'exec_command' }, 'idx_events_agent_tool_order'],
   ] as const) {
-    const { page } = queries.monitorEventsStatements({ agent: 'codex', ...filter });
+    const { count, page } = queries.monitorEventsStatements({ agent: 'codex', ...filter });
     const detail = plan(page.sql, page.values);
     assert.match(detail, new RegExp(`${index} \\(agent_type=\\? AND`), `${JSON.stringify(filter)}: ${detail}`);
     assert.doesNotMatch(detail, /TEMP B-TREE FOR ORDER BY/, `${JSON.stringify(filter)}: ${detail}`);
+    const countDetail = plan(count.sql, count.values);
+    assert.match(countDetail, new RegExp(`COVERING INDEX ${index} \\(agent_type=\\? AND`), `${JSON.stringify(filter)} count: ${countDetail}`);
   }
 });
 
