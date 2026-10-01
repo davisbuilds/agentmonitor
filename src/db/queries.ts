@@ -735,6 +735,30 @@ export function insertEvent(event: {
  * Updates only null-cost benchmark rows so a real captured cost is never
  * clobbered; returns true when a row was updated.
  */
+/**
+ * Retire the row a pre-Harbor-identity import created for this cell. Those
+ * imports keyed canonical Harbor rows by the shared results directory
+ * (`<dir>::<run_id>`, `study_id = <dir>`, no `metadata.suite`), so a corrected
+ * re-import would otherwise leave the collapsed study beside the real one.
+ * Matching the exact legacy key from the same directory limits this to the row
+ * that file produced; returns true when a row was removed.
+ */
+export function retireLegacyHarborBenchmarkEvent(legacyEventId: string, legacyStudy: string): boolean {
+  const db = getDb();
+  const result = db.prepare(`
+    DELETE FROM events
+    WHERE event_id = ? AND source = 'benchmark' AND study_id = ?
+      AND json_extract(metadata, '$.suite') IS NULL
+  `).run(legacyEventId, legacyStudy);
+  if (result.changes === 0) return false;
+  db.prepare(`
+    DELETE FROM sessions
+    WHERE id = ? AND NOT EXISTS (SELECT 1 FROM events WHERE session_id = sessions.id)
+  `).run(legacyEventId);
+  markStatsDirty();
+  return true;
+}
+
 export function backfillBenchmarkCost(eventId: string, cost: number, costSource: CostSource): boolean {
   const db = getDb();
   const result = db.prepare(`

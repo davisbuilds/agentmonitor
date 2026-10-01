@@ -190,6 +190,7 @@ export function registerMaintenanceCommands(): void {
           duplicates: result.duplicates,
           costs_backfilled: result.costsBackfilled,
           skipped: result.skipped,
+          legacy_rows_replaced: result.legacyRowsReplaced,
           unpriced_models: result.unpricedModels.join(', ') || '(none)',
         });
         if (result.unpricedModels.length > 0) {

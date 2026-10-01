@@ -264,6 +264,45 @@ describe('importBenchmarkResults', () => {
     assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`manual-study::${runId}`));
   });
 
+  test('re-importing a Harbor file replaces the row the legacy importer keyed by directory', () => {
+    const runId = 'codex:harbor-legacy:gpt-6-sol-high:trial1';
+    const otherRunId = 'codex:harbor-legacy-other:gpt-6-sol-high:trial1';
+    const hash = 'e'.repeat(64);
+    const bare = (id: string) => ({
+      ...codexRow, run_id: id, model: 'gpt-6-sol-high', study: null, study_sha256: null, suite: null,
+    });
+    // Before Harbor identity was read, these rows were keyed by the shared directory.
+    writeResultsInDir('suite-runs', [bare(runId), bare(otherRunId)]);
+    importBenchmarkResults(path.join(tempDir, 'suite-runs', 'results.jsonl'));
+    const legacyId = `suite-runs::${runId}`;
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId));
+
+    const harborRow = {
+      ...bare(runId),
+      candidate_provenance: {
+        kind: 'harbor_job', suite_manifest_sha256: hash,
+        suite_manifest: { suite: { id: 'legacy-screen' } },
+      },
+    };
+    const file = writeResultsInDir('suite-runs', [harborRow]);
+    // A manual study override names its own key, so it must not retire anything.
+    importBenchmarkResults(file, { study: 'manual-legacy' });
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId));
+
+    const result = importBenchmarkResults(file);
+    assert.equal(result.eventsImported, 1);
+    assert.equal(result.legacyRowsReplaced, 1);
+    assert.equal(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId), undefined);
+    assert.equal(getDb().prepare('SELECT 1 FROM sessions WHERE id = ?').get(legacyId), undefined);
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`${hash}::${runId}`));
+    // Another cell from the same directory is not this row's legacy copy.
+    assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`suite-runs::${otherRunId}`));
+
+    const again = importBenchmarkResults(file);
+    assert.equal(again.duplicates, 1);
+    assert.equal(again.legacyRowsReplaced, 0);
+  });
+
   test('malformed Harbor identity cannot silently fall back to the shared directory name', () => {
     const invalid = [
       {},

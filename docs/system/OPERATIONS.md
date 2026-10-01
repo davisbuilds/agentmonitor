@@ -196,6 +196,11 @@ Harbor identities are skipped instead of grouped under the shared `suite-runs`
 directory. Explicit row identity and `--study` retain their precedence; ordinary
 legacy rows retain the directory-name fallback. The importer reads identity but
 does not verify OpenBench's seals or promote results to publishable evidence.
+Re-importing a canonical Harbor file from the directory it was first imported
+from replaces each cell an older importer stored under that directory's name
+(`legacy_rows_replaced` in the summary), so the collapsed `suite-runs` study
+disappears. A file moved to a differently named directory cannot match those
+rows; re-import it from a directory with the original name.
 
 ## Database Backup And Repair Safety
 

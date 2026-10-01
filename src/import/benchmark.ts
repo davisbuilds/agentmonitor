@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { backfillBenchmarkCost, backfillBenchmarkEvidence, insertEvent } from '../db/queries.js';
+import { backfillBenchmarkCost, backfillBenchmarkEvidence, insertEvent, retireLegacyHarborBenchmarkEvent } from '../db/queries.js';
+import { getDb } from '../db/connection.js';
 import type { CostSource } from '../pricing/cost-provenance.js';
 import { pricingRegistry } from '../pricing/index.js';
 
@@ -33,6 +34,8 @@ export interface BenchmarkImportResult {
   /** Duplicate cells whose previously-null cost was backfilled from a now-resolved price. */
   costsBackfilled: number;
   skipped: number;
+  /** Legacy directory-keyed Harbor rows replaced by their manifest-keyed cell. */
+  legacyRowsReplaced: number;
   /** Distinct bench model strings that resolved to no price (billed as null). */
   unpricedModels: string[];
 }
@@ -173,6 +176,7 @@ export function importBenchmarkResults(
     duplicates: 0,
     costsBackfilled: 0,
     skipped: 0,
+    legacyRowsReplaced: 0,
     unpricedModels: [],
   };
   const unpriced = new Set<string>();
@@ -263,53 +267,64 @@ export function importBenchmarkResults(
     const durationMs = Math.round(num(row.wall_time_s || row.t_agent_s) * 1000) || undefined;
     const isError = row.success === false || (typeof row.error === 'string' && row.error.length > 0);
 
-    const event = insertEvent({
-      event_id: eventId,
-      session_id: eventId,
-      agent_type: harness,
-      event_type: 'llm_response',
-      status: isError ? 'error' : 'success',
-      project: str(row.task),
-      model,
-      tokens_in: num(row.tokens_input_uncached),
-      tokens_out: num(row.tokens_output),
-      cache_read_tokens: num(row.tokens_cache_read),
-      cache_write_tokens: num(row.tokens_cache_write),
-      cost_usd: priced?.cost ?? null,
-      cost_source: priced?.source,
-      source: 'benchmark',
-      study_id: studyId,
-      study,
-      duration_ms: durationMs,
-      client_timestamp: str(row.ts_iso),
-      metadata: {
-        run_id: runId,
-        task: str(row.task),
-        trial: row.trial,
-        harness,
-        harness_version: str(row.harness_version),
-        score: row.score,
-        success: row.success,
-        completed: row.completed,
-        failure_class: str(row.failure_class),
-        failure_reason: str(row.failure_reason),
-        turns: row.turns,
-        tokens_reasoning: num(row.tokens_reasoning),
-        token_basis: str(row.token_basis),
-        usage_evidence_grade: str(row.usage_evidence_grade),
-        // Upstream ranking-eligibility verdict (mirrored, not re-derived).
-        usage_ranking_eligible: rankingEligible,
-        usage_ranking_exclusion_reason: rankingExclusionReason,
-        cost_source: str(row.cost_source),
-        // success with no workspace change = a no-op trial (honesty flag).
-        workspace_changed: typeof row.workspace_changed === 'boolean' ? row.workspace_changed : null,
-        // Arm/model identity (study_id/study live in their own columns).
-        canonical_model: canonicalModel,
-        reasoning_effort: reasoningEffort,
-        is_open_model: isOpenModel,
-        suite: str(row.suite) ?? harbor?.study ?? null,
-      },
-    });
+    // A file imported before Harbor identity was read stored this cell under the
+    // shared directory key. Replace that row atomically with the corrected one;
+    // a manual --study or explicit row identity names its own key instead.
+    const legacyEventId = `${legacyStudy}::${runId}`;
+    const replacesLegacy = harbor !== undefined && studyId === harbor.id && studyId !== legacyStudy;
+
+    const event = getDb().transaction(() => {
+      if (replacesLegacy && retireLegacyHarborBenchmarkEvent(legacyEventId, legacyStudy)) {
+        result.legacyRowsReplaced += 1;
+      }
+      return insertEvent({
+        event_id: eventId,
+        session_id: eventId,
+        agent_type: harness,
+        event_type: 'llm_response',
+        status: isError ? 'error' : 'success',
+        project: str(row.task),
+        model,
+        tokens_in: num(row.tokens_input_uncached),
+        tokens_out: num(row.tokens_output),
+        cache_read_tokens: num(row.tokens_cache_read),
+        cache_write_tokens: num(row.tokens_cache_write),
+        cost_usd: priced?.cost ?? null,
+        cost_source: priced?.source,
+        source: 'benchmark',
+        study_id: studyId,
+        study,
+        duration_ms: durationMs,
+        client_timestamp: str(row.ts_iso),
+        metadata: {
+          run_id: runId,
+          task: str(row.task),
+          trial: row.trial,
+          harness,
+          harness_version: str(row.harness_version),
+          score: row.score,
+          success: row.success,
+          completed: row.completed,
+          failure_class: str(row.failure_class),
+          failure_reason: str(row.failure_reason),
+          turns: row.turns,
+          tokens_reasoning: num(row.tokens_reasoning),
+          token_basis: str(row.token_basis),
+          usage_evidence_grade: str(row.usage_evidence_grade),
+          // Upstream ranking-eligibility verdict (mirrored, not re-derived).
+          usage_ranking_eligible: rankingEligible,
+          usage_ranking_exclusion_reason: rankingExclusionReason,
+          cost_source: str(row.cost_source),
+          // success with no workspace change = a no-op trial (honesty flag).
+          workspace_changed: typeof row.workspace_changed === 'boolean' ? row.workspace_changed : null,
+          // Arm/model identity (study_id/study live in their own columns).
+          canonical_model: canonicalModel,
+          reasoning_effort: reasoningEffort,
+          is_open_model: isOpenModel,
+          suite: str(row.suite) ?? harbor?.study ?? null,
+        },
+      });
+    })();
 
     if (event) {
       result.eventsImported += 1;
