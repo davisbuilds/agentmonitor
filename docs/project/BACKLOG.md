@@ -159,54 +159,19 @@ the build.
   lexical negation in the next prompt (both already scoped out of phase 1);
   measure against real sessions before building ranking on top.
 
-#### Windowed Codex skill-event scan chooses the agent index
-- **What**: on the 2026-07-29 copied 1.4 GB database,
-  `EXPLAIN QUERY PLAN` for the fixed-window Codex skill-event leg chose
-  low-cardinality `idx_events_agent_type` and a temporary ordering b-tree
-  instead of `idx_events_usage_ts`. After removing the duplicate ledger read,
-  the complete enriched 2026-07-01..27 health query measured a 102.5 ms median
-  over seven warm runs versus 88.3 ms for phase 1 alone.
-- **Why it matters**: current latency is acceptable, but this leg still scales
-  with all retained Codex events and may become the next health-query bottleneck
-  as history grows.
-- **Next**: benchmark a purpose-built partial/composite skill-event index
-  against the real predicate and ordering; retain it only if the planner uses it
-  and write cost/storage remain justified.
-
-### Analytics rollups (schema-storage-rebalance Phase 2)
-
-#### Agent-filtered Monitor reads take seconds
-- **What**: with an agent selected, the Monitor's stats and event reads run
-  uncached, synchronous SQLite work on the server. The unfiltered stats read
-  reuses the broadcast snapshot instead.
-- **Why or evidence**: measured 2026-09-24 over HTTP against a local store of
-  about a million events:
-  - unfiltered stats took about 1 ms;
-  - `stats?agent=codex` took 0.4–3.2 s, and `stats?agent=claude_code` about
-    1.9 s;
-  - `events?agent=codex` took about 3 s.
-
-  The usage sum inside the filtered stats read takes about 0.1 s, through
-  `idx_events_agent_type`. The rest is in its other aggregates (event count,
-  tool, model and agent breakdowns). Their plans are a hypothesis, unmeasured.
-  The filtered bar refreshes at most once per 30 s for this reason.
-  Re-measured 2026-10-01: `stats?agent=codex` took 0.6–7 s. That run overlapped
-  the watcher stalls fixed by the incremental re-sync, which also delayed the
-  unfiltered read (1–2 s instead of about 1 ms), so it overstates the query.
-  Re-measured 2026-10-01 after that fix with `verify probe monitor-stats
-  --agent codex`, on the live store and on a snapshot without its WAL (same
-  result): the filtered read takes seconds and three of its ten statements, the
-  usage sum and the tool and model breakdowns, account for nearly all of it. Each
-  plans `SEARCH e USING INDEX idx_events_agent_type (agent_type=?)`, a
-  non-covering index that looks up every matching row. The unfiltered usage read
-  avoids this with a unary `+` in its GROUP BY; the agent filter in WHERE brings
-  the same index back.
-- **Next**: on a snapshot, try making those three statements avoid
-  `idx_events_agent_type` (for example `+e.agent_type = ?` so a covering index is
-  scanned) against a covering index led by `agent_type`, and compare with the
-  same probe. Then check `listMonitorEvents` the same way. A covering
-  index with `agent_type` leading, or per-agent snapshots cached like the
-  unfiltered one, are the candidates. Measure before choosing.
+#### Windowed Codex skill-event scan still reads its candidate rows
+- **What**: the skill health/daily Codex leg (`codexSkillEventStatement`) now
+  seeks an agent-ordered composite (agent with its tool or event type), so it
+  reads only Codex tool calls rather than every Codex event. It still looks up
+  each of those rows to test `metadata LIKE '%SKILL.md%'` and the window, then
+  sorts.
+- **Why or evidence**: on a 2026-10-01 snapshot of a local store the old
+  agent_type-only seek took about 3 s warm; the new plan takes about 0.15-0.25 s
+  warm (1.3-1.8 s cold). Cost now grows with retained Codex tool calls, not all
+  Codex events. `tests/monitor-agent-filter-plans.test.ts` pins the seek.
+- **Revisit when**: skill health latency becomes noticeable again. A LIKE on
+  metadata cannot be indexed, so the next step would be recording SKILL.md
+  reads as a column or a narrow table at ingest rather than another index.
 
 #### Usage overview derived store remains a measured fallback
 - **What**: the event-derived `/api/v2/usage/overview` still folds matching usage

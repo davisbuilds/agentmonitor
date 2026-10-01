@@ -1509,13 +1509,26 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   return { sessions, total: sessions.length };
 }
 
-export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
-  const db = getDb();
+/**
+ * The count and page reads behind the Monitor event feed, shared with plan
+ * tests so they explain the statements the endpoint runs.
+ */
+export function monitorEventsStatements(params: MonitorEventsParams = {}): {
+  count: { sql: string; values: unknown[] };
+  page: { sql: string; values: unknown[] };
+} {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
   if (params.agent) {
-    conditions.push('agent_type = ?');
+    // The agent filter reads an agent-ordered index newest-first, alone or with
+    // an event type or tool (idx_events_agent_event_order/_tool_order). A model
+    // or session has no agent-ordered composite, and walking the agent index
+    // for a rare or absent value visits every row of the agent (seconds), so the
+    // unary `+` lets that filter's own index lead. branch and source have no
+    // index, so the agent index stays the narrower path for them.
+    const narrower = params.session_id || params.model;
+    conditions.push(narrower ? '+agent_type = ?' : 'agent_type = ?');
     values.push(params.agent);
   }
   if (params.event_type) {
@@ -1558,12 +1571,24 @@ export function listMonitorEvents(params: MonitorEventsParams = {}): { events: M
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 500);
   const offset = Math.max(params.offset ?? 0, 0);
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM events ${where}`).get(...values) as CountResult).c;
-  const events = db.prepare(`
+  return {
+    count: { sql: `SELECT COUNT(*) as c FROM events ${where}`, values },
+    page: {
+      sql: `
     SELECT * FROM events ${where}
     ORDER BY datetime(created_at) DESC, id DESC
     LIMIT ? OFFSET ?
-  `).all(...values, limit, offset) as MonitorEventRow[];
+  `,
+      values: [...values, limit, offset],
+    },
+  };
+}
+
+export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
+  const db = getDb();
+  const { count, page } = monitorEventsStatements(params);
+  const total = (db.prepare(count.sql).get(...count.values) as CountResult).c;
+  const events = db.prepare(page.sql).all(...page.values) as MonitorEventRow[];
 
   return { events, total };
 }
@@ -1721,9 +1746,15 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
   // Event count retains overlapping OTEL rows; usage totals reconcile them
   // away. Put the reconciliation predicate in WHERE so SQLite performs its
   // session+timestamp lookup once per candidate row, not once per SUM column.
-  const usageWhere = `${where}
+  // The unary `+` on the agent filter keeps SQLite from seeking
+  // idx_events_agent_type, which does not cover the token columns and looks up
+  // every row of that agent (seconds); it scans the covering usage index instead.
+  const usageConditions = conditions.map(condition => condition === 'e.agent_type = ?' ? '+e.agent_type = ?' : condition);
+  const usageWhere = `WHERE ${usageConditions.join(' AND ')}
     AND ${usageMetricPresenceCondition('e')}
     AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
+  // Breakdowns break count ties by name, so their order does not depend on
+  // which index the plan happens to read.
   const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
   const modelWhere = conditions.length > 0 ? `${where} AND model IS NOT NULL` : 'WHERE model IS NOT NULL';
 
@@ -1737,16 +1768,16 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
     { name: 'tool_breakdown', sql: `
       SELECT tool_name, COUNT(*) as count FROM events e
       ${toolWhere}
-      GROUP BY tool_name ORDER BY count DESC
+      GROUP BY tool_name ORDER BY count DESC, tool_name
     `, values },
     { name: 'agent_breakdown', sql: `
       SELECT agent_type, COUNT(*) as count FROM events e ${where}
-      GROUP BY agent_type ORDER BY count DESC
+      GROUP BY agent_type ORDER BY count DESC, agent_type
     `, values },
     { name: 'model_breakdown', sql: `
       SELECT model, COUNT(*) as count FROM events e
       ${modelWhere}
-      GROUP BY model ORDER BY count DESC
+      GROUP BY model ORDER BY count DESC, model
     `, values },
     { name: 'branches', sql: `
       SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC
