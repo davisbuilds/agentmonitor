@@ -625,12 +625,47 @@ finished. There is no promised OS retention interval or automatic disk quota.
 Runs have a two-minute deadline; a hard-killed runner may leave its host until
 the one-hour expiry. Startup failure logs remain at the path in the error.
 
+### Probing the installed service
+
+`pnpm --silent verify probe <name> --json` investigates the real install rather
+than a fixture. By default it reads the database of the globally linked `amon`
+(its checkout's `data/agentmonitor.db`); `--db <path>` names another file. See the
+[pilot framing](../design/2026-10-01-verification-cli-pilot-design.md) for why
+probes may read it and the rules they follow.
+
+```bash
+pnpm build
+pnpm --silent verify probe health --json                     # build/staleness, listener, DB and WAL sizes
+pnpm --silent verify probe ingestion --json                  # import/watcher state of discoverable transcripts
+pnpm --silent verify probe monitor-stats --agent codex --json # per-statement timing and query plan
+pnpm --silent verify probe snapshot --json                   # disposable copy for probes that write
+pnpm --silent verify probe resync <transcript.jsonl> [--db <snapshot>] --json
+```
+
+Read probes open the database `readonly` with `query_only` in a child process
+that is killed at its deadline (`--timeout-ms` overrides the per-probe default),
+so a slow statement cannot hold a WAL snapshot open indefinitely. `resync` writes
+only to a fresh scratch database, removed afterwards, or to a snapshot directory
+created by `probe snapshot`; any other `--db` is refused. A snapshot needs free
+temporary space of twice the database size and stays until you remove its
+directory.
+
+Results use the run evidence layout (`result.json` under an
+`agentmonitor-evidence-*` directory) and add the target kind, path, and file sizes
+before and after. `monitor-stats` times the statements the endpoint itself runs on
+a separate connection with the server's page cache size; it omits the idle-session
+update the endpoint performs and does not go through HTTP. Probes record counts,
+timings and plans, not transcript content, but their evidence describes a real
+store: keep it out of public issues and commits.
+
 `pnpm test:verify` type-checks the driver and exercises lifecycle isolation,
 interruption, real browser workflows, missing prerequisites, explicit timing
 failure, and a wrong-but-plausible compiled aggregation mutation. It temporarily
 modifies a local `dist` file and restores it; run it serially without concurrent
-builds or other verification against that checkout. The normal tests do not
-require Chromium or a built app.
+builds or other verification against that checkout. Its probe tests run against
+fixture databases from the disposable host, never the installed one. The normal
+tests do not require Chromium or a built app; they cover the probes' read-only
+opener and target guards.
 
 The pre-push checks are:
 

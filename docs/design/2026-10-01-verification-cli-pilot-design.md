@@ -4,9 +4,10 @@ Date: 2026-10-01
 
 Author: Codex, with Davis
 
-Status: pilot implemented locally; follow-up investigation still needed to assess
-setup friction and supervision benefits. The operations guide and executable
-CLI now own the command/result contract and lifecycle mechanics.
+Status: pilot implemented locally, then extended the same day with read-only
+probes of the installed service (see Isolation and verification boundaries). The
+operations guide and executable CLI own the command/result contract and lifecycle
+mechanics.
 
 ## Purpose
 
@@ -141,15 +142,37 @@ capture rather than establishing another independent definition of correctness.
 
 ## Isolation and verification boundaries
 
-Use disposable databases, synthetic transcripts, and explicit local fixture
-paths. Do not read or mutate the user's installed database, real transcript
-collection, credentials, or running application as a side effect of starting a
-verification session. No paid model calls are needed for the initial workflows.
+The pilot has two kinds of target, and results always say which one they used.
 
-Bind disposable services locally and identify which resources the CLI owns.
-Stopping a session must affect only those resources. Choose lifecycle mechanics
-that handle failed startup, interruption, repeated stop, and abandoned sessions
-without relying on blindly trusting a recycled process ID.
+**Scenarios** use disposable databases, synthetic transcripts, and explicit local
+fixture paths. They do not read or mutate the user's installed database, real
+transcript collection, credentials, or running application. No paid model calls
+are needed. Bind disposable services locally and identify which resources the
+CLI owns. Stopping a session must affect only those resources. Choose lifecycle
+mechanics that handle failed startup, interruption, repeated stop, and abandoned
+sessions without relying on blindly trusting a recycled process ID.
+
+**Probes** read the installed service. The first version excluded it entirely,
+which left out the investigations agents actually run here: a slow query on the
+real store, a server still running an old build, ingestion state after a restart.
+Fixtures cannot reproduce that data shape or scale. The pilot's goal is to be as
+useful as possible to agents working in AgentMonitor before any extraction, so
+the boundary moved (decided with Davis, 2026-10-01) under these rules:
+
+- Reads use a connection that is both `readonly` and `query_only`, never the
+  application's `getDb()`, which runs migrations and whose reads can write.
+- Each probe runs in a child process killed at its deadline. SQLite statements
+  cannot be interrupted from JavaScript, and a long read on the installed
+  database holds a WAL snapshot that blocks checkpoints; killing the process
+  releases it.
+- Probes that must write (`resync`) touch only a scratch database or a snapshot
+  that the CLI made with SQLite's online backup. Writes to the installed database
+  stay with `amon`'s own repair commands and their dry runs and backups.
+- Results record the target kind and path, file sizes before and after, and the
+  running server's build. They record counts, timings and query plans, not
+  transcript content.
+- Probes cover what `amon` does not already expose (plans, phase timings,
+  ingestion freshness, build staleness), rather than duplicating its reads.
 
 This is application isolation for verification, not a claim to sandbox arbitrary
 untrusted code. Distinguish the fixture host from the full installed service;
@@ -198,3 +221,25 @@ work. Both workflows passing and the compiled mutation failing establish that th
 pilot can observe those behaviors; they do not establish less supervision or
 commercial demand. Extend a workflow when an actual task needs it, and evaluate a
 second heterogeneous application before proposing a shared runner.
+
+### First use: a slow agent-filtered Monitor read (2026-10-01)
+
+Before the probes existed, an investigation of slow agent-filtered Monitor stats
+needed hand-written scripts that copied the endpoint's SQL, a read-only
+connection opened by hand, and separate commands for plans and file sizes.
+
+With the probes:
+
+- `probe monitor-stats --agent codex` timed the endpoint's own statements on the
+  installed store. Three of its ten statements accounted for nearly all of the
+  time, and each plan showed lookups through a non-covering `agent_type` index.
+- `probe health` showed an unusually large WAL beside the installed database. A
+  `snapshot`, which has no WAL, gave the same timings, which ruled the WAL out as
+  the cause in two commands.
+- `probe resync` on a full-size snapshot measured the incremental write as
+  roughly an order of magnitude slower than on an empty scratch database: one
+  sample, cause not yet split.
+
+So far this is one investigation, carried out by the agent that built the probes.
+Whether another agent picks them up unprompted, and whether reviewers find the
+evidence enough on its own, is still open.
