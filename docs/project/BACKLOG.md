@@ -161,13 +161,14 @@ the build.
 
 #### Windowed Codex skill-event scan still reads its candidate rows
 - **What**: the skill health/daily Codex leg (`codexSkillEventStatement`) now
-  seeks `idx_events_agent_dims (agent_type=? AND tool_name=?)`, so it reads only
-  Codex exec tool calls rather than every Codex event. It still looks up each of
-  those rows to test `metadata LIKE '%SKILL.md%'` and the window, then sorts.
+  seeks an agent-ordered composite (agent with its tool or event type), so it
+  reads only Codex tool calls rather than every Codex event. It still looks up
+  each of those rows to test `metadata LIKE '%SKILL.md%'` and the window, then
+  sorts.
 - **Why or evidence**: on a 2026-10-01 snapshot of a local store the old
-  agent_type-only seek took about 3 s warm; the new plan takes 0.15-0.24 s warm
-  (about 1.3 s cold). Cost now grows with retained Codex exec tool calls, not
-  all Codex events. `tests/monitor-agent-filter-plans.test.ts` pins the seek.
+  agent_type-only seek took about 3 s warm; the new plan takes about 0.15-0.25 s
+  warm (1.3-1.8 s cold). Cost now grows with retained Codex tool calls, not all
+  Codex events. `tests/monitor-agent-filter-plans.test.ts` pins the seek.
 - **Revisit when**: skill health latency becomes noticeable again. A LIKE on
   metadata cannot be indexed, so the next step would be recording SKILL.md
   reads as a column or a narrow table at ingest rather than another index.

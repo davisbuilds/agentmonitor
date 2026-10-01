@@ -23,12 +23,14 @@ test('a read-only command installs the agent-filter indexes on a database from b
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
   // The preceding schema: read commands skip DDL once user_version is current,
   // so the indexes only arrive if the version moves past it.
-  db.exec('DROP INDEX idx_events_agent_dims; DROP INDEX idx_events_agent_created_order; PRAGMA user_version = 10');
+  db.exec('DROP INDEX idx_events_agent_tool_order; DROP INDEX idx_events_agent_event_order; DROP INDEX idx_events_agent_created_order; PRAGMA user_version = 10');
 
   schema.ensureSchemaForRead();
 
   const present = db.prepare(`SELECT name FROM sqlite_master
-    WHERE name IN ('idx_events_agent_dims', 'idx_events_agent_created_order') ORDER BY name`).all();
-  assert.deepEqual(present, [{ name: 'idx_events_agent_created_order' }, { name: 'idx_events_agent_dims' }]);
+    WHERE name IN ('idx_events_agent_tool_order', 'idx_events_agent_event_order', 'idx_events_agent_created_order') ORDER BY name`).all();
+  assert.deepEqual(present, [
+    { name: 'idx_events_agent_created_order' }, { name: 'idx_events_agent_event_order' }, { name: 'idx_events_agent_tool_order' },
+  ]);
   assert.equal(db.pragma('user_version', { simple: true }), 11);
 });

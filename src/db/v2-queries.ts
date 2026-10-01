@@ -1521,12 +1521,13 @@ export function monitorEventsStatements(params: MonitorEventsParams = {}): {
   const values: unknown[] = [];
 
   if (params.agent) {
-    // Alone, the agent filter reads idx_events_agent_created_order newest-first.
-    // Beside a filter with its own index, that walk visits every row of the
-    // agent before finding a rare or absent match (seconds), so the unary `+`
-    // lets the other filter's index lead. branch and source have no index, so
-    // the agent index stays the narrower path for them.
-    const narrower = params.event_type || params.tool_name || params.session_id || params.model;
+    // The agent filter reads an agent-ordered index newest-first, alone or with
+    // an event type or tool (idx_events_agent_event_order/_tool_order). A model
+    // or session has no agent-ordered composite, and walking the agent index
+    // for a rare or absent value visits every row of the agent (seconds), so the
+    // unary `+` lets that filter's own index lead. branch and source have no
+    // index, so the agent index stays the narrower path for them.
+    const narrower = params.session_id || params.model;
     conditions.push(narrower ? '+agent_type = ?' : 'agent_type = ?');
     values.push(params.agent);
   }

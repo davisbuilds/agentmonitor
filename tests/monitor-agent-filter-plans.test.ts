@@ -92,16 +92,28 @@ test('the windowed Codex skill-event read seeks exec tool calls, not every Codex
   const statement = ledger.codexSkillEventStatement({ date_from: '2026-09-01', date_to: '2026-09-30' });
   const detail = plan(statement.sql, statement.values);
   assert.doesNotMatch(detail, /idx_events_agent_type\b/, detail);
-  assert.match(detail, /idx_events_agent_dims \(agent_type=\? AND tool_name=\?\)/, detail);
+  assert.match(detail, /idx_events_agent_(tool|event)_order \(agent_type=\? AND (tool_name|event_type)=\?\)/, detail);
 });
 
-test('a combined feed filter with its own index leads instead of the agent index', () => {
-  // Walking an agent's events newest-first finds a rare or absent event_type,
-  // tool or model only after visiting all of them (about 2 s for Codex on a
-  // real store); that filter's own index finds its few rows directly.
+test('an agent with an event type or tool reads that pair newest-first', () => {
+  // Walking all of an agent's events finds a rare or absent value only after
+  // visiting every row (about 2 s for Codex on a real store), while sorting
+  // every match of a common value takes as long. Seeking the pair in time
+  // order serves both.
   for (const [filter, index] of [
-    [{ event_type: 'session_end' }, 'idx_events_event_type'],
-    [{ tool_name: 'exec_command' }, 'idx_events_tool_name'],
+    [{ event_type: 'tool_use' }, 'idx_events_agent_event_order'],
+    [{ tool_name: 'exec_command' }, 'idx_events_agent_tool_order'],
+  ] as const) {
+    const { page } = queries.monitorEventsStatements({ agent: 'codex', ...filter });
+    const detail = plan(page.sql, page.values);
+    assert.match(detail, new RegExp(`${index} \\(agent_type=\\? AND`), `${JSON.stringify(filter)}: ${detail}`);
+    assert.doesNotMatch(detail, /TEMP B-TREE FOR ORDER BY/, `${JSON.stringify(filter)}: ${detail}`);
+  }
+});
+
+test('a combined model or session filter leads instead of the agent index', () => {
+  // These have selective indexes of their own and no agent-ordered composite.
+  for (const [filter, index] of [
     [{ model: 'gpt-5.5' }, 'idx_events_model'],
     [{ session_id: 's-1' }, 'session'],
   ] as const) {
