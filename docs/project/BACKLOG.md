@@ -193,9 +193,18 @@ the build.
   Re-measured 2026-10-01: `stats?agent=codex` took 0.6–7 s. That run overlapped
   the watcher stalls fixed by the incremental re-sync, which also delayed the
   unfiltered read (1–2 s instead of about 1 ms), so it overstates the query.
-- **Next**: re-time on a build with the incremental re-sync, while no long
-  session is being written, then take `EXPLAIN QUERY PLAN` and timings for each
-  aggregate in `getMonitorStats` and `listMonitorEvents` under an agent filter. A covering
+  Re-measured 2026-10-01 after that fix with `verify probe monitor-stats
+  --agent codex`, on the live store and on a snapshot without its WAL (same
+  result): the filtered read takes seconds and three of its ten statements, the
+  usage sum and the tool and model breakdowns, account for nearly all of it. Each
+  plans `SEARCH e USING INDEX idx_events_agent_type (agent_type=?)`, a
+  non-covering index that looks up every matching row. The unfiltered usage read
+  avoids this with a unary `+` in its GROUP BY; the agent filter in WHERE brings
+  the same index back.
+- **Next**: on a snapshot, try making those three statements avoid
+  `idx_events_agent_type` (for example `+e.agent_type = ?` so a covering index is
+  scanned) against a covering index led by `agent_type`, and compare with the
+  same probe. Then check `listMonitorEvents` the same way. A covering
   index with `agent_type` leading, or per-agent snapshots cached like the
   unfiltered one, are the candidates. Measure before choosing.
 
