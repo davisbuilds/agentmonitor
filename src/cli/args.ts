@@ -175,7 +175,10 @@ export function parseIntegerOption(value: string | undefined, flag: string): num
   if (value == null) return undefined;
   // parseInt alone reads "100xyz" as 100.
   if (!/^-?\d+$/.test(value.trim())) throw invalidUsage(`Invalid ${flag}: ${value}`);
-  return Number.parseInt(value, 10);
+  const parsed = Number.parseInt(value, 10);
+  // Enough digits parse to Infinity or lose precision.
+  if (!Number.isSafeInteger(parsed)) throw invalidUsage(`Invalid ${flag}: ${value}`);
+  return parsed;
 }
 
 export function parseDateOption(value: string | undefined, flag: string): string | undefined {

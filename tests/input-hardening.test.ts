@@ -12,6 +12,11 @@ describe('parseIntegerOption', () => {
     assert.throws(() => parseIntegerOption('1.5', '--limit'), /Invalid --limit/);
   });
 
+  test('rejects a value too large to represent exactly', () => {
+    assert.throws(() => parseIntegerOption('9'.repeat(400), '--min-batch'), /Invalid --min-batch/);
+    assert.throws(() => parseIntegerOption('9007199254740993', '--limit'), /Invalid --limit/);
+  });
+
   test('accepts plain and negative integers', () => {
     assert.equal(parseIntegerOption('100', '--limit'), 100);
     assert.equal(parseIntegerOption('-3', '--offset'), -3);
