@@ -1,0 +1,81 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { parseArgs } from 'node:util';
+import { scenarios, scenarioById } from './contracts.js';
+import { control, readSession, startSession, stopSession } from './session.js';
+import { runScenario } from './run.js';
+
+const help = `AgentMonitor development verification (run pnpm build first)
+  pnpm --silent verify list [--json]
+  pnpm --silent verify start [--json]
+  pnpm --silent verify run <live-session|usage> [--session DIR] [--json]
+       [--max-api-ms N] [--max-ui-ms N]  (usage only; UI filter timing)
+  pnpm --silent verify inspect <session-or-evidence-DIR> [--json]
+  pnpm --silent verify advance <session-DIR> [--json]
+  pnpm --silent verify stop <session-DIR> [--json]
+
+start keeps a disposable compiled app running for up to one hour.
+run owns and stops its app unless --session is given. Evidence and fixtures
+remain in the OS temp directory until you or the OS remove them.
+Exit: 0 success; 1 verification/cleanup failed; 2 invalid request or blocked.
+No real transcripts, installed database, credentials, or paid model calls.
+`;
+const abort = new AbortController();
+process.once('SIGINT', () => abort.abort(new Error('Interrupted (SIGINT)')));
+process.once('SIGTERM', () => abort.abort(new Error('Interrupted (SIGTERM)')));
+let json = process.argv.includes('--json');
+try {
+  const { values, positionals } = parseArgs({ options: {
+    json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+    session: { type: 'string' }, 'max-api-ms': { type: 'string' }, 'max-ui-ms': { type: 'string' },
+  }, allowPositionals: true, strict: true });
+  json = values.json ?? false;
+  if (values.help || positionals.length === 0) { process.stdout.write(help); }
+  else {
+    const [command, target] = positionals;
+    if (!['list', 'start', 'run', 'inspect', 'advance', 'stop'].includes(command)) throw new Error(`Unknown command: ${command}`);
+    const needsTarget = !['list', 'start'].includes(command);
+    if (positionals.length !== (needsTarget ? 2 : 1)) throw new Error(`Invalid arguments for ${command}; use --help`);
+    if (command !== 'run' && (values.session || values['max-api-ms'] || values['max-ui-ms'])) throw new Error('Run options require run');
+    const threshold = (value: string | undefined) => {
+      if (value === undefined) return undefined;
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) throw new Error('Timing thresholds must be positive finite milliseconds');
+      return number;
+    };
+    let output: unknown;
+    switch (command) {
+      case 'list': output = { schema_version: 1, prerequisites: ['pnpm install', 'pnpm build', 'pnpm exec playwright install chromium'], scenarios }; break;
+      case 'start': output = await startSession(abort.signal); break;
+      case 'run': {
+        const scenario = scenarioById(target);
+        if (scenario.id !== 'usage' && (values['max-api-ms'] || values['max-ui-ms'])) throw new Error('Timing thresholds apply to usage only');
+        const result = await runScenario(scenario.id, { session: values.session, maxApiMs: threshold(values['max-api-ms']), maxUiMs: threshold(values['max-ui-ms']), signal: abort.signal });
+        output = result;
+        process.exitCode = result.status === 'passed' ? 0 : result.status === 'failed' ? 1 : 2;
+        break;
+      }
+      case 'inspect': {
+        const file = path.join(target, fs.existsSync(path.join(target, 'failure.json')) ? 'failure.json' : 'result.json');
+        if (fs.existsSync(file)) output = JSON.parse(fs.readFileSync(file, 'utf8')) as unknown;
+        else {
+          const session = readSession(target);
+          output = session.status === 'running' ? await control(session, 'status') : session;
+        }
+        break;
+      }
+      case 'advance': output = await control(readSession(target), 'advance'); break;
+      case 'stop': output = await stopSession(readSession(target)); break;
+    }
+    if (json) process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+    else if (command === 'run') {
+      const result = output as Awaited<ReturnType<typeof runScenario>>;
+      process.stdout.write(`${result.status}: ${result.scenario}\nEvidence: ${result.directory}/result.json\nCleanup: ${result.cleanup}\n`);
+      for (const error of result.errors) process.stderr.write(error + '\n');
+    } else process.stdout.write(JSON.stringify(output, null, 2) + '\n');
+  }
+} catch (error) {
+  if (json) process.stdout.write(JSON.stringify({ schema_version: 1, status: 'blocked', error: String(error) }) + '\n');
+  else process.stderr.write(`${String(error)}\nUse pnpm verify --help\n`);
+  process.exitCode = 2;
+}

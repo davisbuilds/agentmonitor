@@ -561,9 +561,76 @@ whether the server was source or built.
 
 ## Verification
 
-The [verification CLI pilot design](../design/2026-10-01-verification-cli-pilot-design.md)
-records the proposed development interface and its evidence boundaries; it is not
-an available command yet.
+### Disposable compiled-app verification
+
+The development-only `pnpm verify` CLI provides known fixtures, browser checks,
+and inspectable evidence. Build first; the driver uses `tsx`, but the application,
+watcher, schema, queries, and frontend come from the compiled outputs. See the
+[pilot framing](../design/2026-10-01-verification-cli-pilot-design.md) for goals and
+extraction criteria. `pnpm verify --help` owns exact syntax and exit codes;
+`pnpm --silent verify list --json` is the executable workflow map.
+
+```bash
+pnpm build
+pnpm exec playwright install chromium # once, if not already available
+pnpm --silent verify run live-session --json
+pnpm --silent verify run usage --json
+```
+
+Each one-shot run starts its own loopback app and stops it after verification,
+failure, or handled interruption. Live verification appends a synthetic Claude
+JSONL message and observes the real watcher, projection, API, and browser update
+without a reload. Usage verification seeds 1,000 events plus session metadata,
+checks independently known totals, and changes the browser's project filter.
+It tests aggregation/rendering, not usage ingestion or real provider pricing.
+
+For exploration, `pnpm --silent verify start --json` returns a URL and session
+directory. Open that URL with ordinary browser tools; `advance <directory>` adds
+a synthetic transcript message. `run <scenario> --session <directory>` checks
+that instance and leaves it running. `inspect <directory>` reads evidence or
+queries session state; `stop <directory>` confirms shutdown and is repeatable.
+Control uses a session-specific local token, not a stored PID. Concurrent runs
+against the same session are refused. If a runner is forcibly killed, stop that
+session and start another rather than bypassing its stale lock.
+
+The host uses a disposable SQLite database and explicit fixture directories,
+without inheriting application overrides or provider credentials. It expires
+after one hour. This exercises `createApp` and the watcher, **not** full
+`amon serve` startup, Portless, external hooks, provider authentication, or the
+installed service. It is not an OS sandbox for arbitrary code. Keep exploration
+to synthetic inputs; evidence may contain anything submitted to this instance.
+
+Every run writes schema-versioned `result.json`, API observations, browser logs,
+screenshots, and a Playwright trace when available. It identifies the Git revision
+and dirty state, hashes of compiled trees/verifier/benchmark/lockfile, browser,
+host, individual checks, errors, and cleanup status. Builds changed since session
+start are refused; source freshness is not inferred from a build hash. Rebuild
+before testing a source change, then start a new session. Missing prerequisites
+are `blocked`; later checks remain `not_run`. A green result covers only the
+named workflow and build. Inspect the recorded paths or use
+`pnpm exec playwright show-trace <trace.zip>`.
+
+Usage records endpoint warmups and five measured samples using the existing
+benchmark, separately from single browser navigation/filter-to-asserted-card
+observations. Browser timings include automation overhead and are not statistical
+latency estimates. There is no default performance gate. Optional usage thresholds
+apply to the API median and browser filter sample; choose them for a named host
+and fixture, not as a production guarantee.
+
+Sessions and evidence live under the OS temporary directory with owner-only
+access. Stopping releases processes, ports, watchers, and database handles;
+it deliberately retains files so failures remain inspectable. Copy evidence you
+need to keep, then remove the exact stopped session/evidence directories when
+finished. There is no promised OS retention interval or automatic disk quota.
+Runs have a two-minute deadline; a hard-killed runner may leave its host until
+the one-hour expiry. Startup failure logs remain at the path in the error.
+
+`pnpm test:verify` type-checks the driver and exercises lifecycle isolation,
+interruption, real browser workflows, missing prerequisites, explicit timing
+failure, and a wrong-but-plausible compiled aggregation mutation. It temporarily
+modifies a local `dist` file and restores it; run it serially without concurrent
+builds or other verification against that checkout. The normal tests do not
+require Chromium or a built app.
 
 The pre-push checks are:
 

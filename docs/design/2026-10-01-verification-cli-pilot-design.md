@@ -4,8 +4,9 @@ Date: 2026-10-01
 
 Author: Codex, with Davis
 
-Status: agreed pilot direction; implementation paused before code changes.
-Command syntax, result schema, and lifecycle mechanics remain proposed.
+Status: pilot implemented locally; follow-up investigation still needed to assess
+setup friction and supervision benefits. The operations guide and executable
+CLI now own the command/result contract and lifecycle mechanics.
 
 ## Purpose
 
@@ -80,8 +81,8 @@ The interface should let an agent:
 5. Stop the environment and confirm cleanup.
 
 Support both a one-shot run with automatic cleanup and an interactive session
-that stays available for investigation. A possible vocabulary is `list`, `start`,
-`run`, `inspect`, and `stop`; exact syntax is not yet a contract.
+that stays available for investigation. The development CLI exposes `list`,
+`start`, `run`, `inspect`, `advance`, and `stop`; use its help for exact syntax.
 
 Noninteractive invocations must finish or fail clearly rather than wait for a
 prompt. Separate machine-readable results on stdout from diagnostics on stderr.
@@ -112,9 +113,10 @@ does not establish correctness, and a green result applies only to the behavior
 and build actually exercised. Expected values must be capable of rejecting a
 plausible wrong result, not simply mirror application calculations.
 
-Retain useful failure evidence after stopping the app. Decide a bounded retention
-policy during implementation; cleanup must not erase the evidence needed to
-understand the result.
+Retain useful failure evidence after stopping the app. Session lifetime is bounded;
+evidence files remain in OS temporary storage until explicitly removed or reclaimed
+by the OS. Copy evidence needed for longer-term review. Cleanup must not erase
+the evidence needed to understand the result.
 
 ## Existing foundations
 
@@ -173,10 +175,10 @@ evaluation campaign is required to decide whether this local interface is useful
 
 ## Deferred decisions and possible extraction
 
-Before implementation resumes, settle the minimum command/result contract,
-interactive lifecycle, artifact location/retention, and fixture size. These are
-bounded implementation decisions; revisit the product framing only if source or
-runtime evidence contradicts it.
+The initial implementation uses a 1,000-event usage fixture, authenticated loopback
+control, one-hour interactive sessions, two-minute run deadlines, and retained
+temporary artifacts. Revisit these bounds when an actual investigation exposes a
+limitation; revisit product framing only when source or runtime evidence warrants it.
 
 A second application with materially different setup can test which pieces are
 truly reusable. Each repository should continue owning its fixtures and business
@@ -188,10 +190,11 @@ Extract when repeated needs justify the additional contract and maintenance.
 Broader possibilities around reliable agent-operated processes and cross-platform
 delegation remain exploratory; this engineering pilot is not market validation.
 
-## Continuation state
+## Next learning step
 
-The `feat/verification-cli` worktree was created from `c7bd2f8`. Dependencies were
-installed with the lockfile unchanged and the existing production build completed.
-No pilot CLI or runtime changes had been made when Davis requested this artifact.
-Implementation is paused at that point; the next work is the command contract
-and a behavioral red/green slice of the isolated lifecycle and first workflow.
+Use the CLI on a real AgentMonitor change or investigation and assess whether the
+workflow map, fixture controls, and evidence reduce reconstruction and review
+work. Both workflows passing and the compiled mutation failing establish that the
+pilot can observe those behaviors; they do not establish less supervision or
+commercial demand. Extend a workflow when an actual task needs it, and evaluate a
+second heterogeneous application before proposing a shared runner.
