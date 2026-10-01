@@ -246,6 +246,13 @@ With the probes:
   roughly an order of magnitude slower than on an empty scratch database: one
   sample, cause not yet split.
 
+The fix (covering indexes for agent-filtered reads) raised a new question: what
+else would the indexes change? Answering it took an ad hoc script that ran the
+app on a snapshot, recorded every statement its read routes issued, and compared
+plans with and without the indexes. Most statements kept their plan; nearly all
+that changed got faster; a few plain counts lost a few milliseconds. That script
+became `probe plans`, so the next index change starts from one command.
+
 So far this is one investigation, carried out by the agent that built the probes.
 Whether another agent picks them up unprompted, and whether reviewers find the
 evidence enough on its own, is still open.

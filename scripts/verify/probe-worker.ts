@@ -9,6 +9,7 @@ import type * as Connection from '../../src/db/connection.js';
 import type * as Schema from '../../src/db/schema.js';
 import type * as PathExcludes from '../../src/util/path-excludes.js';
 import type * as Config from '../../src/config.js';
+import type * as App from '../../src/app.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -16,6 +17,8 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { once } from 'node:events';
+import Database from 'better-sqlite3';
 import { openReadOnly } from './readonly.js';
 import { repoRoot, writeJson } from './session.js';
 import { snapshotPrefix, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
@@ -258,8 +261,156 @@ async function resync(options: ProbeOptions) {
   };
 }
 
+/** Read routes the plans probe drives; ids come from the target database. */
+function planRoutes(ids: { codexSession?: string; claudeSession?: string; monitorSession?: string; study?: string }): string[] {
+  const to = new Date().toISOString().slice(0, 10);
+  const from = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+  const window = `date_from=${from}&date_to=${to}`;
+  const withAgent = (prefix: string, names: string[]) => names.flatMap(name => [
+    `${prefix}/${name}?${window}`, `${prefix}/${name}?${window}&agent=codex`,
+  ]);
+  const routes = [
+    '/api/stats', '/api/events?limit=50', '/api/events?agent_type=codex&limit=50', '/api/sessions?limit=50', '/api/filter-options',
+    '/api/v2/agents', '/api/v2/projects',
+    ...withAgent('/api/v2/analytics', ['activity', 'agents', 'hour-of-week', 'projects', 'skills/daily', 'skills/health', 'summary', 'tools', 'top-sessions', 'velocity']),
+    ...withAgent('/api/v2/usage', ['agents', 'daily', 'facets', 'models', 'models/daily', 'overview', 'projects', 'summary', 'top-sessions', 'tiers']),
+    '/api/v2/monitor/stats', '/api/v2/monitor/stats?agent=codex', '/api/v2/monitor/stats?agent=claude_code',
+    '/api/v2/monitor/events', '/api/v2/monitor/events?agent=codex', '/api/v2/monitor/events?agent=codex&tool_name=exec_command',
+    '/api/v2/monitor/events?agent=claude_code&since=2026-09-01', '/api/v2/monitor/filter-options',
+    '/api/v2/monitor/tools', '/api/v2/monitor/tools?agent=codex', '/api/v2/monitor/sessions', '/api/v2/monitor/sessions?agent=codex',
+    '/api/v2/sessions?limit=50', '/api/v2/sessions?agent=codex&limit=50',
+    '/api/v2/search?q=index&limit=20', '/api/v2/live/sessions', '/api/v2/metrics', '/api/v2/benchmarks',
+    '/api/v2/trace-quality/traces?limit=20', '/api/v2/insights', '/api/v2/pins',
+  ];
+  if (ids.monitorSession) routes.push(`/api/v2/monitor/sessions/${encodeURIComponent(ids.monitorSession)}`);
+  for (const id of [ids.codexSession, ids.claudeSession]) {
+    if (!id) continue;
+    const session = `/api/v2/sessions/${encodeURIComponent(id)}`;
+    routes.push(session, `${session}/activity`, `${session}/messages?limit=50`, `${session}/skill-context`, `/api/v2/live/sessions/${encodeURIComponent(id)}`);
+  }
+  if (ids.study) routes.push(`/api/v2/benchmarks/${encodeURIComponent(ids.study)}`);
+  return routes;
+}
+
+/**
+ * Index impact on a snapshot: drive the compiled app's read routes, record each
+ * statement that touches the index's table, then compare its plan and timing
+ * with the index present and dropped inside a rolled-back transaction.
+ */
+async function plans(options: ProbeOptions) {
+  const file = request.target!.path;
+  // Record reads by wrapping the shared Statement prototype before the app loads.
+  const recorded = new Map<string, { sql: string; params: unknown[]; route: string }>();
+  let route = 'startup';
+  let recording = false;
+  let table = '';
+  const prepare = Database.prototype.prepare;
+  let wrapped = false;
+  Database.prototype.prepare = function (this: Database.Database, sql: string) {
+    const statement = prepare.call(this, sql);
+    if (!wrapped) {
+      wrapped = true;
+      const proto = Object.getPrototypeOf(statement) as Record<string, (...args: unknown[]) => unknown>;
+      for (const method of ['all', 'get', 'iterate']) {
+        const original = proto[method];
+        proto[method] = function (this: Database.Statement, ...args: unknown[]) {
+          if (recording && this.reader && new RegExp(`\\b${table}\\b`).test(this.source)) {
+            const key = `${this.source}\u0000${JSON.stringify(args)}`;
+            if (!recorded.has(key)) recorded.set(key, { sql: this.source, params: args, route });
+          }
+          return original.apply(this, args);
+        };
+      }
+    }
+    return statement;
+  } as typeof Database.prototype.prepare;
+
+  const { initSchema } = await import(built('db/schema.js')) as typeof Schema;
+  const { getDb, closeDb } = await import(built('db/connection.js')) as typeof Connection;
+  const { createApp } = await import(built('app.js')) as typeof App;
+  initSchema();
+  const db = getDb();
+  assert.equal(fs.realpathSync(db.name), fs.realpathSync(file), 'plans must run only on its snapshot');
+  let index = options.index;
+  if (options.indexSql) {
+    db.exec(options.indexSql);
+    index = options.indexSql.match(/\bINDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)/i)?.[1];
+  }
+  const found = db.prepare(`SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?`).get(index) as { tbl_name: string } | undefined;
+  if (!index || !found) throw new Error(`Index ${index ?? '(unnamed)'} not found in the snapshot`);
+  table = found.tbl_name;
+  const one = (sql: string) => (db.prepare(sql).get() as Record<string, string> | undefined);
+  const routes = planRoutes({
+    codexSession: one(`SELECT id FROM browsing_sessions WHERE agent = 'codex' ORDER BY started_at DESC LIMIT 1`)?.id,
+    claudeSession: one(`SELECT id FROM browsing_sessions WHERE agent = 'claude' ORDER BY started_at DESC LIMIT 1`)?.id,
+    monitorSession: one(`SELECT id FROM sessions ORDER BY last_event_at DESC LIMIT 1`)?.id,
+    study: one(`SELECT study_id FROM events WHERE study_id IS NOT NULL LIMIT 1`)?.study_id,
+  });
+
+  const server = createApp().listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const failed: Record<string, number> = {};
+  recording = true;
+  for (const path of routes) {
+    route = path;
+    try {
+      const response = await fetch(base + path, { signal: AbortSignal.timeout(120_000) });
+      await response.arrayBuffer();
+      if (response.status !== 200) failed[path] = response.status;
+    } catch { failed[path] = -1; }
+  }
+  recording = false;
+  await new Promise<void>(resolve => server.close(() => resolve()));
+  closeDb();
+
+  const raw = new Database(file);
+  raw.pragma('cache_size = -64000');
+  const explain = (sql: string, params: unknown[]) => (raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as Array<{ detail: string }>)
+    .map(row => row.detail).join(' | ');
+  const time = (sql: string, params: unknown[]) => {
+    const samples: number[] = [];
+    for (let run = 0; run < 3; run++) {
+      const start = performance.now();
+      raw.prepare(sql).all(...params);
+      samples.push(elapsed(start));
+    }
+    return { samples_ms: samples, median_ms: median(samples) };
+  };
+  const changed: unknown[] = [];
+  let unchanged = 0;
+  const failures: string[] = [];
+  for (const entry of recorded.values()) {
+    try {
+      const withIndex = explain(entry.sql, entry.params);
+      raw.exec('BEGIN');
+      raw.exec(`DROP INDEX "${index}"`);
+      const withoutIndex = explain(entry.sql, entry.params);
+      if (withIndex === withoutIndex) { raw.exec('ROLLBACK'); unchanged++; continue; }
+      const without = time(entry.sql, entry.params);
+      raw.exec('ROLLBACK');
+      const withTiming = time(entry.sql, entry.params);
+      changed.push({
+        route: entry.route,
+        sql: entry.sql.replace(/\s+/g, ' ').trim().slice(0, 300),
+        plan_with: withIndex, plan_without: withoutIndex,
+        with: withTiming, without,
+      });
+    } catch (error) {
+      if (raw.inTransaction) raw.exec('ROLLBACK');
+      failures.push(String(error));
+    }
+  }
+  raw.close();
+  return {
+    measurements: { statements: recorded.size, unchanged, changed },
+    observations: { index, table, routes: routes.length, failed_routes: failed, compare_errors: failures },
+    limits: ['Each compared statement is timed three times per variant on a warm cache; the first run of each is the coldest'],
+  };
+}
+
 const handlers: Record<ProbeId, (options: ProbeOptions) => Promise<{ measurements: unknown; observations: unknown; limits?: string[] }>> = {
-  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync,
+  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync, plans,
 };
 const output = await handlers[request.probe](request.options);
 writeJson(path.join(request.evidence, 'worker.json'), output);

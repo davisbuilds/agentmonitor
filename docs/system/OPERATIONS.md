@@ -640,6 +640,7 @@ pnpm --silent verify probe ingestion --json                  # import/watcher st
 pnpm --silent verify probe monitor-stats --agent codex --json # per-statement timing and query plan
 pnpm --silent verify probe snapshot --json                   # disposable copy for probes that write
 pnpm --silent verify probe resync <transcript.jsonl> [--db <snapshot>] --json
+pnpm --silent verify probe plans --db <snapshot> --index-sql 'CREATE INDEX ...' --json  # index impact
 ```
 
 Read probes open the database `readonly` with `query_only` in a child process
@@ -649,6 +650,17 @@ only to a fresh scratch database, removed afterwards, or to a snapshot directory
 created by `probe snapshot`; any other `--db` is refused. A snapshot needs free
 temporary space of twice the database size and stays until you remove its
 directory.
+
+`plans` measures an index's effect before it ships. On a snapshot it runs the
+compiled app's startup migrations, creates the `--index-sql` candidate (or uses an
+existing `--index NAME`), drives a built-in list of read routes, and records
+each statement that touches the index's table. It then explains and times each
+one with the index present and again with it dropped inside a rolled-back
+transaction, reporting only the statements whose plan changes. Use it to find
+regressions elsewhere, not only the read the index targets. It records truncated
+SQL and plans, not parameters or results; the route list is a sample, so a
+statement reached only by other routes or by writes is not compared. Like
+`resync`, it refuses any `--db` that is not a snapshot from `probe snapshot`.
 
 Health reports `database_size_matches` as a size comparison only;
 `target_matches_running_server` stays `unknown`. Equal sizes do not identify the

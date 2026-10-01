@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, test } from 'node:test';
+import { spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { assertUsage, usageExpected, scenarioById } from '../scripts/verify/contracts.js';
 import { probeById, resolveTarget, snapshotPrefix } from '../scripts/verify/probe.js';
@@ -59,6 +60,32 @@ describe('verification probes', () => {
       assert.equal(resolveTarget(resync, { db: copy }, evidence)!.kind, 'snapshot');
     } finally {
       for (const dir of [evidence, outside, snapshot]) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('plans runs only on a snapshot made by the CLI', () => {
+    const evidence = temp();
+    const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
+    try {
+      const plans = probeById('plans');
+      assert.throws(() => resolveTarget(plans, {}, evidence), /must be a snapshot/);
+      const other = path.join(evidence, 'agentmonitor.db');
+      fs.writeFileSync(other, '');
+      assert.throws(() => resolveTarget(plans, { db: other }, evidence), /must be a snapshot/);
+      const copy = path.join(snapshot, 'agentmonitor.db');
+      fs.writeFileSync(copy, '');
+      assert.equal(resolveTarget(plans, { db: copy }, evidence)!.kind, 'snapshot');
+    } finally {
+      for (const dir of [evidence, snapshot]) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('plans needs exactly one index option', () => {
+    const invoke = (...args: string[]) => spawnSync(process.execPath, ['--import', 'tsx', 'scripts/verify/cli.ts', 'probe', ...args, '--json'], { encoding: 'utf8' });
+    for (const args of [['plans', '--db', 'x'], ['plans', '--db', 'x', '--index', 'a', '--index-sql', 'CREATE INDEX b ON t(c)'], ['health', '--index', 'a']]) {
+      const result = invoke(...args);
+      assert.equal(result.status, 2, result.stderr);
+      assert.match(JSON.parse(result.stdout).error, /index/);
     }
   });
 

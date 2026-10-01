@@ -18,6 +18,7 @@ const help = `AgentMonitor development verification (run pnpm build first)
        [--agent A] [--since ISO] [--runs N] [--url URL] [--timeout-ms N]
   Ingestion scope: [--claude-dir DIR] [--codex-home DIR] [--exclude PATTERN ...]
   pnpm --silent verify probe resync <transcript.jsonl> [--db SNAPSHOT] [--append-lines N] [--retain-transcripts] [--json]
+  pnpm --silent verify probe plans --db SNAPSHOT (--index NAME | --index-sql 'CREATE INDEX ...') [--json]
 
 start keeps a disposable compiled app running for up to one hour.
 run owns and stops its app unless --session is given. Evidence and fixtures
@@ -28,7 +29,9 @@ model calls. Probes read the installed database (the globally linked amon's
 data/agentmonitor.db, or --db) through a read-only connection in a child process
 killed at its deadline. Resync deletes its transcript copies by default;
 --retain-transcripts keeps them for debugging and lists their location.
-Snapshots contain the full database and remain until you remove them.
+Snapshots contain the full database and remain until you remove them. Plans runs
+the compiled app on a snapshot (its startup migrations and any --index-sql write
+there) and compares each recorded read's plan with and without the index.
 Ingestion scope comes from options, then the caller's environment, then defaults;
 it is recorded but is not asserted to match the running service's configuration.
 `;
@@ -44,6 +47,7 @@ try {
     'claude-dir': { type: 'string' }, 'codex-home': { type: 'string' }, exclude: { type: 'string', multiple: true },
     db: { type: 'string' }, url: { type: 'string' }, agent: { type: 'string' }, since: { type: 'string' },
     runs: { type: 'string' }, 'append-lines': { type: 'string' }, 'timeout-ms': { type: 'string' },
+    index: { type: 'string' }, 'index-sql': { type: 'string' },
   }, allowPositionals: true, strict: true });
   json = values.json ?? false;
   if (values.help || positionals.length === 0) { process.stdout.write(help); }
@@ -54,11 +58,17 @@ try {
     const expected = command === 'probe' && target === 'resync' ? 3 : needsTarget ? 2 : 1;
     if (positionals.length !== expected) throw new Error(`Invalid arguments for ${command}; use --help`);
     if (command !== 'run' && (values.session || values['max-api-ms'] || values['max-ui-ms'])) throw new Error('Run options require run');
-    const probeOptions = ['retain-transcripts', 'claude-dir', 'codex-home', 'exclude', 'db', 'url', 'agent', 'since', 'runs', 'append-lines', 'timeout-ms'] as const;
+    const probeOptions = ['retain-transcripts', 'claude-dir', 'codex-home', 'exclude', 'db', 'url', 'agent', 'since', 'runs', 'append-lines', 'timeout-ms', 'index', 'index-sql'] as const;
     if (command !== 'probe' && probeOptions.some(name => values[name] !== undefined)) throw new Error('Probe options require probe');
     if (values['retain-transcripts'] && (command !== 'probe' || target !== 'resync')) throw new Error('--retain-transcripts requires probe resync');
     if ((values['claude-dir'] !== undefined || values['codex-home'] !== undefined || values.exclude !== undefined)
       && (command !== 'probe' || target !== 'ingestion')) throw new Error('Discovery options require probe ingestion');
+    if ((values.index !== undefined || values['index-sql'] !== undefined) && (command !== 'probe' || target !== 'plans')) {
+      throw new Error('--index and --index-sql require probe plans');
+    }
+    if (command === 'probe' && target === 'plans' && (values.index === undefined) === (values['index-sql'] === undefined)) {
+      throw new Error('probe plans needs exactly one of --index or --index-sql');
+    }
     const count = (value: string | undefined, name: string) => {
       if (value === undefined) return undefined;
       if (!/^\d+$/.test(value) || Number(value) < 1) throw new Error(`${name} must be a positive integer`);
@@ -79,6 +89,7 @@ try {
           db: values.db, url: values.url, agent: values.agent, since: values.since,
           runs: count(values.runs, '--runs'), appendLines: count(values['append-lines'], '--append-lines'),
           timeoutMs: count(values['timeout-ms'], '--timeout-ms'), transcript: positionals[2], signal: abort.signal,
+          index: values.index, indexSql: values['index-sql'],
         });
         output = result;
         process.exitCode = result.status === 'observed' ? 0 : 2;

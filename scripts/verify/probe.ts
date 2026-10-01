@@ -50,6 +50,17 @@ export const probes = [
     ],
     deadline_ms: 300_000,
   },
+  {
+    id: 'plans',
+    target: 'snapshot',
+    description: 'Index impact: run the compiled app on a snapshot, record the statements its read routes run, and compare their plans and timings with and without one index (--index NAME or a candidate --index-sql)',
+    limits: [
+      'Writes only to a snapshot made by this CLI: the app runs its startup migrations there, and --index-sql creates the candidate index',
+      'Covers the built-in route list; statements reached only by other routes or by writes are not compared',
+      'Records SQL text (truncated) and plans, not parameters or results',
+    ],
+    deadline_ms: 900_000,
+  },
 ] as const;
 
 export type ProbeId = typeof probes[number]['id'];
@@ -68,6 +79,8 @@ export interface ProbeOptions {
   runs?: number;
   appendLines?: number;
   transcript?: string;
+  index?: string;
+  indexSql?: string;
   timeoutMs?: number;
   retainTranscripts?: boolean;
   claudeDir?: string;
@@ -114,11 +127,11 @@ function isSnapshot(file: string): boolean {
 }
 
 export function resolveTarget(probe: ReturnType<typeof probeById>, options: ProbeOptions, evidence: string): DatabaseTarget | null {
-  if (probe.id === 'resync') {
-    if (!options.db) return { kind: 'scratch', path: path.join(evidence, 'scratch.db'), resolved_by: 'fresh scratch database' };
+  if (probe.id === 'resync' || probe.id === 'plans') {
+    if (!options.db && probe.id === 'resync') return { kind: 'scratch', path: path.join(evidence, 'scratch.db'), resolved_by: 'fresh scratch database' };
     // A probe that writes may only touch a copy this CLI made.
-    if (!fs.existsSync(options.db) || !isSnapshot(options.db)) {
-      throw new Error('resync writes; --db must be a snapshot created by `verify probe snapshot`');
+    if (!options.db || !fs.existsSync(options.db) || !isSnapshot(options.db)) {
+      throw new Error(`${probe.id} writes; --db must be a snapshot created by \`verify probe snapshot\``);
     }
     return { kind: 'snapshot', path: fs.realpathSync(options.db), resolved_by: '--db (snapshot)' };
   }
@@ -193,7 +206,13 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     if (probe.id === 'ingestion' && process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS !== undefined) {
       env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS = process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS;
     }
-    if (probe.id === 'resync' && target) env.AGENTMONITOR_DB_PATH = target.path;
+    if ((probe.id === 'resync' || probe.id === 'plans') && target) env.AGENTMONITOR_DB_PATH = target.path;
+    if (probe.id === 'plans') {
+      // The app reads these at startup; keep it off real catalogs and auto-import.
+      const empty = path.join(directory, 'empty');
+      fs.mkdirSync(empty);
+      Object.assign(env, { AGENTMONITOR_AUTO_IMPORT_MINUTES: '0', AGENTMONITOR_SKILL_CATALOG_DIRS: empty });
+    }
     const log = fs.openSync(path.join(directory, 'worker.log'), 'a', 0o600);
     const child = spawn(process.execPath, ['--import', 'tsx', path.join(repoRoot, 'scripts/verify/probe-worker.ts'), request], {
       cwd: repoRoot, env, stdio: ['ignore', log, log],
@@ -238,6 +257,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
       }
       if (result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
     }
+    if (probe.id === 'plans' && result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
     result.finished_at = new Date().toISOString();
     persist();
   }
