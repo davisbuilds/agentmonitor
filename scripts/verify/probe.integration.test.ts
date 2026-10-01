@@ -230,4 +230,29 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.deepEqual(result.content_artifacts, [fs.realpathSync(copy)]);
     } finally { fs.rmSync(snapshot, { recursive: true, force: true }); }
   });
+
+  await t.test('hotspots ranks every read the routes ran, on a snapshot copy only', async () => {
+    const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
+    try {
+      const copy = path.join(snapshot, 'agentmonitor.db');
+      fs.copyFileSync(fixture, copy);
+      const before = digest(fixture);
+      const result = await runProbe('hotspots', { db: copy });
+      assert.equal(result.status, 'observed', result.errors.join(' '));
+      type Entry = { route: string; sql: string; median_ms: number; plan: string[]; flags: string[] };
+      const measurements = result.measurements as { statements: number; flagged: Record<string, number>; slowest: Entry[] };
+      const observations = result.observations as { routes: number; failed_routes: Record<string, number>; errors: string[] };
+      assert.deepEqual(observations.errors, []);
+      assert.deepEqual(observations.failed_routes, {});
+      assert.ok(measurements.statements > measurements.slowest.length, 'more statements than the listed slowest');
+      assert.deepEqual(measurements.slowest.map(entry => entry.median_ms), [...measurements.slowest.map(entry => entry.median_ms)].sort((a, b) => b - a));
+      assert.ok(measurements.slowest.every(entry => entry.plan.length > 0));
+      // Reads from more than one table are timed, not only events.
+      const all = measurements.slowest.map(entry => entry.sql).join('\n');
+      assert.match(all, /\bevents\b/);
+      assert.match(all, /\b(messages|browsing_sessions|sessions)\b/);
+      assert.equal(digest(fixture), before, 'only the snapshot copy is written');
+      assert.deepEqual(result.content_artifacts, [fs.realpathSync(copy)]);
+    } finally { fs.rmSync(snapshot, { recursive: true, force: true }); }
+  });
 });

@@ -61,9 +61,23 @@ export const probes = [
     ],
     deadline_ms: 900_000,
   },
+  {
+    id: 'hotspots',
+    target: 'snapshot',
+    description: 'Where reads spend their time: run the compiled app on a snapshot, then time and explain every statement its read routes ran, slowest first, with plan hints (an aggregate that looks up each match, a temporary sort, a full scan)',
+    limits: [
+      'Writes only to a snapshot made by this CLI: the app runs its startup migrations there',
+      'Covers the built-in route list; statements reached only by other routes or by writes are not timed',
+      'Records SQL text (truncated) and plans, not parameters or results',
+    ],
+    deadline_ms: 900_000,
+  },
 ] as const;
 
 export type ProbeId = typeof probes[number]['id'];
+
+/** Probes that run the compiled app, and so its startup migrations, on a snapshot. */
+const drivesApp = (id: ProbeId) => id === 'plans' || id === 'hotspots';
 
 export function probeById(id: string) {
   const probe = probes.find(entry => entry.id === id);
@@ -127,7 +141,7 @@ function isSnapshot(file: string): boolean {
 }
 
 export function resolveTarget(probe: ReturnType<typeof probeById>, options: ProbeOptions, evidence: string): DatabaseTarget | null {
-  if (probe.id === 'resync' || probe.id === 'plans') {
+  if (probe.id === 'resync' || drivesApp(probe.id)) {
     if (!options.db && probe.id === 'resync') return { kind: 'scratch', path: path.join(evidence, 'scratch.db'), resolved_by: 'fresh scratch database' };
     // A probe that writes may only touch a copy this CLI made.
     if (!options.db || !fs.existsSync(options.db) || !isSnapshot(options.db)) {
@@ -206,8 +220,8 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     if (probe.id === 'ingestion' && process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS !== undefined) {
       env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS = process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS;
     }
-    if ((probe.id === 'resync' || probe.id === 'plans') && target) env.AGENTMONITOR_DB_PATH = target.path;
-    if (probe.id === 'plans') {
+    if ((probe.id === 'resync' || drivesApp(probe.id)) && target) env.AGENTMONITOR_DB_PATH = target.path;
+    if (drivesApp(probe.id)) {
       // The app reads these at startup; keep it off real catalogs and auto-import.
       const empty = path.join(directory, 'empty');
       fs.mkdirSync(empty);
@@ -257,7 +271,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
       }
       if (result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
     }
-    if (probe.id === 'plans' && result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
+    if (drivesApp(probe.id) && result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
     result.finished_at = new Date().toISOString();
     persist();
   }

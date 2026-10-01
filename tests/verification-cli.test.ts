@@ -8,12 +8,27 @@ import Database from 'better-sqlite3';
 import { assertUsage, usageExpected, scenarioById } from '../scripts/verify/contracts.js';
 import { probeById, resolveTarget, snapshotPrefix } from '../scripts/verify/probe.js';
 import { openReadOnly } from '../scripts/verify/readonly.js';
+import { planFlags } from '../scripts/verify/plan-flags.js';
 
 test('usage oracle rejects a believable missing event, wrong cost, and malformed result', () => {
   assertUsage({ ...usageExpected.all }, usageExpected.all);
   assert.throws(() => assertUsage({ ...usageExpected.all, total_usage_events: 999 }, usageExpected.all));
   assert.throws(() => assertUsage({ ...usageExpected.all, total_cost_usd: 0 }, usageExpected.all));
   assert.throws(() => assertUsage({}, usageExpected.all));
+});
+
+test('plan flags single out an aggregate that looks up every match', () => {
+  // The plans behind a slow Monitor count (3 s) and its fast page (3 ms).
+  const lookup = 'SEARCH events USING INDEX idx_events_agent_event_order (agent_type=? AND event_type=?)';
+  assert.deepEqual(planFlags('SELECT COUNT(*) as c FROM events WHERE agent_type = ?', [lookup]), ['row_lookups', 'aggregate_row_lookups']);
+  assert.deepEqual(planFlags('SELECT * FROM events WHERE agent_type = ? LIMIT ?', [lookup]), ['row_lookups']);
+  assert.deepEqual(planFlags('SELECT COUNT(*) FROM events WHERE agent_type = ?',
+    ['SEARCH events USING COVERING INDEX idx_events_agent_tool_order (agent_type=? AND tool_name=?)']), []);
+  assert.deepEqual(planFlags('SELECT * FROM events ORDER BY created_at', ['SCAN events', 'USE TEMP B-TREE FOR ORDER BY']), ['full_scan', 'temp_btree']);
+  for (const step of ['SCAN e USING COVERING INDEX idx_events_usage_covering', 'SEARCH events USING INTEGER PRIMARY KEY (rowid=?)',
+    'SCAN messages_fts VIRTUAL TABLE INDEX 0:M2', 'SCAN CONSTANT ROW']) {
+    assert.deepEqual(planFlags('SELECT SUM(x) FROM t', [step]), [], step);
+  }
 });
 
 test('discovery rejects unsupported scenarios', () => {

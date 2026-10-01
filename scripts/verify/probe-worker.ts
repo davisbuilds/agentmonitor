@@ -20,6 +20,7 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import Database from 'better-sqlite3';
 import { openReadOnly } from './readonly.js';
+import { planFlags } from './plan-flags.js';
 import { repoRoot, writeJson } from './session.js';
 import { snapshotPrefix, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
 
@@ -276,6 +277,7 @@ function planRoutes(ids: { codexSession?: string; claudeSession?: string; monito
     ...withAgent('/api/v2/usage', ['agents', 'daily', 'facets', 'models', 'models/daily', 'overview', 'projects', 'summary', 'top-sessions', 'tiers']),
     '/api/v2/monitor/stats', '/api/v2/monitor/stats?agent=codex', '/api/v2/monitor/stats?agent=claude_code',
     '/api/v2/monitor/events', '/api/v2/monitor/events?agent=codex', '/api/v2/monitor/events?agent=codex&tool_name=exec_command',
+    '/api/v2/monitor/events?agent=codex&event_type=tool_use',
     '/api/v2/monitor/events?agent=claude_code&since=2026-09-01', '/api/v2/monitor/filter-options',
     '/api/v2/monitor/tools', '/api/v2/monitor/tools?agent=codex', '/api/v2/monitor/sessions', '/api/v2/monitor/sessions?agent=codex',
     '/api/v2/sessions?limit=50', '/api/v2/sessions?agent=codex&limit=50',
@@ -292,18 +294,22 @@ function planRoutes(ids: { codexSession?: string; claudeSession?: string; monito
   return routes;
 }
 
+interface RecordedStatement { sql: string; params: unknown[]; route: string }
+
 /**
- * Index impact on a snapshot: drive the compiled app's read routes, record each
- * statement that touches the index's table, then compare its plan and timing
- * with the index present and dropped inside a rolled-back transaction.
+ * Drive the compiled app's read routes against the snapshot and record each
+ * distinct read statement (SQL and parameters) that `include` accepts. `setup`
+ * runs on the app's connection after its startup migrations, before any route.
  */
-async function plans(options: ProbeOptions) {
-  const file = request.target!.path;
+async function recordRouteStatements(
+  file: string,
+  include: (sql: string) => boolean,
+  setup?: (db: Database.Database) => void,
+): Promise<{ recorded: RecordedStatement[]; routes: string[]; failed: Record<string, number> }> {
   // Record reads by wrapping the shared Statement prototype before the app loads.
-  const recorded = new Map<string, { sql: string; params: unknown[]; route: string }>();
+  const recorded = new Map<string, RecordedStatement>();
   let route = 'startup';
   let recording = false;
-  let table = '';
   const prepare = Database.prototype.prepare;
   let wrapped = false;
   Database.prototype.prepare = function (this: Database.Database, sql: string) {
@@ -314,7 +320,7 @@ async function plans(options: ProbeOptions) {
       for (const method of ['all', 'get', 'iterate']) {
         const original = proto[method];
         proto[method] = function (this: Database.Statement, ...args: unknown[]) {
-          if (recording && this.reader && new RegExp(`\\b${table}\\b`).test(this.source)) {
+          if (recording && this.reader && include(this.source)) {
             const key = `${this.source}\u0000${JSON.stringify(args)}`;
             if (!recorded.has(key)) recorded.set(key, { sql: this.source, params: args, route });
           }
@@ -330,15 +336,8 @@ async function plans(options: ProbeOptions) {
   const { createApp } = await import(built('app.js')) as typeof App;
   initSchema();
   const db = getDb();
-  assert.equal(fs.realpathSync(db.name), fs.realpathSync(file), 'plans must run only on its snapshot');
-  let index = options.index;
-  if (options.indexSql) {
-    db.exec(options.indexSql);
-    index = options.indexSql.match(/\bINDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)/i)?.[1];
-  }
-  const found = db.prepare(`SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?`).get(index) as { tbl_name: string } | undefined;
-  if (!index || !found) throw new Error(`Index ${index ?? '(unnamed)'} not found in the snapshot`);
-  table = found.tbl_name;
+  assert.equal(fs.realpathSync(db.name), fs.realpathSync(file), 'the app must run only on its snapshot');
+  setup?.(db);
   const one = (sql: string) => (db.prepare(sql).get() as Record<string, string> | undefined);
   const routes = planRoutes({
     codexSession: one(`SELECT id FROM browsing_sessions WHERE agent = 'codex' ORDER BY started_at DESC LIMIT 1`)?.id,
@@ -363,24 +362,54 @@ async function plans(options: ProbeOptions) {
   recording = false;
   await new Promise<void>(resolve => server.close(() => resolve()));
   closeDb();
+  return { recorded: [...recorded.values()], routes, failed };
+}
+
+const explainOn = (db: Database.Database, sql: string, params: unknown[]) =>
+  (db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as Array<{ detail: string }>).map(row => row.detail);
+
+/** Three timed runs on a warm cache; the first is the coldest. */
+function timeOn(db: Database.Database, sql: string, params: unknown[]) {
+  const samples: number[] = [];
+  let rows = 0;
+  for (let run = 0; run < 3; run++) {
+    const start = performance.now();
+    rows = db.prepare(sql).all(...params).length;
+    samples.push(elapsed(start));
+  }
+  return { samples_ms: samples, median_ms: median(samples), rows };
+}
+
+/**
+ * Index impact on a snapshot: drive the compiled app's read routes, record each
+ * statement that touches the index's table, then compare its plan and timing
+ * with the index present and dropped inside a rolled-back transaction.
+ */
+async function plans(options: ProbeOptions) {
+  const file = request.target!.path;
+  let index = options.index;
+  let table = '';
+  const { recorded, routes, failed } = await recordRouteStatements(file, sql => new RegExp(`\\b${table}\\b`).test(sql), db => {
+    if (options.indexSql) {
+      db.exec(options.indexSql);
+      index = options.indexSql.match(/\bINDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)/i)?.[1];
+    }
+    const found = db.prepare(`SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?`).get(index) as { tbl_name: string } | undefined;
+    if (!index || !found) throw new Error(`Index ${index ?? '(unnamed)'} not found in the snapshot`);
+    table = found.tbl_name;
+  });
 
   const raw = new Database(file);
   raw.pragma('cache_size = -64000');
-  const explain = (sql: string, params: unknown[]) => (raw.prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...params) as Array<{ detail: string }>)
-    .map(row => row.detail).join(' | ');
+  const explain = (sql: string, params: unknown[]) => explainOn(raw, sql, params).join(' | ');
   const time = (sql: string, params: unknown[]) => {
-    const samples: number[] = [];
-    for (let run = 0; run < 3; run++) {
-      const start = performance.now();
-      raw.prepare(sql).all(...params);
-      samples.push(elapsed(start));
-    }
-    return { samples_ms: samples, median_ms: median(samples) };
+    const { samples_ms, median_ms } = timeOn(raw, sql, params);
+    return { samples_ms, median_ms };
   };
   const changed: unknown[] = [];
   let unchanged = 0;
   const failures: string[] = [];
-  for (const entry of recorded.values()) {
+  for (const entry of recorded) {
     try {
       const withIndex = explain(entry.sql, entry.params);
       raw.exec('BEGIN');
@@ -403,14 +432,60 @@ async function plans(options: ProbeOptions) {
   }
   raw.close();
   return {
-    measurements: { statements: recorded.size, unchanged, changed },
+    measurements: { statements: recorded.length, unchanged, changed },
     observations: { index, table, routes: routes.length, failed_routes: failed, compare_errors: failures },
     limits: ['Each compared statement is timed three times per variant on a warm cache; the first run of each is the coldest'],
   };
 }
 
+const HOTSPOT_LIMIT = 25;
+
+/**
+ * Where the app's reads spend their time: drive the compiled app's read routes
+ * on a snapshot, then time and explain every distinct statement they ran,
+ * slowest first, with plan hints such as an aggregate that looks up each match.
+ */
+async function hotspots() {
+  const file = request.target!.path;
+  const { recorded, routes, failed } = await recordRouteStatements(file, () => true);
+  const db = openReadOnly(file);
+  db.pragma('cache_size = -64000');
+  const measured: Array<{ route: string; sql: string; median_ms: number; samples_ms: number[]; rows: number; plan: string[]; flags: string[] }> = [];
+  const errors: string[] = [];
+  for (const entry of recorded) {
+    try {
+      const plan = explainOn(db, entry.sql, entry.params);
+      measured.push({
+        route: entry.route,
+        sql: entry.sql.replace(/\s+/g, ' ').trim().slice(0, 300),
+        ...timeOn(db, entry.sql, entry.params),
+        plan,
+        flags: planFlags(entry.sql, plan),
+      });
+    } catch (error) { errors.push(String(error)); }
+  }
+  db.close();
+  measured.sort((a, b) => b.median_ms - a.median_ms);
+  const flagged: Record<string, number> = {};
+  for (const entry of measured) for (const flag of entry.flags) flagged[flag] = (flagged[flag] ?? 0) + 1;
+  return {
+    measurements: {
+      statements: measured.length,
+      total_median_ms: Math.round(measured.reduce((sum, entry) => sum + entry.median_ms, 0) * 100) / 100,
+      flagged,
+      slowest: measured.slice(0, HOTSPOT_LIMIT),
+    },
+    observations: { routes: routes.length, failed_routes: failed, errors },
+    limits: [
+      `Lists the ${HOTSPOT_LIMIT} slowest statements; counts cover all of them`,
+      'Times each statement three times on a separate read-only connection after the routes ran, so caches are warm',
+      'Plan flags are hints for ranking, not verdicts',
+    ],
+  };
+}
+
 const handlers: Record<ProbeId, (options: ProbeOptions) => Promise<{ measurements: unknown; observations: unknown; limits?: string[] }>> = {
-  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync, plans,
+  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync, plans, hotspots,
 };
 const output = await handlers[request.probe](request.options);
 writeJson(path.join(request.evidence, 'worker.json'), output);

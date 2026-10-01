@@ -19,6 +19,7 @@ const help = `AgentMonitor development verification (run pnpm build first)
   Ingestion scope: [--claude-dir DIR] [--codex-home DIR] [--exclude PATTERN ...]
   pnpm --silent verify probe resync <transcript.jsonl> [--db SNAPSHOT] [--append-lines N] [--retain-transcripts] [--json]
   pnpm --silent verify probe plans --db SNAPSHOT (--index NAME | --index-sql 'CREATE INDEX ...') [--json]
+  pnpm --silent verify probe hotspots --db SNAPSHOT [--json]
 
 start keeps a disposable compiled app running for up to one hour.
 run owns and stops its app unless --session is given. Evidence and fixtures
@@ -32,6 +33,7 @@ killed at its deadline. Resync deletes its transcript copies by default;
 Snapshots contain the full database and remain until you remove them. Plans runs
 the compiled app on a snapshot (its startup migrations and any --index-sql write
 there) and compares each recorded read's plan with and without the index.
+Hotspots runs the same routes on a snapshot and ranks every read they ran by time.
 Ingestion scope comes from options, then the caller's environment, then defaults;
 it is recorded but is not asserted to match the running service's configuration.
 `;
