@@ -13,7 +13,6 @@ export interface StorageReport {
   free_pages: number;
   free_bytes: number;
   search_index_bytes: number;
-  wal_size_limit_bytes: number;
 }
 
 function fileBytes(file: string): number {
@@ -42,22 +41,21 @@ export function readStorageReport(db: Database.Database): StorageReport {
     free_pages: freePages,
     free_bytes: freePages * pageSize,
     search_index_bytes: searchIndexBytes(db),
-    wal_size_limit_bytes: db.pragma('journal_size_limit', { simple: true }) as number,
   };
 }
 
 /**
  * Leaf pages one merge step may write. On a store whose search index had grown
- * to 1.4 GB (93% dead), a full cleanup in 100-page steps took 226 steps and
- * 15 s, the slowest step 0.27 s, and ended at the size of a rebuilt index;
- * 500-page steps took up to 0.9 s each.
+ * to 13 times its rebuilt size (93% dead entries), a full cleanup in 100-page
+ * steps took 226 steps and 15 s, the slowest step 0.27 s, and ended at the size
+ * of a rebuilt index; 500-page steps took up to 0.9 s each.
  */
-export const SEARCH_MERGE_STEP_PAGES = 100;
+const SEARCH_MERGE_STEP_PAGES = 100;
 // That cleanup took 226 steps; this bound only stops a loop that never ends.
 const SEARCH_MERGE_MAX_STEPS = 10_000;
 
 /** Run one bounded merge of the search index. Returns whether it found work. */
-export function mergeSearchIndexStep(db: Database.Database, pages = SEARCH_MERGE_STEP_PAGES): boolean {
+function mergeSearchIndexStep(db: Database.Database, pages = SEARCH_MERGE_STEP_PAGES): boolean {
   if (!Number.isSafeInteger(pages) || pages < 1) throw new RangeError(`merge step pages must be a positive integer: ${pages}`);
   // A negative page count merges even when no level has `automerge` segments
   // waiting, which is what carries dead entries down into the oldest segment.

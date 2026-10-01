@@ -409,6 +409,18 @@ the build.
 - **Next**: instrument the wait before changing the timeout. Raising it would
   hide the cause, and the point is to learn whether first paint is genuinely slow.
 
+#### The events table carries more index than data
+- **What**: `events` has 23 indexes, many added one query at a time; a few
+  probably no longer earn their write and space cost (for example
+  `idx_events_agent_type`, now the shared prefix of three composites).
+- **Why or evidence**: measured 2026-10-01 on a compacted local store: the events
+  indexes take 1.75 times the table's own pages and 29% of the file, and every
+  event insert updates all of them.
+- **Next**: for each index, compare the plans of every recorded app statement with
+  and without it (dropped inside a rolled-back transaction, as the verification
+  CLI's `plans` probe does) and include writer statements such as import dedup and
+  session reconciliation, not only reads. Drop only indexes no statement prefers.
+
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
   `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
@@ -505,9 +517,10 @@ entries below record what was measured, not the report's claims.
   in `messages.content`, and the content-linked FTS index tokenizes them.
 - **Why or evidence**: measured 2026-10-01 on a local store: messages containing
   base64 images are well under 1% of messages but about 15% of stored message
-  text. The FTS index is the largest object in the database, about four times
-  the size of the `messages` table; how much of it the image tokens cause is not
-  yet measured. `agentsview` strips such images to a descriptor with a SHA-256
+  text. The FTS index once measured about four times the size of the `messages`
+  table, but 93% of that was dead entries a merge removes; merged, it is about
+  0.4 times the table (2026-10-01). How much of the live index the image tokens
+  cause is not yet measured. `agentsview` strips such images to a descriptor with a SHA-256
   and byte count (`internal/db/tool_result_images.go`).
 - **Next**: measure the index share by rebuilding FTS on a copy with image data
   removed. If material, replace image data with a descriptor in the parsers,

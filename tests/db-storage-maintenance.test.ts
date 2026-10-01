@@ -4,12 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 import type Database from 'better-sqlite3';
+import type * as StorageModule from '../src/db/storage.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-storage-maintenance-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(dir, 'test.db');
 let closeDb: (() => void) | undefined;
 let db: Database.Database;
-let storage: typeof import('../src/db/storage.js');
+let storage: typeof StorageModule;
 
 const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
 

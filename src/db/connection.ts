@@ -48,7 +48,8 @@ export function getDb(): Database.Database {
     db.pragma('cache_size = -64000'); // 64MB
     // Truncate the WAL back to this size when a checkpoint resets it. SQLite
     // otherwise keeps the file at its high-water mark: a burst of writes (an
-    // import, a re-sync) once left a 392 MB WAL behind indefinitely.
+    // import, a re-sync) once left a WAL about 8% of the database's size
+    // behind indefinitely.
     db.pragma(`journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`);
   }
   return db;
