@@ -204,7 +204,11 @@ function parseEventMetadata(event: AgentEvent): Record<string, unknown> {
 // tell whether the path is already in the server's count, so ask the server.
 let editCountNeedsRefetch = false;
 
-function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
+/**
+ * `countKnown` is false for a placeholder built from a live event: its zero
+ * counts are not a baseline, since the backfill may reveal earlier files.
+ */
+function applyLiveEventAggregate(session: Session, event: AgentEvent, countKnown = true): Session {
   const metadata = parseEventMetadata(event);
   const nextStatus = event.event_type === 'session_end'
     ? (event.agent_type === 'claude_code' ? 'idle' : 'ended')
@@ -228,7 +232,7 @@ function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
     && ['Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin'].includes(event.tool_name || '')
   ) {
     const entry = editedFilesBySession.get(session.id)
-      ?? { files: new Set<string>(), complete: (session.files_edited || 0) === 0 };
+      ?? { files: new Set<string>(), complete: countKnown && (session.files_edited || 0) === 0 };
     const sizeBefore = entry.files.size;
     entry.files.add(metadata.file_path);
     if (!entry.complete && entry.files.size > sizeBefore) editCountNeedsRefetch = true;
@@ -290,7 +294,7 @@ export function handleEventForSession(event: AgentEvent): void {
       files_edited: 0,
       lines_added: 0,
       lines_removed: 0,
-    }, event), ...sessions];
+    }, event, false), ...sessions];
     void backfillSession(event.session_id);
   }
 }

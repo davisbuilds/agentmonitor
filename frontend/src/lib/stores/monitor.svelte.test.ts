@@ -279,6 +279,21 @@ describe('edited-file tracking', () => {
     expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
   });
 
+  it('treats a session built from a live event as having unknown files', async () => {
+    fetchSessionDetail.mockReset();
+    fetchSessionDetail
+      .mockResolvedValueOnce({ session: session('hidden', { files_edited: 3 }) })
+      .mockResolvedValueOnce({ session: session('hidden', { files_edited: 4 }) });
+    store.setSessions([]);
+
+    store.handleEventForSession(edit(1, 'hidden', '/a.ts'));
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(3));
+    store.handleEventForSession(edit(2, 'hidden', '/b.ts'));
+
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(4));
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
+  });
+
   it('does not ask the server for a session with no edits yet', () => {
     fetchSessionDetail.mockReset();
     store.setSessions([session('s1')]);
