@@ -561,6 +561,10 @@ whether the server was source or built.
 
 ## Verification
 
+The [verification CLI pilot design](../design/2026-10-01-verification-cli-pilot-design.md)
+records the proposed development interface and its evidence boundaries; it is not
+an available command yet.
+
 The pre-push checks are:
 
 ```bash
