@@ -235,6 +235,12 @@ function logRecordHasTime(record: OtelLogRecord): boolean {
     || Boolean(getAttr(record.attributes, 'event.timestamp'));
 }
 
+function attrToIso(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
+}
+
 function nanoToIso(nanos: string | number | undefined): string | undefined {
   // OTLP JSON sends uint64 as a string, though some exporters send a number.
   // Anything else means "no time", not a BigInt SyntaxError that fails the batch.
@@ -683,7 +689,11 @@ function parseLogRecord(
     ?? getAttr(resourceAttrs, 'branch')
     ?? (bodyJson?.branch as string | undefined);
 
-  const clientTimestamp = nanoToIso(logRecord.timeUnixNano);
+  // Codex leaves timeUnixNano unset and carries its time in event.timestamp;
+  // without it every Codex row fell back to server receive time.
+  const clientTimestamp = nanoToIso(logRecord.timeUnixNano)
+    ?? attrToIso(getAttr(logRecord.attributes, 'event.timestamp'))
+    ?? nanoToIso(logRecord.observedTimeUnixNano);
 
   // Build metadata from body JSON (minus fields we've already extracted)
   let metadata: unknown = {};
