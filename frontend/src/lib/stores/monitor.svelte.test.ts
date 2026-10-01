@@ -245,18 +245,38 @@ describe('edited-file tracking', () => {
     expect(store.getSessions()[0].files_edited).toBe(2);
   });
 
-  it('asks the server when a listed session edits without a known file set', async () => {
+  it('asks the server for each new file while the set is incomplete', async () => {
     fetchSessionDetail.mockReset();
-    fetchSessionDetail.mockResolvedValue({ session: session('s1', { files_edited: 4 }) });
+    fetchSessionDetail
+      .mockResolvedValueOnce({ session: session('s1', { files_edited: 4 }) })
+      .mockResolvedValueOnce({ session: session('s1', { files_edited: 5 }) });
     store.setSessions([session('s1', { files_edited: 3 })]);
 
     store.handleEventForSession(edit(1, 's1', '/new.ts'));
     await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(4));
-
-    expect(fetchSessionDetail).toHaveBeenCalledTimes(1);
-    // With the set rebuilt, later edits count locally.
     store.handleEventForSession(edit(2, 's1', '/other.ts'));
-    expect(fetchSessionDetail).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(5));
+
+    // A path this tab already saw is already in the server's count.
+    store.handleEventForSession(edit(3, 's1', '/other.ts'));
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
+    expect(store.getSessions()[0].files_edited).toBe(5);
+  });
+
+  it('refetches once more when an edit lands during a running refetch', async () => {
+    fetchSessionDetail.mockReset();
+    let release: (value: unknown) => void = () => {};
+    fetchSessionDetail
+      .mockReturnValueOnce(new Promise(resolve => { release = resolve; }))
+      .mockResolvedValueOnce({ session: session('s1', { files_edited: 5 }) });
+    store.setSessions([session('s1', { files_edited: 3 })]);
+
+    store.handleEventForSession(edit(1, 's1', '/new.ts'));
+    store.handleEventForSession(edit(2, 's1', '/other.ts'));
+    release({ session: session('s1', { files_edited: 4 }) });
+
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(5));
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
   });
 
   it('does not ask the server for a session with no edits yet', () => {
