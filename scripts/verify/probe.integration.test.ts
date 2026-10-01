@@ -204,28 +204,30 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
-  await t.test('plans shows which recorded reads a candidate index changes, on a snapshot copy only', async () => {
+  await t.test('plans shows which recorded reads an index changes, on a snapshot copy only', async () => {
     const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
     try {
       const copy = path.join(snapshot, 'agentmonitor.db');
       fs.copyFileSync(fixture, copy);
       const before = digest(fixture);
-      const result = await runProbe('plans', {
-        db: copy,
-        indexSql: 'CREATE INDEX idx_probe_agent_order ON events(agent_type, datetime(created_at) DESC, id DESC)',
-      });
+      const result = await runProbe('plans', { db: copy, index: 'idx_events_agent_created_order' });
       assert.equal(result.status, 'observed', result.errors.join(' '));
       type Changed = { route: string; plan_with: string; plan_without: string };
       const measurements = result.measurements as { statements: number; unchanged: number; changed: Changed[] };
       const observations = result.observations as { index: string; table: string; compare_errors: string[] };
-      assert.deepEqual([observations.index, observations.table], ['idx_probe_agent_order', 'events']);
+      assert.deepEqual([observations.index, observations.table], ['idx_events_agent_created_order', 'events']);
       assert.deepEqual(observations.compare_errors, []);
       assert.equal(measurements.unchanged + measurements.changed.length, measurements.statements);
       // The agent-filtered feed page is the read this index exists for.
       const page = measurements.changed.find(entry => entry.route === '/api/v2/monitor/events?agent=codex'
-        && entry.plan_with.includes('idx_probe_agent_order'));
+        && entry.plan_with.includes('idx_events_agent_created_order'));
       assert.ok(page, JSON.stringify(measurements.changed.map(entry => entry.route)));
       assert.match(page.plan_without, /TEMP B-TREE FOR ORDER BY/);
+
+      // A candidate from --index-sql is created on the snapshot and named from its DDL.
+      const candidate = await runProbe('plans', { db: copy, indexSql: 'CREATE INDEX idx_probe_candidate ON events(branch, id)' });
+      assert.equal(candidate.status, 'observed', candidate.errors.join(' '));
+      assert.equal((candidate.observations as { index: string }).index, 'idx_probe_candidate');
       assert.equal(digest(fixture), before, 'only the snapshot copy is written');
       assert.deepEqual(result.content_artifacts, [fs.realpathSync(copy)]);
     } finally { fs.rmSync(snapshot, { recursive: true, force: true }); }

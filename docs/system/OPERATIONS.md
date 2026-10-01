@@ -641,6 +641,7 @@ pnpm --silent verify probe monitor-stats --agent codex --json # per-statement ti
 pnpm --silent verify probe snapshot --json                   # disposable copy for probes that write
 pnpm --silent verify probe resync <transcript.jsonl> [--db <snapshot>] --json
 pnpm --silent verify probe plans --db <snapshot> --index-sql 'CREATE INDEX ...' --json  # index impact
+pnpm --silent verify probe hotspots --db <snapshot> --json   # slowest reads behind the routes
 ```
 
 Read probes open the database `readonly` with `query_only` in a child process
@@ -661,6 +662,16 @@ regressions elsewhere, not only the read the index targets. It records truncated
 SQL and plans, not parameters or results; the route list is a sample, so a
 statement reached only by other routes or by writes is not compared. Like
 `resync`, it refuses any `--db` that is not a snapshot from `probe snapshot`.
+
+`hotspots` finds where reads spend their time. It drives the same routes on a
+snapshot, records every distinct read statement they run, on any table, and then
+times (three warm runs) and explains each one on a read-only connection. It lists
+the 25 slowest, each with its route, truncated SQL, plan, and hints from the plan:
+`aggregate_row_lookups` (a count or sum whose index does not cover the columns it
+filters, so every match costs a table lookup), `row_lookups`, `temp_btree`, and
+`full_scan`. The hints rank what to look at; they are not verdicts. Run it after an
+index or query change, and when a route is slow but its own statements look fast in
+isolation. The same snapshot and route-list limits as `plans` apply.
 
 Health reports `database_size_matches` as a size comparison only;
 `target_matches_running_server` stays `unknown`. Equal sizes do not identify the

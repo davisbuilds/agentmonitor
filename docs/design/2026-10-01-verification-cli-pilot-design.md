@@ -253,6 +253,14 @@ plans with and without the indexes. Most statements kept their plan; nearly all
 that changed got faster; a few plain counts lost a few milliseconds. That script
 became `probe plans`, so the next index change starts from one command.
 
+After that fix shipped, a filtered feed still took seconds on the live server:
+its page was fast, but the count beside it read an index that did not cover the
+benchmark exclusion, so it looked up every match. Finding that meant timing the
+endpoint, then explaining and timing each statement by hand. `probe hotspots` now
+does that for every read the route list runs. Its first run on a snapshot ranked
+that count among the slowest with the matching plan hint, and also surfaced
+agent-filtered Usage reads with the same shape.
+
 So far this is one investigation, carried out by the agent that built the probes.
 Whether another agent picks them up unprompted, and whether reviewers find the
 evidence enough on its own, is still open.
