@@ -644,8 +644,10 @@ describe('GET/POST/DELETE /api/v2 pins', () => {
 
     const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
     const filePath = '/fake/projects/-Users-dev-Dev-alpha/api-sess-002.jsonl';
+    // A re-sync keeps rows that did not change, so shift the timestamps to
+    // force the pinned row itself to be replaced.
     const parsed = parseSessionMessages(
-      makeSession('api-sess-002', 'alpha', 6, '2026-03-02T14:00:00Z'),
+      makeSession('api-sess-002', 'alpha', 6, '2026-03-02T14:00:30Z'),
       'api-sess-002',
       filePath,
     );
