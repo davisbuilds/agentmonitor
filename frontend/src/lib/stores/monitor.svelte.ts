@@ -196,6 +196,11 @@ function parseEventMetadata(event: AgentEvent): Record<string, unknown> {
   return event.metadata;
 }
 
+// A session whose file count came from the server, or whose set was evicted,
+// has no file identities here: a new file would not raise the count until a
+// fresh set passed the old aggregate. Such an edit asks the server instead.
+let editCountNeedsRefetch = false;
+
 function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
   const metadata = parseEventMetadata(event);
   const nextStatus = event.event_type === 'session_end'
@@ -219,7 +224,9 @@ function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
     typeof metadata.file_path === 'string'
     && ['Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin'].includes(event.tool_name || '')
   ) {
-    const files = editedFilesBySession.get(session.id) || new Set<string>();
+    const known = editedFilesBySession.get(session.id);
+    if (!known && (session.files_edited || 0) > 0) editCountNeedsRefetch = true;
+    const files = known || new Set<string>();
     files.add(metadata.file_path);
     // Re-insert so Map order runs from least to most recently edited.
     editedFilesBySession.delete(session.id);
@@ -254,7 +261,9 @@ async function backfillSession(sessionId: string): Promise<void> {
 export function handleEventForSession(event: AgentEvent): void {
   const idx = sessions.findIndex(s => s.id === event.session_id);
   if (idx >= 0) {
+    editCountNeedsRefetch = false;
     sessions = sessions.map((s, i) => i === idx ? applyLiveEventAggregate(s, event) : s);
+    if (editCountNeedsRefetch) void backfillSession(event.session_id);
   } else {
     sessions = [applyLiveEventAggregate({
       id: event.session_id,

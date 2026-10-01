@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { AgentEvent, Session } from '../api/client';
 
+const fetchSessionDetail = vi.fn();
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
+  fetchSessionDetail: (...args: unknown[]) => fetchSessionDetail(...args),
+}));
+
 // The store is a module singleton built on `$state`. Reset the module registry
 // before each test so every case starts from fresh state rather than inheriting
 // the previous test's events/sessions/signals.
@@ -237,6 +243,28 @@ describe('edited-file tracking', () => {
     store.handleEventForSession(edit(2, 's1', '/b.ts'));
 
     expect(store.getSessions()[0].files_edited).toBe(2);
+  });
+
+  it('asks the server when a listed session edits without a known file set', async () => {
+    fetchSessionDetail.mockReset();
+    fetchSessionDetail.mockResolvedValue({ session: session('s1', { files_edited: 4 }) });
+    store.setSessions([session('s1', { files_edited: 3 })]);
+
+    store.handleEventForSession(edit(1, 's1', '/new.ts'));
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(4));
+
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(1);
+    // With the set rebuilt, later edits count locally.
+    store.handleEventForSession(edit(2, 's1', '/other.ts'));
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not ask the server for a session with no edits yet', () => {
+    fetchSessionDetail.mockReset();
+    store.setSessions([session('s1')]);
+    store.handleEventForSession(edit(1, 's1', '/a.ts'));
+    expect(fetchSessionDetail).not.toHaveBeenCalled();
+    expect(store.getSessions()[0].files_edited).toBe(1);
   });
 
   it('caps the sessions it tracks, dropping the least recently edited', () => {
