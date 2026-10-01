@@ -40,8 +40,13 @@ function setServeEnv(ctx: CliContext, args: string[]): {
     effectivePort = numericPort;
     process.env.AGENTMONITOR_PORT = String(numericPort);
   } else {
-    const envPort = Number.parseInt(process.env.AGENTMONITOR_PORT ?? '', 10);
-    if (Number.isFinite(envPort) && envPort >= 1) effectivePort = envPort;
+    const rawEnvPort = process.env.AGENTMONITOR_PORT;
+    const envPort = Number.parseInt(rawEnvPort ?? '', 10);
+    if (Number.isFinite(envPort)) {
+      // Fail here rather than as a raw ERR_SOCKET_BAD_PORT from listen().
+      if (envPort < 1 || envPort > 65535) throw invalidUsage(`Invalid AGENTMONITOR_PORT: ${rawEnvPort}`);
+      effectivePort = envPort;
+    }
   }
   if (ctx.global.dbPath) process.env.AGENTMONITOR_DB_PATH = ctx.global.dbPath;
   return {

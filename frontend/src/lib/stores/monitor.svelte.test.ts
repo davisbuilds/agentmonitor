@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { AgentEvent, Session } from '../api/client';
 
+const fetchSessionDetail = vi.fn();
+vi.mock('../api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/client')>()),
+  fetchSessionDetail: (...args: unknown[]) => fetchSessionDetail(...args),
+}));
+
 // The store is a module singleton built on `$state`. Reset the module registry
 // before each test so every case starts from fresh state rather than inheriting
 // the previous test's events/sessions/signals.
@@ -213,5 +219,112 @@ describe('server build', () => {
     expect(store.getServerBuildStale()).toBe(false);
     store.setServerBuild(undefined);
     expect(store.getServerBuildStale()).toBe(false);
+  });
+});
+
+describe('edited-file tracking', () => {
+  function edit(id: number, sessionId: string, filePath: string): AgentEvent {
+    return ev(id, {
+      session_id: sessionId,
+      agent_type: 'claude_code',
+      event_type: 'tool_use',
+      tool_name: 'Edit',
+      created_at: '2026-09-11T00:00:00Z',
+      metadata: JSON.stringify({ file_path: filePath }),
+    } as Partial<AgentEvent>);
+  }
+
+  it('keeps file identity for a session a filter hides and restores', () => {
+    store.setSessions([session('s1')]);
+    store.handleEventForSession(edit(1, 's1', '/a.ts'));
+    store.setSessions([]);
+    store.setSessions([session('s1', { files_edited: 1 })]);
+
+    store.handleEventForSession(edit(2, 's1', '/b.ts'));
+
+    expect(store.getSessions()[0].files_edited).toBe(2);
+  });
+
+  it('asks the server for each new file while the set is incomplete', async () => {
+    fetchSessionDetail.mockReset();
+    fetchSessionDetail
+      .mockResolvedValueOnce({ session: session('s1', { files_edited: 4 }) })
+      .mockResolvedValueOnce({ session: session('s1', { files_edited: 5 }) });
+    store.setSessions([session('s1', { files_edited: 3 })]);
+
+    store.handleEventForSession(edit(1, 's1', '/new.ts'));
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(4));
+    store.handleEventForSession(edit(2, 's1', '/other.ts'));
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(5));
+
+    // A path this tab already saw is already in the server's count.
+    store.handleEventForSession(edit(3, 's1', '/other.ts'));
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
+    expect(store.getSessions()[0].files_edited).toBe(5);
+  });
+
+  it('refetches once more when an edit lands during a running refetch', async () => {
+    fetchSessionDetail.mockReset();
+    let release: (value: unknown) => void = () => {};
+    fetchSessionDetail
+      .mockReturnValueOnce(new Promise(resolve => { release = resolve; }))
+      .mockResolvedValueOnce({ session: session('s1', { files_edited: 5 }) });
+    store.setSessions([session('s1', { files_edited: 3 })]);
+
+    store.handleEventForSession(edit(1, 's1', '/new.ts'));
+    store.handleEventForSession(edit(2, 's1', '/other.ts'));
+    release({ session: session('s1', { files_edited: 4 }) });
+
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(5));
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats a session built from a live event as having unknown files', async () => {
+    fetchSessionDetail.mockReset();
+    fetchSessionDetail
+      .mockResolvedValueOnce({ session: session('hidden', { files_edited: 3 }) })
+      .mockResolvedValueOnce({ session: session('hidden', { files_edited: 4 }) });
+    store.setSessions([]);
+
+    store.handleEventForSession(edit(1, 'hidden', '/a.ts'));
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(3));
+    store.handleEventForSession(edit(2, 'hidden', '/b.ts'));
+
+    await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(4));
+    expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not ask the server for a session with no edits yet', () => {
+    fetchSessionDetail.mockReset();
+    store.setSessions([session('s1')]);
+    store.handleEventForSession(edit(1, 's1', '/a.ts'));
+    expect(fetchSessionDetail).not.toHaveBeenCalled();
+    expect(store.getSessions()[0].files_edited).toBe(1);
+  });
+
+  it('caps the sessions it tracks, dropping the least recently edited', () => {
+    const cap = store.EDITED_FILE_SESSION_CAP;
+    const ids = Array.from({ length: cap + 1 }, (_, index) => `s${index}`);
+    store.setSessions(ids.map(id => session(id)));
+    ids.forEach((id, index) => {
+      // s0 edits again just before the last session, so s1 is the oldest.
+      if (index === cap) store.handleEventForSession(edit(index * 2 + 1, 's0', '/again.ts'));
+      store.handleEventForSession(edit(index * 2, id, '/a.ts'));
+    });
+
+    expect(store.trackedEditedFileSessionCount()).toBe(cap);
+    store.handleEventForSession(edit(9_999, 's0', '/b.ts'));
+    const s0 = store.getSessions().find(row => row.id === 's0');
+    expect(s0?.files_edited).toBe(3);
+  });
+
+  it('keeps counting distinct files for a session still listed', () => {
+    store.setSessions([session('s1')]);
+    store.handleEventForSession(edit(1, 's1', '/a.ts'));
+    store.setSessions([session('s1', { files_edited: 1 })]);
+    store.handleEventForSession(edit(2, 's1', '/b.ts'));
+    store.handleEventForSession(edit(3, 's1', '/a.ts'));
+
+    expect(store.getSessions()[0].files_edited).toBe(2);
   });
 });

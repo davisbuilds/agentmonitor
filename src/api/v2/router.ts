@@ -573,8 +573,15 @@ v2Router.get('/live/sessions/:id/items', (req: Request, res: Response) => {
       res.status(404).json({ error: 'Session not found' });
       return;
     }
+    const cursor = req.query.cursor as string | undefined;
+    // The cursor is an item id; anything else would match no rows and read as
+    // the end of the list.
+    if (cursor !== undefined && !/^\d+$/.test(cursor)) {
+      res.status(400).json({ error: 'Invalid cursor' });
+      return;
+    }
     const params = {
-      cursor: req.query.cursor as string | undefined,
+      cursor,
       limit: safeInt(req.query.limit as string),
       kinds: splitKinds(req.query.kinds as string | undefined),
     };

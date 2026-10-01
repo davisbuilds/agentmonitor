@@ -519,18 +519,116 @@ export function parseSessionMessages(
 
 // --- Insert parsed session into database ---
 
+interface StoredMessageRow {
+  id: number;
+  ordinal: number;
+  role: string;
+  content: string;
+  timestamp: string | null;
+  has_thinking: number;
+  has_tool_use: number;
+  content_length: number;
+}
+
+interface StoredToolCallRow {
+  ordinal: number | null;
+  tool_name: string;
+  category: string | null;
+  tool_use_id: string | null;
+  input_json: string | null;
+  subagent_session_id: string | null;
+}
+
+function sameMessage(stored: StoredMessageRow, parsed: ParsedMessage): boolean {
+  return stored.role === parsed.role
+    && stored.content === parsed.content
+    && stored.timestamp === parsed.timestamp
+    && stored.has_thinking === parsed.has_thinking
+    && stored.has_tool_use === parsed.has_tool_use
+    && stored.content_length === parsed.content_length;
+}
+
+function sameToolCall(stored: StoredToolCallRow, parsed: ParsedToolCall): boolean {
+  return stored.ordinal === parsed.message_ordinal
+    && stored.tool_name === parsed.tool_name
+    && stored.category === parsed.category
+    && stored.tool_use_id === parsed.tool_use_id
+    && stored.input_json === parsed.input_json
+    && stored.subagent_session_id === parsed.subagent_session_id;
+}
+
+/**
+ * How many leading messages the stored projection already holds exactly as
+ * parsed. A transcript usually grows by appending, so a re-sync that rewrote
+ * every row spent most of its time deleting and re-indexing unchanged history.
+ * Comparing rows rather than trusting the file to be append-only also covers a
+ * rewritten or truncated source: rows are kept only up to the first difference.
+ */
+function storedPrefixLength(
+  db: Database.Database,
+  sessionId: string,
+  messages: ParsedMessage[],
+  toolCalls: ParsedToolCall[],
+): { keep: number; storedIds: number[] } {
+  const stored = db.prepare(`
+    SELECT id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length
+    FROM messages WHERE session_id = ? ORDER BY ordinal, id
+  `).all(sessionId) as StoredMessageRow[];
+  // Anything but one row per ordinal 0..n-1 cannot be trimmed by ordinal.
+  if (stored.some((row, index) => row.ordinal !== index)) return { keep: 0, storedIds: [] };
+
+  let keep = 0;
+  const limit = Math.min(stored.length, messages.length);
+  while (keep < limit && sameMessage(stored[keep], messages[keep])) keep++;
+  if (keep === 0) return { keep: 0, storedIds: [] };
+
+  const storedTools = db.prepare(`
+    SELECT m.ordinal, tc.tool_name, tc.category, tc.tool_use_id, tc.input_json, tc.subagent_session_id
+    FROM tool_calls tc
+    LEFT JOIN messages m ON m.id = tc.message_id AND m.session_id = tc.session_id
+    WHERE tc.session_id = ?
+    ORDER BY tc.id
+  `).all(sessionId) as StoredToolCallRow[];
+  // Both lists run in message order, so the kept tool calls are a prefix of each.
+  // A tool call whose message is gone is never kept; the delete clears it.
+  const keptStored = storedTools.filter(row => row.ordinal !== null && row.ordinal < keep);
+  const keptParsed = toolCalls.filter(tc => tc.message_ordinal < keep);
+  const length = Math.max(keptStored.length, keptParsed.length);
+  for (let index = 0; index < length; index++) {
+    const storedTool = keptStored[index];
+    const parsedTool = keptParsed[index];
+    if (storedTool && parsedTool && sameToolCall(storedTool, parsedTool)) continue;
+    keep = Math.min(
+      keep,
+      storedTool?.ordinal ?? keep,
+      parsedTool?.message_ordinal ?? keep,
+    );
+    break;
+  }
+
+  return { keep, storedIds: stored.slice(0, keep).map(row => row.id) };
+}
+
+export interface InsertParsedSessionResult {
+  messagesKept: number;
+  messagesWritten: number;
+}
+
 export function insertParsedSession(
   db: Database.Database,
   parsed: ParsedSession,
   filePath: string,
   fileSize: number,
   fileHash: string,
-): void {
-  const txn = db.transaction(() => {
+): InsertParsedSessionResult {
+  const txn = db.transaction((): InsertParsedSessionResult => {
     const { metadata, messages, toolCalls } = parsed;
     const skillContext = parsed.skillContext;
+    const { keep, storedIds } = storedPrefixLength(db, metadata.session_id, messages, toolCalls);
 
-    // Clear existing data for this session (for re-parse)
+    // Clear the rows this parse replaces. Messages and tool calls are trimmed
+    // from the first difference; the session row and observations are small and
+    // are rewritten whole.
     db.prepare(`
       DELETE FROM session_catalog_observation_entries
       WHERE observation_id IN (
@@ -538,8 +636,12 @@ export function insertParsedSession(
       )
     `).run(metadata.session_id);
     db.prepare('DELETE FROM session_context_observations WHERE session_id = ?').run(metadata.session_id);
-    db.prepare('DELETE FROM tool_calls WHERE session_id = ?').run(metadata.session_id);
-    db.prepare('DELETE FROM messages WHERE session_id = ?').run(metadata.session_id);
+    db.prepare(`
+      DELETE FROM tool_calls
+      WHERE session_id = ?
+        AND message_id NOT IN (SELECT id FROM messages WHERE session_id = ? AND ordinal < ?)
+    `).run(metadata.session_id, metadata.session_id, keep);
+    db.prepare('DELETE FROM messages WHERE session_id = ? AND ordinal >= ?').run(metadata.session_id, keep);
     db.prepare('DELETE FROM browsing_sessions WHERE id = ?').run(metadata.session_id);
 
     // Backfill context-window occupancy so cards populate on import/boot, not
@@ -592,8 +694,8 @@ export function insertParsedSession(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const messageIds: number[] = [];
-    for (const msg of messages) {
+    const messageIds: number[] = [...storedIds];
+    for (const msg of messages.slice(keep)) {
       const result = insertMsg.run(
         msg.session_id,
         msg.ordinal,
@@ -617,6 +719,8 @@ export function insertParsedSession(
     for (const tc of toolCalls) {
       const messageId = messageIds[tc.message_ordinal];
       if (messageId != null) {
+        if (tc.subagent_session_id) subagentSessionIds.add(tc.subagent_session_id);
+        if (tc.message_ordinal < keep) continue;
         insertTc.run(
           messageId,
           tc.session_id,
@@ -626,9 +730,6 @@ export function insertParsedSession(
           tc.input_json,
           tc.subagent_session_id,
         );
-        if (tc.subagent_session_id) {
-          subagentSessionIds.add(tc.subagent_session_id);
-        }
       }
     }
 
@@ -672,7 +773,8 @@ export function insertParsedSession(
     }
 
     linkParsedSessionRelationships(db, metadata.session_id, [...subagentSessionIds]);
+    return { messagesKept: keep, messagesWritten: messages.length - keep };
   });
 
-  txn();
+  return txn();
 }

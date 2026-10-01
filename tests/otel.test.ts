@@ -116,6 +116,7 @@ function buildLogPayload(opts: {
     attributes?: Array<{ key: string; value: { stringValue?: string; intValue?: string | number; boolValue?: boolean; doubleValue?: number } }>;
     body?: unknown;
     timeUnixNano?: string;
+    observedTimeUnixNano?: string;
   }>;
 }) {
   const resourceAttrs: Array<{ key: string; value: { stringValue: string } }> = [];
@@ -137,6 +138,7 @@ function buildLogPayload(opts: {
           }
           return {
             timeUnixNano: lr.timeUnixNano ?? '1700000000000000000',
+            ...(lr.observedTimeUnixNano ? { observedTimeUnixNano: lr.observedTimeUnixNano } : {}),
             body: lr.body ?? { stringValue: '{}' },
             attributes: attrs,
           };
@@ -655,7 +657,7 @@ describe('OTLP exporter retries do not double-count', () => {
       { key: 'output_token_count', value: { intValue: 50 } },
     ],
   });
-  const codexLogs = (records: Array<ReturnType<typeof usageRecord> & { timeUnixNano?: string }>) => buildLogPayload({
+  const codexLogs = (records: Array<ReturnType<typeof usageRecord> & { timeUnixNano?: string; observedTimeUnixNano?: string }>) => buildLogPayload({
     serviceName: 'codex_cli_rs',
     resourceAttrs: [{ key: 'conversation.id', value: { stringValue: 'sess-retry' } }],
     logRecords: records,
@@ -697,6 +699,25 @@ describe('OTLP exporter retries do not double-count', () => {
     ]);
     await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
     assert.equal((await getEvents()).total, 2);
+  });
+
+  test('stores the producer time Codex puts in event.timestamp', async () => {
+    const payload = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.250Z'), timeUnixNano: '0' }]);
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+    const events = await getEvents();
+    assert.equal(events.events[0].client_timestamp, '2026-09-23T12:00:00.250Z');
+  });
+
+  test('falls back to the observed time, and prefers the record time when set', async () => {
+    const observed = { ...usageRecord(''), timeUnixNano: '0', observedTimeUnixNano: '1790000000000000000' };
+    observed.attributes = observed.attributes.filter(attr => attr.key !== 'event.timestamp');
+    const timed = { ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '1790000001000000000' };
+    await postJson(`${baseUrl}/api/otel/v1/logs`, codexLogs([observed, timed]));
+    const stamps = (await getEvents()).events.map(event => event.client_timestamp).sort();
+    assert.deepEqual(stamps, [
+      new Date(1790000000000).toISOString(),
+      new Date(1790000001000).toISOString(),
+    ]);
   });
 
   test('a record with no time at all is never collapsed', async () => {

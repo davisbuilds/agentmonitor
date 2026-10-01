@@ -173,8 +173,11 @@ export function parseOptionSet(args: string[], valueFlags: Set<string>, booleanF
 
 export function parseIntegerOption(value: string | undefined, flag: string): number | undefined {
   if (value == null) return undefined;
+  // parseInt alone reads "100xyz" as 100.
+  if (!/^-?\d+$/.test(value.trim())) throw invalidUsage(`Invalid ${flag}: ${value}`);
   const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) throw invalidUsage(`Invalid ${flag}: ${value}`);
+  // Enough digits parse to Infinity or lose precision.
+  if (!Number.isSafeInteger(parsed)) throw invalidUsage(`Invalid ${flag}: ${value}`);
   return parsed;
 }
 

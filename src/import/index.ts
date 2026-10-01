@@ -58,6 +58,7 @@ interface ImportStateRow {
   source: string;
   events_imported: number;
   imported_at: string;
+  file_mtime: string | null;
 }
 
 function getImportState(filePath: string): ImportStateRow | undefined {
@@ -65,17 +66,55 @@ function getImportState(filePath: string): ImportStateRow | undefined {
   return db.prepare('SELECT * FROM import_state WHERE file_path = ?').get(filePath) as ImportStateRow | undefined;
 }
 
-function setImportState(filePath: string, hash: string, size: number, source: string, eventsImported: number): void {
+function setImportState(
+  filePath: string,
+  hash: string,
+  size: number,
+  mtime: string | null,
+  source: string,
+  eventsImported: number,
+): void {
   const db = getDb();
   db.prepare(`
-    INSERT INTO import_state (file_path, file_hash, file_size, source, events_imported, imported_at)
-    VALUES (?, ?, ?, ?, ?, datetime('now'))
+    INSERT INTO import_state (file_path, file_hash, file_size, file_mtime, source, events_imported, imported_at)
+    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(file_path) DO UPDATE SET
       file_hash = excluded.file_hash,
       file_size = excluded.file_size,
+      file_mtime = excluded.file_mtime,
       events_imported = excluded.events_imported,
       imported_at = datetime('now')
-  `).run(filePath, hash, size, source, eventsImported);
+  `).run(filePath, hash, size, mtime, source, eventsImported);
+}
+
+interface DiskStamp {
+  size: number;
+  mtime: string;
+}
+
+/**
+ * Size and nanosecond mtime, taken before the file is read: if the file changes
+ * during the read, the recorded stamp is older than the file and the next run
+ * reads it again.
+ */
+function diskStamp(filePath: string): DiskStamp {
+  const stat = fs.statSync(filePath, { bigint: true });
+  return { size: Number(stat.size), mtime: stat.mtimeNs.toString() };
+}
+
+/**
+ * Auto-import runs every few minutes over every transcript, and reading and
+ * hashing them all is most of its cost. A file whose size and mtime match the
+ * state recorded with its hash is skipped without a read. A cleared hash (how
+ * migrations force a re-import) or a missing stamp falls through to the hash.
+ */
+function isUnchangedOnDisk(filePath: string, stamp: DiskStamp, options: ImportOptions): boolean {
+  if (options.force) return false;
+  const state = getImportState(filePath);
+  return state !== undefined
+    && state.file_hash !== ''
+    && state.file_mtime === stamp.mtime
+    && state.file_size === stamp.size;
 }
 
 // ─── Core import logic ──────────────────────────────────────────────────
@@ -146,10 +185,14 @@ function processFile(
 ): ImportFileResult {
   if (source === 'codex') return processCodexFile(filePath, options);
 
+  // An Antigravity conversation can change in its WAL sidecar alone, so only
+  // its hash can tell; it never takes the stat shortcut.
+  const stamp = source === 'claude-code' ? diskStamp(filePath) : null;
+  if (stamp && isUnchangedOnDisk(filePath, stamp, options)) return unchangedResult(filePath, source);
   const stat = fs.statSync(filePath);
   const hashFn = source === 'claude-code' ? hashClaudeFile : hashAntigravityFile;
   const currentHash = hashFn(filePath);
-  if (isUnchanged(filePath, currentHash, options)) return unchangedResult(filePath, source);
+  if (isUnchanged(filePath, currentHash, stamp, options)) return unchangedResult(filePath, source);
 
   // Parse the file (each source has its own option needs)
   const events = source === 'claude-code'
@@ -167,7 +210,7 @@ function processFile(
     && path.basename(filePath, '.jsonl') === events[0].session_id;
   const { imported, duplicates, refreshed } = importEvents(
     events, options.dryRun ?? false, ownsLegacyIdentity, source === 'claude-code');
-  recordImportState(filePath, currentHash, stat.size, source, imported, options);
+  recordImportState(filePath, currentHash, stamp?.size ?? stat.size, stamp?.mtime ?? null, source, imported, options);
 
   return {
     path: filePath,
@@ -188,8 +231,9 @@ function processFile(
  * exact bytes, so content that changes mid-run is seen as changed next time.
  */
 function processCodexFile(filePath: string, options: ImportOptions): ImportFileResult {
+  if (isUnchangedOnDisk(filePath, diskStamp(filePath), options)) return unchangedResult(filePath, 'codex');
   const read = readCodexRollout(filePath);
-  if (isUnchanged(filePath, read.hash, options)) return unchangedResult(filePath, 'codex');
+  if (isUnchanged(filePath, read.hash, read, options)) return unchangedResult(filePath, 'codex');
   const result: ImportFileResult = {
     path: filePath,
     source: 'codex',
@@ -237,18 +281,21 @@ function appendCodexEvents(
   const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
   result.eventsImported = imported;
   result.skippedDuplicate = duplicates;
-  recordImportState(filePath, read.hash, read.bytes.length, 'codex', imported, options);
+  recordImportState(filePath, read.hash, read.bytes.length, read.mtime, 'codex', imported, options);
   return result;
 }
 
 export interface CodexRolloutRead {
   bytes: Buffer;
   hash: string;
+  /** The file's mtime from just before the read. */
+  mtime: string;
 }
 
 export function readCodexRollout(filePath: string): CodexRolloutRead {
+  const { mtime } = diskStamp(filePath);
   const bytes = fs.readFileSync(filePath);
-  return { bytes, hash: hashCodexContent(bytes) };
+  return { bytes, hash: hashCodexContent(bytes), mtime };
 }
 
 /**
@@ -277,16 +324,26 @@ export function reconcileCodexRollout(
     apply: options.apply,
     onCommit: committed => {
       applySessionModes(events);
-      setImportState(filePath, read.hash, read.bytes.length, 'codex', committed.inserted);
+      setImportState(filePath, read.hash, read.bytes.length, read.mtime, 'codex', committed.inserted);
     },
   });
   return { events, counts };
 }
 
-function isUnchanged(filePath: string, currentHash: string, options: ImportOptions): boolean {
+function isUnchanged(
+  filePath: string,
+  currentHash: string,
+  stamp: { mtime: string } | null,
+  options: ImportOptions,
+): boolean {
   if (options.force) return false;
   const state = getImportState(filePath);
-  return state !== undefined && state.file_hash === currentHash;
+  const unchanged = state !== undefined && state.file_hash === currentHash;
+  // A touched but unchanged file would otherwise be read on every run.
+  if (unchanged && stamp && state.file_mtime !== stamp.mtime && !options.dryRun) {
+    getDb().prepare('UPDATE import_state SET file_mtime = ? WHERE file_path = ?').run(stamp.mtime, filePath);
+  }
+  return unchanged;
 }
 
 function unchangedResult(filePath: string, source: string): ImportFileResult {
@@ -309,12 +366,13 @@ function recordImportState(
   filePath: string,
   hash: string,
   size: number,
+  mtime: string | null,
   source: string,
   imported: number,
   options: ImportOptions,
 ): void {
   const isDateScoped = options.from !== undefined || options.to !== undefined;
-  if (!options.dryRun && !isDateScoped) setImportState(filePath, hash, size, source, imported);
+  if (!options.dryRun && !isDateScoped) setImportState(filePath, hash, size, mtime, source, imported);
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────

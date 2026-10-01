@@ -100,9 +100,20 @@ export function addEvent(event: AgentEvent): void {
 // --- Sessions ---
 let sessions = $state<Session[]>([]);
 const sessionBackfillInFlight = new Set<string>();
-const editedFilesBySession = new Map<string, Set<string>>();
+const sessionBackfillRequestedAgain = new Set<string>();
+// `complete` is false when the set began after the session already had edits
+// (counted by the server, or held in a set the cap evicted); the server then
+// owns the count, since this tab never saw those paths.
+const editedFilesBySession = new Map<string, { files: Set<string>; complete: boolean }>();
 export function getSessions(): Session[] { return sessions; }
 export function setSessions(s: Session[]): void { sessions = s; }
+/** Sessions whose edited-file set is held in memory; for tests. */
+export function trackedEditedFileSessionCount(): number { return editedFilesBySession.size; }
+// The SSE stream lives as long as the tab, so the file sets are capped, least
+// recently edited first. Pruning by the visible list instead would forget a
+// session an agent filter hides and later restores: its count could not grow
+// until a fresh set passed the old aggregate.
+export const EDITED_FILE_SESSION_CAP = 500;
 
 // --- Context-window occupancy (v2 live projection, joined to v1 cards by id) ---
 // Occupancy lives on the v2 browsing_sessions projection, not the v1 Session
@@ -189,7 +200,15 @@ function parseEventMetadata(event: AgentEvent): Record<string, unknown> {
   return event.metadata;
 }
 
-function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
+// Set when an edit adds a new path to an incomplete set: the local set cannot
+// tell whether the path is already in the server's count, so ask the server.
+let editCountNeedsRefetch = false;
+
+/**
+ * `countKnown` is false for a placeholder built from a live event: its zero
+ * counts are not a baseline, since the backfill may reveal earlier files.
+ */
+function applyLiveEventAggregate(session: Session, event: AgentEvent, countKnown = true): Session {
   const metadata = parseEventMetadata(event);
   const nextStatus = event.event_type === 'session_end'
     ? (event.agent_type === 'claude_code' ? 'idle' : 'ended')
@@ -212,17 +231,30 @@ function applyLiveEventAggregate(session: Session, event: AgentEvent): Session {
     typeof metadata.file_path === 'string'
     && ['Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin'].includes(event.tool_name || '')
   ) {
-    const files = editedFilesBySession.get(session.id) || new Set<string>();
-    files.add(metadata.file_path);
-    editedFilesBySession.set(session.id, files);
-    next.files_edited = Math.max(session.files_edited || 0, files.size);
+    const entry = editedFilesBySession.get(session.id)
+      ?? { files: new Set<string>(), complete: countKnown && (session.files_edited || 0) === 0 };
+    const sizeBefore = entry.files.size;
+    entry.files.add(metadata.file_path);
+    if (!entry.complete && entry.files.size > sizeBefore) editCountNeedsRefetch = true;
+    // Re-insert so Map order runs from least to most recently edited.
+    editedFilesBySession.delete(session.id);
+    editedFilesBySession.set(session.id, entry);
+    if (editedFilesBySession.size > EDITED_FILE_SESSION_CAP) {
+      const oldest = editedFilesBySession.keys().next().value;
+      if (oldest !== undefined) editedFilesBySession.delete(oldest);
+    }
+    next.files_edited = Math.max(session.files_edited || 0, entry.files.size);
   }
 
   return next;
 }
 
 async function backfillSession(sessionId: string): Promise<void> {
-  if (sessionBackfillInFlight.has(sessionId)) return;
+  if (sessionBackfillInFlight.has(sessionId)) {
+    // The running fetch may predate the edit that asked again; run once more.
+    sessionBackfillRequestedAgain.add(sessionId);
+    return;
+  }
   sessionBackfillInFlight.add(sessionId);
 
   try {
@@ -235,13 +267,16 @@ async function backfillSession(sessionId: string): Promise<void> {
     console.error('Failed to backfill session aggregates:', err);
   } finally {
     sessionBackfillInFlight.delete(sessionId);
+    if (sessionBackfillRequestedAgain.delete(sessionId)) void backfillSession(sessionId);
   }
 }
 
 export function handleEventForSession(event: AgentEvent): void {
   const idx = sessions.findIndex(s => s.id === event.session_id);
   if (idx >= 0) {
+    editCountNeedsRefetch = false;
     sessions = sessions.map((s, i) => i === idx ? applyLiveEventAggregate(s, event) : s);
+    if (editCountNeedsRefetch) void backfillSession(event.session_id);
   } else {
     sessions = [applyLiveEventAggregate({
       id: event.session_id,
@@ -259,7 +294,7 @@ export function handleEventForSession(event: AgentEvent): void {
       files_edited: 0,
       lines_added: 0,
       lines_removed: 0,
-    }, event), ...sessions];
+    }, event, false), ...sessions];
     void backfillSession(event.session_id);
   }
 }

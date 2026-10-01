@@ -644,8 +644,10 @@ describe('GET/POST/DELETE /api/v2 pins', () => {
 
     const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
     const filePath = '/fake/projects/-Users-dev-Dev-alpha/api-sess-002.jsonl';
+    // A re-sync keeps rows that did not change, so shift the timestamps to
+    // force the pinned row itself to be replaced.
     const parsed = parseSessionMessages(
-      makeSession('api-sess-002', 'alpha', 6, '2026-03-02T14:00:00Z'),
+      makeSession('api-sess-002', 'alpha', 6, '2026-03-02T14:00:30Z'),
       'api-sess-002',
       filePath,
     );
@@ -907,6 +909,11 @@ describe('GET /api/v2/live/sessions/:id/items', () => {
     const secondBody = await second.json() as { data: Array<{ id: number }> };
     assert.ok(secondBody.data.length > 0);
     assert.ok(secondBody.data[0].id > firstBody.data[firstBody.data.length - 1].id);
+  });
+
+  test('rejects a cursor that is not an item id', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?cursor=abc`);
+    assert.equal(res.status, 400);
   });
 
   test('returns 404 for missing live session items', async () => {
