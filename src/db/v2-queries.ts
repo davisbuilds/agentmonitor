@@ -80,7 +80,7 @@ import { pricingRegistry } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
-import { getStatsForBroadcast, sumMonitorUsage, updateIdleSessions } from './queries.js';
+import { getStatsForBroadcast, monitorUsageSql, sumMonitorUsage, updateIdleSessions } from './queries.js';
 import {
   excludeBenchmarkUsageCondition,
   excludeOverlappingCodexOtelUsageCondition,
@@ -1509,13 +1509,26 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   return { sessions, total: sessions.length };
 }
 
-export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
-  const db = getDb();
+/**
+ * The count and page reads behind the Monitor event feed, shared with plan
+ * tests so they explain the statements the endpoint runs.
+ */
+export function monitorEventsStatements(params: MonitorEventsParams = {}): {
+  count: { sql: string; values: unknown[] };
+  page: { sql: string; values: unknown[] };
+} {
   const conditions: string[] = [];
   const values: unknown[] = [];
 
   if (params.agent) {
-    conditions.push('agent_type = ?');
+    // The agent filter reads an agent-ordered index newest-first, alone or with
+    // an event type or tool (idx_events_agent_event_order/_tool_order). A model
+    // or session has no agent-ordered composite, and walking the agent index
+    // for a rare or absent value visits every row of the agent (seconds), so the
+    // unary `+` lets that filter's own index lead. branch and source have no
+    // index, so the agent index stays the narrower path for them.
+    const narrower = params.session_id || params.model;
+    conditions.push(narrower ? '+agent_type = ?' : 'agent_type = ?');
     values.push(params.agent);
   }
   if (params.event_type) {
@@ -1558,12 +1571,24 @@ export function listMonitorEvents(params: MonitorEventsParams = {}): { events: M
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const limit = Math.min(Math.max(params.limit ?? 50, 1), 500);
   const offset = Math.max(params.offset ?? 0, 0);
-  const total = (db.prepare(`SELECT COUNT(*) as c FROM events ${where}`).get(...values) as CountResult).c;
-  const events = db.prepare(`
+  return {
+    count: { sql: `SELECT COUNT(*) as c FROM events ${where}`, values },
+    page: {
+      sql: `
     SELECT * FROM events ${where}
     ORDER BY datetime(created_at) DESC, id DESC
     LIMIT ? OFFSET ?
-  `).all(...values, limit, offset) as MonitorEventRow[];
+  `,
+      values: [...values, limit, offset],
+    },
+  };
+}
+
+export function listMonitorEvents(params: MonitorEventsParams = {}): { events: MonitorEventRow[]; total: number } {
+  const db = getDb();
+  const { count, page } = monitorEventsStatements(params);
+  const total = (db.prepare(count.sql).get(...count.values) as CountResult).c;
+  const events = db.prepare(page.sql).all(...page.values) as MonitorEventRow[];
 
   return { events, total };
 }
@@ -1682,23 +1707,26 @@ function listMonitorProviderQuotas(): MonitorQuotaSnapshot[] {
   });
 }
 
-export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
-  if (!params.agent && !params.since) {
-    // The default Monitor and the SSE broadcaster need the same all-time
-    // snapshot. Reuse the write-invalidated cache instead of running two copies
-    // of the full-history query on the synchronous SQLite connection.
-    const stats = getStatsForBroadcast();
-    const quotaMonitor = listMonitorProviderQuotas();
-    return {
-      ...stats,
-      quota_monitor: quotaMonitor,
-      usage_monitor: quotaMonitor,
-    };
-  }
+export type MonitorStatsStatementName =
+  | 'total_events' | 'usage' | 'active_sessions' | 'total_sessions' | 'live_sessions'
+  | 'active_agents' | 'tool_breakdown' | 'agent_breakdown' | 'model_breakdown' | 'branches';
 
-  const db = getDb();
-  updateIdleSessions(config.sessionTimeoutMinutes);
+export interface MonitorStatsStatement {
+  name: MonitorStatsStatementName;
+  sql: string;
+  values: unknown[];
+}
 
+/**
+ * The reads a filtered Monitor stats request runs, in order. The verification
+ * CLI times these same statements, so a probe measures the product's queries
+ * rather than a copy that can drift.
+ */
+export function monitorStatsStatements(params: MonitorStatsParams = {}): {
+  statements: MonitorStatsStatement[];
+  usageWhere: string;
+  values: unknown[];
+} {
   // The Monitor is the live-activity view: batch-imported benchmark rows are
   // always excluded from its aggregates (no opt-in), and benchmark sessions are
   // marked ended at insert so they never reach the live session lists/counts.
@@ -1718,52 +1746,83 @@ export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   // Event count retains overlapping OTEL rows; usage totals reconcile them
   // away. Put the reconciliation predicate in WHERE so SQLite performs its
   // session+timestamp lookup once per candidate row, not once per SUM column.
-  const totalEvents = (db.prepare(`
-    SELECT COUNT(*) as total_events FROM events e ${where}
-  `).get(...values) as { total_events: number }).total_events;
-  const usageWhere = `${where}
+  // The unary `+` on the agent filter keeps SQLite from seeking
+  // idx_events_agent_type, which does not cover the token columns and looks up
+  // every row of that agent (seconds); it scans the covering usage index instead.
+  const usageConditions = conditions.map(condition => condition === 'e.agent_type = ?' ? '+e.agent_type = ?' : condition);
+  const usageWhere = `WHERE ${usageConditions.join(' AND ')}
     AND ${usageMetricPresenceCondition('e')}
     AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
-  const usageTotals = sumMonitorUsage(db, usageWhere, values);
-
-  const activeSessions = (db.prepare(
-    `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
-  ).get() as { count: number }).count;
-  const totalSessions = (db.prepare(
-    `SELECT COUNT(*) as count FROM sessions`
-  ).get() as { count: number }).count;
-  const liveSessions = (db.prepare(
-    `SELECT COUNT(*) as count FROM sessions WHERE status != 'ended'`
-  ).get() as { count: number }).count;
-  const activeAgents = (db.prepare(
-    `SELECT COUNT(DISTINCT agent_type) as count FROM sessions WHERE status != 'ended'`
-  ).get() as { count: number }).count;
-
+  // Breakdowns break count ties by name, so their order does not depend on
+  // which index the plan happens to read.
   const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
-  const toolRows = db.prepare(`
-    SELECT tool_name, COUNT(*) as count FROM events e
-    ${toolWhere}
-    GROUP BY tool_name ORDER BY count DESC
-  `).all(...values) as { tool_name: string; count: number }[];
-  const toolBreakdown = Object.fromEntries(toolRows.map(row => [row.tool_name, row.count]));
-
-  const agentRows = db.prepare(`
-    SELECT agent_type, COUNT(*) as count FROM events e ${where}
-    GROUP BY agent_type ORDER BY count DESC
-  `).all(...values) as { agent_type: string; count: number }[];
-  const agentBreakdown = Object.fromEntries(agentRows.map(row => [row.agent_type, row.count]));
-
   const modelWhere = conditions.length > 0 ? `${where} AND model IS NOT NULL` : 'WHERE model IS NOT NULL';
-  const modelRows = db.prepare(`
-    SELECT model, COUNT(*) as count FROM events e
-    ${modelWhere}
-    GROUP BY model ORDER BY count DESC
-  `).all(...values) as { model: string; count: number }[];
-  const modelBreakdown = Object.fromEntries(modelRows.map(row => [row.model, row.count]));
 
-  const branchRows = db.prepare(`
-    SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC
-  `).all() as { branch: string }[];
+  const statements: MonitorStatsStatement[] = [
+    { name: 'total_events', sql: `SELECT COUNT(*) as count FROM events e ${where}`, values },
+    { name: 'usage', sql: monitorUsageSql(usageWhere), values },
+    { name: 'active_sessions', sql: `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`, values: [] },
+    { name: 'total_sessions', sql: `SELECT COUNT(*) as count FROM sessions`, values: [] },
+    { name: 'live_sessions', sql: `SELECT COUNT(*) as count FROM sessions WHERE status != 'ended'`, values: [] },
+    { name: 'active_agents', sql: `SELECT COUNT(DISTINCT agent_type) as count FROM sessions WHERE status != 'ended'`, values: [] },
+    { name: 'tool_breakdown', sql: `
+      SELECT tool_name, COUNT(*) as count FROM events e
+      ${toolWhere}
+      GROUP BY tool_name ORDER BY count DESC, tool_name
+    `, values },
+    { name: 'agent_breakdown', sql: `
+      SELECT agent_type, COUNT(*) as count FROM events e ${where}
+      GROUP BY agent_type ORDER BY count DESC, agent_type
+    `, values },
+    { name: 'model_breakdown', sql: `
+      SELECT model, COUNT(*) as count FROM events e
+      ${modelWhere}
+      GROUP BY model ORDER BY count DESC, model
+    `, values },
+    { name: 'branches', sql: `
+      SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC
+    `, values: [] },
+  ];
+  return { statements, usageWhere, values };
+}
+
+export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
+  if (!params.agent && !params.since) {
+    // The default Monitor and the SSE broadcaster need the same all-time
+    // snapshot. Reuse the write-invalidated cache instead of running two copies
+    // of the full-history query on the synchronous SQLite connection.
+    const stats = getStatsForBroadcast();
+    const quotaMonitor = listMonitorProviderQuotas();
+    return {
+      ...stats,
+      quota_monitor: quotaMonitor,
+      usage_monitor: quotaMonitor,
+    };
+  }
+
+  const db = getDb();
+  updateIdleSessions(config.sessionTimeoutMinutes);
+
+  const { statements, usageWhere, values } = monitorStatsStatements(params);
+  const run = (name: MonitorStatsStatementName) => {
+    const statement = statements.find(entry => entry.name === name)!;
+    return db.prepare(statement.sql).all(...statement.values) as Array<Record<string, unknown>>;
+  };
+  const count = (name: MonitorStatsStatementName) => Number(run(name)[0]?.count ?? 0);
+
+  const totalEvents = count('total_events');
+  const usageTotals = sumMonitorUsage(db, usageWhere, values);
+  const activeSessions = count('active_sessions');
+  const totalSessions = count('total_sessions');
+  const liveSessions = count('live_sessions');
+  const activeAgents = count('active_agents');
+  const toolBreakdown = Object.fromEntries(
+    (run('tool_breakdown') as Array<{ tool_name: string; count: number }>).map(row => [row.tool_name, row.count]));
+  const agentBreakdown = Object.fromEntries(
+    (run('agent_breakdown') as Array<{ agent_type: string; count: number }>).map(row => [row.agent_type, row.count]));
+  const modelBreakdown = Object.fromEntries(
+    (run('model_breakdown') as Array<{ model: string; count: number }>).map(row => [row.model, row.count]));
+  const branchRows = run('branches') as Array<{ branch: string }>;
 
   const quotaMonitor = listMonitorProviderQuotas();
   return {
