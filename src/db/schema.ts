@@ -1015,7 +1015,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 10;
+const DATA_SCHEMA_VERSION = 11;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1055,6 +1055,8 @@ export function runDataMigrations(db: Database): void {
     // v7/v8/v9 introduce no data correction. v8 adds the receipt ledger and
     // observed-identity index; v9 adds content-free daily activity indexes.
     if (current < 10) clearMetricTokenRowEstimates(db);
+    // v11 introduces no data correction: it adds the agent-filtered Monitor
+    // indexes, which read commands only install when the version advances.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
