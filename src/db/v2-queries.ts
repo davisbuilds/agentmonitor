@@ -1521,7 +1521,13 @@ export function monitorEventsStatements(params: MonitorEventsParams = {}): {
   const values: unknown[] = [];
 
   if (params.agent) {
-    conditions.push('agent_type = ?');
+    // Alone, the agent filter reads idx_events_agent_created_order newest-first.
+    // Beside a filter with its own index, that walk visits every row of the
+    // agent before finding a rare or absent match (seconds), so the unary `+`
+    // lets the other filter's index lead. branch and source have no index, so
+    // the agent index stays the narrower path for them.
+    const narrower = params.event_type || params.tool_name || params.session_id || params.model;
+    conditions.push(narrower ? '+agent_type = ?' : 'agent_type = ?');
     values.push(params.agent);
   }
   if (params.event_type) {

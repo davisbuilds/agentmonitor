@@ -95,3 +95,37 @@ test('the windowed Codex skill-event read seeks exec tool calls, not every Codex
   assert.match(detail, /idx_events_agent_dims \(agent_type=\? AND tool_name=\?\)/, detail);
 });
 
+test('a combined feed filter with its own index leads instead of the agent index', () => {
+  // Walking an agent's events newest-first finds a rare or absent event_type,
+  // tool or model only after visiting all of them (about 2 s for Codex on a
+  // real store); that filter's own index finds its few rows directly.
+  for (const [filter, index] of [
+    [{ event_type: 'session_end' }, 'idx_events_event_type'],
+    [{ tool_name: 'exec_command' }, 'idx_events_tool_name'],
+    [{ model: 'gpt-5.5' }, 'idx_events_model'],
+    [{ session_id: 's-1' }, 'session'],
+  ] as const) {
+    const { count, page } = queries.monitorEventsStatements({ agent: 'codex', ...filter });
+    for (const statement of [count, page]) {
+      const detail = plan(statement.sql, statement.values);
+      assert.doesNotMatch(detail, /idx_events_agent_(created_order|dims|type)\b/, `${JSON.stringify(filter)}: ${detail}`);
+      assert.match(detail, new RegExp(index), `${JSON.stringify(filter)}: ${detail}`);
+    }
+  }
+});
+
+test('a feed filter without its own index keeps the ordered agent index', () => {
+  // branch and source have no index; there the agent index is the narrow one.
+  for (const filter of [{ branch: 'main' }, { source: 'hook' }]) {
+    const { page } = queries.monitorEventsStatements({ agent: 'codex', ...filter });
+    assert.match(plan(page.sql, page.values), /idx_events_agent_created_order/, JSON.stringify(filter));
+  }
+});
+
+test('a combined filter still selects only that agent', () => {
+  const feed = queries.listMonitorEvents({ agent: 'codex', tool_name: 'exec_command', limit: 50 });
+  assert.equal(feed.total, 20);
+  assert.ok(feed.events.every(event => event.agent_type === 'codex' && event.tool_name === 'exec_command'));
+  assert.equal(queries.listMonitorEvents({ agent: 'claude_code', tool_name: 'exec_command' }).total, 0);
+});
+
