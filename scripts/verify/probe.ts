@@ -19,7 +19,7 @@ export const probes = [
     id: 'ingestion',
     target: 'installed',
     description: 'Import and watcher state against the transcripts discoverable now: unstamped, pending, unwatched, and missing browser projections',
-    limits: ['Counts only; no transcript content or paths', 'Claude and Codex transcripts; Antigravity is not inspected'],
+    limits: ['Counts and resolved discovery scope only; no transcript content or individual file paths', 'Claude and Codex transcripts; Antigravity is not inspected'],
     deadline_ms: 60_000,
   },
   {
@@ -69,6 +69,10 @@ export interface ProbeOptions {
   appendLines?: number;
   transcript?: string;
   timeoutMs?: number;
+  retainTranscripts?: boolean;
+  claudeDir?: string;
+  codexHome?: string;
+  excludePatterns?: string[];
   signal?: AbortSignal;
 }
 
@@ -146,6 +150,14 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-evidence-'));
   fs.chmodSync(directory, 0o700);
   const deadline = options.timeoutMs ?? probe.deadline_ms;
+  // Resolve caller-relative roots before crossing into the worker's repo cwd.
+  const absolute = (value: string) => path.resolve(value === '~' ? os.homedir()
+    : value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : value);
+  if (probe.id === 'ingestion') options = {
+    ...options,
+    claudeDir: absolute(options.claudeDir ?? (process.env.AGENTMONITOR_CLAUDE_DIR?.trim() || path.join(os.homedir(), '.claude'))),
+    codexHome: absolute(options.codexHome ?? (process.env.CODEX_HOME || path.join(os.homedir(), '.codex'))),
+  };
   const result = {
     schema_version: 1,
     kind: 'probe',
@@ -161,10 +173,13 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     observations: {} as Record<string, unknown>,
     limits: [...probe.limits] as string[],
     errors: [] as string[],
+    content_artifacts: [] as string[],
+    cleanup: probe.id === 'resync' ? 'pending' : 'not_applicable',
   };
   const persist = () => writeJson(path.join(directory, 'result.json'), result);
   persist();
   try {
+    options.signal?.throwIfAborted();
     result.runtime = provenance();
     const target = resolveTarget(probe, options, directory);
     if (target) result.target = { ...target, ...(target.kind === 'scratch' ? {} : fileSizes(target.path)) };
@@ -175,6 +190,9 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     // compiled app at its scratch database before any module reads config.
     const env: NodeJS.ProcessEnv = {};
     for (const name of ['PATH', 'TMPDIR', 'HOME', 'CODEX_HOME']) if (process.env[name]) env[name] = process.env[name];
+    if (probe.id === 'ingestion' && process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS !== undefined) {
+      env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS = process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS;
+    }
     if (probe.id === 'resync' && target) env.AGENTMONITOR_DB_PATH = target.path;
     const log = fs.openSync(path.join(directory, 'worker.log'), 'a', 0o600);
     const child = spawn(process.execPath, ['--import', 'tsx', path.join(repoRoot, 'scripts/verify/probe-worker.ts'), request], {
@@ -185,21 +203,41 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     const timer = setTimeout(() => child.kill('SIGKILL'), deadline);
     const abort = () => child.kill('SIGKILL');
     options.signal?.addEventListener('abort', abort, { once: true });
-    const [code, signal] = await exited;
-    clearTimeout(timer);
-    options.signal?.removeEventListener('abort', abort);
+    if (options.signal?.aborted) abort();
+    let code: number | null;
+    let signal: NodeJS.Signals | null;
+    try { [code, signal] = await exited; }
+    finally { clearTimeout(timer); options.signal?.removeEventListener('abort', abort); }
     const output = path.join(directory, 'worker.json');
     if (signal === 'SIGKILL') throw new Error(options.signal?.aborted ? 'Probe interrupted' : `Probe exceeded its ${deadline} ms deadline and was killed`);
     if (code !== 0 || !fs.existsSync(output)) throw new Error(`Probe worker exited (${code}); see ${directory}/worker.log`);
     const worker = JSON.parse(fs.readFileSync(output, 'utf8')) as { measurements: Record<string, unknown>; observations: Record<string, unknown>; limits?: string[] };
     result.measurements = worker.measurements;
     result.observations = worker.observations;
+    if (probe.id === 'snapshot' && typeof worker.observations.snapshot === 'string') result.content_artifacts.push(worker.observations.snapshot);
     result.limits.push(...(worker.limits ?? []));
     if (result.target && result.target.kind !== 'scratch') Object.assign(result.target, { after: fileSizes(result.target.path) });
     result.status = 'observed';
   } catch (error) {
     result.errors.push(String(error));
   } finally {
+    if (probe.id === 'resync') {
+      // The parent owns cleanup: the worker may have failed or been SIGKILLed.
+      // Only remove paths created inside this run's fresh evidence directory.
+      try {
+        const transcripts = path.join(directory, 'transcripts');
+        if (options.retainTranscripts) {
+          if (fs.existsSync(transcripts)) result.content_artifacts.push(transcripts);
+        } else fs.rmSync(transcripts, { recursive: true, force: true });
+        for (const suffix of ['', '-wal', '-shm']) fs.rmSync(path.join(directory, 'scratch.db' + suffix), { force: true });
+        result.cleanup = 'complete';
+      } catch (error) {
+        result.cleanup = 'failed';
+        result.status = 'blocked';
+        result.errors.push(`Content cleanup failed in ${directory}: ${String(error)}`);
+      }
+      if (result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
+    }
     result.finished_at = new Date().toISOString();
     persist();
   }

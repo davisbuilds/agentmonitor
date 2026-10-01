@@ -650,13 +650,36 @@ created by `probe snapshot`; any other `--db` is refused. A snapshot needs free
 temporary space of twice the database size and stays until you remove its
 directory.
 
+Health reports `database_size_matches` as a size comparison only;
+`target_matches_running_server` stays `unknown`. Equal sizes do not identify the
+server's database.
+
+Ingestion resolves `--claude-dir` and `--codex-home` first, then the caller's
+`AGENTMONITOR_CLAUDE_DIR` / `CODEX_HOME`, then home-directory defaults. Repeat
+`--exclude PATTERN` to override `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS`; `--exclude
+""` clears exclusions. Relative roots resolve against the invocation directory.
+The result records the resolved roots and exclusions in `observations.discovery`.
+These are the probe's settings, not verified settings of the running server;
+provide the service's scope when investigating its ingestion state.
+
+Re-sync removes its copied transcripts and scratch database after success,
+failure, deadline expiry, or handled interruption. Parent-side cleanup runs after
+the worker exits, including when it is killed. `--retain-transcripts` explicitly
+keeps the transcript copies for debugging; `content_artifacts` lists those paths
+and any retained snapshot. Explicit snapshots are never deleted by re-sync.
+If the parent itself is forcibly killed, cleanup cannot run: inspect and remove
+its evidence directory manually. The `cleanup` field reports cleanup failure
+rather than claiming the content was removed.
+
 Results use the run evidence layout (`result.json` under an
 `agentmonitor-evidence-*` directory) and add the target kind, path, and file sizes
 before and after. `monitor-stats` times the statements the endpoint itself runs on
 a separate connection with the server's page cache size; it omits the idle-session
-update the endpoint performs and does not go through HTTP. Probes record counts,
-timings and plans, not transcript content, but their evidence describes a real
-store: keep it out of public issues and commits.
+update the endpoint performs and does not go through HTTP. Structured observations
+contain counts, timings, plans, and scope metadata rather than transcript bodies.
+Explicitly retained transcripts and snapshots contain real content; worker logs
+are diagnostic output, not a sanitized export. Keep evidence from a real store
+out of public issues and commits.
 
 `pnpm test:verify` type-checks the driver and exercises lifecycle isolation,
 interruption, real browser workflows, missing prerequisites, explicit timing

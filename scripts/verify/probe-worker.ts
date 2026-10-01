@@ -7,6 +7,7 @@ import type * as CodexLive from '../../src/live/codex-adapter.js';
 import type * as TraceService from '../../src/trace-quality/service.js';
 import type * as Connection from '../../src/db/connection.js';
 import type * as Schema from '../../src/db/schema.js';
+import type * as PathExcludes from '../../src/util/path-excludes.js';
 import type * as Config from '../../src/config.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -58,21 +59,25 @@ async function health(options: ProbeOptions) {
       server_error: error,
       listener,
       build: server?.build ?? null,
-      // Size is the only database identity /api/health exposes.
-      target_matches_running_server: reported === null || dbBytes === null ? 'unknown' : reported === dbBytes,
+      // Equal sizes are not database identity evidence.
+      database_size_matches: reported === null || dbBytes === null ? 'unknown' : reported === dbBytes,
+      target_matches_running_server: 'unknown',
     },
   };
 }
 
-async function ingestion() {
+async function ingestion(probeOptions: ProbeOptions) {
   const db = openReadOnly(request.target!.path);
   const { createConfig } = await import(built('config.js')) as typeof Config;
   const { discoverSessionFiles, discoverCodexSessionFiles, findMissingSessionProjections } = await import(built('watcher/index.js')) as typeof WatcherIndex;
   const config = createConfig(process.env);
-  const options = { excludePatterns: config.sync.excludePatterns };
+  const { normalizeExcludePatterns } = await import(built('util/path-excludes.js')) as typeof PathExcludes;
+  const options = { excludePatterns: normalizeExcludePatterns(probeOptions.excludePatterns ?? config.sync.excludePatterns) };
+  const claudeDir = probeOptions.claudeDir!;
+  const codexHome = probeOptions.codexHome!;
   const files = {
-    claude: discoverSessionFiles(config.claudeDir, options),
-    codex: discoverCodexSessionFiles(undefined, options),
+    claude: discoverSessionFiles(claudeDir, options),
+    codex: discoverCodexSessionFiles(codexHome, options),
   };
   const importState = new Map((db.prepare('SELECT file_path, file_hash, file_size, file_mtime FROM import_state').all() as Array<{
     file_path: string; file_hash: string; file_size: number; file_mtime: string | null;
@@ -110,7 +115,10 @@ async function ingestion() {
     SELECT MAX(imported_at) AS last_import, (SELECT MAX(last_parsed_at) FROM watched_files) AS last_parse FROM import_state
   `).get();
   db.close();
-  return { measurements: {}, observations: { ...summary, ...(recency as object) } };
+  return { measurements: {}, observations: {
+    discovery: { claude_dir: claudeDir, codex_home: codexHome, exclude_patterns: options.excludePatterns, matches_running_service: 'unknown' },
+    ...summary, ...(recency as object),
+  } };
 }
 
 async function monitorStats(options: ProbeOptions) {
@@ -238,9 +246,6 @@ async function resync(options: ProbeOptions) {
     messages_after: countMessages(base),
   };
   closeDb();
-  if (request.target!.kind === 'scratch') {
-    for (const suffix of ['', '-wal', '-shm']) fs.rmSync(request.target!.path + suffix, { force: true });
-  }
   return {
     measurements: {
       end_to_end: { prefix_ms: prefixMs, append_ms: appendMs },

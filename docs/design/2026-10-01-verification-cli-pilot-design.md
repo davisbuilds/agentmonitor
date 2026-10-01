@@ -169,8 +169,14 @@ the boundary moved (decided with Davis, 2026-10-01) under these rules:
   that the CLI made with SQLite's online backup. Writes to the installed database
   stay with `amon`'s own repair commands and their dry runs and backups.
 - Results record the target kind and path, file sizes before and after, and the
-  running server's build. They record counts, timings and query plans, not
-  transcript content.
+  running server's build when health is probed. Size equality does not prove
+  database identity. Ingestion records its resolved discovery scope without
+  asserting it matches the running service.
+- Structured observations contain counts, timings and query plans. Re-sync's
+  transcript copies and scratch database are removed by default, including on
+  worker failure or timeout. `--retain-transcripts` explicitly preserves copies
+  for debugging. Snapshots remain full database copies; retained content is
+  identified in `content_artifacts`. Logs and real-store evidence stay private.
 - Probes cover what `amon` does not already expose (plans, phase timings,
   ingestion freshness, build staleness), rather than duplicating its reads.
 

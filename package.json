@@ -39,7 +39,7 @@
     "test:parity:ts:live": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/*.test.ts",
     "verify": "tsx scripts/verify/cli.ts",
     "verify:check": "tsc --noEmit -p tsconfig.verify.json",
-    "test:verify": "pnpm verify:check && node --import tsx --test scripts/verify/integration.test.ts scripts/verify/probe.integration.test.ts"
+    "test:verify": "pnpm verify:check && node --import tsx --test --test-concurrency=1 scripts/verify/integration.test.ts scripts/verify/probe.integration.test.ts"
   },
   "keywords": [
     "ai",

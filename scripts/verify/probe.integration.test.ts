@@ -17,13 +17,23 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
   const session = await startSession();
   const fixture = path.join(session.directory, 'fixture.db');
   try {
-    await t.test('health matches a running server to its database', async () => {
+    await t.test('health reports size equality without claiming database identity', async () => {
       const result = await runProbe('health', { url: session.url, db: fixture });
       assert.equal(result.status, 'observed', result.errors.join(' '));
       const observations = result.observations as { server: { status: string }; listener: { pid: number } | null; target_matches_running_server: unknown };
       assert.equal(observations.server.status, 'ok');
-      assert.equal(observations.target_matches_running_server, true);
+      assert.notEqual(observations.target_matches_running_server, true, 'equal bytes do not establish identity');
       assert.ok(observations.listener && observations.listener.pid > 0);
+      const different = path.join(session.directory, 'different.db');
+      const other = new Database(different);
+      other.pragma('user_version = 123');
+      other.close();
+      fs.truncateSync(different, fs.statSync(fixture).size);
+      const mismatch = await runProbe('health', { url: session.url, db: different });
+      assert.equal(mismatch.status, 'observed');
+      assert.equal(mismatch.observations.database_size_matches, true);
+      assert.equal(mismatch.observations.target_matches_running_server, 'unknown');
+
     });
   } finally { await stopSession(session); }
 
@@ -55,7 +65,8 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
 
   await t.test('ingestion classifies each transcript against import and watcher state', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-probe-home-'));
-    const previous = process.env.HOME;
+    const previous = process.env.AGENTMONITOR_CLAUDE_DIR;
+    const previousExcludes = process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS;
     try {
       const projects = path.join(home, '.claude', 'projects', 'proj');
       fs.mkdirSync(projects, { recursive: true });
@@ -79,15 +90,42 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       db.prepare(`INSERT INTO watched_files (file_path, file_hash, file_mtime, status) VALUES (?, 'hash', '', 'parsed')`).run(stamped);
       db.close();
 
-      process.env.HOME = home;
-      const result = await runProbe('ingestion', { db: copy });
+      process.env.AGENTMONITOR_CLAUDE_DIR = path.join(home, '.claude');
+      process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS = 'excluded';
+      fs.mkdirSync(path.join(projects, 'excluded'));
+      fs.writeFileSync(path.join(projects, 'excluded', 'hidden.jsonl'), '{}\n');
+      const result = await runProbe('ingestion', { db: copy, codexHome: path.join(home, '.codex') });
       assert.equal(result.status, 'observed', result.errors.join(' '));
       const claude = (result.observations as Record<string, { discovered: number; import_state: Record<string, number>; watcher: Record<string, number> }>).claude;
       assert.equal(claude.discovered, 4);
       assert.deepEqual(claude.import_state, { unchanged: 1, changed_since_import: 1, unstamped: 1, invalidated: 0, never_imported: 1 });
       assert.deepEqual(claude.watcher, { parsed: 1, skipped: 0, error: 0, unwatched: 3 });
+      assert.deepEqual(result.observations.discovery, {
+        claude_dir: path.join(home, '.claude'), codex_home: path.join(home, '.codex'),
+        exclude_patterns: ['excluded'], matches_running_service: 'unknown',
+      });
+      // Explicit scope wins over the caller's environment and can clear exclusions.
+      const override = await runProbe('ingestion', {
+        db: copy, claudeDir: path.join(home, '.claude'), codexHome: path.join(home, '.codex'), excludePatterns: [],
+      });
+      assert.equal((override.observations.claude as { discovered: number }).discovered, 5);
+      const emptyRoot = path.join(home, 'empty');
+      fs.mkdirSync(path.join(emptyRoot, 'projects'), { recursive: true });
+      const empty = await runProbe('ingestion', { db: copy, claudeDir: emptyRoot, codexHome: path.join(home, '.codex') });
+      assert.equal((empty.observations.claude as { discovered: number }).discovered, 0);
+      const fromCli = JSON.parse(execFileSync(process.execPath, [
+        '--import', 'tsx', 'scripts/verify/cli.ts', 'probe', 'ingestion', '--db', copy,
+        '--claude-dir', path.join(home, '.claude'), '--codex-home', path.join(home, '.codex'),
+        '--exclude', 'excluded', '--exclude', 'new.jsonl', '--json',
+      ], { encoding: 'utf8' }));
+      assert.equal(fromCli.status, 'observed');
+      assert.equal(fromCli.observations.claude.discovered, 3);
+      assert.deepEqual(fromCli.observations.discovery.exclude_patterns, ['excluded', 'new.jsonl']);
+
+
     } finally {
-      if (previous === undefined) delete process.env.HOME; else process.env.HOME = previous;
+      if (previous === undefined) delete process.env.AGENTMONITOR_CLAUDE_DIR; else process.env.AGENTMONITOR_CLAUDE_DIR = previous;
+      if (previousExcludes === undefined) delete process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS; else process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS = previousExcludes;
       fs.rmSync(home, { recursive: true, force: true });
     }
   });
@@ -110,6 +148,59 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.deepEqual(observations.end_to_end_results, ['parsed', 'parsed']);
       assert.equal(observations.messages_after, 30);
       assert.equal(fs.existsSync(result.target!.path), false, 'the scratch database is removed');
+      assert.equal(fs.existsSync(path.join(result.directory, 'transcripts')), false, 'transcript copies must not survive default cleanup');
+      assert.equal(result.cleanup, 'complete');
+      assert.deepEqual(result.content_artifacts, []);
+      const retained = await runProbe('resync', { transcript, appendLines: 5, retainTranscripts: true });
+      assert.equal(retained.status, 'observed', retained.errors.join(' '));
+      const copies = path.join(retained.directory, 'transcripts');
+      assert.deepEqual(retained.content_artifacts, [copies]);
+      assert.equal(fs.readdirSync(copies).length, 2);
+      assert.ok(fs.readdirSync(copies).every(file => fs.readFileSync(path.join(copies, file), 'utf8') === lines));
+      assert.equal(fs.existsSync(retained.target!.path), false);
+      fs.rmSync(copies, { recursive: true });
+
+      // A real SQLite error after transcript copies exist must also clean them.
+      const backup = await runProbe('snapshot', { db: fixture });
+      assert.equal(backup.status, 'observed', backup.errors.join(' '));
+      const snapshot = String(backup.observations.snapshot);
+      try {
+        const db = new Database(snapshot);
+        db.exec("CREATE TRIGGER fail_probe BEFORE INSERT ON messages BEGIN SELECT RAISE(ABORT, 'verification write failure'); END");
+        db.close();
+        const failed = await runProbe('resync', { transcript, db: snapshot });
+        assert.equal(failed.status, 'blocked');
+        assert.equal(failed.cleanup, 'complete');
+        assert.equal(fs.existsSync(path.join(failed.directory, 'transcripts')), false);
+        assert.deepEqual(failed.content_artifacts, [fs.realpathSync(snapshot)], 'explicit snapshots are retained and labeled');
+        assert.ok(fs.existsSync(snapshot));
+      } finally { fs.rmSync(path.dirname(snapshot), { recursive: true }); }
+
+      // Wait for a real copy to exist, then interrupt the worker during parsing.
+      fs.writeFileSync(transcript, lines.repeat(300));
+      const before = new Set(fs.readdirSync(os.tmpdir()));
+      const abort = new AbortController();
+      let sawCopy = false;
+      const timer = setInterval(() => {
+        for (const entry of fs.readdirSync(os.tmpdir())) {
+          if (before.has(entry) || !entry.startsWith('agentmonitor-evidence-')) continue;
+          const copies = path.join(os.tmpdir(), entry, 'transcripts');
+          if (fs.existsSync(copies) && fs.readdirSync(copies).length) {
+            sawCopy = true;
+            abort.abort(new Error('Test interruption with transcript copy present'));
+          }
+        }
+      }, 5);
+      try {
+        const interrupted = await runProbe('resync', { transcript, signal: abort.signal });
+        assert.equal(sawCopy, true);
+        assert.equal(interrupted.status, 'blocked');
+        assert.match(interrupted.errors.join(' '), /interrupted/);
+        assert.equal(interrupted.cleanup, 'complete');
+        assert.equal(fs.existsSync(path.join(interrupted.directory, 'transcripts')), false);
+        assert.equal(fs.existsSync(interrupted.target!.path), false);
+      } finally { clearInterval(timer); }
+
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
