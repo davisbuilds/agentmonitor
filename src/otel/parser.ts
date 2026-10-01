@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
+import { sliceWithoutSplittingSurrogates } from '../util/text.js';
 
 // ─── OTLP JSON types (subset we care about) ────────────────────────────
 
@@ -788,7 +789,7 @@ function parseLogRecord(
       }
       if (outputRaw !== undefined) {
         meta.output ??= outputRaw;
-        meta.content_preview ??= outputRaw.slice(0, 500);
+        meta.content_preview ??= sliceWithoutSplittingSurrogates(outputRaw, 500);
       }
     }
 
@@ -819,7 +820,7 @@ function parseLogRecord(
       }
       if (eventType === 'response' && extractedText) {
         meta.text ??= extractedText;
-        meta.content_preview ??= extractedText.slice(0, 500);
+        meta.content_preview ??= sliceWithoutSplittingSurrogates(extractedText, 500);
       }
     }
   }

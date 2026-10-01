@@ -911,6 +911,11 @@ describe('GET /api/v2/live/sessions/:id/items', () => {
     assert.ok(secondBody.data[0].id > firstBody.data[firstBody.data.length - 1].id);
   });
 
+  test('rejects a cursor that is not an item id', async () => {
+    const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?cursor=abc`);
+    assert.equal(res.status, 400);
+  });
+
   test('returns 404 for missing live session items', async () => {
     const res = await fetch(`${baseUrl}/api/v2/live/sessions/missing-live-session/items`);
     assert.equal(res.status, 404);

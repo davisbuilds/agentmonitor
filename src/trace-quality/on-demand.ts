@@ -255,17 +255,32 @@ function mapProjectedObservation(
   };
 }
 
-function buildObservationTree(observations: TraceQualityObservation[]): TraceQualityObservationTreeNode[] {
+export function buildObservationTree(observations: TraceQualityObservation[]): TraceQualityObservationTreeNode[] {
   const nodes = new Map<string, TraceQualityObservationTreeNode>();
+  const parentOf = new Map<string, string | null>();
   const roots: TraceQualityObservationTreeNode[] = [];
   for (const observation of observations) {
     nodes.set(observation.id, { ...observation, children: [] });
+    parentOf.set(observation.id, observation.parent_observation_id ?? null);
   }
+  // The projection only links forward today, but a parent chain that loops back
+  // would make its members unreachable, or a node its own descendant. Such a
+  // node is shown as a root instead.
+  const inCycle = (id: string): boolean => {
+    const visited = new Set<string>();
+    let current = parentOf.get(id) ?? null;
+    while (current !== null && nodes.has(current) && !visited.has(current)) {
+      if (current === id) return true;
+      visited.add(current);
+      current = parentOf.get(current) ?? null;
+    }
+    return false;
+  };
   for (const observation of observations) {
     const node = nodes.get(observation.id);
     if (!node) continue;
     const parent = observation.parent_observation_id ? nodes.get(observation.parent_observation_id) : undefined;
-    if (parent) parent.children.push(node);
+    if (parent && !inCycle(observation.id)) parent.children.push(node);
     else roots.push(node);
   }
   return roots;

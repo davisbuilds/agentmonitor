@@ -173,9 +173,9 @@ export function parseOptionSet(args: string[], valueFlags: Set<string>, booleanF
 
 export function parseIntegerOption(value: string | undefined, flag: string): number | undefined {
   if (value == null) return undefined;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed)) throw invalidUsage(`Invalid ${flag}: ${value}`);
-  return parsed;
+  // parseInt alone reads "100xyz" as 100.
+  if (!/^-?\d+$/.test(value.trim())) throw invalidUsage(`Invalid ${flag}: ${value}`);
+  return Number.parseInt(value, 10);
 }
 
 export function parseDateOption(value: string | undefined, flag: string): string | undefined {
