@@ -15,6 +15,7 @@ import { startServerBuildWatch } from './build-fingerprint.js';
 import { startWatcher, stopWatcher } from './watcher/service.js';
 import { ensureSessionTraceSummaryBackfill } from './trace-quality/summary.js';
 import { recalculateEventCosts } from './pricing/recalc.js';
+import { startSearchIndexMaintenance, type SearchIndexMaintenance } from './db/storage.js';
 
 export interface RuntimeOptions {
   noWatch?: boolean;
@@ -35,6 +36,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
   let sessionChecker: ReturnType<typeof setInterval> | undefined;
   let autoImportTimer: ReturnType<typeof setInterval> | undefined;
   let autoImportDelay: ReturnType<typeof setTimeout> | undefined;
+  let searchIndexMaintenance: SearchIndexMaintenance | undefined;
   let closePromise: Promise<void> | undefined;
 
   function autoImportAll() {
@@ -91,6 +93,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
 
       await attempt(stopProviderQuotaPolling);
       await attempt(stopWatcher);
+      await attempt(() => searchIndexMaintenance?.stop());
       if (serverClosePromise) await attempt(() => serverClosePromise);
       await attempt(() => closeDb());
       await attempt(() => ownership.release());
@@ -152,6 +155,15 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       autoImportTimer = setInterval(autoImportAll, intervalMs);
       console.log(`Auto-import: every ${config.autoImportIntervalMinutes}m`);
     }
+
+    // Deleted messages leave dead entries in the search index until a merge
+    // reaches them; without this it once grew to 13x its live size. The first
+    // run waits out startup's own catch-up work.
+    searchIndexMaintenance = startSearchIndexMaintenance({
+      db: getDb,
+      initialDelayMs: 10 * 60_000,
+      intervalMs: 6 * 60 * 60_000,
+    });
 
     return {
       url: `http://${config.host}:${config.port}`,

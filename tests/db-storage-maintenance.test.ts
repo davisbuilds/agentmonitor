@@ -88,3 +88,62 @@ test('a stepwise merge stops between steps when asked', async () => {
   rewriteSession(30);
   assert.deepEqual(await storage.mergeSearchIndex(db, { pages: 1, maxSteps: 3 }), { steps: 3, completed: false });
 });
+
+async function until(condition: () => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = performance.now() + timeoutMs;
+  while (!condition()) {
+    if (performance.now() > deadline) throw new Error('condition not met in time');
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+}
+
+test('the server-side maintenance merges the index on its schedule', async () => {
+  rewriteSession(30);
+  const bloated = storage.searchIndexBytes(db);
+  const logs: string[] = [];
+  const maintenance = storage.startSearchIndexMaintenance({
+    db: () => db, initialDelayMs: 1, intervalMs: 60_000, pauseMs: 1, pages: 4, log: message => logs.push(message),
+  });
+  try {
+    await until(() => logs.length > 0);
+    assert.match(logs[0], /merged the search index in \d+ steps/);
+    assert.ok(storage.searchIndexBytes(db) * 3 <= bloated);
+  } finally {
+    await maintenance.stop();
+  }
+});
+
+test('stopping the maintenance ends a run in progress and cancels later ones', async () => {
+  rewriteSession(30);
+  let runs = 0;
+  const logs: string[] = [];
+  const maintenance = storage.startSearchIndexMaintenance({
+    db: () => { runs++; return db; }, initialDelayMs: 1, intervalMs: 20, pauseMs: 200, pages: 1, log: message => logs.push(message),
+  });
+  // The fixture's merge takes three working steps; stop between the second
+  // (about 200 ms in) and the third (about 400 ms).
+  await until(() => runs > 0);
+  await new Promise(resolve => setTimeout(resolve, 250));
+  await maintenance.stop();
+  // stop() waits for the run to wind down, so its report precedes shutdown.
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /merged the search index in \d+ steps/);
+  const left = await storage.mergeSearchIndex(db, { pages: 1 });
+  assert.ok(left.steps > 1, `the stopped run left work: ${left.steps} steps`);
+  const started = runs;
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(runs, started, 'no run after stop');
+});
+
+test('a failed maintenance run is logged, not thrown', async () => {
+  const logs: string[] = [];
+  const maintenance = storage.startSearchIndexMaintenance({
+    db: () => { throw new Error('database closed'); }, initialDelayMs: 1, intervalMs: 60_000, log: message => logs.push(message),
+  });
+  try {
+    await until(() => logs.length > 0);
+    assert.match(logs[0], /search index merge failed: database closed/);
+  } finally {
+    await maintenance.stop();
+  }
+});

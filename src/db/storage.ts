@@ -97,3 +97,62 @@ export async function mergeSearchIndex(
     await options.pause?.();
   }
 }
+
+export interface SearchIndexMaintenanceOptions {
+  db: () => Database.Database;
+  initialDelayMs: number;
+  intervalMs: number;
+  /** Time between merge steps, so requests and file events are served meanwhile. */
+  pauseMs?: number;
+  pages?: number;
+  log?: (message: string) => void;
+}
+
+export interface SearchIndexMaintenance {
+  /** Cancel future runs and end the one in progress after its current step. */
+  stop(): Promise<void>;
+}
+
+/**
+ * Keep the search index compact from inside the server. A run on a clean index
+ * is a single step that finds nothing; after the cleanup above, the server's
+ * other work waited at most one 0.27 s step at a time.
+ */
+export function startSearchIndexMaintenance(options: SearchIndexMaintenanceOptions): SearchIndexMaintenance {
+  const log = options.log ?? (message => console.log(message));
+  const pauseMs = options.pauseMs ?? 50;
+  let stopped = false;
+  let running: Promise<void> | undefined;
+
+  function run(): void {
+    if (running) return;
+    running = (async () => {
+      try {
+        const result = await mergeSearchIndex(options.db(), {
+          pages: options.pages,
+          pause: () => new Promise(resolve => setTimeout(resolve, pauseMs)),
+          shouldStop: () => stopped,
+        });
+        if (result.steps > 1) log(`[storage] merged the search index in ${result.steps} steps`);
+      } catch (error) {
+        log(`[storage] search index merge failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    })().finally(() => {
+      running = undefined;
+    });
+  }
+
+  const delay = setTimeout(run, options.initialDelayMs);
+  const interval = setInterval(run, options.intervalMs);
+  delay.unref();
+  interval.unref();
+
+  return {
+    async stop() {
+      stopped = true;
+      clearTimeout(delay);
+      clearInterval(interval);
+      await running;
+    },
+  };
+}
