@@ -1432,3 +1432,121 @@ describe('Import orchestrator integration', () => {
     }
   });
 });
+
+describe('Import skips files unchanged on disk', () => {
+  // A file the importer cannot open proves it was skipped without a read.
+  function claudeFixture(prefix: string): { dir: string; file: string } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    const file = path.join(dir, 'projects', 'proj', 'stat-gate-session.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({
+      type: 'assistant', sessionId: 'stat-gate-session', uuid: 'uuid-stat-gate-0', timestamp: '2026-02-01T10:00:00Z',
+      message: { id: 'msg_stat_gate', model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 2, output_tokens: 3 } },
+    }));
+    return { dir, file };
+  }
+
+  function codexFixture(prefix: string): { dir: string; file: string } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+    const file = path.join(dir, 'sessions', '2026', '02', '01', 'stat-gate-rollout.jsonl');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, [
+      JSON.stringify({ type: 'session_meta', timestamp: '2026-02-01T11:00:00Z', payload: { id: 'stat-gate-codex', cwd: '/home/user/project', timestamp: '2026-02-01T11:00:00Z' } }),
+      JSON.stringify({ type: 'event_msg', timestamp: '2026-02-01T11:01:00Z', payload: { type: 'token_count', info: { total_token_usage: { input_tokens: 500, output_tokens: 100 } } } }),
+    ].join('\n'));
+    return { dir, file };
+  }
+
+  test('a Claude transcript whose size and mtime match is not read again', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const { dir, file } = claudeFixture('agentmonitor-stat-gate-claude-');
+    runImport({ source: 'claude-code', claudeDir: dir });
+    fs.chmodSync(file, 0o000);
+    try {
+      const result = runImport({ source: 'claude-code', claudeDir: dir });
+      assert.equal(result.skippedFiles, 1);
+    } finally {
+      fs.chmodSync(file, 0o644);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a Codex rollout whose size and mtime match is not read again', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const { dir, file } = codexFixture('agentmonitor-stat-gate-codex-');
+    runImport({ source: 'codex', codexDir: dir });
+    fs.chmodSync(file, 0o000);
+    try {
+      const result = runImport({ source: 'codex', codexDir: dir });
+      assert.equal(result.skippedFiles, 1);
+    } finally {
+      fs.chmodSync(file, 0o644);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('a same-size rewrite with a new mtime is read again', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const { dir, file } = claudeFixture('agentmonitor-stat-gate-rewrite-');
+    runImport({ source: 'claude-code', claudeDir: dir });
+    const original = fs.readFileSync(file, 'utf-8');
+    fs.writeFileSync(file, original.replace('uuid-stat-gate-0', 'uuid-stat-gate-9'));
+    const later = new Date(fs.statSync(file).mtimeMs + 5_000);
+    fs.utimesSync(file, later, later);
+
+    const result = runImport({ source: 'claude-code', claudeDir: dir });
+
+    assert.equal(result.skippedFiles, 0);
+    assert.equal(result.totalEventsImported, 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('an append that keeps the mtime is read again by its size', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const { dir, file } = claudeFixture('agentmonitor-stat-gate-size-');
+    // A whole-second mtime can be restored exactly after the append.
+    const pinned = new Date('2026-02-01T12:00:00Z');
+    fs.utimesSync(file, pinned, pinned);
+    runImport({ source: 'claude-code', claudeDir: dir });
+    fs.appendFileSync(file, '\n' + JSON.stringify({
+      type: 'assistant', sessionId: 'stat-gate-session', uuid: 'uuid-stat-gate-1', timestamp: '2026-02-01T10:01:00Z',
+      message: { id: 'msg_stat_gate_1', model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 2, output_tokens: 3 } },
+    }));
+    fs.utimesSync(file, pinned, pinned);
+
+    const result = runImport({ source: 'claude-code', claudeDir: dir });
+
+    assert.equal(result.totalEventsImported, 1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('a hash cleared to force a re-import still reads the file', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const { dir } = codexFixture('agentmonitor-stat-gate-invalidated-');
+    runImport({ source: 'codex', codexDir: dir });
+    if (!getDb) throw new Error('Database not initialized');
+    getDb().prepare("UPDATE import_state SET file_hash = '' WHERE source = 'codex'").run();
+
+    const result = runImport({ source: 'codex', codexDir: dir });
+
+    assert.equal(result.skippedFiles, 0);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  test('a touched but unchanged file is read once, then skipped by its new mtime', async () => {
+    const { runImport } = await import('../src/import/index.js');
+    const { dir, file } = claudeFixture('agentmonitor-stat-gate-touch-');
+    runImport({ source: 'claude-code', claudeDir: dir });
+    const later = new Date(fs.statSync(file).mtimeMs + 5_000);
+    fs.utimesSync(file, later, later);
+    runImport({ source: 'claude-code', claudeDir: dir });
+    fs.chmodSync(file, 0o000);
+    try {
+      const result = runImport({ source: 'claude-code', claudeDir: dir });
+      assert.equal(result.skippedFiles, 1);
+    } finally {
+      fs.chmodSync(file, 0o644);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

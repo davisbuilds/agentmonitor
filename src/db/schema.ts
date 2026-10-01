@@ -159,9 +159,16 @@ function initSchemaLocked(db: Database): void {
       file_size INTEGER NOT NULL,
       source TEXT NOT NULL,
       events_imported INTEGER NOT NULL DEFAULT 0,
-      imported_at TEXT NOT NULL DEFAULT (datetime('now'))
+      imported_at TEXT NOT NULL DEFAULT (datetime('now')),
+      file_mtime TEXT
     );
   `);
+  const importStateColumns = new Set<string>(
+    (db.prepare(`PRAGMA table_info(import_state)`).all() as Array<{ name: string }>).map(col => col.name)
+  );
+  if (!importStateColumns.has('file_mtime')) {
+    db.exec('ALTER TABLE import_state ADD COLUMN file_mtime TEXT');
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS provider_quotas (
