@@ -497,6 +497,14 @@ function initSchemaLocked(db: Database): void {
   //   dimension breakdowns cheap to compute as all rows minus the small,
   //   segregated benchmark slice. Its session_id prefix after source also
   //   accelerates the benchmark-session exclusion in total_sessions.
+  // - idx_events_agent_dims serves the agent-filtered Monitor counts and
+  //   tool/model breakdowns. idx_events_agent_type finds an agent's rows but
+  //   covers nothing else, so those reads looked up every row of that agent
+  //   (about 5 s per breakdown for Codex on a real store). Including source
+  //   lets the benchmark exclusion resolve inside the index as well.
+  // - idx_events_agent_created_order is idx_events_created_at_order per agent,
+  //   so an agent-filtered event page reads the newest rows in order instead of
+  //   sorting all of that agent's rows (about 6 s for Codex on a real store).
   //
   // - idx_events_usage_ts is an EXPRESSION index, and the expression must stay
   //   character-identical to usageTimestampExpr()/the date predicate in
@@ -584,6 +592,10 @@ function initSchemaLocked(db: Database): void {
           OR COALESCE(cache_write_tokens, 0) > 0));
     CREATE INDEX IF NOT EXISTS idx_events_created_at_order
       ON events(datetime(created_at) DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_events_agent_dims
+      ON events(agent_type, tool_name, model, source);
+    CREATE INDEX IF NOT EXISTS idx_events_agent_created_order
+      ON events(agent_type, datetime(created_at) DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_events_usage_ts
       ON events(datetime(COALESCE(client_timestamp, created_at)));
   `);

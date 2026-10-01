@@ -1739,9 +1739,15 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
   // Event count retains overlapping OTEL rows; usage totals reconcile them
   // away. Put the reconciliation predicate in WHERE so SQLite performs its
   // session+timestamp lookup once per candidate row, not once per SUM column.
-  const usageWhere = `${where}
+  // The unary `+` on the agent filter keeps SQLite from seeking
+  // idx_events_agent_type, which does not cover the token columns and looks up
+  // every row of that agent (seconds); it scans the covering usage index instead.
+  const usageConditions = conditions.map(condition => condition === 'e.agent_type = ?' ? '+e.agent_type = ?' : condition);
+  const usageWhere = `WHERE ${usageConditions.join(' AND ')}
     AND ${usageMetricPresenceCondition('e')}
     AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
+  // Breakdowns break count ties by name, so their order does not depend on
+  // which index the plan happens to read.
   const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
   const modelWhere = conditions.length > 0 ? `${where} AND model IS NOT NULL` : 'WHERE model IS NOT NULL';
 
@@ -1755,16 +1761,16 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
     { name: 'tool_breakdown', sql: `
       SELECT tool_name, COUNT(*) as count FROM events e
       ${toolWhere}
-      GROUP BY tool_name ORDER BY count DESC
+      GROUP BY tool_name ORDER BY count DESC, tool_name
     `, values },
     { name: 'agent_breakdown', sql: `
       SELECT agent_type, COUNT(*) as count FROM events e ${where}
-      GROUP BY agent_type ORDER BY count DESC
+      GROUP BY agent_type ORDER BY count DESC, agent_type
     `, values },
     { name: 'model_breakdown', sql: `
       SELECT model, COUNT(*) as count FROM events e
       ${modelWhere}
-      GROUP BY model ORDER BY count DESC
+      GROUP BY model ORDER BY count DESC, model
     `, values },
     { name: 'branches', sql: `
       SELECT DISTINCT branch FROM sessions WHERE branch IS NOT NULL ORDER BY last_event_at DESC
