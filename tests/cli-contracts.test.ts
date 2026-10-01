@@ -1040,3 +1040,17 @@ test('warehouse publish without dry-run fails clearly when no DSN is configured'
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /set AGENTMONITOR_WAREHOUSE_DSN/);
 });
+
+test('serve rejects an AGENTMONITOR_PORT outside the TCP range before starting', async () => {
+  const previous = process.env.AGENTMONITOR_PORT;
+  process.env.AGENTMONITOR_PORT = '99999';
+  try {
+    const result = await runCli(['serve', '--no-portless', '--no-import', '--no-watch']);
+    assert.equal(result.exitCode, 2, result.stderr);
+    assert.match(result.stderr, /AGENTMONITOR_PORT/);
+  } finally {
+    if (previous === undefined) delete process.env.AGENTMONITOR_PORT;
+    else process.env.AGENTMONITOR_PORT = previous;
+  }
+});
+

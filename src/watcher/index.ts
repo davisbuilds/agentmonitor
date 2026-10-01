@@ -16,9 +16,8 @@ import { setSessionMode } from '../db/queries.js';
 
 // --- File hashing ---
 
-function hashFile(filePath: string): string {
-  const content = fs.readFileSync(filePath);
-  return crypto.createHash('sha256').update(content).digest('hex');
+function hashBytes(bytes: Buffer): string {
+  return crypto.createHash('sha256').update(bytes).digest('hex');
 }
 
 // --- Discover session files ---
@@ -112,7 +111,9 @@ export function syncSessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    fileHash = hashFile(filePath);
+    // One read serves both the change check and the parse.
+    const bytes = fs.readFileSync(filePath);
+    fileHash = hashBytes(bytes);
     fileMtime = stat.mtime.toISOString();
 
     // Check watched_files for existing record
@@ -121,8 +122,7 @@ export function syncSessionFileDetailed(
       return { result: 'skipped' };
     }
 
-    // Read and parse the file
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = bytes.toString('utf-8');
     const sessionId = path.basename(filePath, '.jsonl');
     const parsed = parseSessionMessages(content, sessionId, filePath);
 
@@ -199,7 +199,9 @@ export function syncCodexSessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    fileHash = hashFile(filePath);
+    // One read serves both the change check and the parse.
+    const bytes = fs.readFileSync(filePath);
+    fileHash = hashBytes(bytes);
     fileMtime = stat.mtime.toISOString();
 
     const existing = getWatchedFileState(db, filePath);
@@ -207,7 +209,7 @@ export function syncCodexSessionFileDetailed(
       return { result: 'skipped' };
     }
 
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = bytes.toString('utf-8');
     const sessionId = path.basename(filePath, '.jsonl');
     const parsed = parseCodexSessionMessages(content, sessionId, filePath);
 
@@ -267,7 +269,7 @@ export function syncAllCodexFiles(db: Database.Database, codexHome?: string, opt
  * resync see the same hash and skip, leaving the browser/search/trace-quality
  * projection stale until SQLite checkpoints. Folding in the sidecars means any
  * committed WAL frame flips the token (over-parsing on a spurious change is
- * harmless — `insertParsedSession` is delete-and-reinsert). (Codex review, PR #57.)
+ * harmless — `insertParsedSession` rewrites only rows that differ). (Codex review, PR #57.)
  */
 export function hashAntigravityDb(filePath: string): string {
   const h = crypto.createHash('sha256');

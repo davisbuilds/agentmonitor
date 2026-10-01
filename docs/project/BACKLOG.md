@@ -59,26 +59,6 @@ so later readers know what still needs checking.
 
 ### Ingestion
 
-#### Auto-import re-reads and re-hashes every transcript on every run
-- **What**: `processFile` (`src/import/index.ts`) reads and SHA-256 hashes the
-  whole of every discovered Claude, Codex and Antigravity file on each
-  auto-import (every 10 minutes by default), before it checks `import_state`.
-  Unchanged files cost a full read. `import_state.file_size` is stored but never
-  used to skip one. The run is synchronous, so the server blocks while it hashes.
-- **Why it matters / evidence**: measured 2026-09-24 on this MacBook with the
-  files cached in memory:
-  - Hashing 359 Codex rollouts (about 1 GB; Codex never deletes them) takes
-    0.40–0.44 s per run.
-  - Claude transcripts were capped at about 30 days by `cleanupPeriodDays` until
-    that was raised to 3650. At the current rate (about 234 MB of transcripts
-    and file history per 30 days) they add about 1 s per run for each year kept.
-  - Runs with the files no longer in memory are slower (not measured).
-- **Next**: skip re-reading a file whose size and mtime match the stored state.
-  Keep the full hash for changed files and for `--force`. Store the mtime
-  alongside the size. The Codex path already hashes and parses one read of
-  the file (`readCodexRollout`, shipped with the Codex import usage repair), so
-  a skip belongs before that read.
-
 #### Codex subagent boundary rests on the current rollout layout
 - **What**: the importer finds a `thread_spawn` subagent's own activity from
   UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out
@@ -193,21 +173,6 @@ the build.
   against the real predicate and ordering; retain it only if the planner uses it
   and write cost/storage remain justified.
 
-#### Codex OTEL events carry no producer time
-- **What**: Codex's OTLP log appender never sets `timeUnixNano`. The event time
-  is only in the `event.timestamp` attribute (`codex-rs/otel/src/events/shared.rs`),
-  which `parseLogRecord` does not read, so `client_timestamp` is NULL and every
-  read falls back to `created_at` (server receive time).
-- **Why or evidence**: measured 2026-09-23 on the live DB: all but one OTEL row
-  lacks `client_timestamp`. The error is the exporter's batch delay (seconds),
-  so the effect on daily views is small, but ordering within a batch and any
-  per-event latency math use arrival time.
-- **Next**: fall back to `event.timestamp`, then `observedTimeUnixNano`, in
-  `parseLogRecord`. First check the Codex OTEL/JSONL overlap suppression, which
-  compares timestamps, still pairs rows once OTEL rows carry producer time.
-  Related: OTLP operational metrics (`otel_metrics`) have no retry dedup yet,
-  unlike usage metrics.
-
 ### Analytics rollups (schema-storage-rebalance Phase 2)
 
 #### Agent-filtered Monitor reads take seconds
@@ -225,8 +190,12 @@ the build.
   `idx_events_agent_type`. The rest is in its other aggregates (event count,
   tool, model and agent breakdowns). Their plans are a hypothesis, unmeasured.
   The filtered bar refreshes at most once per 30 s for this reason.
-- **Next**: take `EXPLAIN QUERY PLAN` and timings for each aggregate in
-  `getMonitorStats` and `listMonitorEvents` under an agent filter. A covering
+  Re-measured 2026-10-01: `stats?agent=codex` took 0.6–7 s. That run overlapped
+  the watcher stalls fixed by the incremental re-sync, which also delayed the
+  unfiltered read (1–2 s instead of about 1 ms), so it overstates the query.
+- **Next**: re-time on a build with the incremental re-sync, while no long
+  session is being written, then take `EXPLAIN QUERY PLAN` and timings for each
+  aggregate in `getMonitorStats` and `listMonitorEvents` under an agent filter. A covering
   index with `agent_type` leading, or per-agent snapshots cached like the
   unfiltered one, are the candidates. Measure before choosing.
 
@@ -478,55 +447,28 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
-#### Hook safety heuristics under-match and should be documented as best-effort
+#### OTLP operational metrics have no retry dedup
+- **What**: an exporter retry of an operational metrics batch (`otel_metrics`)
+  stores its points again. Usage metrics and log records already dedup retries.
+- **Why or evidence**: noted 2026-09-23 while fixing Codex OTEL producer time.
+  Occurrence counts in `GET /api/v2/metrics` can overstate by the retry rate;
+  that rate is unmeasured.
+- **Next**: apply the usage-metric retry key to operational points if a
+  consumer starts reading occurrence counts as exact.
+
+#### Hook safety heuristics under-match
 - **What**: the destructive-command filter
-  (`hooks/claude-code/pre_tool_use.sh:33` and the identical regex in
-  `python/pre_tool_use.py:31`) requires a literal unquoted path token followed by
-  whitespace/EOL, and the sensitive-file regex (`:55`) is an anchored,
-  case-sensitive suffix match.
-- **Why or evidence**: tested 2026-09-22 — `rm -rf /` is blocked, while
-  `rm -rf "/"`, `rm -rf ${HOME}`, `rm -rf $HOME/`, `rm -rf /*` and
-  `rm --recursive --force /` all pass. `.env.local`, `.env.production`,
-  `credentials.json` and `.PEM` produce no `security_warning`. These are everyday
-  spellings, not adversarial ones.
+  (`hooks/claude-code/pre_tool_use.sh` and the identical regex in
+  `python/pre_tool_use.py`) requires a literal unquoted path token, and the
+  sensitive-file check is an anchored, case-sensitive suffix match on a file
+  tool's `file_path`.
+- **Why or evidence**: re-tested 2026-10-01: `rm -rf /` is blocked, while
+  `rm -rf "/"`, `rm -rf ${HOME}`, `rm -rf /*` and `rm --recursive --force /`
+  pass. `.env.local`, `credentials.json` and `.PEM` are not logged. The hooks
+  README now states the checks are best-effort telemetry, not a security
+  control.
 - **Next**: normalize quotes/braces and match common suffixes; match secret files
-  on basename patterns case-insensitively. Either way state plainly in
-  `hooks/claude-code/README.md` that this is best-effort telemetry, not a
-  security control, so no one builds on it as one.
-
-#### Hook installer rough edges
-- **What**: `hooks/claude-code/install.sh:57` names backups with 1-second
-  resolution, so two installs in the same second overwrite the first backup with
-  already-modified settings. Separately, `notification.sh` is listed in
-  `hooks/claude-code/README.md:125` but is wired nowhere — `install.sh` registers
-  only SessionStart, Stop, PostToolUse, PreToolUse, UserPromptSubmit and
-  InstructionsLoaded, and there is no `python/notification.py`.
-- **Why or evidence**: both confirmed 2026-09-22 — two back-to-back installs into
-  a scratch config dir produced one shared `settings.json.bak.<ts>` (hook entries
-  themselves dedupe correctly, so idempotency is fine); `grep -in notification`
-  across `install.sh`, `README.md` and `python/` hits only the README row.
-- **Next**: add a PID/nanosecond suffix or skip when a backup exists; then either
-  wire `Notification` into the installer and manual-install docs or delete the
-  script and its README row.
-
-#### Small hardening items from the 2026-09-22 review
-- **What**: a cluster of individually minor gaps, all traced, none urgent:
-  `Number(params.cursor)` yielding `NaN` silently matches zero rows
-  (`src/db/v2-queries.ts:551`); `getOperationalMetricSummary` has a floor-only
-  limit guard with no upper clamp (`:4241`); `AGENTMONITOR_PORT` is validated
-  `>= 1` with no upper bound, so `99999` reaches `listen()` as a raw
-  `ERR_SOCKET_BAD_PORT` instead of the CLI's usage error
-  (`src/config.ts:220`, `src/cli/commands/runtime.ts:36`); `parseIntegerOption`
-  accepts `--limit 100xyz` as `100` because `parseInt` stops at the first
-  non-digit (`src/cli/args.ts:174`); `outputRaw.slice(0, 500)`
-  (`src/otel/parser.ts:738,769`) truncates by UTF-16 unit and can split an astral
-  character into a lone surrogate that SQLite stores as U+FFFD — a different path
-  from the byte-safe `truncateMetadata`; `buildObservationTree`
-  (`src/trace-quality/on-demand.ts:272`) has no cycle guard, currently safe only
-  because its sole producer enforces forward-only links.
-- **Why or evidence**: each reproduced or traced 2026-09-22 during the review;
-  none has a known user-visible failure today.
-- **Next**: fix opportunistically when touching the owning file.
+  on basename patterns case-insensitively. Keep the README's caveat either way.
 
 ### Frontend testing
 
@@ -548,59 +490,51 @@ the build.
   coverage threshold is enforced yet — add one only once the surface is broad
   enough that a number is meaningful. Noted 2026-09-11.
 
-#### `editedFilesBySession` grows for the life of the browser tab
-- **What**: the module-level `Map<string, Set<string>>` at
-  `frontend/src/lib/stores/monitor.svelte.ts:61` is populated on every live
-  file-edit event and never evicted; a full-repo grep finds no `.delete()` or
-  clear for it.
-- **Why or evidence**: traced 2026-09-22. The SSE connection opens once at app
-  mount and lives for the whole tab, so on a long-running dashboard — the
-  product's stated use case — every session that ever edits a file retains an
-  entry after it ends. Slow unbounded growth; no measured impact yet, so the
-  severity is *hypothesis, unmeasured*.
-- **Next**: evict when a session resolves to `ended` in
-  `applyLiveEventAggregate`, or prune against the bounded `sessions` array on
-  `setSessions`.
-
 ### Cross-repo pattern-mining candidates (agentsview, 2026-09-13)
 
 Flagged by a clone-mining report comparing `agentsview` (a Go/Svelte local
 AI-agent session aggregator — same archetype as agentmonitor) against this repo.
-The report is held outside this repository and is agent-generated; it was **not**
-independently verified against
-agentmonitor's current code, so each item below is a **hypothesis to confirm**
-before acting — the cited agentmonitor files/pains are the report's claims.
+The report is held outside this repository and is agent-generated. All three
+items were checked against current code and a local store on 2026-10-01; the
+entries below record what was measured, not the report's claims.
 
-#### Watcher re-reads whole appending JSONL transcripts (safe-resume checkpoints)
-- **What**: the report claims the ingestion watcher re-reads/re-hashes full JSONL
-  transcript files on each turn instead of resuming from the appended delta.
-  `agentsview` uses persistent safe-resume checkpoints — inode/mtime/change-time
-  gating plus a bounded 128 KiB trailing-anchor digest — to read only new bytes on
-  multi-hundred-MB logs (report pattern 1; agentsview `internal/sync/checkpoint.go`).
-- **Why it matters / evidence**: report-sourced; cites `src/watcher/index.ts`,
-  `src/db/schema.ts`. Unconfirmed — verify the watcher actually re-reads whole files
-  today before treating this as a defect.
-- **Next / Revisit when**: confirm the re-read behavior in `src/watcher/index.ts`;
-  if real and large logs are a live cost, port the checkpoint + tail-anchor scheme.
+#### Watcher re-sync still re-parses the whole transcript
+- **What**: since 2026-10-01 a re-sync writes only the rows that changed, but it
+  still reads, hashes and parses the whole file, and re-derives the session's
+  trace summary from all of its rows, on every append.
+- **Why or evidence**: measured 2026-10-01 on a 34 MB, 7k-message Claude
+  transcript against a scratch database: the parse took 0.08–0.12 s and the trace
+  summary 0.13–0.19 s, against about 0.011 s for the incremental write (the full
+  rewrite it replaced took about 0.83 s). Both remaining costs grow with the
+  session and block the server.
+- **Next**: make `maintainSessionTraceSummary` incremental for appended rows
+  first, since it is the larger cost. Then consider resuming the parse from a
+  stored byte offset with a trailing-anchor check, as `agentsview` does
+  (`internal/sync/checkpoint.go`), falling back to a full parse on mismatch.
 
-#### Session project identity fragments across ephemeral git worktrees
-- **What**: the report claims sessions run in ephemeral agent worktrees resolve to
-  the worktree branch leaf rather than the canonical parent repo, fragmenting a
-  project's sessions. `agentsview` resolves `.git` gitfiles → `commondir` and
-  recovers deleted ephemeral worktrees from surviving ancestors/`.git/worktrees/`
-  (report pattern 3; agentsview `internal/parser/project.go`).
-- **Why it matters / evidence**: report-sourced; cites `src/util/project-identity.ts`,
-  `src/parser/{claude-code,codex-sessions}.ts`. Unconfirmed.
-- **Next / Revisit when**: confirm project-identity handling of worktree gitfiles;
-  if sessions genuinely fragment, add canonical-parent resolution + sibling recovery.
+#### Session project names fragment
+- **What**: the session browser derives a project name from each session's path,
+  so one project can appear under several names and some sessions get none.
+- **Why or evidence**: measured 2026-10-01 on a local store. Fragmentation is
+  real but mostly not the git-worktree cause the `agentsview` report suggested
+  (its `internal/parser/project.go` resolves worktree gitfiles):
+  - per-run automation workspaces each become their own date-stamped project;
+  - about a fifth of browser sessions have no project;
+  - the same parent folder appears under two names (the Claude path decoder in
+    `projectFromPath` and the cwd basename disagree).
+- **Next**: define one canonical project identity (resolved repo root, with
+  worktree gitfiles followed to their common dir) and re-derive existing rows;
+  `skillContext.projectIdentity` from cwd is a candidate source to reuse.
 
-#### Inline base64 tool-result images bloat the store
-- **What**: the report claims multi-MB base64 image data URIs from browser/screenshot
-  tools are stored inline, bloating SQLite and UI serialization. `agentsview` strips
-  them to a compact descriptor (`agentsview_image`) with SHA-256 + byte count (report
-  pattern 5; agentsview `internal/db/tool_result_images.go`).
-- **Why it matters / evidence**: report-sourced; cites `src/contracts/event-contract.ts`,
-  `src/parser/claude-code.ts`. Unconfirmed — verify whether inline base64 images
-  actually reach the store today.
-- **Next / Revisit when**: confirm via a real session containing tool images; if they
-  land inline, strip to an `image_ref` descriptor in `normalizeEvent`.
+#### Inline base64 images bloat the store and the search index
+- **What**: image blocks (screenshots, pasted images) are stored inline as base64
+  in `messages.content`, and the content-linked FTS index tokenizes them.
+- **Why or evidence**: measured 2026-10-01 on a local store: messages containing
+  base64 images are well under 1% of messages but about 15% of stored message
+  text. The FTS index is the largest object in the database, about four times
+  the size of the `messages` table; how much of it the image tokens cause is not
+  yet measured. `agentsview` strips such images to a descriptor with a SHA-256
+  and byte count (`internal/db/tool_result_images.go`).
+- **Next**: measure the index share by rebuilding FTS on a copy with image data
+  removed. If material, replace image data with a descriptor in the parsers,
+  then re-sync and rebuild the index.

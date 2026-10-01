@@ -107,7 +107,14 @@ loaded.
 The `pre_tool_use` script includes optional safety checks:
 
 - **Blocks** destructive commands: `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`
-- **Logs** sensitive file access: `.env`, `.pem`, `.key`, `.credentials`, `.secret` files
+- **Logs** sensitive file access by file tools (a `file_path` ending in `.env`, `.pem`, `.key`, `.credentials` or `.secret`)
+
+These checks are best-effort telemetry, not a security control. They match
+literal spellings only: quoted or braced paths (`rm -rf "/"`, `rm -rf ${HOME}`),
+globs (`rm -rf /*`) and long options (`rm --recursive --force /`) are not blocked.
+The file match is a case-sensitive suffix, so `.env.local`, `credentials.json`
+and `.PEM` are not logged, and Bash commands that read a file are not checked.
+Do not rely on them to stop a destructive command or to audit secret access.
 
 Safety checks are enabled by default. To disable:
 
@@ -128,7 +135,6 @@ export AGENTMONITOR_SAFETY=0
 | `pre_tool_use.sh` | Safety checks + event on block |
 | `user_prompt_submit.sh` | Maps `UserPromptSubmit` -> `user_prompt` event |
 | `instructions_loaded.sh` | Maps `InstructionsLoaded` -> content-free `instruction_load` event |
-| `notification.sh` | Maps `Notification` -> `response` event |
 
 ### Python (alternative)
 

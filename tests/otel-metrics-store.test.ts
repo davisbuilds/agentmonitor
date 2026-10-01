@@ -61,6 +61,13 @@ describe('operational metrics store', () => {
     assert.equal(byState.get('skipped_rate_limit')!.total_value, 2);
   });
 
+  test('the summary limit is capped', () => {
+    insertOperationalMetrics(Array.from({ length: 510 }, (_, index) => ({
+      session_id: 's-cap', agent_type: 'codex', metric_name: 'cap.metric', attrs: { index }, value: 1, temporality: 'delta' as const,
+    })));
+    assert.equal(getOperationalMetricSummary({ namePrefix: 'cap.', limit: 100_000 }).length, 500);
+  });
+
   test('a prefix filter that matches nothing returns empty, not everything', () => {
     assert.deepEqual(getOperationalMetricSummary({ namePrefix: 'nonexistent.' }), []);
   });

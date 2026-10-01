@@ -6,10 +6,15 @@ import { resolveReportingTimeZone } from './util/time-zone.js';
 
 type EnvMap = NodeJS.ProcessEnv;
 
-function parseEnvInt(value: string | undefined, fallback: number, min: number = 0): number {
+function parseEnvInt(
+  value: string | undefined,
+  fallback: number,
+  min: number = 0,
+  max: number = Number.MAX_SAFE_INTEGER,
+): number {
   if (!value) return fallback;
   const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed) || parsed < min) return fallback;
+  if (Number.isNaN(parsed) || parsed < min || parsed > max) return fallback;
   return parsed;
 }
 
@@ -218,7 +223,7 @@ function parseWarehouseConfig(env: EnvMap): WarehouseConfig {
 
 export function createConfig(env: EnvMap = process.env, cwd: string = process.cwd()) {
   return {
-    port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1),
+    port: parseEnvInt(env.AGENTMONITOR_PORT, 3141, 1, 65535),
     host: env.AGENTMONITOR_HOST || '127.0.0.1',
     dbPath: resolveDbPath(env),
     maxPayloadKB: parseEnvInt(env.AGENTMONITOR_MAX_PAYLOAD_KB, 10, 0),

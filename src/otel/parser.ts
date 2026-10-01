@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
+import { sliceWithoutSplittingSurrogates } from '../util/text.js';
 
 // ─── OTLP JSON types (subset we care about) ────────────────────────────
 
@@ -232,6 +233,12 @@ function logRecordHasTime(record: OtelLogRecord): boolean {
   return hasNanos(record.timeUnixNano)
     || hasNanos(record.observedTimeUnixNano)
     || Boolean(getAttr(record.attributes, 'event.timestamp'));
+}
+
+function attrToIso(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? undefined : new Date(ms).toISOString();
 }
 
 function nanoToIso(nanos: string | number | undefined): string | undefined {
@@ -682,7 +689,11 @@ function parseLogRecord(
     ?? getAttr(resourceAttrs, 'branch')
     ?? (bodyJson?.branch as string | undefined);
 
-  const clientTimestamp = nanoToIso(logRecord.timeUnixNano);
+  // Codex leaves timeUnixNano unset and carries its time in event.timestamp;
+  // without it every Codex row fell back to server receive time.
+  const clientTimestamp = nanoToIso(logRecord.timeUnixNano)
+    ?? attrToIso(getAttr(logRecord.attributes, 'event.timestamp'))
+    ?? nanoToIso(logRecord.observedTimeUnixNano);
 
   // Build metadata from body JSON (minus fields we've already extracted)
   let metadata: unknown = {};
@@ -788,7 +799,7 @@ function parseLogRecord(
       }
       if (outputRaw !== undefined) {
         meta.output ??= outputRaw;
-        meta.content_preview ??= outputRaw.slice(0, 500);
+        meta.content_preview ??= sliceWithoutSplittingSurrogates(outputRaw, 500);
       }
     }
 
@@ -819,7 +830,7 @@ function parseLogRecord(
       }
       if (eventType === 'response' && extractedText) {
         meta.text ??= extractedText;
-        meta.content_preview ??= extractedText.slice(0, 500);
+        meta.content_preview ??= sliceWithoutSplittingSurrogates(extractedText, 500);
       }
     }
   }

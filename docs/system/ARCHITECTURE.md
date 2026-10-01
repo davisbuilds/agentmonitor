@@ -136,7 +136,10 @@ producer timestamps must not be relabeled UTC based on appearance alone.
 
 `src/import/` maps Claude Code JSONL, Codex session JSONL, Antigravity conversation
 databases, and explicit benchmark results into the local model. Import hashes make
-normal reruns idempotent; `--force` is the deliberate recovery path. Benchmark
+normal reruns idempotent; `--force` is the deliberate recovery path. A Claude or
+Codex file whose size and nanosecond mtime match the state recorded with its hash
+is skipped without a read; a cleared hash (how migrations force a re-import) still
+reads it. Antigravity always hashes, since its WAL sidecar can change alone. Benchmark
 events use `source='benchmark'` and remain excluded from normal activity and usage
 aggregates unless a benchmark-aware read explicitly includes them.
 
@@ -163,7 +166,10 @@ OPERATIONS).
 
 `src/watcher/` discovers and reparses supported local session files. Parsed session
 history is persisted independently from event import so transcripts, turns, tool
-calls, search, and skill analytics can be rebuilt from their source files.
+calls, search, and skill analytics can be rebuilt from their source files. A
+re-sync keeps the stored messages and tool calls that match the new parse and
+rewrites from the first difference, so an appended transcript writes only its new
+rows while a rewritten or truncated one is still replaced where it changed.
 
 Codex browser history has two existing identities: JSONL rollout basenames and
 native UUIDs from import/OTEL and API/hook-generated `codex-summary` rows.

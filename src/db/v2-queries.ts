@@ -4285,7 +4285,9 @@ export function getOperationalMetricSummary(query: OperationalMetricQuery = {}):
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const limit = Number.isFinite(query.limit) && (query.limit as number) > 0 ? Math.trunc(query.limit as number) : 200;
+  const limit = Number.isFinite(query.limit) && (query.limit as number) > 0
+    ? Math.min(Math.trunc(query.limit as number), 500)
+    : 200;
 
   const rows = db.prepare(`
     SELECT metric_name,
