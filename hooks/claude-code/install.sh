@@ -53,8 +53,15 @@ if [ ! -f "$SETTINGS_FILE" ]; then
   echo '{}' > "$SETTINGS_FILE"
 fi
 
-# Backup existing settings
-BACKUP="${SETTINGS_FILE}.bak.$(date +%Y%m%d%H%M%S)"
+# Backup existing settings. Two runs in one second would share a timestamp,
+# and the second would overwrite the pre-install backup with modified settings.
+BACKUP_BASE="${SETTINGS_FILE}.bak.$(date +%Y%m%d%H%M%S)"
+BACKUP="$BACKUP_BASE"
+BACKUP_N=1
+while [ -e "$BACKUP" ]; do
+  BACKUP="${BACKUP_BASE}.${BACKUP_N}"
+  BACKUP_N=$((BACKUP_N + 1))
+done
 cp "$SETTINGS_FILE" "$BACKUP"
 echo "Backed up settings to $BACKUP"
 

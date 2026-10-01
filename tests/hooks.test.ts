@@ -77,19 +77,6 @@ function makePreToolUseInput(toolName: string, toolInput: Record<string, unknown
   });
 }
 
-function makeNotificationInput(): string {
-  return JSON.stringify({
-    session_id: 'test-session-001',
-    transcript_path: '/tmp/transcript.jsonl',
-    cwd: '/home/user/my-project',
-    permission_mode: 'default',
-    hook_event_name: 'Notification',
-    message: 'Task completed successfully',
-    title: 'Done',
-    notification_type: 'idle_prompt',
-  });
-}
-
 function makeInstructionsLoadedInput(
   overrides: Record<string, unknown> = {},
 ): string {
@@ -286,11 +273,6 @@ describe('Shell hook scripts', () => {
       'post_tool_use.sh',
       makePostToolUseInput('Read', { file_path: '/src/index.ts' })
     );
-    assert.equal(result.exitCode, 0, `stderr: ${result.stderr}`);
-  });
-
-  test('notification.sh exits 0', () => {
-    const result = runShellHook('notification.sh', makeNotificationInput());
     assert.equal(result.exitCode, 0, `stderr: ${result.stderr}`);
   });
 

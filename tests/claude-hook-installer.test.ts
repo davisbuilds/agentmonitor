@@ -3,6 +3,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import {
   mkdtempSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -133,6 +134,31 @@ test('installer registers both instruction-load modes and preserves unrelated se
     ]);
     assert.deepEqual(commandsFor(uninstalled, 'InstructionsLoaded'), ['/opt/unrelated/instructions.sh']);
     assert.equal(uninstalled.theme, 'dark');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('back-to-back installs keep the original settings in their own backup', {
+  skip: hasJq ? false : 'jq not found',
+}, () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-claude-hooks-backup-'));
+  const configDir = path.join(root, 'claude');
+  mkdirSync(configDir, { recursive: true });
+  const original = JSON.stringify({ theme: 'dark' });
+  writeFileSync(path.join(configDir, 'settings.json'), original);
+
+  try {
+    // Both runs land within one second, which shared a backup name before.
+    runInstaller([], configDir);
+    runInstaller([], configDir);
+
+    const backups = readdirSync(configDir).filter(name => name.startsWith('settings.json.bak.'));
+    assert.equal(backups.length, 2);
+    assert.ok(
+      backups.some(name => readFileSync(path.join(configDir, name), 'utf8') === original),
+      'one backup holds the settings from before any install',
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
