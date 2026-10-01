@@ -3,7 +3,8 @@
 AgentMonitor is a local-first observability console for coding agents. This page
 records selected direction and the boundaries that guide it. The
 [Backlog](BACKLOG.md) holds unresolved candidates; Git and PRs hold routine
-shipment detail. [Positioning](POSITIONING.md) explains the product center.
+shipment detail. [Vision](VISION.md) explains the product center and longer-term
+possibilities.
 
 ## Context For Current Direction
 
@@ -19,6 +20,8 @@ shipment detail. [Positioning](POSITIONING.md) explains the product center.
 
 ## Now
 
+- Establish an excellent monitoring, observability, and analytics baseline before
+  taking on dispatch, automatic intervention, or broader platform consolidation.
 - Treat `/app/`, `/api/v2/*`, and the `amon` CLI as the product center.
 - Preserve v1 where ingestion, provider quotas, shared SSE, or current tests still
   depend on it; avoid adding new product reads there.
@@ -86,13 +89,13 @@ shipment detail. [Positioning](POSITIONING.md) explains the product center.
 - Keep source events and parsed sessions authoritative; derived stores must be
   rebuildable and parity-checked.
 - Put future work in Backlog, current direction here, durable rationale in
-  Positioning or Decisions, and detailed shipped history in Git/PRs.
+  Vision or Decisions, and detailed shipped history in Git/PRs.
 
 ## Active References
 
 - [Architecture](../system/ARCHITECTURE.md)
 - [Features](../system/FEATURES.md)
 - [Operations](../system/OPERATIONS.md)
-- [Positioning](POSITIONING.md)
+- [Vision](VISION.md)
 - [Decisions](DECISIONS.md)
 - [Backlog](BACKLOG.md)

@@ -4,9 +4,11 @@ AgentMonitor provides one lean, inspectable trace per session. It projects detai
 from existing local sources on demand and persists a small content-free summary.
 This keeps local observability useful without maintaining a second trace warehouse.
 
-The product is a collector and local console. Persisted observation/eval storage,
-scoring systems, and prompt management remain deferred to an external depth sink;
-see [POSITIONING.md](../project/POSITIONING.md).
+The current trace-quality implementation keeps persisted observation/eval storage,
+score editing, and prompt management out of the local projection. Deeper export
+remains deferred, as described below. These are current subsystem boundaries;
+[VISION.md](../project/VISION.md) owns broader product direction and the criteria
+for reconsidering scope.
 
 ## Model And Ownership
 
