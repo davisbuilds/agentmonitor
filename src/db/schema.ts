@@ -501,7 +501,9 @@ function initSchemaLocked(db: Database): void {
   //   tool/model breakdowns. idx_events_agent_type finds an agent's rows but
   //   covers nothing else, so those reads looked up every row of that agent
   //   (about 5 s per breakdown for Codex on a real store). Including source
-  //   lets the benchmark exclusion resolve inside the index as well.
+  //   lets the benchmark exclusion resolve inside the index as well. Its
+  //   (agent_type, tool_name) prefix also gives the windowed Codex skill-event
+  //   read (skill health/daily) a seek to exec tool calls.
   // - idx_events_agent_created_order is idx_events_created_at_order per agent,
   //   so an agent-filtered event page reads the newest rows in order instead of
   //   sorting all of that agent's rows (about 6 s for Codex on a real store).

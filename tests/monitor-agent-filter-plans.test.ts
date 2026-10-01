@@ -6,6 +6,7 @@ import test, { after, before } from 'node:test';
 
 import type { closeDb as closeDbType, getDb as getDbType } from '../src/db/connection.js';
 import type * as V2Queries from '../src/db/v2-queries.js';
+import type * as Ledger from '../src/skills/invocation-ledger.js';
 
 // An agent filter let SQLite seek the low-cardinality agent_type index and look
 // up every matching row: on a real store the Codex-filtered Monitor stats took
@@ -15,6 +16,7 @@ let tempDir = '';
 let closeDb: typeof closeDbType;
 let getDb: typeof getDbType;
 let queries: typeof V2Queries;
+let ledger: typeof Ledger;
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-agent-filter-plans-'));
@@ -25,6 +27,7 @@ before(async () => {
   getDb = dbModule.getDb;
   schema.initSchema();
   queries = await import('../src/db/v2-queries.js');
+  ledger = await import('../src/skills/invocation-ledger.js');
   assert.equal(getDb().name, path.join(tempDir, 'plans.db'));
 
   const insert = getDb().prepare(`
@@ -82,3 +85,13 @@ test('the agent filter still selects only that agent', () => {
   assert.deepEqual(feed.events.map(event => event.agent_type), Array(5).fill('claude_code'));
   assert.deepEqual(feed.events.map(event => event.created_at), [...feed.events.map(event => event.created_at)].sort().reverse());
 });
+
+test('the windowed Codex skill-event read seeks exec tool calls, not every Codex event', () => {
+  // The same agent_type-only seek made skill health and daily read all Codex
+  // events (about 3 s on a real store) to find a few SKILL.md commands.
+  const statement = ledger.codexSkillEventStatement({ date_from: '2026-09-01', date_to: '2026-09-30' });
+  const detail = plan(statement.sql, statement.values);
+  assert.doesNotMatch(detail, /idx_events_agent_type\b/, detail);
+  assert.match(detail, /idx_events_agent_dims \(agent_type=\? AND tool_name=\?\)/, detail);
+});
+

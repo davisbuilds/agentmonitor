@@ -159,21 +159,18 @@ the build.
   lexical negation in the next prompt (both already scoped out of phase 1);
   measure against real sessions before building ranking on top.
 
-#### Windowed Codex skill-event scan chooses the agent index
-- **What**: on the 2026-07-29 copied 1.4 GB database,
-  `EXPLAIN QUERY PLAN` for the fixed-window Codex skill-event leg chose
-  low-cardinality `idx_events_agent_type` and a temporary ordering b-tree
-  instead of `idx_events_usage_ts`. After removing the duplicate ledger read,
-  the complete enriched 2026-07-01..27 health query measured a 102.5 ms median
-  over seven warm runs versus 88.3 ms for phase 1 alone.
-- **Why it matters**: current latency is acceptable, but this leg still scales
-  with all retained Codex events and may become the next health-query bottleneck
-  as history grows.
-- **Next**: benchmark a purpose-built partial/composite skill-event index
-  against the real predicate and ordering; retain it only if the planner uses it
-  and write cost/storage remain justified.
-
-### Analytics rollups (schema-storage-rebalance Phase 2)
+#### Windowed Codex skill-event scan still reads its candidate rows
+- **What**: the skill health/daily Codex leg (`codexSkillEventStatement`) now
+  seeks `idx_events_agent_dims (agent_type=? AND tool_name=?)`, so it reads only
+  Codex exec tool calls rather than every Codex event. It still looks up each of
+  those rows to test `metadata LIKE '%SKILL.md%'` and the window, then sorts.
+- **Why or evidence**: on a 2026-10-01 snapshot of a local store the old
+  agent_type-only seek took about 3 s warm; the new plan takes 0.15-0.24 s warm
+  (about 1.3 s cold). Cost now grows with retained Codex exec tool calls, not
+  all Codex events. `tests/monitor-agent-filter-plans.test.ts` pins the seek.
+- **Revisit when**: skill health latency becomes noticeable again. A LIKE on
+  metadata cannot be indexed, so the next step would be recording SKILL.md
+  reads as a column or a narrow table at ingest rather than another index.
 
 #### Usage overview derived store remains a measured fallback
 - **What**: the event-derived `/api/v2/usage/overview` still folds matching usage

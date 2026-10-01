@@ -206,6 +206,48 @@ function take(counts: Map<string, number>, key: string): boolean {
 }
 
 /**
+ * The windowed Codex skill-event read: exec tool calls whose command touched a
+ * SKILL.md. Shared with a plan test, since an agent_type-only seek here reads
+ * every Codex event instead of only its exec tool calls.
+ */
+export function codexSkillEventStatement(params: AnalyticsParams): { sql: string; values: unknown[] } {
+  const eventFilters = [
+    "agent_type = 'codex'",
+    "event_type = 'tool_use'",
+    "tool_name IN ('exec_command', 'exec')",
+    "metadata LIKE '%SKILL.md%'",
+  ];
+  const eventValues: unknown[] = [];
+  if (params.project) {
+    eventFilters.push('project = ?');
+    eventValues.push(params.project);
+  }
+  if (params.date_from) {
+    eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)');
+    eventValues.push(dateParamLowerBound(params.date_from));
+  }
+  const eventToExclusive = params.date_to ? dateParamUpperExclusive(params.date_to) : null;
+  if (eventToExclusive) {
+    eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) < datetime(?)');
+    eventValues.push(eventToExclusive);
+  }
+  return {
+    sql: `
+      SELECT
+        id,
+        session_id,
+        project,
+        COALESCE(client_timestamp, created_at) AS timestamp,
+        metadata
+      FROM events
+      WHERE ${eventFilters.join(' AND ')}
+      ORDER BY timestamp, id
+    `,
+    values: eventValues,
+  };
+}
+
+/**
  * Canonical phase-1 invocation selection.
  *
  * Codex OTEL reads suppress JSONL reads of the same skill in the same session,
@@ -290,37 +332,8 @@ export function selectSkillInvocationOccurrences(
   }
 
   if (!params.agent || params.agent === 'codex') {
-    const eventFilters = [
-      "agent_type = 'codex'",
-      "event_type = 'tool_use'",
-      "tool_name IN ('exec_command', 'exec')",
-      "metadata LIKE '%SKILL.md%'",
-    ];
-    const eventValues: unknown[] = [];
-    if (params.project) {
-      eventFilters.push('project = ?');
-      eventValues.push(params.project);
-    }
-    if (params.date_from) {
-      eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) >= datetime(?)');
-      eventValues.push(dateParamLowerBound(params.date_from));
-    }
-    const eventToExclusive = params.date_to ? dateParamUpperExclusive(params.date_to) : null;
-    if (eventToExclusive) {
-      eventFilters.push('datetime(COALESCE(client_timestamp, created_at)) < datetime(?)');
-      eventValues.push(eventToExclusive);
-    }
-    const eventRows = db.prepare(`
-      SELECT
-        id,
-        session_id,
-        project,
-        COALESCE(client_timestamp, created_at) AS timestamp,
-        metadata
-      FROM events
-      WHERE ${eventFilters.join(' AND ')}
-      ORDER BY timestamp, id
-    `).all(...eventValues) as Array<{
+    const statement = codexSkillEventStatement(params);
+    const eventRows = db.prepare(statement.sql).all(...statement.values) as Array<{
       id: number;
       session_id: string;
       project: string | null;
