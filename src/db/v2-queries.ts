@@ -1746,9 +1746,9 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
   // Event count retains overlapping OTEL rows; usage totals reconcile them
   // away. Put the reconciliation predicate in WHERE so SQLite performs its
   // session+timestamp lookup once per candidate row, not once per SUM column.
-  // The unary `+` on the agent filter keeps SQLite from seeking
-  // idx_events_agent_type, which does not cover the token columns and looks up
-  // every row of that agent (seconds); it scans the covering usage index instead.
+  // The unary `+` on the agent filter keeps SQLite from seeking an agent-led
+  // index, none of which covers the token columns, and looking up every row of
+  // that agent (seconds); it scans the covering usage index instead.
   const usageConditions = conditions.map(condition => condition === 'e.agent_type = ?' ? '+e.agent_type = ?' : condition);
   const usageWhere = `WHERE ${usageConditions.join(' AND ')}
     AND ${usageMetricPresenceCondition('e')}

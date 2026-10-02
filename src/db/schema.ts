@@ -143,7 +143,6 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
     CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
     CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
-    CREATE INDEX IF NOT EXISTS idx_events_agent_type ON events(agent_type);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `);
   // NOTE: the bare session_id index and model coverage are handled in the
@@ -274,7 +273,6 @@ function initSchemaLocked(db: Database): void {
   if (!eventColumns.has('cost_source')) {
     db.exec("ALTER TABLE events ADD COLUMN cost_source TEXT CHECK (cost_source IN ('reported', 'estimated'))");
   }
-  db.exec('CREATE INDEX IF NOT EXISTS idx_events_study_id ON events(study_id) WHERE study_id IS NOT NULL');
 
   const providerQuotaColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(provider_quotas)`).all() as Array<{ name: string }>).map(col => col.name)
@@ -428,11 +426,9 @@ function initSchemaLocked(db: Database): void {
       DROP TABLE events;
       ALTER TABLE events_migrated RENAME TO events;
 
-      CREATE INDEX IF NOT EXISTS idx_events_study_id ON events(study_id) WHERE study_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
       CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
       CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
-      CREATE INDEX IF NOT EXISTS idx_events_agent_type ON events(agent_type);
       CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
     `);
   }
@@ -455,23 +451,27 @@ function initSchemaLocked(db: Database): void {
   //   session-list SUM(tokens_in/out, cost_usd) subqueries resolve index-only.
   //   The composite's leftmost column is session_id, so plain session_id
   //   equality lookups (and DISTINCT session_id) still use it.
-  // - Add a covering (created_at, model, ...) composite for the time-windowed
-  //   cost/usage aggregates.
   // Created here (not with the base table) because the covering columns include
   // cost_usd, which is added by an ALTER guard above on legacy databases.
   //
-  // NOTE: idx_events_agent_type / idx_events_event_type are deliberately NOT
-  // dropped. They are too low-cardinality to help row *filtering*, but they are
-  // the covering indexes for the filter-option `SELECT DISTINCT agent_type/
-  // event_type ... ORDER BY` enumeration (src/db/queries.ts, v2-queries.ts).
-  // Without them that dashboard-bootstrap read regresses from a covering-index
-  // scan to a full events scan + temp b-tree.
+  // v14 drops three indexes no statement needed any more, measured with
+  // `pnpm verify probe index-audit` over every statement the test suite runs
+  // and the route reads recorded on a snapshot: idx_events_agent_type (the
+  // agent-ordered composites cover its DISTINCT agent_type enumeration with no
+  // sort), idx_events_study_id (benchmark reads seek idx_events_benchmark_monitor),
+  // and idx_events_created_model (its time-windowed aggregate was rewritten
+  // onto the normalized usage timestamp). Re-run the probe before adding or
+  // dropping an events index; it reports what each index's absence would cost.
+  //
+  // NOTE: idx_events_event_type is deliberately kept. It is too low-cardinality
+  // to help row *filtering*, but it covers the filter-option `SELECT DISTINCT
+  // event_type ... ORDER BY` enumeration; without it that read sorts.
   //
   // - idx_events_session_reconcile seeds the correlated Codex OTEL/import
   //   usage-reconciliation subquery (src/db/usage-reconciliation.ts). That
   //   subquery correlates on session_id (highly selective) then filters
   //   agent_type='codex' AND source='import'. Without this index the planner
-  //   falls back to seeking idx_events_agent_type (agent_type=?), matching every
+  //   falls back to seeking an agent_type index (agent_type=?), matching every
   //   Codex row, turning the full-history stats aggregate into an O(n^2) scan
   //   (measured ~95s per run on ~440k events; ~0.2s with this index).
   // - idx_events_codex_import_usage_session_ts narrows that same reconciliation
@@ -509,8 +509,8 @@ function initSchemaLocked(db: Database): void {
   //   shipped the event index without it, and the count looked up every match:
   //   about 3 s for Codex tool_use events). idx_events_agent_tool_order
   //   also carries model and source, so it covers the agent-filtered Monitor
-  //   counts and tool/model breakdowns (idx_events_agent_type covers nothing
-  //   else, and those reads looked up every row of the agent), and its
+  //   counts and tool/model breakdowns (an agent_type-only index covers
+  //   nothing else, and those reads looked up every row of the agent), and its
   //   (agent_type, tool_name) prefix gives the windowed Codex skill-event read
   //   a seek to exec tool calls.
   //
@@ -536,8 +536,9 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
     CREATE INDEX IF NOT EXISTS idx_events_session_cost
       ON events(session_id, tokens_in, tokens_out, cost_usd);
-    CREATE INDEX IF NOT EXISTS idx_events_created_model
-      ON events(created_at, model, tokens_in, tokens_out, cost_usd);
+    DROP INDEX IF EXISTS idx_events_agent_type;
+    DROP INDEX IF EXISTS idx_events_study_id;
+    DROP INDEX IF EXISTS idx_events_created_model;
     CREATE INDEX IF NOT EXISTS idx_events_session_reconcile
       ON events(session_id, agent_type, source);
     CREATE INDEX IF NOT EXISTS idx_events_codex_import_usage_session_ts
@@ -1031,7 +1032,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 13;
+const DATA_SCHEMA_VERSION = 14;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1074,7 +1075,8 @@ export function runDataMigrations(db: Database): void {
     // v11 introduces no data correction: it adds the agent-ordered event
     // indexes, which read commands only install when the version advances.
     // v12 likewise only replaces the agent+event-type index with one that
-    // covers the benchmark exclusion, and v13 only adds the session-window index.
+    // covers the benchmark exclusion, v13 only adds the session-window index,
+    // and v14 only drops three events indexes no statement needs.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
