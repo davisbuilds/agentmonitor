@@ -265,7 +265,8 @@ backup (the same checks as `amon database backup`, and it never replaces an
 existing file), then merges the search index fully, runs `VACUUM`, truncates the
 WAL, and runs `quick_check`. The volume holding the database needs about twice the
 database's size free for the rewrite, plus its size again when the backup is on
-the same volume; the command checks before writing anything. On one multi-gigabyte
+the same volume, and the backup's volume needs room for the backup; the command
+checks both before writing anything. On one multi-gigabyte
 store it took under three minutes and roughly halved the file. Keep the backup
 until the restarted server looks right.
 

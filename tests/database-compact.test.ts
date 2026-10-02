@@ -91,13 +91,21 @@ test('compact backs up the store, then reclaims free pages and dead index entrie
   assert.equal(payload.quick_check, 'ok');
   assert.ok(payload.before.free_pages > 0, 'the fixture has free pages');
   assert.equal(payload.after.free_pages, 0);
-  assert.ok(payload.search_merge_steps > 1);
   assert.ok(payload.after.search_index_bytes * 3 <= payload.before.search_index_bytes,
     `search index ${payload.before.search_index_bytes} -> ${payload.after.search_index_bytes}`);
   assert.ok(payload.after.database_bytes < payload.before.database_bytes);
   assert.equal(payload.after.database_bytes, fs.statSync(dbPath).size);
   assert.equal(payload.after.wal_bytes, 0);
   assert.deepEqual(counts(dbPath), expected);
+  // Fully merged, not just smaller: another merge step finds nothing to do.
+  const compacted = new Database(dbPath);
+  try {
+    const before = (compacted.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
+    compacted.exec("INSERT INTO messages_fts(messages_fts, rank) VALUES('merge', -100)");
+    assert.ok((compacted.prepare('SELECT total_changes() AS n').get() as { n: number }).n - before < 2, 'merge work left after compact');
+  } finally {
+    compacted.close();
+  }
   // The backup is the store as it was, validated and closed.
   assert.equal(payload.backup, path.join(fs.realpathSync(backupDir), 'before-compact.db'));
   assert.deepEqual(counts(backup), expected);
@@ -133,6 +141,19 @@ test('compact refuses when the volume lacks room for the backup and the rewrite'
   await assert.rejects(
     compactDatabase({ source: dbPath, backup: path.join(backupDir, 'no-room.db'), availableBytes: () => size * 2 }),
     (error: unknown) => error instanceof DatabaseCompactPolicyError && /free space/.test(error.message),
+  );
+  assert.equal(fs.statSync(dbPath).size, size);
+  assert.deepEqual(fs.readdirSync(backupDir), []);
+});
+
+test('compact refuses when the backup volume lacks room for the backup', async () => {
+  const { compactDatabase, DatabaseCompactPolicyError } = await import('../src/db/compact.js');
+  const size = fs.statSync(dbPath).size;
+  // The store's volume has room; only the backup's directory is short.
+  const available = (directory: string) => (fs.realpathSync(directory) === fs.realpathSync(backupDir) ? size / 2 : size * 10);
+  await assert.rejects(
+    compactDatabase({ source: dbPath, backup: path.join(backupDir, 'short.db'), availableBytes: available }),
+    (error: unknown) => error instanceof DatabaseCompactPolicyError && /backup/.test(error.message),
   );
   assert.equal(fs.statSync(dbPath).size, size);
   assert.deepEqual(fs.readdirSync(backupDir), []);

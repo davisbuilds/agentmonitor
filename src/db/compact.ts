@@ -3,7 +3,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { acquireRuntimeOwnership } from '../runtime-ownership.js';
 import { createValidatedDatabaseBackup } from './backup.js';
-import { mergeSearchIndex, readStorageReport, type StorageReport } from './storage.js';
+import { readStorageReport, type StorageReport } from './storage.js';
 
 const SQLITE_BUSY_TIMEOUT_MS = 30_000;
 
@@ -19,7 +19,6 @@ export interface DatabaseCompactResult {
   backup: string;
   before: StorageReport;
   after: StorageReport;
-  search_merge_steps: number;
   quick_check: 'ok';
 }
 
@@ -51,7 +50,8 @@ function deviceOf(directory: string): number | undefined {
  * server cannot start mid-way. Nothing is rewritten until a validated backup of
  * the current store exists. VACUUM builds the compacted copy in a temporary
  * file and then writes it back through the WAL, so the store's volume needs up
- * to twice the current size free, plus the backup when it shares the volume.
+ * to twice the current size free, plus the backup when it shares the volume;
+ * the backup's own volume needs room for it in any case.
  */
 export async function compactDatabase(options: DatabaseCompactOptions): Promise<DatabaseCompactResult> {
   const source = fs.realpathSync(path.resolve(options.source));
@@ -64,19 +64,27 @@ export async function compactDatabase(options: DatabaseCompactOptions): Promise<
       const storeDir = path.dirname(source);
       const backupDir = path.dirname(path.resolve(options.backup));
       const shared = deviceOf(backupDir) === undefined || deviceOf(backupDir) === deviceOf(storeDir);
+      const availableBytes = options.availableBytes ?? freeBytes;
       const needed = current * 2 + (shared ? current : 0);
-      const available = (options.availableBytes ?? freeBytes)(storeDir);
+      const available = availableBytes(storeDir);
       if (available < needed) {
         throw new DatabaseCompactPolicyError(
           `Not enough free space: compact needs about ${needed} bytes on the store's volume `
           + `(the rewrite${shared ? ' and the backup' : ''}) and ${available} are free.`,
         );
       }
+      const backupAvailable = availableBytes(backupDir);
+      if (backupAvailable < current) {
+        throw new DatabaseCompactPolicyError(
+          `Not enough free space for the backup: it needs about ${current} bytes and ${backupAvailable} are free.`,
+        );
+      }
 
       const backup = await createValidatedDatabaseBackup({ source, output: options.backup, replace: false });
 
-      // The server is stopped, so nothing waits between steps.
-      const merge = await mergeSearchIndex(db);
+      // The server is stopped, so a blocking optimize is fine, and unlike the
+      // server's capped stepwise merge it always finishes.
+      db.exec("INSERT INTO messages_fts(messages_fts) VALUES('optimize')");
       db.exec('VACUUM');
       // Fold the rewrite back into the main file and drop the WAL it filled.
       db.pragma('wal_checkpoint(TRUNCATE)');
@@ -88,7 +96,6 @@ export async function compactDatabase(options: DatabaseCompactOptions): Promise<
         backup: backup.output,
         before,
         after: readStorageReport(db),
-        search_merge_steps: merge.steps,
         quick_check: 'ok',
       };
     } finally {

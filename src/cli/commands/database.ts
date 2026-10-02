@@ -109,7 +109,6 @@ export function registerDatabaseCommands(): void {
           [
             'Database compacted',
             `  backup: ${result.backup}`,
-            `  search index merge steps: ${result.search_merge_steps}`,
             `  quick_check: ${result.quick_check}`,
             'Before',
             formatStorageReport(result.before, '  '),
