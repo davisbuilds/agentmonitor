@@ -6,6 +6,7 @@ import { resolveDbPath } from '../db-path.js';
 
 let db: Database.Database | undefined;
 const SQLITE_BUSY_TIMEOUT_MS = 30_000;
+const WAL_SIZE_LIMIT_BYTES = 64 * 1024 * 1024;
 
 /**
  * Under the test runner, refuse to open the install database.
@@ -45,6 +46,11 @@ export function getDb(): Database.Database {
     db.pragma('synchronous = NORMAL');
     db.pragma('foreign_keys = ON');
     db.pragma('cache_size = -64000'); // 64MB
+    // Truncate the WAL back to this size when a checkpoint resets it. SQLite
+    // otherwise keeps the file at its high-water mark: a burst of writes (an
+    // import, a re-sync) once left a WAL about 8% of the database's size
+    // behind indefinitely.
+    db.pragma(`journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`);
   }
   return db;
 }

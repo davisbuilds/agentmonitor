@@ -227,6 +227,49 @@ A raw forensic snapshot must keep the database, WAL, and SHM together. Copying a
 live main database alone is incomplete. Tests refuse to open the install database,
 but maintenance commands may mutate an explicitly selected database.
 
+## Storage Maintenance
+
+Three things keep the database from growing without bound:
+
+- **WAL cap.** Every connection sets `journal_size_limit` to 64 MB, so a checkpoint
+  truncates the WAL back to that size after a burst of writes. Without the limit,
+  SQLite keeps the WAL at its largest size indefinitely.
+- **Search-index merge.** Deleted or replaced messages leave dead entries in the
+  FTS index until a merge reaches them. The server merges the index in bounded
+  steps 10 minutes after startup and every 6 hours, pausing between steps so
+  requests and file events are served meanwhile. On a clean index a run is one
+  step that finds nothing. Before this existed, one store's index had grown to
+  13 times its rebuilt size, with 93% of it dead entries.
+- **Explicit compaction.** Free pages stay inside the file until a `VACUUM`. That
+  only runs when you ask for it.
+
+Check the current state at any time; this is read-only and safe while the server
+runs:
+
+```bash
+amon database storage
+```
+
+It reports the database, WAL, free-page and search-index sizes. Reading a bloated
+search index takes a while, since every page of it is visited.
+
+To return free pages to the filesystem, stop the server, then compact:
+
+```bash
+amon database compact --backup /absolute/private/path/before-compact.db
+```
+
+The command takes runtime ownership, so it refuses while a server owns the
+database and a server cannot start partway through. It first writes a validated
+backup (the same checks as `amon database backup`, and it never replaces an
+existing file), then merges the search index fully, runs `VACUUM`, truncates the
+WAL, and runs `quick_check`. The volume holding the database needs about twice the
+database's size free for the rewrite, plus its size again when the backup is on
+the same volume, and the backup's volume needs room for the backup; the command
+checks both before writing anything. On one multi-gigabyte
+store it took under three minutes and roughly halved the file. Keep the backup
+until the restarted server looks right.
+
 ### Historical summary timestamp repair
 
 `scripts/repair-summary-timestamps.ts` repairs only offset-free UTC database-time
