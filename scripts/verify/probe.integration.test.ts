@@ -13,6 +13,34 @@ import { runProbe, snapshotPrefix } from './probe.js';
 // from the pilot's disposable host, never the installed database.
 const digest = (file: string) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
+type StatementFailure = { route: string; sql: string; error: string };
+type Coverage = {
+  status: string; scope: string;
+  routes_attempted: number; routes_succeeded: number; routes_failed: number;
+  statements_recorded: number; statements_succeeded: number; statements_failed: number;
+};
+type RouteObservations = {
+  attempted_routes: string[]; routes: number; failed_routes: Record<string, number>; coverage: Coverage;
+};
+function assertCoverage(observations: RouteObservations, status: 'complete' | 'partial') {
+  const { coverage, attempted_routes: routes } = observations;
+  assert.equal(coverage.scope, 'built-in route sample');
+  assert.equal(coverage.status, status);
+  assert.ok(routes.includes('/api/v2/monitor/stats?agent=codex'));
+  assert.equal(routes.length, observations.routes);
+  assert.equal(coverage.routes_attempted, routes.length);
+  assert.equal(coverage.routes_failed, Object.keys(observations.failed_routes).length);
+  assert.equal(coverage.routes_succeeded + coverage.routes_failed, routes.length);
+  assert.equal(coverage.statements_succeeded + coverage.statements_failed, coverage.statements_recorded);
+  if (status === 'complete') assert.equal(coverage.routes_failed + coverage.statements_failed, 0);
+}
+
+function assertTimingName(measurements: unknown) {
+  const values = measurements as Record<string, unknown>;
+  assert.ok(Number.isFinite(values.sum_statement_medians_ms));
+  assert.equal('total_median_ms' in values, false);
+}
+
 test('probes report observations a wrong answer would contradict', { timeout: 240_000 }, async t => {
   const session = await startSession();
   const fixture = path.join(session.directory, 'fixture.db');
@@ -52,6 +80,7 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
     assert.equal(rows(all).model_breakdown, 1);
     assert.equal(rows(claude).model_breakdown, 0, 'the agent filter reaches the statements');
     assert.ok((all.measurements as Statements).statements.every(entry => entry.plan.length > 0));
+    assertTimingName(all.measurements);
     assert.equal(digest(fixture), before, 'a read probe must not modify the database');
   });
 
@@ -214,7 +243,8 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.equal(result.status, 'observed', result.errors.join(' '));
       type Changed = { route: string; plan_with: string; plan_without: string };
       const measurements = result.measurements as { statements: number; unchanged: number; changed: Changed[] };
-      const observations = result.observations as { index: string; table: string; compare_errors: string[] };
+      const observations = result.observations as RouteObservations & { index: string; table: string; compare_errors: StatementFailure[] };
+      assertCoverage(observations, 'complete');
       assert.deepEqual([observations.index, observations.table], ['idx_events_agent_created_order', 'events']);
       assert.deepEqual(observations.compare_errors, []);
       assert.equal(measurements.unchanged + measurements.changed.length, measurements.statements);
@@ -224,13 +254,55 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.ok(page, JSON.stringify(measurements.changed.map(entry => entry.route)));
       assert.match(page.plan_without, /TEMP B-TREE FOR ORDER BY/);
 
-      // A candidate from --index-sql is created on the snapshot and named from its DDL.
-      const candidate = await runProbe('plans', { db: copy, indexSql: 'CREATE INDEX idx_probe_candidate ON events(branch, id)' });
+      // SQLite parses a quoted name; DROP must quote it correctly on each comparison.
+      const candidate = await runProbe('plans', { db: copy, indexSql: 'CREATE INDEX "idx_probe""candidate" ON events(branch, id)' });
       assert.equal(candidate.status, 'observed', candidate.errors.join(' '));
-      assert.equal((candidate.observations as { index: string }).index, 'idx_probe_candidate');
+      assert.equal((candidate.observations as { index: string }).index, 'idx_probe"candidate');
+      assert.deepEqual(candidate.observations.compare_errors, []);
+
+      // The product pins this index with INDEXED BY. Removing it cannot produce
+      // a plan: expose that missing comparison, rather than a clean no-change result.
+      const pinned = await runProbe('plans', { db: copy, index: 'idx_events_usage_covering' });
+      assert.equal(pinned.status, 'observed', pinned.errors.join(' '));
+      const partial = pinned.observations as RouteObservations & { compare_errors: StatementFailure[] };
+      assertCoverage(partial, 'partial');
+      assert.ok(partial.compare_errors.length > 0);
+      assert.equal(partial.coverage.statements_failed, partial.compare_errors.length);
+      for (const failure of partial.compare_errors) {
+        assert.ok(partial.attempted_routes.includes(failure.route));
+        assert.ok(failure.sql.length > 0);
+        assert.match(failure.error, /idx_events_usage_covering/);
+      }
       assert.equal(digest(fixture), before, 'only the snapshot copy is written');
       assert.deepEqual(result.content_artifacts, [fs.realpathSync(copy)]);
     } finally { fs.rmSync(snapshot, { recursive: true, force: true }); }
+  });
+
+  await t.test('candidate SQL cannot mutate outside the snapshot or run an extra statement', async () => {
+    const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-index-sentinel-'));
+    try {
+      const copy = path.join(snapshot, 'agentmonitor.db');
+      fs.copyFileSync(fixture, copy);
+      const sentinel = path.join(outside, 'sentinel.db');
+      const db = new Database(sentinel);
+      db.exec("CREATE TABLE sentinel(value TEXT); INSERT INTO sentinel VALUES ('unchanged')");
+      db.close();
+      const before = digest(sentinel);
+      const sql = `CREATE INDEX idx_boundary_test ON events(branch, id);
+        ATTACH DATABASE '${sentinel.replaceAll("'", "''")}' AS outside;
+        UPDATE outside.sentinel SET value = 'changed'; DETACH DATABASE outside;`;
+      const result = await runProbe('plans', { db: copy, indexSql: sql });
+      assert.equal(digest(sentinel), before, 'rejected SQL must have no external side effects');
+      assert.equal(result.status, 'blocked');
+      const check = new Database(copy, { readonly: true });
+      assert.equal(check.prepare("SELECT name FROM sqlite_schema WHERE name = 'idx_boundary_test'").get(), undefined,
+        'reject the entire input before even creating its first index');
+      check.close();
+    } finally {
+      fs.rmSync(snapshot, { recursive: true, force: true });
+      fs.rmSync(outside, { recursive: true, force: true });
+    }
   });
 
   await t.test('hotspots ranks every read the routes ran, on a snapshot copy only', async () => {
@@ -243,7 +315,9 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.equal(result.status, 'observed', result.errors.join(' '));
       type Entry = { route: string; sql: string; median_ms: number; plan: string[]; flags: string[] };
       const measurements = result.measurements as { statements: number; flagged: Record<string, number>; slowest: Entry[] };
-      const observations = result.observations as { routes: number; failed_routes: Record<string, number>; errors: string[] };
+      const observations = result.observations as RouteObservations & { errors: StatementFailure[] };
+      assertCoverage(observations, 'complete');
+      assertTimingName(measurements);
       assert.deepEqual(observations.errors, []);
       assert.deepEqual(observations.failed_routes, {});
       assert.ok(measurements.statements > measurements.slowest.length, 'more statements than the listed slowest');
@@ -255,6 +329,27 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.match(all, /\b(messages|browsing_sessions|sessions)\b/);
       assert.equal(digest(fixture), before, 'only the snapshot copy is written');
       assert.deepEqual(result.content_artifacts, [fs.realpathSync(copy)]);
+    } finally { fs.rmSync(snapshot, { recursive: true, force: true }); }
+  });
+
+  await t.test('failed routes make coverage partial without discarding the successful observations', async () => {
+    const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
+    try {
+      const copy = path.join(snapshot, 'agentmonitor.db');
+      fs.copyFileSync(fixture, copy);
+      const db = new Database(copy);
+      db.exec(`INSERT INTO sessions (id, agent_id, agent_type, status, last_event_at)
+        VALUES ('coverage-failure', 'probe', 'codex', 'active', '2000-01-01');
+        CREATE TRIGGER fail_idle_session BEFORE UPDATE ON sessions
+        BEGIN SELECT RAISE(ABORT, 'verification route failure'); END;`);
+      db.close();
+      const result = await runProbe('hotspots', { db: copy });
+      assert.equal(result.status, 'observed', result.errors.join(' '));
+      const observations = result.observations as RouteObservations;
+      assertCoverage(observations, 'partial');
+      assert.equal(observations.failed_routes['/api/stats'], 500);
+      assert.ok(observations.coverage.routes_succeeded > 0);
+      assert.ok(observations.coverage.statements_succeeded > 0);
     } finally { fs.rmSync(snapshot, { recursive: true, force: true }); }
   });
 });

@@ -655,13 +655,18 @@ directory.
 `plans` measures an index's effect before it ships. On a snapshot it runs the
 compiled app's startup migrations, creates the `--index-sql` candidate (or uses an
 existing `--index NAME`), drives a built-in list of read routes, and records
-each statement that touches the index's table. It then explains and times each
-one with the index present and again with it dropped inside a rolled-back
-transaction, reporting only the statements whose plan changes. Use it to find
+each statement that touches the index's table. It compares plans with the index
+present and with it dropped inside a rolled-back transaction, then times and
+reports the statements whose plans change. Use it to find
 regressions elsewhere, not only the read the index targets. It records truncated
 SQL and plans, not parameters or results; the route list is a sample, so a
 statement reached only by other routes or by writes is not compared. Like
 `resync`, it refuses any `--db` that is not a snapshot from `probe snapshot`.
+`--index-sql` accepts exactly one `CREATE INDEX` or `CREATE UNIQUE INDEX`
+statement, parsed by SQLite before execution; SQL scripts and other operations
+are rejected. It must create a new index in the snapshot's main database. Use
+`--index` to compare an existing index, including one already shipped by startup
+migrations.
 
 `hotspots` finds where reads spend their time. It drives the same routes on a
 snapshot, records every distinct read statement they run, on any table, and then
@@ -672,6 +677,21 @@ filters, so every match costs a table lookup), `row_lookups`, `temp_btree`, and
 `full_scan`. The hints rank what to look at; they are not verdicts. Run it after an
 index or query change, and when a route is slow but its own statements look fast in
 isolation. The same snapshot and route-list limits as `plans` apply.
+
+Both probes report `attempted_routes`, HTTP failures in `failed_routes` (`-1`
+means the request failed without a response), and an explicit `coverage` summary.
+`complete` means this built-in sample finished, not that every product route or
+query was covered. A failed route or statement makes coverage `partial`;
+statement failures include the route, truncated SQL, and error. An `observed`
+result can have partial coverage: inspect it before interpreting no changes or
+no hotspots as evidence. For example, a query using `INDEXED BY` cannot be
+compared after its required index is dropped.
+
+Monitor-stats and hotspots name their timing sum `sum_statement_medians_ms`.
+It adds separately measured statement medians; it is not endpoint latency or a
+representative workload duration. Hotspots deduplicates reads by SQL and
+parameters and reports the first route that encountered each one, rather than
+weighting statements by production frequency.
 
 Health reports `database_size_matches` as a size comparison only;
 `target_matches_running_server` stays `unknown`. Equal sizes do not identify the

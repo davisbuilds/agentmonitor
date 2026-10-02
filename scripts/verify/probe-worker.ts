@@ -20,6 +20,7 @@ import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import Database from 'better-sqlite3';
 import { openReadOnly } from './readonly.js';
+import { createCandidateIndex } from './candidate-index.js';
 import { planFlags } from './plan-flags.js';
 import { repoRoot, writeJson } from './session.js';
 import { snapshotPrefix, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
@@ -144,11 +145,12 @@ async function monitorStats(options: ProbeOptions) {
   db.close();
   return {
     measurements: {
-      total_median_ms: Math.round(statements.reduce((sum, entry) => sum + entry.median_ms, 0) * 100) / 100,
+      sum_statement_medians_ms: Math.round(statements.reduce((sum, entry) => sum + entry.median_ms, 0) * 100) / 100,
       statements,
     },
     observations: { filter: { agent: options.agent ?? null, since: options.since ?? null }, runs },
-    limits: [runs === 1 ? 'One sample per statement, no warmup' : `${runs} samples per statement, no separate warmup`],
+    limits: [runs === 1 ? 'One sample per statement, no warmup' : `${runs} samples per statement, no separate warmup`,
+      'The sum of statement medians is not an endpoint latency measurement; unfiltered requests also use a product cache'],
   };
 }
 
@@ -295,6 +297,20 @@ function planRoutes(ids: { codexSession?: string; claudeSession?: string; monito
 }
 
 interface RecordedStatement { sql: string; params: unknown[]; route: string }
+interface StatementFailure { route: string; sql: string; error: string }
+const statementFailure = (entry: RecordedStatement, error: unknown): StatementFailure => ({
+  route: entry.route, sql: entry.sql.replace(/\s+/g, ' ').trim().slice(0, 300), error: String(error),
+});
+function coverageSummary(routes: string[], failed: Record<string, number>, statements: number, errors: StatementFailure[]) {
+  const routeFailures = Object.keys(failed).length;
+  return {
+    scope: 'built-in route sample',
+    status: routeFailures || errors.length ? 'partial' : 'complete',
+    routes_attempted: routes.length, routes_succeeded: routes.length - routeFailures, routes_failed: routeFailures,
+    statements_recorded: statements, statements_succeeded: statements - errors.length, statements_failed: errors.length,
+  };
+}
+
 
 /**
  * Drive the compiled app's read routes against the snapshot and record each
@@ -391,8 +407,7 @@ async function plans(options: ProbeOptions) {
   let table = '';
   const { recorded, routes, failed } = await recordRouteStatements(file, sql => new RegExp(`\\b${table}\\b`).test(sql), db => {
     if (options.indexSql) {
-      db.exec(options.indexSql);
-      index = options.indexSql.match(/\bINDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)/i)?.[1];
+      index = createCandidateIndex(db, options.indexSql);
     }
     const found = db.prepare(`SELECT tbl_name FROM sqlite_master WHERE type = 'index' AND name = ?`).get(index) as { tbl_name: string } | undefined;
     if (!index || !found) throw new Error(`Index ${index ?? '(unnamed)'} not found in the snapshot`);
@@ -408,12 +423,12 @@ async function plans(options: ProbeOptions) {
   };
   const changed: unknown[] = [];
   let unchanged = 0;
-  const failures: string[] = [];
+  const failures: StatementFailure[] = [];
   for (const entry of recorded) {
     try {
       const withIndex = explain(entry.sql, entry.params);
       raw.exec('BEGIN');
-      raw.exec(`DROP INDEX "${index}"`);
+      raw.exec(`DROP INDEX "${index!.replaceAll('"', '""')}"`);
       const withoutIndex = explain(entry.sql, entry.params);
       if (withIndex === withoutIndex) { raw.exec('ROLLBACK'); unchanged++; continue; }
       const without = time(entry.sql, entry.params);
@@ -427,13 +442,16 @@ async function plans(options: ProbeOptions) {
       });
     } catch (error) {
       if (raw.inTransaction) raw.exec('ROLLBACK');
-      failures.push(String(error));
+      failures.push(statementFailure(entry, error));
     }
   }
   raw.close();
   return {
     measurements: { statements: recorded.length, unchanged, changed },
-    observations: { index, table, routes: routes.length, failed_routes: failed, compare_errors: failures },
+    observations: {
+      index, table, routes: routes.length, attempted_routes: routes, failed_routes: failed, compare_errors: failures,
+      coverage: coverageSummary(routes, failed, recorded.length, failures),
+    },
     limits: ['Each compared statement is timed three times per variant on a warm cache; the first run of each is the coldest'],
   };
 }
@@ -451,7 +469,7 @@ async function hotspots() {
   const db = openReadOnly(file);
   db.pragma('cache_size = -64000');
   const measured: Array<{ route: string; sql: string; median_ms: number; samples_ms: number[]; rows: number; plan: string[]; flags: string[] }> = [];
-  const errors: string[] = [];
+  const errors: StatementFailure[] = [];
   for (const entry of recorded) {
     try {
       const plan = explainOn(db, entry.sql, entry.params);
@@ -462,7 +480,7 @@ async function hotspots() {
         plan,
         flags: planFlags(entry.sql, plan),
       });
-    } catch (error) { errors.push(String(error)); }
+    } catch (error) { errors.push(statementFailure(entry, error)); }
   }
   db.close();
   measured.sort((a, b) => b.median_ms - a.median_ms);
@@ -471,14 +489,18 @@ async function hotspots() {
   return {
     measurements: {
       statements: measured.length,
-      total_median_ms: Math.round(measured.reduce((sum, entry) => sum + entry.median_ms, 0) * 100) / 100,
+      sum_statement_medians_ms: Math.round(measured.reduce((sum, entry) => sum + entry.median_ms, 0) * 100) / 100,
       flagged,
       slowest: measured.slice(0, HOTSPOT_LIMIT),
     },
-    observations: { routes: routes.length, failed_routes: failed, errors },
+    observations: {
+      routes: routes.length, attempted_routes: routes, failed_routes: failed, errors,
+      coverage: coverageSummary(routes, failed, recorded.length, errors),
+    },
     limits: [
       `Lists the ${HOTSPOT_LIMIT} slowest statements; counts cover all of them`,
       'Times each statement three times on a separate read-only connection after the routes ran, so caches are warm',
+      'The sum of distinct statement medians is not an endpoint or workload latency measurement',
       'Plan flags are hints for ranking, not verdicts',
     ],
   };

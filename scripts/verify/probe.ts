@@ -56,6 +56,7 @@ export const probes = [
     description: 'Index impact: run the compiled app on a snapshot, record the statements its read routes run, and compare their plans and timings with and without one index (--index NAME or a candidate --index-sql)',
     limits: [
       'Writes only to a snapshot made by this CLI: the app runs its startup migrations there, and --index-sql creates the candidate index',
+      '--index-sql accepts one CREATE [UNIQUE] INDEX statement creating a new index; use --index for an existing index',
       'Covers the built-in route list; statements reached only by other routes or by writes are not compared',
       'Records SQL text (truncated) and plans, not parameters or results',
     ],

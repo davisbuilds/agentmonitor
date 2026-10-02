@@ -33,7 +33,11 @@ killed at its deadline. Resync deletes its transcript copies by default;
 Snapshots contain the full database and remain until you remove them. Plans runs
 the compiled app on a snapshot (its startup migrations and any --index-sql write
 there) and compares each recorded read's plan with and without the index.
+--index-sql accepts one CREATE [UNIQUE] INDEX statement creating a new index;
+use --index for an existing index. SQL scripts and other operations are rejected.
 Hotspots runs the same routes on a snapshot and ranks every read they ran by time.
+Both report complete/partial coverage of their route sample and individual failures.
+sum_statement_medians_ms is a sum of separate timings, not endpoint latency.
 Ingestion scope comes from options, then the caller's environment, then defaults;
 it is recorded but is not asserted to match the running service's configuration.
 `;

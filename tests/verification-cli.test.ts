@@ -9,6 +9,29 @@ import { assertUsage, usageExpected, scenarioById } from '../scripts/verify/cont
 import { probeById, resolveTarget, snapshotPrefix } from '../scripts/verify/probe.js';
 import { openReadOnly } from '../scripts/verify/readonly.js';
 import { planFlags } from '../scripts/verify/plan-flags.js';
+import { createCandidateIndex } from '../scripts/verify/candidate-index.js';
+
+test('candidate indexes use SQLite grammar while rejecting scripts and other operations before execution', () => {
+  const db = new Database(':memory:');
+  try {
+    db.exec("CREATE TABLE t (value TEXT); INSERT INTO t VALUES ('unchanged')");
+    const sql = `-- leading comment
+      CREATE /* keyword comment */ UNIQUE INDEX "quoted""index" ON t(lower(value)) WHERE value != ';'; -- trailing comment`;
+    assert.equal(createCandidateIndex(db, sql), 'quoted"index');
+    const indexes = () => db.prepare("SELECT name, sql FROM sqlite_schema WHERE type = 'index'").all();
+    const before = indexes();
+    for (const rejected of [
+      'DELETE FROM t', 'PRAGMA user_version = 123', "ATTACH DATABASE ':memory:' AS outside",
+      'CREATE TABLE unexpected(x)', 'CREATE INDEX extra ON t(value); DELETE FROM t;',
+      'CREATE INDEX extra ON t(value); CREATE INDEX another ON t(value);',
+      'CREATE INDEX malformed ON', 'CREATE INDEX IF NOT EXISTS "quoted""index" ON t(value)',
+    ]) {
+      assert.throws(() => createCandidateIndex(db, rejected), Error, rejected);
+      assert.deepEqual(indexes(), before, rejected);
+      assert.deepEqual(db.prepare('SELECT value FROM t').all(), [{ value: 'unchanged' }], rejected);
+    }
+  } finally { db.close(); }
+});
 
 test('usage oracle rejects a believable missing event, wrong cost, and malformed result', () => {
   assertUsage({ ...usageExpected.all }, usageExpected.all);
