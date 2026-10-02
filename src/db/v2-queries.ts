@@ -2734,7 +2734,20 @@ function usageMetricsCondition(alias = 'e'): string {
   )`;
 }
 
-function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilterState {
+interface UsageFilterOptions {
+  /**
+   * With a date window, write the agent filter as `+agent_type = ?` so the
+   * window-led covering usage index answers the read. Without it SQLite seeks
+   * an agent-led index and looks up every row of that agent's whole history to
+   * apply the window: 0.2-3.5 s for a common agent on a real store, against
+   * 3-60 ms inside the window index. Only for reads measured to win: a rare
+   * agent pays a few ms more, and reads that group by session do better on the
+   * agent index.
+   */
+  windowLeads?: boolean;
+}
+
+function buildUsageFilterState(params: UsageParams = {}, alias = 'e', options: UsageFilterOptions = {}): UsageFilterState {
   const conditions: string[] = [];
   const values: unknown[] = [];
   const timestampExpr = usageTimestampExpr(alias);
@@ -2744,7 +2757,8 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilt
     values.push(params.project);
   }
   if (params.agent) {
-    conditions.push(`${usageAgentExpr(alias)} = ?`);
+    const windowed = Boolean(params.date_from || params.date_to);
+    conditions.push(`${options.windowLeads && windowed ? '+' : ''}${usageAgentExpr(alias)} = ?`);
     values.push(params.agent);
   }
   if (params.date_from) {
@@ -2929,7 +2943,7 @@ function usageRowsToSummaryValues(rows: UsageRow[]): {
 
 /** The usage-bearing rows every Usage rollup is computed from. */
 export function usageRowsStatement(params: UsageParams = {}): { sql: string; values: unknown[] } {
-  const filter = buildUsageFilterState(params, 'e');
+  const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
@@ -2973,7 +2987,7 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
 
 /** The cost total, without a model/provider/tier filter (those group by model). */
 export function usageCostTotalStatement(params: UsageParams = {}): { sql: string; values: unknown[] } {
-  const filter = buildUsageFilterState(params, 'e');
+  const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
@@ -2997,7 +3011,7 @@ function selectUsageCostTotal(params: UsageParams = {}): number {
     return roundCost(row.cost_usd);
   }
 
-  const filter = buildUsageFilterState(params, 'e');
+  const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
