@@ -130,6 +130,14 @@ test('a combined model or session filter leads instead of the agent index', () =
   }
 });
 
+test('the unfiltered feed reads newest-first from the normalized order index', () => {
+  // The Monitor's default request. Without the index each page sorts every event.
+  const { page } = queries.monitorEventsStatements({});
+  const detail = plan(page.sql, page.values);
+  assert.match(detail, /idx_events_created_at_order/, detail);
+  assert.doesNotMatch(detail, /TEMP B-TREE FOR ORDER BY/, detail);
+});
+
 test('a feed filter without its own index keeps the ordered agent index', () => {
   // branch and source have no index; there the agent index is the narrow one.
   for (const filter of [{ branch: 'main' }, { source: 'hook' }]) {

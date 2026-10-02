@@ -688,11 +688,13 @@ pnpm --silent verify probe resync <transcript.jsonl> [--db <snapshot>] --json
 pnpm --silent verify probe plans --db <snapshot> --index-sql 'CREATE INDEX ...' --json  # index impact
 pnpm --silent verify probe hotspots --db <snapshot> --json   # slowest reads behind the routes
 pnpm --silent verify probe reclaim --json                    # what database compact would free
+pnpm --silent verify probe index-audit --json                # which events indexes statements still need
 ```
 
 Read probes open the database `readonly` with `query_only` in a child process
-that is killed at its deadline (`--timeout-ms` overrides the per-probe default),
-so a slow statement cannot hold a WAL snapshot open indefinitely. `resync` writes
+that is killed, with anything it started, at its deadline (`--timeout-ms`
+overrides the per-probe default), so a slow statement cannot hold a WAL snapshot
+open indefinitely. `resync` writes
 only to a fresh scratch database, removed afterwards, or to a snapshot directory
 created by `probe snapshot`; any other `--db` is refused. A snapshot needs free
 temporary space of twice the database size and stays until you remove its
@@ -705,9 +707,12 @@ existing `--index NAME`), drives a built-in list of read routes, and records
 each statement that touches the index's table. It compares plans with the index
 present and with it dropped inside a rolled-back transaction, then times and
 reports the statements whose plans change. Use it to find
-regressions elsewhere, not only the read the index targets. It records truncated
-SQL and plans, not parameters or results; the route list is a sample, so a
-statement reached only by other routes or by writes is not compared. Like
+regressions elsewhere, not only the read the index targets. It reports truncated
+SQL and plans, not results; the route list is a sample, so a statement reached
+only by other routes or by writes is not compared. Both this probe and `hotspots`
+save the statements they recorded, with their parameters (identifiers such as
+session ids), to `sql-corpus/routes.jsonl` in the evidence directory for
+`index-audit`. Like
 `resync`, it refuses any `--db` that is not a snapshot from `probe snapshot`.
 `--index-sql` accepts exactly one `CREATE INDEX` or `CREATE UNIQUE INDEX`
 statement, parsed by SQLite before execution; SQL scripts and other operations
@@ -742,6 +747,33 @@ bytes. The parent deletes the copy when the probe ends, even if the worker faile
 or was killed, so nothing with database content is left behind. It needs free
 temporary space of about twice the database size. Timings are for the copy, not
 for compact on the installed database, which also writes and validates a backup.
+
+`index-audit` asks which indexes on a table (`--table`, default `events`) the
+app's statements still need. It runs the unit test suite with a preload that
+records each distinct statement, writers included, along with those its plan
+tests explain (a plan test pins a query shape on purpose). It then copies the
+installed database's schema, without rows, into the evidence directory. The
+app never runs `ANALYZE`, so SQLite plans from the schema alone; the probe checks
+that by requiring every statement to plan identically on the copy and on the
+real database, and leaves out and reports any that do not. On the copy it drops
+each index in turn, inside a rolled-back transaction, and compares every
+statement's plan, not only the plans that name the index: a partial index can
+steer the planner without appearing in a plan. A plan is worse when it gains a
+full scan, a temporary sort, row lookups, an automatic index, fewer indexed
+search terms, a search that no longer constrains a column it did (as many
+terms, far more rows), or trades a partial index for a full one, or when the
+statement no longer prepares (`INDEXED BY`). Each index is reported as `constraint`
+(unique, never proposed), `unused`, `replaceable`, or `needed`, with its size.
+`plan_tests_only` marks one held only by a shape a plan test explains, which may
+be a stale copy of a rewritten query. The proposed `drop_set` adds unused and
+then replaceable indexes, largest first, re-checking every statement against
+the whole set, so two indexes that only stand in for each other are not both
+dropped. The recorded suite gets its own temp directory in the evidence
+directory, removed when the probe ends even if the deadline killed it. Add the
+route reads of a `hotspots` or `plans` run with
+`--corpus <evidence>/sql-corpus` (repeatable, replacing the test run). The audit
+compares plans, not timings; time a candidate's affected reads with `plans
+--index` on a snapshot before dropping it.
 
 Monitor-stats and hotspots name their timing sum `sum_statement_medians_ms`.
 It adds separately measured statement medians; it is not endpoint latency or a

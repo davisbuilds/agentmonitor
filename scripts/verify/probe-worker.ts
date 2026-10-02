@@ -16,15 +16,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { once } from 'node:events';
 import Database from 'better-sqlite3';
 import { openReadOnly } from './readonly.js';
 import { createCandidateIndex } from './candidate-index.js';
 import { planFlags } from './plan-flags.js';
+import { auditIndexes, explain, replicateSchema, type AuditStatement, type StatementOrigin } from './index-audit.js';
+import { reviveParams, serializeParams } from './record-sql.js';
 import { repoRoot, writeJson } from './session.js';
-import { RECLAIM_COPY, SNAPSHOT_FILE, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
+import { RECLAIM_COPY, SNAPSHOT_FILE, SUITE_TMP, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
 
 const request = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) as {
   probe: ProbeId; target: DatabaseTarget | null; options: ProbeOptions; evidence: string; snapshot_dir: string | null;
@@ -378,6 +380,11 @@ async function recordRouteStatements(
   recording = false;
   await new Promise<void>(resolve => server.close(() => resolve()));
   closeDb();
+  // Saved in the recorder's format, so index-audit --corpus can include these reads.
+  const corpus = path.join(request.evidence, 'sql-corpus');
+  fs.mkdirSync(corpus, { recursive: true });
+  fs.writeFileSync(path.join(corpus, 'routes.jsonl'), [...recorded.values()]
+    .map(entry => JSON.stringify({ sql: entry.sql, params: serializeParams(entry.params) })).join('\n') + '\n');
   return { recorded: [...recorded.values()], routes, failed };
 }
 
@@ -563,8 +570,134 @@ async function reclaim() {
   }
 }
 
+/** Run the unit test suite with the SQL recorder; its statements are the corpus. */
+function recordCorpus(directory: string) {
+  const start = performance.now();
+  // Its own temp dir, which the parent removes even if the deadline kills the suite.
+  const tmp = path.join(request.evidence, SUITE_TMP);
+  fs.mkdirSync(tmp, { recursive: true });
+  const run = spawnSync(process.execPath, [
+    '--import', 'tsx', '--import', './scripts/verify/record-sql.ts', '--test', 'tests/*.test.ts', 'tests/codebase/*.test.ts',
+  ], { cwd: repoRoot, env: { ...process.env, TMPDIR: tmp, AGENTMONITOR_RECORD_SQL_DIR: directory }, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
+  const count = (label: string) => Number(new RegExp(`^ℹ ${label} (\\d+)$`, 'm').exec(run.stdout ?? '')?.[1] ?? Number.NaN);
+  return { pass: count('pass'), fail: count('fail'), exit_code: run.status, ms: elapsed(start) };
+}
+
+/** A plan test explains the shape it pins; the statement under EXPLAIN is the one that counts. */
+const explainPrefix = /^\s*EXPLAIN\s+(QUERY\s+PLAN\s+)?/i;
+
+function loadCorpus(directories: string[]) {
+  const statements = new Map<string, AuditStatement>();
+  let files = 0;
+  let explained = 0;
+  for (const directory of directories) {
+    for (const file of fs.readdirSync(directory).filter(name => name.endsWith('.jsonl'))) {
+      files++;
+      for (const line of fs.readFileSync(path.join(directory, file), 'utf8').split('\n')) {
+        if (!line) continue;
+        const entry = JSON.parse(line) as { sql: string; params: string | null };
+        const sql = entry.sql.replace(explainPrefix, '');
+        const origin: StatementOrigin = file === 'routes.jsonl' ? 'route' : sql !== entry.sql ? 'plan_test' : 'test_run';
+        const known = statements.get(sql);
+        if (known) {
+          if (!known.origins!.includes(origin)) known.origins!.push(origin);
+          continue;
+        }
+        if (origin === 'plan_test') explained++;
+        statements.set(sql, { sql, params: entry.params === null ? null : reviveParams(entry.params), origins: [origin] });
+      }
+    }
+  }
+  return { files, explained, statements: [...statements.values()] };
+}
+
+const dataStatement = /^\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH)\b/i;
+const writer = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b|\)\s*(INSERT|UPDATE|DELETE)\b/i;
+
+/**
+ * Which indexes on a table the app's statements need: plans for every corpus
+ * statement on an empty copy of the schema, each index dropped in turn, after
+ * checking the copy plans each statement as the real database does.
+ */
+async function indexAudit(options: ProbeOptions) {
+  const table = options.table ?? 'events';
+  if (!/^\w+$/.test(table)) throw new Error(`Invalid table name: ${table}`);
+  const recorded = path.join(request.evidence, 'sql-corpus');
+  const suite = options.corpus?.length ? null : recordCorpus(recorded);
+  const directories = options.corpus?.length ? options.corpus : [recorded];
+  for (const directory of directories) {
+    if (!fs.existsSync(directory)) throw new Error(`No SQL corpus in ${directory}${suite ? ' (the test suite recorded nothing; see worker.log)' : ''}`);
+  }
+  const corpus = loadCorpus(directories);
+  const mentions = new RegExp(`\\b${table}\\b`);
+  const candidates = corpus.statements.filter(entry => dataStatement.test(entry.sql) && mentions.test(entry.sql));
+
+  const live = openReadOnly(request.target!.path);
+  const copyPath = path.join(request.evidence, 'schema-copy.db');
+  const copy = new Database(copyPath);
+  try {
+    if (!live.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table)) throw new Error(`No table ${table} in the database`);
+    replicateSchema(live, copy);
+
+    // Control: the schema copy must plan each statement exactly as the real database does.
+    const compared: AuditStatement[] = [];
+    const mismatches: Array<{ sql: string; live: string[]; copy: string[] }> = [];
+    const unpreparable: Array<{ sql: string; error: string }> = [];
+    for (const entry of candidates) {
+      let livePlan: string[];
+      let copyPlan: string[];
+      try {
+        livePlan = explain(live, entry);
+        copyPlan = explain(copy, entry);
+      } catch (error) {
+        unpreparable.push({ sql: entry.sql.replace(/\s+/g, ' ').trim().slice(0, 200), error: String(error) });
+        continue;
+      }
+      if (livePlan.join('\n') === copyPlan.join('\n')) compared.push(entry);
+      else mismatches.push({ sql: entry.sql.replace(/\s+/g, ' ').trim().slice(0, 200), live: livePlan, copy: copyPlan });
+    }
+
+    const indexBytes = new Map<string, number>();
+    const sizeOf = live.prepare(`SELECT COALESCE(SUM(pgsize), 0) AS bytes FROM dbstat WHERE name = ?`);
+    const names = live.prepare(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`).all(table) as Array<{ name: string }>;
+    for (const { name } of names) indexBytes.set(name, (sizeOf.get(name) as { bytes: number }).bytes);
+    const tableBytes = (sizeOf.get(table) as { bytes: number }).bytes;
+
+    const start = performance.now();
+    const audit = auditIndexes(copy, table, compared, indexBytes);
+    return {
+      measurements: {
+        table_bytes: tableBytes,
+        index_bytes: [...indexBytes.values()].reduce((sum, bytes) => sum + bytes, 0),
+        drop_set: audit.drop_set,
+        drop_set_bytes: audit.drop_set_bytes,
+        indexes: audit.verdicts.map(verdict => ({ ...verdict, bytes: indexBytes.get(verdict.name) ?? 0 })),
+        kept_by_joint_check: audit.kept_by_joint_check,
+        audit_ms: elapsed(start),
+      },
+      observations: {
+        table,
+        corpus: {
+          directories, recorded_by: suite ? 'unit test suite' : '--corpus', suite,
+          files: corpus.files, statements: corpus.statements.length, from_plan_tests: corpus.explained,
+          table_statements: candidates.length, table_writers: candidates.filter(entry => writer.test(entry.sql)).length,
+        },
+        control: { compared: compared.length, mismatched: mismatches.length, unpreparable: unpreparable.length, mismatches, unpreparable_statements: unpreparable },
+        schema_copy: copyPath,
+      },
+      limits: [
+        ...(mismatches.length ? [`${mismatches.length} statements plan differently on the schema copy and are left out of the audit`] : []),
+        ...(suite && suite.fail !== 0 ? ['The test suite did not pass cleanly; its corpus may be incomplete'] : []),
+      ],
+    };
+  } finally {
+    copy.close();
+    live.close();
+  }
+}
+
 const handlers: Record<ProbeId, (options: ProbeOptions) => Promise<{ measurements: unknown; observations: unknown; limits?: string[] }>> = {
-  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync, plans, hotspots, reclaim,
+  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync, plans, hotspots, reclaim, 'index-audit': indexAudit,
 };
 const output = await handlers[request.probe](request.options);
 writeJson(path.join(request.evidence, 'worker.json'), output);

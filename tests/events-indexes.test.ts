@@ -59,24 +59,38 @@ test('the redundant bare session_id index is dropped (superseded by composite)',
   assert.equal(names.has('idx_events_session_id'), false, 'bare idx_events_session_id should be superseded');
 });
 
-test('filter-option enumeration indexes are retained', () => {
-  // Low-cardinality, so useless for row filtering, but they cover the
-  // `SELECT DISTINCT agent_type/event_type ... ORDER BY` filter-option reads.
-  const names = indexNames();
-  assert.ok(names.has('idx_events_agent_type'), 'idx_events_agent_type should be retained for DISTINCT enumeration');
-  assert.ok(names.has('idx_events_event_type'), 'idx_events_event_type should be retained for DISTINCT enumeration');
+test('filter-option enumeration keeps the event-type index', () => {
+  // Low-cardinality, so useless for row filtering, but it covers the
+  // `SELECT DISTINCT event_type ... ORDER BY` filter-option read.
+  assert.ok(indexNames().has('idx_events_event_type'), 'idx_events_event_type should be retained for DISTINCT enumeration');
 });
 
 test('filter-option DISTINCT enumeration uses a covering index (no temp b-tree)', () => {
-  const plan = queryPlan('SELECT DISTINCT agent_type FROM events WHERE agent_type IS NOT NULL ORDER BY agent_type');
-  assert.match(plan, /COVERING INDEX idx_events_agent_type/, `expected covering index, got: ${plan}`);
-  assert.doesNotMatch(plan, /TEMP B-TREE/, `expected no temp b-tree, got: ${plan}`);
+  // An agent-ordered composite leads with agent_type, so no agent_type-only
+  // index is needed for this read (v14 dropped it).
+  for (const column of ['agent_type', 'event_type']) {
+    const plan = queryPlan(`SELECT DISTINCT ${column} FROM events WHERE ${column} IS NOT NULL ORDER BY ${column}`);
+    assert.match(plan, /COVERING INDEX/, `${column}: expected covering index, got: ${plan}`);
+    assert.doesNotMatch(plan, /TEMP B-TREE/, `${column}: expected no temp b-tree, got: ${plan}`);
+  }
+});
+
+test('v14 retires the events indexes no statement needs', () => {
+  const names = indexNames();
+  for (const name of ['idx_events_agent_type', 'idx_events_created_model']) {
+    assert.ok(!names.has(name), `${name} should be dropped`);
+  }
+});
+
+test('a per-study benchmark read seeks the study index', () => {
+  // The benchmark index would seek source alone and visit every benchmark row.
+  const plan = queryPlan(`SELECT * FROM events WHERE source = 'benchmark' AND study_id = ?`, 'study-1');
+  assert.match(plan, /idx_events_study_id \(study_id=\?\)/, plan);
 });
 
 test('covering composite event indexes exist', () => {
   const names = indexNames();
   assert.ok(names.has('idx_events_session_cost'), 'idx_events_session_cost should exist');
-  assert.ok(names.has('idx_events_created_model'), 'idx_events_created_model should exist');
   assert.ok(names.has('idx_events_session_reconcile'), 'idx_events_session_reconcile should exist');
   assert.ok(
     names.has('idx_events_codex_import_usage_session_ts'),
@@ -96,14 +110,6 @@ test('covering composite event indexes exist', () => {
 test('per-session SUM subquery uses the covering session index', () => {
   const plan = queryPlan('SELECT SUM(tokens_in), SUM(tokens_out), SUM(cost_usd) FROM events WHERE session_id = ?', 'session-1');
   assert.match(plan, /idx_events_session_cost/, `expected covering session index, got: ${plan}`);
-});
-
-test('time-windowed cost aggregate uses the covering created/model index', () => {
-  const plan = queryPlan(
-    `SELECT date(created_at) d, model, SUM(tokens_in), SUM(cost_usd) FROM events WHERE created_at >= ? GROUP BY d, model`,
-    '2026-05-01',
-  );
-  assert.match(plan, /idx_events_created_model/, `expected covering created/model index, got: ${plan}`);
 });
 
 test('event-session reconciliation uses the dedicated composite index', () => {

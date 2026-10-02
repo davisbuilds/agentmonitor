@@ -103,6 +103,25 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
     assert.ok(!processes.includes(path.join(result.directory, 'request.json')), 'the worker is gone');
   });
 
+  await t.test('the deadline also kills what the worker started', async () => {
+    // index-audit's worker runs the test suite; killing only the worker would orphan it.
+    const recorder = /^\S*node\s.*--import \.\/scripts\/verify\/record-sql\.ts/;
+    const running = () => execFileSync('ps', ['-A', '-o', 'args='], { encoding: 'utf8' }).split('\n').filter(line => recorder.test(line.trim()));
+    assert.deepEqual(running(), [], 'no recorder run before the test');
+    const started = (async () => {
+      for (let i = 0; i < 200 && !running().length; i++) await new Promise(resolve => setTimeout(resolve, 50));
+      return running().length > 0;
+    })();
+    const result = await probe('index-audit', { db: fixture, timeoutMs: 6_000 });
+    assert.equal(await started, true, 'the suite must have started before the deadline');
+    assert.equal(result.status, 'blocked');
+    assert.match(result.errors.join(' '), /deadline/);
+    await new Promise(resolve => setTimeout(resolve, 500));
+    assert.deepEqual(running(), [], 'the test suite died with the worker');
+    assert.equal(result.cleanup, 'complete');
+    assert.equal(fs.existsSync(path.join(result.directory, 'suite-tmp')), false, 'the killed suite leaves no temp files');
+  });
+
   await t.test('ingestion classifies each transcript against import and watcher state', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-probe-home-'));
     const previous = process.env.AGENTMONITOR_CLAUDE_DIR;
@@ -474,5 +493,52 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.ok(observations.coverage.routes_succeeded > 0);
       assert.ok(observations.coverage.statements_succeeded > 0);
     } finally { fs.rmSync(snapshot, { recursive: true, force: true }); }
+  });
+
+  await t.test('index-audit classifies indexes from a corpus without writing the database', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-index-audit-test-'));
+    try {
+      const store = path.join(dir, 'agentmonitor.db');
+      fs.copyFileSync(fixture, store);
+      const writer = new Database(store);
+      writer.exec('CREATE INDEX idx_probe_unused ON events(duration_ms)');
+      writer.close();
+      const before = digest(store);
+      const corpus = path.join(dir, 'corpus');
+      fs.mkdirSync(corpus);
+      const line = (sql: string, params: unknown[] | null) => JSON.stringify({ sql, params: params && JSON.stringify(params) });
+      fs.writeFileSync(path.join(corpus, '1.jsonl'), [
+        line('SELECT id FROM events WHERE tool_name = ?', ['Edit']),
+        line('EXPLAIN QUERY PLAN SELECT * FROM events WHERE session_id = ? ORDER BY datetime(created_at) DESC, id DESC LIMIT ?', ['s', 5]),
+        line("UPDATE events SET cost_usd = ?, cost_source = 'estimated' WHERE id = ?", [1, 2]),
+        line('SELECT COUNT(*) FROM sessions', []),
+      ].join('\n') + '\n');
+
+      const result = await probe('index-audit', { db: store, corpus: [corpus] });
+      assert.equal(result.status, 'observed', result.errors.join(' '));
+      type Verdict = { name: string; verdict: string; bytes: number };
+      const m = result.measurements as { indexes: Verdict[]; drop_set: string[] };
+      const o = result.observations as {
+        corpus: { statements: number; from_plan_tests: number; table_statements: number; table_writers: number };
+        control: { compared: number; mismatched: number }; schema_copy: string;
+      };
+      assert.deepEqual(o.corpus, { ...o.corpus, statements: 4, from_plan_tests: 1, table_statements: 3, table_writers: 1 });
+      assert.deepEqual(o.control, { ...o.control, compared: 3, mismatched: 0 }, 'the schema copy plans like the real database');
+      const verdict = (name: string) => m.indexes.find(index => index.name === name)?.verdict;
+      assert.equal(verdict('idx_probe_unused'), 'unused');
+      assert.ok(m.drop_set.includes('idx_probe_unused'));
+      assert.equal(verdict('idx_events_tool_name'), 'needed', 'without it the tool lookup scans');
+      assert.ok(!m.drop_set.includes('idx_events_tool_name'));
+      assert.ok(m.indexes.every(index => index.bytes >= 0));
+      const copy = new Database(o.schema_copy, { readonly: true });
+      try {
+        assert.equal((copy.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n, 0, 'the copy has no rows');
+      } finally { copy.close(); }
+      assert.equal(digest(store), before, 'index-audit reads the database only');
+
+      const invalid = await probe('index-audit', { db: store, corpus: [corpus], table: 'events; DROP TABLE events' });
+      assert.equal(invalid.status, 'blocked');
+      assert.equal(digest(store), before);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });
