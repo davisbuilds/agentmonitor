@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
-import test, { before } from 'node:test';
+import test, { after, before } from 'node:test';
 
 import { formatAttrs, formatOpsMetrics } from '../src/cli/formatters/ops.js';
 import { resolveSince } from '../src/cli/commands/ops.js';
@@ -95,6 +95,12 @@ before(async () => {
   insert.run('s1', 'codex', 'codex.memory.startup', JSON.stringify({ state: 'succeeded' }), 1, 'delta', '2026-09-11 10:05:00', '2026-09-11T10:05:00Z');
   insert.run('s1', 'codex', 'codex.memory.startup', JSON.stringify({ state: 'skipped_rate_limit' }), 1, 'delta', '2026-09-11 09:00:00', '2026-09-11T09:00:00Z');
   insert.run('s2', 'claude_code', 'claude.tool.decision', JSON.stringify({ decision: 'accept' }), 1, 'delta', '2026-09-11 08:00:00', '2026-09-11T08:00:00Z');
+});
+
+after(async () => {
+  const { closeDb } = await import('../src/db/connection.js');
+  closeDb();
+  fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
 test('ops metrics --json emits the grouped summary rows', async () => {

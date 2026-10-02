@@ -927,6 +927,7 @@ describe('Import orchestrator integration', () => {
   after(() => {
     fs.rmSync(claudeDir, { recursive: true, force: true });
     fs.rmSync(codexDir, { recursive: true, force: true });
+    fs.rmSync(antigravityDir, { recursive: true, force: true });
   });
 
   test('imports Claude Code logs into database', async () => {
