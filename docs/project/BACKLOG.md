@@ -184,6 +184,12 @@ the build.
   had already reduced a 6.6 second cold read and stopped Monitor from issuing
   redundant per-panel reads. Current latency is usable, while the query remains a
   plausible scaling target if observed CLI/UI latency rises with retained history.
+  Re-measured 2026-10-02 on a snapshot over HTTP, 30-day window: an agent filter
+  had pushed the overview to 8-10 s for Codex (agent-led index plus a row lookup
+  per event) and the top sessions' event count cost about 3.7 s unfiltered; with
+  the window leading those reads and a session-window index, the overview takes
+  0.1-0.3 s warm, filtered or not. The matching-population count (about 0.6 s,
+  index-only) is now its largest statement.
 - **Next / Revisit when**: revisit a session-grained `(day, agent, model, project,
   session_id)` derived store when representative user-facing latency becomes a
   recurring problem or retained history materially changes the curve. Require
@@ -197,6 +203,20 @@ the build.
   `internal/db/usage_cache_schema.go`). Worth a look when
   building the derived store — the disposable-sibling framing (rebuildable, never
   authoritative) directly addresses the rebuild/recovery and parity concerns above.
+
+#### Monitor session list parses every event of the listed sessions
+- **What**: `listMonitorSessions` pages the sessions cheaply, then aggregates
+  every event of those sessions, including `json_extract` over `metadata` for
+  files edited and lines added or removed. Its cost grows with the events in the
+  listed sessions, not with the page size.
+- **Why or evidence**: measured 2026-10-02 on the live server. The Monitor page's
+  request (live sessions only) took 0.06-1.8 s across three runs; the default
+  50-session list (CLI and API) took 2.4 s cold and 0.18-0.25 s warm. Paging alone
+  takes under 10 ms. No index helps, because each event's metadata is read.
+- **Next**: keep the per-session aggregates (event count, tokens, cost, files
+  edited, lines) on the `sessions` row as events are inserted, with a one-time
+  backfill, so the list reads one row per session. Check the 1.8 s sample first: it
+  may be an overlapping write rather than the query.
 
 #### Legacy v1 session-list N+1
 - **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the

@@ -12,6 +12,7 @@ import {
   getAnalyticsVelocity,
   getUsageAgents,
   getUsageCoverage,
+  getUsageRows,
   getUsageDaily,
   getUsageModels,
   getUsageProjects,
@@ -100,12 +101,13 @@ function buildInsightDataset(params: GenerateInsightParams): InsightDatasetPacke
     project: params.project,
     agent: normalizeUsageAgent(params.agent),
   };
+  const usageRows = getUsageRows(usageParams);
 
   return {
     analytics_summary: getAnalyticsSummary(analyticsParams),
     analytics_coverage: getAnalyticsCoverage(analyticsParams, 'all_sessions'),
-    usage_summary: getUsageSummary(usageParams),
-    usage_coverage: getUsageCoverage(usageParams),
+    usage_summary: getUsageSummary(usageParams, usageRows),
+    usage_coverage: getUsageCoverage(usageParams, usageRows),
     input_snapshot: {
       analytics_activity: getAnalyticsActivity(analyticsParams).slice(-MAX_ACTIVITY_POINTS),
       analytics_projects: getAnalyticsProjects(analyticsParams).slice(0, MAX_BREAKDOWN_ROWS),

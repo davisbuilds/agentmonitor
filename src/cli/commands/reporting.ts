@@ -140,8 +140,9 @@ export function registerReportingCommands(): void {
       const params = parseUsageParams(args);
       const { closeDb } = await initReadDb();
       try {
-        const { getUsageCoverage, getUsageDaily } = await import('../../db/v2-queries.js');
-        const payload = { data: getUsageDaily(params), coverage: getUsageCoverage(params) };
+        const { getUsageCoverage, getUsageDaily, getUsageRows } = await import('../../db/v2-queries.js');
+        const usageRows = getUsageRows(params);
+        const payload = { data: getUsageDaily(params, usageRows), coverage: getUsageCoverage(params, usageRows) };
         writeReport(ctx, payload, formatRows(payload.data as unknown as Array<Record<string, unknown>>, ['date', 'cost_usd', 'usage_events', 'session_count']));
       } finally {
         closeDb();
@@ -163,8 +164,9 @@ export function registerReportingCommands(): void {
         const { closeDb } = await initReadDb();
         try {
           const queries = await import('../../db/v2-queries.js');
-          const data = queries[getter](params);
-          const coverage = queries.getUsageCoverage(params);
+          const usageRows = queries.getUsageRows(params);
+          const data = queries[getter](params, usageRows);
+          const coverage = queries.getUsageCoverage(params, usageRows);
           const payload = { data, coverage };
           writeReport(ctx, payload, formatRows(data as unknown as Array<Record<string, unknown>>, columns as unknown as string[]));
         } finally {

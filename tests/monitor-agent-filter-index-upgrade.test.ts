@@ -32,7 +32,7 @@ test('a read-only command installs the agent-filter indexes on a database from b
   assert.deepEqual(present, [
     { name: 'idx_events_agent_created_order' }, { name: 'idx_events_agent_event_covering' }, { name: 'idx_events_agent_tool_order' },
   ]);
-  assert.equal(db.pragma('user_version', { simple: true }), 12);
+  assert.equal(db.pragma('user_version', { simple: true }), 13);
 });
 
 test('a read-only command replaces the v11 agent+event-type index with the covering one', async () => {
@@ -50,5 +50,18 @@ test('a read-only command replaces the v11 agent+event-type index with the cover
 
   const names = db.prepare(`SELECT name FROM sqlite_master WHERE name LIKE 'idx_events_agent_event%' ORDER BY name`).all();
   assert.deepEqual(names, [{ name: 'idx_events_agent_event_covering' }]);
-  assert.equal(db.pragma('user_version', { simple: true }), 12);
+  assert.equal(db.pragma('user_version', { simple: true }), 13);
+});
+
+test('a read-only command installs the session-window index on a v12 database', async () => {
+  const connection = await import('../src/db/connection.js');
+  const schema = await import('../src/db/schema.js');
+  const db = connection.getDb();
+  assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
+  db.exec('DROP INDEX idx_events_session_window; PRAGMA user_version = 12');
+
+  schema.ensureSchemaForRead();
+
+  assert.deepEqual(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'idx_events_session_window'`).all(), [{ name: 'idx_events_session_window' }]);
+  assert.equal(db.pragma('user_version', { simple: true }), 13);
 });

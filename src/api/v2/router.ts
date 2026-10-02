@@ -26,6 +26,7 @@ import {
   getMonitorSessionTranscript,
   getUsageSummary,
   getUsageCoverage,
+  getUsageRows,
   getUsageDaily,
   getUsageProjects,
   getUsageModels,
@@ -919,9 +920,11 @@ v2Router.get('/usage/summary', (req: Request, res: Response) => {
 v2Router.get('/usage/daily', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
+    // One scan feeds both, and coverage from rows stays index-only.
+    const usageRows = getUsageRows(params);
     res.json({
-      data: getUsageDaily(params),
-      coverage: getUsageCoverage(params),
+      data: getUsageDaily(params, usageRows),
+      coverage: getUsageCoverage(params, usageRows),
     });
   } catch (err) {
     console.error('[v2/usage/daily] Error:', err);
@@ -932,9 +935,11 @@ v2Router.get('/usage/daily', (req: Request, res: Response) => {
 v2Router.get('/usage/projects', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
+    // One scan feeds both, and coverage from rows stays index-only.
+    const usageRows = getUsageRows(params);
     res.json({
-      data: getUsageProjects(params),
-      coverage: getUsageCoverage(params),
+      data: getUsageProjects(params, usageRows),
+      coverage: getUsageCoverage(params, usageRows),
     });
   } catch (err) {
     console.error('[v2/usage/projects] Error:', err);
@@ -945,9 +950,11 @@ v2Router.get('/usage/projects', (req: Request, res: Response) => {
 v2Router.get('/usage/models', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
+    // One scan feeds both, and coverage from rows stays index-only.
+    const usageRows = getUsageRows(params);
     res.json({
-      data: getUsageModels(params),
-      coverage: getUsageCoverage(params),
+      data: getUsageModels(params, usageRows),
+      coverage: getUsageCoverage(params, usageRows),
     });
   } catch (err) {
     console.error('[v2/usage/models] Error:', err);
@@ -958,9 +965,11 @@ v2Router.get('/usage/models', (req: Request, res: Response) => {
 v2Router.get('/usage/models/daily', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
+    // One scan feeds both, and coverage from rows stays index-only.
+    const usageRows = getUsageRows(params);
     res.json({
-      data: getUsageModelsDaily(params),
-      coverage: getUsageCoverage(params),
+      data: getUsageModelsDaily(params, usageRows),
+      coverage: getUsageCoverage(params, usageRows),
     });
   } catch (err) {
     console.error('[v2/usage/models/daily] Error:', err);
@@ -971,9 +980,11 @@ v2Router.get('/usage/models/daily', (req: Request, res: Response) => {
 v2Router.get('/usage/tiers', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
+    // One scan feeds both, and coverage from rows stays index-only.
+    const usageRows = getUsageRows(params);
     res.json({
-      data: getUsageTiers(params),
-      coverage: getUsageCoverage(params),
+      data: getUsageTiers(params, usageRows),
+      coverage: getUsageCoverage(params, usageRows),
     });
   } catch (err) {
     console.error('[v2/usage/tiers] Error:', err);
@@ -984,9 +995,11 @@ v2Router.get('/usage/tiers', (req: Request, res: Response) => {
 v2Router.get('/usage/agents', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
+    // One scan feeds both, and coverage from rows stays index-only.
+    const usageRows = getUsageRows(params);
     res.json({
-      data: getUsageAgents(params),
-      coverage: getUsageCoverage(params),
+      data: getUsageAgents(params, usageRows),
+      coverage: getUsageCoverage(params, usageRows),
     });
   } catch (err) {
     console.error('[v2/usage/agents] Error:', err);
@@ -997,9 +1010,11 @@ v2Router.get('/usage/agents', (req: Request, res: Response) => {
 v2Router.get('/usage/top-sessions', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
+    // One scan feeds both, and coverage from rows stays index-only.
+    const usageRows = getUsageRows(params);
     res.json({
-      data: getUsageTopSessions(params),
-      coverage: getUsageCoverage(params),
+      data: getUsageTopSessions(params, usageRows),
+      coverage: getUsageCoverage(params, usageRows),
     });
   } catch (err) {
     console.error('[v2/usage/top-sessions] Error:', err);

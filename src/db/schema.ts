@@ -514,6 +514,11 @@ function initSchemaLocked(db: Database): void {
   //   (agent_type, tool_name) prefix gives the windowed Codex skill-event read
   //   a seek to exec tool calls.
   //
+  // - idx_events_session_window counts a session's events inside a usage date
+  //   window (the Usage top sessions' event counts) as a range seek. Through
+  //   the session_id index alone, ten large sessions took 3.7 s of row lookups;
+  //   18 ms with this index. Its expression must match usageTimestampExpr().
+  //
   // - idx_events_usage_ts is an EXPRESSION index, and the expression must stay
   //   character-identical to usageTimestampExpr()/the date predicate in
   //   v2-queries.ts or SQLite silently ignores it and reverts to a full scan.
@@ -607,6 +612,8 @@ function initSchemaLocked(db: Database): void {
       ON events(agent_type, event_type, datetime(created_at) DESC, id DESC, source);
     CREATE INDEX IF NOT EXISTS idx_events_agent_tool_order
       ON events(agent_type, tool_name, datetime(created_at) DESC, id DESC, model, source);
+    CREATE INDEX IF NOT EXISTS idx_events_session_window
+      ON events(session_id, datetime(COALESCE(client_timestamp, created_at)), source);
     CREATE INDEX IF NOT EXISTS idx_events_usage_ts
       ON events(datetime(COALESCE(client_timestamp, created_at)));
   `);
@@ -1024,7 +1031,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 12;
+const DATA_SCHEMA_VERSION = 13;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1067,7 +1074,7 @@ export function runDataMigrations(db: Database): void {
     // v11 introduces no data correction: it adds the agent-ordered event
     // indexes, which read commands only install when the version advances.
     // v12 likewise only replaces the agent+event-type index with one that
-    // covers the benchmark exclusion.
+    // covers the benchmark exclusion, and v13 only adds the session-window index.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

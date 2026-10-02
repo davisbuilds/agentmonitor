@@ -2734,7 +2734,20 @@ function usageMetricsCondition(alias = 'e'): string {
   )`;
 }
 
-function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilterState {
+interface UsageFilterOptions {
+  /**
+   * With a date window, write the agent filter as `+agent_type = ?` so the
+   * window-led covering usage index answers the read. Without it SQLite seeks
+   * an agent-led index and looks up every row of that agent's whole history to
+   * apply the window: 0.2-3.5 s for a common agent on a real store, against
+   * 3-60 ms inside the window index. Only for reads measured to win: a rare
+   * agent pays a few ms more, and reads that group by session do better on the
+   * agent index.
+   */
+  windowLeads?: boolean;
+}
+
+function buildUsageFilterState(params: UsageParams = {}, alias = 'e', options: UsageFilterOptions = {}): UsageFilterState {
   const conditions: string[] = [];
   const values: unknown[] = [];
   const timestampExpr = usageTimestampExpr(alias);
@@ -2744,7 +2757,8 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e'): UsageFilt
     values.push(params.project);
   }
   if (params.agent) {
-    conditions.push(`${usageAgentExpr(alias)} = ?`);
+    const windowed = Boolean(params.date_from || params.date_to);
+    conditions.push(`${options.windowLeads && windowed ? '+' : ''}${usageAgentExpr(alias)} = ?`);
     values.push(params.agent);
   }
   if (params.date_from) {
@@ -2927,16 +2941,16 @@ function usageRowsToSummaryValues(rows: UsageRow[]): {
   };
 }
 
-function selectUsageRows(params: UsageParams = {}): UsageRow[] {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
+/** The usage-bearing rows every Usage rollup is computed from. */
+export function usageRowsStatement(params: UsageParams = {}): { sql: string; values: unknown[] } {
+  const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
     excludeOverlappingCodexOtelUsageCondition('e'),
   ].join(' AND ');
   const timestampExpr = usageTimestampExpr('e');
-  const rows = db.prepare(`
+  const sql = `
     SELECT
       e.session_id as session_id,
       COALESCE(NULLIF(e.source, ''), 'api') as source,
@@ -2952,7 +2966,14 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
     FROM events e
     WHERE ${usageWhere}
     ORDER BY ${timestampExpr} ASC, e.id ASC
-  `).all(...filter.values) as UsageDbRow[];
+  `;
+  return { sql, values: filter.values };
+}
+
+/** Usage-bearing rows for the filter; pass them to several rollups to scan once. */
+export function getUsageRows(params: UsageParams = {}): UsageRow[] {
+  const statement = usageRowsStatement(params);
+  const rows = getDb().prepare(statement.sql).all(...statement.values) as UsageDbRow[];
 
   const selected: UsageRow[] = [];
   for (const row of rows) {
@@ -2965,23 +2986,38 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
   return selected;
 }
 
-function selectUsageCostTotal(params: UsageParams = {}): number {
-  const db = getDb();
-  const filter = buildUsageFilterState(params, 'e');
+/** The cost total, without a model/provider/tier filter (those group by model). */
+export function usageCostTotalStatement(params: UsageParams = {}): { sql: string; values: unknown[] } {
+  const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
     excludeOverlappingCodexOtelUsageCondition('e'),
   ].join(' AND ');
-
-  if (!hasUsageClassificationFilter(params)) {
-    const row = db.prepare(`
+  return {
+    sql: `
       SELECT COALESCE(SUM(e.cost_usd), 0) as cost_usd
       FROM events e
       WHERE ${usageWhere}
-    `).get(...filter.values) as { cost_usd: number };
+    `,
+    values: filter.values,
+  };
+}
+
+function selectUsageCostTotal(params: UsageParams = {}): number {
+  const db = getDb();
+  if (!hasUsageClassificationFilter(params)) {
+    const statement = usageCostTotalStatement(params);
+    const row = db.prepare(statement.sql).get(...statement.values) as { cost_usd: number };
     return roundCost(row.cost_usd);
   }
+
+  const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
+  const usageWhere = [
+    ...filter.conditions,
+    usageMetricsCondition('e'),
+    excludeOverlappingCodexOtelUsageCondition('e'),
+  ].join(' AND ');
 
   const groups = db.prepare(`
     SELECT
@@ -3379,7 +3415,7 @@ export function getUsageCoverage(params: UsageParams = {}, usageRows?: UsageRow[
 // panel keep passing params alone and pay for their own scan, as before.
 export function getUsageSummary(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
   sharedCoverage?: UsageCoverage,
 ): UsageSummary {
   const row = usageRowsToSummaryValues(usageRows);
@@ -3442,13 +3478,13 @@ export function getUsageSummary(
     prior_total_cost_usd: priorTotalCostUsd,
     cost_delta_pct: costDeltaPct,
     peak_day: row.peak_day,
-    coverage: sharedCoverage ?? getUsageCoverage(params),
+    coverage: sharedCoverage ?? getUsageCoverage(params, usageRows),
   };
 }
 
 export function getUsageDaily(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageDailyPoint[] {
   const days = new Map<string, UsageAccumulator>();
   for (const row of usageRows) {
@@ -3490,7 +3526,7 @@ export function getUsageDaily(
 
 export function getUsageProjects(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageProjectBreakdown[] {
   const projects = new Map<string, UsageAccumulator>();
   for (const row of usageRows) {
@@ -3528,7 +3564,7 @@ function compareUsageModelBreakdown(a: UsageModelBreakdown, b: UsageModelBreakdo
 
 export function getUsageModels(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageModelBreakdown[] {
   const models = new Map<string, UsageAccumulator>();
   for (const usageRow of usageRows) {
@@ -3544,7 +3580,7 @@ export function getUsageModels(
 
 export function getUsageModelsDaily(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageModelDailyPoint[] {
   const days = new Map<string, Map<string, UsageAccumulator>>();
   for (const row of usageRows) {
@@ -3581,7 +3617,7 @@ export function getUsageModelsDaily(
 
 export function getUsageTiers(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageTierBreakdown[] {
   const tiers = new Map<string, { provider: string; tier: string; acc: UsageAccumulator }>();
 
@@ -3611,7 +3647,7 @@ export function getUsageTiers(
 
 export function getUsageAgents(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageAgentBreakdown[] {
   const agents = new Map<string, UsageAccumulator>();
   for (const row of usageRows) {
@@ -3628,13 +3664,30 @@ export function getUsageAgents(
     .sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.agent.localeCompare(b.agent));
 }
 
+/** Every event (not only usage-bearing ones) of the given sessions inside the filter. */
+export function usageSessionEventCountStatement(ids: string[], params: UsageParams = {}): { sql: string; values: unknown[] } {
+  const filter = buildUsageFilterState(params, 'e');
+  const where = [
+    `e.session_id IN (${ids.map(() => '?').join(', ')})`,
+    ...filter.conditions,
+  ].join(' AND ');
+  return {
+    sql: `
+      SELECT e.session_id as id, COUNT(*) as event_count
+      FROM events e
+      WHERE ${where}
+      GROUP BY e.session_id
+    `,
+    values: [...ids, ...filter.values],
+  };
+}
+
 export function getUsageTopSessions(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageTopSessionRow[] {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
-  const filter = buildUsageFilterState(params, 'e');
   const sessions = new Map<string, {
     id: string;
     project: string | null;
@@ -3741,16 +3794,8 @@ export function getUsageTopSessions(
   }>;
   const sessionsById = new Map(sessionRows.map(row => [row.id, row]));
 
-  const eventCountWhere = [
-    `e.session_id IN (${placeholders})`,
-    ...filter.conditions,
-  ].join(' AND ');
-  const eventCountRows = db.prepare(`
-    SELECT e.session_id as id, COUNT(*) as event_count
-    FROM events e
-    WHERE ${eventCountWhere}
-    GROUP BY e.session_id
-  `).all(...ids, ...filter.values) as Array<{ id: string; event_count: number }>;
+  const eventCount = usageSessionEventCountStatement(ids, params);
+  const eventCountRows = db.prepare(eventCount.sql).all(...eventCount.values) as Array<{ id: string; event_count: number }>;
   const eventCountsById = new Map(eventCountRows.map(row => [row.id, row.event_count]));
 
   return entries
@@ -3878,7 +3923,7 @@ export function getUsageFacets(params: UsageParams = {}): UsageFacets {
 export function getUsageOverview(params: UsageParams = {}): UsageOverview {
   const db = getDb();
   return db.transaction(() => {
-    const usageRows = selectUsageRows(params);
+    const usageRows = getUsageRows(params);
     const coverage = getUsageCoverage(params, usageRows);
 
     return {
