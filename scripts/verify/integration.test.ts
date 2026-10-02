@@ -9,7 +9,20 @@ import { runScenario } from './run.js';
 
 // Explicit opt-in: these checks require the compiled app and Chromium.
 // Run serially; the mutation test temporarily changes one local dist file.
+
+// Evidence and session directories outlive a run by design; the tests remove
+// exactly the ones their runs report, never a prefix sweep of the temp dir.
+const created = new Set<string>();
+function keep<T extends { directory?: string; session?: string | null }>(result: T): T {
+  for (const dir of [result.directory, result.session]) if (dir) created.add(dir);
+  return result;
+}
+const removeCreated = () => { for (const dir of created) fs.rmSync(dir, { recursive: true, force: true }); };
+const scenario = (...args: Parameters<typeof runScenario>) => runScenario(...args).then(keep);
+const start = (...args: Parameters<typeof startSession>) => startSession(...args).then(keep);
+
 test('verification pilot lifecycle, real workflows, and negative controls', { timeout: 120_000 }, async t => {
+  t.after(removeCreated);
   await t.test('JSON discovery and invalid input need no server', () => {
     const invoke = (...args: string[]) => spawnSync(process.execPath, ['--import', 'tsx', 'scripts/verify/cli.ts', ...args, '--json'], { cwd: repoRoot, encoding: 'utf8' });
     const listing = invoke('list');
@@ -18,7 +31,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     for (const args of [['run', 'bogus'], ['start', '--session', 'oops'], ['run', 'usage', '--max-api-ms', '-1']]) {
       const rejected = invoke(...args);
       assert.equal(rejected.status, 2);
-      assert.equal(JSON.parse(rejected.stdout).status, 'blocked');
+      assert.equal(keep(JSON.parse(rejected.stdout)).status, 'blocked');
     }
   });
   await t.test('separate sessions, authenticated control, ambient DB override, idempotent stop', async () => {
@@ -27,10 +40,10 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     fs.writeFileSync(sentinelFile, 'unchanged');
     const previous = process.env.AGENTMONITOR_DB_PATH;
     process.env.AGENTMONITOR_DB_PATH = sentinelFile;
-    const first = await startSession();
+    const first = await start();
     let second: Awaited<ReturnType<typeof startSession>> | undefined;
     try {
-      second = await startSession();
+      second = await start();
       assert.notEqual(first.url, second.url);
       assert.equal((await fetch(first.control_url + '/stop', { method: 'POST' })).status, 403);
       await control(first, 'status');
@@ -39,7 +52,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
       await assert.rejects(fetch(first.url, { signal: AbortSignal.timeout(1_000) }));
       await control(second, 'status');
       assert.equal(fs.readFileSync(sentinelFile, 'utf8'), 'unchanged');
-      const live = await runScenario('live-session', { session: second.directory });
+      const live = await scenario('live-session', { session: second.directory });
       assert.equal(live.status, 'passed', JSON.stringify(live.errors));
       assert.equal(live.cleanup, 'retained');
       assert.equal(readSession(second.directory).status, 'running');
@@ -48,12 +61,12 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
       const originalBuild = fs.readFileSync(builtApp);
       try {
         fs.appendFileSync(builtApp, '\n// changed after session start\n');
-        const stale = await runScenario('usage', { session: second.directory });
+        const stale = await scenario('usage', { session: second.directory });
         assert.equal(stale.status, 'blocked');
         assert.match(stale.errors.join(' '), /changed since start/);
       } finally { fs.writeFileSync(builtApp, originalBuild); }
       const interrupted = new AbortController();
-      const pending = runScenario('usage', { session: second.directory, signal: interrupted.signal });
+      const pending = scenario('usage', { session: second.directory, signal: interrupted.signal });
       const timer = setTimeout(() => interrupted.abort(new Error('Test interruption')), 20);
       const result = await pending;
       clearTimeout(timer);
@@ -68,7 +81,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     }
   });
   await t.test('one-shot usage records API/UI evidence and closes its host', async () => {
-    const result = await runScenario('usage');
+    const result = await scenario('usage');
     assert.equal(result.status, 'passed', JSON.stringify(result.errors));
     assert.equal(result.cleanup, 'stopped');
     assert.equal(result.checks.every(check => check.status === 'passed'), true);
@@ -80,7 +93,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
   await t.test('one-shot interruption retains evidence and stops the owned host', async () => {
     const before = new Set(fs.readdirSync(os.tmpdir()));
     const abort = new AbortController();
-    const pending = runScenario('usage', { signal: abort.signal });
+    const pending = scenario('usage', { signal: abort.signal });
     const timer = setInterval(() => {
       for (const entry of fs.readdirSync(os.tmpdir())) {
         if (before.has(entry) || !entry.startsWith('agentmonitor-evidence-')) continue;
@@ -98,7 +111,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     } finally { clearInterval(timer); }
   });
   await t.test('unattainable explicit timing budget fails after correctness passes', async () => {
-    const result = await runScenario('usage', { maxApiMs: 0.000001 });
+    const result = await scenario('usage', { maxApiMs: 0.000001 });
     assert.equal(result.status, 'failed');
     assert.ok(result.errors.some(error => error.includes('API median')));
     assert.equal(result.checks.every(check => check.status === 'passed'), true);
@@ -111,7 +124,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     assert.equal(original.split(target).length, 2, 'Mutation must hit one real aggregation');
     try {
       fs.writeFileSync(file, original.replace(target, 'total_usage_events: rows.length - 1,'));
-      const result = await runScenario('usage');
+      const result = await scenario('usage');
       assert.equal(result.status, 'failed');
       assert.equal(result.checks[0].status, 'failed');
       assert.match(result.checks[0].detail!, /999 !== 1000/);
@@ -125,7 +138,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     const file = path.join(repoRoot, 'dist/app.js');
     fs.renameSync(file, file + '.verification-test');
     try {
-      const result = await runScenario('usage');
+      const result = await scenario('usage');
       assert.equal(result.status, 'blocked');
       assert.equal(result.cleanup, 'not_started');
       assert.ok(result.checks.every(check => check.status === 'not_run'));
@@ -133,7 +146,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     const builtApp = fs.readFileSync(file);
     try {
       fs.writeFileSync(file, 'intentionally invalid JavaScript syntax');
-      const result = await runScenario('usage');
+      const result = await scenario('usage');
       assert.equal(result.status, 'blocked');
       assert.equal(result.cleanup, 'host_exited');
       assert.ok(result.artifacts.some(artifact => artifact.endsWith('host.log')));
@@ -147,7 +160,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
         env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: empty },
       });
       assert.equal(result.status, 2, result.stderr);
-      const evidence = JSON.parse(result.stdout);
+      const evidence = keep(JSON.parse(result.stdout));
       assert.equal(evidence.status, 'blocked');
       assert.equal(evidence.cleanup, 'stopped');
       assert.ok(evidence.errors.some((error: string) => error.includes("Executable doesn't exist")));

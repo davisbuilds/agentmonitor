@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
-import test, { before } from 'node:test';
+import test, { after, before } from 'node:test';
 import { main } from '../src/cli.js';
 
 class CaptureStream extends Writable {
@@ -82,6 +82,12 @@ before(async () => {
     'import',
   );
   closeDb();
+});
+
+after(async () => {
+  const { closeDb } = await import('../src/db/connection.js');
+  closeDb();
+  fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
 test('sessions list emits JSON from the configured database', async () => {

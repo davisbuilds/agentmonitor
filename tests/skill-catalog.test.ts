@@ -19,8 +19,11 @@ function makeSkill(dir: string, name: string, frontmatter: string): void {
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `---\n${frontmatter}\n---\n\n# ${name}\n`);
 }
 
+const tempDirs: string[] = [];
 function tmpRoot(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'skill-catalog-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-catalog-'));
+  tempDirs.push(dir);
+  return dir;
 }
 
 test('scanSkillCatalogs reads name and version from frontmatter', () => {
@@ -130,6 +133,7 @@ function loadSnapshots(name: string): CatalogSnapshot[] {
 
 before(async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skill-snapshots-'));
+  tempDirs.push(tempDir);
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
   const { initSchema } = await import('../src/db/schema.js');
   const dbModule = await import('../src/db/connection.js');
@@ -140,6 +144,7 @@ before(async () => {
 
 after(() => {
   closeDb?.();
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
 });
 
 test('refreshCatalogSnapshots inserts a fresh (name, version) pair', () => {

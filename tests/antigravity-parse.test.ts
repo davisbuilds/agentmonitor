@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -46,8 +46,16 @@ const timedGenmeta = (model: string, u: Record<number, number>, secs: number, na
     ...lField(9, [...lField(4, [...vField(1, secs), ...vField(2, nanos)])]),
   ]));
 
+const tempDirs: string[] = [];
+function tempDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
+after(() => { for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true }); });
+
 function buildFixture(uuid: string): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agr-'));
+  const dir = tempDir('agr-');
   const dbPath = path.join(dir, `${uuid}.db`);
   const db = new Database(dbPath);
   db.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
@@ -103,7 +111,7 @@ test('parseAntigravityFile: each generation is stamped and priced at its own tim
   // the 2027-01-01 revert to list price, so it must price at the list rate.
   const opened = Date.UTC(2026, 11, 31, 23, 59) / 1000;
   const second = Date.UTC(2027, 0, 1, 0, 5) / 1000;
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agr-'));
+  const dir = tempDir('agr-');
   const dbPath = path.join(dir, '44444444-0000-0000-0000-000000000000.db');
   const db = new Database(dbPath);
   db.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
@@ -133,7 +141,7 @@ test('parseAntigravityFile: each generation is stamped and priced at its own tim
 });
 
 test('discoverAntigravityLogs: finds conversation DBs nested under subdirectories', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agr-home-'));
+  const home = tempDir('agr-home-');
   const conversations = path.join(home, 'conversations');
   const nested = path.join(conversations, 'project-x', '2026-07');
   fs.mkdirSync(nested, { recursive: true });
