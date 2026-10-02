@@ -2927,8 +2927,8 @@ function usageRowsToSummaryValues(rows: UsageRow[]): {
   };
 }
 
-function selectUsageRows(params: UsageParams = {}): UsageRow[] {
-  const db = getDb();
+/** The usage-bearing rows every Usage rollup is computed from. */
+export function usageRowsStatement(params: UsageParams = {}): { sql: string; values: unknown[] } {
   const filter = buildUsageFilterState(params, 'e');
   const usageWhere = [
     ...filter.conditions,
@@ -2936,7 +2936,7 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
     excludeOverlappingCodexOtelUsageCondition('e'),
   ].join(' AND ');
   const timestampExpr = usageTimestampExpr('e');
-  const rows = db.prepare(`
+  const sql = `
     SELECT
       e.session_id as session_id,
       COALESCE(NULLIF(e.source, ''), 'api') as source,
@@ -2952,7 +2952,13 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
     FROM events e
     WHERE ${usageWhere}
     ORDER BY ${timestampExpr} ASC, e.id ASC
-  `).all(...filter.values) as UsageDbRow[];
+  `;
+  return { sql, values: filter.values };
+}
+
+function selectUsageRows(params: UsageParams = {}): UsageRow[] {
+  const statement = usageRowsStatement(params);
+  const rows = getDb().prepare(statement.sql).all(...statement.values) as UsageDbRow[];
 
   const selected: UsageRow[] = [];
   for (const row of rows) {
@@ -2965,23 +2971,38 @@ function selectUsageRows(params: UsageParams = {}): UsageRow[] {
   return selected;
 }
 
-function selectUsageCostTotal(params: UsageParams = {}): number {
-  const db = getDb();
+/** The cost total, without a model/provider/tier filter (those group by model). */
+export function usageCostTotalStatement(params: UsageParams = {}): { sql: string; values: unknown[] } {
   const filter = buildUsageFilterState(params, 'e');
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
     excludeOverlappingCodexOtelUsageCondition('e'),
   ].join(' AND ');
-
-  if (!hasUsageClassificationFilter(params)) {
-    const row = db.prepare(`
+  return {
+    sql: `
       SELECT COALESCE(SUM(e.cost_usd), 0) as cost_usd
       FROM events e
       WHERE ${usageWhere}
-    `).get(...filter.values) as { cost_usd: number };
+    `,
+    values: filter.values,
+  };
+}
+
+function selectUsageCostTotal(params: UsageParams = {}): number {
+  const db = getDb();
+  if (!hasUsageClassificationFilter(params)) {
+    const statement = usageCostTotalStatement(params);
+    const row = db.prepare(statement.sql).get(...statement.values) as { cost_usd: number };
     return roundCost(row.cost_usd);
   }
+
+  const filter = buildUsageFilterState(params, 'e');
+  const usageWhere = [
+    ...filter.conditions,
+    usageMetricsCondition('e'),
+    excludeOverlappingCodexOtelUsageCondition('e'),
+  ].join(' AND ');
 
   const groups = db.prepare(`
     SELECT
