@@ -6,6 +6,8 @@ import { once } from 'node:events';
 import { provenance, repoRoot, writeJson } from './session.js';
 
 export const snapshotPrefix = 'agentmonitor-snapshot-';
+/** The reclaim probe's working copy, inside its evidence directory. */
+export const RECLAIM_COPY = 'reclaim-copy.db';
 
 export const probes = [
   {
@@ -70,6 +72,17 @@ export const probes = [
       'Writes only to a snapshot made by this CLI: the app runs its startup migrations there',
       'Covers the built-in route list; statements reached only by other routes or by writes are not timed',
       'Records SQL text (truncated) and plans, not parameters or results',
+    ],
+    deadline_ms: 900_000,
+  },
+  {
+    id: 'reclaim',
+    target: 'installed',
+    description: 'What `amon database compact` would reclaim: copy the database with the online backup API, run compact\'s search-index optimize and VACUUM on the copy, and report current against projected sizes',
+    limits: [
+      'Reads the database only, through the online backup API; the copy is deleted when the probe ends, even if it fails',
+      'Needs free temporary space of about twice the database size, like a snapshot',
+      'Projects the file size, not how long compact takes on the installed database',
     ],
     deadline_ms: 900_000,
   },
@@ -202,7 +215,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     limits: [...probe.limits] as string[],
     errors: [] as string[],
     content_artifacts: [] as string[],
-    cleanup: probe.id === 'resync' ? 'pending' : 'not_applicable',
+    cleanup: probe.id === 'resync' || probe.id === 'reclaim' ? 'pending' : 'not_applicable',
   };
   const persist = () => writeJson(path.join(directory, 'result.json'), result);
   persist();
@@ -271,6 +284,18 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
         result.errors.push(`Content cleanup failed in ${directory}: ${String(error)}`);
       }
       if (result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
+    }
+    if (probe.id === 'reclaim') {
+      // The copy holds the whole database; the parent removes it because the
+      // worker may have failed or been killed before it could.
+      try {
+        for (const suffix of ['', '-wal', '-shm', '-journal']) fs.rmSync(path.join(directory, `${RECLAIM_COPY}${suffix}`), { force: true });
+        result.cleanup = 'complete';
+      } catch (error) {
+        result.cleanup = 'failed';
+        result.status = 'blocked';
+        result.errors.push(`Content cleanup failed in ${directory}: ${String(error)}`);
+      }
     }
     if (drivesApp(probe.id) && result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
     result.finished_at = new Date().toISOString();

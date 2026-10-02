@@ -10,6 +10,7 @@ import type * as Schema from '../../src/db/schema.js';
 import type * as PathExcludes from '../../src/util/path-excludes.js';
 import type * as Config from '../../src/config.js';
 import type * as App from '../../src/app.js';
+import type * as Storage from '../../src/db/storage.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -23,7 +24,7 @@ import { openReadOnly } from './readonly.js';
 import { createCandidateIndex } from './candidate-index.js';
 import { planFlags } from './plan-flags.js';
 import { repoRoot, writeJson } from './session.js';
-import { snapshotPrefix, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
+import { RECLAIM_COPY, snapshotPrefix, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
 
 const request = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) as {
   probe: ProbeId; target: DatabaseTarget | null; options: ProbeOptions; evidence: string;
@@ -506,8 +507,65 @@ async function hotspots() {
   };
 }
 
+/**
+ * What compaction would return: copy the database through the online backup
+ * API (read-only), then run compact's own steps on the copy, a full search-index
+ * optimize and a VACUUM, and compare sizes. The parent deletes the copy.
+ */
+async function reclaim() {
+  const source = request.target!.path;
+  const sourceBytes = fs.statSync(source).size;
+  const walBytes = fs.existsSync(`${source}-wal`) ? fs.statSync(`${source}-wal`).size : 0;
+  const stats = fs.statfsSync(request.evidence);
+  const free = Number(stats.bavail) * Number(stats.bsize);
+  const needed = (sourceBytes + walBytes) * 2;
+  if (free < needed) throw new Error(`Reclaim needs about ${needed} free bytes in ${request.evidence}; ${free} available`);
+  const { readStorageReport } = await import(built('db/storage.js')) as typeof Storage;
+
+  const copy = path.join(request.evidence, RECLAIM_COPY);
+  const reader = openReadOnly(source);
+  let start = performance.now();
+  await reader.backup(copy);
+  const copyMs = elapsed(start);
+  reader.close();
+
+  const db = new Database(copy);
+  try {
+    const current = readStorageReport(db);
+    start = performance.now();
+    db.exec("INSERT INTO messages_fts(messages_fts) VALUES('optimize')");
+    const optimizeMs = elapsed(start);
+    start = performance.now();
+    db.exec('VACUUM');
+    // As compact does: in WAL mode the rewrite lands in the WAL, and the main
+    // file only shrinks once a checkpoint folds it back.
+    db.pragma('wal_checkpoint(TRUNCATE)');
+    const vacuumMs = elapsed(start);
+    const projected = readStorageReport(db);
+    return {
+      measurements: {
+        current: {
+          database_bytes: sourceBytes,
+          wal_bytes: walBytes,
+          free_bytes: current.free_bytes,
+          search_index_bytes: current.search_index_bytes,
+        },
+        projected: { database_bytes: projected.database_bytes, search_index_bytes: projected.search_index_bytes },
+        reclaimable_bytes: Math.max(0, sourceBytes + walBytes - projected.database_bytes),
+        copy_ms: copyMs,
+        optimize_ms: optimizeMs,
+        vacuum_ms: vacuumMs,
+      },
+      observations: { method: 'online backup copy, then FTS optimize and VACUUM on the copy' },
+      limits: ['Timings are for the copy on this machine; compact also writes and validates a backup first'],
+    };
+  } finally {
+    db.close();
+  }
+}
+
 const handlers: Record<ProbeId, (options: ProbeOptions) => Promise<{ measurements: unknown; observations: unknown; limits?: string[] }>> = {
-  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync, plans, hotspots,
+  health, ingestion, 'monitor-stats': monitorStats, snapshot, resync, plans, hotspots, reclaim,
 };
 const output = await handlers[request.probe](request.options);
 writeJson(path.join(request.evidence, 'worker.json'), output);

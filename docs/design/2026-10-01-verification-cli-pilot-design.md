@@ -5,9 +5,11 @@ Date: 2026-10-01
 Author: Codex, with Davis
 
 Status: pilot implemented locally, then extended the same day with read-only
-probes of the installed service (see Isolation and verification boundaries). The
-operations guide and executable CLI own the command/result contract and lifecycle
-mechanics.
+probes of the installed service (see Isolation and verification boundaries).
+Merged into the repository on 2026-10-02 as development tooling (`pnpm verify`),
+separate from the shipped `amon` CLI; a probe moves into `amon` only once it
+matters to operators and its output has settled. The operations guide and
+executable CLI own the command/result contract and lifecycle mechanics.
 
 ## Purpose
 
@@ -261,6 +263,11 @@ does that for every read the route list runs. Its first run on a snapshot ranked
 that count among the slowest with the matching plan hint, and also surfaced
 agent-filtered Usage reads with the same shape.
 
-So far this is one investigation, carried out by the agent that built the probes.
+The Usage fixes that followed were measured the same way, and the storage work
+that compacted the store gained `probe reclaim`, which projects what compaction
+would free from a deleted copy instead of a stop.
+
+So far these investigations were carried out by the agent that built the probes.
 Whether another agent picks them up unprompted, and whether reviewers find the
-evidence enough on its own, is still open.
+evidence enough on its own, is still open; `AGENTS.md` now points agents at the
+probes so that the next investigation can test it.

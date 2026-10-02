@@ -14,7 +14,7 @@ const help = `AgentMonitor development verification (run pnpm build first)
   pnpm --silent verify inspect <session-or-evidence-DIR> [--json]
   pnpm --silent verify advance <session-DIR> [--json]
   pnpm --silent verify stop <session-DIR> [--json]
-  pnpm --silent verify probe <health|ingestion|monitor-stats|snapshot> [--db PATH] [--json]
+  pnpm --silent verify probe <health|ingestion|monitor-stats|snapshot|reclaim> [--db PATH] [--json]
        [--agent A] [--since ISO] [--runs N] [--url URL] [--timeout-ms N]
   Ingestion scope: [--claude-dir DIR] [--codex-home DIR] [--exclude PATTERN ...]
   pnpm --silent verify probe resync <transcript.jsonl> [--db SNAPSHOT] [--append-lines N] [--retain-transcripts] [--json]

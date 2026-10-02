@@ -305,6 +305,72 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
     }
   });
 
+  await t.test('reclaim projects what compact would free, from a deleted copy', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-reclaim-test-'));
+    try {
+      // A store with known free pages: data written, then dropped.
+      const store = path.join(dir, 'agentmonitor.db');
+      fs.copyFileSync(fixture, store);
+      const writer = new Database(store);
+      writer.exec(`CREATE TABLE filler (b BLOB);
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO filler SELECT randomblob(2000) FROM n;
+        DROP TABLE filler;`);
+      // And dead search-index entries, from messages rewritten the way the old
+      // re-sync did (automerge off keeps them in segments FTS5 never merges).
+      writer.exec("INSERT INTO messages_fts(messages_fts, rank) VALUES('automerge', 0)");
+      writer.exec("INSERT INTO messages_fts(messages_fts, rank) VALUES('crisismerge', 64)");
+      const insert = writer.prepare('INSERT INTO messages (session_id, ordinal, role, content) VALUES (?, ?, ?, ?)');
+      for (let pass = 0; pass < 30; pass++) {
+        writer.transaction(() => {
+          writer.prepare("DELETE FROM messages WHERE session_id = 'reclaim-fixture'").run();
+          for (let i = 0; i < 100; i++) insert.run('reclaim-fixture', i, 'user', `alpha${i % 97} bravo${(i * 7) % 89} charlie${(i * 3) % 83} delta${i}`.repeat(4));
+        })();
+      }
+      writer.close();
+      const before = digest(store);
+
+      const result = await runProbe('reclaim', { db: store });
+      assert.equal(result.status, 'observed', result.errors.join(' '));
+      type Sizes = { database_bytes: number; wal_bytes?: number; free_bytes?: number; search_index_bytes: number };
+      const m = result.measurements as { current: Sizes; projected: Sizes; reclaimable_bytes: number };
+      assert.ok(m.current.free_bytes! > 2000 * 2000 * 0.9, `free ${m.current.free_bytes}`);
+      assert.ok(m.projected.database_bytes < m.current.database_bytes);
+      assert.ok(m.projected.search_index_bytes * 2 <= m.current.search_index_bytes,
+        `search index ${m.current.search_index_bytes} -> ${m.projected.search_index_bytes}`);
+      assert.equal(m.reclaimable_bytes, m.current.database_bytes + m.current.wal_bytes! - m.projected.database_bytes);
+      assert.ok(m.reclaimable_bytes >= m.current.free_bytes! * 0.9, 'the dropped data is what compact frees');
+      assert.equal(result.cleanup, 'complete');
+      assert.deepEqual(fs.readdirSync(result.directory).filter(name => name.startsWith('reclaim-copy')), []);
+      assert.deepEqual(result.content_artifacts, []);
+      assert.equal(digest(store), before, 'reclaim reads the store and writes only its copy');
+
+      // Interrupted while the copy exists, the parent still deletes it.
+      const grow = new Database(store);
+      grow.exec(`CREATE TABLE ballast (b BLOB);
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) INSERT INTO ballast SELECT randomblob(4000) FROM n;`);
+      grow.close();
+      const seen = new Set(fs.readdirSync(os.tmpdir()));
+      const abort = new AbortController();
+      let sawCopy = false;
+      const timer = setInterval(() => {
+        for (const entry of fs.readdirSync(os.tmpdir())) {
+          if (seen.has(entry) || !entry.startsWith('agentmonitor-evidence-')) continue;
+          if (fs.existsSync(path.join(os.tmpdir(), entry, 'reclaim-copy.db'))) {
+            sawCopy = true;
+            abort.abort(new Error('Test interruption with reclaim copy present'));
+          }
+        }
+      }, 2);
+      try {
+        const interrupted = await runProbe('reclaim', { db: store, signal: abort.signal });
+        assert.equal(sawCopy, true);
+        assert.equal(interrupted.status, 'blocked');
+        assert.equal(interrupted.cleanup, 'complete');
+        assert.deepEqual(fs.readdirSync(interrupted.directory).filter(name => name.startsWith('reclaim-copy')), []);
+      } finally { clearInterval(timer); }
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   await t.test('hotspots ranks every read the routes ran, on a snapshot copy only', async () => {
     const snapshot = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
     try {

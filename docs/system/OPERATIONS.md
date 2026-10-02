@@ -244,7 +244,9 @@ Three things keep the database from growing without bound:
   only runs when you ask for it.
 
 Check the current state at any time; this is read-only and safe while the server
-runs:
+runs (from a checkout, `pnpm --silent verify probe reclaim --json` also projects
+what a compaction would free, without stopping anything; see
+[Probing the installed service](#probing-the-installed-service)):
 
 ```bash
 amon database storage
@@ -685,6 +687,7 @@ pnpm --silent verify probe snapshot --json                   # disposable copy f
 pnpm --silent verify probe resync <transcript.jsonl> [--db <snapshot>] --json
 pnpm --silent verify probe plans --db <snapshot> --index-sql 'CREATE INDEX ...' --json  # index impact
 pnpm --silent verify probe hotspots --db <snapshot> --json   # slowest reads behind the routes
+pnpm --silent verify probe reclaim --json                    # what database compact would free
 ```
 
 Read probes open the database `readonly` with `query_only` in a child process
@@ -729,6 +732,15 @@ statement failures include the route, truncated SQL, and error. An `observed`
 result can have partial coverage: inspect it before interpreting no changes or
 no hotspots as evidence. For example, a query using `INDEXED BY` cannot be
 compared after its required index is dropped.
+
+`reclaim` answers whether `amon database compact` is worth a stop. It copies the
+database through the online backup API (a read, like `snapshot`), runs compact's
+own steps on the copy (a full search-index `optimize`, `VACUUM`, and a WAL
+checkpoint), and reports current against projected sizes and the reclaimable
+bytes. The parent deletes the copy when the probe ends, even if the worker failed
+or was killed, so nothing with database content is left behind. It needs free
+temporary space of about twice the database size. Timings are for the copy, not
+for compact on the installed database, which also writes and validates a backup.
 
 Monitor-stats and hotspots name their timing sum `sum_statement_medians_ms`.
 It adds separately measured statement medians; it is not endpoint latency or a
