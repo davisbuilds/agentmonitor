@@ -500,16 +500,24 @@ function initSchemaLocked(db: Database): void {
   // - idx_events_agent_created_order is idx_events_created_at_order per agent,
   //   so an agent-filtered event page reads the newest rows in order instead of
   //   sorting all of that agent's rows (about 6 s for Codex on a real store).
-  // - idx_events_agent_event_order and idx_events_agent_tool_order do the same
-  //   for an agent combined with an event type or a tool. Walking the agent
+  // - idx_events_agent_event_covering and idx_events_agent_tool_order do the
+  //   same for an agent combined with an event type or a tool. Walking the agent
   //   index for a rare or absent value visits every row of the agent, and
   //   sorting every match of a common value takes as long (seconds either way);
-  //   seeking the pair in time order serves both. idx_events_agent_tool_order
+  //   seeking the pair in time order serves both. Both carry source so the
+  //   page's total count applies the benchmark exclusion inside the index (v11
+  //   shipped the event index without it, and the count looked up every match:
+  //   about 3 s for Codex tool_use events). idx_events_agent_tool_order
   //   also carries model and source, so it covers the agent-filtered Monitor
   //   counts and tool/model breakdowns (idx_events_agent_type covers nothing
   //   else, and those reads looked up every row of the agent), and its
   //   (agent_type, tool_name) prefix gives the windowed Codex skill-event read
   //   a seek to exec tool calls.
+  //
+  // - idx_events_session_window counts a session's events inside a usage date
+  //   window (the Usage top sessions' event counts) as a range seek. Through
+  //   the session_id index alone, ten large sessions took 3.7 s of row lookups;
+  //   18 ms with this index. Its expression must match usageTimestampExpr().
   //
   // - idx_events_usage_ts is an EXPRESSION index, and the expression must stay
   //   character-identical to usageTimestampExpr()/the date predicate in
@@ -599,10 +607,13 @@ function initSchemaLocked(db: Database): void {
       ON events(datetime(created_at) DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_events_agent_created_order
       ON events(agent_type, datetime(created_at) DESC, id DESC);
-    CREATE INDEX IF NOT EXISTS idx_events_agent_event_order
-      ON events(agent_type, event_type, datetime(created_at) DESC, id DESC);
+    DROP INDEX IF EXISTS idx_events_agent_event_order;
+    CREATE INDEX IF NOT EXISTS idx_events_agent_event_covering
+      ON events(agent_type, event_type, datetime(created_at) DESC, id DESC, source);
     CREATE INDEX IF NOT EXISTS idx_events_agent_tool_order
       ON events(agent_type, tool_name, datetime(created_at) DESC, id DESC, model, source);
+    CREATE INDEX IF NOT EXISTS idx_events_session_window
+      ON events(session_id, datetime(COALESCE(client_timestamp, created_at)), source);
     CREATE INDEX IF NOT EXISTS idx_events_usage_ts
       ON events(datetime(COALESCE(client_timestamp, created_at)));
   `);
@@ -1020,7 +1031,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 11;
+const DATA_SCHEMA_VERSION = 13;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1062,6 +1073,8 @@ export function runDataMigrations(db: Database): void {
     if (current < 10) clearMetricTokenRowEstimates(db);
     // v11 introduces no data correction: it adds the agent-ordered event
     // indexes, which read commands only install when the version advances.
+    // v12 likewise only replaces the agent+event-type index with one that
+    // covers the benchmark exclusion, and v13 only adds the session-window index.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

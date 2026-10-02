@@ -101,6 +101,12 @@ be rebuildable and must never silently replace their inputs.
 - `amon database backup` uses SQLite's online backup API through a separate
   connection, validates the staged database, and publishes it atomically. Copying
   the live main/WAL/SHM files is not a supported backup procedure.
+- Growth is bounded without rewriting the live file: connections cap the WAL a
+  checkpoint leaves behind, and the server merges the FTS index in short steps so
+  dead entries from deleted messages do not accumulate. Reclaiming free pages
+  (`VACUUM`) is never automatic; `amon database compact` does it only under runtime
+  ownership and after a validated backup. See
+  [Storage Maintenance](OPERATIONS.md#storage-maintenance).
 - Event import state and session-browser watcher state protect different tables.
   Re-importing events cannot reconstruct missing messages or tool calls when
   watcher hashes say files were already parsed. The recovery path is
