@@ -209,14 +209,17 @@ the build.
   every event of those sessions, including `json_extract` over `metadata` for
   files edited and lines added or removed. Its cost grows with the events in the
   listed sessions, not with the page size.
-- **Why or evidence**: measured 2026-10-02 on the live server. The Monitor page's
-  request (live sessions only) took 0.06-1.8 s across three runs; the default
-  50-session list (CLI and API) took 2.4 s cold and 0.18-0.25 s warm. Paging alone
-  takes under 10 ms. No index helps, because each event's metadata is read.
-- **Next**: keep the per-session aggregates (event count, tokens, cost, files
-  edited, lines) on the `sessions` row as events are inserted, with a one-time
-  backfill, so the list reads one row per session. Check the 1.8 s sample first: it
-  may be an overlapping write rather than the query.
+- **Why or evidence**: re-measured 2026-10-02 on the live server after compaction.
+  The Monitor page's own request (live sessions only) took 65 ms at the median and
+  70 ms at p90 over 40 samples, with one 0.49 s outlier; the earlier 1.8 s sample
+  was such an outlier, not the norm. The default 50-session list takes about
+  0.15 s warm, and a 200-session list about 0.3 s: roughly linear in the events
+  of the listed sessions. Keeping the aggregates on the `sessions` row would mean
+  every event write path (insert, cost recalc, repairs, dedup, deletes) has to
+  keep them right, to save 50-150 ms.
+- **Revisit when**: the Monitor page's request passes about 0.3 s at the median,
+  or a consumer needs the full list often. Then keep the per-session aggregates
+  on the `sessions` row as events are written, with a one-time backfill.
 
 #### Legacy v1 session-list N+1
 - **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the
@@ -428,18 +431,6 @@ the build.
   in the file — but that is unconfirmed.
 - **Next**: instrument the wait before changing the timeout. Raising it would
   hide the cause, and the point is to learn whether first paint is genuinely slow.
-
-#### The events table carries more index than data
-- **What**: `events` has 23 indexes, many added one query at a time; a few
-  probably no longer earn their write and space cost (for example
-  `idx_events_agent_type`, now the shared prefix of three composites).
-- **Why or evidence**: measured 2026-10-01 on a compacted local store: the events
-  indexes take 1.75 times the table's own pages and 29% of the file, and every
-  event insert updates all of them.
-- **Next**: for each index, compare the plans of every recorded app statement with
-  and without it (dropped inside a rolled-back transaction, as the verification
-  CLI's `plans` probe does) and include writer statements such as import dedup and
-  session reconciliation, not only reads. Drop only indexes no statement prefers.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
