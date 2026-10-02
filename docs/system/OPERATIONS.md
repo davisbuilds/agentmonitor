@@ -244,7 +244,9 @@ Three things keep the database from growing without bound:
   only runs when you ask for it.
 
 Check the current state at any time; this is read-only and safe while the server
-runs:
+runs (from a checkout, `pnpm --silent verify probe reclaim --json` also projects
+what a compaction would free, without stopping anything; see
+[Probing the installed service](#probing-the-installed-service)):
 
 ```bash
 amon database storage
@@ -603,6 +605,189 @@ Record the entrypoint, dataset/window, host, warmup policy, sample count, and
 whether the server was source or built.
 
 ## Verification
+
+### Disposable compiled-app verification
+
+The development-only `pnpm verify` CLI provides known fixtures, browser checks,
+and inspectable evidence. Build first; the driver uses `tsx`, but the application,
+watcher, schema, queries, and frontend come from the compiled outputs. See the
+[pilot framing](../design/2026-10-01-verification-cli-pilot-design.md) for goals and
+extraction criteria. `pnpm verify --help` owns exact syntax and exit codes;
+`pnpm --silent verify list --json` is the executable workflow map.
+
+```bash
+pnpm build
+pnpm exec playwright install chromium # once, if not already available
+pnpm --silent verify run live-session --json
+pnpm --silent verify run usage --json
+```
+
+Each one-shot run starts its own loopback app and stops it after verification,
+failure, or handled interruption. Live verification appends a synthetic Claude
+JSONL message and observes the real watcher, projection, API, and browser update
+without a reload. Usage verification seeds 1,000 events plus session metadata,
+checks independently known totals, and changes the browser's project filter.
+It tests aggregation/rendering, not usage ingestion or real provider pricing.
+
+For exploration, `pnpm --silent verify start --json` returns a URL and session
+directory. Open that URL with ordinary browser tools; `advance <directory>` adds
+a synthetic transcript message. `run <scenario> --session <directory>` checks
+that instance and leaves it running. `inspect <directory>` reads evidence or
+queries session state; `stop <directory>` confirms shutdown and is repeatable.
+Control uses a session-specific local token, not a stored PID. Concurrent runs
+against the same session are refused. If a runner is forcibly killed, stop that
+session and start another rather than bypassing its stale lock.
+
+The host uses a disposable SQLite database and explicit fixture directories,
+without inheriting application overrides or provider credentials. It expires
+after one hour. This exercises `createApp` and the watcher, **not** full
+`amon serve` startup, Portless, external hooks, provider authentication, or the
+installed service. It is not an OS sandbox for arbitrary code. Keep exploration
+to synthetic inputs; evidence may contain anything submitted to this instance.
+
+Every run writes schema-versioned `result.json`, API observations, browser logs,
+screenshots, and a Playwright trace when available. It identifies the Git revision
+and dirty state, hashes of compiled trees/verifier/benchmark/lockfile, browser,
+host, individual checks, errors, and cleanup status. Builds changed since session
+start are refused; source freshness is not inferred from a build hash. Rebuild
+before testing a source change, then start a new session. Missing prerequisites
+are `blocked`; later checks remain `not_run`. A green result covers only the
+named workflow and build. Inspect the recorded paths or use
+`pnpm exec playwright show-trace <trace.zip>`.
+
+Usage records endpoint warmups and five measured samples using the existing
+benchmark, separately from single browser navigation/filter-to-asserted-card
+observations. Browser timings include automation overhead and are not statistical
+latency estimates. There is no default performance gate. Optional usage thresholds
+apply to the API median and browser filter sample; choose them for a named host
+and fixture, not as a production guarantee.
+
+Sessions and evidence live under the OS temporary directory with owner-only
+access. Stopping releases processes, ports, watchers, and database handles;
+it deliberately retains files so failures remain inspectable. Copy evidence you
+need to keep, then remove the exact stopped session/evidence directories when
+finished. There is no promised OS retention interval or automatic disk quota.
+Runs have a two-minute deadline; a hard-killed runner may leave its host until
+the one-hour expiry. Startup failure logs remain at the path in the error.
+
+### Probing the installed service
+
+`pnpm --silent verify probe <name> --json` investigates the real install rather
+than a fixture. By default it reads the database of the globally linked `amon`
+(its checkout's `data/agentmonitor.db`); `--db <path>` names another file. See the
+[pilot framing](../design/2026-10-01-verification-cli-pilot-design.md) for why
+probes may read it and the rules they follow.
+
+```bash
+pnpm build
+pnpm --silent verify probe health --json                     # build/staleness, listener, DB and WAL sizes
+pnpm --silent verify probe ingestion --json                  # import/watcher state of discoverable transcripts
+pnpm --silent verify probe monitor-stats --agent codex --json # per-statement timing and query plan
+pnpm --silent verify probe snapshot --json                   # disposable copy for probes that write
+pnpm --silent verify probe resync <transcript.jsonl> [--db <snapshot>] --json
+pnpm --silent verify probe plans --db <snapshot> --index-sql 'CREATE INDEX ...' --json  # index impact
+pnpm --silent verify probe hotspots --db <snapshot> --json   # slowest reads behind the routes
+pnpm --silent verify probe reclaim --json                    # what database compact would free
+```
+
+Read probes open the database `readonly` with `query_only` in a child process
+that is killed at its deadline (`--timeout-ms` overrides the per-probe default),
+so a slow statement cannot hold a WAL snapshot open indefinitely. `resync` writes
+only to a fresh scratch database, removed afterwards, or to a snapshot directory
+created by `probe snapshot`; any other `--db` is refused. A snapshot needs free
+temporary space of twice the database size and stays until you remove its
+directory; one that fails or is interrupted mid-copy is removed. Re-sync needs a
+transcript of at least two lines, one kept and one appended.
+
+`plans` measures an index's effect before it ships. On a snapshot it runs the
+compiled app's startup migrations, creates the `--index-sql` candidate (or uses an
+existing `--index NAME`), drives a built-in list of read routes, and records
+each statement that touches the index's table. It compares plans with the index
+present and with it dropped inside a rolled-back transaction, then times and
+reports the statements whose plans change. Use it to find
+regressions elsewhere, not only the read the index targets. It records truncated
+SQL and plans, not parameters or results; the route list is a sample, so a
+statement reached only by other routes or by writes is not compared. Like
+`resync`, it refuses any `--db` that is not a snapshot from `probe snapshot`.
+`--index-sql` accepts exactly one `CREATE INDEX` or `CREATE UNIQUE INDEX`
+statement, parsed by SQLite before execution; SQL scripts and other operations
+are rejected. It must create a new index in the snapshot's main database. Use
+`--index` to compare an existing index, including one already shipped by startup
+migrations.
+
+`hotspots` finds where reads spend their time. It drives the same routes on a
+snapshot, records every distinct read statement they run, on any table, and then
+times (three warm runs) and explains each one on a read-only connection. It lists
+the 25 slowest, each with its route, truncated SQL, plan, and hints from the plan:
+`aggregate_row_lookups` (a count or sum whose index does not cover the columns it
+filters, so every match costs a table lookup), `row_lookups`, `temp_btree`, and
+`full_scan`. The hints rank what to look at; they are not verdicts. Run it after an
+index or query change, and when a route is slow but its own statements look fast in
+isolation. The same snapshot and route-list limits as `plans` apply.
+
+Both probes report `attempted_routes`, HTTP failures in `failed_routes` (`-1`
+means the request failed without a response), and an explicit `coverage` summary.
+`complete` means this built-in sample finished, not that every product route or
+query was covered. A failed route or statement makes coverage `partial`;
+statement failures include the route, truncated SQL, and error. An `observed`
+result can have partial coverage: inspect it before interpreting no changes or
+no hotspots as evidence. For example, a query using `INDEXED BY` cannot be
+compared after its required index is dropped.
+
+`reclaim` answers whether `amon database compact` is worth a stop. It copies the
+database through the online backup API (a read, like `snapshot`), runs compact's
+own steps on the copy (a full search-index `optimize`, `VACUUM`, and a WAL
+checkpoint), and reports current against projected sizes and the reclaimable
+bytes. The parent deletes the copy when the probe ends, even if the worker failed
+or was killed, so nothing with database content is left behind. It needs free
+temporary space of about twice the database size. Timings are for the copy, not
+for compact on the installed database, which also writes and validates a backup.
+
+Monitor-stats and hotspots name their timing sum `sum_statement_medians_ms`.
+It adds separately measured statement medians; it is not endpoint latency or a
+representative workload duration. Hotspots deduplicates reads by SQL and
+parameters and reports the first route that encountered each one, rather than
+weighting statements by production frequency.
+
+Health reports `database_size_matches` as a size comparison only;
+`target_matches_running_server` stays `unknown`. Equal sizes do not identify the
+server's database.
+
+Ingestion resolves `--claude-dir` and `--codex-home` first, then the caller's
+`AGENTMONITOR_CLAUDE_DIR` / `CODEX_HOME`, then home-directory defaults. Repeat
+`--exclude PATTERN` to override `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS`; `--exclude
+""` clears exclusions. Relative roots resolve against the invocation directory.
+The result records the resolved roots and exclusions in `observations.discovery`.
+These are the probe's settings, not verified settings of the running server;
+provide the service's scope when investigating its ingestion state.
+
+Re-sync removes its copied transcripts and scratch database after success,
+failure, deadline expiry, or handled interruption. Parent-side cleanup runs after
+the worker exits, including when it is killed. `--retain-transcripts` explicitly
+keeps the transcript copies for debugging; `content_artifacts` lists those paths
+and any retained snapshot. Explicit snapshots are never deleted by re-sync.
+If the parent itself is forcibly killed, cleanup cannot run: inspect and remove
+its evidence directory manually. The `cleanup` field reports cleanup failure
+rather than claiming the content was removed.
+
+Results use the run evidence layout (`result.json` under an
+`agentmonitor-evidence-*` directory) and add the target kind, path, and file sizes
+before and after. `monitor-stats` times the statements the endpoint itself runs on
+a separate connection with the server's page cache size; it omits the idle-session
+update the endpoint performs and does not go through HTTP. Structured observations
+contain counts, timings, plans, and scope metadata rather than transcript bodies.
+Explicitly retained transcripts and snapshots contain real content; worker logs
+are diagnostic output, not a sanitized export. Keep evidence from a real store
+out of public issues and commits.
+
+`pnpm test:verify` type-checks the driver and exercises lifecycle isolation,
+interruption, real browser workflows, missing prerequisites, explicit timing
+failure, and a wrong-but-plausible compiled aggregation mutation. It temporarily
+modifies a local `dist` file and restores it; run it serially without concurrent
+builds or other verification against that checkout. Its probe tests run against
+fixture databases from the disposable host, never the installed one. The normal
+tests do not require Chromium or a built app; they cover the probes' read-only
+opener and target guards.
 
 The pre-push checks are:
 
