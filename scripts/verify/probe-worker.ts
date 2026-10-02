@@ -26,7 +26,7 @@ import { planFlags } from './plan-flags.js';
 import { auditIndexes, explain, replicateSchema, type AuditStatement, type StatementOrigin } from './index-audit.js';
 import { reviveParams, serializeParams } from './record-sql.js';
 import { repoRoot, writeJson } from './session.js';
-import { RECLAIM_COPY, SNAPSHOT_FILE, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
+import { RECLAIM_COPY, SNAPSHOT_FILE, SUITE_TMP, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
 
 const request = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) as {
   probe: ProbeId; target: DatabaseTarget | null; options: ProbeOptions; evidence: string; snapshot_dir: string | null;
@@ -573,9 +573,12 @@ async function reclaim() {
 /** Run the unit test suite with the SQL recorder; its statements are the corpus. */
 function recordCorpus(directory: string) {
   const start = performance.now();
+  // Its own temp dir, which the parent removes even if the deadline kills the suite.
+  const tmp = path.join(request.evidence, SUITE_TMP);
+  fs.mkdirSync(tmp, { recursive: true });
   const run = spawnSync(process.execPath, [
     '--import', 'tsx', '--import', './scripts/verify/record-sql.ts', '--test', 'tests/*.test.ts', 'tests/codebase/*.test.ts',
-  ], { cwd: repoRoot, env: { ...process.env, AGENTMONITOR_RECORD_SQL_DIR: directory }, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
+  ], { cwd: repoRoot, env: { ...process.env, TMPDIR: tmp, AGENTMONITOR_RECORD_SQL_DIR: directory }, encoding: 'utf8', maxBuffer: 512 * 1024 * 1024 });
   const count = (label: string) => Number(new RegExp(`^ℹ ${label} (\\d+)$`, 'm').exec(run.stdout ?? '')?.[1] ?? Number.NaN);
   return { pass: count('pass'), fail: count('fail'), exit_code: run.status, ms: elapsed(start) };
 }

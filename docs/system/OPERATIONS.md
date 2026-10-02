@@ -768,7 +768,9 @@ statement no longer prepares (`INDEXED BY`). Each index is reported as `constrai
 be a stale copy of a rewritten query. The proposed `drop_set` adds unused and
 then replaceable indexes, largest first, re-checking every statement against
 the whole set, so two indexes that only stand in for each other are not both
-dropped. Add the route reads of a `hotspots` or `plans` run with
+dropped. The recorded suite gets its own temp directory in the evidence
+directory, removed when the probe ends even if the deadline killed it. Add the
+route reads of a `hotspots` or `plans` run with
 `--corpus <evidence>/sql-corpus` (repeatable, replacing the test run). The audit
 compares plans, not timings; time a candidate's affected reads with `plans
 --index` on a snapshot before dropping it.

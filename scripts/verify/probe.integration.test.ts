@@ -112,12 +112,14 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       for (let i = 0; i < 200 && !running().length; i++) await new Promise(resolve => setTimeout(resolve, 50));
       return running().length > 0;
     })();
-    const result = await runProbe('index-audit', { db: fixture, timeoutMs: 6_000 });
+    const result = await probe('index-audit', { db: fixture, timeoutMs: 6_000 });
     assert.equal(await started, true, 'the suite must have started before the deadline');
     assert.equal(result.status, 'blocked');
     assert.match(result.errors.join(' '), /deadline/);
     await new Promise(resolve => setTimeout(resolve, 500));
     assert.deepEqual(running(), [], 'the test suite died with the worker');
+    assert.equal(result.cleanup, 'complete');
+    assert.equal(fs.existsSync(path.join(result.directory, 'suite-tmp')), false, 'the killed suite leaves no temp files');
   });
 
   await t.test('ingestion classifies each transcript against import and watcher state', async () => {
@@ -512,7 +514,7 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
         line('SELECT COUNT(*) FROM sessions', []),
       ].join('\n') + '\n');
 
-      const result = await runProbe('index-audit', { db: store, corpus: [corpus] });
+      const result = await probe('index-audit', { db: store, corpus: [corpus] });
       assert.equal(result.status, 'observed', result.errors.join(' '));
       type Verdict = { name: string; verdict: string; bytes: number };
       const m = result.measurements as { indexes: Verdict[]; drop_set: string[] };
@@ -534,7 +536,7 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       } finally { copy.close(); }
       assert.equal(digest(store), before, 'index-audit reads the database only');
 
-      const invalid = await runProbe('index-audit', { db: store, corpus: [corpus], table: 'events; DROP TABLE events' });
+      const invalid = await probe('index-audit', { db: store, corpus: [corpus], table: 'events; DROP TABLE events' });
       assert.equal(invalid.status, 'blocked');
       assert.equal(digest(store), before);
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }

@@ -8,6 +8,8 @@ import { provenance, repoRoot, writeJson } from './session.js';
 export const snapshotPrefix = 'agentmonitor-snapshot-';
 /** The reclaim probe's working copy, inside its evidence directory. */
 export const RECLAIM_COPY = 'reclaim-copy.db';
+/** The temp directory index-audit gives the test suite it records, inside its evidence directory. */
+export const SUITE_TMP = 'suite-tmp';
 /** The database file inside a snapshot directory. */
 export const SNAPSHOT_FILE = 'agentmonitor.db';
 
@@ -232,7 +234,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     limits: [...probe.limits] as string[],
     errors: [] as string[],
     content_artifacts: [] as string[],
-    cleanup: probe.id === 'resync' || probe.id === 'reclaim' || probe.id === 'snapshot' ? 'pending' : 'not_applicable',
+    cleanup: ['resync', 'reclaim', 'snapshot', 'index-audit'].includes(probe.id) ? 'pending' : 'not_applicable',
   };
   const persist = () => writeJson(path.join(directory, 'result.json'), result);
   persist();
@@ -333,6 +335,16 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
         result.cleanup = 'failed';
         result.status = 'blocked';
         result.errors.push(`Content cleanup failed in ${directory}: ${String(error)}`);
+      }
+    }
+    if (probe.id === 'index-audit') {
+      // A suite killed at the deadline never runs its own cleanup.
+      try {
+        fs.rmSync(path.join(directory, SUITE_TMP), { recursive: true, force: true });
+        result.cleanup = 'complete';
+      } catch (error) {
+        result.cleanup = 'failed';
+        result.errors.push(`Suite temp cleanup failed in ${directory}: ${String(error)}`);
       }
     }
     if (drivesApp(probe.id) && result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
