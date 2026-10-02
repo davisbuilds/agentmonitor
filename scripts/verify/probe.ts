@@ -8,6 +8,8 @@ import { provenance, repoRoot, writeJson } from './session.js';
 export const snapshotPrefix = 'agentmonitor-snapshot-';
 /** The reclaim probe's working copy, inside its evidence directory. */
 export const RECLAIM_COPY = 'reclaim-copy.db';
+/** The database file inside a snapshot directory. */
+export const SNAPSHOT_FILE = 'agentmonitor.db';
 
 export const probes = [
   {
@@ -215,18 +217,25 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     limits: [...probe.limits] as string[],
     errors: [] as string[],
     content_artifacts: [] as string[],
-    cleanup: probe.id === 'resync' || probe.id === 'reclaim' ? 'pending' : 'not_applicable',
+    cleanup: probe.id === 'resync' || probe.id === 'reclaim' || probe.id === 'snapshot' ? 'pending' : 'not_applicable',
   };
   const persist = () => writeJson(path.join(directory, 'result.json'), result);
   persist();
+  // The parent creates the snapshot directory so it can remove a partial copy
+  // when the worker fails or is killed mid-backup.
+  let snapshotDir: string | null = null;
   try {
     options.signal?.throwIfAborted();
     result.runtime = provenance();
     const target = resolveTarget(probe, options, directory);
     if (target) result.target = { ...target, ...(target.kind === 'scratch' ? {} : fileSizes(target.path)) };
     persist();
+    if (probe.id === 'snapshot') {
+      snapshotDir = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
+      fs.chmodSync(snapshotDir, 0o700);
+    }
     const request = path.join(directory, 'request.json');
-    writeJson(request, { probe: probe.id, target, options: result.request, evidence: directory });
+    writeJson(request, { probe: probe.id, target, options: result.request, evidence: directory, snapshot_dir: snapshotDir });
     // Only what the worker needs: discovery reads HOME, and resync points the
     // compiled app at its scratch database before any module reads config.
     const env: NodeJS.ProcessEnv = {};
@@ -261,7 +270,6 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     const worker = JSON.parse(fs.readFileSync(output, 'utf8')) as { measurements: Record<string, unknown>; observations: Record<string, unknown>; limits?: string[] };
     result.measurements = worker.measurements;
     result.observations = worker.observations;
-    if (probe.id === 'snapshot' && typeof worker.observations.snapshot === 'string') result.content_artifacts.push(worker.observations.snapshot);
     result.limits.push(...(worker.limits ?? []));
     if (result.target && result.target.kind !== 'scratch') Object.assign(result.target, { after: fileSizes(result.target.path) });
     result.status = 'observed';
@@ -285,6 +293,18 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
       }
       if (result.target?.kind === 'snapshot') result.content_artifacts.push(result.target.path);
     }
+    if (snapshotDir && result.status === 'observed') {
+      result.content_artifacts.push(path.join(snapshotDir, SNAPSHOT_FILE));
+      result.cleanup = 'retained';
+    } else if (snapshotDir) {
+      try {
+        fs.rmSync(snapshotDir, { recursive: true, force: true });
+        result.cleanup = 'complete';
+      } catch (error) {
+        result.cleanup = 'failed';
+        result.errors.push(`Snapshot cleanup failed in ${snapshotDir}: ${String(error)}`);
+      }
+    } else if (probe.id === 'snapshot') result.cleanup = 'complete';
     if (probe.id === 'reclaim') {
       // The copy holds the whole database; the parent removes it because the
       // worker may have failed or been killed before it could.

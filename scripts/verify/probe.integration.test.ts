@@ -230,7 +230,53 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
         assert.equal(fs.existsSync(interrupted.target!.path), false);
       } finally { clearInterval(timer); }
 
+      // Too short to split into a prefix and an append: refused, not a timing of nothing.
+      for (const short of ['', lines.split('\n')[0] + '\n']) {
+        fs.writeFileSync(transcript, short);
+        const refused = await runProbe('resync', { transcript });
+        assert.equal(refused.status, 'blocked');
+        assert.match(fs.readFileSync(path.join(refused.directory, 'worker.log'), 'utf8'), /at least two lines/);
+        assert.equal(refused.cleanup, 'complete');
+      }
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  await t.test('an interrupted snapshot leaves no copy behind', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-snapshot-test-'));
+    const seen = new Set(fs.readdirSync(os.tmpdir()));
+    const fresh = () => fs.readdirSync(os.tmpdir()).filter(entry => !seen.has(entry) && entry.startsWith(snapshotPrefix));
+    const abort = new AbortController();
+    let sawCopy = false;
+    const timer = setInterval(() => {
+      if (fresh().some(entry => fs.existsSync(path.join(os.tmpdir(), entry, 'agentmonitor.db')))) {
+        sawCopy = true;
+        abort.abort(new Error('Test interruption with snapshot copy present'));
+      }
+    }, 2);
+    try {
+      const store = path.join(dir, 'agentmonitor.db');
+      fs.copyFileSync(fixture, store);
+      const grow = new Database(store);
+      grow.exec(`CREATE TABLE ballast (b BLOB);
+        WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) INSERT INTO ballast SELECT randomblob(4000) FROM n;`);
+      grow.close();
+      const interrupted = await runProbe('snapshot', { db: store, signal: abort.signal });
+      assert.equal(sawCopy, true);
+      assert.equal(interrupted.status, 'blocked');
+      assert.equal(interrupted.cleanup, 'complete');
+      assert.deepEqual(interrupted.content_artifacts, []);
+      assert.deepEqual(fresh(), [], 'the partial snapshot directory is removed');
+
+      const kept = await runProbe('snapshot', { db: fixture });
+      assert.equal(kept.status, 'observed', kept.errors.join(' '));
+      assert.equal(kept.cleanup, 'retained');
+      assert.deepEqual(kept.content_artifacts, [kept.observations.snapshot]);
+      assert.ok(fs.existsSync(String(kept.observations.snapshot)));
+    } finally {
+      clearInterval(timer);
+      for (const entry of fresh()) fs.rmSync(path.join(os.tmpdir(), entry), { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   await t.test('plans shows which recorded reads an index changes, on a snapshot copy only', async () => {

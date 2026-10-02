@@ -24,10 +24,10 @@ import { openReadOnly } from './readonly.js';
 import { createCandidateIndex } from './candidate-index.js';
 import { planFlags } from './plan-flags.js';
 import { repoRoot, writeJson } from './session.js';
-import { RECLAIM_COPY, snapshotPrefix, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
+import { RECLAIM_COPY, SNAPSHOT_FILE, type DatabaseTarget, type ProbeId, type ProbeOptions } from './probe.js';
 
 const request = JSON.parse(fs.readFileSync(process.argv[2], 'utf8')) as {
-  probe: ProbeId; target: DatabaseTarget | null; options: ProbeOptions; evidence: string;
+  probe: ProbeId; target: DatabaseTarget | null; options: ProbeOptions; evidence: string; snapshot_dir: string | null;
 };
 const built = (module: string) => pathToFileURL(path.join(repoRoot, 'dist', module)).href;
 const elapsed = (start: number) => Math.round((performance.now() - start) * 100) / 100;
@@ -161,9 +161,7 @@ async function snapshot() {
   const stats = fs.statfsSync(os.tmpdir());
   const free = Number(stats.bavail) * Number(stats.bsize);
   if (free < bytes * 2) throw new Error(`Snapshot needs about ${bytes * 2} free bytes in ${os.tmpdir()}; ${free} available`);
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), snapshotPrefix));
-  fs.chmodSync(directory, 0o700);
-  const destination = path.join(directory, 'agentmonitor.db');
+  const destination = path.join(request.snapshot_dir!, SNAPSHOT_FILE);
   const db = openReadOnly(source);
   const start = performance.now();
   await db.backup(destination);
@@ -194,6 +192,7 @@ async function resync(options: ProbeOptions) {
   const content = fs.readFileSync(transcript, 'utf8');
   const isCodex = transcript.includes(`${path.sep}.codex${path.sep}`) || content.slice(0, 200).includes('"session_meta"');
   const lines = content.split('\n').filter(line => line.trim()).map(line => line + '\n');
+  if (lines.length < 2) throw new Error(`resync needs a transcript with at least two lines (one kept, one appended); ${transcript} has ${lines.length}`);
   const append = Math.min(Math.max(1, options.appendLines ?? 10), lines.length - 1);
   const prefix = lines.slice(0, lines.length - append).join('');
   const rest = lines.slice(lines.length - append).join('');

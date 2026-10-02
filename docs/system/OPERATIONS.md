@@ -696,7 +696,8 @@ so a slow statement cannot hold a WAL snapshot open indefinitely. `resync` write
 only to a fresh scratch database, removed afterwards, or to a snapshot directory
 created by `probe snapshot`; any other `--db` is refused. A snapshot needs free
 temporary space of twice the database size and stays until you remove its
-directory.
+directory; one that fails or is interrupted mid-copy is removed. Re-sync needs a
+transcript of at least two lines, one kept and one appended.
 
 `plans` measures an index's effect before it ships. On a snapshot it runs the
 compiled app's startup migrations, creates the `--index-sql` candidate (or uses an
