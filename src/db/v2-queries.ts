@@ -2970,7 +2970,8 @@ export function usageRowsStatement(params: UsageParams = {}): { sql: string; val
   return { sql, values: filter.values };
 }
 
-function selectUsageRows(params: UsageParams = {}): UsageRow[] {
+/** Usage-bearing rows for the filter; pass them to several rollups to scan once. */
+export function getUsageRows(params: UsageParams = {}): UsageRow[] {
   const statement = usageRowsStatement(params);
   const rows = getDb().prepare(statement.sql).all(...statement.values) as UsageDbRow[];
 
@@ -3414,7 +3415,7 @@ export function getUsageCoverage(params: UsageParams = {}, usageRows?: UsageRow[
 // panel keep passing params alone and pay for their own scan, as before.
 export function getUsageSummary(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
   sharedCoverage?: UsageCoverage,
 ): UsageSummary {
   const row = usageRowsToSummaryValues(usageRows);
@@ -3477,13 +3478,13 @@ export function getUsageSummary(
     prior_total_cost_usd: priorTotalCostUsd,
     cost_delta_pct: costDeltaPct,
     peak_day: row.peak_day,
-    coverage: sharedCoverage ?? getUsageCoverage(params),
+    coverage: sharedCoverage ?? getUsageCoverage(params, usageRows),
   };
 }
 
 export function getUsageDaily(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageDailyPoint[] {
   const days = new Map<string, UsageAccumulator>();
   for (const row of usageRows) {
@@ -3525,7 +3526,7 @@ export function getUsageDaily(
 
 export function getUsageProjects(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageProjectBreakdown[] {
   const projects = new Map<string, UsageAccumulator>();
   for (const row of usageRows) {
@@ -3563,7 +3564,7 @@ function compareUsageModelBreakdown(a: UsageModelBreakdown, b: UsageModelBreakdo
 
 export function getUsageModels(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageModelBreakdown[] {
   const models = new Map<string, UsageAccumulator>();
   for (const usageRow of usageRows) {
@@ -3579,7 +3580,7 @@ export function getUsageModels(
 
 export function getUsageModelsDaily(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageModelDailyPoint[] {
   const days = new Map<string, Map<string, UsageAccumulator>>();
   for (const row of usageRows) {
@@ -3616,7 +3617,7 @@ export function getUsageModelsDaily(
 
 export function getUsageTiers(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageTierBreakdown[] {
   const tiers = new Map<string, { provider: string; tier: string; acc: UsageAccumulator }>();
 
@@ -3646,7 +3647,7 @@ export function getUsageTiers(
 
 export function getUsageAgents(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageAgentBreakdown[] {
   const agents = new Map<string, UsageAccumulator>();
   for (const row of usageRows) {
@@ -3665,7 +3666,7 @@ export function getUsageAgents(
 
 export function getUsageTopSessions(
   params: UsageParams = {},
-  usageRows: UsageRow[] = selectUsageRows(params),
+  usageRows: UsageRow[] = getUsageRows(params),
 ): UsageTopSessionRow[] {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
@@ -3913,7 +3914,7 @@ export function getUsageFacets(params: UsageParams = {}): UsageFacets {
 export function getUsageOverview(params: UsageParams = {}): UsageOverview {
   const db = getDb();
   return db.transaction(() => {
-    const usageRows = selectUsageRows(params);
+    const usageRows = getUsageRows(params);
     const coverage = getUsageCoverage(params, usageRows);
 
     return {

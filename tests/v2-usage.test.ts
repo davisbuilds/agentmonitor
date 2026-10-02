@@ -955,3 +955,23 @@ describe('GET /api/v2/usage/facets', () => {
     assert.deepEqual(body.projects, ['alpha', 'beta']);
   });
 });
+
+describe('usage coverage from shared rows', () => {
+  // Panels compute coverage from the usage rows they already selected. That
+  // path counts the matching population index-only and subtracts the Codex
+  // OTEL overlap separately; it must equal the per-group computation.
+  test('equals coverage computed on its own, across filters', async () => {
+    const { getUsageCoverage, getUsageRows } = await import('../src/db/v2-queries.js');
+    const window = { date_from: '2026-04-01', date_to: '2026-04-04' };
+    const cases = [
+      {}, window, { ...window, agent: 'codex' }, { ...window, agent: 'claude_code' }, { agent: 'codex' },
+      { ...window, project: 'alpha' }, { ...window, model: 'gpt-5.4' }, { ...window, provider: 'anthropic' },
+      { ...window, include_benchmark: true },
+    ];
+    for (const params of cases) {
+      assert.deepEqual(getUsageCoverage(params, getUsageRows(params)), getUsageCoverage(params), JSON.stringify(params));
+    }
+    assert.ok(getUsageCoverage(window).matching_events > 0, 'the fixture has matching events');
+    assert.ok(getUsageCoverage({ ...window, agent: 'codex' }).source_breakdown.some(row => row.source === 'otel'), 'the Codex OTEL overlap is exercised');
+  });
+});
