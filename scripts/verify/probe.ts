@@ -62,7 +62,7 @@ export const probes = [
       'Writes only to a snapshot made by this CLI: the app runs its startup migrations there, and --index-sql creates the candidate index',
       '--index-sql accepts one CREATE [UNIQUE] INDEX statement creating a new index; use --index for an existing index',
       'Covers the built-in route list; statements reached only by other routes or by writes are not compared',
-      'Records SQL text (truncated) and plans, not parameters or results',
+      'Reports SQL text (truncated) and plans, not results; sql-corpus/routes.jsonl in the evidence directory keeps each statement with its parameters (identifiers such as session ids) for index-audit',
     ],
     deadline_ms: 900_000,
   },
@@ -73,7 +73,7 @@ export const probes = [
     limits: [
       'Writes only to a snapshot made by this CLI: the app runs its startup migrations there',
       'Covers the built-in route list; statements reached only by other routes or by writes are not timed',
-      'Records SQL text (truncated) and plans, not parameters or results',
+      'Reports SQL text (truncated) and plans, not results; sql-corpus/routes.jsonl in the evidence directory keeps each statement with its parameters (identifiers such as session ids) for index-audit',
     ],
     deadline_ms: 900_000,
   },
@@ -85,6 +85,18 @@ export const probes = [
       'Reads the database only, through the online backup API; the copy is deleted when the probe ends, even if it fails',
       'Needs free temporary space of about twice the database size, like a snapshot',
       'Projects the file size, not how long compact takes on the installed database',
+    ],
+    deadline_ms: 900_000,
+  },
+  {
+    id: 'index-audit',
+    target: 'installed',
+    description: 'Which indexes on a table (--table, default events) the app\'s statements still need: record every statement the unit test suite runs, writers included (or reuse --corpus DIR), compare their plans with each index dropped on an empty copy of the schema, and propose a drop set that leaves no plan worse',
+    limits: [
+      'Reads the schema and index sizes through a read-only connection; plans are compared on an empty copy of the schema in the evidence directory, checked against the real database\'s plans',
+      'Covers the statements the unit test suite runs, including the statements its plan tests explain; a variant no test reaches is not compared. Add the reads plans or hotspots recorded on a snapshot with --corpus <evidence>/sql-corpus',
+      'Compares plans, not timings: confirm a drop with plans or hotspots on a snapshot',
+      'Never proposes dropping a UNIQUE index',
     ],
     deadline_ms: 900_000,
   },
@@ -111,6 +123,8 @@ export interface ProbeOptions {
   transcript?: string;
   index?: string;
   indexSql?: string;
+  corpus?: string[];
+  table?: string;
   timeoutMs?: number;
   retainTranscripts?: boolean;
   claudeDir?: string;
@@ -196,6 +210,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
   // Resolve caller-relative roots before crossing into the worker's repo cwd.
   const absolute = (value: string) => path.resolve(value === '~' ? os.homedir()
     : value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : value);
+  if (probe.id === 'index-audit' && options.corpus) options = { ...options, corpus: options.corpus.map(absolute) };
   if (probe.id === 'ingestion') options = {
     ...options,
     claudeDir: absolute(options.claudeDir ?? (process.env.AGENTMONITOR_CLAUDE_DIR?.trim() || path.join(os.homedir(), '.claude'))),
@@ -251,13 +266,16 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
       Object.assign(env, { AGENTMONITOR_AUTO_IMPORT_MINUTES: '0', AGENTMONITOR_SKILL_CATALOG_DIRS: empty });
     }
     const log = fs.openSync(path.join(directory, 'worker.log'), 'a', 0o600);
+    // Its own process group, so the deadline also kills anything the worker
+    // started, such as the test suite index-audit records.
     const child = spawn(process.execPath, ['--import', 'tsx', path.join(repoRoot, 'scripts/verify/probe-worker.ts'), request], {
-      cwd: repoRoot, env, stdio: ['ignore', log, log],
+      cwd: repoRoot, env, stdio: ['ignore', log, log], detached: true,
     });
     fs.closeSync(log);
     const exited = once(child, 'exit') as Promise<[number | null, NodeJS.Signals | null]>;
-    const timer = setTimeout(() => child.kill('SIGKILL'), deadline);
-    const abort = () => child.kill('SIGKILL');
+    const kill = () => { try { process.kill(-child.pid!, 'SIGKILL'); } catch { child.kill('SIGKILL'); } };
+    const timer = setTimeout(kill, deadline);
+    const abort = kill;
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) abort();
     let code: number | null;
