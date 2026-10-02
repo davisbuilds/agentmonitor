@@ -3664,13 +3664,30 @@ export function getUsageAgents(
     .sort((a, b) => b.cost_usd - a.cost_usd || b.input_tokens - a.input_tokens || a.agent.localeCompare(b.agent));
 }
 
+/** Every event (not only usage-bearing ones) of the given sessions inside the filter. */
+export function usageSessionEventCountStatement(ids: string[], params: UsageParams = {}): { sql: string; values: unknown[] } {
+  const filter = buildUsageFilterState(params, 'e');
+  const where = [
+    `e.session_id IN (${ids.map(() => '?').join(', ')})`,
+    ...filter.conditions,
+  ].join(' AND ');
+  return {
+    sql: `
+      SELECT e.session_id as id, COUNT(*) as event_count
+      FROM events e
+      WHERE ${where}
+      GROUP BY e.session_id
+    `,
+    values: [...ids, ...filter.values],
+  };
+}
+
 export function getUsageTopSessions(
   params: UsageParams = {},
   usageRows: UsageRow[] = getUsageRows(params),
 ): UsageTopSessionRow[] {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
-  const filter = buildUsageFilterState(params, 'e');
   const sessions = new Map<string, {
     id: string;
     project: string | null;
@@ -3777,16 +3794,8 @@ export function getUsageTopSessions(
   }>;
   const sessionsById = new Map(sessionRows.map(row => [row.id, row]));
 
-  const eventCountWhere = [
-    `e.session_id IN (${placeholders})`,
-    ...filter.conditions,
-  ].join(' AND ');
-  const eventCountRows = db.prepare(`
-    SELECT e.session_id as id, COUNT(*) as event_count
-    FROM events e
-    WHERE ${eventCountWhere}
-    GROUP BY e.session_id
-  `).all(...ids, ...filter.values) as Array<{ id: string; event_count: number }>;
+  const eventCount = usageSessionEventCountStatement(ids, params);
+  const eventCountRows = db.prepare(eventCount.sql).all(...eventCount.values) as Array<{ id: string; event_count: number }>;
   const eventCountsById = new Map(eventCountRows.map(row => [row.id, row.event_count]));
 
   return entries
