@@ -77,9 +77,15 @@ test('filter-option DISTINCT enumeration uses a covering index (no temp b-tree)'
 
 test('v14 retires the events indexes no statement needs', () => {
   const names = indexNames();
-  for (const name of ['idx_events_agent_type', 'idx_events_study_id', 'idx_events_created_model']) {
+  for (const name of ['idx_events_agent_type', 'idx_events_created_model']) {
     assert.ok(!names.has(name), `${name} should be dropped`);
   }
+});
+
+test('a per-study benchmark read seeks the study index', () => {
+  // The benchmark index would seek source alone and visit every benchmark row.
+  const plan = queryPlan(`SELECT * FROM events WHERE source = 'benchmark' AND study_id = ?`, 'study-1');
+  assert.match(plan, /idx_events_study_id \(study_id=\?\)/, plan);
 });
 
 test('covering composite event indexes exist', () => {

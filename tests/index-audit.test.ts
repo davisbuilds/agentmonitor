@@ -120,6 +120,24 @@ test('a partial index traded for a full one is a regression, even with as many t
   assert.ok(!result.drop_set.includes('idx_import'));
 });
 
+test('a search on a different, less selective column is a regression', () => {
+  // A per-study read: without the study index SQLite seeks the benchmark index
+  // on source alone, one term either way, but every benchmark row matches.
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE ev (id INTEGER PRIMARY KEY, source TEXT, session TEXT, agent TEXT, tool TEXT, model TEXT, study TEXT);
+    CREATE INDEX idx_study ON ev(study) WHERE study IS NOT NULL;
+    CREATE INDEX idx_bench ON ev(source, session, agent, tool, model) WHERE source = 'benchmark';
+  `);
+  const statement = { sql: "SELECT * FROM ev WHERE source = 'benchmark' AND study = ?", params: ['s'] };
+  assert.match(explain(db, statement).join(' '), /idx_study \(study=\?\)/, 'the fixture must start on the study seek');
+  const result = auditIndexes(db, 'ev', [statement]);
+  const study = result.verdicts.find(v => v.name === 'idx_study')!;
+  assert.equal(study.verdict, 'needed', JSON.stringify(study));
+  assert.deepEqual(study.regressions[0].regressions, ['loses_search_column']);
+  assert.deepEqual(regressions('', ['SEARCH ev USING INDEX a (study=?)'], ['SEARCH ev USING INDEX b (study=? AND source=?)']), [], 'searching more is not worse');
+});
+
 test('an index a statement names with INDEXED BY is needed', () => {
   const db = fixture();
   const pinned = [{ sql: 'SELECT id FROM ev INDEXED BY idx_unused WHERE created > ?', params: ['x'] }];

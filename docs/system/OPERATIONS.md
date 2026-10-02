@@ -760,8 +760,9 @@ each index in turn, inside a rolled-back transaction, and compares every
 statement's plan, not only the plans that name the index: a partial index can
 steer the planner without appearing in a plan. A plan is worse when it gains a
 full scan, a temporary sort, row lookups, an automatic index, fewer indexed
-search terms, or trades a partial index for a full one, or when the statement
-no longer prepares (`INDEXED BY`). Each index is reported as `constraint`
+search terms, a search that no longer constrains a column it did (as many
+terms, far more rows), or trades a partial index for a full one, or when the
+statement no longer prepares (`INDEXED BY`). Each index is reported as `constraint`
 (unique, never proposed), `unused`, `replaceable`, or `needed`, with its size.
 `plan_tests_only` marks one held only by a shape a plan test explains, which may
 be a stale copy of a rewritten query. The proposed `drop_set` adds unused and

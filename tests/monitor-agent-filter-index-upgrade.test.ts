@@ -66,7 +66,7 @@ test('a read-only command installs the session-window index on a v12 database', 
   assert.equal(db.pragma('user_version', { simple: true }), 14);
 });
 
-test('a read-only command drops the events indexes v14 retired on a v13 database', async () => {
+test('a read-only command drops the events indexes v14 retired on a v13 database, keeping the study index', async () => {
   const connection = await import('../src/db/connection.js');
   const schema = await import('../src/db/schema.js');
   const db = connection.getDb();
@@ -78,8 +78,8 @@ test('a read-only command drops the events indexes v14 retired on a v13 database
 
   schema.ensureSchemaForRead();
 
-  const retired = db.prepare(`SELECT name FROM sqlite_master
+  const remaining = db.prepare(`SELECT name FROM sqlite_master
     WHERE name IN ('idx_events_agent_type', 'idx_events_study_id', 'idx_events_created_model')`).all();
-  assert.deepEqual(retired, []);
+  assert.deepEqual(remaining, [{ name: 'idx_events_study_id' }]);
   assert.equal(db.pragma('user_version', { simple: true }), 14);
 });

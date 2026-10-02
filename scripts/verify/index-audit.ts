@@ -13,7 +13,7 @@ export type StatementOrigin = 'test_run' | 'plan_test' | 'route';
 
 export interface AuditStatement { sql: string; params: unknown[] | null; origins?: StatementOrigin[] }
 
-export type Regression = PlanFlag | 'fewer_index_terms' | 'automatic_index' | 'statement_fails' | 'loses_partial_filter';
+export type Regression = PlanFlag | 'fewer_index_terms' | 'loses_search_column' | 'automatic_index' | 'statement_fails' | 'loses_partial_filter';
 
 export interface IndexVerdict {
   name: string;
@@ -65,14 +65,18 @@ export function indexesInPlan(plan: string[]): string[] {
   return [...names];
 }
 
-/** Indexed search terms per table, e.g. "(agent_type=? AND created_at>?)" counts two. */
-function indexTerms(plan: string[]): Map<string, number> {
-  const terms = new Map<string, number>();
+/**
+ * Indexed search terms per table, by the column each constrains:
+ * "(agent_type=? AND created_at>?)" searches agent_type and created_at.
+ */
+function indexTerms(plan: string[]): Map<string, Set<string>> {
+  const terms = new Map<string, Set<string>>();
   for (const step of plan) {
     const match = /^SEARCH (\w+)(?: AS \w+)? USING (?:COVERING |INTEGER PRIMARY KEY |PRIMARY KEY )?(?:INDEX \S+ )?\((.*)\)$/.exec(step);
     if (!match) continue;
-    const count = match[2].split(' AND ').length;
-    terms.set(match[1], Math.max(terms.get(match[1]) ?? 0, count));
+    const columns = terms.get(match[1]) ?? new Set<string>();
+    for (const term of match[2].split(' AND ')) columns.add(/^(<expr>|[\w.]+)/.exec(term)?.[1] ?? term);
+    terms.set(match[1], columns);
   }
   return terms;
 }
@@ -82,9 +86,10 @@ export interface TableIndexes { all: Set<string>; partial: Set<string> }
 
 /**
  * What got worse from one plan to the next: a new plan hint, an index SQLite
- * must build for each run, a search on fewer indexed terms, or a partial index
- * traded for a full one. The last keeps its search terms but visits every row
- * the partial index's predicate used to skip.
+ * must build for each run, a search on fewer indexed terms or that no longer
+ * constrains a column it did (study_id=? traded for source=? has as many terms
+ * but matches far more rows), or a partial index traded for a full one, which
+ * keeps its search terms but visits every row the partial predicate skipped.
  */
 export function regressions(sql: string, before: string[], after: string[], indexes?: TableIndexes): Regression[] {
   const had = new Set(planFlags(sql, before));
@@ -93,8 +98,11 @@ export function regressions(sql: string, before: string[], after: string[], inde
   if (automatic(after) && !automatic(before)) found.push('automatic_index');
   const termsBefore = indexTerms(before);
   const termsAfter = indexTerms(after);
-  for (const [table, count] of termsBefore) {
-    if ((termsAfter.get(table) ?? 0) < count) { found.push('fewer_index_terms'); break; }
+  for (const [table, columns] of termsBefore) {
+    const after = termsAfter.get(table) ?? new Set<string>();
+    if (after.size < columns.size) found.push('fewer_index_terms');
+    else if ([...columns].some(column => !after.has(column))) found.push('loses_search_column');
+    if (found.includes('fewer_index_terms') || found.includes('loses_search_column')) break;
   }
   if (indexes) {
     const usedAfter = indexesInPlan(after);

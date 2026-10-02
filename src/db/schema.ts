@@ -273,6 +273,7 @@ function initSchemaLocked(db: Database): void {
   if (!eventColumns.has('cost_source')) {
     db.exec("ALTER TABLE events ADD COLUMN cost_source TEXT CHECK (cost_source IN ('reported', 'estimated'))");
   }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_events_study_id ON events(study_id) WHERE study_id IS NOT NULL');
 
   const providerQuotaColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(provider_quotas)`).all() as Array<{ name: string }>).map(col => col.name)
@@ -426,6 +427,7 @@ function initSchemaLocked(db: Database): void {
       DROP TABLE events;
       ALTER TABLE events_migrated RENAME TO events;
 
+      CREATE INDEX IF NOT EXISTS idx_events_study_id ON events(study_id) WHERE study_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_events_created_at ON events(created_at);
       CREATE INDEX IF NOT EXISTS idx_events_event_type ON events(event_type);
       CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
@@ -454,14 +456,15 @@ function initSchemaLocked(db: Database): void {
   // Created here (not with the base table) because the covering columns include
   // cost_usd, which is added by an ALTER guard above on legacy databases.
   //
-  // v14 drops three indexes no statement needed any more, measured with
+  // v14 drops two indexes no statement needed any more, measured with
   // `pnpm verify probe index-audit` over every statement the test suite runs
   // and the route reads recorded on a snapshot: idx_events_agent_type (the
   // agent-ordered composites cover its DISTINCT agent_type enumeration with no
-  // sort), idx_events_study_id (benchmark reads seek idx_events_benchmark_monitor),
-  // and idx_events_created_model (its time-windowed aggregate was rewritten
-  // onto the normalized usage timestamp). Re-run the probe before adding or
-  // dropping an events index; it reports what each index's absence would cost.
+  // sort) and idx_events_created_model (its time-windowed aggregate was
+  // rewritten onto the normalized usage timestamp). idx_events_study_id stays:
+  // without it a per-study read seeks the benchmark index on source alone and
+  // visits every benchmark row. Re-run the probe before adding or dropping an
+  // events index; it reports what each index's absence would cost.
   //
   // NOTE: idx_events_event_type is deliberately kept. It is too low-cardinality
   // to help row *filtering*, but it covers the filter-option `SELECT DISTINCT
@@ -537,7 +540,6 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_session_cost
       ON events(session_id, tokens_in, tokens_out, cost_usd);
     DROP INDEX IF EXISTS idx_events_agent_type;
-    DROP INDEX IF EXISTS idx_events_study_id;
     DROP INDEX IF EXISTS idx_events_created_model;
     CREATE INDEX IF NOT EXISTS idx_events_session_reconcile
       ON events(session_id, agent_type, source);
@@ -1076,7 +1078,7 @@ export function runDataMigrations(db: Database): void {
     // indexes, which read commands only install when the version advances.
     // v12 likewise only replaces the agent+event-type index with one that
     // covers the benchmark exclusion, v13 only adds the session-window index,
-    // and v14 only drops three events indexes no statement needs.
+    // and v14 only drops two events indexes no statement needs.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
