@@ -31,6 +31,7 @@ let getAnalyticsSkillHealthParts: (params?: Record<string, unknown>) => {
 let server: Server;
 let baseUrl: string;
 let catalogRoot: string;
+let tempDir = '';
 
 function makeCatalogSkill(root: string, name: string, version: string | null): void {
   const dir = path.join(root, name);
@@ -86,7 +87,7 @@ function seedInvocation(
 }
 
 before(async () => {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-health-'));
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'skills-health-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
 
   catalogRoot = path.join(tempDir, 'catalog');
@@ -267,6 +268,7 @@ before(async () => {
 after(() => {
   server?.close();
   closeDb?.();
+  if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
 function rowsByName(): Map<string, SkillHealthRow> {
