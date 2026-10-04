@@ -220,6 +220,15 @@ describe('server build', () => {
     store.setServerBuild(undefined);
     expect(store.getServerBuildStale()).toBe(false);
   });
+
+  it('tracks unpriced models from the snapshot, and an absent list clears them', () => {
+    expect(store.getUnpricedModels()).toEqual([]);
+    const models = [{ model: 'gpt-new', usage_events: 2, last_seen: '2026-10-04 12:00:00' }];
+    store.setUnpricedModels(models);
+    expect(store.getUnpricedModels()).toEqual(models);
+    store.setUnpricedModels(undefined);
+    expect(store.getUnpricedModels()).toEqual([]);
+  });
 });
 
 describe('edited-file tracking', () => {

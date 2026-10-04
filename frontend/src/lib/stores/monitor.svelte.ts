@@ -65,6 +65,14 @@ export function setServerBuild(build: Stats['server_build']): void {
   serverBuildStale = Boolean(build?.tracked && build.stale);
 }
 
+// Models whose recent usage bills as $0 because no rate card matches them. Also
+// server state riding the snapshot, so a Monitor filter does not hide it.
+let unpricedModels = $state<NonNullable<Stats['unpriced_models']>>([]);
+export function getUnpricedModels(): NonNullable<Stats['unpriced_models']> { return unpricedModels; }
+export function setUnpricedModels(models: Stats['unpriced_models']): void {
+  unpricedModels = models ?? [];
+}
+
 export function incrementEvent(event: AgentEvent): void {
   // A live event is new, so a start-time filter always admits it; an agent filter may not.
   const agent = statsParams(filters).agent;

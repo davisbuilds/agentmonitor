@@ -76,7 +76,7 @@ import type {
   BenchmarkCostBasis,
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
-import { pricingRegistry } from '../pricing/index.js';
+import { normalizeModelId, pricingRegistry, UNPRICEABLE_MODELS } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
@@ -4419,4 +4419,59 @@ export function getOperationalMetricSummary(query: OperationalMetricQuery = {}):
     total_value: row.total_value,
     last_seen: row.last_seen,
   }));
+}
+
+// --- Unpriced model usage ---
+
+/** A model whose recent usage carries no cost because no rate card matches it. */
+export interface UnpricedModelUsage {
+  model: string;
+  usage_events: number;
+  last_seen: string;
+}
+
+// Grouping by `+model` keeps SQLite off the model index, which would read every row of every
+// model across all history to find the few recent ones (about 1 s cold on a
+// real store); the window on the time index is a few milliseconds. Benchmark
+// imports report their own unpriced models loudly.
+export function recentUnpricedUsageStatement(since: string): { sql: string; values: unknown[] } {
+  return {
+    sql: `
+      SELECT model, COUNT(*) AS usage_events, MAX(created_at) AS last_seen
+      FROM events
+      WHERE created_at >= datetime(?)
+        AND cost_usd IS NULL
+        AND model IS NOT NULL AND model <> ''
+        AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
+        AND COALESCE(source, '') <> 'benchmark'
+      GROUP BY +model
+    `,
+    values: [since],
+  };
+}
+
+/**
+ * Models with usage since `since` (ISO) that bill as $0 for want of a rate card,
+ * most events first. A NULL cost on a model the registry can price is a row the
+ * startup backfill has yet to fill, not a missing rate, so it is left out.
+ */
+export function listRecentUnpricedModels(since: string): UnpricedModelUsage[] {
+  const { sql, values } = recentUnpricedUsageStatement(since);
+  const rows = getDb().prepare(sql).all(...values) as UnpricedModelUsage[];
+  return rows
+    .filter(row => pricingRegistry.resolve(row.model) === null && !UNPRICEABLE_MODELS.has(normalizeModelId(row.model)))
+    .sort((a, b) => b.usage_events - a.usage_events || b.last_seen.localeCompare(a.last_seen) || a.model.localeCompare(b.model));
+}
+
+const UNPRICED_WINDOW_MS = 7 * 86_400_000;
+const UNPRICED_CACHE_MS = 60_000;
+let unpricedCache: { at: number; db: Database; models: UnpricedModelUsage[] } | null = null;
+
+/** The last week's unpriced models, re-read at most once a minute (health and the stats snapshot poll it). */
+export function getRecentUnpricedModels(nowMs = Date.now()): UnpricedModelUsage[] {
+  const db = getDb();
+  if (!unpricedCache || unpricedCache.db !== db || nowMs - unpricedCache.at >= UNPRICED_CACHE_MS) {
+    unpricedCache = { at: nowMs, db, models: listRecentUnpricedModels(new Date(nowMs - UNPRICED_WINDOW_MS).toISOString()) };
+  }
+  return unpricedCache.models;
 }

@@ -3,6 +3,7 @@ import fs from 'fs';
 import { config } from '../config.js';
 import { broadcaster } from '../sse/emitter.js';
 import { serverBuildStatus } from '../build-fingerprint.js';
+import { getRecentUnpricedModels } from '../db/v2-queries.js';
 
 export const healthRouter = Router();
 
@@ -24,5 +25,6 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     db_size_bytes: dbSizeBytes,
     sse_clients: broadcaster.clientCount,
     build: serverBuildStatus(),
+    pricing: { unpriced_models: getRecentUnpricedModels() },
   });
 });
