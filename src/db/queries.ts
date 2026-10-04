@@ -487,16 +487,17 @@ export function refreshImportedUsage(event: {
   tokens_out: number;
   cache_read_tokens?: number;
   cache_write_tokens?: number;
+  cache_write_1h_tokens?: number;
 }): number | null {
   const db = getDb();
   const row = db.prepare(`
     SELECT id, session_id, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
-           cost_usd, cost_source, model, client_timestamp
+           cache_write_1h_tokens, cost_usd, cost_source, model, client_timestamp
     FROM events WHERE event_id = ? AND source = 'import'
   `).get(event.event_id) as {
     id: number; session_id: string; tokens_in: number; tokens_out: number;
-    cache_read_tokens: number; cache_write_tokens: number; cost_usd: number | null;
-    cost_source: CostSource | null; model: string | null; client_timestamp: string | null;
+    cache_read_tokens: number; cache_write_tokens: number; cache_write_1h_tokens: number;
+    cost_usd: number | null; cost_source: CostSource | null; model: string | null; client_timestamp: string | null;
   } | undefined;
   if (!row || row.session_id !== event.session_id) return null;
   const tokens = {
@@ -504,9 +505,11 @@ export function refreshImportedUsage(event: {
     output: event.tokens_out,
     cacheRead: event.cache_read_tokens ?? 0,
     cacheWrite: event.cache_write_tokens ?? 0,
+    cacheWrite1h: event.cache_write_1h_tokens ?? 0,
   };
   if (row.tokens_in === tokens.input && row.tokens_out === tokens.output
-    && row.cache_read_tokens === tokens.cacheRead && row.cache_write_tokens === tokens.cacheWrite) return null;
+    && row.cache_read_tokens === tokens.cacheRead && row.cache_write_tokens === tokens.cacheWrite
+    && row.cache_write_1h_tokens === tokens.cacheWrite1h) return null;
 
   let cost = row.cost_usd;
   let costSource = row.cost_source;
@@ -519,9 +522,10 @@ export function refreshImportedUsage(event: {
   }
   db.prepare(`
     UPDATE events
-    SET tokens_in = ?, tokens_out = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?, cost_source = ?
+    SET tokens_in = ?, tokens_out = ?, cache_read_tokens = ?, cache_write_tokens = ?, cache_write_1h_tokens = ?,
+        cost_usd = ?, cost_source = ?
     WHERE id = ?
-  `).run(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, cost, costSource, row.id);
+  `).run(tokens.input, tokens.output, tokens.cacheRead, tokens.cacheWrite, tokens.cacheWrite1h, cost, costSource, row.id);
   markStatsDirty();
   return row.id;
 }
@@ -558,6 +562,7 @@ export function insertEvent(event: {
   cost_usd?: number | null;
   cache_read_tokens?: number;
   cache_write_tokens?: number;
+  cache_write_1h_tokens?: number;
   source?: string;
   mode?: 'interactive' | 'headless';
   /** Benchmark study grouping (source='benchmark' only). study_id = exact per-run key. */
@@ -609,13 +614,17 @@ export function insertEvent(event: {
   let costSource: CostSource | null = event.cost_usd === undefined || event.cost_usd === null
     ? null
     : event.cost_source ?? 'reported';
-  // Auto-calculate cost if model + tokens present but cost not provided
-  if (event.model && (event.tokens_in > 0 || event.tokens_out > 0) && costSource === null) {
+  // Auto-calculate cost if model + usage present but cost not provided. Usage
+  // includes cache tokens, as in the startup backfill (src/pricing/recalc.ts).
+  const hasUsage = event.tokens_in > 0 || event.tokens_out > 0
+    || (event.cache_read_tokens ?? 0) > 0 || (event.cache_write_tokens ?? 0) > 0;
+  if (event.model && hasUsage && costSource === null) {
     event.cost_usd = pricingRegistry.calculate(event.model, {
       input: event.tokens_in,
       output: event.tokens_out,
       cacheRead: event.cache_read_tokens,
       cacheWrite: event.cache_write_tokens,
+      cacheWrite1h: event.cache_write_1h_tokens,
     }, event.client_timestamp);
     if (event.cost_usd !== null) costSource = 'estimated';
   }
@@ -644,9 +653,9 @@ export function insertEvent(event: {
       result = db.prepare(`
         INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, status,
           tokens_in, tokens_out, branch, project, duration_ms, created_at, client_timestamp,
-          metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens, source,
-          study_id, study, cost_source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          metadata, payload_truncated, model, cost_usd, cache_read_tokens, cache_write_tokens,
+          cache_write_1h_tokens, source, study_id, study, cost_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         event.event_id || null,
         event.session_id,
@@ -666,6 +675,7 @@ export function insertEvent(event: {
         event.cost_usd ?? null,
         event.cache_read_tokens ?? 0,
         event.cache_write_tokens ?? 0,
+        event.cache_write_1h_tokens ?? 0,
         event.source || 'api',
         event.study_id ?? null,
         event.study ?? null,

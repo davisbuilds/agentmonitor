@@ -134,6 +134,7 @@ function initSchemaLocked(db: Database): void {
       cost_usd REAL,
       cache_read_tokens INTEGER DEFAULT 0,
       cache_write_tokens INTEGER DEFAULT 0,
+      cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0,
       source TEXT DEFAULT 'api',
       study_id TEXT,
       study TEXT,
@@ -257,6 +258,11 @@ function initSchemaLocked(db: Database): void {
   }
   if (!eventColumns.has('source')) {
     db.exec("ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'api'");
+  }
+  // Of cache_write_tokens, the tokens written to Anthropic's 1-hour cache, which
+  // bill at their own rate. Claude transcripts record the split per request.
+  if (!eventColumns.has('cache_write_1h_tokens')) {
+    db.exec('ALTER TABLE events ADD COLUMN cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0');
   }
   // Benchmark study grouping (source='benchmark' rows only; null elsewhere).
   // study_id = openbench study_sha256 (exact per-run key, the grouping key);
@@ -401,6 +407,7 @@ function initSchemaLocked(db: Database): void {
         cost_usd REAL,
         cache_read_tokens INTEGER DEFAULT 0,
         cache_write_tokens INTEGER DEFAULT 0,
+        cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0,
         source TEXT DEFAULT 'api',
         study_id TEXT,
         study TEXT,
@@ -411,7 +418,7 @@ function initSchemaLocked(db: Database): void {
         id, event_id, schema_version, session_id, agent_type, event_type, tool_name,
         status, tokens_in, tokens_out, branch, project, duration_ms,
         created_at, client_timestamp, metadata, payload_truncated,
-        model, cost_usd, cache_read_tokens, cache_write_tokens, source, study_id, study,
+        model, cost_usd, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, source, study_id, study,
         cost_source
       )
       SELECT
@@ -419,7 +426,7 @@ function initSchemaLocked(db: Database): void {
         status, tokens_in, tokens_out, branch, project, duration_ms,
         created_at, client_timestamp, metadata, payload_truncated,
         model, cost_usd,
-        COALESCE(cache_read_tokens, 0), COALESCE(cache_write_tokens, 0),
+        COALESCE(cache_read_tokens, 0), COALESCE(cache_write_tokens, 0), COALESCE(cache_write_1h_tokens, 0),
         COALESCE(source, 'api'), study_id, study,
         cost_source
       FROM events;
@@ -1034,7 +1041,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 14;
+const DATA_SCHEMA_VERSION = 15;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1078,7 +1085,9 @@ export function runDataMigrations(db: Database): void {
     // indexes, which read commands only install when the version advances.
     // v12 likewise only replaces the agent+event-type index with one that
     // covers the benchmark exclusion, v13 only adds the session-window index,
-    // and v14 only drops two events indexes no statement needs.
+    // and v14 only drops two events indexes no statement needs. v15 only adds
+    // events.cache_write_1h_tokens; `amon costs repair-claude-usage` fills it
+    // from the transcripts that record the split.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

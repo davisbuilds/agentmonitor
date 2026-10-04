@@ -33,6 +33,7 @@ interface CostRow {
   tokens_out: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cache_write_1h_tokens: number;
   cost_usd: number | null;
   created_at: string;
   client_timestamp: string | null;
@@ -69,14 +70,14 @@ function recalculate(db: Database, options: CostRecalcOptions): CostRecalcReport
   // so the startup backfill finds its handful of rows without a table scan.
   const events = db.prepare(`
     SELECT id, session_id, source, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
-           cost_usd, created_at, client_timestamp
+           cache_write_1h_tokens, cost_usd, created_at, client_timestamp
     FROM events
     WHERE cost_usd IS NULL AND model IS NOT NULL
       AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
     ${missingOnly ? '' : `
     UNION ALL
     SELECT id, session_id, source, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
-           cost_usd, created_at, client_timestamp
+           cache_write_1h_tokens, cost_usd, created_at, client_timestamp
     FROM events
     WHERE cost_source = 'estimated' AND model IS NOT NULL
       AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)`}
@@ -95,6 +96,7 @@ function recalculate(db: Database, options: CostRecalcOptions): CostRecalcReport
         output: event.tokens_out,
         cacheRead: event.cache_read_tokens,
         cacheWrite: event.cache_write_tokens,
+        cacheWrite1h: event.cache_write_1h_tokens,
       }, event.client_timestamp ?? event.created_at);
       if (cost === null) {
         unknownModel++;

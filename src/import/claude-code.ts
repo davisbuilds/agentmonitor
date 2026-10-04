@@ -13,6 +13,11 @@ interface ClaudeCodeUsage {
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
+  // The same cache writes by cache lifetime; recorded since mid-2026.
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number;
+    ephemeral_1h_input_tokens?: number;
+  };
 }
 
 interface ClaudeCodeMessage {
@@ -164,6 +169,7 @@ export function parseClaudeCodeFile(
     const tokensOut = alreadyBilled ? 0 : turnUsage?.output_tokens ?? 0;
     const cacheRead = alreadyBilled ? 0 : turnUsage?.cache_read_input_tokens ?? 0;
     const cacheWrite = alreadyBilled ? 0 : turnUsage?.cache_creation_input_tokens ?? 0;
+    const cacheWrite1h = Math.min(cacheWrite, alreadyBilled ? 0 : turnUsage?.cache_creation?.ephemeral_1h_input_tokens ?? 0);
 
     // Apply the date filter only now: a turn whose first line falls outside
     // the range was billed there, and its later lines must stay at zero.
@@ -284,6 +290,7 @@ export function parseClaudeCodeFile(
       tokens_out: tokensOut,
       cache_read_tokens: cacheRead,
       cache_write_tokens: cacheWrite,
+      cache_write_1h_tokens: cacheWrite1h,
       model,
       cost_usd: !alreadyBilled && costDelta && costDelta > 0 ? costDelta : undefined,
       duration_ms: line.duration_ms ?? line.durationMs,

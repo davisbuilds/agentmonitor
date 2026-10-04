@@ -213,7 +213,7 @@ test('concurrent built local reads initialize an older database before querying'
     }
 
     const upgraded = new Database(dbPath, { readonly: true });
-    assert.equal(upgraded.pragma('user_version', { simple: true }), 14);
+    assert.equal(upgraded.pragma('user_version', { simple: true }), 15);
     upgraded.close();
   } finally {
     fs.rmSync(tempDir, { recursive: true, force: true });
