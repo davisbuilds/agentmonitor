@@ -245,22 +245,6 @@ the build.
 - **Next**: needs a bounded sample buffer in the projection and a retention
   decision.
 
-#### Interleaved sidechain turns can clobber occupancy (latent)
-- **What**: `src/parser/claude-code.ts:450` updates `contextUsedTokens` and
-  `latestModel` for every assistant turn with usage, with no `isSidechain`
-  guard, so an inline subagent turn would overwrite the main thread's occupancy
-  with its own small context.
-- **Why or evidence**: reproduced 2026-09-22 against a synthetic transcript
-  (main thread at 500k/1M reported as 1200 tokens after a subagent turn). **Not
-  currently reachable**: Claude Code now writes subagents to separate
-  `agent-*.jsonl` files, which the parser already treats as distinct sessions,
-  and 0 of the 200 most recent local transcripts contain inline
-  `"isSidechain":true` lines. Latent regression risk only, if the transcript
-  layout changes back or an older archive is imported.
-- **Revisit when**: importing legacy transcripts with inline sidechains, or if
-  the upstream layout changes; the fix is a one-line guard on the occupancy
-  assignment.
-
 ### Invocation mode
 
 #### No `mode` filter facet in the Monitor FilterBar
@@ -274,9 +258,10 @@ the build.
 #### A few current vendor models are still unpriced ($0-bill risk)
 - **What**: `gpt-5.6-cyber` ($12.50/$75) is still unpriced, and an unpriced
   model bills as **$0** — the silent under-report failure mode. Claude Opus 5.5
-  and Fable 5.1 were priced 2026-09-23 from the live pricing page, after Fable
-  5.1 usage had already landed at $0; both break the 0.1x cache-read convention
-  (0.05x and 0.025x), so a rate card cannot be derived from the input price.
+  and Fable 5.1 were priced 2026-09-23, Sonnet 5.5 and GPT-6.1 Sol 2026-10-04,
+  each after its usage had already landed at $0. Opus 5.5, Fable 5.1 and GPT-6.1
+  Sol all break the 0.1x cache-read convention (0.05x, 0.025x, 0.05x), so a rate
+  card cannot be derived from the input price.
 - **Why it matters**: only bites if the model appears in the data, but when it
   does it is invisible (no error, plausible dashboard). `gpt-5.6-sol` shows a
   promo $4/$20 ("through 2026-11-21") on the OpenAI page while aggregators list
@@ -289,9 +274,8 @@ the build.
 - **Next / Revisit when**: add a model the moment the "unknown-priced tokens"
   surface shows it, from the vendor's live page (never from a multiplier).
   Startup prices its stored usage on the restart that ships the rate, so no
-  manual backfill is needed. What is still missing is the signal: a check that
-  fails, or a Monitor warning, when recent usage carries an unpriced model would
-  catch the next launch before the $0 rows pile up.
+  manual backfill is needed. Since 2026-10-04 the app header, `/api/health` and
+  the server log name any model with unpriced usage in the last week.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
@@ -374,7 +358,9 @@ the build.
   needs a Claude Code configuration change and a check of how amon ingests
   those events and whether they identify the request's purpose.
 - **Revisit when**: the ratio drifts outside that band, or a decision rests on
-  the absolute size of Claude cost.
+  the absolute size of Claude cost. Fix the 1-hour cache-write rate ("Claude 1-hour
+  cache writes are billed at the 5-minute rate") first; it should close part
+  of the gap.
 
 #### The warehouse export still buckets UTC days
 - **What**: every user-facing day is now a local day in the reporting zone
@@ -389,33 +375,25 @@ the build.
   the zone per row; either needs a migration of the existing table, not just a
   code change.
 
-#### Bedrock-style and `[1m]` model IDs never resolve (silent $0)
-- **What**: `PricingRegistry.normalize` (`src/pricing/index.ts:227`) strips only
-  `anthropic/`, `openai/`, `google/` prefixes. `anthropic.claude-…-v1:0`,
-  `us.anthropic.claude-…-v1:0` and a trailing `[1m]` long-context marker fall
-  through to no match, and no alias covers them.
-- **Why or evidence**: reproduced 2026-09-22 — `claude-sonnet-4-5-20250929`
-  resolves while the Bedrock and `[1m]` spellings return `pricing_status=unknown`
-  and `cost_usd` stays null. Claude Code against Bedrock is a real, supported
-  configuration, and an unpriced model bills as $0 rather than raising — the same
-  shape as the five-month dist-pricing bug.
-- **Next**: strip `^(us\.)?anthropic\.`, a trailing `-v\d+:\d+`, and a
-  trailing `[1m]` before lookup (or add explicit aliases), with a normalization
-  test per spelling. Distinct from the unpriced-model item above, which is a
-  missing rate card rather than a normalization gap.
-
-#### Cache-write TTL tiers are not represented anywhere (unanswered)
-- **What**: nothing in the pricing schema, the OTEL `token.type` handling
-  (`src/otel/parser.ts:1093`), or the Claude Code JSONL usage shape distinguishes
-  Anthropic's 5-minute from 1-hour cache-write TTL; one flat
-  `cacheWriteCostPerMTok` exists per model.
-- **Why or evidence**: current values (e.g. sonnet-5 at `2.5` = 1.25× base input)
-  follow the 5m convention, so a 1h-TTL write would underprice by roughly
-  1.6–2×. Whether local telemetry ever surfaces the distinction was **not
-  established** — recorded unanswered rather than closed.
-- **Revisit when**: extended-cache-TTL usage is plausible locally. The cheap
-  probe is to grep a live transcript and an OTEL capture for any TTL-bearing
-  usage field before designing schema for it.
+#### Claude 1-hour cache writes are billed at the 5-minute rate
+- **What**: Claude transcripts split each request's cache writes into
+  `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`, but the parser
+  reads only the total and the pricing schema has one `cacheWriteCostPerMTok`
+  per model, set to the 5-minute rate (1.25x input). A 1-hour write costs 2x.
+- **Why or evidence**: measured 2026-10-04 on local transcripts. The split first
+  appears on 2026-07-07; since then 1-hour writes are roughly 90% of cache-write
+  tokens in every month. On the 30 most recent transcripts, deduplicated per
+  request, pricing them at 2x would raise Claude cost by about 6% (4-16% by
+  model, at approximate rate ratios). That is likely part of the shortfall against
+  Claude Code's own running cost recorded above. Rows carrying Claude Code's
+  own cost (`cost_source = 'reported'`) already include it; only `estimated`
+  rows, mostly imports, are affected.
+- **Next**: read the split in the Claude parser and importer, store 1-hour writes
+  apart from the total, add a 1-hour rate per Claude model from the live pricing
+  page, then re-price only rows whose transcript records 1-hour writes. Rows
+  from before the split existed, or with no surviving transcript, keep the
+  5-minute rate: nothing says otherwise. Re-run `amon costs check-claude-sessions`
+  afterwards to see how much of the gap closes.
 
 ### Reliability And Observability
 
