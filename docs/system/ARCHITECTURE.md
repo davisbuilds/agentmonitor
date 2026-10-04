@@ -236,7 +236,10 @@ asset check protects this source-versus-runtime boundary.
 The token-bucket invariant is load-bearing: `tokens_in` stores uncached prompt
 tokens, while `cache_read_tokens` and `cache_write_tokens` are separate additive
 buckets. Codex sources that report cache-inclusive input are normalized before
-storage to prevent cached tokens from being billed twice.
+storage to prevent cached tokens from being billed twice. `cache_write_1h_tokens`
+is not a further bucket: it is the share of `cache_write_tokens` written to
+Anthropic's 1-hour cache, which bills at 2x input rather than 1.25x, so adding it
+to the other buckets counts those tokens twice.
 
 Codex can produce both live OTEL usage and later imported JSONL usage for the same
 session. Usage and stats reconcile that overlap at read time: imported usage is

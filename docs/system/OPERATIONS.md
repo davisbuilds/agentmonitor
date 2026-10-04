@@ -355,6 +355,16 @@ counted per content block again. No ratio is given while any imported row in
 the window has usage but no cost (an unpriced model), since the sum would skip
 it and read low.
 
+The repair also fills in the 1-hour part of each row's cache writes. Claude
+transcripts split each request's cache writes into a 5-minute and a 1-hour part
+(`message.usage.cache_creation`), and the 1-hour part bills at 2x input rather
+than 1.25x. Rows imported before schema v15 carry no split, so they bill every
+cache write at the 5-minute rate. The repair takes the split from the transcript
+and re-estimates an `estimated` cost; a reported cost is kept. Token totals do not
+change. `rows_split_1h` counts these rows, and `cost_reclaimed_usd` is net, so it
+goes negative when the raised costs outweigh the reclaimed ones. A row whose
+transcript records no split, or whose transcript is gone, is left as it is.
+
 Applying also re-derives `session_trace_summary` for every repaired session:
 that rollup stores its own token and cost totals, the trace-quality API and
 warehouse export read it directly, and startup backfill skips rows already at

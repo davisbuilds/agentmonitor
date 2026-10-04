@@ -280,7 +280,7 @@ export function registerMaintenanceCommands(): void {
   registerCommand({
     name: 'costs repair-claude-usage',
     group: 'Data Commands',
-    summary: 'Correct imported Claude events billed once per content block',
+    summary: 'Correct imported Claude events from their transcripts (per-turn usage, 1-hour cache writes)',
     // Reports by default: this rewrites stored history, so writing is opt-in
     // through --apply rather than opt-out through --dry-run.
     usage: 'costs repair-claude-usage [--apply] [--claude-dir <path>]',

@@ -358,9 +358,10 @@ the build.
   needs a Claude Code configuration change and a check of how amon ingests
   those events and whether they identify the request's purpose.
 - **Revisit when**: the ratio drifts outside that band, or a decision rests on
-  the absolute size of Claude cost. Fix the 1-hour cache-write rate ("Claude 1-hour
-  cache writes are billed at the 5-minute rate") first; it should close part
-  of the gap.
+  the absolute size of Claude cost. 1-hour cache writes were billed at the
+  5-minute rate until 2026-10-04; re-measure after `amon costs
+  repair-claude-usage --apply` fills in their split, which should close part of
+  the gap.
 
 #### The warehouse export still buckets UTC days
 - **What**: every user-facing day is now a local day in the reporting zone
@@ -375,25 +376,19 @@ the build.
   the zone per row; either needs a migration of the existing table, not just a
   code change.
 
-#### Claude 1-hour cache writes are billed at the 5-minute rate
-- **What**: Claude transcripts split each request's cache writes into
-  `ephemeral_5m_input_tokens` and `ephemeral_1h_input_tokens`, but the parser
-  reads only the total and the pricing schema has one `cacheWriteCostPerMTok`
-  per model, set to the 5-minute rate (1.25x input). A 1-hour write costs 2x.
-- **Why or evidence**: measured 2026-10-04 on local transcripts. The split first
-  appears on 2026-07-07; since then 1-hour writes are roughly 90% of cache-write
-  tokens in every month. On the 30 most recent transcripts, deduplicated per
-  request, pricing them at 2x would raise Claude cost by about 6% (4-16% by
-  model, at approximate rate ratios). That is likely part of the shortfall against
-  Claude Code's own running cost recorded above. Rows carrying Claude Code's
-  own cost (`cost_source = 'reported'`) already include it; only `estimated`
-  rows, mostly imports, are affected.
-- **Next**: read the split in the Claude parser and importer, store 1-hour writes
-  apart from the total, add a 1-hour rate per Claude model from the live pricing
-  page, then re-price only rows whose transcript records 1-hour writes. Rows
-  from before the split existed, or with no surviving transcript, keep the
-  5-minute rate: nothing says otherwise. Re-run `amon costs check-claude-sessions`
-  afterwards to see how much of the gap closes.
+#### The cache savings estimate prices every cache write at the 5-minute rate
+- **What**: stored costs bill Claude's 1-hour cache writes at their own rate
+  (2x input), but `estimateCacheSavings` in `src/db/v2-queries.ts` charges every
+  cache write the 5-minute premium (1.25x), so it overstates savings by 0.75x
+  input per 1-hour write token.
+- **Why or evidence**: since mid-2026 roughly 90% of Claude cache-write tokens
+  are 1-hour writes (measured 2026-10-04). The usage read that feeds the
+  estimate is served by `idx_events_usage_covering`; adding
+  `cache_write_1h_tokens` to it would break the covering read or grow the index.
+  Cache reads dominate the savings, so the error is smaller than the share
+  suggests; it is unmeasured.
+- **Revisit when**: a decision rests on the savings figure. Measure the
+  overstatement first, then add the column to the covering index if it matters.
 
 ### Reliability And Observability
 
