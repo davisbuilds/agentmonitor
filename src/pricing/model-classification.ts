@@ -1,4 +1,4 @@
-import { pricingRegistry, type PricingRegistry } from './index.js';
+import { normalizeModelId, pricingRegistry, type PricingRegistry } from './index.js';
 
 export type ModelPricingStatus = 'known' | 'deprecated' | 'unknown';
 
@@ -18,13 +18,6 @@ const DEPRECATED_MODELS = new Set([
   'claude-3-sonnet-20240229',
   'claude-3-haiku-20240307',
 ]);
-
-function stripProviderPrefix(model: string): string {
-  return model
-    .replace(/^anthropic\//, '')
-    .replace(/^openai\//, '')
-    .replace(/^google\//, '');
-}
 
 function inferProvider(model: string): string {
   if (model.startsWith('anthropic/') || model.startsWith('claude-')) return 'anthropic';
@@ -61,7 +54,7 @@ function inferTier(model: string, provider: string): string {
   if (provider === 'openai') {
     if (/^o\d/.test(model) || model.includes('reasoning')) return 'reasoning';
     if (model === 'gpt-6-astra') return 'astra';
-    if (model === 'gpt-6-sol' || model === 'gpt-5.6-sol') return 'sol';
+    if (model === 'gpt-6-sol' || model === 'gpt-6.1-sol' || model === 'gpt-5.6-sol') return 'sol';
     if (model === 'gpt-5.6-terra') return 'terra';
     if (model === 'gpt-6-luna' || model === 'gpt-5.6-luna') return 'luna';
     if (model.includes('mini') || model.includes('nano')) return 'economy';
@@ -107,8 +100,8 @@ export function classifyModel(
     };
   }
 
-  const canonical = stripProviderPrefix(trimmed);
-  const provider = inferProvider(trimmed);
+  const canonical = normalizeModelId(trimmed);
+  const provider = inferProvider(canonical);
   const deprecated = DEPRECATED_MODELS.has(canonical);
   return {
     raw_model: rawModel,

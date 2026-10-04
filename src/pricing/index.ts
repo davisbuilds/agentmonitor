@@ -175,6 +175,37 @@ function selectRates(pricing: ModelPricing, tokens: TokenCounts, atMs: number): 
   return rates;
 }
 
+/**
+ * Models that report usage but have no public rate to bill it at. They stay
+ * unpriced (cost NULL) and are left out of the unpriced-model warning, which
+ * would otherwise ask for a rate card that cannot exist.
+ */
+export const UNPRICEABLE_MODELS: ReadonlyMap<string, string> = new Map([
+  // Codex's auto-review subagent: a hidden routing alias with no billable model
+  // behind it (openai/codex#20981).
+  ['codex-auto-review', 'Codex routing alias with no public rate'],
+]);
+
+// Bedrock model IDs: an optional cross-region inference prefix, `anthropic.`,
+// then the model with a `-v1` or `-v1:0` revision. Only these lose the revision.
+const BEDROCK_ANTHROPIC_ID = /^(?:(?:us|eu|apac|jp|au|ca|us-gov|global)\.)?anthropic\.(.+?)-v\d+(?::\d+)?$/;
+
+/**
+ * The rate-card spelling of a model ID: no `anthropic/`, `openai/` or `google/`
+ * routing prefix, no Claude Code `[1m]` long-context suffix (Claude 4.6 and later
+ * bill the full window at standard rates), and a Bedrock ID reduced to its
+ * Anthropic model. Bedrock's regional-endpoint premium is not modeled.
+ */
+export function normalizeModelId(model: string): string {
+  const id = model
+    .trim()
+    .replace(/\[1m\]$/i, '')
+    .replace(/^anthropic\//, '')
+    .replace(/^openai\//, '')
+    .replace(/^google\//, '');
+  return BEDROCK_ANTHROPIC_ID.exec(id)?.[1] ?? id;
+}
+
 export class PricingRegistry {
   private models = new Map<string, ModelPricing>();
   private aliases = new Map<string, string>(); // alias → canonical name
@@ -221,15 +252,6 @@ export class PricingRegistry {
     }
   }
 
-  /**
-   * Normalize a model name by stripping common provider prefixes.
-   */
-  private normalize(model: string): string {
-    return model
-      .replace(/^anthropic\//, '')
-      .replace(/^openai\//, '')
-      .replace(/^google\//, '');
-  }
 
   /**
    * Look up pricing for a model by canonical name or alias.
@@ -242,7 +264,7 @@ export class PricingRegistry {
    * Resolve a model by canonical name or alias and return the canonical ID.
    */
   resolve(model: string): ResolvedModelPricing | null {
-    const normalized = this.normalize(model.trim());
+    const normalized = normalizeModelId(model);
     if (!normalized) return null;
 
     // Try direct canonical match
