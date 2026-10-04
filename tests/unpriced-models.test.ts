@@ -31,18 +31,22 @@ before(async () => {
   assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
   const insert = getDb().prepare(`
     INSERT INTO events (event_id, session_id, agent_type, event_type, status, model, tokens_in, tokens_out,
-      cache_read_tokens, cache_write_tokens, cost_usd, source, created_at)
-    VALUES (?, 's', 'codex', ?, 'success', ?, ?, ?, ?, 0, ?, ?, ?)
+      cache_read_tokens, cache_write_tokens, cost_usd, source, created_at, client_timestamp)
+    VALUES (?, 's', 'codex', ?, 'success', ?, ?, ?, ?, 0, ?, ?, ?, ?)
   `);
   let id = 0;
-  const row = (model: string, fields: { type?: string; tin?: number; tout?: number; read?: number; cost?: number | null; source?: string; at?: string } = {}) =>
+  const row = (model: string, fields: { type?: string; tin?: number; tout?: number; read?: number; cost?: number | null; source?: string; at?: string; happened?: string } = {}) =>
     insert.run(`e-${id++}`, fields.type ?? 'llm_response', model, fields.tin ?? 10, fields.tout ?? 5, fields.read ?? 0,
-      fields.cost === undefined ? null : fields.cost, fields.source ?? 'otel', fields.at ?? daysAgo(1));
+      fields.cost === undefined ? null : fields.cost, fields.source ?? 'otel', fields.at ?? daysAgo(1), fields.happened ?? null);
+  // An import stamps created_at with the import time and keeps the event's own
+  // time in client_timestamp (ISO with zone).
+  const isoDaysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
 
   row('gpt-new', { at: daysAgo(2) });
   row('gpt-new', { at: daysAgo(1) });
   row('gpt-new', { type: 'session_start', tin: 0, tout: 0 });   // carries no usage
-  row('claude-new', { tin: 0, tout: 0, read: 500 });             // cache reads alone are usage
+  row('claude-new', { tin: 0, tout: 0, read: 500, at: daysAgo(0), happened: isoDaysAgo(3) }); // cache reads alone are usage
+  row('gpt-reimported', { source: 'import', at: daysAgo(0), happened: isoDaysAgo(30) }); // old usage, imported today
   row('gpt-old', { at: daysAgo(10) });                           // outside the window
   row('gpt-6-sol', { cost: 0.01 });                              // priced
   row('claude-harness', { cost: 0.5 });                          // unknown here, but its producer reported a cost
@@ -63,7 +67,7 @@ after(async () => {
 
 const expected = [
   { model: 'gpt-new', usage_events: 2, last_seen: daysAgo(1) },
-  { model: 'claude-new', usage_events: 1, last_seen: daysAgo(1) },
+  { model: 'claude-new', usage_events: 1, last_seen: daysAgo(3) },
 ];
 
 describe('recent unpriced models', () => {
@@ -71,11 +75,11 @@ describe('recent unpriced models', () => {
     assert.deepEqual(listRecentUnpricedModels(SINCE), expected);
   });
 
-  test('reads the window through the time index, not every row of a model', () => {
+  test('reads the window through the event-time index, not every row of a model', () => {
     const { sql, values } = recentUnpricedUsageStatement(SINCE);
     const detail = (getDb().prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...values) as Array<{ detail: string }>)
       .map(r => r.detail).join(' | ');
-    assert.match(detail, /SEARCH events USING INDEX idx_events_created_at \(created_at>\?\)/, detail);
+    assert.match(detail, /SEARCH events USING INDEX idx_events_usage_ts \(<expr>>\?\)/, detail);
   });
 
   test('/api/health reports them', async () => {

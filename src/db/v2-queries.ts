@@ -4430,16 +4430,19 @@ export interface UnpricedModelUsage {
   last_seen: string;
 }
 
-// Grouping by `+model` keeps SQLite off the model index, which would read every row of every
-// model across all history to find the few recent ones (about 1 s cold on a
-// real store); the window on the time index is a few milliseconds. Benchmark
-// imports report their own unpriced models loudly.
+// The window is on event time (client_timestamp, else created_at), which
+// idx_events_usage_ts indexes: an import stamps created_at with the import time,
+// so old usage would otherwise read as last week's. Grouping by `+model` keeps
+// SQLite off the model index, which would read every row of every model across
+// all history (about 1 s cold on a real store). Benchmark imports report their
+// own unpriced models loudly.
 export function recentUnpricedUsageStatement(since: string): { sql: string; values: unknown[] } {
+  const eventTime = 'datetime(COALESCE(client_timestamp, created_at))';
   return {
     sql: `
-      SELECT model, COUNT(*) AS usage_events, MAX(created_at) AS last_seen
+      SELECT model, COUNT(*) AS usage_events, MAX(${eventTime}) AS last_seen
       FROM events
-      WHERE created_at >= datetime(?)
+      WHERE ${eventTime} >= datetime(?)
         AND cost_usd IS NULL
         AND model IS NOT NULL AND model <> ''
         AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0)
