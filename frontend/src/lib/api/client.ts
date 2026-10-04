@@ -30,6 +30,14 @@ export interface Stats {
   usage_monitor?: QuotaMonitorData[];
   /** On the SSE stats snapshot only: whether the server runs an older build than the one on disk. */
   server_build?: { tracked: boolean; stale: boolean };
+  /** On the SSE stats snapshot only: models whose last week of usage bills as $0 for want of a rate card. */
+  unpriced_models?: UnpricedModelUsage[];
+}
+
+export interface UnpricedModelUsage {
+  model: string;
+  usage_events: number;
+  last_seen: string;
 }
 
 export interface QuotaMonitorWindow {

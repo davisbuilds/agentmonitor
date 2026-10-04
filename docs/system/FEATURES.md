@@ -104,6 +104,13 @@ model, provider, and provider-neutral tier.
   show all four buckets.
 - Unknown and deprecated models stay visible. A persistent warning identifies
   unpriced use or known pricing that has not yet been applied to zero-cost history.
+  Every page's header also names models whose last week of usage has no rate
+  card, so a newly released model does not pile up at $0 unnoticed. Codex's
+  `codex-auto-review` routing alias has no public rate; it stays unpriced and
+  outside that notice.
+- Bedrock model IDs (`us.anthropic.claude-…-v1:0`) and Claude Code's `[1m]`
+  long-context suffix price as their Anthropic model at list rates. Bedrock's
+  regional-endpoint premium is not modeled.
 - Claude Code token and cost figures are **per API response**: each assistant
   turn is billed once, with the usage its last transcript line records. That is
   what Anthropic bills and what Claude Code's live counters (statusline,

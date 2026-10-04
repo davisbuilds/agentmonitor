@@ -520,7 +520,11 @@ store and a snapshot of its rollouts:
 ### Pricing a newly released model
 
 An unpriced model bills as **$0**, not as an error, and its rows keep a NULL
-cost. Rates load once from the build, so a pricing update reaches the server
+cost. To catch one early, the app header shows an **unpriced models** notice,
+`/api/health` lists them under `pricing.unpriced_models`, and the server log
+warns once per new set; each covers usage from the last 7 days. Add the rate
+from the vendor's live pricing page, never from a multiplier: recent models
+break the usual cache ratios. Rates load once from the build, so a pricing update reaches the server
 only with a rebuild and restart, and every `amon serve` startup prices those
 NULL-cost usage rows before it starts accepting requests. Adding a model therefore
 needs no manual backfill. A one-shot command does the same thing without a restart:

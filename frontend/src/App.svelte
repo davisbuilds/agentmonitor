@@ -13,6 +13,7 @@
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
   import ConnectionStatus from './lib/components/monitor/ConnectionStatus.svelte';
   import StaleBuildNotice from './lib/components/monitor/StaleBuildNotice.svelte';
+  import UnpricedModelsNotice from './lib/components/monitor/UnpricedModelsNotice.svelte';
   import FilterBar from './lib/components/monitor/FilterBar.svelte';
   import QuotaPill from './lib/components/monitor/QuotaPill.svelte';
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
@@ -114,6 +115,7 @@
           />
         </svg>
       </button>
+      <UnpricedModelsNotice />
       <StaleBuildNotice />
       <ConnectionStatus />
     </div>

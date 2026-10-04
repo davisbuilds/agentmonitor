@@ -222,9 +222,41 @@ describe('PricingRegistry', () => {
     test('returns null for unknown models', () => {
       assert.equal(registry.resolve('not-a-real-model'), null);
     });
+
+    // Claude Code against Bedrock reports the Bedrock model ID, and its
+    // long-context variant carries a `[1m]` suffix. Unresolved, both bill $0.
+    test('resolves Bedrock model IDs and the [1m] long-context suffix', () => {
+      for (const [raw, canonical] of [
+        ['anthropic.claude-sonnet-4-5-20250929-v1:0', 'claude-sonnet-4-5-20250929'],
+        ['us.anthropic.claude-sonnet-4-5-20250929-v1:0', 'claude-sonnet-4-5-20250929'],
+        ['eu.anthropic.claude-haiku-4-5-20251001-v1:0', 'claude-haiku-4-5-20251001'],
+        ['global.anthropic.claude-opus-4-6-v1', 'claude-opus-4-6'],
+        ['claude-opus-4-6[1m]', 'claude-opus-4-6'],
+        ['claude-sonnet-5[1m]', 'claude-sonnet-5'],
+        ['us.anthropic.claude-sonnet-4-5-20250929-v1:0[1m]', 'claude-sonnet-4-5-20250929'],
+      ] as const) {
+        assert.equal(registry.resolve(raw)?.canonicalModel, canonical, raw);
+      }
+    });
+
+    test('strips a version suffix only from a Bedrock ID', () => {
+      assert.equal(registry.resolve('claude-sonnet-5-v1'), null);
+      assert.equal(registry.resolve('claude-sonnet-5-v1:0'), null);
+    });
   });
 
   describe('classification', () => {
+    test('classifies a Bedrock ID by its Anthropic model, priced or not', () => {
+      const known = classifyModel('us.anthropic.claude-sonnet-4-5-20250929-v1:0');
+      assert.equal(known.canonical_model, 'claude-sonnet-4-5-20250929');
+      assert.equal(known.pricing_status, 'known');
+      const unknown = classifyModel('us.anthropic.claude-sonnet-9-v1:0');
+      assert.equal(unknown.canonical_model, 'claude-sonnet-9');
+      assert.equal(unknown.provider, 'anthropic');
+      assert.equal(unknown.tier, 'sonnet');
+      assert.equal(unknown.pricing_status, 'unknown');
+    });
+
     test('classifies known Claude aliases by canonical model and tier', () => {
       assert.deepEqual(classifyModel('anthropic/claude-sonnet-4-5'), {
         raw_model: 'anthropic/claude-sonnet-4-5',
@@ -261,7 +293,7 @@ describe('PricingRegistry', () => {
     });
 
     test('classifies GPT-6 Sol and Luna by tier, apart from their GPT-5.6 namesakes', () => {
-      for (const [model, tier] of [['gpt-6-sol', 'sol'], ['gpt-6-luna', 'luna']] as const) {
+      for (const [model, tier] of [['gpt-6-sol', 'sol'], ['gpt-6.1-sol', 'sol'], ['gpt-6-luna', 'luna']] as const) {
         const c = classifyModel(model);
         assert.equal(c.canonical_model, model, 'resolves to its own rate card, not a 5.6 alias');
         assert.equal(c.tier, tier);
@@ -569,6 +601,24 @@ describe('PricingRegistry', () => {
     });
   });
 
+  // ─── Sonnet 5.5 (2026-10-04 live pricing page: $2/$10, cache read $0.20,
+  //     5m write $2.50). Full 1M context at standard rates, so no tiers. ──
+  describe('Claude Sonnet 5.5', () => {
+    test('resolves with its published per-MTok rates and classifies as sonnet', () => {
+      const pricing = registry.lookup('claude-sonnet-5-5');
+      assert.ok(pricing);
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.inputCostPerToken, 2 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 10 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 2.5 / 1_000_000);
+      assert.equal(pricing.tiers, undefined);
+      const c = classifyModel('claude-sonnet-5-5');
+      assert.equal(c.tier, 'sonnet');
+      assert.equal(c.pricing_status, 'known');
+    });
+  });
+
   // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
   describe('tiered prompt-size pricing', () => {
     // The parser subtracts cache-write tokens from tokens_in, so the cache-write
@@ -582,6 +632,7 @@ describe('PricingRegistry', () => {
       const cases = [
         { model: 'gpt-6-astra', base: [10, 50, 1, 12.5], long: [20, 75, 2, 25] },
         { model: 'gpt-6-sol', base: [2, 10, 0.2, 2.5], long: [4, 15, 0.4, 5] },
+        { model: 'gpt-6.1-sol', base: [2, 10, 0.1, 2.5], long: [4, 15, 0.2, 5] },
         { model: 'gpt-6-luna', base: [0.1, 0.5, 0.01, 0.125], long: [0.2, 0.75, 0.02, 0.25] },
         { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 5], long: [10, 45, 1, 10] },
         { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 2], long: [4, 18, 0.4, 4] },

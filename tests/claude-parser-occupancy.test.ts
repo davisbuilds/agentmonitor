@@ -62,3 +62,34 @@ test('parseSessionMessages: no usage yields undefined occupancy (not 0)', () => 
   const parsed = parseSessionMessages(noUsage, 's2');
   assert.equal(parsed.metadata.context_used_tokens, undefined);
 });
+
+function assistantTurn(sessionId: string, at: string, model: string, cacheRead: number, isSidechain: boolean): string {
+  return JSON.stringify({
+    type: 'assistant', sessionId, isSidechain, timestamp: at,
+    message: { role: 'assistant', model, content: [{ type: 'text', text: 'x' }], usage: { input_tokens: 0, cache_read_input_tokens: cacheRead, output_tokens: 1 } },
+  });
+}
+
+// Older transcripts interleave subagent turns into the main file. Their small
+// context must not replace the main thread's reading.
+test('parseSessionMessages: an inline sidechain turn does not overwrite the main thread occupancy', () => {
+  const interleaved = [
+    assistantTurn('s3', '2026-07-07T10:00:00.000Z', 'claude-opus-4-8', 500_000, false),
+    assistantTurn('s3', '2026-07-07T10:00:01.000Z', 'claude-haiku-4-5-20251001', 1_200, true),
+  ].join('\n');
+  const parsed = parseSessionMessages(interleaved, 's3');
+  assert.equal(parsed.metadata.context_used_tokens, 500_000);
+  assert.equal(parsed.metadata.model, 'claude-opus-4-8');
+});
+
+// A subagent's own file marks every line as a sidechain, so ignoring sidechain
+// turns outright would leave it with no occupancy at all.
+test('parseSessionMessages: a subagent file of only sidechain turns keeps its occupancy', () => {
+  const subagent = [
+    assistantTurn('s4', '2026-07-07T10:00:00.000Z', 'claude-haiku-4-5-20251001', 800, true),
+    assistantTurn('s4', '2026-07-07T10:00:01.000Z', 'claude-haiku-4-5-20251001', 1_200, true),
+  ].join('\n');
+  const parsed = parseSessionMessages(subagent, 's4');
+  assert.equal(parsed.metadata.context_used_tokens, 1_200);
+  assert.equal(parsed.metadata.model, 'claude-haiku-4-5-20251001');
+});
