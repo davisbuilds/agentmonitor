@@ -8,7 +8,10 @@ interface PricingDataRates {
   inputCostPerMTok: number;
   outputCostPerMTok: number;
   cacheReadCostPerMTok: number;
+  /** Cache writes; Anthropic's 5-minute cache. */
   cacheWriteCostPerMTok: number;
+  /** Anthropic's 1-hour cache writes, where the provider sells them. */
+  cacheWrite1hCostPerMTok?: number;
 }
 
 // A higher prompt-size band: when a request's prompt exceeds `abovePromptTokens`,
@@ -46,6 +49,7 @@ export interface PricingRates {
   outputCostPerToken: number;
   cacheReadCostPerToken: number;
   cacheWriteCostPerToken: number;
+  cacheWrite1hCostPerToken?: number;
 }
 
 export interface PricingTier extends PricingRates {
@@ -80,7 +84,10 @@ export interface TokenCounts {
   input: number;
   output: number;
   cacheRead?: number;
+  /** All cache-write tokens, whichever cache they went to. */
   cacheWrite?: number;
+  /** Of `cacheWrite`, the tokens written to Anthropic's 1-hour cache. */
+  cacheWrite1h?: number;
 }
 
 export interface ResolvedModelPricing {
@@ -93,12 +100,14 @@ export interface ResolvedModelPricing {
 const M_TOK = 1_000_000;
 
 function toPerToken(rates: PricingDataRates): PricingRates {
-  return {
+  const perToken: PricingRates = {
     inputCostPerToken: rates.inputCostPerMTok / M_TOK,
     outputCostPerToken: rates.outputCostPerMTok / M_TOK,
     cacheReadCostPerToken: rates.cacheReadCostPerMTok / M_TOK,
     cacheWriteCostPerToken: rates.cacheWriteCostPerMTok / M_TOK,
   };
+  if (rates.cacheWrite1hCostPerMTok !== undefined) perToken.cacheWrite1hCostPerToken = rates.cacheWrite1hCostPerMTok / M_TOK;
+  return perToken;
 }
 
 // Convert prompt-size bands to per-token rates, ascending by threshold. Returns
@@ -294,10 +303,15 @@ export class PricingRegistry {
     if (!pricing) return null;
 
     const rates = selectRates(pricing, tokens, resolveAtMs(at));
+    // The 1-hour part is a share of the cache writes, never more. A model with
+    // no 1-hour rate bills it as any other cache write.
+    const cacheWrite = tokens.cacheWrite ?? 0;
+    const cacheWrite1h = Math.min(Math.max(tokens.cacheWrite1h ?? 0, 0), cacheWrite);
     return (tokens.input * rates.inputCostPerToken)
       + (tokens.output * rates.outputCostPerToken)
       + ((tokens.cacheRead ?? 0) * rates.cacheReadCostPerToken)
-      + ((tokens.cacheWrite ?? 0) * rates.cacheWriteCostPerToken);
+      + ((cacheWrite - cacheWrite1h) * rates.cacheWriteCostPerToken)
+      + (cacheWrite1h * (rates.cacheWrite1hCostPerToken ?? rates.cacheWriteCostPerToken));
   }
 
   /**

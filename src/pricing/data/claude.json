@@ -8,6 +8,7 @@
       "outputCostPerMTok": 50,
       "cacheReadCostPerMTok": 0.25,
       "cacheWriteCostPerMTok": 12.5,
+      "cacheWrite1hCostPerMTok": 20,
       "deprecated": false
     },
     "claude-fable-5": {
@@ -16,6 +17,7 @@
       "outputCostPerMTok": 50,
       "cacheReadCostPerMTok": 1,
       "cacheWriteCostPerMTok": 12.5,
+      "cacheWrite1hCostPerMTok": 20,
       "deprecated": false
     },
     "claude-opus-5-5": {
@@ -24,6 +26,7 @@
       "outputCostPerMTok": 20,
       "cacheReadCostPerMTok": 0.2,
       "cacheWriteCostPerMTok": 5,
+      "cacheWrite1hCostPerMTok": 8,
       "deprecated": false
     },
     "claude-opus-5": {
@@ -32,6 +35,7 @@
       "outputCostPerMTok": 25,
       "cacheReadCostPerMTok": 0.5,
       "cacheWriteCostPerMTok": 6.25,
+      "cacheWrite1hCostPerMTok": 10,
       "deprecated": false
     },
     "claude-opus-4-8": {
@@ -40,6 +44,7 @@
       "outputCostPerMTok": 25,
       "cacheReadCostPerMTok": 0.5,
       "cacheWriteCostPerMTok": 6.25,
+      "cacheWrite1hCostPerMTok": 10,
       "deprecated": false
     },
     "claude-opus-4-7": {
@@ -48,6 +53,7 @@
       "outputCostPerMTok": 25,
       "cacheReadCostPerMTok": 0.5,
       "cacheWriteCostPerMTok": 6.25,
+      "cacheWrite1hCostPerMTok": 10,
       "deprecated": false
     },
     "claude-opus-4-6": {
@@ -58,6 +64,7 @@
       "outputCostPerMTok": 25,
       "cacheReadCostPerMTok": 0.5,
       "cacheWriteCostPerMTok": 6.25,
+      "cacheWrite1hCostPerMTok": 10,
       "deprecated": false
     },
     "claude-opus-4-1-20250805": {
@@ -66,6 +73,7 @@
       "outputCostPerMTok": 75,
       "cacheReadCostPerMTok": 1.5,
       "cacheWriteCostPerMTok": 18.75,
+      "cacheWrite1hCostPerMTok": 30,
       "deprecated": false
     },
     "claude-opus-4-5-20251101": {
@@ -77,6 +85,7 @@
       "outputCostPerMTok": 25,
       "cacheReadCostPerMTok": 0.5,
       "cacheWriteCostPerMTok": 6.25,
+      "cacheWrite1hCostPerMTok": 10,
       "deprecated": false
     },
     "claude-opus-4-20250514": {
@@ -89,6 +98,7 @@
       "outputCostPerMTok": 75,
       "cacheReadCostPerMTok": 1.5,
       "cacheWriteCostPerMTok": 18.75,
+      "cacheWrite1hCostPerMTok": 30,
       "deprecated": true
     },
     "claude-sonnet-5-5": {
@@ -97,6 +107,7 @@
       "outputCostPerMTok": 10,
       "cacheReadCostPerMTok": 0.2,
       "cacheWriteCostPerMTok": 2.5,
+      "cacheWrite1hCostPerMTok": 4,
       "deprecated": false
     },
     "claude-sonnet-5": {
@@ -107,6 +118,7 @@
       "outputCostPerMTok": 10,
       "cacheReadCostPerMTok": 0.2,
       "cacheWriteCostPerMTok": 2.5,
+      "cacheWrite1hCostPerMTok": 4,
       "deprecated": false
     },
     "claude-sonnet-4-6": {
@@ -115,6 +127,7 @@
       "outputCostPerMTok": 15,
       "cacheReadCostPerMTok": 0.3,
       "cacheWriteCostPerMTok": 3.75,
+      "cacheWrite1hCostPerMTok": 6,
       "deprecated": false
     },
     "claude-sonnet-4-5-20250929": {
@@ -126,6 +139,7 @@
       "outputCostPerMTok": 15,
       "cacheReadCostPerMTok": 0.3,
       "cacheWriteCostPerMTok": 3.75,
+      "cacheWrite1hCostPerMTok": 6,
       "deprecated": false
     },
     "claude-sonnet-4-20250514": {
@@ -138,6 +152,7 @@
       "outputCostPerMTok": 15,
       "cacheReadCostPerMTok": 0.3,
       "cacheWriteCostPerMTok": 3.75,
+      "cacheWrite1hCostPerMTok": 6,
       "deprecated": true
     },
     "claude-haiku-4-5-20251001": {
@@ -150,6 +165,7 @@
       "outputCostPerMTok": 5,
       "cacheReadCostPerMTok": 0.1,
       "cacheWriteCostPerMTok": 1.25,
+      "cacheWrite1hCostPerMTok": 2,
       "deprecated": false
     }
   }

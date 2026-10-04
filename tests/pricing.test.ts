@@ -619,6 +619,51 @@ describe('PricingRegistry', () => {
     });
   });
 
+  // ─── Claude 1-hour cache writes (2x input, vs 1.25x for 5-minute writes) ──
+  // Rates from the live pricing page's "1h cache writes" column (2026-10-04).
+  describe('Claude 1-hour cache writes', () => {
+    const ONE_HOUR_RATES: Record<string, number> = {
+      'claude-fable-5-1': 20, 'claude-fable-5': 20, 'claude-opus-5-5': 8, 'claude-opus-5': 10,
+      'claude-opus-4-8': 10, 'claude-opus-4-7': 10, 'claude-opus-4-6': 10, 'claude-opus-4-5-20251101': 10,
+      'claude-opus-4-1-20250805': 30, 'claude-opus-4-20250514': 30, 'claude-sonnet-5-5': 4, 'claude-sonnet-5': 4,
+      'claude-sonnet-4-6': 6, 'claude-sonnet-4-5-20250929': 6, 'claude-sonnet-4-20250514': 6, 'claude-haiku-4-5-20251001': 2,
+    };
+
+    test('every Anthropic model carries its published 1-hour rate', () => {
+      const anthropic = registry.knownModels.filter(model => registry.lookup(model)?.provider === 'anthropic');
+      assert.deepEqual([...anthropic].sort(), Object.keys(ONE_HOUR_RATES).sort());
+      for (const [model, rate] of Object.entries(ONE_HOUR_RATES)) {
+        assert.equal(registry.lookup(model)?.cacheWrite1hCostPerToken, rate / 1_000_000, model);
+      }
+    });
+
+    test('bills the 1-hour part of the cache writes at the 1-hour rate and the rest at the 5-minute rate', () => {
+      // Opus 5: 5m write $6.25, 1h write $10 per MTok.
+      const cost = registry.calculate('claude-opus-5', { input: 0, output: 0, cacheWrite: 1_000_000, cacheWrite1h: 600_000 });
+      assert.ok(cost !== null);
+      assert.ok(Math.abs(cost - (0.4 * 6.25 + 0.6 * 10)) < 1e-9, `got ${cost}`);
+    });
+
+    test('without a 1-hour part, cache writes bill exactly as before', () => {
+      const tokens = { input: 1_000, output: 2_000, cacheRead: 50_000, cacheWrite: 10_000 };
+      assert.equal(registry.calculate('claude-opus-5', { ...tokens, cacheWrite1h: 0 }), registry.calculate('claude-opus-5', tokens));
+    });
+
+    test('a 1-hour part larger than the total is capped at the total', () => {
+      assert.equal(
+        registry.calculate('claude-opus-5', { input: 0, output: 0, cacheWrite: 100, cacheWrite1h: 500 }),
+        registry.calculate('claude-opus-5', { input: 0, output: 0, cacheWrite: 100, cacheWrite1h: 100 }),
+      );
+    });
+
+    test('a model with no 1-hour rate bills its 1-hour part at the cache-write rate', () => {
+      assert.equal(
+        registry.calculate('gpt-6-sol', { input: 0, output: 0, cacheWrite: 1_000, cacheWrite1h: 1_000 }),
+        registry.calculate('gpt-6-sol', { input: 0, output: 0, cacheWrite: 1_000 }),
+      );
+    });
+  });
+
   // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
   describe('tiered prompt-size pricing', () => {
     // The parser subtracts cache-write tokens from tokens_in, so the cache-write
