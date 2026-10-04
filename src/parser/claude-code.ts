@@ -291,6 +291,10 @@ export function parseSessionMessages(
   // Latest assistant turn's context-window occupancy (in file order).
   let contextUsedTokens: number | undefined;
   let latestModel: string | undefined;
+  // Sidechain turns only speak for a file with no main thread: a subagent's own
+  // file marks every line as a sidechain, an older interleaved transcript does not.
+  let sidechainContextUsedTokens: number | undefined;
+  let sidechainLatestModel: string | undefined;
   let latestCwd: string | null = null;
   let rawOrdinal = 0;
   let malformedRecords = 0;
@@ -449,11 +453,18 @@ export function parseSessionMessages(
     // how full the window is right now; output_tokens is generation, not window.
     if (msg.role === 'assistant' && msg.usage) {
       const u = msg.usage;
-      contextUsedTokens =
+      const used =
         (u.input_tokens ?? 0) +
         (u.cache_read_input_tokens ?? 0) +
         (u.cache_creation_input_tokens ?? 0);
-      if (typeof msg.model === 'string') latestModel = msg.model;
+      const model = typeof msg.model === 'string' ? msg.model : undefined;
+      if (line.isSidechain) {
+        sidechainContextUsedTokens = used;
+        if (model) sidechainLatestModel = model;
+      } else {
+        contextUsedTokens = used;
+        if (model) latestModel = model;
+      }
     }
 
     messages.push({
@@ -490,8 +501,8 @@ export function parseSessionMessages(
       parent_session_id: parentSessionId,
       relationship_type: relationshipType,
       mode: claudeInvocationMode(entrypoint, promptSource),
-      context_used_tokens: contextUsedTokens,
-      model: latestModel,
+      context_used_tokens: contextUsedTokens ?? sidechainContextUsedTokens,
+      model: latestModel ?? sidechainLatestModel,
     },
     skillContext: {
       projectIdentity: projectIdentityFromCwd(latestCwd),
