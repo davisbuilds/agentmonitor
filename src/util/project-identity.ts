@@ -16,8 +16,16 @@ import path from 'node:path';
  * name, as before.
  */
 
-const resolved = new Map<string, string | null>();
-const reposByParent = new Map<string, string[]>();
+// Resolution reads the filesystem, and an import resolves the same directories
+// many times over. Entries expire so a long-running server notices a worktree
+// path removed and recreated, or repointed to another repository.
+const CACHE_TTL_MS = 30_000;
+const resolved = new Map<string, { name: string | null; at: number }>();
+const reposByParent = new Map<string, { repos: string[]; at: number }>();
+
+function fresh<T extends { at: number }>(entry: T | undefined): T | undefined {
+  return entry && Date.now() - entry.at < CACHE_TTL_MS ? entry : undefined;
+}
 
 function isWorktreeContainer(dir: string): boolean {
   const name = path.basename(dir);
@@ -71,7 +79,7 @@ function gitRoot(dir: string): string | null {
 
 /** Repository directories directly under `parent`, longest name first. */
 function siblingRepos(parent: string): string[] {
-  let repos = reposByParent.get(parent);
+  let repos = fresh(reposByParent.get(parent))?.repos;
   if (!repos) {
     try {
       repos = fs.readdirSync(parent, { withFileTypes: true })
@@ -81,7 +89,7 @@ function siblingRepos(parent: string): string[] {
     } catch {
       repos = [];
     }
-    reposByParent.set(parent, repos);
+    reposByParent.set(parent, { repos, at: Date.now() });
   }
   return repos;
 }
@@ -114,6 +122,9 @@ export function projectNameFromCwd(cwd: string | null | undefined): string | nul
   const trimmed = cwd?.trim();
   if (!trimmed) return null;
   const dir = path.resolve(trimmed);
-  if (!resolved.has(dir)) resolved.set(dir, path.basename(resolveRoot(dir)) || null);
-  return resolved.get(dir) ?? null;
+  const cached = fresh(resolved.get(dir));
+  if (cached) return cached.name;
+  const name = path.basename(resolveRoot(dir)) || null;
+  resolved.set(dir, { name, at: Date.now() });
+  return name;
 }

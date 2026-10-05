@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test, { after } from 'node:test';
+import test, { after, mock } from 'node:test';
 
 import { projectNameFromCwd } from '../src/util/project-identity.js';
 
@@ -78,4 +78,19 @@ test('anything else falls back to its own name', () => {
   assert.equal(projectNameFromCwd(path.join(dev, '.worktrees', 'unknown-task')), 'unknown-task');
   assert.equal(projectNameFromCwd(''), null);
   assert.equal(projectNameFromCwd(null), null);
+});
+
+test('a long-running process sees a worktree repointed to another repo', () => {
+  mock.timers.enable({ apis: ['Date'], now: Date.parse('2026-10-05T12:00:00Z') });
+  try {
+    const api = repo(path.join(dev, 'api'));
+    const reused = worktree(app, path.join(dev, '.worktrees', 'reused-slot'));
+    assert.equal(projectNameFromCwd(reused), 'app');
+    fs.rmSync(reused, { recursive: true });
+    worktree(api, reused);
+    mock.timers.tick(60_000);
+    assert.equal(projectNameFromCwd(reused), 'api');
+  } finally {
+    mock.timers.reset();
+  }
 });
