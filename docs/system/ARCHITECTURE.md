@@ -170,7 +170,8 @@ OPERATIONS).
 The session browser uses the same boundary: a subagent's transcript, tool calls
 and context observations start at its own first turn, keeping only the
 instruction preamble written before the copy; the parent session shows the
-copied turns. Plain forks (`forked_from_id` without `thread_spawn`) and
+copied turns. Only inherited turns or requests mark a copy, so a child's own
+compaction before its first surviving turn stays. Plain forks (`forked_from_id` without `thread_spawn`) and
 unresolved subagents keep their whole rollout.
 
 ### Session Browser And Live

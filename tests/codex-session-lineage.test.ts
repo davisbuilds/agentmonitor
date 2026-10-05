@@ -104,6 +104,31 @@ test('a preamble ahead of a copied span stays with the child', () => {
   assert.deepEqual(parsed.messages.map(m => JSON.parse(m.content)[0].text), ['child instructions', 'child work']);
 });
 
+test('a child\'s own compaction before its first surviving turn is kept', () => {
+  // Without inherited turns there is no copy: a compacted record here is the
+  // child's own earlier work, not the parent's.
+  const parsed = rollout([
+    spawnMeta,
+    { type: 'compacted', payload: { message: 'child summary' } },
+    turn(SPAWNED_AT + 5, 'child-model'),
+    assistantMessage('child work'),
+  ]);
+  assert.ok(parsed.skillContext.observations.some(o => o.kind === 'compaction'));
+  assert.equal(parsed.messages.length, 1);
+});
+
+test('an older copy with requests but no turn records is still dropped', () => {
+  const parsed = rollout([
+    spawnMeta,
+    { type: 'compacted', payload: { message: 'parent summary' } },
+    { type: 'event_msg', payload: { type: 'token_count', info: null } },
+    userMessage('parent question'),
+    turn(SPAWNED_AT + 5, 'child-model'),
+    assistantMessage('child work'),
+  ]);
+  assert.deepEqual(parsed.messages.map(m => JSON.parse(m.content)[0].text), ['child work']);
+});
+
 test('a spawned subagent without a turn of its own is kept whole', () => {
   const parsed = rollout([
     spawnMeta,
