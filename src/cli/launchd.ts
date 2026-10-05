@@ -21,7 +21,8 @@ export interface LaunchdHost {
   uid: number;
   home: string;
   run: (command: string, args: string[]) => CommandResult;
-  /** How long to wait for a stopped server to release the database. */
+  isAlive: (pid: number) => boolean;
+  /** How long to wait for a stopped server to exit. */
   stopTimeoutMs: number;
 }
 
@@ -34,6 +35,14 @@ export function currentLaunchdHost(): LaunchdHost {
       const result = spawnSync(command, args, { encoding: 'utf8' });
       if (result.error) return { status: null, stdout: '', stderr: result.error.message };
       return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+    },
+    isAlive: pid => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (error) {
+        return (error as NodeJS.ErrnoException).code === 'EPERM';
+      }
     },
     stopTimeoutMs: 30_000,
   };
@@ -56,6 +65,26 @@ export interface ServiceSpec {
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|DSN/;
 // Seams for tests, never runtime configuration.
 const TEST_ONLY = new Set(['AGENTMONITOR_PORTLESS_CLI']);
+
+// Settings that name a path, which the server resolves against its working
+// directory. The service's is the install root, so the install pins each to
+// what it meant in the shell that ran it. Keep in step with src/config.ts;
+// tests/launchd-service.test.ts checks the *_DIR, *_DIRS and *_PATH names.
+export const PATH_SETTINGS = new Set([
+  'AGENTMONITOR_DB_PATH',
+  'AGENTMONITOR_PROJECTS_DIR',
+  'AGENTMONITOR_CLAUDE_DIR',
+  'AGENTMONITOR_EXECUTIONS_DIR',
+  'AGENTMONITOR_USAGE_BUDGETS_PATH',
+  'AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH',
+  'CODEX_HOME',
+]);
+export const PATH_LIST_SETTINGS = new Set(['AGENTMONITOR_SKILL_CATALOG_DIRS']);
+
+function absolutePath(value: string, cwd: string, home: string): string {
+  const expanded = value === '~' ? home : value.startsWith('~/') ? path.join(home, value.slice(2)) : value;
+  return path.resolve(cwd, expanded);
+}
 
 function recordedName(name: string): boolean {
   if (name === 'PATH' || name === 'CODEX_HOME') return true;
@@ -95,11 +124,14 @@ export function buildServiceSpec(input: {
       skippedSecrets.push(name);
       continue;
     }
-    environment[name] = value;
-  }
-  // The service's working directory is the install root, not this shell's.
-  if (environment.AGENTMONITOR_DB_PATH) {
-    environment.AGENTMONITOR_DB_PATH = path.resolve(input.cwd, environment.AGENTMONITOR_DB_PATH);
+    if (PATH_SETTINGS.has(name)) {
+      environment[name] = absolutePath(value.trim(), input.cwd, input.host.home);
+    } else if (PATH_LIST_SETTINGS.has(name)) {
+      environment[name] = value.split(path.delimiter).map(item => item.trim()).filter(Boolean)
+        .map(item => absolutePath(item, input.cwd, input.host.home)).join(path.delimiter);
+    } else {
+      environment[name] = value;
+    }
   }
 
   return {
@@ -209,11 +241,13 @@ function launchctl(host: LaunchdHost, args: string[]): void {
   }
 }
 
-async function waitForRelease(host: LaunchdHost, dbPath: string): Promise<void> {
+// bootout can return while the server is still shutting down. Its process,
+// not the new spec's database, is what holds the port and its own database.
+async function waitForExit(host: LaunchdHost, pid: number): Promise<void> {
   const deadline = performance.now() + host.stopTimeoutMs;
-  while (readRuntimeOwner(dbPath)) {
+  while (host.isAlive(pid)) {
     if (performance.now() >= deadline) {
-      throw new CliError(`The previous server did not release ${dbPath} within ${host.stopTimeoutMs} ms.`);
+      throw new CliError(`The previous server (PID ${pid}) did not exit within ${host.stopTimeoutMs} ms.`);
     }
     await delay(100);
   }
@@ -222,7 +256,8 @@ async function waitForRelease(host: LaunchdHost, dbPath: string): Promise<void> 
 /**
  * Write the agent and start it. Refuses while a server the service does not
  * run owns the database: launchd would retry it every ten seconds until that
- * server stopped. Reinstalling stops the service's own server first.
+ * server stopped. Reinstalling stops the service's own server, and waits for
+ * it to exit, first.
  */
 export async function installService(host: LaunchdHost, spec: ServiceSpec): Promise<void> {
   assertSupported(host);
@@ -236,7 +271,7 @@ export async function installService(host: LaunchdHost, spec: ServiceSpec): Prom
 
   if (current.loaded) {
     launchctl(host, ['bootout', `${domain(host)}/${SERVICE_LABEL}`]);
-    await waitForRelease(host, spec.dbPath);
+    if (current.pid !== null) await waitForExit(host, current.pid);
   }
   fs.mkdirSync(path.dirname(spec.plistPath), { recursive: true });
   fs.mkdirSync(path.dirname(spec.logPath), { recursive: true });

@@ -7,6 +7,8 @@ import test, { describe } from 'node:test';
 import {
   buildServiceSpec,
   installService,
+  PATH_LIST_SETTINGS,
+  PATH_SETTINGS,
   restartService,
   serviceStatus,
   uninstallService,
@@ -15,7 +17,7 @@ import {
   type LaunchdHost,
 } from '../src/cli/launchd.js';
 import { CliError } from '../src/cli/errors.js';
-import { acquireRuntimeOwnership, readRuntimeOwner } from '../src/runtime-ownership.js';
+import { acquireRuntimeOwnership } from '../src/runtime-ownership.js';
 
 const onMac = process.platform === 'darwin';
 
@@ -32,7 +34,11 @@ function fixture(options: { platform?: NodeJS.Platform; servicePid?: number } = 
   fs.mkdirSync(path.dirname(dbPath));
 
   const calls: string[][] = [];
-  const service = { loaded: false, pid: options.servicePid ?? 4242, onBootout: () => {}, ownedAtBootstrap: [] as boolean[] };
+  // A booted-out server keeps running for stopDelayMs, as a graceful shutdown does.
+  const service = {
+    loaded: false, alive: false, pid: options.servicePid ?? 4242, stopDelayMs: 0,
+    onStopped: () => {}, aliveAtBootstrap: [] as boolean[],
+  };
   const run = (command: string, args: string[]): CommandResult => {
     if (command === 'plutil') {
       const result = spawnSync(command, args, { encoding: 'utf8' });
@@ -47,15 +53,25 @@ function fixture(options: { platform?: NodeJS.Platform; servicePid?: number } = 
     }
     if (verb === 'bootout') {
       service.loaded = false;
-      service.onBootout();
+      const stop = () => {
+        service.alive = false;
+        service.onStopped();
+      };
+      if (service.stopDelayMs > 0) setTimeout(stop, service.stopDelayMs).unref();
+      else stop();
     }
     if (verb === 'bootstrap') {
       service.loaded = true;
-      service.ownedAtBootstrap.push(readRuntimeOwner(dbPath) !== null);
+      service.aliveAtBootstrap.push(service.alive);
+      service.alive = true;
     }
     return { status: 0, stdout: '', stderr: '' };
   };
-  const host: LaunchdHost = { platform: options.platform ?? 'darwin', uid: 501, home, run, stopTimeoutMs: 2_000 };
+  const host: LaunchdHost = {
+    platform: options.platform ?? 'darwin', uid: 501, home, run,
+    isAlive: pid => pid === service.pid && service.alive,
+    stopTimeoutMs: 2_000,
+  };
   const env = {
     PATH: '/opt/homebrew/bin:/usr/bin',
     HOME: home,
@@ -97,6 +113,40 @@ describe('amon service (launchd)', () => {
     });
     assert.equal(built.environment.AGENTMONITOR_DB_PATH, path.join(root, 'elsewhere', 'my.db'));
     assert.equal(built.dbPath, path.join(root, 'elsewhere', 'my.db'));
+  });
+
+  test('pins every relative or ~ path setting to what it meant in the installing shell', () => {
+    const { host, entryScript, root, env, home } = fixture();
+    const built = buildServiceSpec({
+      host, nodePath: 'node', entryScript, cwd: root, env: {
+        ...env,
+        AGENTMONITOR_PROJECTS_DIR: 'projects',
+        AGENTMONITOR_CLAUDE_DIR: '~/claude',
+        AGENTMONITOR_EXECUTIONS_DIR: '/abs/executions',
+        AGENTMONITOR_USAGE_BUDGETS_PATH: './config/budgets.json',
+        AGENTMONITOR_SKILL_CATALOG_DIRS: ['skills', '~/more-skills', '/abs/skills'].join(path.delimiter),
+        CODEX_HOME: 'codex-home',
+      },
+    });
+    assert.equal(built.environment.AGENTMONITOR_PROJECTS_DIR, path.join(root, 'projects'));
+    assert.equal(built.environment.AGENTMONITOR_CLAUDE_DIR, path.join(home, 'claude'));
+    assert.equal(built.environment.AGENTMONITOR_EXECUTIONS_DIR, '/abs/executions');
+    assert.equal(built.environment.AGENTMONITOR_USAGE_BUDGETS_PATH, path.join(root, 'config', 'budgets.json'));
+    assert.equal(
+      built.environment.AGENTMONITOR_SKILL_CATALOG_DIRS,
+      [path.join(root, 'skills'), path.join(home, 'more-skills'), '/abs/skills'].join(path.delimiter),
+    );
+    assert.equal(built.environment.CODEX_HOME, path.join(root, 'codex-home'));
+  });
+
+  test('knows every path setting the server reads', () => {
+    const configSource = fs.readFileSync(path.join(import.meta.dirname, '..', 'src', 'config.ts'), 'utf8');
+    const names = new Set([...configSource.matchAll(/env\.((?:AGENTMONITOR_[A-Z0-9_]+)|CODEX_HOME)\b/g)].map(m => m[1]!));
+    const pathNames = [...names].filter(name => /(_DIRS?|_PATH)$/.test(name) || name === 'CODEX_HOME');
+    assert.ok(pathNames.length >= 5, `detector found ${pathNames.join(', ')}`);
+    for (const name of pathNames) {
+      assert.ok(PATH_SETTINGS.has(name) || PATH_LIST_SETTINGS.has(name), `${name} is a path the service would not pin`);
+    }
   });
 
   test('refuses to install from source or from a script outside dist/', () => {
@@ -145,18 +195,40 @@ describe('amon service (launchd)', () => {
     }
   });
 
-  test('a reinstall stops the service, waits for it to release the database, then starts the new one', async () => {
+  test('a reinstall stops the service and waits for its server to exit before starting the new one', async () => {
     const { host, spec, dbPath, calls, service } = fixture({ servicePid: process.pid });
     const built = spec();
     await installService(host, built);
     // The running service is this process, holding the database.
     const owner = acquireRuntimeOwnership(dbPath);
-    service.onBootout = () => setTimeout(() => owner.release(), 200);
+    service.stopDelayMs = 200;
+    service.onStopped = () => owner.release();
     calls.length = 0;
 
     await installService(host, built);
     assert.deepEqual(calls.map(call => call[1]), ['print', 'bootout', 'bootstrap']);
-    assert.deepEqual(service.ownedAtBootstrap, [false, false], 'the new server never starts against a held database');
+    assert.deepEqual(service.aliveAtBootstrap, [false, false], 'the new server never starts beside the old one');
+  });
+
+  test('a reinstall onto another database still waits for the old server, which holds the port', async () => {
+    const { host, spec, entryScript, env, root, service } = fixture();
+    await installService(host, spec());
+    service.stopDelayMs = 200;
+    const moved = buildServiceSpec({
+      host, nodePath: 'node', entryScript, cwd: root, env: { ...env, AGENTMONITOR_DB_PATH: path.join(root, 'other.db') },
+    });
+    await installService(host, moved);
+    assert.deepEqual(service.aliveAtBootstrap, [false, false]);
+  });
+
+  test('gives up, without starting a second server, when the old one does not exit', async () => {
+    const { host, spec, service, calls } = fixture();
+    await installService(host, spec());
+    service.stopDelayMs = 60_000;
+    host.stopTimeoutMs = 300;
+    calls.length = 0;
+    await assert.rejects(installService(host, spec()), /did not exit/);
+    assert.ok(!calls.some(call => call[1] === 'bootstrap'));
   });
 
   test('restart kicks a loaded service and reports a missing one as not found', async () => {

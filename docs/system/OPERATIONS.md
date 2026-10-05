@@ -48,13 +48,15 @@ when it exits with an error. A server that was stopped (`amon service uninstall`
 
 launchd starts the server without the shell's environment. The install records
 `PATH` (the Codex quota reader runs `codex app-server`), `CODEX_HOME`, and the
-`AGENTMONITOR_*` settings in effect when it runs, and lists them. A setting whose
+`AGENTMONITOR_*` settings in effect when it runs, and lists them. The service
+runs from the install root, so relative and `~` paths in those settings are
+recorded as the absolute paths they meant where the install ran. A setting whose
 name marks a secret (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `DSN`)
 is left out and named as skipped, and generic provider keys such as
 `OPENAI_API_KEY` are never read, so insights that need a provider key are
 unavailable under the service. After changing a setting, rerun the install: it
-stops the service's own server, waits for it to release the database, and
-starts the new one. It refuses while a server it does not run owns the database;
+stops the service's own server, waits for that process to exit, and starts the
+new one. It refuses while a server it does not run owns the database;
 stop that one first.
 
 The service serves the direct port only. `https://agentmonitor.localhost` comes
