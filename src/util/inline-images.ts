@@ -22,9 +22,9 @@ function describe(base64: string): string {
 /**
  * Replace inline base64 image data in serialized transcript JSON with a short
  * descriptor carrying the image's SHA-256 and size. Nothing renders stored
- * images, and their base64 inflates the store and the search index; the source
- * transcript keeps the original. The result stays valid JSON at every escaping
- * depth, and stripping twice changes nothing.
+ * images, and their base64 inflates the store and the search index. The image
+ * survives only in the source transcript, if that still exists. The result
+ * stays valid JSON at every escaping depth, and stripping twice changes nothing.
  */
 export function stripInlineImages(json: string): string {
   if (!json.includes('base64')) return json;
