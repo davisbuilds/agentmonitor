@@ -8,6 +8,7 @@ import {
   type SessionContextObservation,
 } from '../skills/context-observations.js';
 import { extractExplicitSkillName } from '../skills/invocation-detection.js';
+import { projectNameFromCwd } from '../util/project-identity.js';
 
 // --- Tool category normalization ---
 
@@ -296,6 +297,7 @@ export function parseSessionMessages(
   let sidechainContextUsedTokens: number | undefined;
   let sidechainLatestModel: string | undefined;
   let latestCwd: string | null = null;
+  let firstCwd: string | null = null;
   let rawOrdinal = 0;
   let malformedRecords = 0;
   const contextObservations: SessionContextObservation[] = [];
@@ -317,7 +319,10 @@ export function parseSessionMessages(
     const recordOrdinal = rawOrdinal++;
 
     const lineType = line.type;
-    if (typeof line.cwd === 'string' && line.cwd.trim()) latestCwd = line.cwd;
+    if (typeof line.cwd === 'string' && line.cwd.trim()) {
+      latestCwd = line.cwd;
+      firstCwd ??= line.cwd;
+    }
     const projectIdentity = projectIdentityFromCwd(latestCwd);
 
     if (lineType === 'system' && line.subtype === 'compact_boundary') {
@@ -479,7 +484,10 @@ export function parseSessionMessages(
     });
   }
 
-  const project = filePath ? projectFromPath(filePath) : null;
+  // The transcript's own cwd names the project; the encoded directory name is
+  // ambiguous (a dash may be a separator or part of a name), so it is only the
+  // fallback for transcripts that record no cwd.
+  const project = projectNameFromCwd(firstCwd) ?? (filePath ? projectFromPath(filePath) : null);
   if (sessionId.startsWith('agent-')) {
     relationshipType = 'subagent';
   } else if (sawSidechain) {

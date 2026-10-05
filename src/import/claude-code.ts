@@ -5,6 +5,7 @@ import crypto from 'crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { claudeInvocationMode } from '../util/invocation-mode.js';
+import { projectNameFromCwd } from '../util/project-identity.js';
 
 // ─── Claude Code JSONL line types ──────────────────────────────────────
 
@@ -182,8 +183,7 @@ export function parseClaudeCodeFile(
       if (ts > options.to) continue;
     }
 
-    // Extract project (basename of cwd) and branch
-    const project = line.cwd ? path.basename(line.cwd) : undefined;
+    const project = projectNameFromCwd(line.cwd) ?? undefined;
     const branch = line.gitBranch;
 
     // Determine status

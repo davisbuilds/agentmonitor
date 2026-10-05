@@ -1,4 +1,5 @@
 import type { CostSource } from '../pricing/cost-provenance.js';
+import { projectNameFromCwd } from '../util/project-identity.js';
 
 const EVENT_TYPES = [
   'tool_use',
@@ -235,7 +236,10 @@ export function normalizeIngestEvent(input: unknown): NormalizeEventResult {
   const eventId = getOptionalString(input, 'event_id', errors);
   const toolName = getOptionalString(input, 'tool_name', errors);
   const branch = getOptionalString(input, 'branch', errors);
-  const project = getOptionalString(input, 'project', errors);
+  // A client that sends its working directory gets the canonical project name
+  // for it; the directory itself is not stored.
+  const cwd = getOptionalString(input, 'cwd', errors);
+  const project = projectNameFromCwd(cwd) ?? getOptionalString(input, 'project', errors);
   const model = getOptionalString(input, 'model', errors);
   const durationMs = getOptionalNonNegativeInt(input, 'duration_ms', errors);
   const tokensIn = getOptionalNonNegativeInt(input, 'tokens_in', errors) ?? 0;

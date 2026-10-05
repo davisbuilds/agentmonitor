@@ -100,6 +100,7 @@ interface CapturedHookPayload {
   agent_type: string;
   event_type: string;
   project?: string;
+  cwd?: string;
   branch?: string;
   metadata?: Record<string, unknown>;
 }
@@ -482,6 +483,34 @@ describe('Hook payload contract validation', () => {
         load_reason: 'session_start',
       },
     });
+  });
+});
+
+describe('Hook working directory', () => {
+  // The server derives the canonical project from the cwd; a hook that only
+  // sent its folder name would name a worktree after itself.
+  test('every hook payload carries the session cwd', async () => {
+    const prompt = JSON.stringify({ session_id: 'test-session-001', cwd: '/home/user/my-project', prompt: 'hello' });
+    // The sensitive-file warning is the pre-tool event that exits 0.
+    const warned = makePreToolUseInput('Read', { file_path: '/home/user/my-project/.env' });
+    const runs = [
+      ...['session_start.sh', 'session_end.sh', 'post_tool_use.sh', 'instructions_loaded.sh', 'user_prompt_submit.sh', 'pre_tool_use.sh']
+        .map(script => ({ executable: 'bash', args: [path.join(HOOKS_DIR, script)] , script })),
+      ...['session_start.py', 'session_end.py', 'post_tool_use.py', 'instructions_loaded.py', 'pre_tool_use.py']
+        .map(script => ({ executable: 'python3', args: [path.join(PYTHON_DIR, script)], script })),
+    ].map(({ executable, args, script }) => ({
+      executable,
+      args,
+      stdin: script.startsWith('session_start') ? makeSessionStartInput()
+        : script.startsWith('session_end') ? makeStopInput()
+          : script.startsWith('post_tool_use') ? makePostToolUseInput('Bash', { command: 'npm test' })
+            : script.startsWith('instructions_loaded') ? makeInstructionsLoadedInput()
+              : script.startsWith('pre_tool_use') ? warned
+                : prompt,
+    }));
+    const payloads = await captureHookPayloads(runs);
+    assert.equal(payloads.length, runs.length);
+    assert.deepEqual(payloads.map(payload => payload.cwd), runs.map(() => '/home/user/my-project'));
   });
 });
 

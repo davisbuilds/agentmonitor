@@ -7,6 +7,7 @@ import { pricingRegistry } from '../pricing/index.js';
 import { parsePatchMeta } from '../otel/parser.js';
 import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
+import { projectNameFromCwd } from '../util/project-identity.js';
 
 // ─── Codex JSONL line types ─────────────────────────────────────────────
 
@@ -187,7 +188,7 @@ export function parseCodexFile(
     sessionId = uuidMatch?.[1] ?? basename;
   }
 
-  const project = cwd ? path.basename(cwd) : undefined;
+  const project = projectNameFromCwd(cwd) ?? undefined;
 
   // Apply date filter on session start time
   if (sessionTimestamp && options?.from) {

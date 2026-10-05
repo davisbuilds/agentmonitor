@@ -5,7 +5,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from send_event import get_project, read_hook_input, send_event
+from send_event import extract, get_project, read_hook_input, send_event
 
 hook_input = read_hook_input()
 metadata = {
@@ -26,6 +26,7 @@ send_event({
     "agent_type": "claude_code",
     "event_type": "instruction_load",
     "project": get_project(),
+    "cwd": extract("cwd"),
     "source": "hook",
     "metadata": metadata,
 })

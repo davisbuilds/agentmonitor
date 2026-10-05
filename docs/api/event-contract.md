@@ -43,6 +43,10 @@ Canonical ingest contract for `POST /api/events` and `POST /api/events/batch`.
   when the model is known (`cost_source: "estimated"`).
 - `branch` (string)
 - `project` (string)
+- `cwd` (string). The producer's working directory. When present, the server
+  names the project from it (the repository it belongs to, with worktrees in a
+  worktree area folded into their repository) instead of using `project`. The
+  directory itself is not stored.
 - `duration_ms` (non-negative integer)
 - `metadata` (any JSON value or string)
 - `client_timestamp` (ISO timestamp string)

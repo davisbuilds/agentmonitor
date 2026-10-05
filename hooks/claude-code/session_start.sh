@@ -22,6 +22,7 @@ send_event "$(cat <<EOF
   "agent_type": "claude_code",
   "event_type": "session_start",
   "project": "$(json_escape "$PROJECT")",
+  "cwd": "$(json_escape "$(extract_field cwd)")",
   "branch": "$(json_escape "$BRANCH")",
   "model": "$(json_escape "$MODEL")",
   "source": "hook",

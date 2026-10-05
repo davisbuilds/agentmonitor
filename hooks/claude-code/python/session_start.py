@@ -14,6 +14,7 @@ send_event({
     "agent_type": "claude_code",
     "event_type": "session_start",
     "project": get_project(),
+    "cwd": extract("cwd"),
     "model": extract("model"),
     "source": "hook",
     "metadata": {

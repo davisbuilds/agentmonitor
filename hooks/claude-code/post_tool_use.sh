@@ -61,6 +61,7 @@ send_event "$(cat <<EOF
   "event_type": "tool_use",
   "tool_name": "$TOOL_NAME_ESC",
   "project": "$PROJECT_ESC",
+  "cwd": "$(json_escape "$(extract_field cwd)")",
   "branch": "$BRANCH_ESC",
   "source": "hook",
   "metadata": $META

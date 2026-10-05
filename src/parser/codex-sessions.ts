@@ -11,6 +11,7 @@ import {
   extractCodexSkillNamesFromCommand,
   fingerprintCodexCommand,
 } from '../skills/invocation-detection.js';
+import { projectNameFromCwd } from '../util/project-identity.js';
 
 // --- Codex JSONL line types ---
 
@@ -418,7 +419,7 @@ export function parseCodexSessionMessages(
     });
   }
 
-  const project = cwd ? path.basename(cwd) : (filePath ? projectFromCodexPath(filePath) : null);
+  const project = projectNameFromCwd(cwd) ?? (filePath ? projectFromCodexPath(filePath) : null);
 
   return {
     messages,
