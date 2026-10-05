@@ -24,6 +24,31 @@ test('data before the media type, and images inside JSON-escaped strings, are st
   assert.deepEqual(inner, [{ type: 'image', source: { type: 'base64', data: descriptor, media_type: 'image/jpeg' } }]);
 });
 
+test('a base64 source that is not an image keeps its data', () => {
+  const pdf = JSON.stringify([{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } }]);
+  assert.equal(stripInlineImages(pdf), pdf);
+});
+
+test('an image source is found whatever its property order', () => {
+  const reordered = JSON.stringify([{ type: 'image', source: { data, cache: 'x', type: 'base64', media_type: 'image/webp' } }]);
+  assert.deepEqual(JSON.parse(stripInlineImages(reordered)),
+    [{ type: 'image', source: { data: descriptor, cache: 'x', type: 'base64', media_type: 'image/webp' } }]);
+  const noMediaType = JSON.stringify([{ type: 'image', source: { type: 'base64', data } }]);
+  assert.deepEqual(JSON.parse(stripInlineImages(noMediaType)), [{ type: 'image', source: { type: 'base64', data: descriptor } }],
+    'an image block vouches for a source without a media type');
+});
+
+test('an image in serialized JSON that no longer parses is still stripped', () => {
+  // A truncated or prose-embedded serialization: the structure is gone, the
+  // escaped image source is not.
+  const block = JSON.stringify({ type: 'image', source: { type: 'base64', media_type: 'image/png', data } });
+  const pdfBlock = JSON.stringify({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } });
+  const out = stripInlineImages(JSON.stringify({ text: `see [${block}, ${pdfBlock}` }));
+  const text = JSON.parse(out).text as string;
+  assert.ok(text.includes(descriptor));
+  assert.ok(text.includes(`"media_type":"application/pdf","data":"${data}"`), 'non-image data stays');
+});
+
 test('a data URI image is stripped in place', () => {
   const out = stripInlineImages(JSON.stringify({ text: `[image1]: <data:image/png;base64,${data}>` }));
   assert.equal(JSON.parse(out).text, `[image1]: <data:image/png;${descriptor}>`);
