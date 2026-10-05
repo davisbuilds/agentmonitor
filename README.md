@@ -125,6 +125,7 @@ pnpm build                       # TS build + frontend build
 pnpm start                       # Run compiled server
 amon serve                       # Compiled runtime at https://agentmonitor.localhost
 amon serve --no-portless         # Direct runtime on http://127.0.0.1:3141
+amon service install             # Run it as a macOS login service (`amon service restart` after a rebuild)
 pnpm cli -- --help               # CLI help during local development
 pnpm cli -- health               # Check the local server (`build.stale` means restart to load a newer build)
 pnpm cli -- sessions list --json # Query session history from SQLite

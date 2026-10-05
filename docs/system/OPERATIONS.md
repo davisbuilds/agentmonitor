@@ -28,6 +28,44 @@ exporters, and direct API clients remain on `:3141`.
 `amon serve --no-portless` starts the direct backend without the named HTTPS
 origin. Ctrl-C shuts down the runtime and removes its Portless route.
 
+### Login Service (macOS)
+
+```bash
+pnpm build
+amon service install     # or: node dist/cli.js service install
+amon service status
+amon service restart     # after every rebuild
+amon service uninstall
+```
+
+`amon service install` writes the launchd agent
+`~/Library/LaunchAgents/dev.agentmonitor.serve.plist` and starts it. The agent
+runs the build the installing CLI belongs to (`node <install>/dist/cli.js serve
+--no-portless`) from the install root, starts at login, and restarts the server
+when it exits with an error. A server that was stopped (`amon service uninstall`,
+`launchctl bootout`) exits cleanly and stays stopped. Output goes to
+`~/Library/Logs/agentmonitor/serve.log`, which nothing rotates.
+
+launchd starts the server without the shell's environment. The install records
+`PATH` (the Codex quota reader runs `codex app-server`), `CODEX_HOME`, and the
+`AGENTMONITOR_*` settings in effect when it runs, and lists them. A setting whose
+name marks a secret (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `DSN`)
+is left out and named as skipped, and generic provider keys such as
+`OPENAI_API_KEY` are never read, so insights that need a provider key are
+unavailable under the service. After changing a setting, rerun the install: it
+stops the service's own server, waits for it to release the database, and
+starts the new one. It refuses while a server it does not run owns the database;
+stop that one first.
+
+The service serves the direct port only. `https://agentmonitor.localhost` comes
+from Portless, which runs one HTTPS proxy per machine, shared by every project
+that uses it. To keep the named URL with the service, run that proxy at boot from
+a global install (`npm install -g portless`, then `portless service install`) and
+give AgentMonitor a static route: `portless alias agentmonitor 3141`. The alias
+outlives server restarts, so the URL works however the server is started; while
+the server is down, the proxy answers with an error rather than refusing the
+connection. `portless doctor` checks the proxy, its routes and the certificate.
+
 ### Runtime Ownership
 
 Long-running startup is exclusive per resolved SQLite database. A competing

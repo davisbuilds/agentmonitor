@@ -24,7 +24,8 @@
       <p class="text-text">This server is running an older build than the one on disk.</p>
       <p class="text-text-muted">
         It keeps the code it started with, so imports and fixes in the new build do not
-        apply until it restarts. Restart <code class="font-mono">amon serve</code> to load it.
+        apply until it restarts. Restart <code class="font-mono">amon serve</code>, or run
+        <code class="font-mono">amon service restart</code> if it runs as the service.
       </p>
     </div>
   </Popover>
