@@ -1,11 +1,11 @@
 import { test, expect } from '@playwright/test';
-import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const baseUrl = process.env['AGENTMONITOR_E2E_URL'];
 const artifactDir = path.join(process.cwd(), 'output', 'playwright');
-const claudeProject = `cwd:${createHash('sha256').update('/work/alpha').digest('hex')}`;
+// The session's project name, from its working directory /work/alpha.
+const claudeProject = 'alpha';
 
 test.skip(!baseUrl, 'AGENTMONITOR_E2E_URL is provided by the built-runtime verifier');
 
