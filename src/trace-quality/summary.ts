@@ -136,6 +136,19 @@ function isError(observation: ProjectedTraceQualityObservation): boolean {
   return observation.severity === 'error' || observation.status === 'error';
 }
 
+/** The event columns the summary reads; everything else on the row is detail. */
+type EventRollupSource = Pick<
+  EventProjectionSource,
+  | 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'duration_ms'
+  | 'status' | 'model' | 'event_type' | 'tool_name' | 'client_timestamp' | 'created_at'
+>;
+
+interface SessionMetadata {
+  agentType: string | null;
+  project: string | null;
+  browsingSession: { started_at: string | null; ended_at: string | null } | null;
+}
+
 interface MeasureRollup {
   count: number;
   tokensIn: number;
@@ -159,7 +172,7 @@ interface MeasureRollup {
  * session has events, the summary measures and coverage come from them (this
  * also makes the full derive agree with the O(1) incremental event path).
  */
-function rollupFromEvents(events: readonly EventProjectionSource[]): MeasureRollup {
+function rollupFromEvents(events: readonly EventRollupSource[]): MeasureRollup {
   const rollup: MeasureRollup = {
     count: events.length,
     tokensIn: 0, tokensOut: 0, cacheRead: 0, cacheWrite: 0, cost: 0, latency: 0, errorCount: 0,
@@ -211,27 +224,71 @@ function rollupFromObservations(
   return rollup;
 }
 
-/** Project a session in-memory and aggregate it into a content-free summary. */
+function presentOrNull(value: string | null | undefined): string | null {
+  return value != null && value !== '' ? value : null;
+}
+
+/**
+ * The session fields an event-sourced summary takes from outside the rollup,
+ * with the same precedence as `readTraceQualityProjectionInputForSession`, read
+ * one row at a time so the transcript tables stay unread.
+ */
+function readEventSessionMetadata(db: Database, sessionId: string): SessionMetadata {
+  const browsingSession = db.prepare(
+    'SELECT agent, project, started_at, ended_at FROM browsing_sessions WHERE id = ?',
+  ).get(sessionId) as { agent: string; project: string | null; started_at: string | null; ended_at: string | null } | undefined;
+  const firstTurnAgent = () => (db.prepare(
+    'SELECT agent_type FROM session_turns WHERE session_id = ? ORDER BY COALESCE(started_at, created_at), id LIMIT 1',
+  ).get(sessionId) as { agent_type: string } | undefined)?.agent_type;
+  const firstEventAgent = () => (db.prepare(
+    'SELECT agent_type FROM events WHERE session_id = ? ORDER BY COALESCE(client_timestamp, created_at), id LIMIT 1',
+  ).get(sessionId) as { agent_type: string } | undefined)?.agent_type;
+  const firstEventProject = () => (db.prepare(
+    `SELECT project FROM events WHERE session_id = ? AND project IS NOT NULL AND project <> ''
+     ORDER BY COALESCE(client_timestamp, created_at), id LIMIT 1`,
+  ).get(sessionId) as { project: string } | undefined)?.project;
+
+  return {
+    agentType: presentOrNull(browsingSession?.agent) ?? presentOrNull(firstTurnAgent()) ?? presentOrNull(firstEventAgent()),
+    project: presentOrNull(browsingSession?.project) ?? presentOrNull(firstEventProject()),
+    browsingSession: browsingSession ?? null,
+  };
+}
+
+/**
+ * Aggregate a session into a content-free summary. The watcher re-derives on
+ * every transcript append, so a session with events reads only the event
+ * columns the rollup uses; message, tool-call and item bodies are loaded and
+ * projected only for sessions without events.
+ */
 export function deriveSessionTraceSummary(sessionId: string): SessionTraceSummary {
-  const input = readTraceQualityProjectionInputForSession(sessionId);
-  const events = input.events ?? [];
+  const db = getDb();
+  const events = db.prepare(`
+    SELECT tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms,
+           status, model, event_type, tool_name, client_timestamp, created_at
+    FROM events WHERE session_id = ?
+  `).all(sessionId) as EventRollupSource[];
   let rollup: MeasureRollup;
+  let metadata: SessionMetadata;
   if (events.length > 0) {
     rollup = rollupFromEvents(events);
+    metadata = readEventSessionMetadata(db, sessionId);
   } else {
+    const input = readTraceQualityProjectionInputForSession(sessionId);
     const projected = projectTraceQuality(input);
     rollup = rollupFromObservations(projected.observations, projected.traces);
+    metadata = { agentType: input.agentType ?? null, project: input.project ?? null, browsingSession: input.browsingSession ?? null };
   }
 
   const { score, grade } = computeQualityScalar(rollup.count, rollup.errorCount, rollup.coverage);
 
   return {
     session_id: sessionId,
-    agent_type: input.agentType ?? null,
-    project: input.project ?? null,
+    agent_type: metadata.agentType,
+    project: metadata.project,
     primary_model: rollup.primaryModel,
-    started_at: input.browsingSession?.started_at ?? rollup.startedAt,
-    ended_at: input.browsingSession?.ended_at ?? rollup.endedAt,
+    started_at: metadata.browsingSession?.started_at ?? rollup.startedAt,
+    ended_at: metadata.browsingSession?.ended_at ?? rollup.endedAt,
     observation_count: rollup.count,
     error_count: rollup.errorCount,
     tokens_in: rollup.tokensIn,
