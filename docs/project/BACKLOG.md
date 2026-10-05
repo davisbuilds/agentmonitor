@@ -93,15 +93,6 @@ so later readers know what still needs checking.
 - **Next**: compare per-request OTEL ids with rollout counters for one session
   below 0.95×, before changing any reconciliation.
 
-#### Copied subagent history in the transcript browser (hypothesis)
-- **What**: the session browser and skill/tool analytics parse Codex rollouts
-  separately from the importer. A subagent's copied parent history may appear
-  there as the child's own messages and tool calls.
-- **Why or evidence**: not measured. The importer fix covers usage and file
-  edits only. This surface does not bill cost.
-- **Next**: count a subagent's browser messages and tool calls before and after
-  its boundary line. Fix only if the copied part shows up.
-
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
   deepseek-v4-flash-0731, minimax-m3) and the codex/claude daily drivers, but
