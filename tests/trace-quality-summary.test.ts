@@ -156,3 +156,79 @@ test('incremental per-event bump matches the full derive for an event-sourced se
   assert.equal(incremental.latency_ms_total, full.latency_ms_total);
   assert.equal(incremental.quality_score, full.quality_score);
 });
+
+function preparedSql(fn: () => void): string[] {
+  const db = getDb();
+  const original = db.prepare.bind(db);
+  const seen: string[] = [];
+  db.prepare = ((sql: string) => {
+    seen.push(sql);
+    return original(sql);
+  }) as typeof db.prepare;
+  try {
+    fn();
+  } finally {
+    db.prepare = original;
+  }
+  return seen;
+}
+
+test('an event-sourced derive reads no message, tool-call, item or turn bodies', () => {
+  // The watcher re-derives on every transcript append; those tables hold the
+  // session's full text, which an event-sourced summary never uses.
+  const db = getDb();
+  db.prepare(`INSERT INTO browsing_sessions (id, agent, project, started_at, ended_at) VALUES ('s-heavy', 'claude', 'proj', ?, ?)`)
+    .run('2026-05-02T09:00:00Z', '2026-05-02T09:30:00Z');
+  db.prepare(`INSERT INTO messages (session_id, ordinal, role, content) VALUES ('s-heavy', 0, 'user', ?)`).run('x'.repeat(1000));
+  db.prepare(
+    `INSERT INTO events (id, event_id, session_id, agent_type, event_type, status, model,
+       tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, created_at)
+     VALUES (950, 'h1', 's-heavy', 'claude', 'response', 'success', 'claude-opus-4-8', 10, 20, 0, 0, 0.01, ?)`,
+  ).run('2026-05-02T09:01:00Z');
+
+  const seen = preparedSql(() => maintainSessionTraceSummary('s-heavy'));
+  const heavy = seen.filter(sql => /\bFROM\s+(messages|tool_calls|session_items|session_turns)\b/i.test(sql) && /SELECT\s+\*/i.test(sql));
+  assert.deepEqual(heavy, [], 'event-sourced derive must not load transcript rows');
+  assert.ok(!seen.some(sql => /SELECT\s+\*\s+FROM\s+events/i.test(sql)), 'reads only the event columns the rollup uses');
+  assert.equal(deriveSessionTraceSummary('s-heavy').tokens_out, 20);
+});
+
+test('event-sourced metadata prefers the browsing session, then turns, then events', () => {
+  const db = getDb();
+  const event = db.prepare(
+    `INSERT INTO events (id, event_id, session_id, agent_type, event_type, status, project,
+       tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, created_at, client_timestamp)
+     VALUES (?, ?, ?, ?, 'response', 'success', ?, 1, 1, 0, 0, ?, ?)`,
+  );
+  // Browsing session wins for agent, project and the time span.
+  db.prepare(`INSERT INTO browsing_sessions (id, agent, project, started_at, ended_at) VALUES ('s-meta-bs', 'claude', 'bs-proj', ?, ?)`)
+    .run('2026-05-03T08:00:00Z', '2026-05-03T09:00:00Z');
+  event.run(960, 'm1', 's-meta-bs', 'codex', 'ev-proj', '2026-05-03T08:10:00Z', null);
+  const fromBrowsing = deriveSessionTraceSummary('s-meta-bs');
+  assert.equal(fromBrowsing.agent_type, 'claude');
+  assert.equal(fromBrowsing.project, 'bs-proj');
+  assert.equal(fromBrowsing.started_at, '2026-05-03T08:00:00Z');
+  assert.equal(fromBrowsing.ended_at, '2026-05-03T09:00:00Z');
+
+  // No browsing session: the earliest turn's agent, then the earliest event
+  // carrying a project, and the event time span (client time first). The
+  // project names sort against time so an unordered read picks the wrong one.
+  db.prepare(`INSERT INTO session_turns (id, session_id, agent_type, started_at) VALUES (961, 's-meta-ev', 'antigravity', ?)`)
+    .run('2026-05-03T10:00:00Z');
+  db.prepare(`INSERT INTO session_turns (id, session_id, agent_type, started_at) VALUES (962, 's-meta-ev', 'gemini', ?)`)
+    .run('2026-05-03T11:00:00Z');
+  event.run(963, 'm2', 's-meta-ev', 'codex', 'alpha-later-proj', '2026-05-03T10:20:00Z', null);
+  event.run(964, 'm3', 's-meta-ev', 'claude', null, '2026-05-03T10:30:00Z', '2026-05-03T10:00:00Z');
+  event.run(965, 'm4', 's-meta-ev', 'claude', 'zeta-first-proj', '2026-05-03T10:40:00Z', '2026-05-03T10:05:00Z');
+  const fromEvents = deriveSessionTraceSummary('s-meta-ev');
+  assert.equal(fromEvents.agent_type, 'antigravity');
+  assert.equal(fromEvents.project, 'zeta-first-proj');
+  assert.equal(fromEvents.started_at, '2026-05-03T10:00:00Z');
+  assert.equal(fromEvents.ended_at, '2026-05-03T10:20:00Z');
+
+  // No browsing session and no turns: the earliest event's agent. Insertion,
+  // alphabetical and created_at order all point at the other event.
+  event.run(966, 'm5', 's-meta-only', 'claude', null, '2026-05-03T12:10:00Z', null);
+  event.run(967, 'm6', 's-meta-only', 'codex', null, '2026-05-03T12:20:00Z', '2026-05-03T12:00:00Z');
+  assert.equal(deriveSessionTraceSummary('s-meta-only').agent_type, 'codex');
+});

@@ -331,8 +331,16 @@ the build.
 - **What**: `amon costs check-claude-sessions` compares imported cost with the
   statusline's `cost.total_cost_usd` for the same session and process window.
   After the 2026-09-27 repair, the sessions checked read about 10-15% below the
-  harness. The harness also pays for requests that never become transcript
-  turns; which requests, and how much each contributes, is unmeasured.
+  harness. Billing 1-hour cache writes at their own rate (repair applied
+  2026-10-04) closed about half of that: re-measured 2026-10-05 on six sessions,
+  imported cost is about 0.95 of the harness's, weighted by cost (0.92 with the
+  outlier below), and five sessions read between 0.93 and 1.07. The harness also
+  pays for requests that never become transcript turns; which requests, and how
+  much each contributes, is unmeasured.
+- **Open question**: one resumed session reads about 0.05 of the harness's cost
+  after both repairs. Whether its statusline cost covers earlier processes of the
+  same session, or its transcript is missing turns, is unchecked; comparing its
+  process window against the transcript's turn timestamps would answer it.
 - **Why or evidence**: 2026-09-27, one long session: compaction records carry
   `preTokens`/`postTokens` but no usage or cost, and pricing its compactions
   from those sizes accounts for roughly 12% (context read from cache) to 55%
@@ -348,11 +356,8 @@ the build.
   records every API request with model, tokens and cost; pointing it at amon
   needs a Claude Code configuration change and a check of how amon ingests
   those events and whether they identify the request's purpose.
-- **Revisit when**: the ratio drifts outside that band, or a decision rests on
-  the absolute size of Claude cost. 1-hour cache writes were billed at the
-  5-minute rate until 2026-10-04; re-measure after `amon costs
-  repair-claude-usage --apply` fills in their split, which should close part of
-  the gap.
+- **Revisit when**: the weighted ratio drifts outside about 0.9-1.0, or a
+  decision rests on the absolute size of Claude cost.
 
 #### The warehouse export still buckets UTC days
 - **What**: every user-facing day is now a local day in the reporting zone
@@ -461,17 +466,19 @@ entries below record what was measured, not the report's claims.
 
 #### Watcher re-sync still re-parses the whole transcript
 - **What**: since 2026-10-01 a re-sync writes only the rows that changed, but it
-  still reads, hashes and parses the whole file, and re-derives the session's
-  trace summary from all of its rows, on every append.
+  still reads, hashes and parses the whole file on every append.
 - **Why or evidence**: measured 2026-10-01 on a 34 MB, 7k-message Claude
-  transcript against a scratch database: the parse took 0.08–0.12 s and the trace
-  summary 0.13–0.19 s, against about 0.011 s for the incremental write (the full
-  rewrite it replaced took about 0.83 s). Both remaining costs grow with the
-  session and block the server.
-- **Next**: make `maintainSessionTraceSummary` incremental for appended rows
-  first, since it is the larger cost. Then consider resuming the parse from a
-  stored byte offset with a trailing-anchor check, as `agentsview` does
-  (`internal/sync/checkpoint.go`), falling back to a full parse on mismatch.
+  transcript against a scratch database: the parse took 0.08–0.12 s, against
+  about 0.011 s for the incremental write (the full rewrite it replaced took
+  about 0.83 s). The parse grows with the session and blocks the server. The
+  trace-summary re-derive, then the larger cost, now reads only the event columns
+  its rollup uses for sessions with events: measured warm on a store snapshot
+  2026-10-05, about 6x faster on the largest sessions (roughly 75 ms to 12 ms),
+  with identical summaries for every stored session. Sessions without events
+  (mostly Codex) still load and project their full transcript.
+- **Next**: resume the parse from a stored byte offset with a trailing-anchor
+  check, as `agentsview` does (`internal/sync/checkpoint.go`), falling back to a
+  full parse on mismatch.
 
 #### Session project names fragment
 - **What**: the session browser derives a project name from each session's path,
