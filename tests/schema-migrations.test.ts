@@ -74,6 +74,7 @@ test('initSchema upgrades legacy event and provider quota tables in place', () =
     'cost_usd',
     'cache_read_tokens',
     'cache_write_tokens',
+    'cache_write_1h_tokens',
     'source',
     'study_id',
     'study',
@@ -87,18 +88,20 @@ test('initSchema upgrades legacy event and provider quota tables in place', () =
   ).get() as { sql: string }).sql;
   assert.equal(eventSql.includes('CHECK (event_type IN'), false);
 
-  const legacyEvent = db.prepare('SELECT metadata, payload_truncated, cache_read_tokens, cache_write_tokens, source FROM events WHERE event_id = ?')
+  const legacyEvent = db.prepare('SELECT metadata, payload_truncated, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, source FROM events WHERE event_id = ?')
     .get('evt-legacy') as {
       metadata: string;
       payload_truncated: number;
       cache_read_tokens: number;
       cache_write_tokens: number;
+      cache_write_1h_tokens: number;
       source: string;
     };
   assert.equal(legacyEvent.metadata, '"not valid json"');
   assert.equal(legacyEvent.payload_truncated, 0);
   assert.equal(legacyEvent.cache_read_tokens, 0);
   assert.equal(legacyEvent.cache_write_tokens, 0);
+  assert.equal(legacyEvent.cache_write_1h_tokens, 0);
   assert.equal(legacyEvent.source, 'api');
 
   assert.doesNotThrow(() => {

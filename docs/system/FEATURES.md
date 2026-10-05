@@ -102,6 +102,13 @@ model, provider, and provider-neutral tier.
   estimate from current pricing metadata and disclose incomplete pricing coverage.
 - Input, output, cache-read, and cache-write tokens remain separate. Model views can
   show all four buckets.
+- Claude cache writes are priced by cache lifetime: the 1-hour part a transcript
+  records bills at its own rate, the rest at the 5-minute rate. Transcripts began
+  recording the split in mid-2026. An estimated cost on an earlier row, on a row
+  whose transcript is gone, or on a token-only OTEL export prices every cache
+  write at the 5-minute rate; Claude Code's own reported cost already includes
+  the 1-hour price. The cache savings estimate still uses the 5-minute rate for
+  every write.
 - Unknown and deprecated models stay visible. A persistent warning identifies
   unpriced use or known pricing that has not yet been applied to zero-cost history.
   Every page's header also names models whose last week of usage has no rate

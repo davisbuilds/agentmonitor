@@ -19,6 +19,7 @@ interface UnattributedRow {
   tokens_out: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cache_write_1h_tokens: number;
   cost_usd: number;
   created_at: string;
   client_timestamp: string | null;
@@ -53,8 +54,8 @@ export function attributeCostSources(db: Database): number {
     `).run().changes;
 
     const rows = db.prepare(`
-      SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd,
-             created_at, client_timestamp
+      SELECT id, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens,
+             cost_usd, created_at, client_timestamp
       FROM events WHERE ${UNATTRIBUTED}
     `).all() as UnattributedRow[];
     const label = db.prepare('UPDATE events SET cost_source = ? WHERE id = ?');
@@ -65,6 +66,7 @@ export function attributeCostSources(db: Database): number {
             output: row.tokens_out,
             cacheRead: row.cache_read_tokens,
             cacheWrite: row.cache_write_tokens,
+            cacheWrite1h: row.cache_write_1h_tokens,
           }, row.client_timestamp ?? row.created_at)
         : null;
       label.run(estimate !== null && sameCost(row.cost_usd, estimate) ? 'estimated' : 'reported', row.id);

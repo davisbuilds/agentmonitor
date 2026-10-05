@@ -31,6 +31,11 @@ Canonical ingest contract for `POST /api/events` and `POST /api/events/batch`.
 - `tokens_out` (non-negative integer, default `0`)
 - `cache_read_tokens` (non-negative integer, default `0`)
 - `cache_write_tokens` (non-negative integer, default `0`)
+- `cache_write_1h_tokens` (non-negative integer, default `0`, at most
+  `cache_write_tokens`). The part of `cache_write_tokens` written to Claude's
+  1-hour cache, which bills at a higher rate than the 5-minute cache. It is a
+  share of the cache-write total, not a further bucket. Without it, an estimated
+  cost prices every cache write at the 5-minute rate.
 - `model` (string)
 - `cost_usd` (finite non-negative number). A supplied cost is stored as the
   producer's figure (`cost_source: "reported"`) and a later recalc never
@@ -123,6 +128,7 @@ also refuses any request whose `Host` is not a loopback name
   "tokens_out": 460,
   "cache_read_tokens": 82,
   "cache_write_tokens": 12,
+  "cache_write_1h_tokens": 8,
   "model": "claude-sonnet-4-6",
   "cost_usd": 0.0045,
   "project": "myapp",

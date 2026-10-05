@@ -58,6 +58,8 @@ export interface NormalizedIngestEvent {
   cost_usd?: number;
   cache_read_tokens?: number;
   cache_write_tokens?: number;
+  /** Of cache_write_tokens, the tokens written to Anthropic's 1-hour cache. */
+  cache_write_1h_tokens?: number;
   source?: EventSource;
   // Invocation mode of the owning session (interactive vs headless). Session-level
   // constant carried on events so the session upsert can persist it; see
@@ -240,6 +242,10 @@ export function normalizeIngestEvent(input: unknown): NormalizeEventResult {
   const tokensOut = getOptionalNonNegativeInt(input, 'tokens_out', errors) ?? 0;
   const cacheReadTokens = getOptionalNonNegativeInt(input, 'cache_read_tokens', errors) ?? 0;
   const cacheWriteTokens = getOptionalNonNegativeInt(input, 'cache_write_tokens', errors) ?? 0;
+  const cacheWrite1hTokens = getOptionalNonNegativeInt(input, 'cache_write_1h_tokens', errors) ?? 0;
+  if (cacheWrite1hTokens > cacheWriteTokens) {
+    errors.push({ field: 'cache_write_1h_tokens', message: 'cannot exceed cache_write_tokens' });
+  }
   const costUsd = getOptionalNonNegativeNumber(input, 'cost_usd', errors);
   const clientTimestamp = normalizeClientTimestamp(input, errors);
   const source = normalizeSource(input, errors);
@@ -268,6 +274,7 @@ export function normalizeIngestEvent(input: unknown): NormalizeEventResult {
       cost_usd: costUsd,
       cache_read_tokens: cacheReadTokens,
       cache_write_tokens: cacheWriteTokens,
+      cache_write_1h_tokens: cacheWrite1hTokens,
       source,
     },
   };

@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile } from './claude-code.js';
 import { maintainSessionTraceSummary } from '../trace-quality/summary.js';
 import { pricingRegistry } from '../pricing/index.js';
+import { attributeCostSources } from '../pricing/cost-provenance.js';
 
 export interface ClaudeUsageRepairOptions {
   /** Root of the Claude installation holding `projects/`. Defaults to `~/.claude`. */
@@ -21,10 +22,13 @@ export type ClaudeUsageRepairReport = {
   rows_corrected: number;
   /** Of `rows_corrected`: rows zeroed because another row already bills the same producer line. */
   rows_deduplicated: number;
+  /** Of `rows_corrected`: rows whose 1-hour cache-write part was filled in or changed. */
+  rows_split_1h: number;
   rows_ambiguous: number;
   rows_without_transcript: number;
   sessions_resummarized: number;
   tokens_reclaimed: number;
+  /** Net cost removed; negative when billing 1-hour cache writes at their rate raises it. */
   cost_reclaimed_usd: number;
 };
 
@@ -36,17 +40,21 @@ interface StoredRow {
   tokens_out: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cache_write_1h_tokens: number;
   cost_usd: number | null;
   cost_source: string | null;
   model: string | null;
   client_timestamp: string | null;
 }
 
-type Buckets = [number, number, number, number];
+// input, output, cache read, cache write, and the 1-hour part of the cache write.
+type Buckets = [number, number, number, number, number];
 
 /**
  * Correct imported Claude Code rows that were billed once per content block
- * rather than once per assistant turn.
+ * rather than once per assistant turn, and fill in the 1-hour part of their
+ * cache writes where the transcript records it (rows imported before it was
+ * read bill those writes at the 5-minute rate).
  *
  * The transcript is the authority: each file is re-parsed with the corrected
  * parser and the stored row for a given `event_id` is aligned to what that line
@@ -82,6 +90,7 @@ export function repairClaudeImportUsage(
     rows_matched: 0,
     rows_corrected: 0,
     rows_deduplicated: 0,
+    rows_split_1h: 0,
     rows_ambiguous: 0,
     rows_without_transcript: 0,
     sessions_resummarized: 0,
@@ -116,6 +125,7 @@ export function repairClaudeImportUsage(
         event.tokens_out ?? 0,
         event.cache_read_tokens ?? 0,
         event.cache_write_tokens ?? 0,
+        event.cache_write_1h_tokens ?? 0,
       ];
       // Index under both ids a line can be stored as: the current one, and the
       // positional id every row imported before the uuid change still carries.
@@ -147,12 +157,7 @@ export function repairClaudeImportUsage(
   }
 
   // Pass 2: compare every stored import row against what its transcript says.
-  const rows = db.prepare(`
-    SELECT id, event_id, session_id, tokens_in, tokens_out, cache_read_tokens,
-           cache_write_tokens, cost_usd, cost_source, model, client_timestamp
-    FROM events
-    WHERE source = 'import' AND agent_type = 'claude_code' AND event_id IS NOT NULL
-  `).all() as StoredRow[];
+  const rows = readStoredRows(db, apply);
   const storedRows = new Map(rows.map(row => [row.event_id, row]));
   const corrections = new Map<string, Buckets | null>();
   for (const [id, list] of claims) corrections.set(id, resolveClaims(id, list, storedRows));
@@ -180,7 +185,7 @@ export function repairClaudeImportUsage(
     report.rows_matched++;
 
     const stored: Buckets = [
-      row.tokens_in, row.tokens_out, row.cache_read_tokens, row.cache_write_tokens,
+      row.tokens_in, row.tokens_out, row.cache_read_tokens, row.cache_write_tokens, row.cache_write_1h_tokens,
     ];
     if (corrected.every((value, index) => value === stored[index])) continue;
 
@@ -192,7 +197,9 @@ export function repairClaudeImportUsage(
 
     report.rows_corrected++;
     if (duplicate) report.rows_deduplicated++;
-    report.tokens_reclaimed += stored.reduce((sum, value, index) => sum + (value - corrected[index]), 0);
+    if (corrected[4] !== stored[4]) report.rows_split_1h++;
+    // The 1-hour part is already counted in the cache-write total.
+    report.tokens_reclaimed += stored.slice(0, 4).reduce((sum, value, index) => sum + (value - corrected[index]), 0);
     report.cost_reclaimed_usd += (row.cost_usd ?? 0) - (cost ?? 0);
     pending.push({ row, corrected, cost });
     touchedSessions.add(row.session_id);
@@ -203,12 +210,13 @@ export function repairClaudeImportUsage(
   if (apply && pending.length > 0) {
     const updateRow = db.prepare(`
       UPDATE events
-      SET tokens_in = ?, tokens_out = ?, cache_read_tokens = ?, cache_write_tokens = ?, cost_usd = ?
+      SET tokens_in = ?, tokens_out = ?, cache_read_tokens = ?, cache_write_tokens = ?, cache_write_1h_tokens = ?,
+          cost_usd = ?
       WHERE id = ?
     `);
     const run = db.transaction(() => {
       for (const { row, corrected, cost } of pending) {
-        updateRow.run(corrected[0], corrected[1], corrected[2], corrected[3], cost, row.id);
+        updateRow.run(corrected[0], corrected[1], corrected[2], corrected[3], corrected[4], cost, row.id);
       }
     });
     run();
@@ -226,7 +234,34 @@ export function repairClaudeImportUsage(
   return report;
 }
 
-const ZERO: Buckets = [0, 0, 0, 0];
+const ZERO: Buckets = [0, 0, 0, 0, 0];
+const DRY_RUN_ROLLBACK = Symbol('dry-run rollback');
+
+/**
+ * The stored import rows, with costs written before provenance was recorded
+ * labelled first. That label compares a cost with the tables at the row's
+ * current tokens, so it has to be decided before the repair changes them: an
+ * estimate kept beside a newly recorded split would no longer match and be
+ * pinned as `reported`. A dry run reads the labels and rolls them back.
+ */
+function readStoredRows(db: Database, apply: boolean): StoredRow[] {
+  let rows: StoredRow[] = [];
+  try {
+    db.transaction(() => {
+      attributeCostSources(db);
+      rows = db.prepare(`
+        SELECT id, event_id, session_id, tokens_in, tokens_out, cache_read_tokens,
+               cache_write_tokens, cache_write_1h_tokens, cost_usd, cost_source, model, client_timestamp
+        FROM events
+        WHERE source = 'import' AND agent_type = 'claude_code' AND event_id IS NOT NULL
+      `).all() as StoredRow[];
+      if (!apply) throw DRY_RUN_ROLLBACK;
+    })();
+  } catch (err) {
+    if (err !== DRY_RUN_ROLLBACK) throw err;
+  }
+  return rows;
+}
 
 function correctedCost(row: StoredRow, corrected: Buckets): number | null {
   if (row.cost_source !== 'estimated' || !row.model) return row.cost_usd;
@@ -235,6 +270,7 @@ function correctedCost(row: StoredRow, corrected: Buckets): number | null {
     output: corrected[1],
     cacheRead: corrected[2],
     cacheWrite: corrected[3],
+    cacheWrite1h: corrected[4],
   }, row.client_timestamp) ?? row.cost_usd;
 }
 

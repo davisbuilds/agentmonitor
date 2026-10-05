@@ -32,7 +32,7 @@ test('a read-only command installs the agent-filter indexes on a database from b
   assert.deepEqual(present, [
     { name: 'idx_events_agent_created_order' }, { name: 'idx_events_agent_event_covering' }, { name: 'idx_events_agent_tool_order' },
   ]);
-  assert.equal(db.pragma('user_version', { simple: true }), 14);
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
 });
 
 test('a read-only command replaces the v11 agent+event-type index with the covering one', async () => {
@@ -50,7 +50,7 @@ test('a read-only command replaces the v11 agent+event-type index with the cover
 
   const names = db.prepare(`SELECT name FROM sqlite_master WHERE name LIKE 'idx_events_agent_event%' ORDER BY name`).all();
   assert.deepEqual(names, [{ name: 'idx_events_agent_event_covering' }]);
-  assert.equal(db.pragma('user_version', { simple: true }), 14);
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
 });
 
 test('a read-only command installs the session-window index on a v12 database', async () => {
@@ -63,7 +63,7 @@ test('a read-only command installs the session-window index on a v12 database', 
   schema.ensureSchemaForRead();
 
   assert.deepEqual(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'idx_events_session_window'`).all(), [{ name: 'idx_events_session_window' }]);
-  assert.equal(db.pragma('user_version', { simple: true }), 14);
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
 });
 
 test('a read-only command drops the events indexes v14 retired on a v13 database, keeping the study index', async () => {
@@ -81,5 +81,20 @@ test('a read-only command drops the events indexes v14 retired on a v13 database
   const remaining = db.prepare(`SELECT name FROM sqlite_master
     WHERE name IN ('idx_events_agent_type', 'idx_events_study_id', 'idx_events_created_model')`).all();
   assert.deepEqual(remaining, [{ name: 'idx_events_study_id' }]);
-  assert.equal(db.pragma('user_version', { simple: true }), 14);
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
+});
+
+test('a read-only command adds the 1-hour cache-write column on a v14 database', async () => {
+  const connection = await import('../src/db/connection.js');
+  const schema = await import('../src/db/schema.js');
+  const db = connection.getDb();
+  assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
+  db.exec('ALTER TABLE events DROP COLUMN cache_write_1h_tokens; PRAGMA user_version = 14');
+
+  schema.ensureSchemaForRead();
+
+  const column = (db.prepare('PRAGMA table_info(events)').all() as Array<{ name: string; notnull: number; dflt_value: string | null }>)
+    .find(entry => entry.name === 'cache_write_1h_tokens');
+  assert.deepEqual(column && { notnull: column.notnull, dflt_value: column.dflt_value }, { notnull: 1, dflt_value: '0' });
+  assert.equal(db.pragma('user_version', { simple: true }), 15);
 });
