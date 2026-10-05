@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { stripInlineImages } from '../util/inline-images.js';
 import { claudeInvocationMode } from '../util/invocation-mode.js';
 import { config } from '../config.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
@@ -410,7 +411,7 @@ export function parseSessionMessages(
               tool_name: block.name,
               category: categorizeToolName(block.name),
               tool_use_id: block.id ?? null,
-              input_json: block.input != null ? JSON.stringify(block.input) : null,
+              input_json: block.input != null ? stripInlineImages(JSON.stringify(block.input)) : null,
               subagent_session_id: extractSubagentSessionId(block.input),
               message_ordinal: messages.length, // current message index
             });
@@ -431,7 +432,7 @@ export function parseSessionMessages(
       }
     }
 
-    const contentJson = JSON.stringify(normalizedBlocks);
+    const contentJson = stripInlineImages(JSON.stringify(normalizedBlocks));
     const timestamp = line.timestamp ?? null;
 
     // Track timestamps for session metadata
