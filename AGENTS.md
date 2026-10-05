@@ -45,6 +45,7 @@ pnpm frontend:dev # terminal 2: Svelte at :5173 with API proxy
 pnpm build
 pnpm link --global
 amon serve        # compiled app at https://agentmonitor.localhost
+amon service install  # or run it as a macOS login service (launchd)
 ```
 
 Full command catalog (build, test, parity, import, reparse, seed, bench) is in `docs/system/OPERATIONS.md`.
@@ -59,9 +60,15 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - If a public API response shape changes, update the owning contract or reference
   when its statement changes; route exact shapes through source and tests.
 - **`performance.now()` vs `Date.now()`**: Never mix these in deadline calculations. `performance.now()` returns monotonic ms from process start; `Date.now()` returns epoch ms (~1.7 trillion). Mixing them produces instant timeouts.
+- **The login service runs the `dist/` of the checkout that installed it.**
+  When `amon service status` shows it running, restart it with
+  `amon service restart`; do not start a second `amon serve` beside it (the
+  database's runtime lock refuses one). launchd also restarts it after a crash,
+  loading whatever `dist/` holds at that moment, so build experiments in a
+  worktree rather than that checkout.
 - **Codex OTEL drop-out**: if Codex terminal activity is visible but `source=otel` stops updating, verify Codex is exporting OTLP to `127.0.0.1:3141` and not a stale endpoint (e.g. an old `:3142` runtime config).
 - **Provider quotas**: Monitor header uses provider-native snapshots only. Codex from local `codex app-server`; Claude requires the statusline bridge or renders as unavailable rather than estimated.
-- **Every gate reads `src/`; only the built server reads `dist/`**: `pnpm test` (tsx), `pnpm dev` (tsx) and `pnpm lint` all run from source. `amon serve` — how the tool is actually used — loads `dist/`. So a bug in what the build *emits* passes lint, build, and test simultaneously. This shipped stale pricing tables for five months (`cp -r` nesting into `dist/pricing/data/data/`), and an unpriced model bills as **$0 rather than raising**, so the dashboard stayed plausible while under-reporting the top models. `scripts/check-pricing-dist.mjs` guards that one case; the class is wider — any non-TS asset the build copies has this shape. If a bug reproduces for the user but not in tests, check whether they run the built path while you are testing `src/`. A rebuild is not live until the server restarts: `/api/health` `build.stale` (and the app's **Restart needed** notice) says when the running server is older than `dist/`.
+- **Every gate reads `src/`; only the built server reads `dist/`**: `pnpm test` (tsx), `pnpm dev` (tsx) and `pnpm lint` all run from source. `amon serve` — how the tool is actually used — loads `dist/`. So a bug in what the build *emits* passes lint, build, and test simultaneously. This shipped stale pricing tables for five months (`cp -r` nesting into `dist/pricing/data/data/`), and an unpriced model bills as **$0 rather than raising**, so the dashboard stayed plausible while under-reporting the top models. `scripts/check-pricing-dist.mjs` guards that one case; the class is wider — any non-TS asset the build copies has this shape. If a bug reproduces for the user but not in tests, check whether they run the built path while you are testing `src/`. A rebuild is not live until the server restarts (`amon service restart` for the login service): `/api/health` `build.stale` (and the app's **Restart needed** notice) says when the running server is older than `dist/`.
 
 ## Testing
 
