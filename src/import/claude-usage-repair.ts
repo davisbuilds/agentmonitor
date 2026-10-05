@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile } from './claude-code.js';
 import { maintainSessionTraceSummary } from '../trace-quality/summary.js';
 import { pricingRegistry } from '../pricing/index.js';
+import { attributeCostSources } from '../pricing/cost-provenance.js';
 
 export interface ClaudeUsageRepairOptions {
   /** Root of the Claude installation holding `projects/`. Defaults to `~/.claude`. */
@@ -156,12 +157,7 @@ export function repairClaudeImportUsage(
   }
 
   // Pass 2: compare every stored import row against what its transcript says.
-  const rows = db.prepare(`
-    SELECT id, event_id, session_id, tokens_in, tokens_out, cache_read_tokens,
-           cache_write_tokens, cache_write_1h_tokens, cost_usd, cost_source, model, client_timestamp
-    FROM events
-    WHERE source = 'import' AND agent_type = 'claude_code' AND event_id IS NOT NULL
-  `).all() as StoredRow[];
+  const rows = readStoredRows(db, apply);
   const storedRows = new Map(rows.map(row => [row.event_id, row]));
   const corrections = new Map<string, Buckets | null>();
   for (const [id, list] of claims) corrections.set(id, resolveClaims(id, list, storedRows));
@@ -239,6 +235,33 @@ export function repairClaudeImportUsage(
 }
 
 const ZERO: Buckets = [0, 0, 0, 0, 0];
+const DRY_RUN_ROLLBACK = Symbol('dry-run rollback');
+
+/**
+ * The stored import rows, with costs written before provenance was recorded
+ * labelled first. That label compares a cost with the tables at the row's
+ * current tokens, so it has to be decided before the repair changes them: an
+ * estimate kept beside a newly recorded split would no longer match and be
+ * pinned as `reported`. A dry run reads the labels and rolls them back.
+ */
+function readStoredRows(db: Database, apply: boolean): StoredRow[] {
+  let rows: StoredRow[] = [];
+  try {
+    db.transaction(() => {
+      attributeCostSources(db);
+      rows = db.prepare(`
+        SELECT id, event_id, session_id, tokens_in, tokens_out, cache_read_tokens,
+               cache_write_tokens, cache_write_1h_tokens, cost_usd, cost_source, model, client_timestamp
+        FROM events
+        WHERE source = 'import' AND agent_type = 'claude_code' AND event_id IS NOT NULL
+      `).all() as StoredRow[];
+      if (!apply) throw DRY_RUN_ROLLBACK;
+    })();
+  } catch (err) {
+    if (err !== DRY_RUN_ROLLBACK) throw err;
+  }
+  return rows;
+}
 
 function correctedCost(row: StoredRow, corrected: Buckets): number | null {
   if (row.cost_source !== 'estimated' || !row.model) return row.cost_usd;

@@ -338,7 +338,10 @@ The repair also bills each transcript line once when several rows hold it:
   transcript's tokens under the child's provenance.
 
 A row that now bills different, non-zero tokens keeps a reported cost; an
-estimated cost is recomputed from the new tokens.
+estimated cost is recomputed from the new tokens. On a store older than cost
+provenance, the repair first labels each unlabelled cost as estimated or
+reported, the same way startup does, so that comparison runs against the tokens
+the cost was written for.
 
 Each turn is billed with the usage on its **last** line. Every line of a turn
 repeats its input and cache counts; a main transcript repeats the final output

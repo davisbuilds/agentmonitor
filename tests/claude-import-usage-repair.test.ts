@@ -671,7 +671,7 @@ describe('Claude import usage repair', () => {
     const uuidId = (uuid: string) => `import-ccu-${crypto.createHash('sha256').update(`claude-code:uuid:${uuid}`).digest('hex').slice(0, 32)}`;
 
     /** One single-line turn per uuid, and the row the importer stored for it before reading the split. */
-    function scenario(name: string, options: { split: boolean; costSource?: 'estimated' | 'reported' }) {
+    function scenario(name: string, options: { split: boolean; costSource?: 'estimated' | 'reported' | null; cost?: number }) {
       const claudeDir = fs.mkdtempSync(path.join(tempDir, `claude-${name}-`));
       const dir = path.join(claudeDir, 'projects', '-Users-someone-project');
       fs.mkdirSync(dir, { recursive: true });
@@ -681,8 +681,8 @@ describe('Claude import usage repair', () => {
         type: 'assistant', sessionId, uuid, timestamp: '2026-09-01T10:00:00Z',
         message: { id: `msg-${name}`, model: SPLIT_MODEL, usage: usage(options.split), content: [{ type: 'text', text: 'x' }] },
       }));
-      const costSource = options.costSource ?? 'estimated';
-      const cost = costSource === 'reported' ? 1.23 : flatCost;
+      const costSource = options.costSource === undefined ? 'estimated' : options.costSource;
+      const cost = options.cost ?? (costSource === 'reported' ? 1.23 : flatCost);
       getDb().prepare(`
         INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out,
           cache_read_tokens, cache_write_tokens, model, cost_usd, cost_source, source, client_timestamp)
@@ -692,7 +692,9 @@ describe('Claude import usage repair', () => {
         SELECT tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cache_write_1h_tokens, cost_usd
         FROM events WHERE event_id = ?
       `).get(uuidId(uuid)) as Record<string, number>;
-      return { claudeDir, row };
+      const costSourceOf = () => (getDb().prepare('SELECT cost_source FROM events WHERE event_id = ?')
+        .get(uuidId(uuid)) as { cost_source: string | null }).cost_source;
+      return { claudeDir, row, costSourceOf };
     }
 
     test('reports the split on a dry run without writing it', () => {
@@ -726,6 +728,34 @@ describe('Claude import usage repair', () => {
       repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
       assert.equal(row().cache_write_1h_tokens, 600_000);
       assert.equal(row().cost_usd, 1.23);
+    });
+
+    // A store older than cost provenance holds costs with no cost_source until
+    // startup or a recalc labels them, by comparing each cost with the tables.
+    // Keeping the flat-rate cost beside the recorded split would make that
+    // comparison fail and pin the stale estimate as reported.
+    test('labels a legacy estimate before applying the split, so it is re-estimated rather than pinned', () => {
+      const { claudeDir, row, costSourceOf } = scenario('legacy', { split: true, costSource: null });
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+      assert.equal(report.rows_split_1h, 1);
+      assert.equal(costSourceOf(), 'estimated');
+      assert.ok(Math.abs(row().cost_usd - splitCost) < 1e-9, `${row().cost_usd}`);
+    });
+
+    test('labels a legacy reported cost and keeps it', () => {
+      const { claudeDir, row, costSourceOf } = scenario('legacy-reported', { split: true, costSource: null, cost: 1.23 });
+      repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
+      assert.equal(costSourceOf(), 'reported');
+      assert.equal(row().cache_write_1h_tokens, 600_000);
+      assert.equal(row().cost_usd, 1.23);
+    });
+
+    test('a dry run reports a legacy estimate as re-estimated without labelling it', () => {
+      const { claudeDir, row, costSourceOf } = scenario('legacy-dry', { split: true, costSource: null });
+      const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: false });
+      assert.ok(Math.abs(report.cost_reclaimed_usd - (flatCost - splitCost)) < 1e-9, `${report.cost_reclaimed_usd}`);
+      assert.equal(costSourceOf(), null);
+      assert.equal(row().cost_usd, flatCost);
     });
 
     test('leaves a row alone when its transcript predates the split', () => {
