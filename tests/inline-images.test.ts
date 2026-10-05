@@ -49,16 +49,26 @@ test('an image in serialized JSON that no longer parses is still stripped', () =
   assert.ok(text.includes(`"media_type":"application/pdf","data":"${data}"`), 'non-image data stays');
 });
 
+test('small images are stripped too', () => {
+  const small = Buffer.from('tiny-png');
+  const tiny = JSON.stringify({ type: 'base64', media_type: 'image/png', data: small.toString('base64') });
+  const expected = `omitted-image;sha256=${createHash('sha256').update(small).digest('hex')};bytes=${small.length}`;
+  assert.equal(JSON.parse(stripInlineImages(tiny)).data, expected);
+});
+
+test('a data URI with media type parameters is stripped', () => {
+  const out = stripInlineImages(JSON.stringify({ text: `<img src="data:image/svg+xml;charset=utf-8;base64,${data}">` }));
+  assert.equal(JSON.parse(out).text, `<img src="data:image/svg+xml;charset=utf-8;${descriptor}">`);
+});
+
 test('a data URI image is stripped in place', () => {
   const out = stripInlineImages(JSON.stringify({ text: `[image1]: <data:image/png;base64,${data}>` }));
   assert.equal(JSON.parse(out).text, `[image1]: <data:image/png;${descriptor}>`);
 });
 
-test('other long strings and short images are left alone, and stripping is idempotent', () => {
+test('other long strings are left alone, and stripping is idempotent', () => {
   const unrelated = JSON.stringify({ type: 'file', encoding: 'base64', data });
   assert.equal(stripInlineImages(unrelated), unrelated, 'only base64 image sources are stripped');
-  const tiny = JSON.stringify({ type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' });
-  assert.equal(stripInlineImages(tiny), tiny);
   const once = stripInlineImages(JSON.stringify([{ type: 'base64', media_type: 'image/png', data }]));
   assert.equal(stripInlineImages(once), once);
 });
@@ -77,8 +87,14 @@ test('the Claude parser stores pasted and tool-result images as descriptors', ()
       { type: 'tool_result', tool_use_id: 't1', content: [imageBlock] },
     ] } },
   ];
+  lines.push({ type: 'assistant', uuid: 'a1', timestamp: '2026-10-05T10:00:10Z', message: { role: 'assistant', content: [
+    { type: 'tool_use', id: 't2', name: 'mcp__browser__upload', input: { image: imageBlock } },
+  ] } } as unknown as typeof lines[number]);
   const parsed = parseSessionMessages(lines.map(line => JSON.stringify(line)).join('\n'), 's-img', '/tmp/s-img.jsonl');
-  assert.equal(parsed.messages.length, 2);
+  assert.equal(parsed.messages.length, 3);
+  assert.equal(parsed.toolCalls.length, 1);
+  assert.ok(!parsed.toolCalls[0].input_json?.includes(data.slice(0, 200)), 'tool-call inputs keep no image data');
+  assert.ok(parsed.toolCalls[0].input_json?.includes(descriptor));
   for (const message of parsed.messages) {
     assert.ok(!message.content.includes(data.slice(0, 200)), 'no image data is stored');
     assert.ok(message.content.includes(descriptor));
@@ -109,7 +125,10 @@ test('v16 strips images already stored, and the search index forgets them', () =
       INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
     END;
     CREATE TABLE session_items (id INTEGER PRIMARY KEY, session_id TEXT, payload_json TEXT);
+    CREATE TABLE tool_calls (id INTEGER PRIMARY KEY, session_id TEXT, input_json TEXT, result_content TEXT);
   `);
+  db.prepare('INSERT INTO tool_calls (session_id, input_json, result_content) VALUES (?, ?, ?)')
+    .run('s', JSON.stringify({ image: imageBlock }), JSON.stringify([imageBlock]));
   const withImage = JSON.stringify([{ type: 'text', text: 'screenshot attached' }, imageBlock]);
   const plain = JSON.stringify([{ type: 'text', text: 'no base64 here' }]);
   const insert = db.prepare('INSERT INTO messages (session_id, ordinal, role, content, content_length) VALUES (?, ?, ?, ?, ?)');
@@ -129,6 +148,8 @@ test('v16 strips images already stored, and the search index forgets them', () =
   assert.equal(rows[1].content, plain);
   const item = (db.prepare('SELECT payload_json FROM session_items').get() as { payload_json: string }).payload_json;
   assert.ok(!item.includes(data.slice(0, 200)));
+  const call = db.prepare('SELECT input_json, result_content FROM tool_calls').get() as { input_json: string; result_content: string };
+  assert.ok(!call.input_json.includes(data.slice(0, 200)) && !call.result_content.includes(data.slice(0, 200)), 'tool calls keep no image data');
   assert.equal(hits(imageToken), 0, 'the index no longer holds the image data');
   assert.equal(hits('screenshot'), 1, 'the message text is still searchable');
   assert.equal(db.pragma('user_version', { simple: true }), 16);

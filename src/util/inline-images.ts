@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 
-// Base64 shorter than this (under ~190 bytes of image) is not worth a descriptor.
-const MIN_BASE64_CHARS = 256;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
-const DATA_URI = new RegExp(String.raw`(data:image/[a-z0-9.+-]+;)base64,([A-Za-z0-9+/]{${MIN_BASE64_CHARS},}={0,2})`, 'gi');
+// An image data URI, media type parameters (`;charset=utf-8`) included.
+const DATA_URI = /(data:image\/[a-z0-9.+-]+(?:;[a-z0-9.+-]+=[^;,"'\s\\]*)*;)base64,([A-Za-z0-9+/]+={0,2})/gi;
 
 function describe(base64: string): string {
   const bytes = Buffer.from(base64, 'base64');
@@ -15,7 +14,7 @@ function describe(base64: string): string {
 // escaping depth (group 2 holds the backslashes before each quote).
 const SERIALIZED_IMAGE_SOURCE = new RegExp(
   String.raw`((\\*)"type\2":\s*\2"base64\2",\s*\2"media_type\2":\s*\2"image/[^"\\]*\2",\s*\2"data\2":\s*\2")`
-  + String.raw`([A-Za-z0-9+/]{${MIN_BASE64_CHARS},}={0,2})`,
+  + String.raw`([A-Za-z0-9+/]+={0,2})`,
   'gi',
 );
 
@@ -33,7 +32,7 @@ function describeTextualImages(text: string): string {
 function isImageSource(value: Record<string, unknown>, parentType: unknown): value is Record<string, unknown> & { data: string } {
   if (value['type'] !== 'base64') return false;
   const data = value['data'];
-  if (typeof data !== 'string' || data.length < MIN_BASE64_CHARS || !BASE64.test(data)) return false;
+  if (typeof data !== 'string' || !BASE64.test(data)) return false;
   const mediaType = value['media_type'];
   return typeof mediaType === 'string' ? mediaType.toLowerCase().startsWith('image/') : parentType === 'image';
 }

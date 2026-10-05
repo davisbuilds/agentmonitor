@@ -411,7 +411,7 @@ export function parseSessionMessages(
               tool_name: block.name,
               category: categorizeToolName(block.name),
               tool_use_id: block.id ?? null,
-              input_json: block.input != null ? JSON.stringify(block.input) : null,
+              input_json: block.input != null ? stripInlineImages(JSON.stringify(block.input)) : null,
               subagent_session_id: extractSubagentSessionId(block.input),
               message_ordinal: messages.length, // current message index
             });

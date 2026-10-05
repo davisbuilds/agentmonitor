@@ -1096,15 +1096,15 @@ export function runDataMigrations(db: Database): void {
 }
 
 /**
- * v16 — replace inline base64 image data in stored transcript rows with the
- * descriptor the parsers now write (see `stripInlineImages`). Nothing renders
+ * v16 — replace inline base64 image data in stored transcript and tool-call rows
+ * with the descriptor the parsers now write (see `stripInlineImages`). Nothing renders
  * stored images; their base64 was a large share of message text and of the
  * search index, which the messages trigger updates as each row changes. The
  * pages freed stay in the file until the database is compacted.
  */
 function stripStoredInlineImages(db: Database): void {
   const tables = new Set((db.prepare(
-    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('messages', 'session_items')",
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('messages', 'session_items', 'tool_calls')",
   ).all() as Array<{ name: string }>).map(row => row.name));
   if (tables.has('messages')) {
     const update = db.prepare('UPDATE messages SET content = ?, content_length = ? WHERE id = ?');
@@ -1120,6 +1120,17 @@ function stripStoredInlineImages(db: Database): void {
     for (const row of rows) {
       const payload = stripInlineImages(row.payload_json);
       if (payload !== row.payload_json) update.run(payload, row.id);
+    }
+  }
+  if (tables.has('tool_calls')) {
+    const update = db.prepare('UPDATE tool_calls SET input_json = ?, result_content = ? WHERE id = ?');
+    const rows = db.prepare(
+      "SELECT id, input_json, result_content FROM tool_calls WHERE input_json LIKE '%base64%' OR result_content LIKE '%base64%'",
+    ).all() as Array<{ id: number; input_json: string | null; result_content: string | null }>;
+    for (const row of rows) {
+      const input = row.input_json === null ? null : stripInlineImages(row.input_json);
+      const result = row.result_content === null ? null : stripInlineImages(row.result_content);
+      if (input !== row.input_json || result !== row.result_content) update.run(input, result, row.id);
     }
   }
 }
