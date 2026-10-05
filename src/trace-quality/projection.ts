@@ -748,7 +748,12 @@ function sortedToolCalls(toolCalls: readonly ToolCallProjectionSource[]): ToolCa
   return [...toolCalls].sort((a, b) => a.id - b.id);
 }
 
-export function coverageForEvents(events: readonly EventProjectionSource[]): TraceQualityCoverage {
+export function coverageForEvents(
+  events: readonly Pick<
+    EventProjectionSource,
+    'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'event_type' | 'tool_name'
+  >[],
+): TraceQualityCoverage {
   const hasTokenUsage = events.some(event =>
     event.tokens_in > 0
     || event.tokens_out > 0
