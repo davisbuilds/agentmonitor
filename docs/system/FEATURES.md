@@ -57,6 +57,10 @@ product never substitutes a misleading `0%` for missing evidence.
   tool calls, metadata, and an activity minimap for long sessions.
 - Search supports recency and relevance ordering and includes enough session
   context to navigate directly to the matching ordinal.
+- Inline images (pasted images, screenshots in tool results) are stored as a
+  descriptor with their SHA-256 and size, not their base64 data, so they are
+  neither shown nor searchable. AgentMonitor keeps no copy: once a source
+  transcript is gone, so are its images.
 - Pinned transcript moments use session-plus-ordinal identity so they survive
   re-imports that replace internal row IDs.
 - The global `Cmd/Ctrl+K` palette searches recent sessions and transcript matches

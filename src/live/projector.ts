@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { stripInlineImages } from '../util/inline-images.js';
 import type { CanonicalLiveItem } from './normalize.js';
 
 export type ProjectionFidelity = 'summary' | 'full';
@@ -350,7 +351,7 @@ export function insertProjectedItem(
     item.source_item_id ?? null,
     item.kind,
     item.status ?? null,
-    JSON.stringify(item.payload),
+    stripInlineImages(JSON.stringify(item.payload)),
     item.created_at ?? null,
   );
 }

@@ -1,5 +1,6 @@
 import path from 'path';
 import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
+import { findSubagentBoundary } from './codex-subagent-boundary.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
 import {
   parseCodexCatalogPresentations,
@@ -145,6 +146,23 @@ export function parseCodexSessionMessages(
       malformedRecords++;
     }
     sourceOrdinal++;
+  }
+
+  // A spawned subagent's rollout can open with a copy of the parent's turns,
+  // which the parent session already shows. Browse the child from its own first
+  // turn, keeping only the instruction preamble written before the copy. Only
+  // inherited activity (a turn or a request) proves a copy: a compaction with
+  // neither after it, before the child's first surviving turn, is the child's
+  // own earlier work.
+  const boundary = findSubagentBoundary(lines.map(entry => entry.line));
+  if (boundary.kind === 'resolved') {
+    const preBoundary = lines.slice(0, boundary.line);
+    const copyStart = preBoundary.findIndex(entry =>
+      entry.line.type === 'turn_context' || entry.line.type === 'compacted');
+    const inherited = copyStart >= 0 && preBoundary.slice(copyStart).some(entry =>
+      entry.line.type === 'turn_context'
+      || (entry.line.type === 'event_msg' && entry.line.payload?.type === 'token_count'));
+    if (inherited) lines.splice(copyStart, boundary.line - copyStart);
   }
 
   // Extract session metadata

@@ -167,6 +167,12 @@ emit nothing, so the child's own ids are unchanged. A subagent with no datable
 turn is billed as before and flagged `_subagent_boundary: unresolved`.
 `amon costs repair-codex-usage` applies both rules to rows stored earlier (see
 OPERATIONS).
+The session browser uses the same boundary: a subagent's transcript, tool calls
+and context observations start at its own first turn, keeping only the
+instruction preamble written before the copy; the parent session shows the
+copied turns. Only inherited turns or requests mark a copy, so a child's own
+compaction before its first surviving turn stays. Plain forks (`forked_from_id` without `thread_spawn`) and
+unresolved subagents keep their whole rollout.
 
 ### Session Browser And Live
 
