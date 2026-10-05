@@ -14,5 +14,6 @@ send_event({
     "agent_type": "claude_code",
     "event_type": "session_end",
     "project": get_project(),
+    "cwd": extract("cwd"),
     "source": "hook",
 })

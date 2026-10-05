@@ -37,6 +37,7 @@ send_event "$(cat <<EOF
   "agent_type": "claude_code",
   "event_type": "instruction_load",
   "project": "$(json_escape "$PROJECT")",
+  "cwd": "$(json_escape "$(extract_field cwd)")",
   "source": "hook",
   "metadata": $METADATA
 }

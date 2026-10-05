@@ -40,6 +40,7 @@ if SAFETY_ENABLED and TOOL_NAME == "Bash" and COMMAND:
             "tool_name": TOOL_NAME,
             "status": "error",
             "project": PROJECT,
+            "cwd": extract("cwd"),
             "source": "hook",
             "metadata": {
                 "blocked": True,
@@ -60,6 +61,7 @@ if SAFETY_ENABLED and FILE_PATH:
             "event_type": "tool_use",
             "tool_name": TOOL_NAME,
             "project": PROJECT,
+            "cwd": extract("cwd"),
             "source": "hook",
             "metadata": {
                 "security_warning": True,

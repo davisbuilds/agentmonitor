@@ -75,7 +75,12 @@ product never substitutes a misleading `0%` for missing evidence.
 ## Analytics And Skill Evidence
 
 Analytics covers activity over time, projects, agents, tools, hour-of-week patterns,
-velocity, and high-volume sessions. Capability metadata distinguishes all-session
+velocity, and high-volume sessions. A project is the git repository a session's
+working directory belongs to, named after the repository root: subdirectories
+and worktrees in a worktree area (`.worktrees/`, `*-worktrees/`,
+`.claude/worktrees/`, `.codex/worktrees/`) count as their repository, also once
+removed. A directory outside any repository is named after itself; sessions that
+record no working directory (Codex OTEL-only, Antigravity) have no project. Capability metadata distinguishes all-session
 aggregates from tool or transcript analysis that excludes unsupported sources.
 
 Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of

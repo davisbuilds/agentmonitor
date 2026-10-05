@@ -19,6 +19,7 @@ send_event "$(cat <<EOF
   "agent_type": "claude_code",
   "event_type": "user_prompt",
   "project": "$(json_escape "$PROJECT")",
+  "cwd": "$(json_escape "$(extract_field cwd)")",
   "source": "hook",
   "metadata": {"message": "$(json_escape "$PROMPT")"}
 }

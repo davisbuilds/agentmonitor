@@ -22,6 +22,7 @@ send_event({
     "event_type": "tool_use",
     "tool_name": extract("tool_name"),
     "project": get_project(),
+    "cwd": extract("cwd"),
     "source": "hook",
     "metadata": meta,
 })

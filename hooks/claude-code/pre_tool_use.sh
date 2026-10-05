@@ -40,6 +40,7 @@ if [ "$SAFETY_ENABLED" = "1" ] && [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]
   "tool_name": "$TOOL_NAME_ESC",
   "status": "error",
   "project": "$PROJECT_ESC",
+  "cwd": "$(json_escape "$(extract_field cwd)")",
   "source": "hook",
   "metadata": {"blocked": true, "reason": "destructive_command", "command": "$COMMAND_ESC"}
 }
@@ -60,6 +61,7 @@ if [ "$SAFETY_ENABLED" = "1" ] && [ -n "$FILE_PATH" ]; then
   "event_type": "tool_use",
   "tool_name": "$TOOL_NAME_ESC",
   "project": "$PROJECT_ESC",
+  "cwd": "$(json_escape "$(extract_field cwd)")",
   "source": "hook",
   "metadata": {"security_warning": true, "file_path": "$FILE_PATH_ESC", "reason": "sensitive_file_access"}
 }
