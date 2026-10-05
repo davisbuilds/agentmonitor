@@ -482,20 +482,6 @@ entries below record what was measured, not the report's claims.
   stored byte offset with a trailing-anchor check, as `agentsview` does
   (`internal/sync/checkpoint.go`), falling back to a full parse on mismatch.
 
-#### Session project names fragment
-- **What**: the session browser derives a project name from each session's path,
-  so one project can appear under several names and some sessions get none.
-- **Why or evidence**: measured 2026-10-01 on a local store. Fragmentation is
-  real but mostly not the git-worktree cause the `agentsview` report suggested
-  (its `internal/parser/project.go` resolves worktree gitfiles):
-  - per-run automation workspaces each become their own date-stamped project;
-  - about a fifth of browser sessions have no project;
-  - the same parent folder appears under two names (the Claude path decoder in
-    `projectFromPath` and the cwd basename disagree).
-- **Next**: define one canonical project identity (resolved repo root, with
-  worktree gitfiles followed to their common dir) and re-derive existing rows;
-  `skillContext.projectIdentity` from cwd is a candidate source to reuse.
-
 #### Inline base64 images bloat the store and the search index
 - **What**: image blocks (screenshots, pasted images) are stored inline as base64
   in `messages.content`, and the content-linked FTS index tokenizes them.

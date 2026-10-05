@@ -411,6 +411,44 @@ export function registerMaintenanceCommands(): void {
   });
 
   registerCommand({
+    name: 'sessions repair-projects',
+    group: 'Data Commands',
+    summary: 'Rename stored projects to their repository, re-derived from each session transcript',
+    // Reports by default: this rewrites stored history, so writing is opt-in
+    // through --apply rather than opt-out through --dry-run.
+    usage: 'sessions repair-projects [--apply] [--claude-dir <path>] [--codex-dir <path>]',
+    examples: [
+      'sessions repair-projects --json',
+      'sessions repair-projects --apply',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--claude-dir', '--codex-dir']), new Set(['--apply']));
+      rejectExtraPositionals(parsed.positionals, 'amon sessions repair-projects [--apply]');
+      const { createConfig } = await import('../../config.js');
+      const runtimeConfig = createConfig();
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb, getDb } = await import('../../db/connection.js');
+      const { repairProjectNames } = await import('../../import/project-repair.js');
+      initSchema();
+      try {
+        const report = repairProjectNames(getDb(), {
+          claudeDir: parsed.values.get('--claude-dir') ?? runtimeConfig.claudeDir,
+          codexDir: parsed.values.get('--codex-dir'),
+          apply: parsed.flags.has('--apply'),
+          excludePatterns: runtimeConfig.sync.excludePatterns,
+        });
+        printSummary(ctx, report.apply ? 'Project name repair' : 'Project name repair preview', report);
+        // The running server caches Monitor totals in its own process.
+        if (report.apply && report.sessions_changed > 0) {
+          console.error('Restart the AgentMonitor server so the Monitor shows the repaired names.');
+        }
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'costs recalc',
     group: 'Data Commands',
     summary: 'Recalculate event costs from pricing metadata',

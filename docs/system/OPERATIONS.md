@@ -570,6 +570,25 @@ store and a snapshot of its rollouts:
 - the Codex Monitor total fell by about 45%;
 - a second apply changed nothing.
 
+### Project name repair
+
+New sessions are named after their repository (see FEATURES). Rows stored
+earlier carry the old names: the working directory's basename for events,
+Monitor sessions and Codex browser rows, and a decoded folder name for Claude
+browser rows. `amon sessions repair-projects` re-derives each session from its
+transcript and renames those rows; event and session rows change only where they
+still carry the old basename. It reports by default and writes only with
+`--apply`:
+
+```sh
+amon sessions repair-projects --json            # preview, no writes
+amon sessions repair-projects --apply
+```
+
+Take a validated backup first, and restart the server afterwards so the
+Monitor's cached totals pick up the names. Sessions whose transcript is gone keep
+their names. Re-running finds nothing further to rename.
+
 ### Pricing a newly released model
 
 An unpriced model bills as **$0**, not as an error, and its rows keep a NULL
