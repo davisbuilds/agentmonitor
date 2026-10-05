@@ -7,6 +7,7 @@ import { registerMonitorCommands } from './commands/monitor.js';
 import { registerOpsCommands } from './commands/ops.js';
 import { registerReportingCommands } from './commands/reporting.js';
 import { registerRuntimeCommands } from './commands/runtime.js';
+import { registerServiceCommands } from './commands/service.js';
 import { registerSessionLiveCommands } from './commands/sessions-live.js';
 import { registerWarehouseCommands } from './commands/warehouse.js';
 import { commandHelp, rootHelp } from './help.js';
@@ -19,6 +20,7 @@ export function registerAllCommands(): void {
   registered = true;
 
   registerRuntimeCommands();
+  registerServiceCommands();
   registerDatabaseCommands();
   registerMaintenanceCommands();
   registerSessionLiveCommands();

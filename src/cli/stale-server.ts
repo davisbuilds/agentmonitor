@@ -15,7 +15,7 @@ export function staleServerWarning(
   if (!owner?.build || !mine || owner.build === mine) return null;
   return `Warning: the AgentMonitor server (PID ${owner.pid}) on this database is running a different build `
     + `(${owner.build}) than this command (${mine}). It keeps the code it started with, so it can write rows `
-    + 'the old way while this command writes them the new way. Restart `amon serve` to load this build.';
+    + 'the old way while this command writes them the new way. Restart `amon serve` (`amon service restart` if it runs as the service) to load this build.';
 }
 
 /** Warn on stderr when the server on this command's database runs another build. */
