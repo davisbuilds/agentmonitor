@@ -99,10 +99,11 @@ A server run from source (`pnpm dev`) reports `build.tracked: false`.
 
 ## Source Development
 
-After upgrading the Codex lineage parser, preserve a closed database backup and
-rehearse `amon sync sessions --source codex --force` on a separate database path
-before reparsing the live projection. Unchanged files otherwise retain their old
-null lineage; deploying the binary alone cannot classify that historical data.
+After upgrading the Codex session parser (lineage, or the subagent boundary),
+preserve a closed database backup and rehearse
+`amon sync sessions --source codex --force` on a separate database path before
+reparsing the live projection. Unchanged files otherwise keep their old
+projection; deploying the binary alone cannot reclassify or trim that history.
 Unknown source shapes remain unclassified. Reparse reads native files but never
 modifies them. [Daily activity](../api/activity-contract.md#daily-conversation-activity)
 is an aggregate read; inspect its response separately from the older
