@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { stripInlineImages } from '../util/inline-images.js';
 import { claudeInvocationMode } from '../util/invocation-mode.js';
 import { config } from '../config.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
@@ -431,7 +432,7 @@ export function parseSessionMessages(
       }
     }
 
-    const contentJson = JSON.stringify(normalizedBlocks);
+    const contentJson = stripInlineImages(JSON.stringify(normalizedBlocks));
     const timestamp = line.timestamp ?? null;
 
     // Track timestamps for session metadata

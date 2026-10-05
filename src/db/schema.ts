@@ -1,5 +1,6 @@
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
+import { stripInlineImages } from '../util/inline-images.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import {
@@ -1041,7 +1042,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 15;
+const DATA_SCHEMA_VERSION = 16;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1088,9 +1089,39 @@ export function runDataMigrations(db: Database): void {
     // and v14 only drops two events indexes no statement needs. v15 only adds
     // events.cache_write_1h_tokens; `amon costs repair-claude-usage` fills it
     // from the transcripts that record the split.
+    if (current < 16) stripStoredInlineImages(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v16 — replace inline base64 image data in stored transcript rows with the
+ * descriptor the parsers now write (see `stripInlineImages`). Nothing renders
+ * stored images; their base64 was a large share of message text and of the
+ * search index, which the messages trigger updates as each row changes. The
+ * pages freed stay in the file until the database is compacted.
+ */
+function stripStoredInlineImages(db: Database): void {
+  const tables = new Set((db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('messages', 'session_items')",
+  ).all() as Array<{ name: string }>).map(row => row.name));
+  if (tables.has('messages')) {
+    const update = db.prepare('UPDATE messages SET content = ?, content_length = ? WHERE id = ?');
+    const rows = db.prepare("SELECT id, content FROM messages WHERE content LIKE '%base64%'").all() as Array<{ id: number; content: string }>;
+    for (const row of rows) {
+      const content = stripInlineImages(row.content);
+      if (content !== row.content) update.run(content, content.length, row.id);
+    }
+  }
+  if (tables.has('session_items')) {
+    const update = db.prepare('UPDATE session_items SET payload_json = ? WHERE id = ?');
+    const rows = db.prepare("SELECT id, payload_json FROM session_items WHERE payload_json LIKE '%base64%'").all() as Array<{ id: number; payload_json: string }>;
+    for (const row of rows) {
+      const payload = stripInlineImages(row.payload_json);
+      if (payload !== row.payload_json) update.run(payload, row.id);
+    }
+  }
 }
 
 /**

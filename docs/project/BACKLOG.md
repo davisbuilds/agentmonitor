@@ -495,17 +495,3 @@ entries below record what was measured, not the report's claims.
 - **Next**: define one canonical project identity (resolved repo root, with
   worktree gitfiles followed to their common dir) and re-derive existing rows;
   `skillContext.projectIdentity` from cwd is a candidate source to reuse.
-
-#### Inline base64 images bloat the store and the search index
-- **What**: image blocks (screenshots, pasted images) are stored inline as base64
-  in `messages.content`, and the content-linked FTS index tokenizes them.
-- **Why or evidence**: measured 2026-10-01 on a local store: messages containing
-  base64 images are well under 1% of messages but about 15% of stored message
-  text. The FTS index once measured about four times the size of the `messages`
-  table, but 93% of that was dead entries a merge removes; merged, it is about
-  0.4 times the table (2026-10-01). How much of the live index the image tokens
-  cause is not yet measured. `agentsview` strips such images to a descriptor with a SHA-256
-  and byte count (`internal/db/tool_result_images.go`).
-- **Next**: measure the index share by rebuilding FTS on a copy with image data
-  removed. If material, replace image data with a descriptor in the parsers,
-  then re-sync and rebuild the index.
