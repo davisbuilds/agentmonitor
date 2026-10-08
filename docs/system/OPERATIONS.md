@@ -776,7 +776,10 @@ only to a fresh scratch database, removed afterwards, or to a snapshot directory
 created by `probe snapshot`; any other `--db` is refused. A snapshot needs free
 temporary space of twice the database size and stays until you remove its
 directory; one that fails or is interrupted mid-copy is removed. Re-sync needs a
-transcript of at least two lines, one kept and one appended.
+transcript of at least two lines, one kept and one appended. It reports whether
+the append continued from the first sync's checkpoint (`end_to_end_parses`)
+and, among the phases, how long parsing only the appended lines takes
+(`resumed_parse_ms`) beside a whole-file parse (`parse_ms`).
 
 `plans` measures an index's effect before it ships. On a snapshot it runs the
 compiled app's startup migrations, creates the `--index-sql` candidate (or uses an

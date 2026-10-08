@@ -1,5 +1,5 @@
 import path from 'path';
-import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
+import type { ContentBlock, ParsedChunk, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
 import { findSubagentBoundary } from './codex-subagent-boundary.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
 import {
@@ -108,35 +108,77 @@ function responseItemText(payload: Record<string, unknown>): string {
 
 // --- Parse Codex JSONL content into ParsedSession ---
 
+/** What a Codex parse carries forward; see ClaudeParseState. */
+export interface CodexParseState {
+  messageCount: number;
+  sourceOrdinal: number;
+  firstUserMessage: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  userMessageCount: number;
+  cwd: string | null;
+  latestCwd: string | null;
+  originator?: string;
+  parentSessionId: string | null;
+  relationshipType: string | null;
+  harnessVersion: string | null;
+  initialModel: string | null;
+  initialContextWindowReported?: number;
+  latestModel: string | null;
+  contextUsedTokens?: number;
+  contextWindowReported?: number;
+  malformedRecords: number;
+  sawInstructionWorldState: boolean;
+  sawCatalogPresentation: boolean;
+}
+
 export function parseCodexSessionMessages(
   jsonlContent: string,
   sessionId: string,
   filePath?: string,
 ): ParsedSession {
+  return parseCodexSessionChunk(jsonlContent, sessionId, filePath).parsed;
+}
+
+/**
+ * Parse Codex rollout lines, continuing from `state` when given (see
+ * ParsedChunk). A parse is not resumable while a later line could still change
+ * what it produced: before the session_meta line, while a subagent's own first
+ * turn is still unseen, or after a catalog presentation recorded a model or
+ * context window that only a later line would supply.
+ */
+export function parseCodexSessionChunk(
+  jsonlContent: string,
+  sessionId: string,
+  filePath?: string,
+  state?: CodexParseState,
+): ParsedChunk<CodexParseState> {
   const messages: ParsedMessage[] = [];
   const toolCalls: ParsedToolCall[] = [];
-  let firstUserMessage: string | null = null;
-  let startedAt: string | null = null;
-  let endedAt: string | null = null;
-  let userMessageCount = 0;
-  let cwd: string | null = null;
-  let originator: string | undefined;
-  let parentSessionId: string | null = null;
-  let relationshipType: string | null = null;
-  let harnessVersion: string | null = null;
-  let initialModel: string | null = null;
-  let initialContextWindowReported: number | undefined;
-  let latestModel: string | null = null;
+  const ordinalBase = state?.messageCount ?? 0;
+  let firstUserMessage: string | null = state?.firstUserMessage ?? null;
+  let startedAt: string | null = state?.startedAt ?? null;
+  let endedAt: string | null = state?.endedAt ?? null;
+  let userMessageCount = state?.userMessageCount ?? 0;
+  let cwd: string | null = state?.cwd ?? null;
+  let originator: string | undefined = state?.originator;
+  let parentSessionId: string | null = state?.parentSessionId ?? null;
+  let relationshipType: string | null = state?.relationshipType ?? null;
+  let harnessVersion: string | null = state?.harnessVersion ?? null;
+  let initialModel: string | null = state?.initialModel ?? null;
+  let initialContextWindowReported: number | undefined = state?.initialContextWindowReported;
+  let latestModel: string | null = state?.latestModel ?? null;
   // Latest context-window occupancy from token_count telemetry (in file order).
   // Numerator is last_token_usage.input_tokens, which is cache-inclusive.
-  let contextUsedTokens: number | undefined;
-  let contextWindowReported: number | undefined;
-  let malformedRecords = 0;
-  let sawInstructionWorldState = false;
+  let contextUsedTokens: number | undefined = state?.contextUsedTokens;
+  let contextWindowReported: number | undefined = state?.contextWindowReported;
+  let malformedRecords = state?.malformedRecords ?? 0;
+  let sawInstructionWorldState = state?.sawInstructionWorldState ?? false;
+  let resumable = true;
   const contextObservations: SessionContextObservation[] = [];
 
   const lines: Array<{ line: CodexLine; ordinal: number }> = [];
-  let sourceOrdinal = 0;
+  let sourceOrdinal = state?.sourceOrdinal ?? 0;
   for (const raw of jsonlContent.split('\n')) {
     const trimmed = raw.trim();
     if (!trimmed) continue;
@@ -154,19 +196,24 @@ export function parseCodexSessionMessages(
   // inherited activity (a turn or a request) proves a copy: a compaction with
   // neither after it, before the child's first surviving turn, is the child's
   // own earlier work.
-  const boundary = findSubagentBoundary(lines.map(entry => entry.line));
-  if (boundary.kind === 'resolved') {
-    const preBoundary = lines.slice(0, boundary.line);
-    const copyStart = preBoundary.findIndex(entry =>
-      entry.line.type === 'turn_context' || entry.line.type === 'compacted');
-    const inherited = copyStart >= 0 && preBoundary.slice(copyStart).some(entry =>
-      entry.line.type === 'turn_context'
-      || (entry.line.type === 'event_msg' && entry.line.payload?.type === 'token_count'));
-    if (inherited) lines.splice(copyStart, boundary.line - copyStart);
+  // A continued parse starts after both, so neither is looked for again.
+  if (!state) {
+    const boundary = findSubagentBoundary(lines.map(entry => entry.line));
+    if (boundary.kind === 'unresolved') resumable = false;
+    if (boundary.kind === 'resolved') {
+      const preBoundary = lines.slice(0, boundary.line);
+      const copyStart = preBoundary.findIndex(entry =>
+        entry.line.type === 'turn_context' || entry.line.type === 'compacted');
+      const inherited = copyStart >= 0 && preBoundary.slice(copyStart).some(entry =>
+        entry.line.type === 'turn_context'
+        || (entry.line.type === 'event_msg' && entry.line.payload?.type === 'token_count'));
+      if (inherited) lines.splice(copyStart, boundary.line - copyStart);
+    }
+    if (!lines.some(({ line }) => line.type === 'session_meta' && line.payload)) resumable = false;
   }
 
   // Extract session metadata
-  for (const { line } of lines) {
+  for (const { line } of state ? [] : lines) {
     if (line.type === 'session_meta' && line.payload) {
       cwd = (line.payload.cwd as string) ?? null;
       startedAt = line.payload.timestamp ?? line.timestamp ?? null;
@@ -210,7 +257,7 @@ export function parseCodexSessionMessages(
     if (initialModel !== null && initialContextWindowReported !== undefined) break;
   }
 
-  let latestCwd = cwd;
+  let latestCwd = state ? state.latestCwd : cwd;
   const inspectContextPayload = (
     payload: Record<string, unknown>,
     ordinal: number,
@@ -246,6 +293,12 @@ export function parseCodexSessionMessages(
 
     const text = responseItemText(payload);
     for (const presentation of parseCodexCatalogPresentations(text)) {
+      // Falling back to an initial value no line has given yet: a later line
+      // that gives one would change this observation.
+      if ((latestModel ?? initialModel) === null
+        || (contextWindowReported ?? initialContextWindowReported) === undefined) {
+        resumable = false;
+      }
       contextObservations.push({
         ordinal,
         kind: 'catalog_presentation',
@@ -383,13 +436,13 @@ export function parseCodexSessionMessages(
         tool_use_id: null,
         input_json: toolInput != null ? JSON.stringify(toolInput) : null,
         subagent_session_id: null,
-        message_ordinal: messages.length,
+        message_ordinal: ordinalBase + messages.length,
       });
 
       const contentJson = JSON.stringify(blocks);
       messages.push({
         session_id: sessionId,
-        ordinal: messages.length,
+        ordinal: ordinalBase + messages.length,
         role: 'assistant',
         content: contentJson,
         timestamp,
@@ -427,7 +480,7 @@ export function parseCodexSessionMessages(
 
     messages.push({
       session_id: sessionId,
-      ordinal: messages.length,
+      ordinal: ordinalBase + messages.length,
       role,
       content: contentJson,
       timestamp,
@@ -438,8 +491,10 @@ export function parseCodexSessionMessages(
   }
 
   const project = projectNameFromCwd(cwd) ?? (filePath ? projectFromCodexPath(filePath) : null);
+  const sawCatalogPresentation = (state?.sawCatalogPresentation ?? false)
+    || contextObservations.some(observation => observation.kind === 'catalog_presentation');
 
-  return {
+  const parsed: ParsedSession = {
     messages,
     toolCalls,
     metadata: {
@@ -449,7 +504,7 @@ export function parseCodexSessionMessages(
       first_message: firstUserMessage,
       started_at: startedAt,
       ended_at: endedAt,
-      message_count: messages.length,
+      message_count: ordinalBase + messages.length,
       user_message_count: userMessageCount,
       parent_session_id: parentSessionId,
       relationship_type: relationshipType,
@@ -467,9 +522,7 @@ export function parseCodexSessionMessages(
         compactionVisibility: malformedRecords === 0
           ? { observable: true }
           : { observable: false, reason: 'malformed_source_record' },
-        catalogPresentation: contextObservations.some(
-          observation => observation.kind === 'catalog_presentation',
-        )
+        catalogPresentation: sawCatalogPresentation
           ? { observable: true }
           : { observable: false, reason: 'presentation_signal_absent' },
         instructionLoads: sawInstructionWorldState
@@ -481,6 +534,32 @@ export function parseCodexSessionMessages(
         diagnostics: malformedRecords > 0 ? ['malformed_source_record'] : [],
       },
     },
+  };
+  return {
+    parsed,
+    state: {
+      messageCount: ordinalBase + messages.length,
+      sourceOrdinal,
+      firstUserMessage,
+      startedAt,
+      endedAt,
+      userMessageCount,
+      cwd,
+      latestCwd,
+      originator,
+      parentSessionId,
+      relationshipType,
+      harnessVersion,
+      initialModel,
+      initialContextWindowReported,
+      latestModel,
+      contextUsedTokens,
+      contextWindowReported,
+      malformedRecords,
+      sawInstructionWorldState,
+      sawCatalogPresentation,
+    },
+    resumable,
   };
 }
 

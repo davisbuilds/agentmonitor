@@ -9,18 +9,14 @@
 import type Database from 'better-sqlite3';
 import { config } from '../config.js';
 import type { ContentBlock, ParsedSession, ParsedMessage } from '../parser/claude-code.js';
-import {
-  applyLivePrivacyPolicy,
-  normalizeClaudeBlock,
-  type LivePrivacyPolicy,
-} from './normalize.js';
+import { applyLivePrivacyPolicy, normalizeClaudeBlock } from './normalize.js';
 import {
   clearProjectedSessionStream,
   insertProjectedItem,
   insertProjectedTurn,
   upsertProjectedSessionSnapshot,
 } from './projector.js';
-import type { ClaudeLiveSyncResult } from './claude-adapter.js';
+import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
 
 const ANTIGRAVITY_SQLITE_CAPABILITIES = Object.freeze({
   history: 'summary' as const,
@@ -49,7 +45,7 @@ function deriveLiveStatusFromTimestamp(lastItemAt: string | null): string {
 export function syncAntigravityLiveSession(
   db: Database.Database,
   parsed: ParsedSession,
-  options: { privacyPolicy?: LivePrivacyPolicy } = {},
+  options: LiveSyncOptions = {},
 ): ClaudeLiveSyncResult {
   const sessionId = parsed.metadata.session_id;
   const existingTurnCount = (
@@ -59,9 +55,11 @@ export function syncAntigravityLiveSession(
   let reset = false;
   let startOrdinal = existingTurnCount;
 
-  // A shorter step list than we already projected means the DB was rewritten;
-  // clear and reproject to stay consistent (mirrors the Codex adapter).
-  if (parsed.messages.length < existingTurnCount) {
+  // A shorter step list than we already projected, or a changed earlier step,
+  // means the DB was rewritten; clear and reproject to stay consistent (mirrors
+  // the Codex adapter).
+  if (parsed.messages.length < existingTurnCount
+    || (options.keptMessages !== undefined && options.keptMessages < existingTurnCount)) {
     clearProjectedSessionStream(db, sessionId);
     reset = true;
     startOrdinal = 0;

@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
+import type { ParsedSession } from '../src/parser/claude-code.js';
 
 let tempDir = '';
 /* eslint-disable @typescript-eslint/consistent-type-imports */
@@ -194,4 +195,46 @@ test('syncClaudeLiveSession redacts prompt, reasoning, and tool arguments when c
   assert.equal(items[2].kind, 'tool_call');
   assert.deepEqual(toolPayload.input, { redacted: true });
   assert.equal(toolPayload.input_redacted, true);
+});
+
+test('each live adapter projects again when an earlier message changed', async () => {
+  const db = getDb();
+  const { syncCodexLiveSession } = await import('../src/live/codex-adapter.js');
+  const { syncAntigravityLiveSession } = await import('../src/live/antigravity-adapter.js');
+  const adapters = [
+    { agent: 'claude', sync: syncClaudeLiveSession },
+    { agent: 'codex', sync: syncCodexLiveSession },
+    { agent: 'antigravity', sync: syncAntigravityLiveSession },
+  ];
+  for (const { agent, sync } of adapters) {
+    const sessionId = `live-rewrite-${agent}`;
+    const session = (texts: string[]): ParsedSession => ({
+      messages: texts.map((text, ordinal) => {
+        const content = JSON.stringify([{ type: 'text', text }]);
+        return {
+          session_id: sessionId, ordinal, role: 'user', content, timestamp: `2026-03-24T10:00:0${ordinal}.000Z`,
+          has_thinking: 0, has_tool_use: 0, content_length: content.length,
+        };
+      }),
+      toolCalls: [],
+      metadata: {
+        session_id: sessionId, project: 'agentmonitor', agent, first_message: texts[0],
+        started_at: '2026-03-24T10:00:00.000Z', ended_at: `2026-03-24T10:00:0${texts.length - 1}.000Z`,
+        message_count: texts.length, user_message_count: texts.length, parent_session_id: null, relationship_type: null,
+      },
+    });
+    const store = (parsed: ParsedSession) => {
+      const { messagesKept } = insertParsedSession(db, parsed, `/tmp/${sessionId}`, 1, parsed.messages.map(m => m.content).join());
+      return sync(db, parsed, { keptMessages: messagesKept });
+    };
+
+    store(session(['alpha', 'bravo', 'charlie']));
+    // Same number of messages, so only the kept count reveals the change.
+    const result = store(session(['alpha', 'bravo rewritten', 'charlie']));
+
+    const titles = (db.prepare('SELECT title FROM session_turns WHERE session_id = ? ORDER BY id')
+      .all(sessionId) as Array<{ title: string }>).map(row => row.title);
+    assert.deepEqual(titles, ['alpha', 'bravo rewritten', 'charlie'], agent);
+    assert.equal(result.reset, true, agent);
+  }
 });

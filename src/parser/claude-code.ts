@@ -274,33 +274,78 @@ function linkParsedSessionRelationships(
 
 // --- Parse JSONL content into structured messages ---
 
+/**
+ * Everything a parse carries from one line to the next, so a later parse can
+ * continue after the last line this one read. Plain data: it holds no rows.
+ */
+export interface ClaudeParseState {
+  messageCount: number;
+  firstUserMessage: string | null;
+  startedAt: string | null;
+  endedAt: string | null;
+  userMessageCount: number;
+  sawSidechain: boolean;
+  entrypoint?: string;
+  promptSource?: string;
+  contextUsedTokens?: number;
+  latestModel?: string;
+  sidechainContextUsedTokens?: number;
+  sidechainLatestModel?: string;
+  latestCwd: string | null;
+  firstCwd: string | null;
+  rawOrdinal: number;
+  malformedRecords: number;
+}
+
+/**
+ * A parse of some of a transcript's lines. Continued from a state, `parsed`
+ * holds only the rows those lines add, numbered after the earlier ones, while
+ * its metadata and capabilities describe the whole transcript so far.
+ * `resumable` is false when a later line could change what was already parsed.
+ */
+export interface ParsedChunk<State> {
+  parsed: ParsedSession;
+  state: State;
+  resumable: boolean;
+}
+
 export function parseSessionMessages(
   jsonlContent: string,
   sessionId: string,
   filePath?: string,
 ): ParsedSession {
+  return parseSessionChunk(jsonlContent, sessionId, filePath).parsed;
+}
+
+export function parseSessionChunk(
+  jsonlContent: string,
+  sessionId: string,
+  filePath?: string,
+  state?: ClaudeParseState,
+): ParsedChunk<ClaudeParseState> {
   const messages: ParsedMessage[] = [];
   const toolCalls: ParsedToolCall[] = [];
-  let firstUserMessage: string | null = null;
-  let startedAt: string | null = null;
-  let endedAt: string | null = null;
-  let userMessageCount = 0;
+  const ordinalBase = state?.messageCount ?? 0;
+  let firstUserMessage: string | null = state?.firstUserMessage ?? null;
+  let startedAt: string | null = state?.startedAt ?? null;
+  let endedAt: string | null = state?.endedAt ?? null;
+  let userMessageCount = state?.userMessageCount ?? 0;
   const parentSessionId: string | null = null;
   let relationshipType: string | null = null;
-  let sawSidechain = false;
-  let entrypoint: string | undefined;
-  let promptSource: string | undefined;
+  let sawSidechain = state?.sawSidechain ?? false;
+  let entrypoint: string | undefined = state?.entrypoint;
+  let promptSource: string | undefined = state?.promptSource;
   // Latest assistant turn's context-window occupancy (in file order).
-  let contextUsedTokens: number | undefined;
-  let latestModel: string | undefined;
+  let contextUsedTokens: number | undefined = state?.contextUsedTokens;
+  let latestModel: string | undefined = state?.latestModel;
   // Sidechain turns only speak for a file with no main thread: a subagent's own
   // file marks every line as a sidechain, an older interleaved transcript does not.
-  let sidechainContextUsedTokens: number | undefined;
-  let sidechainLatestModel: string | undefined;
-  let latestCwd: string | null = null;
-  let firstCwd: string | null = null;
-  let rawOrdinal = 0;
-  let malformedRecords = 0;
+  let sidechainContextUsedTokens: number | undefined = state?.sidechainContextUsedTokens;
+  let sidechainLatestModel: string | undefined = state?.sidechainLatestModel;
+  let latestCwd: string | null = state?.latestCwd ?? null;
+  let firstCwd: string | null = state?.firstCwd ?? null;
+  let rawOrdinal = state?.rawOrdinal ?? 0;
+  let malformedRecords = state?.malformedRecords ?? 0;
   const contextObservations: SessionContextObservation[] = [];
 
   const lines = jsonlContent.split('\n');
@@ -418,7 +463,7 @@ export function parseSessionMessages(
               tool_use_id: block.id ?? null,
               input_json: block.input != null ? stripInlineImages(JSON.stringify(block.input)) : null,
               subagent_session_id: extractSubagentSessionId(block.input),
-              message_ordinal: messages.length, // current message index
+              message_ordinal: ordinalBase + messages.length, // current message index
             });
           }
           break;
@@ -475,7 +520,7 @@ export function parseSessionMessages(
 
     messages.push({
       session_id: sessionId,
-      ordinal: messages.length,
+      ordinal: ordinalBase + messages.length,
       role: msg.role,
       content: contentJson,
       timestamp,
@@ -495,7 +540,7 @@ export function parseSessionMessages(
     relationshipType = 'sidechain';
   }
 
-  return {
+  const parsed: ParsedSession = {
     messages,
     toolCalls,
     metadata: {
@@ -505,7 +550,7 @@ export function parseSessionMessages(
       first_message: firstUserMessage,
       started_at: startedAt,
       ended_at: endedAt,
-      message_count: messages.length,
+      message_count: ordinalBase + messages.length,
       user_message_count: userMessageCount,
       parent_session_id: parentSessionId,
       relationship_type: relationshipType,
@@ -534,6 +579,28 @@ export function parseSessionMessages(
         diagnostics: malformedRecords > 0 ? ['malformed_source_record'] : [],
       },
     },
+  };
+  return {
+    parsed,
+    state: {
+      messageCount: ordinalBase + messages.length,
+      firstUserMessage,
+      startedAt,
+      endedAt,
+      userMessageCount,
+      sawSidechain,
+      entrypoint,
+      promptSource,
+      contextUsedTokens,
+      latestModel,
+      sidechainContextUsedTokens,
+      sidechainLatestModel,
+      latestCwd,
+      firstCwd,
+      rawOrdinal,
+      malformedRecords,
+    },
+    resumable: true,
   };
 }
 
@@ -634,28 +701,43 @@ export interface InsertParsedSessionResult {
   messagesWritten: number;
 }
 
+export interface InsertParsedSessionOptions {
+  /**
+   * The parse continued from a state whose rows are already stored: `parsed`
+   * holds only the rows from this message ordinal on, and its observations are
+   * only the new ones. Stored rows are kept without being compared.
+   */
+  appendFrom?: number;
+}
+
 export function insertParsedSession(
   db: Database.Database,
   parsed: ParsedSession,
   filePath: string,
   fileSize: number,
   fileHash: string,
+  options: InsertParsedSessionOptions = {},
 ): InsertParsedSessionResult {
   const txn = db.transaction((): InsertParsedSessionResult => {
     const { metadata, messages, toolCalls } = parsed;
     const skillContext = parsed.skillContext;
-    const { keep, storedIds } = storedPrefixLength(db, metadata.session_id, messages, toolCalls);
+    const appending = options.appendFrom !== undefined;
+    const { keep, storedIds } = appending
+      ? { keep: options.appendFrom!, storedIds: [] }
+      : storedPrefixLength(db, metadata.session_id, messages, toolCalls);
 
     // Clear the rows this parse replaces. Messages and tool calls are trimmed
     // from the first difference; the session row and observations are small and
-    // are rewritten whole.
-    db.prepare(`
-      DELETE FROM session_catalog_observation_entries
-      WHERE observation_id IN (
-        SELECT id FROM session_context_observations WHERE session_id = ?
-      )
-    `).run(metadata.session_id);
-    db.prepare('DELETE FROM session_context_observations WHERE session_id = ?').run(metadata.session_id);
+    // are rewritten whole, unless this parse only adds to them.
+    if (!appending) {
+      db.prepare(`
+        DELETE FROM session_catalog_observation_entries
+        WHERE observation_id IN (
+          SELECT id FROM session_context_observations WHERE session_id = ?
+        )
+      `).run(metadata.session_id);
+      db.prepare('DELETE FROM session_context_observations WHERE session_id = ?').run(metadata.session_id);
+    }
     db.prepare(`
       DELETE FROM tool_calls
       WHERE session_id = ?
@@ -714,8 +796,9 @@ export function insertParsedSession(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
-    const messageIds: number[] = [...storedIds];
-    for (const msg of messages.slice(keep)) {
+    const messageIds = new Map<number, number>(storedIds.map((id, ordinal) => [ordinal, id]));
+    for (const msg of messages) {
+      if (msg.ordinal < keep) continue;
       const result = insertMsg.run(
         msg.session_id,
         msg.ordinal,
@@ -726,7 +809,7 @@ export function insertParsedSession(
         msg.has_tool_use,
         msg.content_length,
       );
-      messageIds.push(Number(result.lastInsertRowid));
+      messageIds.set(msg.ordinal, Number(result.lastInsertRowid));
     }
 
     // Insert tool calls linked to their messages
@@ -737,7 +820,7 @@ export function insertParsedSession(
 
     const subagentSessionIds = new Set<string>();
     for (const tc of toolCalls) {
-      const messageId = messageIds[tc.message_ordinal];
+      const messageId = messageIds.get(tc.message_ordinal);
       if (messageId != null) {
         if (tc.subagent_session_id) subagentSessionIds.add(tc.subagent_session_id);
         if (tc.message_ordinal < keep) continue;
@@ -793,7 +876,7 @@ export function insertParsedSession(
     }
 
     linkParsedSessionRelationships(db, metadata.session_id, [...subagentSessionIds]);
-    return { messagesKept: keep, messagesWritten: messages.length - keep };
+    return { messagesKept: keep, messagesWritten: metadata.message_count - keep };
   });
 
   return txn();

@@ -19,7 +19,7 @@ import {
   upsertProjectedSessionIncrement,
   upsertProjectedSessionSnapshot,
 } from './projector.js';
-import type { ClaudeLiveSyncResult } from './claude-adapter.js';
+import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
 
 export interface CodexSummaryLiveSyncResult {
@@ -451,7 +451,7 @@ function deriveLiveStatusFromTimestamp(lastItemAt: string | null): string {
 export function syncCodexLiveSession(
   db: Database.Database,
   parsed: ParsedSession,
-  options: { privacyPolicy?: LivePrivacyPolicy } = {},
+  options: LiveSyncOptions = {},
 ): ClaudeLiveSyncResult {
   const sessionId = parsed.metadata.session_id;
   const existingTurnCount = (
@@ -461,7 +461,9 @@ export function syncCodexLiveSession(
   let reset = false;
   let startOrdinal = existingTurnCount;
 
-  if (parsed.messages.length < existingTurnCount) {
+  // A continued parse holds only its new messages; the count covers them all.
+  if (parsed.metadata.message_count < existingTurnCount
+    || (options.keptMessages !== undefined && options.keptMessages < existingTurnCount)) {
     clearProjectedSessionStream(db, sessionId);
     reset = true;
     startOrdinal = 0;
@@ -476,7 +478,8 @@ export function syncCodexLiveSession(
     diffPayloadMaxBytes: config.live.diffPayloadMaxBytes,
   };
 
-  for (const message of parsed.messages.slice(startOrdinal)) {
+  for (const message of parsed.messages) {
+    if (message.ordinal < startOrdinal) continue;
     const sourceTurnId = `codex-message:${message.ordinal}`;
     const blocks = parseMessageBlocks(message);
     const titleBlock = blocks.find(block => block.type === 'text' && typeof block.text === 'string' && block.text.trim());
