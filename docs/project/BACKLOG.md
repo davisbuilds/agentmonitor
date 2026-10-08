@@ -409,20 +409,6 @@ the build.
 - **Next**: apply the usage-metric retry key to operational points if a
   consumer starts reading occurrence counts as exact.
 
-#### Hook safety heuristics under-match
-- **What**: the destructive-command filter
-  (`hooks/claude-code/pre_tool_use.sh` and the identical regex in
-  `python/pre_tool_use.py`) requires a literal unquoted path token, and the
-  sensitive-file check is an anchored, case-sensitive suffix match on a file
-  tool's `file_path`.
-- **Why or evidence**: re-tested 2026-10-01: `rm -rf /` is blocked, while
-  `rm -rf "/"`, `rm -rf ${HOME}`, `rm -rf /*` and `rm --recursive --force /`
-  pass. `.env.local`, `credentials.json` and `.PEM` are not logged. The hooks
-  README now states the checks are best-effort telemetry, not a security
-  control.
-- **Next**: normalize quotes/braces and match common suffixes; match secret files
-  on basename patterns case-insensitively. Keep the README's caveat either way.
-
 ### Frontend testing
 
 #### Extend Vitest coverage beyond the store/pure layer
