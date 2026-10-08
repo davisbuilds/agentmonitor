@@ -181,7 +181,18 @@ history is persisted independently from event import so transcripts, turns, tool
 calls, search, and skill analytics can be rebuilt from their source files. A
 re-sync keeps the stored messages and tool calls that match the new parse and
 rewrites from the first difference, so an appended transcript writes only its new
-rows while a rewritten or truncated one is still replaced where it changed.
+rows while a rewritten or truncated one is still replaced where it changed. The
+live turn projection is rebuilt from the start when an earlier message changed.
+
+The server also parses only what was appended. After each Claude or Codex parse
+it keeps an in-memory checkpoint: the bytes parsed, their hash, and the parser's
+running state. The next sync hashes the file and continues from the checkpoint
+only when the file still starts with exactly those bytes and the stored session
+still matches what that parse wrote. Otherwise, after a restart, under `--force`,
+or when the file ends inside a line, it parses the whole file. A Codex parse
+leaves no checkpoint while a later line could still change what it produced:
+before `session_meta`, before a subagent's own first turn, or after a catalog
+recorded a model or window that only a later line would give.
 
 Codex browser history has two existing identities: JSONL rollout basenames and
 native UUIDs from import/OTEL and API/hook-generated `codex-summary` rows.

@@ -3,8 +3,13 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import type Database from 'better-sqlite3';
-import { parseSessionMessages, insertParsedSession } from '../parser/claude-code.js';
-import { parseCodexSessionMessages } from '../parser/codex-sessions.js';
+import {
+  insertParsedSession,
+  parseSessionChunk,
+  type ClaudeParseState,
+  type ParsedChunk,
+} from '../parser/claude-code.js';
+import { parseCodexSessionChunk, type CodexParseState } from '../parser/codex-sessions.js';
 import { parseAntigravitySessions } from '../parser/antigravity-sessions.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
@@ -18,6 +23,111 @@ import { setSessionMode } from '../db/queries.js';
 
 function hashBytes(bytes: Buffer): string {
   return crypto.createHash('sha256').update(bytes).digest('hex');
+}
+
+// --- Resuming a parse ---
+
+/**
+ * Where the last parse of a transcript stopped. Transcripts grow by appending,
+ * and parsing the whole file again on every append grew with the session; a
+ * checkpoint lets the next sync parse only the bytes after it. Kept in memory:
+ * after a restart each file's first sync parses it whole.
+ */
+interface ParseCheckpoint<State> {
+  /** Bytes parsed, ending at a newline. */
+  bytes: number;
+  /** sha256 of those bytes: the file_hash the parse stored. */
+  fileHash: string;
+  messageCount: number;
+  state: State;
+}
+
+const MAX_CHECKPOINTS = 64;
+const checkpoints = new Map<string, ParseCheckpoint<unknown>>();
+
+function rememberCheckpoint(filePath: string, checkpoint: ParseCheckpoint<unknown>): void {
+  checkpoints.delete(filePath);
+  checkpoints.set(filePath, checkpoint);
+  // Map order is insertion order, so the first key is the least recently synced.
+  if (checkpoints.size > MAX_CHECKPOINTS) checkpoints.delete(checkpoints.keys().next().value!);
+}
+
+/** Forget every checkpoint, so the next sync of each file parses it whole. */
+export function clearParseCheckpoints(): void {
+  checkpoints.clear();
+}
+
+/**
+ * Hash the file, and return the checkpoint only if the file still starts with
+ * exactly the bytes it covers and the store still holds what that parse wrote.
+ * Anything else (a rewritten or truncated file, rows changed by another sync or
+ * a repair) parses the file whole.
+ */
+function readCheckpoint<State>(
+  db: Database.Database,
+  filePath: string,
+  sessionId: string,
+  bytes: Buffer,
+): { fileHash: string; checkpoint?: ParseCheckpoint<State> } {
+  const checkpoint = checkpoints.get(filePath) as ParseCheckpoint<State> | undefined;
+  if (!checkpoint || bytes.length < checkpoint.bytes) return { fileHash: hashBytes(bytes) };
+  const hash = crypto.createHash('sha256').update(bytes.subarray(0, checkpoint.bytes));
+  const prefixHash = hash.copy().digest('hex');
+  const fileHash = hash.update(bytes.subarray(checkpoint.bytes)).digest('hex');
+  if (prefixHash !== checkpoint.fileHash) return { fileHash };
+
+  const stored = db.prepare(`
+    SELECT bs.message_count, bs.file_hash, wf.file_hash AS watched_hash, wf.status,
+      (SELECT COUNT(*) FROM messages WHERE session_id = bs.id) AS messages,
+      (SELECT COUNT(*) FROM session_turns WHERE session_id = bs.id) AS turns
+    FROM browsing_sessions bs
+    JOIN watched_files wf ON wf.file_path = bs.file_path
+    WHERE bs.id = ? AND bs.file_path = ?
+  `).get(sessionId, filePath) as {
+    message_count: number; file_hash: string; watched_hash: string; status: string; messages: number; turns: number;
+  } | undefined;
+  const intact = stored
+    && stored.status === 'parsed'
+    && stored.file_hash === checkpoint.fileHash
+    && stored.watched_hash === checkpoint.fileHash
+    && stored.message_count === checkpoint.messageCount
+    && stored.messages === checkpoint.messageCount
+    && stored.turns === checkpoint.messageCount;
+  return intact ? { fileHash, checkpoint } : { fileHash };
+}
+
+type ChunkParser<State> = (
+  content: string,
+  sessionId: string,
+  filePath: string,
+  state?: State,
+) => ParsedChunk<State>;
+
+/** Parse the whole file, or only the bytes after a checkpoint that still applies. */
+function parseTranscript<State>(
+  bytes: Buffer,
+  sessionId: string,
+  filePath: string,
+  parse: ChunkParser<State>,
+  checkpoint: ParseCheckpoint<State> | undefined,
+): ParsedChunk<State> {
+  return checkpoint
+    ? parse(bytes.subarray(checkpoint.bytes).toString('utf-8'), sessionId, filePath, checkpoint.state)
+    : parse(bytes.toString('utf-8'), sessionId, filePath);
+}
+
+/** Call once the parse is stored: a partial last line is parsed again next time. */
+function settleCheckpoint<State>(filePath: string, bytes: Buffer, fileHash: string, chunk: ParsedChunk<State>): void {
+  if (chunk.resumable && bytes.length > 0 && bytes[bytes.length - 1] === 0x0a) {
+    rememberCheckpoint(filePath, {
+      bytes: bytes.length,
+      fileHash,
+      messageCount: chunk.parsed.metadata.message_count,
+      state: chunk.state,
+    });
+  } else {
+    checkpoints.delete(filePath);
+  }
 }
 
 // --- Discover session files ---
@@ -40,6 +150,8 @@ export interface SyncSessionOutcome {
   result: SyncResult;
   live?: ClaudeLiveSyncResult;
   session_id?: string;
+  /** Whether the parse read the whole file or continued from a checkpoint. */
+  parse?: 'full' | 'resumed';
 }
 
 interface WatchedFileState {
@@ -111,9 +223,13 @@ export function syncSessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    // One read serves both the change check and the parse.
+    // One read serves the change check, the checkpoint check and the parse.
     const bytes = fs.readFileSync(filePath);
-    fileHash = hashBytes(bytes);
+    const sessionId = path.basename(filePath, '.jsonl');
+    const read = options.force
+      ? { fileHash: hashBytes(bytes), checkpoint: undefined }
+      : readCheckpoint<ClaudeParseState>(db, filePath, sessionId, bytes);
+    fileHash = read.fileHash;
     fileMtime = stat.mtime.toISOString();
 
     // Check watched_files for existing record
@@ -122,19 +238,20 @@ export function syncSessionFileDetailed(
       return { result: 'skipped' };
     }
 
-    const content = bytes.toString('utf-8');
-    const sessionId = path.basename(filePath, '.jsonl');
-    const parsed = parseSessionMessages(content, sessionId, filePath);
+    const chunk = parseTranscript(bytes, sessionId, filePath, parseSessionChunk, read.checkpoint);
+    const appendFrom = read.checkpoint?.messageCount;
+    const parsed = chunk.parsed;
 
     // Skip files with no messages (non-interactive sessions)
-    if (parsed.messages.length === 0) {
+    if (parsed.metadata.message_count === 0) {
+      checkpoints.delete(filePath);
       upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
       return { result: 'skipped', session_id: sessionId };
     }
 
     // Insert parsed data
-    insertParsedSession(db, parsed, filePath, stat.size, fileHash);
-    const live = syncClaudeLiveSession(db, parsed);
+    const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash, { appendFrom });
+    const live = syncClaudeLiveSession(db, parsed, { keptMessages: messagesKept });
     // Stamp the Monitor session's invocation mode from the JSONL the watcher
     // already parsed, so a live session gets its headless/interactive pill
     // without waiting for the next auto-import tick. No-op if the Monitor
@@ -144,9 +261,11 @@ export function syncSessionFileDetailed(
 
     // Update watched_files
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
+    settleCheckpoint(filePath, bytes, fileHash, chunk);
 
-    return { result: 'parsed', live, session_id: sessionId };
+    return { result: 'parsed', live, session_id: sessionId, parse: appendFrom === undefined ? 'full' : 'resumed' };
   } catch (err) {
+    checkpoints.delete(filePath);
     console.error(`[watcher] Failed to sync ${filePath}:`, err);
     try {
       upsertWatchedFile(db, filePath, fileHash, fileMtime, 'error');
@@ -199,9 +318,13 @@ export function syncCodexSessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    // One read serves both the change check and the parse.
+    // One read serves the change check, the checkpoint check and the parse.
     const bytes = fs.readFileSync(filePath);
-    fileHash = hashBytes(bytes);
+    const sessionId = path.basename(filePath, '.jsonl');
+    const read = options.force
+      ? { fileHash: hashBytes(bytes), checkpoint: undefined }
+      : readCheckpoint<CodexParseState>(db, filePath, sessionId, bytes);
+    fileHash = read.fileHash;
     fileMtime = stat.mtime.toISOString();
 
     const existing = getWatchedFileState(db, filePath);
@@ -209,17 +332,18 @@ export function syncCodexSessionFileDetailed(
       return { result: 'skipped' };
     }
 
-    const content = bytes.toString('utf-8');
-    const sessionId = path.basename(filePath, '.jsonl');
-    const parsed = parseCodexSessionMessages(content, sessionId, filePath);
+    const chunk = parseTranscript(bytes, sessionId, filePath, parseCodexSessionChunk, read.checkpoint);
+    const appendFrom = read.checkpoint?.messageCount;
+    const parsed = chunk.parsed;
 
-    if (parsed.messages.length === 0) {
+    if (parsed.metadata.message_count === 0) {
+      checkpoints.delete(filePath);
       upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
       return { result: 'skipped', session_id: sessionId };
     }
 
-    insertParsedSession(db, parsed, filePath, stat.size, fileHash);
-    const live = syncCodexLiveSession(db, parsed);
+    const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash, { appendFrom });
+    const live = syncCodexLiveSession(db, parsed, { keptMessages: messagesKept });
     // The Monitor session row is keyed by the Codex session UUID (session_meta.id),
     // not the rollout filename the watcher uses for browsing_sessions — match the
     // import's id resolution so mode lands on the right row. No-op if absent.
@@ -230,9 +354,11 @@ export function syncCodexSessionFileDetailed(
     safelyMaintainTraceSummaryForSession(sessionId, 'codex session sync');
 
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
+    settleCheckpoint(filePath, bytes, fileHash, chunk);
 
-    return { result: 'parsed', live, session_id: sessionId };
+    return { result: 'parsed', live, session_id: sessionId, parse: appendFrom === undefined ? 'full' : 'resumed' };
   } catch (err) {
+    checkpoints.delete(filePath);
     console.error(`[watcher] Failed to sync Codex ${filePath}:`, err);
     try {
       upsertWatchedFile(db, filePath, fileHash, fileMtime, 'error');
@@ -310,8 +436,8 @@ function syncAntigravitySessionFileDetailed(
       return { result: 'skipped', session_id: sessionId };
     }
 
-    insertParsedSession(db, parsed, filePath, stat.size, fileHash);
-    const live = syncAntigravityLiveSession(db, parsed);
+    const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash);
+    const live = syncAntigravityLiveSession(db, parsed, { keptMessages: messagesKept });
     safelyMaintainTraceSummaryForSession(sessionId, 'antigravity session sync');
 
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');

@@ -11,6 +11,16 @@ import {
   upsertProjectedSessionSnapshot,
 } from './projector.js';
 
+export interface LiveSyncOptions {
+  privacyPolicy?: LivePrivacyPolicy;
+  /**
+   * How many leading messages the browser write kept unchanged
+   * (`insertParsedSession`'s messagesKept). Turns past it describe messages
+   * that changed, so the stream is projected again from the start.
+   */
+  keptMessages?: number;
+}
+
 export interface ClaudeLiveSyncResult {
   inserted_turns: number;
   inserted_items: number;
@@ -43,7 +53,7 @@ function resetLiveSession(db: Database.Database, sessionId: string): void {
 export function syncClaudeLiveSession(
   db: Database.Database,
   parsed: ParsedSession,
-  options: { privacyPolicy?: LivePrivacyPolicy } = {},
+  options: LiveSyncOptions = {},
 ): ClaudeLiveSyncResult {
   const sessionId = parsed.metadata.session_id;
   const existingTurnCount = (
@@ -53,7 +63,9 @@ export function syncClaudeLiveSession(
   let reset = false;
   let startOrdinal = existingTurnCount;
 
-  if (parsed.messages.length < existingTurnCount) {
+  // A continued parse holds only its new messages; the count covers them all.
+  if (parsed.metadata.message_count < existingTurnCount
+    || (options.keptMessages !== undefined && options.keptMessages < existingTurnCount)) {
     resetLiveSession(db, sessionId);
     reset = true;
     startOrdinal = 0;
@@ -68,7 +80,8 @@ export function syncClaudeLiveSession(
     diffPayloadMaxBytes: config.live.diffPayloadMaxBytes,
   };
 
-  for (const message of parsed.messages.slice(startOrdinal)) {
+  for (const message of parsed.messages) {
+    if (message.ordinal < startOrdinal) continue;
     const sourceTurnId = `claude-message:${message.ordinal}`;
     const blocks = parseMessageBlocks(message);
     const titleBlock = blocks.find(block => block.type === 'text' && typeof block.text === 'string' && block.text.trim());

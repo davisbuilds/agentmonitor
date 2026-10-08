@@ -245,12 +245,20 @@ async function resync(options: ProbeOptions) {
   };
   const prefixPhases = phases(prefix);
   const appendPhases = phases(prefix + rest);
+  // What the watcher parses on an append once it holds a checkpoint: only the new lines.
+  const parseChunk = (isCodex ? codex.parseCodexSessionChunk : claude.parseSessionChunk) as (
+    content: string, sessionId: string, filePath: string, state?: unknown) => { state: unknown };
+  const head = parseChunk(prefix, phaseId, phaseFile);
+  const resumeStart = performance.now();
+  parseChunk(rest, phaseId, phaseFile, head.state);
+  appendPhases.resumed_parse_ms = elapsed(resumeStart);
   const observations = {
     agent: isCodex ? 'codex' : 'claude',
     transcript_bytes: Buffer.byteLength(content),
     lines: lines.length,
     appended_lines: append,
     end_to_end_results: [first.result, second.result],
+    end_to_end_parses: [first.parse ?? null, second.parse ?? null],
     messages_after: countMessages(base),
   };
   closeDb();
