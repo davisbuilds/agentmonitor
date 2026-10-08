@@ -742,6 +742,11 @@ const DESTRUCTIVE_COMMANDS = [
   'nice -n 5 rm -rf ~',
   'FOO=1 rm -rf /',
   'env FOO=1 rm -rf ~',
+  'FOO="a b" rm -rf /',
+  "env FOO='a b' rm -rf ~",
+  'echo "x $(rm -rf /) y"',
+  'echo "`rm -rf ~`"',
+  'echo "$(cd /tmp; rm -rf ~)"',
   // A long payload after the match must not end the check early.
   `rm -rf / && echo ${'x'.repeat(100_000)}`,
 ];
@@ -758,6 +763,8 @@ const SAFE_COMMANDS = [
   'git commit -m "document this; rm -rf /"',
   "echo 'a | rm -rf ~'",
   'git commit -m "first line\nrm -rf /"',
+  'git commit -m "document (rm -rf /)"',
+  'echo "$(date) (rm -rf ~)"',
   'echo farm /',
 ];
 

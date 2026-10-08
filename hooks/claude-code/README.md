@@ -111,9 +111,11 @@ The `pre_tool_use` script includes optional safety checks:
   option spelling, after variable assignments or wrappers such as `sudo`, `env`
   and `nice` with their options (`rm -rf /`, `rm --recursive --force ~`,
   `sudo -n /bin/rm -rf "$HOME"`). Each command in a list, pipeline or command
-  substitution is checked on its own; a `;`, `&` or `|` inside quotes does not
-  start a command, and `${HOME}` is read as `$HOME`. An `rm` that only appears
-  inside another command's arguments, such as a commit message, is not blocked.
+  substitution is checked on its own, including a `$(...)` or backtick
+  substitution inside double quotes. Other quoted text never starts a command
+  (`;`, `|`, parentheses and blanks in it stay part of one word), and `${HOME}`
+  is read as `$HOME`. An `rm` that only appears inside another command's
+  arguments, such as a commit message, is not blocked.
 - **Logs** sensitive file access by file tools, by the file's name and ignoring
   case: `.env` and `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.secret`,
   `credentials` and `secrets` files (bare or with a data extension such as

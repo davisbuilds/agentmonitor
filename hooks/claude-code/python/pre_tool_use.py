@@ -49,28 +49,68 @@ TEMPLATE_NAME = re.compile(r'\.(example|sample|template|dist)$', re.IGNORECASE)
 
 
 def simple_commands(command):
-    """Split at ; & | and newlines outside quotes, and at ( ) and backticks
-    outside single quotes (command substitution runs inside double quotes).
-    Quote characters are dropped."""
-    parts, current, quote = [], [], ''
-    for c in command:
+    """Split into simple commands, as SPLIT_COMMANDS does in pre_tool_use.sh.
+
+    Outside quotes, split at ; & | ( ) backticks and newlines. Inside double
+    quotes only a $( ) or backtick substitution is code: split there and read
+    its body as unquoted, returning to the quote at the closing ) or backtick (a
+    stack keeps nesting). Quote characters are dropped and quoted blanks and
+    newlines become _, so a quoted value stays one word."""
+    parts, current, quote, stack = [], [], '', []
+
+    def split():
+        parts.append(''.join(current))
+        current.clear()
+
+    def push(kind):
+        nonlocal quote
+        stack.append((kind, quote))
+        quote = ''
+        split()
+
+    def pop():
+        nonlocal quote
+        quote = stack.pop()[1]
+        split()
+
+    i = 0
+    while i < len(command):
+        c = command[i]
         if quote == "'":
             if c == "'":
                 quote = ''
             else:
-                current.append(' ' if c == '\n' else c)
-        elif c == "'" and not quote:
+                current.append('_' if c in ' \t\n' else c)
+        elif quote == '"':
+            if c == '"':
+                quote = ''
+            elif c == '$' and command[i + 1:i + 2] == '(':
+                push('(')
+                i += 1
+            elif c == '`':
+                push('`')
+            else:
+                current.append('_' if c in ' \t\n' else c)
+        elif c in '\'"':
             quote = c
-        elif c == '"':
-            quote = '' if quote else c
-        elif c in '()`' or (not quote and c in ';&|\n'):
-            parts.append(''.join(current))
-            current = []
-        elif c == '\n':
-            current.append(' ')
+        elif c == '(':
+            push('(')
+        elif c == ')':
+            if stack:
+                pop()
+            else:
+                split()
+        elif c == '`':
+            if stack and stack[-1][0] == '`':
+                pop()
+            else:
+                push('`')
+        elif c in ';&|\n':
+            split()
         else:
             current.append(c)
-    parts.append(''.join(current))
+        i += 1
+    split()
     return parts
 
 

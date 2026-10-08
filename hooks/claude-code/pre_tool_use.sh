@@ -34,22 +34,36 @@ SAFETY_ENABLED="${AGENTMONITOR_SAFETY:-1}"
 # their options. Matched per simple command (see SPLIT_COMMANDS), after
 # ${HOME} is spelled $HOME.
 DESTRUCTIVE_RM='^[[:blank:]]*(\{[[:blank:]]*)?(([A-Za-z_][A-Za-z0-9_]*=[^[:blank:]]*|(sudo|command|exec|nice|nohup|time|doas|env)([[:blank:]]+-[^[:blank:]]+([[:blank:]]+[^-[:blank:]][^[:blank:]]*)?)*)[[:blank:]]+)*([^[:blank:]]*/)?rm([[:blank:]]+[^[:blank:]]+)*[[:blank:]]+(/|/\*|~|~/|~/\*|\$HOME|\$HOME/|\$HOME/\*)([[:blank:]]|$)'
-# One simple command per output line: split at ; & | and newlines outside
-# quotes, and at ( ) and backticks outside single quotes (command substitution
-# runs inside double quotes). Quote characters are dropped. Prints each
-# character as it goes, so a long command costs linear time.
+# One simple command per output line. Outside quotes it splits at ; & | ( )
+# backticks and newlines. Inside double quotes only a $( ) or backtick
+# substitution is code: the scanner splits there and reads its body as
+# unquoted, returning to the quote at the closing ) or backtick (a stack keeps
+# nesting). Quote characters are dropped and quoted blanks become _, so a quoted
+# value stays one word. Prints each character as it goes, so a long command
+# costs linear time.
 SPLIT_COMMANDS='
+function out(ch) { printf "%s", ((q != "" && (ch == " " || ch == "\t")) ? "_" : ch) }
+function push(k) { d++; kind[d] = k; saved[d] = q; q = ""; printf "\n" }
+function pop() { q = saved[d]; d--; printf "\n" }
 {
   for (i = 1; i <= length($0); i++) {
     c = substr($0, i, 1)
-    if (q == "\047") { if (c == "\047") q = ""; else printf "%s", c; continue }
-    if (c == "\047" && q == "") { q = c; continue }
-    if (c == "\"") { q = (q == "") ? c : ""; continue }
-    if (c == "(" || c == ")" || c == "`") { printf "\n"; continue }
-    if (q == "" && (c == ";" || c == "&" || c == "|")) { printf "\n"; continue }
-    printf "%s", c
+    if (q == "\047") { if (c == "\047") q = ""; else out(c); continue }
+    if (q == "\"") {
+      if (c == "\"") q = ""
+      else if (c == "$" && substr($0, i + 1, 1) == "(") { push("("); i++ }
+      else if (c == "`") push("`")
+      else out(c)
+      continue
+    }
+    if (c == "\047" || c == "\"") { q = c; continue }
+    if (c == "(") { push("("); continue }
+    if (c == ")") { if (d > 0) pop(); else printf "\n"; continue }
+    if (c == "`") { if (d > 0 && kind[d] == "`") pop(); else push("`"); continue }
+    if (c == ";" || c == "&" || c == "|") { printf "\n"; continue }
+    out(c)
   }
-  printf "%s", (q == "" ? "\n" : " ")
+  if (q == "") printf "\n"; else out(" ")
 }
 END { printf "\n" }'
 # A file name that usually holds secrets, matched on the basename, ignoring case;
