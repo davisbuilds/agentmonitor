@@ -736,6 +736,14 @@ const DESTRUCTIVE_COMMANDS = [
   'cd /tmp && rm -rf ~',
   'rm -rf / tmp/build',
   'echo $(rm -rf ~)',
+  'echo "$(rm -rf ~)"',
+  'sudo -n rm -rf /',
+  'sudo -u root rm -rf /',
+  'nice -n 5 rm -rf ~',
+  'FOO=1 rm -rf /',
+  'env FOO=1 rm -rf ~',
+  // A long payload after the match must not end the check early.
+  `rm -rf / && echo ${'x'.repeat(100_000)}`,
 ];
 
 const SAFE_COMMANDS = [
@@ -747,6 +755,9 @@ const SAFE_COMMANDS = [
   'rm -rf ~/{a,b}',
   'rm -f /tmp/x.lock',
   'git commit -m "guard against rm -rf / in hooks"',
+  'git commit -m "document this; rm -rf /"',
+  "echo 'a | rm -rf ~'",
+  'git commit -m "first line\nrm -rf /"',
   'echo farm /',
 ];
 

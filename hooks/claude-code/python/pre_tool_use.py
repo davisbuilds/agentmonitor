@@ -28,12 +28,14 @@ SAFETY_ENABLED = os.environ.get("AGENTMONITOR_SAFETY", "1") == "1"
 
 # These patterns match pre_tool_use.sh; tests/hooks.test.ts holds both to one
 # table of cases.
-# An rm (optionally after sudo and the like) with the root or home directory, or
-# everything in it, among its arguments. Matched per simple command, after quotes
-# are dropped and ${HOME} is spelled $HOME.
+# An rm with the root or home directory, or everything in it, among its
+# arguments. It may follow variable assignments and wrappers such as sudo, with
+# their options. Matched per simple command (see simple_commands), after
+# ${HOME} is spelled $HOME.
 DESTRUCTIVE_RM = re.compile(
-    r'^[ \t]*(\{[ \t]*)?((sudo|command|exec|nice|nohup|time|doas)[ \t]+)*([^ \t]*/)?rm([ \t]+[^ \t]+)*'
-    r'[ \t]+(/|/\*|~|~/|~/\*|\$HOME|\$HOME/|\$HOME/\*)([ \t]|$)'
+    r'^[ \t]*(\{[ \t]*)?(([A-Za-z_][A-Za-z0-9_]*=[^ \t]*'
+    r'|(sudo|command|exec|nice|nohup|time|doas|env)([ \t]+-[^ \t]+([ \t]+[^- \t][^ \t]*)?)*)[ \t]+)*'
+    r'([^ \t]*/)?rm([ \t]+[^ \t]+)*[ \t]+(/|/\*|~|~/|~/\*|\$HOME|\$HOME/|\$HOME/\*)([ \t]|$)'
 )
 # A file name that usually holds secrets, matched on the basename, ignoring case;
 # example and template copies are not.
@@ -46,9 +48,35 @@ SENSITIVE_NAME = re.compile(
 TEMPLATE_NAME = re.compile(r'\.(example|sample|template|dist)$', re.IGNORECASE)
 
 
+def simple_commands(command):
+    """Split at ; & | and newlines outside quotes, and at ( ) and backticks
+    outside single quotes (command substitution runs inside double quotes).
+    Quote characters are dropped."""
+    parts, current, quote = [], [], ''
+    for c in command:
+        if quote == "'":
+            if c == "'":
+                quote = ''
+            else:
+                current.append(' ' if c == '\n' else c)
+        elif c == "'" and not quote:
+            quote = c
+        elif c == '"':
+            quote = '' if quote else c
+        elif c in '()`' or (not quote and c in ';&|\n'):
+            parts.append(''.join(current))
+            current = []
+        elif c == '\n':
+            current.append(' ')
+        else:
+            current.append(c)
+    parts.append(''.join(current))
+    return parts
+
+
 def is_destructive(command):
-    normalized = re.sub(r'["\']', '', command).replace('${HOME}', '$HOME')
-    return any(DESTRUCTIVE_RM.search(part) for part in re.split(r'[;&|()`\n]', normalized))
+    normalized = command.replace('${HOME}', '$HOME')
+    return any(DESTRUCTIVE_RM.search(part) for part in simple_commands(normalized))
 
 
 def is_sensitive(file_path):

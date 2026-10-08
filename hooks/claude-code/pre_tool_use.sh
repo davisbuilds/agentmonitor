@@ -29,10 +29,29 @@ SAFETY_ENABLED="${AGENTMONITOR_SAFETY:-1}"
 
 # These patterns match python/pre_tool_use.py; tests/hooks.test.ts holds both to
 # one table of cases.
-# An rm (optionally after sudo and the like) with the root or home directory, or
-# everything in it, among its arguments. Matched per simple command, after quotes
-# are dropped and ${HOME} is spelled $HOME.
-DESTRUCTIVE_RM='^[[:blank:]]*(\{[[:blank:]]*)?((sudo|command|exec|nice|nohup|time|doas)[[:blank:]]+)*([^[:blank:]]*/)?rm([[:blank:]]+[^[:blank:]]+)*[[:blank:]]+(/|/\*|~|~/|~/\*|\$HOME|\$HOME/|\$HOME/\*)([[:blank:]]|$)'
+# An rm with the root or home directory, or everything in it, among its
+# arguments. It may follow variable assignments and wrappers such as sudo, with
+# their options. Matched per simple command (see SPLIT_COMMANDS), after
+# ${HOME} is spelled $HOME.
+DESTRUCTIVE_RM='^[[:blank:]]*(\{[[:blank:]]*)?(([A-Za-z_][A-Za-z0-9_]*=[^[:blank:]]*|(sudo|command|exec|nice|nohup|time|doas|env)([[:blank:]]+-[^[:blank:]]+([[:blank:]]+[^-[:blank:]][^[:blank:]]*)?)*)[[:blank:]]+)*([^[:blank:]]*/)?rm([[:blank:]]+[^[:blank:]]+)*[[:blank:]]+(/|/\*|~|~/|~/\*|\$HOME|\$HOME/|\$HOME/\*)([[:blank:]]|$)'
+# One simple command per output line: split at ; & | and newlines outside
+# quotes, and at ( ) and backticks outside single quotes (command substitution
+# runs inside double quotes). Quote characters are dropped. Prints each
+# character as it goes, so a long command costs linear time.
+SPLIT_COMMANDS='
+{
+  for (i = 1; i <= length($0); i++) {
+    c = substr($0, i, 1)
+    if (q == "\047") { if (c == "\047") q = ""; else printf "%s", c; continue }
+    if (c == "\047" && q == "") { q = c; continue }
+    if (c == "\"") { q = (q == "") ? c : ""; continue }
+    if (c == "(" || c == ")" || c == "`") { printf "\n"; continue }
+    if (q == "" && (c == ";" || c == "&" || c == "|")) { printf "\n"; continue }
+    printf "%s", c
+  }
+  printf "%s", (q == "" ? "\n" : " ")
+}
+END { printf "\n" }'
 # A file name that usually holds secrets, matched on the basename, ignoring case;
 # example and template copies are not.
 SENSITIVE_NAME='^(\.env(\..+)?|.+\.(env|pem|key|p12|pfx|secret|credentials)|\.?(credentials|secrets?)(\.(json|ya?ml|toml|ini|txt|env|xml|cfg|conf))?|id_(rsa|dsa|ecdsa|ed25519)|\.netrc|\.pgpass)$'
@@ -40,12 +59,10 @@ TEMPLATE_NAME='\.(example|sample|template|dist)$'
 
 # --- Safety checks (only for Bash commands) ---
 if [ "$SAFETY_ENABLED" = "1" ] && [ "$TOOL_NAME" = "Bash" ] && [ -n "$COMMAND" ]; then
-  # Block destructive rm patterns
-  if printf '%s\n' "$COMMAND" \
-    | tr -d "\"'" \
-    | sed 's/\${HOME}/$HOME/g' \
-    | tr ';&|()`' '\n\n\n\n\n\n' \
-    | grep -qE "$DESTRUCTIVE_RM"; then
+  # Block destructive rm patterns. Every stage reads all of its input, and grep
+  # reads a here-string, so an early match cannot fail the pipeline on SIGPIPE.
+  SIMPLE_COMMANDS="$(printf '%s\n' "$COMMAND" | sed 's/\${HOME}/$HOME/g' | awk "$SPLIT_COMMANDS")"
+  if grep -qE "$DESTRUCTIVE_RM" <<<"$SIMPLE_COMMANDS"; then
     # Log the blocked attempt
     send_event "$(cat <<EOF
 {
@@ -69,8 +86,8 @@ fi
 # --- Security warnings (log but don't block) ---
 if [ "$SAFETY_ENABLED" = "1" ] && [ -n "$FILE_PATH" ]; then
   FILE_NAME="${FILE_PATH##*/}"
-  if printf '%s\n' "$FILE_NAME" | grep -qiE "$SENSITIVE_NAME" \
-    && ! printf '%s\n' "$FILE_NAME" | grep -qiE "$TEMPLATE_NAME"; then
+  if grep -qiE "$SENSITIVE_NAME" <<<"$FILE_NAME" \
+    && ! grep -qiE "$TEMPLATE_NAME" <<<"$FILE_NAME"; then
     send_event "$(cat <<EOF
 {
   "session_id": "$SESSION_ID_ESC",

@@ -108,10 +108,12 @@ The `pre_tool_use` script includes optional safety checks:
 
 - **Blocks** an `rm` whose arguments include the root or home directory, or
   everything in it (`/`, `/*`, `~`, `~/`, `~/*`, `$HOME`, `$HOME/*`), in any
-  option spelling (`rm -rf /`, `rm --recursive --force ~`, `sudo /bin/rm -rf "$HOME"`).
-  Each command in a list or pipeline is checked, after quotes are dropped and
-  `${HOME}` is read as `$HOME`. An `rm` that only appears inside another command's
-  arguments, such as a commit message, is not blocked.
+  option spelling, after variable assignments or wrappers such as `sudo`, `env`
+  and `nice` with their options (`rm -rf /`, `rm --recursive --force ~`,
+  `sudo -n /bin/rm -rf "$HOME"`). Each command in a list, pipeline or command
+  substitution is checked on its own; a `;`, `&` or `|` inside quotes does not
+  start a command, and `${HOME}` is read as `$HOME`. An `rm` that only appears
+  inside another command's arguments, such as a commit message, is not blocked.
 - **Logs** sensitive file access by file tools, by the file's name and ignoring
   case: `.env` and `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.secret`,
   `credentials` and `secrets` files (bare or with a data extension such as
@@ -122,7 +124,8 @@ The `pre_tool_use` script includes optional safety checks:
 These checks are best-effort telemetry, not a security control. They read the
 command text, not what the shell would run: variables other than `$HOME`
 (`rm -rf "$DIR"` with `DIR=/`), escapes, `find / -delete` and scripts are not
-blocked, and Bash commands that read a file are not checked. Do not rely on them
+blocked, while an `rm` line inside a heredoc body is. Bash commands that read a
+file are not checked. Do not rely on them
 to stop a destructive command or to audit secret access.
 
 Safety checks are enabled by default. To disable:
