@@ -388,19 +388,6 @@ the build.
 
 ### Reliability And Observability
 
-#### CI flake: analytics capability banner times out on a cold runner
-- **What**: `search-analytics-capabilities.spec.ts:119` intermittently exceeds
-  Playwright's 5s `expect` timeout waiting for the coverage banner. It passes on
-  retry, so CI stays green and it reads as flaky rather than broken.
-- **Why it matters**: it burns retries and trains us to ignore a red E2E. Ruled
-  out so far: it is not query time (the seeded DB has two sessions), and it is not
-  a text race between `coverage.summary` and `coverage.tools` (both seeded sessions
-  are `tool_analytics: full`, so `excluded_sessions` is always 0 and the banner
-  cannot flip branches). Most likely first-navigation cost — it is the first test
-  in the file — but that is unconfirmed.
-- **Next**: instrument the wait before changing the timeout. Raising it would
-  hide the cause, and the point is to learn whether first paint is genuinely slow.
-
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
   `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
