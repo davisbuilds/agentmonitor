@@ -711,3 +711,150 @@ describe('Hooks never make the agent wait on a slow server', () => {
     });
   });
 });
+
+// The checks are best-effort telemetry (see hooks/claude-code/README.md), but
+// the shell and Python hooks must agree, and each case here is a form that an
+// earlier, literal-token version either missed or blocked by mistake.
+const DESTRUCTIVE_COMMANDS = [
+  'rm -rf /',
+  'rm -rf ~',
+  'rm -rf "/"',
+  "rm -rf '/'",
+  'rm -rf ${HOME}',
+  'rm -rf "$HOME"',
+  'rm -rf $HOME/',
+  'rm -rf /*',
+  'rm -rf ~/',
+  'rm -rf ~/*',
+  'rm --recursive --force /',
+  'rm -r -f /',
+  'rm -Rf /',
+  'rm -rf --no-preserve-root /',
+  'rm -rf -- /',
+  'sudo rm -rf /',
+  '/bin/rm -rf /',
+  'cd /tmp && rm -rf ~',
+  'rm -rf / tmp/build',
+  'echo $(rm -rf ~)',
+  'echo "$(rm -rf ~)"',
+  'sudo -n rm -rf /',
+  'sudo -u root rm -rf /',
+  'nice -n 5 rm -rf ~',
+  'FOO=1 rm -rf /',
+  'env FOO=1 rm -rf ~',
+  'FOO="a b" rm -rf /',
+  "env FOO='a b' rm -rf ~",
+  'echo "x $(rm -rf /) y"',
+  'echo "`rm -rf ~`"',
+  'echo "$(cd /tmp; rm -rf ~)"',
+  // A long payload after the match must not end the check early.
+  `rm -rf / && echo ${'x'.repeat(100_000)}`,
+];
+
+const SAFE_COMMANDS = [
+  'npm test',
+  'rm -rf node_modules',
+  'rm -rf ./dist /tmp/scratch',
+  'rm -rf ~/.cache/foo',
+  'rm -rf "$HOME/.cache/foo"',
+  'rm -rf ~/{a,b}',
+  'rm -f /tmp/x.lock',
+  'git commit -m "guard against rm -rf / in hooks"',
+  'git commit -m "document this; rm -rf /"',
+  "echo 'a | rm -rf ~'",
+  'git commit -m "first line\nrm -rf /"',
+  'git commit -m "document (rm -rf /)"',
+  'echo "$(date) (rm -rf ~)"',
+  'echo farm /',
+];
+
+const SENSITIVE_PATHS = [
+  '/p/.env',
+  '/p/.env.local',
+  '/p/.ENV.production',
+  '/p/certs/server.PEM',
+  '/p/tls.key',
+  '/p/credentials.json',
+  '/home/user/.aws/credentials',
+  '/p/config/secrets.yaml',
+  '/home/user/.ssh/id_ed25519',
+  '/p/app.secret',
+  '/home/user/.netrc',
+];
+
+const ORDINARY_PATHS = [
+  '/p/README.md',
+  '/p/.env.example',
+  '/p/src/env.ts',
+  '/home/user/.ssh/id_ed25519.pub',
+  '/p/keyboard.ts',
+  '/p/environment.json',
+  '/p/src/secrets.ts',
+  '/p/docs/credentials-guide.md',
+];
+
+/** File paths a pre_tool_use hook reported as sensitive, out of `filePaths`. */
+async function warnedPaths(executable: string, script: string, filePaths: string[], expected: number): Promise<string[]> {
+  const warned: string[] = [];
+  const server = createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on('data', chunk => chunks.push(Buffer.from(chunk)));
+    request.on('end', () => {
+      const payload = JSON.parse(Buffer.concat(chunks).toString('utf8')) as CapturedHookPayload;
+      if (payload.metadata?.security_warning) warned.push(String(payload.metadata.file_path));
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end('{}');
+    });
+  });
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  try {
+    for (const filePath of filePaths) {
+      await runHookProcess(executable, [script], makePreToolUseInput('Read', { file_path: filePath }), url);
+    }
+    // Wait for the expected warnings, then a little longer for unexpected ones:
+    // the hooks post in the background after they exit.
+    await waitFor(() => warned.length >= expected).catch(() => undefined);
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return warned.sort();
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+}
+
+describe('Hook safety heuristics', () => {
+  let hasPython = true;
+  try {
+    execSync('python3 --version', { timeout: 5000 });
+  } catch {
+    hasPython = false;
+  }
+  const implementations = [
+    { name: 'pre_tool_use.sh', run: (stdin: string) => runShellHook('pre_tool_use.sh', stdin), executable: 'bash', script: path.join(HOOKS_DIR, 'pre_tool_use.sh') },
+    { name: 'pre_tool_use.py', run: (stdin: string) => runPythonHook('pre_tool_use.py', stdin), executable: 'python3', script: path.join(PYTHON_DIR, 'pre_tool_use.py') },
+  ].filter(implementation => hasPython || implementation.executable !== 'python3');
+
+  for (const implementation of implementations) {
+    test(`${implementation.name} blocks destructive rm forms and allows ordinary ones`, () => {
+      const exitCodes = (commands: string[]) => commands.map(command => [
+        command,
+        implementation.run(makePreToolUseInput('Bash', { command })).exitCode,
+      ]);
+      assert.deepEqual(exitCodes(DESTRUCTIVE_COMMANDS), DESTRUCTIVE_COMMANDS.map(command => [command, 2]));
+      assert.deepEqual(exitCodes(SAFE_COMMANDS), SAFE_COMMANDS.map(command => [command, 0]));
+    });
+
+    test(`${implementation.name} reports secret files by name, ignoring case`, async () => {
+      const warned = await warnedPaths(
+        implementation.executable,
+        implementation.script,
+        [...SENSITIVE_PATHS, ...ORDINARY_PATHS],
+        SENSITIVE_PATHS.length,
+      );
+      assert.deepEqual(warned, [...SENSITIVE_PATHS].sort());
+    });
+  }
+});
