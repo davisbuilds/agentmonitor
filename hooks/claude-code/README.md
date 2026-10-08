@@ -106,15 +106,24 @@ loaded.
 
 The `pre_tool_use` script includes optional safety checks:
 
-- **Blocks** destructive commands: `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`
-- **Logs** sensitive file access by file tools (a `file_path` ending in `.env`, `.pem`, `.key`, `.credentials` or `.secret`)
+- **Blocks** an `rm` whose arguments include the root or home directory, or
+  everything in it (`/`, `/*`, `~`, `~/`, `~/*`, `$HOME`, `$HOME/*`), in any
+  option spelling (`rm -rf /`, `rm --recursive --force ~`, `sudo /bin/rm -rf "$HOME"`).
+  Each command in a list or pipeline is checked, after quotes are dropped and
+  `${HOME}` is read as `$HOME`. An `rm` that only appears inside another command's
+  arguments, such as a commit message, is not blocked.
+- **Logs** sensitive file access by file tools, by the file's name and ignoring
+  case: `.env` and `.env.*`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.secret`,
+  `credentials` and `secrets` files (bare or with a data extension such as
+  `.json` or `.yaml`), SSH private keys (`id_rsa`, `id_ed25519`, ...), `.netrc`
+  and `.pgpass`. Copies named `*.example`, `*.sample`, `*.template` or `*.dist`
+  are not logged.
 
-These checks are best-effort telemetry, not a security control. They match
-literal spellings only: quoted or braced paths (`rm -rf "/"`, `rm -rf ${HOME}`),
-globs (`rm -rf /*`) and long options (`rm --recursive --force /`) are not blocked.
-The file match is a case-sensitive suffix, so `.env.local`, `credentials.json`
-and `.PEM` are not logged, and Bash commands that read a file are not checked.
-Do not rely on them to stop a destructive command or to audit secret access.
+These checks are best-effort telemetry, not a security control. They read the
+command text, not what the shell would run: variables other than `$HOME`
+(`rm -rf "$DIR"` with `DIR=/`), escapes, `find / -delete` and scripts are not
+blocked, and Bash commands that read a file are not checked. Do not rely on them
+to stop a destructive command or to audit secret access.
 
 Safety checks are enabled by default. To disable:
 

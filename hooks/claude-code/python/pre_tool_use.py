@@ -26,13 +26,39 @@ FILE_PATH = extract_nested("tool_input.file_path")
 
 SAFETY_ENABLED = os.environ.get("AGENTMONITOR_SAFETY", "1") == "1"
 
+# These patterns match pre_tool_use.sh; tests/hooks.test.ts holds both to one
+# table of cases.
+# An rm (optionally after sudo and the like) with the root or home directory, or
+# everything in it, among its arguments. Matched per simple command, after quotes
+# are dropped and ${HOME} is spelled $HOME.
+DESTRUCTIVE_RM = re.compile(
+    r'^[ \t]*(\{[ \t]*)?((sudo|command|exec|nice|nohup|time|doas)[ \t]+)*([^ \t]*/)?rm([ \t]+[^ \t]+)*'
+    r'[ \t]+(/|/\*|~|~/|~/\*|\$HOME|\$HOME/|\$HOME/\*)([ \t]|$)'
+)
+# A file name that usually holds secrets, matched on the basename, ignoring case;
+# example and template copies are not.
+SENSITIVE_NAME = re.compile(
+    r'^(\.env(\..+)?|.+\.(env|pem|key|p12|pfx|secret|credentials)'
+    r'|\.?(credentials|secrets?)(\.(json|ya?ml|toml|ini|txt|env|xml|cfg|conf))?'
+    r'|id_(rsa|dsa|ecdsa|ed25519)|\.netrc|\.pgpass)$',
+    re.IGNORECASE,
+)
+TEMPLATE_NAME = re.compile(r'\.(example|sample|template|dist)$', re.IGNORECASE)
+
+
+def is_destructive(command):
+    normalized = re.sub(r'["\']', '', command).replace('${HOME}', '$HOME')
+    return any(DESTRUCTIVE_RM.search(part) for part in re.split(r'[;&|()`\n]', normalized))
+
+
+def is_sensitive(file_path):
+    name = file_path.rsplit('/', 1)[-1]
+    return bool(SENSITIVE_NAME.search(name)) and not TEMPLATE_NAME.search(name)
+
+
 # --- Safety checks (only for Bash commands) ---
 if SAFETY_ENABLED and TOOL_NAME == "Bash" and COMMAND:
-    destructive = re.search(
-        r'rm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|--force\s+)*(/|~|\$HOME)(\s|$)',
-        COMMAND,
-    )
-    if destructive:
+    if is_destructive(COMMAND):
         send_event({
             "session_id": SESSION_ID,
             "agent_type": "claude_code",
@@ -53,8 +79,7 @@ if SAFETY_ENABLED and TOOL_NAME == "Bash" and COMMAND:
 
 # --- Security warnings (log but don't block) ---
 if SAFETY_ENABLED and FILE_PATH:
-    sensitive = re.search(r'\.(env|pem|key|credentials|secret)$', FILE_PATH)
-    if sensitive:
+    if is_sensitive(FILE_PATH):
         send_event({
             "session_id": SESSION_ID,
             "agent_type": "claude_code",
