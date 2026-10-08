@@ -203,8 +203,9 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.equal(result.status, 'observed', result.errors.join(' '));
       const append = (result.measurements as { phases: { append: { write: { messagesKept: number; messagesWritten: number } } } }).phases.append;
       assert.deepEqual(append.write, { messagesKept: 25, messagesWritten: 5 });
-      const observations = result.observations as { end_to_end_results: string[]; messages_after: number };
+      const observations = result.observations as { end_to_end_results: string[]; end_to_end_parses: string[]; messages_after: number };
       assert.deepEqual(observations.end_to_end_results, ['parsed', 'parsed']);
+      assert.deepEqual(observations.end_to_end_parses, ['full', 'resumed'], 'the append parses only the new lines');
       assert.equal(observations.messages_after, 30);
       assert.equal(fs.existsSync(result.target!.path), false, 'the scratch database is removed');
       assert.equal(fs.existsSync(path.join(result.directory, 'transcripts')), false, 'transcript copies must not survive default cleanup');

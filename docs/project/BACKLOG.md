@@ -451,18 +451,19 @@ The report is held outside this repository and is agent-generated. All three
 items were checked against current code and a local store on 2026-10-01; the
 entries below record what was measured, not the report's claims.
 
-#### Watcher re-sync still re-parses the whole transcript
-- **What**: since 2026-10-01 a re-sync writes only the rows that changed, but it
-  still reads, hashes and parses the whole file on every append.
-- **Why or evidence**: measured 2026-10-01 on a 34 MB, 7k-message Claude
-  transcript against a scratch database: the parse took 0.08–0.12 s, against
-  about 0.011 s for the incremental write (the full rewrite it replaced took
-  about 0.83 s). The parse grows with the session and blocks the server. The
-  trace-summary re-derive, then the larger cost, now reads only the event columns
-  its rollup uses for sessions with events: measured warm on a store snapshot
-  2026-10-05, about 6x faster on the largest sessions (roughly 75 ms to 12 ms),
-  with identical summaries for every stored session. Sessions without events
-  (mostly Codex) still load and project their full transcript.
-- **Next**: resume the parse from a stored byte offset with a trailing-anchor
-  check, as `agentsview` does (`internal/sync/checkpoint.go`), falling back to a
-  full parse on mismatch.
+#### Watcher re-sync still reads, hashes and summarizes the whole session
+- **What**: since 2026-10-07 a re-sync parses only the appended lines (see
+  ARCHITECTURE, Session Browser And Live), but every sync still reads and hashes
+  the whole file, and the trace summary of a session without events (mostly
+  Codex) still projects its full transcript.
+- **Why or evidence**: measured 2026-10-07 with `verify probe resync` on the
+  largest local transcripts, a 10-line append: the parse went from about 0.19 s
+  (Claude) and 0.33 s (Codex) to under 0.1 ms. What remains on the Codex
+  transcript, about 0.14 s end to end, is mostly read and hash (about 0.06 s)
+  and the trace summary (about 0.065 s). A Claude session with events
+  summarizes in about 12 ms on the live store.
+- **Next**: if appends to large Codex rollouts still block the server, derive the
+  trace summary for event-less sessions incrementally, then hash only the bytes
+  after a checkpoint, as `agentsview` does (`internal/sync/checkpoint.go`) with a
+  trailing-anchor check; the periodic resync's full hash would remain the
+  backstop for a changed prefix.
