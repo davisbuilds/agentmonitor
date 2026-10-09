@@ -33,7 +33,10 @@ import type { TraceQualityCoverage } from './types.js';
 // comes from live session_items, fixing zeroed Codex usage (PR #37 review).
 // v3: add the stable per-session `trace_id` (reframe Phase 2 on-demand read
 // layer); the bump re-backfills existing rows so the column populates on upgrade.
-const SESSION_TRACE_SUMMARY_VERSION = 'sts:v3';
+// v4: empty reasoning items are no longer projected and the stored ones were
+// restored or removed (data migration v18), so observation counts and the
+// has_reasoning flag are re-derived.
+const SESSION_TRACE_SUMMARY_VERSION = 'sts:v4';
 
 /**
  * Stable, deterministic trace id for a session. The lean view presents one trace

@@ -95,6 +95,81 @@ test('syncClaudeLiveSession inserts one turn per new message and normalized item
   assert.equal(capabilities.live_items, 'full');
 });
 
+test('a live reasoning item carries the thinking text the transcript recorded', () => {
+  const db = getDb();
+  const jsonl = makeSession('live-claude-thinking-text', [
+    {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Why is the build red?' }] },
+      timestamp: '2026-03-24T10:20:00.000Z',
+    },
+    {
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'The lint step fails first', signature: 'sig' }] },
+      timestamp: '2026-03-24T10:20:03.000Z',
+    },
+  ]);
+
+  const parsed = parseSessionMessages(jsonl, 'live-claude-thinking-text', '/tmp/live-claude-thinking-text.jsonl');
+  insertParsedSession(db, parsed, '/tmp/live-claude-thinking-text.jsonl', 256, 'hash-thinking-text');
+  syncClaudeLiveSession(db, parsed);
+
+  const reasoning = db.prepare(
+    "SELECT payload_json FROM session_items WHERE session_id = ? AND kind = 'reasoning'",
+  ).all('live-claude-thinking-text') as Array<{ payload_json: string }>;
+  assert.equal(reasoning.length, 1);
+  assert.deepEqual(JSON.parse(reasoning[0].payload_json), { text: 'The lint step fails first' });
+});
+
+test('an empty thinking block projects no live item but keeps its turn', () => {
+  const db = getDb();
+  const lines = [
+    {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Rename the helper' }] },
+      timestamp: '2026-03-24T10:30:00.000Z',
+    },
+    {
+      // Claude Code often records a thinking block with its text left out.
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: '', signature: 'sig' }] },
+      timestamp: '2026-03-24T10:30:02.000Z',
+    },
+    {
+      type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'thinking', thinking: '  \n', signature: 'sig' }, { type: 'text', text: 'Renamed.' }] },
+      timestamp: '2026-03-24T10:30:04.000Z',
+    },
+  ];
+  const jsonl = makeSession('live-claude-empty-thinking', lines);
+  const parsed = parseSessionMessages(jsonl, 'live-claude-empty-thinking', '/tmp/live-claude-empty-thinking.jsonl');
+  insertParsedSession(db, parsed, '/tmp/live-claude-empty-thinking.jsonl', 256, 'hash-empty-thinking-1');
+  const result = syncClaudeLiveSession(db, parsed);
+
+  assert.equal(result.inserted_turns, 3);
+  assert.equal(result.inserted_items, 2);
+  const kinds = (db.prepare('SELECT kind FROM session_items WHERE session_id = ? ORDER BY id').all('live-claude-empty-thinking') as Array<{ kind: string }>)
+    .map(item => item.kind);
+  assert.deepEqual(kinds, ['user_message', 'assistant_message']);
+
+  // The turn count still matches the message count, so the next sync appends
+  // only the new message instead of rebuilding the session.
+  const jsonl2 = makeSession('live-claude-empty-thinking', [
+    ...lines,
+    {
+      type: 'user',
+      message: { role: 'user', content: [{ type: 'text', text: 'Thanks' }] },
+      timestamp: '2026-03-24T10:31:00.000Z',
+    },
+  ]);
+  const parsed2 = parseSessionMessages(jsonl2, 'live-claude-empty-thinking', '/tmp/live-claude-empty-thinking.jsonl');
+  insertParsedSession(db, parsed2, '/tmp/live-claude-empty-thinking.jsonl', 320, 'hash-empty-thinking-2');
+  const appended = syncClaudeLiveSession(db, parsed2);
+  assert.equal(appended.reset, false);
+  assert.equal(appended.inserted_turns, 1);
+  assert.equal(appended.inserted_items, 1);
+});
+
 test('syncClaudeLiveSession appends only new messages on re-sync', () => {
   const db = getDb();
   const jsonl1 = makeSession('live-claude-append', [

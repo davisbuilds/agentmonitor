@@ -132,12 +132,18 @@ export function normalizeClaudeBlock(
         created_at: createdAt,
         payload: { text: block.text ?? '' },
       };
-    case 'thinking':
+    case 'thinking': {
+      // The parsers store thinking under `text`; `thinking` is the raw
+      // transcript field. Claude Code often records a thinking block with its
+      // text left out, and such a block carries nothing to show.
+      const text = block.text ?? block.thinking ?? '';
+      if (!text.trim()) return null;
       return {
         kind: 'reasoning',
         created_at: createdAt,
-        payload: { text: block.thinking ?? '' },
+        payload: { text },
       };
+    }
     case 'tool_use':
       return {
         kind: 'tool_call',

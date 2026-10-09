@@ -76,5 +76,5 @@ test('a read-only command adds the retry key to a v16 database', async () => {
   const columns = (db.prepare('PRAGMA table_info(otel_metrics)').all() as Array<{ name: string }>).map(column => column.name);
   assert.ok(columns.includes('point_id'));
   assert.deepEqual(db.prepare(`SELECT name FROM sqlite_master WHERE name = 'idx_otel_metrics_point_id'`).all(), [{ name: 'idx_otel_metrics_point_id' }]);
-  assert.equal(db.pragma('user_version', { simple: true }), 17);
+  assert.equal(db.pragma('user_version', { simple: true }), 18);
 });
