@@ -133,3 +133,141 @@ test('a single priced arm is bracketed to its enclosing decade, not collapsed', 
   assert.equal(g.points.length, 1);
   assert.ok(g.points[0].x > 0 && g.points[0].x < 100); // lands mid-axis
 });
+
+test('a single arm on an exact decade is widened a decade each side, not collapsed to a zero-width axis', () => {
+  // floor(log10(1)) === ceil(log10(1)): without the widening the domain is
+  // [1, 1], the log scale degenerates, and every point stacks on the left edge.
+  const g = computeFrontier(
+    [arm({ canonical_model: 'one', label: 'one', mean_score: 0.5, cost_per_trial: 1, pareto: true, dominated_by: null })],
+    RANGES,
+  );
+  assert.deepEqual(g.costDomain, [0.1, 10]);
+  assert.ok(Math.abs(g.points[0].x - 50) < 1e-9); // geometric centre of [0.1, 10]
+});
+
+test('several arms sharing one exact-decade cost are also widened and centred', () => {
+  const g = computeFrontier(
+    [
+      arm({ canonical_model: 'a', label: 'a', mean_score: 0.9, cost_per_trial: 0.1, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'b', label: 'b', mean_score: 0.3, cost_per_trial: 0.1, pareto: false, dominated_by: 'a' }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(g.costDomain, [0.01, 1]);
+  for (const p of g.points) assert.ok(Math.abs(p.x - 50) < 1e-9);
+});
+
+test('plotted coordinates are the log-cost and linear-score positions in the given ranges', () => {
+  const g = computeFrontier(FIXTURE, RANGES); // costDomain [0.01, 10] spans 3 decades
+  const deepseek = g.points.find((p) => p.arm.canonical_model === 'deepseek-v4-flash-0731')!;
+  assert.equal(deepseek.cost, 0.05);
+  assert.equal(deepseek.score, 0.778);
+  assert.ok(Math.abs(deepseek.x - ((Math.log10(0.05) + 2) / 3) * 100) < 1e-9);
+  assert.ok(Math.abs(deepseek.y - (100 - 77.8)) < 1e-9);
+  const laguna = FIXTURE[6];
+  assert.ok(!g.points.some((p) => p.arm === laguna)); // score 0 but unpriced: never plotted
+  // The scales handed back are the ones the points were placed with.
+  assert.equal(g.xScale(0.05), deepseek.x);
+  assert.equal(g.yScale(0.778), deepseek.y);
+});
+
+test('no priced positive cost: free arms sit on the left edge of a default domain', () => {
+  const g = computeFrontier(
+    [
+      arm({ canonical_model: 'f1', label: 'f1', mean_score: 0.8, cost_per_trial: 0, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'f2', label: 'f2', mean_score: 0.2, cost_per_trial: 0, pareto: false, dominated_by: 'f1' }),
+      arm({ canonical_model: 'u', label: 'u', mean_score: 0.5, cost_per_trial: null, pareto: false, dominated_by: null }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(g.costDomain, [0.001, 1]);
+  assert.deepEqual(g.points.map((p) => p.x), [0, 0]);
+  assert.deepEqual(g.points.map((p) => Number.isFinite(p.x) && Number.isFinite(p.y)), [true, true]);
+  assert.deepEqual(g.free.map((a) => a.label), ['f1', 'f2']);
+  assert.deepEqual(g.unpriced.map((a) => a.label), ['u']);
+  assert.deepEqual(g.connectors.map((c) => [c.from.arm.label, c.to.arm.label]), [['f2', 'f1']]);
+});
+
+test('empty input yields empty geometry with a usable default domain', () => {
+  const g = computeFrontier([], RANGES);
+  assert.deepEqual(g.points, []);
+  assert.deepEqual(g.frontier, []);
+  assert.deepEqual(g.connectors, []);
+  assert.deepEqual(g.unpriced, []);
+  assert.deepEqual(g.free, []);
+  assert.deepEqual(g.costDomain, [0.001, 1]);
+});
+
+test('connector rejects a cheaper candidate that scores worse than the dominated arm', () => {
+  // Both efforts share canonical_model 'm'. m (cheap) is cheaper than x but
+  // scores below it, so it does not dominate x; only m (good) does.
+  const g = computeFrontier(
+    [
+      arm({ canonical_model: 'm', label: 'm (cheap)', mean_score: 0.1, cost_per_trial: 0.01, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'm', label: 'm (good)', mean_score: 0.9, cost_per_trial: 0.05, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'x', label: 'x', mean_score: 0.5, cost_per_trial: 0.1, pareto: false, dominated_by: 'm' }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(g.connectors.map((c) => [c.from.arm.label, c.to.arm.label]), [['x', 'm (good)']]);
+});
+
+test('connector accepts a dominator at exactly the same cost with a higher score', () => {
+  const g = computeFrontier(
+    [
+      arm({ canonical_model: 'm', label: 'm', mean_score: 0.9, cost_per_trial: 0.1, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'x', label: 'x', mean_score: 0.5, cost_per_trial: 0.1, pareto: false, dominated_by: 'm' }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(g.connectors.map((c) => [c.from.arm.label, c.to.arm.label]), [['x', 'm']]);
+});
+
+test('connector breaks a cost tie between dominating efforts by the higher score', () => {
+  const g = computeFrontier(
+    [
+      arm({ canonical_model: 'm', label: 'm (lo)', mean_score: 0.6, cost_per_trial: 0.05, pareto: false, dominated_by: null }),
+      arm({ canonical_model: 'm', label: 'm (hi)', mean_score: 0.8, cost_per_trial: 0.05, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'x', label: 'x', mean_score: 0.5, cost_per_trial: 0.1, pareto: false, dominated_by: 'm' }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(g.connectors.map((c) => [c.from.arm.label, c.to.arm.label]), [['x', 'm (hi)']]);
+});
+
+test('an arm dominated by another effort of its own model never links to itself', () => {
+  // m (high) is dominated by m (low): same canonical_model. The arm itself
+  // trivially satisfies "at least as cheap and as good" and must be excluded.
+  const linked = computeFrontier(
+    [
+      arm({ canonical_model: 'm', label: 'm (high)', mean_score: 0.7, cost_per_trial: 0.4, pareto: false, dominated_by: 'm' }),
+      arm({ canonical_model: 'm', label: 'm (low)', mean_score: 0.7, cost_per_trial: 0.1, pareto: true, dominated_by: null }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(linked.connectors.map((c) => [c.from.arm.label, c.to.arm.label]), [['m (high)', 'm (low)']]);
+
+  // With no other effort that dominates it, there is no connector at all.
+  const alone = computeFrontier(
+    [arm({ canonical_model: 'm', label: 'm (high)', mean_score: 0.7, cost_per_trial: 0.4, pareto: false, dominated_by: 'm' })],
+    RANGES,
+  );
+  assert.deepEqual(alone.connectors, []);
+});
+
+test('no connector is drawn when either end is off the cost axis', () => {
+  const g = computeFrontier(
+    [
+      // Dominator is unpriced: nowhere to draw the segment to.
+      arm({ canonical_model: 'ghost', label: 'ghost', mean_score: 0.9, cost_per_trial: null, pareto: true, dominated_by: null }),
+      arm({ canonical_model: 'x', label: 'x', mean_score: 0.5, cost_per_trial: 0.1, pareto: false, dominated_by: 'ghost' }),
+      // Dominated arm is unpriced: it is listed, not plotted.
+      arm({ canonical_model: 'y', label: 'y', mean_score: 0.2, cost_per_trial: null, pareto: false, dominated_by: 'z' }),
+      arm({ canonical_model: 'z', label: 'z', mean_score: 0.8, cost_per_trial: 0.02, pareto: true, dominated_by: null }),
+    ],
+    RANGES,
+  );
+  assert.deepEqual(g.connectors, []);
+  assert.deepEqual(g.unpriced.map((a) => a.label), ['ghost', 'y']);
+  assert.deepEqual(g.frontier.map((p) => p.arm.label), ['z']); // unpriced pareto arm is not on the polyline
+});

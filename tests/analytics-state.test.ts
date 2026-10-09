@@ -6,6 +6,7 @@ import {
   parseAnalyticsHash,
   buildAnalyticsCsv,
 } from '../frontend/src/lib/analytics-state.ts';
+import { csvSection, parseCsv } from './helpers/csv.ts';
 
 test('createDefaultAnalyticsFilters uses an inclusive last-30-day range', () => {
   const filters = createDefaultAnalyticsFilters(new Date('2026-04-15T12:00:00.000Z'));
@@ -317,4 +318,70 @@ test('buildAnalyticsCsv omits an empty consultation section', () => {
   });
 
   assert.doesNotMatch(csv, /Skill Consultations By Harness/);
+});
+
+test('buildAnalyticsCsv puts every value under its own header (no swapped columns)', () => {
+  const csv = buildAnalyticsCsv({
+    generatedAt: '2026-04-15T12:00:00.000Z',
+    filters: { from: '2026-04-01', to: '2026-04-15', project: '', agent: '' },
+    summary: null,
+    velocity: null,
+    activity: [{ date: '2026-04-01', sessions: 3, messages: 27, user_messages: 8 }],
+    projects: [{ project: 'proj', session_count: 9, message_count: 110, user_message_count: 31 }],
+    tools: [{ tool_name: 'Bash', category: 'Execute', count: 18 }],
+    skills: [{ date: '2026-04-11', total: 3, skills: [{ skill_name: 'a', count: 1 }, { skill_name: 'b', count: 2 }] }],
+    topSessions: [{
+      id: 'sid', project: 'proj', agent: 'codex',
+      started_at: '2026-04-10T11:00:00Z', ended_at: null,
+      message_count: 30, user_message_count: 9, tool_call_count: 5, fidelity: 'summary',
+    }],
+    agents: [{
+      agent: 'codex', session_count: 10, message_count: 130, user_message_count: 39,
+      average_messages_per_session: 13, full_fidelity_sessions: 6, summary_fidelity_sessions: 4,
+      tool_analytics_capable_sessions: 7,
+      first_started_at: '2026-04-01T10:00:00Z', last_started_at: '2026-04-15T18:00:00Z',
+    }],
+  });
+
+  assert.deepEqual(csvSection(csv, 'Activity By Day'), [
+    { Date: '2026-04-01', Sessions: '3', Messages: '27', 'User Messages': '8' },
+  ]);
+  assert.deepEqual(csvSection(csv, 'Projects'), [
+    { Project: 'proj', Sessions: '9', Messages: '110', 'User Messages': '31' },
+  ]);
+  assert.deepEqual(csvSection(csv, 'Tools'), [{ Tool: 'Bash', Category: 'Execute', Count: '18' }]);
+  // One row per (day, skill), not per day.
+  assert.deepEqual(csvSection(csv, 'Skills By Day'), [
+    { Date: '2026-04-11', Skill: 'a', Count: '1' },
+    { Date: '2026-04-11', Skill: 'b', Count: '2' },
+  ]);
+  assert.deepEqual(csvSection(csv, 'Top Sessions'), [{
+    'Session ID': 'sid', Project: 'proj', Agent: 'codex', Messages: '30', 'User Messages': '9',
+    'Tool Calls': '5', Fidelity: 'summary', 'Started At': '2026-04-10T11:00:00Z', 'Ended At': '',
+  }]);
+  assert.deepEqual(csvSection(csv, 'Agent Comparison'), [{
+    Agent: 'codex', Sessions: '10', Messages: '130', 'User Messages': '39', 'Average Messages': '13',
+    'Full Fidelity': '6', 'Summary Fidelity': '4', 'Tool Analytics Capable': '7',
+  }]);
+  // Unset filters export as "All"; absent summary/velocity emit no rows.
+  assert.deepEqual(parseCsv(csv).find(r => r[0] === 'Filters' && r[1] === 'Agent'), ['Filters', 'Agent', 'All']);
+  assert.doesNotMatch(csv, /^(Summary|Velocity),/m);
+});
+
+test('buildAnalyticsCsv quotes values containing commas, quotes, or newlines', () => {
+  const awkward = 'acme, "inc"';
+  const csv = buildAnalyticsCsv({
+    generatedAt: '2026-04-15T12:00:00.000Z',
+    filters: { from: '2026-04-01', to: '2026-04-15', project: awkward, agent: 'two\nlines' },
+    summary: null,
+    velocity: null,
+    activity: [],
+    projects: [{ project: awkward, session_count: 1, message_count: 2, user_message_count: 1 }],
+    tools: [],
+    topSessions: [],
+    agents: [],
+  });
+  assert.equal(csvSection(csv, 'Projects')[0].Project, awkward);
+  assert.deepEqual(parseCsv(csv).find(r => r[0] === 'Filters' && r[1] === 'Agent'), ['Filters', 'Agent', 'two\nlines']);
+  assert.doesNotMatch(csv, /Activity By Day|Tools|Skills By Day/);
 });
