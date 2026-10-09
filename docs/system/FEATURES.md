@@ -43,6 +43,8 @@ fidelity is explicit:
 - Claude session files can provide transcript-capable live detail. Reasoning
   appears only where the transcript recorded its text; Claude Code often records
   a thinking block with the text left out, and such a block projects no item.
+  The stream and the trace tree fold each tool result into its call's row and
+  state a status only when it is not a routine success.
 - Codex OTEL provides summary-oriented live activity, including response-completion
   token and cost data. Historical Codex JSONL import enriches later analysis but is
   not the sole usage source.

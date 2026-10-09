@@ -1,6 +1,8 @@
 <script lang="ts">
   import { Badge } from '../ui';
   import type { TraceQualityObservationTreeNode } from '../../api/client';
+  import { isNotableStatus } from '../../status';
+  import { foldToolResults, type TraceTreeRow } from './trace-tree-rows';
 
   interface Props {
     nodes: TraceQualityObservationTreeNode[];
@@ -29,6 +31,13 @@
     return 'neutral';
   }
 
+  // Success is the routine case; only a status or severity that says something
+  // gets a badge.
+  function showsStatus(obs: TraceQualityObservationTreeNode): boolean {
+    if (obs.status) return isNotableStatus(obs.status);
+    return obs.severity === 'warning' || obs.severity === 'error' || obs.severity === 'critical';
+  }
+
   function formatDuration(ms: number | null): string {
     if (ms == null) return '—';
     if (ms < 1000) return `${ms}ms`;
@@ -46,15 +55,20 @@
   }
 </script>
 
-{#snippet row(obs: TraceQualityObservationTreeNode, depth: number)}
+{#snippet row(entry: TraceTreeRow, depth: number)}
+  {@const obs = entry.node}
+  {@const result = entry.result}
+  {@const flagged = result && showsStatus(result) ? result : showsStatus(obs) ? obs : null}
   {@const hasChildren = obs.children.length > 0}
   {@const isCollapsed = collapsed[obs.id] === true}
   <div class="border-b border-line/40 last:border-b-0">
-    <button
-      type="button"
-      class={`flex w-full items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-surface-2 ${selectedId === obs.id ? 'bg-surface-2' : ''}`}
+    <div
+      role="button"
+      tabindex="0"
+      class={`flex w-full cursor-pointer items-center gap-2 px-2 py-1.5 text-left transition-colors hover:bg-surface-2 ${selectedId === obs.id || (result && selectedId === result.id) ? 'bg-surface-2' : ''}`}
       style={`padding-left: ${depth * 1.1 + 0.5}rem`}
       onclick={() => onselect(obs.id)}
+      onkeydown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onselect(obs.id); } }}
     >
       {#if hasChildren}
         <span
@@ -74,17 +88,27 @@
 
       <span class="hidden shrink-0 items-center gap-2 font-mono text-meta text-text-faint sm:flex">
         {#if obs.model}<span class="truncate max-w-[10rem]" title={obs.model}>{obs.model}</span>{/if}
-        {#if obs.tool_name}<span class="truncate max-w-[8rem]" title={`tool: ${obs.tool_name}`}>{obs.tool_name}</span>{/if}
         {#if formatTokens(obs)}<span title="tokens">{formatTokens(obs)}t</span>{/if}
         {#if formatCost(obs.cost_usd)}<span title="cost">{formatCost(obs.cost_usd)}</span>{/if}
-        <span title="duration" class="w-12 text-right">{formatDuration(obs.duration_ms)}</span>
+        {#if obs.duration_ms}<span title="duration" class="w-12 text-right">{formatDuration(obs.duration_ms)}</span>{/if}
       </span>
 
-      <Badge tone={statusTone(obs)}>{obs.status ?? obs.severity ?? '—'}</Badge>
-    </button>
+      {#if result}
+        <button
+          type="button"
+          class={`shrink-0 rounded-sm px-1 text-meta transition-colors hover:text-text ${selectedId === result.id ? 'text-accent' : 'text-text-faint'}`}
+          title="Inspect the tool result"
+          onclick={(e) => { e.stopPropagation(); onselect(result.id); }}
+        >result</button>
+      {/if}
+
+      {#if flagged}
+        <Badge tone={statusTone(flagged)}>{flagged.status ?? flagged.severity}</Badge>
+      {/if}
+    </div>
 
     {#if hasChildren && !isCollapsed}
-      {#each obs.children as child (child.id)}
+      {#each foldToolResults(obs.children) as child (child.node.id)}
         {@render row(child, depth + 1)}
       {/each}
     {/if}
@@ -92,7 +116,7 @@
 {/snippet}
 
 <div class="overflow-hidden">
-  {#each nodes as node (node.id)}
-    {@render row(node, 0)}
+  {#each foldToolResults(nodes) as entry (entry.node.id)}
+    {@render row(entry, 0)}
   {/each}
 </div>

@@ -13,6 +13,7 @@
   import { timeAgo, agentHexColor, agentDisplayName } from '../../format';
   import { getMessagePreviewText, getSessionPreviewText } from '../../session-text';
   import { classifyMessageAuthor, type MessageAuthor } from '../../session-roles';
+  import { hasVisibleContent } from '../../transcript-blocks';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import { hasSessionCapability } from '../../session-capabilities';
   import { pins } from '../../stores/pins.svelte';
@@ -57,10 +58,13 @@
     { value: 'assistant', label: agentDisplayName(session?.agent ?? 'unknown') },
     { value: 'tool', label: 'Tools' },
   ]);
+  // A message with nothing to render (Claude Code often records a thinking block
+  // with its text left out) would show as an empty header, so it is left out.
+  const visibleMessages = $derived(messages.filter(hasVisibleContent));
   const filteredMessages = $derived(
     authorFilter === 'all'
-      ? messages
-      : messages.filter((message) => classifyMessageAuthor(message) === authorFilter),
+      ? visibleMessages
+      : visibleMessages.filter((message) => classifyMessageAuthor(message) === authorFilter),
   );
 
   const PAGE_SIZE = 50;
@@ -164,8 +168,8 @@
 
   // Resolve against the rendered (filtered) set so the result always has a DOM
   // node. With an author filter active, a bucket jump lands on the nearest
-  // visible turn instead of silently no-opping on a hidden ordinal. When the
-  // filter is "all", filteredMessages === messages, so behavior is unchanged.
+  // visible turn instead of silently no-opping on a hidden ordinal. The same
+  // holds for a message left out because it has nothing to render.
   function findLoadedOrdinal(targetOrdinal: number): number | null {
     let fallback: number | null = null;
     for (const message of filteredMessages) {
@@ -377,7 +381,7 @@
       <div class="ml-auto flex items-center gap-2">
         {#if authorFilter !== 'all'}
           <span class="tabular font-mono text-meta text-text-faint">
-            {filteredMessages.length} of {messages.length} loaded
+            {filteredMessages.length} of {visibleMessages.length} loaded
           </span>
         {/if}
         <Select
@@ -444,8 +448,12 @@
 
             {#if filteredMessages.length === 0}
               <div class="py-8 text-center text-meta text-text-muted">
-                No {authorFilter === 'you' ? 'You' : authorFilter === 'tool' ? 'Tool' : agentDisplayName(session?.agent ?? 'unknown')}
-                turns in the loaded window — load more to keep looking.
+                {#if authorFilter === 'all'}
+                  Nothing to show in the loaded window — load more to keep looking.
+                {:else}
+                  No {authorFilter === 'you' ? 'You' : authorFilter === 'tool' ? 'Tool' : agentDisplayName(session?.agent ?? 'unknown')}
+                  turns in the loaded window — load more to keep looking.
+                {/if}
               </div>
             {/if}
 
