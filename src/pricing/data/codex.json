@@ -124,12 +124,23 @@
       ]
     },
     "gpt-5.6-cyber": {
-      "aliases": [],
+      "aliases": [
+        "gpt-daybreak-red-latest"
+      ],
       "inputCostPerMTok": 12.5,
       "outputCostPerMTok": 75,
       "cacheReadCostPerMTok": 1.25,
       "cacheWriteCostPerMTok": 15.625,
-      "deprecated": false
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 25,
+          "outputCostPerMTok": 112.5,
+          "cacheReadCostPerMTok": 2.5,
+          "cacheWriteCostPerMTok": 31.25
+        }
+      ]
     },
     "gpt-5.5": {
       "aliases": [],

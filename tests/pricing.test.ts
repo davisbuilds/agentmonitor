@@ -161,8 +161,10 @@ describe('PricingRegistry', () => {
 
     // 2026-10-09 live pricing page (developers.openai.com/api/docs/pricing,
     // "Cyber models"): $12.50 input, $1.25 cached input, $15.625 cache writes,
-    // $75 output; no long-context rates listed.
-    test('prices gpt-5.6-cyber at its published flat rates', () => {
+    // $75 output. The pricing table lists no long-context rates; the model page
+    // (developers.openai.com/api/docs/models/gpt-5.6-cyber) does, and names
+    // gpt-daybreak-red-latest as a deprecated alias.
+    test('prices gpt-5.6-cyber at its published rates and long-context tier', () => {
       const pricing = registry.lookup('gpt-5.6-cyber');
       assert.ok(pricing, 'gpt-5.6-cyber must be priced, not billed as $0');
       assert.equal(pricing.provider, 'openai');
@@ -171,8 +173,23 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.outputCostPerToken, 75 / 1_000_000);
       assert.equal(pricing.cacheReadCostPerToken, 1.25 / 1_000_000);
       assert.equal(pricing.cacheWriteCostPerToken, 15.625 / 1_000_000);
-      assert.equal(pricing.tiers, undefined);
+      // Model page (2026-10-09): prompts over 272K input tokens pay 2x input
+      // and 1.5x output for the full request.
+      assert.equal(pricing.tiers?.length, 1);
+      const [tier] = pricing.tiers ?? [];
+      assert.equal(tier.abovePromptTokens, 272_000);
+      assert.equal(tier.inputCostPerToken, 25 / 1_000_000);
+      assert.equal(tier.outputCostPerToken, 112.5 / 1_000_000);
+      assert.equal(tier.cacheReadCostPerToken, 2.5 / 1_000_000);
+      assert.equal(tier.cacheWriteCostPerToken, 31.25 / 1_000_000);
       assert.equal(classifyModel('gpt-5.6-cyber').pricing_status, 'known');
+    });
+
+    test('resolves the deprecated Daybreak Red alias to gpt-5.6-cyber', () => {
+      const pricing = registry.lookup('gpt-daybreak-red-latest');
+      assert.ok(pricing, 'gpt-daybreak-red-latest must resolve, not bill as $0');
+      assert.equal(pricing.inputCostPerToken, 12.5 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 75 / 1_000_000);
     });
 
     test('finds OpenAI GPT-5.4 snapshot alias', () => {
