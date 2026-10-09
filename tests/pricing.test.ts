@@ -159,6 +159,22 @@ describe('PricingRegistry', () => {
       assert.equal(registry.resolve('gpt-5.6')?.canonicalModel, 'gpt-5.6-sol');
     });
 
+    // 2026-10-09 live pricing page (developers.openai.com/api/docs/pricing,
+    // "Cyber models"): $12.50 input, $1.25 cached input, $15.625 cache writes,
+    // $75 output; no long-context rates listed.
+    test('prices gpt-5.6-cyber at its published flat rates', () => {
+      const pricing = registry.lookup('gpt-5.6-cyber');
+      assert.ok(pricing, 'gpt-5.6-cyber must be priced, not billed as $0');
+      assert.equal(pricing.provider, 'openai');
+      assert.equal(pricing.deprecated, false);
+      assert.equal(pricing.inputCostPerToken, 12.5 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 75 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 1.25 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 15.625 / 1_000_000);
+      assert.equal(pricing.tiers, undefined);
+      assert.equal(classifyModel('gpt-5.6-cyber').pricing_status, 'known');
+    });
+
     test('finds OpenAI GPT-5.4 snapshot alias', () => {
       const pricing = registry.lookup('gpt-5.4-2026-03-05');
       assert.ok(pricing);
@@ -619,14 +635,58 @@ describe('PricingRegistry', () => {
     });
   });
 
+  // ─── Haiku 5.5 (2026-10-09 live pricing page, platform.claude.com/docs/en/
+  //     about-claude/pricing): priced by prompt length. Up to 100K prompt tokens
+  //     $0.10 input / $0.125 5m write / $0.20 1h write / $0.01 cache read /
+  //     $0.50 output; over 100K, $0.50 / $0.625 / $1 / $0.05 / $2.50. The prompt
+  //     counts cache reads and writes too. ──
+  describe('Claude Haiku 5.5', () => {
+    test('resolves with its published base rates, a 100K prompt tier, and classifies as haiku', () => {
+      const pricing = registry.lookup('claude-haiku-5-5');
+      assert.ok(pricing, 'claude-haiku-5-5 must be priced, not billed as $0');
+      assert.equal(pricing.provider, 'anthropic');
+      assert.equal(pricing.deprecated, false);
+      assert.equal(pricing.inputCostPerToken, 0.1 / 1_000_000);
+      assert.equal(pricing.outputCostPerToken, 0.5 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.01 / 1_000_000);
+      assert.equal(pricing.cacheWriteCostPerToken, 0.125 / 1_000_000);
+      assert.equal(pricing.cacheWrite1hCostPerToken, 0.2 / 1_000_000);
+      assert.deepEqual(pricing.tiers, [{
+        abovePromptTokens: 100_000,
+        inputCostPerToken: 0.5 / 1_000_000,
+        outputCostPerToken: 2.5 / 1_000_000,
+        cacheReadCostPerToken: 0.05 / 1_000_000,
+        cacheWriteCostPerToken: 0.625 / 1_000_000,
+        cacheWrite1hCostPerToken: 1 / 1_000_000,
+      }]);
+      const c = classifyModel('claude-haiku-5-5');
+      assert.equal(c.tier, 'haiku');
+      assert.equal(c.pricing_status, 'known');
+    });
+
+    test('bills a prompt of exactly 100K at base rates and one over it at the higher rates', () => {
+      // Prompt = input + cache reads + cache writes; the 1h part is a share of the writes.
+      const tokens = { input: 40_000, output: 10_000, cacheRead: 50_000, cacheWrite: 10_000, cacheWrite1h: 4_000 };
+      const at = registry.calculate('claude-haiku-5-5', tokens);
+      const over = registry.calculate('claude-haiku-5-5', { ...tokens, input: 40_001 });
+      assert.ok(at !== null && over !== null);
+      const expectedAt = (40_000 * 0.1 + 10_000 * 0.5 + 50_000 * 0.01 + 6_000 * 0.125 + 4_000 * 0.2) / 1_000_000;
+      const expectedOver = (40_001 * 0.5 + 10_000 * 2.5 + 50_000 * 0.05 + 6_000 * 0.625 + 4_000 * 1) / 1_000_000;
+      assert.ok(Math.abs(at - expectedAt) < 1e-12, `at got ${at}`);
+      assert.ok(Math.abs(over - expectedOver) < 1e-12, `over got ${over}`);
+    });
+  });
+
   // ─── Claude 1-hour cache writes (2x input, vs 1.25x for 5-minute writes) ──
-  // Rates from the live pricing page's "1h cache writes" column (2026-10-04).
+  // Rates from the live pricing page's "1h cache writes" column (2026-10-04;
+  // Haiku 5.5 2026-10-09, its up-to-100K-prompt rate).
   describe('Claude 1-hour cache writes', () => {
     const ONE_HOUR_RATES: Record<string, number> = {
       'claude-fable-5-1': 20, 'claude-fable-5': 20, 'claude-opus-5-5': 8, 'claude-opus-5': 10,
       'claude-opus-4-8': 10, 'claude-opus-4-7': 10, 'claude-opus-4-6': 10, 'claude-opus-4-5-20251101': 10,
       'claude-opus-4-1-20250805': 30, 'claude-opus-4-20250514': 30, 'claude-sonnet-5-5': 4, 'claude-sonnet-5': 4,
-      'claude-sonnet-4-6': 6, 'claude-sonnet-4-5-20250929': 6, 'claude-sonnet-4-20250514': 6, 'claude-haiku-4-5-20251001': 2,
+      'claude-sonnet-4-6': 6, 'claude-sonnet-4-5-20250929': 6, 'claude-sonnet-4-20250514': 6, 'claude-haiku-5-5': 0.2,
+      'claude-haiku-4-5-20251001': 2,
     };
 
     test('every Anthropic model carries its published 1-hour rate', () => {
