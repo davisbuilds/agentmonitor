@@ -105,7 +105,7 @@
       "aliases": [],
       "inputCostPerMTok": 2,
       "outputCostPerMTok": 10,
-      "cacheReadCostPerMTok": 0.2,
+      "cacheReadCostPerMTok": 0.1,
       "cacheWriteCostPerMTok": 2.5,
       "cacheWrite1hCostPerMTok": 4,
       "deprecated": false

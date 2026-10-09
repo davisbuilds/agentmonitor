@@ -255,12 +255,11 @@ the build.
 #### Some stored rates disagree with the vendors' live pricing pages
 - **What**: no model with recent usage is unpriced any more: Claude Haiku 5.5
   (prompt-length tiered at 100K) and `gpt-5.6-cyber` were priced 2026-10-09 from
-  the vendors' live pages. Three rate questions remain open.
-  - **Sonnet 5.5 cache reads**: `claude.json` bills them at $0.20/MTok, but on
-    2026-10-09 Anthropic's pricing page lists $0.10 (footnote: "0.05x the base
-    input price" for Opus 5.5 and Sonnet 5.5), and the models overview says the
-    same. The 2026-10-04 entry and its test cite $0.20 from the same page. Either
-    the page changed after that date or $0.20 was a 0.1x reading.
+  the vendors' live pages. The same day Sonnet 5.5 cache reads were corrected
+  from $0.20 to $0.10/MTok (the page's "0.05x the base input price"). Open items:
+  - **Stored Sonnet 5.5 costs**: `estimated` costs stored before the correction
+    used the $0.20 cache-read rate. Startup only fills NULL costs, so they need a
+    full recalc, not `--missing-only`. `reported` costs are never rewritten.
   - **GPT-5.6 cache writes**: the OpenAI page (checked 2026-09-23, again
     2026-10-09) lists a 1.25x cache-write column for every GPT-5.6 and GPT-6
     model, while `codex.json` bills GPT-5.6 Sol, Terra and Luna cache writes at
@@ -272,11 +271,10 @@ the build.
     could encode the promo.
 - **Why it matters**: a wrong rate is as silent as a missing one: the dashboard
   stays plausible.
-- **Next**: for Sonnet 5.5, decide between a flat correction and a `schedule`
-  entry from the date the page changed (if it did), update the test, then run a
-  full `amon costs recalc --dry-run --json` and confirm that only Sonnet 5.5 rows
-  move. Reconcile the GPT-5.6 cache-write column before Codex starts emitting
-  cache-write tokens.
+- **Next**: once the Sonnet 5.5 correction is running, run
+  `amon costs recalc --dry-run --json` and confirm that only Sonnet 5.5 rows
+  move, then apply it. Reconcile the GPT-5.6 cache-write column before Codex
+  starts emitting cache-write tokens.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not

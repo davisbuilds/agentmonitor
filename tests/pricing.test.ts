@@ -617,8 +617,9 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Sonnet 5.5 (2026-10-04 live pricing page: $2/$10, cache read $0.20,
-  //     5m write $2.50). Full 1M context at standard rates, so no tiers. ──
+  // ─── Sonnet 5.5 (live pricing page: $2/$10, 5m write $2.50; cache read
+  //     $0.10, "0.05x the base input price", per the page on 2026-10-09).
+  //     Full 1M context at standard rates, so no tiers. ──
   describe('Claude Sonnet 5.5', () => {
     test('resolves with its published per-MTok rates and classifies as sonnet', () => {
       const pricing = registry.lookup('claude-sonnet-5-5');
@@ -626,7 +627,7 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.provider, 'anthropic');
       assert.equal(pricing.inputCostPerToken, 2 / 1_000_000);
       assert.equal(pricing.outputCostPerToken, 10 / 1_000_000);
-      assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
+      assert.equal(pricing.cacheReadCostPerToken, 0.1 / 1_000_000);
       assert.equal(pricing.cacheWriteCostPerToken, 2.5 / 1_000_000);
       assert.equal(pricing.tiers, undefined);
       const c = classifyModel('claude-sonnet-5-5');
