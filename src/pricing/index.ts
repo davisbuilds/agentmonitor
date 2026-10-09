@@ -202,7 +202,8 @@ const BEDROCK_ANTHROPIC_ID = /^(?:(?:us|eu|apac|jp|au|ca|us-gov|global)\.)?anthr
 /**
  * The rate-card spelling of a model ID: no `anthropic/`, `openai/` or `google/`
  * routing prefix, no Claude Code `[1m]` long-context suffix (Claude 4.6 and later
- * bill the full window at standard rates), and a Bedrock ID reduced to its
+ * bill the full window at standard rates; Haiku 5.5's prompt-length tier lives
+ * on its rate card, so dropping the suffix keeps it), and a Bedrock ID reduced to its
  * Anthropic model. Bedrock's regional-endpoint premium is not modeled.
  */
 export function normalizeModelId(model: string): string {
