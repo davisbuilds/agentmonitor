@@ -40,7 +40,9 @@ other machines and cloud tasks that no local source records.
 Live exposes normalized sessions, turns, items, and a dedicated live stream. Its
 fidelity is explicit:
 
-- Claude session files can provide transcript-capable live detail.
+- Claude session files can provide transcript-capable live detail. Reasoning
+  appears only where the transcript recorded its text; Claude Code often records
+  a thinking block with the text left out, and such a block projects no item.
 - Codex OTEL provides summary-oriented live activity, including response-completion
   token and cost data. Historical Codex JSONL import enriches later analysis but is
   not the sole usage source.

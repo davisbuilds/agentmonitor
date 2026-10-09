@@ -1,6 +1,8 @@
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { stripInlineImages } from '../util/inline-images.js';
+import { config } from '../config.js';
+import { applyLivePrivacyPolicy, normalizeClaudeBlock } from '../live/normalize.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import {
@@ -1042,7 +1044,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 16;
+const DATA_SCHEMA_VERSION = 17;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1090,9 +1092,92 @@ export function runDataMigrations(db: Database): void {
     // events.cache_write_1h_tokens; `amon costs repair-claude-usage` fills it
     // from the transcripts that record the split.
     if (current < 16) stripStoredInlineImages(db);
+    if (current < 17) repairStoredLiveReasoning(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v17 — the live normalizer read a Claude thinking block's raw `thinking`
+ * field, while the parsers store its text under `text`, so every stored
+ * reasoning item has an empty text. Restore the text from the stored transcript
+ * message where the block recorded one, under the current capture policy, and
+ * delete the rest: Claude Code often records a thinking block with its text left
+ * out, and such an item has nothing to show. Only items whose payload is an
+ * empty text (no redaction or other field) are touched. Trace summaries count
+ * these items; `SESSION_TRACE_SUMMARY_VERSION` re-derives them after this.
+ */
+function repairStoredLiveReasoning(db: Database): void {
+  const tables = new Set((db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('messages', 'session_items', 'session_turns')",
+  ).all() as Array<{ name: string }>).map(row => row.name));
+  if (!tables.has('session_items') || !tables.has('session_turns') || !tables.has('messages')) return;
+
+  const emptyItems = db.prepare(`
+    SELECT si.id, si.session_id, si.turn_id, st.source_turn_id
+    FROM session_items si
+    LEFT JOIN session_turns st ON st.id = si.turn_id
+    WHERE si.kind = 'reasoning'
+      AND TRIM(COALESCE(json_extract(si.payload_json, '$.text'), '')) = ''
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(si.payload_json) WHERE key NOT IN ('text', 'item_type')
+      )
+    ORDER BY si.turn_id, si.ordinal, si.id
+  `).all() as Array<{ id: number; session_id: string; turn_id: number | null; source_turn_id: string | null }>;
+  if (emptyItems.length === 0) return;
+
+  const turnReasoningCount = db.prepare(
+    "SELECT COUNT(*) AS c FROM session_items WHERE turn_id = ? AND kind = 'reasoning'",
+  );
+  const messageContent = db.prepare('SELECT content FROM messages WHERE session_id = ? AND ordinal = ?');
+  const update = db.prepare('UPDATE session_items SET payload_json = ? WHERE id = ?');
+  const remove = db.prepare('DELETE FROM session_items WHERE id = ?');
+  const policy = {
+    capturePrompts: config.live.capture.prompts,
+    captureReasoning: config.live.capture.reasoning,
+    captureToolArguments: config.live.capture.toolArguments,
+    diffPayloadMaxBytes: config.live.diffPayloadMaxBytes,
+  };
+
+  // The adapter wrote one reasoning item per thinking block, in block order, so
+  // a turn's items pair with its message's thinking blocks when the counts agree.
+  const thinkingTexts = (sessionId: string, sourceTurnId: string | null): string[] | null => {
+    const match = /^claude-message:(\d+)$/.exec(sourceTurnId ?? '');
+    if (!match) return null;
+    const row = messageContent.get(sessionId, Number(match[1])) as { content: string } | undefined;
+    if (!row) return null;
+    try {
+      const blocks = JSON.parse(row.content) as Array<{ type?: string; text?: string; thinking?: string }>;
+      if (!Array.isArray(blocks)) return null;
+      return blocks.filter(block => block?.type === 'thinking').map(block => block.text ?? block.thinking ?? '');
+    } catch {
+      return null;
+    }
+  };
+
+  let index = 0;
+  while (index < emptyItems.length) {
+    const turnId = emptyItems[index].turn_id;
+    let end = index + 1;
+    while (end < emptyItems.length && turnId !== null && emptyItems[end].turn_id === turnId) end += 1;
+    const group = emptyItems.slice(index, end);
+    index = end;
+
+    const texts = turnId === null ? null : thinkingTexts(group[0].session_id, group[0].source_turn_id);
+    const total = turnId === null ? -1 : (turnReasoningCount.get(turnId) as { c: number }).c;
+    const paired = texts !== null && texts.length === group.length && total === group.length;
+    group.forEach((item, position) => {
+      const restored = paired
+        ? normalizeClaudeBlock('assistant', { type: 'thinking', text: texts[position] })
+        : null;
+      if (restored) {
+        update.run(JSON.stringify(applyLivePrivacyPolicy(restored, policy).payload), item.id);
+      } else {
+        remove.run(item.id);
+      }
+    });
+  }
 }
 
 /**

@@ -50,5 +50,5 @@ test('v10 clears the table estimate a Claude token metric row billed on top of t
   assert.deepEqual(rows['log-usage'], [2, null], 'rows outside the metric path are untouched');
   assert.deepEqual(rows['tokens-only'], [2, null], 'no companion cost metric, so the estimate stays');
   assert.deepEqual(rows['other-interval'], [2, null], 'a cost metric from another interval does not cover it');
-  assert.equal(db.pragma('user_version', { simple: true }), 16);
+  assert.equal(db.pragma('user_version', { simple: true }), 17);
 });
