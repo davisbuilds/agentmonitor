@@ -221,6 +221,7 @@ function initSchemaLocked(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS otel_metrics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      point_id TEXT,
       session_id TEXT NOT NULL,
       agent_type TEXT NOT NULL,
       metric_name TEXT NOT NULL,
@@ -235,6 +236,20 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_otel_metrics_session ON otel_metrics(session_id);
     CREATE INDEX IF NOT EXISTS idx_otel_metrics_created ON otel_metrics(created_at DESC);
   `);
+
+  // Exporter-retry key (v17), mirroring events.event_id: the parser derives it
+  // per OTLP data point, and a resend with a stored key is not inserted again.
+  // Rows from before it keep a NULL key. They are not collapsed: the stored row
+  // keeps only the projected attributes, so an old duplicate cannot be told
+  // apart from two genuine points of different series. UNIQUE allows any
+  // number of NULLs, so the index creates over them.
+  const otelMetricColumns = new Set<string>(
+    (db.prepare(`PRAGMA table_info(otel_metrics)`).all() as Array<{ name: string }>).map(col => col.name)
+  );
+  if (!otelMetricColumns.has('point_id')) {
+    db.exec('ALTER TABLE otel_metrics ADD COLUMN point_id TEXT');
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_otel_metrics_point_id ON otel_metrics(point_id)');
 
   // Backward-compatible schema updates for existing local databases.
   const eventColumns = new Set<string>(
@@ -1044,7 +1059,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 17;
+const DATA_SCHEMA_VERSION = 18;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1092,14 +1107,16 @@ export function runDataMigrations(db: Database): void {
     // events.cache_write_1h_tokens; `amon costs repair-claude-usage` fills it
     // from the transcripts that record the split.
     if (current < 16) stripStoredInlineImages(db);
-    if (current < 17) repairStoredLiveReasoning(db);
+    // v17 introduces no data correction: it adds otel_metrics.point_id and its
+    // unique index. Rows stored before it keep a NULL key and are not collapsed.
+    if (current < 18) repairStoredLiveReasoning(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
 }
 
 /**
- * v17 — the live normalizer read a Claude thinking block's raw `thinking`
+ * v18 — the live normalizer read a Claude thinking block's raw `thinking`
  * field, while the parsers store its text under `text`, so every stored
  * reasoning item has an empty text. Restore the text from the stored transcript
  * message where the block recorded one, under the current capture policy, and

@@ -22,7 +22,7 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-const SESSION = 'live-reasoning-v17';
+const SESSION = 'live-reasoning-v18';
 
 function seed(): Record<string, number> {
   const db = getDb();
@@ -62,14 +62,14 @@ function seed(): Record<string, number> {
   return ids;
 }
 
-test('v17 restores live reasoning text from the transcript and removes empty reasoning', () => {
+test('v18 restores live reasoning text from the transcript and removes empty reasoning', () => {
   const db = getDb();
   const ids = seed();
   // The summary as the previous release derived it, counting every stored item.
   maintainSessionTraceSummary(SESSION);
   db.prepare("UPDATE session_trace_summary SET projection_version = 'sts:v3'").run();
 
-  db.pragma('user_version = 16');
+  db.pragma('user_version = 17');
   runDataMigrations(db);
 
   const rows = new Map((db.prepare('SELECT id, kind, payload_json FROM session_items WHERE session_id = ?').all(SESSION) as Array<{
@@ -82,7 +82,7 @@ test('v17 restores live reasoning text from the transcript and removes empty rea
   assert.deepEqual(rows.get(ids.user), { text: 'Fix the build' }, 'other kinds are untouched');
   const turns = (db.prepare('SELECT COUNT(*) AS c FROM session_turns WHERE session_id = ?').get(SESSION) as { c: number }).c;
   assert.equal(turns, 5, 'every message keeps its turn, so the next sync only appends');
-  assert.equal(db.pragma('user_version', { simple: true }), 17);
+  assert.equal(db.pragma('user_version', { simple: true }), 18);
 });
 
 test('the trace summary is re-derived without the removed reasoning', () => {
@@ -96,9 +96,9 @@ test('the trace summary is re-derived without the removed reasoning', () => {
   assert.equal((JSON.parse(after.coverage_json) as { has_reasoning?: boolean }).has_reasoning, true, 'the restored text counts as reasoning');
 });
 
-test('v17 restores reasoning under the current capture policy', () => {
+test('v18 restores reasoning under the current capture policy', () => {
   const db = getDb();
-  const sessionId = 'live-reasoning-v17-private';
+  const sessionId = 'live-reasoning-v18-private';
   db.prepare(`
     INSERT INTO messages (session_id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length)
     VALUES (?, 0, 'assistant', ?, '2026-10-01T11:00:00.000Z', 1, 0, 10)
@@ -115,7 +115,7 @@ test('v17 restores reasoning under the current capture policy', () => {
   const previous = config.live.capture.reasoning;
   config.live.capture.reasoning = false;
   try {
-    db.pragma('user_version = 16');
+    db.pragma('user_version = 17');
     runDataMigrations(db);
   } finally {
     config.live.capture.reasoning = previous;

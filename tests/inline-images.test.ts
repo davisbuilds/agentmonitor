@@ -152,5 +152,5 @@ test('v16 strips images already stored, and the search index forgets them', () =
   assert.ok(!call.input_json.includes(data.slice(0, 200)) && !call.result_content.includes(data.slice(0, 200)), 'tool calls keep no image data');
   assert.equal(hits(imageToken), 0, 'the index no longer holds the image data');
   assert.equal(hits('screenshot'), 1, 'the message text is still searchable');
-  assert.equal(db.pragma('user_version', { simple: true }), 17);
+  assert.equal(db.pragma('user_version', { simple: true }), 18);
 });

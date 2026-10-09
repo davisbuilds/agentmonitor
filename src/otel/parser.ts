@@ -206,7 +206,9 @@ function extractAnyValue(v: OtelAnyValue): unknown {
 // resend used to insert fresh rows. A retry carries byte-for-byte the same
 // record, so a hash of the record (with its resource and instrumentation scope)
 // is a stable event_id that collapses retries through insertEvent's event_id
-// dedup. Scope is part of it because two scopes may emit identical records.
+// dedup. Operational metric points take the same key as `point_id`, which the
+// unique index on otel_metrics.point_id collapses the same way. Scope is part
+// of it because two scopes may emit identical records.
 // Only records that carry a time get one: without a time, a retry and a genuine repeat of the
 // same event are indistinguishable, and dropping real usage is the worse error.
 
@@ -961,6 +963,8 @@ export interface ParsedMetricDelta {
  * table, not the events pipeline. Carries no tokens/cost.
  */
 export interface ParsedOperationalMetric {
+  /** Stable per data point, so a resent export collapses; absent without a time. */
+  point_id?: string;
   session_id: string;
   agent_type: string;
   metric_name: string;
@@ -1129,6 +1133,11 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
 
         for (const dp of dataPoints) {
           const rawValue = getDataPointValue(dp);
+          // Retry identity of this data point, shared by usage and operational
+          // points; absent without a time (see "Retry identity" above).
+          const pointKey = () => hasNanos(dp.timeUnixNano)
+            ? retryKey('metric', { resource: resourceAttrs ?? [], scope: sm.scope ?? {}, metric: metricName, point: dp })
+            : undefined;
           // startTimeUnixNano marks the start of a cumulative series; it changes
           // when the producer restarts and its counter resets. Folding it into the
           // series key means a restart begins a fresh series, so the first export
@@ -1154,9 +1163,7 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
             if (delta <= 0) continue;
 
             const entry: ParsedMetricDelta = {
-              event_id: hasNanos(dp.timeUnixNano)
-                ? retryKey('metric', { resource: resourceAttrs ?? [], scope: sm.scope ?? {}, metric: metricName, point: dp })
-                : undefined,
+              event_id: pointKey(),
               session_id: sessionId,
               agent_type: agentType,
               model: model ?? undefined,
@@ -1204,6 +1211,7 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
           if (delta <= 0) continue;
 
           operational.push({
+            point_id: pointKey(),
             session_id: sessionId,
             agent_type: agentType,
             metric_name: metricName,
