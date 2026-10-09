@@ -1,6 +1,6 @@
 {
   "provider": "anthropic",
-  "lastUpdated": "2026-10-04T00:00:00Z",
+  "lastUpdated": "2026-10-09T00:00:00Z",
   "models": {
     "claude-fable-5-1": {
       "aliases": [],
@@ -105,7 +105,7 @@
       "aliases": [],
       "inputCostPerMTok": 2,
       "outputCostPerMTok": 10,
-      "cacheReadCostPerMTok": 0.2,
+      "cacheReadCostPerMTok": 0.1,
       "cacheWriteCostPerMTok": 2.5,
       "cacheWrite1hCostPerMTok": 4,
       "deprecated": false
@@ -154,6 +154,25 @@
       "cacheWriteCostPerMTok": 3.75,
       "cacheWrite1hCostPerMTok": 6,
       "deprecated": true
+    },
+    "claude-haiku-5-5": {
+      "aliases": [],
+      "inputCostPerMTok": 0.1,
+      "outputCostPerMTok": 0.5,
+      "cacheReadCostPerMTok": 0.01,
+      "cacheWriteCostPerMTok": 0.125,
+      "cacheWrite1hCostPerMTok": 0.2,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 100000,
+          "inputCostPerMTok": 0.5,
+          "outputCostPerMTok": 2.5,
+          "cacheReadCostPerMTok": 0.05,
+          "cacheWriteCostPerMTok": 0.625,
+          "cacheWrite1hCostPerMTok": 1
+        }
+      ]
     },
     "claude-haiku-4-5-20251001": {
       "aliases": [
