@@ -100,11 +100,17 @@ so later readers know what still needs checking.
   non-zero exit) in current runs.
 - **Why it matters / evidence**: `laguna-s-2.1` is routed `:free` in
   the comparator harness's own bridge config yet its root `prices.json` lists
-  0.1/0.2 — free-vs-paid is genuinely ambiguous, so a rate was **not** guessed. `nemotron-3-ultra` has no authoritative source in the fork at all.
-- **Next / Revisit when**: these models re-enter a run whose costs matter. Confirm
-  the tier (free → 0, or the paid OpenRouter rate) from a live
-  `openrouter.ai/api/v1/models` pull, then add entries to
-  `src/pricing/data/openrouter.json`. Noted 2026-09-02.
+  0.1/0.2, so free-vs-paid is genuinely ambiguous and a rate was **not** guessed.
+  A live `openrouter.ai/api/v1/models` pull on 2026-10-09 lists both a paid and a
+  `:free` ($0) route for each: `poolside/laguna-s-2.1` at $0.09/$0.18 (cache read
+  $0.009) and `nvidia/nemotron-3-ultra-550b-a55b` at $0.50/$2.20 (cache read
+  $0.10). The imported `canonical_model` drops the route, so the pull cannot say
+  which one a run used, and `nemotron-3-ultra` mapping to the 550B model is
+  itself an assumption. Still not priced.
+- **Next / Revisit when**: these models re-enter a run whose costs matter. Read
+  the run's actual route (`:free` or paid) from the harness config, then add
+  entries to `src/pricing/data/openrouter.json` from a fresh pull. Noted
+  2026-09-02, rechecked 2026-10-09.
 
 #### Benchmark artifact export (P4)
 - **What**: P1 data/queries + P2 arm-ladder UI **shipped** 2026-09-03 (PR #106);
@@ -246,27 +252,31 @@ the build.
 
 ### Pricing
 
-#### A few current vendor models are still unpriced ($0-bill risk)
-- **What**: `gpt-5.6-cyber` ($12.50/$75) is still unpriced, and an unpriced
-  model bills as **$0** — the silent under-report failure mode. Claude Opus 5.5
-  and Fable 5.1 were priced 2026-09-23, Sonnet 5.5 and GPT-6.1 Sol 2026-10-04,
-  each after its usage had already landed at $0. Opus 5.5, Fable 5.1 and GPT-6.1
-  Sol all break the 0.1x cache-read convention (0.05x, 0.025x, 0.05x), so a rate
-  card cannot be derived from the input price.
-- **Why it matters**: only bites if the model appears in the data, but when it
-  does it is invisible (no error, plausible dashboard). `gpt-5.6-sol` shows a
-  promo $4/$20 ("through 2026-11-21") on the OpenAI page while aggregators list
-  $5/$30 — we kept list ($5/$30); a `schedule` entry could encode the promo.
-  The same page (checked 2026-09-23, when GPT-6 Sol/Luna were added) lists a
-  1.25x cache-write column for every GPT-5.6 and GPT-6 model, while `codex.json`
-  bills GPT-5.6 cache writes at the input rate (commit `84db40b`'s reading). No
-  effect today, since Codex emits no cache-write tokens; reconcile before it
-  does. That page also confirms `gpt-6-astra`'s $12.50 cache write.
-- **Next / Revisit when**: add a model the moment the "unknown-priced tokens"
-  surface shows it, from the vendor's live page (never from a multiplier).
-  Startup prices its stored usage on the restart that ships the rate, so no
-  manual backfill is needed. Since 2026-10-04 the app header, `/api/health` and
-  the server log name any model with unpriced usage in the last week.
+#### Some stored rates disagree with the vendors' live pricing pages
+- **What**: no model with recent usage is unpriced any more: Claude Haiku 5.5
+  (prompt-length tiered at 100K) and `gpt-5.6-cyber` were priced 2026-10-09 from
+  the vendors' live pages. Three rate questions remain open.
+  - **Sonnet 5.5 cache reads**: `claude.json` bills them at $0.20/MTok, but on
+    2026-10-09 Anthropic's pricing page lists $0.10 (footnote: "0.05x the base
+    input price" for Opus 5.5 and Sonnet 5.5), and the models overview says the
+    same. The 2026-10-04 entry and its test cite $0.20 from the same page. Either
+    the page changed after that date or $0.20 was a 0.1x reading.
+  - **GPT-5.6 cache writes**: the OpenAI page (checked 2026-09-23, again
+    2026-10-09) lists a 1.25x cache-write column for every GPT-5.6 and GPT-6
+    model, while `codex.json` bills GPT-5.6 Sol, Terra and Luna cache writes at
+    the input rate (commit `84db40b`'s reading). `gpt-5.6-cyber` uses the page's
+    $15.625, so the GPT-5.6 rows now disagree among themselves. No effect today,
+    since Codex emits no cache-write tokens.
+  - **GPT-5.6 Sol promo**: the OpenAI page shows $4/$20 ("through 2026-11-21")
+    while aggregators list $5/$30. We kept list ($5/$30); a `schedule` entry
+    could encode the promo.
+- **Why it matters**: a wrong rate is as silent as a missing one: the dashboard
+  stays plausible.
+- **Next**: for Sonnet 5.5, decide between a flat correction and a `schedule`
+  entry from the date the page changed (if it did), update the test, then run a
+  full `amon costs recalc --dry-run --json` and confirm that only Sonnet 5.5 rows
+  move. Reconcile the GPT-5.6 cache-write column before Codex starts emitting
+  cache-write tokens.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
