@@ -22,3 +22,12 @@ test('classifyMessageAuthor distinguishes you, assistant, and tool turns', () =>
   assert.equal(classifyMessageAuthor({ role: 'user', content: 'hello there' }), 'you');
   assert.equal(classifyMessageAuthor({ role: 'user', content: '' }), 'you');
 });
+
+test('classifyMessageAuthor only calls a user turn "tool" when it is a non-empty tool_result array', () => {
+  // An empty block array has no tool_result: it is not the environment talking.
+  assert.equal(classifyMessageAuthor({ role: 'user', content: '[]' }), 'you');
+  // A single object (not an array) is not a block list.
+  assert.equal(classifyMessageAuthor({ role: 'user', content: JSON.stringify({ type: 'tool_result' }) }), 'you');
+  // A null entry is not a tool_result.
+  assert.equal(classifyMessageAuthor({ role: 'user', content: JSON.stringify([{ type: 'tool_result' }, null]) }), 'you');
+});
