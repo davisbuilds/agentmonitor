@@ -104,7 +104,12 @@ data point gets a derived `event_id` (`otel-log-…`/`otel-metric-…`, a hash o
 record with its resource and instrumentation scope, keys sorted) and a resend is stored once. A record
 with no time at all (no `timeUnixNano`, `observedTimeUnixNano`, or
 `event.timestamp` attribute) gets no key, because a retry and a genuine repeat
-would be indistinguishable.
+would be indistinguishable. Operational metric points, which are stored outside
+`events`, take the same per-point key, so a resend counts once in
+`GET /api/v2/metrics` occurrences. Points that differ in time, value, attributes,
+or session stay distinct; a cumulative series' next export differs by time.
+Operational rows stored before the key existed have none and are not
+retroactively collapsed.
 
 ## Browser Requests
 

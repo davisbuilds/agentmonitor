@@ -81,6 +81,8 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   transcript sources.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots. Operational metrics never enter usage or event-count aggregates.
+  Each OTLP point carries the same retry key as usage points, so an exporter
+  resend is stored once.
 - **Execution receipts:** opt-in host-authored launcher attempts, imported from a
   private spool into a separate ledger. They never create native sessions, usage
   events or trace summaries; see [the contract](../api/execution-receipts.md).
