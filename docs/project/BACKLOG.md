@@ -400,15 +400,6 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
-#### OTLP operational metrics have no retry dedup
-- **What**: an exporter retry of an operational metrics batch (`otel_metrics`)
-  stores its points again. Usage metrics and log records already dedup retries.
-- **Why or evidence**: noted 2026-09-23 while fixing Codex OTEL producer time.
-  Occurrence counts in `GET /api/v2/metrics` can overstate by the retry rate;
-  that rate is unmeasured.
-- **Next**: apply the usage-metric retry key to operational points if a
-  consumer starts reading occurrence counts as exact.
-
 ### Frontend testing
 
 #### Extend Vitest coverage beyond the store/pure layer
