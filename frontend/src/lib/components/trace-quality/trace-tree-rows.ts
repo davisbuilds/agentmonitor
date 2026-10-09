@@ -1,9 +1,13 @@
 import type { TraceQualityObservationTreeNode } from '../../api/client';
 
-/** One trace-tree row: an observation, plus the tool result folded into its call. */
+/**
+ * One trace-tree row: an observation, the tool result folded into its call, and
+ * the children still to show beneath it.
+ */
 export interface TraceTreeRow {
   node: TraceQualityObservationTreeNode;
   result: TraceQualityObservationTreeNode | null;
+  children: TraceQualityObservationTreeNode[];
 }
 
 function isToolResult(node: TraceQualityObservationTreeNode): boolean {
@@ -18,13 +22,17 @@ function callKey(node: TraceQualityObservationTreeNode): string | null {
 }
 
 /**
- * Fold each tool result into the earlier sibling tool call it answers, so a call
- * and its outcome take one row. A result without a matching earlier call, or a
- * second result for the same call, keeps a row of its own.
+ * Fold each tool result into the tool call it answers, so a call and its
+ * outcome take one row. The projection links a result to its call only when
+ * both sit in the same turn, so a result may be the call's child or a later
+ * sibling; both fold. A result without a matching call, or a second result for
+ * the same call, keeps a row of its own.
  */
 export function foldToolResults(nodes: readonly TraceQualityObservationTreeNode[]): TraceTreeRow[] {
   const rows: TraceTreeRow[] = [];
   const openCalls = new Map<string, TraceTreeRow>();
+  const foldable = (node: TraceQualityObservationTreeNode, key: string | null): boolean =>
+    isToolResult(node) && key !== null && callKey(node) === key && node.children.length === 0;
   for (const node of nodes) {
     const key = callKey(node);
     if (isToolResult(node) && key && node.children.length === 0) {
@@ -35,9 +43,15 @@ export function foldToolResults(nodes: readonly TraceQualityObservationTreeNode[
         continue;
       }
     }
-    const row: TraceTreeRow = { node, result: null };
+    const isCall = node.observation_type === 'tool' && !isToolResult(node) && key !== null;
+    const nested = isCall ? node.children.find(child => foldable(child, key)) ?? null : null;
+    const row: TraceTreeRow = {
+      node,
+      result: nested,
+      children: nested ? node.children.filter(child => child !== nested) : node.children,
+    };
     rows.push(row);
-    if (node.observation_type === 'tool' && !isToolResult(node) && key) openCalls.set(key, row);
+    if (isCall && !nested) openCalls.set(key, row);
   }
   return rows;
 }

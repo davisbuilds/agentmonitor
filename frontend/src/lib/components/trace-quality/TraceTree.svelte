@@ -59,7 +59,7 @@
   {@const obs = entry.node}
   {@const result = entry.result}
   {@const flagged = result && showsStatus(result) ? result : showsStatus(obs) ? obs : null}
-  {@const hasChildren = obs.children.length > 0}
+  {@const hasChildren = entry.children.length > 0}
   {@const isCollapsed = collapsed[obs.id] === true}
   <div class="border-b border-line/40 last:border-b-0">
     <div
@@ -108,7 +108,7 @@
     </div>
 
     {#if hasChildren && !isCollapsed}
-      {#each foldToolResults(obs.children) as child (child.node.id)}
+      {#each foldToolResults(entry.children) as child (child.node.id)}
         {@render row(child, depth + 1)}
       {/each}
     {/if}

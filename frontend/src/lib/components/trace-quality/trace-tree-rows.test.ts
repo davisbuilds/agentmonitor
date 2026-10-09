@@ -81,6 +81,23 @@ describe('foldToolResults', () => {
     expect(shape([call, result])).toEqual([[call.id, null], [result.id, null]]);
   });
 
+  it('folds a result nested under its own call and keeps the call\'s other children', () => {
+    const result = node('Tool result', 'toolu_n');
+    const other = node('User message', 'claude-message:9:item:0');
+    const call = node('Tool: Bash', 'toolu_n', { children: [result, other] });
+    const [row] = foldToolResults([call]);
+    expect(row.result?.id).toBe(result.id);
+    expect(row.children.map(child => child.id)).toEqual([other.id]);
+  });
+
+  it('keeps a nested result for another call as a child', () => {
+    const stray = node('Tool result', 'toolu_other');
+    const call = node('Tool: Bash', 'toolu_m', { children: [stray] });
+    const [row] = foldToolResults([call]);
+    expect(row.result).toBeNull();
+    expect(row.children.map(child => child.id)).toEqual([stray.id]);
+  });
+
   it('returns no rows for no nodes', () => {
     expect(foldToolResults([])).toEqual([]);
   });
