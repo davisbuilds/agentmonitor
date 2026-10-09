@@ -388,6 +388,34 @@ the build.
 
 ### Reliability And Observability
 
+#### Cumulative OTLP baselines live only in memory
+- **What**: `computeDelta` in `src/otel/parser.ts` converts cumulative counters
+  to deltas against an in-memory baseline, and counts a series' full value the
+  first time it sees it. After an amon restart, the next export of every
+  cumulative series is counted in full again, for usage (tokens and cost) and
+  operational metrics alike. A zero-change export also stores no retry key, so
+  a resend that arrives after a restart is not caught either.
+- **Why or evidence**: latent today. Checked 2026-10-09: Codex hardcodes
+  delta temporality for its OTLP metric exporter (`codex-rs/otel/src/metrics/
+  client.rs`), and Claude Code is not configured to export metrics to amon, so
+  no cumulative series arrives. Raised by review of the operational retry dedup.
+- **Revisit when**: a producer that exports cumulative temporality is
+  connected (a Claude Code metrics export, or a Codex change). Then persist
+  the baseline per series (keyed as `computeDelta` keys it today) so a restart
+  diffs against the last stored value, and treat a series first seen after a
+  restart as a baseline rather than a delta.
+
+#### A failed operational insert fails the request after usage is stored
+- **What**: the OTLP metrics route stores usage events before operational
+  points; if the operational insert throws, the request returns 500 after the
+  usage events were written. The exporter then retries the whole batch.
+- **Why or evidence**: noted 2026-10-09 while adding operational retry dedup.
+  Usage events and operational points both dedup resends now, so a retry
+  should not double-count; whether the partial write leaves anything else
+  inconsistent is unchecked.
+- **Revisit when**: an operational insert failure shows up in the logs, or the
+  metrics route gains another write. Then wrap both writes in one transaction.
+
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
   `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
