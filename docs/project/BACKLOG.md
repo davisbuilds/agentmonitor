@@ -411,23 +411,43 @@ the build.
 
 ### Frontend testing
 
-#### Extend Vitest coverage beyond the store/pure layer
-- **What**: the Vitest harness (added 2026-09-11) covers the Monitor store, the
-  reconnect/SSE signalling, and the pure `lib/*.ts` helpers (`format`,
-  `monitor-session-merge`). It does **not** yet cover: component mounting +
-  `$derived`/`$effect` reactivity (needs `@testing-library/svelte` +
-  `flushSync`/`$effect.root`), or the remaining pure modules
-  (`monitor-analytics`, `frontier-geometry`, `session-roles`,
-  `session-capabilities`, `skill-consultation-view`, the `*-state.ts` helpers).
-- **Why it matters**: chart geometry (`frontier-geometry`) and the cost-window
-  logic (`monitor-analytics`) are exactly the silent-render-plausible-but-wrong
-  class this project guards; they are pure and cheap to cover. Component tests
-  are the larger lift and only worth it where a component holds real logic.
-- **Next / Revisit when**: fold in the remaining pure modules opportunistically
-  when touching them; stand up `@testing-library/svelte` the first time a
+#### Cover component behavior (mount + reactivity)
+- **What**: every pure `frontend/src/lib` module now has mutation-checked unit
+  tests (2026-10-09). Not covered: component mounting and `$derived`/`$effect`
+  reactivity, which needs `@testing-library/svelte` plus
+  `flushSync`/`$effect.root`.
+- **Why it matters**: component tests are the larger lift and only pay off
+  where a component holds real logic rather than markup over tested helpers.
+- **Next / Revisit when**: stand up `@testing-library/svelte` the first time a
   component's behavior (not just its markup) needs a regression guard. No
-  coverage threshold is enforced yet — add one only once the surface is broad
-  enough that a number is meaningful. Noted 2026-09-11.
+  coverage threshold is enforced yet; add one only once the surface is broad
+  enough that a number is meaningful. Noted 2026-09-11, narrowed 2026-10-09.
+
+#### Frontend pure-module tests are split across two runners
+- **What**: most `frontend/src/lib` helper tests (`frontier-geometry`, chart
+  `scales`, `monitor-analytics`, `route-state`, the `*-state.ts` helpers,
+  `session-roles`, `session-capabilities`, `skill-consultation-view`, usage
+  `model-colors` and `unpriced-usage`) are root `node:test` files under
+  `tests/` and run in `pnpm test`. The Vitest harness (`pnpm frontend:test`)
+  holds the store tests plus `session-text` and chart `layout`. `format`,
+  `monitor-session-merge`, and `monitor-token-totals` have a suite in each.
+- **Why or evidence**: the split hid existing coverage. The 2026-09-11
+  coverage entry listed the root-tested modules as untested.
+- **Next**: when the UI restructure moves or renames one of these modules, move
+  its tests into a colocated Vitest file in the same change. Merge the
+  duplicated suites at the same time.
+
+#### Test-only exports in the analytics, usage, and insights state helpers
+- **What**: `createDefaultAnalyticsFilters`, `buildAnalyticsHash`,
+  `parseAnalyticsHash` (`analytics-state.ts`), `createDefaultUsageFilters`,
+  `buildUsageHash`, `parseUsageHash` (`usage-state.ts`), and
+  `clampInsightDateRange` (`insights-state.ts`) have no product caller. Only
+  their tests import them. Routing moved to `route-state.ts` when Analytics
+  absorbed Usage and Insights.
+- **Why or evidence**: the dead-code test scans root `src/` exports only, so
+  frontend leftovers go unflagged. Found 2026-10-09 while extending tests.
+- **Next**: delete them and their tests during the UI restructure, unless a
+  restructured view revives one.
 
 ### Cross-repo pattern-mining candidates (agentsview, 2026-09-13)
 
