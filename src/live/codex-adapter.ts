@@ -194,6 +194,8 @@ function buildCodexResponseItem(row: EventRow, metadata: Record<string, unknown>
     case 'reasoning_summary_delta':
     case 'reasoning_content_delta':
     case 'reasoning_summary_part_added':
+      // Encrypted reasoning arrives without text; there is nothing to show.
+      if (!text?.trim()) return null;
       return normalizeCodexItem({
         type: 'reasoning',
         id: baseId,

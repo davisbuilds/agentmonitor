@@ -241,6 +241,36 @@ test('syncCodexSummaryLiveEvent materializes assistant messages for codex respon
   assert.equal(payload.item_type, 'message_from_assistant');
 });
 
+test('syncCodexSummaryLiveEvent writes no item for reasoning without text', () => {
+  const db = getDb();
+  const empty = makeEventRow({
+    id: 41,
+    session_id: 'codex-summary-reasoning',
+    event_type: 'response',
+    metadata: JSON.stringify({ otel_event_name: 'codex.response', response_item_type: 'reasoning' }),
+  });
+  const withText = makeEventRow({
+    id: 42,
+    session_id: 'codex-summary-reasoning',
+    event_type: 'response',
+    metadata: JSON.stringify({
+      otel_event_name: 'codex.response',
+      response_item_type: 'reasoning',
+      content_preview: 'Checking the lockfile first.',
+    }),
+  });
+
+  assert.equal(syncCodexSummaryLiveEvent(db, empty).inserted_items, 0);
+  assert.equal(syncCodexSummaryLiveEvent(db, withText).inserted_items, 1);
+  const items = db.prepare('SELECT kind, payload_json FROM session_items WHERE session_id = ?').all('codex-summary-reasoning') as Array<{
+    kind: string;
+    payload_json: string;
+  }>;
+  assert.deepEqual(items.map(item => [item.kind, (JSON.parse(item.payload_json) as { text?: string }).text]), [
+    ['reasoning', 'Checking the lockfile first.'],
+  ]);
+});
+
 test('syncCodexSummaryLiveEvent clears stale ended_at when live OTEL activity resumes', () => {
   const db = getDb();
   const importedRow = makeEventRow({
