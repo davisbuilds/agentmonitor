@@ -69,8 +69,8 @@
     "better-sqlite3": "^13.0.3",
     "chokidar": "^5.0.0",
     "express": "^5.2.1",
-    "pg": "^8.23.0",
-    "portless": "0.15.6",
+    "pg": "^8.23.1",
+    "portless": "0.15.7",
     "uuid": "^14.0.2"
   },
   "devDependencies": {
@@ -79,9 +79,9 @@
     "@tailwindcss/cli": "^4.3.3",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
-    "@types/node": "^26.6.3",
+    "@types/node": "^26.6.4",
     "@types/pg": "^8.23.1",
-    "eslint": "^10.11.0",
+    "eslint": "^10.12.0",
     "tailwindcss": "^4.3.3",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
