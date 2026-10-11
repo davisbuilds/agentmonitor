@@ -57,7 +57,7 @@ before(() => {
   db.prepare(`INSERT INTO sessions (id, agent_id, agent_type, project, status, last_event_at) VALUES (?, 'a', ?, ?, 'ended', '2026-10-05 10:00:00')`)
     .run(CODEX_ID, 'codex', 'app-task');
   const browser = db.prepare('INSERT INTO browsing_sessions (id, agent, project) VALUES (?, ?, ?)');
-  browser.run(CLAUDE_ID, 'claude', 'mac-mini-Dev');
+  browser.run(CLAUDE_ID, 'claude', 'user-Dev');
   browser.run(ROLLOUT, 'codex', 'app-task');
   browser.run(CODEX_ID, 'codex', 'app-task');
   for (const id of [CLAUDE_ID, ROLLOUT, CODEX_ID]) maintainSessionTraceSummary(id);
@@ -77,7 +77,7 @@ test('a preview reports the renames and writes nothing', () => {
   assert.equal(report.transcripts_scanned, 2);
   assert.deepEqual(report.rows, { events: 3, sessions: 2, browsing_sessions: 3 });
   assert.deepEqual(projects('events'), ['app-task', 'app-task', 'notes', 'app-task', null, 'app-task']);
-  assert.deepEqual(projects('browsing_sessions'), ['mac-mini-Dev', 'app-task', 'app-task']);
+  assert.deepEqual(projects('browsing_sessions'), ['user-Dev', 'app-task', 'app-task']);
 });
 
 test('applying renames every table to the canonical project, once', () => {
@@ -90,7 +90,7 @@ test('applying renames every table to the canonical project, once', () => {
   // The Claude browser row takes the transcript's first cwd.
   assert.deepEqual(projects('browsing_sessions'), ['app', 'app', 'app']);
   assert.deepEqual(projects('session_trace_summary', `session_id IN ('${CLAUDE_ID}', '${ROLLOUT}', '${CODEX_ID}')`), ['app', 'app', 'app']);
-  assert.ok(report.renames.some(rename => rename.from === 'mac-mini-Dev' && rename.to === 'app'));
+  assert.ok(report.renames.some(rename => rename.from === 'user-Dev' && rename.to === 'app'));
 
   const again = repairProjectNames(getDb(), { claudeDir, codexDir, apply: true });
   assert.deepEqual(again.rows, { events: 0, sessions: 0, browsing_sessions: 0 });
