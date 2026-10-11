@@ -100,11 +100,17 @@ so later readers know what still needs checking.
   non-zero exit) in current runs.
 - **Why it matters / evidence**: `laguna-s-2.1` is routed `:free` in
   the comparator harness's own bridge config yet its root `prices.json` lists
-  0.1/0.2 — free-vs-paid is genuinely ambiguous, so a rate was **not** guessed. `nemotron-3-ultra` has no authoritative source in the fork at all.
-- **Next / Revisit when**: these models re-enter a run whose costs matter. Confirm
-  the tier (free → 0, or the paid OpenRouter rate) from a live
-  `openrouter.ai/api/v1/models` pull, then add entries to
-  `src/pricing/data/openrouter.json`. Noted 2026-09-02.
+  0.1/0.2, so free-vs-paid is genuinely ambiguous and a rate was **not** guessed.
+  A live `openrouter.ai/api/v1/models` pull on 2026-10-09 lists both a paid and a
+  `:free` ($0) route for each: `poolside/laguna-s-2.1` at $0.09/$0.18 (cache read
+  $0.009) and `nvidia/nemotron-3-ultra-550b-a55b` at $0.50/$2.20 (cache read
+  $0.10). The imported `canonical_model` drops the route, so the pull cannot say
+  which one a run used, and `nemotron-3-ultra` mapping to the 550B model is
+  itself an assumption. Still not priced.
+- **Next / Revisit when**: these models re-enter a run whose costs matter. Read
+  the run's actual route (`:free` or paid) from the harness config, then add
+  entries to `src/pricing/data/openrouter.json` from a fresh pull. Noted
+  2026-09-02, rechecked 2026-10-09.
 
 #### Benchmark artifact export (P4)
 - **What**: P1 data/queries + P2 arm-ladder UI **shipped** 2026-09-03 (PR #106);
@@ -246,27 +252,29 @@ the build.
 
 ### Pricing
 
-#### A few current vendor models are still unpriced ($0-bill risk)
-- **What**: `gpt-5.6-cyber` ($12.50/$75) is still unpriced, and an unpriced
-  model bills as **$0** — the silent under-report failure mode. Claude Opus 5.5
-  and Fable 5.1 were priced 2026-09-23, Sonnet 5.5 and GPT-6.1 Sol 2026-10-04,
-  each after its usage had already landed at $0. Opus 5.5, Fable 5.1 and GPT-6.1
-  Sol all break the 0.1x cache-read convention (0.05x, 0.025x, 0.05x), so a rate
-  card cannot be derived from the input price.
-- **Why it matters**: only bites if the model appears in the data, but when it
-  does it is invisible (no error, plausible dashboard). `gpt-5.6-sol` shows a
-  promo $4/$20 ("through 2026-11-21") on the OpenAI page while aggregators list
-  $5/$30 — we kept list ($5/$30); a `schedule` entry could encode the promo.
-  The same page (checked 2026-09-23, when GPT-6 Sol/Luna were added) lists a
-  1.25x cache-write column for every GPT-5.6 and GPT-6 model, while `codex.json`
-  bills GPT-5.6 cache writes at the input rate (commit `84db40b`'s reading). No
-  effect today, since Codex emits no cache-write tokens; reconcile before it
-  does. That page also confirms `gpt-6-astra`'s $12.50 cache write.
-- **Next / Revisit when**: add a model the moment the "unknown-priced tokens"
-  surface shows it, from the vendor's live page (never from a multiplier).
-  Startup prices its stored usage on the restart that ships the rate, so no
-  manual backfill is needed. Since 2026-10-04 the app header, `/api/health` and
-  the server log name any model with unpriced usage in the last week.
+#### Some stored rates disagree with the vendors' live pricing pages
+- **What**: no model with recent usage is unpriced any more: Claude Haiku 5.5
+  (prompt-length tiered at 100K) and `gpt-5.6-cyber` were priced 2026-10-09 from
+  the vendors' live pages. The same day Sonnet 5.5 cache reads were corrected
+  from $0.20 to $0.10/MTok (the page's "0.05x the base input price"). Open items:
+  - **Stored Sonnet 5.5 costs**: `estimated` costs stored before the correction
+    used the $0.20 cache-read rate. Startup only fills NULL costs, so they need a
+    full recalc, not `--missing-only`. `reported` costs are never rewritten.
+  - **GPT-5.6 cache writes**: the OpenAI page (checked 2026-09-23, again
+    2026-10-09) lists a 1.25x cache-write column for every GPT-5.6 and GPT-6
+    model, while `codex.json` bills GPT-5.6 Sol, Terra and Luna cache writes at
+    the input rate (commit `84db40b`'s reading). `gpt-5.6-cyber` uses the page's
+    $15.625, so the GPT-5.6 rows now disagree among themselves. No effect today,
+    since Codex emits no cache-write tokens.
+  - **GPT-5.6 Sol promo**: the OpenAI page shows $4/$20 ("through 2026-11-21")
+    while aggregators list $5/$30. We kept list ($5/$30); a `schedule` entry
+    could encode the promo.
+- **Why it matters**: a wrong rate is as silent as a missing one: the dashboard
+  stays plausible.
+- **Next**: once the Sonnet 5.5 correction is running, run
+  `amon costs recalc --dry-run --json` and confirm that only Sonnet 5.5 rows
+  move, then apply it. Reconcile the GPT-5.6 cache-write column before Codex
+  starts emitting cache-write tokens.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
@@ -388,6 +396,34 @@ the build.
 
 ### Reliability And Observability
 
+#### Cumulative OTLP baselines live only in memory
+- **What**: `computeDelta` in `src/otel/parser.ts` converts cumulative counters
+  to deltas against an in-memory baseline, and counts a series' full value the
+  first time it sees it. After an amon restart, the next export of every
+  cumulative series is counted in full again, for usage (tokens and cost) and
+  operational metrics alike. A zero-change export also stores no retry key, so
+  a resend that arrives after a restart is not caught either.
+- **Why or evidence**: latent today. Checked 2026-10-09: Codex hardcodes
+  delta temporality for its OTLP metric exporter (`codex-rs/otel/src/metrics/
+  client.rs`), and Claude Code is not configured to export metrics to amon, so
+  no cumulative series arrives. Raised by review of the operational retry dedup.
+- **Revisit when**: a producer that exports cumulative temporality is
+  connected (a Claude Code metrics export, or a Codex change). Then persist
+  the baseline per series (keyed as `computeDelta` keys it today) so a restart
+  diffs against the last stored value, and treat a series first seen after a
+  restart as a baseline rather than a delta.
+
+#### A failed operational insert fails the request after usage is stored
+- **What**: the OTLP metrics route stores usage events before operational
+  points; if the operational insert throws, the request returns 500 after the
+  usage events were written. The exporter then retries the whole batch.
+- **Why or evidence**: noted 2026-10-09 while adding operational retry dedup.
+  Usage events and operational points both dedup resends now, so a retry
+  should not double-count; whether the partial write leaves anything else
+  inconsistent is unchecked.
+- **Revisit when**: an operational insert failure shows up in the logs, or the
+  metrics route gains another write. Then wrap both writes in one transaction.
+
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
   `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
@@ -400,34 +436,45 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
-#### OTLP operational metrics have no retry dedup
-- **What**: an exporter retry of an operational metrics batch (`otel_metrics`)
-  stores its points again. Usage metrics and log records already dedup retries.
-- **Why or evidence**: noted 2026-09-23 while fixing Codex OTEL producer time.
-  Occurrence counts in `GET /api/v2/metrics` can overstate by the retry rate;
-  that rate is unmeasured.
-- **Next**: apply the usage-metric retry key to operational points if a
-  consumer starts reading occurrence counts as exact.
-
 ### Frontend testing
 
-#### Extend Vitest coverage beyond the store/pure layer
-- **What**: the Vitest harness (added 2026-09-11) covers the Monitor store, the
-  reconnect/SSE signalling, and the pure `lib/*.ts` helpers (`format`,
-  `monitor-session-merge`). It does **not** yet cover: component mounting +
-  `$derived`/`$effect` reactivity (needs `@testing-library/svelte` +
-  `flushSync`/`$effect.root`), or the remaining pure modules
-  (`monitor-analytics`, `frontier-geometry`, `session-roles`,
-  `session-capabilities`, `skill-consultation-view`, the `*-state.ts` helpers).
-- **Why it matters**: chart geometry (`frontier-geometry`) and the cost-window
-  logic (`monitor-analytics`) are exactly the silent-render-plausible-but-wrong
-  class this project guards; they are pure and cheap to cover. Component tests
-  are the larger lift and only worth it where a component holds real logic.
-- **Next / Revisit when**: fold in the remaining pure modules opportunistically
-  when touching them; stand up `@testing-library/svelte` the first time a
+#### Cover component behavior (mount + reactivity)
+- **What**: every pure `frontend/src/lib` module now has mutation-checked unit
+  tests (2026-10-09). Not covered: component mounting and `$derived`/`$effect`
+  reactivity, which needs `@testing-library/svelte` plus
+  `flushSync`/`$effect.root`.
+- **Why it matters**: component tests are the larger lift and only pay off
+  where a component holds real logic rather than markup over tested helpers.
+- **Next / Revisit when**: stand up `@testing-library/svelte` the first time a
   component's behavior (not just its markup) needs a regression guard. No
-  coverage threshold is enforced yet — add one only once the surface is broad
-  enough that a number is meaningful. Noted 2026-09-11.
+  coverage threshold is enforced yet; add one only once the surface is broad
+  enough that a number is meaningful. Noted 2026-09-11, narrowed 2026-10-09.
+
+#### Frontend pure-module tests are split across two runners
+- **What**: most `frontend/src/lib` helper tests (`frontier-geometry`, chart
+  `scales`, `monitor-analytics`, `route-state`, the `*-state.ts` helpers,
+  `session-roles`, `session-capabilities`, `skill-consultation-view`, usage
+  `model-colors` and `unpriced-usage`) are root `node:test` files under
+  `tests/` and run in `pnpm test`. The Vitest harness (`pnpm frontend:test`)
+  holds the store tests plus `session-text` and chart `layout`. `format`,
+  `monitor-session-merge`, and `monitor-token-totals` have a suite in each.
+- **Why or evidence**: the split hid existing coverage. The 2026-09-11
+  coverage entry listed the root-tested modules as untested.
+- **Next**: when the UI restructure moves or renames one of these modules, move
+  its tests into a colocated Vitest file in the same change. Merge the
+  duplicated suites at the same time.
+
+#### Test-only exports in the analytics, usage, and insights state helpers
+- **What**: `createDefaultAnalyticsFilters`, `buildAnalyticsHash`,
+  `parseAnalyticsHash` (`analytics-state.ts`), `createDefaultUsageFilters`,
+  `buildUsageHash`, `parseUsageHash` (`usage-state.ts`), and
+  `clampInsightDateRange` (`insights-state.ts`) have no product caller. Only
+  their tests import them. Routing moved to `route-state.ts` when Analytics
+  absorbed Usage and Insights.
+- **Why or evidence**: the dead-code test scans root `src/` exports only, so
+  frontend leftovers go unflagged. Found 2026-10-09 while extending tests.
+- **Next**: delete them and their tests during the UI restructure, unless a
+  restructured view revives one.
 
 ### Cross-repo pattern-mining candidates (agentsview, 2026-09-13)
 

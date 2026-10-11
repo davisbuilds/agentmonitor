@@ -10,7 +10,7 @@ import type { AddressInfo } from 'node:net';
 let server: Server;
 let baseUrl = '';
 let tempDir = '';
-let getDb: (() => { exec: (sql: string) => void }) | null = null;
+let getDb: (() => { exec: (sql: string) => void; prepare: (sql: string) => { get: () => unknown } }) | null = null;
 let closeDb: (() => void) | null = null;
 
 async function postJson(url: string, body: unknown, headers?: Record<string, string>): Promise<Response> {
@@ -65,7 +65,7 @@ before(async () => {
   const dbModule = await import('../src/db/connection.js');
   const { createApp } = await import('../src/app.js');
 
-  getDb = dbModule.getDb as () => { exec: (sql: string) => void };
+  getDb = dbModule.getDb as unknown as NonNullable<typeof getDb>;
   closeDb = dbModule.closeDb as () => void;
 
   initSchema();
@@ -88,6 +88,7 @@ beforeEach(() => {
     DELETE FROM events;
     DELETE FROM sessions;
     DELETE FROM agents;
+    DELETE FROM otel_metrics;
   `);
 });
 
@@ -786,6 +787,77 @@ describe('OTLP exporter retries do not double-count', () => {
     const nextInterval = JSON.parse(JSON.stringify(payload).replace('"1700000000000000000"', '"1700000060000000000"'));
     await postJson(`${baseUrl}/api/otel/v1/metrics`, nextInterval);
     assert.equal((await getEvents()).total, 2);
+  });
+
+  // Operational points (otel_metrics) take the same per-point retry key.
+  const operationalBatch = (opts: { session?: string; state?: string; value?: number; temporality?: number } = {}) => buildMetricsPayload({
+    serviceName: 'codex',
+    resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: opts.session ?? 'sess-op-retry' } }],
+    metrics: [{
+      name: 'codex.memory.startup',
+      dataPoints: [{ value: opts.value ?? 1, attributes: [{ key: 'state', value: { stringValue: opts.state ?? 'skipped_rate_limit' } }] }],
+      aggregationTemporality: opts.temporality ?? 1,
+    }],
+  });
+  const atTime = (payload: unknown, nanos: string) => JSON.parse(JSON.stringify(payload).replaceAll('"1700000000000000000"', `"${nanos}"`));
+  const operationalSummary = async () => {
+    const read = await fetch(`${baseUrl}/api/v2/metrics?name_prefix=codex.memory.`);
+    assert.equal(read.status, 200);
+    const body = await read.json() as { metrics: Array<{ attrs: { state: string }; occurrences: number; total_value: number }> };
+    return body.metrics;
+  };
+  const storedOperationalRows = () => {
+    if (!getDb) throw new Error('Database not initialized');
+    return (getDb().prepare('SELECT COUNT(*) c FROM otel_metrics').get() as { c: number }).c;
+  };
+
+  test('a resent operational metrics batch counts once in GET /api/v2/metrics', async () => {
+    const payload = operationalBatch();
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+      assert.deepEqual(await res.json(), {});
+    }
+    const [row] = await operationalSummary();
+    assert.equal(row.occurrences, 1);
+    assert.equal(row.total_value, 1);
+  });
+
+  test('distinct operational points are all kept', async () => {
+    const points = [
+      operationalBatch(),
+      atTime(operationalBatch(), '1700000060000000000'), // next interval
+      operationalBatch({ value: 2 }), // same time, different value
+      operationalBatch({ state: 'succeeded' }), // same time, different attrs
+      operationalBatch({ session: 'sess-op-retry-other' }), // same time, different session
+    ];
+    for (const payload of points) await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal(storedOperationalRows(), 5);
+  });
+
+  test('a resent cumulative operational point collapses; the next cumulative point does not', async () => {
+    const { resetCumulativeState } = await import('../src/otel/parser.js');
+    resetCumulativeState();
+    const first = operationalBatch({ value: 3, temporality: 2 });
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, first);
+    // A server restart clears the cumulative baseline, so a resend arriving
+    // afterwards converts to its full value again; only the retry key stops it.
+    resetCumulativeState();
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, first);
+    assert.equal(storedOperationalRows(), 1);
+
+    // The next real export differs by timestamp (and value), so it is kept.
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, atTime(operationalBatch({ value: 5, temporality: 2 }), '1700000060000000000'));
+    assert.equal(storedOperationalRows(), 2);
+    const [row] = await operationalSummary();
+    assert.equal(row.total_value, 5);
+    resetCumulativeState();
+  });
+
+  test('an operational point with no time is never collapsed', async () => {
+    const payload = atTime(operationalBatch(), '0');
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
+    assert.equal(storedOperationalRows(), 2);
   });
 });
 

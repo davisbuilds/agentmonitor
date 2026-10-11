@@ -4,6 +4,15 @@
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import { hasSessionCapability } from '../../session-capabilities';
   import { Badge, Button } from '../ui';
+  import {
+    buildLiveStreamRows,
+    rowBody,
+    rowFailed,
+    rowLabel,
+    toolArgument,
+    type LiveStreamRow,
+  } from '../../live-stream-rows';
+  import { isNotableStatus } from '../../status';
 
   interface Props {
     session: LiveSession | null;
@@ -35,76 +44,38 @@
     onopenhistory,
   }: Props = $props();
 
-  const kindFilters = ['reasoning', 'tool_call', 'tool_result', 'plan', 'message'];
+  const kindFilters: Array<{ value: string; label: string }> = [
+    { value: 'message', label: 'Messages' },
+    { value: 'reasoning', label: 'Thinking' },
+    { value: 'tool_call', label: 'Tool calls' },
+    { value: 'tool_result', label: 'Tool results' },
+    { value: 'plan', label: 'Plans' },
+  ];
 
-  function parsePayload(item: LiveItem): Record<string, unknown> | null {
-    try {
-      return JSON.parse(item.payload_json) as Record<string, unknown>;
-    } catch {
-      return null;
-    }
+  const rows = $derived(buildLiveStreamRows(items));
+
+  function preview(text: string, max = 220): string {
+    const flat = text.replace(/\s+/g, ' ').trim();
+    return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
   }
 
-  function findText(value: unknown): string | null {
-    if (typeof value === 'string' && value.trim()) return value.trim();
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        const next = findText(item);
-        if (next) return next;
-      }
-      return null;
-    }
-    if (value && typeof value === 'object') {
-      for (const key of ['summary', 'text', 'thinking', 'content', 'result_content', 'title', 'label', 'name']) {
-        const next = findText((value as Record<string, unknown>)[key]);
-        if (next) return next;
-      }
-    }
-    return null;
-  }
-
-  function summaryFor(item: LiveItem): string {
-    const payload = parsePayload(item);
-    if (!payload) return item.payload_json;
-
-    if (item.kind === 'plan' && Array.isArray(payload.steps)) {
-      return `${payload.steps.length} planned step${payload.steps.length === 1 ? '' : 's'}`;
-    }
-
-    if (item.kind === 'tool_call') {
-      const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : findText(payload);
-      return toolName ? `Call ${toolName}` : 'Tool call';
-    }
-
-    if (item.kind === 'tool_result') {
-      const status = typeof payload.status === 'string' ? payload.status : item.status;
-      const text = findText(payload);
-      return status ? `${status}: ${text || 'result received'}` : (text || 'Tool result');
-    }
-
-    return findText(payload) || item.kind;
-  }
-
-  function preview(text: string): string {
-    return text.replace(/\s+/g, ' ').trim().slice(0, 220);
-  }
-
-  // Item kinds map onto the design's signal tokens (no bespoke hues): tool_call =
-  // the agent acting (accent), tool_result = a result (ok), plan = warn, the rest neutral.
-  type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn';
-  function kindTone(kind: string): BadgeTone {
-    switch (kind) {
-      case 'tool_call':
-        return 'accent';
-      case 'tool_result':
-        return 'ok';
-      case 'plan':
-        return 'warn';
+  // One dot per row in the design's signal tokens: you = accent, the assistant =
+  // ok, tools neutral, a plan = warn, and anything that failed = danger.
+  function dotClass(row: LiveStreamRow): string {
+    if (rowFailed(row)) return 'bg-danger';
+    switch (row.item.kind) {
+      case 'user_message':
+        return 'bg-accent';
+      case 'assistant_message':
+        return 'bg-ok';
+      case 'plan_update':
+        return 'bg-warn';
       default:
-        return 'neutral';
+        return 'bg-text-faint';
     }
   }
 
+  type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn';
   function statusTone(status: string | null): BadgeTone {
     switch (status) {
       case 'live':
@@ -117,12 +88,6 @@
     }
   }
 
-  function turnLabel(turnId: number | null): string | null {
-    if (turnId == null) return null;
-    const turn = turns.find(candidate => candidate.id === turnId);
-    if (!turn) return `Turn ${turnId}`;
-    return turn.title || turn.source_turn_id || `Turn ${turn.id}`;
-  }
 </script>
 
 <div class="flex flex-col xl:h-full xl:overflow-hidden">
@@ -132,10 +97,9 @@
         <div class="min-w-0">
           <h2 class="truncate text-h3">{session.project || session.id}</h2>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-meta text-text-faint">
-            <Badge tone="neutral" class="uppercase tracking-wide">{session.integration_mode || 'unknown source'}</Badge>
-            <Badge tone="neutral" class="uppercase tracking-wide">{session.fidelity || 'n/a'} fidelity</Badge>
+            <span>{session.integration_mode || 'unknown source'} · {session.fidelity || 'n/a'} fidelity</span>
             <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
-            <Badge tone={statusTone(session.live_status)} class="uppercase tracking-wide">{session.live_status || 'unknown'}</Badge>
+            <Badge tone={statusTone(session.live_status)}>{session.live_status || 'unknown'}</Badge>
             <span class="tabular font-mono">{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
             <span class="tabular font-mono">{items.length} item{items.length === 1 ? '' : 's'}</span>
           </div>
@@ -152,18 +116,19 @@
     {/if}
 
     <div class="mt-3 flex flex-wrap items-center gap-2">
-      {#each kindFilters as kind}
+      {#each kindFilters as kind (kind.value)}
         <button
-          class="rounded-sm border px-2 py-1 text-meta uppercase tracking-wide transition-colors {selectedKinds.includes(kind) ? 'border-accent/50 bg-accent/10 text-accent' : 'border-line text-text-muted hover:border-line-strong hover:text-text'}"
-          onclick={() => ontogglekind(kind)}
+          class="rounded-sm border px-2 py-1 text-meta transition-colors {selectedKinds.includes(kind.value) ? 'border-accent/50 bg-accent/10 text-accent' : 'border-line text-text-muted hover:border-line-strong hover:text-text'}"
+          aria-pressed={selectedKinds.includes(kind.value)}
+          onclick={() => ontogglekind(kind.value)}
         >
-          {kind.replace('_', ' ')}
+          {kind.label}
         </button>
       {/each}
     </div>
   </div>
 
-  <div class="space-y-2 px-4 py-4 xl:flex-1 xl:overflow-y-auto">
+  <div class="space-y-0.5 px-2 py-2 xl:flex-1 xl:overflow-y-auto">
     {#if loading && items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">Loading live items…</div>
     {:else if error}
@@ -173,31 +138,34 @@
     {:else if items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">No live items for this session yet.</div>
     {:else}
-      {#each items as item (item.id)}
+      {#each rows as row (row.item.id)}
+        {@const failed = rowFailed(row)}
+        {@const argument = row.item.kind === 'tool_call' ? toolArgument(row.item) : null}
+        {@const body = rowBody(row)}
         <button
-          class="animate-row-enter w-full rounded-sm border px-3 py-3 text-left transition-colors {selectedItemId === item.id ? 'border-accent/50 bg-accent/10' : 'border-line bg-surface hover:border-line-strong hover:bg-surface-2'}"
-          onclick={() => onselect(item.id)}
+          class="animate-row-enter w-full rounded-sm border px-3 py-2 text-left transition-colors {selectedItemId === row.item.id ? 'border-accent/50 bg-accent/10' : 'border-transparent hover:border-line hover:bg-surface-2'}"
+          onclick={() => onselect(row.item.id)}
         >
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0 flex-1">
-              <div class="flex flex-wrap items-center gap-2">
-                <Badge tone={kindTone(item.kind)} class="uppercase tracking-wide">{item.kind.replace('_', ' ')}</Badge>
-                {#if item.status}
-                  <Badge tone="neutral" class="uppercase tracking-wide">{item.status}</Badge>
-                {/if}
-                {#if turnLabel(item.turn_id)}
-                  <span class="text-meta text-text-faint">{turnLabel(item.turn_id)}</span>
-                {/if}
-              </div>
-              <p class="mt-2 text-body text-text">{preview(summaryFor(item))}</p>
-            </div>
-            <div class="shrink-0 text-right tabular font-mono text-meta text-text-faint">
-              <div>#{item.ordinal}</div>
-              {#if item.created_at}
-                <div class="mt-1">{timeAgo(item.created_at)}</div>
-              {/if}
-            </div>
+          <div class="flex items-center gap-2">
+            <span class="h-1.5 w-1.5 shrink-0 rounded-full {dotClass(row)}" aria-hidden="true"></span>
+            <span class="shrink-0 text-meta {row.item.kind === 'tool_call' || row.item.kind === 'tool_result' ? 'font-mono text-text' : 'text-text-muted'}">{rowLabel(row.item)}</span>
+            {#if argument}
+              <span class="min-w-0 flex-1 truncate font-mono text-meta text-text-muted">{preview(argument, 160)}</span>
+            {:else}
+              <span class="flex-1"></span>
+            {/if}
+            {#if failed}
+              <span class="shrink-0 text-meta text-danger">failed</span>
+            {:else if isNotableStatus(row.item.status)}
+              <span class="shrink-0 text-meta text-warn">{row.item.status}</span>
+            {/if}
+            {#if row.item.created_at}
+              <span class="shrink-0 tabular font-mono text-meta text-text-faint">{timeAgo(row.item.created_at)}</span>
+            {/if}
           </div>
+          {#if body}
+            <p class="mt-1 line-clamp-2 pl-3.5 text-meta {row.item.kind === 'user_message' || row.item.kind === 'assistant_message' ? 'text-text' : 'text-text-muted'} {failed ? 'text-danger' : ''}">{preview(body)}</p>
+          {/if}
         </button>
       {/each}
 

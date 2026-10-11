@@ -80,3 +80,43 @@ test('formatUsd renders compact axis labels', () => {
   assert.equal(formatUsd(1.1), '$1.1');
   assert.equal(formatUsd(120), '$120');
 });
+
+test('niceLinearTicks picks the 1-2-5 step for the range, not just any covering set', () => {
+  // [3, 17]: rough step 14/4 rounds to 5, so ticks start/end on multiples of 5.
+  assert.deepEqual(niceLinearTicks(3, 17, 5), [0, 5, 10, 15, 20]);
+  // [0, 100] with 5 ticks: 25 is not nice, 20 is.
+  assert.deepEqual(niceLinearTicks(0, 100, 5), [0, 20, 40, 60, 80, 100]);
+  // Fewer requested ticks widen the step.
+  assert.deepEqual(niceLinearTicks(0, 100, 3), [0, 50, 100]);
+  // Two ticks means one interval: the whole range is a single step.
+  assert.deepEqual(niceLinearTicks(0, 10, 2), [0, 10]);
+});
+
+test('niceLinearTicks treats an inverted range as degenerate rather than looping', () => {
+  assert.deepEqual(niceLinearTicks(10, 2), [10]);
+});
+
+test('log10Scale collapses a zero-width domain to the range start (no NaN)', () => {
+  const s = log10Scale([1, 1], [0, 100]);
+  assert.equal(s(1), 0);
+  assert.equal(s(50), 0);
+});
+
+test('log10Scale honours an inverted range', () => {
+  const s = log10Scale([0.01, 1], [100, 0]);
+  assert.equal(s(0.01), 100);
+  assert.equal(s(1), 0);
+});
+
+test('log10Ticks on exact decades does not add an extra decade', () => {
+  assert.deepEqual(log10Ticks(0.01, 10), [0.01, 0.1, 1, 10]);
+  assert.deepEqual(log10Ticks(1, 1), [1]);
+});
+
+test('formatUsd switches precision at the $1 and $100 boundaries', () => {
+  assert.equal(formatUsd(0.123), '$0.12'); // two significant figures below $1
+  assert.equal(formatUsd(0.0042), '$0.0042');
+  assert.equal(formatUsd(99.5), '$99.5');
+  assert.equal(formatUsd(100), '$100');
+  assert.equal(formatUsd(1234.56), '$1235'); // whole dollars from $100 up
+});

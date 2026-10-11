@@ -4,14 +4,17 @@
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
   import ContextPill from '../monitor/ContextPill.svelte';
+  import { isNotableStatus } from '../../status';
 
   interface Props {
     session: LiveSession | null;
     turns: LiveTurn[];
     item: LiveItem | null;
+    /** The tool result folded into the selected call's row, if any. */
+    result?: LiveItem | null;
   }
 
-  let { session, turns, item }: Props = $props();
+  let { session, turns, item, result = null }: Props = $props();
 
   const parsedPayload = $derived.by(() => {
     if (!item) return null;
@@ -22,11 +25,17 @@
     }
   });
 
-  const prettyPayload = $derived.by(() => {
-    if (parsedPayload) return JSON.stringify(parsedPayload, null, 2);
-    if (!item) return '';
-    return item.payload_json;
-  });
+  function pretty(target: LiveItem | null): string {
+    if (!target) return '';
+    try {
+      return JSON.stringify(JSON.parse(target.payload_json), null, 2);
+    } catch {
+      return target.payload_json;
+    }
+  }
+
+  const prettyPayload = $derived(pretty(item));
+  const prettyResult = $derived(pretty(result));
 
   function steps(payload: Record<string, unknown> | null): Array<{ label: string; status: string | null }> {
     if (!payload || !Array.isArray(payload.steps)) return [];
@@ -140,9 +149,9 @@
                   <div class="truncate text-body text-text">{turn.title || turn.source_turn_id || `Turn ${turn.id}`}</div>
                   <div class="mt-1 text-meta text-text-faint">{turn.agent_type}</div>
                 </div>
-                <span class={`text-meta uppercase tracking-wide ${turnStatusClasses(turn.status)}`}>
-                  {turn.status || 'unknown'}
-                </span>
+                {#if isNotableStatus(turn.status)}
+                  <span class={`text-meta ${turnStatusClasses(turn.status)}`}>{turn.status}</span>
+                {/if}
               </div>
             </div>
           {/each}
@@ -158,10 +167,12 @@
             <span class="text-text-faint">Kind</span>
             <span>{item.kind}</span>
           </div>
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-text-faint">Status</span>
-            <span>{item.status || 'n/a'}</span>
-          </div>
+          {#if isNotableStatus(item.status) || isNotableStatus(result?.status)}
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-text-faint">Status</span>
+              <span>{isNotableStatus(result?.status) ? result?.status : item.status}</span>
+            </div>
+          {/if}
           <div class="flex items-center justify-between gap-3">
             <span class="text-text-faint">Ordinal</span>
             <span class="tabular font-mono">#{item.ordinal}</span>
@@ -189,6 +200,13 @@
         <h4 class="text-meta font-semibold uppercase tracking-wide text-text-faint">Payload</h4>
         <pre class="mt-2 overflow-x-auto rounded-sm border border-line bg-surface-2 p-3 text-meta text-text-muted">{prettyPayload}</pre>
       </section>
+
+      {#if result}
+        <section>
+          <h4 class="text-meta font-semibold uppercase tracking-wide text-text-faint">Result</h4>
+          <pre class="mt-2 max-h-96 overflow-auto rounded-sm border border-line bg-surface-2 p-3 text-meta text-text-muted">{prettyResult}</pre>
+        </section>
+      {/if}
     {/if}
   </div>
 </aside>

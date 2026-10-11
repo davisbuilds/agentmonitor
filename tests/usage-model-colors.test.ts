@@ -140,3 +140,38 @@ describe('usage top models: color assignment', () => {
     }
   });
 });
+
+describe('usage top models: overlap and ties', () => {
+  // Overlapping top-N sets that together exceed the palette: the token view
+  // shares one model (A) with the cost view and adds four more. Nine models,
+  // six colors. Handing colors out by position in the union would wrap G back
+  // onto A's hue, and A and G are shown side by side under Tokens.
+  test('overlapping top-N sets larger than the palette still never collide on screen', () => {
+    const points = [day(
+      slice('A', 100, 9_000),
+      slice('B', 90, 1),
+      slice('C', 80, 1),
+      slice('D', 70, 1),
+      slice('E', 60, 1),
+      slice('F', 0.05, 10_000),
+      slice('G', 0.04, 8_000),
+      slice('H', 0.03, 7_000),
+      slice('I', 0.02, 6_000),
+    )];
+    assert.deepEqual(rankModels(points, 'cost'), ['A', 'B', 'C', 'D', 'E']);
+    assert.deepEqual(rankModels(points, 'tokens'), ['F', 'A', 'G', 'H', 'I']);
+
+    const colors = assignModelColors(points);
+    for (const metric of METRICS) {
+      const shown = rankModels(points, metric);
+      assert.equal(new Set(shown.map(m => colors.get(m))).size, shown.length, `collision under ${metric}`);
+    }
+  });
+
+  test('tied totals rank by model name so the top-N cut is deterministic', () => {
+    // Six models tie; exactly one must fall to Other, and it must always be the same one.
+    const points = [day(...['f', 'b', 'e', 'a', 'd', 'c'].map(name => slice(name, 5, 5)))];
+    assert.deepEqual(rankModels(points, 'cost'), ['a', 'b', 'c', 'd', 'e']);
+    assert.deepEqual(rankModels(points, 'tokens'), ['a', 'b', 'c', 'd', 'e']);
+  });
+});

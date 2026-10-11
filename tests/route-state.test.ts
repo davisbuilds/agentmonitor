@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildAnalyticsQualityHash,
   buildAnalyticsRouteHash,
   buildAppHash,
   buildSearchHash,
@@ -228,4 +229,96 @@ test('search hashes omit default sort and fall back on non-search hashes', () =>
 
   assert.equal(buildSearchHash({ ...fallback, query: 'hello' }), 'search?q=hello');
   assert.deepEqual(parseSearchHash('#sessions?session=abc', fallback), fallback);
+});
+
+test('parseAppHash accepts a hash with or without the leading #, and unknown tabs fall back to monitor', () => {
+  assert.equal(parseAppHash('search?q=x').tab, 'search');
+  assert.equal(parseAppHash('#search').params.toString(), '');
+  assert.equal(parseAppHash('#nonsense?q=x').tab, 'monitor');
+});
+
+test('buildAppHash skips empty values but keeps a numeric zero, and passes URLSearchParams through', () => {
+  assert.equal(buildAppHash('sessions', { project: '', agent: null, session: undefined, message: 0 }), 'sessions?message=0');
+  assert.equal(buildAppHash('search', {}), 'search');
+  assert.equal(buildAppHash('search', new URLSearchParams('q=a&sort=relevance')), 'search?q=a&sort=relevance');
+});
+
+test('message ordinal 0 survives a sessions round-trip', () => {
+  const state = { view: 'browse' as const, project: '', agent: '', sessionId: 's1', messageOrdinal: 0 };
+  const hash = buildSessionsHash(state);
+  assert.equal(hash, 'sessions?session=s1&message=0');
+  assert.deepEqual(
+    parseSessionsHash(`#${hash}`, { view: 'browse', project: '', agent: '', sessionId: null, messageOrdinal: null }),
+    state,
+  );
+});
+
+test('search hashes round-trip reserved characters in the query', () => {
+  // The parser splits the hash on "?", so a literal "?" or "#" in a query must
+  // be encoded by the builder or the query is truncated.
+  const state = { query: 'why? a&b=c #1 100%', project: 'p q', agent: '', sort: 'recent' as const };
+  const hash = buildSearchHash(state);
+  assert.deepEqual(parseSearchHash(`#${hash}`, { query: '', project: '', agent: '', sort: 'recent' }), state);
+});
+
+test('parseSearchHash ignores an unknown sort value', () => {
+  const fallback = { query: '', project: '', agent: '', sort: 'recent' as const };
+  assert.equal(parseSearchHash('#search?q=x&sort=bogus', fallback).sort, 'recent');
+});
+
+test('search sort: an omitted sort param means "recent" even when the fallback differs', {
+  todo: 'latent: buildSearchHash omits sort only for "recent", but parseSearchHash fills a missing sort from fallback.sort. Harmless while the only URL-synced store defaults to "recent".',
+}, () => {
+  const relevanceDefault = { query: '', project: '', agent: '', sort: 'relevance' as const };
+  const hash = buildSearchHash({ query: 'x', project: '', agent: '', sort: 'recent' });
+  assert.equal(parseSearchHash(`#${hash}`, relevanceDefault).sort, 'recent');
+});
+
+test('parseAnalyticsRouteHash coerces unknown view/signal/sort values to their defaults', () => {
+  const parsed = parseAnalyticsRouteHash('#analytics?view=bogus&signal=nope&sort=nope', analyticsFallback);
+  assert.equal(parsed.view, 'overview');
+  const skills = parseAnalyticsRouteHash('#analytics?view=skills&signal=nope&sort=nope', analyticsFallback);
+  assert.equal(skills.skillSignal, 'all');
+  assert.equal(skills.skillSort, 'volume');
+});
+
+test('parseAnalyticsRouteHash falls back for missing dates and non-analytics hashes', () => {
+  const parsed = parseAnalyticsRouteHash('#analytics?project=am', analyticsFallback);
+  assert.equal(parsed.from, analyticsFallback.from);
+  assert.equal(parsed.to, analyticsFallback.to);
+  assert.equal(parseAnalyticsRouteHash('#sessions?project=am', analyticsFallback), analyticsFallback);
+});
+
+test('buildAnalyticsRouteHash omits the default skill signal and sort', () => {
+  assert.equal(
+    buildAnalyticsRouteHash({ ...analyticsFallback, view: 'skills', skillSignal: 'all', skillSort: 'volume' }),
+    'analytics?view=skills&from=2026-01-01&to=2026-01-30',
+  );
+});
+
+test('quality view carries session and trace; other views drop them', () => {
+  const qualityHash = buildAnalyticsRouteHash({ ...analyticsFallback, view: 'quality', sessionId: 's1', traceId: 't1' });
+  assert.equal(qualityHash, 'analytics?view=quality&from=2026-01-01&to=2026-01-30&session=s1&trace=t1');
+  const quality = parseAnalyticsRouteHash(`#${qualityHash}`, analyticsFallback);
+  assert.equal(quality.sessionId, 's1');
+  assert.equal(quality.traceId, 't1');
+
+  const usage = parseAnalyticsRouteHash('#analytics?view=usage&session=s1&trace=t1', analyticsFallback);
+  assert.equal(usage.sessionId, null);
+  assert.equal(usage.traceId, null);
+});
+
+test('insight provider and kind persist from the current state when another view is active', () => {
+  const current = { ...analyticsFallback, insightProvider: 'anthropic', kind: 'weekly' };
+  const usage = parseAnalyticsRouteHash('#analytics?view=usage&provider=openai', current);
+  assert.equal(usage.insightProvider, 'anthropic'); // usage's provider param is the billed provider
+  assert.equal(usage.provider, 'openai');
+  assert.equal(usage.kind, 'weekly');
+});
+
+test('buildAnalyticsQualityHash always targets the quality view and adds only the given scope', () => {
+  assert.equal(buildAnalyticsQualityHash(), 'analytics?view=quality');
+  assert.equal(buildAnalyticsQualityHash({ sessionId: 's1' }), 'analytics?view=quality&session=s1');
+  assert.equal(buildAnalyticsQualityHash({ traceId: 't1' }), 'analytics?view=quality&trace=t1');
+  assert.equal(buildAnalyticsQualityHash({ sessionId: 's1', traceId: 't1' }), 'analytics?view=quality&session=s1&trace=t1');
 });

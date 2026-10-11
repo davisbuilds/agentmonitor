@@ -210,6 +210,35 @@ test('live tab renders seeded sessions and reacts to streamed item deltas', asyn
   await expect(page.locator('p', { hasText: 'Streamed follow-up from test' }).first()).toBeVisible();
 });
 
+test('a tool call and its result read as one row without routine success badges', async ({ page }) => {
+  const db = getDb();
+  const turn = db.prepare('SELECT id FROM session_turns WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(sessionId) as { id: number };
+  const insert = db.prepare(`
+    INSERT INTO session_items (
+      session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insert.run(sessionId, turn.id, 2, 'toolu_e2e_status', 'tool_call', 'success',
+    JSON.stringify({ tool_name: 'Bash', input: { command: 'git status --short' } }), '2026-03-24T12:00:07.000Z');
+  insert.run(sessionId, turn.id, 3, 'toolu_e2e_status', 'tool_result', 'success',
+    JSON.stringify({ content: 'nothing to commit, working tree clean', is_error: false }), '2026-03-24T12:00:08.000Z');
+
+  await page.goto(`${baseUrl}/app/#live`);
+  await page.locator('button').filter({ hasText: 'Inspect the repo' }).first().click();
+
+  const row = page.locator('button', { hasText: 'git status --short' });
+  await expect(row).toHaveCount(1);
+  await expect(row).toContainText('Bash');
+  await expect(row).toContainText('nothing to commit, working tree clean');
+  // The result has no row of its own, and success is left unsaid.
+  await expect(page.locator('button', { hasText: 'nothing to commit, working tree clean' })).toHaveCount(1);
+  const stream = page.locator('section', { has: page.getByRole('heading', { name: 'agentmonitor' }) });
+  await expect(stream.getByText('success', { exact: true })).toHaveCount(0);
+
+  await row.click();
+  await expect(page.getByRole('heading', { name: 'Result' })).toBeVisible();
+});
+
 test('summary-only Codex sessions explain missing transcript history', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#live`);
 

@@ -132,3 +132,115 @@ test('explorer sort orders null engagement last and uses volume as a stable tie-
     ['higher-high-volume', 'higher-low-volume', 'lower', 'none'],
   );
 });
+
+const ALL_FILTERS = { harness: '', query: '', signal: 'all', sort: 'volume' } as const;
+const names = (harnesses: ReturnType<typeof filterSkillConsultations>) =>
+  harnesses.map(item => [item.harness, item.skills.map(row => row.name)]);
+
+test('overview preview ranks unsorted input by volume, breaking ties by name', () => {
+  const input = [
+    harness('claude', [
+      skill('zeta', 'claude', { invocations: 5 }),
+      skill('low', 'claude', { invocations: 1 }),
+      skill('alpha', 'claude', { invocations: 5 }),
+      skill('top', 'claude', { invocations: 9 }),
+    ]),
+  ];
+  const preview = selectSkillConsultationPreview(input, 3);
+  assert.deepEqual(names(preview), [['claude', ['top', 'alpha', 'zeta']]]);
+  // The caller's rows keep their original order.
+  assert.deepEqual(input[0].skills.map(row => row.name), ['zeta', 'low', 'alpha', 'top']);
+});
+
+test('overview preview takes rank-by-rank across harnesses and drops empty lanes', () => {
+  const preview = selectSkillConsultationPreview([
+    harness('claude', [skill('c1', 'claude', { invocations: 9 }), skill('c2', 'claude', { invocations: 8 })]),
+    harness('empty', []),
+    harness('codex', [skill('x1', 'codex', { invocations: 1 }), skill('x2', 'codex', { invocations: 1 })]),
+    harness('antigravity', [skill('a1', 'antigravity', { invocations: 2 })]),
+  ], 4);
+  // Rank 0 from every lane first (3 rows), then rank 1 from the first lane.
+  assert.deepEqual(names(preview), [
+    ['claude', ['c1', 'c2']],
+    ['codex', ['x1']],
+    ['antigravity', ['a1']],
+  ]);
+});
+
+test('overview preview returns everything under the limit and nothing for a non-positive limit', () => {
+  const input = [
+    harness('claude', [skill('c1', 'claude')]),
+    harness('codex', [skill('x1', 'codex')]),
+  ];
+  assert.equal(countSkillRows(selectSkillConsultationPreview(input, 10)), 2);
+  assert.deepEqual(selectSkillConsultationPreview(input, 0), []);
+  assert.deepEqual(selectSkillConsultationPreview(input, -1), []);
+  assert.deepEqual(selectSkillConsultationPreview([], 6), []);
+});
+
+test('explorer query is trimmed and case-insensitive; an empty harness filter keeps every lane', () => {
+  const filtered = filterSkillConsultations([
+    harness('claude', [skill('Test-Strategy', 'claude'), skill('write-plan', 'claude')]),
+    harness('codex', [skill('test-runner', 'codex')]),
+  ], { ...ALL_FILTERS, query: '  TEST ' });
+  assert.deepEqual(names(filtered), [['claude', ['Test-Strategy']], ['codex', ['test-runner']]]);
+});
+
+test('each explorer signal selects only rows with that observed evidence', () => {
+  const rows = [
+    harness('claude', [
+      skill('first', 'claude', { firstReads: 1, invocations: 5 }),
+      skill('rehydrated', 'claude', { rehydrations: 1, invocations: 4 }),
+      skill('presented', 'claude', { presentedUnread: 1, invocations: 3 }),
+      skill('unclassified', 'claude', { unclassified: 1, invocations: 2 }),
+      skill('quiet', 'claude', { invocations: 1 }),
+    ]),
+  ];
+  const bySignal = (signal: 'all' | 'first_read' | 'rehydrated' | 'presented_unread' | 'unclassified') =>
+    filterSkillConsultations(rows, { ...ALL_FILTERS, signal })[0]?.skills.map(row => row.name) ?? [];
+  assert.deepEqual(bySignal('first_read'), ['first']);
+  assert.deepEqual(bySignal('rehydrated'), ['rehydrated']);
+  assert.deepEqual(bySignal('presented_unread'), ['presented']);
+  assert.deepEqual(bySignal('unclassified'), ['unclassified']);
+  assert.deepEqual(bySignal('all'), ['first', 'rehydrated', 'presented', 'unclassified', 'quiet']);
+});
+
+test('a lane with no rows left after filtering is dropped, not rendered empty', () => {
+  const filtered = filterSkillConsultations([
+    harness('claude', [skill('quiet', 'claude')]),
+    harness('codex', [skill('first', 'codex', { firstReads: 1 })]),
+  ], { ...ALL_FILTERS, signal: 'first_read' });
+  assert.deepEqual(names(filtered), [['codex', ['first']]]);
+});
+
+test('explorer sorts by rehydrations with volume as tie-breaker, and by name ascending', () => {
+  const rows = [
+    harness('codex', [
+      skill('b-low', 'codex', { rehydrations: 1, invocations: 1 }),
+      skill('a-most', 'codex', { rehydrations: 3, invocations: 1 }),
+      skill('c-busy', 'codex', { rehydrations: 1, invocations: 7 }),
+    ]),
+  ];
+  assert.deepEqual(
+    filterSkillConsultations(rows, { ...ALL_FILTERS, sort: 'rehydrations' })[0]?.skills.map(row => row.name),
+    ['a-most', 'c-busy', 'b-low'],
+  );
+  assert.deepEqual(
+    filterSkillConsultations(rows, { ...ALL_FILTERS, sort: 'name' })[0]?.skills.map(row => row.name),
+    ['a-most', 'b-low', 'c-busy'],
+  );
+});
+
+test('engagement-rate sort keeps every null rate last regardless of input position', () => {
+  const filtered = filterSkillConsultations([
+    harness('codex', [
+      skill('null-busy', 'codex', { eligible: 0, invocations: 50 }),
+      skill('half', 'codex', { eligible: 2, firstReads: 1 }),
+      skill('null-quiet', 'codex', { eligible: 0, invocations: 1 }),
+      skill('zero', 'codex', { eligible: 3, firstReads: 0 }),
+      skill('full', 'codex', { eligible: 1, firstReads: 1 }),
+    ]),
+  ], { ...ALL_FILTERS, sort: 'first_read_rate' });
+  // A 0% rate is a real measurement and ranks above "no eligible sessions".
+  assert.deepEqual(filtered[0]?.skills.map(row => row.name), ['full', 'half', 'zero', 'null-busy', 'null-quiet']);
+});

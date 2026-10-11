@@ -93,3 +93,26 @@ test('retains known-priced usage with zero stored cost until recalculation', () 
     models: ['claude-opus-5'],
   });
 });
+
+function usage(model: string, pricing_status: 'known' | 'deprecated' | 'unknown', cost_usd: number, input_tokens: number) {
+  return {
+    model, pricing_status, cost_usd, input_tokens,
+    output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, usage_events: 1,
+  };
+}
+
+test('a $0 row with no tokens is not incomplete cost usage', () => {
+  // Nothing was consumed, so a zero cost is correct, not missing.
+  assert.equal(summarizeIncompleteCostUsage([usage('idle', 'known', 0, 0)]), null);
+});
+
+test('a $0 deprecated-priced row counts as unrecalculated, not unknown pricing', () => {
+  const summary = summarizeIncompleteCostUsage([
+    usage('old-model', 'deprecated', 0, 40),
+    usage('mystery', 'unknown', 0, 40),
+  ]);
+  assert.equal(summary?.unknown_pricing_model_count, 1);
+  assert.equal(summary?.unrecalculated_model_count, 1);
+  // Equal token volume: ordered by name so the list is stable.
+  assert.deepEqual(summary?.models, ['mystery', 'old-model']);
+});

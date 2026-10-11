@@ -181,3 +181,34 @@ test('clampInsightDateRange keeps the range valid when one side crosses the othe
     { from: '2026-04-10', to: '2026-04-20' },
   );
 });
+
+test('sameInsightListFilters compares every slice field', () => {
+  for (const change of [
+    { from: '2026-03-02' },
+    { to: '2026-03-30' },
+    { project: 'beta' },
+    { agent: 'codex' },
+    { kind: 'usage' as const },
+  ]) {
+    assert.equal(sameInsightListFilters(baseFilters, { ...baseFilters, ...change }), false, JSON.stringify(change));
+  }
+});
+
+test('insightMatchesListFilters treats the date window as inclusive overlap', () => {
+  const window = { ...baseFilters, from: '2026-03-10', to: '2026-03-20' };
+  const span = (date_from: string, date_to: string) => insightMatchesListFilters({ ...baseInsight, date_from, date_to }, window);
+  assert.equal(span('2026-03-01', '2026-03-10'), true); // ends on the window's first day
+  assert.equal(span('2026-03-20', '2026-03-31'), true); // starts on the window's last day
+  assert.equal(span('2026-03-12', '2026-03-14'), true); // inside
+  assert.equal(span('2026-03-01', '2026-03-31'), true); // covers it
+  assert.equal(span('2026-03-01', '2026-03-09'), false); // ends the day before
+  assert.equal(span('2026-03-21', '2026-03-31'), false); // starts the day after
+});
+
+test('insightMatchesListFilters: an empty project/agent filter matches anything, a set one needs an exact match', () => {
+  const unscoped = { ...baseInsight, project: null, agent: null };
+  assert.equal(insightMatchesListFilters(unscoped, { ...baseFilters, project: '', agent: '' }), true);
+  assert.equal(insightMatchesListFilters(unscoped, { ...baseFilters, project: 'alpha', agent: '' }), false);
+  assert.equal(insightMatchesListFilters(unscoped, { ...baseFilters, project: '', agent: 'claude' }), false);
+  assert.equal(insightMatchesListFilters(baseInsight, { ...baseFilters, project: '', agent: '' }), true);
+});

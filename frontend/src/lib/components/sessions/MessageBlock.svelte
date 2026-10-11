@@ -3,6 +3,7 @@
   import { formatTimeOfDay, agentDisplayName } from '../../format';
   import { parseSessionText } from '../../session-text';
   import { classifyMessageAuthor } from '../../session-roles';
+  import { hasThinkingText, parseMessageBlocks, thinkingText } from '../../transcript-blocks';
   import { Badge } from '../ui';
 
   interface Props {
@@ -24,13 +25,8 @@
     onunpin,
   }: Props = $props();
 
-  let blocks = $derived.by<ContentBlock[]>(() => {
-    try {
-      return JSON.parse(message.content);
-    } catch {
-      return [{ type: 'text', text: message.content }];
-    }
-  });
+  let blocks = $derived<ContentBlock[]>(parseMessageBlocks(message.content));
+  const showsThinking = $derived(hasThinkingText(message));
 
   let thinkingExpanded = $state(false);
   let toolExpanded = $state<Record<string, boolean>>({});
@@ -76,7 +72,7 @@
     {#if message.timestamp}
       <span class="tabular font-mono text-meta text-text-faint">{formatTimeOfDay(message.timestamp)}</span>
     {/if}
-    {#if message.has_thinking}
+    {#if showsThinking}
       <Badge tone="neutral">thinking</Badge>
     {/if}
     {#if message.has_tool_use}
@@ -129,17 +125,18 @@
         </div>
       {/if}
 
-    {:else if block.type === 'thinking' && block.thinking}
+    {:else if block.type === 'thinking' && thinkingText(block)}
+      {@const thought = thinkingText(block)}
       <div class="my-1">
         <button
           class="text-meta text-text-muted transition-colors hover:text-text"
           onclick={() => thinkingExpanded = !thinkingExpanded}
         >
-          {thinkingExpanded ? '▾' : '▸'} Thinking ({block.thinking.length} chars)
+          {thinkingExpanded ? '▾' : '▸'} Thinking ({thought.length} chars)
         </button>
         {#if thinkingExpanded}
           <div class="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap rounded-sm bg-surface-2 p-2 text-meta text-text-muted">
-            {block.thinking}
+            {thought}
           </div>
         {/if}
       </div>

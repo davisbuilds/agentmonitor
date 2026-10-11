@@ -1,6 +1,8 @@
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { stripInlineImages } from '../util/inline-images.js';
+import { config } from '../config.js';
+import { applyLivePrivacyPolicy, normalizeClaudeBlock } from '../live/normalize.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import {
@@ -219,6 +221,7 @@ function initSchemaLocked(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS otel_metrics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      point_id TEXT,
       session_id TEXT NOT NULL,
       agent_type TEXT NOT NULL,
       metric_name TEXT NOT NULL,
@@ -233,6 +236,20 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_otel_metrics_session ON otel_metrics(session_id);
     CREATE INDEX IF NOT EXISTS idx_otel_metrics_created ON otel_metrics(created_at DESC);
   `);
+
+  // Exporter-retry key (v17), mirroring events.event_id: the parser derives it
+  // per OTLP data point, and a resend with a stored key is not inserted again.
+  // Rows from before it keep a NULL key. They are not collapsed: the stored row
+  // keeps only the projected attributes, so an old duplicate cannot be told
+  // apart from two genuine points of different series. UNIQUE allows any
+  // number of NULLs, so the index creates over them.
+  const otelMetricColumns = new Set<string>(
+    (db.prepare(`PRAGMA table_info(otel_metrics)`).all() as Array<{ name: string }>).map(col => col.name)
+  );
+  if (!otelMetricColumns.has('point_id')) {
+    db.exec('ALTER TABLE otel_metrics ADD COLUMN point_id TEXT');
+  }
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_otel_metrics_point_id ON otel_metrics(point_id)');
 
   // Backward-compatible schema updates for existing local databases.
   const eventColumns = new Set<string>(
@@ -1042,7 +1059,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 16;
+const DATA_SCHEMA_VERSION = 18;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1090,9 +1107,94 @@ export function runDataMigrations(db: Database): void {
     // events.cache_write_1h_tokens; `amon costs repair-claude-usage` fills it
     // from the transcripts that record the split.
     if (current < 16) stripStoredInlineImages(db);
+    // v17 introduces no data correction: it adds otel_metrics.point_id and its
+    // unique index. Rows stored before it keep a NULL key and are not collapsed.
+    if (current < 18) repairStoredLiveReasoning(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v18 — the live normalizer read a Claude thinking block's raw `thinking`
+ * field, while the parsers store its text under `text`, so every stored
+ * reasoning item has an empty text. Restore the text from the stored transcript
+ * message where the block recorded one, under the current capture policy, and
+ * delete the rest: Claude Code often records a thinking block with its text left
+ * out, and such an item has nothing to show. Only items whose payload is an
+ * empty text (no redaction or other field) are touched. Trace summaries count
+ * these items; `SESSION_TRACE_SUMMARY_VERSION` re-derives them after this.
+ */
+function repairStoredLiveReasoning(db: Database): void {
+  const tables = new Set((db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('messages', 'session_items', 'session_turns')",
+  ).all() as Array<{ name: string }>).map(row => row.name));
+  if (!tables.has('session_items') || !tables.has('session_turns') || !tables.has('messages')) return;
+
+  const emptyItems = db.prepare(`
+    SELECT si.id, si.session_id, si.turn_id, st.source_turn_id
+    FROM session_items si
+    LEFT JOIN session_turns st ON st.id = si.turn_id
+    WHERE si.kind = 'reasoning'
+      AND TRIM(COALESCE(json_extract(si.payload_json, '$.text'), '')) = ''
+      AND NOT EXISTS (
+        SELECT 1 FROM json_each(si.payload_json) WHERE key NOT IN ('text', 'item_type')
+      )
+    ORDER BY si.turn_id, si.ordinal, si.id
+  `).all() as Array<{ id: number; session_id: string; turn_id: number | null; source_turn_id: string | null }>;
+  if (emptyItems.length === 0) return;
+
+  const turnReasoningCount = db.prepare(
+    "SELECT COUNT(*) AS c FROM session_items WHERE turn_id = ? AND kind = 'reasoning'",
+  );
+  const messageContent = db.prepare('SELECT content FROM messages WHERE session_id = ? AND ordinal = ?');
+  const update = db.prepare('UPDATE session_items SET payload_json = ? WHERE id = ?');
+  const remove = db.prepare('DELETE FROM session_items WHERE id = ?');
+  const policy = {
+    capturePrompts: config.live.capture.prompts,
+    captureReasoning: config.live.capture.reasoning,
+    captureToolArguments: config.live.capture.toolArguments,
+    diffPayloadMaxBytes: config.live.diffPayloadMaxBytes,
+  };
+
+  // The adapter wrote one reasoning item per thinking block, in block order, so
+  // a turn's items pair with its message's thinking blocks when the counts agree.
+  const thinkingTexts = (sessionId: string, sourceTurnId: string | null): string[] | null => {
+    const match = /^claude-message:(\d+)$/.exec(sourceTurnId ?? '');
+    if (!match) return null;
+    const row = messageContent.get(sessionId, Number(match[1])) as { content: string } | undefined;
+    if (!row) return null;
+    try {
+      const blocks = JSON.parse(row.content) as Array<{ type?: string; text?: string; thinking?: string }>;
+      if (!Array.isArray(blocks)) return null;
+      return blocks.filter(block => block?.type === 'thinking').map(block => block.text ?? block.thinking ?? '');
+    } catch {
+      return null;
+    }
+  };
+
+  let index = 0;
+  while (index < emptyItems.length) {
+    const turnId = emptyItems[index].turn_id;
+    let end = index + 1;
+    while (end < emptyItems.length && turnId !== null && emptyItems[end].turn_id === turnId) end += 1;
+    const group = emptyItems.slice(index, end);
+    index = end;
+
+    const texts = turnId === null ? null : thinkingTexts(group[0].session_id, group[0].source_turn_id);
+    const total = turnId === null ? -1 : (turnReasoningCount.get(turnId) as { c: number }).c;
+    const paired = texts !== null && texts.length === group.length && total === group.length;
+    group.forEach((item, position) => {
+      const restored = paired
+        ? normalizeClaudeBlock('assistant', { type: 'thinking', text: texts[position] })
+        : null;
+      if (restored) {
+        update.run(JSON.stringify(applyLivePrivacyPolicy(restored, policy).payload), item.id);
+      } else {
+        remove.run(item.id);
+      }
+    });
+  }
 }
 
 /**

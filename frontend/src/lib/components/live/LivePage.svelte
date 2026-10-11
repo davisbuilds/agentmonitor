@@ -33,6 +33,7 @@
     toggleLiveItemKind,
   } from '../../stores/live.svelte';
   import { connectLiveSSE, disconnectLiveSSE } from '../../stores/live-sse';
+  import { pairedToolResult } from '../../live-stream-rows';
   import SessionTree from './SessionTree.svelte';
   import ItemStream from './ItemStream.svelte';
   import InspectorPanel from './InspectorPanel.svelte';
@@ -73,6 +74,7 @@
   const selectedKinds = $derived(getSelectedLiveKinds());
   const selectedItemId = $derived(getSelectedLiveItemId());
   const selectedItem = $derived(getSelectedLiveItem());
+  const selectedResult = $derived(pairedToolResult(items, selectedItem));
   const connectionStatus = $derived(getLiveConnectionStatus());
   const liveSettings = $derived(getLiveSettings());
 
@@ -277,7 +279,7 @@
       </section>
 
       <section class="min-h-[20rem] rounded-lg border border-line bg-surface xl:min-h-0 xl:w-[22rem] xl:shrink-0 xl:overflow-hidden">
-        <InspectorPanel session={selectedSession} {turns} item={selectedItem} />
+        <InspectorPanel session={selectedSession} {turns} item={selectedItem} result={selectedResult} />
       </section>
     </div>
   </div>
