@@ -50,6 +50,16 @@ function readTracked(): Array<{ file: string; content: string }> {
     });
 }
 
+// Any `-Users-` not glued to an identifier: after a quote, `/`, `=`, space, or line start.
+function encodedHomePaths(content: string): string[] {
+  const found: string[] = [];
+  for (const match of content.matchAll(/(?<![A-Za-z0-9_])-(?:Users|home)-([A-Za-z0-9._]+)/g)) {
+    if (ALLOWED_HOME_SEGMENTS.has(match[1].toLowerCase())) continue;
+    found.push(match[0]);
+  }
+  return found;
+}
+
 describe('publication hygiene (public repository)', () => {
   test('no tracked file hardcodes a real home directory', () => {
     const offenders: string[] = [];
@@ -70,6 +80,33 @@ describe('publication hygiene (public repository)', () => {
       [],
       `Replace real home paths with a placeholder (e.g. /Users/example/...):\n${offenders.join('\n')}`,
     );
+  });
+
+  test('no tracked file hardcodes a real home directory in encoded form', () => {
+    // Claude names project folders after the path with `/` turned into `-`, so
+    // `/Users/<name>/Dev` becomes `-Users-<name>-Dev` and slips past the check
+    // above. Usernames can contain `-`, so only the first segment is knowable;
+    // fixtures must start the account part with a placeholder.
+    const offenders = readTracked().flatMap(({ file, content }) =>
+      encodedHomePaths(content).map(found => `${file}: ${found}`));
+    assert.deepEqual(
+      offenders,
+      [],
+      `Replace encoded home paths with a placeholder (e.g. -Users-example-Dev):\n${offenders.join('\n')}`,
+    );
+  });
+
+  test('the encoded-path detector sees every delimiter and ignores placeholders', () => {
+    // A detector that misses a form reports the same clean result as a clean tree.
+    const positives = [
+      "path.join(dir, 'projects', '-Users-realname-Dev')",
+      'CLAUDE_PROJECT=-Users-realname-Dev',
+      'key: -home-realname-work',
+      '/projects/-Users-realname-Dev/session.jsonl',
+    ];
+    for (const line of positives) assert.equal(encodedHomePaths(line).length, 1, line);
+    const negatives = ["'-Users-example-Dev'", '/projects/-Users-test-user-Dev', 'foo-Users-realname'];
+    for (const line of negatives) assert.deepEqual(encodedHomePaths(line), [], line);
   });
 
   test('no tracked file carries an unexpected email address', () => {
