@@ -72,6 +72,25 @@ describe('publication hygiene (public repository)', () => {
     );
   });
 
+  test('no tracked file hardcodes a real home directory in encoded form', () => {
+    // Claude names project folders after the path with `/` turned into `-`, so
+    // `/Users/<name>/Dev` becomes `-Users-<name>-Dev` and slips past the check
+    // above. Usernames can contain `-`, so only the first segment is knowable;
+    // fixtures must start the account part with a placeholder.
+    const offenders: string[] = [];
+    for (const { file, content } of readTracked()) {
+      for (const match of content.matchAll(/(?:^|[\s'"`/(])-(?:Users|home)-([A-Za-z0-9._]+)/gm)) {
+        if (ALLOWED_HOME_SEGMENTS.has(match[1].toLowerCase())) continue;
+        offenders.push(`${file}: ${match[0].trim()}`);
+      }
+    }
+    assert.deepEqual(
+      offenders,
+      [],
+      `Replace encoded home paths with a placeholder (e.g. -Users-example-Dev):\n${offenders.join('\n')}`,
+    );
+  });
+
   test('no tracked file carries an unexpected email address', () => {
     const offenders: string[] = [];
     for (const { file, content } of readTracked()) {

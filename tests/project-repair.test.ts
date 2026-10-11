@@ -32,7 +32,7 @@ before(() => {
   assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
 
   // Claude transcript: the encoded folder name is the one the old decoder misread.
-  const claudeFile = path.join(claudeDir, 'projects', '-Users-dg-mac-mini-Dev', `${CLAUDE_ID}.jsonl`);
+  const claudeFile = path.join(claudeDir, 'projects', '-Users-test-user-Dev', `${CLAUDE_ID}.jsonl`);
   fs.mkdirSync(path.dirname(claudeFile), { recursive: true });
   fs.writeFileSync(claudeFile, [
     { type: 'user', sessionId: CLAUDE_ID, cwd: goneWorktree, timestamp: '2026-10-05T10:00:00Z', message: { role: 'user', content: 'hi' } },
