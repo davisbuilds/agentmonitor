@@ -13,6 +13,7 @@ import {
   type InsightListFilters,
 } from '../insights-state';
 import { analyticsFilters } from './analytics-filters.svelte';
+import { anyInsightProviderConfigured, type InsightsAvailability } from '../analytics-views';
 
 class InsightsStore {
   private listVersion = 0;
@@ -46,6 +47,9 @@ class InsightsStore {
       gemini: { configured: false, default_model: 'gemini-2.5-flash' },
     },
   });
+
+  /** Whether any provider has a key; null until the status first loads. */
+  availability = $state<InsightsAvailability>(null);
 
   loading = $state(false);
   generating = $state(false);
@@ -93,6 +97,22 @@ class InsightsStore {
     await this.load();
   }
 
+  /**
+   * Learn whether any provider is configured, without loading the Insights
+   * page. The status rides the list response, so one row is requested.
+   */
+  async loadAvailability(): Promise<void> {
+    try {
+      const result = await fetchInsights({ limit: 1 });
+      this.availability = anyInsightProviderConfigured(result.generation);
+    } catch (err) {
+      // Without the status Insights can't be offered honestly; fall back
+      // rather than leave a deep link waiting on it.
+      console.error('Failed to load insight provider status:', err);
+      this.availability = false;
+    }
+  }
+
   dispose(): void {
     if (this.unsubscribe) {
       this.unsubscribe();
@@ -110,6 +130,7 @@ class InsightsStore {
       if (version !== this.listVersion) return;
       this.items = result.data;
       this.generation = result.generation;
+      this.availability = anyInsightProviderConfigured(result.generation);
       if (!analyticsFilters.insightModel) {
         const defaultProvider = result.generation.default_provider;
         analyticsFilters.setInsightProvider(defaultProvider);

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { analyticsFilters } from '../../stores/analytics-filters.svelte';
   import { analytics } from '../../stores/analytics.svelte';
   import { usage } from '../../stores/usage.svelte';
@@ -6,6 +7,7 @@
   import { traceQuality } from '../../stores/trace-quality.svelte';
   import { Button, Select, SubTabs } from '../ui';
   import type { AnalyticsView } from '../../route-state';
+  import { resolveAnalyticsView, visibleAnalyticsViews } from '../../analytics-views';
   import AnalyticsPage from './AnalyticsPage.svelte';
   import SkillsPage from './SkillsPage.svelte';
   import UsagePage from '../usage/UsagePage.svelte';
@@ -14,13 +16,31 @@
 
   const f = analyticsFilters;
 
-  const views: Array<{ id: AnalyticsView; label: string }> = [
-    { id: 'overview', label: 'Overview' },
-    { id: 'usage', label: 'Usage' },
-    { id: 'skills', label: 'Skills' },
-    { id: 'insights', label: 'Insights' },
-    { id: 'quality', label: 'Quality' },
-  ];
+  const viewLabels: Record<AnalyticsView, string> = {
+    overview: 'Overview',
+    usage: 'Usage',
+    skills: 'Skills',
+    insights: 'Insights',
+    quality: 'Quality',
+  };
+
+  // Insights does nothing without an LLM API key, so it is offered only once a
+  // provider is known to be configured — and not while that is still loading.
+  const views = $derived(
+    visibleAnalyticsViews(insights.availability).map(id => ({ id, label: viewLabels[id] })),
+  );
+  // The view actually rendered: an Insights deep link with no key shows
+  // Overview, and shows nothing while the key status is unknown.
+  const shown = $derived(resolveAnalyticsView(f.view, insights.availability));
+
+  onMount(() => {
+    void insights.loadAvailability();
+  });
+
+  // Point the hash (and the export/refresh actions) at the view really shown.
+  $effect(() => {
+    if (shown && shown !== f.view) f.setView(shown);
+  });
 
   const quickRanges = [
     { days: 7, label: '7D' },
@@ -100,15 +120,17 @@
     </div>
   </div>
 
-  {#if f.view === 'overview'}
+  {#if shown === 'overview'}
     <AnalyticsPage />
-  {:else if f.view === 'usage'}
+  {:else if shown === 'usage'}
     <UsagePage />
-  {:else if f.view === 'skills'}
+  {:else if shown === 'skills'}
     <SkillsPage />
-  {:else if f.view === 'quality'}
+  {:else if shown === 'quality'}
     <TraceQualityPage />
-  {:else}
+  {:else if shown === 'insights'}
     <InsightsPage />
+  {:else}
+    <main class="flex-1"></main>
   {/if}
 </div>

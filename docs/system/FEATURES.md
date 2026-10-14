@@ -9,7 +9,8 @@ the v2 route/query source and [API index](../api/README.md).
 - The Svelte SPA at `/app/` is the sole human-facing surface; `/` redirects there.
 - Monitor, Live, Sessions, Search, and Analytics are the primary workflows.
 - Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
-  one shared date/project/agent filter context.
+  one shared date/project/agent filter context. Insights appears only once an LLM
+  provider API key is configured.
 - Deep links preserve the active view and selected session, message, or trace where
   applicable.
 
@@ -176,6 +177,11 @@ agent scope plus the analytics/usage coverage used to produce them. OpenAI,
 Anthropic, and Gemini providers are optional; local monitoring works without any
 provider API key. Generated text remains visibly attached to its scope and evidence
 limits.
+
+The Insights sub-view is offered only once at least one provider has an API key.
+A link to `#analytics?view=insights` on a server with no key opens Overview
+instead. Saved insights stay in the database and reappear once a key is
+configured.
 
 ## Trace Quality
 

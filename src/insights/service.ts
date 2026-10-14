@@ -241,6 +241,15 @@ function getProviderConfig(provider: InsightProvider): {
   };
 }
 
+/**
+ * Whether generation could find an API key for this provider. The list
+ * response reports this so the app can hide Insights until a key exists; it
+ * shares the resolver with generation so the two can never disagree.
+ */
+export function isInsightProviderConfigured(provider: InsightProvider): boolean {
+  return getProviderConfig(provider).apiKey != null;
+}
+
 function resolveRequestedProvider(params: GenerateInsightParams): {
   provider: InsightProvider;
   apiKey: string | null;

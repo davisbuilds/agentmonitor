@@ -54,9 +54,9 @@ recorded as the absolute paths they meant where the install ran. A setting whose
 name marks a secret (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `DSN`)
 is left out and named as skipped, and generic provider keys such as
 `OPENAI_API_KEY` are never read, so insights that need a provider key are
-unavailable under the service. After changing a setting, rerun the install: it
-stops the service's own server, waits for that process to exit, and starts the
-new one. It refuses while a server it does not run owns the database;
+unavailable under the service and the app hides its Insights view. After
+changing a setting, rerun the install: it stops the service's own server, waits
+for that process to exit, and starts the new one. It refuses while a server it does not run owns the database;
 stop that one first.
 
 The service serves the direct port only. `https://agentmonitor.localhost` comes
