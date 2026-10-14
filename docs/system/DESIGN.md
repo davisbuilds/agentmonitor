@@ -96,9 +96,12 @@ Animate `transform`/`opacity` only. Default duration 140ms, `ease-out`
 - **Tables breathe.** Row padding ~`py-2.5`, hairline row separators, sticky headers,
   right-aligned `font-mono tabular` numerics.
 - **Demote loud chips.** Status/capability indicators are a tinted dot + label, not a colored
-  uppercase pill on every row.
+  uppercase pill on every row. Say nothing about the normal case: a list row omits a session's
+  coverage when everything was captured (`SessionCoverage` variant `row`), and a header opens the
+  breakdown from one dot + label (variant `detail`). Live status uses `StatusDot`.
 - **Constrain prose** to `max-w-[65ch]`; collapse stacked heading+subtitle+banner+pill into one
-  heading plus a single `ⓘ` affordance.
+  heading plus a single `ⓘ` affordance (`InfoTip`, or `Panel`'s `info`). Write its text in plain
+  words: no table names, integration modes or capability-contract vocabulary.
 
 ## Accessibility floor
 

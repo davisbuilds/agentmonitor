@@ -64,6 +64,19 @@ so later readers know what still needs checking.
 - **Revisit when**: Codex writes thread names or a job marker into rollouts or
   telemetry, or Codex app jobs reappear in the Sessions list.
 
+### Codex developer messages read as the assistant in Live
+
+- **What**: Codex records injected instructions (`<permissions instructions>`,
+  `<model_switch>`, skills and collaboration-mode blocks) as `developer`-role
+  messages. The live sync maps every non-user role to `assistant`, so Live
+  shows them as "Assistant" rows, often several before the first real reply.
+- **Why or evidence**: observed 2026-10-14 on an active Codex session in Live;
+  `syncCodexLiveSession` in `src/live/codex-adapter.ts` passes
+  `message.role === 'user' ? 'user' : 'assistant'`.
+- **Next**: give developer messages their own kind, or keep their turn and drop
+  the item as v18 did for empty reasoning. The resumable sync relies on one
+  turn per stored message, so keep the turn either way.
+
 ### Explicit provenance for unresolved historical timestamps
 
 - **What**: the conservative timestamp repair leaves fields without matching
