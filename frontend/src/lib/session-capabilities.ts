@@ -1,28 +1,29 @@
 import type { SessionCapabilities, SessionCapabilityLevel } from './api/client';
 
 export type SessionCapabilityKey = keyof SessionCapabilities;
-export type CapabilitySummaryTone = 'full' | 'summary' | 'mixed' | 'unknown';
+export type CoverageTone = 'ok' | 'warn' | 'accent' | 'neutral';
 
 export interface SessionCapabilityEntry {
   key: SessionCapabilityKey;
   label: string;
-  shortLabel: string;
   level: SessionCapabilityLevel;
 }
 
-export interface SessionCapabilitySummary {
+/** How much of a session amon can show, in a word or two. */
+export interface SessionCoverage {
   label: string;
-  description: string;
-  tone: CapabilitySummaryTone;
+  tone: CoverageTone;
+  /** Everything is available at full detail; lists say nothing about it. */
+  full: boolean;
 }
 
 const CAPABILITY_ORDER: SessionCapabilityKey[] = ['history', 'search', 'tool_analytics', 'live_items'];
 
-const CAPABILITY_LABELS: Record<SessionCapabilityKey, { label: string; shortLabel: string }> = {
-  history: { label: 'History', shortLabel: 'Hist' },
-  search: { label: 'Search', shortLabel: 'Search' },
-  tool_analytics: { label: 'Tool Analytics', shortLabel: 'Tools' },
-  live_items: { label: 'Live Items', shortLabel: 'Live' },
+const CAPABILITY_LABELS: Record<SessionCapabilityKey, string> = {
+  history: 'Transcript',
+  search: 'Search',
+  tool_analytics: 'Tool analytics',
+  live_items: 'Live stream',
 };
 
 const LEVEL_RANK: Record<SessionCapabilityLevel, number> = {
@@ -31,26 +32,17 @@ const LEVEL_RANK: Record<SessionCapabilityLevel, number> = {
   full: 2,
 };
 
-export function capabilityLevelText(level: SessionCapabilityLevel): string {
+export function capabilityLevelLabel(level: SessionCapabilityLevel): string {
   switch (level) {
-    case 'full':
-      return 'full';
-    case 'summary':
-      return 'summary';
-    default:
-      return 'off';
+    case 'full': return 'Full';
+    case 'summary': return 'Summary';
+    default: return 'Not available';
   }
 }
 
 export function getCapabilityEntries(capabilities: SessionCapabilities | null): SessionCapabilityEntry[] {
   if (!capabilities) return [];
-
-  return CAPABILITY_ORDER.map((key) => ({
-    key,
-    label: CAPABILITY_LABELS[key].label,
-    shortLabel: CAPABILITY_LABELS[key].shortLabel,
-    level: capabilities[key],
-  }));
+  return CAPABILITY_ORDER.map((key) => ({ key, label: CAPABILITY_LABELS[key], level: capabilities[key] }));
 }
 
 export function hasSessionCapability(
@@ -62,47 +54,33 @@ export function hasSessionCapability(
   return LEVEL_RANK[capabilities[key]] >= LEVEL_RANK[minimum];
 }
 
-export function summarizeCapabilities(capabilities: SessionCapabilities | null): SessionCapabilitySummary {
-  if (!capabilities) {
-    return {
-      label: 'capabilities unknown',
-      description: 'This session did not report a projection capability contract.',
-      tone: 'unknown',
-    };
-  }
-
+export function describeCoverage(capabilities: SessionCapabilities | null): SessionCoverage {
+  if (!capabilities) return { label: 'Detail unknown', tone: 'neutral', full: false };
   const levels = CAPABILITY_ORDER.map((key) => capabilities[key]);
-  if (levels.every((level) => level === 'full')) {
-    return {
-      label: 'full surface',
-      description: 'History, search, tool analytics, and live items are all available.',
-      tone: 'full',
-    };
+  if (levels.every((level) => level === 'full')) return { label: 'Full detail', tone: 'ok', full: true };
+  const available = CAPABILITY_ORDER.filter((key) => capabilities[key] !== 'none');
+  if (available.length === 0) return { label: 'No detail', tone: 'neutral', full: false };
+  if (available.length === 1 && available[0] === 'live_items') {
+    return { label: 'Live activity only', tone: 'warn', full: false };
   }
-
-  if (
-    capabilities.live_items !== 'none'
-    && capabilities.history === 'none'
-    && capabilities.search === 'none'
-    && capabilities.tool_analytics === 'none'
-  ) {
-    return {
-      label: capabilities.live_items === 'full' ? 'live surface only' : 'live summary only',
-      description: 'Live items are available, but transcript history, search, and tool analytics are not.',
-      tone: 'summary',
-    };
+  if (available.length > 0 && available.every((key) => capabilities[key] === 'summary')) {
+    return { label: 'Summary detail', tone: 'warn', full: false };
   }
+  return { label: 'Partial detail', tone: 'accent', full: false };
+}
 
-  const available = CAPABILITY_ORDER
-    .filter((key) => capabilities[key] !== 'none')
-    .map((key) => CAPABILITY_LABELS[key].label.toLowerCase());
-  const missing = CAPABILITY_ORDER
-    .filter((key) => capabilities[key] === 'none')
-    .map((key) => CAPABILITY_LABELS[key].label.toLowerCase());
+const SOURCE_LABELS: Record<string, string> = {
+  'claude-jsonl': 'Claude Code transcript',
+  'codex-jsonl': 'Codex rollout file',
+  'codex-otel': 'Codex telemetry',
+  'codex-import': 'Codex history import',
+  'codex-summary': 'Codex summary',
+  'antigravity-sqlite': 'Antigravity',
+  'antigravity-cli': 'Antigravity',
+};
 
-  return {
-    label: 'partial surface',
-    description: `Available: ${available.join(', ') || 'none'}. Missing: ${missing.join(', ') || 'none'}.`,
-    tone: 'mixed',
-  };
+/** Where a session's data came from, in words rather than its integration mode. */
+export function sessionSourceLabel(integrationMode: string | null | undefined): string {
+  if (!integrationMode) return 'Unknown source';
+  return SOURCE_LABELS[integrationMode] ?? integrationMode;
 }

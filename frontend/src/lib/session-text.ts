@@ -94,3 +94,10 @@ export function sessionTitle(session: SessionTitleSource): string {
   // agentDisplayName's fallback for an agent it does not know.
   return agent && agent !== 'Assistant' ? `Untitled ${agent} session` : 'Untitled session';
 }
+
+/** A live turn's title for display: a local command reads as its name. */
+export function turnTitle(title: string | null | undefined): string | null {
+  const parsed = parseSessionText(title);
+  if (parsed?.kind === 'command') return parsed.name || null;
+  return getSessionPreviewText(title);
+}

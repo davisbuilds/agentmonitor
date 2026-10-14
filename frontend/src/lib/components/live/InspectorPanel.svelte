@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
   import { timeAgo } from '../../format';
-  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import SessionCoverage from '../shared/SessionCoverage.svelte';
+  import { turnTitle } from '../../session-text';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
   import ContextPill from '../monitor/ContextPill.svelte';
   import { isNotableStatus } from '../../status';
@@ -15,6 +16,10 @@
   }
 
   let { session, turns, item, result = null }: Props = $props();
+
+  // Every message is a turn, so the full list repeats the stream; only turns
+  // that are still running or went wrong are worth listing here.
+  const attentionTurns = $derived(turns.filter(turn => isNotableStatus(turn.status)));
 
   const parsedPayload = $derived.by(() => {
     if (!item) return null;
@@ -72,13 +77,6 @@
 <aside class="flex flex-col xl:h-full xl:overflow-hidden">
   <div class="shrink-0 border-b border-line px-4 py-3">
     <h3 class="text-h3">Inspector</h3>
-    <p class="mt-0.5 text-meta text-text-muted">
-      {#if item}
-        Selected {item.kind.replace('_', ' ')} item
-      {:else}
-        Session metadata and turn state
-      {/if}
-    </p>
   </div>
 
   <div class="space-y-5 px-4 py-4 xl:flex-1 xl:overflow-y-auto">
@@ -99,12 +97,12 @@
             <span>{session.agent}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
-            <span class="text-text-faint">Mode</span>
-            <span>{session.integration_mode || 'unknown'}</span>
-          </div>
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-text-faint">Fidelity</span>
-            <span>{session.fidelity || 'n/a'}</span>
+            <span class="text-text-faint">Detail</span>
+            <SessionCoverage
+              capabilities={session.capabilities}
+              integrationMode={session.integration_mode}
+              fidelity={session.fidelity}
+            />
           </div>
           {#if session.context_pct != null}
             <div class="pt-1">
@@ -116,10 +114,6 @@
               />
             </div>
           {/if}
-          <div class="pt-1">
-            <div class="mb-2 text-meta uppercase tracking-wide text-text-faint">Capabilities</div>
-            <ProjectionCapabilities capabilities={session.capabilities} />
-          </div>
           {#if session.last_item_at}
             <div class="flex items-center justify-between gap-3">
               <span class="text-text-faint">Last item</span>
@@ -139,20 +133,17 @@
     <section>
       <h4 class="text-meta font-semibold uppercase tracking-wide text-text-faint">Turns</h4>
       {#if turns.length === 0}
-        <div class="mt-2 text-meta text-text-muted">No normalized turns yet.</div>
+        <div class="mt-2 text-meta text-text-muted">No turns yet.</div>
+      {:else if attentionTurns.length === 0}
+        <div class="mt-2 text-meta text-text-muted">
+          {turns.length} turn{turns.length === 1 ? '' : 's'}, none running or failed.
+        </div>
       {:else}
         <div class="mt-2 space-y-2">
-          {#each turns as turn (turn.id)}
-            <div class="rounded-sm border border-line bg-surface-2 px-3 py-2">
-              <div class="flex items-start justify-between gap-3">
-                <div class="min-w-0">
-                  <div class="truncate text-body text-text">{turn.title || turn.source_turn_id || `Turn ${turn.id}`}</div>
-                  <div class="mt-1 text-meta text-text-faint">{turn.agent_type}</div>
-                </div>
-                {#if isNotableStatus(turn.status)}
-                  <span class={`text-meta ${turnStatusClasses(turn.status)}`}>{turn.status}</span>
-                {/if}
-              </div>
+          {#each attentionTurns as turn (turn.id)}
+            <div class="flex items-start justify-between gap-3 rounded-sm border border-line bg-surface-2 px-3 py-2">
+              <div class="min-w-0 truncate text-body text-text">{turnTitle(turn.title) ?? `Turn ${turn.id}`}</div>
+              <span class={`shrink-0 text-meta ${turnStatusClasses(turn.status)}`}>{turn.status}</span>
             </div>
           {/each}
         </div>

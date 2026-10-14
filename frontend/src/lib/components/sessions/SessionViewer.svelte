@@ -14,8 +14,8 @@
   import { getMessagePreviewText, sessionTitle } from '../../session-text';
   import { classifyMessageAuthor, type MessageAuthor } from '../../session-roles';
   import { hasVisibleContent } from '../../transcript-blocks';
-  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
-  import { hasSessionCapability } from '../../session-capabilities';
+  import SessionCoverage from '../shared/SessionCoverage.svelte';
+  import { hasSessionCapability, sessionSourceLabel } from '../../session-capabilities';
   import { pins } from '../../stores/pins.svelte';
   import ActivityMinimap from './ActivityMinimap.svelte';
   import MessageBlock from './MessageBlock.svelte';
@@ -362,12 +362,11 @@
         {#if session.project}
           <Badge tone="neutral">{session.project}</Badge>
         {/if}
-        {#if session.integration_mode}
-          <Badge tone="neutral" class="uppercase tracking-wide">{session.integration_mode}</Badge>
-        {/if}
-        {#if session.fidelity}
-          <Badge tone="neutral" class="uppercase tracking-wide">{session.fidelity} fidelity</Badge>
-        {/if}
+        <SessionCoverage
+          capabilities={session.capabilities}
+          integrationMode={session.integration_mode}
+          fidelity={session.fidelity}
+        />
         <span class="tabular font-mono">{session.message_count} messages</span>
         {#if session.started_at}
           <span class="tabular font-mono">{timeAgo(session.started_at)}</span>
@@ -378,8 +377,6 @@
 
   {#if session}
     <div class="flex flex-wrap items-center gap-2 border-b border-line px-4 sm:px-6 py-2">
-      <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
-      <ProjectionCapabilities capabilities={session.capabilities} />
       <div class="ml-auto flex items-center gap-2">
         {#if authorFilter !== 'all'}
           <span class="tabular font-mono text-meta text-text-faint">
@@ -435,8 +432,8 @@
           {:else if messages.length === 0}
             {#if session && !hasSessionCapability(session.capabilities, 'history')}
               <EmptyState
-                title="Transcript history unavailable."
-                description="{session.integration_mode || session.agent} currently projects this session without transcript history. Search and tool analytics are limited by this session's reported capability contract."
+                title="No transcript for this session."
+                description="Its source ({sessionSourceLabel(session.integration_mode)}) records activity but not the conversation, so there is nothing to read or search here."
               />
             {:else}
               <EmptyState title="No messages in this session." />

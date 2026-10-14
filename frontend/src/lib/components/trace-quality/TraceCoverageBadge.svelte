@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { Badge } from '../ui';
   import type { TraceQualityTrace } from '../../api/client';
 
   interface Props {
     trace: TraceQualityTrace;
-    /** Compact rows (list view) show only the headline transcript + score state. */
+    /** List rows show only a score; the detail view lists what was captured. */
     compact?: boolean;
   }
 
@@ -15,30 +14,41 @@
   }
 
   const hasFullTranscript = $derived(flag('has_full_transcript'));
-  const hasTools = $derived(flag('has_tool_details'));
-  const hasUsage = $derived(flag('has_token_usage'));
-  const hasCost = $derived(flag('has_cost'));
+  const captured = $derived([
+    { label: 'Tool calls', on: flag('has_tool_details') },
+    { label: 'Token usage', on: flag('has_token_usage') },
+    { label: 'Cost', on: flag('has_cost') },
+  ]);
   const scored = $derived(trace.score_count > 0);
 </script>
 
-<div class="flex flex-wrap items-center gap-1">
-  {#if hasFullTranscript}
-    <Badge tone="ok" title="Full transcript was available to the projection">Full transcript</Badge>
-  {:else}
-    <Badge tone="warn" title="Projected from partial / summary-only source data">Summary only</Badge>
-  {/if}
-
-  {#if !compact}
-    {#if hasTools}<Badge tone="accent" title="Tool call details captured">Tools</Badge>{/if}
-    {#if hasUsage}<Badge tone="accent" title="Token usage captured">Usage</Badge>{/if}
-    {#if hasCost}<Badge tone="accent" title="Cost resolved">Cost</Badge>{/if}
-  {/if}
-
+<!-- The transcript flag is set only where the projection could see the
+     transcript; most summaries leave it unset even when one exists, so its
+     absence is not shown as "summary only". -->
+{#if compact}
   {#if scored}
-    <Badge tone="ok" title={`${trace.score_count} local score${trace.score_count === 1 ? '' : 's'}`}>
-      Scored
-    </Badge>
-  {:else}
-    <Badge tone="neutral" title="No local review scores yet">Unscored</Badge>
+    <div class="mt-1.5 inline-flex items-center gap-1.5 text-meta text-text-faint">
+      <span class="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true"></span>Scored
+    </div>
   {/if}
-</div>
+{:else}
+  <div class="flex flex-wrap items-center gap-3 text-meta text-text-muted">
+    {#if hasFullTranscript}
+      <span class="inline-flex items-center gap-1.5">
+        <span class="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true"></span>Full transcript
+      </span>
+    {/if}
+    {#each captured as item (item.label)}
+      <span class="inline-flex items-center gap-1.5 {item.on ? '' : 'text-text-faint'}">
+        <span class="h-1.5 w-1.5 rounded-full {item.on ? 'bg-ok' : 'bg-line-strong'}" aria-hidden="true"></span>
+        {item.label}{item.on ? '' : ' missing'}
+      </span>
+    {/each}
+    {#if scored}
+      <span class="inline-flex items-center gap-1.5">
+        <span class="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true"></span>
+        {trace.score_count} score{trace.score_count === 1 ? '' : 's'}
+      </span>
+    {/if}
+  </div>
+{/if}

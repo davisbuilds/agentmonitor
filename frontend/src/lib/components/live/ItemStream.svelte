@@ -1,9 +1,10 @@
 <script lang="ts">
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
   import { timeAgo } from '../../format';
-  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import SessionCoverage from '../shared/SessionCoverage.svelte';
+  import { sessionTitle } from '../../session-text';
   import { hasSessionCapability } from '../../session-capabilities';
-  import { Badge, Button } from '../ui';
+  import { Button, StatusDot } from '../ui';
   import {
     buildLiveStreamRows,
     rowBody,
@@ -12,7 +13,7 @@
     toolArgument,
     type LiveStreamRow,
   } from '../../live-stream-rows';
-  import { isNotableStatus } from '../../status';
+  import { isNotableStatus, liveDotStatus } from '../../status';
 
   interface Props {
     session: LiveSession | null;
@@ -75,18 +76,6 @@
     }
   }
 
-  type BadgeTone = 'neutral' | 'accent' | 'ok' | 'warn';
-  function statusTone(status: string | null): BadgeTone {
-    switch (status) {
-      case 'live':
-      case 'active':
-        return 'ok';
-      case 'idle':
-        return 'warn';
-      default:
-        return 'neutral';
-    }
-  }
 
 </script>
 
@@ -95,17 +84,21 @@
     {#if session}
       <div class="flex items-start justify-between gap-3">
         <div class="min-w-0">
-          <h2 class="truncate text-h3">{session.project || session.id}</h2>
+          <h2 class="truncate text-h3">{sessionTitle(session)}</h2>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-meta text-text-faint">
-            <span>{session.integration_mode || 'unknown source'} · {session.fidelity || 'n/a'} fidelity</span>
-            <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
-            <Badge tone={statusTone(session.live_status)}>{session.live_status || 'unknown'}</Badge>
+            {#if session.project}<span>{session.project}</span>{/if}
+            <StatusDot status={liveDotStatus(session.live_status)} label={session.live_status || 'unknown'} />
+            <SessionCoverage
+              capabilities={session.capabilities}
+              integrationMode={session.integration_mode}
+              fidelity={session.fidelity}
+            />
             <span class="tabular font-mono">{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
             <span class="tabular font-mono">{items.length} item{items.length === 1 ? '' : 's'}</span>
           </div>
           {#if !hasSessionCapability(session.capabilities, 'history')}
             <p class="mt-2 text-meta text-warn">
-              Transcript history is not available for this source yet. Use the live stream as the primary view.
+              No transcript was recorded for this session; the live stream below is all there is.
             </p>
           {/if}
         </div>

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { TraceQualityObservationTreeNode } from '../../api/client';
-import { foldToolResults } from './trace-tree-rows';
+import { foldToolResults, toolInputSummary } from './trace-tree-rows';
 
 let nextId = 1;
 function node(name: string, sourceItemId: string | null, extra: Partial<TraceQualityObservationTreeNode> = {}): TraceQualityObservationTreeNode {
@@ -100,5 +100,18 @@ describe('foldToolResults', () => {
 
   it('returns no rows for no nodes', () => {
     expect(foldToolResults([])).toEqual([]);
+  });
+});
+
+describe('toolInputSummary', () => {
+  it("shows a tool call's arguments", () => {
+    expect(toolInputSummary({ observation_type: 'tool', input_summary: 'command: git status --short' })).toBe('command: git status --short');
+  });
+
+  it('says nothing when the summary only names the tool, or for other rows', () => {
+    expect(toolInputSummary({ observation_type: 'tool', input_summary: 'tool_name: exec_command' })).toBeNull();
+    expect(toolInputSummary({ observation_type: 'tool', input_summary: 'name: Bash' })).toBeNull();
+    expect(toolInputSummary({ observation_type: 'tool', input_summary: null })).toBeNull();
+    expect(toolInputSummary({ observation_type: 'generation', input_summary: 'command: ls' })).toBeNull();
   });
 });

@@ -2,7 +2,7 @@
   import { Badge } from '../ui';
   import type { TraceQualityObservationTreeNode } from '../../api/client';
   import { isNotableStatus } from '../../status';
-  import { foldToolResults, type TraceTreeRow } from './trace-tree-rows';
+  import { foldToolResults, toolInputSummary, type TraceTreeRow } from './trace-tree-rows';
 
   interface Props {
     nodes: TraceQualityObservationTreeNode[];
@@ -84,7 +84,12 @@
       {/if}
 
       <span class="shrink-0 text-text-faint" title={obs.observation_type}>{TYPE_GLYPH[obs.observation_type] ?? '•'}</span>
-      <span class="min-w-0 flex-1 truncate text-meta text-text">{obs.name}</span>
+      <span class="min-w-0 flex-1 truncate text-meta text-text">
+        {obs.name}
+        {#if toolInputSummary(obs)}
+          <span class="ml-1.5 font-mono text-text-faint" title={toolInputSummary(obs)}>{toolInputSummary(obs)}</span>
+        {/if}
+      </span>
 
       <span class="hidden shrink-0 items-center gap-2 font-mono text-meta text-text-faint sm:flex">
         {#if obs.model}<span class="truncate max-w-[10rem]" title={obs.model}>{obs.model}</span>{/if}

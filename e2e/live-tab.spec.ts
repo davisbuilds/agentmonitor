@@ -170,9 +170,11 @@ test('live tab renders seeded sessions and reacts to streamed item deltas', asyn
   await page.goto(`${baseUrl}/app/#live`);
 
   await expect(page.getByRole('heading', { name: 'Live' })).toBeVisible();
-  await expect(page.getByText('Prompts on')).toBeVisible();
-  await expect(page.getByText('Codex: otel-only')).toBeVisible();
-  await expect(page.getByText('full surface').first()).toBeVisible();
+  await page.getByRole('button', { name: /^Capture/ }).click();
+  const capture = page.getByRole('dialog', { name: 'Capture settings' });
+  await expect(capture.getByText('Prompts')).toBeVisible();
+  await expect(capture.getByText('otel-only')).toBeVisible();
+  await page.keyboard.press('Escape');
 
   const sessionButton = page.locator('button').filter({ hasText: 'Inspect the repo' }).first();
   await expect(sessionButton).toBeVisible();
@@ -232,7 +234,7 @@ test('a tool call and its result read as one row without routine success badges'
   await expect(row).toContainText('nothing to commit, working tree clean');
   // The result has no row of its own, and success is left unsaid.
   await expect(page.locator('button', { hasText: 'nothing to commit, working tree clean' })).toHaveCount(1);
-  const stream = page.locator('section', { has: page.getByRole('heading', { name: 'agentmonitor' }) });
+  const stream = page.locator('section', { has: page.getByRole('heading', { name: 'Inspect the repo' }) });
   await expect(stream.getByText('success', { exact: true })).toHaveCount(0);
 
   await row.click();
@@ -244,16 +246,18 @@ test('summary-only Codex sessions explain missing transcript history', async ({ 
 
   const sessionButton = page.locator('button').filter({ hasText: 'Review OTEL stream' }).first();
   await expect(sessionButton).toBeVisible();
-  await expect(sessionButton).toContainText('live summary only');
+  await expect(sessionButton).toContainText('Live activity only');
   await sessionButton.click();
 
   await expect(page.locator('p', { hasText: 'Codex live summary item from OTEL stream' }).first()).toBeVisible();
-  await expect(page.getByText('Transcript history is not available for this source yet.')).toBeVisible();
+  await expect(page.getByText('No transcript was recorded for this session')).toBeVisible();
 
   await page.getByRole('button', { name: 'Open in Sessions' }).click();
 
-  await expect(page.getByText('Transcript history unavailable.')).toBeVisible();
-  await expect(page.getByText('codex-otel currently projects this session without transcript history.')).toBeVisible();
-  await expect(page.getByText('Hist off')).toBeVisible();
-  await expect(page.getByText('Live summary', { exact: true })).toBeVisible();
+  await expect(page.getByText('No transcript for this session.')).toBeVisible();
+  await expect(page.getByText('Its source (Codex telemetry) records activity but not the conversation')).toBeVisible();
+  await page.getByRole('button', { name: 'Live activity only' }).click();
+  const detail = page.getByRole('dialog', { name: 'Session detail' });
+  await expect(detail.getByRole('listitem').filter({ hasText: 'Transcript' })).toContainText('Not available');
+  await expect(detail.getByRole('listitem').filter({ hasText: 'Live stream' })).toContainText('Summary');
 });

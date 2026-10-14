@@ -1,119 +1,66 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  capabilityLevelText,
+  capabilityLevelLabel,
+  describeCoverage,
   getCapabilityEntries,
   hasSessionCapability,
-  summarizeCapabilities,
+  sessionSourceLabel,
 } from '../frontend/src/lib/session-capabilities.ts';
 
-test('summarizes full projection coverage', () => {
-  const capabilities = {
-    history: 'full',
-    search: 'full',
-    tool_analytics: 'full',
-    live_items: 'full',
-  } as const;
+const caps = (history: string, search: string, tool_analytics: string, live_items: string) =>
+  ({ history, search, tool_analytics, live_items }) as Parameters<typeof describeCoverage>[0];
 
-  assert.equal(summarizeCapabilities(capabilities).label, 'full surface');
-  assert.equal(getCapabilityEntries(capabilities).length, 4);
-  assert.equal(capabilityLevelText(capabilities.history), 'full');
-  assert.equal(hasSessionCapability(capabilities, 'search'), true);
+test('a fully captured session is full detail, which lists leave unsaid', () => {
+  assert.deepEqual(describeCoverage(caps('full', 'full', 'full', 'full')), { label: 'Full detail', tone: 'ok', full: true });
 });
 
-test('summarizes live-only coverage and thresholds missing history', () => {
-  const capabilities = {
-    history: 'none',
-    search: 'none',
-    tool_analytics: 'none',
-    live_items: 'summary',
-  } as const;
-
-  const summary = summarizeCapabilities(capabilities);
-
-  assert.equal(summary.label, 'live summary only');
-  assert.match(summary.description, /Live items are available/i);
-  assert.equal(hasSessionCapability(capabilities, 'history'), false);
-  assert.equal(hasSessionCapability(capabilities, 'live_items'), true);
-  assert.equal(hasSessionCapability(capabilities, 'live_items', 'full'), false);
-  assert.equal(capabilityLevelText(capabilities.history), 'off');
+test('sessions with less to show are named in plain words', () => {
+  assert.deepEqual(describeCoverage(caps('summary', 'summary', 'summary', 'summary')), { label: 'Summary detail', tone: 'warn', full: false });
+  assert.deepEqual(describeCoverage(caps('summary', 'none', 'summary', 'summary')), { label: 'Summary detail', tone: 'warn', full: false });
+  assert.deepEqual(describeCoverage(caps('none', 'none', 'none', 'summary')), { label: 'Live activity only', tone: 'warn', full: false });
+  assert.deepEqual(describeCoverage(caps('none', 'none', 'none', 'full')), { label: 'Live activity only', tone: 'warn', full: false });
+  assert.deepEqual(describeCoverage(caps('none', 'none', 'none', 'none')), { label: 'No detail', tone: 'neutral', full: false });
+  assert.deepEqual(describeCoverage(null), { label: 'Detail unknown', tone: 'neutral', full: false });
 });
 
-test('summarizes mixed coverage and unknown contracts', () => {
-  const partial = {
-    history: 'full',
-    search: 'summary',
-    tool_analytics: 'none',
-    live_items: 'summary',
-  } as const;
-
-  assert.equal(summarizeCapabilities(partial).label, 'partial surface');
-  assert.equal(summarizeCapabilities(null).label, 'capabilities unknown');
+test('one level below full makes a session partial', () => {
+  assert.deepEqual(describeCoverage(caps('full', 'full', 'summary', 'full')), { label: 'Partial detail', tone: 'accent', full: false });
+  assert.deepEqual(describeCoverage(caps('full', 'full', 'none', 'full')), { label: 'Partial detail', tone: 'accent', full: false });
+  assert.deepEqual(describeCoverage(caps('summary', 'none', 'none', 'full')), { label: 'Partial detail', tone: 'accent', full: false });
 });
 
-test('getCapabilityEntries lists every capability in a fixed display order', () => {
-  const entries = getCapabilityEntries({
-    history: 'full',
-    search: 'summary',
-    tool_analytics: 'none',
-    live_items: 'full',
-  });
-  assert.deepEqual(entries, [
-    { key: 'history', label: 'History', shortLabel: 'Hist', level: 'full' },
-    { key: 'search', label: 'Search', shortLabel: 'Search', level: 'summary' },
-    { key: 'tool_analytics', label: 'Tool Analytics', shortLabel: 'Tools', level: 'none' },
-    { key: 'live_items', label: 'Live Items', shortLabel: 'Live', level: 'full' },
-  ]);
+test('getCapabilityEntries lists every capability in a fixed order with a readable level', () => {
+  assert.deepEqual(
+    getCapabilityEntries(caps('full', 'summary', 'none', 'full')).map(entry => [entry.key, entry.label, capabilityLevelLabel(entry.level)]),
+    [
+      ['history', 'Transcript', 'Full'],
+      ['search', 'Search', 'Summary'],
+      ['tool_analytics', 'Tool analytics', 'Not available'],
+      ['live_items', 'Live stream', 'Full'],
+    ],
+  );
   assert.deepEqual(getCapabilityEntries(null), []);
 });
 
-test('capabilityLevelText names each level', () => {
-  assert.equal(capabilityLevelText('full'), 'full');
-  assert.equal(capabilityLevelText('summary'), 'summary');
-  assert.equal(capabilityLevelText('none'), 'off');
+test('sessionSourceLabel names where a session came from', () => {
+  assert.equal(sessionSourceLabel('claude-jsonl'), 'Claude Code transcript');
+  assert.equal(sessionSourceLabel('codex-jsonl'), 'Codex rollout file');
+  assert.equal(sessionSourceLabel('codex-otel'), 'Codex telemetry');
+  assert.equal(sessionSourceLabel('codex-import'), 'Codex history import');
+  assert.equal(sessionSourceLabel('codex-summary'), 'Codex summary');
+  assert.equal(sessionSourceLabel('antigravity-sqlite'), 'Antigravity');
+  assert.equal(sessionSourceLabel('something-new'), 'something-new');
+  assert.equal(sessionSourceLabel(null), 'Unknown source');
 });
 
 test('hasSessionCapability is false without a contract and thresholds at the minimum inclusively', () => {
   assert.equal(hasSessionCapability(null, 'history'), false);
   assert.equal(hasSessionCapability(null, 'history', 'none'), false);
-  const caps = { history: 'summary', search: 'full', tool_analytics: 'none', live_items: 'none' } as const;
-  assert.equal(hasSessionCapability(caps, 'history'), true); // summary meets the default minimum
-  assert.equal(hasSessionCapability(caps, 'history', 'full'), false);
-  assert.equal(hasSessionCapability(caps, 'search', 'full'), true);
-  assert.equal(hasSessionCapability(caps, 'tool_analytics'), false);
-  assert.equal(hasSessionCapability(caps, 'tool_analytics', 'none'), true);
-});
-
-test('summarizeCapabilities names exactly what is available and missing, in display order', () => {
-  const partial = summarizeCapabilities({
-    history: 'full',
-    search: 'summary',
-    tool_analytics: 'none',
-    live_items: 'summary',
-  });
-  assert.equal(partial.tone, 'mixed');
-  // A summary-level capability counts as available, not missing.
-  assert.equal(partial.description, 'Available: history, search, live items. Missing: tool analytics.');
-
-  const none = summarizeCapabilities({ history: 'none', search: 'none', tool_analytics: 'none', live_items: 'none' });
-  assert.equal(none.label, 'partial surface');
-  assert.equal(none.description, 'Available: none. Missing: history, search, tool analytics, live items.');
-
-  // Not every-full: one summary level breaks the full surface.
-  const almost = summarizeCapabilities({ history: 'full', search: 'full', tool_analytics: 'summary', live_items: 'full' });
-  assert.equal(almost.tone, 'mixed');
-  assert.equal(almost.description, 'Available: history, search, tool analytics, live items. Missing: none.');
-});
-
-test('summarizeCapabilities tones distinguish full, live-only, and unknown contracts', () => {
-  assert.equal(summarizeCapabilities({ history: 'full', search: 'full', tool_analytics: 'full', live_items: 'full' }).tone, 'full');
-  const liveFull = summarizeCapabilities({ history: 'none', search: 'none', tool_analytics: 'none', live_items: 'full' });
-  assert.equal(liveFull.label, 'live surface only');
-  assert.equal(liveFull.tone, 'summary');
-  // Live plus any transcript capability is no longer "live only".
-  assert.equal(
-    summarizeCapabilities({ history: 'summary', search: 'none', tool_analytics: 'none', live_items: 'full' }).label,
-    'partial surface',
-  );
-  assert.equal(summarizeCapabilities(null).tone, 'unknown');
+  const summaryHistory = caps('summary', 'full', 'none', 'none');
+  assert.equal(hasSessionCapability(summaryHistory, 'history'), true); // summary meets the default minimum
+  assert.equal(hasSessionCapability(summaryHistory, 'history', 'full'), false);
+  assert.equal(hasSessionCapability(summaryHistory, 'search', 'full'), true);
+  assert.equal(hasSessionCapability(summaryHistory, 'tool_analytics'), false);
+  assert.equal(hasSessionCapability(summaryHistory, 'tool_analytics', 'none'), true);
 });
