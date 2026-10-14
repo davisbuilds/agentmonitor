@@ -1,46 +1,23 @@
 import {
+  ApiError,
   fetchLiveItems,
   fetchLiveSession,
-  fetchLiveSessions,
   fetchLiveSettings,
   fetchLiveTurns,
-  fetchV2Agents,
-  fetchV2Projects,
   type LiveItem,
   type LiveSession,
   type LiveSettings,
   type LiveTurn,
 } from '../api/client';
 
-export interface LiveFilters {
-  project: string;
-  agent: string;
-  live_status: string;
-  fidelity: string;
-  active_only: boolean;
-}
+// The live stream of the one session Monitor is following (an agent card's
+// drill-in). There is no session list here: Monitor's agent cards are the list.
 
-const LIVE_PAGE_SIZE = 50;
 const LIVE_ITEMS_PAGE_SIZE = 100;
-
-let sessions = $state<LiveSession[]>([]);
-let sessionsTotal = $state(0);
-let sessionsCursor = $state<string | undefined>();
-let sessionsLoading = $state(false);
-let sessionsError = $state<string | null>(null);
-
-let projects = $state<string[]>([]);
-let agents = $state<string[]>([]);
-let filters = $state<LiveFilters>({
-  project: '',
-  agent: '',
-  live_status: '',
-  fidelity: '',
-  active_only: true,
-});
 
 let selectedSessionId = $state<string | null>(null);
 let selectedSession = $state<LiveSession | null>(null);
+let sessionMissing = $state(false);
 let turns = $state<LiveTurn[]>([]);
 let items = $state<LiveItem[]>([]);
 let itemsTotal = $state(0);
@@ -62,9 +39,7 @@ let settings = $state<LiveSettings>({
   diff_payload_max_bytes: 32768,
 });
 
-let sessionsRequestToken = 0;
 let selectedRequestToken = 0;
-let sessionsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let turnsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let metaRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let itemsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -84,19 +59,19 @@ function dedupeItems(existing: LiveItem[], incoming: LiveItem[]): LiveItem[] {
   return merged;
 }
 
-function syncSelectedSessionFromList(): void {
-  if (!selectedSessionId) return;
-  const next = sessions.find(session => session.id === selectedSessionId);
-  if (next) selectedSession = next;
-}
-
 async function loadSelectedSessionMeta(sessionId: string): Promise<void> {
   const token = selectedRequestToken;
   try {
     const session = await fetchLiveSession(sessionId);
     if (token !== selectedRequestToken || selectedSessionId !== sessionId) return;
     selectedSession = session;
+    sessionMissing = false;
   } catch (err) {
+    if (token !== selectedRequestToken || selectedSessionId !== sessionId) return;
+    if (err instanceof ApiError && err.status === 404) {
+      sessionMissing = true;
+      return;
+    }
     console.error('Failed to load live session:', err);
   }
 }
@@ -141,21 +116,6 @@ async function loadSelectedItems(sessionId: string, append = false): Promise<voi
   }
 }
 
-export async function initializeLivePage(): Promise<void> {
-  const [settingsRes, projectsRes, agentsRes] = await Promise.all([
-    fetchLiveSettings().catch(() => settings),
-    fetchV2Projects().catch(() => ({ data: [] })),
-    fetchV2Agents().catch(() => ({ data: [] })),
-  ]);
-
-  settings = settingsRes;
-  projects = projectsRes.data;
-  agents = agentsRes.data;
-
-  if (!settings.enabled) return;
-  await loadLiveSessions();
-}
-
 export async function initializeLiveSettings(): Promise<void> {
   try {
     settings = await fetchLiveSettings();
@@ -164,49 +124,12 @@ export async function initializeLiveSettings(): Promise<void> {
   }
 }
 
-export async function loadLiveSessions(append = false): Promise<void> {
-  const token = ++sessionsRequestToken;
-  sessionsLoading = true;
-  sessionsError = null;
-
-  try {
-    const params: Record<string, string | number | boolean> = { limit: LIVE_PAGE_SIZE };
-    if (filters.project) params.project = filters.project;
-    if (filters.agent) params.agent = filters.agent;
-    if (filters.live_status) params.live_status = filters.live_status;
-    if (filters.fidelity) params.fidelity = filters.fidelity;
-    if (filters.active_only) params.active_only = true;
-    if (append && sessionsCursor) params.cursor = sessionsCursor;
-
-    const res = await fetchLiveSessions(params);
-    if (token !== sessionsRequestToken) return;
-
-    sessions = append ? [...sessions, ...res.data] : res.data;
-    sessionsTotal = res.total;
-    sessionsCursor = res.cursor;
-
-    syncSelectedSessionFromList();
-
-    if (!selectedSessionId && sessions[0]) {
-      await selectLiveSession(sessions[0].id);
-      return;
-    }
-
-    if (!append && selectedSessionId && !sessions.some(session => session.id === selectedSessionId) && sessions[0]) {
-      await selectLiveSession(sessions[0].id);
-      return;
-    }
-  } catch (err) {
-    console.error('Failed to load live sessions:', err);
-    sessionsError = 'Failed to load live sessions.';
-  } finally {
-    if (token === sessionsRequestToken) sessionsLoading = false;
-  }
-}
-
-export async function selectLiveSession(sessionId: string): Promise<void> {
+/** Start following one session's live stream, replacing any previous one. */
+export async function followLiveSession(sessionId: string): Promise<void> {
+  clearRefreshTimers();
   selectedSessionId = sessionId;
-  selectedSession = sessions.find(session => session.id === sessionId) ?? selectedSession;
+  selectedSession = null;
+  sessionMissing = false;
   selectedRequestToken += 1;
   selectedItemId = null;
   itemsCursor = undefined;
@@ -222,9 +145,22 @@ export async function selectLiveSession(sessionId: string): Promise<void> {
   ]);
 }
 
-export async function loadMoreLiveSessions(): Promise<void> {
-  if (!sessionsCursor || sessionsLoading) return;
-  await loadLiveSessions(true);
+/** Stop following: drop the stream and any pending refresh. Settings stay. */
+export function stopFollowingLiveSession(): void {
+  clearRefreshTimers();
+  selectedRequestToken += 1;
+  selectedSessionId = null;
+  selectedSession = null;
+  sessionMissing = false;
+  turns = [];
+  items = [];
+  itemsTotal = 0;
+  itemsCursor = undefined;
+  itemsLoading = false;
+  itemsError = null;
+  selectedItemId = null;
+  selectedKinds = [];
+  connectionStatus = 'connecting';
 }
 
 export async function loadMoreLiveItems(): Promise<void> {
@@ -236,10 +172,6 @@ export async function refreshLiveItems(): Promise<void> {
   if (!selectedSessionId) return;
   itemsCursor = undefined;
   await loadSelectedItems(selectedSessionId, false);
-}
-
-export function setLiveFilters(next: Partial<LiveFilters>): void {
-  filters = { ...filters, ...next };
 }
 
 export function toggleLiveItemKind(kind: string): void {
@@ -262,30 +194,25 @@ export function setLiveConnectionStatus(status: 'connected' | 'connecting' | 'di
 export function handleLiveEvent(message: { type: string; payload?: Record<string, unknown> }): void {
   const sessionId = typeof message.payload?.session_id === 'string' ? message.payload.session_id : null;
 
+  if (message.type === 'connected') {
+    setLiveConnectionStatus('connected');
+    return;
+  }
+  if (!sessionId || sessionId !== selectedSessionId) return;
+
   switch (message.type) {
-    case 'connected':
-      setLiveConnectionStatus('connected');
-      return;
     case 'session_presence':
-      scheduleSessionsRefresh();
-      if (sessionId && sessionId === selectedSessionId) scheduleMetaRefresh(sessionId);
+      scheduleMetaRefresh(sessionId);
       return;
     case 'turn_update':
-      scheduleSessionsRefresh();
-      if (sessionId && sessionId === selectedSessionId) scheduleTurnsRefresh(sessionId);
+      scheduleMetaRefresh(sessionId);
+      scheduleTurnsRefresh(sessionId);
       return;
     case 'item_delta':
-      scheduleSessionsRefresh();
-      if (sessionId && sessionId === selectedSessionId) scheduleItemsRefresh(sessionId);
+      scheduleMetaRefresh(sessionId);
+      scheduleItemsRefresh(sessionId);
       return;
   }
-}
-
-function scheduleSessionsRefresh(): void {
-  if (sessionsRefreshTimer) clearTimeout(sessionsRefreshTimer);
-  sessionsRefreshTimer = setTimeout(() => {
-    void loadLiveSessions();
-  }, 150);
 }
 
 function scheduleMetaRefresh(sessionId: string): void {
@@ -309,62 +236,19 @@ function scheduleItemsRefresh(sessionId: string): void {
   }, 120);
 }
 
-export function resetLiveState(): void {
-  if (sessionsRefreshTimer) clearTimeout(sessionsRefreshTimer);
+function clearRefreshTimers(): void {
   if (turnsRefreshTimer) clearTimeout(turnsRefreshTimer);
   if (metaRefreshTimer) clearTimeout(metaRefreshTimer);
   if (itemsRefreshTimer) clearTimeout(itemsRefreshTimer);
-  sessionsRefreshTimer = null;
   turnsRefreshTimer = null;
   metaRefreshTimer = null;
   itemsRefreshTimer = null;
-  sessions = [];
-  sessionsTotal = 0;
-  sessionsCursor = undefined;
-  sessionsLoading = false;
-  sessionsError = null;
-  projects = [];
-  agents = [];
-  filters = {
-    project: '',
-    agent: '',
-    live_status: '',
-    fidelity: '',
-    active_only: true,
-  };
-  selectedSessionId = null;
-  selectedSession = null;
-  turns = [];
-  items = [];
-  itemsTotal = 0;
-  itemsCursor = undefined;
-  itemsLoading = false;
-  itemsError = null;
-  selectedItemId = null;
-  selectedKinds = [];
-  connectionStatus = 'connecting';
-  settings = {
-    enabled: true,
-    codex_mode: 'otel-only',
-    capture: {
-      prompts: true,
-      reasoning: true,
-      tool_arguments: true,
-    },
-    diff_payload_max_bytes: 32768,
-  };
 }
 
-export function getLiveSessions(): LiveSession[] { return sessions; }
-export function getLiveSessionsTotal(): number { return sessionsTotal; }
-export function getLiveSessionsHasMore(): boolean { return !!sessionsCursor && sessions.length < sessionsTotal; }
-export function getLiveSessionsLoading(): boolean { return sessionsLoading; }
-export function getLiveSessionsError(): string | null { return sessionsError; }
-export function getLiveProjects(): string[] { return projects; }
-export function getLiveAgents(): string[] { return agents; }
-export function getLiveFilters(): LiveFilters { return filters; }
 export function getSelectedLiveSessionId(): string | null { return selectedSessionId; }
 export function getSelectedLiveSession(): LiveSession | null { return selectedSession; }
+/** True when the followed session has no live record (the API answered 404). */
+export function getLiveSessionMissing(): boolean { return sessionMissing; }
 export function getLiveTurns(): LiveTurn[] { return turns; }
 export function getLiveItems(): LiveItem[] { return items; }
 export function getLiveItemsTotal(): number { return itemsTotal; }

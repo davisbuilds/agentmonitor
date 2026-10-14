@@ -1,8 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import AgentCards from './AgentCards.svelte';
-  import CostDashboard from './CostDashboard.svelte';
-  import ToolAnalytics from './ToolAnalytics.svelte';
+  import MonitorStream from './MonitorStream.svelte';
   import SessionDetail from './SessionDetail.svelte';
   import StatsBar from './StatsBar.svelte';
   import {
@@ -10,12 +9,11 @@
     setSessions,
     setStats,
     beginFilteredStatsRead,
+    getStats,
     endFilteredStatsRead,
-    setCostData,
-    setToolStats,
+    setCostWindows,
     setQuotaMonitor,
     getFilters,
-    getCostWindow,
     getFilterOptions,
     setFilterOptions,
     getAutoImportSignal,
@@ -23,27 +21,34 @@
     getStatsRefreshSignal,
     refreshOccupancy,
   } from '../../stores/monitor.svelte';
-  import { fetchStats, fetchEvents, fetchMonitorSessions, fetchCostData, fetchToolStats, fetchFilterOptions, statsParams } from '../../api/client';
-  import { buildCostFilters } from '../../monitor-analytics';
+  import { fetchStats, fetchEvents, fetchMonitorSessions, fetchFilterOptions, fetchUsageSummary, statsParams } from '../../api/client';
+  import { monitorCostWindowParams } from '../../monitor-analytics';
+  import { getMonitorSessionId } from '../../stores/router.svelte';
+  import { getLiveSettings } from '../../stores/live.svelte';
 
   interface Props {
     onfilterchange: (filters: Record<string, string>) => void;
   }
   let { onfilterchange }: Props = $props();
 
-  async function loadAnalytics(filters: Record<string, string> = {}) {
-    // Each request performs synchronous SQLite work on the server. Sending both
-    // together queues them back-to-back on the event loop, preventing health or
-    // ingestion requests from running between panels on a large database.
-    for (const load of [
-      () => fetchCostData(buildCostFilters(filters, getCostWindow())).then(setCostData),
-      () => fetchToolStats(filters).then(setToolStats),
-    ]) {
-      try {
-        await load();
-      } catch (error) {
-        console.error('Failed to load monitor analytics:', error);
-      }
+  const followedSessionId = $derived(getLiveSettings().enabled ? getMonitorSessionId() : null);
+
+  // Today's and the last 30 days' cost come from the Usage API, with the window
+  // Usage's 30D range uses, so the Monitor and Usage show the same figures.
+  // Each read is synchronous SQLite work on the server, so they run in turn,
+  // and only the latest request's figures are kept.
+  let costWindowsRequest = 0;
+  async function loadCostWindows(filters: Record<string, string> = {}) {
+    const request = ++costWindowsRequest;
+    try {
+      const windows = monitorCostWindowParams(filters);
+      const today = await fetchUsageSummary(windows.today);
+      if (request !== costWindowsRequest) return;
+      const last30Days = await fetchUsageSummary(windows.last30Days);
+      if (request !== costWindowsRequest) return;
+      setCostWindows({ today: today.total_cost_usd, last30Days: last30Days.total_cost_usd });
+    } catch (error) {
+      console.error('Failed to load monitor cost windows:', error);
     }
   }
 
@@ -66,7 +71,7 @@
       console.error('Failed to load monitor data:', err);
     }
 
-    await loadAnalytics(filters);
+    await loadCostWindows(filters);
   }
 
   async function loadMonitorFilterOptions() {
@@ -138,6 +143,24 @@
       .finally(() => { filteredStatsInFlight = false; });
   });
 
+  // Live events move the all-time cost in the stats snapshot as they land; take
+  // that as the cue to re-read the windowed figures, at most once per interval.
+  const COST_WINDOWS_REFRESH_MS = 30_000;
+  let lastCostSeen: number | null = null;
+  let lastCostWindowsAt = 0;
+  $effect(() => {
+    const cost = getStats().total_cost_usd;
+    if (lastCostSeen === null) {
+      lastCostSeen = cost;
+      return;
+    }
+    if (cost === lastCostSeen) return;
+    lastCostSeen = cost;
+    if (Date.now() - lastCostWindowsAt < COST_WINDOWS_REFRESH_MS) return;
+    lastCostWindowsAt = Date.now();
+    void loadCostWindows(getFilters());
+  });
+
   // Refetch after an SSE reconnect: the v1 stream has no replay, so events that
   // landed while the connection was dropped (e.g. laptop sleep) never reached the
   // incremental store. Guarded against the initial run so mount doesn't double-load.
@@ -151,19 +174,23 @@
   });
 </script>
 
-<main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6 gap-8">
-  <section>
-    <StatsBar />
-  </section>
+{#if followedSessionId}
+  <main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6 gap-4 xl:overflow-hidden">
+    <section class="shrink-0">
+      <StatsBar />
+    </section>
+    <MonitorStream sessionId={followedSessionId} />
+  </main>
+{:else}
+  <main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6 gap-8">
+    <section>
+      <StatsBar />
+    </section>
 
-  <section>
-    <AgentCards />
-  </section>
-
-  <section class="grid grid-cols-1 items-start gap-6 xl:grid-cols-2">
-    <CostDashboard onwindowchange={() => void loadAnalytics(getFilters())} />
-    <ToolAnalytics />
-  </section>
-</main>
+    <section>
+      <AgentCards />
+    </section>
+  </main>
+{/if}
 
 <SessionDetail />
