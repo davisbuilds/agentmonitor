@@ -17,11 +17,11 @@ let broadcaster: typeof import('../src/sse/emitter.js').broadcaster;
 
 const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-function seedUsage(agent: string, cost: number): void {
+function seedUsage(agent: string, cost: number, tokensIn: number): void {
   getDb().prepare(`
     INSERT INTO events (session_id, agent_type, event_type, status, tokens_in, tokens_out, cost_usd, created_at, source)
-    VALUES (?, ?, 'llm_response', 'success', 100, 10, ?, ?, 'import')
-  `).run(`e2e-filtered-${agent}`, agent, cost, now);
+    VALUES (?, ?, 'llm_response', 'success', ?, 0, ?, ?, 'import')
+  `).run(`e2e-filtered-${agent}`, agent, tokensIn, cost, now);
 }
 
 test.beforeAll(async () => {
@@ -38,8 +38,8 @@ test.beforeAll(async () => {
   const { createApp } = await import('../src/app.js');
 
   initSchema();
-  seedUsage('codex', 3);
-  seedUsage('claude_code', 97);
+  seedUsage('codex', 3, 300);
+  seedUsage('claude_code', 97, 9_700);
 
   server = createApp().listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -56,20 +56,25 @@ test.afterAll(async () => {
 
 test('an agent filter keeps its totals when the unfiltered stats broadcast arrives', async ({ page }) => {
   await page.goto(`${baseUrl}/app/`);
-  const cost = page.locator('span', { hasText: /^Cost/ });
-  await expect(cost).toContainText('$100.00');
+  const tokens = page.getByTestId('monitor-total-tokens');
+  const costToday = page.getByTestId('monitor-cost-today');
+  await expect(tokens).toHaveText('10.0K');
+  await expect(costToday).toHaveText('$100.00');
 
   await page.getByRole('combobox').first().selectOption('codex');
-  await expect(cost).toContainText('$3.00');
+  await expect(tokens).toHaveText('300');
+  await expect(costToday).toHaveText('$3.00');
 
   // The server's periodic snapshot is always unfiltered.
   for (let i = 0; i < 3; i++) {
     broadcaster.broadcast('stats', getStats() as unknown as Record<string, unknown>);
     await page.waitForTimeout(300);
   }
-  await expect(cost).toContainText('$3.00');
+  await expect(tokens).toHaveText('300');
+  await expect(costToday).toHaveText('$3.00');
 
   // Clearing the filter takes the unfiltered snapshot again.
   await page.getByRole('combobox').first().selectOption('');
-  await expect(cost).toContainText('$100.00');
+  await expect(tokens).toHaveText('10.0K');
+  await expect(costToday).toHaveText('$100.00');
 });
