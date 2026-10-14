@@ -137,19 +137,6 @@ test('monitor backfills aggregate session metrics for newly reactivated sessions
   await page.goto(`${baseUrl}/app/`);
 
   await expect(page.getByRole('heading', { name: 'Active Agents' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '30d' })).toBeVisible();
-  await expect(page.getByRole('button', { name: '60d' })).toBeVisible();
-  // Provider quota moved to the provider-native QuotaPill, which only renders
-  // when a live provider snapshot exists — never against this seeded e2e server.
-  await expect(page.getByRole('columnheader', { name: 'Frequency' })).toBeVisible();
-  // Bar renders as a purely visual div now (no progressbar role), so assert
-  // the seeded Write tool row instead of the bar itself.
-  await expect(
-    page.locator('section').filter({ hasText: 'Tool Analytics' }).getByText('Write', { exact: true })
-  ).toBeVisible();
-  await expect(
-    page.locator('section').filter({ hasText: 'Cost Overview' }).getByText('1 session').first()
-  ).toBeVisible();
 
   const response = await fetch(`${baseUrl}/api/events`, {
     method: 'POST',
@@ -180,8 +167,4 @@ test('monitor backfills aggregate session metrics for newly reactivated sessions
   await expect(card).toContainText('+12');
   await expect(card).toContainText('$0.80');
   await expect(card).not.toContainText('-14400s ago');
-  await page.getByRole('button', { name: '30d' }).click();
-  await expect(
-    page.locator('svg[preserveAspectRatio="none"]')
-  ).toBeVisible();
 });

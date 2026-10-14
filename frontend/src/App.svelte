@@ -9,7 +9,7 @@
     openCommandPalette,
     type Tab,
   } from './lib/stores/router.svelte';
-  import { getLiveSettings, initializeLiveSettings } from './lib/stores/live.svelte';
+  import { getFollowedLiveSessionId, initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
   import ConnectionStatus from './lib/components/monitor/ConnectionStatus.svelte';
   import StaleBuildNotice from './lib/components/monitor/StaleBuildNotice.svelte';
@@ -17,7 +17,6 @@
   import FilterBar from './lib/components/monitor/FilterBar.svelte';
   import QuotaPill from './lib/components/monitor/QuotaPill.svelte';
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
-  import LivePage from './lib/components/live/LivePage.svelte';
   import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
   import CommandPalette from './lib/components/command-palette/CommandPalette.svelte';
   import AnalyticsShell from './lib/components/analytics/AnalyticsShell.svelte';
@@ -25,22 +24,15 @@
 
   const tab = $derived(getTab());
   const commandPaletteOpen = $derived(isCommandPaletteOpen());
-  const liveSettings = $derived(getLiveSettings());
 
   let monitorPage = $state<MonitorPage>();
 
-  const tabs = $derived.by(() => {
-    const next: Array<{ id: Tab; label: string }> = [
-      { id: 'monitor', label: 'Monitor' },
-      { id: 'sessions', label: 'Sessions' },
-      { id: 'analytics', label: 'Analytics' },
-      { id: 'benchmarks', label: 'Benchmarks' },
-    ];
-    if (liveSettings.enabled) {
-      next.splice(1, 0, { id: 'live', label: 'Live' });
-    }
-    return next;
-  });
+  const tabs: Array<{ id: Tab; label: string }> = [
+    { id: 'monitor', label: 'Monitor' },
+    { id: 'sessions', label: 'Sessions' },
+    { id: 'analytics', label: 'Analytics' },
+    { id: 'benchmarks', label: 'Benchmarks' },
+  ];
 
   async function handleFilterChange(filters: Record<string, string>) {
     if (monitorPage) {
@@ -65,9 +57,6 @@
 
     void (async () => {
       await initializeLiveSettings();
-      if (!getLiveSettings().enabled && getTab() === 'live') {
-        setTab('monitor');
-      }
       connectSSE();
     })();
 
@@ -119,8 +108,8 @@
     </div>
   </header>
 
-  <!-- Contextual sub-bar (only on tabs that filter) -->
-  {#if tab === 'monitor'}
+  <!-- Contextual sub-bar (only on tabs that filter; a followed session has none) -->
+  {#if tab === 'monitor' && !getFollowedLiveSessionId()}
     <div class="border-b border-line px-4 sm:px-6 py-2">
       <FilterBar onchange={handleFilterChange} />
     </div>
@@ -129,8 +118,6 @@
   <!-- Tab Content -->
   {#if tab === 'monitor'}
     <MonitorPage bind:this={monitorPage} onfilterchange={handleFilterChange} />
-  {:else if tab === 'live'}
-    <LivePage />
   {:else if tab === 'sessions'}
     <SessionsPage />
   {:else if tab === 'analytics'}

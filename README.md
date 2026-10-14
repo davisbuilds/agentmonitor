@@ -176,7 +176,8 @@ Common knobs:
 - `AGENTMONITOR_PROJECTS_DIR` for git branch/project resolution.
 - `AGENTMONITOR_CLAUDE_DIR` for Claude JSONL history discovery (the directory
   containing `projects/`).
-- `AGENTMONITOR_ENABLE_LIVE_TAB` and live capture/redaction flags.
+- `AGENTMONITOR_ENABLE_LIVE_TAB` (the Monitor's live stream) and live
+  capture/redaction flags.
 - `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` for historical discovery/import ignores.
 
 AI insight generation is optional and needs `AGENTMONITOR_INSIGHTS_PROVIDER` plus

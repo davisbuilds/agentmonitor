@@ -5,6 +5,8 @@
   import { buildActiveAgentLabel } from '../../monitor-analytics';
   import { SectionHeader, StatusDot, EmptyState, Badge } from '../ui';
   import ContextPill from './ContextPill.svelte';
+  import { openMonitorSession } from '../../stores/router.svelte';
+  import { getLiveSettings } from '../../stores/live.svelte';
 
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
@@ -30,6 +32,13 @@
       return parseTimestamp(b.last_event_at).getTime() - parseTimestamp(a.last_event_at).getTime();
     });
   });
+
+  // A card opens the session's live stream in place; with the live view turned
+  // off it falls back to the recent-events drawer.
+  function openSession(id: string): void {
+    if (getLiveSettings().enabled) openMonitorSession(id);
+    else setSelectedSessionId(id);
+  }
 
   function eventLabel(e: AgentEvent): string {
     if (e.event_type === 'tool_use' && e.tool_name) return e.tool_name;
@@ -57,7 +66,7 @@
       {@const occupancy = getSessionOccupancy(session.id)}
       <button
         class="w-full cursor-pointer rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-line-strong"
-        onclick={() => setSelectedSessionId(session.id)}
+        onclick={() => openSession(session.id)}
       >
         <!-- Header -->
         <div class="mb-2 flex items-start justify-between gap-3">

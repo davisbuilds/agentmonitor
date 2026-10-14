@@ -10,7 +10,7 @@ source.
 Claude hooks ───────┐
 Codex OTLP ─────────┼─> ingest/normalization ─> SQLite ─> v1/v2 reads ─> Svelte /app/
 session JSONL/DBs ──┘                         │                 └──────> amon CLI
-                                              └─> SSE ─────────> Monitor / Live
+                                              └─> SSE ─────────> Monitor + live stream
 ```
 
 1. Claude hooks, Codex OTLP exporters, generic clients, and historical importers
@@ -18,8 +18,8 @@ session JSONL/DBs ──┘                         │                 └─�
 2. SQLite stores authoritative local event history, parsed session history,
    operational metrics, provider quota snapshots, and small derived summaries.
 3. `/api/v2/*` serves the canonical Svelte application and agent-first CLI reads.
-4. SSE carries current activity to Monitor and Live without making the stream an
-   authoritative store.
+4. SSE carries current activity to Monitor and its live stream without making the
+   stream an authoritative store.
 
 ## Product And Runtime Boundaries
 
@@ -282,7 +282,7 @@ See [trace-quality.md](trace-quality.md) for the semantic and privacy contract.
 ## Streaming
 
 The shared SSE broadcaster carries `event`, `stats`, and `session_update` messages.
-The Live surface has a separate v2 stream. Both enforce connection limits,
+The live stream (Monitor's drill-in) has a separate v2 SSE stream. Both enforce connection limits,
 heartbeats, disconnect cleanup, and backpressure behavior; neither replaces stored
 state. Exact stream routes and payload wiring live in their route and emitter
 modules.

@@ -2,41 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildActiveAgentLabel,
-  buildCostFilters,
-  formatMonitorCost,
-  shortModelName,
+  monitorCostWindowParams,
 } from '../frontend/src/lib/monitor-analytics.ts';
-
-test('buildCostFilters applies rolling since window when no explicit since exists', () => {
-  const filters = buildCostFilters({ project: 'agentmonitor' }, '60d', new Date('2026-04-10T12:00:00.000Z'));
-
-  assert.equal(filters.project, 'agentmonitor');
-  assert.equal(filters.since, '2026-02-09T12:00:00.000Z');
-});
-
-test('buildCostFilters preserves explicit since and all-time selection', () => {
-  assert.deepEqual(
-    buildCostFilters({ since: '2026-01-01T00:00:00.000Z' }, '30d', new Date('2026-04-10T12:00:00.000Z')),
-    { since: '2026-01-01T00:00:00.000Z' },
-  );
-
-  assert.deepEqual(
-    buildCostFilters({ agent_type: 'codex' }, 'all', new Date('2026-04-10T12:00:00.000Z')),
-    { agent_type: 'codex' },
-  );
-
-  assert.deepEqual(
-    buildCostFilters({ project: 'agentmonitor' }, 'all', new Date('2026-04-10T12:00:00.000Z')),
-    { project: 'agentmonitor' },
-  );
-});
-
-test('formatMonitorCost preserves operator-friendly small values', () => {
-  assert.equal(formatMonitorCost(0), '$0.00');
-  assert.equal(formatMonitorCost(0.004), '<$0.01');
-  assert.equal(formatMonitorCost(0.1234), '$0.123');
-  assert.equal(formatMonitorCost(1.234), '$1.23');
-});
+import { createDefaultAnalyticsFilters } from '../frontend/src/lib/analytics-state.ts';
 
 test('buildActiveAgentLabel includes model and reasoning effort when available', () => {
   assert.equal(
@@ -77,54 +45,6 @@ test('buildActiveAgentLabel drops the suffix when the only model is <synthetic>'
     buildActiveAgentLabel('claude_code', [{ model: '<synthetic>' }]),
     'Claude',
   );
-});
-
-test('shortModelName compacts known provider model families', () => {
-  assert.equal(shortModelName(''), 'unknown');
-  assert.equal(shortModelName('claude-sonnet-4-5-20250929'), 'sonnet-4.5');
-  assert.equal(shortModelName('claude-opus-4-7'), 'opus-4.7');
-  assert.equal(shortModelName('claude-opus-4-6-20260101'), 'opus-4.6');
-  assert.equal(shortModelName('claude-opus-4-5-20260101'), 'opus-4.5');
-  assert.equal(shortModelName('claude-haiku-4-5-20260101'), 'haiku-4.5');
-  assert.equal(shortModelName('claude-3-5-sonnet-20241022'), 'sonnet-3.5');
-  assert.equal(shortModelName('claude-3-5-haiku-20241022'), 'haiku-3.5');
-  assert.equal(shortModelName('claude-3-opus-20240229'), 'opus-3');
-  assert.equal(shortModelName('claude-custom'), 'c-custom');
-  assert.equal(shortModelName('gpt-5.5'), 'gpt-5.5');
-});
-
-test('buildCostFilters subtracts exactly the window length for every rolling option', () => {
-  const now = new Date('2026-04-10T12:00:00.000Z');
-  const day = 86_400_000;
-  for (const [window, days] of [['30d', 30], ['60d', 60], ['90d', 90]] as const) {
-    assert.equal(
-      buildCostFilters({}, window, now).since,
-      new Date(now.getTime() - days * day).toISOString(),
-      window,
-    );
-  }
-  // Spot-check the 30d edge as a literal so a shared off-by-one cannot hide.
-  assert.equal(buildCostFilters({}, '30d', now).since, '2026-03-11T12:00:00.000Z');
-});
-
-test('buildCostFilters treats an empty since as absent and never mutates the caller filters', () => {
-  const now = new Date('2026-04-10T12:00:00.000Z');
-  const input = { since: '', project: 'p' };
-  const out = buildCostFilters(input, '30d', now);
-  assert.equal(out.since, '2026-03-11T12:00:00.000Z');
-  assert.equal(out.project, 'p');
-  assert.deepEqual(input, { since: '', project: 'p' }); // caller object untouched
-  assert.notEqual(out, input);
-});
-
-test('formatMonitorCost switches precision exactly at one cent and one dollar', () => {
-  assert.equal(formatMonitorCost(null), '$0.00');
-  assert.equal(formatMonitorCost(undefined), '$0.00');
-  assert.equal(formatMonitorCost(0.0099), '<$0.01');
-  assert.equal(formatMonitorCost(0.01), '$0.010'); // one cent is shown, not hidden as "<$0.01"
-  assert.equal(formatMonitorCost(0.999), '$0.999');
-  assert.equal(formatMonitorCost(1), '$1.00'); // a dollar uses cents precision
-  assert.equal(formatMonitorCost(1234.5), '$1234.50');
 });
 
 test('buildActiveAgentLabel takes the newest real model (events are newest-first)', () => {
@@ -177,7 +97,35 @@ test('buildActiveAgentLabel names every recognized agent and strips only known p
   assert.equal(buildActiveAgentLabel('amp', [{ model: 'x-ai/grok-5' }]), 'amp (x-ai/grok-5)');
 });
 
-test('shortModelName compacts dated variants of the undated families too', () => {
-  assert.equal(shortModelName('claude-opus-4-7-20260301'), 'opus-4.7');
-  assert.equal(shortModelName('claude-opus-4-6'), 'opus-4.6');
+test('monitor cost windows are today and the same 30 days as Usage\'s default range', () => {
+  const now = new Date(2026, 9, 14, 0, 30);
+  const usage = createDefaultAnalyticsFilters(now);
+  const windows = monitorCostWindowParams({}, now);
+
+  assert.deepEqual(windows.today, { date_from: '2026-10-14', date_to: '2026-10-14' });
+  assert.deepEqual(windows.last30Days, { date_from: usage.from, date_to: usage.to });
+  assert.deepEqual(windows.last30Days, { date_from: '2026-09-15', date_to: '2026-10-14' });
+
+  // Across a month end (2026 is not a leap year).
+  assert.deepEqual(
+    monitorCostWindowParams({}, new Date(2026, 2, 1, 23, 0)).last30Days,
+    { date_from: '2026-01-31', date_to: '2026-03-01' },
+  );
+});
+
+test('monitor cost windows carry only the project and agent filters', () => {
+  const now = new Date(2026, 9, 14, 12, 0);
+  const windows = monitorCostWindowParams({
+    agent_type: 'codex',
+    project: 'agentmonitor',
+    model: 'gpt-5',
+    event_type: 'tool_use',
+    since: '2026-01-01T00:00:00.000Z',
+  }, now);
+
+  for (const params of [windows.today, windows.last30Days]) {
+    assert.equal(params.agent, 'codex');
+    assert.equal(params.project, 'agentmonitor');
+    assert.deepEqual(Object.keys(params).sort(), ['agent', 'date_from', 'date_to', 'project']);
+  }
 });

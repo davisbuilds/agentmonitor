@@ -1,47 +1,28 @@
-export type CostWindow = '30d' | '60d' | '90d' | 'all';
+import { createDefaultAnalyticsFilters } from './analytics-state';
 
-export const COST_WINDOW_OPTIONS: Array<{ value: CostWindow; label: string }> = [
-  { value: '30d', label: '30d' },
-  { value: '60d', label: '60d' },
-  { value: '90d', label: '90d' },
-  { value: 'all', label: 'All' },
-];
+export interface MonitorCostWindows {
+  today: Record<string, string>;
+  last30Days: Record<string, string>;
+}
 
-export function buildCostFilters(
+/**
+ * Usage API params for the Monitor's two cost figures. The 30-day window is the
+ * one Usage's default 30D range uses, so the two pages show the same number.
+ * Only the project and agent filters carry over, as they did for the Monitor's
+ * cost panel before.
+ */
+export function monitorCostWindowParams(
   filters: Record<string, string>,
-  costWindow: CostWindow,
   now: Date = new Date(),
-): Record<string, string> {
-  const next = { ...filters };
-  if (next.since || costWindow === 'all') return next;
-
-  const days = Number.parseInt(costWindow, 10);
-  if (!Number.isFinite(days) || days <= 0) return next;
-
-  next.since = new Date(now.getTime() - days * 86_400_000).toISOString();
-  return next;
-}
-
-export function formatMonitorCost(value: number | null | undefined): string {
-  if (value == null || value === 0) return '$0.00';
-  if (value < 0.01) return '<$0.01';
-  if (value < 1) return `$${value.toFixed(3)}`;
-  return `$${value.toFixed(2)}`;
-}
-
-export function shortModelName(model: string): string {
-  if (!model) return 'unknown';
-  return model
-    .replace(/claude-opus-4-7(-\d+)?/, 'opus-4.7')
-    .replace(/claude-sonnet-4-5-\d+/, 'sonnet-4.5')
-    .replace(/claude-opus-4-6(-\d+)?/, 'opus-4.6')
-    .replace(/claude-opus-4-5-\d+/, 'opus-4.5')
-    .replace(/claude-haiku-4-5-\d+/, 'haiku-4.5')
-    .replace(/claude-3-5-sonnet-\d+/, 'sonnet-3.5')
-    .replace(/claude-3-5-haiku-\d+/, 'haiku-3.5')
-    .replace(/claude-3-opus-\d+/, 'opus-3')
-    .replace(/^claude-/, 'c-')
-    .replace(/^gpt-/, 'gpt-');
+): MonitorCostWindows {
+  const usageDefault = createDefaultAnalyticsFilters(now);
+  const scope: Record<string, string> = {};
+  if (filters.project) scope.project = filters.project;
+  if (filters.agent_type) scope.agent = filters.agent_type;
+  return {
+    today: { ...scope, date_from: usageDefault.to, date_to: usageDefault.to },
+    last30Days: { ...scope, date_from: usageDefault.from, date_to: usageDefault.to },
+  };
 }
 
 interface ActiveAgentLabelEvent {

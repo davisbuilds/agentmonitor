@@ -7,8 +7,9 @@ the v2 route/query source and [API index](../api/README.md).
 ## Canonical Product Surface
 
 - The Svelte SPA at `/app/` is the sole human-facing surface; `/` redirects there.
-- Monitor, Live, Sessions, and Analytics are the primary workflows. Sessions holds
-  full-text search and pinned messages.
+- Monitor, Sessions, and Analytics are the primary workflows. Sessions holds
+  full-text search and pinned messages; the live stream is Monitor's drill-in
+  rather than a tab of its own.
 - Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
   one shared date/project/agent filter context.
 - Deep links preserve the active view and selected session, message, or trace where
@@ -26,11 +27,22 @@ for agents. Filter semantics and data-selection rules are shared with v2 whereve
 the command represents a UI read. Use `amon --help` and subcommand help as the
 current command contract.
 
-## Monitor And Live
+## Monitor And The Live Stream
 
-Monitor provides current sessions, recent events, aggregate stats, tool activity,
+Monitor provides current sessions as agent cards, recent events, aggregate stats,
 provider-native quota snapshots, and context-window occupancy. It consumes the v2
 Monitor reads and the shared SSE stream.
+
+Clicking an agent card opens that session's live stream and inspector in place, at
+`#monitor?session=<id>`; old `#live` links land on Monitor. A session with no live
+record, and every session when the live view is turned off
+(`AGENTMONITOR_ENABLE_LIVE_TAB=false`, a name kept for compatibility), opens the
+recent-events drawer instead.
+
+Monitor's cost figures name their window: today and the last 30 days. Both come
+from the Usage summary with the window of Usage's 30D range, so Monitor and Usage
+show the same 30-day cost. Monitor carries no cost or tool breakdown of its own;
+those live in Analytics.
 
 The Monitor's token headline counts every bucket (uncached input, output, cache
 reads and cache writes), which is how Claude's `/stats` and Codex's `/usage`
@@ -38,8 +50,8 @@ count tokens. Its breakdown splits the buckets and each agent. It covers the
 usage recorded on this machine: a harness's account-wide total can include
 other machines and cloud tasks that no local source records.
 
-Live exposes normalized sessions, turns, items, and a dedicated live stream. Its
-fidelity is explicit:
+The live stream exposes a session's normalized turns and items, updated over a
+dedicated live SSE stream. Its fidelity is explicit:
 
 - Claude session files can provide transcript-capable live detail. Reasoning
   appears only where the transcript recorded its text; Claude Code often records
@@ -49,7 +61,7 @@ fidelity is explicit:
 - Codex OTEL provides summary-oriented live activity, including response-completion
   token and cost data. Historical Codex JSONL import enriches later analysis but is
   not the sole usage source.
-- Antigravity conversation files feed a summary-fidelity Live projection when
+- Antigravity conversation files feed a summary-fidelity live projection when
   the watcher syncs them; this does not establish transcript-level parity.
 
 Context occupancy is absent when the source cannot support it. Its numerator is
@@ -193,8 +205,9 @@ Quality presents one lean trace per session from the content-free session summar
 named by the session's title.
 Observation trees are projected on demand from local source rows and are not stored
 as a second trace warehouse. List and detail views disclose usage and telemetry
-coverage over the full filtered set. Drill-ins from Usage, Analytics, Live,
-and Sessions (including its search results) can open the relevant trace.
+coverage over the full filtered set. Drill-ins from Usage, Analytics, the
+live stream's inspector, and Sessions (including its search results) can open
+the relevant trace.
 
 Deep scoring, prompt management, and persisted observation/eval storage remain
 outside the local product boundary. See [trace-quality.md](trace-quality.md).

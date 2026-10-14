@@ -127,7 +127,7 @@
     {:else if error}
       <div class="py-12 text-center text-meta text-danger">{error}</div>
     {:else if !session}
-      <div class="py-12 text-center text-meta text-text-muted">Select a live session to inspect its stream.</div>
+      <div class="py-12 text-center text-meta text-text-muted">Loading session…</div>
     {:else if items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">No live items for this session yet.</div>
     {:else}
