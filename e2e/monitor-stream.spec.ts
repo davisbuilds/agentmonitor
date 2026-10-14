@@ -315,12 +315,29 @@ test('with the live view turned off, a card opens the recent-events drawer inste
     },
   }));
 
-  // A followed-session link has nothing to follow, so it shows the cards.
+  // A followed-session link has nothing to follow, so it shows the cards,
+  // with their filters.
   await page.goto(`${baseUrl}/app/#monitor?session=${sessionId}`);
   await expect(card(page, 'card-full-stream')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Inspect the repo' })).toHaveCount(0);
+  await expect(page.getByRole('combobox', { name: 'Agent' })).toBeVisible();
 
   await card(page, 'card-summary-stream').click();
   await expect(page.getByRole('heading', { name: 'Session Details' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Review OTEL stream' })).toHaveCount(0);
+});
+
+test('a session whose record fails to load offers a retry instead of loading forever', async ({ page }) => {
+  let failing = true;
+  await page.route(`**/api/v2/live/sessions/${sessionId}`, route => (
+    failing ? route.fulfill({ status: 500, json: { error: 'boom' } }) : route.continue()
+  ));
+
+  await page.goto(`${baseUrl}/app/#monitor?session=${sessionId}`);
+  await expect(page.getByText("Couldn't load this session.")).toBeVisible();
+  await expect(page.getByText('Loading session…')).toHaveCount(0);
+
+  failing = false;
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByRole('heading', { name: 'Inspect the repo' })).toBeVisible();
 });

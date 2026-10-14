@@ -47,6 +47,27 @@ describe('following one session in Monitor', () => {
     expect(store.getLiveSessionMissing()).toBe(false);
   });
 
+  it('a record that fails to load for another reason reads as failed, until a retry loads it', async () => {
+    fetchLiveSession.mockRejectedValueOnce(new ApiError('fetchLiveSession failed (500): ', 500));
+    await store.followLiveSession('flaky');
+    expect(store.getLiveSessionLoadFailed()).toBe(true);
+    expect(store.getLiveSessionMissing()).toBe(false);
+
+    await store.followLiveSession('flaky');
+    expect(store.getLiveSessionLoadFailed()).toBe(false);
+    expect(store.getSelectedLiveSession()?.id).toBe('flaky');
+  });
+
+  it("a failed record recovers when the session's next update loads it", async () => {
+    fetchLiveSession.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await store.followLiveSession('s1');
+    expect(store.getLiveSessionLoadFailed()).toBe(true);
+
+    store.handleLiveEvent({ type: 'session_presence', payload: { session_id: 's1' } });
+    await vi.runAllTimersAsync();
+    expect(store.getLiveSessionLoadFailed()).toBe(false);
+  });
+
   it('a later session that loads clears the missing mark', async () => {
     fetchLiveSession.mockRejectedValueOnce(new ApiError('fetchLiveSession failed (404): ', 404));
     await store.followLiveSession('gone');

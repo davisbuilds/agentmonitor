@@ -9,6 +9,7 @@ import {
   type LiveSettings,
   type LiveTurn,
 } from '../api/client';
+import { getMonitorSessionId } from './router.svelte';
 
 // The live stream of the one session Monitor is following (an agent card's
 // drill-in). There is no session list here: Monitor's agent cards are the list.
@@ -18,6 +19,7 @@ const LIVE_ITEMS_PAGE_SIZE = 100;
 let selectedSessionId = $state<string | null>(null);
 let selectedSession = $state<LiveSession | null>(null);
 let sessionMissing = $state(false);
+let sessionLoadFailed = $state(false);
 let turns = $state<LiveTurn[]>([]);
 let items = $state<LiveItem[]>([]);
 let itemsTotal = $state(0);
@@ -66,6 +68,7 @@ async function loadSelectedSessionMeta(sessionId: string): Promise<void> {
     if (token !== selectedRequestToken || selectedSessionId !== sessionId) return;
     selectedSession = session;
     sessionMissing = false;
+    sessionLoadFailed = false;
   } catch (err) {
     if (token !== selectedRequestToken || selectedSessionId !== sessionId) return;
     if (err instanceof ApiError && err.status === 404) {
@@ -73,6 +76,8 @@ async function loadSelectedSessionMeta(sessionId: string): Promise<void> {
       return;
     }
     console.error('Failed to load live session:', err);
+    // Keep a record that loaded earlier; only a session never loaded is failed.
+    if (!selectedSession) sessionLoadFailed = true;
   }
 }
 
@@ -130,6 +135,7 @@ export async function followLiveSession(sessionId: string): Promise<void> {
   selectedSessionId = sessionId;
   selectedSession = null;
   sessionMissing = false;
+  sessionLoadFailed = false;
   selectedRequestToken += 1;
   selectedItemId = null;
   itemsCursor = undefined;
@@ -152,6 +158,7 @@ export function stopFollowingLiveSession(): void {
   selectedSessionId = null;
   selectedSession = null;
   sessionMissing = false;
+  sessionLoadFailed = false;
   turns = [];
   items = [];
   itemsTotal = 0;
@@ -249,6 +256,8 @@ export function getSelectedLiveSessionId(): string | null { return selectedSessi
 export function getSelectedLiveSession(): LiveSession | null { return selectedSession; }
 /** True when the followed session has no live record (the API answered 404). */
 export function getLiveSessionMissing(): boolean { return sessionMissing; }
+/** True when the followed session's record failed to load for another reason. */
+export function getLiveSessionLoadFailed(): boolean { return sessionLoadFailed; }
 export function getLiveTurns(): LiveTurn[] { return turns; }
 export function getLiveItems(): LiveItem[] { return items; }
 export function getLiveItemsTotal(): number { return itemsTotal; }
@@ -263,3 +272,10 @@ export function getSelectedLiveItem(): LiveItem | null {
 }
 export function getLiveConnectionStatus(): 'connected' | 'connecting' | 'disconnected' { return connectionStatus; }
 export function getLiveSettings(): LiveSettings { return settings; }
+/**
+ * The session Monitor shows a live stream for: the one in its route, while the
+ * live view is on. With it off, Monitor shows the cards (and their filters).
+ */
+export function getFollowedLiveSessionId(): string | null {
+  return settings.enabled ? getMonitorSessionId() : null;
+}

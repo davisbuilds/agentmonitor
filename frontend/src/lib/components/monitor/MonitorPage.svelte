@@ -23,15 +23,14 @@
   } from '../../stores/monitor.svelte';
   import { fetchStats, fetchEvents, fetchMonitorSessions, fetchFilterOptions, fetchUsageSummary, statsParams } from '../../api/client';
   import { monitorCostWindowParams } from '../../monitor-analytics';
-  import { getMonitorSessionId } from '../../stores/router.svelte';
-  import { getLiveSettings } from '../../stores/live.svelte';
+  import { getFollowedLiveSessionId } from '../../stores/live.svelte';
 
   interface Props {
     onfilterchange: (filters: Record<string, string>) => void;
   }
   let { onfilterchange }: Props = $props();
 
-  const followedSessionId = $derived(getLiveSettings().enabled ? getMonitorSessionId() : null);
+  const followedSessionId = $derived(getFollowedLiveSessionId());
 
   // Today's and the last 30 days' cost come from the Usage API, with the window
   // Usage's 30D range uses, so the Monitor and Usage show the same figures.

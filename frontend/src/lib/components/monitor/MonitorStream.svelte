@@ -9,6 +9,7 @@
     getLiveItemsError,
     getLiveItemsHasMore,
     getLiveItemsLoading,
+    getLiveSessionLoadFailed,
     getLiveSessionMissing,
     getLiveSettings,
     getLiveTurns,
@@ -34,6 +35,7 @@
 
   const session = $derived(getSelectedLiveSession());
   const missing = $derived(getLiveSessionMissing());
+  const loadFailed = $derived(getLiveSessionLoadFailed());
   const turns = $derived(getLiveTurns());
   const items = $derived(getLiveItems());
   const selectedItem = $derived(getSelectedLiveItem());
@@ -105,6 +107,17 @@
       >
         {#snippet action()}
           <Button variant="neutral" size="sm" onclick={() => setSelectedSessionId(sessionId)}>Show recent events</Button>
+        {/snippet}
+      </EmptyState>
+    </section>
+  {:else if loadFailed}
+    <section class="rounded-lg border border-line bg-surface">
+      <EmptyState
+        title="Couldn't load this session."
+        description="The live view didn't answer. Its stream may still be there."
+      >
+        {#snippet action()}
+          <Button variant="neutral" size="sm" onclick={() => void followLiveSession(sessionId)}>Retry</Button>
         {/snippet}
       </EmptyState>
     </section>

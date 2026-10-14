@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
-    getMonitorSessionId,
     getTab,
     setTab,
     isCommandPaletteOpen,
@@ -10,7 +9,7 @@
     openCommandPalette,
     type Tab,
   } from './lib/stores/router.svelte';
-  import { initializeLiveSettings } from './lib/stores/live.svelte';
+  import { getFollowedLiveSessionId, initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
   import ConnectionStatus from './lib/components/monitor/ConnectionStatus.svelte';
   import StaleBuildNotice from './lib/components/monitor/StaleBuildNotice.svelte';
@@ -112,7 +111,7 @@
   </header>
 
   <!-- Contextual sub-bar (only on tabs that filter; a followed session has none) -->
-  {#if tab === 'monitor' && !getMonitorSessionId()}
+  {#if tab === 'monitor' && !getFollowedLiveSessionId()}
     <div class="border-b border-line px-4 sm:px-6 py-2">
       <FilterBar onchange={handleFilterChange} />
     </div>
