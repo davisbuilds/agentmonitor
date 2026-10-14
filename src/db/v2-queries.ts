@@ -105,6 +105,7 @@ function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
     project: row.project,
     agent: row.agent,
     first_message: row.first_message,
+    title: row.title ?? null,
     started_at: row.started_at,
     ended_at: row.ended_at,
     message_count: row.message_count,
@@ -129,7 +130,43 @@ function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
       usedTokens: row.context_used_tokens,
       window: row.context_window_tokens,
     })?.pct ?? null,
+    ...(row.child_count === undefined ? {} : { child_count: row.child_count }),
   };
+}
+
+export interface SessionTitleFields {
+  title: string | null;
+  first_message: string | null;
+}
+
+/**
+ * The title fields of the browser session behind each id. Usage and trace rows
+ * key a Codex session by its native UUID, while its browsable transcript is
+ * stored under the rollout file name; both name the same session.
+ */
+export function lookupSessionTitles(ids: readonly string[]): Map<string, SessionTitleFields> {
+  const titles = new Map<string, SessionTitleFields>();
+  if (ids.length === 0) return titles;
+  const keys = [...new Set(ids.map(id => id.toLowerCase()))];
+  const rows = getDb().prepare(`
+    SELECT id, agent, integration_mode, title, first_message, ${browserSessionKey('b')} AS session_key
+    FROM browsing_sessions b
+    WHERE b.id IN (${ids.map(() => '?').join(', ')})
+      OR (b.agent = 'codex' AND ${browserSessionKey('b')} IN (${keys.map(() => '?').join(', ')}))
+    ORDER BY CASE WHEN b.integration_mode = 'codex-jsonl' THEN 0 ELSE 1 END, b.id
+  `).all(...ids, ...keys) as Array<{
+    id: string; agent: string; title: string | null; first_message: string | null; session_key: string;
+  }>;
+  for (const id of ids) {
+    const key = id.toLowerCase();
+    const matches = rows.filter(row => row.id === id || (row.agent === 'codex' && row.session_key === key));
+    if (matches.length === 0) continue;
+    titles.set(id, {
+      title: matches.find(row => row.title)?.title ?? null,
+      first_message: matches.find(row => row.first_message)?.first_message ?? null,
+    });
+  }
+  return titles;
 }
 
 // --- Sessions ---
@@ -185,6 +222,43 @@ const sessionListCte = `WITH ranked_sessions AS (
       message_count DESC, id ASC
   ) AS identity_rank FROM browsing_sessions
 ), listed_sessions AS (SELECT * FROM ranked_sessions WHERE identity_rank = 1)`;
+
+/** The session a browser row stands for, by the same aliases sessionListCte collapses. */
+function browserSessionKey(alias: string): string {
+  return `CASE
+    WHEN ${alias}.agent = 'codex' AND ${alias}.integration_mode = 'codex-jsonl'
+      AND ${alias}.id GLOB '${codexRolloutGlob}' THEN lower(substr(${alias}.id, -36))
+    WHEN ${alias}.agent = 'codex' AND ${alias}.integration_mode IN ('codex-import', 'codex-otel', 'codex-summary')
+      AND ${alias}.id GLOB '${codexUuidGlob}' THEN lower(${alias}.id)
+    ELSE ${alias}.id END`;
+}
+
+/** The session a row names as its parent: Codex records the parent's native UUID. */
+function parentSessionKey(alias: string): string {
+  return `CASE WHEN ${alias}.agent = 'codex' THEN lower(${alias}.parent_session_id)
+    ELSE ${alias}.parent_session_id END`;
+}
+
+// What a session list shows: one row per session, without internal jobs, and
+// with a subagent nested under its parent (counted there) whenever the parent is
+// stored. A subagent whose parent is not stored stays listed on its own.
+const browsableSessionsCte = `${sessionListCte},
+session_keys AS (SELECT DISTINCT agent, ${browserSessionKey('b')} AS session_key FROM browsing_sessions b),
+child_counts AS (
+  SELECT c.agent, ${parentSessionKey('c')} AS parent_key, COUNT(*) AS child_count
+  FROM listed_sessions c
+  WHERE c.parent_session_id IS NOT NULL AND COALESCE(c.relationship_type, '') != 'internal'
+  GROUP BY c.agent, parent_key
+),
+browsable_sessions AS (
+  SELECT s.*, COALESCE(cc.child_count, 0) AS child_count
+  FROM listed_sessions s
+  LEFT JOIN child_counts cc ON cc.agent = s.agent AND cc.parent_key = ${browserSessionKey('s')}
+  WHERE COALESCE(s.relationship_type, '') != 'internal'
+    AND NOT (s.parent_session_id IS NOT NULL AND EXISTS (
+      SELECT 1 FROM session_keys k WHERE k.agent = s.agent AND k.session_key = ${parentSessionKey('s')}
+    ))
+)`;
 
 // Keys deliberately distinguish unrecognized browser projections from native
 // Codex UUIDs. An arbitrary producer mode is not evidence of an alias.
@@ -405,7 +479,7 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
   const filterValues = [...values];
 
   const total = (db.prepare(
-    `${sessionListCte} SELECT COUNT(*) as c FROM listed_sessions ${filterWhere}`
+    `${browsableSessionsCte} SELECT COUNT(*) as c FROM browsable_sessions ${filterWhere}`
   ).get(...filterValues) as CountResult).c;
 
   const cursor = decodeTimeCursor(params.cursor);
@@ -418,7 +492,7 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
 
   values.push(limit);
   const data = (db.prepare(
-    `${sessionListCte} SELECT * FROM listed_sessions ${where} ORDER BY started_at DESC, id DESC LIMIT ?`
+    `${browsableSessionsCte} SELECT * FROM browsable_sessions ${where} ORDER BY started_at DESC, id DESC LIMIT ?`
   ).all(...values) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 
   // Build cursor from last item
@@ -465,9 +539,15 @@ export function listObservedExecutions(params: { limit?: number; offset?: number
 
 export function getSessionChildren(parentId: string): BrowsingSessionRow[] {
   const db = getDb();
-  return (db.prepare(
-    'SELECT * FROM browsing_sessions WHERE parent_session_id = ? ORDER BY started_at'
-  ).all(parentId) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
+  const parent = db.prepare(`SELECT agent, ${browserSessionKey('b')} AS session_key FROM browsing_sessions b WHERE b.id = ?`)
+    .get(parentId) as { agent: string; session_key: string } | undefined;
+  if (!parent) return [];
+  return (db.prepare(`
+    ${sessionListCte}
+    SELECT * FROM listed_sessions c
+    WHERE c.parent_session_id IS NOT NULL AND c.agent = ? AND ${parentSessionKey('c')} = ?
+    ORDER BY c.started_at, c.id
+  `).all(parent.agent, parent.session_key) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 }
 
 // --- Live sessions ---
@@ -795,7 +875,8 @@ export function listPinnedMessages(params: PinsListParams & { session_id?: strin
       p.created_at,
       bs.project as session_project,
       bs.agent as session_agent,
-      bs.first_message as session_first_message
+      bs.first_message as session_first_message,
+      bs.title as session_title
     FROM pinned_messages p
     LEFT JOIN messages m
       ON m.session_id = p.session_id
@@ -840,7 +921,8 @@ export function pinMessage(sessionId: string, messageId: number): PinnedMessageR
       p.created_at,
       bs.project as session_project,
       bs.agent as session_agent,
-      bs.first_message as session_first_message
+      bs.first_message as session_first_message,
+      bs.title as session_title
     FROM pinned_messages p
     LEFT JOIN messages m
       ON m.session_id = p.session_id
@@ -970,6 +1052,7 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
         bs.started_at as session_started_at,
         bs.ended_at as session_ended_at,
         bs.first_message as session_first_message,
+        bs.title as session_title,
         bm25(messages_fts) as search_rank
       FROM messages_fts
       JOIN messages m ON m.rowid = messages_fts.rowid
@@ -1016,7 +1099,8 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
       bs.agent as session_agent,
       bs.started_at as session_started_at,
       bs.ended_at as session_ended_at,
-      bs.first_message as session_first_message
+      bs.first_message as session_first_message,
+      bs.title as session_title
     FROM messages_fts
     JOIN messages m ON m.rowid = messages_fts.rowid
     JOIN browsing_sessions bs ON bs.id = m.session_id
@@ -3794,6 +3878,8 @@ export function getUsageTopSessions(
   }>;
   const sessionsById = new Map(sessionRows.map(row => [row.id, row]));
 
+  const titles = lookupSessionTitles(ids);
+
   const eventCount = usageSessionEventCountStatement(ids, params);
   const eventCountRows = db.prepare(eventCount.sql).all(...eventCount.values) as Array<{ id: string; event_count: number }>;
   const eventCountsById = new Map(eventCountRows.map(row => [row.id, row.event_count]));
@@ -3822,6 +3908,8 @@ export function getUsageTopSessions(
         id: entry.id,
         project: preferUsageProject(entry.project, browsing?.project, session?.project),
         agent: entry.agent ?? session?.agent_type ?? browsing?.agent ?? 'unknown',
+        title: titles.get(entry.id)?.title ?? null,
+        first_message: titles.get(entry.id)?.first_message ?? null,
         started_at: browsing?.started_at ?? session?.started_at ?? entry.first_activity_at,
         ended_at: browsing?.ended_at ?? session?.ended_at ?? entry.last_activity_at,
         last_activity_at: entry.last_activity_at,

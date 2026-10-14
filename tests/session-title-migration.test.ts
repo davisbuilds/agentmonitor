@@ -29,10 +29,10 @@ function seed(): void {
   const watched = db.prepare(`
     INSERT INTO watched_files (file_path, file_hash, file_mtime, status) VALUES (?, 'hash', '2026-10-01', 'parsed')
   `);
-  const claudeFile = '/home/u/.claude/projects/-home-u-app/top-1.jsonl';
-  const subagentFile = '/home/u/.claude/projects/-home-u-app/top-1/subagents/agent-a9.jsonl';
-  const codexFile = '/home/u/.codex/sessions/2026/10/01/rollout-2026-10-01T10-00-00-0000.jsonl';
-  const antigravityFile = '/home/u/.gemini/antigravity/brain/ag-1.pb';
+  const claudeFile = '/Users/example/.claude/projects/-Users-example-app/top-1.jsonl';
+  const subagentFile = '/Users/example/.claude/projects/-Users-example-app/top-1/subagents/agent-a9.jsonl';
+  const codexFile = '/Users/example/.codex/sessions/2026/10/01/rollout-2026-10-01T10-00-00-0000.jsonl';
+  const antigravityFile = '/Users/example/.gemini/antigravity/brain/ag-1.pb';
   session.run('top-1', 'claude', 'Fix it', claudeFile, null, null, 'claude-jsonl');
   session.run('agent-a9', 'claude', 'You are a helper', subagentFile, null, 'subagent', 'claude-jsonl');
   session.run('rollout-1', 'codex', '# AGENTS.md instructions for /app', codexFile, null, 'conversation', 'codex-jsonl');
@@ -40,7 +40,7 @@ function seed(): void {
   session.run('codex-job', 'codex', 'Generate a concise, single-line task title of at most 36 characters', null, null, null, 'codex-otel');
   session.run('codex-user', 'codex', 'Generate a title for the blog post', null, null, null, 'codex-otel');
   // An older layout kept subagent transcripts beside their parent's, not inside it.
-  session.run('agent-old', 'claude', 'Legacy helper', '/home/u/.claude/projects/-home-u-app/agent-old.jsonl', null, 'subagent', 'claude-jsonl');
+  session.run('agent-old', 'claude', 'Legacy helper', '/Users/example/.claude/projects/-Users-example-app/agent-old.jsonl', null, 'subagent', 'claude-jsonl');
   session.run('codex-job-file', 'codex', 'Write a brief catch-up for a user returning to this task.', codexFile.replace('0000', '1111'), null, null, 'codex-jsonl');
   session.run('codex-sub', 'codex', 'Write a brief catch-up for a user returning to this task.', null, 'p', 'subagent', 'codex-otel');
   for (const file of [claudeFile, subagentFile, codexFile, antigravityFile]) watched.run(file);

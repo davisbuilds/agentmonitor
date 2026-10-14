@@ -210,6 +210,7 @@ export function registerSessionLiveCommands(): void {
           project: row.session_project,
           agent: row.session_agent,
           first_message: row.snippet,
+          title: null,
           started_at: row.session_started_at,
           ended_at: row.session_ended_at,
           message_count: row.message_ordinal,

@@ -16,6 +16,8 @@ export interface BrowsingSessionRow {
   project: string | null;
   agent: string;
   first_message: string | null;
+  // A name the harness or a parent gave the session; shown before first_message.
+  title: string | null;
   started_at: string | null;
   ended_at: string | null;
   message_count: number;
@@ -35,11 +37,14 @@ export interface BrowsingSessionRow {
   context_used_tokens: number | null;
   context_window_tokens: number | null;
   context_pct: number | null;
+  // Session lists only: listed subagent sessions nested under this one.
+  child_count?: number;
 }
 
 // context_pct is derived, not stored, so it is omitted from the raw DB row.
 export interface BrowsingSessionDbRow
-  extends Omit<BrowsingSessionRow, 'capabilities' | 'context_pct'> {
+  extends Omit<BrowsingSessionRow, 'capabilities' | 'context_pct' | 'child_count'> {
+  child_count?: number;
   capabilities_json: string | null;
 }
 
@@ -150,6 +155,7 @@ export interface PinnedMessageRow {
   session_project: string | null;
   session_agent: string | null;
   session_first_message: string | null;
+  session_title: string | null;
 }
 
 // --- Aggregate query result ---
@@ -1100,6 +1106,8 @@ export interface UsageTopSessionRow {
   id: string;
   project: string | null;
   agent: string;
+  title: string | null;
+  first_message: string | null;
   started_at: string | null;
   ended_at: string | null;
   last_activity_at: string | null;
@@ -1286,6 +1294,7 @@ export interface SearchResultRow {
   session_started_at: string | null;
   session_ended_at: string | null;
   session_first_message: string | null;
+  session_title: string | null;
 }
 
 // --- Trace quality response types ---
