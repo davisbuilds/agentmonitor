@@ -6,19 +6,30 @@
 // taken from the first user message names the injected context instead.
 
 const TITLE_MAX_CHARS = 200;
+// Elements Codex and Claude Code write into user messages on their own. A user's
+// prompt can be markup too (`<task>…</task>`), so only these tags mark context.
+const HARNESS_TAGS = new Set([
+  // Codex
+  'environment_context', 'recommended_plugins', 'user_action', 'turn_aborted', 'skill',
+  'subagent_notification', 'codex_internal_context', 'external_codex_apps_open_page',
+  // Claude Code
+  'system-reminder', 'task-notification', 'local-command-caveat', 'local-command-stdout',
+  'local-command-stderr', 'command-name', 'command-message', 'command-args',
+  'bash-input', 'bash-stdout', 'bash-stderr',
+]);
 const OPENING_TAG_RE = /^<([A-Za-z][\w-]*)(?:\s[^>]*)?>/;
 const IMAGE_TAG_RE = /^<\/?image\b[^>]*>$/;
 
 /**
- * True when the text is nothing but complete markup elements, such as
+ * True when the text is nothing but complete harness elements, such as
  * `<environment_context>…</environment_context>` or a run of Claude Code's
  * `<command-name>` / `<command-message>` / `<command-args>` wrappers.
  */
-function isOnlyWrapperElements(text: string): boolean {
+function isOnlyHarnessElements(text: string): boolean {
   let rest = text;
   while (rest) {
     const open = OPENING_TAG_RE.exec(rest);
-    if (!open) return false;
+    if (!open || !HARNESS_TAGS.has(open[1])) return false;
     const close = `</${open[1]}>`;
     const end = rest.indexOf(close, open[0].length);
     if (end < 0) return false;
@@ -32,7 +43,7 @@ export function isInjectedContextText(text: string): boolean {
   if (!trimmed) return false;
   if (trimmed.startsWith('# AGENTS.md instructions')) return true;
   if (IMAGE_TAG_RE.test(trimmed)) return true;
-  return isOnlyWrapperElements(trimmed);
+  return isOnlyHarnessElements(trimmed);
 }
 
 function cleanTitleText(text: string): string {

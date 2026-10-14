@@ -25,6 +25,9 @@ describe('isInjectedContextText', () => {
       '<local-command-caveat>Caveat</local-command-caveat>',
       '<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>',
       '<local-command-stdout>done</local-command-stdout>',
+      '<bash-input>git status</bash-input><bash-stdout>clean</bash-stdout><bash-stderr></bash-stderr>',
+      '<skill>\n<name>review</name>\n</skill>',
+      '<user_action>\n  <context>User initiated a review task.</context>\n</user_action>',
       '<image name=[Image #1]>',
       '</image>',
     ]) {
@@ -39,6 +42,8 @@ describe('isInjectedContextText', () => {
       'Use <environment_context> in the fixture',
       '# Plan: migrate to pnpm\n\nSteps below.',
       '<b>bold</b> text and then more words',
+      '<task>Review the authentication flow</task>',
+      '<div class="card">Fix the card padding</div>',
     ]) {
       assert.equal(isInjectedContextText(text), false, text);
     }
