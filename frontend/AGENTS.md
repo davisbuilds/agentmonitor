@@ -1,6 +1,6 @@
 # Svelte 5 Frontend
 
-Vite SPA served at `/app/` with Monitor, Live, Sessions, Analytics, Benchmarks, and Search tabs.
+Vite SPA served at `/app/` with Monitor, Sessions, Analytics, Benchmarks, and Search tabs. An agent card on Monitor opens that session's live stream (`components/monitor/MonitorStream.svelte`).
 This is the canonical product surface for AgentMonitor.
 
 See root `AGENTS.md` for project overview, API contract (V2 endpoints this app consumes), and shared conventions.
@@ -25,11 +25,11 @@ See root `AGENTS.md` for project overview, API contract (V2 endpoints this app c
 
 ## Code Map
 
-- `src/lib/components/monitor/`: Monitor tab (real-time dashboard).
+- `src/lib/components/monitor/`: Monitor tab (real-time dashboard). An agent card opens `MonitorStream` (the followed session's live stream at `#monitor?session=…`, built from `components/live/ItemStream` + `InspectorPanel` and `stores/live.svelte.ts`); legacy `#live` redirects to Monitor. With the live view off, cards open the `SessionDetail` drawer.
 - `src/lib/components/sessions/`: Sessions tab. `SessionsShell.svelte` renders Browse | Pinned SubTabs (Pinned folded in from its old top-level tab); Browse = `SessionsPage` (list + `SessionViewer`), Pinned = `components/pinned/PinnedPage`. `view` rides the `#sessions?view=…` hash; legacy `#pinned` redirects to `#sessions?view=pinned`.
 - `src/lib/components/search/`: Search tab (FTS5 full-text search).
 - `src/lib/components/analytics/`: Analytics tab. `AnalyticsShell.svelte` hosts the shared filter bar + SubTabs and renders five sub-views — Overview, Usage (`components/usage/`), Skills (the filterable consultation evidence ledger), Insights (`components/insights/`), and Quality (`components/trace-quality/`). Overview keeps only a bounded consultation preview; `#analytics?view=skills` owns the full expandable rows. Shared filter state + the `#analytics?view=…` hash live in `stores/analytics-filters.svelte.ts`; the `analytics`/`usage`/`insights`/`trace-quality` data stores read filters from it and subscribe for refetch.
-- `src/lib/components/trace-quality/`: lean Quality sub-view (one trace per session, summary-backed list + on-demand detail). `TraceQualityPage` (list + inspector), `TraceTree` (recursive observation tree, read straight from the loaded detail), `TraceCoverageBadge`, `TraceDrillInLink` (session drill-in from Usage/Analytics/Live/Sessions/Search). Backed by `stores/trace-quality.svelte.ts`; `?session=`/`?trace=` ride the analytics hash. The persisted eval/dashboard depth (scores, findings, prompt rollups, score trends) was removed in the trace-quality reframe. Current local projection and deferred export boundaries live in `docs/system/trace-quality.md`; broader direction lives in `docs/project/VISION.md`.
+- `src/lib/components/trace-quality/`: lean Quality sub-view (one trace per session, summary-backed list + on-demand detail). `TraceQualityPage` (list + inspector), `TraceTree` (recursive observation tree, read straight from the loaded detail), `TraceCoverageBadge`, `TraceDrillInLink` (session drill-in from Usage/Analytics/the live stream/Sessions/Search). Backed by `stores/trace-quality.svelte.ts`; `?session=`/`?trace=` ride the analytics hash. The persisted eval/dashboard depth (scores, findings, prompt rollups, score trends) was removed in the trace-quality reframe. Current local projection and deferred export boundaries live in `docs/system/trace-quality.md`; broader direction lives in `docs/project/VISION.md`.
 - `src/lib/components/benchmarks/`: Benchmarks tab (segregated bake-off comparison). `BenchmarksPage.svelte` renders the studies list → study detail (arm ladder with verdict Badges + auto-generated honesty panel). Selected study rides `#benchmarks?study=<study_id>`; data via `stores/benchmarks.svelte.ts` off `GET /api/v2/benchmarks[/:studyId]`. Study detail also renders `BenchmarkFrontier.svelte` — a cost×score Pareto scatter on the shared `ui/chart/` primitives (`scales.ts`, `layout.ts`, `PlotFrame.svelte`) with pure geometry in `frontier-geometry.ts`; markers click-drill to the matching ladder row.
 - `src/lib/api/client.ts`: typed API client for v1 and v2 endpoints.
 - `src/lib/stores/`: Svelte 5 reactive state (runes).

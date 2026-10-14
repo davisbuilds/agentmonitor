@@ -1,6 +1,6 @@
-export type AppTab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search' | 'benchmarks';
+export type AppTab = 'monitor' | 'sessions' | 'analytics' | 'search' | 'benchmarks';
 
-const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'analytics', 'search', 'benchmarks']);
+const TAB_SET = new Set<AppTab>(['monitor', 'sessions', 'analytics', 'search', 'benchmarks']);
 
 /** Sub-views inside the consolidated Analytics tab. */
 export type AnalyticsView = 'overview' | 'usage' | 'skills' | 'insights' | 'quality';
@@ -232,6 +232,30 @@ export function canonicalizeLegacyPinnedHash(hash: string): string | null {
   const [rawTab = ''] = normalized.split('?');
   if (rawTab !== 'pinned') return null;
   return 'sessions?view=pinned';
+}
+
+/**
+ * Monitor's drill-in: an agent card opens that session's live stream at
+ * `#monitor?session=…`. Without a session the Monitor hash stays empty.
+ */
+export function buildMonitorHash(sessionId: string | null): string {
+  if (!sessionId) return '';
+  return `monitor?${new URLSearchParams({ session: sessionId }).toString()}`;
+}
+
+export function parseMonitorSessionId(hash: string): string | null {
+  const [rawTab = '', query = ''] = normalizeHash(hash).split('?');
+  if (rawTab !== 'monitor') return null;
+  return new URLSearchParams(query).get('session') || null;
+}
+
+/**
+ * Rewrite a legacy `#live` deep link to Monitor, which now holds the live
+ * stream. Returns null when no rewrite is needed.
+ */
+export function canonicalizeLegacyLiveHash(hash: string): string | null {
+  const [rawTab = ''] = normalizeHash(hash).split('?');
+  return rawTab === 'live' ? '' : null;
 }
 
 export function buildSearchHash(state: SearchRouteState): string {
