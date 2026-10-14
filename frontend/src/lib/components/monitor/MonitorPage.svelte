@@ -38,8 +38,10 @@
   // Each read is synchronous SQLite work on the server, so they run in turn,
   // and only the latest request's figures are kept.
   let costWindowsRequest = 0;
+  let lastCostWindowsAt = 0;
   async function loadCostWindows(filters: Record<string, string> = {}) {
     const request = ++costWindowsRequest;
+    lastCostWindowsAt = Date.now();
     try {
       const windows = monitorCostWindowParams(filters);
       const today = await fetchUsageSummary(windows.today);
@@ -147,7 +149,6 @@
   // that as the cue to re-read the windowed figures, at most once per interval.
   const COST_WINDOWS_REFRESH_MS = 30_000;
   let lastCostSeen: number | null = null;
-  let lastCostWindowsAt = 0;
   $effect(() => {
     const cost = getStats().total_cost_usd;
     if (lastCostSeen === null) {
@@ -157,7 +158,6 @@
     if (cost === lastCostSeen) return;
     lastCostSeen = cost;
     if (Date.now() - lastCostWindowsAt < COST_WINDOWS_REFRESH_MS) return;
-    lastCostWindowsAt = Date.now();
     void loadCostWindows(getFilters());
   });
 

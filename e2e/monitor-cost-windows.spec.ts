@@ -63,11 +63,20 @@ test.afterAll(async () => {
 });
 
 test('the Monitor names its cost windows, and its 30 days matches Usage', async ({ page }) => {
+  const summaryReads: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/v2/usage/summary') summaryReads.push(url.search);
+  });
   await page.goto(`${baseUrl}/app/`);
 
   await expect(page.getByTestId('monitor-cost-today')).toHaveText('$1.25');
   await expect(page.getByTestId('monitor-cost-30d')).toHaveText('$3.25');
   await expect(page.getByText('$7.25')).toHaveCount(0);
+  // Read once on load: the first stats snapshot moving the cost from zero must
+  // not start a second pair of reads.
+  await page.waitForTimeout(1_000);
+  expect(summaryReads).toHaveLength(2);
 
   await page.goto(`${baseUrl}/app/#analytics?view=usage`);
   const usageTotal = page.getByText('Total Cost', { exact: true }).locator('xpath=..');
