@@ -59,7 +59,8 @@ Exact routes and flags live in source and CLI help.
 
 The Svelte Quality view sits under Analytics. It presents coverage badges, aggregate
 stats, and an expandable observation tree. Deep links from Usage, Analytics, Live,
-Sessions, and Search scope the explorer to the relevant session or trace.
+and Sessions (including its search results) scope the explorer to the relevant
+session or trace.
 
 Local score editing, prompt rollups, persisted findings, and aggregate eval
 dashboards were removed with the old warehouse.

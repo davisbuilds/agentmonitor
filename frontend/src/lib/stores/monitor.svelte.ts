@@ -1,5 +1,4 @@
-import { fetchSessionDetail, fetchLiveSessions, statsParams, type Stats, type AgentEvent, type Session, type FilterOptions, type CostData, type ToolStats, type QuotaMonitorData } from '../api/client';
-import type { CostWindow } from '../monitor-analytics';
+import { fetchSessionDetail, fetchLiveSessions, statsParams, type Stats, type AgentEvent, type Session, type FilterOptions, type QuotaMonitorData } from '../api/client';
 import { parseTimestamp } from '../format';
 import { mergeSessionAggregates } from '../monitor-session-merge';
 import { addEventUsage } from '../monitor-token-totals';
@@ -319,17 +318,15 @@ export function getFilterOptions(): FilterOptions { return filterOptions; }
 export function setFilterOptions(o: FilterOptions): void { filterOptions = o; }
 
 // --- Cost ---
-let costData = $state<CostData | null>(null);
-export function getCostData(): CostData | null { return costData; }
-export function setCostData(d: CostData): void { costData = d; }
-let costWindow = $state<CostWindow>('60d');
-export function getCostWindow(): CostWindow { return costWindow; }
-export function setCostWindow(window: CostWindow): void { costWindow = window; }
-
-// --- Tools ---
-let toolStats = $state<ToolStats | null>(null);
-export function getToolStats(): ToolStats | null { return toolStats; }
-export function setToolStats(t: ToolStats): void { toolStats = t; }
+// Today's and the last 30 days' cost, read from the Usage API so they match the
+// Usage page. Null until the first read finishes.
+export interface MonitorCostWindowTotals {
+  today: number | null;
+  last30Days: number | null;
+}
+let costWindows = $state<MonitorCostWindowTotals>({ today: null, last30Days: null });
+export function getCostWindows(): MonitorCostWindowTotals { return costWindows; }
+export function setCostWindows(next: MonitorCostWindowTotals): void { costWindows = next; }
 
 // --- Usage Monitor ---
 let quotaMonitor = $state<QuotaMonitorData[]>([]);

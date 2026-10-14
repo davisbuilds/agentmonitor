@@ -1,6 +1,6 @@
-export type AppTab = 'monitor' | 'live' | 'sessions' | 'analytics' | 'search' | 'benchmarks';
+export type AppTab = 'monitor' | 'sessions' | 'analytics' | 'benchmarks';
 
-const TAB_SET = new Set<AppTab>(['monitor', 'live', 'sessions', 'analytics', 'search', 'benchmarks']);
+const TAB_SET = new Set<AppTab>(['monitor', 'sessions', 'analytics', 'benchmarks']);
 
 /** Sub-views inside the consolidated Analytics tab. */
 export type AnalyticsView = 'overview' | 'usage' | 'skills' | 'insights' | 'quality';
@@ -15,9 +15,6 @@ export type AnalyticsSkillSort =
   | 'first_read_rate'
   | 'rehydrations'
   | 'name';
-
-/** Sub-views inside the Sessions tab (Pinned folded in). */
-export type SessionsView = 'browse' | 'pinned';
 
 export interface ParsedAppHash {
   tab: AppTab;
@@ -49,19 +46,33 @@ export interface AnalyticsRouteState {
   traceId: string | null;
 }
 
+export type SessionsSearchSort = 'recent' | 'relevance';
+
+/**
+ * The Sessions tab: a session list that a query turns into full-text message
+ * results and the Pinned filter turns into pinned messages, plus the open
+ * session (and message) when the viewer is showing.
+ */
 export interface SessionsRouteState {
-  view: SessionsView;
+  query: string;
+  sort: SessionsSearchSort;
   project: string;
   agent: string;
+  pinned: boolean;
   sessionId: string | null;
   messageOrdinal: number | null;
 }
 
-export interface SearchRouteState {
-  query: string;
-  project: string;
-  agent: string;
-  sort: 'recent' | 'relevance';
+export function defaultSessionsRouteState(): SessionsRouteState {
+  return {
+    query: '',
+    sort: 'recent',
+    project: '',
+    agent: '',
+    pinned: false,
+    sessionId: null,
+    messageOrdinal: null,
+  };
 }
 
 function normalizeHash(hash: string): string {
@@ -94,13 +105,15 @@ export function buildAppHash(tab: AppTab, params: URLSearchParams | Record<strin
 }
 
 export function buildSessionsHash(state: SessionsRouteState): string {
-  // The Pinned sub-view has no session/filter state; Browse carries the rest.
-  if (state.view === 'pinned') {
-    return buildAppHash('sessions', { view: 'pinned' });
-  }
+  // Sort orders full-text results only: no query, or pinned messages (which
+  // keep their own order), leave it out of the link.
+  const ordersResults = state.query.trim() !== '' && !state.pinned;
   return buildAppHash('sessions', {
+    q: state.query,
     project: state.project,
     agent: state.agent,
+    sort: ordersResults && state.sort === 'relevance' ? 'relevance' : null,
+    pinned: state.pinned ? 1 : null,
     session: state.sessionId,
     message: state.messageOrdinal,
   });
@@ -114,9 +127,11 @@ export function parseSessionsHash(hash: string, fallback: SessionsRouteState): S
   const messageOrdinal = rawMessage == null ? null : Number.parseInt(rawMessage, 10);
 
   return {
-    view: parsed.params.get('view') === 'pinned' ? 'pinned' : 'browse',
+    query: parsed.params.get('q') || '',
+    sort: parsed.params.get('sort') === 'relevance' ? 'relevance' : 'recent',
     project: parsed.params.get('project') || '',
     agent: parsed.params.get('agent') || '',
+    pinned: parsed.params.get('pinned') === '1',
     sessionId: parsed.params.get('session') || null,
     messageOrdinal: Number.isFinite(messageOrdinal) ? messageOrdinal : null,
   };
@@ -224,34 +239,57 @@ export function canonicalizeLegacyAnalyticsHash(hash: string): string | null {
 }
 
 /**
- * Rewrite a legacy top-level `#pinned` deep link into the canonical
- * `#sessions?view=pinned` form. Returns null when no rewrite is needed.
+ * Rewrite a legacy Pinned deep link — the old top-level `#pinned` tab or the
+ * old `#sessions?view=pinned` sub-view — into the canonical Pinned filter,
+ * `#sessions?pinned=1`. Returns null when no rewrite is needed.
  */
 export function canonicalizeLegacyPinnedHash(hash: string): string | null {
   const normalized = normalizeHash(hash);
-  const [rawTab = ''] = normalized.split('?');
-  if (rawTab !== 'pinned') return null;
-  return 'sessions?view=pinned';
-}
-
-export function buildSearchHash(state: SearchRouteState): string {
-  return buildAppHash('search', {
-    q: state.query,
-    project: state.project,
-    agent: state.agent,
-    sort: state.sort === 'recent' ? null : state.sort,
+  const [rawTab = '', query = ''] = normalized.split('?');
+  const params = new URLSearchParams(query);
+  if (rawTab === 'pinned') {
+    return buildSessionsHash({ ...defaultSessionsRouteState(), pinned: true });
+  }
+  if (rawTab !== 'sessions' || params.get('view') !== 'pinned') return null;
+  params.delete('view');
+  return buildSessionsHash({
+    ...parseSessionsHash(`sessions?${params.toString()}`, defaultSessionsRouteState()),
+    pinned: true,
   });
 }
 
-export function parseSearchHash(hash: string, fallback: SearchRouteState): SearchRouteState {
-  const parsed = parseAppHash(hash);
-  if (parsed.tab !== 'search') return fallback;
+/**
+ * Rewrite a legacy `#search?…` deep link (the Search tab folded into Sessions)
+ * into the canonical `#sessions?q=…` form. Returns null when no rewrite is needed.
+ */
+export function canonicalizeLegacySearchHash(hash: string): string | null {
+  const normalized = normalizeHash(hash);
+  const [rawTab = '', query = ''] = normalized.split('?');
+  if (rawTab !== 'search') return null;
+  // The old Search params (q, project, agent, sort) keep their names.
+  return buildSessionsHash(parseSessionsHash(`sessions?${query}`, defaultSessionsRouteState()));
+}
 
-  const sort = parsed.params.get('sort');
-  return {
-    query: parsed.params.get('q') || '',
-    project: parsed.params.get('project') || '',
-    agent: parsed.params.get('agent') || '',
-    sort: sort === 'relevance' ? 'relevance' : fallback.sort,
-  };
+/**
+ * Monitor's drill-in: an agent card opens that session's live stream at
+ * `#monitor?session=…`. Without a session the Monitor hash stays empty.
+ */
+export function buildMonitorHash(sessionId: string | null): string {
+  if (!sessionId) return '';
+  return `monitor?${new URLSearchParams({ session: sessionId }).toString()}`;
+}
+
+export function parseMonitorSessionId(hash: string): string | null {
+  const [rawTab = '', query = ''] = normalizeHash(hash).split('?');
+  if (rawTab !== 'monitor') return null;
+  return new URLSearchParams(query).get('session') || null;
+}
+
+/**
+ * Rewrite a legacy `#live` deep link to Monitor, which now holds the live
+ * stream. Returns null when no rewrite is needed.
+ */
+export function canonicalizeLegacyLiveHash(hash: string): string | null {
+  const [rawTab = ''] = normalizeHash(hash).split('?');
+  return rawTab === 'live' ? '' : null;
 }

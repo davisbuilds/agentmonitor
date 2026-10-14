@@ -116,23 +116,6 @@ export interface Session {
   lines_removed?: number;
 }
 
-export interface CostData {
-  timeline: Array<{ date: string; cost: number }>;
-  by_project: Array<{ project: string; cost: number; session_count: number; event_count: number }>;
-  by_model: Array<{ model: string; cost: number }>;
-}
-
-export interface ToolStats {
-  tools: Array<{
-    tool_name: string;
-    total_calls: number;
-    error_count: number;
-    error_rate: number;
-    avg_duration_ms: number;
-    by_agent: Record<string, number>;
-  }>;
-}
-
 export interface SelectOption {
   value: string;
   label: string;
@@ -838,24 +821,24 @@ export interface TraceQualityObservationTreeNode extends TraceQualityObservation
 
 type Filters = Record<string, string>;
 
-function monitorCostFiltersToUsageParams(filters: Filters): Record<string, string> {
-  const params: Record<string, string> = {};
-  if (filters.project) params.project = filters.project;
-  if (filters.agent_type) params.agent = filters.agent_type;
-  if (filters.since) params.date_from = filters.since;
-  return params;
-}
-
 function qs(params: Record<string, string | number | boolean | undefined>): string {
   const entries = Object.entries(params).filter(([, v]) => v != null);
   if (entries.length === 0) return '';
   return '?' + new URLSearchParams(entries.map(([k, v]) => [k, String(v)])).toString();
 }
 
+/** A non-2xx API response, keeping the status so callers can tell 404 from failure. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = 'ApiError';
+  }
+}
+
 async function checkedJson<T>(res: Response, context: string): Promise<T> {
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error(`${context} failed (${res.status}): ${body}`);
+    throw new ApiError(`${context} failed (${res.status}): ${body}`, res.status);
   }
   return res.json();
 }
@@ -914,36 +897,6 @@ export async function fetchMonitorSessions(filters: Filters = {}): Promise<{ ses
 export async function fetchFilterOptions(): Promise<FilterOptions> {
   const res = await fetch('/api/v2/monitor/filter-options');
   return checkedJson(res, 'fetchFilterOptions');
-}
-
-export async function fetchCostData(filters: Filters = {}): Promise<CostData> {
-  const params = monitorCostFiltersToUsageParams(filters);
-  // Monitor needs the same daily/project/model slices already returned by the
-  // Usage overview. Reuse its one-scan contract instead of queueing three
-  // synchronous SQLite scans on the server's event loop during every reload.
-  const overview = await fetchUsageOverview(params);
-
-  return {
-    timeline: overview.daily.map((item) => ({
-      date: item.date,
-      cost: item.cost_usd,
-    })),
-    by_project: overview.projects.map((item) => ({
-      project: item.project,
-      cost: item.cost_usd,
-      session_count: item.session_count,
-      event_count: item.usage_events,
-    })),
-    by_model: overview.models.map((item) => ({
-      model: item.model,
-      cost: item.cost_usd,
-    })),
-  };
-}
-
-export async function fetchToolStats(filters: Filters = {}): Promise<ToolStats> {
-  const res = await fetch(`/api/v2/monitor/tools${qs(monitorCostFiltersToUsageParams(filters))}`);
-  return checkedJson(res, 'fetchToolStats');
 }
 
 export async function fetchSessionDetail(id: string, eventLimit = 10): Promise<{ session: Session; events: AgentEvent[] }> {

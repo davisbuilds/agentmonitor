@@ -939,7 +939,8 @@ dependency because `~/Dev` is not a monorepo.
 
 1. Run `pnpm build`, then `amon serve`.
 2. Open `https://agentmonitor.localhost` and confirm the root redirects to `/app/`.
-3. Confirm capture settings match the Live banner.
+3. Open an agent card on Monitor and confirm its **Capture** settings match your
+   configuration.
 4. Start a Claude or Codex session and verify new activity appears without a full
    page reload.
 5. When capture is disabled, confirm payloads render redacted.

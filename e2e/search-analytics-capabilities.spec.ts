@@ -115,10 +115,11 @@ test.afterAll(async () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test('search and analytics explain what they cover behind an info button', async ({ page }) => {
-  await page.goto(`${baseUrl}/app/#search`);
-  await page.getByRole('button', { name: 'About search' }).click();
-  await expect(page.getByRole('dialog', { name: 'About search' })).toContainText('Searches the text of recorded transcripts.');
+test('sessions search and analytics explain what they cover behind an info button', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions`);
+  await page.getByRole('button', { name: 'About Sessions' }).click();
+  await expect(page.getByRole('dialog', { name: 'About Sessions' }))
+    .toContainText('search the text of recorded transcripts');
 
   await page.goto(`${baseUrl}/app/#analytics`);
   await page.getByRole('button', { name: 'About Tool Usage' }).click();
@@ -127,9 +128,9 @@ test('search and analytics explain what they cover behind an info button', async
 });
 
 test('app restores search and session deep links from the hash', async ({ page }) => {
-  await page.goto(`${baseUrl}/app/#search?q=quota%20reset&sort=relevance`);
-  await expect(page.getByPlaceholder('Search across transcript history…')).toHaveValue('quota reset');
-  await expect(page.locator('select').first()).toHaveValue('relevance');
+  await page.goto(`${baseUrl}/app/#sessions?q=quota%20reset&sort=relevance`);
+  await expect(page.getByRole('searchbox', { name: 'Search transcripts' })).toHaveValue('quota reset');
+  await expect(page.getByLabel('Sort results')).toHaveValue('relevance');
 
   await page.goto(`${baseUrl}/app/#sessions?session=missing-session&message=7`);
   await expect(page.getByRole('button', { name: /Back/ })).toBeVisible();
@@ -199,7 +200,7 @@ test('monitor filters use the v2 monitor endpoint instead of v1 filter options',
   expect(requestedPaths).not.toContain('/api/filter-options');
 });
 
-test('monitor cost card uses one v2 usage overview instead of per-panel or v1 cost reads', async ({ page }) => {
+test('monitor reads its cost windows from the v2 usage summary and loads no breakdowns', async ({ page }) => {
   const requestedPaths: string[] = [];
   page.on('request', (request) => {
     requestedPaths.push(new URL(request.url()).pathname);
@@ -207,12 +208,12 @@ test('monitor cost card uses one v2 usage overview instead of per-panel or v1 co
 
   await page.goto(`${baseUrl}/app/#monitor`);
 
-  await expect(page.getByText('Cost Overview')).toBeVisible();
-  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/overview')).toBe(true);
-  expect(requestedPaths).not.toContain('/api/v2/usage/daily');
-  expect(requestedPaths).not.toContain('/api/v2/usage/projects');
-  expect(requestedPaths).not.toContain('/api/v2/usage/models');
+  await expect(page.getByTestId('monitor-cost-30d')).not.toHaveText('—');
+  expect(requestedPaths).toContain('/api/v2/usage/summary');
+  expect(requestedPaths).not.toContain('/api/v2/usage/overview');
+  expect(requestedPaths).not.toContain('/api/v2/monitor/tools');
   expect(requestedPaths).not.toContain('/api/stats/cost');
+  expect(requestedPaths).not.toContain('/api/stats/tools');
 });
 
 test('monitor stats bar uses the v2 monitor endpoint instead of v1 stats', async ({ page }) => {
@@ -226,19 +227,6 @@ test('monitor stats bar uses the v2 monitor endpoint instead of v1 stats', async
   await expect(page.getByText(/Events\s+\d/).first()).toBeVisible();
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/stats')).toBe(true);
   expect(requestedPaths).not.toContain('/api/stats');
-});
-
-test('monitor tool analytics use the v2 monitor endpoint instead of v1 tool stats', async ({ page }) => {
-  const requestedPaths: string[] = [];
-  page.on('request', (request) => {
-    requestedPaths.push(new URL(request.url()).pathname);
-  });
-
-  await page.goto(`${baseUrl}/app/#monitor`);
-
-  await expect(page.getByText('Tool Analytics')).toBeVisible();
-  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/tools')).toBe(true);
-  expect(requestedPaths).not.toContain('/api/stats/tools');
 });
 
 test('monitor active sessions use the v2 monitor endpoint instead of v1 sessions', async ({ page }) => {
@@ -285,9 +273,11 @@ test('monitor session detail drawer uses v2 detail and transcript endpoints', as
 
   await page.goto(`${baseUrl}/app/#monitor`);
 
+  // This session has no live record, so its card offers the recent-events drawer.
   const card = page.locator('button').filter({ hasText: 'agentmonitor' }).first();
   await expect(card).toBeVisible();
   await card.click();
+  await page.getByRole('button', { name: 'Show recent events' }).click();
 
   await expect(page.getByRole('heading', { name: 'Session Details' })).toBeVisible();
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/sessions/e2e-monitor-model-session')).toBe(true);

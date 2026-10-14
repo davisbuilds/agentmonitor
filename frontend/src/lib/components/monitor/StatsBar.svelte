@@ -1,10 +1,11 @@
 <script lang="ts">
-  import { getStats } from '../../stores/monitor.svelte';
+  import { getCostWindows, getStats } from '../../stores/monitor.svelte';
   import { formatCost, formatNumber } from '../../format';
   import { agentTokenRows, statsTotalTokens } from '../../monitor-token-totals';
   import { Popover } from '../ui';
 
   const stats = $derived(getStats());
+  const costWindows = $derived(getCostWindows());
   const sessionCount = $derived(Number.isFinite(stats.live_sessions) ? stats.live_sessions : stats.active_sessions);
   const agentCount = $derived(Number.isFinite(stats.active_agents) ? stats.active_agents : Object.keys(stats.agent_breakdown || {}).length);
   const totalTokens = $derived(statsTotalTokens(stats));
@@ -22,7 +23,8 @@
   <span>Events <span class="tabular ml-1 font-mono text-text">{formatNumber(stats.total_events)}</span></span>
   <span>Sessions <span class="tabular ml-1 font-mono text-text">{sessionCount}</span></span>
   <span>Agents <span class="tabular ml-1 font-mono text-text">{agentCount}</span></span>
-  <span>Cost <span class="tabular ml-1 font-mono text-text">{formatCost(stats.total_cost_usd)}</span></span>
+  <span>Cost today <span class="tabular ml-1 font-mono text-text" data-testid="monitor-cost-today">{costWindows.today == null ? '—' : formatCost(costWindows.today)}</span></span>
+  <span>Cost 30 days <span class="tabular ml-1 font-mono text-text" data-testid="monitor-cost-30d">{costWindows.last30Days == null ? '—' : formatCost(costWindows.last30Days)}</span></span>
   <Popover align="left" width="w-96" label="Token breakdown">
     {#snippet trigger({ toggle, open })}
       <button

@@ -44,7 +44,7 @@ Prefer to do it yourself? The manual steps are below.
 
 ## What It Does
 
-- Serves the canonical Svelte app at `/app/` for Monitor, Live, Sessions, Analytics (Overview / Usage / Skills / Insights / Quality), and Search.
+- Serves the canonical Svelte app at `/app/` for Monitor, Live, Sessions (with full-text search and pinned messages), and Analytics (Overview / Usage / Skills / Insights / Quality).
 - Accepts live ingest from Claude Code hooks, Codex OTEL export, or generic HTTP event producers.
 - Watches local Claude and Codex session history and imports historical sessions into SQLite.
 - Streams live updates over SSE (`/api/stream`) for dashboards and operator views.
@@ -176,7 +176,8 @@ Common knobs:
 - `AGENTMONITOR_PROJECTS_DIR` for git branch/project resolution.
 - `AGENTMONITOR_CLAUDE_DIR` for Claude JSONL history discovery (the directory
   containing `projects/`).
-- `AGENTMONITOR_ENABLE_LIVE_TAB` and live capture/redaction flags.
+- `AGENTMONITOR_ENABLE_LIVE_TAB` (the Monitor's live stream) and live
+  capture/redaction flags.
 - `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` for historical discovery/import ignores.
 
 AI insight generation is optional and needs `AGENTMONITOR_INSIGHTS_PROVIDER` plus
