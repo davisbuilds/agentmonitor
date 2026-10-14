@@ -7,7 +7,8 @@ the v2 route/query source and [API index](../api/README.md).
 ## Canonical Product Surface
 
 - The Svelte SPA at `/app/` is the sole human-facing surface; `/` redirects there.
-- Monitor, Live, Sessions, Search, and Analytics are the primary workflows.
+- Monitor, Live, Sessions, and Analytics are the primary workflows. Sessions holds
+  full-text search and pinned messages.
 - Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
   one shared date/project/agent filter context.
 - Deep links preserve the active view and selected session, message, or trace where
@@ -65,14 +66,23 @@ product never substitutes a misleading `0%` for missing evidence.
   wrappers), else "Untitled <agent> session". Every page uses the same title.
 - Session lists nest a subagent under its parent whenever the parent is stored,
   and hide internal jobs, including the Codex app's own background threads.
-- Search supports recency and relevance ordering and includes enough session
-  context to navigate directly to the matching ordinal.
+- Full-text search lives in the Sessions list: while a query is entered, matching
+  messages replace the list, with recency or relevance ordering and the list's
+  project and agent filters; clearing the query returns to the list. A result
+  opens its session at the matching ordinal, and closing the viewer returns to
+  the results. The query rides the `#sessions?q=…` link, and starting a search
+  adds one history entry, so Back returns to the list. Old `#search?…` links
+  redirect there without adding a history entry.
 - Inline images (pasted images, screenshots in tool results) are stored as a
   descriptor with their SHA-256 and size, not their base64 data, so they are
   neither shown nor searchable. AgentMonitor keeps no copy: once a source
   transcript is gone, so are its images.
 - Pinned transcript moments use session-plus-ordinal identity so they survive
-  re-imports that replace internal row IDs.
+  re-imports that replace internal row IDs. Pinned is a filter on the Sessions
+  list (`#sessions?pinned=1`): it lists pinned messages under the same project
+  and agent filters, and a query then narrows them by the words they show
+  rather than searching every transcript. Old `#pinned` and
+  `#sessions?view=pinned` links redirect to it.
 - The global `Cmd/Ctrl+K` palette searches recent sessions and transcript matches
   from any tab.
 - Sessions lists count recognized Codex rollout/UUID aliases once and prefer
@@ -184,7 +194,7 @@ named by the session's title.
 Observation trees are projected on demand from local source rows and are not stored
 as a second trace warehouse. List and detail views disclose usage and telemetry
 coverage over the full filtered set. Drill-ins from Usage, Analytics, Live,
-Sessions, and Search can open the relevant trace.
+and Sessions (including its search results) can open the relevant trace.
 
 Deep scoring, prompt management, and persisted observation/eval storage remain
 outside the local product boundary. See [trace-quality.md](trace-quality.md).

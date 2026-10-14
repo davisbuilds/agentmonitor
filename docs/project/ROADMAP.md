@@ -49,7 +49,7 @@ possibilities.
 
 ### Product Polish And Release Confidence
 
-- Tighten Monitor, Live, Sessions, Search, and Analytics around real monitoring and
+- Tighten Monitor, Live, Sessions, and Analytics around real monitoring and
   review workflows.
 - Preserve the Instrument Console design system and laptop-first layout while
   retaining usable narrow-width behavior.
