@@ -115,10 +115,11 @@ test.afterAll(async () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test('search and analytics explain what they cover behind an info button', async ({ page }) => {
-  await page.goto(`${baseUrl}/app/#search`);
-  await page.getByRole('button', { name: 'About search' }).click();
-  await expect(page.getByRole('dialog', { name: 'About search' })).toContainText('Searches the text of recorded transcripts.');
+test('sessions search and analytics explain what they cover behind an info button', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions`);
+  await page.getByRole('button', { name: 'About Sessions' }).click();
+  await expect(page.getByRole('dialog', { name: 'About Sessions' }))
+    .toContainText('search the text of recorded transcripts');
 
   await page.goto(`${baseUrl}/app/#analytics`);
   await page.getByRole('button', { name: 'About Tool Usage' }).click();
@@ -127,9 +128,9 @@ test('search and analytics explain what they cover behind an info button', async
 });
 
 test('app restores search and session deep links from the hash', async ({ page }) => {
-  await page.goto(`${baseUrl}/app/#search?q=quota%20reset&sort=relevance`);
-  await expect(page.getByPlaceholder('Search across transcript history…')).toHaveValue('quota reset');
-  await expect(page.locator('select').first()).toHaveValue('relevance');
+  await page.goto(`${baseUrl}/app/#sessions?q=quota%20reset&sort=relevance`);
+  await expect(page.getByRole('searchbox', { name: 'Search transcripts' })).toHaveValue('quota reset');
+  await expect(page.getByLabel('Sort results')).toHaveValue('relevance');
 
   await page.goto(`${baseUrl}/app/#sessions?session=missing-session&message=7`);
   await expect(page.getByRole('button', { name: /Back/ })).toBeVisible();

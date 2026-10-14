@@ -18,8 +18,7 @@
   import QuotaPill from './lib/components/monitor/QuotaPill.svelte';
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
   import LivePage from './lib/components/live/LivePage.svelte';
-  import SessionsShell from './lib/components/sessions/SessionsShell.svelte';
-  import SearchPage from './lib/components/search/SearchPage.svelte';
+  import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
   import CommandPalette from './lib/components/command-palette/CommandPalette.svelte';
   import AnalyticsShell from './lib/components/analytics/AnalyticsShell.svelte';
   import BenchmarksPage from './lib/components/benchmarks/BenchmarksPage.svelte';
@@ -36,7 +35,6 @@
       { id: 'sessions', label: 'Sessions' },
       { id: 'analytics', label: 'Analytics' },
       { id: 'benchmarks', label: 'Benchmarks' },
-      { id: 'search', label: 'Search' },
     ];
     if (liveSettings.enabled) {
       next.splice(1, 0, { id: 'live', label: 'Live' });
@@ -134,13 +132,11 @@
   {:else if tab === 'live'}
     <LivePage />
   {:else if tab === 'sessions'}
-    <SessionsShell />
+    <SessionsPage />
   {:else if tab === 'analytics'}
     <AnalyticsShell />
   {:else if tab === 'benchmarks'}
     <BenchmarksPage />
-  {:else if tab === 'search'}
-    <SearchPage />
   {/if}
 
   {#if commandPaletteOpen}

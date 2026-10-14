@@ -98,8 +98,8 @@ test("a parent's subagent opens from the viewer, and Back returns to the parent"
   await expect(page.getByRole('heading', { name: 'Parser audit' })).toBeVisible();
 });
 
-test('recent sessions in Search skip sessions with no transcript', async ({ page }) => {
-  await page.goto(`${baseUrl}/app/#search`);
+test('the session list skips sessions with no transcript', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions`);
   await expect(page.getByText('Parser audit')).toBeVisible();
   await expect(page.getByText('Untitled Codex session')).toHaveCount(0);
 });

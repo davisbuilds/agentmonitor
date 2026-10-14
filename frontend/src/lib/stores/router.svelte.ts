@@ -1,4 +1,12 @@
-import { buildSessionsHash, canonicalizeLegacyAnalyticsHash, canonicalizeLegacyPinnedHash, parseAppHash, type AppTab } from '../route-state';
+import {
+  buildSessionsHash,
+  canonicalizeLegacyAnalyticsHash,
+  canonicalizeLegacyPinnedHash,
+  canonicalizeLegacySearchHash,
+  defaultSessionsRouteState,
+  parseAppHash,
+  type AppTab,
+} from '../route-state';
 
 export type Tab = AppTab;
 
@@ -45,13 +53,7 @@ export function navigateToSession(sessionId: string): void {
   currentTab = 'sessions';
   commandPaletteOpen = false;
   if (typeof window !== 'undefined') {
-    window.location.hash = buildSessionsHash({
-      view: 'browse',
-      project: '',
-      agent: '',
-      sessionId,
-      messageOrdinal: null,
-    });
+    window.location.hash = buildSessionsHash({ ...defaultSessionsRouteState(), sessionId });
   }
 }
 
@@ -62,13 +64,7 @@ export function navigateToSessionMessage(sessionId: string, messageOrdinal: numb
   currentTab = 'sessions';
   commandPaletteOpen = false;
   if (typeof window !== 'undefined') {
-    window.location.hash = buildSessionsHash({
-      view: 'browse',
-      project: '',
-      agent: '',
-      sessionId,
-      messageOrdinal,
-    });
+    window.location.hash = buildSessionsHash({ ...defaultSessionsRouteState(), sessionId, messageOrdinal });
   }
 }
 
@@ -88,13 +84,15 @@ export function consumePendingSessionNavigation(): { sessionId: string | null; m
 function initFromHash(): void {
   if (typeof window === 'undefined') return;
   // Rewrite legacy deep links to their canonical consolidated form (#usage /
-  // #insights → #analytics?view=…, #pinned → #sessions?view=pinned). Use
+  // #insights → #analytics?view=…, #pinned and #sessions?view=pinned →
+  // #sessions?pinned=1, #search?q=… → #sessions?q=…). Use
   // replaceState (not location.hash =) so the rewrite adds no history entry —
   // otherwise Back returns to the legacy hash and immediately re-redirects,
   // trapping the user. replaceState fires no hashchange, so we read the
   // canonical hash and set the tab in this same pass.
   const canonical = canonicalizeLegacyAnalyticsHash(window.location.hash)
-    ?? canonicalizeLegacyPinnedHash(window.location.hash);
+    ?? canonicalizeLegacyPinnedHash(window.location.hash)
+    ?? canonicalizeLegacySearchHash(window.location.hash);
   if (canonical !== null) {
     window.history.replaceState(null, '', `#${canonical}`);
   }

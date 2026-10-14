@@ -1,19 +1,16 @@
 import {
   fetchPins,
   fetchSessionPins,
-  fetchV2Projects,
   pinSessionMessage,
   unpinSessionMessage,
   type PinnedMessage,
 } from '../api/client';
-import { navigateToSessionMessage } from './router.svelte';
 
 class PinsStore {
-  private initialized = false;
   private sessionVersions: Record<string, number> = {};
 
-  project = $state('');
-  projectOptions = $state<string[]>([]);
+  // Every pin, unfiltered: the Sessions filters narrow them client-side
+  // (`filterPinnedMessages`), so a pin made under any filter lands here.
   pins = $state<PinnedMessage[]>([]);
   loading = $state(false);
   error = $state<string | null>(null);
@@ -22,31 +19,11 @@ class PinsStore {
   sessionLoading = $state<Record<string, boolean>>({});
   sessionErrors = $state<Record<string, string | null>>({});
 
-  async initialize(): Promise<void> {
-    if (!this.initialized) {
-      try {
-        const projects = await fetchV2Projects();
-        this.projectOptions = [...projects.data].sort((a, b) => a.localeCompare(b));
-      } catch {
-        this.projectOptions = [];
-      }
-      this.initialized = true;
-    }
-
-    await this.loadAll();
-  }
-
-  async setProject(project: string): Promise<void> {
-    if (this.project === project) return;
-    this.project = project;
-    await this.loadAll();
-  }
-
   async loadAll(): Promise<void> {
     this.loading = true;
     this.error = null;
     try {
-      const res = await fetchPins(this.project ? { project: this.project } : {});
+      const res = await fetchPins();
       this.pins = res.data;
     } catch (err) {
       console.error('Failed to load pins:', err);
@@ -110,10 +87,6 @@ class PinsStore {
     );
   }
 
-  openPin(sessionId: string, ordinal: number): void {
-    navigateToSessionMessage(sessionId, ordinal);
-  }
-
   private updateSessionOrdinal(sessionId: string, ordinal: number, add: boolean): void {
     const current = this.sessionPins[sessionId] ?? [];
     const next = add
@@ -127,7 +100,6 @@ class PinsStore {
   }
 
   private upsertPin(pin: PinnedMessage): void {
-    if (this.project && pin.session_project !== this.project) return;
     this.pins = [
       pin,
       ...this.pins.filter(
