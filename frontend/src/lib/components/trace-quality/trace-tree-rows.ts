@@ -55,3 +55,13 @@ export function foldToolResults(nodes: readonly TraceQualityObservationTreeNode[
   }
   return rows;
 }
+
+/**
+ * What a tool row shows beside its name: the call's input summary, unless that
+ * only repeats the tool's name (Codex encrypts the arguments, so its summaries
+ * often hold nothing else).
+ */
+export function toolInputSummary(node: Pick<TraceQualityObservationTreeNode, 'observation_type' | 'input_summary'>): string | null {
+  if (node.observation_type !== 'tool' || !node.input_summary) return null;
+  return /^(tool_name|name): [^,]*$/.test(node.input_summary) ? null : node.input_summary;
+}

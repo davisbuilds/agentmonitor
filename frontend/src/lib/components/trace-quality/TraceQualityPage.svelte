@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { traceQuality } from '../../stores/trace-quality.svelte';
-  import { Badge, Button, Stat } from '../ui';
+  import { Badge, Button, InfoTip, Stat } from '../ui';
   import TraceCoverageBadge from './TraceCoverageBadge.svelte';
   import TraceTree from './TraceTree.svelte';
 
@@ -42,14 +42,6 @@
     </div>
   {/if}
 
-  {#if tq.coverage}
-    <div class="rounded-sm border border-line bg-surface-2 px-3 py-2 text-meta text-text-muted">
-      <span class="text-text">{formatNumber(tq.coverage.included_traces)}</span> of
-      <span class="text-text">{formatNumber(tq.coverage.matching_traces)}</span> matching traces shown.
-      {tq.coverage.note}
-    </div>
-  {/if}
-
   {#if tq.error}
     <div class="rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-meta text-danger">{tq.error}</div>
   {/if}
@@ -58,9 +50,16 @@
     <!-- Trace list -->
     <section class="rounded-lg border border-line bg-surface xl:col-span-4">
       <div class="border-b border-line px-4 py-3">
-        <h3 class="text-h3">Traces</h3>
-        <div class="mt-0.5 text-meta text-text-muted">
-          {tq.traces.length} trace{tq.traces.length === 1 ? '' : 's'} in this slice
+        <div class="flex items-center gap-1.5">
+          <h3 class="text-h3">Traces</h3>
+          <InfoTip label="traces">
+            <p>One trace per session, from its stored summary. A trace's steps are rebuilt from the session's records when you open it.</p>
+          </InfoTip>
+        </div>
+        <div class="mt-0.5 tabular font-mono text-meta text-text-muted">
+          {tq.coverage
+            ? `${formatNumber(tq.traces.length)} of ${formatNumber(tq.coverage.matching_traces)}`
+            : formatNumber(tq.traces.length)} trace{(tq.coverage?.matching_traces ?? tq.traces.length) === 1 ? '' : 's'}
         </div>
       </div>
 
@@ -80,7 +79,7 @@
                   <div class="min-w-0 flex-1 truncate font-medium text-text">{trace.name}</div>
                   <div class="shrink-0 font-mono tabular text-meta text-text-faint">{formatCost(trace.aggregate.total_cost_usd)}</div>
                 </div>
-                <div class="mt-1.5"><TraceCoverageBadge {trace} compact /></div>
+                <TraceCoverageBadge {trace} compact />
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-meta text-text-faint">
                   <span>{formatAgent(trace.agent_type)}</span>
                   <span class="font-mono">{formatNumber(trace.aggregate.observation_count)} obs</span>

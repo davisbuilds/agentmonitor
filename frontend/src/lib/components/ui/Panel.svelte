@@ -1,22 +1,24 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
+  import InfoTip from './InfoTip.svelte';
 
   interface Props {
     title?: string;
-    subtitle?: string;
+    /** Explanation shown behind the title's ⓘ rather than as a subtitle line. */
+    info?: string;
     /** Pad the body. Set false for flush content like tables. */
     padded?: boolean;
     class?: string;
-    /** Replaces the default title/subtitle block in the header's left slot. */
+    /** Replaces the default title block in the header's left slot. */
     header?: Snippet;
     /** Right-aligned header actions. */
     actions?: Snippet;
     children: Snippet;
   }
 
-  let { title, subtitle, padded = true, class: klass = '', header, actions, children }: Props = $props();
+  let { title, info, padded = true, class: klass = '', header, actions, children }: Props = $props();
 
-  const showHeader = $derived(Boolean(title || subtitle || header || actions));
+  const showHeader = $derived(Boolean(title || header || actions));
 </script>
 
 <section class="rounded-lg border border-line bg-surface {klass}">
@@ -25,9 +27,9 @@
       {#if header}
         {@render header()}
       {:else}
-        <div class="min-w-0">
+        <div class="flex min-w-0 items-center gap-1.5">
           {#if title}<h3 class="truncate text-h3">{title}</h3>{/if}
-          {#if subtitle}<p class="mt-0.5 text-meta text-text-muted">{subtitle}</p>{/if}
+          {#if info}<InfoTip label={title ?? 'this panel'}><p>{info}</p></InfoTip>{/if}
         </div>
       {/if}
       {#if actions}

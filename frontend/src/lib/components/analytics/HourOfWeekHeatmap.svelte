@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
 
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -20,8 +21,10 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Hour Of Week</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Message density by local weekday and hour.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Hour Of Week</h3>
+        <InfoTip label="Hour Of Week"><p>Messages by weekday and hour, in your local time.</p></InfoTip>
+      </div>
     </div>
     <span class="text-meta text-text-faint">24h local time</span>
   </div>

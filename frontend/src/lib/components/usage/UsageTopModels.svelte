@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatNumber } from '../../format';
   import type { UsageModelDailyPoint } from '../../api/client';
@@ -90,10 +91,10 @@
 <section class="flex h-full flex-col rounded-lg border border-line bg-surface p-4 xl:max-h-[34rem]">
   <div class="flex items-start justify-between gap-3">
     <div>
-      <h3 class="text-h3">Top Models</h3>
-      <p class="mt-0.5 text-meta text-text-muted">
-        Model mix by day. All tokens include cache reads and writes. Click a day to drill the page into it.
-      </p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Top Models</h3>
+        <InfoTip label="Top Models"><p>Model mix by day. Token totals include cache reads and writes. Click a day to narrow the page to it.</p></InfoTip>
+      </div>
     </div>
 
     <div class="flex shrink-0 rounded-sm border border-line" role="group" aria-label="Metric">

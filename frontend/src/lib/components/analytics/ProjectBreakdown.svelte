@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
   import { formatNumber } from '../../format';
 
@@ -8,8 +9,10 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Projects</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Click a project to drill the whole page into that slice.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Projects</h3>
+        <InfoTip label="Projects"><p>Click a project to narrow the page to it.</p></InfoTip>
+      </div>
     </div>
     {#if analytics.project}
       <span class="text-meta text-accent">Filtered to {analytics.project}</span>

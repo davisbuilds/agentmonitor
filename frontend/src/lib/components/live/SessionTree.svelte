@@ -2,8 +2,9 @@
   import type { LiveSession } from '../../api/client';
   import { agentHexColor, timeAgo } from '../../format';
   import { sessionTitle } from '../../session-text';
-  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
-  import { Badge, Button } from '../ui';
+  import { liveDotStatus } from '../../status';
+  import SessionCoverage from '../shared/SessionCoverage.svelte';
+  import { Badge, Button, StatusDot } from '../ui';
 
   interface SessionTreeNode {
     session: LiveSession;
@@ -23,18 +24,6 @@
   let { sessions, selectedSessionId, loading, error, hasMore, onselect, onloadmore }: Props = $props();
 
 
-  type BadgeTone = 'neutral' | 'ok' | 'warn';
-  function statusTone(status: string | null): BadgeTone {
-    switch (status) {
-      case 'live':
-      case 'active':
-        return 'ok';
-      case 'idle':
-        return 'warn';
-      default:
-        return 'neutral';
-    }
-  }
 </script>
 
 <div class="space-y-2 xl:flex-1 xl:overflow-y-auto">
@@ -64,9 +53,6 @@
               {#if session.project}
                 <Badge tone="neutral">{session.project}</Badge>
               {/if}
-              {#if session.relationship_type}
-                <Badge tone="neutral" class="uppercase tracking-wide">{session.relationship_type}</Badge>
-              {/if}
               <span class="tabular font-mono">{session.message_count} msgs</span>
               {#if session.last_item_at}
                 <span class="tabular font-mono">{timeAgo(session.last_item_at)}</span>
@@ -76,10 +62,8 @@
             </div>
           </div>
           <div class="flex shrink-0 flex-col items-end gap-1">
-            <Badge tone={statusTone(session.live_status)} class="uppercase tracking-wide">
-              {session.live_status || 'unknown'}
-            </Badge>
-            <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
+            <StatusDot status={liveDotStatus(session.live_status)} label={session.live_status || 'unknown'} />
+            <SessionCoverage capabilities={session.capabilities} variant="row" />
           </div>
         </div>
       </button>

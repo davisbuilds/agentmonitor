@@ -10,7 +10,7 @@
   import { buildSessionsHash, parseSessionsHash } from '../../route-state';
   import { SessionList } from '../../stores/session-list.svelte';
   import SessionViewer from './SessionViewer.svelte';
-  import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
+  import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { SectionHeader, Select, Badge, EmptyState, Button } from '../ui';
 
   const list = new SessionList();
@@ -232,7 +232,7 @@
                     {#if session.project}
                       <Badge tone="neutral">{session.project}</Badge>
                     {/if}
-                    <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
+                    <SessionCoverage capabilities={session.capabilities} variant="row" />
                     <span class="tabular font-mono">{session.message_count} msgs</span>
                     {#if session.started_at}
                       <span class="tabular font-mono">{timeAgo(session.started_at)}</span>

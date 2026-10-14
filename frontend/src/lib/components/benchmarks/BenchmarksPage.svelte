@@ -129,12 +129,12 @@
 
       <div class="flex-1 overflow-y-auto">
         {#if d.arms.some((a) => a.cost_per_trial != null && a.cost_per_trial > 0)}
-          <Panel title="The frontier" subtitle="Cost per trial (log) vs mean score; the dashed line is the Pareto front. Click a marker to find its row." class="mb-4">
+          <Panel title="The frontier" info="Cost per trial (log) vs mean score; the dashed line is the Pareto front. Click a marker to find its row." class="mb-4">
             <BenchmarkFrontier arms={d.arms} onselect={focusArm} />
           </Panel>
         {/if}
 
-        <Panel title="The ladder" subtitle="Arms ranked by score; frontier verdicts and honesty flags computed from the run" padded={false}>
+        <Panel title="The ladder" info="Arms ranked by score; frontier verdicts and honesty flags computed from the run" padded={false}>
           <DataTable
             columns={armColumns}
             rows={d.arms}

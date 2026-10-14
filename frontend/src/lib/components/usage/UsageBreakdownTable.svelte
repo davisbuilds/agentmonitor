@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatNumber } from '../../format';
   import type {
@@ -52,15 +53,17 @@
   const helperText = $derived.by(() => {
     if (kind === 'project') return 'Click a project row to filter the page.';
     if (kind === 'agent') return 'Click an agent row to filter the page.';
-    if (kind === 'tier') return 'Tier totals are provider-neutral rollups from classified usage events.';
+    if (kind === 'tier') return 'Totals by pricing tier, across providers.';
     return 'Use the model filter above to narrow this table.';
   });
 </script>
 
 <section class="rounded-lg border border-line bg-surface p-4">
   <div>
-    <h3 class="text-h3">{title}</h3>
-    <p class="mt-0.5 text-meta text-text-muted">{helperText}</p>
+    <div class="flex items-center gap-1.5">
+      <h3 class="text-h3">{title}</h3>
+      <InfoTip label={title}><p>{helperText}</p></InfoTip>
+    </div>
   </div>
 
   {#if loading}

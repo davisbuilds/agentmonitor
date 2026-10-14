@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
   import { timeAgo } from '../../format';
   import { sessionTitle } from '../../session-text';
@@ -8,8 +9,10 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Top Sessions</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Highest-volume sessions in the current filter set.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Top Sessions</h3>
+        <InfoTip label="Top Sessions"><p>Sessions with the most messages in the current filters.</p></InfoTip>
+      </div>
     </div>
     {#if analytics.coverage.topSessions}
       <span class="tabular font-mono text-meta text-text-faint">{analytics.coverage.topSessions.included_sessions} sessions scanned</span>
@@ -25,7 +28,7 @@
       {#each analytics.topSessions as session, index}
         <div class="flex items-center gap-1">
           <button
-            class="flex flex-1 items-center gap-3 rounded-sm px-2 py-2 text-left transition-colors hover:bg-surface-2"
+            class="flex min-w-0 flex-1 items-center gap-3 rounded-sm px-2 py-2 text-left transition-colors hover:bg-surface-2"
             onclick={() => analytics.openSession(session.id)}
           >
             <div class="w-6 text-right tabular font-mono text-meta text-text-faint">{index + 1}</div>

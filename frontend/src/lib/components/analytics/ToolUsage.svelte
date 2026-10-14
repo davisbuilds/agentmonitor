@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
   import { formatNumber } from '../../format';
 
@@ -8,8 +9,10 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Tool Usage</h3>
-      <p class="mt-0.5 text-meta text-text-muted">This panel only counts sessions with tool-analytics coverage.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Tool Usage</h3>
+        <InfoTip label="Tool Usage"><p>Tool calls from sessions that recorded them in detail.{#if analytics.coverage.tools?.excluded_sessions} {analytics.coverage.tools.excluded_sessions} summary-only session{analytics.coverage.tools.excluded_sessions === 1 ? ' is' : 's are'} left out.{/if}</p></InfoTip>
+      </div>
     </div>
     {#if analytics.coverage.tools}
       <span class="tabular font-mono text-meta text-text-faint">{analytics.coverage.tools.included_sessions}/{analytics.coverage.tools.matching_sessions} sessions included</span>

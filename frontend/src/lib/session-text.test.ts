@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getMessagePreviewText, getSessionPreviewText, parseSessionText, sessionTitle } from './session-text';
+import { getMessagePreviewText, getSessionPreviewText, parseSessionText, sessionTitle, turnTitle } from './session-text';
 
 const ESC = '\u001b';
 
@@ -136,5 +136,18 @@ describe('sessionTitle', () => {
     expect(sessionTitle({ title: null, first_message: null, agent: 'claude_code' })).toBe('Untitled Claude session');
     expect(sessionTitle({ title: null, first_message: null, agent: 'mystery' })).toBe('Untitled session');
     expect(sessionTitle({})).toBe('Untitled session');
+  });
+});
+
+describe('turnTitle', () => {
+  it('reads a local command as its name and plain text as itself', () => {
+    expect(turnTitle('<command-name>/compact</command-name>\n<command-message>compact</command-message>\n<command-args></command-args>')).toBe('/compact');
+    expect(turnTitle('Fix the  flaky\ntest')).toBe('Fix the flaky test');
+  });
+
+  it('has no title for command output, caveats or nothing', () => {
+    expect(turnTitle('<local-command-stdout>done</local-command-stdout>')).toBeNull();
+    expect(turnTitle('<local-command-caveat>Caveat</local-command-caveat>')).toBeNull();
+    expect(turnTitle(null)).toBeNull();
   });
 });

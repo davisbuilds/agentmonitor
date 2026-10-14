@@ -37,14 +37,7 @@
   import SessionTree from './SessionTree.svelte';
   import ItemStream from './ItemStream.svelte';
   import InspectorPanel from './InspectorPanel.svelte';
-  import { Badge } from '../ui';
-
-  type BadgeTone = 'neutral' | 'ok' | 'warn' | 'danger';
-  function connectionTone(status: string): BadgeTone {
-    if (status === 'connected') return 'ok';
-    if (status === 'connecting') return 'warn';
-    return 'danger';
-  }
+  import { InfoTip, Popover, StatusDot } from '../ui';
 
   let filterProject = $state('');
   let filterAgent = $state('');
@@ -72,6 +65,12 @@
   const selectedResult = $derived(pairedToolResult(items, selectedItem));
   const connectionStatus = $derived(getLiveConnectionStatus());
   const liveSettings = $derived(getLiveSettings());
+  const captureRows = $derived([
+    { label: 'Prompts', on: liveSettings.capture.prompts },
+    { label: 'Reasoning', on: liveSettings.capture.reasoning },
+    { label: 'Tool arguments', on: liveSettings.capture.tool_arguments },
+  ]);
+  const captureAllOn = $derived(captureRows.every(row => row.on));
 
   const sessionTree = $derived.by(() => buildSessionTree(sessions));
 
@@ -121,15 +120,15 @@
     <section class="rounded-lg border border-line bg-surface xl:shrink-0">
       <div class="px-4 py-4 sm:px-5">
         <div class="flex flex-wrap items-start justify-between gap-4">
-          <div>
+          <div class="flex items-center gap-1.5">
             <h2 class="text-h2">Live</h2>
-            <p class="mt-0.5 text-meta text-text-muted">
-              Operator-focused stream for active and recently updated sessions.
-            </p>
+            <InfoTip label="Live">
+              <p>The item stream of active and recently updated sessions. Pick a session to follow it as it runs.</p>
+            </InfoTip>
           </div>
           <div class="flex items-center gap-3">
             <span class="tabular font-mono text-meta text-text-faint">{sessionsTotal} tracked session{sessionsTotal === 1 ? '' : 's'}</span>
-            <Badge tone={connectionTone(connectionStatus)} class="uppercase tracking-wide">{connectionStatus}</Badge>
+            <StatusDot status={connectionStatus} label={connectionStatus} />
           </div>
         </div>
 
@@ -185,20 +184,38 @@
             Active sessions first view
           </label>
 
-          <div class="rounded-sm border border-line bg-surface-2 px-3 py-3 text-meta text-text-muted">
-            <div class="flex items-center justify-between gap-3">
-              <span class="uppercase tracking-wide text-text-faint">Capture</span>
-              <span class="uppercase tracking-wide text-text-faint">Codex: {liveSettings.codex_mode}</span>
+          <Popover align="right" width="w-64" label="Capture settings">
+            {#snippet trigger({ toggle, open })}
+              <button
+                type="button"
+                class="inline-flex items-center gap-1.5 rounded-sm px-2 py-1 text-meta text-text-muted transition-colors hover:bg-surface-2 hover:text-text"
+                aria-haspopup="dialog"
+                aria-expanded={open}
+                onclick={toggle}
+              >
+                <span
+                  class="h-1.5 w-1.5 rounded-full {captureAllOn ? 'bg-ok' : 'bg-warn'}"
+                  aria-hidden="true"
+                ></span>
+                Capture {captureAllOn ? 'on' : 'limited'}
+              </button>
+            {/snippet}
+            <ul class="space-y-1.5 text-meta">
+              {#each captureRows as row (row.label)}
+                <li class="flex items-center justify-between gap-3">
+                  <span class="text-text-muted">{row.label}</span>
+                  <span class="inline-flex items-center gap-1.5 text-text">
+                    <span class="h-1.5 w-1.5 rounded-full {row.on ? 'bg-ok' : 'bg-line-strong'}" aria-hidden="true"></span>
+                    {row.on ? 'on' : 'off'}
+                  </span>
+                </li>
+              {/each}
+            </ul>
+            <div class="mt-3 space-y-1 border-t border-line pt-2 text-meta text-text-faint">
+              <div>Codex: <span class="text-text-muted">{liveSettings.codex_mode}</span></div>
+              <div>Diffs kept up to <span class="tabular font-mono text-text-muted">{liveSettings.diff_payload_max_bytes.toLocaleString()}</span> bytes</div>
             </div>
-            <div class="mt-2 flex flex-wrap gap-1.5">
-              <Badge tone={liveSettings.capture.prompts ? 'ok' : 'neutral'}>Prompts {liveSettings.capture.prompts ? 'on' : 'off'}</Badge>
-              <Badge tone={liveSettings.capture.reasoning ? 'ok' : 'neutral'}>Reasoning {liveSettings.capture.reasoning ? 'on' : 'off'}</Badge>
-              <Badge tone={liveSettings.capture.tool_arguments ? 'ok' : 'neutral'}>Tool args {liveSettings.capture.tool_arguments ? 'on' : 'off'}</Badge>
-            </div>
-            <div class="mt-2 tabular font-mono text-meta text-text-faint">
-              Diff payload cap: {liveSettings.diff_payload_max_bytes.toLocaleString()} bytes
-            </div>
-          </div>
+          </Popover>
         </div>
       </div>
     </section>
@@ -207,9 +224,6 @@
       <section class="flex min-h-[20rem] flex-col rounded-lg border border-line bg-surface xl:min-h-0 xl:w-[19rem] xl:shrink-0 xl:overflow-hidden">
         <div class="shrink-0 border-b border-line px-4 py-3">
           <h3 class="text-h3">Sessions</h3>
-          <p class="mt-0.5 text-meta text-text-muted">
-            Filtered live and recent sessions. Select one to inspect its stream.
-          </p>
         </div>
 
         <div class="px-3 py-3 xl:flex xl:min-h-0 xl:flex-1 xl:flex-col">

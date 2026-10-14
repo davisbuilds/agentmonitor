@@ -103,6 +103,8 @@ class SearchStore {
         limit: this.recentLimit,
         project: this.project || undefined,
         agent: this.agent || undefined,
+        // Like the Sessions list: a session with no transcript has nothing to open.
+        exclude_empty: 'true',
       });
       if (version !== this.requestVersion) return;
       this.recentSessions = res.data;

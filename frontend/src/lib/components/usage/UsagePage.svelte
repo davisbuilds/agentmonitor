@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { usage } from '../../stores/usage.svelte';
   import { Select } from '../ui';
-  import UsageCoverageBanner from './UsageCoverageBanner.svelte';
+  import UsageCoverageNote from './UsageCoverageNote.svelte';
   import UsageUnpricedWarning from './UsageUnpricedWarning.svelte';
   import UsageSummaryCards from './UsageSummaryCards.svelte';
   import UsageTimeline from './UsageTimeline.svelte';
@@ -50,10 +50,10 @@
       aria-label="Filter by model"
       onchange={(value) => usage.setModel(value)}
     />
+    <div class="ml-auto"><UsageCoverageNote /></div>
   </div>
 
   <UsageUnpricedWarning />
-  <UsageCoverageBanner />
   <UsageSummaryCards />
 
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-12">
