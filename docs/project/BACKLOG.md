@@ -258,10 +258,10 @@ the build.
 ### Context occupancy
 
 #### Monitor-card occupancy join not visually verified with a live session
-- **What**: the Live inspector and Monitor reads use v2. Monitor separately joins
-  occupancy from the Live session projection by session id. This is Svelte-checked
+- **What**: the live stream and Monitor reads use v2. Monitor separately joins
+  occupancy from the live session projection by session id. This is Svelte-checked
   and logically verified but was not screenshotted with a live hook/OTEL-fed active
-  session. Codex's Monitor UUID and Live rollout identity are aliased during the
+  session. Codex's Monitor UUID and live rollout identity are aliased during the
   occupancy refresh.
 - **Why it matters**: confirm the join renders on a real running card, especially
   for Codex.
