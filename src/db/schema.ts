@@ -1,8 +1,10 @@
+import path from 'node:path';
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { stripInlineImages } from '../util/inline-images.js';
 import { config } from '../config.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from '../live/normalize.js';
+import { isCodexAppJobPrompt } from '../parser/session-title.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import {
@@ -1064,7 +1066,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 18;
+const DATA_SCHEMA_VERSION = 19;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1115,9 +1117,67 @@ export function runDataMigrations(db: Database): void {
     // v17 introduces no data correction: it adds otel_metrics.point_id and its
     // unique index. Rows stored before it keep a NULL key and are not collapsed.
     if (current < 18) repairStoredLiveReasoning(db);
+    if (current < 19) refreshSessionTitles(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v19 — session titles. Parsers now skip the context harnesses inject ahead of
+ * a session's first prompt, keep Claude Code's ai-title and subagent task
+ * names, and link a Claude subagent to its parent. Flag every Claude and Codex
+ * transcript for one reparse, which normal startup sync performs. Rows that can
+ * no longer be reparsed are corrected here: a Claude subagent's parent is the
+ * session folder its transcript sits in, and a Codex app job thread, which
+ * leaves only telemetry, is marked internal by its prompt.
+ */
+function refreshSessionTitles(db: Database): void {
+  const columns = new Set((db.prepare('PRAGMA table_info(browsing_sessions)').all() as Array<{ name: string }>)
+    .map(col => col.name));
+  if (!['agent', 'file_path', 'first_message', 'parent_session_id', 'relationship_type'].every(col => columns.has(col))) {
+    return;
+  }
+  const hasWatchedFiles = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'watched_files'").get();
+  const flagged = hasWatchedFiles ? db.prepare(`
+    UPDATE watched_files
+    SET file_hash = ''
+    WHERE file_path IN (
+      SELECT file_path FROM browsing_sessions
+      WHERE agent IN ('claude', 'codex') AND file_path IS NOT NULL
+    )
+  `).run().changes : 0;
+
+  // <project>/<parent session>/subagents/agent-<id>.jsonl
+  const setParent = db.prepare('UPDATE browsing_sessions SET parent_session_id = ? WHERE id = ?');
+  let linked = 0;
+  for (const row of db.prepare(`
+    SELECT id, file_path FROM browsing_sessions
+    WHERE agent = 'claude' AND relationship_type = 'subagent' AND parent_session_id IS NULL
+      AND file_path IS NOT NULL
+  `).all() as Array<{ id: string; file_path: string }>) {
+    const folder = path.dirname(row.file_path);
+    if (path.basename(folder) !== 'subagents') continue;
+    setParent.run(path.basename(path.dirname(folder)), row.id);
+    linked++;
+  }
+
+  const markInternal = db.prepare("UPDATE browsing_sessions SET relationship_type = 'internal' WHERE id = ?");
+  let internal = 0;
+  for (const row of db.prepare(`
+    SELECT id, first_message FROM browsing_sessions
+    WHERE agent = 'codex' AND relationship_type IS NULL AND first_message IS NOT NULL
+      AND file_path IS NULL
+  `).all() as Array<{ id: string; first_message: string }>) {
+    if (!isCodexAppJobPrompt(row.first_message)) continue;
+    markInternal.run(row.id);
+    internal++;
+  }
+
+  if (flagged + linked + internal > 0) {
+    console.error(`[migration] session titles: flagged ${flagged} transcript(s) for reparse, `
+      + `linked ${linked} subagent(s), marked ${internal} Codex app job(s) internal`);
+  }
 }
 
 /**
