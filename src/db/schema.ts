@@ -716,6 +716,11 @@ function initSchemaLocked(db: Database): void {
     `);
   }
 
+  if (!browsingSessionColumns.has('title')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN title TEXT');
+  }
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_bs_parent ON browsing_sessions(parent_session_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_live_status ON browsing_sessions(live_status)');
 

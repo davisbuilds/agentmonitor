@@ -1,6 +1,7 @@
 import path from 'path';
 import type { ContentBlock, ParsedChunk, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
 import { findSubagentBoundary } from './codex-subagent-boundary.js';
+import { codexSubagentTitle, promptTitleFromTexts } from './session-title.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
 import {
   parseCodexCatalogPresentations,
@@ -113,6 +114,7 @@ export interface CodexParseState {
   messageCount: number;
   sourceOrdinal: number;
   firstUserMessage: string | null;
+  title: string | null;
   startedAt: string | null;
   endedAt: string | null;
   userMessageCount: number;
@@ -157,6 +159,7 @@ export function parseCodexSessionChunk(
   const toolCalls: ParsedToolCall[] = [];
   const ordinalBase = state?.messageCount ?? 0;
   let firstUserMessage: string | null = state?.firstUserMessage ?? null;
+  let title: string | null = state?.title ?? null;
   let startedAt: string | null = state?.startedAt ?? null;
   let endedAt: string | null = state?.endedAt ?? null;
   let userMessageCount = state?.userMessageCount ?? 0;
@@ -226,6 +229,7 @@ export function parseCodexSessionChunk(
       if (spawn || line.payload['thread_source'] === 'subagent') {
         relationshipType = 'subagent';
         parentSessionId = typeof parent === 'string' && parent ? parent : null;
+        title = codexSubagentTitle(spawn?.['agent_path']);
       } else if (typeof subagent === 'string'
         && ['compact', 'memory_consolidation', 'memory_extraction'].includes(subagent)) {
         relationshipType = 'internal';
@@ -470,12 +474,7 @@ export function parseCodexSessionChunk(
 
     if (role === 'user') {
       userMessageCount++;
-      if (firstUserMessage === null) {
-        const text = blocks.find(b => b.type === 'text')?.text?.trim();
-        if (text) {
-          firstUserMessage = text.replace(/\s+/g, ' ').slice(0, 200) || null;
-        }
-      }
+      firstUserMessage ??= promptTitleFromTexts(blocks.flatMap(block => block.text ? [block.text] : []));
     }
 
     messages.push({
@@ -502,6 +501,7 @@ export function parseCodexSessionChunk(
       project,
       agent: 'codex',
       first_message: firstUserMessage,
+      title,
       started_at: startedAt,
       ended_at: endedAt,
       message_count: ordinalBase + messages.length,
@@ -541,6 +541,7 @@ export function parseCodexSessionChunk(
       messageCount: ordinalBase + messages.length,
       sourceOrdinal,
       firstUserMessage,
+      title,
       startedAt,
       endedAt,
       userMessageCount,

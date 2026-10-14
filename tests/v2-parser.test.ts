@@ -561,3 +561,94 @@ describe('insertParsedSession', () => {
     assert.equal(child.relationship_type, 'subagent');
   });
 });
+
+describe('Claude session titles and subagent parents', () => {
+  /* eslint-disable @typescript-eslint/consistent-type-imports */
+  let parseSessionChunk: typeof import('../src/parser/claude-code.js').parseSessionChunk;
+  let parseSessionMessages: typeof import('../src/parser/claude-code.js').parseSessionMessages;
+  let insertParsedSession: typeof import('../src/parser/claude-code.js').insertParsedSession;
+  /* eslint-enable @typescript-eslint/consistent-type-imports */
+
+  before(async () => {
+    const mod = await import('../src/parser/claude-code.js');
+    parseSessionChunk = mod.parseSessionChunk;
+    parseSessionMessages = mod.parseSessionMessages;
+    insertParsedSession = mod.insertParsedSession;
+  });
+
+  function userLine(sessionId: string, content: unknown, timestamp = '2026-10-01T10:00:00.000Z'): object {
+    return { type: 'user', sessionId, message: { role: 'user', content }, timestamp };
+  }
+
+  test("uses Claude Code's latest ai-title as the title", () => {
+    const content = sampleJsonl([
+      userLine('sess-title', [{ type: 'text', text: '# Workspace Audit: Git Hooks, Agent Validation, and CI' }]),
+      { type: 'ai-title', aiTitle: 'Workspace audit', sessionId: 'sess-title' },
+      { type: 'ai-title', aiTitle: '  Workspace audit:\n Git hooks and CI ', sessionId: 'sess-title' },
+      { type: 'ai-title', aiTitle: '   ', sessionId: 'sess-title' },
+    ]);
+    const { metadata } = parseSessionMessages(content, 'sess-title');
+    assert.equal(metadata.title, 'Workspace audit: Git hooks and CI');
+    assert.equal(metadata.first_message, '# Workspace Audit: Git Hooks, Agent Validation, and CI');
+  });
+
+  test('a continued parse keeps the title until a newer ai-title arrives', () => {
+    const first = parseSessionChunk(sampleJsonl([
+      userLine('sess-resume', [{ type: 'text', text: 'Start the work' }]),
+      { type: 'ai-title', aiTitle: 'Start the work', sessionId: 'sess-resume' },
+    ]), 'sess-resume');
+    const second = parseSessionChunk(sampleJsonl([
+      userLine('sess-resume', [{ type: 'text', text: 'Keep going' }], '2026-10-01T10:05:00.000Z'),
+    ]), 'sess-resume', undefined, first.state);
+    assert.equal(second.parsed.metadata.title, 'Start the work');
+    const third = parseSessionChunk(sampleJsonl([
+      { type: 'ai-title', aiTitle: 'Renamed work', sessionId: 'sess-resume' },
+    ]), 'sess-resume', undefined, second.state);
+    assert.equal(third.parsed.metadata.title, 'Renamed work');
+  });
+
+  test('first_message skips injected blocks inside the first user message', () => {
+    const content = sampleJsonl([
+      userLine('sess-inject', [
+        { type: 'text', text: '<system-reminder>Background context.</system-reminder>' },
+        { type: 'text', text: 'Fix the flaky test' },
+      ]),
+    ]);
+    assert.equal(parseSessionMessages(content, 'sess-inject').metadata.first_message, 'Fix the flaky test');
+  });
+
+  test("a subagent's parent is the session its transcript lines name", () => {
+    const content = sampleJsonl([
+      { ...userLine('parent-session-1', [{ type: 'text', text: 'Audit the parser' }]), isSidechain: true, agentId: 'a1' },
+    ]);
+    const first = parseSessionChunk(content, 'agent-a1');
+    assert.equal(first.parsed.metadata.parent_session_id, 'parent-session-1');
+    assert.equal(first.parsed.metadata.relationship_type, 'subagent');
+    // A continued parse can read only lines that name no session.
+    const resumed = parseSessionChunk(sampleJsonl([
+      { type: 'assistant', isSidechain: true,
+        message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } },
+    ]), 'agent-a1', undefined, first.state);
+    assert.equal(resumed.parsed.metadata.parent_session_id, 'parent-session-1');
+  });
+
+  test('a top-level transcript naming another session is not given a parent', () => {
+    const content = sampleJsonl([
+      userLine('older-session', [{ type: 'text', text: 'Resumed work' }]),
+    ]);
+    assert.equal(parseSessionMessages(content, 'sess-forked').metadata.parent_session_id, null);
+  });
+
+  test('insertParsedSession stores the title and the parent', () => {
+    const db = getDb();
+    const content = sampleJsonl([
+      { ...userLine('parent-session-2', [{ type: 'text', text: 'Check the docs' }]), isSidechain: true },
+      { type: 'ai-title', aiTitle: 'Docs check', sessionId: 'parent-session-2' },
+    ]);
+    const parsed = parseSessionMessages(content, 'agent-b2', '/path/to/agent-b2.jsonl');
+    insertParsedSession(db, parsed, '/path/to/agent-b2.jsonl', 100, 'hash-b2');
+    const row = db.prepare('SELECT title, parent_session_id FROM browsing_sessions WHERE id = ?')
+      .get('agent-b2') as { title: string | null; parent_session_id: string | null };
+    assert.deepEqual(row, { title: 'Docs check', parent_session_id: 'parent-session-2' });
+  });
+});

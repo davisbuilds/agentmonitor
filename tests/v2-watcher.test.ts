@@ -474,3 +474,48 @@ describe('session projection cache consistency', () => {
     assert.deepEqual(findMissingSessionProjections(db, [filePath]), []);
   });
 });
+
+describe('Claude subagent titles from their sidecar', () => {
+  let syncSessionFile: typeof syncSessionFileFn;
+
+  before(async () => {
+    syncSessionFile = (await import('../src/watcher/index.js')).syncSessionFile;
+  });
+
+  function writeSubagent(parentId: string, agentId: string, meta: string | null): string {
+    const dir = path.join(watchDir, parentId, 'subagents');
+    fs.mkdirSync(dir, { recursive: true });
+    const filePath = path.join(dir, `${agentId}.jsonl`);
+    fs.writeFileSync(filePath, sampleJsonl([{
+      type: 'user', sessionId: parentId, isSidechain: true, cwd: '/Users/dev/Dev/testproject',
+      message: { role: 'user', content: [{ type: 'text', text: 'You are one hunter in a multi-agent bug hunt.' }] },
+      timestamp: '2026-10-01T10:00:00.000Z',
+    }]));
+    if (meta !== null) fs.writeFileSync(path.join(dir, `${agentId}.meta.json`), meta);
+    return filePath;
+  }
+
+  function stored(id: string) {
+    return getDb().prepare('SELECT title, parent_session_id, first_message FROM browsing_sessions WHERE id = ?')
+      .get(id) as { title: string | null; parent_session_id: string | null; first_message: string | null };
+  }
+
+  test('titles a subagent with the task description its parent gave it', () => {
+    const filePath = writeSubagent('parent-sidecar-1', 'agent-s1',
+      JSON.stringify({ agentType: 'general-purpose', description: 'otel_metrics retry dedup', toolUseId: 'toolu_1' }));
+    assert.equal(syncSessionFile(getDb(), filePath), 'parsed');
+    assert.deepEqual(stored('agent-s1'), {
+      title: 'otel_metrics retry dedup',
+      parent_session_id: 'parent-sidecar-1',
+      first_message: 'You are one hunter in a multi-agent bug hunt.',
+    });
+  });
+
+  test('a missing, malformed or empty sidecar leaves the title unset', () => {
+    for (const [agentId, meta] of [['agent-s2', null], ['agent-s3', '{not json'], ['agent-s4', '{"description":"  "}'], ['agent-s5', '{"description":42}']] as const) {
+      const filePath = writeSubagent('parent-sidecar-2', agentId, meta);
+      assert.equal(syncSessionFile(getDb(), filePath), 'parsed', agentId);
+      assert.equal(stored(agentId).title, null, agentId);
+    }
+  });
+});

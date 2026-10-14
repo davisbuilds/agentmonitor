@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { parseCodexSessionMessages } from '../src/parser/codex-sessions.js';
+import { parseCodexSessionChunk, parseCodexSessionMessages } from '../src/parser/codex-sessions.js';
 
 const parse = (payload: Record<string, unknown>) => parseCodexSessionMessages(
   JSON.stringify({ type: 'session_meta', payload: { id: 'child', ...payload } }), 'child',
@@ -89,7 +89,7 @@ test('a spawned subagent keeps the instruction preamble written before any turn'
     assistantMessage('child work'),
   ]);
   assert.equal(parsed.messages.length, 2);
-  assert.equal(parsed.metadata.first_message, '# AGENTS.md instructions for /work');
+  assert.equal(parsed.metadata.first_message, null, 'the preamble stays browsable but is not a title');
 });
 
 test('a preamble ahead of a copied span stays with the child', () => {
@@ -147,4 +147,31 @@ test('a user fork keeps its inherited turns', () => {
     userMessage('fork question'),
   ]);
   assert.equal(parsed.metadata.user_message_count, 2);
+});
+
+test("a conversation's first prompt skips the context Codex injects ahead of it", () => {
+  const parsed = rollout([
+    { type: 'session_meta', payload: { id: 'conv', cwd: '/work', source: 'cli' } },
+    { type: 'response_item', payload: { type: 'message', role: 'user', content: [
+      { type: 'input_text', text: '# AGENTS.md instructions for /work\n\n<INSTRUCTIONS>\nRules\n</INSTRUCTIONS>' },
+      { type: 'input_text', text: '<environment_context>\n  <cwd>/work</cwd>\n</environment_context>' },
+    ] } },
+    userMessage('Review the open pull request'),
+    assistantMessage('Looking now.'),
+  ]);
+  assert.equal(parsed.metadata.first_message, 'Review the open pull request');
+  assert.equal(parsed.metadata.user_message_count, 2, 'injected context still counts as a user message');
+});
+
+test('a spawned subagent is titled by the task name its parent gave it', () => {
+  const meta = { type: 'session_meta', payload: {
+    ...spawnMeta.payload,
+    source: { subagent: { thread_spawn: { parent_thread_id: 'parent', depth: 1, agent_path: '/root/emil_pstack' } } },
+  } };
+  const first = parseCodexSessionChunk([meta, turn(SPAWNED_AT + 5, 'child-model')]
+    .map(row => JSON.stringify(row)).join('\n') + '\n', 'child');
+  assert.equal(first.parsed.metadata.title, 'emil pstack');
+  const resumed = parseCodexSessionChunk(JSON.stringify(assistantMessage('more work')) + '\n',
+    'child', undefined, first.state);
+  assert.equal(resumed.parsed.metadata.title, 'emil pstack');
 });
