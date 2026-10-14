@@ -4,17 +4,13 @@
   import ActiveFilters from './ActiveFilters.svelte';
   import SummaryCards from './SummaryCards.svelte';
   import ActivityTimeline from './ActivityTimeline.svelte';
-  import SkillUsageTimeline from './SkillUsageTimeline.svelte';
-  import SkillConsultationInsights from './SkillConsultationInsights.svelte';
   import ProjectBreakdown from './ProjectBreakdown.svelte';
   import ToolUsage from './ToolUsage.svelte';
   import HourOfWeekHeatmap from './HourOfWeekHeatmap.svelte';
-  import TopSessions from './TopSessions.svelte';
   import VelocityMetrics from './VelocityMetrics.svelte';
   import AgentComparison from './AgentComparison.svelte';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-
 
   onMount(() => {
     void analytics.initialize();
@@ -32,21 +28,18 @@
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
   <ActiveFilters />
 
-
   <SummaryCards />
 
+  <!-- Highest-volume sessions live in Usage (by cost); skill panels live in Skills. -->
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-12">
     <div class="space-y-4 xl:col-span-7">
       <ActivityTimeline />
-      <SkillUsageTimeline />
-      <SkillConsultationInsights />
       <ProjectBreakdown />
       <HourOfWeekHeatmap />
-      <VelocityMetrics />
     </div>
 
     <div class="space-y-4 xl:col-span-5">
-      <TopSessions />
+      <VelocityMetrics />
       <ToolUsage />
       <AgentComparison />
     </div>

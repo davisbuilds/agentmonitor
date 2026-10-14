@@ -498,6 +498,30 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
+### Analytics deep links mount Overview first
+
+- **What**: opening `#analytics?view=usage` (or any non-Overview view) first
+  mounts Overview and fires its panel reads, then switches. The filter store
+  applies the hash only in a sub-view's `onMount`, so `AnalyticsShell` renders
+  the default `overview` view until one has mounted.
+- **Why or evidence**: a 2026-10-14 scratch probe against an empty temp DB saw
+  `/api/v2/analytics/summary` requested on a Usage deep link alongside
+  `/api/v2/usage/overview`. The cost is wasted reads and a brief Overview flash,
+  not wrong data. The Insights gate (`analytics-views.ts`) already copes: it
+  resolves the requested view once the hash is applied.
+- **Next**: seed `analyticsFilters` from `window.location.hash` before the shell's
+  first render (constructor or the shell's script), then assert in E2E that a
+  Usage deep link makes no `/api/v2/analytics/*` request.
+
+### Saved insights while no provider key is configured
+
+- **What**: Insights is hidden unless a provider has an API key (2026-10-14), so
+  insights saved under an earlier key cannot be read in the app until one is
+  set again. They remain in the database and in `amon insights list`.
+- **Revisit when**: someone needs to read saved insights on a keyless server;
+  then offer a read-only Insights view when saved rows exist, rather than
+  bringing back the empty setup page.
+
 ### Frontend testing
 
 #### Cover component behavior (mount + reactivity)

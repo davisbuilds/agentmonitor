@@ -6,7 +6,6 @@ import {
   fetchAnalyticsSkillsDaily,
   fetchAnalyticsSkillsHealth,
   fetchAnalyticsHourOfWeek,
-  fetchAnalyticsTopSessions,
   fetchAnalyticsVelocity,
   fetchAnalyticsAgents,
   type AnalyticsSummary,
@@ -17,7 +16,6 @@ import {
   type SkillUsageDay,
   type SkillConsultationAnalytics,
   type HourOfWeekDataPoint,
-  type TopSessionStat,
   type VelocityMetrics,
   type AgentComparisonRow,
 } from '../api/client';
@@ -36,7 +34,6 @@ type PanelKey =
   | 'skills'
   | 'skillConsultations'
   | 'hourOfWeek'
-  | 'topSessions'
   | 'velocity'
   | 'agents';
 
@@ -56,12 +53,11 @@ class AnalyticsStore {
     skills: 0,
     skillConsultations: 0,
     hourOfWeek: 0,
-    topSessions: 0,
     velocity: 0,
     agents: 0,
   };
   private unsubscribe: (() => void) | null = null;
-  private subscriptionMode: 'overview' | 'consultations' | null = null;
+  private subscriptionMode: 'overview' | 'skills' | null = null;
 
   // Shared filters live in the consolidated analytics filter store; the Overview
   // sub-view reads from it and refetches when it changes.
@@ -80,7 +76,6 @@ class AnalyticsStore {
   skillUsageDaily = $state<SkillUsageDay[]>([]);
   skillConsultations = $state<SkillConsultationAnalytics | null>(null);
   hourOfWeek = $state<HourOfWeekDataPoint[]>([]);
-  topSessions = $state<TopSessionStat[]>([]);
   velocity = $state<VelocityMetrics | null>(null);
   agentComparison = $state<AgentComparisonRow[]>([]);
 
@@ -92,7 +87,6 @@ class AnalyticsStore {
     skills: null,
     skillConsultations: null,
     hourOfWeek: null,
-    topSessions: null,
     velocity: null,
     agents: null,
   });
@@ -105,7 +99,6 @@ class AnalyticsStore {
     skills: false,
     skillConsultations: false,
     hourOfWeek: false,
-    topSessions: false,
     velocity: false,
     agents: false,
   });
@@ -118,7 +111,6 @@ class AnalyticsStore {
     skills: null,
     skillConsultations: null,
     hourOfWeek: null,
-    topSessions: null,
     velocity: null,
     agents: null,
   });
@@ -164,19 +156,19 @@ class AnalyticsStore {
     await this.fetchAll();
   }
 
-  async initializeSkillConsultations(): Promise<void> {
-    this.bindFilterSubscription('consultations');
+  async initializeSkills(): Promise<void> {
+    this.bindFilterSubscription('skills');
     await analyticsFilters.initialize();
-    await this.fetchSkillConsultations();
+    await this.fetchSkillsView();
   }
 
-  private bindFilterSubscription(mode: 'overview' | 'consultations'): void {
+  private bindFilterSubscription(mode: 'overview' | 'skills'): void {
     if (this.unsubscribe && this.subscriptionMode === mode) return;
     this.unsubscribe?.();
     this.subscriptionMode = mode;
     this.unsubscribe = analyticsFilters.subscribe(() => {
       if (mode === 'overview') void this.fetchAll();
-      else void this.fetchSkillConsultations();
+      else void this.fetchSkillsView();
     });
   }
 
@@ -194,12 +186,17 @@ class AnalyticsStore {
       this.fetchActivity(),
       this.fetchProjects(),
       this.fetchTools(),
-      this.fetchSkills(),
-      this.fetchSkillConsultations(),
       this.fetchHourOfWeek(),
-      this.fetchTopSessions(),
       this.fetchVelocity(),
       this.fetchAgents(),
+    ]);
+  }
+
+  /** Everything the Skills sub-view shows: daily invocation volume and consultation evidence. */
+  async fetchSkillsView(): Promise<void> {
+    await Promise.all([
+      this.fetchSkills(),
+      this.fetchSkillConsultations(),
     ]);
   }
 
@@ -347,26 +344,6 @@ class AnalyticsStore {
     }
   }
 
-  async fetchTopSessions(): Promise<void> {
-    const version = ++this.versions.topSessions;
-    this.loading.topSessions = true;
-    this.errors.topSessions = null;
-    try {
-      const result = await fetchAnalyticsTopSessions({ ...this.queryParams, limit: 10 });
-      if (version !== this.versions.topSessions) return;
-      this.topSessions = result.data;
-      this.coverage.topSessions = result.coverage;
-    } catch (err) {
-      if (version !== this.versions.topSessions) return;
-      console.error('Failed to load top sessions:', err);
-      this.errors.topSessions = 'Failed to load top sessions.';
-    } finally {
-      if (version === this.versions.topSessions) {
-        this.loading.topSessions = false;
-      }
-    }
-  }
-
   async fetchVelocity(): Promise<void> {
     const version = ++this.versions.velocity;
     this.loading.velocity = true;
@@ -466,12 +443,26 @@ class AnalyticsStore {
       activity: this.activity,
       projects: this.projectBreakdowns,
       tools: this.toolUsage,
-      skills: this.skillUsageDaily,
-      skillConsultations: this.skillConsultations,
-      topSessions: this.topSessions,
       agents: this.agentComparison,
     });
     downloadAnalyticsCsv(`agentmonitor-analytics-${this.from}-to-${this.to}.csv`, csv);
+  }
+
+  /** The Skills sub-view's export: daily invocation volume and consultation evidence. */
+  exportSkillsCsv(): void {
+    const csv = buildAnalyticsCsv({
+      generatedAt: new Date().toISOString(),
+      filters: this.filters,
+      summary: null,
+      velocity: null,
+      activity: [],
+      projects: [],
+      tools: [],
+      skills: this.skillUsageDaily,
+      skillConsultations: this.skillConsultations,
+      agents: [],
+    });
+    downloadAnalyticsCsv(`agentmonitor-skills-${this.from}-to-${this.to}.csv`, csv);
   }
 }
 

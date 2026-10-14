@@ -1832,6 +1832,40 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
       }));
     }
   });
+
+  test('list reports a provider as configured from the same key resolution generation uses', async () => {
+    // The app hides Insights until a provider is configured, so the list's
+    // `generation` status must agree with what generate would actually find —
+    // including the test override — not just the ambient environment.
+    async function configured(): Promise<Record<string, boolean>> {
+      const res = await fetch(`${baseUrl}/api/v2/insights?limit=1`);
+      assert.equal(res.status, 200);
+      const body = await res.json() as {
+        generation: { providers: Record<string, { configured: boolean }> };
+      };
+      return Object.fromEntries(
+        Object.entries(body.generation.providers).map(([name, p]) => [name, p.configured]),
+      );
+    }
+
+    try {
+      setInsightProviderConfigForTests({
+        openai: { apiKey: null },
+        anthropic: { apiKey: null },
+        gemini: { apiKey: null },
+      });
+      assert.deepEqual(await configured(), { openai: false, anthropic: false, gemini: false });
+
+      setInsightProviderConfigForTests({
+        openai: { apiKey: null },
+        anthropic: { apiKey: 'test-anthropic-key' },
+        gemini: { apiKey: null },
+      });
+      assert.deepEqual(await configured(), { openai: false, anthropic: true, gemini: false });
+    } finally {
+      setInsightProviderConfigForTests(null);
+    }
+  });
 });
 
 // --- Metadata endpoints ---

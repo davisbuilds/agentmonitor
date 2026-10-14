@@ -118,19 +118,6 @@ test('buildAnalyticsCsv emits summary and table sections for export', () => {
       { tool_name: 'Read', category: 'Read', count: 18 },
     ],
     skills: [],
-    topSessions: [
-      {
-        id: 'sess-1',
-        project: 'agentmonitor',
-        agent: 'claude',
-        started_at: '2026-04-10T11:00:00Z',
-        ended_at: '2026-04-10T12:00:00Z',
-        message_count: 30,
-        user_message_count: 9,
-        tool_call_count: 5,
-        fidelity: 'full',
-      },
-    ],
     agents: [
       {
         agent: 'claude',
@@ -152,7 +139,8 @@ test('buildAnalyticsCsv emits summary and table sections for export', () => {
   assert.match(csv, /Summary,Total Sessions,12/);
   assert.match(csv, /Velocity,Messages Per Active Day,18/);
   assert.match(csv, /Activity By Day/);
-  assert.match(csv, /Top Sessions/);
+  // Top sessions belong to the Usage export (highest cost), not this one.
+  assert.doesNotMatch(csv, /Top Sessions/);
   assert.match(csv, /Agent Comparison/);
 });
 
@@ -181,7 +169,6 @@ test('buildAnalyticsCsv emits the skills section when skill usage is present', (
         ],
       },
     ],
-    topSessions: [],
     agents: [],
   });
 
@@ -267,7 +254,6 @@ test('buildAnalyticsCsv appends per-harness consultation evidence without changi
         limitingEvidence: ['different_detection_semantics'],
       },
     },
-    topSessions: [],
     agents: [],
   });
 
@@ -313,7 +299,6 @@ test('buildAnalyticsCsv omits an empty consultation section', () => {
         limitingEvidence: [],
       },
     },
-    topSessions: [],
     agents: [],
   });
 
@@ -330,11 +315,6 @@ test('buildAnalyticsCsv puts every value under its own header (no swapped column
     projects: [{ project: 'proj', session_count: 9, message_count: 110, user_message_count: 31 }],
     tools: [{ tool_name: 'Bash', category: 'Execute', count: 18 }],
     skills: [{ date: '2026-04-11', total: 3, skills: [{ skill_name: 'a', count: 1 }, { skill_name: 'b', count: 2 }] }],
-    topSessions: [{
-      id: 'sid', project: 'proj', agent: 'codex',
-      started_at: '2026-04-10T11:00:00Z', ended_at: null,
-      message_count: 30, user_message_count: 9, tool_call_count: 5, fidelity: 'summary',
-    }],
     agents: [{
       agent: 'codex', session_count: 10, message_count: 130, user_message_count: 39,
       average_messages_per_session: 13, full_fidelity_sessions: 6, summary_fidelity_sessions: 4,
@@ -355,10 +335,6 @@ test('buildAnalyticsCsv puts every value under its own header (no swapped column
     { Date: '2026-04-11', Skill: 'a', Count: '1' },
     { Date: '2026-04-11', Skill: 'b', Count: '2' },
   ]);
-  assert.deepEqual(csvSection(csv, 'Top Sessions'), [{
-    'Session ID': 'sid', Project: 'proj', Agent: 'codex', Messages: '30', 'User Messages': '9',
-    'Tool Calls': '5', Fidelity: 'summary', 'Started At': '2026-04-10T11:00:00Z', 'Ended At': '',
-  }]);
   assert.deepEqual(csvSection(csv, 'Agent Comparison'), [{
     Agent: 'codex', Sessions: '10', Messages: '130', 'User Messages': '39', 'Average Messages': '13',
     'Full Fidelity': '6', 'Summary Fidelity': '4', 'Tool Analytics Capable': '7',
@@ -378,7 +354,6 @@ test('buildAnalyticsCsv quotes values containing commas, quotes, or newlines', (
     activity: [],
     projects: [{ project: awkward, session_count: 1, message_count: 2, user_message_count: 1 }],
     tools: [],
-    topSessions: [],
     agents: [],
   });
   assert.equal(csvSection(csv, 'Projects')[0].Project, awkward);

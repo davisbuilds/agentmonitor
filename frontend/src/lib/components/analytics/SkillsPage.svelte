@@ -3,13 +3,14 @@
   import { analytics } from '../../stores/analytics.svelte';
   import ActiveFilters from './ActiveFilters.svelte';
   import SkillConsultationExplorer from './SkillConsultationExplorer.svelte';
+  import SkillUsageTimeline from './SkillUsageTimeline.svelte';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
   onMount(() => {
-    void analytics.initializeSkillConsultations();
+    void analytics.initializeSkills();
     const timer = window.setInterval(() => {
-      void analytics.fetchSkillConsultations();
+      void analytics.fetchSkillsView();
     }, REFRESH_INTERVAL_MS);
 
     return () => {
@@ -22,6 +23,7 @@
 <main class="flex-1 overflow-y-auto p-4 sm:p-6">
   <div class="mx-auto max-w-[1600px] space-y-4">
     <ActiveFilters />
+    <SkillUsageTimeline />
     <SkillConsultationExplorer />
   </div>
 </main>

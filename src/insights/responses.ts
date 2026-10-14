@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { listInsights } from '../db/v2-queries.js';
+import { isInsightProviderConfigured } from './service.js';
 import type { InsightProvider, InsightRow, InsightsListParams } from '../api/v2/types.js';
 
 export interface InsightGenerationStatus {
@@ -23,15 +24,15 @@ export function getInsightsListResponse(params: InsightsListParams = {}): Insigh
       default_provider: config.insights.provider,
       providers: {
         openai: {
-          configured: config.insights.providers.openai.apiKey != null,
+          configured: isInsightProviderConfigured('openai'),
           default_model: config.insights.providers.openai.model,
         },
         anthropic: {
-          configured: config.insights.providers.anthropic.apiKey != null,
+          configured: isInsightProviderConfigured('anthropic'),
           default_model: config.insights.providers.anthropic.model,
         },
         gemini: {
-          configured: config.insights.providers.gemini.apiKey != null,
+          configured: isInsightProviderConfigured('gemini'),
           default_model: config.insights.providers.gemini.model,
         },
       },

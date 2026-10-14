@@ -14,7 +14,7 @@
     type SkillConsultationSignal,
     type SkillConsultationSort,
   } from '../../skill-consultation-view';
-  import { Button, Panel, Select, SubTabs, Toolbar } from '../ui';
+  import { Button, InfoTip, Panel, Select, SubTabs, Toolbar } from '../ui';
   import SkillConsultationEvidenceRow from './SkillConsultationEvidenceRow.svelte';
 
   const PAGE_SIZE = 30;
@@ -148,11 +148,11 @@
 <div role="region" aria-labelledby="skill-consultation-explorer-heading">
   <Panel padded={false}>
     {#snippet header()}
-      <div class="min-w-0">
+      <div class="flex min-w-0 items-center gap-1.5">
         <h1 id="skill-consultation-explorer-heading" class="text-h2 text-balance">Skill consultation explorer</h1>
-        <p class="mt-0.5 max-w-[65ch] text-meta text-text-muted">
-          Inspect observed first reads, rehydrations, catalog exposure, and attribution without treating them as outcome value.
-        </p>
+        <InfoTip label="Skill consultation explorer">
+          <p>First reads, rereads after compaction, how often a skill was listed but not read, and which version was read. These show use, not whether a skill helped.</p>
+        </InfoTip>
       </div>
     {/snippet}
 

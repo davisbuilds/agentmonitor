@@ -9,28 +9,31 @@ const claudeProject = 'alpha';
 
 test.skip(!baseUrl, 'AGENTMONITOR_E2E_URL is provided by the built-runtime verifier');
 
-test('Analytics keeps consultation overview bounded and provides a filterable explorer', async ({
+test('Skills shows invocation volume and a filterable consultation explorer', async ({
   page,
 }) => {
   fs.mkdirSync(artifactDir, { recursive: true });
   await page.goto(`${baseUrl}/app/#analytics?from=2026-07-01&to=2026-07-29`);
 
-  const preview = page.getByRole('region', { name: 'Skill consultations' });
-  await expect(preview).toBeVisible();
-  await expect(preview.locator('details')).toHaveCount(0);
-  await expect(preview.getByTestId('skill-preview-row')).toHaveCount(6);
-  await expect(preview.getByRole('link', { name: /Explore all 37 skills/ })).toBeVisible();
+  // Overview no longer carries skill panels; they live in Skills.
+  await expect(page.getByRole('heading', { name: 'Tool Usage' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Skill consultations' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Raw skill invocation volume' })).toHaveCount(0);
 
-  await preview.screenshot({
-    path: path.join(artifactDir, 'skill-consultations-preview-desktop.png'),
-  });
-  await page.setViewportSize({ width: 390, height: 844 });
-  await preview.screenshot({
-    path: path.join(artifactDir, 'skill-consultations-preview-narrow.png'),
-  });
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await preview.getByRole('link', { name: /Explore all 37 skills/ }).click();
+  await page.getByRole('button', { name: 'Skills', exact: true }).click();
   await expect(page).toHaveURL(/#analytics\?.*view=skills/);
+
+  const volume = page.locator('section').filter({
+    has: page.getByRole('heading', { name: 'Raw skill invocation volume' }),
+  });
+  await expect(volume).toBeVisible();
+  // The fixture's Claude Skill calls fall inside the window, so the daily
+  // chart has data and its legend names the most-used skill.
+  await expect(volume).toContainText('test-strategy');
+  await expect(volume.getByText('No skill usage in the selected range.')).toHaveCount(0);
+  await volume.screenshot({
+    path: path.join(artifactDir, 'skill-invocation-volume-desktop.png'),
+  });
 
   const region = page.getByRole('region', { name: 'Skill consultation explorer' });
   await expect(region).toBeVisible();

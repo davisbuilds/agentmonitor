@@ -22,46 +22,6 @@ export function countSkillRows(harnesses: SkillConsultationHarness[]): number {
   return harnesses.reduce((total, harness) => total + harness.skills.length, 0);
 }
 
-export function selectSkillConsultationPreview(
-  harnesses: SkillConsultationHarness[],
-  limit = 6,
-): SkillConsultationHarness[] {
-  if (limit <= 0) return [];
-
-  const ranked = harnesses
-    .map(harness => ({
-      ...harness,
-      skills: [...harness.skills].sort(compareVolume),
-    }))
-    .filter(harness => harness.skills.length > 0);
-  const selected = new Map<string, SkillConsultationRow[]>(
-    ranked.map(harness => [harness.harness, []]),
-  );
-
-  let selectedCount = 0;
-  let rank = 0;
-  while (selectedCount < limit) {
-    let addedAtRank = false;
-    for (const harness of ranked) {
-      if (selectedCount >= limit) break;
-      const row = harness.skills[rank];
-      if (!row) continue;
-      selected.get(harness.harness)?.push(row);
-      selectedCount += 1;
-      addedAtRank = true;
-    }
-    if (!addedAtRank) break;
-    rank += 1;
-  }
-
-  return ranked
-    .map(harness => ({
-      ...harness,
-      skills: selected.get(harness.harness) ?? [],
-    }))
-    .filter(harness => harness.skills.length > 0);
-}
-
 export function filterSkillConsultations(
   harnesses: SkillConsultationHarness[],
   filters: SkillConsultationExplorerFilters,

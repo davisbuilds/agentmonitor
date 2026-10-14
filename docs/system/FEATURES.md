@@ -11,7 +11,8 @@ the v2 route/query source and [API index](../api/README.md).
   full-text search and pinned messages; the live stream is Monitor's drill-in
   rather than a tab of its own.
 - Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
-  one shared date/project/agent filter context.
+  one shared date/project/agent filter context. Insights appears only once an LLM
+  provider API key is configured.
 - Deep links preserve the active view and selected session, message, or trace where
   applicable.
 
@@ -106,8 +107,13 @@ product never substitutes a misleading `0%` for missing evidence.
 
 ## Analytics And Skill Evidence
 
-Analytics covers activity over time, projects, agents, tools, hour-of-week patterns,
-velocity, and high-volume sessions. A project is the git repository a session's
+Analytics Overview covers activity over time, projects, agents, tools,
+hour-of-week patterns, and velocity. Top sessions appear once, in
+Usage, ranked by cost; all skill evidence lives in Skills, which shows daily
+skill invocation volume above the consultation explorer and exports both as CSV.
+The shared date, project, and agent filters scope both Skills panels; the
+explorer's harness, name, signal, and sort controls narrow only the explorer.
+A project is the git repository a session's
 working directory belongs to, named after the repository root: subdirectories
 and worktrees in a worktree area (`.worktrees/`, `*-worktrees/`,
 `.claude/worktrees/`, `.codex/worktrees/`) count as their repository, also once
@@ -199,15 +205,20 @@ Anthropic, and Gemini providers are optional; local monitoring works without any
 provider API key. Generated text remains visibly attached to its scope and evidence
 limits.
 
+The Insights sub-view is offered only once at least one provider has an API key.
+A link to `#analytics?view=insights` on a server with no key opens Overview
+instead. Saved insights stay in the database and reappear once a key is
+configured.
+
 ## Trace Quality
 
 Quality presents one lean trace per session from the content-free session summary,
 named by the session's title.
 Observation trees are projected on demand from local source rows and are not stored
 as a second trace warehouse. List and detail views disclose usage and telemetry
-coverage over the full filtered set. Drill-ins from Usage, Analytics, the
-live stream's inspector, and Sessions (including its search results) can open
-the relevant trace.
+coverage over the full filtered set. Drill-ins from Usage's top sessions, the
+live stream's inspector, and Sessions (the viewer and its search results) can
+open the relevant trace.
 
 Deep scoring, prompt management, and persisted observation/eval storage remain
 outside the local product boundary. See [trace-quality.md](trace-quality.md).
