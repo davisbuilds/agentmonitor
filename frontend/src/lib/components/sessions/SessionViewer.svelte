@@ -353,9 +353,9 @@
           class="inline-block w-2 h-2 rounded-full shrink-0"
           style="background-color: {agentHexColor(session.agent)}"
         ></span>
-        <span class="truncate text-body font-medium text-text">
+        <h2 class="truncate text-body font-medium text-text">
           {displayTitle}
-        </span>
+        </h2>
       </div>
       <div class="flex items-center gap-2 text-meta text-text-faint shrink-0">
         <TraceDrillInLink sessionId={sessionId} label="Quality ↗" />
