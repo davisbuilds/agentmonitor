@@ -184,3 +184,23 @@ test('a pin opens at its message, and Unpin removes it from the Pinned filter', 
       .run(quotaPin.session_id, quotaPin.message_id, quotaPin.message_ordinal);
   }
 });
+
+test('the Project filter narrows the list and the search results at once', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions`);
+  await expect(page.getByRole('button', { name: /Importer cleanup/ })).toBeVisible();
+
+  await page.getByRole('combobox', { name: 'Filter by project' }).selectOption('blueprint');
+  await expect(page).toHaveURL(/#sessions\?project=blueprint$/);
+  await expect(page.getByRole('button', { name: /Importer cleanup/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Quota investigation/ })).toHaveCount(0);
+
+  // Both transcripts mention "the"; the filter keeps only blueprint's.
+  await searchBox(page).fill('the');
+  await expect(page.getByRole('button', { name: /msg #\d.*Importer cleanup/ }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /Quota investigation/ })).toHaveCount(0);
+
+  await page.getByRole('combobox', { name: 'Filter by project' }).selectOption('agentmonitor');
+  await expect(page).toHaveURL(/project=agentmonitor/);
+  await expect(page.getByRole('button', { name: /msg #\d.*Quota investigation/ }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: /Importer cleanup/ })).toHaveCount(0);
+});
