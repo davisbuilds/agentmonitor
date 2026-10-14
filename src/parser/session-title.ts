@@ -76,3 +76,16 @@ export function codexSubagentTitle(agentPath: unknown): string | null {
   if (segments.length < 2) return null;
   return segments[segments.length - 1].replace(/_+/g, ' ').trim() || null;
 }
+
+const AGENT_NAMES: Record<string, string> = {
+  claude: 'Claude',
+  claude_code: 'Claude',
+  codex: 'Codex',
+  antigravity: 'Antigravity',
+};
+
+/** What to call a session nothing names. Matches the app's sessionTitle(). */
+export function untitledSessionName(agent: string | null | undefined): string {
+  const name = agent ? AGENT_NAMES[agent] : undefined;
+  return name ? `Untitled ${name} session` : 'Untitled session';
+}

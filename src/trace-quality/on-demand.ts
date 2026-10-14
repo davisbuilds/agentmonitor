@@ -12,6 +12,7 @@
  */
 import { getDb } from '../db/connection.js';
 import { lookupSessionTitles, type SessionTitleFields } from '../db/v2-queries.js';
+import { untitledSessionName } from '../parser/session-title.js';
 import type {
   TraceQualityObservation,
   TraceQualityObservationListParams,
@@ -128,7 +129,7 @@ function mapSummaryToTrace(row: SessionTraceSummaryRow, titles: Map<string, Sess
     browsing_session_id: null,
     source_trace_id: null,
     agent_type: row.agent_type ?? 'unknown',
-    name: title?.title ?? title?.first_message ?? 'Untitled session',
+    name: title?.title ?? title?.first_message ?? untitledSessionName(row.agent_type),
     status: summaryStatus(row),
     project: row.project,
     branch: null,

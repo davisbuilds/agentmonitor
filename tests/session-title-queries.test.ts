@@ -103,6 +103,12 @@ describe('title lookups by event session id', () => {
     const names = Object.fromEntries(traces.map(trace => [trace.session_id, trace.name]));
     assert.equal(names['c-parent'], 'Parser audit');
     assert.equal(names[PARENT_UUID], 'Review the PR');
+    insertEvent({
+      session_id: 'codex-untitled', agent_type: 'codex', event_type: 'llm_response', status: 'success',
+      tokens_in: 1, tokens_out: 1, model: 'gpt-5.5', metadata: {}, client_timestamp: '2026-10-01T10:31:00.000Z', source: 'otel',
+    });
+    maintainSessionTraceSummary('codex-untitled');
+    assert.equal(listSessionTraces().data.find(trace => trace.session_id === 'codex-untitled')?.name, 'Untitled Codex session');
     const traceId = traces.find(trace => trace.session_id === 'c-parent')!.id;
     assert.equal(getSessionTraceDetail(traceId)?.trace.name, 'Parser audit');
   });

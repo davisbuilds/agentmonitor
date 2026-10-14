@@ -5,6 +5,7 @@ import {
   isCodexAppJobPrompt,
   isInjectedContextText,
   promptTitleFromTexts,
+  untitledSessionName,
 } from '../src/parser/session-title.js';
 
 const AGENTS_MD = '# AGENTS.md instructions for /Users/dev/project\n\n<INSTRUCTIONS>\n# AGENTS.md\nRules.\n</INSTRUCTIONS>';
@@ -102,5 +103,14 @@ describe('codexSubagentTitle', () => {
     assert.equal(codexSubagentTitle(42), null);
     assert.equal(codexSubagentTitle('/root/'), null);
     assert.equal(codexSubagentTitle('/root'), null);
+  });
+});
+
+describe('untitledSessionName', () => {
+  test('names the agent when it is known', () => {
+    assert.equal(untitledSessionName('codex'), 'Untitled Codex session');
+    assert.equal(untitledSessionName('claude_code'), 'Untitled Claude session');
+    assert.equal(untitledSessionName('mystery'), 'Untitled session');
+    assert.equal(untitledSessionName(null), 'Untitled session');
   });
 });

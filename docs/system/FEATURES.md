@@ -59,6 +59,12 @@ product never substitutes a misleading `0%` for missing evidence.
 
 - Session browsing provides incremental transcript loading, child-session context,
   tool calls, metadata, and an activity minimap for long sessions.
+- A session is titled by the name its harness gave it (Claude Code's own title,
+  or a subagent's task), else by its first prompt, skipping the context harnesses
+  inject ahead of it (Codex AGENTS.md and environment blocks, Claude Code command
+  wrappers), else "Untitled <agent> session". Every page uses the same title.
+- Session lists nest a subagent under its parent whenever the parent is stored,
+  and hide internal jobs, including the Codex app's own background threads.
 - Search supports recency and relevance ordering and includes enough session
   context to navigate directly to the matching ordinal.
 - Inline images (pasted images, screenshots in tool results) are stored as a
@@ -173,7 +179,8 @@ limits.
 
 ## Trace Quality
 
-Quality presents one lean trace per session from the content-free session summary.
+Quality presents one lean trace per session from the content-free session summary,
+named by the session's title.
 Observation trees are projected on demand from local source rows and are not stored
 as a second trace warehouse. List and detail views disclose usage and telemetry
 coverage over the full filtered set. Drill-ins from Usage, Analytics, Live,
