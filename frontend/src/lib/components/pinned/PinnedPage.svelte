@@ -1,14 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { PinnedMessage } from '../../api/client';
   import { pins } from '../../stores/pins.svelte';
-  import { getMessagePreviewText, getSessionPreviewText } from '../../session-text';
+  import { getMessagePreviewText, sessionTitle } from '../../session-text';
   import { timeAgo, agentHexColor } from '../../format';
   import { Panel, Select, Button, EmptyState } from '../ui';
 
-  function preview(pin: { content: string | null; session_first_message: string | null }): string {
+  function preview(pin: PinnedMessage): string {
     return getMessagePreviewText({ content: pin.content ?? '' })
-      || getSessionPreviewText(pin.session_first_message)
-      || 'Pinned transcript moment';
+      || sessionTitle({ title: pin.session_title, first_message: pin.session_first_message, agent: pin.session_agent });
   }
 
   onMount(() => {

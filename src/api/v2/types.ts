@@ -847,6 +847,8 @@ export interface TopSessionStat {
   id: string;
   project: string | null;
   agent: string;
+  title: string | null;
+  first_message: string | null;
   started_at: string | null;
   ended_at: string | null;
   message_count: number;

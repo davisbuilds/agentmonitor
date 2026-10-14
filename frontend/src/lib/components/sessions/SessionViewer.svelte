@@ -11,7 +11,7 @@
     type SessionActivityBucket,
   } from '../../api/client';
   import { timeAgo, agentHexColor, agentDisplayName } from '../../format';
-  import { getMessagePreviewText, getSessionPreviewText } from '../../session-text';
+  import { getMessagePreviewText, sessionTitle } from '../../session-text';
   import { classifyMessageAuthor, type MessageAuthor } from '../../session-roles';
   import { hasVisibleContent } from '../../transcript-blocks';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
@@ -26,8 +26,10 @@
     sessionId: string;
     initialMessageOrdinal?: number | null;
     onclose: () => void;
+    /** Opens another session, such as one of this session's subagents. */
+    onselectsession?: (sessionId: string) => void;
   }
-  let { sessionId, initialMessageOrdinal = null, onclose }: Props = $props();
+  let { sessionId, initialMessageOrdinal = null, onclose, onselectsession }: Props = $props();
 
   let session = $state<BrowsingSession | null>(null);
   let messages = $state<Message[]>([]);
@@ -69,12 +71,12 @@
 
   const PAGE_SIZE = 50;
   const displayTitle = $derived.by(() => {
+    if (session) return sessionTitle(session);
     for (const message of messages) {
       const preview = getMessagePreviewText(message);
       if (preview) return preview;
     }
-    if (!session) return sessionId.slice(0, 12);
-    return getSessionPreviewText(session.first_message) || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12));
+    return 'Session';
   });
   const showMinimap = $derived.by(() => activityLoading || !!activityError || ((activity?.data.length ?? 0) > 0));
   const loadedStartOrdinal = $derived(messages[0]?.ordinal ?? null);
@@ -397,11 +399,18 @@
   <!-- Children -->
   {#if children.length > 0}
     <div class="border-b border-line px-4 sm:px-6 py-2 flex flex-wrap items-center gap-1.5 text-meta text-text-faint">
-      <span class="mr-1">Sub-sessions:</span>
-      {#each children as child}
-        <Badge tone="neutral">
-          {(getSessionPreviewText(child.first_message) || (child.message_count > 0 ? 'Local command activity' : child.id.slice(0, 8))).slice(0, 30)}
-        </Badge>
+      <span class="mr-1">Subagents:</span>
+      {#each children as child (child.id)}
+        {#if onselectsession}
+          <button
+            type="button"
+            class="max-w-64 truncate rounded-sm border border-line px-1.5 py-0.5 text-meta text-text-muted transition-colors hover:border-line-strong hover:text-text"
+            title={sessionTitle(child)}
+            onclick={() => onselectsession(child.id)}
+          >{sessionTitle(child)}</button>
+        {:else}
+          <Badge tone="neutral" class="max-w-64 truncate">{sessionTitle(child)}</Badge>
+        {/if}
       {/each}
     </div>
   {/if}

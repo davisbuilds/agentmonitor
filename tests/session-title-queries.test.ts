@@ -96,6 +96,8 @@ describe('title lookups by event session id', () => {
       .map(row => [row.id, [row.title, row.first_message]]));
     assert.deepEqual(top['c-parent'], ['Parser audit', 'Audit the parser']);
     assert.deepEqual(top[PARENT_UUID], [null, 'Review the PR']);
+    const analyticsTop = queries.getAnalyticsTopSessions().find(row => row.id === 'c-parent');
+    assert.deepEqual([analyticsTop?.title, analyticsTop?.first_message], ['Parser audit', 'Audit the parser']);
 
     const traces = listSessionTraces().data;
     const names = Object.fromEntries(traces.map(trace => [trace.session_id, trace.name]));

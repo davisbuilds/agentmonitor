@@ -1,6 +1,7 @@
 <script lang="ts">
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatNumber } from '../../format';
+  import { sessionTitle } from '../../session-text';
   import { Badge, Button } from '../ui';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
@@ -37,7 +38,7 @@
         <div class="rounded-lg border border-line bg-surface-2 px-3 py-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div class="min-w-0">
-              <div class="truncate text-body font-medium text-text">{row.id}</div>
+              <div class="truncate text-body font-medium text-text" title={row.id}>{sessionTitle(row)}</div>
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-text-faint">
                 <span>{row.project ?? 'unknown project'}</span>
                 <span>{row.agent}</span>

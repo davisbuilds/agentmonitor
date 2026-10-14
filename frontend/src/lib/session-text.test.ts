@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { getMessagePreviewText, getSessionPreviewText, parseSessionText } from './session-text';
+import { getMessagePreviewText, getSessionPreviewText, parseSessionText, sessionTitle } from './session-text';
 
 const ESC = '\u001b';
 
@@ -113,5 +113,28 @@ describe('getMessagePreviewText — stored message content', () => {
   it('applies the command filter to the extracted text block', () => {
     const content = JSON.stringify([{ type: 'text', text: '<local-command-stdout>ok</local-command-stdout>' }]);
     expect(getMessagePreviewText({ content })).toBeNull();
+  });
+});
+
+describe('sessionTitle', () => {
+  it('prefers the stored title, then the first prompt', () => {
+    expect(sessionTitle({ title: 'Parser audit', first_message: 'Audit the parser', agent: 'claude' })).toBe('Parser audit');
+    expect(sessionTitle({ title: null, first_message: 'Audit  the\nparser', agent: 'claude' })).toBe('Audit the parser');
+    expect(sessionTitle({ title: '   ', first_message: 'Audit the parser', agent: 'claude' })).toBe('Audit the parser');
+  });
+
+  it('skips a first message that is only a local command', () => {
+    expect(sessionTitle({
+      title: null,
+      first_message: '<command-name>/clear</command-name><command-message>clear</command-message><command-args></command-args>',
+      agent: 'claude',
+    })).toBe('Untitled Claude session');
+  });
+
+  it('names an untitled session by its agent, never by its id', () => {
+    expect(sessionTitle({ title: null, first_message: null, agent: 'codex' })).toBe('Untitled Codex session');
+    expect(sessionTitle({ title: null, first_message: null, agent: 'claude_code' })).toBe('Untitled Claude session');
+    expect(sessionTitle({ title: null, first_message: null, agent: 'mystery' })).toBe('Untitled session');
+    expect(sessionTitle({})).toBe('Untitled session');
   });
 });

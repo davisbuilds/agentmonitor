@@ -1,4 +1,5 @@
 import type { ContentBlock, Message } from './api/client';
+import { agentDisplayName } from './format';
 
 export type SessionTextKind = 'plain' | 'caveat' | 'command' | 'output';
 
@@ -75,4 +76,21 @@ export function getSessionPreviewText(text: string | null | undefined): string |
 export function getMessagePreviewText(message: Pick<Message, 'content'>): string | null {
   const text = firstTextBlock(message.content);
   return getSessionPreviewText(text);
+}
+
+export interface SessionTitleSource {
+  title?: string | null;
+  first_message?: string | null;
+  agent?: string | null;
+}
+
+/** What to call a session wherever it is listed. Never a raw id. */
+export function sessionTitle(session: SessionTitleSource): string {
+  const title = session.title?.replace(/\s+/g, ' ').trim();
+  if (title) return title;
+  const preview = getSessionPreviewText(session.first_message);
+  if (preview) return preview;
+  const agent = session.agent ? agentDisplayName(session.agent) : null;
+  // agentDisplayName's fallback for an agent it does not know.
+  return agent && agent !== 'Assistant' ? `Untitled ${agent} session` : 'Untitled session';
 }

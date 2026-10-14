@@ -2,7 +2,7 @@
   import { onMount, tick } from 'svelte';
   import type { BrowsingSession, SearchResult } from '../../api/client';
   import { agentHexColor, timeAgo } from '../../format';
-  import { getSessionPreviewText } from '../../session-text';
+  import { sessionTitle } from '../../session-text';
   import { closeCommandPalette } from '../../stores/router.svelte';
   import { commandPaletteSearch } from '../../stores/search.svelte';
 
@@ -24,9 +24,8 @@
       .replace(/\x00MARK_CLOSE\x00/g, '</mark>');
   }
 
-  function sessionPreview(session: { first_message: string | null; message_count: number; id: string }): string {
-    return getSessionPreviewText(session.first_message)
-      || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12));
+  function resultSessionTitle(result: SearchResult): string {
+    return sessionTitle({ title: result.session_title, first_message: result.session_first_message, agent: result.session_agent });
   }
 
   const paletteItems = $derived.by<PaletteItem[]>(() => {
@@ -235,19 +234,13 @@
                   <div class="shrink-0">
                     {#if item.result.session_started_at}
                       {timeAgo(item.result.session_started_at)}
-                    {:else}
-                      {item.result.session_id.slice(0, 8)}
                     {/if}
                   </div>
                 </div>
                 <div class="mt-2 line-clamp-2 text-body text-text">
                   {@html sanitizeSnippet(item.result.snippet)}
                 </div>
-                {#if item.result.session_first_message}
-                  <div class="mt-2 truncate text-meta text-text-faint">
-                    {getSessionPreviewText(item.result.session_first_message)}
-                  </div>
-                {/if}
+                <div class="mt-2 truncate text-meta text-text-faint">{resultSessionTitle(item.result)}</div>
               </button>
             {:else}
               <button
@@ -265,7 +258,7 @@
                       class="inline-block h-2 w-2 shrink-0 rounded-full"
                       style={`background-color:${agentHexColor(item.session.agent)}`}
                     ></span>
-                    <span class="truncate text-body text-text">{sessionPreview(item.session)}</span>
+                    <span class="truncate text-body text-text">{sessionTitle(item.session)}</span>
                   </div>
                   <div class="shrink-0 text-meta text-text-faint">
                     {#if item.session.started_at}

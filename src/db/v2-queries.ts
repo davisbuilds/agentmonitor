@@ -2452,6 +2452,8 @@ export function getAnalyticsTopSessions(params: AnalyticsParams = {}): TopSessio
       bs.id,
       bs.project,
       bs.agent,
+      bs.title,
+      bs.first_message,
       bs.started_at,
       bs.ended_at,
       bs.message_count,
