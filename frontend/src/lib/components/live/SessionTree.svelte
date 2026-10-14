@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { LiveSession } from '../../api/client';
   import { agentHexColor, timeAgo } from '../../format';
-  import { getSessionPreviewText } from '../../session-text';
+  import { sessionTitle } from '../../session-text';
   import ProjectionCapabilities from '../shared/ProjectionCapabilities.svelte';
   import { Badge, Button } from '../ui';
 
@@ -22,10 +22,6 @@
 
   let { sessions, selectedSessionId, loading, error, hasMore, onselect, onloadmore }: Props = $props();
 
-  function titleFor(session: LiveSession): string {
-    return getSessionPreviewText(session.first_message)
-      || (session.message_count > 0 ? 'Live agent activity' : session.id.slice(0, 12));
-  }
 
   type BadgeTone = 'neutral' | 'ok' | 'warn';
   function statusTone(status: string | null): BadgeTone {
@@ -62,7 +58,7 @@
                 class="inline-block h-2 w-2 shrink-0 rounded-full"
                 style={`background-color: ${agentHexColor(session.agent)}`}
               ></span>
-              <span class="truncate text-body text-text">{titleFor(session)}</span>
+              <span class="truncate text-body text-text">{sessionTitle(session)}</span>
             </div>
             <div class="mt-1 flex flex-wrap items-center gap-2 text-meta text-text-faint">
               {#if session.project}

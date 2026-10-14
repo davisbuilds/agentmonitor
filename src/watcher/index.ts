@@ -214,6 +214,22 @@ export function findMissingSessionProjections(
     .sort();
 }
 
+/**
+ * A Claude subagent's task description: Claude Code writes it, with the
+ * spawning tool call, to `<agent>.meta.json` beside the subagent's transcript.
+ */
+function readSubagentDescription(filePath: string): string | null {
+  try {
+    const meta = JSON.parse(fs.readFileSync(filePath.replace(/\.jsonl$/, '.meta.json'), 'utf-8')) as {
+      description?: unknown;
+    };
+    if (typeof meta.description !== 'string') return null;
+    return meta.description.replace(/\s+/g, ' ').trim().slice(0, 200) || null;
+  } catch {
+    return null;
+  }
+}
+
 export function syncSessionFileDetailed(
   db: Database.Database,
   filePath: string,
@@ -241,6 +257,9 @@ export function syncSessionFileDetailed(
     const chunk = parseTranscript(bytes, sessionId, filePath, parseSessionChunk, read.checkpoint);
     const appendFrom = read.checkpoint?.messageCount;
     const parsed = chunk.parsed;
+    if (parsed.metadata.relationship_type === 'subagent' && !parsed.metadata.title) {
+      parsed.metadata.title = readSubagentDescription(filePath);
+    }
 
     // Skip files with no messages (non-interactive sessions)
     if (parsed.metadata.message_count === 0) {

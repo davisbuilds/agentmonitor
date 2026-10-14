@@ -10,6 +10,7 @@ import {
 } from '../skills/context-observations.js';
 import { extractExplicitSkillName } from '../skills/invocation-detection.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
+import { promptTitleFromTexts } from './session-title.js';
 
 // --- Tool category normalization ---
 
@@ -53,6 +54,8 @@ interface ClaudeCodeLine {
   type?: string;
   parentUuid?: string | null;
   sessionId?: string;
+  // Claude Code's own short title for the session (`type: 'ai-title'` lines).
+  aiTitle?: string;
   isSidechain?: boolean;
   isMeta?: boolean;
   cwd?: string;
@@ -103,6 +106,9 @@ export interface ParsedSessionMetadata {
   project: string | null;
   agent: string;
   first_message: string | null;
+  // A name for the session the harness or its parent gave it, preferred over
+  // first_message for display. Undefined when the parser has none.
+  title?: string | null;
   started_at: string | null;
   ended_at: string | null;
   message_count: number;
@@ -135,16 +141,10 @@ function cleanPreviewText(text: string): string {
 }
 
 function previewTextFromBlocks(blocks: ContentBlock[], isMeta: boolean): string | null {
-  const textBlock = blocks.find((block) => block.type === 'text' && typeof block.text === 'string' && block.text.trim());
-  const text = textBlock?.text?.trim();
-  if (!text) return null;
-
   if (isMeta) return null;
-  if (text.includes('<local-command-caveat>')) return null;
-  if (text.includes('<command-name>')) return null;
-  if (text.includes('<local-command-stdout>') || text.includes('<local-command-stderr>')) return null;
-
-  return cleanPreviewText(text).slice(0, 200) || null;
+  return promptTitleFromTexts(blocks.flatMap(block => (
+    block.type === 'text' && typeof block.text === 'string' ? [block.text] : []
+  )));
 }
 
 // --- Extract project name from file path ---
@@ -281,6 +281,8 @@ function linkParsedSessionRelationships(
 export interface ClaudeParseState {
   messageCount: number;
   firstUserMessage: string | null;
+  title: string | null;
+  parentSessionId: string | null;
   startedAt: string | null;
   endedAt: string | null;
   userMessageCount: number;
@@ -327,10 +329,15 @@ export function parseSessionChunk(
   const toolCalls: ParsedToolCall[] = [];
   const ordinalBase = state?.messageCount ?? 0;
   let firstUserMessage: string | null = state?.firstUserMessage ?? null;
+  let title: string | null = state?.title ?? null;
   let startedAt: string | null = state?.startedAt ?? null;
   let endedAt: string | null = state?.endedAt ?? null;
   let userMessageCount = state?.userMessageCount ?? 0;
-  const parentSessionId: string | null = null;
+  // A subagent's own file (agent-*.jsonl) records its parent's session id on
+  // every line. A top-level file can name another session too (a resumed
+  // conversation), which is not a parent, so only subagent files read it.
+  const isSubagentFile = sessionId.startsWith('agent-');
+  let parentSessionId: string | null = state?.parentSessionId ?? null;
   let relationshipType: string | null = null;
   let sawSidechain = state?.sawSidechain ?? false;
   let entrypoint: string | undefined = state?.entrypoint;
@@ -382,6 +389,18 @@ export function parseSessionChunk(
     }
 
     if (!lineType) {
+      continue;
+    }
+
+    if (isSubagentFile && parentSessionId === null
+      && typeof line.sessionId === 'string' && line.sessionId && line.sessionId !== sessionId) {
+      parentSessionId = line.sessionId;
+    }
+
+    if (lineType === 'ai-title') {
+      // Claude Code rewrites its title as the session goes; the latest one wins.
+      const aiTitle = typeof line.aiTitle === 'string' ? cleanPreviewText(line.aiTitle) : '';
+      if (aiTitle) title = aiTitle.slice(0, 200);
       continue;
     }
 
@@ -548,6 +567,7 @@ export function parseSessionChunk(
       project,
       agent: 'claude',
       first_message: firstUserMessage,
+      title,
       started_at: startedAt,
       ended_at: endedAt,
       message_count: ordinalBase + messages.length,
@@ -585,6 +605,8 @@ export function parseSessionChunk(
     state: {
       messageCount: ordinalBase + messages.length,
       firstUserMessage,
+      title,
+      parentSessionId,
       startedAt,
       endedAt,
       userMessageCount,
@@ -764,17 +786,18 @@ export function insertParsedSession(
     // Insert browsing session
     db.prepare(`
       INSERT INTO browsing_sessions (
-        id, project, agent, first_message, started_at, ended_at, message_count,
+        id, project, agent, first_message, title, started_at, ended_at, message_count,
         user_message_count, parent_session_id, relationship_type, file_path,
         file_size, file_hash, context_used_tokens, context_window_tokens,
         project_identity, skill_context_capabilities_json
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       metadata.session_id,
       metadata.project,
       metadata.agent,
       metadata.first_message,
+      metadata.title ?? null,
       metadata.started_at,
       metadata.ended_at,
       metadata.message_count,

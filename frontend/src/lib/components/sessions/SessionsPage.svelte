@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { fetchV2Projects, fetchV2Agents } from '../../api/client';
+  import { fetchSessionChildren, fetchV2Projects, fetchV2Agents, type BrowsingSession } from '../../api/client';
   import { timeAgo, agentHexColor } from '../../format';
-  import { getSessionPreviewText } from '../../session-text';
+  import { sessionTitle } from '../../session-text';
   import {
     consumePendingSessionNavigation,
     getPendingSessionNavigationVersion,
@@ -20,6 +20,25 @@
   let agents = $state<string[]>([]);
   let filterProject = $state('');
   let filterAgent = $state('');
+
+  // Subagents shown under their parent row, by parent id.
+  let expandedChildren = $state<Record<string, BrowsingSession[] | 'loading' | 'error'>>({});
+
+  async function toggleChildren(parentId: string) {
+    if (expandedChildren[parentId] && expandedChildren[parentId] !== 'error') {
+      const { [parentId]: _collapsed, ...rest } = expandedChildren;
+      expandedChildren = rest;
+      return;
+    }
+    expandedChildren = { ...expandedChildren, [parentId]: 'loading' };
+    try {
+      const { data } = await fetchSessionChildren(parentId);
+      expandedChildren = { ...expandedChildren, [parentId]: data };
+    } catch (err) {
+      console.error('Failed to load subagents:', err);
+      expandedChildren = { ...expandedChildren, [parentId]: 'error' };
+    }
+  }
 
   // Selected session
   let selectedSessionId = $state<string | null>(null);
@@ -161,7 +180,12 @@
 
 {#if selectedSessionId}
   {#key selectedSessionId}
-    <SessionViewer sessionId={selectedSessionId} initialMessageOrdinal={selectedMessageOrdinal} onclose={closeViewer} />
+    <SessionViewer
+      sessionId={selectedSessionId}
+      initialMessageOrdinal={selectedMessageOrdinal}
+      onclose={closeViewer}
+      onselectsession={selectSession}
+    />
   {/key}
 {:else}
   <main class="flex-1 min-h-0 overflow-hidden flex flex-col p-4 sm:p-6">
@@ -189,32 +213,62 @@
     <div class="min-h-0 flex-1 overflow-y-auto">
       <div class="divide-y divide-line/60">
         {#each list.sessions as session (session.id)}
-          <button
-            class="group w-full rounded-sm px-2 py-2.5 text-left transition-colors hover:bg-surface"
-            onclick={() => selectSession(session.id)}
-          >
-            <div class="flex items-center justify-between gap-3">
-              <div class="flex min-w-0 flex-1 items-center gap-2">
-                <span
-                  class="inline-block h-2 w-2 shrink-0 rounded-full"
-                  style="background-color: {agentHexColor(session.agent)}"
-                ></span>
-                <span class="truncate text-body text-text group-hover:text-text">
-                  {getSessionPreviewText(session.first_message) || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12))}
-                </span>
-              </div>
-              <div class="flex shrink-0 items-center gap-2 text-meta text-text-faint">
-                {#if session.project}
-                  <Badge tone="neutral">{session.project}</Badge>
-                {/if}
-                <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
-                <span class="tabular font-mono">{session.message_count} msgs</span>
-                {#if session.started_at}
-                  <span class="tabular font-mono">{timeAgo(session.started_at)}</span>
-                {/if}
-              </div>
+          {@const childState = expandedChildren[session.id]}
+          <div>
+            <div class="flex items-center gap-1">
+              <button
+                class="group min-w-0 flex-1 rounded-sm px-2 py-2.5 text-left transition-colors hover:bg-surface"
+                onclick={() => selectSession(session.id)}
+              >
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex min-w-0 flex-1 items-center gap-2">
+                    <span
+                      class="inline-block h-2 w-2 shrink-0 rounded-full"
+                      style="background-color: {agentHexColor(session.agent)}"
+                    ></span>
+                    <span class="truncate text-body text-text group-hover:text-text">{sessionTitle(session)}</span>
+                  </div>
+                  <div class="flex shrink-0 items-center gap-2 text-meta text-text-faint">
+                    {#if session.project}
+                      <Badge tone="neutral">{session.project}</Badge>
+                    {/if}
+                    <ProjectionCapabilities capabilities={session.capabilities} variant="summary" />
+                    <span class="tabular font-mono">{session.message_count} msgs</span>
+                    {#if session.started_at}
+                      <span class="tabular font-mono">{timeAgo(session.started_at)}</span>
+                    {/if}
+                  </div>
+                </div>
+              </button>
+              {#if session.child_count}
+                <button
+                  type="button"
+                  class="shrink-0 rounded-sm px-2 py-1 text-meta text-text-faint transition-colors hover:bg-surface hover:text-text"
+                  aria-expanded={childState !== undefined && childState !== 'error'}
+                  onclick={() => toggleChildren(session.id)}
+                >
+                  {session.child_count} {session.child_count === 1 ? 'subagent' : 'subagents'}
+                </button>
+              {/if}
             </div>
-          </button>
+            {#if childState === 'loading'}
+              <div class="py-1.5 pl-7 text-meta text-text-faint">Loading subagents…</div>
+            {:else if childState === 'error'}
+              <div class="py-1.5 pl-7 text-meta text-danger">Could not load subagents.</div>
+            {:else if childState}
+              <div class="mb-1 ml-3 border-l border-line pl-2">
+                {#each childState as child (child.id)}
+                  <button
+                    class="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-surface"
+                    onclick={() => selectSession(child.id)}
+                  >
+                    <span class="truncate text-meta text-text-muted">{sessionTitle(child)}</span>
+                    <span class="shrink-0 tabular font-mono text-meta text-text-faint">{child.message_count} msgs</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
         {/each}
       </div>
 

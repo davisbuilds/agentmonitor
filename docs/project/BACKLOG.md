@@ -31,20 +31,38 @@ so later readers know what still needs checking.
 
 ### Consistent session identity and parent/child coverage across read surfaces
 
-- **What**: Sessions lists now reconcile known Codex rollout/UUID aliases, but
-  Analytics, Live, Search and projection storage still have distinct identity
-  semantics. Claude child-agent transcript IDs also need explicit, reliable
-  parent linkage rather than a pooled conversation count.
-- **Why or evidence**: the Codex watcher uses a rollout basename, whereas the
-  summary adapter uses event session IDs. Claude child-agent files can carry an
-  embedded parent session ID that differs from their filename. Event history can
-  outlive the source transcripts and browser projections; forcing a file resync
-  cannot recover absent files. See `tests/v2-session-identity.test.ts` for the
-  bounded list guarantee, not a claim that all read surfaces are reconciled.
+- **What**: Sessions lists and child lookups reconcile known Codex rollout/UUID
+  aliases, and Claude subagents link to the parent session their transcript
+  records (2026-10-13). Analytics, Search, Quality and projection storage still
+  have distinct identity semantics, and only the Sessions list hides internal
+  jobs (Codex compaction, memory and app background threads).
+- **Why or evidence**: the Codex watcher keys a session by its rollout basename,
+  whereas the summary adapter uses event session IDs, so a Codex session can hold
+  a trace summary under each. On 2026-10-13 every Codex session in a 15-row
+  Quality sample was listed twice, once per id, now under the same title. Event
+  history can outlive the source transcripts and browser projections; forcing a
+  file resync cannot recover absent files. See `tests/v2-session-identity.test.ts`
+  and `tests/session-title-queries.test.ts` for the bounded list guarantees, not
+  a claim that all read surfaces are reconciled.
 - **Next**: define persisted provider-native identity plus child-agent identity
   and coverage provenance; preserve existing links and pins during any migration.
   Expose usage-only versus browsable coverage explicitly without fabricating
   transcripts, and audit each aggregate before calling its count conversations.
+
+### Codex thread names and app-job detection
+
+- **What**: Codex sessions are titled by their first real prompt, or a subagent
+  by its task name. The Codex app's own generated thread names are not read, and
+  its background threads (thread naming, catch-up summaries, memory
+  consolidation) are recognized only by their prompt's opening words.
+- **Why or evidence**: the names live in Codex's internal state database, not in
+  rollouts or telemetry, and on one host on 2026-10-13 fewer than a tenth of
+  threads had one; reading it would couple amon to that schema. The background
+  threads leave no rollout and their telemetry carries no originator, so a
+  reworded prompt would list them as ordinary sessions again
+  (`CODEX_APP_JOB_PREFIXES` in `src/parser/session-title.ts`).
+- **Revisit when**: Codex writes thread names or a job marker into rollouts or
+  telemetry, or Codex app jobs reappear in the Sessions list.
 
 ### Explicit provenance for unresolved historical timestamps
 

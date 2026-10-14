@@ -21,6 +21,7 @@ import {
 } from './projector.js';
 import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
+import { isCodexAppJobPrompt, promptTitleFromTexts } from '../parser/session-title.js';
 
 export interface CodexSummaryLiveSyncResult {
   inserted_turns: number;
@@ -365,9 +366,10 @@ export function syncCodexSummaryLiveEvent(
   const normalizedItem = buildCodexSummaryLiveItem(row, metadata);
   const item = normalizedItem ? applyLivePrivacyPolicy(normalizedItem, privacyPolicy) : null;
   const endedAt = row.event_type === 'session_end' || row.source === 'import' ? timestamp : null;
-  const firstMessage = row.event_type === 'user_prompt' && typeof metadata.message === 'string'
-    ? metadata.message.slice(0, 400)
+  const prompt = row.event_type === 'user_prompt' && typeof metadata.message === 'string'
+    ? metadata.message
     : null;
+  const firstMessage = prompt === null ? null : promptTitleFromTexts([prompt]);
   const messageCount = item && (item.kind === 'user_message' || item.kind === 'assistant_message') ? 1 : 0;
   const userMessageCount = item?.kind === 'user_message' ? 1 : 0;
   upsertProjectedSessionIncrement(db, {
@@ -381,6 +383,7 @@ export function syncCodexSummaryLiveEvent(
     user_message_count_delta: userMessageCount,
     live_status: liveStatus,
     last_item_at: timestamp,
+    relationship_type: prompt !== null && isCodexAppJobPrompt(prompt) ? 'internal' : null,
   }, {
     integration_mode: integrationMode,
     fidelity: 'summary',

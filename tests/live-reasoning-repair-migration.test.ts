@@ -82,7 +82,7 @@ test('v18 restores live reasoning text from the transcript and removes empty rea
   assert.deepEqual(rows.get(ids.user), { text: 'Fix the build' }, 'other kinds are untouched');
   const turns = (db.prepare('SELECT COUNT(*) AS c FROM session_turns WHERE session_id = ?').get(SESSION) as { c: number }).c;
   assert.equal(turns, 5, 'every message keeps its turn, so the next sync only appends');
-  assert.equal(db.pragma('user_version', { simple: true }), 18);
+  assert.equal(db.pragma('user_version', { simple: true }), 19);
 });
 
 test('the trace summary is re-derived without the removed reasoning', () => {

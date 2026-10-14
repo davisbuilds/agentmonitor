@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { SearchResult } from '../../api/client';
   import { agentHexColor, timeAgo } from '../../format';
-  import { getSessionPreviewText } from '../../session-text';
+  import { sessionTitle } from '../../session-text';
   import { openCommandPalette } from '../../stores/router.svelte';
   import { search } from '../../stores/search.svelte';
   import { Select, Button, EmptyState } from '../ui';
@@ -23,9 +24,8 @@
       .replace(/\x00MARK_CLOSE\x00/g, '</mark>');
   }
 
-  function sessionPreview(session: { first_message: string | null; message_count: number; id: string }): string {
-    return getSessionPreviewText(session.first_message)
-      || (session.message_count > 0 ? 'Local command activity' : session.id.slice(0, 12));
+  function resultSessionTitle(result: SearchResult): string {
+    return sessionTitle({ title: result.session_title, first_message: result.session_first_message, agent: result.session_agent });
   }
 
   const searchNotice = $derived.by(() => {
@@ -150,19 +150,13 @@
               <div class="shrink-0 tabular font-mono">
                 {#if result.session_started_at}
                   {timeAgo(result.session_started_at)}
-                {:else}
-                  {result.session_id.slice(0, 8)}
                 {/if}
               </div>
             </div>
             <div class="text-body text-text line-clamp-2">
               {@html sanitizeSnippet(result.snippet)}
             </div>
-            {#if result.session_first_message}
-              <div class="mt-2 truncate text-meta text-text-faint">
-                {getSessionPreviewText(result.session_first_message)}
-              </div>
-            {/if}
+            <div class="mt-2 truncate text-meta text-text-faint">{resultSessionTitle(result)}</div>
           </button>
           </div>
         {/each}
@@ -194,7 +188,7 @@
                   class="inline-block h-2 w-2 shrink-0 rounded-full"
                   style={`background-color:${agentHexColor(session.agent)}`}
                 ></span>
-                <span class="truncate text-body text-text">{sessionPreview(session)}</span>
+                <span class="truncate text-body text-text">{sessionTitle(session)}</span>
               </div>
               <div class="flex shrink-0 items-center gap-3 text-meta text-text-faint">
                 {#if session.project}

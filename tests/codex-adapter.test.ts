@@ -357,3 +357,32 @@ test('normalizeCodexExporterRecord preserves reserved richer item kinds for futu
     payload: { files: [{ path: 'src/live/codex-adapter.ts' }] },
   });
 });
+
+test('OTEL prompts title the session with the first prompt that is not injected context', () => {
+  const db = getDb();
+  syncCodexSummaryLiveEvent(db, makeEventRow({
+    id: 9101, session_id: 'codex-summary-title', event_type: 'user_prompt',
+    metadata: JSON.stringify({ message: '<environment_context>\n  <cwd>/work</cwd>\n</environment_context>' }),
+  }));
+  syncCodexSummaryLiveEvent(db, makeEventRow({
+    id: 9102, session_id: 'codex-summary-title', event_type: 'user_prompt',
+    metadata: JSON.stringify({ message: '  Tidy the\n  release notes ' }),
+  }));
+  const session = db.prepare('SELECT first_message, relationship_type FROM browsing_sessions WHERE id = ?')
+    .get('codex-summary-title') as { first_message: string | null; relationship_type: string | null };
+  assert.deepEqual(session, { first_message: 'Tidy the release notes', relationship_type: null });
+});
+
+test("the Codex app's background-job threads are classified as internal", () => {
+  const db = getDb();
+  syncCodexSummaryLiveEvent(db, makeEventRow({
+    id: 9201, session_id: 'codex-app-job', event_type: 'user_prompt',
+    metadata: JSON.stringify({ message: 'Generate a concise, single-line task title of at most 36 characters.' }),
+  }));
+  syncCodexSummaryLiveEvent(db, makeEventRow({
+    id: 9202, session_id: 'codex-app-job', event_type: 'llm_response', metadata: '{}',
+  }));
+  const row = db.prepare('SELECT relationship_type FROM browsing_sessions WHERE id = ?')
+    .get('codex-app-job') as { relationship_type: string | null };
+  assert.equal(row.relationship_type, 'internal');
+});

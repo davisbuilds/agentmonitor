@@ -164,6 +164,9 @@ export interface BrowsingSession {
   project: string | null;
   agent: string;
   first_message: string | null;
+  title: string | null;
+  // Session lists only: subagent sessions nested under this one.
+  child_count?: number;
   started_at: string | null;
   ended_at: string | null;
   message_count: number;
@@ -268,6 +271,7 @@ export interface PinnedMessage {
   session_project: string | null;
   session_agent: string | null;
   session_first_message: string | null;
+  session_title: string | null;
 }
 
 export interface ContentBlock {
@@ -293,6 +297,7 @@ export interface SearchResult {
   session_started_at: string | null;
   session_ended_at: string | null;
   session_first_message: string | null;
+  session_title: string | null;
 }
 
 export type SearchSort = 'recent' | 'relevance';
@@ -450,6 +455,8 @@ export interface TopSessionStat {
   id: string;
   project: string | null;
   agent: string;
+  title: string | null;
+  first_message: string | null;
   started_at: string | null;
   ended_at: string | null;
   message_count: number;
@@ -610,6 +617,8 @@ export interface UsageTopSessionRow {
   id: string;
   project: string | null;
   agent: string;
+  title: string | null;
+  first_message: string | null;
   started_at: string | null;
   ended_at: string | null;
   last_activity_at: string | null;

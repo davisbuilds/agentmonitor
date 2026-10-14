@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { LiveSession } from '../../api/client';
+  import { buildSessionTree } from '../../session-tree';
   import { navigateToSession } from '../../stores/router.svelte';
   import {
     getLiveAgents,
@@ -46,11 +46,6 @@
     return 'danger';
   }
 
-  interface SessionTreeNode {
-    session: LiveSession;
-    depth: number;
-  }
-
   let filterProject = $state('');
   let filterAgent = $state('');
   let filterStatus = $state('');
@@ -79,37 +74,6 @@
   const liveSettings = $derived(getLiveSettings());
 
   const sessionTree = $derived.by(() => buildSessionTree(sessions));
-
-  function buildSessionTree(source: LiveSession[]): SessionTreeNode[] {
-    const childrenByParent = new Map<string, LiveSession[]>();
-    const roots: LiveSession[] = [];
-
-    for (const session of source) {
-      if (session.parent_session_id && source.some(candidate => candidate.id === session.parent_session_id)) {
-        const children = childrenByParent.get(session.parent_session_id) || [];
-        children.push(session);
-        childrenByParent.set(session.parent_session_id, children);
-      } else {
-        roots.push(session);
-      }
-    }
-
-    const flattened: SessionTreeNode[] = [];
-    const visited = new Set<string>();
-
-    function visit(session: LiveSession, depth: number): void {
-      if (visited.has(session.id)) return;
-      visited.add(session.id);
-      flattened.push({ session, depth });
-      const children = childrenByParent.get(session.id) || [];
-      for (const child of children) visit(child, depth + 1);
-    }
-
-    for (const root of roots) visit(root, 0);
-    for (const session of source) visit(session, 0);
-
-    return flattened;
-  }
 
   function applyFilters(): void {
     setLiveFilters({

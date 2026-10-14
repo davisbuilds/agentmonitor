@@ -11,6 +11,8 @@
  * the frontend contract are all unchanged.
  */
 import { getDb } from '../db/connection.js';
+import { lookupSessionTitles, type SessionTitleFields } from '../db/v2-queries.js';
+import { untitledSessionName } from '../parser/session-title.js';
 import type {
   TraceQualityObservation,
   TraceQualityObservationListParams,
@@ -119,14 +121,15 @@ function summaryStatus(row: SessionTraceSummaryRow): string {
   return row.error_count > 0 ? 'error' : 'success';
 }
 
-function mapSummaryToTrace(row: SessionTraceSummaryRow): TraceQualityTrace {
+function mapSummaryToTrace(row: SessionTraceSummaryRow, titles: Map<string, SessionTitleFields>): TraceQualityTrace {
+  const title = titles.get(row.session_id);
   return {
     id: row.trace_id,
     session_id: row.session_id,
     browsing_session_id: null,
     source_trace_id: null,
     agent_type: row.agent_type ?? 'unknown',
-    name: `Session ${row.session_id}`,
+    name: title?.title ?? title?.first_message ?? untitledSessionName(row.agent_type),
     status: summaryStatus(row),
     project: row.project,
     branch: null,
@@ -204,6 +207,8 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
     LIMIT ? OFFSET ?
   `).all(...values, limit, offset) as SessionTraceSummaryRow[];
 
+  const titles = lookupSessionTitles(rows.map(row => row.session_id));
+
   // Coverage describes the full filtered selection, not just the current page —
   // the summary table is ~one row per session, so the extra scan is cheap.
   const coverageRows = db.prepare(`
@@ -211,7 +216,7 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
   `).all(...values) as CoverageRow[];
 
   return {
-    data: rows.map(mapSummaryToTrace),
+    data: rows.map(row => mapSummaryToTrace(row, titles)),
     total,
     limit,
     offset,
@@ -232,7 +237,7 @@ export function getSessionTraceDetail(traceId: string): { trace: TraceQualityTra
   if (!row) return null;
   return {
     trace: {
-      ...mapSummaryToTrace(row),
+      ...mapSummaryToTrace(row, lookupSessionTitles([row.session_id])),
       prompt_refs: [],
       score_summary: [],
     },

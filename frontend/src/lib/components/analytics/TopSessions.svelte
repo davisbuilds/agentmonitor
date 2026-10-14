@@ -1,11 +1,8 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
   import { timeAgo } from '../../format';
+  import { sessionTitle } from '../../session-text';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
-
-  function preview(session: { id: string; project: string | null; message_count: number }) {
-    return session.project ? `${session.project}` : session.id.slice(0, 12);
-  }
 </script>
 
 <section class="rounded-lg border border-line bg-surface p-4">
@@ -33,8 +30,8 @@
           >
             <div class="w-6 text-right tabular font-mono text-meta text-text-faint">{index + 1}</div>
             <div class="min-w-0 flex-1">
-              <div class="truncate text-body text-text">{preview(session)}</div>
-              <div class="text-meta text-text-faint">{session.agent} · {session.tool_call_count} tool calls</div>
+              <div class="truncate text-body text-text">{sessionTitle(session)}</div>
+              <div class="text-meta text-text-faint">{session.project ? `${session.project} · ` : ''}{session.agent} · {session.tool_call_count} tool calls</div>
             </div>
             <div class="text-right tabular font-mono text-meta text-text-muted">
               <div>{session.message_count} msgs</div>
