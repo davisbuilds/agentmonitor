@@ -2,7 +2,7 @@
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatNumber } from '../../format';
   import { sessionTitle } from '../../session-text';
-  import { Badge, Button } from '../ui';
+  import { Button, InfoTip } from '../ui';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
   function openSession(sessionId: string, available: boolean): void {
@@ -13,8 +13,10 @@
 
 <section class="flex h-full flex-col rounded-lg border border-line bg-surface p-4 xl:max-h-[34rem]">
   <div>
-    <h3 class="text-h3">Top Sessions</h3>
-    <p class="mt-0.5 text-meta text-text-muted">Highest-cost sessions in the selected window. Sessions without transcript history stay visible as event-only rows.</p>
+    <div class="flex items-center gap-1.5">
+      <h3 class="text-h3">Top Sessions</h3>
+      <InfoTip label="Top Sessions"><p>Highest-cost sessions in the range. Sessions with no transcript still appear, from their usage events.</p></InfoTip>
+    </div>
   </div>
 
   {#if usage.loading.topSessions}
@@ -57,19 +59,19 @@
           </div>
 
           <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap gap-1.5">
-              <Badge tone="neutral">{formatNumber(row.event_count)} total events</Badge>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-meta text-text-faint">
+              <span class="tabular font-mono">{formatNumber(row.event_count)} events</span>
               {#if row.message_count != null}
-                <Badge tone="neutral">{formatNumber(row.message_count)} messages</Badge>
-              {/if}
-              {#if row.fidelity}
-                <Badge tone="neutral">{row.fidelity}</Badge>
+                <span class="tabular font-mono">{formatNumber(row.message_count)} messages</span>
               {/if}
               {#if row.model_count > 1}
-                <Badge tone="neutral">{formatNumber(row.model_count)} models</Badge>
+                <span class="tabular font-mono">{formatNumber(row.model_count)} models</span>
               {/if}
               {#if row.unknown_model_events > 0}
-                <Badge tone="warn">{formatNumber(row.unknown_model_events)} unknown model events</Badge>
+                <span class="inline-flex items-center gap-1.5 text-warn">
+                  <span class="h-1.5 w-1.5 rounded-full bg-warn" aria-hidden="true"></span>
+                  {formatNumber(row.unknown_model_events)} unpriced events
+                </span>
               {/if}
             </div>
 

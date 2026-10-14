@@ -15,25 +15,6 @@
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
-  const banner = $derived.by(() => {
-    const summary = analytics.coverage.summary;
-    const tools = analytics.coverage.tools;
-    if (!summary) return null;
-
-    if (tools && tools.excluded_sessions > 0) {
-      return {
-        dot: 'bg-warn',
-        title: 'Capability-aware.',
-        body: `${summary.included_sessions} matching sessions are included in all-session metrics, but ${tools.excluded_sessions} summary-only session${tools.excluded_sessions === 1 ? '' : 's'} are excluded from tool analytics.`,
-      };
-    }
-
-    return {
-      dot: 'bg-accent',
-      title: 'Reflects session capability coverage.',
-      body: summary.note,
-    };
-  });
 
   onMount(() => {
     void analytics.initialize();
@@ -51,12 +32,6 @@
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
   <ActiveFilters />
 
-  {#if banner}
-    <div class="flex items-start gap-2 text-meta text-text-muted">
-      <span class="mt-1 inline-block h-1.5 w-1.5 shrink-0 rounded-full {banner.dot}" aria-hidden="true"></span>
-      <p class="max-w-[80ch]"><span class="text-text">{banner.title}</span> {banner.body}</p>
-    </div>
-  {/if}
 
   <SummaryCards />
 

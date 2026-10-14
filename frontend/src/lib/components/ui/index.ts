@@ -6,6 +6,7 @@ export { default as Button } from './Button.svelte';
 export { default as Select } from './Select.svelte';
 export { default as Field } from './Field.svelte';
 export { default as Popover } from './Popover.svelte';
+export { default as InfoTip } from './InfoTip.svelte';
 export { default as Stat } from './Stat.svelte';
 export { default as DataTable } from './DataTable.svelte';
 export { default as Bar } from './Bar.svelte';

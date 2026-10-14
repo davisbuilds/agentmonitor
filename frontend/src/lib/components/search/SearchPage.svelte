@@ -5,7 +5,7 @@
   import { sessionTitle } from '../../session-text';
   import { openCommandPalette } from '../../stores/router.svelte';
   import { search } from '../../stores/search.svelte';
-  import { Select, Button, EmptyState } from '../ui';
+  import { Button, EmptyState, InfoTip, Select } from '../ui';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
   const sortOptions = [
@@ -28,28 +28,14 @@
     return sessionTitle({ title: result.session_title, first_message: result.session_first_message, agent: result.session_agent });
   }
 
-  const searchNotice = $derived.by(() => {
+  const searchNote = $derived.by(() => {
     if (search.agent === 'codex') {
-      return {
-        dot: 'bg-warn',
-        title: 'Codex search is partial.',
-        body: 'Transcript-backed history only — summary-only Codex live sessions are excluded until richer Codex ingestion exists.',
-      };
+      return 'Only Codex sessions with a rollout file are searchable; ones known only from telemetry have no text to search.';
     }
-
     if (search.agent === 'antigravity') {
-      return {
-        dot: 'bg-warn',
-        title: 'Antigravity search is partial.',
-        body: 'Summary fidelity — only step kinds are indexed (e.g. "run command"), not transcript text, until conversation payload internals are decoded.',
-      };
+      return 'Antigravity sessions are searchable by step kind (such as "run command"), not by what was said.';
     }
-
-    return {
-      dot: 'bg-accent',
-      title: 'Search is capability-aware.',
-      body: 'Only sessions with searchable history appear here; summary-only live sessions do not contribute to full-text results.',
-    };
+    return 'Searches the text of recorded transcripts. Sessions known only from telemetry have no text to search.';
   });
 
   onMount(() => {
@@ -59,14 +45,6 @@
 </script>
 
 <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
-  <div class="mb-4 flex max-w-[72ch] items-start gap-2 text-meta">
-    <span class="mt-1 h-2 w-2 shrink-0 rounded-full {searchNotice.dot}"></span>
-    <p class="text-text-muted">
-      <span class="font-medium text-text">{searchNotice.title}</span>
-      {searchNotice.body}
-    </p>
-  </div>
-
   <div class="mb-4 flex flex-wrap items-start gap-3">
     <div class="min-w-[260px] flex-1">
       <input
@@ -82,7 +60,13 @@
           }
         }}
       />
-      <p class="mt-2 text-meta text-text-faint">Results update automatically after a short pause. Press Enter to run immediately.</p>
+    </div>
+
+    <div class="flex h-9 items-center">
+      <InfoTip label="search">
+        <p>{searchNote}</p>
+        <p>Results update after a short pause; press Enter to search right away.</p>
+      </InfoTip>
     </div>
 
     <Button variant="neutral" onclick={() => openCommandPalette()}>Command Palette</Button>

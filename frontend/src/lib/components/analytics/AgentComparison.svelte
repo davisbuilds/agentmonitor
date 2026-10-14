@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
   import { formatNumber } from '../../format';
 </script>
@@ -6,8 +7,10 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Agent Comparison</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Click an agent row to drill the dashboard into that agent.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Agent Comparison</h3>
+        <InfoTip label="Agent Comparison"><p>Click an agent to narrow the page to it.</p></InfoTip>
+      </div>
     </div>
     {#if analytics.agent}
       <span class="text-meta text-accent">Filtered to {analytics.agent}</span>

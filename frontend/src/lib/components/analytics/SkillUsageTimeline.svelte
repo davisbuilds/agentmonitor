@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
   import { formatDateOnly, formatNumber } from '../../format';
   import type { SkillUsageDay } from '../../api/client';
@@ -91,8 +92,10 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Raw skill invocation volume</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Phase-1 volume: Claude uses explicit `Skill` calls; Codex is inferred from concrete `SKILL.md` reads. Use consultation evidence below for engagement and coverage.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Raw skill invocation volume</h3>
+        <InfoTip label="Raw skill invocation volume"><p>Claude counts explicit Skill tool calls; Codex counts reads of a skill's SKILL.md. Whether a skill was actually followed is in the consultation evidence below.</p></InfoTip>
+      </div>
     </div>
     {#if analytics.coverage.skills}
       <span class="tabular font-mono text-meta text-text-faint">{analytics.coverage.skills.included_sessions} sessions in range</span>

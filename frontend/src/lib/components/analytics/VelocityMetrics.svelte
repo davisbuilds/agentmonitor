@@ -1,6 +1,6 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
-  import { Stat } from '../ui';
+  import { InfoTip, Stat } from '../ui';
 
   const cards = $derived.by(() => {
     const velocity = analytics.velocity;
@@ -19,12 +19,11 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Velocity</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Pace metrics across active days and calendar span.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Velocity</h3>
+        <InfoTip label="Velocity"><p>Pace across the days you were active and across the whole date range.</p></InfoTip>
+      </div>
     </div>
-    {#if analytics.coverage.velocity}
-      <span class="text-meta text-text-faint">{analytics.coverage.velocity.note}</span>
-    {/if}
   </div>
 
   {#if analytics.loading.velocity}

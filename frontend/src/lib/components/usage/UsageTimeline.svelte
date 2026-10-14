@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatNumber } from '../../format';
 
@@ -13,8 +14,10 @@
 
 <section class="flex h-full flex-col rounded-lg border border-line bg-surface p-4 xl:max-h-[34rem]">
   <div>
-    <h3 class="text-h3">Daily Usage</h3>
-    <p class="mt-0.5 text-meta text-text-muted">Cost and token totals by event timestamp. Click a row to drill into one day.</p>
+    <div class="flex items-center gap-1.5">
+      <h3 class="text-h3">Daily Usage</h3>
+      <InfoTip label="Daily Usage"><p>Cost and tokens per day, by event time. Click a day to narrow the page to it.</p></InfoTip>
+    </div>
   </div>
 
   {#if usage.loading.daily}

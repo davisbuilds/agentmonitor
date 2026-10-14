@@ -115,14 +115,15 @@ test.afterAll(async () => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-test('search and analytics tabs explain capability boundaries', async ({ page }) => {
+test('search and analytics explain what they cover behind an info button', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#search`);
-  await expect(page.getByText('Search is capability-aware.')).toBeVisible();
-  await expect(page.getByText('Only sessions with searchable history appear here')).toBeVisible();
+  await page.getByRole('button', { name: 'About search' }).click();
+  await expect(page.getByRole('dialog', { name: 'About search' })).toContainText('Searches the text of recorded transcripts.');
 
   await page.goto(`${baseUrl}/app/#analytics`);
-  await expect(page.getByText('Reflects session capability coverage.')).toBeVisible();
-  await expect(page.getByText('This metric includes every session matching the current filters').first()).toBeVisible();
+  await page.getByRole('button', { name: 'About Tool Usage' }).click();
+  await expect(page.getByRole('dialog', { name: 'About Tool Usage' }))
+    .toContainText('Tool calls from sessions that recorded them in detail.');
 });
 
 test('app restores search and session deep links from the hash', async ({ page }) => {

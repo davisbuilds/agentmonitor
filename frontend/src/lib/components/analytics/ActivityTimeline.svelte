@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
 
   const maxMessages = $derived(Math.max(...analytics.activity.map((entry) => entry.messages), 1));
@@ -7,8 +8,10 @@
 <section class="rounded-lg border border-line bg-surface p-4">
   <div class="mb-3 flex items-center justify-between gap-3">
     <div>
-      <h3 class="text-h3">Activity</h3>
-      <p class="mt-0.5 text-meta text-text-muted">Click a day to narrow the dashboard to that date.</p>
+      <div class="flex items-center gap-1.5">
+        <h3 class="text-h3">Activity</h3>
+        <InfoTip label="Activity"><p>Sessions per day. Click a day to narrow the page to it.</p></InfoTip>
+      </div>
     </div>
     {#if analytics.coverage.activity}
       <span class="tabular font-mono text-meta text-text-faint">{analytics.coverage.activity.included_sessions} sessions in range</span>
