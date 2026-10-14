@@ -85,8 +85,13 @@ product never substitutes a misleading `0%` for missing evidence.
 
 ## Analytics And Skill Evidence
 
-Analytics covers activity over time, projects, agents, tools, hour-of-week patterns,
-velocity, and high-volume sessions. A project is the git repository a session's
+Analytics Overview covers activity over time, projects, agents, tools,
+hour-of-week patterns, and velocity. Top sessions appear once, in
+Usage, ranked by cost; all skill evidence lives in Skills, which shows daily
+skill invocation volume above the consultation explorer and exports both as CSV.
+The shared date, project, and agent filters scope both Skills panels; the
+explorer's harness, name, signal, and sort controls narrow only the explorer.
+A project is the git repository a session's
 working directory belongs to, named after the repository root: subdirectories
 and worktrees in a worktree area (`.worktrees/`, `*-worktrees/`,
 `.claude/worktrees/`, `.codex/worktrees/`) count as their repository, also once

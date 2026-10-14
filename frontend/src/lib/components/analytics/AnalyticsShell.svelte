@@ -48,13 +48,13 @@
     { days: 90, label: '90D' },
   ];
 
-  // Export only exists for the data-backed sub-views; insights has none.
-  const canExport = $derived(f.view === 'overview' || f.view === 'usage');
+  // Export only exists for the data-backed sub-views; insights and quality have none.
+  const canExport = $derived(f.view === 'overview' || f.view === 'usage' || f.view === 'skills');
 
   function refreshActive(): void {
     if (f.view === 'overview') void analytics.fetchAll();
     else if (f.view === 'usage') void usage.fetchAll();
-    else if (f.view === 'skills') void analytics.fetchSkillConsultations();
+    else if (f.view === 'skills') void analytics.fetchSkillsView();
     else if (f.view === 'quality') void traceQuality.load();
     else void insights.load();
   }
@@ -62,6 +62,7 @@
   function exportActive(): void {
     if (f.view === 'overview') analytics.exportCsv();
     else if (f.view === 'usage') usage.exportCsv();
+    else if (f.view === 'skills') analytics.exportSkillsCsv();
   }
 </script>
 

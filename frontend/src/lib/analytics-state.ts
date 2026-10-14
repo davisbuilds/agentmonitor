@@ -6,7 +6,6 @@ import type {
   ToolUsageStat,
   SkillUsageDay,
   SkillConsultationAnalytics,
-  TopSessionStat,
   AgentComparisonRow,
 } from './api/client';
 
@@ -27,7 +26,6 @@ export interface AnalyticsCsvPayload {
   tools: ToolUsageStat[];
   skills?: SkillUsageDay[];
   skillConsultations?: SkillConsultationAnalytics | null;
-  topSessions: TopSessionStat[];
   agents: AgentComparisonRow[];
 }
 
@@ -184,25 +182,6 @@ export function buildAnalyticsCsv(payload: AnalyticsCsvPayload): string {
           skillConsultations.comparability.status,
         ]));
       }
-    }
-  }
-
-  if (payload.topSessions.length > 0) {
-    lines.push('');
-    lines.push('Top Sessions');
-    lines.push('Session ID,Project,Agent,Messages,User Messages,Tool Calls,Fidelity,Started At,Ended At');
-    for (const row of payload.topSessions) {
-      lines.push(tableRow([
-        row.id,
-        row.project,
-        row.agent,
-        row.message_count,
-        row.user_message_count,
-        row.tool_call_count,
-        row.fidelity,
-        row.started_at,
-        row.ended_at,
-      ]));
     }
   }
 

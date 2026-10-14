@@ -33,6 +33,25 @@ test.beforeAll(async () => {
   const { createApp } = await import('../src/app.js');
 
   initSchema();
+  const { getDb } = await import('../src/db/connection.js');
+  getDb().prepare(`
+    INSERT INTO browsing_sessions (
+      id, project, agent, first_message, started_at, message_count, user_message_count,
+      live_status, integration_mode, fidelity, capabilities_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'e2e-analytics-views-session',
+    'alpha',
+    'claude',
+    'Seeded analytics session',
+    new Date().toISOString(),
+    4,
+    2,
+    'ended',
+    'claude-jsonl',
+    'full',
+    JSON.stringify({ history: 'full', search: 'full', tool_analytics: 'full', live_items: 'full' }),
+  );
   const app = createApp();
   server = app.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -88,4 +107,49 @@ test('Insights appears once any provider has an API key', async ({ page }) => {
   await expect(fresh).toHaveURL(/view=insights/);
   await expect(subTab(fresh, 'Insights')).toHaveAttribute('aria-pressed', 'true');
   await expect(fresh.getByRole('button', { name: 'Generate Insight' })).toBeVisible();
+});
+
+test('Overview leaves top sessions to Usage and skill panels to Skills', async ({ page }) => {
+  const requestedPaths: string[] = [];
+  page.on('request', (request) => {
+    requestedPaths.push(new URL(request.url()).pathname);
+  });
+
+  await page.goto(`${baseUrl}/app/#analytics`);
+  // Control: Overview rendered and fetched its own panels.
+  await expect(page.getByRole('heading', { name: 'Tool Usage' })).toBeVisible();
+  await expect.poll(() => requestedPaths.includes('/api/v2/analytics/summary')).toBe(true);
+  await expect(page.getByRole('heading', { name: 'Top Sessions' })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Raw skill invocation volume' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Skill consultations' })).toHaveCount(0);
+  expect(requestedPaths).not.toContain('/api/v2/analytics/top-sessions');
+  expect(requestedPaths).not.toContain('/api/v2/analytics/skills/daily');
+
+  // The one Top Sessions panel is Usage's, ranked by cost.
+  await subTab(page, 'Usage').click();
+  await expect(page.getByRole('heading', { name: 'Top Sessions' })).toHaveCount(1);
+
+  await subTab(page, 'Skills').click();
+  await expect(page.getByRole('heading', { name: 'Raw skill invocation volume' })).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Skill consultation explorer' })).toBeVisible();
+  // Skills keeps the skill sections the Overview export used to carry.
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Export CSV' }).click();
+  expect((await download).suggestedFilename()).toMatch(/^agentmonitor-skills-.*\.csv$/);
+});
+
+test('the shared project filter scopes the skill volume chart on Skills', async ({ page }) => {
+  const skillRequests: URL[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (url.pathname === '/api/v2/analytics/skills/daily') skillRequests.push(url);
+  });
+
+  await page.goto(`${baseUrl}/app/#analytics?view=skills`);
+  await expect(page.getByRole('heading', { name: 'Raw skill invocation volume' })).toBeVisible();
+  await expect.poll(() => skillRequests.length).toBeGreaterThan(0);
+
+  await page.getByLabel('Filter by project').selectOption('alpha');
+  await expect.poll(() => skillRequests.some(url => url.searchParams.get('project') === 'alpha')).toBe(true);
+  await expect(page).toHaveURL(/view=skills/);
 });

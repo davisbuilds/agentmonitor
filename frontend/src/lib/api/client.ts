@@ -1072,11 +1072,6 @@ export async function fetchAnalyticsHourOfWeek(params: Record<string, string | n
   return checkedJson(res, 'fetchAnalyticsHourOfWeek');
 }
 
-export async function fetchAnalyticsTopSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: TopSessionStat[]; coverage: AnalyticsCoverage }> {
-  const res = await fetch(`/api/v2/analytics/top-sessions${qs(params)}`);
-  return checkedJson(res, 'fetchAnalyticsTopSessions');
-}
-
 export async function fetchAnalyticsVelocity(params: Record<string, string | number | undefined> = {}): Promise<VelocityMetrics> {
   const res = await fetch(`/api/v2/analytics/velocity${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsVelocity');

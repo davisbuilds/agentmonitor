@@ -5,9 +5,7 @@ import type {
   SkillConsultationRow,
 } from '../frontend/src/lib/api/client.js';
 import {
-  countSkillRows,
   filterSkillConsultations,
-  selectSkillConsultationPreview,
 } from '../frontend/src/lib/skill-consultation-view.js';
 
 function skill(
@@ -63,32 +61,6 @@ function harness(
   };
 }
 
-test('overview preview stays bounded while representing every selected harness', () => {
-  const preview = selectSkillConsultationPreview([
-    harness('claude', [
-      skill('claude-1', 'claude', { invocations: 9 }),
-      skill('claude-2', 'claude', { invocations: 8 }),
-      skill('claude-3', 'claude', { invocations: 7 }),
-      skill('claude-4', 'claude', { invocations: 6 }),
-      skill('claude-5', 'claude', { invocations: 5 }),
-      skill('claude-6', 'claude', { invocations: 4 }),
-    ]),
-    harness('codex', [
-      skill('codex-1', 'codex', { invocations: 3 }),
-      skill('codex-2', 'codex', { invocations: 2 }),
-    ]),
-  ], 6);
-
-  assert.equal(countSkillRows(preview), 6);
-  assert.deepEqual(
-    preview.map(item => [item.harness, item.skills.map(row => row.name)]),
-    [
-      ['claude', ['claude-1', 'claude-2', 'claude-3', 'claude-4']],
-      ['codex', ['codex-1', 'codex-2']],
-    ],
-  );
-});
-
 test('explorer filters observed signals without pooling harness lanes', () => {
   const filtered = filterSkillConsultations([
     harness('claude', [
@@ -136,47 +108,6 @@ test('explorer sort orders null engagement last and uses volume as a stable tie-
 const ALL_FILTERS = { harness: '', query: '', signal: 'all', sort: 'volume' } as const;
 const names = (harnesses: ReturnType<typeof filterSkillConsultations>) =>
   harnesses.map(item => [item.harness, item.skills.map(row => row.name)]);
-
-test('overview preview ranks unsorted input by volume, breaking ties by name', () => {
-  const input = [
-    harness('claude', [
-      skill('zeta', 'claude', { invocations: 5 }),
-      skill('low', 'claude', { invocations: 1 }),
-      skill('alpha', 'claude', { invocations: 5 }),
-      skill('top', 'claude', { invocations: 9 }),
-    ]),
-  ];
-  const preview = selectSkillConsultationPreview(input, 3);
-  assert.deepEqual(names(preview), [['claude', ['top', 'alpha', 'zeta']]]);
-  // The caller's rows keep their original order.
-  assert.deepEqual(input[0].skills.map(row => row.name), ['zeta', 'low', 'alpha', 'top']);
-});
-
-test('overview preview takes rank-by-rank across harnesses and drops empty lanes', () => {
-  const preview = selectSkillConsultationPreview([
-    harness('claude', [skill('c1', 'claude', { invocations: 9 }), skill('c2', 'claude', { invocations: 8 })]),
-    harness('empty', []),
-    harness('codex', [skill('x1', 'codex', { invocations: 1 }), skill('x2', 'codex', { invocations: 1 })]),
-    harness('antigravity', [skill('a1', 'antigravity', { invocations: 2 })]),
-  ], 4);
-  // Rank 0 from every lane first (3 rows), then rank 1 from the first lane.
-  assert.deepEqual(names(preview), [
-    ['claude', ['c1', 'c2']],
-    ['codex', ['x1']],
-    ['antigravity', ['a1']],
-  ]);
-});
-
-test('overview preview returns everything under the limit and nothing for a non-positive limit', () => {
-  const input = [
-    harness('claude', [skill('c1', 'claude')]),
-    harness('codex', [skill('x1', 'codex')]),
-  ];
-  assert.equal(countSkillRows(selectSkillConsultationPreview(input, 10)), 2);
-  assert.deepEqual(selectSkillConsultationPreview(input, 0), []);
-  assert.deepEqual(selectSkillConsultationPreview(input, -1), []);
-  assert.deepEqual(selectSkillConsultationPreview([], 6), []);
-});
 
 test('explorer query is trimmed and case-insensitive; an empty harness filter keeps every lane', () => {
   const filtered = filterSkillConsultations([
