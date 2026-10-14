@@ -17,8 +17,7 @@
   import FilterBar from './lib/components/monitor/FilterBar.svelte';
   import QuotaPill from './lib/components/monitor/QuotaPill.svelte';
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
-  import SessionsShell from './lib/components/sessions/SessionsShell.svelte';
-  import SearchPage from './lib/components/search/SearchPage.svelte';
+  import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
   import CommandPalette from './lib/components/command-palette/CommandPalette.svelte';
   import AnalyticsShell from './lib/components/analytics/AnalyticsShell.svelte';
   import BenchmarksPage from './lib/components/benchmarks/BenchmarksPage.svelte';
@@ -33,7 +32,6 @@
     { id: 'sessions', label: 'Sessions' },
     { id: 'analytics', label: 'Analytics' },
     { id: 'benchmarks', label: 'Benchmarks' },
-    { id: 'search', label: 'Search' },
   ];
 
   async function handleFilterChange(filters: Record<string, string>) {
@@ -121,13 +119,11 @@
   {#if tab === 'monitor'}
     <MonitorPage bind:this={monitorPage} onfilterchange={handleFilterChange} />
   {:else if tab === 'sessions'}
-    <SessionsShell />
+    <SessionsPage />
   {:else if tab === 'analytics'}
     <AnalyticsShell />
   {:else if tab === 'benchmarks'}
     <BenchmarksPage />
-  {:else if tab === 'search'}
-    <SearchPage />
   {/if}
 
   {#if commandPaletteOpen}

@@ -79,6 +79,22 @@ so later readers know what still needs checking.
   the item as v18 did for empty reasoning. The resumable sync relies on one
   turn per stored message, so keep the turn either way.
 
+### Full-text search indexes message JSON, not message text
+
+- **What**: `messages_fts` indexes `messages.content` as stored, and the Claude
+  parser stores it as JSON-serialized content blocks. Search snippets in the
+  Sessions search (and the Cmd/Ctrl+K palette) therefore show JSON syntax around
+  the match, and the block keys (`type`, `text`) are indexed tokens, so a query
+  for either word matches nearly every message.
+- **Why or evidence**: seen 2026-10-14 while folding Search into Sessions: a
+  fixture message stored the way `src/parser/claude-code.ts` stores content
+  rendered its snippet as `[{"type":"text","text":"…"}]`. Predates that change;
+  the old Search page used the same read. The key-token match follows from the
+  tokenizer and is unmeasured on real data.
+- **Next**: index extracted text (text and thinking blocks, tool names) instead
+  of raw JSON, with an FTS rebuild migration, and check snippet offsets still
+  line up with what the viewer shows.
+
 ### Monitor's live stream opens at a session's oldest items
 
 - **What**: the live items read pages forward from the start (`id > cursor`,

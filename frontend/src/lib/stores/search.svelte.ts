@@ -8,15 +8,21 @@ import {
   type SearchSort,
 } from '../api/client';
 import { navigateToSession, navigateToSessionMessage } from './router.svelte';
-import { buildSearchHash, parseSearchHash } from '../route-state';
 
 const PAGE_SIZE = 25;
 const DEFAULT_RECENT_LIMIT = 12;
 
 interface SearchStoreOptions {
+  /** Recent sessions shown while there is no query; 0 never loads them. */
   recentLimit?: number;
   defaultSort?: SearchSort;
-  syncUrl?: boolean;
+}
+
+export interface SearchState {
+  query: string;
+  project: string;
+  agent: string;
+  sort: SearchSort;
 }
 
 class SearchStore {
@@ -25,13 +31,10 @@ class SearchStore {
   private requestVersion = 0;
   private readonly recentLimit: number;
   private readonly defaultSort: SearchSort;
-  private readonly syncUrl: boolean;
-  private hashListenerAttached = false;
 
   constructor(options: SearchStoreOptions = {}) {
     this.recentLimit = options.recentLimit ?? DEFAULT_RECENT_LIMIT;
     this.defaultSort = options.defaultSort ?? 'recent';
-    this.syncUrl = options.syncUrl ?? true;
     this.sort = this.defaultSort;
   }
 
@@ -60,14 +63,6 @@ class SearchStore {
   }
 
   async initialize(): Promise<void> {
-    if (this.syncUrl && typeof window !== 'undefined') {
-      this.applyRouteState(false);
-      if (!this.hashListenerAttached) {
-        window.addEventListener('hashchange', this.handleHashChange);
-        this.hashListenerAttached = true;
-      }
-    }
-
     if (!this.initialized) {
       const [projects, agents] = await Promise.all([
         fetchV2Projects().catch(() => ({ data: [] })),
@@ -94,6 +89,7 @@ class SearchStore {
   }
 
   async refreshRecent(): Promise<void> {
+    if (this.recentLimit <= 0) return;
     const version = ++this.requestVersion;
     this.recentLoading = true;
     this.recentError = null;
@@ -119,15 +115,24 @@ class SearchStore {
     }
   }
 
-  setQuery(next: string): void {
-    this.query = next;
+  /**
+   * Replace the query, filters and sort at once. A query searches after a
+   * short pause, or right away with `immediate`; no query clears the results.
+   */
+  update(next: Partial<SearchState>, { immediate = false }: { immediate?: boolean } = {}): void {
+    if (next.query !== undefined) this.query = next.query;
+    if (next.project !== undefined) this.project = next.project;
+    if (next.agent !== undefined) this.agent = next.agent;
+    if (next.sort !== undefined) this.sort = next.sort;
     this.cursor = undefined;
     this.hasMore = false;
     this.error = null;
-    this.syncHash();
 
     if (!this.hasQuery) {
       this.cancelPending();
+      // A search still in flight must not land on the cleared results.
+      this.requestVersion += 1;
+      this.loading = false;
       this.results = [];
       this.total = 0;
       this.searched = false;
@@ -135,41 +140,19 @@ class SearchStore {
       return;
     }
 
+    if (immediate) {
+      void this.searchNow(false);
+      return;
+    }
     this.scheduleSearch();
   }
 
-  setProject(next: string): void {
-    this.project = next;
-    this.cursor = undefined;
-    this.hasMore = false;
-    this.syncHash();
-    if (this.hasQuery) {
-      this.scheduleSearch();
-      return;
-    }
-    void this.refreshRecent();
-  }
-
-  setAgent(next: string): void {
-    this.agent = next;
-    this.cursor = undefined;
-    this.hasMore = false;
-    this.syncHash();
-    if (this.hasQuery) {
-      this.scheduleSearch();
-      return;
-    }
-    void this.refreshRecent();
+  setQuery(next: string): void {
+    this.update({ query: next });
   }
 
   setSort(next: SearchSort): void {
-    this.sort = next;
-    this.cursor = undefined;
-    this.hasMore = false;
-    this.syncHash();
-    if (this.hasQuery) {
-      this.scheduleSearch();
-    }
+    this.update({ sort: next });
   }
 
   async searchNow(append = false): Promise<void> {
@@ -244,10 +227,7 @@ class SearchStore {
 
   dispose(): void {
     this.cancelPending();
-    if (this.hashListenerAttached && typeof window !== 'undefined') {
-      window.removeEventListener('hashchange', this.handleHashChange);
-      this.hashListenerAttached = false;
-    }
+    this.requestVersion += 1;
   }
 
   private scheduleSearch(): void {
@@ -256,63 +236,12 @@ class SearchStore {
       void this.searchNow(false);
     }, 220);
   }
-
-  private syncHash(): void {
-    if (!this.syncUrl || typeof window === 'undefined') return;
-    const nextHash = buildSearchHash({
-      query: this.query,
-      project: this.project,
-      agent: this.agent,
-      sort: this.sort,
-    });
-    const nextUrl = `${window.location.pathname}${window.location.search}#${nextHash}`;
-    window.history.replaceState(null, '', nextUrl);
-  }
-
-  private applyRouteState(shouldFetch: boolean): void {
-    if (!this.syncUrl || typeof window === 'undefined') return;
-    const next = parseSearchHash(window.location.hash, {
-      query: this.query,
-      project: this.project,
-      agent: this.agent,
-      sort: this.defaultSort,
-    });
-    const changed = (
-      next.query !== this.query
-      || next.project !== this.project
-      || next.agent !== this.agent
-      || next.sort !== this.sort
-    );
-    if (!changed) return;
-
-    this.cancelPending();
-    this.query = next.query;
-    this.project = next.project;
-    this.agent = next.agent;
-    this.sort = next.sort;
-    this.cursor = undefined;
-    this.hasMore = false;
-    this.error = null;
-
-    if (!shouldFetch) return;
-    if (this.hasQuery) {
-      void this.searchNow(false);
-      return;
-    }
-    this.results = [];
-    this.total = 0;
-    this.searched = false;
-    void this.refreshRecent();
-  }
-
-  private readonly handleHashChange = (): void => {
-    this.applyRouteState(true);
-  };
 }
+
+export type { SearchStore };
 
 export function createSearchStore(options?: SearchStoreOptions): SearchStore {
   return new SearchStore(options);
 }
 
-export const search = createSearchStore();
-export const commandPaletteSearch = createSearchStore({ recentLimit: 10, syncUrl: false });
+export const commandPaletteSearch = createSearchStore({ recentLimit: 10 });
