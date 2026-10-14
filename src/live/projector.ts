@@ -44,6 +44,8 @@ export interface ProjectedSessionIncrement {
   user_message_count_delta: number;
   live_status: string | null;
   last_item_at: string | null;
+  /** Kept once set: a later event does not reclassify the session. */
+  relationship_type?: string | null;
 }
 
 export interface ProjectedTurnInput {
@@ -259,12 +261,13 @@ export function upsertProjectedSessionIncrement(
   db.prepare(`
     INSERT INTO browsing_sessions (
       id, project, agent, first_message, started_at, ended_at, message_count, user_message_count,
-      live_status, last_item_at, integration_mode, fidelity, capabilities_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      live_status, last_item_at, integration_mode, fidelity, capabilities_json, relationship_type
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       project = COALESCE(excluded.project, browsing_sessions.project),
       agent = COALESCE(excluded.agent, browsing_sessions.agent),
       first_message = COALESCE(browsing_sessions.first_message, excluded.first_message),
+      relationship_type = COALESCE(browsing_sessions.relationship_type, excluded.relationship_type),
       started_at = COALESCE(browsing_sessions.started_at, excluded.started_at),
       ended_at = CASE
         WHEN excluded.ended_at IS NOT NULL THEN excluded.ended_at
@@ -292,6 +295,7 @@ export function upsertProjectedSessionIncrement(
     encoded.integration_mode,
     encoded.fidelity,
     encoded.capabilities_json,
+    session.relationship_type ?? null,
   );
 }
 
