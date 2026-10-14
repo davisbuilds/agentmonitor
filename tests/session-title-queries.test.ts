@@ -42,6 +42,8 @@ before(() => {
   // Its telemetry twin names the same parent; the session still counts once.
   insert.run(CHILD_UUID, 'codex', 'Telemetry prompt', null, at(7), 0, PARENT_UUID, 'subagent', 'codex-otel');
   insert.run('codex-job', 'codex', 'Generate a concise, single-line task title', null, at(8), 2, null, 'internal', 'codex-otel');
+  // A hidden internal parent must not hide its child too.
+  insert.run('codex-job-child', 'codex', 'Helper of a job', null, at(9), 2, 'codex-job', 'subagent', 'codex-otel');
 });
 
 after(() => {
@@ -58,9 +60,19 @@ describe('session lists nest subagents and hide internal jobs', () => {
       'agent-orphan': 0,
       'c-plain': 0,
       [PARENT_ROLLOUT]: 1,
-    }, 'a subagent whose parent is stored nests under it; one without stays listed');
-    assert.equal(result.total, 4);
+      'codex-job-child': 0,
+    }, 'a subagent nests under a listed parent; one without stays listed');
+    assert.equal(result.total, 5);
     assert.equal(result.data.find(row => row.id === 'c-parent')?.title, 'Parser audit');
+  });
+
+  test('a subagent stays listed when filters hide its parent', () => {
+    const smallOnly = queries.listBrowsingSessions({ agent: 'claude', max_messages: 2 });
+    assert.deepEqual(smallOnly.data.map(row => row.id).sort(), ['agent-c1', 'agent-c2', 'agent-orphan', 'c-plain']);
+    assert.equal(smallOnly.total, 4);
+    const largeOnly = queries.listBrowsingSessions({ agent: 'claude', min_messages: 3 });
+    assert.deepEqual(largeOnly.data.map(row => [row.id, row.child_count]), [['c-parent', 2]]);
+    assert.equal(largeOnly.total, 1);
   });
 
   test('children are found under either id a Codex parent is stored with', () => {

@@ -239,11 +239,19 @@ function parentSessionKey(alias: string): string {
     ELSE ${alias}.parent_session_id END`;
 }
 
-// What a session list shows: one row per session, without internal jobs, and
-// with a subagent nested under its parent (counted there) whenever the parent is
-// stored. A subagent whose parent is not stored stays listed on its own.
-const browsableSessionsCte = `${sessionListCte},
-session_keys AS (SELECT DISTINCT agent, ${browserSessionKey('b')} AS session_key FROM browsing_sessions b),
+// What a session list shows: one row per session matching the filters, without
+// internal jobs, and with a subagent nested under its parent whenever the parent
+// is listed too. A subagent whose parent is not stored, or is filtered out, stays
+// listed on its own. The count covers every listed subagent of the parent, since
+// expanding it shows them all.
+const browsableSessionsCte = (filterWhere: string): string => `${sessionListCte},
+filtered_sessions AS (
+  SELECT * FROM listed_sessions ${filterWhere}
+),
+visible_keys AS (
+  SELECT DISTINCT f.agent, ${browserSessionKey('f')} AS session_key FROM filtered_sessions f
+  WHERE COALESCE(f.relationship_type, '') != 'internal'
+),
 child_counts AS (
   SELECT c.agent, ${parentSessionKey('c')} AS parent_key, COUNT(*) AS child_count
   FROM listed_sessions c
@@ -252,11 +260,11 @@ child_counts AS (
 ),
 browsable_sessions AS (
   SELECT s.*, COALESCE(cc.child_count, 0) AS child_count
-  FROM listed_sessions s
+  FROM filtered_sessions s
   LEFT JOIN child_counts cc ON cc.agent = s.agent AND cc.parent_key = ${browserSessionKey('s')}
   WHERE COALESCE(s.relationship_type, '') != 'internal'
     AND NOT (s.parent_session_id IS NOT NULL AND EXISTS (
-      SELECT 1 FROM session_keys k WHERE k.agent = s.agent AND k.session_key = ${parentSessionKey('s')}
+      SELECT 1 FROM visible_keys k WHERE k.agent = s.agent AND k.session_key = ${parentSessionKey('s')}
     ))
 )`;
 
@@ -478,22 +486,19 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
   const filterWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const filterValues = [...values];
 
+  const cte = browsableSessionsCte(filterWhere);
+
   const total = (db.prepare(
-    `${browsableSessionsCte} SELECT COUNT(*) as c FROM browsable_sessions ${filterWhere}`
+    `${cte} SELECT COUNT(*) as c FROM browsable_sessions`
   ).get(...filterValues) as CountResult).c;
 
   const cursor = decodeTimeCursor(params.cursor);
-  if (cursor) {
-    conditions.push('(started_at < ? OR (started_at = ? AND id < ?))');
-    values.push(cursor.sort_at, cursor.sort_at, cursor.id);
-  }
+  const cursorWhere = cursor ? 'WHERE (started_at < ? OR (started_at = ? AND id < ?))' : '';
+  const cursorValues = cursor ? [cursor.sort_at, cursor.sort_at, cursor.id] : [];
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  values.push(limit);
   const data = (db.prepare(
-    `${browsableSessionsCte} SELECT * FROM browsable_sessions ${where} ORDER BY started_at DESC, id DESC LIMIT ?`
-  ).all(...values) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
+    `${cte} SELECT * FROM browsable_sessions ${cursorWhere} ORDER BY started_at DESC, id DESC LIMIT ?`
+  ).all(...filterValues, ...cursorValues, limit) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 
   // Build cursor from last item
   let nextCursor: string | undefined;
