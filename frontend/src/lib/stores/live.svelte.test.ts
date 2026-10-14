@@ -54,6 +54,20 @@ describe('following one session in Monitor', () => {
     expect(store.getLiveSessionMissing()).toBe(false);
   });
 
+  it('a session whose live record appears after the click stops reading as missing', async () => {
+    // A new session's card can come from its first hook event before the live
+    // projection has written the session.
+    fetchLiveSession.mockRejectedValueOnce(new ApiError('fetchLiveSession failed (404): ', 404));
+    await store.followLiveSession('new');
+    expect(store.getLiveSessionMissing()).toBe(true);
+
+    store.handleLiveEvent({ type: 'session_presence', payload: { session_id: 'new' } });
+    await vi.runAllTimersAsync();
+
+    expect(store.getLiveSessionMissing()).toBe(false);
+    expect(store.getSelectedLiveSession()?.id).toBe('new');
+  });
+
   it('activity in other sessions never moves or refreshes the followed one', async () => {
     await store.followLiveSession('s1');
     fetchLiveSession.mockClear();
