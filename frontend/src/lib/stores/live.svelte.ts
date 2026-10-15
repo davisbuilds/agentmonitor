@@ -23,7 +23,8 @@ let sessionLoadFailed = $state(false);
 let turns = $state<LiveTurn[]>([]);
 let items = $state<LiveItem[]>([]);
 let itemsTotal = $state(0);
-let itemsCursor = $state<string | undefined>();
+// The stream opens at its newest page; this is where the next older page starts.
+let itemsBeforeCursor = $state<string | undefined>();
 let itemsLoading = $state(false);
 let itemsError = $state<string | null>(null);
 let selectedItemId = $state<number | null>(null);
@@ -92,27 +93,59 @@ async function loadSelectedTurns(sessionId: string): Promise<void> {
   }
 }
 
-async function loadSelectedItems(sessionId: string, append = false): Promise<void> {
+function keepSelectionInView(): void {
+  if (selectedItemId == null || !items.some(item => item.id === selectedItemId)) {
+    selectedItemId = items[items.length - 1]?.id ?? null;
+  }
+}
+
+/**
+ * Load the stream's items. `tail` (re)opens it at the newest page, `earlier`
+ * prepends the page before the oldest item held, and `newer` appends whatever
+ * arrived after the newest item held, a page at a time until caught up.
+ */
+async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | 'newer'): Promise<void> {
   const token = selectedRequestToken;
+  const current = () => token === selectedRequestToken && selectedSessionId === sessionId;
   itemsLoading = true;
   itemsError = null;
   try {
-    const res = await fetchLiveItems(sessionId, {
-      limit: LIVE_ITEMS_PAGE_SIZE,
-      cursor: append ? itemsCursor : undefined,
-      kinds: itemKindsParam(),
-    });
-    if (token !== selectedRequestToken || selectedSessionId !== sessionId) return;
-
-    items = append ? dedupeItems(items, res.data) : res.data;
-    itemsTotal = res.total;
-    itemsCursor = res.cursor;
-
-    if (selectedItemId != null && !items.some(item => item.id === selectedItemId)) {
-      selectedItemId = items[items.length - 1]?.id ?? null;
-    } else if (selectedItemId == null) {
-      selectedItemId = items[items.length - 1]?.id ?? null;
+    if (mode === 'newer' && items.length > 0) {
+      // A burst can exceed a page; follow the cursor until a page comes back short.
+      for (let page = 0; page < 20; page += 1) {
+        const res = await fetchLiveItems(sessionId, {
+          limit: LIVE_ITEMS_PAGE_SIZE,
+          cursor: String(items[items.length - 1].id),
+          kinds: itemKindsParam(),
+        });
+        if (!current()) return;
+        items = dedupeItems(items, res.data);
+        itemsTotal = res.total;
+        if (!res.cursor) break;
+      }
+    } else if (mode === 'earlier') {
+      if (!itemsBeforeCursor) return;
+      const res = await fetchLiveItems(sessionId, {
+        limit: LIVE_ITEMS_PAGE_SIZE,
+        before: itemsBeforeCursor,
+        kinds: itemKindsParam(),
+      });
+      if (!current()) return;
+      items = dedupeItems(res.data, items);
+      itemsTotal = res.total;
+      itemsBeforeCursor = res.before_cursor;
+    } else {
+      const res = await fetchLiveItems(sessionId, {
+        limit: LIVE_ITEMS_PAGE_SIZE,
+        tail: true,
+        kinds: itemKindsParam(),
+      });
+      if (!current()) return;
+      items = res.data;
+      itemsTotal = res.total;
+      itemsBeforeCursor = res.before_cursor;
     }
+    keepSelectionInView();
   } catch (err) {
     console.error('Failed to load live items:', err);
     itemsError = 'Failed to load live items.';
@@ -138,7 +171,7 @@ export async function followLiveSession(sessionId: string): Promise<void> {
   sessionLoadFailed = false;
   selectedRequestToken += 1;
   selectedItemId = null;
-  itemsCursor = undefined;
+  itemsBeforeCursor = undefined;
   itemsTotal = 0;
   items = [];
   turns = [];
@@ -147,7 +180,7 @@ export async function followLiveSession(sessionId: string): Promise<void> {
   await Promise.all([
     loadSelectedSessionMeta(sessionId),
     loadSelectedTurns(sessionId),
-    loadSelectedItems(sessionId),
+    loadSelectedItems(sessionId, 'tail'),
   ]);
 }
 
@@ -162,7 +195,7 @@ export function stopFollowingLiveSession(): void {
   turns = [];
   items = [];
   itemsTotal = 0;
-  itemsCursor = undefined;
+  itemsBeforeCursor = undefined;
   itemsLoading = false;
   itemsError = null;
   selectedItemId = null;
@@ -170,15 +203,17 @@ export function stopFollowingLiveSession(): void {
   connectionStatus = 'connecting';
 }
 
-export async function loadMoreLiveItems(): Promise<void> {
-  if (!selectedSessionId || !itemsCursor || itemsLoading) return;
-  await loadSelectedItems(selectedSessionId, true);
+/** Load the page just older than the oldest item shown (scrolling up). */
+export async function loadEarlierLiveItems(): Promise<void> {
+  if (!selectedSessionId || !itemsBeforeCursor || itemsLoading) return;
+  await loadSelectedItems(selectedSessionId, 'earlier');
 }
 
+/** Reopen the stream at its newest page, as after changing the kind filter. */
 export async function refreshLiveItems(): Promise<void> {
   if (!selectedSessionId) return;
-  itemsCursor = undefined;
-  await loadSelectedItems(selectedSessionId, false);
+  itemsBeforeCursor = undefined;
+  await loadSelectedItems(selectedSessionId, 'tail');
 }
 
 export function toggleLiveItemKind(kind: string): void {
@@ -239,7 +274,7 @@ function scheduleTurnsRefresh(sessionId: string): void {
 function scheduleItemsRefresh(sessionId: string): void {
   if (itemsRefreshTimer) clearTimeout(itemsRefreshTimer);
   itemsRefreshTimer = setTimeout(() => {
-    void loadSelectedItems(sessionId, true);
+    void loadSelectedItems(sessionId, 'newer');
   }, 120);
 }
 
@@ -261,7 +296,8 @@ export function getLiveSessionLoadFailed(): boolean { return sessionLoadFailed; 
 export function getLiveTurns(): LiveTurn[] { return turns; }
 export function getLiveItems(): LiveItem[] { return items; }
 export function getLiveItemsTotal(): number { return itemsTotal; }
-export function getLiveItemsHasMore(): boolean { return !!itemsCursor && items.length < itemsTotal; }
+/** True when older items exist before the oldest one shown. */
+export function getLiveItemsHasEarlier(): boolean { return itemsBeforeCursor !== undefined; }
 export function getLiveItemsLoading(): boolean { return itemsLoading; }
 export function getLiveItemsError(): string | null { return itemsError; }
 export function getSelectedLiveKinds(): string[] { return selectedKinds; }

@@ -68,7 +68,12 @@ usage recorded on this machine: a harness's account-wide total can include
 other machines and cloud tasks that no local source records.
 
 The live stream exposes a session's normalized turns and items, updated over a
-dedicated live SSE stream. Its fidelity is explicit:
+dedicated live SSE stream. It opens at the session's newest items and follows
+new ones while you are at the bottom; scrolling to the top loads the page before.
+Instructions a harness injects for the model (Codex's developer-role messages:
+permissions, skills, memory) read as Instructions rather than as the assistant,
+and the prompt capture setting governs them as it does prompts. Its fidelity is
+explicit:
 
 - Claude session files can provide transcript-capable live detail. Reasoning
   appears only where the transcript recorded its text; Claude Code often records
@@ -88,7 +93,9 @@ product never substitutes a misleading `0%` for missing evidence.
 ## Sessions, Search, And Pins
 
 - Session browsing provides incremental transcript loading, child-session context,
-  tool calls, metadata, and an activity minimap for long sessions.
+  tool calls, metadata, and an activity minimap for long sessions. Codex's
+  injected developer-role messages are labelled Instructions, with their own
+  entry in the author filter.
 - A session is titled by the name its harness gave it (Claude Code's own title,
   or a subagent's task), else by its first prompt, skipping the context harnesses
   inject ahead of it (Codex AGENTS.md and environment blocks, Claude Code command
