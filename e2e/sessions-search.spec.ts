@@ -204,3 +204,24 @@ test('the Project filter narrows the list and the search results at once', async
   await expect(page.getByRole('button', { name: /msg #\d.*Quota investigation/ }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /Importer cleanup/ })).toHaveCount(0);
 });
+
+test('Pin shows on hover or focus, while Pinned always shows', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions?session=sess-quota`);
+  const ask = page.locator('[data-message-ordinal="0"]');
+  const reply = page.locator('[data-message-ordinal="1"]');
+  const pin = ask.getByRole('button', { name: 'Pin', exact: true });
+  const opacity = (locator: typeof pin) => locator.evaluate(el => getComputedStyle(el).opacity);
+
+  await expect(pin).toHaveCount(1);
+  await page.mouse.move(0, 0);
+  await expect.poll(() => opacity(pin)).toBe('0');
+  await expect.poll(() => opacity(reply.getByRole('button', { name: 'Pinned', exact: true }))).toBe('1');
+
+  await ask.hover();
+  await expect.poll(() => opacity(pin)).toBe('1');
+
+  // Reachable from the keyboard too.
+  await page.mouse.move(0, 0);
+  await pin.focus();
+  await expect.poll(() => opacity(pin)).toBe('1');
+});
