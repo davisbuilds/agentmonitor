@@ -98,6 +98,35 @@ test('sessions list emits JSON from the configured database', async () => {
   assert.equal(parsed.data[0]?.id, 'cli-session-001');
 });
 
+test('live items reads the newest page with --tail and pages back with --before', async () => {
+  const { getDb, closeDb } = await import('../src/db/connection.js');
+  const db = getDb();
+  for (let n = 1; n <= 5; n++) {
+    const turnId = Number(db.prepare(`
+      INSERT INTO session_turns (session_id, agent_type, source_turn_id, status, title)
+      VALUES ('cli-session-001', 'codex', ?, 'completed', 't')
+    `).run(`codex-message:${n}`).lastInsertRowid);
+    db.prepare(`
+      INSERT INTO session_items (session_id, turn_id, ordinal, source_item_id, kind, status, payload_json)
+      VALUES ('cli-session-001', ?, 0, ?, 'assistant_message', 'success', ?)
+    `).run(turnId, `cli-item-${n}`, JSON.stringify({ text: `item ${n}` }));
+  }
+  const ids = (db.prepare("SELECT id FROM session_items WHERE session_id = 'cli-session-001' ORDER BY id").all() as Array<{ id: number }>).map(row => row.id);
+  closeDb();
+
+  type Page = { data: Array<{ id: number }>; before_cursor?: string };
+  const tail = await runCli(['live', 'items', 'cli-session-001', '--tail', '--limit', '2', '--json']);
+  assert.equal(tail.exitCode, 0);
+  const tailPage = JSON.parse(tail.stdout) as Page;
+  assert.deepEqual(tailPage.data.map(item => item.id), ids.slice(-2));
+
+  const earlier = await runCli(['live', 'items', 'cli-session-001', '--before', String(tailPage.before_cursor), '--limit', '2', '--json']);
+  assert.deepEqual((JSON.parse(earlier.stdout) as Page).data.map(item => item.id), ids.slice(-4, -2));
+
+  const invalid = await runCli(['live', 'items', 'cli-session-001', '--before', 'abc']);
+  assert.notEqual(invalid.exitCode, 0);
+});
+
 test('sessions show returns exit 4 for missing sessions', async () => {
   const result = await runCli(['sessions', 'show', 'missing-session']);
 
