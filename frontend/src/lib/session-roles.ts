@@ -1,7 +1,7 @@
 import type { ContentBlock, Message } from './api/client';
 
 /** Who a transcript turn is attributed to in the viewer. */
-export type MessageAuthor = 'you' | 'assistant' | 'tool';
+export type MessageAuthor = 'you' | 'assistant' | 'tool' | 'instructions';
 
 /**
  * Classify a transcript message by displayed author.
@@ -12,6 +12,9 @@ export type MessageAuthor = 'you' | 'assistant' | 'tool';
  * alongside a tool_result — counts as genuine human input.
  */
 export function classifyMessageAuthor(message: Pick<Message, 'role' | 'content'>): MessageAuthor {
+  // Codex injects harness instructions (permissions, skills, memory) as
+  // developer-role messages: input to the model, not its replies.
+  if (message.role === 'developer' || message.role === 'system') return 'instructions';
   if (message.role !== 'user') return 'assistant';
   try {
     const blocks = JSON.parse(message.content) as ContentBlock[];

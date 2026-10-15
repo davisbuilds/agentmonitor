@@ -64,21 +64,6 @@ so later readers know what still needs checking.
 - **Revisit when**: Codex writes thread names or a job marker into rollouts or
   telemetry, or Codex app jobs reappear in the Sessions list.
 
-### Codex developer messages read as the assistant in the live stream
-
-- **What**: Codex records injected instructions (`<permissions instructions>`,
-  `<model_switch>`, skills and collaboration-mode blocks) as `developer`-role
-  messages. The live sync maps every non-user role to `assistant`, so the live
-  stream shows them as "Assistant" rows, often several before the first real
-  reply.
-- **Why or evidence**: observed 2026-10-14 on an active Codex session in Live
-  (now Monitor's live stream);
-  `syncCodexLiveSession` in `src/live/codex-adapter.ts` passes
-  `message.role === 'user' ? 'user' : 'assistant'`.
-- **Next**: give developer messages their own kind, or keep their turn and drop
-  the item as v18 did for empty reasoning. The resumable sync relies on one
-  turn per stored message, so keep the turn either way.
-
 ### Full-text search indexes message JSON, not message text
 
 - **What**: `messages_fts` indexes `messages.content` as stored, and the Claude
@@ -94,19 +79,6 @@ so later readers know what still needs checking.
 - **Next**: index extracted text (text and thinking blocks, tool names) instead
   of raw JSON, with an FTS rebuild migration, and check snippet offsets still
   line up with what the viewer shows.
-
-### Monitor's live stream opens at a session's oldest items
-
-- **What**: the live items read pages forward from the start (`id > cursor`,
-  100 per page), so opening an agent card on a long session shows its first
-  hundred items and the current activity sits behind repeated "Load more".
-- **Why or evidence**: 2026-10-14, on a snapshot of the installed store, an
-  active Codex card with about 1.6K turns opened on items from a day earlier.
-  The old Live tab read the same way; it matters more now that this stream is
-  what an active agent card opens.
-- **Next**: add a tail read to `/api/v2/live/sessions/:id/items` (the latest
-  page, then older pages on scroll up) and open the stream at the end. New
-  `item_delta` rows already append.
 
 ### Explicit provenance for unresolved historical timestamps
 
