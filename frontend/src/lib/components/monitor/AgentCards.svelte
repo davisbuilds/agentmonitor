@@ -2,7 +2,7 @@
   import { getSessions, getEvents, setSelectedSessionId, getSessionOccupancy } from '../../stores/monitor.svelte';
   import { formatCost, formatNumber, timeAgo, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
-  import { buildActiveAgentLabel } from '../../monitor-analytics';
+  import { buildActiveAgentLabel, collapseEventRuns } from '../../monitor-analytics';
   import { SectionHeader, StatusDot, EmptyState, Badge } from '../ui';
   import ContextPill from './ContextPill.svelte';
   import { openMonitorSession } from '../../stores/router.svelte';
@@ -119,11 +119,12 @@
         <!-- Mini event feed -->
         {#if recentEvents.length > 0}
           <div class="max-h-48 space-y-1 overflow-hidden">
-            {#each recentEvents.slice(0, 8) as event}
+            {#each collapseEventRuns(recentEvents.slice(0, 8), eventLabel, (e) => `${eventLabel(e)}|${eventStatusDot(e)}`) as run}
               <div class="flex items-center gap-2 text-meta">
-                <span class="h-1.5 w-1.5 shrink-0 rounded-full {eventStatusDot(event)}"></span>
-                <span class="truncate text-text-muted">{eventLabel(event)}</span>
-                <span class="ml-auto shrink-0 text-text-faint">{timeAgo(event.created_at)}</span>
+                <span class="h-1.5 w-1.5 shrink-0 rounded-full {eventStatusDot(run.event)}"></span>
+                <span class="truncate text-text-muted">{run.label}</span>
+                {#if run.count > 1}<span class="shrink-0 tabular font-mono text-text-faint">×{run.count}</span>{/if}
+                <span class="ml-auto shrink-0 text-text-faint">{timeAgo(run.event.created_at)}</span>
               </div>
             {/each}
           </div>

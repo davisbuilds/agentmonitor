@@ -641,9 +641,17 @@ export function getSessionTurns(sessionId: string): LiveTurnRow[] {
 interface LiveItemsResult {
   data: LiveItemRow[];
   total: number;
+  /** Pass as `cursor` for the next newer page; set when this page was full. */
   cursor?: string;
+  /** Pass as `before` for the next older page; set when older items exist. */
+  before_cursor?: string;
 }
 
+/**
+ * A page of a session's live items, always oldest first. By default it pages
+ * forward from the start (`cursor`); `tail` reads the newest page, where a
+ * stream opens, and `before` the page just older than an item, for scrolling up.
+ */
 export function getSessionItems(sessionId: string, params: LiveItemsListParams = {}): LiveItemsResult {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
@@ -654,7 +662,11 @@ export function getSessionItems(sessionId: string, params: LiveItemsListParams =
     conditions.push(`kind IN (${params.kinds.map(() => '?').join(', ')})`);
     values.push(...params.kinds);
   }
-  if (params.cursor) {
+  const backward = params.tail === true || params.before !== undefined;
+  if (params.before !== undefined) {
+    conditions.push('id < ?');
+    values.push(Number(params.before));
+  } else if (params.cursor && !backward) {
     conditions.push('id > ?');
     values.push(Number(params.cursor));
   }
@@ -664,17 +676,21 @@ export function getSessionItems(sessionId: string, params: LiveItemsListParams =
     `SELECT COUNT(*) as c FROM session_items WHERE session_id = ?`
   ).get(sessionId) as CountResult).c;
 
-  values.push(limit);
-  const data = db.prepare(
-    `SELECT * FROM session_items ${where} ORDER BY id ASC LIMIT ?`
+  // Read one extra row to learn whether a further page exists in the reading
+  // direction, without a second query.
+  values.push(limit + 1);
+  const rows = db.prepare(
+    `SELECT * FROM session_items ${where} ORDER BY id ${backward ? 'DESC' : 'ASC'} LIMIT ?`
   ).all(...values) as LiveItemRow[];
+  const more = rows.length > limit;
+  const page = rows.slice(0, limit);
 
-  let cursor: string | undefined;
-  if (data.length === limit && data.length > 0) {
-    cursor = String(data[data.length - 1].id);
+  if (backward) {
+    const data = page.reverse();
+    return { data, total, before_cursor: more && data.length > 0 ? String(data[0].id) : undefined };
   }
-
-  return { data, total, cursor };
+  // Forward paging keeps its old contract: a cursor whenever the page was full.
+  return { data: page, total, cursor: page.length === limit ? String(page[page.length - 1].id) : undefined };
 }
 
 export interface TraceQualitySessionSourceRows {

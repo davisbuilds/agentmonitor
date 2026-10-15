@@ -1515,7 +1515,12 @@ export interface LiveSessionsListParams {
 }
 
 export interface LiveItemsListParams {
+  /** Items after this id, oldest first (paging forward). */
   cursor?: string;
+  /** Items before this id: the page just older than it. */
+  before?: string;
+  /** The newest page, where a stream opens. */
+  tail?: boolean;
   limit?: number;
   kinds?: string[];
 }

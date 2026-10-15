@@ -105,6 +105,11 @@ Animate `transform`/`opacity` only. Default duration 140ms, `ease-out`
   width (`max-w-48`, full value in the tooltip) instead of growing to its longest option, and
   less-used filters sit behind `MoreFilters`, whose button counts the ones set. Offer only
   filters the page's reads honor.
+- **One spelling per model.** Render model IDs through `formatModelName`, with the raw ID in the
+  tooltip; `tests/model-name-display.test.ts` keeps it in step with the server's
+  `normalizeModelId`.
+- **Quiet per-row actions.** An action repeated on every row (Pin) appears on hover or focus,
+  and stays visible once it holds state (Pinned).
 - **Name every cost's window.** A cost figure says which period it covers ("Cost today",
   "Sep 16 – Oct 15"); an unlabeled total invites comparison with a different window elsewhere.
 - **Constrain prose** to `max-w-[65ch]`; collapse stacked heading+subtitle+banner+pill into one

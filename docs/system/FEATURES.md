@@ -37,7 +37,14 @@ current command contract.
 
 Monitor provides current sessions as agent cards, recent events, aggregate stats,
 provider-native quota snapshots, and context-window occupancy. It consumes the v2
-Monitor reads and the shared SSE stream.
+Monitor reads and the shared SSE stream. A card folds repeated recent events into
+one row with a count. The header's quota pill names each provider and shows what
+is left of its most-used window.
+
+Model IDs read one way everywhere: as the vendor names the model, without a
+routing prefix, a long-context suffix, a Bedrock wrapper, or a release date
+stamp. The unpriced-models notice keeps the exact ID, since that is what a rate
+card must match.
 
 Clicking an agent card opens that session's live stream and inspector in place, at
 `#monitor?session=<id>`; old `#live` links land on Monitor. A session with no live
@@ -61,7 +68,12 @@ usage recorded on this machine: a harness's account-wide total can include
 other machines and cloud tasks that no local source records.
 
 The live stream exposes a session's normalized turns and items, updated over a
-dedicated live SSE stream. Its fidelity is explicit:
+dedicated live SSE stream. It opens at the session's newest items and follows
+new ones while you are at the bottom; scrolling to the top loads the page before.
+Instructions a harness injects for the model (Codex's developer-role messages:
+permissions, skills, memory) read as Instructions rather than as the assistant,
+and the prompt capture setting governs them as it does prompts. Its fidelity is
+explicit:
 
 - Claude session files can provide transcript-capable live detail. Reasoning
   appears only where the transcript recorded its text; Claude Code often records
@@ -81,7 +93,9 @@ product never substitutes a misleading `0%` for missing evidence.
 ## Sessions, Search, And Pins
 
 - Session browsing provides incremental transcript loading, child-session context,
-  tool calls, metadata, and an activity minimap for long sessions.
+  tool calls, metadata, and an activity minimap for long sessions. Codex's
+  injected developer-role messages are labelled Instructions, with their own
+  entry in the author filter.
 - A session is titled by the name its harness gave it (Claude Code's own title,
   or a subagent's task), else by its first prompt, skipping the context harnesses
   inject ahead of it (Codex AGENTS.md and environment blocks, Claude Code command
@@ -100,7 +114,8 @@ product never substitutes a misleading `0%` for missing evidence.
   neither shown nor searchable. AgentMonitor keeps no copy: once a source
   transcript is gone, so are its images.
 - Pinned transcript moments use session-plus-ordinal identity so they survive
-  re-imports that replace internal row IDs. Pinned is a filter on the Sessions
+  re-imports that replace internal row IDs. A message's Pin button appears on
+  hover or keyboard focus; a pinned message always shows Pinned. Pinned is a filter on the Sessions
   list (`#sessions?pinned=1`): it lists pinned messages under the same project
   and agent filters, and a query then narrows them by the words they show
   rather than searching every transcript. Old `#pinned` and
@@ -150,8 +165,10 @@ with observed consultation and instruction evidence without rewriting history.
 
 ## Usage And Cost
 
-Usage is event-derived and includes totals, daily series, project/model/tier/agent
-attribution, model mix, and top sessions. The shared filters cover date, project,
+Usage is event-derived and includes totals, one daily chart split by the top
+models (each day carries its cost, tokens, events, and sessions, and clicking it
+narrows the page to that day), project/model/tier/agent attribution, and top
+sessions. The shared filters cover date, project,
 and agent; Usage adds model, provider, and provider-neutral tier behind the bar's
 Filters button. The total cost names its date range, so it reads apart from
 Monitor's today and 30-day figures.

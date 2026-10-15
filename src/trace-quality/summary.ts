@@ -36,7 +36,9 @@ import type { TraceQualityCoverage } from './types.js';
 // v4: empty reasoning items are no longer projected and the stored ones were
 // restored or removed (data migration v18), so observation counts and the
 // has_reasoning flag are re-derived.
-const SESSION_TRACE_SUMMARY_VERSION = 'sts:v4';
+// v5: Codex developer-role items are `instructions`, not assistant messages
+// (data migration v20), so generation counts and raw-output coverage change.
+const SESSION_TRACE_SUMMARY_VERSION = 'sts:v5';
 
 /**
  * Stable, deterministic trace id for a session. The lean view presents one trace

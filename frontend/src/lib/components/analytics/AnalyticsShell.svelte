@@ -6,7 +6,7 @@
   import { insights } from '../../stores/insights.svelte';
   import { traceQuality } from '../../stores/trace-quality.svelte';
   import { Button, Field, FilterBar, MoreFilters, Popover, Select, SubTabs } from '../ui';
-  import { formatDateRange } from '../../format';
+  import { formatDateRange, modelSelectOptions } from '../../format';
   import { QUICK_RANGE_DAYS } from '../../analytics-state';
   import type { AnalyticsView } from '../../route-state';
   import { resolveAnalyticsView, visibleAnalyticsViews } from '../../analytics-views';
@@ -163,7 +163,7 @@
         <Field label="Model">
           <Select
             value={usage.model}
-            options={usage.modelOptions}
+            options={modelSelectOptions(usage.modelOptions)}
             placeholder="All Models"
             aria-label="Filter by model"
             fill

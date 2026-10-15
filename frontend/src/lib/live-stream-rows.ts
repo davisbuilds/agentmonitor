@@ -139,6 +139,8 @@ export function rowLabel(item: LiveItem): string {
     }
     case 'assistant_message':
       return payload?.summary === 'Model response' ? 'Model response' : 'Assistant';
+    case 'instructions':
+      return 'Instructions';
     case 'reasoning':
       return 'Thinking';
     case 'tool_call':

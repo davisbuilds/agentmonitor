@@ -20,6 +20,7 @@ const sessionId = 'e2e-live-001';
 const summarySessionId = 'e2e-live-002';
 // On the Monitor, but with no live record behind it.
 const noLiveSessionId = 'e2e-live-003';
+const longSessionId = 'e2e-live-long';
 
 test.beforeAll(async () => {
   const builtIndex = path.join(process.cwd(), 'frontend', 'dist', 'index.html');
@@ -158,6 +159,33 @@ test.beforeAll(async () => {
   insertCard.run(sessionId, 'claude_code', 'claude_code', 'card-full-stream', 'main', now, now);
   insertCard.run(summarySessionId, 'codex', 'codex', 'card-summary-stream', 'main', now, now);
   insertCard.run(noLiveSessionId, 'claude_code', 'claude_code', 'card-no-stream', 'main', now, now);
+  // A long Codex session: 250 items, with injected instructions near the end.
+  db.prepare(`
+    INSERT INTO browsing_sessions (
+      id, project, agent, first_message, started_at, ended_at, message_count,
+      user_message_count, live_status, last_item_at, integration_mode, fidelity, capabilities_json
+    ) VALUES (?, 'agentmonitor', 'codex', 'Long run', '2026-03-24T10:00:00.000Z', NULL, 250, 0, 'live',
+      '2026-03-24T12:00:00.000Z', 'codex-jsonl', 'summary', ?)
+  `).run(longSessionId, JSON.stringify({ history: 'full', search: 'full', tool_analytics: 'none', live_items: 'summary' }));
+  const longTurn = db.prepare(`
+    INSERT INTO session_turns (session_id, agent_type, source_turn_id, status, title)
+    VALUES (?, 'codex', ?, 'completed', 't')
+  `);
+  const longItem = db.prepare(`
+    INSERT INTO session_items (session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at)
+    VALUES (?, ?, 0, ?, ?, 'success', ?, ?)
+  `);
+  for (let n = 1; n <= 250; n++) {
+    const turnId = Number(longTurn.run(longSessionId, `codex-message:${n}`).lastInsertRowid);
+    const instructions = n === 248;
+    longItem.run(
+      longSessionId, turnId, `codex-message:${n}:item:0`,
+      instructions ? 'instructions' : 'assistant_message',
+      JSON.stringify({ text: instructions ? '<permissions instructions>sandboxed</permissions instructions>' : `Long item ${n}` }),
+      new Date(Date.parse('2026-03-24T10:00:00.000Z') + n * 1000).toISOString(),
+    );
+  }
+
   // One event gives the Monitor's filter bar an Agent option to show.
   db.prepare(`
     INSERT INTO events (session_id, agent_type, event_type, tool_name, status, project, created_at, metadata, source)
@@ -340,4 +368,28 @@ test('a session whose record fails to load offers a retry instead of loading for
   failing = false;
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByRole('heading', { name: 'Inspect the repo' })).toBeVisible();
+});
+
+test('a long stream opens at its newest items and loads earlier ones without losing your place', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${baseUrl}/app/#monitor?session=${longSessionId}`);
+  const stream = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Long run' }) });
+
+  await expect(stream.getByText('Long item 250', { exact: true })).toBeInViewport();
+  await expect(stream.getByText('Long item 1', { exact: true })).toHaveCount(0);
+  await expect(stream.getByText('100 of 250 items')).toBeVisible();
+
+  // Codex's injected instructions read as such, not as the assistant.
+  const instructions = stream.getByRole('button', { name: /^Instructions.*permissions instructions/ });
+  await expect(instructions).toHaveCount(1);
+
+  // The oldest row shown stays put while the page before it loads above.
+  await stream.getByRole('button', { name: 'Load earlier items' }).click();
+  await expect(stream.getByText('Long item 60', { exact: true })).toHaveCount(1);
+  await expect(stream.getByText('Long item 151', { exact: true })).toBeInViewport();
+
+  // The Messages filter selects messages (it once matched no stored kind) and leaves instructions out.
+  await stream.getByRole('button', { name: 'Messages', exact: true }).click();
+  await expect(stream.getByText('Long item 250', { exact: true })).toBeVisible();
+  await expect(instructions).toHaveCount(0);
 });
