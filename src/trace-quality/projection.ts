@@ -534,7 +534,8 @@ function eventOutputSummary(event: EventProjectionSource, metadata: Record<strin
 
 function itemInputSummary(item: SessionItemProjectionSource, payload: Record<string, unknown> | undefined): string | null {
   if (!payload) return null;
-  if (item.kind === 'user_message') return summarizeRecord(payload);
+  // Injected instructions are model input, as the person's prompts are.
+  if (item.kind === 'user_message' || item.kind === 'instructions') return summarizeRecord(payload);
   if (item.kind === 'tool_call' || item.kind === 'command_execution') {
     const input = asRecord(payload.input);
     if (input) return summarizeRecord(input);
@@ -793,7 +794,7 @@ function coverageForItems(
   );
   const hasParentChildStructure = items.some(item => item.kind === 'tool_result' && item.source_item_id && toolCallIds.has(item.source_item_id));
   const hasRawInput = parsedPayloads.some(({ item, payload }) =>
-    (item.kind === 'user_message' || item.kind === 'tool_call' || item.kind === 'command_execution')
+    (item.kind === 'user_message' || item.kind === 'instructions' || item.kind === 'tool_call' || item.kind === 'command_execution')
     && !isRedactedPayload(payload),
   );
   const hasRawOutput = parsedPayloads.some(({ item, payload }) =>

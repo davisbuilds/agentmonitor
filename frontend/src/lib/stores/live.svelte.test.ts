@@ -156,6 +156,25 @@ describe('following one session in Monitor', () => {
     expect(store.getLiveItems()).toHaveLength(200);
   });
 
+  it('a burst larger than one catch-up keeps reading until it is caught up', async () => {
+    const page = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => ({ id: from + i }) as LiveItem);
+    fetchLiveItems.mockReset().mockResolvedValueOnce({ data: page(1, 100), total: 100 });
+    await store.followLiveSession('s1');
+
+    // 2,550 new items: 25 full pages, then a short one.
+    let next = 101;
+    fetchLiveItems.mockImplementation(async () => {
+      const from = next;
+      const to = Math.min(from + 99, 2650);
+      next = to + 1;
+      return { data: page(from, to), total: 2650, cursor: to - from + 1 === 100 ? String(to) : undefined };
+    });
+    store.handleLiveEvent({ type: 'item_delta', payload: { session_id: 's1' } });
+    await vi.runAllTimersAsync();
+
+    expect(store.getLiveItems().at(-1)?.id).toBe(2650);
+  });
+
   it('stopping drops the stream and cancels a pending refresh', async () => {
     await store.followLiveSession('s1');
     store.handleLiveEvent({ type: 'item_delta', payload: { session_id: 's1' } });

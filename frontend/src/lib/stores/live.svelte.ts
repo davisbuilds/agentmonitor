@@ -15,6 +15,8 @@ import { getMonitorSessionId } from './router.svelte';
 // drill-in). There is no session list here: Monitor's agent cards are the list.
 
 const LIVE_ITEMS_PAGE_SIZE = 100;
+// Pages read per catch-up after new items arrive, before yielding to the next one.
+const CATCH_UP_PAGES = 20;
 
 let selectedSessionId = $state<string | null>(null);
 let selectedSession = $state<LiveSession | null>(null);
@@ -111,8 +113,11 @@ async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | '
   itemsError = null;
   try {
     if (mode === 'newer' && items.length > 0) {
-      // A burst can exceed a page; follow the cursor until a page comes back short.
-      for (let page = 0; page < 20; page += 1) {
+      // A burst can exceed a page; follow the cursor until a page comes back
+      // short. Past a bounded run of pages, hand the rest to another scheduled
+      // catch-up rather than stop: no further item_delta may come for it.
+      let more = false;
+      for (let page = 0; page < CATCH_UP_PAGES; page += 1) {
         const res = await fetchLiveItems(sessionId, {
           limit: LIVE_ITEMS_PAGE_SIZE,
           cursor: String(items[items.length - 1].id),
@@ -121,8 +126,10 @@ async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | '
         if (!current()) return;
         items = dedupeItems(items, res.data);
         itemsTotal = res.total;
-        if (!res.cursor) break;
+        more = Boolean(res.cursor);
+        if (!more) break;
       }
+      if (more) scheduleItemsRefresh(sessionId);
     } else if (mode === 'earlier') {
       if (!itemsBeforeCursor) return;
       const res = await fetchLiveItems(sessionId, {
