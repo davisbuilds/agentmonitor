@@ -13,6 +13,11 @@ the v2 route/query source and [API index](../api/README.md).
 - Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
   one shared date/project/agent filter context. Insights appears only once an LLM
   provider API key is configured.
+- Monitor, Sessions, and Analytics each lay their filters out in one bar under the
+  command bar, in the same order: the page's scope (Analytics' sub-views or the
+  Sessions search box), then Project and Agent, then the page's own filters, with
+  Clear and the page's actions at the end. Each tab keeps its own selection;
+  switching tabs does not carry a filter over.
 - Deep links preserve the active view and selected session, message, or trace where
   applicable.
 
@@ -39,6 +44,10 @@ Clicking an agent card opens that session's live stream and inspector in place, 
 record, and every session when the live view is turned off
 (`AGENTMONITOR_ENABLE_LIVE_TAB=false`, a name kept for compatibility), opens the
 recent-events drawer instead.
+
+Monitor filters by agent only, the one filter every Monitor read honors: the stats,
+the cards, their recent events, live updates, and the cost windows. Project and the
+event-level filters live in Sessions and Analytics, whose reads support them.
 
 Monitor's cost figures name their window: today and the last 30 days. Both come
 from the Usage summary with the window of Usage's 30D range, so Monitor and Usage
@@ -142,8 +151,10 @@ with observed consultation and instruction evidence without rewriting history.
 ## Usage And Cost
 
 Usage is event-derived and includes totals, daily series, project/model/tier/agent
-attribution, model mix, and top sessions. Shared filters cover date, project, agent,
-model, provider, and provider-neutral tier.
+attribution, model mix, and top sessions. The shared filters cover date, project,
+and agent; Usage adds model, provider, and provider-neutral tier behind the bar's
+Filters button. The total cost names its date range, so it reads apart from
+Monitor's today and 30-day figures.
 
 - Stored `cost_usd` remains the authoritative event cost. Cache savings are an
   estimate from current pricing metadata and disclose incomplete pricing coverage.

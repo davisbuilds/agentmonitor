@@ -199,8 +199,8 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await expect(page).toHaveURL(new RegExp(`#monitor\\?session=${sessionId}$`));
   await expect(page.getByRole('heading', { name: 'Inspect the repo' })).toBeVisible();
   await expect(page.locator('p', { hasText: 'Initial live response from seeded session' }).first()).toBeVisible();
-  // The Monitor's filters apply to the cards, not to a single session.
-  await expect(page.getByRole('combobox', { name: 'Agent' })).toHaveCount(0);
+  // The agent filter stays in view: it still scopes the stats above the stream.
+  await expect(page.getByTestId('filter-bar').getByRole('combobox', { name: 'Filter by agent' })).toBeVisible();
 
   await page.getByRole('button', { name: /^Capture/ }).click();
   const capture = page.getByRole('dialog', { name: 'Capture settings' });

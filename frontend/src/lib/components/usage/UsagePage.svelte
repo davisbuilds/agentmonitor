@@ -1,8 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { usage } from '../../stores/usage.svelte';
-  import { Select } from '../ui';
-  import UsageCoverageNote from './UsageCoverageNote.svelte';
   import UsageUnpricedWarning from './UsageUnpricedWarning.svelte';
   import UsageSummaryCards from './UsageSummaryCards.svelte';
   import UsageTimeline from './UsageTimeline.svelte';
@@ -26,33 +24,6 @@
 </script>
 
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
-  <!-- Usage-specific facets; shared date/project/agent live in the Analytics bar. -->
-  <div class="flex flex-wrap items-center gap-2">
-    <span class="text-meta uppercase tracking-wide text-text-faint">Usage facets</span>
-    <Select
-      value={usage.provider}
-      options={usage.providerOptions}
-      placeholder="All Providers"
-      aria-label="Filter by provider"
-      onchange={(value) => usage.setProvider(value)}
-    />
-    <Select
-      value={usage.tier}
-      options={usage.tierOptions}
-      placeholder="All Tiers"
-      aria-label="Filter by tier"
-      onchange={(value) => usage.setTier(value)}
-    />
-    <Select
-      value={usage.model}
-      options={usage.modelOptions}
-      placeholder="All Models"
-      aria-label="Filter by model"
-      onchange={(value) => usage.setModel(value)}
-    />
-    <div class="ml-auto"><UsageCoverageNote /></div>
-  </div>
-
   <UsageUnpricedWarning />
   <UsageSummaryCards />
 
