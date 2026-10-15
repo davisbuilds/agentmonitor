@@ -15,3 +15,5 @@ export { default as StatusDot } from './StatusDot.svelte';
 export { default as EmptyState } from './EmptyState.svelte';
 export { default as SubTabs } from './SubTabs.svelte';
 export { default as Toolbar } from './Toolbar.svelte';
+export { default as FilterBar } from './FilterBar.svelte';
+export { default as MoreFilters } from './MoreFilters.svelte';

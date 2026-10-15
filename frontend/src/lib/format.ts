@@ -51,6 +51,24 @@ export function formatDateOnly(value: string, locales?: Intl.LocalesArgument): s
   });
 }
 
+/**
+ * A `YYYY-MM-DD` date range for a window label: "Sep 1 – Sep 30", with the year
+ * only when the range leaves the current year.
+ */
+export function formatDateRange(from: string, to: string, now = new Date()): string {
+  const year = String(now.getFullYear());
+  const withYear = !from.startsWith(year) || !to.startsWith(year);
+  // Read as UTC midnight and format in UTC, so the label shows the calendar
+  // day in every time zone.
+  const day = (value: string) => new Date(`${value}T00:00:00.000Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(withYear ? { year: 'numeric' as const } : {}),
+    timeZone: 'UTC',
+  });
+  return from === to ? day(from) : `${day(from)} – ${day(to)}`;
+}
+
 export function timeAgo(dateStr: string): string {
   const diff = Math.max(0, Date.now() - parseTimestamp(dateStr).getTime());
   const seconds = Math.floor(diff / 1000);

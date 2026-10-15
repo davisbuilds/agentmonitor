@@ -304,14 +304,6 @@ the build.
 - **Next**: needs a bounded sample buffer in the projection and a retention
   decision.
 
-### Invocation mode
-
-#### No `mode` filter facet in the Monitor FilterBar
-- **What**: intentionally scoped out. `mode` lives in `sessions.metadata`
-  (json_extract).
-- **Why it matters**: cheap to add if wanted, but a filterable/indexed path would
-  want a dedicated column rather than json_extract.
-
 ### Pricing
 
 #### Some stored rates disagree with the vendors' live pricing pages
@@ -498,21 +490,6 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
-### Analytics deep links mount Overview first
-
-- **What**: opening `#analytics?view=usage` (or any non-Overview view) first
-  mounts Overview and fires its panel reads, then switches. The filter store
-  applies the hash only in a sub-view's `onMount`, so `AnalyticsShell` renders
-  the default `overview` view until one has mounted.
-- **Why or evidence**: a 2026-10-14 scratch probe against an empty temp DB saw
-  `/api/v2/analytics/summary` requested on a Usage deep link alongside
-  `/api/v2/usage/overview`. The cost is wasted reads and a brief Overview flash,
-  not wrong data. The Insights gate (`analytics-views.ts`) already copes: it
-  resolves the requested view once the hash is applied.
-- **Next**: seed `analyticsFilters` from `window.location.hash` before the shell's
-  first render (constructor or the shell's script), then assert in E2E that a
-  Usage deep link makes no `/api/v2/analytics/*` request.
-
 ### Saved insights while no provider key is configured
 
 - **What**: Insights is hidden unless a provider has an API key (2026-10-14), so
@@ -536,6 +513,16 @@ the build.
   coverage threshold is enforced yet; add one only once the surface is broad
   enough that a number is meaningful. Noted 2026-09-11, narrowed 2026-10-09.
 
+#### `test:verify` runs outside CI, so its browser scenarios can rot
+- **What**: the verification pilot's scenarios (`pnpm test:verify`) are neither a
+  CI job nor a pre-push gate.
+- **Why or evidence**: after Live folded into Monitor, the live-session scenario
+  kept opening `#live`, by then a redirect, and failed until 2026-10-15. Nothing
+  noticed, though it is the one check that runs the compiled watcher through to
+  the browser.
+- **Next**: time `pnpm test:verify` in the E2E job (which already builds and
+  installs Chromium) and add it there if the cost is acceptable.
+
 #### Frontend pure-module tests are split across two runners
 - **What**: most `frontend/src/lib` helper tests (`frontier-geometry`, chart
   `scales`, `monitor-analytics`, `route-state`, the `*-state.ts` helpers,
@@ -549,18 +536,6 @@ the build.
 - **Next**: when the UI restructure moves or renames one of these modules, move
   its tests into a colocated Vitest file in the same change. Merge the
   duplicated suites at the same time.
-
-#### Test-only exports in the analytics, usage, and insights state helpers
-- **What**: `createDefaultAnalyticsFilters`, `buildAnalyticsHash`,
-  `parseAnalyticsHash` (`analytics-state.ts`), `createDefaultUsageFilters`,
-  `buildUsageHash`, `parseUsageHash` (`usage-state.ts`), and
-  `clampInsightDateRange` (`insights-state.ts`) have no product caller. Only
-  their tests import them. Routing moved to `route-state.ts` when Analytics
-  absorbed Usage and Insights.
-- **Why or evidence**: the dead-code test scans root `src/` exports only, so
-  frontend leftovers go unflagged. Found 2026-10-09 while extending tests.
-- **Next**: delete them and their tests during the UI restructure, unless a
-  restructured view revives one.
 
 ### Cross-repo pattern-mining candidates (agentsview, 2026-09-13)
 

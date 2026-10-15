@@ -9,12 +9,11 @@
     openCommandPalette,
     type Tab,
   } from './lib/stores/router.svelte';
-  import { getFollowedLiveSessionId, initializeLiveSettings } from './lib/stores/live.svelte';
+  import { initializeLiveSettings } from './lib/stores/live.svelte';
   import { connectSSE, disconnectSSE } from './lib/stores/sse';
   import ConnectionStatus from './lib/components/monitor/ConnectionStatus.svelte';
   import StaleBuildNotice from './lib/components/monitor/StaleBuildNotice.svelte';
   import UnpricedModelsNotice from './lib/components/monitor/UnpricedModelsNotice.svelte';
-  import FilterBar from './lib/components/monitor/FilterBar.svelte';
   import QuotaPill from './lib/components/monitor/QuotaPill.svelte';
   import MonitorPage from './lib/components/monitor/MonitorPage.svelte';
   import SessionsPage from './lib/components/sessions/SessionsPage.svelte';
@@ -25,20 +24,12 @@
   const tab = $derived(getTab());
   const commandPaletteOpen = $derived(isCommandPaletteOpen());
 
-  let monitorPage = $state<MonitorPage>();
-
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'monitor', label: 'Monitor' },
     { id: 'sessions', label: 'Sessions' },
     { id: 'analytics', label: 'Analytics' },
     { id: 'benchmarks', label: 'Benchmarks' },
   ];
-
-  async function handleFilterChange(filters: Record<string, string>) {
-    if (monitorPage) {
-      await monitorPage.reload(filters);
-    }
-  }
 
   function handleGlobalKeydown(event: KeyboardEvent): void {
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -108,16 +99,9 @@
     </div>
   </header>
 
-  <!-- Contextual sub-bar (only on tabs that filter; a followed session has none) -->
-  {#if tab === 'monitor' && !getFollowedLiveSessionId()}
-    <div class="border-b border-line px-4 sm:px-6 py-2">
-      <FilterBar onchange={handleFilterChange} />
-    </div>
-  {/if}
-
-  <!-- Tab Content -->
+  <!-- Tab Content: each tab renders its own FilterBar under the command bar. -->
   {#if tab === 'monitor'}
-    <MonitorPage bind:this={monitorPage} onfilterchange={handleFilterChange} />
+    <MonitorPage />
   {:else if tab === 'sessions'}
     <SessionsPage />
   {:else if tab === 'analytics'}

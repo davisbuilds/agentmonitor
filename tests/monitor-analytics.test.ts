@@ -113,7 +113,7 @@ test('monitor cost windows are today and the same 30 days as Usage\'s default ra
   );
 });
 
-test('monitor cost windows carry only the project and agent filters', () => {
+test('monitor cost windows carry only the agent filter', () => {
   const now = new Date(2026, 9, 14, 12, 0);
   const windows = monitorCostWindowParams({
     agent_type: 'codex',
@@ -125,7 +125,6 @@ test('monitor cost windows carry only the project and agent filters', () => {
 
   for (const params of [windows.today, windows.last30Days]) {
     assert.equal(params.agent, 'codex');
-    assert.equal(params.project, 'agentmonitor');
-    assert.deepEqual(Object.keys(params).sort(), ['agent', 'date_from', 'date_to', 'project']);
+    assert.deepEqual(Object.keys(params).sort(), ['agent', 'date_from', 'date_to']);
   }
 });

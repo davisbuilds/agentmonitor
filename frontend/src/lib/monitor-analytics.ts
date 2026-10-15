@@ -8,8 +8,7 @@ export interface MonitorCostWindows {
 /**
  * Usage API params for the Monitor's two cost figures. The 30-day window is the
  * one Usage's default 30D range uses, so the two pages show the same number.
- * Only the project and agent filters carry over, as they did for the Monitor's
- * cost panel before.
+ * The agent filter, Monitor's only one, carries over.
  */
 export function monitorCostWindowParams(
   filters: Record<string, string>,
@@ -17,7 +16,6 @@ export function monitorCostWindowParams(
 ): MonitorCostWindows {
   const usageDefault = createDefaultAnalyticsFilters(now);
   const scope: Record<string, string> = {};
-  if (filters.project) scope.project = filters.project;
   if (filters.agent_type) scope.agent = filters.agent_type;
   return {
     today: { ...scope, date_from: usageDefault.to, date_to: usageDefault.to },

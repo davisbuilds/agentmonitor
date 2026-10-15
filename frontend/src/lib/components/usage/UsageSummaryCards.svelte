@@ -1,13 +1,15 @@
 <script lang="ts">
   import { usage } from '../../stores/usage.svelte';
-  import { formatCost, formatNumber } from '../../format';
+  import { formatCost, formatDateRange, formatNumber } from '../../format';
   import { Stat } from '../ui';
+  import UsageCoverageNote from './UsageCoverageNote.svelte';
 
   interface Card {
     label: string;
     value: string;
     sub?: string;
     delta?: { value: string; tone?: 'ok' | 'danger' | 'muted' };
+    testid?: string;
   }
 
   const summary = $derived(usage.summary);
@@ -23,7 +25,9 @@
           value: `${summary.cost_delta_pct >= 0 ? '+' : ''}${summary.cost_delta_pct.toFixed(1)}%`,
           tone: summary.cost_delta_pct > 0 ? 'danger' : 'ok',
         },
-        sub: `vs ${formatCost(summary.prior_total_cost_usd)} prior period`,
+        // Name the window, so this figure can't be read against Monitor's.
+        sub: `${formatDateRange(usage.from, usage.to)} · vs ${formatCost(summary.prior_total_cost_usd)} the period before`,
+        testid: 'usage-total-cost',
       },
       {
         label: 'Cache Hit Rate',
@@ -55,9 +59,10 @@
 {:else if summary}
   <div class="overflow-hidden rounded-lg border border-line bg-line">
     <div class="grid grid-cols-1 gap-px sm:grid-cols-2">
-      {#each promoted as card}
-        <div class="bg-surface p-5">
+      {#each promoted as card, i}
+        <div class="relative bg-surface p-5" data-testid={card.testid}>
           <Stat size="lg" label={card.label} value={card.value} sub={card.sub} delta={card.delta} />
+          {#if i === 0}<div class="absolute right-4 top-4"><UsageCoverageNote /></div>{/if}
         </div>
       {/each}
     </div>

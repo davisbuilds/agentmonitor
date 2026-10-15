@@ -23,7 +23,7 @@
   import SearchResults from './SearchResults.svelte';
   import PinnedMessages from './PinnedMessages.svelte';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
-  import { Select, Badge, EmptyState, Button, InfoTip } from '../ui';
+  import { Select, Badge, EmptyState, Button, InfoTip, FilterBar } from '../ui';
 
   const list = new SessionList();
   // Full-text results for the query box. The page owns the URL, so the store
@@ -197,6 +197,20 @@
     syncSearch(true);
   }
 
+  const hasActiveFilters = $derived(Boolean(filterProject || filterAgent || pinned || query));
+
+  function clearFilters() {
+    const filtersChanged = Boolean(filterProject || filterAgent);
+    filterProject = '';
+    filterAgent = '';
+    pinned = false;
+    query = '';
+    sort = 'recent';
+    syncHash(true);
+    if (filtersChanged) void loadSessions();
+    syncSearch(true);
+  }
+
   function handleQueryInput(next: string) {
     // Starting a search adds a history entry so Back returns to the list;
     // later keystrokes replace it.
@@ -290,63 +304,67 @@
     />
   {/key}
 {:else}
+  <FilterBar>
+    <input
+      type="search"
+      aria-label="Search transcripts"
+      placeholder={pinned ? 'Search pinned messages…' : 'Search transcripts…'}
+      class="w-64 min-w-0 rounded-sm border border-line bg-surface px-2.5 py-1.5 text-meta text-text transition-colors placeholder:text-text-faint hover:border-line-strong focus:border-accent focus:outline-none"
+      value={query}
+      oninput={(event) => handleQueryInput((event.currentTarget as HTMLInputElement).value)}
+      onkeydown={(event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          syncSearch(true);
+        }
+      }}
+    />
+    {#if mode === 'search'}
+      <Select
+        value={sort}
+        options={sortOptions}
+        aria-label="Sort results"
+        onchange={(value) => handleSortChange(value as SessionsSearchSort)}
+      />
+    {/if}
+    <Select
+      bind:value={filterProject}
+      options={projects}
+      placeholder="All Projects"
+      aria-label="Filter by project"
+      onchange={handleFilterChange}
+    />
+    <Select
+      bind:value={filterAgent}
+      options={agents}
+      placeholder="All Agents"
+      aria-label="Filter by agent"
+      onchange={handleFilterChange}
+    />
+    <button
+      type="button"
+      aria-pressed={pinned}
+      class="shrink-0 rounded-sm border px-2.5 py-1.5 text-meta transition-colors {pinned ? 'border-accent/60 bg-accent/10 text-text' : 'border-line bg-surface text-text-muted hover:border-line-strong hover:text-text'}"
+      onclick={togglePinned}
+    >Pinned</button>
+
+    {#snippet end()}
+      {#if hasActiveFilters}
+        <Button variant="ghost" size="sm" onclick={clearFilters}>Clear</Button>
+      {/if}
+    {/snippet}
+  </FilterBar>
+
   <main class="flex-1 min-h-0 overflow-hidden flex flex-col p-4 sm:p-6">
-    <!-- Heading, search box and filters -->
-    <div class="mb-3 flex items-center justify-between gap-3">
-      <div class="flex shrink-0 items-baseline gap-2">
-        <div class="flex items-center gap-1.5 self-center">
-          <h2 class="text-h2">Sessions</h2>
-          <InfoTip label="Sessions" width="w-96">
-            <p>Type in the search box to search the text of recorded transcripts; matching messages replace the list until you clear it. Results update after a short pause, or press Enter. {searchNote}</p>
-            <p>Pinned shows the messages you pinned in a session. With it on, the search box narrows them by their words instead.</p>
-          </InfoTip>
-        </div>
-        {#if countLabel}<span class="tabular text-meta text-text-muted">{countLabel}</span>{/if}
+    <div class="mb-3 flex items-baseline gap-2">
+      <div class="flex items-center gap-1.5 self-center">
+        <h2 class="text-h2">Sessions</h2>
+        <InfoTip label="Sessions" width="w-96">
+          <p>Type in the search box to search the text of recorded transcripts; matching messages replace the list until you clear it. Results update after a short pause, or press Enter. {searchNote}</p>
+          <p>Pinned shows the messages you pinned in a session. With it on, the search box narrows them by their words instead.</p>
+        </InfoTip>
       </div>
-      <div class="flex min-w-0 items-center gap-2">
-        <input
-          type="search"
-          aria-label="Search transcripts"
-          placeholder={pinned ? 'Search pinned messages…' : 'Search transcripts…'}
-          class="w-72 min-w-0 rounded-sm border border-line bg-surface px-2.5 py-1.5 text-meta text-text transition-colors placeholder:text-text-faint hover:border-line-strong focus:border-accent focus:outline-none"
-          value={query}
-          oninput={(event) => handleQueryInput((event.currentTarget as HTMLInputElement).value)}
-          onkeydown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              syncSearch(true);
-            }
-          }}
-        />
-        {#if mode === 'search'}
-          <Select
-            value={sort}
-            options={sortOptions}
-            aria-label="Sort results"
-            onchange={(value) => handleSortChange(value as SessionsSearchSort)}
-          />
-        {/if}
-        <Select
-          bind:value={filterProject}
-          options={projects}
-          placeholder="All Projects"
-          aria-label="Filter by project"
-          onchange={handleFilterChange}
-        />
-        <Select
-          bind:value={filterAgent}
-          options={agents}
-          placeholder="All Agents"
-          aria-label="Filter by agent"
-          onchange={handleFilterChange}
-        />
-        <button
-          type="button"
-          aria-pressed={pinned}
-          class="shrink-0 rounded-sm border px-2.5 py-1.5 text-meta transition-colors {pinned ? 'border-accent/60 bg-accent/10 text-text' : 'border-line bg-surface text-text-muted hover:border-line-strong hover:text-text'}"
-          onclick={togglePinned}
-        >Pinned</button>
-      </div>
+      {#if countLabel}<span class="tabular text-meta text-text-muted">{countLabel}</span>{/if}
     </div>
 
     <div class="min-h-0 flex-1 overflow-y-auto">

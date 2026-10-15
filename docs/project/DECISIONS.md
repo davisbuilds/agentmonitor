@@ -29,3 +29,22 @@ flake, whose likely area is cold first navigation.
 
 **Revisit when:** profiling finds material duplicated work or latency that a
 combined read can eliminate; diagnose the E2E flake separately.
+
+## Monitor filters by agent only (2026-10-15)
+
+**Decision:** Monitor offers a single filter, Agent. Project, event type, tool,
+model, branch, and source filtering live in Sessions and Analytics.
+
+**Evidence:** Monitor's bar offered seven filters, but only Agent reached every
+read. Project narrowed just the two cost figures; event type, tool, model,
+branch, and source narrowed just the recent-event rows inside each agent card.
+The stats strip (`/api/v2/monitor/stats`) takes only an agent and a start time,
+and a project filter there would scan the events table without a matching index,
+where the agent filter needed a dedicated index and plan test to stay fast. With
+Monitor showing only what is running now, few cards remain to filter.
+
+**Revisit when:** Monitor regularly shows enough concurrent sessions that
+narrowing them by project matters. Then add project to the stats read with an
+index measured on a snapshot (`verify probe plans`), and apply it to the cards
+and live events in the same change. A `mode` facet would likewise want a
+dedicated column rather than `json_extract` on `sessions.metadata`.
