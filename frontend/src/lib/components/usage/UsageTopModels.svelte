@@ -1,8 +1,8 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
   import { usage } from '../../stores/usage.svelte';
-  import { formatCost, formatNumber } from '../../format';
-  import type { UsageModelDailyPoint } from '../../api/client';
+  import { formatCost, formatModelName, formatNumber } from '../../format';
+  import type { UsageDailyPoint, UsageModelDailyPoint } from '../../api/client';
   import {
     assignModelColors,
     measure,
@@ -68,6 +68,21 @@
   const maxTotal = $derived(rows.reduce((max, row) => Math.max(max, row.total), 0));
   const rangeTotal = $derived(rows.reduce((sum, row) => sum + row.total, 0));
 
+  // The day's totals, from the daily series, so each bar says what the old
+  // Daily Usage list did.
+  const dailyByDate = $derived(new Map(usage.daily.map((row: UsageDailyPoint) => [row.date, row])));
+  function dayLabel(row: Row): string {
+    const day = dailyByDate.get(row.date);
+    if (!day) return `${row.date}: ${formatMetric(row.total, metric)}`;
+    const tokens = day.input_tokens + day.output_tokens + day.cache_read_tokens + day.cache_write_tokens;
+    return [
+      `${row.date}: ${formatCost(day.cost_usd)}`,
+      `${formatNumber(tokens)} tokens`,
+      `${formatNumber(day.usage_events)} usage event${day.usage_events === 1 ? '' : 's'}`,
+      `${formatNumber(day.session_count)} session${day.session_count === 1 ? '' : 's'}`,
+    ].join(' · ');
+  }
+
   function shortDate(date: string): string {
     return date.slice(5).replace('-', '/');
   }
@@ -88,12 +103,15 @@
   });
 </script>
 
-<section class="flex h-full flex-col rounded-lg border border-line bg-surface p-4 xl:max-h-[34rem]">
+<section
+  class="flex h-full flex-col rounded-lg border border-line bg-surface p-4 xl:max-h-[34rem]"
+  aria-labelledby="usage-daily-heading"
+>
   <div class="flex items-start justify-between gap-3">
     <div>
       <div class="flex items-center gap-1.5">
-        <h3 class="text-h3">Top Models</h3>
-        <InfoTip label="Top Models"><p>Model mix by day. Token totals include cache reads and writes. Click a day to narrow the page to it.</p></InfoTip>
+        <h3 id="usage-daily-heading" class="text-h3">Daily Usage by Model</h3>
+        <InfoTip label="Daily Usage by Model"><p>Cost or tokens per day by event time, split by the top models. Token totals include cache reads and writes. Point at a day for its totals; click it to narrow the page to that day.</p></InfoTip>
       </div>
     </div>
 
@@ -140,7 +158,7 @@
             style={`background:${colorFor(model)}`}
             aria-hidden="true"
           ></span>
-          <span class="font-mono">{model}</span>
+          <span class="font-mono" title={model}>{formatModelName(model)}</span>
         </li>
       {/each}
     </ul>
@@ -158,8 +176,8 @@
             <button
               class="group flex h-full min-w-0 flex-1 flex-col justify-end rounded-t-sm transition-colors hover:bg-surface-2"
               onclick={() => usage.setDateRange(row.date, row.date)}
-              title={`${row.date} · ${formatMetric(row.total, metric)}`}
-              aria-label={`${row.date}: ${formatMetric(row.total, metric)}`}
+              title={dayLabel(row)}
+              aria-label={dayLabel(row)}
             >
               {#if row.total > 0}
                 <div
@@ -170,7 +188,7 @@
                     <div
                       class="w-full"
                       style={`background:${colorFor(segment.model)}; flex:${segment.value} 1 0; min-height:2px`}
-                      title={`${row.date} · ${segment.model} · ${formatMetric(segment.value, metric)} (${Math.round((segment.value / row.total) * 100)}%)`}
+                      title={`${row.date} · ${formatModelName(segment.model)} · ${formatMetric(segment.value, metric)} (${Math.round((segment.value / row.total) * 100)}%)`}
                     ></div>
                   {/each}
                 </div>

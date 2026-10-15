@@ -1,4 +1,5 @@
 import { createDefaultAnalyticsFilters } from './analytics-state';
+import { formatModelName } from './format';
 
 export interface MonitorCostWindows {
   today: Record<string, string>;
@@ -43,10 +44,6 @@ function parseMetadata(metadata: Record<string, unknown> | string | undefined): 
   return metadata;
 }
 
-function cleanModelName(model: string): string {
-  return model.replace(/^(openai|anthropic|google)\//, '');
-}
-
 function reasoningEffortFromEvent(event: ActiveAgentLabelEvent): string | null {
   const metadata = parseMetadata(event.metadata);
   for (const key of ['reasoning_effort', 'thinking_level']) {
@@ -87,6 +84,33 @@ export function buildActiveAgentLabel(agentType: string, events: ActiveAgentLabe
 
   if (!model) return name;
 
-  const suffix = [cleanModelName(model), reasoningEffort].filter(Boolean).join(' ');
+  const suffix = [formatModelName(model), reasoningEffort].filter(Boolean).join(' ');
   return `${name} (${suffix})`;
+}
+
+export interface EventRun<T> {
+  /** The newest event of the run, which the row shows. */
+  event: T;
+  label: string;
+  count: number;
+}
+
+/**
+ * Fold consecutive events with the same label into one row, so a card reads
+ * "llm_response ×8" rather than listing the same line eight times. `key` can
+ * add what else a row shows (its status), so a run never hides a failure.
+ */
+export function collapseEventRuns<T>(
+  events: readonly T[],
+  label: (event: T) => string,
+  key: (event: T) => string = label,
+): EventRun<T>[] {
+  const runs: Array<EventRun<T> & { key: string }> = [];
+  for (const event of events) {
+    const runKey = key(event);
+    const last = runs.at(-1);
+    if (last && last.key === runKey) last.count += 1;
+    else runs.push({ event, label: label(event), count: 1, key: runKey });
+  }
+  return runs.map(({ event, label: text, count }) => ({ event, label: text, count }));
 }

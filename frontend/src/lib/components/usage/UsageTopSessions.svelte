@@ -1,6 +1,6 @@
 <script lang="ts">
   import { usage } from '../../stores/usage.svelte';
-  import { formatCost, formatNumber } from '../../format';
+  import { formatCost, formatModelName, formatNumber } from '../../format';
   import { sessionTitle } from '../../session-text';
   import { Button, InfoTip } from '../ui';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
@@ -44,8 +44,8 @@
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-text-faint">
                 <span>{row.project ?? 'unknown project'}</span>
                 <span>{row.agent}</span>
-                <span class="font-mono">{row.primary_model}</span>
-                <span>{row.primary_provider}/{row.primary_tier}</span>
+                <span class="font-mono" title={row.primary_model}>{formatModelName(row.primary_model)}</span>
+                <span>{row.primary_provider} / {row.primary_tier}</span>
                 <span class="tabular font-mono">{formatNumber(row.usage_events)} usage events</span>
                 <span class="tabular font-mono">{formatNumber(row.input_tokens + row.output_tokens)} tokens</span>
               </div>

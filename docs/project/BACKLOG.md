@@ -288,15 +288,6 @@ the build.
 
 ### Context occupancy
 
-#### Monitor-card occupancy join not visually verified with a live session
-- **What**: the live stream and Monitor reads use v2. Monitor separately joins
-  occupancy from the live session projection by session id. This is Svelte-checked
-  and logically verified but was not screenshotted with a live hook/OTEL-fed active
-  session. Codex's Monitor UUID and live rollout identity are aliased during the
-  occupancy refresh.
-- **Why it matters**: confirm the join renders on a real running card, especially
-  for Codex.
-
 #### Trajectory sparkline (occupancy gauge Task 8)
 - **What**: session-lifetime occupancy fill over time with compaction drop-offs,
   in the detail/inspector surface.
@@ -529,8 +520,9 @@ the build.
   `session-roles`, `session-capabilities`, `skill-consultation-view`, usage
   `model-colors` and `unpriced-usage`) are root `node:test` files under
   `tests/` and run in `pnpm test`. The Vitest harness (`pnpm frontend:test`)
-  holds the store tests plus `session-text` and chart `layout`. `format`,
-  `monitor-session-merge`, and `monitor-token-totals` have a suite in each.
+  holds the store tests plus `session-text`, `format`, `quota-pill`, and chart
+  `layout`. `monitor-session-merge` and `monitor-token-totals` have a suite in
+  each (`format`'s two were merged into Vitest on 2026-10-15).
 - **Why or evidence**: the split hid existing coverage. The 2026-09-11
   coverage entry listed the root-tested modules as untested.
 - **Next**: when the UI restructure moves or renames one of these modules, move

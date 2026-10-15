@@ -69,6 +69,22 @@ export function formatDateRange(from: string, to: string, now = new Date()): str
   return from === to ? day(from) : `${day(from)} – ${day(to)}`;
 }
 
+/**
+ * The one way a model ID is shown: as its vendor names it, without a routing
+ * prefix (`anthropic/`), Claude Code's `[1m]` suffix, a Bedrock wrapper or a
+ * release date stamp. Mirrors the server's `normalizeModelId`, plus the date.
+ * Show the raw ID in a tooltip where the exact spelling matters.
+ */
+const BEDROCK_ANTHROPIC_ID = /^(?:(?:us|eu|apac|jp|au|ca|us-gov|global)\.)?anthropic\.(.+?)-v\d+(?::\d+)?$/;
+
+export function formatModelName(model: string): string {
+  const id = model
+    .trim()
+    .replace(/\[1m\]$/i, '')
+    .replace(/^(?:anthropic|openai|google)\//, '');
+  return (BEDROCK_ANTHROPIC_ID.exec(id)?.[1] ?? id).replace(/-20\d{6}$/, '');
+}
+
 export function timeAgo(dateStr: string): string {
   const diff = Math.max(0, Date.now() - parseTimestamp(dateStr).getTime());
   const seconds = Math.floor(diff / 1000);
