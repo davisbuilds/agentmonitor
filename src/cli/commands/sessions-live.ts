@@ -351,10 +351,13 @@ export function registerSessionLiveCommands(): void {
     name: 'live items',
     group: 'Live Commands',
     summary: 'List live items for a session',
-    usage: 'live items <id> [--limit <n>] [--cursor <id>] [--kinds <csv>]',
-    examples: ['live items abc123 --kinds message,tool_call --json'],
+    usage: 'live items <id> [--limit <n>] [--cursor <id> | --tail | --before <id>] [--kinds <csv>]',
+    examples: [
+      'live items abc123 --tail --limit 20',
+      'live items abc123 --kinds user_message,assistant_message,tool_call --json',
+    ],
     async handler(ctx, args) {
-      const parsed = parseOptionSet(args, new Set(['--limit', '--cursor', '--kinds']), new Set());
+      const parsed = parseOptionSet(args, new Set(['--limit', '--cursor', '--before', '--kinds']), new Set(['--tail']));
       const id = requireOne(parsed.positionals, 'amon live items <id> [options]');
       const { closeDb } = await initReadDb();
       try {
@@ -363,6 +366,11 @@ export function registerSessionLiveCommands(): void {
         const result = getSessionItems(id, {
           limit: parseIntegerOption(parsed.values.get('--limit'), '--limit'),
           cursor: parsed.values.get('--cursor'),
+          // An item id, like --cursor; anything else would read as the end of the list.
+          before: parsed.values.has('--before')
+            ? String(parseIntegerOption(parsed.values.get('--before'), '--before'))
+            : undefined,
+          tail: parsed.flags.has('--tail'),
           kinds: parsed.values.get('--kinds')?.split(',').map(value => value.trim()).filter(Boolean),
         });
         writeFormatted(ctx, result, formatLiveItems(result.data));

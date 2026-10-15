@@ -215,6 +215,31 @@ test('session turns and items project into trace trees with parent-child tool li
   assert.equal(toolResult?.observation_type, 'tool');
 });
 
+test('injected instructions project as model input', () => {
+  const projection = projectTraceQuality({
+    sessionId: 'instructions-session',
+    agentType: 'codex',
+    turns: [{
+      id: 21, session_id: 'instructions-session', agent_type: 'codex', source_turn_id: 'codex-message:0',
+      status: 'completed', title: 'Instructions', started_at: '2026-10-15T10:00:00.000Z',
+      ended_at: '2026-10-15T10:00:00.000Z', created_at: '2026-10-15T10:00:00.000Z',
+    }],
+    sessionItems: [{
+      id: 30, session_id: 'instructions-session', turn_id: 21, ordinal: 0,
+      source_item_id: 'codex-message:0:item:0', kind: 'instructions', status: 'success',
+      payload_json: JSON.stringify({ text: '<permissions instructions>sandboxed</permissions instructions>' }),
+      created_at: '2026-10-15T10:00:00.000Z',
+    }],
+  });
+
+  const observation = projection.observations.find(o => o.source_id === '30');
+  assert.equal(observation?.name, 'Instructions');
+  assert.ok(observation?.input_summary, 'instructions carry an input summary');
+  assert.ok(observation?.input_hash, 'and an input hash');
+  const coverage = JSON.parse(projection.traces[0].coverage_json) as Record<string, unknown>;
+  assert.equal(coverage.has_raw_input, true);
+});
+
 test('messages and tool calls project into one low-risk browsing-session trace when live turns are absent', () => {
   const projection = projectTraceQuality({
     sessionId: 'imported-session',

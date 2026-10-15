@@ -72,10 +72,14 @@ export function setUnpricedModels(models: Stats['unpriced_models']): void {
   unpricedModels = models ?? [];
 }
 
-export function incrementEvent(event: AgentEvent): void {
-  // A live event is new, so a start-time filter always admits it; an agent filter may not.
+// A live event is new, so a start-time filter always admits it; an agent filter may not.
+function matchesFilters(event: AgentEvent): boolean {
   const agent = statsParams(filters).agent;
-  if (agent && event.agent_type !== agent) return;
+  return !agent || event.agent_type === agent;
+}
+
+export function incrementEvent(event: AgentEvent): void {
+  if (!matchesFilters(event)) return;
   eventsDuringFilteredRead?.push(event);
   stats = { ...addEventUsage(stats, event), total_events: stats.total_events + 1 };
 }
@@ -304,6 +308,14 @@ export function handleEventForSession(event: AgentEvent): void {
     }, event, false), ...sessions];
     void backfillSession(event.session_id);
   }
+}
+
+/** A live event from the SSE stream: the feed, its session's card, and the stats. */
+export function applyLiveEvent(event: AgentEvent): void {
+  if (!matchesFilters(event)) return;
+  addEvent(event);
+  handleEventForSession(event);
+  incrementEvent(event);
 }
 
 // --- Filters ---

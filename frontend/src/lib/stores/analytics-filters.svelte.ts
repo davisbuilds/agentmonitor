@@ -12,6 +12,7 @@ import {
   type AnalyticsSkillSort,
   type AnalyticsView,
 } from '../route-state';
+import { createDefaultAnalyticsFilters, matchingQuickRange, QUICK_RANGE_DAYS } from '../analytics-state';
 
 function localDateString(date: Date): string {
   const year = date.getFullYear();
@@ -27,10 +28,11 @@ function daysAgo(days: number, now = new Date()): string {
 }
 
 export function createDefaultAnalyticsRouteState(now = new Date()): AnalyticsRouteState {
+  const { from, to } = createDefaultAnalyticsFilters(now);
   return {
     view: 'overview',
-    from: daysAgo(29, now),
-    to: localDateString(now),
+    from,
+    to,
     project: '',
     agent: '',
     model: '',
@@ -124,13 +126,22 @@ class AnalyticsFiltersStore {
     };
   }
 
-  /** True when the shared (date/project/agent) filters differ from defaults. */
+  /** The quick range (7, 30 or 90 days) the date range matches, if any. */
+  get activeQuickRange(): number | null {
+    return matchingQuickRange(this.from, this.to, QUICK_RANGE_DAYS);
+  }
+
+  /**
+   * True when anything in the bar differs from its default: the shared
+   * date/project/agent filters, or Usage's facets while Usage is shown.
+   */
   get hasActiveSharedFilters(): boolean {
     return (
       this.from !== this.defaults.from
       || this.to !== this.defaults.to
       || this.project !== ''
       || this.agent !== ''
+      || (this.view === 'usage' && (this.model !== '' || this.provider !== '' || this.tier !== ''))
     );
   }
 
@@ -167,13 +178,21 @@ class AnalyticsFiltersStore {
     }
   }
 
-  /** Attach the hash listener + seed filters from the URL, and load options once. */
+  /**
+   * Attach the hash listener and seed the filters from the URL, once. The
+   * Analytics shell calls this before its first render, so a deep link to a
+   * sub-view mounts that view directly rather than Overview first.
+   */
+  attachHash(): void {
+    if (this.hashListenerAttached || typeof window === 'undefined') return;
+    window.addEventListener('hashchange', this.handleHashChange);
+    this.hashListenerAttached = true;
+    this.applyState(parseAnalyticsRouteHash(window.location.hash, this.snapshot));
+  }
+
+  /** Seed filters from the URL (if not yet) and load the option lists once. */
   async initialize(): Promise<void> {
-    if (!this.hashListenerAttached && typeof window !== 'undefined') {
-      window.addEventListener('hashchange', this.handleHashChange);
-      this.hashListenerAttached = true;
-      this.applyState(parseAnalyticsRouteHash(window.location.hash, this.snapshot));
-    }
+    this.attachHash();
 
     if (!this.optionsLoaded) {
       const [projects, agents] = await Promise.all([
@@ -346,11 +365,15 @@ class AnalyticsFiltersStore {
     this.syncHash();
   }
 
+  /** Reset everything in the bar, Usage's facets included. */
   clearSharedFilters(): void {
     this.from = this.defaults.from;
     this.to = this.defaults.to;
     this.project = '';
     this.agent = '';
+    this.model = '';
+    this.provider = '';
+    this.tier = '';
     this.syncHash();
     this.notify();
   }

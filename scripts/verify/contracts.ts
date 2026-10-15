@@ -4,7 +4,8 @@ export const scenarios = [
   {
     id: 'live-session',
     description: 'Synthetic transcript → compiled watcher/projection → API → live browser update without reload',
-    route: '/app/#live',
+    // The live stream is Monitor's drill-in; run.ts appends the session id.
+    route: '/app/#monitor?session=',
     fixture: 'claude-live-v1',
     checks: ['initial-api', 'initial-browser', 'updated-api', 'updated-browser'],
     limits: ['Claude JSONL only; no external harness hooks, provider authentication, or installed-service checks'],
@@ -12,7 +13,7 @@ export const scenarios = [
   {
     id: 'usage',
     description: 'Known usage totals → compiled API → browser cards and project filter; separate API and UI timings',
-    route: '/app/#usage?from=2026-07-01&to=2026-07-31',
+    route: '/app/#analytics?view=usage&from=2026-07-01&to=2026-07-31',
     fixture: 'usage-1000-v1',
     checks: ['totals-api', 'totals-browser', 'filtered-api', 'filtered-browser'],
     limits: ['Synthetic 1,000-event fixture; timings are observations, not a production performance guarantee'],

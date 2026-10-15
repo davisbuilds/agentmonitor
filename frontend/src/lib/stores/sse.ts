@@ -1,4 +1,4 @@
-import { applyBroadcastStats, setServerBuild, setUnpricedModels, incrementEvent, addEvent, handleSessionUpdate, handleEventForSession, setConnectionStatus, setQuotaMonitor, signalReconnect } from './monitor.svelte';
+import { applyBroadcastStats, setServerBuild, setUnpricedModels, applyLiveEvent, handleSessionUpdate, setConnectionStatus, setQuotaMonitor, signalReconnect } from './monitor.svelte';
 import type { AgentEvent, Stats } from '../api/client';
 
 let source: EventSource | null = null;
@@ -57,9 +57,7 @@ function dispatch(msg: { type: string; payload: unknown }): void {
   switch (msg.type) {
     case 'event': {
       const event = msg.payload as AgentEvent;
-      addEvent(event);
-      handleEventForSession(event);
-      incrementEvent(event);
+      applyLiveEvent(event);
       break;
     }
     case 'stats': {

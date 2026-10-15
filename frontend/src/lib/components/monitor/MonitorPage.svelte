@@ -14,6 +14,7 @@
     setCostWindows,
     setQuotaMonitor,
     getFilters,
+    setFilters,
     getFilterOptions,
     setFilterOptions,
     getAutoImportSignal,
@@ -24,13 +25,19 @@
   import { fetchStats, fetchEvents, fetchMonitorSessions, fetchFilterOptions, fetchUsageSummary, statsParams } from '../../api/client';
   import { monitorCostWindowParams } from '../../monitor-analytics';
   import { getFollowedLiveSessionId } from '../../stores/live.svelte';
-
-  interface Props {
-    onfilterchange: (filters: Record<string, string>) => void;
-  }
-  let { onfilterchange }: Props = $props();
+  import { FilterBar, Select } from '../ui';
 
   const followedSessionId = $derived(getFollowedLiveSessionId());
+
+  // Monitor filters by agent alone: it is the one filter every read here
+  // honors (the stats, the cards, their recent events and the cost windows).
+  const agentFilter = $derived(getFilters().agent_type ?? '');
+  const agentOptions = $derived(getFilterOptions().agent_types);
+  function setAgentFilter(agent: string): void {
+    const next: Record<string, string> = agent ? { agent_type: agent } : {};
+    setFilters(next);
+    void reload(next);
+  }
 
   // Today's and the last 30 days' cost come from the Usage API, with the window
   // Usage's 30D range uses, so the Monitor and Usage show the same figures.
@@ -53,7 +60,7 @@
     }
   }
 
-  export async function reload(filters: Record<string, string> = {}) {
+  async function reload(filters: Record<string, string> = {}) {
     const sessionsParams: Record<string, string> = { limit: '0', exclude_status: 'ended' };
     if (filters.agent_type) sessionsParams.agent_type = filters.agent_type;
 
@@ -173,22 +180,25 @@
   });
 </script>
 
+<FilterBar>
+  <Select
+    value={agentFilter}
+    options={agentOptions}
+    placeholder="All Agents"
+    aria-label="Filter by agent"
+    onchange={setAgentFilter}
+  />
+  <div class="mx-1 h-5 w-px bg-line" aria-hidden="true"></div>
+  <StatsBar />
+</FilterBar>
+
 {#if followedSessionId}
   <main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6 gap-4 xl:overflow-hidden">
-    <section class="shrink-0">
-      <StatsBar />
-    </section>
     <MonitorStream sessionId={followedSessionId} />
   </main>
 {:else}
-  <main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6 gap-8">
-    <section>
-      <StatsBar />
-    </section>
-
-    <section>
-      <AgentCards />
-    </section>
+  <main class="flex-1 min-h-0 overflow-y-auto flex flex-col p-4 sm:p-6">
+    <AgentCards />
   </main>
 {/if}
 

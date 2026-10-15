@@ -2,8 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   createDefaultAnalyticsFilters,
-  buildAnalyticsHash,
-  parseAnalyticsHash,
+  matchingQuickRange,
   buildAnalyticsCsv,
 } from '../frontend/src/lib/analytics-state.ts';
 import { csvSection, parseCsv } from './helpers/csv.ts';
@@ -19,34 +18,21 @@ test('createDefaultAnalyticsFilters uses an inclusive last-30-day range', () => 
   });
 });
 
-test('buildAnalyticsHash and parseAnalyticsHash round-trip analytics filters', () => {
-  const hash = buildAnalyticsHash({
-    from: '2026-04-01',
-    to: '2026-04-15',
-    project: 'agentmonitor',
-    agent: 'codex',
-  });
-
-  assert.equal(hash, 'analytics?from=2026-04-01&to=2026-04-15&project=agentmonitor&agent=codex');
-  assert.deepEqual(
-    parseAnalyticsHash(`#${hash}`, createDefaultAnalyticsFilters(new Date('2026-04-15T12:00:00.000Z'))),
-    {
-      from: '2026-04-01',
-      to: '2026-04-15',
-      project: 'agentmonitor',
-      agent: 'codex',
-    },
-  );
-});
-
-test('parseAnalyticsHash falls back for non-analytics hashes and missing params', () => {
-  const fallback = createDefaultAnalyticsFilters(new Date('2026-04-15T12:00:00.000Z'));
-
-  assert.deepEqual(parseAnalyticsHash('#sessions', fallback), fallback);
-  assert.deepEqual(parseAnalyticsHash('#analytics?project=alpha', fallback), {
-    ...fallback,
-    project: 'alpha',
-  });
+test('matchingQuickRange names the quick range a date range covers exactly', () => {
+  const now = new Date(2026, 9, 15, 12, 0);
+  const ranges = [7, 30, 90];
+  assert.equal(matchingQuickRange('2026-10-09', '2026-10-15', ranges, now), 7);
+  assert.equal(matchingQuickRange('2026-09-16', '2026-10-15', ranges, now), 30);
+  assert.equal(matchingQuickRange('2026-07-18', '2026-10-15', ranges, now), 90);
+  // The default range is the 30D one.
+  const defaults = createDefaultAnalyticsFilters(now);
+  assert.equal(matchingQuickRange(defaults.from, defaults.to, ranges, now), 30);
+  // One day off at either end, or a range that does not end today, is custom.
+  assert.equal(matchingQuickRange('2026-10-08', '2026-10-15', ranges, now), null);
+  assert.equal(matchingQuickRange('2026-10-09', '2026-10-14', ranges, now), null);
+  assert.equal(matchingQuickRange('2026-09-01', '2026-09-30', ranges, now), null);
+  // Across a month end (2026 is not a leap year).
+  assert.equal(matchingQuickRange('2026-02-23', '2026-03-01', ranges, new Date(2026, 2, 1, 23, 0)), 7);
 });
 
 test('buildAnalyticsCsv emits summary and table sections for export', () => {

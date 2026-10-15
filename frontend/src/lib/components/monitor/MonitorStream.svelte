@@ -7,7 +7,8 @@
     getLiveConnectionStatus,
     getLiveItems,
     getLiveItemsError,
-    getLiveItemsHasMore,
+    getLiveItemsHasEarlier,
+    getLiveItemsTotal,
     getLiveItemsLoading,
     getLiveSessionLoadFailed,
     getLiveSessionMissing,
@@ -17,7 +18,7 @@
     getSelectedLiveItemId,
     getSelectedLiveKinds,
     getSelectedLiveSession,
-    loadMoreLiveItems,
+    loadEarlierLiveItems,
     setSelectedLiveItem,
     stopFollowingLiveSession,
     toggleLiveItemKind,
@@ -131,11 +132,12 @@
           selectedItemId={getSelectedLiveItemId()}
           loading={getLiveItemsLoading()}
           error={getLiveItemsError()}
-          hasMore={getLiveItemsHasMore()}
+          hasEarlier={getLiveItemsHasEarlier()}
+          total={getLiveItemsTotal()}
           selectedKinds={getSelectedLiveKinds()}
           onselect={setSelectedLiveItem}
           ontogglekind={toggleLiveItemKind}
-          onloadmore={() => void loadMoreLiveItems()}
+          onloadearlier={() => loadEarlierLiveItems()}
           onopenhistory={() => navigateToSession(sessionId)}
         />
       </section>

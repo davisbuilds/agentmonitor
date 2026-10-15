@@ -99,6 +99,19 @@ Animate `transform`/`opacity` only. Default duration 140ms, `ease-out`
   uppercase pill on every row. Say nothing about the normal case: a list row omits a session's
   coverage when everything was captured (`SessionCoverage` variant `row`), and a header opens the
   breakdown from one dot + label (variant `detail`). Live status uses `StatusDot`.
+- **One filter bar per tab.** A filtering tab renders `ui/FilterBar` directly under the command
+  bar: scope first (sub-tabs or a search box), then Project and Agent, then the page's own
+  filters, with Clear and actions at the end. It stays one row on desktop: `Select` caps its
+  width (`max-w-48`, full value in the tooltip) instead of growing to its longest option, and
+  less-used filters sit behind `MoreFilters`, whose button counts the ones set. Offer only
+  filters the page's reads honor.
+- **One spelling per model.** Render model IDs through `formatModelName`, with the raw ID in the
+  tooltip; `tests/model-name-display.test.ts` keeps it in step with the server's
+  `normalizeModelId`.
+- **Quiet per-row actions.** An action repeated on every row (Pin) appears on hover or focus,
+  and stays visible once it holds state (Pinned).
+- **Name every cost's window.** A cost figure says which period it covers ("Cost today",
+  "Sep 16 – Oct 15"); an unlabeled total invites comparison with a different window elsewhere.
 - **Constrain prose** to `max-w-[65ch]`; collapse stacked heading+subtitle+banner+pill into one
   heading plus a single `ⓘ` affordance (`InfoTip`, or `Panel`'s `info`). Write its text in plain
   words: no table names, integration modes or capability-contract vocabulary.

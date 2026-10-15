@@ -47,28 +47,21 @@ export function createDefaultAnalyticsFilters(now = new Date()): AnalyticsFilter
   };
 }
 
-export function buildAnalyticsHash(filters: AnalyticsFilters): string {
-  const params = new URLSearchParams();
-  params.set('from', filters.from);
-  params.set('to', filters.to);
-  if (filters.project) params.set('project', filters.project);
-  if (filters.agent) params.set('agent', filters.agent);
-  const suffix = params.toString();
-  return suffix ? `analytics?${suffix}` : 'analytics';
-}
+/** The Analytics bar's quick ranges, in days ending today. */
+export const QUICK_RANGE_DAYS = [7, 30, 90];
 
-export function parseAnalyticsHash(hash: string, fallback: AnalyticsFilters): AnalyticsFilters {
-  const normalized = hash.startsWith('#') ? hash.slice(1) : hash;
-  const [tab, query = ''] = normalized.split('?');
-  if (tab !== 'analytics') return fallback;
-
-  const params = new URLSearchParams(query);
-  return {
-    from: params.get('from') || fallback.from,
-    to: params.get('to') || fallback.to,
-    project: params.get('project') || '',
-    agent: params.get('agent') || '',
-  };
+/**
+ * The quick range, in days ending today, that `from`-`to` covers exactly, or
+ * null for any other range, so the bar can mark the one in force.
+ */
+export function matchingQuickRange(from: string, to: string, ranges: number[], now = new Date()): number | null {
+  if (to !== localDateString(now)) return null;
+  for (const days of ranges) {
+    const start = new Date(now);
+    start.setDate(start.getDate() - (days - 1));
+    if (from === localDateString(start)) return days;
+  }
+  return null;
 }
 
 function csvEscape(value: string | number | null | undefined): string {

@@ -106,8 +106,7 @@ export async function runScenario(id: Scenario, options: RunOptions = {}) {
         assert.ok(JSON.stringify(body).includes('Initial verification response'), 'Initial transcript projected');
       });
       await check('initial-browser', async () => {
-        await page!.goto(session!.url + scenario.route);
-        await page!.getByRole('button').filter({ hasText: 'Verify the live session' }).first().click();
+        await page!.goto(session!.url + scenario.route + encodeURIComponent(String(state.liveId)));
         await expect(page!.getByText('Initial verification response', { exact: true }).first()).toBeVisible();
         await screenshot('before.png');
       });

@@ -59,6 +59,7 @@
     { value: 'you', label: 'You' },
     { value: 'assistant', label: agentDisplayName(session?.agent ?? 'unknown') },
     { value: 'tool', label: 'Tools' },
+    { value: 'instructions', label: 'Instructions' },
   ]);
   // A message with nothing to render (Claude Code often records a thinking block
   // with its text left out) would show as an empty header, so it is left out.

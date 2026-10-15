@@ -172,6 +172,24 @@ describe('stats under a Monitor filter', () => {
   });
 });
 
+describe('live events under the agent filter', () => {
+  it('leaves out events, cards and totals for other agents', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.applyLiveEvent(ev(1, { agent_type: 'claude_code', session_id: 'claude-1', cost_usd: 2 }));
+    expect(store.getEvents()).toEqual([]);
+    expect(store.getSessions()).toEqual([]);
+    expect(store.getStats().total_events).toBe(0);
+  });
+
+  it('applies a matching event everywhere', () => {
+    store.setFilters({ agent_type: 'codex' });
+    store.applyLiveEvent(ev(1, { agent_type: 'codex', session_id: 'codex-1', cost_usd: 2 }));
+    expect(store.getEvents().map(e => e.id)).toEqual([1]);
+    expect(store.getSessions().map(s => s.id)).toEqual(['codex-1']);
+    expect(store.getStats().total_events).toBe(1);
+  });
+});
+
 describe('a filtered stats read in flight', () => {
   const snapshot = (cost: number) => ({ ...store.getStats(), total_events: 10, total_cost_usd: cost });
 

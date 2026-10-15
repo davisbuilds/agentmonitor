@@ -5,7 +5,9 @@
   import { usage } from '../../stores/usage.svelte';
   import { insights } from '../../stores/insights.svelte';
   import { traceQuality } from '../../stores/trace-quality.svelte';
-  import { Button, Select, SubTabs } from '../ui';
+  import { Button, Field, FilterBar, MoreFilters, Popover, Select, SubTabs } from '../ui';
+  import { formatDateRange, modelSelectOptions } from '../../format';
+  import { QUICK_RANGE_DAYS } from '../../analytics-state';
   import type { AnalyticsView } from '../../route-state';
   import { resolveAnalyticsView, visibleAnalyticsViews } from '../../analytics-views';
   import AnalyticsPage from './AnalyticsPage.svelte';
@@ -15,6 +17,9 @@
   import TraceQualityPage from '../trace-quality/TraceQualityPage.svelte';
 
   const f = analyticsFilters;
+  // Apply a deep link before the first render, so `#analytics?view=usage`
+  // mounts Usage straight away instead of mounting Overview and its reads first.
+  f.attachHash();
 
   const viewLabels: Record<AnalyticsView, string> = {
     overview: 'Overview',
@@ -42,11 +47,9 @@
     if (shown && shown !== f.view) f.setView(shown);
   });
 
-  const quickRanges = [
-    { days: 7, label: '7D' },
-    { days: 30, label: '30D' },
-    { days: 90, label: '90D' },
-  ];
+  // The range button names the window every figure below covers.
+  const rangeLabel = $derived(formatDateRange(f.from, f.to));
+  const usageFacetCount = $derived([usage.provider, usage.tier, usage.model].filter(Boolean).length);
 
   // Export only exists for the data-backed sub-views; insights and quality have none.
   const canExport = $derived(f.view === 'overview' || f.view === 'usage' || f.view === 'skills');
@@ -67,31 +70,56 @@
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col">
-  <!-- Shared filter bar: date / project / agent apply across every sub-view. -->
-  <div class="flex flex-wrap items-center gap-2 border-b border-line px-4 sm:px-6 py-2.5">
+  <!-- Date, project and agent apply across every sub-view; Usage adds its own facets. -->
+  <FilterBar>
     <SubTabs tabs={views} active={f.view} onchange={(id) => f.setView(id as AnalyticsView)} />
 
     <div class="mx-1 h-5 w-px bg-line" aria-hidden="true"></div>
 
-    <input
-      type="date"
-      class="rounded-sm border border-line bg-surface px-2 py-1 text-meta tabular text-text-muted transition-colors hover:border-line-strong focus:border-accent focus:outline-none"
-      aria-label="From date"
-      value={f.from}
-      onchange={(e) => f.setDateRange((e.currentTarget as HTMLInputElement).value, f.to)}
-    />
-    <span class="text-meta text-text-faint">to</span>
-    <input
-      type="date"
-      class="rounded-sm border border-line bg-surface px-2 py-1 text-meta tabular text-text-muted transition-colors hover:border-line-strong focus:border-accent focus:outline-none"
-      aria-label="To date"
-      value={f.to}
-      onchange={(e) => f.setDateRange(f.from, (e.currentTarget as HTMLInputElement).value)}
-    />
+    <Popover align="left" width="w-64" label="Date range">
+      {#snippet trigger({ toggle, open })}
+        <Button variant="neutral" size="sm" aria-label="Date range {rangeLabel}" onclick={toggle}>
+          <span class="tabular">{rangeLabel}</span>
+          <svg
+            class="h-3 w-3 text-text-faint transition-transform {open ? 'rotate-180' : ''}"
+            viewBox="0 0 24 24"
+            fill="none"
+            aria-hidden="true"
+          >
+            <path d="m6 9 6 6 6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </Button>
+      {/snippet}
+      <div class="space-y-3">
+        <Field label="From">
+          <input
+            type="date"
+            class="w-full rounded-sm border border-line bg-surface px-2 py-1.5 text-meta tabular text-text-muted transition-colors hover:border-line-strong focus:border-accent focus:outline-none"
+            aria-label="From date"
+            value={f.from}
+            onchange={(e) => f.setDateRange((e.currentTarget as HTMLInputElement).value, f.to)}
+          />
+        </Field>
+        <Field label="To">
+          <input
+            type="date"
+            class="w-full rounded-sm border border-line bg-surface px-2 py-1.5 text-meta tabular text-text-muted transition-colors hover:border-line-strong focus:border-accent focus:outline-none"
+            aria-label="To date"
+            value={f.to}
+            onchange={(e) => f.setDateRange(f.from, (e.currentTarget as HTMLInputElement).value)}
+          />
+        </Field>
+      </div>
+    </Popover>
 
-    <div class="flex items-center gap-1">
-      {#each quickRanges as range}
-        <Button variant="ghost" size="sm" onclick={() => f.applyQuickRange(range.days)}>{range.label}</Button>
+    <div class="flex items-center gap-0.5">
+      {#each QUICK_RANGE_DAYS as days}
+        <button
+          type="button"
+          class="rounded-sm px-2 py-1 text-meta transition-colors {f.activeQuickRange === days ? 'bg-surface-2 text-text' : 'text-text-muted hover:bg-surface hover:text-text'}"
+          aria-pressed={f.activeQuickRange === days}
+          onclick={() => f.applyQuickRange(days)}
+        >{days}D</button>
       {/each}
     </div>
 
@@ -110,7 +138,42 @@
       onchange={(value) => f.setAgent(value)}
     />
 
-    <div class="ml-auto flex items-center gap-2">
+    {#if shown === 'usage'}
+      <MoreFilters active={usageFacetCount}>
+        <Field label="Provider">
+          <Select
+            value={usage.provider}
+            options={usage.providerOptions}
+            placeholder="All Providers"
+            aria-label="Filter by provider"
+            fill
+            onchange={(value) => usage.setProvider(value)}
+          />
+        </Field>
+        <Field label="Tier">
+          <Select
+            value={usage.tier}
+            options={usage.tierOptions}
+            placeholder="All Tiers"
+            aria-label="Filter by tier"
+            fill
+            onchange={(value) => usage.setTier(value)}
+          />
+        </Field>
+        <Field label="Model">
+          <Select
+            value={usage.model}
+            options={modelSelectOptions(usage.modelOptions)}
+            placeholder="All Models"
+            aria-label="Filter by model"
+            fill
+            onchange={(value) => usage.setModel(value)}
+          />
+        </Field>
+      </MoreFilters>
+    {/if}
+
+    {#snippet end()}
       {#if f.hasActiveSharedFilters}
         <Button variant="ghost" size="sm" onclick={() => f.clearSharedFilters()}>Clear</Button>
       {/if}
@@ -118,8 +181,8 @@
       {#if canExport}
         <Button variant="neutral" size="sm" onclick={exportActive}>Export CSV</Button>
       {/if}
-    </div>
-  </div>
+    {/snippet}
+  </FilterBar>
 
   {#if shown === 'overview'}
     <AnalyticsPage />

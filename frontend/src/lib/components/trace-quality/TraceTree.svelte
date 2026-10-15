@@ -2,6 +2,7 @@
   import { Badge } from '../ui';
   import type { TraceQualityObservationTreeNode } from '../../api/client';
   import { isNotableStatus } from '../../status';
+  import { formatModelName } from '../../format';
   import { foldToolResults, toolInputSummary, type TraceTreeRow } from './trace-tree-rows';
 
   interface Props {
@@ -92,7 +93,7 @@
       </span>
 
       <span class="hidden shrink-0 items-center gap-2 font-mono text-meta text-text-faint sm:flex">
-        {#if obs.model}<span class="truncate max-w-[10rem]" title={obs.model}>{obs.model}</span>{/if}
+        {#if obs.model}<span class="truncate max-w-[10rem]" title={obs.model}>{formatModelName(obs.model)}</span>{/if}
         {#if formatTokens(obs)}<span title="tokens">{formatTokens(obs)}t</span>{/if}
         {#if formatCost(obs.cost_usd)}<span title="cost">{formatCost(obs.cost_usd)}</span>{/if}
         {#if obs.duration_ms}<span title="duration" class="w-12 text-right">{formatDuration(obs.duration_ms)}</span>{/if}

@@ -1,5 +1,5 @@
 /**
- * Series selection and color assignment for the Top Models chart.
+ * Series selection and color assignment for the Daily Usage by Model chart.
  *
  * Pure, and separate from the component, so the color invariants can actually be
  * tested: they are data-dependent and the failure mode is silent (two categories
@@ -39,7 +39,7 @@ export const OTHER_LABEL = 'Other';
 // assignModelColors() always find a free color. Guard the invariant here rather
 // than discovering it as a gray series in the chart.
 if (TOP_N > SERIES_COLORS.length) {
-  throw new Error(`Top Models needs at least ${TOP_N} series colors, got ${SERIES_COLORS.length}`);
+  throw new Error(`Daily Usage by Model needs at least ${TOP_N} series colors, got ${SERIES_COLORS.length}`);
 }
 
 /**

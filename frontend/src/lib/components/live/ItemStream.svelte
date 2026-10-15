@@ -1,6 +1,7 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
-  import { timeAgo } from '../../format';
+  import { formatNumber, timeAgo } from '../../format';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { sessionTitle } from '../../session-text';
   import { hasSessionCapability } from '../../session-capabilities';
@@ -22,11 +23,13 @@
     selectedItemId: number | null;
     loading: boolean;
     error: string | null;
-    hasMore: boolean;
+    hasEarlier: boolean;
+    /** Every item the session has, whatever the kind filter. */
+    total: number;
     selectedKinds: string[];
     onselect: (itemId: number) => void;
     ontogglekind: (kind: string) => void;
-    onloadmore: () => void;
+    onloadearlier: () => Promise<void>;
     onopenhistory: () => void;
   }
 
@@ -37,21 +40,52 @@
     selectedItemId,
     loading,
     error,
-    hasMore,
+    hasEarlier,
+    total,
     selectedKinds,
     onselect,
     ontogglekind,
-    onloadmore,
+    onloadearlier,
     onopenhistory,
   }: Props = $props();
 
+  // Each value is the stored item kinds it selects, comma-joined as the API takes them.
   const kindFilters: Array<{ value: string; label: string }> = [
-    { value: 'message', label: 'Messages' },
+    { value: 'user_message,assistant_message', label: 'Messages' },
     { value: 'reasoning', label: 'Thinking' },
     { value: 'tool_call', label: 'Tool calls' },
     { value: 'tool_result', label: 'Tool results' },
-    { value: 'plan', label: 'Plans' },
+    { value: 'instructions', label: 'Instructions' },
+    { value: 'plan_update', label: 'Plans' },
   ];
+
+  // The stream opens at its newest items and follows new ones while you are at
+  // the bottom; scrolling to the top loads the page before, keeping your place.
+  let scroller = $state<HTMLDivElement>();
+  let atBottom = true;
+  const NEAR_EDGE_PX = 48;
+
+  async function loadEarlier(): Promise<void> {
+    if (!hasEarlier || loading || !scroller) return;
+    const heightBefore = scroller.scrollHeight;
+    const topBefore = scroller.scrollTop;
+    await onloadearlier();
+    await tick();
+    if (scroller) scroller.scrollTop = topBefore + (scroller.scrollHeight - heightBefore);
+  }
+
+  function handleScroll(): void {
+    if (!scroller) return;
+    atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_EDGE_PX;
+    if (scroller.scrollTop < NEAR_EDGE_PX) void loadEarlier();
+  }
+
+  $effect(() => {
+    void items.length;
+    void tick().then(() => {
+      if (atBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+  });
 
   const rows = $derived(buildLiveStreamRows(items));
 
@@ -94,7 +128,14 @@
               fidelity={session.fidelity}
             />
             <span class="tabular font-mono">{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
-            <span class="tabular font-mono">{items.length} item{items.length === 1 ? '' : 's'}</span>
+            <!-- The stream holds the newest page or so; say how much of the session that is. -->
+            <span class="tabular font-mono">
+              {#if hasEarlier && selectedKinds.length === 0}
+                {formatNumber(items.length)} of {formatNumber(total)} items
+              {:else}
+                {items.length} item{items.length === 1 ? '' : 's'}
+              {/if}
+            </span>
           </div>
           {#if !hasSessionCapability(session.capabilities, 'history')}
             <p class="mt-2 text-meta text-warn">
@@ -121,7 +162,7 @@
     </div>
   </div>
 
-  <div class="space-y-0.5 px-2 py-2 xl:flex-1 xl:overflow-y-auto">
+  <div class="space-y-0.5 px-2 py-2 xl:flex-1 xl:overflow-y-auto" bind:this={scroller} onscroll={handleScroll}>
     {#if loading && items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">Loading live items…</div>
     {:else if error}
@@ -131,6 +172,11 @@
     {:else if items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">No live items for this session yet.</div>
     {:else}
+      {#if hasEarlier}
+        <div class="pb-2 text-center">
+          <Button variant="ghost" size="sm" disabled={loading} onclick={() => void loadEarlier()}>Load earlier items</Button>
+        </div>
+      {/if}
       {#each rows as row (row.item.id)}
         {@const failed = rowFailed(row)}
         {@const argument = row.item.kind === 'tool_call' ? toolArgument(row.item) : null}
@@ -162,11 +208,6 @@
         </button>
       {/each}
 
-      {#if hasMore}
-        <div class="pt-2 text-center">
-          <Button variant="ghost" size="sm" onclick={onloadmore}>Load newer items</Button>
-        </div>
-      {/if}
     {/if}
   </div>
 </div>

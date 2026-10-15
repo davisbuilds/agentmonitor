@@ -914,6 +914,38 @@ describe('GET /api/v2/live/sessions/:id/items', () => {
   test('rejects a cursor that is not an item id', async () => {
     const res = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?cursor=abc`);
     assert.equal(res.status, 400);
+    const before = await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?before=abc`);
+    assert.equal(before.status, 400);
+  });
+
+  test('tail opens at the newest items and pages back with before', async () => {
+    type Page = { data: Array<{ id: number }>; before_cursor?: string; cursor?: string };
+    const all = await (await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?limit=500`)).json() as Page;
+    const ids = all.data.map(item => item.id);
+    assert.ok(ids.length >= 4, 'the fixture needs a few pages of two');
+
+    const tail = await (await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?limit=2&tail=1`)).json() as Page;
+    assert.deepEqual(tail.data.map(item => item.id), ids.slice(-2), 'the newest two, oldest first');
+    assert.equal(tail.before_cursor, String(ids.at(-2)));
+
+    // Walk back to the start: contiguous pages, then no older cursor.
+    const collected = [...tail.data.map(item => item.id)];
+    let before = tail.before_cursor;
+    while (before) {
+      const page = await (await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?limit=2&before=${before}`)).json() as Page;
+      assert.ok(page.data.length > 0);
+      collected.unshift(...page.data.map(item => item.id));
+      before = page.before_cursor;
+    }
+    assert.deepEqual(collected, ids);
+  });
+
+  test('tail honors the kind filter', async () => {
+    type Page = { data: Array<{ id: number; kind: string }>; before_cursor?: string };
+    const reasoning = await (await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?kinds=reasoning&limit=500`)).json() as Page;
+    const tail = await (await fetch(`${baseUrl}/api/v2/live/sessions/api-sess-003/items?kinds=reasoning&limit=1&tail=1`)).json() as Page;
+    assert.deepEqual(tail.data.map(item => item.id), reasoning.data.slice(-1).map(item => item.id));
+    assert.equal(tail.before_cursor === undefined, reasoning.data.length <= 1);
   });
 
   test('returns 404 for missing live session items', async () => {
