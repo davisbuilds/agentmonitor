@@ -575,14 +575,17 @@ v2Router.get('/live/sessions/:id/items', (req: Request, res: Response) => {
       return;
     }
     const cursor = req.query.cursor as string | undefined;
-    // The cursor is an item id; anything else would match no rows and read as
+    const before = req.query.before as string | undefined;
+    // Both cursors are item ids; anything else would match no rows and read as
     // the end of the list.
-    if (cursor !== undefined && !/^\d+$/.test(cursor)) {
+    if ((cursor !== undefined && !/^\d+$/.test(cursor)) || (before !== undefined && !/^\d+$/.test(before))) {
       res.status(400).json({ error: 'Invalid cursor' });
       return;
     }
     const params = {
       cursor,
+      before,
+      tail: req.query.tail === '1' || req.query.tail === 'true',
       limit: safeInt(req.query.limit as string),
       kinds: splitKinds(req.query.kinds as string | undefined),
     };

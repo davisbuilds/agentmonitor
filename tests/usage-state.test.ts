@@ -2,52 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  createDefaultUsageFilters,
-  buildUsageHash,
-  parseUsageHash,
   buildUsageCsv,
 } from '../frontend/src/lib/usage-state.ts';
 import { csvSection, parseCsv } from './helpers/csv.ts';
-
-test('buildUsageHash and parseUsageHash round-trip usage filters', () => {
-  const filters = {
-    from: '2026-04-01',
-    to: '2026-04-15',
-    project: 'agentmonitor',
-    agent: 'codex',
-    model: 'gpt-5.4',
-    provider: 'openai',
-    tier: 'standard',
-  };
-
-  const hash = buildUsageHash(filters);
-  assert.equal(hash, 'usage?from=2026-04-01&to=2026-04-15&project=agentmonitor&agent=codex&model=gpt-5.4&provider=openai&tier=standard');
-
-  assert.deepEqual(parseUsageHash(`#${hash}`, createDefaultUsageFilters(new Date('2026-04-15T12:00:00Z'))), filters);
-});
-
-test('parseUsageHash falls back for non-usage hashes and missing params', () => {
-  const fallback = {
-    from: '2026-03-17',
-    to: '2026-04-15',
-    project: '',
-    agent: '',
-    model: '',
-    provider: '',
-    tier: '',
-  };
-
-  assert.deepEqual(parseUsageHash('#analytics?project=alpha', fallback), fallback);
-  assert.deepEqual(parseUsageHash('#usage?project=alpha', fallback), {
-    from: '2026-03-17',
-    to: '2026-04-15',
-    project: 'alpha',
-    agent: '',
-    model: '',
-    provider: '',
-    tier: '',
-  });
-});
 
 test('buildUsageCsv includes summary and table sections', () => {
   const csv = buildUsageCsv({

@@ -1066,7 +1066,7 @@ export function initSchema(): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 19;
+const DATA_SCHEMA_VERSION = 20;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1118,9 +1118,55 @@ export function runDataMigrations(db: Database): void {
     // unique index. Rows stored before it keep a NULL key and are not collapsed.
     if (current < 18) repairStoredLiveReasoning(db);
     if (current < 19) refreshSessionTitles(db);
+    if (current < 20) relabelCodexInstructionItems(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v20 — the Codex live sync projected every non-user message as the assistant,
+ * so the instructions Codex injects as developer-role messages read as
+ * assistant replies. Relabel those items `instructions`, matching each Codex
+ * turn (`codex-message:<ordinal>`) to its stored message, and apply the current
+ * prompt capture policy, which now governs them. Trace summaries count item
+ * kinds; `SESSION_TRACE_SUMMARY_VERSION` re-derives them after this.
+ */
+function relabelCodexInstructionItems(db: Database): void {
+  const tables = new Set((db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('messages', 'session_items', 'session_turns')",
+  ).all() as Array<{ name: string }>).map(row => row.name));
+  if (!tables.has('session_items') || !tables.has('session_turns') || !tables.has('messages')) return;
+
+  const rows = db.prepare(`
+    SELECT si.id, si.payload_json
+    FROM session_items si
+    JOIN session_turns st ON st.id = si.turn_id
+    JOIN messages m ON m.session_id = st.session_id
+      AND m.ordinal = CAST(substr(st.source_turn_id, length('codex-message:') + 1) AS INTEGER)
+    WHERE st.source_turn_id LIKE 'codex-message:%'
+      AND m.role = 'developer'
+      AND si.kind = 'assistant_message'
+  `).all() as Array<{ id: number; payload_json: string }>;
+  if (rows.length === 0) return;
+
+  const policy = {
+    capturePrompts: config.live.capture.prompts,
+    captureReasoning: config.live.capture.reasoning,
+    captureToolArguments: config.live.capture.toolArguments,
+    diffPayloadMaxBytes: config.live.diffPayloadMaxBytes,
+  };
+  const relabel = db.prepare("UPDATE session_items SET kind = 'instructions', payload_json = ? WHERE id = ?");
+  for (const row of rows) {
+    let payload: Record<string, unknown>;
+    try {
+      payload = JSON.parse(row.payload_json) as Record<string, unknown>;
+    } catch {
+      payload = {};
+    }
+    const item = applyLivePrivacyPolicy({ kind: 'instructions', payload }, policy);
+    relabel.run(JSON.stringify(item.payload), row.id);
+  }
 }
 
 /**

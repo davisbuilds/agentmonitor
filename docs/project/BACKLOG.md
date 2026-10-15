@@ -64,21 +64,6 @@ so later readers know what still needs checking.
 - **Revisit when**: Codex writes thread names or a job marker into rollouts or
   telemetry, or Codex app jobs reappear in the Sessions list.
 
-### Codex developer messages read as the assistant in the live stream
-
-- **What**: Codex records injected instructions (`<permissions instructions>`,
-  `<model_switch>`, skills and collaboration-mode blocks) as `developer`-role
-  messages. The live sync maps every non-user role to `assistant`, so the live
-  stream shows them as "Assistant" rows, often several before the first real
-  reply.
-- **Why or evidence**: observed 2026-10-14 on an active Codex session in Live
-  (now Monitor's live stream);
-  `syncCodexLiveSession` in `src/live/codex-adapter.ts` passes
-  `message.role === 'user' ? 'user' : 'assistant'`.
-- **Next**: give developer messages their own kind, or keep their turn and drop
-  the item as v18 did for empty reasoning. The resumable sync relies on one
-  turn per stored message, so keep the turn either way.
-
 ### Full-text search indexes message JSON, not message text
 
 - **What**: `messages_fts` indexes `messages.content` as stored, and the Claude
@@ -94,19 +79,6 @@ so later readers know what still needs checking.
 - **Next**: index extracted text (text and thinking blocks, tool names) instead
   of raw JSON, with an FTS rebuild migration, and check snippet offsets still
   line up with what the viewer shows.
-
-### Monitor's live stream opens at a session's oldest items
-
-- **What**: the live items read pages forward from the start (`id > cursor`,
-  100 per page), so opening an agent card on a long session shows its first
-  hundred items and the current activity sits behind repeated "Load more".
-- **Why or evidence**: 2026-10-14, on a snapshot of the installed store, an
-  active Codex card with about 1.6K turns opened on items from a day earlier.
-  The old Live tab read the same way; it matters more now that this stream is
-  what an active agent card opens.
-- **Next**: add a tail read to `/api/v2/live/sessions/:id/items` (the latest
-  page, then older pages on scroll up) and open the stream at the end. New
-  `item_delta` rows already append.
 
 ### Explicit provenance for unresolved historical timestamps
 
@@ -288,29 +260,12 @@ the build.
 
 ### Context occupancy
 
-#### Monitor-card occupancy join not visually verified with a live session
-- **What**: the live stream and Monitor reads use v2. Monitor separately joins
-  occupancy from the live session projection by session id. This is Svelte-checked
-  and logically verified but was not screenshotted with a live hook/OTEL-fed active
-  session. Codex's Monitor UUID and live rollout identity are aliased during the
-  occupancy refresh.
-- **Why it matters**: confirm the join renders on a real running card, especially
-  for Codex.
-
 #### Trajectory sparkline (occupancy gauge Task 8)
 - **What**: session-lifetime occupancy fill over time with compaction drop-offs,
   in the detail/inspector surface.
 - **Why it matters**: gauge + pill shipped first; this is the fast-follow.
 - **Next**: needs a bounded sample buffer in the projection and a retention
   decision.
-
-### Invocation mode
-
-#### No `mode` filter facet in the Monitor FilterBar
-- **What**: intentionally scoped out. `mode` lives in `sessions.metadata`
-  (json_extract).
-- **Why it matters**: cheap to add if wanted, but a filterable/indexed path would
-  want a dedicated column rather than json_extract.
 
 ### Pricing
 
@@ -498,21 +453,6 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
-### Analytics deep links mount Overview first
-
-- **What**: opening `#analytics?view=usage` (or any non-Overview view) first
-  mounts Overview and fires its panel reads, then switches. The filter store
-  applies the hash only in a sub-view's `onMount`, so `AnalyticsShell` renders
-  the default `overview` view until one has mounted.
-- **Why or evidence**: a 2026-10-14 scratch probe against an empty temp DB saw
-  `/api/v2/analytics/summary` requested on a Usage deep link alongside
-  `/api/v2/usage/overview`. The cost is wasted reads and a brief Overview flash,
-  not wrong data. The Insights gate (`analytics-views.ts`) already copes: it
-  resolves the requested view once the hash is applied.
-- **Next**: seed `analyticsFilters` from `window.location.hash` before the shell's
-  first render (constructor or the shell's script), then assert in E2E that a
-  Usage deep link makes no `/api/v2/analytics/*` request.
-
 ### Saved insights while no provider key is configured
 
 - **What**: Insights is hidden unless a provider has an API key (2026-10-14), so
@@ -536,31 +476,30 @@ the build.
   coverage threshold is enforced yet; add one only once the surface is broad
   enough that a number is meaningful. Noted 2026-09-11, narrowed 2026-10-09.
 
+#### `test:verify` runs outside CI, so its browser scenarios can rot
+- **What**: the verification pilot's scenarios (`pnpm test:verify`) are neither a
+  CI job nor a pre-push gate.
+- **Why or evidence**: after Live folded into Monitor, the live-session scenario
+  kept opening `#live`, by then a redirect, and failed until 2026-10-15. Nothing
+  noticed, though it is the one check that runs the compiled watcher through to
+  the browser.
+- **Next**: time `pnpm test:verify` in the E2E job (which already builds and
+  installs Chromium) and add it there if the cost is acceptable.
+
 #### Frontend pure-module tests are split across two runners
 - **What**: most `frontend/src/lib` helper tests (`frontier-geometry`, chart
   `scales`, `monitor-analytics`, `route-state`, the `*-state.ts` helpers,
   `session-roles`, `session-capabilities`, `skill-consultation-view`, usage
   `model-colors` and `unpriced-usage`) are root `node:test` files under
   `tests/` and run in `pnpm test`. The Vitest harness (`pnpm frontend:test`)
-  holds the store tests plus `session-text` and chart `layout`. `format`,
-  `monitor-session-merge`, and `monitor-token-totals` have a suite in each.
+  holds the store tests plus `session-text`, `format`, `quota-pill`, and chart
+  `layout`. `monitor-session-merge` and `monitor-token-totals` have a suite in
+  each (`format`'s two were merged into Vitest on 2026-10-15).
 - **Why or evidence**: the split hid existing coverage. The 2026-09-11
   coverage entry listed the root-tested modules as untested.
 - **Next**: when the UI restructure moves or renames one of these modules, move
   its tests into a colocated Vitest file in the same change. Merge the
   duplicated suites at the same time.
-
-#### Test-only exports in the analytics, usage, and insights state helpers
-- **What**: `createDefaultAnalyticsFilters`, `buildAnalyticsHash`,
-  `parseAnalyticsHash` (`analytics-state.ts`), `createDefaultUsageFilters`,
-  `buildUsageHash`, `parseUsageHash` (`usage-state.ts`), and
-  `clampInsightDateRange` (`insights-state.ts`) have no product caller. Only
-  their tests import them. Routing moved to `route-state.ts` when Analytics
-  absorbed Usage and Insights.
-- **Why or evidence**: the dead-code test scans root `src/` exports only, so
-  frontend leftovers go unflagged. Found 2026-10-09 while extending tests.
-- **Next**: delete them and their tests during the UI restructure, unless a
-  restructured view revives one.
 
 ### Cross-repo pattern-mining candidates (agentsview, 2026-09-13)
 

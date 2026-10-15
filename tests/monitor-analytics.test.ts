@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildActiveAgentLabel,
+  collapseEventRuns,
   monitorCostWindowParams,
 } from '../frontend/src/lib/monitor-analytics.ts';
 import { createDefaultAnalyticsFilters } from '../frontend/src/lib/analytics-state.ts';
@@ -113,7 +114,7 @@ test('monitor cost windows are today and the same 30 days as Usage\'s default ra
   );
 });
 
-test('monitor cost windows carry only the project and agent filters', () => {
+test('monitor cost windows carry only the agent filter', () => {
   const now = new Date(2026, 9, 14, 12, 0);
   const windows = monitorCostWindowParams({
     agent_type: 'codex',
@@ -125,7 +126,45 @@ test('monitor cost windows carry only the project and agent filters', () => {
 
   for (const params of [windows.today, windows.last30Days]) {
     assert.equal(params.agent, 'codex');
-    assert.equal(params.project, 'agentmonitor');
-    assert.deepEqual(Object.keys(params).sort(), ['agent', 'date_from', 'date_to', 'project']);
+    assert.deepEqual(Object.keys(params).sort(), ['agent', 'date_from', 'date_to']);
   }
+});
+
+test('buildActiveAgentLabel spells the model the way every other page does', () => {
+  assert.equal(
+    buildActiveAgentLabel('claude_code', [{ model: 'us.anthropic.claude-opus-4-8-v1:0' }]),
+    'Claude (claude-opus-4-8)',
+  );
+  assert.equal(
+    buildActiveAgentLabel('claude_code', [{ model: 'claude-haiku-4-5-20251001' }]),
+    'Claude (claude-haiku-4-5)',
+  );
+});
+
+test('collapseEventRuns folds consecutive repeats and keeps the newest of each run', () => {
+  const events = [
+    { id: 9, kind: 'llm_response' },
+    { id: 8, kind: 'llm_response' },
+    { id: 7, kind: 'llm_response' },
+    { id: 6, kind: 'Bash' },
+    { id: 5, kind: 'llm_response' },
+    { id: 4, kind: 'llm_response' },
+  ];
+  const runs = collapseEventRuns(events, e => e.kind);
+  assert.deepEqual(runs.map(r => [r.label, r.count, r.event.id]), [
+    ['llm_response', 3, 9],
+    ['Bash', 1, 6],
+    ['llm_response', 2, 5],
+  ]);
+  assert.deepEqual(collapseEventRuns([], (e: { kind: string }) => e.kind), []);
+});
+
+test('collapseEventRuns starts a new run when the key differs, so a failure stays visible', () => {
+  const events = [
+    { label: 'Bash', status: 'success' },
+    { label: 'Bash', status: 'error' },
+    { label: 'Bash', status: 'success' },
+  ];
+  const runs = collapseEventRuns(events, e => e.label, e => `${e.label}|${e.status}`);
+  assert.deepEqual(runs.map(r => [r.event.status, r.count]), [['success', 1], ['error', 1], ['success', 1]]);
 });

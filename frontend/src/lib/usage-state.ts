@@ -30,57 +30,6 @@ export interface UsageCsvPayload {
   topSessions: UsageTopSessionRow[];
 }
 
-function localDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-export function createDefaultUsageFilters(now = new Date()): UsageFilters {
-  const from = new Date(now);
-  from.setDate(from.getDate() - 29);
-  return {
-    from: localDateString(from),
-    to: localDateString(now),
-    project: '',
-    agent: '',
-    model: '',
-    provider: '',
-    tier: '',
-  };
-}
-
-export function buildUsageHash(filters: UsageFilters): string {
-  const params = new URLSearchParams();
-  params.set('from', filters.from);
-  params.set('to', filters.to);
-  if (filters.project) params.set('project', filters.project);
-  if (filters.agent) params.set('agent', filters.agent);
-  if (filters.model) params.set('model', filters.model);
-  if (filters.provider) params.set('provider', filters.provider);
-  if (filters.tier) params.set('tier', filters.tier);
-  const suffix = params.toString();
-  return suffix ? `usage?${suffix}` : 'usage';
-}
-
-export function parseUsageHash(hash: string, fallback: UsageFilters): UsageFilters {
-  const normalized = hash.startsWith('#') ? hash.slice(1) : hash;
-  const [tab, query = ''] = normalized.split('?');
-  if (tab !== 'usage') return fallback;
-
-  const params = new URLSearchParams(query);
-  return {
-    from: params.get('from') || fallback.from,
-    to: params.get('to') || fallback.to,
-    project: params.get('project') || '',
-    agent: params.get('agent') || '',
-    model: params.get('model') || '',
-    provider: params.get('provider') || '',
-    tier: params.get('tier') || '',
-  };
-}
-
 function csvEscape(value: string | number | boolean | null | undefined): string {
   const stringValue = value == null ? '' : String(value);
   if (/[",\n]/.test(stringValue)) {

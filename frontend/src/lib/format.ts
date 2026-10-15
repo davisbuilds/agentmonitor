@@ -51,6 +51,58 @@ export function formatDateOnly(value: string, locales?: Intl.LocalesArgument): s
   });
 }
 
+/**
+ * A `YYYY-MM-DD` date range for a window label: "Sep 1 – Sep 30", with the year
+ * only when the range leaves the current year.
+ */
+export function formatDateRange(from: string, to: string, now = new Date()): string {
+  const year = String(now.getFullYear());
+  const withYear = !from.startsWith(year) || !to.startsWith(year);
+  // Read as UTC midnight and format in UTC, so the label shows the calendar
+  // day in every time zone.
+  const day = (value: string) => new Date(`${value}T00:00:00.000Z`).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(withYear ? { year: 'numeric' as const } : {}),
+    timeZone: 'UTC',
+  });
+  return from === to ? day(from) : `${day(from)} – ${day(to)}`;
+}
+
+/**
+ * The one way a model ID is shown: as its vendor names it, without a routing
+ * prefix (`anthropic/`), Claude Code's `[1m]` suffix, a Bedrock wrapper or a
+ * release date stamp. Mirrors the server's `normalizeModelId`, plus the date.
+ * Show the raw ID in a tooltip where the exact spelling matters.
+ */
+const BEDROCK_ANTHROPIC_ID = /^(?:(?:us|eu|apac|jp|au|ca|us-gov|global)\.)?anthropic\.(.+?)-v\d+(?::\d+)?$/;
+
+export function formatModelName(model: string): string {
+  const id = model
+    .trim()
+    .replace(/\[1m\]$/i, '')
+    .replace(/^(?:anthropic|openai|google)\//, '');
+  // Anthropic stamps `-20251001`, OpenAI snapshots `-2026-03-05`.
+  return (BEDROCK_ANTHROPIC_ID.exec(id)?.[1] ?? id).replace(/-20\d{2}-?\d{2}-?\d{2}$/, '');
+}
+
+/**
+ * Filter options for raw model IDs, labelled with `formatModelName`. Where two
+ * IDs would read the same (`openai/gpt-5.4` and `gpt-5.4`) they keep their raw
+ * spelling: they can select different rows, and an option has no tooltip.
+ */
+export function modelSelectOptions(models: string[]): Array<{ value: string; label: string }> {
+  const counts = new Map<string, number>();
+  for (const model of models) {
+    const label = formatModelName(model);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return models.map((model) => {
+    const label = formatModelName(model);
+    return { value: model, label: (counts.get(label) ?? 0) > 1 ? model : label };
+  });
+}
+
 export function timeAgo(dateStr: string): string {
   const diff = Math.max(0, Date.now() - parseTimestamp(dateStr).getTime());
   const seconds = Math.floor(diff / 1000);

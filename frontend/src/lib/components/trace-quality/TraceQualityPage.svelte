@@ -4,6 +4,7 @@
   import { Badge, Button, InfoTip, Stat } from '../ui';
   import TraceCoverageBadge from './TraceCoverageBadge.svelte';
   import TraceTree from './TraceTree.svelte';
+  import { formatModelName } from '../../format';
 
   const tq = traceQuality;
 
@@ -140,7 +141,7 @@
             <div class="flex flex-wrap items-center gap-2 text-meta text-text-faint">
               <span class="text-text">{o.name}</span>
               <Badge tone="neutral">{o.observation_type}</Badge>
-              {#if o.model}<span class="font-mono">{o.model}</span>{/if}
+              {#if o.model}<span class="font-mono" title={o.model}>{formatModelName(o.model)}</span>{/if}
               {#if o.tool_name}<span class="font-mono">tool: {o.tool_name}</span>{/if}
               <span class="font-mono">{formatDuration(o.duration_ms)}</span>
               <Badge tone="neutral" title="Payload retention policy for this observation">policy: {o.payload_policy}</Badge>

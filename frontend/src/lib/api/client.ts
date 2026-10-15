@@ -980,7 +980,10 @@ export async function fetchLiveTurns(sessionId: string): Promise<{ data: LiveTur
   return checkedJson(res, 'fetchLiveTurns');
 }
 
-export async function fetchLiveItems(sessionId: string, params: { cursor?: string; limit?: number; kinds?: string } = {}): Promise<{ data: LiveItem[]; total: number; cursor?: string }> {
+export async function fetchLiveItems(
+  sessionId: string,
+  params: { cursor?: string; before?: string; tail?: boolean; limit?: number; kinds?: string } = {},
+): Promise<{ data: LiveItem[]; total: number; cursor?: string; before_cursor?: string }> {
   const res = await fetch(`/api/v2/live/sessions/${sessionId}/items${qs(params)}`);
   return checkedJson(res, 'fetchLiveItems');
 }
