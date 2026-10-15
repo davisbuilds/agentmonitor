@@ -3,18 +3,11 @@
   import type { QuotaMonitorData, QuotaMonitorWindow } from '../../api/client';
   import { parseTimestamp, timeAgo } from '../../format';
   import { Popover, Bar } from '../ui';
+  import { quotaPillEntries, quotaPillLabel, quotaProviderLabel as providerLabel, quotaWindows as windows } from '../../quota-pill';
 
   const rows = $derived(getQuotaMonitor());
-
-  function providerLabel(row: QuotaMonitorData): string {
-    return row.provider === 'claude' ? 'Claude' : 'Codex';
-  }
-
-  function dotColor(usedPercent: number): string {
-    if (usedPercent >= 85) return 'bg-danger';
-    if (usedPercent >= 60) return 'bg-warn';
-    return 'bg-ok';
-  }
+  const entries = $derived(quotaPillEntries(rows));
+  const toneDot = { ok: 'bg-ok', warn: 'bg-warn', danger: 'bg-danger' } as const;
 
   function windowLabel(window: QuotaMonitorWindow): string {
     const minutes = window.window_minutes ?? 0;
@@ -35,23 +28,11 @@
     return `resets ${resetAt.toLocaleDateString([], { month: 'short', day: 'numeric' })}`;
   }
 
-  function windows(row: QuotaMonitorData): QuotaMonitorWindow[] {
-    return [row.primary, row.secondary].filter(Boolean) as QuotaMonitorWindow[];
-  }
-
   function unavailableCopy(row: QuotaMonitorData): string {
     if (row.status === 'error') return row.error_message || 'quota unavailable';
     return row.provider === 'claude' ? 'statusline bridge needed' : 'native quota unavailable';
   }
 
-  // Most-constrained window per provider drives the compact pill.
-  function worstWindow(row: QuotaMonitorData): QuotaMonitorWindow | null {
-    const ws = windows(row);
-    if (ws.length === 0) return null;
-    return ws.reduce((worst, w) => (w.used_percent > worst.used_percent ? w : worst));
-  }
-
-  const available = $derived(rows.filter((r) => r.status === 'available' && windows(r).length > 0));
 </script>
 
 {#if rows.length > 0}
@@ -62,19 +43,19 @@
         class="flex items-center gap-2 rounded-sm border border-line bg-surface px-2.5 py-1.5 text-meta text-text-muted transition-colors hover:border-line-strong hover:text-text"
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label="Provider quota usage"
+        aria-label={quotaPillLabel(entries)}
         onclick={toggle}
       >
-        {#if available.length > 0}
-          {#each available as row (row.provider)}
-            {@const worst = worstWindow(row)}
-            {#if worst}
-              <span class="flex items-center gap-1.5">
-                <span class="h-1.5 w-1.5 rounded-full {dotColor(worst.used_percent)}"></span>
-                <span class="tabular font-mono text-text">{Math.round(worst.remaining_percent)}%</span>
-              </span>
-            {/if}
+        {#if entries.length > 0}
+          <!-- Each provider's name and what is left of its most-used window. -->
+          {#each entries as entry (entry.provider)}
+            <span class="flex items-center gap-1.5">
+              <span class="h-1.5 w-1.5 rounded-full {toneDot[entry.tone]}"></span>
+              <span>{entry.label}</span>
+              <span class="tabular font-mono text-text">{entry.remainingPercent}%</span>
+            </span>
           {/each}
+          <span class="text-text-faint">left</span>
         {:else}
           <span class="h-1.5 w-1.5 rounded-full bg-line-strong"></span>
           <span>Quota</span>
@@ -100,7 +81,7 @@
               <div class="flex items-center gap-2.5 text-meta">
                 <span class="w-6 shrink-0 text-text-faint">{windowLabel(window)}</span>
                 <Bar value={window.used_percent} tone="auto" class="flex-1" />
-                <span class="tabular w-10 shrink-0 text-right font-mono text-text-muted">{Math.round(window.remaining_percent)}%</span>
+                <span class="tabular w-16 shrink-0 text-right font-mono text-text-muted">{Math.round(window.remaining_percent)}% left</span>
                 <span class="w-24 shrink-0 text-right text-text-faint">{resetLabel(window.resets_at)}</span>
               </div>
             {/each}
