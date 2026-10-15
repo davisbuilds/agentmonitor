@@ -9,6 +9,7 @@ import {
   formatDuration,
   formatModelName,
   formatNumber,
+  modelSelectOptions,
   formatTimeOfDay,
   parseTimestamp,
   statusColor,
@@ -124,9 +125,27 @@ describe('formatModelName — one spelling for every model', () => {
   it('drops a release date stamp', () => {
     expect(formatModelName('claude-haiku-4-5-20251001')).toBe('claude-haiku-4-5');
     expect(formatModelName('claude-sonnet-4-20250514')).toBe('claude-sonnet-4');
+    expect(formatModelName('openai/gpt-5.4-2026-03-05')).toBe('gpt-5.4');
     // Version numbers are not dates.
     expect(formatModelName('gpt-5.6-terra')).toBe('gpt-5.6-terra');
     expect(formatModelName('gemini-3.1-pro-preview')).toBe('gemini-3.1-pro-preview');
+  });
+});
+
+describe('modelSelectOptions — a filter option per raw ID', () => {
+  it('labels options with the display spelling', () => {
+    expect(modelSelectOptions(['claude-haiku-4-5-20251001', 'gpt-6-astra'])).toEqual([
+      { value: 'claude-haiku-4-5-20251001', label: 'claude-haiku-4-5' },
+      { value: 'gpt-6-astra', label: 'gpt-6-astra' },
+    ]);
+  });
+
+  it('keeps the raw ID where two IDs would read the same, since they can filter differently', () => {
+    expect(modelSelectOptions(['openai/gpt-5.4', 'gpt-5.4', 'gpt-6-astra'])).toEqual([
+      { value: 'openai/gpt-5.4', label: 'openai/gpt-5.4' },
+      { value: 'gpt-5.4', label: 'gpt-5.4' },
+      { value: 'gpt-6-astra', label: 'gpt-6-astra' },
+    ]);
   });
 });
 

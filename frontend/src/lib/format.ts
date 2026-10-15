@@ -82,7 +82,25 @@ export function formatModelName(model: string): string {
     .trim()
     .replace(/\[1m\]$/i, '')
     .replace(/^(?:anthropic|openai|google)\//, '');
-  return (BEDROCK_ANTHROPIC_ID.exec(id)?.[1] ?? id).replace(/-20\d{6}$/, '');
+  // Anthropic stamps `-20251001`, OpenAI snapshots `-2026-03-05`.
+  return (BEDROCK_ANTHROPIC_ID.exec(id)?.[1] ?? id).replace(/-20\d{2}-?\d{2}-?\d{2}$/, '');
+}
+
+/**
+ * Filter options for raw model IDs, labelled with `formatModelName`. Where two
+ * IDs would read the same (`openai/gpt-5.4` and `gpt-5.4`) they keep their raw
+ * spelling: they can select different rows, and an option has no tooltip.
+ */
+export function modelSelectOptions(models: string[]): Array<{ value: string; label: string }> {
+  const counts = new Map<string, number>();
+  for (const model of models) {
+    const label = formatModelName(model);
+    counts.set(label, (counts.get(label) ?? 0) + 1);
+  }
+  return models.map((model) => {
+    const label = formatModelName(model);
+    return { value: model, label: (counts.get(label) ?? 0) > 1 ? model : label };
+  });
 }
 
 export function timeAgo(dateStr: string): string {

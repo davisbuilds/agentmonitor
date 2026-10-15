@@ -23,4 +23,5 @@ test('the displayed model name follows the server\'s model ID normalization', ()
     assert.equal(formatModelName(id), normalizeModelId(id), id);
   }
   assert.equal(formatModelName('claude-haiku-4-5-20251001'), normalizeModelId('claude-haiku-4-5'));
+  assert.equal(formatModelName('openai/gpt-5.4-2026-03-05'), normalizeModelId('openai/gpt-5.4'));
 });

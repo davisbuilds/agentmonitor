@@ -67,6 +67,11 @@
 
   const maxTotal = $derived(rows.reduce((max, row) => Math.max(max, row.total), 0));
   const rangeTotal = $derived(rows.reduce((sum, row) => sum + row.total, 0));
+  // Empty only when there is no usage at all: unpriced models record tokens at
+  // $0, and their days must still show under the Cost view.
+  const anyUsage = $derived(
+    usage.modelsDaily.some(point => point.models.some(slice => measure(slice, 'cost') > 0 || measure(slice, 'tokens') > 0)),
+  );
 
   // The day's totals, from the daily series, so each bar says what the old
   // Daily Usage list did.
@@ -145,11 +150,16 @@
     <div class="mt-4 rounded-sm border border-danger/30 bg-danger/10 px-3 py-2 text-meta text-danger">
       {usage.errors.modelsDaily}
     </div>
-  {:else if rangeTotal === 0}
+  {:else if !anyUsage}
     <div class="mt-4 flex flex-1 items-center justify-center rounded-sm border border-dashed border-line px-4 py-10 text-center text-meta text-text-faint">
       No model usage for this range.
     </div>
   {:else}
+    {#if rangeTotal === 0}
+      <p class="mt-3 text-meta text-text-faint">
+        No cost recorded in this range; unpriced models bill as $0. Switch to All tokens to see the usage.
+      </p>
+    {/if}
     <ul class="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5">
       {#each legend as model}
         <li class="flex items-center gap-1.5 text-meta text-text-muted">

@@ -32,6 +32,8 @@ test.beforeAll(async () => {
   insert.run('daily-a', 'claude_code', 'claude-haiku-4-5-20251001', 1000, 200, 3, '2026-09-10 12:00:00');
   insert.run('daily-b', 'codex', 'openai/gpt-6-astra', 500, 100, 1, '2026-09-10 13:00:00');
   insert.run('daily-a', 'claude_code', 'claude-haiku-4-5-20251001', 2000, 400, 5, '2026-09-11 12:00:00');
+  // An unpriced model: tokens but no cost.
+  insert.run('daily-c', 'codex', 'mystery-model-1', 1000, 200, 0, '2026-09-20 12:00:00');
 
   server = createApp().listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -62,4 +64,17 @@ test('Daily usage is one chart: each day says its totals and narrows the page wh
 
   await day.click();
   await expect(page).toHaveURL(/from=2026-09-10&to=2026-09-10/);
+});
+
+test('days with usage but no cost still show, with a pointer to the token view', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#analytics?view=usage&from=2026-09-20&to=2026-09-20`);
+  const chart = page.getByRole('region', { name: 'Daily Usage by Model' });
+  await expect(chart.getByRole('button', { name: /^2026-09-20:/ }))
+    .toHaveAccessibleName('2026-09-20: $0.00 · 1.2K tokens · 1 usage event · 1 session');
+  await expect(chart.getByText('No model usage for this range.')).toHaveCount(0);
+  await expect(chart.getByText(/No cost recorded/)).toBeVisible();
+
+  await chart.getByRole('button', { name: 'All tokens' }).click();
+  await expect(chart.getByText(/No cost recorded/)).toHaveCount(0);
+  await expect(chart.getByText('mystery-model-1', { exact: true })).toBeVisible();
 });
