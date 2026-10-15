@@ -59,7 +59,7 @@
 </script>
 
 <div
-  class={`rounded-r-sm border-l-2 px-3 py-2 transition-colors ${
+  class={`group rounded-r-sm border-l-2 px-3 py-2 transition-colors ${
     borderColor
   } ${
     highlighted ? 'bg-accent/5 ring-1 ring-accent/20' : ''
@@ -85,7 +85,13 @@
           pinned
             ? 'border-warn/40 bg-warn/10 text-warn hover:border-warn'
             : 'border-line text-text-muted hover:border-line-strong hover:text-text'
-        } ${pinning ? 'cursor-wait opacity-70' : ''}`}
+        } ${
+          pinning
+            ? 'cursor-wait opacity-70'
+            : pinned
+              ? ''
+              : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
+        }`}
         disabled={pinning}
         onclick={togglePin}
       >

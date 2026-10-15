@@ -1,7 +1,7 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
   import { usage } from '../../stores/usage.svelte';
-  import { formatCost, formatNumber } from '../../format';
+  import { formatCost, formatModelName, formatNumber } from '../../format';
   import type {
     UsageProjectBreakdown,
     UsageModelBreakdown,
@@ -25,7 +25,7 @@
 
   function labelForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): string {
     if ('project' in row) return row.project;
-    if ('model' in row) return row.model;
+    if ('model' in row) return formatModelName(row.model);
     if ('tier' in row) return `${row.provider} / ${row.tier}`;
     return row.agent;
   }
@@ -90,7 +90,7 @@
         >
           <div class="flex items-center justify-between gap-3">
             <div class="min-w-0">
-              <div class="truncate text-body font-medium text-text">{labelForRow(row)}</div>
+              <div class="truncate text-body font-medium text-text" title={'model' in row ? row.model : undefined}>{labelForRow(row)}</div>
               <div class="mt-0.5 text-meta text-text-faint">
                 {detailForRow(row)}
               </div>
@@ -98,7 +98,7 @@
             <div class="text-right">
               <div class="tabular font-mono text-body text-ok">{formatCost(row.cost_usd)}</div>
               <div class="mt-0.5 tabular font-mono text-meta text-text-faint">
-                {formatNumber(tokenTotal(row))} {kind === 'model' ? 'observed tokens' : 'tokens'}
+                {formatNumber(tokenTotal(row))} {kind === 'model' ? 'all tokens' : 'tokens'}
               </div>
             </div>
           </div>
