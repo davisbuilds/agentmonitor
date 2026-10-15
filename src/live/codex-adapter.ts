@@ -508,6 +508,11 @@ export function syncCodexLiveSession(
         message.timestamp ?? undefined,
       );
       if (!normalizedItem) continue;
+      // Codex injects instructions (permissions, skills, memory) as
+      // developer-role messages; they are not the assistant's replies.
+      if (message.role === 'developer' && normalizedItem.kind === 'assistant_message') {
+        normalizedItem.kind = 'instructions';
+      }
       const normalized = applyLivePrivacyPolicy(normalizedItem, privacyPolicy);
 
       insertProjectedItem(db, sessionId, turnId, {

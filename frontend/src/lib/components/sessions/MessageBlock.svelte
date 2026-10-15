@@ -38,14 +38,16 @@
   // Shared classifier keeps the label in sync with the viewer's author filter.
   const author = $derived(classifyMessageAuthor(message));
   const roleLabel = $derived(
-    author === 'tool' ? 'Tool' : author === 'you' ? 'You' : agentDisplayName(agent),
+    author === 'tool' ? 'Tool' : author === 'you' ? 'You' : author === 'instructions' ? 'Instructions' : agentDisplayName(agent),
   );
-  // You = the one interactive accent; assistant = ok; tool output = neutral.
+  // You = the one interactive accent; assistant = ok; tool output and
+  // injected instructions = neutral.
+  const quiet = $derived(author === 'tool' || author === 'instructions');
   const roleColor = $derived(
-    author === 'tool' ? 'text-text-muted' : author === 'you' ? 'text-accent' : 'text-ok',
+    quiet ? 'text-text-muted' : author === 'you' ? 'text-accent' : 'text-ok',
   );
   const borderColor = $derived(
-    author === 'tool' ? 'border-line' : author === 'you' ? 'border-accent/30' : 'border-ok/30',
+    quiet ? 'border-line' : author === 'you' ? 'border-accent/30' : 'border-ok/30',
   );
 
   function togglePin() {

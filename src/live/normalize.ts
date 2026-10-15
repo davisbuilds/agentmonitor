@@ -1,6 +1,9 @@
 export type LiveItemKind =
   | 'user_message'
   | 'assistant_message'
+  // Instructions a harness injects for the model, such as Codex's
+  // developer-role messages: input, but not the person's prompt.
+  | 'instructions'
   | 'reasoning'
   | 'tool_call'
   | 'tool_result'
@@ -70,7 +73,9 @@ export function applyLivePrivacyPolicy(
   item: CanonicalLiveItem,
   policy: LivePrivacyPolicy,
 ): CanonicalLiveItem {
-  if (item.kind === 'user_message' && !policy.capturePrompts) {
+  // Injected instructions are model input too (memory files, skill lists), so
+  // prompt capture governs them as it does the person's prompts.
+  if ((item.kind === 'user_message' || item.kind === 'instructions') && !policy.capturePrompts) {
     return {
       ...item,
       payload: {

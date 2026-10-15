@@ -486,6 +486,8 @@ function itemName(item: SessionItemProjectionSource, payload: Record<string, unk
       return 'Assistant message';
     case 'user_message':
       return 'User message';
+    case 'instructions':
+      return 'Instructions';
     case 'reasoning':
       return 'Reasoning';
     default:
