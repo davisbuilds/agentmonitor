@@ -177,6 +177,15 @@ test('Clear resets everything in the bar', async ({ page }) => {
   await expect(page).not.toHaveURL(/project=|pinned=/);
   await expect(bar.getByRole('button', { name: 'Clear' })).toHaveCount(0);
 
+  // A search's sort is part of the bar too: the next search starts from Newest First.
+  await bar.getByRole('searchbox', { name: 'Search transcripts' }).fill('seeded');
+  await bar.getByRole('combobox', { name: 'Sort results' }).selectOption('relevance');
+  await expect(page).toHaveURL(/sort=relevance/);
+  await bar.getByRole('button', { name: 'Clear' }).click();
+  await bar.getByRole('searchbox', { name: 'Search transcripts' }).fill('seeded');
+  await expect(bar.getByRole('combobox', { name: 'Sort results' })).toHaveValue('recent');
+  await expect(page).not.toHaveURL(/sort=relevance/);
+
   // On Usage, the facets behind Filters are part of the bar too.
   await page.goto(`${baseUrl}/app/#analytics?view=usage&provider=anthropic`);
   await expect(bar.getByRole('button', { name: 'More filters' })).toContainText('1');

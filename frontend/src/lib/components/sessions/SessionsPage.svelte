@@ -205,6 +205,7 @@
     filterAgent = '';
     pinned = false;
     query = '';
+    sort = 'recent';
     syncHash(true);
     if (filtersChanged) void loadSessions();
     syncSearch(true);
