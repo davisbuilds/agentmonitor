@@ -40,6 +40,8 @@ const LINEAGE_COLUMNS = [
 export interface WarehousePublishResult {
   run_id: string;
   rows_published: number;
+  /** Rows deleted for sessions another summary of the same session supersedes. */
+  rows_retracted: number;
   grant_role: string | null;
   grant_skipped: boolean;
 }
@@ -54,6 +56,20 @@ export interface WarehousePublishPlan extends WarehousePublishResult {
 
 export interface PlanRunsOptions {
   biRoleExists?: boolean;
+  /** Session ids to delete for this account (superseded aliases). */
+  retractSessionIds?: readonly string[];
+}
+
+/** The part of a `pg` client publishing uses; tests pass a recorder. */
+export interface WarehouseClient {
+  connect(): Promise<unknown>;
+  query(sql: string, values?: unknown[]): Promise<{ rowCount: number | null }>;
+  end(): Promise<unknown>;
+}
+
+export interface PublishRunsOptions {
+  retractSessionIds?: readonly string[];
+  client?: WarehouseClient;
 }
 
 function assertIdentifier(kind: string, value: string): void {
@@ -117,6 +133,13 @@ function runUpsertSql(schema: string): string {
     `ON CONFLICT (account, session_id) DO UPDATE SET ${updates}`;
 }
 
+// Rows already published under a session id that another summary of the same
+// session now supersedes (a Codex rollout alias of a UUID-keyed session). The
+// upsert cannot remove them, so publishing deletes them for this account.
+function retractSql(schema: string): string {
+  return `DELETE FROM ${schema}.runs WHERE account = $1 AND session_id = ANY($2::text[])`;
+}
+
 function lineageInsertSql(schema: string): string {
   const columns = LINEAGE_COLUMNS.join(', ');
   const placeholders = LINEAGE_COLUMNS.map((_, index) => `$${index + 1}`).join(', ');
@@ -160,11 +183,13 @@ export function planRuns(
   const schema = schemaName(config);
   const grantPlan = plannedGrantStatements(schema, config, options);
   const plannedLineage = { ...lineage, grant_skipped: grantPlan.grantSkipped };
+  const retract = options.retractSessionIds ?? [];
   return {
     dry_run: true,
     schema,
     run_id: plannedLineage.run_id,
     rows_published: rows.length,
+    rows_retracted: retract.length,
     grant_role: config.biRole,
     grant_skipped: grantPlan.grantSkipped,
     rows: [...rows],
@@ -173,6 +198,7 @@ export function planRuns(
       'BEGIN',
       ...ddlStatements(schema),
       runUpsertSql(schema),
+      ...(retract.length > 0 ? [retractSql(schema)] : []),
       ...grantPlan.statements,
       lineageInsertSql(schema),
       'COMMIT',
@@ -184,11 +210,12 @@ export async function publishRuns(
   rows: readonly WarehouseRunRow[],
   lineage: PublishLineage,
   config: WarehouseConfig,
+  options: PublishRunsOptions = {},
 ): Promise<WarehousePublishResult> {
   if (!config.dsn) throw new Error('AGENTMONITOR_WAREHOUSE_DSN is required to publish warehouse rows');
   const schema = schemaName(config);
-  const { Client } = await import('pg');
-  const client = new Client({ connectionString: config.dsn });
+  const client: WarehouseClient = options.client
+    ?? new (await import('pg')).Client({ connectionString: config.dsn });
   await client.connect();
   try {
     await client.query('BEGIN');
@@ -199,6 +226,13 @@ export async function publishRuns(
     const upsert = runUpsertSql(schema);
     for (const row of rows) {
       await client.query(upsert, runValues(row));
+    }
+
+    const retract = options.retractSessionIds ?? [];
+    let rowsRetracted = 0;
+    if (retract.length > 0) {
+      const deleted = await client.query(retractSql(schema), [lineage.account, [...retract]]);
+      rowsRetracted = deleted.rowCount ?? 0;
     }
 
     let grantSkipped = false;
@@ -219,6 +253,7 @@ export async function publishRuns(
     return {
       run_id: finalLineage.run_id,
       rows_published: rows.length,
+      rows_retracted: rowsRetracted,
       grant_role: config.biRole,
       grant_skipped: grantSkipped,
     };

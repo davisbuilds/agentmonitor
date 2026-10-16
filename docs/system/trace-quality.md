@@ -76,7 +76,10 @@ medallion-owned view explicitly models personal coding-agent usage.
 Before publication, mapped keys must match the `WarehouseRunRow` allowlist and
 text-like values must satisfy bounded field shapes. Dry-run performs no network
 connection. Live publication is opt-in, idempotent for the account/session key, and
-does not retract rows when local sessions are later removed. A minimum batch is an
+does not retract rows when local sessions are later removed. It publishes one
+summary per session and deletes the account's rows for session ids another
+summary of the same session supersedes, such as a Codex rollout alias published
+before aliases were collapsed. A minimum batch is an
 operator guard, not a privacy mechanism.
 
 Configuration and recovery procedures live in [OPERATIONS.md](OPERATIONS.md).

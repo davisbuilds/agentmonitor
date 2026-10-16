@@ -221,8 +221,10 @@ a universal identity reconciliation across Live and Search.
 Trace-quality lists apply the same grammar to session summaries: a summary is
 event-backed when its session has events, so a Codex session holds a
 transcript-only summary under its rollout basename and an event-backed one
-under its UUID. The list hides the rollout one when the UUID one exists; both
-stay stored.
+under its UUID, and one per rollout file. Lists and the warehouse export keep
+one summary per session, the UUID one first, else the rollout with the most
+observations; all stay stored, and publishing retracts superseded ids it
+published earlier.
 
 The additive `/api/v2/activity/sessions` read reconciles ordinary event evidence
 with browser identities without requiring a transcript. It normalizes the known

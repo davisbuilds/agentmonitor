@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { planRuns } from '../src/warehouse/postgres-sink.js';
+import { planRuns, publishRuns } from '../src/warehouse/postgres-sink.js';
 import type { PublishLineage, WarehouseConfig, WarehouseRunRow } from '../src/warehouse/types.js';
 
 function runRow(overrides: Partial<WarehouseRunRow> = {}): WarehouseRunRow {
@@ -101,4 +101,49 @@ test('sink rejects unsafe schema and role identifiers before planning SQL', () =
     () => planRuns([runRow()], lineage(), warehouseConfig({ biRole: 'bad;drop' })),
     /invalid role identifier/,
   );
+});
+
+const RETRACT = 'DELETE FROM agentmonitor.runs WHERE account = $1 AND session_id = ANY($2::text[])';
+
+/** Records what publishRuns sends, as a `pg` client would receive it. */
+function recordingClient(deleted = 2) {
+  const calls: Array<{ sql: string; values?: unknown[] }> = [];
+  return {
+    calls,
+    client: {
+      connect: async () => undefined,
+      end: async () => undefined,
+      query: async (sql: string, values?: unknown[]) => {
+        calls.push({ sql, values });
+        return { rowCount: sql.startsWith('DELETE') ? deleted : 1 };
+      },
+    },
+  };
+}
+
+test('a dry-run plan retracts superseded session rows for the account', () => {
+  const plan = planRuns([runRow()], lineage(), warehouseConfig(), { retractSessionIds: ['rollout-a', 'rollout-b'] });
+  assert.equal(plan.rows_retracted, 2);
+  const upsert = plan.statements.findIndex(statement => statement.startsWith('INSERT INTO agentmonitor.runs'));
+  assert.ok(plan.statements.indexOf(RETRACT) > upsert, 'the retraction follows the upserts');
+});
+
+test('publishing deletes superseded session rows inside its transaction and reports them', async () => {
+  const { calls, client } = recordingClient(2);
+  const result = await publishRuns([runRow()], lineage(), warehouseConfig({ dsn: 'postgresql://unused' }), {
+    retractSessionIds: ['rollout-a', 'rollout-b'],
+    client,
+  });
+  assert.equal(result.rows_retracted, 2);
+  const sql = calls.map(call => call.sql);
+  const retract = calls.find(call => call.sql === RETRACT);
+  assert.deepEqual(retract?.values, [lineage().account, ['rollout-a', 'rollout-b']]);
+  assert.ok(sql.indexOf('BEGIN') < sql.indexOf(RETRACT) && sql.indexOf(RETRACT) < sql.indexOf('COMMIT'));
+});
+
+test('publishing with nothing superseded deletes nothing', async () => {
+  const { calls, client } = recordingClient();
+  const result = await publishRuns([runRow()], lineage(), warehouseConfig({ dsn: 'postgresql://unused' }), { client });
+  assert.equal(result.rows_retracted, 0);
+  assert.equal(calls.some(call => call.sql.startsWith('DELETE')), false);
 });
