@@ -5,12 +5,15 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import Database from 'better-sqlite3';
 
+// A host west of UTC, where `new Date` and SQLite read an offset-free time apart.
+process.env.TZ = 'America/Los_Angeles';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-live-status-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
 const { getDb, closeDb } = await import('../src/db/connection.js');
 const { initSchema } = await import('../src/db/schema.js');
 const { listLiveSessions, getLiveSession } = await import('../src/db/v2-queries.js');
 const { effectiveLiveStatus, effectiveLiveStatusSql, liveStatusFromActivity } = await import('../src/live/live-status.js');
+const { getSessionSkillContext } = await import('../src/skills/session-skill-context.js');
 
 after(() => {
   closeDb();
@@ -42,6 +45,14 @@ test('the boundaries match the write-time rule: five minutes live, fifteen activ
   }
 });
 
+test('an activity time without an offset is UTC, as SQLite reads it', () => {
+  assert.equal(new Date(2026, 0, 1).getTimezoneOffset() !== 0, true, 'the test host is not on UTC');
+  assert.equal(effectiveLiveStatus('live', '2026-10-16 11:58:00', NOW), 'live');
+  assert.equal(effectiveLiveStatus('live', '2026-10-16 11:50:00', NOW), 'active');
+  assert.equal(effectiveLiveStatus('live', '2026-10-16T11:30:00', NOW), 'ended');
+  assert.equal(effectiveLiveStatus('live', '2026-10-16T04:58:00-07:00', NOW), 'live');
+});
+
 test('the SQL reading agrees with the TypeScript one', () => {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE browsing_sessions (live_status TEXT, last_item_at TEXT, ended_at TEXT)');
@@ -50,6 +61,10 @@ test('the SQL reading agrees with the TypeScript one', () => {
   for (const stored of ['live', 'active', 'ended', 'available', null]) {
     for (const minutes of [1, 5, 6, 10, 15, 16, 24 * 60]) cases.push([stored, ago(minutes), null]);
     cases.push([stored, null, ago(2)], [stored, null, null], [stored, 'not a time', null]);
+    for (const time of ['2026-10-16 11:58:00', '2026-10-16 11:50:00.250', '2026-10-16T11:30', '2026-10-16',
+      '2026-10-16T04:58:00-07:00', '2461330.0', '2026-10-16Tjunk']) {
+      cases.push([stored, time, null]);
+    }
   }
   for (const row of cases) insert.run(...row);
   const rows = db.prepare(`SELECT live_status, last_item_at, ended_at, ${effectiveLiveStatusSql('', new Date(NOW).toISOString())} AS effective
@@ -81,4 +96,6 @@ test('the live session list and detail read a stale live session as ended', () =
 
   assert.equal(getLiveSession('quiet-since-yesterday')?.live_status, 'ended');
   assert.equal(getLiveSession('paused')?.live_status, 'active');
+  assert.equal(getSessionSkillContext(db, 'quiet-since-yesterday')?.active, false, 'skill context agrees with the detail');
+  assert.equal(getSessionSkillContext(db, 'paused')?.active, true);
 });

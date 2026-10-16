@@ -9,10 +9,24 @@
 const LIVE_WINDOW_MS = 5 * 60_000;
 const ACTIVE_WINDOW_MS = 15 * 60_000;
 
+// An activity time in the forms SQLite's date functions read: a date, then
+// optionally a time, then optionally an offset. SQLite reads a time without an
+// offset as UTC, where `new Date` reads it as local time, and offset-free times
+// are still stored, so the TypeScript reading takes SQLite's.
+const ACTIVITY_TIME = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?))?(Z|[+-]\d{2}:\d{2})?$/;
+const ACTIVITY_TIME_GLOB = '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*';
+
+function activityTimeMs(value: string): number {
+  const match = ACTIVITY_TIME.exec(value);
+  if (!match) return Number.NaN;
+  const [, date, time, offset] = match;
+  return Date.parse(`${date}T${time ?? '00:00'}${offset ?? 'Z'}`);
+}
+
 /** The status a session last active at `lastActivityAt` has at `now`. */
 export function liveStatusFromActivity(lastActivityAt: string | null, now: number = Date.now()): string {
   if (!lastActivityAt) return 'available';
-  const idleMs = now - new Date(lastActivityAt).getTime();
+  const idleMs = now - activityTimeMs(lastActivityAt);
   if (Number.isNaN(idleMs)) return 'available';
   if (idleMs <= LIVE_WINDOW_MS) return 'live';
   if (idleMs <= ACTIVE_WINDOW_MS) return 'active';
@@ -26,7 +40,7 @@ export function effectiveLiveStatus(
   now: number = Date.now(),
 ): string | null {
   if (stored !== 'live' && stored !== 'active') return stored;
-  if (!lastActivityAt || Number.isNaN(new Date(lastActivityAt).getTime())) return stored;
+  if (!lastActivityAt || Number.isNaN(activityTimeMs(lastActivityAt))) return stored;
   return liveStatusFromActivity(lastActivityAt, now);
 }
 
@@ -44,7 +58,8 @@ export function effectiveLiveStatusSql(alias = '', nowIso?: string): string {
   const now = nowIso === undefined ? "'now'" : `'${nowIso}'`;
   // Whole milliseconds, so the boundaries agree with the TypeScript reading.
   const idleMs = `CAST(round((julianday(${now}) - julianday(${activity})) * 86400000.0) AS INTEGER)`;
-  return `(CASE WHEN ${stored} IN ('live', 'active') AND julianday(${activity}) IS NOT NULL THEN
+  return `(CASE WHEN ${stored} IN ('live', 'active') AND ${activity} GLOB '${ACTIVITY_TIME_GLOB}'
+      AND julianday(${activity}) IS NOT NULL THEN
       CASE WHEN ${idleMs} <= ${LIVE_WINDOW_MS} THEN 'live'
         WHEN ${idleMs} <= ${ACTIVE_WINDOW_MS} THEN 'active'
         ELSE 'ended' END

@@ -129,7 +129,9 @@ test('GET session skill context distinguishes unknown and known unavailable stat
   assert.equal(body.instructions.reason, 'instruction_load_signal_absent');
 });
 
-test('GET session skill context treats a live projection as active', async () => {
+test('GET session skill context treats a session live in the last five minutes as active', async () => {
+  db.prepare('UPDATE browsing_sessions SET last_item_at = ? WHERE id = ?')
+    .run(new Date().toISOString(), 'claude-context-session');
   const response = await fetch(
     `${baseUrl}/api/v2/sessions/claude-context-session/skill-context`,
   );

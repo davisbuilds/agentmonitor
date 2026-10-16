@@ -2638,7 +2638,7 @@ export function selectSessionSkillContextSession(
   sessionId: string,
 ): SessionSkillContextSessionRow | undefined {
   return db.prepare(`
-    SELECT id, agent, started_at, ended_at, live_status,
+    SELECT id, agent, started_at, ended_at, ${effectiveLiveStatusSql()} AS live_status,
            skill_context_capabilities_json
     FROM browsing_sessions
     WHERE id = ?
