@@ -233,6 +233,29 @@ function browserSessionKey(alias: string): string {
     ELSE ${alias}.id END`;
 }
 
+/**
+ * A Codex trace summary keyed by rollout basename whose session also has one
+ * under its native UUID. A summary is event-backed when the session has events
+ * and projects the transcript only when it has none, so the watcher's rollout
+ * summary (transcript, no usage) and the UUID one (events, usage and cost) both
+ * exist for one session. Trace lists show the UUID one, as every Claude
+ * session's summary is event-backed; the rollout row stays stored.
+ */
+export function shadowedCodexRolloutSummary(alias: string): string {
+  return `(${alias}.agent_type = 'codex' AND ${alias}.session_id GLOB '${codexRolloutGlob}'
+    AND EXISTS (SELECT 1 FROM session_trace_summary twin
+      WHERE twin.session_id IN (substr(${alias}.session_id, -36), lower(substr(${alias}.session_id, -36)))
+        AND twin.agent_type = 'codex'))`;
+}
+
+const CODEX_ROLLOUT_ID = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+
+/** The ids a read scoped to one session matches: a Codex rollout also names its native UUID. */
+export function codexSessionAliases(sessionId: string): string[] {
+  const uuid = CODEX_ROLLOUT_ID.exec(sessionId)?.[1];
+  return uuid ? [...new Set([sessionId, uuid, uuid.toLowerCase()])] : [sessionId];
+}
+
 /** The session a row names as its parent: Codex records the parent's native UUID. */
 function parentSessionKey(alias: string): string {
   return `CASE WHEN ${alias}.agent = 'codex' THEN lower(${alias}.parent_session_id)
