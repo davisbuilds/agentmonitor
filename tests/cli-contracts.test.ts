@@ -1031,6 +1031,33 @@ test('warehouse publish dry-run reports planned rows without a warehouse DSN', a
   assert.equal(parsed.rows_planned, 1);
   assert.equal(parsed.rows_suppressed, 0);
   assert.ok(parsed.statements.some(statement => statement.includes('INSERT INTO agentmonitor.runs')));
+  assert.equal(parsed.statements.some(statement => statement.startsWith('DELETE')), false, 'nothing superseded, nothing retracted');
+});
+
+test('warehouse publish dry-run plans retracting a Codex rollout alias its UUID summary supersedes', async () => {
+  const uuid = '019c26b7-327b-75f3-b000-0000000000aa';
+  const insert = getDb().prepare(`INSERT INTO session_trace_summary
+    (session_id, trace_id, agent_type, started_at, observation_count, projection_version)
+    VALUES (?, ?, 'codex', '2026-03-01T10:00:00Z', ?, 'test')`);
+  insert.run(`rollout-2026-03-01T10-00-00-${uuid}`, 'sts:alias-rollout', 40);
+  insert.run(uuid, 'sts:alias-uuid', 12);
+
+  const result = await runCli(['warehouse', 'publish', '--dry-run', '--json']);
+
+  assert.equal(result.exitCode, 0, result.stderr);
+  const parsed = JSON.parse(result.stdout) as { rows_planned: number; rows_retracted: number; statements: string[] };
+  assert.equal(parsed.rows_planned, 2, 'the fixture session and the UUID summary');
+  assert.equal(parsed.rows_retracted, 1);
+  assert.ok(parsed.statements.some(statement => statement.startsWith('DELETE FROM agentmonitor.runs')));
+
+  // A publish that leaves the UUID summary out retracts nothing it replaces.
+  for (const args of [['--min-batch', '99'], ['--date-from', '2026-04-01']]) {
+    const narrow = await runCli(['warehouse', 'publish', '--dry-run', '--json', ...args]);
+    assert.equal(narrow.exitCode, 0, narrow.stderr);
+    const plan = JSON.parse(narrow.stdout) as { rows_retracted: number; statements: string[] };
+    assert.equal(plan.rows_retracted, 0, args.join(' '));
+    assert.equal(plan.statements.some(statement => statement.startsWith('DELETE')), false, args.join(' '));
+  }
 });
 
 test('warehouse publish without dry-run fails clearly when no DSN is configured', async () => {

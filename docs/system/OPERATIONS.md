@@ -661,7 +661,9 @@ AGENTMONITOR_WAREHOUSE_DSN=postgresql://... amon warehouse publish
 
 The live path upserts one row per `(account, session_id)` and records a publication
 lineage row. Re-publication does not retract a warehouse row when local data is
-later deleted. `--dry-run` needs no DSN and opens no Postgres connection.
+later deleted, but it does delete the account's rows for session ids that a row
+it publishes supersedes (a Codex rollout alias of a session published under its
+UUID); the dry-run reports how many it would retract. `--dry-run` needs no DSN and opens no Postgres connection.
 `--min-batch` prevents accidental tiny publishes but is not a privacy threshold.
 Changing the account label can duplicate BI identity and emits a warning.
 

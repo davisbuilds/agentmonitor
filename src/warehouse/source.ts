@@ -1,4 +1,5 @@
 import { getDb } from '../db/connection.js';
+import { traceSummaryRankCte } from '../db/v2-queries.js';
 
 export interface WarehouseSessionTraceSummaryRow {
   session_id: string;
@@ -71,7 +72,8 @@ export function listWarehouseSessionTraceSummaries(
     params.date_to,
   );
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  return getDb().prepare(`
+  // One row per session (traceSummaryRankCte), chosen before the date window.
+  return getDb().prepare(`${traceSummaryRankCte}
     SELECT
       session_id,
       trace_id,
@@ -93,8 +95,28 @@ export function listWarehouseSessionTraceSummaries(
       quality_grade,
       projection_version,
       updated_at
-    FROM session_trace_summary
+    FROM listed_summaries
     ${where}
     ORDER BY datetime(COALESCE(started_at, updated_at)) ASC, session_id ASC
   `).all(...values) as WarehouseSessionTraceSummaryRow[];
+}
+
+/**
+ * Session ids whose summary a published one supersedes (traceSummaryRankCte),
+ * across all history rather than a publish window: a Codex rollout alias
+ * published before the warehouse collapsed aliases is still in the warehouse,
+ * and publishing its replacement retracts it. An alias whose replacement this
+ * publish leaves out (by date window or minimum batch) stays until one includes it.
+ */
+export function listWarehouseSupersededSessionIds(publishedSessionIds: readonly string[]): string[] {
+  const published = new Set(publishedSessionIds);
+  const rows = getDb().prepare(`${traceSummaryRankCte}
+    SELECT superseded.session_id, listed.session_id AS superseded_by
+    FROM ranked_summary_rows superseded
+    JOIN listed_summaries listed
+      ON listed.agent_type IS superseded.agent_type AND listed.summary_key = superseded.summary_key
+    WHERE superseded.summary_rank > 1
+    ORDER BY superseded.session_id
+  `).all() as Array<{ session_id: string; superseded_by: string }>;
+  return rows.filter(row => published.has(row.superseded_by)).map(row => row.session_id);
 }

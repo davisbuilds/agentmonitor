@@ -222,14 +222,19 @@ Session-list reads reconcile recognized aliases
 without rewriting either projection, messages, pins, or detail links. The JSONL
 representative wins; multiple JSONL projections use message count then ID as the
 tie-breaker. Reconciliation precedes date/project/message filters and pagination,
-so a later summary observation cannot reintroduce a second session. Other reads
+so a later summary observation cannot reintroduce a second session. Analytics
+counts from the same reconciled rows (`listed_sessions`), so its session and
+message totals count such a session once, and the warehouse export publishes
+one trace summary per session (the UUID one when both exist). Other reads
 retain their own projection/usage semantics; this is not a storage migration or
-a universal identity reconciliation across Analytics, Live, and Search.
+a universal identity reconciliation across Live and Search.
 Trace-quality lists apply the same grammar to session summaries: a summary is
 event-backed when its session has events, so a Codex session holds a
 transcript-only summary under its rollout basename and an event-backed one
-under its UUID. The list hides the rollout one when the UUID one exists; both
-stay stored, and the warehouse export still publishes both.
+under its UUID, and one per rollout file. Lists and the warehouse export keep
+one summary per session, the UUID one first, else the rollout with the most
+observations; all stay stored, and publishing a summary retracts the ids it
+supersedes that were published earlier.
 
 The additive `/api/v2/activity/sessions` read reconciles ordinary event evidence
 with browser identities without requiring a transcript. It normalizes the known

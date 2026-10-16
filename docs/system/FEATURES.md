@@ -129,8 +129,9 @@ product never substitutes a misleading `0%` for missing evidence.
   active within fifteen, whatever status was last stored; before 2026-10-16 a
   session whose producer went quiet, such as one known only from telemetry,
   stayed live indefinitely and counted in every recent Skills window.
-- Sessions lists count recognized Codex rollout/UUID aliases once and prefer
-  JSONL history. Existing detail links remain valid. A browser session is a
+- Sessions lists and Analytics count recognized Codex rollout/UUID aliases once
+  and prefer JSONL history; before 2026-10-16 Analytics counted such a session,
+  and its messages, twice. Existing detail links remain valid. A browser session is a
   projected conversation or child-agent history, not a turn, API call, billing
   block, or duration. Resuming the same native conversation does not itself make
   a new conversation. Browser coverage and event-derived usage-session coverage
@@ -254,8 +255,9 @@ as a second trace warehouse. List and detail views disclose usage and telemetry
 coverage over the full filtered set. Drill-ins from Usage's top sessions, the
 live stream's inspector, and Sessions (the viewer and its search results) can
 open the relevant trace.
-A Codex session summarized under both its rollout and its native UUID lists
-once, as the event-backed UUID summary, and a drill-in by either id opens it.
+A Codex session summarized under its native UUID and one or more rollout files
+lists once, as the event-backed UUID summary when there is one, and a drill-in
+by any of its ids opens it.
 
 Deep scoring, prompt management, and persisted observation/eval storage remain
 outside the local product boundary. See [trace-quality.md](trace-quality.md).
