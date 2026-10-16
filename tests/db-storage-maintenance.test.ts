@@ -5,12 +5,14 @@ import path from 'node:path';
 import test, { after, before } from 'node:test';
 import type Database from 'better-sqlite3';
 import type * as StorageModule from '../src/db/storage.js';
+import type * as SchemaModule from '../src/db/schema.js';
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-storage-maintenance-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(dir, 'test.db');
 let closeDb: (() => void) | undefined;
 let db: Database.Database;
 let storage: typeof StorageModule;
+let schema: typeof SchemaModule;
 
 const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
 
@@ -43,7 +45,7 @@ function matches(term: string): number {
 before(async () => {
   const connection = await import('../src/db/connection.js');
   closeDb = connection.closeDb;
-  const schema = await import('../src/db/schema.js');
+  schema = await import('../src/db/schema.js');
   schema.initSchema();
   db = connection.getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
@@ -64,7 +66,7 @@ test('a stepwise merge reclaims dead search-index entries without changing resul
   const result = await storage.mergeSearchIndex(db, { pages: 4, pause: async () => { pauses++; } });
 
   const merged = storage.searchIndexBytes(db);
-  db.exec("INSERT INTO messages_fts(messages_fts) VALUES('rebuild')");
+  schema.rebuildMessageSearchIndex(db);
   const rebuilt = storage.searchIndexBytes(db);
   // The merge reaches the size of an index built from scratch, and the fixture
   // was bloated enough for that to mean something.

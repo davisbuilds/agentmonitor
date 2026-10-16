@@ -7,13 +7,13 @@ the v2 route/query source and [API index](../api/README.md).
 ## Canonical Product Surface
 
 - The Svelte SPA at `/app/` is the sole human-facing surface; `/` redirects there.
-- Monitor, Sessions, and Analytics are the primary workflows. Sessions holds
+- Monitor, Analytics, and Sessions are the primary workflows. Sessions holds
   full-text search and pinned messages; the live stream is Monitor's drill-in
   rather than a tab of its own.
 - Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
   one shared date/project/agent filter context. Insights appears only once an LLM
   provider API key is configured.
-- Monitor, Sessions, and Analytics each lay their filters out in one bar under the
+- Monitor, Analytics, and Sessions each lay their filters out in one bar under the
   command bar, in the same order: the page's scope (Analytics' sub-views or the
   Sessions search box), then Project and Agent, then the page's own filters, with
   Clear and the page's actions at the end. Each tab keeps its own selection;
@@ -109,6 +109,9 @@ product never substitutes a misleading `0%` for missing evidence.
   the results. The query rides the `#sessions?q=…` link, and starting a search
   adds one history entry, so Back returns to the list. Old `#search?…` links
   redirect there without adding a history entry.
+- Search matches what a message says (its text, thinking, tool names, tool
+  inputs and tool results), not the JSON it is stored as, so snippets read as
+  text and a block key such as "type" matches only messages that use the word.
 - Inline images (pasted images, screenshots in tool results) are stored as a
   descriptor with their SHA-256 and size, not their base64 data, so they are
   neither shown nor searchable. AgentMonitor keeps no copy: once a source
@@ -247,6 +250,8 @@ as a second trace warehouse. List and detail views disclose usage and telemetry
 coverage over the full filtered set. Drill-ins from Usage's top sessions, the
 live stream's inspector, and Sessions (the viewer and its search results) can
 open the relevant trace.
+A Codex session summarized under both its rollout and its native UUID lists
+once, as the event-backed UUID summary, and a drill-in by either id opens it.
 
 Deep scoring, prompt management, and persisted observation/eval storage remain
 outside the local product boundary. See [trace-quality.md](trace-quality.md).

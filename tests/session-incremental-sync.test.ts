@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { before, after, describe } from 'node:test';
+import { assertSearchIndexMatchesMessages } from './helpers/search-index.js';
 import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connection.js';
 import type {
   insertParsedSession as insertParsedSessionFn,
@@ -110,11 +111,6 @@ function searchHits(sessionId: string, term: string): number {
   `).get(term, sessionId) as { n: number }).n;
 }
 
-function assertSearchIndexMatchesMessages(): void {
-  // For an external-content FTS5 table, rank 1 also checks the index against
-  // the content table, so a stale or missing row raises here.
-  getDb().prepare("INSERT INTO messages_fts(messages_fts, rank) VALUES ('integrity-check', 1)").run();
-}
 
 const BASE = [
   userLine('alpha request', 0),
@@ -140,7 +136,7 @@ describe('insertParsedSession re-sync', () => {
     assert.equal(toolsAfter[0].id, toolsBefore[0].id);
     assert.equal(toolsAfter[1].ordinal, 3);
     assert.equal(searchHits('append', 'delta'), 1);
-    assertSearchIndexMatchesMessages();
+    assertSearchIndexMatchesMessages(getDb());
   });
 
   test('a rewritten earlier line replaces rows from the first change onward', () => {
@@ -158,7 +154,7 @@ describe('insertParsedSession re-sync', () => {
     assert.equal(toolRows('rewrite')[0].input_json, JSON.stringify({ command: 'ls hotel' }));
     assert.equal(searchHits('rewrite', 'bravo'), 0);
     assert.equal(searchHits('rewrite', 'hotel'), 1);
-    assertSearchIndexMatchesMessages();
+    assertSearchIndexMatchesMessages(getDb());
 
     // The stored rows are what a full rewrite of the new parse would store.
     const expected = parse('rewrite-fresh', rewritten);
@@ -178,7 +174,7 @@ describe('insertParsedSession re-sync', () => {
 
     assert.deepEqual(after.slice(0, 2).map(row => row.id), before.slice(0, 2).map(row => row.id));
     assert.match(after[2].content, /charlie fallowup/);
-    assertSearchIndexMatchesMessages();
+    assertSearchIndexMatchesMessages(getDb());
   });
 
   test('a shortened transcript drops the messages it no longer contains', () => {
@@ -191,7 +187,7 @@ describe('insertParsedSession re-sync', () => {
     assert.deepEqual(after.map(row => row.id), [before[0].id]);
     assert.equal(toolCallCount('shrink'), 0);
     assert.equal(searchHits('shrink', 'golf'), 0);
-    assertSearchIndexMatchesMessages();
+    assertSearchIndexMatchesMessages(getDb());
   });
 
   test('a changed tool call on an unchanged message is rewritten', () => {
@@ -213,7 +209,7 @@ describe('insertParsedSession re-sync', () => {
     store(parse('stray', BASE));
 
     assert.deepEqual(messageRows('stray').map(row => row.ordinal), [0, 1, 2]);
-    assertSearchIndexMatchesMessages();
+    assertSearchIndexMatchesMessages(getDb());
   });
 
   test('a tool call whose message is gone is cleared without rewriting history', () => {

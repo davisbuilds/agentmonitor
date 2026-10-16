@@ -11,7 +11,7 @@
  * the frontend contract are all unchanged.
  */
 import { getDb } from '../db/connection.js';
-import { lookupSessionTitles, type SessionTitleFields } from '../db/v2-queries.js';
+import { codexSessionAliases, lookupSessionTitles, shadowedCodexRolloutSummary, type SessionTitleFields } from '../db/v2-queries.js';
 import { untitledSessionName } from '../parser/session-title.js';
 import type {
   TraceQualityObservation,
@@ -95,11 +95,12 @@ function normalizedOffset(value: number | undefined): number {
 
 /** Build the WHERE clause for the summary-backed list from the supported filters. */
 function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string; values: unknown[] } {
-  const clauses: string[] = [];
+  const clauses: string[] = [`NOT ${shadowedCodexRolloutSummary('session_trace_summary')}`];
   const values: unknown[] = [];
   if (params.session_id) {
-    clauses.push('session_id = ?');
-    values.push(params.session_id);
+    const ids = codexSessionAliases(params.session_id);
+    clauses.push(`session_id IN (${ids.map(() => '?').join(', ')})`);
+    values.push(...ids);
   }
   if (params.project) {
     clauses.push('project = ?');

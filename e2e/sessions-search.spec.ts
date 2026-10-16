@@ -225,3 +225,28 @@ test('Pin shows on hover or focus, while Pinned always shows', async ({ page }) 
   await pin.focus();
   await expect.poll(() => opacity(pin)).toBe('1');
 });
+
+test('a result snippet shows what the message says, and a stored JSON key matches nothing', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions?q=midnight`);
+  const result = page.getByRole('button', { name: /msg #0.*Quota investigation/ });
+  await expect(result).toContainText('Why does the quota reset at midnight?');
+  await expect(result).not.toContainText('"type"');
+
+  await searchBox(page).fill('text');
+  await expect(page.getByText('0 results', { exact: true })).toBeVisible();
+});
+
+test('the session list is a table, and any cell of a row opens its session', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions`);
+  const headers = page.getByRole('columnheader');
+  await expect(headers).toHaveText(['Session', 'Project', 'Messages', 'Started']);
+  const row = page.getByRole('row').filter({ hasText: 'Importer cleanup' });
+  await expect(row).toContainText('Codex');
+  await row.getByText('blueprint', { exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Importer cleanup' })).toBeVisible();
+});
+
+test('the top tabs put Analytics second', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions`);
+  await expect(page.getByRole('navigation').getByRole('button')).toHaveText(['Monitor', 'Analytics', 'Sessions', 'Benchmarks']);
+});

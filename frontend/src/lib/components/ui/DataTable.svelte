@@ -22,6 +22,9 @@
     rowClass?: (row: Row) => string;
     /** Extra attributes spread onto a row's `<tr>` (e.g. a scroll anchor). */
     rowAttrs?: (row: Row) => Record<string, string | undefined>;
+    /** A full-width row rendered under a row while `expanded` holds for it (e.g. its children). */
+    detail?: Snippet<[Row]>;
+    expanded?: (row: Row) => boolean;
     empty?: string;
     stickyHeader?: boolean;
     class?: string;
@@ -35,6 +38,8 @@
     onrowclick,
     rowClass,
     rowAttrs,
+    detail,
+    expanded,
     empty = 'No data.',
     stickyHeader = true,
     class: klass = '',
@@ -77,12 +82,17 @@
           >
             {#each columns as column}
               <td
-                class="px-3 py-2.5 {column.numeric ? 'tabular text-right font-mono text-text' : 'text-text-muted'}"
+                class="px-3 py-2.5 {alignClass(column)} {column.numeric ? 'tabular font-mono text-text' : 'text-text-muted'}"
               >
                 {#if cell}{@render cell(row, column)}{:else}{cellValue(row, column) ?? '—'}{/if}
               </td>
             {/each}
           </tr>
+          {#if detail && expanded?.(row)}
+            <tr class="border-b border-line/60 last:border-0">
+              <td colspan={columns.length} class="px-3 pb-2">{@render detail(row)}</td>
+            </tr>
+          {/if}
         {/each}
       {/if}
     </tbody>
