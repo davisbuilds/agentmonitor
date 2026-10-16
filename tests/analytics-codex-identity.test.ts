@@ -9,7 +9,7 @@ process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
 const { getDb, closeDb } = await import('../src/db/connection.js');
 const { initSchema } = await import('../src/db/schema.js');
 const queries = await import('../src/db/v2-queries.js');
-const { listWarehouseSessionTraceSummaries } = await import('../src/warehouse/source.js');
+const { listWarehouseSessionTraceSummaries, listWarehouseSupersededSessionIds } = await import('../src/warehouse/source.js');
 
 after(() => {
   closeDb();
@@ -78,5 +78,12 @@ test('the warehouse export publishes a Codex session once, as its event-backed s
   summary.run(rollout, 'sts:rollout', 40, 0);
   summary.run(uuid, 'sts:uuid', 12, 0.5);
   summary.run(solo, 'sts:solo', 3, 0.1);
-  assert.deepEqual(listWarehouseSessionTraceSummaries().map(row => row.session_id).sort(), [uuid, solo].sort());
+  // A resumed session stored as two rollout files and no UUID summary.
+  const resumed = '019c26b7-327b-75f3-b000-00000000000c';
+  summary.run(`rollout-2026-03-05T09-00-00-${resumed}`, 'sts:resumed-1', 12, 0);
+  summary.run(`rollout-2026-03-06T09-00-00-${resumed}`, 'sts:resumed-2', 30, 0);
+  assert.deepEqual(listWarehouseSessionTraceSummaries().map(row => row.session_id).sort(),
+    [uuid, solo, `rollout-2026-03-06T09-00-00-${resumed}`].sort());
+  // What publishing retracts: every summary the published ones supersede, in any window.
+  assert.deepEqual(listWarehouseSupersededSessionIds(), [rollout, `rollout-2026-03-05T09-00-00-${resumed}`].sort());
 });

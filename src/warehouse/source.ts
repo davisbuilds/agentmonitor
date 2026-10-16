@@ -1,5 +1,5 @@
 import { getDb } from '../db/connection.js';
-import { shadowedCodexRolloutSummary } from '../db/v2-queries.js';
+import { traceSummaryRankCte } from '../db/v2-queries.js';
 
 export interface WarehouseSessionTraceSummaryRow {
   session_id: string;
@@ -62,8 +62,7 @@ function appendDateRangeConditions(
 export function listWarehouseSessionTraceSummaries(
   params: WarehouseSummaryListParams = {},
 ): WarehouseSessionTraceSummaryRow[] {
-  // One row per session: a Codex rollout summary shadowed by its UUID twin is not published.
-  const conditions: string[] = [`NOT ${shadowedCodexRolloutSummary('session_trace_summary')}`];
+  const conditions: string[] = [];
   const values: unknown[] = [];
   appendDateRangeConditions(
     conditions,
@@ -73,7 +72,8 @@ export function listWarehouseSessionTraceSummaries(
     params.date_to,
   );
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  return getDb().prepare(`
+  // One row per session (traceSummaryRankCte), chosen before the date window.
+  return getDb().prepare(`${traceSummaryRankCte}
     SELECT
       session_id,
       trace_id,
@@ -95,8 +95,20 @@ export function listWarehouseSessionTraceSummaries(
       quality_grade,
       projection_version,
       updated_at
-    FROM session_trace_summary
+    FROM listed_summaries
     ${where}
     ORDER BY datetime(COALESCE(started_at, updated_at)) ASC, session_id ASC
   `).all(...values) as WarehouseSessionTraceSummaryRow[];
+}
+
+/**
+ * Session ids whose summary another summary of the same session supersedes
+ * (traceSummaryRankCte), across all history rather than a publish window:
+ * a Codex rollout alias published before the warehouse collapsed aliases is
+ * still in the warehouse, and publishing retracts it.
+ */
+export function listWarehouseSupersededSessionIds(): string[] {
+  return (getDb().prepare(`${traceSummaryRankCte}
+    SELECT session_id FROM ranked_summary_rows WHERE summary_rank > 1 ORDER BY session_id
+  `).all() as Array<{ session_id: string }>).map(row => row.session_id);
 }

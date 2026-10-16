@@ -234,23 +234,35 @@ function browserSessionKey(alias: string): string {
 }
 
 /**
- * A Codex trace summary keyed by rollout basename whose session also has one
- * under its native UUID. A summary is event-backed when the session has events
- * and projects the transcript only when it has none, so the watcher's rollout
- * summary (transcript, no usage) and the UUID one (events, usage and cost) both
- * exist for one session. Trace lists show the UUID one, as every Claude
- * session's summary is event-backed; the rollout row stays stored.
+ * One trace summary per session, ranked as `sessionListCte` ranks browser rows.
+ * A summary is event-backed when its session has events and projects the
+ * transcript only when it has none. The watcher keys a Codex session by its
+ * rollout basename (one summary per rollout file, transcript, no usage) and
+ * import/OTEL by its native UUID (events, usage and cost), so one session can
+ * hold several summaries. The UUID one wins, as every Claude session's summary
+ * is event-backed; otherwise the rollout with the most observations. Every row
+ * stays stored; `summary_rank > 1` names the ones a reader leaves out.
  */
-export function shadowedCodexRolloutSummary(alias: string): string {
-  return `(${alias}.agent_type = 'codex' AND ${alias}.session_id GLOB '${codexRolloutGlob}'
-    AND EXISTS (SELECT 1 FROM session_trace_summary twin
-      WHERE twin.session_id IN (substr(${alias}.session_id, -36), lower(substr(${alias}.session_id, -36)))
-        AND twin.agent_type = 'codex'))`;
-}
+export const traceSummaryRankCte = `WITH ranked_summaries AS (
+  SELECT *, CASE
+      WHEN agent_type = 'codex' AND session_id GLOB '${codexRolloutGlob}' THEN lower(substr(session_id, -36))
+      WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}' THEN lower(session_id)
+      ELSE session_id END AS summary_key
+  FROM session_trace_summary
+), ranked_summary_rows AS (
+  SELECT *, ROW_NUMBER() OVER (
+    PARTITION BY agent_type, summary_key
+    ORDER BY CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexRolloutGlob}' THEN 1 ELSE 0 END,
+      observation_count DESC, session_id ASC
+  ) AS summary_rank FROM ranked_summaries
+), listed_summaries AS (SELECT * FROM ranked_summary_rows WHERE summary_rank = 1)`;
 
 const CODEX_ROLLOUT_ID = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
-/** The ids a read scoped to one session matches: a Codex rollout also names its native UUID. */
+/**
+ * The keys a read scoped to one session matches against `summary_key`: a Codex
+ * rollout names its native UUID, which keys every summary of that session.
+ */
 export function codexSessionAliases(sessionId: string): string[] {
   const uuid = CODEX_ROLLOUT_ID.exec(sessionId)?.[1];
   return uuid ? [...new Set([sessionId, uuid, uuid.toLowerCase()])] : [sessionId];
