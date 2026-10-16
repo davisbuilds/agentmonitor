@@ -48,7 +48,10 @@ Rows expose harness-scoped `id`, source `session_id`, `agent`, UTC `started_at`
 message content, not that the original source file still exists. Counts include
 separately identified subagents and are neither execution counts nor usage totals.
 Known Codex aliases, including API/hook-generated `codex-summary` UUIDs,
-reconcile before filtering; benchmark events are excluded.
+reconcile before filtering; benchmark events are excluded. A Codex event names its
+session by the exact rollout or UUID grammar alone, since events carry no
+integration mode; before 2026-10-16, events an older import keyed by a rollout
+basename were listed as a second, browser-less identity.
 Dates use the selected browser start when present, otherwise first timed event
 evidence—not necessarily the actual beginning of work. Unresolved timestamps are
 counted across the requested agent's inventory, independently of date filters.

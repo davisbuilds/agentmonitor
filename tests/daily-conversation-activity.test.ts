@@ -57,6 +57,9 @@ before(async () => {
   db.prepare(`INSERT INTO browsing_sessions(id,agent,integration_mode,started_at)
     VALUES (?,'codex','codex-import','2026-09-01T10:00:00Z')`).run(uuid);
   message.run(uuid, 0, '2026-09-14T12:00:00Z');
+  // An older import keyed some Codex events by the rollout file.
+  db.prepare(`INSERT INTO events(session_id,agent_type,event_type,source,client_timestamp)
+    VALUES (?,'codex','user_prompt','import','2026-09-11T12:00:00Z')`).run(`rollout-2026-09-01T10-00-00-${uuid}`);
   // Fork history remains browsable, but before-creation evidence is not work.
   db.prepare("UPDATE browsing_sessions SET started_at='2026-09-15T14:00:00Z' WHERE id='child-0'").run();
   message.run('child-0', 1, '2026-09-14T12:00:00Z');
@@ -95,6 +98,12 @@ test('all recognized projections contribute dated work without inheriting earlie
   assert.deepEqual(body.data, [
     { date: '2026-09-13', agent: 'codex', classification: 'conversation', count: 1 },
     { date: '2026-09-14', agent: 'codex', classification: 'conversation', count: 1 },
+  ]);
+});
+test('a Codex event stored under its rollout basename is that conversation\'s work', async () => {
+  const body = await (await fetch(`${base}/api/v2/activity/daily?since=2026-09-11&until=2026-09-11`)).json();
+  assert.deepEqual(body.data, [
+    { date: '2026-09-11', agent: 'codex', classification: 'conversation', count: 1 },
   ]);
 });
 test('daily windows reject missing, malformed, extra and oversized parameters', async () => {

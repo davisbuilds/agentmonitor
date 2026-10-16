@@ -102,6 +102,26 @@ test('known aliases reconcile before date filtering and preserve projected date'
   assert.equal((await list('?agent=codex&date_from=2026-03-04')).total, 0);
 });
 
+test('Codex events stored under a rollout basename join that session, not a second identity', async () => {
+  const { getDb } = await import('../src/db/connection.js');
+  const db = getDb();
+  const malformed = `rollout-abcd-ef-ghTij-kl-mn-${uuid}`;
+  const insert = db.prepare(`INSERT INTO events (session_id, agent_type, event_type, source, tokens_in, client_timestamp)
+    VALUES (?, 'codex', 'api_request', 'import', 7, '2026-03-05T09:00:00Z')`);
+  try {
+    // An older import keyed some Codex events by the rollout file, in either case.
+    insert.run(rollout);
+    insert.run(`rollout-2026-03-01T09-00-00-${uuid.toUpperCase()}`);
+    const result = await list('?agent=codex');
+    assert.deepEqual(result.data.map((row: { session_id: string }) => row.session_id), [uuid]);
+    assert.equal(result.data[0].has_browser_history, true);
+    insert.run(malformed);
+    assert.equal((await list('?agent=codex')).total, 2, 'a malformed rollout id stays its own identity');
+  } finally {
+    db.prepare("DELETE FROM events WHERE agent_type = 'codex' AND session_id LIKE 'rollout-%'").run();
+  }
+});
+
 test('ingested Codex API and hook summaries share native identity, including later JSONL history', async () => {
   const { getDb } = await import('../src/db/connection.js');
   const { insertEvent } = await import('../src/db/queries.js');

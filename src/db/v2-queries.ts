@@ -317,6 +317,19 @@ function observedBrowserIdentity(): string {
     ELSE id END`;
 }
 
+/**
+ * The session an event row stands for. Events carry no integration mode, so a
+ * Codex event names its session by the exact rollout or UUID grammar alone: an
+ * older import keyed some events by the rollout basename, and they belong to
+ * the same native session as the browser rows `observedBrowserIdentity` maps.
+ */
+function observedEventIdentity(): string {
+  return `CASE
+    WHEN agent_type = 'codex' AND session_id GLOB '${codexRolloutGlob}' THEN lower(substr(session_id, -36))
+    WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}' THEN lower(session_id)
+    ELSE session_id END`;
+}
+
 const activityClass = `CASE WHEN b.relationship_type = 'subagent' THEN 'delegated'
   WHEN b.relationship_type = 'internal' THEN 'internal'
   WHEN b.relationship_type = 'conversation' AND b.has_user_evidence THEN 'conversation'
@@ -334,8 +347,7 @@ const observedSessionsCte = `${sessionListCte},
     FROM listed_sessions
   ), event_evidence AS (
     SELECT CASE WHEN agent_type = 'claude_code' THEN 'claude' ELSE agent_type END AS agent,
-      CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}'
-        THEN lower(session_id) ELSE session_id END AS session_id,
+      ${observedEventIdentity()} AS session_id,
       MIN(CASE WHEN client_timestamp IS NULL
         THEN strftime('%Y-%m-%dT%H:%M:%fZ', created_at)
         ELSE ${observedInstant('client_timestamp')} END) AS instant,
@@ -426,8 +438,7 @@ export function getDailyConversationActivity(since: string, until: string) {
   const through = localDayEndExclusive(until);
   const eventEvidence = `SELECT
     CASE WHEN agent_type = 'claude_code' THEN 'claude' ELSE agent_type END,
-    CASE WHEN agent_type = 'codex' AND session_id GLOB '${codexUuidGlob}'
-      THEN lower(session_id) ELSE session_id END,
+    ${observedEventIdentity()},
     ${activityEventInstant('events')}
     FROM events INDEXED BY idx_events_daily_activity WHERE ${excludeBenchmarkUsageCondition('events')}
       AND (event_type IN ('user_prompt', 'tool_use') OR ${usageMetricPresenceCondition('events')})`;

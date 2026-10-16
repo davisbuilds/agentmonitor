@@ -239,7 +239,8 @@ supersedes that were published earlier.
 The additive `/api/v2/activity/sessions` read reconciles ordinary event evidence
 with browser identities without requiring a transcript. It normalizes the known
 `claude_code` event / `claude` browser labels, reuses the conservative Codex alias
-grammar, and exposes usage, event, browser and readable-transcript evidence
+grammar (for events, which carry no integration mode, the exact rollout or UUID
+grammar alone, as one expression shared with daily activity), and exposes usage, event, browser and readable-transcript evidence
 separately. No new persistent summary is created. It preserves projected browser
 starts where present; otherwise it uses first timed event evidence. Unknown
 timezone evidence remains unresolved. This observed inventory includes subagents
