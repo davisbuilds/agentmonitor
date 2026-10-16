@@ -26,8 +26,8 @@
 
   const tabs: Array<{ id: Tab; label: string }> = [
     { id: 'monitor', label: 'Monitor' },
-    { id: 'sessions', label: 'Sessions' },
     { id: 'analytics', label: 'Analytics' },
+    { id: 'sessions', label: 'Sessions' },
     { id: 'benchmarks', label: 'Benchmarks' },
   ];
 

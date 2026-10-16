@@ -1,6 +1,6 @@
 # Svelte 5 Frontend
 
-Vite SPA served at `/app/` with Monitor, Sessions, Analytics, and Benchmarks tabs. An agent card on Monitor opens that session's live stream (`components/monitor/MonitorStream.svelte`).
+Vite SPA served at `/app/` with Monitor, Analytics, Sessions, and Benchmarks tabs. An agent card on Monitor opens that session's live stream (`components/monitor/MonitorStream.svelte`).
 This is the canonical product surface for AgentMonitor.
 
 See root `AGENTS.md` for project overview, API contract (V2 endpoints this app consumes), and shared conventions.
