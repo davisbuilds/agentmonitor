@@ -52,19 +52,6 @@ so later readers know what still needs checking.
   Expose usage-only versus browsable coverage explicitly without fabricating
   transcripts, and audit each aggregate before calling its count conversations.
 
-### Browser sessions known only from telemetry stay "live"
-
-- **What**: nothing ends a browser session that has no transcript. Sessions
-  created from Codex OTEL keep `live_status = 'live'` after their activity
-  stops, and so do some Antigravity sessions.
-- **Why or evidence**: on 2026-10-16 most live-marked rows on a local store
-  were Codex OTEL rows idle for over a day, the oldest since July; transcript
-  sessions end on their own. `/api/v2/live/sessions` (the Monitor's live list)
-  reads `live_status`.
-- **Next**: decide what ends a telemetry-only session (an idle timeout, or the
-  producer's own end signal) and apply it on read or with a sweep; check what
-  the Monitor shows from these rows first.
-
 ### Codex thread names and app-job detection
 
 - **What**: Codex sessions are titled by their first real prompt, or a subagent

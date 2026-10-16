@@ -111,11 +111,36 @@ before(async () => {
     10,
     'active-across-window',
   );
+  // Live at the response instant (2026-07-10T12:00Z): active two minutes
+  // before it, while the parsed transcript still ends the previous evening.
   getDb().prepare(`
     UPDATE browsing_sessions
-    SET live_status = 'live'
+    SET live_status = 'live', last_item_at = '2026-07-10T11:58:00Z'
     WHERE id = 'active-across-window'
   `).run();
+
+  // Stored as live, but quiet since the previous evening: its status was
+  // written then and never rewritten, so it is not active in the window.
+  const staleLivePath = '/tmp/.claude/projects/-Users-test-Dev-stale-window/stale.jsonl';
+  const staleLive = parseSessionMessages([
+    JSON.stringify({
+      type: 'user',
+      cwd: '/work/stale-window',
+      timestamp: '2026-07-09T23:00:00Z',
+      message: { role: 'user', content: [{ type: 'text', text: 'Keep working.' }] },
+    }),
+  ].join('\n'), 'stale-live', staleLivePath);
+  insertParsedSession(getDb(), staleLive, staleLivePath, 10, 'stale-live');
+  getDb().prepare(`
+    UPDATE browsing_sessions
+    SET live_status = 'live', last_item_at = '2026-07-09T23:00:00Z'
+    WHERE id = 'stale-live'
+  `).run();
+  const staleWindowInvocationPath = '/tmp/.claude/projects/-Users-test-Dev-stale-window/invocation.jsonl';
+  const staleWindowInvocation = parseSessionMessages([
+    line('2026-07-10T10:00:00Z', 'stale-window-read', '/work/stale-window'),
+  ].join('\n'), 'stale-window-invocation', staleWindowInvocationPath);
+  insertParsedSession(getDb(), staleWindowInvocation, staleWindowInvocationPath, 10, 'stale-window-invocation');
 
   const activeWindowInvocationPath =
     '/tmp/.claude/projects/-Users-test-Dev-active-window/invocation.jsonl';
@@ -271,6 +296,18 @@ test('classifies in-window consultations against earlier history in the same ses
     repeat_no_compaction: 0,
     unclassifiable: 0,
   });
+});
+
+test('a session stored as live but quiet before the window is not active in it', () => {
+  const result = getAnalyticsSkillConsultations({
+    agent: 'claude',
+    project: 'stale-window',
+    date_from: '2026-07-10',
+    date_to: '2026-07-10',
+  }, new Date('2026-07-10T12:00:00Z'));
+  const row = result.byHarness[0]?.skills.find(skill => skill.name === 'test-strategy');
+  assert.ok(row);
+  assert.equal(row.sessionsInWindow, 1, 'only the session that invoked the skill in the window');
 });
 
 test('counts an active session through the response time despite a stale parsed end', () => {

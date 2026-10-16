@@ -186,6 +186,16 @@ rewrites from the first difference, so an appended transcript writes only its ne
 rows while a rewritten or truncated one is still replaced where it changed. The
 live turn projection is rebuilt from the start when an earlier message changed.
 
+A session's live status says how recently it was active: live within five
+minutes, active within fifteen, ended after that (`src/live/live-status.ts`).
+Writers store the status they derive, but a row that stops receiving writes
+keeps it, so a producer that goes quiet (most often a session known only from
+telemetry) would read as live indefinitely. Readers (session rows, the live
+list's filters, the skill-context `active` flag, Skills date windows) re-derive
+a stored live or active status from the last activity; an explicit end, or any
+other stored status, is read as stored. The SQL and TypeScript readings agree,
+and both read an offset-free activity time as UTC, as SQLite does.
+
 Search indexes the text of the stored content blocks. The FTS5 index's content
 table is the `messages_search` view, which extracts every string value except
 block bookkeeping keys outside a tool's input with `json_tree`, and the

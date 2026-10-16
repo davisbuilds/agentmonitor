@@ -76,6 +76,7 @@ import type {
   BenchmarkCostBasis,
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
+import { effectiveLiveStatus, effectiveLiveStatusSql } from '../live/live-status.js';
 import { normalizeModelId, pricingRegistry, UNPRICEABLE_MODELS } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
@@ -112,7 +113,7 @@ function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
     user_message_count: row.user_message_count,
     parent_session_id: row.parent_session_id,
     relationship_type: row.relationship_type,
-    live_status: row.live_status,
+    live_status: effectiveLiveStatus(row.live_status, row.last_item_at ?? row.ended_at),
     last_item_at: row.last_item_at,
     integration_mode: row.integration_mode,
     fidelity: row.fidelity,
@@ -614,7 +615,7 @@ export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessi
     values.push(params.agent);
   }
   if (params.live_status) {
-    conditions.push('live_status = ?');
+    conditions.push(`${effectiveLiveStatusSql()} = ?`);
     values.push(params.live_status);
   }
   if (params.fidelity) {
@@ -622,7 +623,7 @@ export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessi
     values.push(params.fidelity);
   }
   if (params.active_only) {
-    conditions.push("COALESCE(live_status, '') IN ('live', 'active')");
+    conditions.push(`COALESCE(${effectiveLiveStatusSql()}, '') IN ('live', 'active')`);
   }
 
   const filterWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -2436,11 +2437,13 @@ export function getAnalyticsSkillsHealth(params: AnalyticsParams = {}): SkillHea
 
 export function getAnalyticsSkillConsultations(
   params: AnalyticsParams = {},
+  now?: Date,
 ): SkillConsultationAnalytics {
   return getSkillConsultationAnalytics(
     getDb(),
     params,
     loadCatalogSnapshots(),
+    { now },
   );
 }
 
@@ -2652,7 +2655,7 @@ export function selectSessionSkillContextSession(
   sessionId: string,
 ): SessionSkillContextSessionRow | undefined {
   return db.prepare(`
-    SELECT id, agent, started_at, ended_at, live_status,
+    SELECT id, agent, started_at, ended_at, ${effectiveLiveStatusSql()} AS live_status,
            skill_context_capabilities_json
     FROM browsing_sessions
     WHERE id = ?

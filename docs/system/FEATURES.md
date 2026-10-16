@@ -125,6 +125,10 @@ product never substitutes a misleading `0%` for missing evidence.
   `#sessions?view=pinned` links redirect to it.
 - The global `Cmd/Ctrl+K` palette searches recent sessions and transcript matches
   from any tab.
+- A session reads as live while it was active in the last five minutes and as
+  active within fifteen, whatever status was last stored; before 2026-10-16 a
+  session whose producer went quiet, such as one known only from telemetry,
+  stayed live indefinitely and counted in every recent Skills window.
 - Sessions lists and Analytics count recognized Codex rollout/UUID aliases once
   and prefer JSONL history; before 2026-10-16 Analytics counted such a session,
   and its messages, twice. Existing detail links remain valid. A browser session is a

@@ -4,6 +4,7 @@ import { resolveVersionAt, type CatalogSnapshot } from './catalog.js';
 import { extractCanonicalCodexSessionId } from './invocation-detection.js';
 import { selectSkillInvocationOccurrences, type SkillInvocationOccurrence } from './invocation-ledger.js';
 import { dateParamLowerBound, dateParamUpperExclusive } from '../util/local-day.js';
+import { effectiveLiveStatusSql } from '../live/live-status.js';
 
 interface SessionRow {
   id: string;
@@ -209,7 +210,7 @@ function selectScopedSessions(
   if (from) {
     intervalClauses.push(`
       datetime(CASE
-        WHEN live_status IN ('live', 'active', 'available') THEN ?
+        WHEN ${effectiveLiveStatusSql('', asOf)} IN ('live', 'active', 'available') THEN ?
         ELSE COALESCE(ended_at, last_item_at, ?)
       END) >= datetime(?)
     `);
