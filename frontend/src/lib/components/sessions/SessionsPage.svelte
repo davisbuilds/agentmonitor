@@ -8,7 +8,7 @@
     type PinnedMessage,
     type SearchResult,
   } from '../../api/client';
-  import { timeAgo, agentHexColor } from '../../format';
+  import { timeAgo, agentHexColor, agentDisplayName } from '../../format';
   import { sessionTitle } from '../../session-text';
   import {
     consumePendingSessionNavigation,
@@ -16,6 +16,7 @@
   } from '../../stores/router.svelte';
   import { buildSessionsHash, parseSessionsHash, type SessionsRouteState, type SessionsSearchSort } from '../../route-state';
   import { filterPinnedMessages, sessionsListMode, startsSearch } from '../../sessions-browse';
+  import { describeCoverage } from '../../session-capabilities';
   import { SessionList } from '../../stores/session-list.svelte';
   import { createSearchStore } from '../../stores/search.svelte';
   import { pins } from '../../stores/pins.svelte';
@@ -23,7 +24,7 @@
   import SearchResults from './SearchResults.svelte';
   import PinnedMessages from './PinnedMessages.svelte';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
-  import { Select, Badge, EmptyState, Button, InfoTip, FilterBar } from '../ui';
+  import { Select, EmptyState, Button, InfoTip, FilterBar, Panel, DataTable } from '../ui';
 
   const list = new SessionList();
   // Full-text results for the query box. The page owns the URL, so the store
@@ -62,6 +63,13 @@
     }
     return 'Sessions known only from telemetry have no text to search.';
   });
+
+  const sessionColumns = [
+    { key: 'session', label: 'Session' },
+    { key: 'project', label: 'Project', width: '12rem' },
+    { key: 'message_count', label: 'Messages', numeric: true, width: '6rem' },
+    { key: 'started_at', label: 'Started', align: 'right' as const, width: '7rem' },
+  ];
 
   // Subagents shown under their parent row, by parent id.
   let expandedChildren = $state<Record<string, BrowsingSession[] | 'loading' | 'error'>>({});
@@ -373,67 +381,77 @@
       {:else if mode === 'pinned'}
         <PinnedMessages visible={visiblePins} onopen={openPin} />
       {:else}
-      <!-- Session List -->
-        <div class="divide-y divide-line/60">
-          {#each list.sessions as session (session.id)}
-            {@const childState = expandedChildren[session.id]}
-            <div>
-              <div class="flex items-center gap-1">
-                <button
-                  class="group min-w-0 flex-1 rounded-sm px-2 py-2.5 text-left transition-colors hover:bg-surface"
-                  onclick={() => selectSession(session.id)}
-                >
-                  <div class="flex items-center justify-between gap-3">
-                    <div class="flex min-w-0 flex-1 items-center gap-2">
+        {#if list.sessions.length > 0}
+          <Panel padded={false}>
+            <DataTable
+              columns={sessionColumns}
+              rows={list.sessions}
+              rowKey={(session) => session.id}
+              onrowclick={(session) => selectSession(session.id)}
+              expanded={(session) => expandedChildren[session.id] !== undefined}
+            >
+              {#snippet cell(session, column)}
+                {#if column.key === 'session'}
+                  <div class="flex max-w-[44rem] min-w-0 flex-col">
+                    <button
+                      type="button"
+                      class="truncate text-left text-text"
+                      title={sessionTitle(session)}
+                      onclick={(event) => { event.stopPropagation(); selectSession(session.id); }}
+                    >{sessionTitle(session)}</button>
+                    <span class="flex items-center gap-1.5 text-meta text-text-faint">
                       <span
                         class="inline-block h-2 w-2 shrink-0 rounded-full"
                         style="background-color: {agentHexColor(session.agent)}"
                       ></span>
-                      <span class="truncate text-body text-text group-hover:text-text">{sessionTitle(session)}</span>
-                    </div>
-                    <div class="flex shrink-0 items-center gap-2 text-meta text-text-faint">
-                      {#if session.project}
-                        <Badge tone="neutral">{session.project}</Badge>
+                      <span>{agentDisplayName(session.agent)}</span>
+                      {#if session.child_count}
+                        <span aria-hidden="true">·</span>
+                        <button
+                          type="button"
+                          class="rounded-sm transition-colors hover:text-text"
+                          aria-expanded={expandedChildren[session.id] !== undefined && expandedChildren[session.id] !== 'error'}
+                          onclick={(event) => { event.stopPropagation(); void toggleChildren(session.id); }}
+                        >{session.child_count} {session.child_count === 1 ? 'subagent' : 'subagents'}</button>
                       {/if}
-                      <SessionCoverage capabilities={session.capabilities} variant="row" />
-                      <span class="tabular font-mono">{session.message_count} msgs</span>
-                      {#if session.started_at}
-                        <span class="tabular font-mono">{timeAgo(session.started_at)}</span>
+                      {#if !describeCoverage(session.capabilities).full}
+                        <span aria-hidden="true">·</span>
+                        <SessionCoverage capabilities={session.capabilities} variant="row" />
                       {/if}
-                    </div>
+                    </span>
                   </div>
-                </button>
-                {#if session.child_count}
-                  <button
-                    type="button"
-                    class="shrink-0 rounded-sm px-2 py-1 text-meta text-text-faint transition-colors hover:bg-surface hover:text-text"
-                    aria-expanded={childState !== undefined && childState !== 'error'}
-                    onclick={() => toggleChildren(session.id)}
-                  >
-                    {session.child_count} {session.child_count === 1 ? 'subagent' : 'subagents'}
-                  </button>
+                {:else if column.key === 'project'}
+                  <span class="text-text-muted">{session.project ?? '—'}</span>
+                {:else if column.key === 'message_count'}
+                  {session.message_count}
+                {:else if column.key === 'started_at'}
+                  <span title={session.started_at ?? undefined}>{session.started_at ? timeAgo(session.started_at) : '—'}</span>
                 {/if}
-              </div>
-              {#if childState === 'loading'}
-                <div class="py-1.5 pl-7 text-meta text-text-faint">Loading subagents…</div>
-              {:else if childState === 'error'}
-                <div class="py-1.5 pl-7 text-meta text-danger">Could not load subagents.</div>
-              {:else if childState}
-                <div class="mb-1 ml-3 border-l border-line pl-2">
-                  {#each childState as child (child.id)}
-                    <button
-                      class="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-surface"
-                      onclick={() => selectSession(child.id)}
-                    >
-                      <span class="truncate text-meta text-text-muted">{sessionTitle(child)}</span>
-                      <span class="shrink-0 tabular font-mono text-meta text-text-faint">{child.message_count} msgs</span>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/each}
-        </div>
+              {/snippet}
+              {#snippet detail(session)}
+                {@const childState = expandedChildren[session.id]}
+                {#if childState === 'loading'}
+                  <div class="py-1.5 pl-4 text-meta text-text-faint">Loading subagents…</div>
+                {:else if childState === 'error'}
+                  <div class="py-1.5 pl-4 text-meta text-danger">Could not load subagents.</div>
+                {:else if childState}
+                  <div class="ml-1 border-l border-line pl-2">
+                    {#each childState as child (child.id)}
+                      <button
+                        type="button"
+                        class="flex w-full items-center justify-between gap-3 rounded-sm px-2 py-1.5 text-left transition-colors hover:bg-surface-2"
+                        onclick={() => selectSession(child.id)}
+                      >
+                        <span class="truncate text-meta text-text-muted">{sessionTitle(child)}</span>
+                        <span class="shrink-0 tabular font-mono text-meta text-text-faint">{child.message_count} msgs</span>
+                      </button>
+                    {/each}
+                  </div>
+                {/if}
+              {/snippet}
+            </DataTable>
+          </Panel>
+        {/if}
 
         {#if list.loading}
           <div class="py-8 text-center text-meta text-text-muted">Loading sessions…</div>

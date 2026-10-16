@@ -986,37 +986,7 @@ function initSchemaLocked(db: Database): void {
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_sts_trace ON session_trace_summary(trace_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_sts_project ON session_trace_summary(project)');
 
-  // FTS5 full-text search on message content
-  db.exec(`
-    CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
-      content,
-      content=messages,
-      content_rowid=id,
-      tokenize='porter unicode61'
-    );
-  `);
-
-  // Triggers to keep FTS index in sync with messages table
-  const ftsTriggersExist = db.prepare(
-    "SELECT name FROM sqlite_master WHERE type='trigger' AND name='messages_fts_insert'"
-  ).get();
-
-  if (!ftsTriggersExist) {
-    db.exec(`
-      CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
-        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
-      END;
-
-      CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
-      END;
-
-      CREATE TRIGGER messages_fts_update AFTER UPDATE OF content ON messages BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, old.content);
-        INSERT INTO messages_fts(rowid, content) VALUES (new.id, new.content);
-      END;
-    `);
-  }
+  ensureMessageSearchIndex(db);
 
   // File-watcher state tracking
   db.exec(`
@@ -1064,9 +1034,84 @@ export function initSchema(): void {
   initialize.immediate();
 }
 
+// Search indexes what a message says. Messages store JSON content blocks, and
+// indexing them raw made the block keys ("type", "text") match nearly every
+// message and put JSON syntax in snippets. The index reads every string value
+// in the blocks except these bookkeeping keys, so text, thinking, tool names,
+// tool inputs and tool results stay searchable. A tool's input is the tool's
+// own data, so a field there named "type" or "id" is kept.
+const SEARCH_SKIPPED_KEYS = ['type', 'id', 'tool_use_id', 'media_type'];
+
+/** SQL for the searchable text of a stored `messages.content` value. */
+function messageSearchText(content: string): string {
+  const skipped = SEARCH_SKIPPED_KEYS.map(key => `'${key}'`).join(', ');
+  return `CASE WHEN json_valid(${content}) THEN (
+      SELECT group_concat(json_tree.value, ' ') FROM json_tree(${content})
+      WHERE json_tree.type = 'text' AND (json_tree.key IS NULL OR json_tree.key NOT IN (${skipped})
+        OR json_tree.path GLOB '$[[]*].input' OR json_tree.path GLOB '$[[]*].input[.[]*')
+    ) ELSE ${content} END`;
+}
+
+const MESSAGE_SEARCH_VIEW = `CREATE VIEW messages_search AS SELECT id, ${messageSearchText('content')} AS content FROM messages`;
+
+const MESSAGE_SEARCH_FTS = `CREATE VIRTUAL TABLE messages_fts USING fts5(
+  content, content='messages_search', content_rowid='id', tokenize='porter unicode61'
+)`;
+
+/**
+ * Refill the search index from the messages. FTS5's own 'rebuild' (and the
+ * rank-1 'integrity-check') scan the content table from inside the index, where
+ * the view's json_tree cannot be opened ("no such table: main.json_tree"), so
+ * the text is derived by this statement instead. Lookups by row (snippets,
+ * highlights) read the view and work.
+ */
+export function rebuildMessageSearchIndex(db: Database): void {
+  db.exec(`
+    INSERT INTO messages_fts(messages_fts) VALUES ('delete-all');
+    INSERT INTO messages_fts(rowid, content) SELECT id, ${messageSearchText('content')} FROM messages;
+  `);
+}
+
+/**
+ * The search index's content table is a view that extracts the text, so no
+ * text is stored twice, and its triggers derive the same text in SQL, so every
+ * writer (and the sqlite3 shell) keeps it in step without a registered
+ * function. An index built over the raw JSON is replaced and rebuilt.
+ */
+function ensureMessageSearchIndex(db: Database): void {
+  const stored = (name: string) => (db.prepare('SELECT sql FROM sqlite_master WHERE name = ?')
+    .get(name) as { sql: string } | undefined)?.sql;
+  // Rebuild when the index reads anything but the view, or the view extracts
+  // text by a rule other than the current one.
+  const current = stored('messages_fts')?.includes("content='messages_search'") === true
+    && stored('messages_search') === MESSAGE_SEARCH_VIEW;
+  if (current) return;
+
+  db.exec(`
+    DROP TRIGGER IF EXISTS messages_fts_insert;
+    DROP TRIGGER IF EXISTS messages_fts_delete;
+    DROP TRIGGER IF EXISTS messages_fts_update;
+    DROP TABLE IF EXISTS messages_fts;
+    DROP VIEW IF EXISTS messages_search;
+    ${MESSAGE_SEARCH_VIEW};
+    ${MESSAGE_SEARCH_FTS};
+    CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
+      INSERT INTO messages_fts(rowid, content) VALUES (new.id, ${messageSearchText('new.content')});
+    END;
+    CREATE TRIGGER messages_fts_delete AFTER DELETE ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, ${messageSearchText('old.content')});
+    END;
+    CREATE TRIGGER messages_fts_update AFTER UPDATE OF content ON messages BEGIN
+      INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.id, ${messageSearchText('old.content')});
+      INSERT INTO messages_fts(rowid, content) VALUES (new.id, ${messageSearchText('new.content')});
+    END;
+  `);
+  rebuildMessageSearchIndex(db);
+}
+
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 20;
+const DATA_SCHEMA_VERSION = 21;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1119,6 +1164,9 @@ export function runDataMigrations(db: Database): void {
     if (current < 18) repairStoredLiveReasoning(db);
     if (current < 19) refreshSessionTitles(db);
     if (current < 20) relabelCodexInstructionItems(db);
+    // v21 introduces no data correction: the schema guard replaces a search
+    // index built over the raw JSON with one over the message text, which read
+    // commands only install when the version advances.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

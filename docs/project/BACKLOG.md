@@ -33,8 +33,8 @@ so later readers know what still needs checking.
 
 - **What**: Sessions lists and child lookups reconcile known Codex rollout/UUID
   aliases, and Claude subagents link to the parent session their transcript
-  records (2026-10-13). Analytics and the warehouse export count a Codex
-  session once (2026-10-16). Search, Quality and projection storage still have
+  records (2026-10-13). Quality, Analytics and the warehouse export count a
+  Codex session once (2026-10-16). Search and projection storage still have
   distinct identity semantics, and only the Sessions list hides internal jobs
   (Codex compaction, memory and app background threads). Consumers that stored
   earlier reads keep their duplicates: a downstream store of the session list
@@ -79,22 +79,6 @@ so later readers know what still needs checking.
   (`CODEX_APP_JOB_PREFIXES` in `src/parser/session-title.ts`).
 - **Revisit when**: Codex writes thread names or a job marker into rollouts or
   telemetry, or Codex app jobs reappear in the Sessions list.
-
-### Full-text search indexes message JSON, not message text
-
-- **What**: `messages_fts` indexes `messages.content` as stored, and the Claude
-  parser stores it as JSON-serialized content blocks. Search snippets in the
-  Sessions search (and the Cmd/Ctrl+K palette) therefore show JSON syntax around
-  the match, and the block keys (`type`, `text`) are indexed tokens, so a query
-  for either word matches nearly every message.
-- **Why or evidence**: seen 2026-10-14 while folding Search into Sessions: a
-  fixture message stored the way `src/parser/claude-code.ts` stores content
-  rendered its snippet as `[{"type":"text","text":"…"}]`. Predates that change;
-  the old Search page used the same read. The key-token match follows from the
-  tokenizer and is unmeasured on real data.
-- **Next**: index extracted text (text and thinking blocks, tool names) instead
-  of raw JSON, with an FTS rebuild migration, and check snippet offsets still
-  line up with what the viewer shows.
 
 ### Explicit provenance for unresolved historical timestamps
 
