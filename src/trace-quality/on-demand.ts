@@ -11,7 +11,7 @@
  * the frontend contract are all unchanged.
  */
 import { getDb } from '../db/connection.js';
-import { codexSessionAliases, lookupSessionTitles, shadowedCodexRolloutSummary, type SessionTitleFields } from '../db/v2-queries.js';
+import { codexSessionAliases, lookupSessionTitles, traceSummaryRankCte, type SessionTitleFields } from '../db/v2-queries.js';
 import { untitledSessionName } from '../parser/session-title.js';
 import type {
   TraceQualityObservation,
@@ -95,12 +95,12 @@ function normalizedOffset(value: number | undefined): number {
 
 /** Build the WHERE clause for the summary-backed list from the supported filters. */
 function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string; values: unknown[] } {
-  const clauses: string[] = [`NOT ${shadowedCodexRolloutSummary('session_trace_summary')}`];
+  const clauses: string[] = [];
   const values: unknown[] = [];
   if (params.session_id) {
-    const ids = codexSessionAliases(params.session_id);
-    clauses.push(`session_id IN (${ids.map(() => '?').join(', ')})`);
-    values.push(...ids);
+    const keys = codexSessionAliases(params.session_id);
+    clauses.push(`summary_key IN (${keys.map(() => '?').join(', ')})`);
+    values.push(...keys);
   }
   if (params.project) {
     clauses.push('project = ?');
@@ -200,9 +200,11 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
   const offset = normalizedOffset(params.offset);
   const { where, values } = buildSummaryWhere(params);
 
-  const total = (db.prepare(`SELECT COUNT(*) AS c FROM session_trace_summary ${where}`).get(...values) as { c: number }).c;
-  const rows = db.prepare(`
-    SELECT * FROM session_trace_summary
+  // One summary per session (traceSummaryRankCte), chosen before the filters.
+  const total = (db.prepare(`${traceSummaryRankCte} SELECT COUNT(*) AS c FROM listed_summaries ${where}`)
+    .get(...values) as { c: number }).c;
+  const rows = db.prepare(`${traceSummaryRankCte}
+    SELECT * FROM listed_summaries
     ${where}
     ORDER BY datetime(COALESCE(started_at, updated_at)) DESC, session_id DESC
     LIMIT ? OFFSET ?
@@ -212,8 +214,8 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
 
   // Coverage describes the full filtered selection, not just the current page —
   // the summary table is ~one row per session, so the extra scan is cheap.
-  const coverageRows = db.prepare(`
-    SELECT observation_count, coverage_json FROM session_trace_summary ${where}
+  const coverageRows = db.prepare(`${traceSummaryRankCte}
+    SELECT observation_count, coverage_json FROM listed_summaries ${where}
   `).all(...values) as CoverageRow[];
 
   return {

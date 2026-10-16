@@ -33,19 +33,16 @@ so later readers know what still needs checking.
 
 - **What**: Sessions lists and child lookups reconcile known Codex rollout/UUID
   aliases, and Claude subagents link to the parent session their transcript
-  records (2026-10-13). Quality lists one summary per Codex session, the
-  event-backed UUID one (2026-10-16). Analytics, Search, the warehouse export and
-  projection storage still have distinct identity semantics, and only the
-  Sessions list hides internal jobs (Codex compaction, memory and app background
-  threads).
+  records (2026-10-13). Quality, Analytics and the warehouse export count a
+  Codex session once (2026-10-16). Search and projection storage still have
+  distinct identity semantics, and only the Sessions list hides internal jobs
+  (Codex compaction, memory and app background threads). Consumers that stored
+  earlier reads keep their duplicates: a downstream store of the session list
+  from before 2026-10-13 can hold a Codex session under both ids.
 - **Why or evidence**: the Codex watcher keys a session by its rollout basename,
   whereas the summary adapter uses event session IDs, so a Codex session can hold
   a trace summary under each. On 2026-10-13 every Codex session in a 15-row
-  Quality sample was listed twice, once per id, now under the same title. The
-  warehouse export still publishes both summaries of such a session (the
-  rollout one with no usage), so a warehouse count of sessions overstates
-  Codex; rows it already published would stay in its table if the export
-  changed, since it upserts by session. Event
+  Quality sample was listed twice, once per id, now under the same title. Event
   history can outlive the source transcripts and browser projections; forcing a
   file resync cannot recover absent files. See `tests/v2-session-identity.test.ts`
   and `tests/session-title-queries.test.ts` for the bounded list guarantees, not
@@ -54,6 +51,19 @@ so later readers know what still needs checking.
   and coverage provenance; preserve existing links and pins during any migration.
   Expose usage-only versus browsable coverage explicitly without fabricating
   transcripts, and audit each aggregate before calling its count conversations.
+
+### Browser sessions known only from telemetry stay "live"
+
+- **What**: nothing ends a browser session that has no transcript. Sessions
+  created from Codex OTEL keep `live_status = 'live'` after their activity
+  stops, and so do some Antigravity sessions.
+- **Why or evidence**: on 2026-10-16 most live-marked rows on a local store
+  were Codex OTEL rows idle for over a day, the oldest since July; transcript
+  sessions end on their own. `/api/v2/live/sessions` (the Monitor's live list)
+  reads `live_status`.
+- **Next**: decide what ends a telemetry-only session (an idle timeout, or the
+  producer's own end signal) and apply it on read or with a sweep; check what
+  the Monitor shows from these rows first.
 
 ### Codex thread names and app-job detection
 

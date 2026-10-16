@@ -65,7 +65,7 @@ export function registerWarehouseCommands(): void {
       try {
         const { config } = await import('../../config.js');
         const { ensureSessionTraceSummaryBackfill } = await import('../../trace-quality/summary.js');
-        const { listWarehouseSessionTraceSummaries } = await import('../../warehouse/source.js');
+        const { listWarehouseSessionTraceSummaries, listWarehouseSupersededSessionIds } = await import('../../warehouse/source.js');
         const {
           mapSummaryToRunRow,
           assertContentFree,
@@ -97,6 +97,8 @@ export function registerWarehouseCommands(): void {
           assertContentFree(row);
         }
         const batch = applyMinBatch(rows, options.minBatch);
+        // Aliases published before the export kept one summary per session.
+        const retractSessionIds = listWarehouseSupersededSessionIds(batch.published.map(row => row.session_id));
         const lineage = buildLineage({
           runId,
           account,
@@ -109,7 +111,7 @@ export function registerWarehouseCommands(): void {
         });
 
         if (options.dryRun) {
-          const plan = planRuns(batch.published, lineage, config.warehouse);
+          const plan = planRuns(batch.published, lineage, config.warehouse, { retractSessionIds });
           writeWarehouseResult(
             ctx,
             {
@@ -118,6 +120,7 @@ export function registerWarehouseCommands(): void {
               schema: plan.schema,
               account,
               rows_planned: plan.rows_published,
+              rows_retracted: plan.rows_retracted,
               rows_suppressed: batch.suppressed.length,
               min_batch: options.minBatch,
               grant_role: plan.grant_role,
@@ -125,7 +128,7 @@ export function registerWarehouseCommands(): void {
               statements: plan.statements,
             },
             [
-              `Dry run: ${plan.rows_published} row(s) planned, ${batch.suppressed.length} suppressed.`,
+              `Dry run: ${plan.rows_published} row(s) planned, ${batch.suppressed.length} suppressed, up to ${plan.rows_retracted} superseded row(s) retracted.`,
               `Schema: ${plan.schema}`,
               `Run: ${plan.run_id}`,
               'SQL plan:',
@@ -136,7 +139,7 @@ export function registerWarehouseCommands(): void {
           return;
         }
 
-        const result = await publishRuns(batch.published, lineage, config.warehouse);
+        const result = await publishRuns(batch.published, lineage, config.warehouse, { retractSessionIds });
         writeWarehouseResult(
           ctx,
           {
@@ -144,11 +147,12 @@ export function registerWarehouseCommands(): void {
             run_id: result.run_id,
             account,
             rows_published: result.rows_published,
+            rows_retracted: result.rows_retracted,
             rows_suppressed: batch.suppressed.length,
             grant_role: result.grant_role,
             grant_skipped: result.grant_skipped,
           },
-          `Published ${result.rows_published} warehouse row(s); ${batch.suppressed.length} suppressed. Run: ${result.run_id}`,
+          `Published ${result.rows_published} warehouse row(s); ${batch.suppressed.length} suppressed; ${result.rows_retracted} superseded row(s) retracted. Run: ${result.run_id}`,
           options.json,
         );
       } finally {
