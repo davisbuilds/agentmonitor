@@ -1038,7 +1038,8 @@ export function initSchema(): void {
 // indexing them raw made the block keys ("type", "text") match nearly every
 // message and put JSON syntax in snippets. The index reads every string value
 // in the blocks except these bookkeeping keys, so text, thinking, tool names,
-// tool inputs and tool results stay searchable.
+// tool inputs and tool results stay searchable. A tool's input is the tool's
+// own data, so a field there named "type" or "id" is kept.
 const SEARCH_SKIPPED_KEYS = ['type', 'id', 'tool_use_id', 'media_type'];
 
 /** SQL for the searchable text of a stored `messages.content` value. */
@@ -1046,9 +1047,12 @@ function messageSearchText(content: string): string {
   const skipped = SEARCH_SKIPPED_KEYS.map(key => `'${key}'`).join(', ');
   return `CASE WHEN json_valid(${content}) THEN (
       SELECT group_concat(json_tree.value, ' ') FROM json_tree(${content})
-      WHERE json_tree.type = 'text' AND (json_tree.key IS NULL OR json_tree.key NOT IN (${skipped}))
+      WHERE json_tree.type = 'text' AND (json_tree.key IS NULL OR json_tree.key NOT IN (${skipped})
+        OR json_tree.path GLOB '$[[]*].input' OR json_tree.path GLOB '$[[]*].input[.[]*')
     ) ELSE ${content} END`;
 }
+
+const MESSAGE_SEARCH_VIEW = `CREATE VIEW messages_search AS SELECT id, ${messageSearchText('content')} AS content FROM messages`;
 
 const MESSAGE_SEARCH_FTS = `CREATE VIRTUAL TABLE messages_fts USING fts5(
   content, content='messages_search', content_rowid='id', tokenize='porter unicode61'
@@ -1075,9 +1079,12 @@ export function rebuildMessageSearchIndex(db: Database): void {
  * function. An index built over the raw JSON is replaced and rebuilt.
  */
 function ensureMessageSearchIndex(db: Database): void {
-  const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'messages_fts'")
-    .get() as { sql: string } | undefined;
-  const current = existing?.sql.includes("content='messages_search'") === true;
+  const stored = (name: string) => (db.prepare('SELECT sql FROM sqlite_master WHERE name = ?')
+    .get(name) as { sql: string } | undefined)?.sql;
+  // Rebuild when the index reads anything but the view, or the view extracts
+  // text by a rule other than the current one.
+  const current = stored('messages_fts')?.includes("content='messages_search'") === true
+    && stored('messages_search') === MESSAGE_SEARCH_VIEW;
   if (current) return;
 
   db.exec(`
@@ -1086,7 +1093,7 @@ function ensureMessageSearchIndex(db: Database): void {
     DROP TRIGGER IF EXISTS messages_fts_update;
     DROP TABLE IF EXISTS messages_fts;
     DROP VIEW IF EXISTS messages_search;
-    CREATE VIEW messages_search AS SELECT id, ${messageSearchText('content')} AS content FROM messages;
+    ${MESSAGE_SEARCH_VIEW};
     ${MESSAGE_SEARCH_FTS};
     CREATE TRIGGER messages_fts_insert AFTER INSERT ON messages BEGIN
       INSERT INTO messages_fts(rowid, content) VALUES (new.id, ${messageSearchText('new.content')});

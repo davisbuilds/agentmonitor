@@ -37,6 +37,7 @@ const MESSAGES = [
   [{ type: 'tool_use', id: 'toolu_01', name: 'Bash', input: { command: 'pnpm vitest run', description: 'Run unit tests' } }],
   [{ type: 'tool_result', tool_use_id: 'toolu_01', content: [{ type: 'text', text: 'All suites passed' }] }],
   [{ type: 'text', text: 'Which type annotation fits here?' }],
+  [{ type: 'tool_use', id: 'toolu_02', name: 'Task', input: { type: 'explorer', id: 'sentinel-ticket', nested: [{ type: 'quorum' }] } }],
 ];
 
 function insertMessages(db: Database.Database, sessionId: string): void {
@@ -64,6 +65,9 @@ test('search matches the words a message says, not the keys of its stored JSON',
   assert.deepEqual(ordinals('type'), [4], 'the block key "type" matches only a message that says it');
   assert.deepEqual(ordinals('text'), [], 'the block key "text" matches nothing');
   assert.deepEqual(ordinals('toolu_01'), [], 'tool ids are not indexed');
+  assert.deepEqual(ordinals('explorer'), [5], 'a tool input field named "type" is searchable');
+  assert.deepEqual(ordinals('sentinel'), [5], 'a tool input field named "id" is searchable');
+  assert.deepEqual(ordinals('quorum'), [5], 'nested tool input values are searchable');
 });
 
 test('snippets show the message text without JSON syntax', () => {
@@ -112,5 +116,17 @@ test('a database indexed the old way is reindexed on upgrade', () => {
   assert.equal(db.pragma('user_version', { simple: true }), 21);
   assert.deepEqual(ordinals('text'), []);
   assert.deepEqual(ordinals('fibonacci'), [0]);
+  assertSearchIndexMatchesMessages(db);
+});
+
+test('an index whose view extracts text by an earlier rule is rebuilt', () => {
+  const db = getDb();
+  // The first v21 rule skipped bookkeeping keys at any depth, tool inputs included.
+  db.exec(`DROP VIEW messages_search;
+    CREATE VIEW messages_search AS SELECT id, content AS content FROM messages`);
+  initSchema();
+  const view = db.prepare("SELECT sql FROM sqlite_master WHERE name = 'messages_search'").get() as { sql: string };
+  assert.match(view.sql, /json_tree/);
+  assert.deepEqual(ordinals('explorer'), [5]);
   assertSearchIndexMatchesMessages(db);
 });

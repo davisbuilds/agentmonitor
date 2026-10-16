@@ -188,8 +188,10 @@ live turn projection is rebuilt from the start when an earlier message changed.
 
 Search indexes the text of the stored content blocks. The FTS5 index's content
 table is the `messages_search` view, which extracts every string value except
-block bookkeeping keys with `json_tree`, and the `messages` triggers derive the
-same text, so no text is stored twice and any writer keeps the index current.
+block bookkeeping keys outside a tool's input with `json_tree`, and the
+`messages` triggers derive the same text, so no text is stored twice and any
+writer keeps the index current. The schema guard rebuilds the index whenever
+the stored view differs from the current rule.
 FTS5 cannot scan that view from inside the index, so its `rebuild` command and
 rank-1 `integrity-check` fail; `rebuildMessageSearchIndex` refills the index, and
 the tests compare it with one built from the view.
