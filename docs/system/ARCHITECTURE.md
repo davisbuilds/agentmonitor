@@ -202,9 +202,12 @@ Session-list reads reconcile recognized aliases
 without rewriting either projection, messages, pins, or detail links. The JSONL
 representative wins; multiple JSONL projections use message count then ID as the
 tie-breaker. Reconciliation precedes date/project/message filters and pagination,
-so a later summary observation cannot reintroduce a second session. Other reads
+so a later summary observation cannot reintroduce a second session. Analytics
+counts from the same reconciled rows (`listed_sessions`), so its session and
+message totals count such a session once, and the warehouse export publishes
+one trace summary per session (the UUID one when both exist). Other reads
 retain their own projection/usage semantics; this is not a storage migration or
-a universal identity reconciliation across Analytics, Live, and Search.
+a universal identity reconciliation across Live and Search.
 
 The additive `/api/v2/activity/sessions` read reconciles ordinary event evidence
 with browser identities without requiring a transcript. It normalizes the known

@@ -122,8 +122,9 @@ product never substitutes a misleading `0%` for missing evidence.
   `#sessions?view=pinned` links redirect to it.
 - The global `Cmd/Ctrl+K` palette searches recent sessions and transcript matches
   from any tab.
-- Sessions lists count recognized Codex rollout/UUID aliases once and prefer
-  JSONL history. Existing detail links remain valid. A browser session is a
+- Sessions lists and Analytics count recognized Codex rollout/UUID aliases once
+  and prefer JSONL history; before 2026-10-16 Analytics counted such a session,
+  and its messages, twice. Existing detail links remain valid. A browser session is a
   projected conversation or child-agent history, not a turn, API call, billing
   block, or duration. Resuming the same native conversation does not itself make
   a new conversation. Browser coverage and event-derived usage-session coverage
