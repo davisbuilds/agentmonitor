@@ -17,6 +17,7 @@ import {
   upsertProjectedSessionSnapshot,
 } from './projector.js';
 import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
+import { liveStatusFromActivity } from './live-status.js';
 
 const ANTIGRAVITY_SQLITE_CAPABILITIES = Object.freeze({
   history: 'summary' as const,
@@ -31,15 +32,6 @@ function parseMessageBlocks(message: ParsedMessage): ContentBlock[] {
   } catch {
     return [{ type: 'text', text: message.content }];
   }
-}
-
-function deriveLiveStatusFromTimestamp(lastItemAt: string | null): string {
-  if (!lastItemAt) return 'available';
-  const diffMs = Date.now() - new Date(lastItemAt).getTime();
-  if (Number.isNaN(diffMs)) return 'available';
-  if (diffMs <= 5 * 60_000) return 'live';
-  if (diffMs <= 15 * 60_000) return 'active';
-  return 'ended';
 }
 
 export function syncAntigravityLiveSession(
@@ -113,7 +105,7 @@ export function syncAntigravityLiveSession(
     }
   }
 
-  const liveStatus = deriveLiveStatusFromTimestamp(parsed.metadata.ended_at);
+  const liveStatus = liveStatusFromActivity(parsed.metadata.ended_at);
   upsertProjectedSessionSnapshot(db, {
     id: sessionId,
     agent: 'antigravity',

@@ -22,6 +22,7 @@ import {
 import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
 import { isCodexAppJobPrompt, promptTitleFromTexts } from '../parser/session-title.js';
+import { liveStatusFromActivity } from './live-status.js';
 
 export interface CodexSummaryLiveSyncResult {
   inserted_turns: number;
@@ -87,12 +88,7 @@ function deriveTimestamp(row: EventRow): string {
 
 function deriveLiveStatus(row: EventRow, timestamp: string): string {
   if (row.event_type === 'session_end' || row.source === 'import') return 'ended';
-
-  const diffMs = Date.now() - new Date(timestamp).getTime();
-  if (Number.isNaN(diffMs)) return 'available';
-  if (diffMs <= 5 * 60_000) return 'live';
-  if (diffMs <= 15 * 60_000) return 'active';
-  return 'ended';
+  return liveStatusFromActivity(timestamp);
 }
 
 function integrationModeFor(row: EventRow): string {
@@ -444,15 +440,6 @@ function parseMessageBlocks(message: ParsedMessage): ContentBlock[] {
   }
 }
 
-function deriveLiveStatusFromTimestamp(lastItemAt: string | null): string {
-  if (!lastItemAt) return 'available';
-  const diffMs = Date.now() - new Date(lastItemAt).getTime();
-  if (Number.isNaN(diffMs)) return 'available';
-  if (diffMs <= 5 * 60_000) return 'live';
-  if (diffMs <= 15 * 60_000) return 'active';
-  return 'ended';
-}
-
 export function syncCodexLiveSession(
   db: Database.Database,
   parsed: ParsedSession,
@@ -528,7 +515,7 @@ export function syncCodexLiveSession(
     }
   }
 
-  const liveStatus = deriveLiveStatusFromTimestamp(parsed.metadata.ended_at);
+  const liveStatus = liveStatusFromActivity(parsed.metadata.ended_at);
   const usedTokens = parsed.metadata.context_used_tokens ?? null;
   const contextWindow = usedTokens != null
     ? resolveContextWindow({

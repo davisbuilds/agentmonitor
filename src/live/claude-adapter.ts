@@ -10,6 +10,7 @@ import {
   insertProjectedTurn,
   upsertProjectedSessionSnapshot,
 } from './projector.js';
+import { liveStatusFromActivity } from './live-status.js';
 
 export interface LiveSyncOptions {
   privacyPolicy?: LivePrivacyPolicy;
@@ -35,15 +36,6 @@ function parseMessageBlocks(message: ParsedMessage): ContentBlock[] {
   } catch {
     return [{ type: 'text', text: message.content }];
   }
-}
-
-function deriveLiveStatus(lastItemAt: string | null): string {
-  if (!lastItemAt) return 'available';
-  const diffMs = Date.now() - new Date(lastItemAt).getTime();
-  if (Number.isNaN(diffMs)) return 'available';
-  if (diffMs <= 5 * 60_000) return 'live';
-  if (diffMs <= 15 * 60_000) return 'active';
-  return 'ended';
 }
 
 function resetLiveSession(db: Database.Database, sessionId: string): void {
@@ -120,7 +112,7 @@ export function syncClaudeLiveSession(
     }
   }
 
-  const liveStatus = deriveLiveStatus(parsed.metadata.ended_at);
+  const liveStatus = liveStatusFromActivity(parsed.metadata.ended_at);
   const usedTokens = parsed.metadata.context_used_tokens ?? null;
   const contextWindow = usedTokens != null
     ? resolveContextWindow({
