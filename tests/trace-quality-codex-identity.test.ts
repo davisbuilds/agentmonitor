@@ -75,6 +75,8 @@ test('the agent filter and its count agree with the list', () => {
 test('scoping to a session by its rollout id finds the summary listed for it', () => {
   assert.deepEqual(listSessionTraces({ session_id: rollout }).data.map(trace => trace.session_id), [uuid]);
   assert.deepEqual(listSessionTraces({ session_id: uuid }).data.map(trace => trace.session_id), [uuid]);
+  assert.deepEqual(listSessionTraces({ session_id: uuid.toUpperCase() }).data.map(trace => trace.session_id), [uuid],
+    'the identity grammar reads a UUID in either case');
   assert.deepEqual(listSessionTraces({ session_id: loneRollout }).data.map(trace => trace.session_id), [loneRollout]);
   assert.deepEqual(listSessionTraces({ session_id: resumedFirst }).data.map(trace => trace.session_id), [resumedSecond]);
 });

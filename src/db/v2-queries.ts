@@ -257,11 +257,12 @@ export const traceSummaryRankCte = `WITH ranked_summaries AS (
   ) AS summary_rank FROM ranked_summaries
 ), listed_summaries AS (SELECT * FROM ranked_summary_rows WHERE summary_rank = 1)`;
 
-const CODEX_ROLLOUT_ID = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
+const CODEX_ROLLOUT_ID = /^(?:rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-)?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 /**
  * The keys a read scoped to one session matches against `summary_key`: a Codex
- * rollout names its native UUID, which keys every summary of that session.
+ * rollout or native UUID names the lowercase UUID, which keys every summary of
+ * that session.
  */
 export function codexSessionAliases(sessionId: string): string[] {
   const uuid = CODEX_ROLLOUT_ID.exec(sessionId)?.[1];
