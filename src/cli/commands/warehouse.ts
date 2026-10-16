@@ -93,12 +93,12 @@ export function registerWarehouseCommands(): void {
           date_to: options.dateTo,
         });
         const rows = summaries.map(summary => mapSummaryToRunRow(summary, account, runId));
-        // Aliases published before the export kept one summary per session.
-        const retractSessionIds = listWarehouseSupersededSessionIds();
         for (const row of rows) {
           assertContentFree(row);
         }
         const batch = applyMinBatch(rows, options.minBatch);
+        // Aliases published before the export kept one summary per session.
+        const retractSessionIds = listWarehouseSupersededSessionIds(batch.published.map(row => row.session_id));
         const lineage = buildLineage({
           runId,
           account,

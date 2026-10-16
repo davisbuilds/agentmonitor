@@ -102,13 +102,21 @@ export function listWarehouseSessionTraceSummaries(
 }
 
 /**
- * Session ids whose summary another summary of the same session supersedes
- * (traceSummaryRankCte), across all history rather than a publish window:
- * a Codex rollout alias published before the warehouse collapsed aliases is
- * still in the warehouse, and publishing retracts it.
+ * Session ids whose summary a published one supersedes (traceSummaryRankCte),
+ * across all history rather than a publish window: a Codex rollout alias
+ * published before the warehouse collapsed aliases is still in the warehouse,
+ * and publishing its replacement retracts it. An alias whose replacement this
+ * publish leaves out (by date window or minimum batch) stays until one includes it.
  */
-export function listWarehouseSupersededSessionIds(): string[] {
-  return (getDb().prepare(`${traceSummaryRankCte}
-    SELECT session_id FROM ranked_summary_rows WHERE summary_rank > 1 ORDER BY session_id
-  `).all() as Array<{ session_id: string }>).map(row => row.session_id);
+export function listWarehouseSupersededSessionIds(publishedSessionIds: readonly string[]): string[] {
+  const published = new Set(publishedSessionIds);
+  const rows = getDb().prepare(`${traceSummaryRankCte}
+    SELECT superseded.session_id, listed.session_id AS superseded_by
+    FROM ranked_summary_rows superseded
+    JOIN listed_summaries listed
+      ON listed.agent_type IS superseded.agent_type AND listed.summary_key = superseded.summary_key
+    WHERE superseded.summary_rank > 1
+    ORDER BY superseded.session_id
+  `).all() as Array<{ session_id: string; superseded_by: string }>;
+  return rows.filter(row => published.has(row.superseded_by)).map(row => row.session_id);
 }

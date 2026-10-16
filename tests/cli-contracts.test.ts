@@ -1049,6 +1049,15 @@ test('warehouse publish dry-run plans retracting a Codex rollout alias its UUID 
   assert.equal(parsed.rows_planned, 2, 'the fixture session and the UUID summary');
   assert.equal(parsed.rows_retracted, 1);
   assert.ok(parsed.statements.some(statement => statement.startsWith('DELETE FROM agentmonitor.runs')));
+
+  // A publish that leaves the UUID summary out retracts nothing it replaces.
+  for (const args of [['--min-batch', '99'], ['--date-from', '2026-04-01']]) {
+    const narrow = await runCli(['warehouse', 'publish', '--dry-run', '--json', ...args]);
+    assert.equal(narrow.exitCode, 0, narrow.stderr);
+    const plan = JSON.parse(narrow.stdout) as { rows_retracted: number; statements: string[] };
+    assert.equal(plan.rows_retracted, 0, args.join(' '));
+    assert.equal(plan.statements.some(statement => statement.startsWith('DELETE')), false, args.join(' '));
+  }
 });
 
 test('warehouse publish without dry-run fails clearly when no DSN is configured', async () => {

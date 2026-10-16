@@ -223,8 +223,8 @@ event-backed when its session has events, so a Codex session holds a
 transcript-only summary under its rollout basename and an event-backed one
 under its UUID, and one per rollout file. Lists and the warehouse export keep
 one summary per session, the UUID one first, else the rollout with the most
-observations; all stay stored, and publishing retracts superseded ids it
-published earlier.
+observations; all stay stored, and publishing a summary retracts the ids it
+supersedes that were published earlier.
 
 The additive `/api/v2/activity/sessions` read reconciles ordinary event evidence
 with browser identities without requiring a transcript. It normalizes the known

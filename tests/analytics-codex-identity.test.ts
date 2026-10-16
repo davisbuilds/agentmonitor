@@ -85,5 +85,9 @@ test('the warehouse export publishes a Codex session once, as its event-backed s
   assert.deepEqual(listWarehouseSessionTraceSummaries().map(row => row.session_id).sort(),
     [uuid, solo, `rollout-2026-03-06T09-00-00-${resumed}`].sort());
   // What publishing retracts: every summary the published ones supersede, in any window.
-  assert.deepEqual(listWarehouseSupersededSessionIds(), [rollout, `rollout-2026-03-05T09-00-00-${resumed}`].sort());
+  const published = listWarehouseSessionTraceSummaries().map(row => row.session_id);
+  assert.deepEqual(listWarehouseSupersededSessionIds(published), [rollout, `rollout-2026-03-05T09-00-00-${resumed}`].sort());
+  // Only those: an alias whose replacement is not published this time stays.
+  assert.deepEqual(listWarehouseSupersededSessionIds([uuid, solo]), [rollout]);
+  assert.deepEqual(listWarehouseSupersededSessionIds([]), []);
 });
