@@ -233,6 +233,21 @@ function browserSessionKey(alias: string): string {
     ELSE ${alias}.id END`;
 }
 
+/**
+ * A Codex trace summary keyed by rollout basename whose session also has one
+ * under its native UUID. A summary is event-backed when the session has events
+ * and projects the transcript only when it has none, so the watcher's rollout
+ * summary (transcript, no usage) and the UUID one (events, usage and cost) both
+ * exist for one session. Readers that count sessions take the UUID one, as
+ * every Claude session's summary is event-backed; the rollout row stays stored.
+ */
+export function shadowedCodexRolloutSummary(alias: string): string {
+  return `(${alias}.agent_type = 'codex' AND ${alias}.session_id GLOB '${codexRolloutGlob}'
+    AND EXISTS (SELECT 1 FROM session_trace_summary twin
+      WHERE twin.session_id IN (substr(${alias}.session_id, -36), lower(substr(${alias}.session_id, -36)))
+        AND twin.agent_type = 'codex'))`;
+}
+
 /** The session a row names as its parent: Codex records the parent's native UUID. */
 function parentSessionKey(alias: string): string {
   return `CASE WHEN ${alias}.agent = 'codex' THEN lower(${alias}.parent_session_id)
@@ -1285,7 +1300,7 @@ export function getAnalyticsCoverage(
   const toolAnalyticsExpr = analyticsCapabilityExpr('tool_analytics');
   const liveItemsExpr = analyticsCapabilityExpr('live_items');
 
-  const row = db.prepare(`
+  const row = db.prepare(`${sessionListCte}
     SELECT
       COUNT(*) as matching_sessions,
       COALESCE(SUM(CASE WHEN ${includedCondition} THEN 1 ELSE 0 END), 0) as included_sessions,
@@ -1308,7 +1323,7 @@ export function getAnalyticsCoverage(
       COALESCE(SUM(CASE WHEN ${liveItemsExpr} = 'summary' THEN 1 ELSE 0 END), 0) as live_items_summary,
       COALESCE(SUM(CASE WHEN ${liveItemsExpr} = 'none' THEN 1 ELSE 0 END), 0) as live_items_none,
       COALESCE(SUM(CASE WHEN ${liveItemsExpr} = 'unknown' THEN 1 ELSE 0 END), 0) as live_items_unknown
-    FROM browsing_sessions
+    FROM listed_sessions
     ${filter.where}
   `).get(...filter.values) as Record<string, number>;
 
@@ -1357,18 +1372,22 @@ export function getAnalyticsCoverage(
   };
 }
 
+// Analytics counts sessions, so every read here takes the rows a session list
+// shows (`listed_sessions`): one per recognized Codex rollout/UUID pair, the
+// JSONL transcript row preferred, chosen before the filters. Counting
+// browsing_sessions directly counts such a session, and its messages, twice.
 export function getAnalyticsSummary(params: AnalyticsParams = {}): AnalyticsSummary {
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
 
-  const row = db.prepare(`
+  const row = db.prepare(`${sessionListCte}
     SELECT
       COUNT(*) as total_sessions,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
       MIN(started_at) as earliest,
       MAX(started_at) as latest
-    FROM browsing_sessions
+    FROM listed_sessions
     ${filter.where}
   `).get(...filter.values) as {
     total_sessions: number;
@@ -1404,9 +1423,9 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
 
-  const rows = db.prepare(`
+  const rows = db.prepare(`${sessionListCte}
     SELECT started_at, message_count, user_message_count
-    FROM browsing_sessions
+    FROM listed_sessions
     ${filter.where}
   `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
 
@@ -1429,13 +1448,13 @@ export function getAnalyticsProjects(params: AnalyticsParams = {}): ProjectBreak
   const filter = buildAnalyticsFilterState(params);
   const where = ['project IS NOT NULL', ...filter.conditions].join(' AND ');
 
-  return db.prepare(`
+  return db.prepare(`${sessionListCte}
     SELECT
       project,
       COUNT(*) as session_count,
       COALESCE(SUM(message_count), 0) as message_count,
       COALESCE(SUM(user_message_count), 0) as user_message_count
-    FROM browsing_sessions
+    FROM listed_sessions
     WHERE ${where}
     GROUP BY project
     ORDER BY message_count DESC, session_count DESC, project ASC
@@ -2425,9 +2444,9 @@ export function getAnalyticsSkillHealthParts(
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
-  const sessions = db.prepare(`
+  const sessions = db.prepare(`${sessionListCte}
     SELECT started_at, message_count, user_message_count
-    FROM browsing_sessions
+    FROM listed_sessions
     ${filter.where}
   `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
 
@@ -2468,7 +2487,7 @@ export function getAnalyticsTopSessions(params: AnalyticsParams = {}): TopSessio
   const filter = buildAnalyticsFilterState(params, 'bs');
   const limit = Math.min(Math.max(params.limit ?? 10, 1), 50);
 
-  return db.prepare(`
+  return db.prepare(`${sessionListCte}
     SELECT
       bs.id,
       bs.project,
@@ -2481,7 +2500,7 @@ export function getAnalyticsTopSessions(params: AnalyticsParams = {}): TopSessio
       bs.user_message_count,
       COALESCE(tc.tool_call_count, 0) as tool_call_count,
       bs.fidelity
-    FROM browsing_sessions bs
+    FROM listed_sessions bs
     LEFT JOIN (
       SELECT session_id, COUNT(*) as tool_call_count
       FROM tool_calls
@@ -2497,14 +2516,14 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
 
-  const row = db.prepare(`
+  const row = db.prepare(`${sessionListCte}
     SELECT
       COUNT(*) as total_sessions,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
       MIN(started_at) as earliest,
       MAX(started_at) as latest
-    FROM browsing_sessions
+    FROM listed_sessions
     ${filter.where}
   `).get(...filter.values) as {
     total_sessions: number;
@@ -2514,7 +2533,7 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
     latest: string | null;
   };
   const activeDays = new Set(
-    (db.prepare(`SELECT started_at FROM browsing_sessions ${filter.where}`).all(...filter.values) as Array<{ started_at: string | null }>)
+    (db.prepare(`${sessionListCte} SELECT started_at FROM listed_sessions ${filter.where}`).all(...filter.values) as Array<{ started_at: string | null }>)
       .map(session => (session.started_at ? localDayOf(session.started_at) : null))
       .filter((day): day is string => day !== null),
   ).size;
@@ -2546,7 +2565,7 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
   const filter = buildAnalyticsFilterState(params);
   const fidelityExpr = analyticsFidelityExpr();
 
-  return db.prepare(`
+  return db.prepare(`${sessionListCte}
     SELECT
       agent,
       COUNT(*) as session_count,
@@ -2558,7 +2577,7 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
       COALESCE(SUM(CASE WHEN ${toolAnalyticsCapableCondition()} THEN 1 ELSE 0 END), 0) as tool_analytics_capable_sessions,
       MIN(started_at) as first_started_at,
       MAX(started_at) as last_started_at
-    FROM browsing_sessions
+    FROM listed_sessions
     ${filter.where}
     GROUP BY agent
     ORDER BY message_count DESC, session_count DESC, agent ASC

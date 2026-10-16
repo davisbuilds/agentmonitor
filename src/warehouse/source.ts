@@ -1,4 +1,5 @@
 import { getDb } from '../db/connection.js';
+import { shadowedCodexRolloutSummary } from '../db/v2-queries.js';
 
 export interface WarehouseSessionTraceSummaryRow {
   session_id: string;
@@ -61,7 +62,8 @@ function appendDateRangeConditions(
 export function listWarehouseSessionTraceSummaries(
   params: WarehouseSummaryListParams = {},
 ): WarehouseSessionTraceSummaryRow[] {
-  const conditions: string[] = [];
+  // One row per session: a Codex rollout summary shadowed by its UUID twin is not published.
+  const conditions: string[] = [`NOT ${shadowedCodexRolloutSummary('session_trace_summary')}`];
   const values: unknown[] = [];
   appendDateRangeConditions(
     conditions,
