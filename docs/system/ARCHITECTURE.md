@@ -186,6 +186,14 @@ rewrites from the first difference, so an appended transcript writes only its ne
 rows while a rewritten or truncated one is still replaced where it changed. The
 live turn projection is rebuilt from the start when an earlier message changed.
 
+Search indexes the text of the stored content blocks. The FTS5 index's content
+table is the `messages_search` view, which extracts every string value except
+block bookkeeping keys with `json_tree`, and the `messages` triggers derive the
+same text, so no text is stored twice and any writer keeps the index current.
+FTS5 cannot scan that view from inside the index, so its `rebuild` command and
+rank-1 `integrity-check` fail; `rebuildMessageSearchIndex` refills the index, and
+the tests compare it with one built from the view.
+
 The server also parses only what was appended. After each Claude or Codex parse
 it keeps an in-memory checkpoint: the bytes parsed, their hash, and the parser's
 running state. The next sync hashes the file and continues from the checkpoint
@@ -205,6 +213,11 @@ tie-breaker. Reconciliation precedes date/project/message filters and pagination
 so a later summary observation cannot reintroduce a second session. Other reads
 retain their own projection/usage semantics; this is not a storage migration or
 a universal identity reconciliation across Analytics, Live, and Search.
+Trace-quality lists apply the same grammar to session summaries: a summary is
+event-backed when its session has events, so a Codex session holds a
+transcript-only summary under its rollout basename and an event-backed one
+under its UUID. The list hides the rollout one when the UUID one exists; both
+stay stored, and the warehouse export still publishes both.
 
 The additive `/api/v2/activity/sessions` read reconciles ordinary event evidence
 with browser identities without requiring a transcript. It normalizes the known

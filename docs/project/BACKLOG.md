@@ -33,13 +33,19 @@ so later readers know what still needs checking.
 
 - **What**: Sessions lists and child lookups reconcile known Codex rollout/UUID
   aliases, and Claude subagents link to the parent session their transcript
-  records (2026-10-13). Analytics, Search, Quality and projection storage still
-  have distinct identity semantics, and only the Sessions list hides internal
-  jobs (Codex compaction, memory and app background threads).
+  records (2026-10-13). Quality lists one summary per Codex session, the
+  event-backed UUID one (2026-10-16). Analytics, Search, the warehouse export and
+  projection storage still have distinct identity semantics, and only the
+  Sessions list hides internal jobs (Codex compaction, memory and app background
+  threads).
 - **Why or evidence**: the Codex watcher keys a session by its rollout basename,
   whereas the summary adapter uses event session IDs, so a Codex session can hold
   a trace summary under each. On 2026-10-13 every Codex session in a 15-row
-  Quality sample was listed twice, once per id, now under the same title. Event
+  Quality sample was listed twice, once per id, now under the same title. The
+  warehouse export still publishes both summaries of such a session (the
+  rollout one with no usage), so a warehouse count of sessions overstates
+  Codex; rows it already published would stay in its table if the export
+  changed, since it upserts by session. Event
   history can outlive the source transcripts and browser projections; forcing a
   file resync cannot recover absent files. See `tests/v2-session-identity.test.ts`
   and `tests/session-title-queries.test.ts` for the bounded list guarantees, not
@@ -63,22 +69,6 @@ so later readers know what still needs checking.
   (`CODEX_APP_JOB_PREFIXES` in `src/parser/session-title.ts`).
 - **Revisit when**: Codex writes thread names or a job marker into rollouts or
   telemetry, or Codex app jobs reappear in the Sessions list.
-
-### Full-text search indexes message JSON, not message text
-
-- **What**: `messages_fts` indexes `messages.content` as stored, and the Claude
-  parser stores it as JSON-serialized content blocks. Search snippets in the
-  Sessions search (and the Cmd/Ctrl+K palette) therefore show JSON syntax around
-  the match, and the block keys (`type`, `text`) are indexed tokens, so a query
-  for either word matches nearly every message.
-- **Why or evidence**: seen 2026-10-14 while folding Search into Sessions: a
-  fixture message stored the way `src/parser/claude-code.ts` stores content
-  rendered its snippet as `[{"type":"text","text":"…"}]`. Predates that change;
-  the old Search page used the same read. The key-token match follows from the
-  tokenizer and is unmeasured on real data.
-- **Next**: index extracted text (text and thinking blocks, tool names) instead
-  of raw JSON, with an FTS rebuild migration, and check snippet offsets still
-  line up with what the viewer shows.
 
 ### Explicit provenance for unresolved historical timestamps
 
