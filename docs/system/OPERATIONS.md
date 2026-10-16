@@ -909,6 +909,11 @@ pnpm build
 pnpm test
 ```
 
+`pnpm test` runs the suite through `scripts/test/run-node-tests.mjs`, which
+gives it a private temp directory and fails the run, naming each entry, when a
+test leaves anything under `os.tmpdir()`. The directory is removed either way.
+The tsx and Node compile caches are linked to the shared ones and are not counted.
+
 If frontend TypeScript or Svelte changes, also run:
 
 ```bash

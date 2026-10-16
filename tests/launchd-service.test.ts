@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import test, { describe } from 'node:test';
+import test, { after, describe } from 'node:test';
 import {
   buildServiceSpec,
   installService,
@@ -21,9 +21,15 @@ import { acquireRuntimeOwnership } from '../src/runtime-ownership.js';
 
 const onMac = process.platform === 'darwin';
 
+const fixtureRoots: string[] = [];
+after(() => {
+  for (const root of fixtureRoots) fs.rmSync(root, { recursive: true, force: true });
+});
+
 /** A temp home, a built-looking install, and a launchctl that keeps its state in memory. */
 function fixture(options: { platform?: NodeJS.Platform; servicePid?: number } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'amon-launchd-'));
+  fixtureRoots.push(root);
   const home = path.join(root, 'home');
   const install = path.join(root, 'install & co');
   fs.mkdirSync(path.join(install, 'dist'), { recursive: true });
