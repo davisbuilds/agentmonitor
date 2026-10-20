@@ -544,6 +544,9 @@ export function resolveEventGitBranch(event: {
   return resolveGitBranch(event.project);
 }
 
+/** Thrown out of insertEvent's transaction so a skipped duplicate rolls back. */
+const DUPLICATE_EVENT_ID = new Error('duplicate event_id');
+
 export function insertEvent(event: {
   event_id?: string;
   session_id: string;
@@ -635,7 +638,8 @@ export function insertEvent(event: {
   // between (a constraint, or SQLITE_BUSY under concurrent writers) used to
   // leave a committed session with no event, inflating session counts for
   // good. Nested inside a caller's transaction this becomes a savepoint.
-  const row = db.transaction((): EventRow | null => {
+  // A duplicate found inside it throws so the upserts roll back with it.
+  const insert = db.transaction((): EventRow => {
     const agentId = `${event.agent_type}-default`;
     upsertAgent(agentId, event.agent_type);
     upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch, event.mode);
@@ -683,14 +687,14 @@ export function insertEvent(event: {
       );
     } catch (err: unknown) {
       // UNIQUE constraint violation = duplicate event_id (a concurrent writer
-      // won the race past the pre-check), silently skip
+      // won the race past the pre-check): skip it, undoing the session upsert
       if (err instanceof Error && err.message.includes('UNIQUE constraint failed: events.event_id')) {
-        return null;
+        throw DUPLICATE_EVENT_ID;
       }
       throw err;
     }
 
-    if (result.changes === 0) return null; // duplicate event_id
+    if (result.changes === 0) throw DUPLICATE_EVENT_ID;
 
     // Handle session lifecycle for successful inserts only.
     // Recent import session_end events are often synthetic snapshots, so they
@@ -714,9 +718,15 @@ export function insertEvent(event: {
     }
 
     return db.prepare('SELECT * FROM events WHERE id = ?').get(result.lastInsertRowid) as EventRow;
-  })();
+  });
 
-  if (!row) return null;
+  let row: EventRow;
+  try {
+    row = insert();
+  } catch (err) {
+    if (err === DUPLICATE_EVENT_ID) return null;
+    throw err;
+  }
   markStatsDirty(); // event (and its session-status side effects) changed totals
 
   // Benchmark cells carry harness='codex' but are batch-imported historical

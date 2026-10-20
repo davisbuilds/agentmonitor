@@ -383,8 +383,11 @@ test('a long stream opens at its newest items and loads earlier ones without los
   const instructions = stream.getByRole('button', { name: /^Instructions.*permissions instructions/ });
   await expect(instructions).toHaveCount(1);
 
-  // The oldest row shown stays put while the page before it loads above.
-  await stream.getByRole('button', { name: 'Load earlier items' }).click();
+  // Scrolling up to the top loads the page before, and the oldest row shown stays put.
+  // Reaching the "Load earlier items" control already starts that load (a click there
+  // races it), so the scroll is the gesture under test: one page, not two.
+  await stream.getByRole('button', { name: 'Load earlier items' }).scrollIntoViewIfNeeded();
+  await expect(stream.getByText('200 of 250 items')).toBeVisible();
   await expect(stream.getByText('Long item 60', { exact: true })).toHaveCount(1);
   await expect(stream.getByText('Long item 151', { exact: true })).toBeInViewport();
 
