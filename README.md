@@ -42,10 +42,12 @@ Set up AgentMonitor for me: https://github.com/davisbuilds/agentmonitor
 Read its README first. Clone it if I don't already have a checkout. Using
 Node.js 24.13.0 and pnpm 10.29.3, run `pnpm install` and `pnpm build` in the
 checkout. Start it with `node dist/cli.js serve --no-portless` and keep it
-running. Once `node dist/cli.js status` reports the server as reachable, give
-me the link http://127.0.0.1:3141/app/ and use `node dist/cli.js sessions list`
-to tell me what history it found. The first start can take a few minutes on a
-large history.
+running. On the first start it reads my existing history before it answers. On a
+large history that can take several minutes, so while startup is still running,
+wait and retry `node dist/cli.js status` rather than restarting it. If the process
+exits, report its error. Once status reports it reachable, give me the link
+http://127.0.0.1:3141/app/. Then use `node dist/cli.js sessions list --agent claude`
+and `--agent codex` to tell me which of my agents' history it found.
 
 Ask me before anything that changes my system or my agents' settings:
 installing Claude Code hooks, editing my Codex config, linking `amon` globally,
@@ -84,20 +86,32 @@ AgentMonitor listening on http://127.0.0.1:3141
 Dashboard: http://localhost:3141/app/
 ```
 
-Next comes a `[watcher] Initial sync complete: …` line once AgentMonitor has read
-the Claude Code, Codex, and Antigravity history it found. On a large history this
-can take a few minutes. After that it picks up sessions as their files change, and
-rescans every few minutes for anything it missed.
+AgentMonitor then reads your existing history: Claude Code first, then Codex, then
+Antigravity. **The server can't answer until all three are read.** The page may sit
+loading, and `node dist/cli.js status` may report the server as unavailable. On a
+large history this can take several minutes. Leave it running rather than
+restarting it, because a restart begins the reading again.
 
-In the app, **Sessions** lists your past conversations with their projects; open one
-to read it. **Analytics → Usage** shows tokens and estimated cost by model and project.
-**Monitor** fills in while your agents run. In a second terminal from the same
-folder, these confirm the same thing:
+Startup is complete when the page responds. If you have history, **Sessions**
+should list conversations from each agent you use; use the Agent filter to check
+each one. From a second terminal in the same folder:
 
 ```bash
-node dist/cli.js status          # Server: reachable, and the database path
-node dist/cli.js sessions list   # your recent sessions
+node dist/cli.js status                        # Server: reachable
+node dist/cli.js sessions list --agent claude  # repeat with --agent codex
 ```
+
+On the first start, about five seconds after the server begins answering,
+AgentMonitor also reads your history for token usage and cost. On a large history
+the server can pause again while it does. **Analytics → Usage** shows tokens and
+estimated cost by model and project once that finishes. **Monitor** fills in while
+your agents run. After that, AgentMonitor picks up sessions as their files change,
+and rescans every few minutes for anything it missed.
+
+To follow progress in the terminal, `[watcher] Initial sync complete: …` covers
+Claude Code only. Codex and Antigravity each print their own `[watcher] Codex sync: …`
+or `[watcher] Antigravity sync: …` line when they find history. A
+`[watcher] Watching … for changes` line means all three are done.
 
 For a first session, finish a short Claude Code or Codex conversation in one of
 your projects: ask "Summarize this project and suggest a small next step."
@@ -239,6 +253,7 @@ The Insights view appears under Analytics once a key is set.
 | --- | --- |
 | `Database is already owned by AgentMonitor runtime PID …` | Another AgentMonitor (often the login service) is already using this database. Check `node dist/cli.js service status` and use or stop that one. Don't delete the lock file while that process runs. |
 | Port 3141 is in use | Start with `--port <n>`. Then rerun the hook install and update your Codex config with `AGENTMONITOR_PORT` set to the same port. |
+| Right after starting, the page won't load or `status` says unavailable | If the process is still running and scanning history, wait for `[watcher] Watching … for changes` or retry `status` every minute. Restarting repeats the scan. If the process exited, check its terminal error. |
 | Sessions is empty | Finish a first agent conversation, then run `node dist/cli.js sync sessions --source all --dry-run`. If you have history but no files are found, check `AGENTMONITOR_CLAUDE_DIR`, `CODEX_HOME`, and your exclude patterns. |
 | The app shows **Restart needed** | The build changed since the server started. Restart it. |
 | The app names **unpriced models** | Cost totals leave those models out until their prices are available. Once an update includes their prices, rebuilding and restarting fills in the missing costs. |

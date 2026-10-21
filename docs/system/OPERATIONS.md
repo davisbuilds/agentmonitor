@@ -40,9 +40,15 @@ origin. Ctrl-C shuts down the runtime and removes its Portless route.
 
 On startup without `--no-watch`, the watcher reads every discoverable Claude Code,
 Codex, and Antigravity history file once before it begins watching Claude and Codex
-files, and rescans all three every 15 minutes. Without
-`--no-import`, an event import of the same sources follows 5 seconds later and
-repeats every `AGENTMONITOR_AUTO_IMPORT_MINUTES` (default 10; `0` disables it).
+files, and rescans all three every 15 minutes. The startup scans run synchronously
+after the listener opens, in that order, so HTTP requests (including `amon status`
+and `amon health`) wait until all three finish. Each scan logs its own summary:
+`[watcher] Initial sync complete` covers Claude Code only. `[watcher] Codex sync` and
+`[watcher] Antigravity sync` print only when files were found.
+`[watcher] Watching … for changes` follows the last scan. Without `--no-import`, an
+event import of the same sources follows 5 seconds after the scans and repeats every
+`AGENTMONITOR_AUTO_IMPORT_MINUTES` (default 10; `0` disables it). It also runs
+synchronously, so a large first import pauses requests again.
 Provider quota polling always starts. For Codex it runs `codex app-server` from
 `PATH`, and records an error snapshot when the Codex CLI is absent.
 
