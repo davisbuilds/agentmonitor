@@ -165,7 +165,8 @@ is not pooled as directly comparable because the observation mechanisms differ.
 Invocation, presentation, project breadth, and version attribution are screening
 evidence. They do not by themselves prove skill value, correct placement, or a
 reason to remove a skill. Missing denominators remain unavailable with a reason
-rather than becoming zero.
+rather than becoming zero. A skill's current files on disk are not treated as
+evidence of what a past session loaded.
 
 External profile authorities may attach bounded, immutable expected-realization
 evidence to a compatible session. The session view then compares desired context
@@ -268,7 +269,10 @@ outside the local product boundary. See [trace-quality.md](trace-quality.md).
 Imported benchmark studies remain segregated from personal activity and usage
 totals. Benchmark reads expose study arms, cost/quality evidence, eligibility, and
 Pareto comparisons without promoting estimated or incomplete evidence to a stronger
-grade.
+grade. Each arm reports its Pareto verdict, mean score, cost per trial with its cost
+basis, the imported `native` flag, and honesty counts (excluded and no-op trials). OpenBench's own
+usage-evidence verdict (`usage_evidence_grade`, tri-state `ranking_eligible`, and
+`ranking_exclusion_reason`) is passed through as recorded, never re-derived.
 
 Operational OTEL metrics are stored separately from events and exposed to the CLI
 and v2 API as name-and-attribute aggregates. They carry no tokens or cost and never
@@ -283,7 +287,13 @@ enter activity or usage totals.
   does not read or emit instruction contents.
 - Trace-quality list rows and aggregate warehouse exports are content-free.
 - Insight generation is the sole product path that sends an analysis request to a
-  configured external model provider.
+  configured external model provider. The request carries the selected scope's
+  analytics and usage rollups. These include project, model, and tool names plus
+  selected top-session titles and opening prompts. It does not carry
+  full transcripts.
+- Session sync copies transcript text, tool calls, and usage from local history
+  files into the local database for search and analysis; it never modifies those
+  files. `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` skips matching paths.
 
 ## Historical Import And Recovery
 

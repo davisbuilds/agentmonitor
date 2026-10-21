@@ -1,251 +1,287 @@
+<p align="center">
+  <img src="docs/assets/amon-header.svg" width="880" alt="AgentMonitor (amon): on an instrument screen, a signal trace passes two faint earlier spikes and rises into a bright peak shaped like the letter A, beside the AgentMonitor wordmark." />
+</p>
+
 # AgentMonitor
 
-Local dashboard and session browser for observing AI coding agents across live
-telemetry, tool activity, costs, quota state, and historical session data.
+A local dashboard for the AI coding agents you run. AgentMonitor reads the session
+history that Claude Code and Codex already keep on your machine. You can see what
+your agents are doing now, search what they did before, and follow token usage and
+estimated cost across projects. It runs entirely on your computer, and its
+command-line tool is called `amon`.
 
-The Svelte app, v2 API, and `amon` CLI are the supported product surfaces. See
-[activity read contracts](docs/api/activity-contract.md) for the content-free
-session inventory and daily conversation semantics.
+It's for developers who use Claude Code or Codex daily, often in several projects
+at once, and want one place to look. It's built for single-user local use.
 
-## Agent Setup
+## What it does
 
-New here? Paste the prompt below into your coding agent (Claude Code, Codex, etc.) and it will install, build, and verify the repo, then tell you how to launch the live dashboard.
+- **Monitor** shows active sessions as cards with their recent events, cost for
+  today and the last 30 days, context-window use, and remaining plan quota where the
+  provider reports it.
+- **Sessions** lets you browse and full-text search past conversations, including
+  tool calls and subagents, and pin moments you want to find again.
+- **Analytics** charts activity, projects, tools, token usage and cost by model and
+  project, alongside skill activity from your sessions.
+- **The `amon` CLI** returns the same data as JSON, so an agent can look up its own
+  history.
+- **Optional extras:** written insights generated with your own OpenAI, Anthropic,
+  or Gemini key; Claude Code hooks and Codex telemetry for live activity; benchmark
+  imports; database backups; and a macOS login service.
+
+Claude Code sessions get the most detail. Codex live activity is a summary (requests,
+tools, tokens, cost), and full Codex transcripts come from its session files.
+Antigravity CLI history is imported at summary level.
+
+## Agent setup
+
+Open your coding agent and paste this:
 
 ```text
-Set up the `agentmonitor` repo for me. It's a local dashboard for monitoring AI
-coding agents — Node.js + TypeScript + Express + SQLite backend with a Svelte 5
-frontend, all served on localhost.
+Set up AgentMonitor for me: https://github.com/davisbuilds/agentmonitor
 
-Do this, in order:
+Read its README first. Clone it if I don't already have a checkout. Using
+Node.js 24.13.0 and pnpm 10.29.3, run `pnpm install` and `pnpm build` in the
+checkout. Start it with `node dist/cli.js serve --no-portless` and keep it
+running. On the first start it reads my existing history before it answers. On a
+large history that can take several minutes, so while startup is still running,
+wait and retry `node dist/cli.js status` rather than restarting it. If the process
+exits, report its error. Once status reports it reachable, give me the link
+http://127.0.0.1:3141/app/. Then use `node dist/cli.js sessions list --agent claude`
+and `--agent codex` to tell me which of my agents' history it found.
 
-1. Install deps. Use Node 24.13.0 (`nvm use` if nvm is present) and pnpm 10.29.3+;
-   run `pnpm install` from the repo root. Clone
-   https://github.com/davisbuilds/agentmonitor.git and cd in first if needed.
-
-2. Configure env (optional — it runs without any secrets). Copy `.env.example` to
-   `.env`; every `AGENTMONITOR_*` var already has a sensible default. The only
-   optional secrets are for AI-generated insights: AGENTMONITOR_INSIGHTS_PROVIDER
-   plus the matching provider key (OPENAI_API_KEY / ANTHROPIC_API_KEY /
-   GEMINI_API_KEY). Leave them as placeholders unless I ask for insights.
-
-3. Verify the build works WITHOUT any secrets: run `pnpm build` then `pnpm test`.
-   Both should pass offline. If either fails, show me the error and stop.
-
-4. Link the built CLI with `pnpm link --global`, then report back: confirm install
-   + build + tests passed, note that AI insights are the only thing needing a
-   key, and give me the launch command `amon serve`. Open
-   https://agentmonitor.localhost; the first run may ask to trust Portless's
-   local HTTPS certificate.
-
-Don't commit anything.
+Ask me before anything that changes my system or my agents' settings:
+installing Claude Code hooks, editing my Codex config, linking `amon` globally,
+installing the login service, or using the HTTPS address (it installs a local
+certificate and may ask for my password). Don't set up insights or any API keys
+unless I ask.
 ```
 
-Prefer to do it yourself? The manual steps are below.
+Your agent handles the install and first check, and asks before anything that
+changes your agents or your system. Prefer the terminal? Follow the
+[quick start](#quick-start).
 
-## What It Does
+## Quick start
 
-- Serves the canonical Svelte app at `/app/` for Monitor, Live, Sessions (with full-text search and pinned messages), and Analytics (Overview / Usage / Skills / Insights / Quality).
-- Accepts live ingest from Claude Code hooks, Codex OTEL export, or generic HTTP event producers.
-- Watches local Claude and Codex session history and imports historical sessions into SQLite.
-- Streams live updates over SSE (`/api/stream`) for dashboards and operator views.
-  An auto-import that changes anything sends a `session_update` of
-  `{ type: 'auto_import', imported, refreshed, removed }`: the rows it
-  inserted, rewrote, and removed because their Codex rollout no longer
-  produces them.
-- Exposes canonical app APIs under `/api/v2/*`.
-- Exposes a lean local trace-quality view (one trace per session) — a content-free per-session summary plus on-demand observation detail.
-- Surfaces segregated benchmark bake-offs (openbench `results.jsonl` imports) at `/api/v2/benchmarks[/:studyId]` and the `/app/` Benchmarks tab. Each study returns per-arm rows with Pareto `verdict`, `mean_score`, `cost_per_trial`/`cost_basis`, `native`, and honesty flags — `excluded_trials`, `noop_trials`, and openbench's own usage-evidence verdict (`usage_evidence_grade`, plus tri-state `ranking_eligible` and `ranking_exclusion_reason`) consumed verbatim, not re-derived.
-- Provides provider-native quota snapshots through `/api/provider-quotas`.
-- Ships a local operator CLI. The preferred command is `amon`; `agentmonitor` is an equivalent executable alias.
-- Creates validated, single-file SQLite backups through the one-shot
-  `amon database backup` command while the normal WAL runtime remains active.
-- Supports optional persisted AI-generated insights grounded in analytics and usage coverage.
-- Reports per-skill trigger health plus additive, per-harness consultation
-  decomposition (first read, post-compaction rehydration, repeat, and
-  unclassifiable evidence) via `/api/v2/analytics/skills/health`. Mixed-harness
-  compatibility rows are explicitly non-comparative. Bounded v2 resources
-  expose per-session skill context and accept immutable expected realizations
-  plus explicit same-harness session associations. Invocation, presentation,
-  and project-breadth signals are screening evidence rather than value or
-  removal recommendations; current filesystem state is not treated as
-  historical runtime truth.
-
-## Quick Start
-
-Requirements:
-
-- Node.js `24.13.0`
-- pnpm `10.29.3+`
+You need macOS or Linux, Git, [Node.js](https://nodejs.org/) 24.13.0 (pinned in
+`.nvmrc`, so `nvm use` selects it), and [pnpm](https://pnpm.io/installation)
+10.29.3. AgentMonitor runs with no Claude Code or Codex history, but then it has
+nothing to show.
 
 ```bash
-nvm use
+git clone https://github.com/davisbuilds/agentmonitor.git
+cd agentmonitor
 pnpm install
 pnpm build
-pnpm link --global
-amon serve
+node dist/cli.js serve --no-portless
 ```
 
-Open `https://agentmonitor.localhost`. Portless terminates local HTTPS and sends
-traffic to the fixed AgentMonitor server on `127.0.0.1:3141`; the bare named URL
-redirects to the canonical `/app/` surface. Hooks, OTEL exporters, and direct API
-clients continue to use `http://127.0.0.1:3141`. Portless is pinned as an
-AgentMonitor dependency, so no global Portless install is required. Use
-`amon serve --no-portless` for direct-only startup.
+Then open <http://127.0.0.1:3141/app/>. Press Ctrl-C in that terminal to stop it.
 
-Only one long-running AgentMonitor runtime may own a resolved SQLite database at
-a time. A second `amon serve`/`pnpm start` targeting the same DB exits with the
-owner PID and path; stale ownership from a dead process is recovered
-automatically. One-shot reporting and maintenance commands remain available
-while the runtime is active.
+### What success looks like
 
-For active frontend development with Vite HMR, keep the two-process workflow:
+The terminal prints:
+
+```text
+AgentMonitor listening on http://127.0.0.1:3141
+Dashboard: http://localhost:3141/app/
+```
+
+AgentMonitor then reads your existing history: Claude Code first, then Codex, then
+Antigravity. **The server can't answer until all three are read.** The page may sit
+loading, and `node dist/cli.js status` may report the server as unavailable. On a
+large history this can take several minutes. Leave it running rather than
+restarting it, because a restart begins the reading again.
+
+Startup is complete when the page responds. If you have history, **Sessions**
+should list conversations from each agent you use; use the Agent filter to check
+each one. From a second terminal in the same folder:
 
 ```bash
-# terminal 1: Express server on :3141
-pnpm dev
-
-# terminal 2: Vite frontend with API proxy on :5173
-pnpm frontend:dev
+node dist/cli.js status                        # Server: reachable
+node dist/cli.js sessions list --agent claude  # repeat with --agent codex
 ```
 
-Open:
+On the first start, about five seconds after the server begins answering,
+AgentMonitor also reads your history for token usage and cost. On a large history
+the server can pause again while it does. **Analytics → Usage** shows tokens and
+estimated cost by model and project once that finishes. **Monitor** fills in while
+your agents run. After that, AgentMonitor picks up sessions as their files change,
+and rescans every few minutes for anything it missed.
 
-- `http://127.0.0.1:5173/app/` for Vite-powered frontend development.
-- `http://127.0.0.1:3141/app/` for the Express-served canonical app (`/` redirects here).
+To follow progress in the terminal, `[watcher] Initial sync complete: …` covers
+Claude Code only. Codex and Antigravity each print their own `[watcher] Codex sync: …`
+or `[watcher] Antigravity sync: …` line when they find history. A
+`[watcher] Watching … for changes` line means all three are done.
 
-If you want the Express-served `/app/` to refresh as you edit frontend code, run
-`pnpm frontend:watch`.
+For a first session, finish a short Claude Code or Codex conversation in one of
+your projects: ask "Summarize this project and suggest a small next step."
+Return to **Sessions**, open that conversation, and try searching for
+"small next step". This also gives a new installation with no history something
+to show.
 
-## Common Commands
+### Optional: the named HTTPS address
 
-```bash
-pnpm dev                         # TS server in watch mode
-pnpm frontend:dev                # Svelte/Vite dev server
-pnpm build                       # TS build + frontend build
-pnpm start                       # Run compiled server
-amon serve                       # Compiled runtime at https://agentmonitor.localhost
-amon serve --no-portless         # Direct runtime on http://127.0.0.1:3141
-amon service install             # Run it as a macOS login service (`amon service restart` after a rebuild)
-pnpm cli -- --help               # CLI help during local development
-pnpm cli -- health               # Check the local server (`build.stale` means restart to load a newer build)
-pnpm cli -- sessions list --json # Query session history from SQLite
-pnpm cli -- sessions activity <session-id> --json # Read the session minimap contract
-pnpm cli -- live settings --json # Read Live capture and integration settings
-pnpm cli -- monitor stats --json # Monitor aggregate state: all four token buckets and a per-agent split
-pnpm cli -- monitor watch        # Stream Monitor events as NDJSON
-pnpm cli -- usage overview --json # Read every Usage-page rollup in one JSON document
-pnpm cli -- analytics overview --json # Read every Analytics-page contract in one JSON document
-pnpm cli -- quality trace <trace-id> --json # Read trace detail for agent analysis
-pnpm cli -- insights list --json # Read saved insights and generation availability
-pnpm cli -- benchmarks list --json # Read benchmark-study summaries
-pnpm cli -- database backup --output /private/path/agentmonitor.db # Closed SQLite copy
-pnpm cli -- import --dry-run     # Preview historical import
-pnpm lint                        # ESLint
-pnpm test                        # Node test runner suite
-pnpm frontend:check              # Svelte check
-pnpm run import --source claude-code # Compatibility wrapper for `amon import`
-pnpm run import --source codex       # Compatibility wrapper for `amon import`
-pnpm reparse:sessions                # Compatibility wrapper for `amon sync sessions`
-pnpm reparse:codex-sessions          # Compatibility wrapper for `amon sync sessions`
-```
+Without `--no-portless`, `node dist/cli.js serve` also serves the app at
+<https://agentmonitor.localhost> through [Portless](https://github.com/vercel-labs/portless),
+which comes with AgentMonitor. On its first run, Portless creates a local
+certificate authority, adds it to your system's trusted certificates, and listens
+on port 443. That can prompt for your password. Hooks and Codex telemetry keep
+using `http://127.0.0.1:3141` either way.
 
-Session-list identity: `/api/v2/sessions` and `amon sessions list` collapse known
-Codex rollout/UUID projection aliases, preferring JSONL history (then the highest
-message count, with ID as a stable tie-breaker). Selection happens before filters
-and pagination; fields and dates belong to that selected projection. Original
-detail URLs remain valid and no stored history is removed. Summary-only sessions
-remain visible unless `exclude_empty=true` is requested. List totals are not
-usage-session totals: usage counts distinct usage-bearing event session IDs in
-the event-time window; browser history may include subagents and omit transcripts
-that were never projected. Unknown ID formats/integrations are not guessed at.
+## Connect your agents
 
-Full command, config, parity, import, benchmark, and runtime notes live in
-[docs/system/OPERATIONS.md](docs/system/OPERATIONS.md).
+History shows up without changing your agents. To see activity as it happens,
+start AgentMonitor first, then:
+
+- **Claude Code:** preview the hook install, then run it and confirm when asked.
+  It adds hooks to `~/.claude/settings.json`. Restart Claude Code afterwards.
+
+  ```bash
+  node dist/cli.js hooks install claude --dry-run
+  node dist/cli.js hooks install claude
+  ```
+
+  The hooks post events only to your local AgentMonitor. One of them also blocks a
+  few obviously destructive `rm` commands as a best-effort check. It isn't a
+  security control, and `AGENTMONITOR_SAFETY=0` turns it off. See the
+  [Claude Code hook guide](hooks/claude-code/README.md) for details and the
+  statusline bridge that adds Claude plan quota to Monitor.
+
+- **Codex:** print the telemetry settings and add them to `~/.codex/config.toml`,
+  then restart your Codex sessions. The block includes `log_user_prompt = true`,
+  which sends prompt text to your local AgentMonitor. See the
+  [Codex guide](hooks/codex/README.md).
+
+  ```bash
+  node dist/cli.js hooks print-codex-config
+  ```
+
+Both commands use the address of the server AgentMonitor would start with your
+current settings. Run them in the same environment as `serve`.
+
+## Everyday use
+
+- **Keep it running (macOS).** `node dist/cli.js service install` starts AgentMonitor
+  at login and restarts it after a crash. Use `service status`, `service restart`,
+  and `service uninstall` with the same prefix. The service serves
+  <http://127.0.0.1:3141/app/>. It records the `AGENTMONITOR_*` settings set when
+  you install it, but deliberately leaves out API keys, so insights aren't available
+  under it. Rerun the install after changing a setting.
+- **Update.** Run `git pull`, `pnpm install`, and `pnpm build`, then restart the
+  server: press Ctrl-C and start it again, or run `node dist/cli.js service restart`.
+  Until you restart, the app shows **Restart needed**.
+- **Let agents query it.** Finite read commands accept `--json`:
+
+  ```bash
+  node dist/cli.js sessions search "rate limit" --json
+  node dist/cli.js usage summary --json
+  node dist/cli.js monitor stats --json
+  node dist/cli.js --help          # everything else
+  ```
+
+- **Back up.** This writes a checked copy while the server keeps running. The
+  destination folder must be private to you:
+
+  ```bash
+  mkdir -p -m 700 ~/agentmonitor-backups
+  node dist/cli.js database backup --output ~/agentmonitor-backups/agentmonitor.db
+  ```
+
+## Your data and privacy
+
+- **Where it's kept.** Everything goes into one SQLite database, by default
+  `data/agentmonitor.db` inside the checkout. This file is ignored by Git. Set
+  `AGENTMONITOR_DB_PATH` to keep it elsewhere.
+- **What it reads.** It reads Claude Code history under `~/.claude/projects`,
+  Codex history under `~/.codex/sessions`, and Antigravity CLI history in
+  `~/.gemini/antigravity-cli`. To change roots, set `AGENTMONITOR_CLAUDE_DIR` to
+  the directory containing `projects/`, or `CODEX_HOME` to the one containing
+  `sessions/`. It
+  copies conversation text, tool calls, and token counts into the database so you
+  can search them, and never changes the original files. Images inside
+  conversations are recorded only by fingerprint and size.
+- **Leaving things out.** `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` takes comma-separated
+  glob patterns that skip matching folders or files, for example
+  `*client-project*`. Claude Code names each project folder after its path, so a
+  pattern can match a project by name. In the live stream, setting
+  `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `…_REASONING`, or `…_TOOL_ARGUMENTS` to
+  `false` replaces that content with a redaction marker. These settings don't
+  change what Sessions imports from history files.
+- **Network.** By default the server listens on `127.0.0.1`, and refuses changes requested
+  by web pages from other sites.
+- **What can leave your machine:**
+  - **Insights**, only if you set a provider key and generate one. AgentMonitor
+    sends that provider the chosen period's activity and usage summaries. These
+    include project, model, and tool names, plus selected top-session titles and
+    opening prompts.
+  - **Codex quota.** If the Codex CLI is installed, AgentMonitor runs
+    `codex app-server` about once a minute to read your remaining plan quota. Codex
+    makes that request with its own sign-in.
+  - **Warehouse export**, only when you run `amon warehouse publish` with a
+    Postgres address. It sends content-free session summaries.
 
 ## Configuration
 
-AgentMonitor runs locally without secrets. `.env` is optional because every
-`AGENTMONITOR_*` variable has a default.
+AgentMonitor works without any settings. Settings are environment variables. It
+does **not** read a `.env` file by itself. Either export variables in your shell, or
+copy the example file and pass it to Node:
 
-Common knobs:
-
-- `AGENTMONITOR_PORT` / `AGENTMONITOR_HOST` for the TypeScript runtime bind. On a
-  loopback bind the API answers only loopback host names, and writes from other
-  web origins get `403` (see [event-contract.md](docs/api/event-contract.md#browser-requests)).
-- `AGENTMONITOR_DB_PATH` for the SQLite database location.
-- `AGENTMONITOR_PROJECTS_DIR` for git branch/project resolution.
-- `AGENTMONITOR_CLAUDE_DIR` for Claude JSONL history discovery (the directory
-  containing `projects/`).
-- `AGENTMONITOR_ENABLE_LIVE_TAB` (the Monitor's live stream) and live
-  capture/redaction flags.
-- `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` for historical discovery/import ignores.
-
-AI insight generation is optional and needs `AGENTMONITOR_INSIGHTS_PROVIDER` plus
-the matching provider key. See [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
-for the full environment table.
-
-## Integrations
-
-- Claude Code hooks: [hooks/claude-code/README.md](hooks/claude-code/README.md)
-- Codex OTEL setup: [hooks/codex/README.md](hooks/codex/README.md)
-- Claude Code quota bridge: [hooks/claude-code/README.md#claude-statusline-quota-bridge](hooks/claude-code/README.md#claude-statusline-quota-bridge)
-- Generic ingest contract: [docs/api/event-contract.md](docs/api/event-contract.md)
-- Stored events carry `cost_source` alongside `cost_usd`: `reported` for a cost
-  the producer sent, `estimated` for one priced from AgentMonitor's tables
-  ([contract](docs/api/event-contract.md)). Only estimates are re-derived when
-  rates change.
-- OTLP ingest (`POST /api/otel/v1/logs`, `/v1/metrics`) answers `{}` when every
-  record is stored, or OTLP's partial-success shape when some fail the ingest
-  contract: `{"partialSuccess":{"rejectedLogRecords":1,"errorMessage":"..."}}`
-  (`rejectedDataPoints` for metrics). A resent batch is stored once
-  ([details](docs/api/event-contract.md#otlp-ingestion)).
-- Historical import and runtime behavior: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
-
-## Code Layout
-
-```text
-src/api/              Express route handlers
-src/cli/              Local operator CLI command modules
-src/cli.ts            CLI executable entrypoint for amon and agentmonitor
-src/contracts/        TypeScript event contract types and validation
-src/db/               SQLite schema, migrations, queries, connection management
-src/import/           Historical Claude/Codex importers
-src/live/             Live session normalization and projection
-src/otel/             OTLP JSON parser
-src/pricing/          Model pricing and cost calculation
-src/provider-quotas/  Provider-native quota polling/ingest
-src/runtime-ownership.ts DB-scoped long-running runtime ownership
-src/runtime.ts        Shared TypeScript runtime startup used by server and CLI
-src/sse/              SSE client management and fan-out
-src/watcher/          Session-history watcher and sync
-frontend/             Svelte 5 `/app/` frontend
-hooks/                Claude Code and Codex integration setup
-tests/                Node test runner suite
-docs/                 System, project, API, and plan docs
+```bash
+cp .env.example .env    # then edit
+node --env-file=.env dist/cli.js serve --no-portless
 ```
+
+Variables already set in your shell take priority over the file. The ones people
+change most:
+
+| Setting | Purpose |
+| --- | --- |
+| `AGENTMONITOR_DB_PATH` | Database file location |
+| `AGENTMONITOR_PORT` | Server port (default `3141`; hooks and Codex need the same one) |
+| `AGENTMONITOR_CLAUDE_DIR`, `CODEX_HOME` | Roots containing Claude's `projects/` and Codex's `sessions/` |
+| `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` | History to skip |
+| `AGENTMONITOR_TIMEZONE` | The time zone days are counted in (default: this computer's) |
+| `AGENTMONITOR_INSIGHTS_PROVIDER` | `openai` (default), `anthropic`, or `gemini`, with that provider's key in `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY` |
+
+The Insights view appears under Analytics once a key is set.
+[Operations](docs/system/OPERATIONS.md#common-configuration) groups the rest, and
+[`src/config.ts`](src/config.ts) is the complete list.
+
+## Troubleshooting
+
+| What you see | What to do |
+| --- | --- |
+| `Database is already owned by AgentMonitor runtime PID …` | Another AgentMonitor (often the login service) is already using this database. Check `node dist/cli.js service status` and use or stop that one. Don't delete the lock file while that process runs. |
+| Port 3141 is in use | Start with `--port <n>`. Then rerun the hook install and update your Codex config with `AGENTMONITOR_PORT` set to the same port. |
+| Right after starting, the page won't load or `status` says unavailable | If the process is still running and scanning history, wait for `[watcher] Watching … for changes` or retry `status` every minute. Restarting repeats the scan. If the process exited, check its terminal error. |
+| Sessions is empty | Finish a first agent conversation, then run `node dist/cli.js sync sessions --source all --dry-run`. If you have history but no files are found, check `AGENTMONITOR_CLAUDE_DIR`, `CODEX_HOME`, and your exclude patterns. |
+| The app shows **Restart needed** | The build changed since the server started. Restart it. |
+| The app names **unpriced models** | Cost totals leave those models out until their prices are available. Once an update includes their prices, rebuilding and restarting fills in the missing costs. |
+| Codex live activity stopped updating | Make sure `~/.codex/config.toml` points at `127.0.0.1:3141` (or your port), then restart Codex sessions. |
+| No Insights view | Set a provider key (see [Configuration](#configuration)) and restart. Under the login service, keys aren't passed through. |
+| Claude quota shows as unavailable | Install the [statusline bridge](hooks/claude-code/README.md#claude-statusline-quota-bridge). |
+| `pnpm install` fails building `better-sqlite3` | Switch to Node.js 24.13.0 (`nvm use`) and install again. |
+| Certificate warning or password prompt | That's Portless setting up the HTTPS address. Run with `--no-portless`, or check its state with `pnpm exec portless doctor`. |
+
+Deeper recovery procedures, such as rebuilding session history or repairing
+imported costs, are in [Operations](docs/system/OPERATIONS.md).
 
 ## Documentation
 
-Start with [docs/README.md](docs/README.md) for the full docs map.
+- [Features](docs/system/FEATURES.md): what each view shows and the limits of its data.
+- [Operations](docs/system/OPERATIONS.md): setup options, the login service, imports, backups, and recovery.
+- [Architecture](docs/system/ARCHITECTURE.md): how data flows and which part owns what.
+- [API docs](docs/api/README.md): the event-ingest contract and read APIs.
+- [Vision](docs/project/VISION.md), [Roadmap](docs/project/ROADMAP.md), and [Backlog](docs/project/BACKLOG.md): direction and open work.
+- [Full docs index](docs/README.md).
 
-- Agent implementation guidance: [AGENTS.md](AGENTS.md)
-- Product and capability overview: [docs/system/FEATURES.md](docs/system/FEATURES.md)
-- Local development and runtime operations: [docs/system/OPERATIONS.md](docs/system/OPERATIONS.md)
-- Architecture and code organization: [docs/system/ARCHITECTURE.md](docs/system/ARCHITECTURE.md)
-- Local trace-quality layer: [docs/system/trace-quality.md](docs/system/trace-quality.md)
-- API docs and contracts: [docs/api/README.md](docs/api/README.md)
-- Roadmap and project direction: [docs/project/ROADMAP.md](docs/project/ROADMAP.md)
-- Future work and revisit triggers: [docs/project/BACKLOG.md](docs/project/BACKLOG.md)
-- Durable decisions: [docs/project/DECISIONS.md](docs/project/DECISIONS.md)
-- Contributor workflow: [CONTRIBUTING.md](CONTRIBUTING.md)
+## Work on AgentMonitor
 
-## Current Boundaries
-
-- Canonical product surface is Svelte `/app/` plus `/api/v2/*`.
-- Both the direct and Portless roots redirect to the canonical `/app/` surface.
-- TypeScript on `127.0.0.1:3141` is the runtime.
-- Codex `otel-only` live data is summary-oriented; transcript-grade parity needs richer local-state integration.
-- AI insight generation is optional and the only path that needs provider API keys.
+Focused fixes and documentation improvements are welcome. Start with
+[Contributing](CONTRIBUTING.md), [development setup](docs/system/OPERATIONS.md#source-development),
+and the [required checks](AGENTS.md#testing). [Architecture](docs/system/ARCHITECTURE.md#source-layout)
+maps the code. Optional CLI linking and service setup live in
+[Operations](docs/system/OPERATIONS.md#built-product).
 
 ## License
 
