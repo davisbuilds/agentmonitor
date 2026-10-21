@@ -272,19 +272,25 @@ class InsightsStore {
     this.deleting = true;
     this.error = null;
     const id = this.selectedId;
+    let reload = false;
     let recheck = false;
     try {
       await deleteInsight(id);
       this.items = this.items.filter(item => item.id !== id);
       this.selectedId = this.items[0]?.id ?? null;
-      recheck = this.needsAvailabilityCheck();
+      // A list read still in flight may have been answered before the delete
+      // and would restore the row; a fresh read for the current filters
+      // supersedes it and rechecks availability itself.
+      reload = this.loading;
+      recheck = !reload && this.needsAvailabilityCheck();
     } catch (err) {
       console.error('Failed to delete insight:', err);
       this.error = err instanceof Error ? err.message : 'Failed to delete insight.';
     } finally {
       this.deleting = false;
     }
-    if (recheck) await this.loadAvailability();
+    if (reload) await this.load();
+    else if (recheck) await this.loadAvailability();
   }
 }
 

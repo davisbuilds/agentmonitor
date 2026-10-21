@@ -253,3 +253,108 @@ describe('insights availability once saved insights are gone', () => {
     expect(store.insights.availability).toBe(true);
   });
 });
+
+describe('insights list reads in flight during a delete', () => {
+  // Refresh (or the auto-refresh timer) starts a list read; the server may
+  // answer it from before the delete lands.
+  function pendingListRead() {
+    let resolve!: (value: unknown) => void;
+    let reject!: (err: unknown) => void;
+    fetchInsights.mockImplementationOnce(() => new Promise((res, rej) => { resolve = res; reject = rej; }));
+    const settled = store.insights.load();
+    return { resolve: (value: unknown) => resolve(value), reject: (err: unknown) => reject(err), settled };
+  }
+
+  it('cannot restore the final insight after it is deleted without a key', async () => {
+    fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
+    await store.insights.load();
+    const stale = pendingListRead();
+
+    deleteInsight.mockResolvedValue({ removed: true });
+    fetchInsights.mockResolvedValue({ data: [], generation: generation({}) });
+    await store.insights.removeSelected();
+    expect(store.insights.availability).toBe(false);
+
+    stale.resolve({ data: [savedInsight], generation: generation({}) });
+    await stale.settled;
+    expect(store.insights.items).toEqual([]);
+    expect(store.insights.selectedId).toBeNull();
+    expect(store.insights.availability).toBe(false);
+    expect(store.insights.error).toBeNull();
+  });
+
+  it('settles loading once the delete has superseded the read in flight', async () => {
+    fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
+    await store.insights.load();
+    const stale = pendingListRead();
+    expect(store.insights.loading).toBe(true);
+
+    deleteInsight.mockResolvedValue({ removed: true });
+    fetchInsights.mockResolvedValue({ data: [], generation: generation({}) });
+    await store.insights.removeSelected();
+    expect(store.insights.loading).toBe(false);
+
+    stale.resolve({ data: [savedInsight], generation: generation({}) });
+    await stale.settled;
+    expect(store.insights.loading).toBe(false);
+  });
+
+  it('a read in flight that fails after the delete does not overwrite it', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
+    await store.insights.load();
+    const stale = pendingListRead();
+
+    deleteInsight.mockResolvedValue({ removed: true });
+    fetchInsights.mockResolvedValue({ data: [], generation: generation({}) });
+    await store.insights.removeSelected();
+
+    stale.reject(new Error('boom'));
+    await stale.settled;
+    expect(consoleError).not.toHaveBeenCalled();
+    expect(store.insights.error).toBeNull();
+    expect(store.insights.items).toEqual([]);
+    expect(store.insights.availability).toBe(false);
+    expect(store.insights.loading).toBe(false);
+  });
+
+  it('a failed delete keeps the read in flight current', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
+    await store.insights.load();
+    const pending = pendingListRead();
+
+    deleteInsight.mockRejectedValue(new Error('boom'));
+    await store.insights.removeSelected();
+
+    const another = { ...savedInsight, id: 9 };
+    pending.resolve({ data: [savedInsight, another], generation: generation({}) });
+    await pending.settled;
+    expect(fetchInsights).toHaveBeenCalledTimes(2);
+    expect(store.insights.items).toEqual([savedInsight, another]);
+    expect(store.insights.availability).toBe(true);
+    expect(store.insights.loading).toBe(false);
+  });
+
+  it('a delete during a filter change still lands on the new slice', async () => {
+    fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
+    await store.insights.load();
+
+    // The kind changed while the old slice's row stays selected.
+    const workflowInsight = { id: 11, kind: 'workflow', title: 'Workflow' } as Insight;
+    await store.insights.setKind('workflow');
+    const pending = pendingListRead();
+
+    deleteInsight.mockResolvedValue({ removed: true });
+    fetchInsights.mockResolvedValue({ data: [workflowInsight], generation: generation({}) });
+    await store.insights.removeSelected();
+
+    pending.resolve({ data: [workflowInsight], generation: generation({}) });
+    await pending.settled;
+    expect(fetchInsights).toHaveBeenLastCalledWith(expect.objectContaining({ kind: 'workflow' }));
+    expect(store.insights.items).toEqual([workflowInsight]);
+    expect(store.insights.selectedId).toBe(11);
+    expect(store.insights.availability).toBe(true);
+    expect(store.insights.loading).toBe(false);
+  });
+});
