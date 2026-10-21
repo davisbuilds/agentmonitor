@@ -228,6 +228,12 @@ message totals count such a session once, and the warehouse export publishes
 one trace summary per session (the UUID one when both exist). Other reads
 retain their own projection/usage semantics; this is not a storage migration or
 a universal identity reconciliation across Live and Search.
+The selected representative's fields and dates are the ones listed. Summary-only
+sessions stay listed unless a caller passes `exclude_empty=true`. Unknown ID formats
+and integrations are left as they are rather than guessed into an alias. List totals
+are not usage-session totals: usage counts distinct usage-bearing event session IDs
+in the event-time window, while browser history can include subagents and omit
+transcripts that were never projected.
 Trace-quality lists apply the same grammar to session summaries: a summary is
 event-backed when its session has events, so a Codex session holds a
 transcript-only summary under its rollout basename and an event-backed one
@@ -317,6 +323,41 @@ The live stream (Monitor's drill-in) has a separate v2 SSE stream. Both enforce 
 heartbeats, disconnect cleanup, and backpressure behavior; neither replaces stored
 state. Exact stream routes and payload wiring live in their route and emitter
 modules.
+
+A periodic auto-import that changes anything sends a `session_update` of
+`{ type: 'auto_import', imported, refreshed, removed }`. Those fields count the rows
+it inserted, rewrote, and removed because their Codex rollout no longer produces
+them. The app's Monitor store treats it as a refresh signal, not as a delta to
+apply.
+
+## Source Layout
+
+```text
+src/cli.ts            CLI entrypoint for `amon` and `agentmonitor`
+src/cli/              CLI command modules, help, output, launchd and Portless wrappers
+src/runtime.ts        Long-running startup/shutdown shared by `amon serve` and `pnpm start`
+src/runtime-ownership.ts  Per-database runtime lock
+src/app.ts            Express app: `/api`, the `/` redirect, and the `/app/` static build
+src/api/              v1 and v2 route handlers and the local-origin guard
+src/contracts/        Event-ingest contract types and validation
+src/db/               Schema, migrations, v1/v2 queries, connection, storage maintenance
+src/import/           Claude Code, Codex, Antigravity, and benchmark importers
+src/watcher/          Session-file discovery and session-browser projection
+src/live/             Live session adapters and normalization
+src/otel/             OTLP JSON parsing
+src/pricing/          Pricing tables (copied into `dist/` by the build) and cost math
+src/provider-quotas/  Provider-native quota polling and bridges
+src/sse/              SSE client management and fan-out
+frontend/             Svelte 5 `/app/` (see frontend/AGENTS.md); static files in frontend/public/
+hooks/                Claude Code, Codex, and Antigravity integration setup
+scripts/              Package-script tools, the verification CLI, and test runners
+tests/, e2e/          Node test suite and Playwright end-to-end tests
+```
+
+The remaining `src/` directories hold the domain services behind the v2 reads they
+are named for (`analytics/`, `usage/`, `insights/`, `skills/`, `trace-quality/`,
+`warehouse/`), plus shared transcript parsing (`parser/`) and helpers (`util/`).
+Source is authoritative when this map drifts.
 
 ## Runtime Path Resolution
 
