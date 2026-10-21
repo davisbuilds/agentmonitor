@@ -14,19 +14,43 @@ Related references:
 
 ## Built Product
 
+The [README quick start](../../README.md#quick-start) is the consumer path. It
+runs the built CLI in place, which needs no global install:
+
 ```bash
 pnpm build
-pnpm link --global
-amon serve
+node dist/cli.js serve --no-portless   # http://127.0.0.1:3141/app/
 ```
+
+`pnpm link --global` puts the same entrypoint on `PATH` as `amon` and `agentmonitor`.
+pnpm's global bin directory must be on `PATH` (`pnpm setup`). `amon <command>` and
+`node dist/cli.js <command>` are interchangeable from the checkout.
 
 `amon serve` runs Express on the fixed `127.0.0.1:3141` backend and normally uses
 the pinned package-local Portless CLI to expose
-`https://agentmonitor.localhost`. Both roots redirect to `/app/`. Hooks, OTLP
-exporters, and direct API clients remain on `:3141`.
+`https://agentmonitor.localhost`. Portless is an AgentMonitor dependency, so no
+global Portless install is required. Its first run generates a local certificate
+authority, adds it to the system trust store, and binds port 443, elevating with
+`sudo` on macOS and Linux. `pnpm exec portless doctor` inspects that state. Both
+roots redirect to `/app/`. Hooks, OTLP exporters, and direct API clients remain on
+`:3141`.
 
 `amon serve --no-portless` starts the direct backend without the named HTTPS
 origin. Ctrl-C shuts down the runtime and removes its Portless route.
+
+On startup without `--no-watch`, the watcher reads every discoverable Claude Code,
+Codex, and Antigravity history file once before it begins watching Claude and Codex
+files, and rescans all three every 15 minutes. The startup scans run synchronously
+after the listener opens, in that order, so HTTP requests (including `amon status`
+and `amon health`) wait until all three finish. Each scan logs its own summary:
+`[watcher] Initial sync complete` covers Claude Code only. `[watcher] Codex sync` and
+`[watcher] Antigravity sync` print only when files were found.
+`[watcher] Watching … for changes` follows the last scan. Without `--no-import`, an
+event import of the same sources follows 5 seconds after the scans and repeats every
+`AGENTMONITOR_AUTO_IMPORT_MINUTES` (default 10; `0` disables it). It also runs
+synchronously, so a large first import pauses requests again.
+Provider quota polling always starts. For Codex it runs `codex app-server` from
+`PATH`, and records an error snapshot when the Codex CLI is absent.
 
 ### Login Service (macOS)
 
@@ -116,7 +140,8 @@ pnpm frontend:dev # Svelte HMR server with API proxy
 ```
 
 Open `http://127.0.0.1:3141/app/` for the backend-served app or
-`http://127.0.0.1:5173/app/` for the frontend HMR path.
+`http://127.0.0.1:5173/app/` for the frontend HMR path. The backend serves the last
+`frontend/dist` build; run `pnpm frontend:watch` to rebuild it as you edit.
 
 During development, `pnpm cli -- ...` runs the TypeScript CLI entrypoint. After a
 build/link, use `amon ...`. `agentmonitor` is an equivalent executable alias.
@@ -137,9 +162,13 @@ for new operator documentation and automation.
 
 ## Common Configuration
 
-All configuration is optional. [`src/config.ts`](../../src/config.ts) is the
-complete authority; [`.env.example`](../../.env.example) provides a practical
-local-runtime starting point. Common controls include:
+All configuration is optional and comes from the process environment.
+[`src/config.ts`](../../src/config.ts) is the complete authority;
+[`.env.example`](../../.env.example) provides a practical local-runtime starting
+point. Nothing loads a `.env` file automatically. Export the variables, or pass a
+file through Node (`node --env-file=.env dist/cli.js serve`), where variables already
+set in the shell take precedence. For a linked `amon`, export the variables
+instead. Common controls include:
 
 | Concern | Variables |
 | --- | --- |
@@ -251,8 +280,10 @@ Create an application-consistent backup while the WAL writer remains active:
 amon database backup --output /absolute/private/path/agentmonitor.db
 ```
 
-The command requires an absolute regular-file destination, refuses source/sidecar
-paths and unsafe replacements, creates a mode-`0600` staged database through
+The command requires an absolute regular-file destination whose parent directory
+already exists, is not a symbolic link, is owned by the current user, and is
+private (mode `0700` or stricter). It refuses source/sidecar paths and unsafe
+replacements, creates a mode-`0600` staged database through
 SQLite's online backup API, validates it, and publishes it atomically. Use
 `--replace` to replace an existing valid target. AgentMonitor does not choose a
 backup schedule or retention policy.

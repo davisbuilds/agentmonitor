@@ -116,6 +116,37 @@ Animate `transform`/`opacity` only. Default duration 140ms, `ease-out`
   heading plus a single `ⓘ` affordance (`InfoTip`, or `Panel`'s `info`). Write its text in plain
   words: no table names, integration modes or capability-contract vocabulary.
 
+## Brand assets
+
+The mark is a flat signal line that rises into a peak shaped like an A, with a
+crossbar. Earlier activity reads as fainter, smaller spikes. It uses only the
+canvas, surface, line, text, and accent tokens. The accent is the one hue, as in the app.
+
+| File | Use |
+| --- | --- |
+| `docs/assets/amon-header.svg` | README header (880×240). Hand-edited vector; no external fonts, images, or scripts. |
+| `frontend/public/favicon.svg` | Browser-tab icon. The source for the raster fallback. |
+| `frontend/public/favicon.ico` | 16 px and 32 px PNG images rendered from `favicon.svg`, packed as one ICO. |
+
+- **Colors are hex copies of `app.css` tokens.** SVG fill attributes get sRGB
+  hex rather than `oklch()`. When a token changes, update the hex values here and
+  in the asset comments. Check them against Chromium's own conversion of the
+  token, for example by filling a canvas and reading the pixel back.
+- **Keep the mark's geometry shared.** The header's A and the favicon's A use the
+  same leg slope (8:17) and crossbar height. Change both together.
+- **Keep words in Markdown.** The header carries only the wordmark and `amon`. Copy
+  that explains the product belongs in the README, where it stays readable when
+  GitHub scales the image to a phone's width. The wordmark sets `textLength` so
+  that system font fallbacks cannot overflow it.
+- **Rebuild the ICO after editing `favicon.svg`.** Render it at exactly 16×16 and
+  32×32 with a transparent background, for example with Playwright's Chromium.
+  Check the 16 px render at 8× zoom; the A's counter must stay open. Then pack both
+  PNGs into `favicon.ico`.
+- **Wiring.** `frontend/index.html` links `/favicon.ico` (`sizes="16x16 32x32"`) and
+  `/favicon.svg` (`sizes="any"`). Vite copies `frontend/public/` into the build and prefixes these
+  root-relative URLs with the `/app/` base. Browsers with SVG favicon support
+  generally prefer the SVG; others use the ICO.
+
 ## Accessibility floor
 
 Body/secondary ≥ 4.5:1, large/numeric ≥ 3:1; all controls keyboard-reachable with a visible

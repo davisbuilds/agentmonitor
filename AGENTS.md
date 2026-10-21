@@ -23,7 +23,7 @@ and procedures that those executable surfaces do not explain on their own.
 - `docs/system/ARCHITECTURE.md` — system topology, data ownership, critical invariants, and recovery relationships.
 - `docs/system/FEATURES.md` — user-visible behavior plus fidelity, coverage, privacy, and human-review boundaries.
 - `docs/system/OPERATIONS.md` — local setup, runtime operation, integrations, backup/recovery, and verification workflows.
-- `docs/system/DESIGN.md` — Svelte `/app/` design system ("Instrument Console"): color/type/space/radius tokens, layout language, accessibility floor. Tokens live in `frontend/src/app.css` `@theme`.
+- `docs/system/DESIGN.md` — Svelte `/app/` design system ("Instrument Console"): color/type/space/radius tokens, layout language, brand assets (README header, favicons), accessibility floor. Tokens live in `frontend/src/app.css` `@theme`.
 - `docs/system/trace-quality.md` — lean local trace/observation projection, coverage and payload-policy honesty, aggregate warehouse export, and deferred Langfuse depth.
 - `docs/api/` — API ownership and externally consumed ingest semantics; exact routes remain source-owned.
 - `docs/project/VISION.md` — product purpose, the monitoring/observability/analytics baseline, guiding principles, and possible future role in a broader AgentOps platform.

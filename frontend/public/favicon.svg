@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- AgentMonitor tab icon: a signal line rising into an A, on the canvas tile.
+       Colors are the Instrument Console canvas, line-strong and accent tokens
+       (frontend/src/app.css) converted to sRGB. See docs/system/DESIGN.md. -->
+  <title>AgentMonitor</title>
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="7" fill="#080c0f" stroke="#3e4349" stroke-width="1.5"/>
+  <g fill="none" stroke="#00abed" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M4 23.5H8L16 6.5L24 23.5H28"/>
+    <path d="M11.6 17H20.4"/>
+  </g>
+</svg>

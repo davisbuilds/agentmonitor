@@ -28,6 +28,7 @@ parsing, schema details, and repository settings.
 - Features and product surface: [system/FEATURES.md](system/FEATURES.md)
 - Operations and recovery workflows: [system/OPERATIONS.md](system/OPERATIONS.md)
 - Architecture, data ownership, and invariants: [system/ARCHITECTURE.md](system/ARCHITECTURE.md)
+- App design system and brand assets: [system/DESIGN.md](system/DESIGN.md)
 - Local trace-quality layer: [system/trace-quality.md](system/trace-quality.md)
 - Read-only usage budgets: [system/usage-budgets.md](system/usage-budgets.md)
 
