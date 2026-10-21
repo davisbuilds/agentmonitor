@@ -13,10 +13,15 @@ import {
   type InsightListFilters,
 } from '../insights-state';
 import { analyticsFilters } from './analytics-filters.svelte';
-import { insightsViewAvailable, type InsightsAvailability } from '../analytics-views';
+import {
+  anyInsightProviderConfigured,
+  insightsViewAvailable,
+  type InsightsAvailability,
+} from '../analytics-views';
 
 class InsightsStore {
   private listVersion = 0;
+  private availabilityVersion = 0;
   private initialized = false;
   private unsubscribe: (() => void) | null = null;
   /** Whether any insight is saved at all, whatever the current filters select. */
@@ -105,16 +110,28 @@ class InsightsStore {
    * unfiltered row is requested.
    */
   async loadAvailability(): Promise<void> {
+    const version = ++this.availabilityVersion;
     try {
       const result = await fetchInsights({ limit: 1 });
+      if (version !== this.availabilityVersion) return;
       this.hasSavedInsights = result.data.length > 0;
       this.availability = insightsViewAvailable(result.generation, this.hasSavedInsights);
     } catch (err) {
+      if (version !== this.availabilityVersion) return;
       // Without the status Insights can't be offered honestly; fall back
-      // rather than leave a deep link waiting on it.
+      // rather than leave a deep link waiting on it. A failed recheck is no
+      // evidence that nothing is saved, so a known answer stands.
       console.error('Failed to load insight provider status:', err);
-      this.availability = false;
+      if (this.availability === null) this.availability = false;
     }
+  }
+
+  /**
+   * Without a key, Insights stays offered only while an insight is saved. An
+   * empty slice can't tell whether any remain elsewhere, so ask unfiltered.
+   */
+  private needsAvailabilityCheck(): boolean {
+    return this.items.length === 0 && !anyInsightProviderConfigured(this.generation);
   }
 
   dispose(): void {
@@ -128,6 +145,7 @@ class InsightsStore {
     const version = ++this.listVersion;
     this.loading = true;
     this.error = null;
+    let recheck = false;
 
     try {
       const result = await fetchInsights(this.queryParams);
@@ -135,8 +153,13 @@ class InsightsStore {
       this.items = result.data;
       this.generation = result.generation;
       // An empty filtered slice says nothing about the other saved insights, so
-      // it must not hide the view on a keyless server.
+      // it must not hide the view on a keyless server; the unfiltered recheck
+      // below decides whether any remain.
       if (result.data.length > 0) this.hasSavedInsights = true;
+      recheck = this.needsAvailabilityCheck();
+      // Rows or a key in hand outrank an unfiltered read still in flight;
+      // otherwise the recheck below supersedes it.
+      if (!recheck) this.availabilityVersion++;
       this.availability = insightsViewAvailable(result.generation, this.hasSavedInsights);
       if (!analyticsFilters.insightModel) {
         const defaultProvider = result.generation.default_provider;
@@ -159,6 +182,7 @@ class InsightsStore {
         this.loading = false;
       }
     }
+    if (recheck) await this.loadAvailability();
   }
 
   // Shared/specialized filter mutations delegate to the shared store, which
@@ -248,16 +272,19 @@ class InsightsStore {
     this.deleting = true;
     this.error = null;
     const id = this.selectedId;
+    let recheck = false;
     try {
       await deleteInsight(id);
       this.items = this.items.filter(item => item.id !== id);
       this.selectedId = this.items[0]?.id ?? null;
+      recheck = this.needsAvailabilityCheck();
     } catch (err) {
       console.error('Failed to delete insight:', err);
       this.error = err instanceof Error ? err.message : 'Failed to delete insight.';
     } finally {
       this.deleting = false;
     }
+    if (recheck) await this.loadAvailability();
   }
 }
 

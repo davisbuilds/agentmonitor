@@ -116,11 +116,9 @@ function daysAgo(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-test('saved insights stay readable without an API key, with generation disabled', async ({ page }) => {
-  setInsightProviderConfigForTests(NO_KEYS);
-  // Saved under a key that has since been removed; inside the default 30-day window.
-  const title = 'Insight saved under an earlier key';
-  const { lastInsertRowid } = getDb().prepare(`
+// Saved under a key that has since been removed; inside the default 30-day window.
+function saveInsight(title: string): number | bigint {
+  return getDb().prepare(`
     INSERT INTO insights (
       kind, title, prompt, content, date_from, date_to, project, agent, provider, model,
       analytics_summary_json, analytics_coverage_json, usage_summary_json, usage_coverage_json, input_json
@@ -141,7 +139,13 @@ test('saved insights stay readable without an API key, with generation disabled'
     JSON.stringify({ total_usage_events: 0, total_cost_usd: 0 }),
     JSON.stringify({ usage_events: 0, matching_events: 0, note: '' }),
     JSON.stringify({ analytics_activity: [] }),
-  );
+  ).lastInsertRowid;
+}
+
+test('saved insights stay readable without an API key, with generation disabled', async ({ page }) => {
+  setInsightProviderConfigForTests(NO_KEYS);
+  const title = 'Insight saved under an earlier key';
+  const id = saveInsight(title);
 
   try {
     const generateRequests: string[] = [];
@@ -171,7 +175,46 @@ test('saved insights stay readable without an API key, with generation disabled'
     await expect(fresh.getByRole('button', { name: 'Generate Insight' })).toBeDisabled();
     expect(generateRequests).toEqual([]);
   } finally {
-    getDb().prepare('DELETE FROM insights WHERE id = ?').run(lastInsertRowid);
+    getDb().prepare('DELETE FROM insights WHERE id = ?').run(id);
+  }
+});
+
+test('deleting the final saved insight without an API key drops Insights', async ({ page }) => {
+  setInsightProviderConfigForTests(NO_KEYS);
+  const title = 'Final saved insight, deleted here';
+  const id = saveInsight(title);
+
+  try {
+    await page.goto(`${baseUrl}/app/#analytics?view=insights`);
+    await expect(page.getByText(title).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Generate Insight' })).toBeDisabled();
+
+    await page.getByRole('button', { name: 'Delete', exact: true }).click();
+    await expect(page).not.toHaveURL(/view=insights/);
+    await expect(subTab(page, 'Overview')).toHaveAttribute('aria-pressed', 'true');
+    await expect(subTab(page, 'Insights')).toHaveCount(0);
+  } finally {
+    getDb().prepare('DELETE FROM insights WHERE id = ?').run(id);
+  }
+});
+
+test('a refresh after the final saved insight is removed elsewhere drops Insights', async ({ page }) => {
+  setInsightProviderConfigForTests(NO_KEYS);
+  const title = 'Final saved insight, removed elsewhere';
+  const id = saveInsight(title);
+
+  try {
+    await page.goto(`${baseUrl}/app/#analytics?view=insights`);
+    await expect(page.getByText(title).first()).toBeVisible();
+
+    // Removed outside this page (another tab, the CLI).
+    getDb().prepare('DELETE FROM insights WHERE id = ?').run(id);
+    await page.getByRole('button', { name: 'Refresh', exact: true }).first().click();
+    await expect(page).not.toHaveURL(/view=insights/);
+    await expect(subTab(page, 'Overview')).toHaveAttribute('aria-pressed', 'true');
+    await expect(subTab(page, 'Insights')).toHaveCount(0);
+  } finally {
+    getDb().prepare('DELETE FROM insights WHERE id = ?').run(id);
   }
 });
 
