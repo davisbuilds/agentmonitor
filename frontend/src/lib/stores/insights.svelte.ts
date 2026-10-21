@@ -13,12 +13,14 @@ import {
   type InsightListFilters,
 } from '../insights-state';
 import { analyticsFilters } from './analytics-filters.svelte';
-import { anyInsightProviderConfigured, type InsightsAvailability } from '../analytics-views';
+import { insightsViewAvailable, type InsightsAvailability } from '../analytics-views';
 
 class InsightsStore {
   private listVersion = 0;
   private initialized = false;
   private unsubscribe: (() => void) | null = null;
+  /** Whether any insight is saved at all, whatever the current filters select. */
+  private hasSavedInsights = false;
 
   // Shared filters (date/project/agent) and the insight-specialized filters
   // (kind + authoring provider/model) live in the consolidated filter store.
@@ -48,7 +50,7 @@ class InsightsStore {
     },
   });
 
-  /** Whether any provider has a key; null until the status first loads. */
+  /** Whether a provider has a key or an insight is saved; null until the status first loads. */
   availability = $state<InsightsAvailability>(null);
 
   loading = $state(false);
@@ -98,13 +100,15 @@ class InsightsStore {
   }
 
   /**
-   * Learn whether any provider is configured, without loading the Insights
-   * page. The status rides the list response, so one row is requested.
+   * Learn whether any provider is configured or any insight is saved, without
+   * loading the Insights page. The status rides the list response, so one
+   * unfiltered row is requested.
    */
   async loadAvailability(): Promise<void> {
     try {
       const result = await fetchInsights({ limit: 1 });
-      this.availability = anyInsightProviderConfigured(result.generation);
+      this.hasSavedInsights = result.data.length > 0;
+      this.availability = insightsViewAvailable(result.generation, this.hasSavedInsights);
     } catch (err) {
       // Without the status Insights can't be offered honestly; fall back
       // rather than leave a deep link waiting on it.
@@ -130,7 +134,10 @@ class InsightsStore {
       if (version !== this.listVersion) return;
       this.items = result.data;
       this.generation = result.generation;
-      this.availability = anyInsightProviderConfigured(result.generation);
+      // An empty filtered slice says nothing about the other saved insights, so
+      // it must not hide the view on a keyless server.
+      if (result.data.length > 0) this.hasSavedInsights = true;
+      this.availability = insightsViewAvailable(result.generation, this.hasSavedInsights);
       if (!analyticsFilters.insightModel) {
         const defaultProvider = result.generation.default_provider;
         analyticsFilters.setInsightProvider(defaultProvider);
@@ -203,6 +210,8 @@ class InsightsStore {
   }
 
   async generate(): Promise<void> {
+    // Saved insights are readable without a key; generating one still needs it.
+    if (!this.selectedProviderConfigured) return;
     const requestFilters = this.listFilters;
     this.generating = true;
     this.error = null;

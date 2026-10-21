@@ -11,6 +11,7 @@ let server: Server;
 /* eslint-disable @typescript-eslint/consistent-type-imports */
 let closeDb: typeof import('../src/db/connection.js').closeDb;
 let setInsightProviderConfigForTests: typeof import('../src/insights/service.js').setInsightProviderConfigForTests;
+let getDb: typeof import('../src/db/connection.js').getDb;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 
 const NO_KEYS = {
@@ -33,7 +34,7 @@ test.beforeAll(async () => {
   const { createApp } = await import('../src/app.js');
 
   initSchema();
-  const { getDb } = await import('../src/db/connection.js');
+  ({ getDb } = await import('../src/db/connection.js'));
   getDb().prepare(`
     INSERT INTO browsing_sessions (
       id, project, agent, first_message, started_at, message_count, user_message_count,
@@ -107,6 +108,71 @@ test('Insights appears once any provider has an API key', async ({ page }) => {
   await expect(fresh).toHaveURL(/view=insights/);
   await expect(subTab(fresh, 'Insights')).toHaveAttribute('aria-pressed', 'true');
   await expect(fresh.getByRole('button', { name: 'Generate Insight' })).toBeVisible();
+});
+
+function daysAgo(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return date.toISOString().slice(0, 10);
+}
+
+test('saved insights stay readable without an API key, with generation disabled', async ({ page }) => {
+  setInsightProviderConfigForTests(NO_KEYS);
+  // Saved under a key that has since been removed; inside the default 30-day window.
+  const title = 'Insight saved under an earlier key';
+  const { lastInsertRowid } = getDb().prepare(`
+    INSERT INTO insights (
+      kind, title, prompt, content, date_from, date_to, project, agent, provider, model,
+      analytics_summary_json, analytics_coverage_json, usage_summary_json, usage_coverage_json, input_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    'overview',
+    title,
+    null,
+    'Saved insight body.',
+    daysAgo(7),
+    daysAgo(3),
+    null,
+    null,
+    'openai',
+    'gpt-5-mini',
+    JSON.stringify({ total_sessions: 1, total_messages: 4 }),
+    JSON.stringify({ included_sessions: 1, matching_sessions: 1, note: '' }),
+    JSON.stringify({ total_usage_events: 0, total_cost_usd: 0 }),
+    JSON.stringify({ usage_events: 0, matching_events: 0, note: '' }),
+    JSON.stringify({ analytics_activity: [] }),
+  );
+
+  try {
+    const generateRequests: string[] = [];
+    page.context().on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/v2/insights/generate') generateRequests.push(request.method());
+    });
+
+    await page.goto(`${baseUrl}/app/#analytics`);
+    await expect(subTab(page, 'Insights')).toBeVisible();
+
+    const fresh = await page.context().newPage();
+    await fresh.goto(`${baseUrl}/app/#analytics?view=insights`);
+    await expect(subTab(fresh, 'Insights')).toHaveAttribute('aria-pressed', 'true');
+    await expect(fresh.getByText(title).first()).toBeVisible();
+    await expect(fresh.getByRole('button', { name: 'Generate Insight' })).toBeDisabled();
+
+    // A kind with nothing saved empties the slice; the view must stay put.
+    const listLoaded = fresh.waitForResponse(res => {
+      const url = new URL(res.url());
+      return url.pathname === '/api/v2/insights' && url.searchParams.get('kind') === 'workflow';
+    });
+    await fresh.locator('select:has(option[value="workflow"])').selectOption('workflow');
+    await listLoaded;
+    await expect(fresh.getByText('No saved insights for the current filters.')).toBeVisible();
+    await expect(fresh).toHaveURL(/view=insights/);
+    await expect(subTab(fresh, 'Insights')).toHaveAttribute('aria-pressed', 'true');
+    await expect(fresh.getByRole('button', { name: 'Generate Insight' })).toBeDisabled();
+    expect(generateRequests).toEqual([]);
+  } finally {
+    getDb().prepare('DELETE FROM insights WHERE id = ?').run(lastInsertRowid);
+  }
 });
 
 test('Overview leaves top sessions to Usage and skill panels to Skills', async ({ page }) => {

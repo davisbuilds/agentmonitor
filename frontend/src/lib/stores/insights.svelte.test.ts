@@ -1,10 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import type { InsightGenerationStatus } from '../api/client';
+import type { Insight, InsightGenerationStatus } from '../api/client';
 
 const fetchInsights = vi.fn();
+const generateInsight = vi.fn();
 vi.mock('../api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../api/client')>()),
   fetchInsights: (...args: unknown[]) => fetchInsights(...args),
+  generateInsight: (...args: unknown[]) => generateInsight(...args),
 }));
 
 function generation(configured: Partial<Record<'openai' | 'anthropic' | 'gemini', boolean>>): InsightGenerationStatus {
@@ -18,11 +20,15 @@ function generation(configured: Partial<Record<'openai' | 'anthropic' | 'gemini'
   };
 }
 
+// Only the fields the store reads; the rest of the row is irrelevant here.
+const savedInsight = { id: 7, kind: 'overview', title: 'Saved under an earlier key' } as Insight;
+
 // Module singleton on `$state`: reset per test so availability starts unknown.
 let store: typeof import('./insights.svelte');
 beforeEach(async () => {
   vi.resetModules();
   fetchInsights.mockReset();
+  generateInsight.mockReset();
   store = await import('./insights.svelte');
 });
 
@@ -60,5 +66,50 @@ describe('insights availability', () => {
     fetchInsights.mockResolvedValue({ data: [], generation: generation({ gemini: true }) });
     await store.insights.load();
     expect(store.insights.availability).toBe(true);
+  });
+});
+
+describe('insights saved while no provider key is configured', () => {
+  it('stays available for saved insights after every key is removed', async () => {
+    fetchInsights.mockResolvedValue({ data: [savedInsight], generation: generation({}) });
+    await store.insights.loadAvailability();
+    expect(store.insights.availability).toBe(true);
+  });
+
+  it('stays available when the filters select none of the saved insights', async () => {
+    fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
+    await store.insights.loadAvailability();
+
+    // e.g. a kind or date range that matches nothing saved: an empty slice,
+    // not an empty table, so the view must not drop back to Overview.
+    fetchInsights.mockResolvedValueOnce({ data: [], generation: generation({}) });
+    await store.insights.load();
+    expect(store.insights.items).toEqual([]);
+    expect(store.insights.availability).toBe(true);
+  });
+
+  it('a filtered load that finds saved insights also makes the view available', async () => {
+    fetchInsights.mockResolvedValue({ data: [savedInsight], generation: generation({}) });
+    await store.insights.load();
+    expect(store.insights.availability).toBe(true);
+  });
+
+  it('never posts a generation request without a key', async () => {
+    fetchInsights.mockResolvedValue({ data: [savedInsight], generation: generation({}) });
+    await store.insights.load();
+    expect(store.insights.selectedProviderConfigured).toBe(false);
+
+    await store.insights.generate();
+    expect(generateInsight).not.toHaveBeenCalled();
+    expect(store.insights.items).toEqual([savedInsight]);
+  });
+
+  it('still generates once the selected provider has a key', async () => {
+    fetchInsights.mockResolvedValue({ data: [], generation: generation({ openai: true }) });
+    await store.insights.load();
+    generateInsight.mockResolvedValue({ ...savedInsight, id: 8 });
+
+    await store.insights.generate();
+    expect(generateInsight).toHaveBeenCalledTimes(1);
   });
 });

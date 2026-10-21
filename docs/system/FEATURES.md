@@ -241,10 +241,11 @@ Anthropic, and Gemini providers are optional; local monitoring works without any
 provider API key. Generated text remains visibly attached to its scope and evidence
 limits.
 
-The Insights sub-view is offered only once at least one provider has an API key.
-A link to `#analytics?view=insights` on a server with no key opens Overview
-instead. Saved insights stay in the database and reappear once a key is
-configured.
+The Insights sub-view is offered once at least one provider has an API key or
+any insight is saved. Saved insights stay readable after every key is removed,
+including when the current filters select none of them; generating a new one
+stays disabled until the selected provider has a key. A link to
+`#analytics?view=insights` on a server with neither opens Overview instead.
 
 ## Trace Quality
 
