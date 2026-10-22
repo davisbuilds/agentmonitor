@@ -40,7 +40,7 @@ Open your coding agent and paste this:
 Set up AgentMonitor for me: https://github.com/davisbuilds/agentmonitor
 
 Read its README first. Clone it if I don't already have a checkout. Using
-Node.js 24.13.0 and pnpm 10.29.3, run `pnpm install` and `pnpm build` in the
+Node.js 24.22.1 and pnpm 11.28.5, run `pnpm install` and `pnpm build` in the
 checkout. Start it with `node dist/cli.js serve --no-portless` and keep it
 running. On the first start it reads my existing history before it answers. On a
 large history that can take several minutes, so while startup is still running,
@@ -62,9 +62,9 @@ changes your agents or your system. Prefer the terminal? Follow the
 
 ## Quick start
 
-You need macOS or Linux, Git, [Node.js](https://nodejs.org/) 24.13.0 (pinned in
+You need macOS or Linux, Git, [Node.js](https://nodejs.org/) 24.22.1 (pinned in
 `.nvmrc`, so `nvm use` selects it), and [pnpm](https://pnpm.io/installation)
-10.29.3. AgentMonitor runs with no Claude Code or Codex history, but then it has
+11.28.5. AgentMonitor runs with no Claude Code or Codex history, but then it has
 nothing to show.
 
 ```bash
@@ -260,7 +260,7 @@ The Insights view appears under Analytics once a key is set.
 | Codex live activity stopped updating | Make sure `~/.codex/config.toml` points at `127.0.0.1:3141` (or your port), then restart Codex sessions. |
 | No Insights view | Set a provider key (see [Configuration](#configuration)) and restart. Under the login service, keys aren't passed through. |
 | Claude quota shows as unavailable | Install the [statusline bridge](hooks/claude-code/README.md#claude-statusline-quota-bridge). |
-| `pnpm install` fails building `better-sqlite3` | Switch to Node.js 24.13.0 (`nvm use`) and install again. |
+| `pnpm install` fails building `better-sqlite3` | Switch to Node.js 24.22.1 (`nvm use`) and install again. |
 | Certificate warning or password prompt | That's Portless setting up the HTTPS address. Run with `--no-portless`, or check its state with `pnpm exec portless doctor`. |
 
 Deeper recovery procedures, such as rebuilding session history or repairing
