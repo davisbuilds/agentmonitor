@@ -428,6 +428,24 @@ the build.
 - **Revisit when**: an operational insert failure shows up in the logs, or the
   metrics route gains another write. Then wrap both writes in one transaction.
 
+#### The OTLP traces route acknowledges spans and discards them
+- **What**: `POST /api/otel/v1/traces` in `src/api/otel.ts` checks that the body
+  is JSON and returns `200 {}` without parsing, storing, or counting the spans.
+  The logs and metrics routes admit records and report drops; this route reports
+  success for a batch it threw away, so an exporter sees no error.
+- **Why or evidence**: latent today. Checked 2026-10-22 on the Mac mini: Codex
+  exports only logs and metrics to amon (`~/.codex/config.toml`), and Claude Code
+  has no OTEL exporter configured, so no spans arrive. Claude Code 2.1.300 added
+  GenAI semantic-convention span attributes (`gen_ai.conversation.id`,
+  `gen_ai.tool.name`, `error.type`), which makes enabling its traces tempting;
+  doing so would lose every span without a signal.
+- **Next**: until ingestion exists, make the route honest (count the spans as
+  rejected the way the logs and metrics routes record drops, or return 501).
+  Before building ingestion, capture a sanitized Claude Code 2.1.301+ trace
+  export and compare its spans with the events hooks, session files, and OTEL
+  logs already produce. Ingest only what spans add, and deduplicate against
+  those sources.
+
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
   `GET /api/v2/metrics` (shipped 2026-09-04; see `src/api/v2/router.ts` and
