@@ -11,6 +11,11 @@ on:
 permissions:
   contents: read
 
+# Superseded validation must release runner capacity for the newest commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     name: pnpm audit
