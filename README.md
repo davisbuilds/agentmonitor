@@ -40,7 +40,7 @@ Open your coding agent and paste this:
 Set up AgentMonitor for me: https://github.com/davisbuilds/agentmonitor
 
 Read its README first. Clone it if I don't already have a checkout. Using
-Node.js 24.22.1 and pnpm 11.28.5, run `pnpm install` and `pnpm build` in the
+Node.js 24.22.1 and pnpm 11.28.6, run `pnpm install` and `pnpm build` in the
 checkout. Start it with `node dist/cli.js serve --no-portless` and keep it
 running. On the first start it reads my existing history before it answers. On a
 large history that can take several minutes, so while startup is still running,
@@ -64,7 +64,7 @@ changes your agents or your system. Prefer the terminal? Follow the
 
 You need macOS or Linux, Git, [Node.js](https://nodejs.org/) 24.22.1 (pinned in
 `.nvmrc`, so `nvm use` selects it), and [pnpm](https://pnpm.io/installation)
-11.28.5. AgentMonitor runs with no Claude Code or Codex history, but then it has
+11.28.6. AgentMonitor runs with no Claude Code or Codex history, but then it has
 nothing to show.
 
 ```bash
