@@ -1,3 +1,21 @@
 packages:
   - .
   - frontend
+
+# Supply-chain quarantine: refuse package versions published in the last 7 days.
+# For an urgent fix, list the package under minimumReleaseAgeExclude and remove
+# it once the release ages past the window.
+minimumReleaseAge: 10080
+
+# pnpm 10 skipped every build script not listed in onlyBuiltDependencies;
+# false keeps that behavior under pnpm 11's strictDepBuilds.
+allowBuilds:
+  '@parcel/watcher': false
+  better-sqlite3: true
+  esbuild: true
+
+overrides:
+  'qs@<6.16.0': '6.16.0'
+  'path-to-regexp@8.3.0': '8.4.0'
+  'nanoid@<3.3.18': '3.3.18'
+  'body-parser@>=2.0.0 <2.3.0': '2.3.0'

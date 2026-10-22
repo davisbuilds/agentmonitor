@@ -49,22 +49,10 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": "24.13.0",
-    "pnpm": "10.29.3"
+    "node": "24.22.1",
+    "pnpm": "11.28.6"
   },
-  "packageManager": "pnpm@10.29.3",
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "better-sqlite3",
-      "esbuild"
-    ],
-    "overrides": {
-      "qs@<6.16.0": "6.16.0",
-      "path-to-regexp@8.3.0": "8.4.0",
-      "nanoid@<3.3.18": "3.3.18",
-      "body-parser@>=2.0.0 <2.3.0": "2.3.0"
-    }
-  },
+  "packageManager": "pnpm@11.28.6",
   "dependencies": {
     "better-sqlite3": "^13.0.3",
     "chokidar": "^5.0.0",

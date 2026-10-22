@@ -43,7 +43,7 @@ pnpm dev          # terminal 1: server in watch mode
 pnpm frontend:dev # terminal 2: Svelte at :5173 with API proxy
 
 pnpm build
-pnpm link --global
+pnpm add -g .
 amon serve        # compiled app at https://agentmonitor.localhost
 amon service install  # or run it as a macOS login service (launchd)
 ```
