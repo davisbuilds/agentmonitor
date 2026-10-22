@@ -1,3 +1,8 @@
 packages:
   - .
   - frontend
+
+# Supply-chain quarantine: refuse package versions published in the last 7 days.
+# For an urgent fix, list the package under minimumReleaseAgeExclude and remove
+# it once the release ages past the window.
+minimumReleaseAge: 10080
