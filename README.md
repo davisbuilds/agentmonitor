@@ -163,7 +163,7 @@ current settings. Run them in the same environment as `serve`.
 
 - **Keep it running (macOS).** `node dist/cli.js service install` starts AgentMonitor
   at login and restarts it after a crash. Use `service status`, `service restart`,
-  and `service uninstall` with the same prefix. The service serves
+  `service stop`, and `service uninstall` with the same prefix. The service serves
   <http://127.0.0.1:3141/app/>. It records the `AGENTMONITOR_*` settings set when
   you install it, but deliberately leaves out API keys, so insights aren't available
   under it. Rerun the install after changing a setting.

@@ -11,6 +11,7 @@ import {
   PATH_SETTINGS,
   restartService,
   serviceStatus,
+  stopService,
   uninstallService,
   SERVICE_LABEL,
   type CommandResult,
@@ -241,8 +242,87 @@ describe('amon service (launchd)', () => {
     const { host, spec, calls } = fixture();
     assert.throws(() => restartService(host), (error: unknown) => error instanceof CliError && error.exitCode === 4);
     await installService(host, spec());
-    restartService(host);
+    assert.equal(restartService(host), 'restarted');
     assert.deepEqual(calls.at(-1), ['launchctl', 'kickstart', '-k', `gui/501/${SERVICE_LABEL}`]);
+  });
+
+  test('stop unloads the service, keeps its plist, and waits for its server to exit', async () => {
+    const { host, spec, service, calls } = fixture();
+    const built = spec();
+    await installService(host, built);
+    service.stopDelayMs = 200;
+    calls.length = 0;
+
+    assert.equal(await stopService(host), 'stopped');
+    assert.deepEqual(calls.map(call => call.slice(1)), [
+      ['print', `gui/501/${SERVICE_LABEL}`],
+      ['bootout', `gui/501/${SERVICE_LABEL}`],
+    ]);
+    assert.equal(service.alive, false, 'returns only once the server has exited');
+    assert.equal(fs.existsSync(built.plistPath), true);
+    const status = serviceStatus(host);
+    assert.equal(status.installed, true);
+    assert.equal(status.loaded, false);
+  });
+
+  test('stop says when the service is already stopped, and reports a missing one as not found', async () => {
+    const { host, spec, calls } = fixture();
+    await assert.rejects(stopService(host), (error: unknown) => error instanceof CliError && error.exitCode === 4);
+    await installService(host, spec());
+    await stopService(host);
+    calls.length = 0;
+    assert.equal(await stopService(host), 'already-stopped');
+    assert.ok(!calls.some(call => call[1] === 'bootout'));
+  });
+
+  test('stop gives up when the server does not exit', async () => {
+    const { host, spec, service } = fixture();
+    await installService(host, spec());
+    service.stopDelayMs = 60_000;
+    host.stopTimeoutMs = 300;
+    await assert.rejects(stopService(host), /did not exit/);
+  });
+
+  test('restart starts a stopped service from its plist', async () => {
+    const { host, spec, calls } = fixture();
+    const built = spec();
+    await installService(host, built);
+    await stopService(host);
+    calls.length = 0;
+
+    assert.equal(restartService(host), 'started');
+    assert.deepEqual(calls.at(-1), ['launchctl', 'bootstrap', 'gui/501', built.plistPath]);
+    assert.equal(serviceStatus(host).loaded, true);
+  });
+
+  test('restart of a stopped service refuses while another server owns its database', async () => {
+    const { host, spec, dbPath, calls } = fixture();
+    await installService(host, spec());
+    await stopService(host);
+    const owner = acquireRuntimeOwnership(dbPath);
+    try {
+      calls.length = 0;
+      assert.throws(() => restartService(host), /already serves/);
+      assert.ok(!calls.some(call => call[1] === 'bootstrap'));
+    } finally {
+      owner.release();
+    }
+  });
+
+  test('restart of a stopped service checks the default database under the install when none is recorded', async () => {
+    const { host, entryScript, env, root, install, calls } = fixture();
+    const { AGENTMONITOR_DB_PATH: _recorded, ...withoutDb } = env;
+    await installService(host, buildServiceSpec({ host, nodePath: 'node', entryScript, cwd: root, env: withoutDb }));
+    await stopService(host);
+    fs.mkdirSync(path.join(install, 'data'));
+    const owner = acquireRuntimeOwnership(path.join(install, 'data', 'agentmonitor.db'));
+    try {
+      calls.length = 0;
+      assert.throws(() => restartService(host), /already serves/);
+      assert.ok(!calls.some(call => call[1] === 'bootstrap'));
+    } finally {
+      owner.release();
+    }
   });
 
   test('uninstall stops the service and removes its plist, and says when there was none', async () => {

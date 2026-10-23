@@ -73,7 +73,7 @@ test('a command group prints its subcommands for --help', async () => {
   assert.equal(result.exitCode, 0);
   assert.equal(result.stderr, '');
   assert.match(result.stdout, /Usage: amon service <subcommand> \[args\]/);
-  for (const subcommand of ['install', 'restart', 'status', 'uninstall']) {
+  for (const subcommand of ['install', 'restart', 'stop', 'status', 'uninstall']) {
     assert.match(result.stdout, new RegExp(`^  service ${subcommand} `, 'm'));
   }
   assert.doesNotMatch(result.stdout, /^ {2}sessions /m, 'lists only the group asked for');
@@ -109,7 +109,7 @@ test('a bare command group exits with invalid usage and names its subcommands', 
 
   assert.equal(result.exitCode, 2);
   assert.equal(result.stdout, '');
-  assert.match(result.stderr, /amon service needs a subcommand: install, restart, status, uninstall/);
+  assert.match(result.stderr, /amon service needs a subcommand: install, restart, stop, status, uninstall/);
   assert.match(result.stderr, /amon service --help/);
 });
 
@@ -119,7 +119,7 @@ test('an unknown subcommand names the group and its subcommands', async () => {
   assert.equal(result.exitCode, 2);
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /Unknown command: service stopp/);
-  assert.match(result.stderr, /install, restart, status, uninstall/);
+  assert.match(result.stderr, /install, restart, stop, status, uninstall/);
 });
 
 test('a flag after a bare group is not read as a subcommand', async () => {

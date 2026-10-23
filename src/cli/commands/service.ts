@@ -7,6 +7,7 @@ import {
   installService,
   restartService,
   serviceStatus,
+  stopService,
   uninstallService,
 } from '../launchd.js';
 import { writeHuman, writeJson, writeStdout } from '../output.js';
@@ -55,13 +56,28 @@ export function registerServiceCommands(): void {
   registerCommand({
     name: 'service restart',
     group: GROUP,
-    summary: 'Restart the service so it loads the build on disk',
+    summary: 'Restart the service so it loads the build on disk, or start a stopped one',
     usage: 'service restart',
     examples: ['service restart'],
     handler(ctx, args) {
       rejectExtraPositionals(args, 'amon service restart');
-      restartService(currentLaunchdHost());
-      writeHuman(ctx, 'Restarted the AgentMonitor service.');
+      const outcome = restartService(currentLaunchdHost());
+      writeHuman(ctx, outcome === 'started' ? 'Started the AgentMonitor service.' : 'Restarted the AgentMonitor service.');
+    },
+  });
+
+  registerCommand({
+    name: 'service stop',
+    group: GROUP,
+    summary: 'Stop the service, keeping it installed, until `service restart` or the next login',
+    usage: 'service stop',
+    examples: ['service stop'],
+    async handler(ctx, args) {
+      rejectExtraPositionals(args, 'amon service stop');
+      const outcome = await stopService(currentLaunchdHost());
+      writeHuman(ctx, outcome === 'stopped'
+        ? 'Stopped the AgentMonitor service. `amon service restart` starts it again.'
+        : 'The AgentMonitor service is already stopped.');
     },
   });
 
@@ -83,11 +99,12 @@ export function registerServiceCommands(): void {
         return;
       }
       writeStdout(ctx, [
-        `Service: ${status.label} (${status.loaded ? status.state ?? 'loaded' : 'not loaded'})`,
+        `Service: ${status.label} (${status.loaded ? status.state ?? 'loaded' : 'stopped'})`,
         `PID: ${status.pid ?? '-'}`,
         `Last exit: ${status.last_exit_code ?? '-'}`,
         `Plist: ${status.plist_path}${status.installed ? '' : ' (missing)'}`,
         ...(status.program_arguments ? [`Runs: ${status.program_arguments.join(' ')}`] : []),
+        ...(status.installed && !status.loaded ? ['Start it with `amon service restart`.'] : []),
         ...(status.entry_exists === false ? ['Warning: the recorded CLI no longer exists; rerun `amon service install`.'] : []),
       ].join('\n'));
     },
