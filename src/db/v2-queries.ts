@@ -1608,10 +1608,12 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
 
   // Page the sessions first, then compute all seven event aggregates in a single
   // grouped pass restricted to that page, instead of running seven correlated
-  // subqueries per returned row. Byte-identical to the previous correlated query
-  // (see tests/monitor-session-list.test.ts, which diffs both against seeded
-  // edge cases); the SUM(session_id IN page) restriction keeps it index-backed
-  // by idx_events_session_cost rather than scanning all events.
+  // subqueries per returned row. tests/monitor-session-list.test.ts diffs that
+  // paging shape against the correlated form on seeded edge cases; its oracle
+  // sums every row, so the reconciled usage sums are covered by
+  // tests/monitor-session-usage-reconciliation.test.ts instead. The
+  // session_id IN page restriction keeps the pass index-backed rather than
+  // scanning all events.
   const sessions = db.prepare(`
     WITH page AS (
       SELECT s.*
