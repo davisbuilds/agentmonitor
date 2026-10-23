@@ -80,6 +80,37 @@ so later readers know what still needs checking.
 
 ### Ingestion
 
+#### Decide the Codex tool-result evidence boundary
+
+- **What**: investigate how downstream readers can verify selected Codex tool
+  outcomes while respecting amon's deliberately selective capture and retention.
+  This is a focused design/investigation task, not a commitment to import every
+  tool output or create another raw-content store.
+- **Why or evidence**: a 2026-10-16 source-to-projection investigation recovered a
+  review receipt from native JSONL that was absent from the browser projection.
+  `src/parser/codex-sessions.ts` omits `function_call_output` and
+  `custom_tool_call_output`, drops native call IDs from `tool_use` blocks, and
+  sets `tool_use_id` to null; source and built-parser probes reproduced this.
+  Source inspection on 2026-10-23 confirmed these paths remain. A downstream
+  reader recognized normalized results in a positive control, so its missing
+  receipt did not establish a failed operation. This identifies an evidence gap,
+  not proof that the existing retention choice is wrong.
+- **Next**: review the rationale and controls in
+  [trace quality](../system/trace-quality.md) and the owning capture/import paths.
+  Choose the smallest useful evidence contract: call linkage, explicit omission
+  reasons, selected bounded receipts, or on-demand source references may suffice.
+  Evaluate privacy/redaction, payload size, storage cost, source expiry, and
+  display/search consequences before selecting what to persist. Keep summaries
+  and warehouse exports content-free; use synthetic examples in tracked tests.
+- **Before any backfill**: preserve existing pins and evidence references.
+  Browser ordinals count emitted messages, so inserting omitted results can shift
+  later ordinals and silently retarget `(session_id, message_ordinal)` pins.
+  Define stable identity or an explicit migration, test full/incremental parsing
+  and late/orphan results without changing human-turn or usage counts, then
+  rehearse the chosen policy on a scratch database through the built runtime.
+  Unchanged files are cached; deploying a parser alone does not recover history.
+  Live reparse and expanded retention remain separate rollout decisions.
+
 #### Codex subagent boundary rests on the current rollout layout
 - **What**: the importer finds a `thread_spawn` subagent's own activity from
   UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out
@@ -427,6 +458,24 @@ the build.
   inconsistent is unchecked.
 - **Revisit when**: an operational insert failure shows up in the logs, or the
   metrics route gains another write. Then wrap both writes in one transaction.
+
+#### The OTLP traces route acknowledges spans and discards them
+- **What**: `POST /api/otel/v1/traces` in `src/api/otel.ts` checks that the body
+  is JSON and returns `200 {}` without parsing, storing, or counting the spans.
+  The logs and metrics routes admit records and report drops; this route reports
+  success for a batch it threw away, so an exporter sees no error.
+- **Why or evidence**: latent today. Checked 2026-10-22 on the Mac mini: Codex
+  exports only logs and metrics to amon (`~/.codex/config.toml`), and Claude Code
+  has no OTEL exporter configured, so no spans arrive. Claude Code 2.1.300 added
+  GenAI semantic-convention span attributes (`gen_ai.conversation.id`,
+  `gen_ai.tool.name`, `error.type`), which makes enabling its traces tempting;
+  doing so would lose every span without a signal.
+- **Next**: until ingestion exists, make the route honest (count the spans as
+  rejected the way the logs and metrics routes record drops, or return 501).
+  Before building ingestion, capture a sanitized Claude Code 2.1.301+ trace
+  export and compare its spans with the events hooks, session files, and OTEL
+  logs already produce. Ingest only what spans add, and deduplicate against
+  those sources.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
 - **What**: operational OTEL metrics now ingest into `otel_metrics` and read via
