@@ -1602,6 +1602,10 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   const where = `WHERE ${conditions.join(' AND ')}`;
   const queryValues = [...values, limit];
 
+  // Codex usage seen by both OTEL and the import counts once, as Usage counts it,
+  // so a card's cost agrees with the header's; the event count keeps both rows.
+  const countedUsage = excludeOverlappingCodexOtelUsageCondition('e');
+
   // Page the sessions first, then compute all seven event aggregates in a single
   // grouped pass restricted to that page, instead of running seven correlated
   // subqueries per returned row. Byte-identical to the previous correlated query
@@ -1623,9 +1627,9 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
       SELECT
         e.session_id,
         COUNT(*) AS event_count,
-        SUM(e.tokens_in) AS tokens_in,
-        SUM(e.tokens_out) AS tokens_out,
-        SUM(e.cost_usd) AS total_cost_usd,
+        SUM(CASE WHEN ${countedUsage} THEN e.tokens_in END) AS tokens_in,
+        SUM(CASE WHEN ${countedUsage} THEN e.tokens_out END) AS tokens_out,
+        SUM(CASE WHEN ${countedUsage} THEN e.cost_usd END) AS total_cost_usd,
         COUNT(DISTINCT CASE
           WHEN json_valid(e.metadata) = 1
             AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin')
@@ -2047,14 +2051,16 @@ export function getMonitorSessionWithEvents(sessionId: string, eventLimit = 10):
   const db = getDb();
   updateIdleSessions(config.sessionTimeoutMinutes);
   const limit = Math.min(Math.max(eventLimit, 0), 500);
+  // Reconciled like the session list's totals (see listMonitorSessions).
+  const countedUsage = excludeOverlappingCodexOtelUsageCondition('e');
 
   const session = db.prepare(`
     SELECT s.*,
       json_extract(s.metadata, '$.mode') as mode,
       COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
-      COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id), 0) as tokens_in,
-      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id), 0) as tokens_out,
-      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id), 0) as total_cost_usd,
+      COALESCE((SELECT SUM(e.tokens_in) FROM events e WHERE e.session_id = s.id AND ${countedUsage}), 0) as tokens_in,
+      COALESCE((SELECT SUM(e.tokens_out) FROM events e WHERE e.session_id = s.id AND ${countedUsage}), 0) as tokens_out,
+      COALESCE((SELECT SUM(e.cost_usd) FROM events e WHERE e.session_id = s.id AND ${countedUsage}), 0) as total_cost_usd,
       COALESCE((SELECT COUNT(DISTINCT json_extract(e.metadata, '$.file_path')) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND e.tool_name IN ('Edit', 'Write', 'MultiEdit', 'apply_patch', 'write_stdin') AND json_extract(e.metadata, '$.file_path') IS NOT NULL), 0) as files_edited,
       COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_added') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_added') IS NOT NULL), 0) as lines_added,
       COALESCE((SELECT SUM(CAST(json_extract(e.metadata, '$.lines_removed') AS INTEGER)) FROM events e WHERE e.session_id = s.id AND json_valid(e.metadata) = 1 AND json_extract(e.metadata, '$.lines_removed') IS NOT NULL), 0) as lines_removed
