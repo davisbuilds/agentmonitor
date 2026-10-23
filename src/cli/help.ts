@@ -59,3 +59,16 @@ export function commandHelp(commandName: string, usage: string, summary: string,
   }
   return `${lines.join('\n')}\n`;
 }
+
+/** Help for a command group such as `service`: its subcommands and their summaries. */
+export function groupHelp(commandName: string, prefix: string, members: Command[]): string {
+  const lines = [
+    `Usage: ${commandName} ${prefix} <subcommand> [args]`,
+    '',
+    'Subcommands:',
+    ...members.map(command => `  ${command.name.padEnd(24)} ${command.summary}`),
+    '',
+    `Run \`${commandName} ${prefix} <subcommand> --help\` for a subcommand's usage.`,
+  ];
+  return `${lines.join('\n')}\n`;
+}

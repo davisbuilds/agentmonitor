@@ -58,7 +58,8 @@ Provider quota polling always starts. For Codex it runs `codex app-server` from
 pnpm build
 amon service install     # or: node dist/cli.js service install
 amon service status
-amon service restart     # after every rebuild
+amon service restart     # after every rebuild; also starts a stopped service
+amon service stop        # stays installed; starts again on restart or at login
 amon service uninstall
 ```
 
@@ -66,8 +67,11 @@ amon service uninstall
 `~/Library/LaunchAgents/dev.agentmonitor.serve.plist` and starts it. The agent
 runs the build the installing CLI belongs to (`node <install>/dist/cli.js serve
 --no-portless`) from the install root, starts at login, and restarts the server
-when it exits with an error. A server that was stopped (`amon service uninstall`,
-`launchctl bootout`) exits cleanly and stays stopped. Output goes to
+when it exits with an error. A server that was stopped (`amon service stop`,
+`amon service uninstall`) exits cleanly and stays stopped: `stop` unloads the
+agent but keeps its plist, waits for the server to exit, and leaves it stopped
+until `amon service restart` or the next login. Restarting a stopped service
+refuses while another server owns its database. Output goes to
 `~/Library/Logs/agentmonitor/serve.log`, which nothing rotates.
 
 launchd starts the server without the shell's environment. The install records
