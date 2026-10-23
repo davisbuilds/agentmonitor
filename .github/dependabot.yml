@@ -4,6 +4,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Installs quarantine releases for 7 days (pnpm minimumReleaseAge).
+    # Wait one day longer so bumps never land inside that window and fail
+    # the locked install. Security updates bypass this cooldown.
+    cooldown:
+      default-days: 8
     groups:
       minor-and-patch:
         applies-to: version-updates

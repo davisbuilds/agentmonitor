@@ -22,7 +22,7 @@ pnpm build
 node dist/cli.js serve --no-portless   # http://127.0.0.1:3141/app/
 ```
 
-`pnpm link --global` puts the same entrypoint on `PATH` as `amon` and `agentmonitor`.
+`pnpm add -g .` (pnpm 11 removed `pnpm link --global`) puts the same entrypoint on `PATH` as `amon` and `agentmonitor`.
 pnpm's global bin directory must be on `PATH` (`pnpm setup`). `amon <command>` and
 `node dist/cli.js <command>` are interchangeable from the checkout.
 
