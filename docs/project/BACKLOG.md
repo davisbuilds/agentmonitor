@@ -80,6 +80,37 @@ so later readers know what still needs checking.
 
 ### Ingestion
 
+#### Decide the Codex tool-result evidence boundary
+
+- **What**: investigate how downstream readers can verify selected Codex tool
+  outcomes while respecting amon's deliberately selective capture and retention.
+  This is a focused design/investigation task, not a commitment to import every
+  tool output or create another raw-content store.
+- **Why or evidence**: a 2026-10-16 source-to-projection investigation recovered a
+  review receipt from native JSONL that was absent from the browser projection.
+  `src/parser/codex-sessions.ts` omits `function_call_output` and
+  `custom_tool_call_output`, drops native call IDs from `tool_use` blocks, and
+  sets `tool_use_id` to null; source and built-parser probes reproduced this.
+  Source inspection on 2026-10-23 confirmed these paths remain. A downstream
+  reader recognized normalized results in a positive control, so its missing
+  receipt did not establish a failed operation. This identifies an evidence gap,
+  not proof that the existing retention choice is wrong.
+- **Next**: review the rationale and controls in
+  [trace quality](../system/trace-quality.md) and the owning capture/import paths.
+  Choose the smallest useful evidence contract: call linkage, explicit omission
+  reasons, selected bounded receipts, or on-demand source references may suffice.
+  Evaluate privacy/redaction, payload size, storage cost, source expiry, and
+  display/search consequences before selecting what to persist. Keep summaries
+  and warehouse exports content-free; use synthetic examples in tracked tests.
+- **Before any backfill**: preserve existing pins and evidence references.
+  Browser ordinals count emitted messages, so inserting omitted results can shift
+  later ordinals and silently retarget `(session_id, message_ordinal)` pins.
+  Define stable identity or an explicit migration, test full/incremental parsing
+  and late/orphan results without changing human-turn or usage counts, then
+  rehearse the chosen policy on a scratch database through the built runtime.
+  Unchanged files are cached; deploying a parser alone does not recover history.
+  Live reparse and expanded retention remain separate rollout decisions.
+
 #### Codex subagent boundary rests on the current rollout layout
 - **What**: the importer finds a `thread_spawn` subagent's own activity from
   UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out
