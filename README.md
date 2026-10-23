@@ -128,6 +128,13 @@ certificate authority, adds it to your system's trusted certificates, and listen
 on port 443. That can prompt for your password. Hooks and Codex telemetry keep
 using `http://127.0.0.1:3141` either way.
 
+### The `amon` command
+
+From here on, commands are written `amon …`. To put `amon` on your `PATH`, run
+`pnpm add -g .` in the checkout; pnpm's global bin directory must be on `PATH`
+(`pnpm setup` adds it). Without that, run `node dist/cli.js …` from the checkout
+instead. It is the same CLI.
+
 ## Connect your agents
 
 History shows up without changing your agents. To see activity as it happens,
@@ -137,8 +144,8 @@ start AgentMonitor first, then:
   It adds hooks to `~/.claude/settings.json`. Restart Claude Code afterwards.
 
   ```bash
-  node dist/cli.js hooks install claude --dry-run
-  node dist/cli.js hooks install claude
+  amon hooks install claude --dry-run
+  amon hooks install claude
   ```
 
   The hooks post events only to your local AgentMonitor. One of them also blocks a
@@ -153,7 +160,7 @@ start AgentMonitor first, then:
   [Codex guide](hooks/codex/README.md).
 
   ```bash
-  node dist/cli.js hooks print-codex-config
+  amon hooks print-codex-config
   ```
 
 Both commands use the address of the server AgentMonitor would start with your
@@ -161,22 +168,22 @@ current settings. Run them in the same environment as `serve`.
 
 ## Everyday use
 
-- **Keep it running (macOS).** `node dist/cli.js service install` starts AgentMonitor
+- **Keep it running (macOS).** `amon service install` starts AgentMonitor
   at login and restarts it after a crash. Use `service status`, `service restart`,
   `service stop`, and `service uninstall` with the same prefix. The service serves
   <http://127.0.0.1:3141/app/>. It records the `AGENTMONITOR_*` settings set when
   you install it, but deliberately leaves out API keys, so insights aren't available
   under it. Rerun the install after changing a setting.
 - **Update.** Run `git pull`, `pnpm install`, and `pnpm build`, then restart the
-  server: press Ctrl-C and start it again, or run `node dist/cli.js service restart`.
+  server: press Ctrl-C and start it again, or run `amon service restart`.
   Until you restart, the app shows **Restart needed**.
 - **Let agents query it.** Finite read commands accept `--json`:
 
   ```bash
-  node dist/cli.js sessions search "rate limit" --json
-  node dist/cli.js usage summary --json
-  node dist/cli.js monitor stats --json
-  node dist/cli.js --help          # everything else
+  amon sessions search "rate limit" --json
+  amon usage summary --json
+  amon monitor stats --json
+  amon --help          # everything else
   ```
 
 - **Back up.** This writes a checked copy while the server keeps running. The
@@ -184,7 +191,7 @@ current settings. Run them in the same environment as `serve`.
 
   ```bash
   mkdir -p -m 700 ~/agentmonitor-backups
-  node dist/cli.js database backup --output ~/agentmonitor-backups/agentmonitor.db
+  amon database backup --output ~/agentmonitor-backups/agentmonitor.db
   ```
 
 ## Your data and privacy
@@ -251,10 +258,10 @@ The Insights view appears under Analytics once a key is set.
 
 | What you see | What to do |
 | --- | --- |
-| `Database is already owned by AgentMonitor runtime PID …` | Another AgentMonitor (often the login service) is already using this database. Check `node dist/cli.js service status` and use or stop that one. Don't delete the lock file while that process runs. |
+| `Database is already owned by AgentMonitor runtime PID …` | Another AgentMonitor (often the login service) is already using this database. Check `amon service status`, then use that one or stop it with `amon service stop`. Don't delete the lock file while that process runs. |
 | Port 3141 is in use | Start with `--port <n>`. Then rerun the hook install and update your Codex config with `AGENTMONITOR_PORT` set to the same port. |
 | Right after starting, the page won't load or `status` says unavailable | If the process is still running and scanning history, wait for `[watcher] Watching … for changes` or retry `status` every minute. Restarting repeats the scan. If the process exited, check its terminal error. |
-| Sessions is empty | Finish a first agent conversation, then run `node dist/cli.js sync sessions --source all --dry-run`. If you have history but no files are found, check `AGENTMONITOR_CLAUDE_DIR`, `CODEX_HOME`, and your exclude patterns. |
+| Sessions is empty | Finish a first agent conversation, then run `amon sync sessions --source all --dry-run`. If you have history but no files are found, check `AGENTMONITOR_CLAUDE_DIR`, `CODEX_HOME`, and your exclude patterns. |
 | The app shows **Restart needed** | The build changed since the server started. Restart it. |
 | The app names **unpriced models** | Cost totals leave those models out until their prices are available. Once an update includes their prices, rebuilding and restarting fills in the missing costs. |
 | Codex live activity stopped updating | Make sure `~/.codex/config.toml` points at `127.0.0.1:3141` (or your port), then restart Codex sessions. |
