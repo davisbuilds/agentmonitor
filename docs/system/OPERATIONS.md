@@ -78,7 +78,8 @@ recorded as the absolute paths they meant where the install ran. A setting whose
 name marks a secret (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `DSN`)
 is left out and named as skipped, and generic provider keys such as
 `OPENAI_API_KEY` are never read, so insights that need a provider key are
-unavailable under the service and the app hides its Insights view. After
+unavailable under the service: the app hides its Insights view unless insights
+are already saved, which stay readable but cannot be regenerated. After
 changing a setting, rerun the install: it stops the service's own server, waits
 for that process to exit, and starts the new one. It refuses while a server it does not run owns the database;
 stop that one first.

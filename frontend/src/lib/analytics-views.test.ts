@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import type { InsightGenerationStatus } from './api/client';
 import {
   anyInsightProviderConfigured,
+  insightsViewAvailable,
   resolveAnalyticsView,
   visibleAnalyticsViews,
 } from './analytics-views';
@@ -25,6 +26,21 @@ describe('anyInsightProviderConfigured', () => {
   it('is true when any one provider has a key, not only the default', () => {
     expect(anyInsightProviderConfigured(generation({ gemini: true }))).toBe(true);
     expect(anyInsightProviderConfigured(generation({ openai: true }))).toBe(true);
+  });
+});
+
+describe('insightsViewAvailable', () => {
+  it('offers Insights for saved insights even when no provider has a key', () => {
+    expect(insightsViewAvailable(generation({}), true)).toBe(true);
+  });
+
+  it('stays unavailable with neither a key nor a saved insight', () => {
+    expect(insightsViewAvailable(generation({}), false)).toBe(false);
+  });
+
+  it('offers Insights with a key whether or not anything is saved yet', () => {
+    expect(insightsViewAvailable(generation({ anthropic: true }), false)).toBe(true);
+    expect(insightsViewAvailable(generation({ anthropic: true }), true)).toBe(true);
   });
 });
 
