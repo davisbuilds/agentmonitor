@@ -1,4 +1,4 @@
-import { listCommands, registerCommand } from './commands.js';
+import { helpFor, listCommands, registerCommand } from './commands.js';
 import { registerDatabaseCommands } from './commands/database.js';
 import { registerArtifactCommands } from './commands/artifacts.js';
 import { registerHookCommands } from './commands/hooks.js';
@@ -10,7 +10,7 @@ import { registerRuntimeCommands } from './commands/runtime.js';
 import { registerServiceCommands } from './commands/service.js';
 import { registerSessionLiveCommands } from './commands/sessions-live.js';
 import { registerWarehouseCommands } from './commands/warehouse.js';
-import { commandHelp, rootHelp } from './help.js';
+import { rootHelp } from './help.js';
 import { writeStdout } from './output.js';
 
 let registered = false;
@@ -41,7 +41,7 @@ export function registerAllCommands(): void {
         writeStdout(ctx, rootHelp(ctx.commandName, listCommands()));
         return;
       }
-      writeStdout(ctx, commandHelp(ctx.commandName, args.join(' '), 'Command help is available with --help.'));
+      writeStdout(ctx, helpFor(ctx.commandName, args));
     },
   });
 }

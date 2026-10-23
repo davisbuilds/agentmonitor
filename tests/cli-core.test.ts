@@ -66,3 +66,65 @@ test('unknown commands exit with invalid usage', async () => {
   assert.equal(result.stdout, '');
   assert.match(result.stderr, /Unknown command: nope/);
 });
+
+test('a command group prints its subcommands for --help', async () => {
+  const result = await runCli(['service', '--help']);
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.stderr, '');
+  assert.match(result.stdout, /Usage: amon service <subcommand> \[args\]/);
+  for (const subcommand of ['install', 'restart', 'status', 'uninstall']) {
+    assert.match(result.stdout, new RegExp(`^  service ${subcommand} `, 'm'));
+  }
+  assert.doesNotMatch(result.stdout, /^ {2}sessions /m, 'lists only the group asked for');
+});
+
+test('help <group> prints the same subcommand list', async () => {
+  const viaFlag = await runCli(['service', '--help']);
+  const viaHelp = await runCli(['help', 'service']);
+
+  assert.equal(viaHelp.exitCode, 0);
+  assert.equal(viaHelp.stdout, viaFlag.stdout);
+});
+
+test('help <command> prints that command\'s own help', async () => {
+  const viaFlag = await runCli(['service', 'status', '--help']);
+  const viaHelp = await runCli(['help', 'service', 'status']);
+
+  assert.equal(viaHelp.exitCode, 0);
+  assert.match(viaFlag.stdout, /^Usage: amon service status/m);
+  assert.equal(viaHelp.stdout, viaFlag.stdout);
+});
+
+test('help for an unknown command exits with invalid usage', async () => {
+  const result = await runCli(['help', 'nope']);
+
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Unknown command: nope/);
+});
+
+test('a bare command group exits with invalid usage and names its subcommands', async () => {
+  const result = await runCli(['service']);
+
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /amon service needs a subcommand: install, restart, status, uninstall/);
+  assert.match(result.stderr, /amon service --help/);
+});
+
+test('an unknown subcommand names the group and its subcommands', async () => {
+  const result = await runCli(['service', 'stopp']);
+
+  assert.equal(result.exitCode, 2);
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /Unknown command: service stopp/);
+  assert.match(result.stderr, /install, restart, status, uninstall/);
+});
+
+test('a flag after a bare group is not read as a subcommand', async () => {
+  const result = await runCli(['service', '--force']);
+
+  assert.equal(result.exitCode, 2);
+  assert.match(result.stderr, /amon service needs a subcommand/);
+});
