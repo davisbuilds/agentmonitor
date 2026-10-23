@@ -295,7 +295,8 @@ describe('amon service (launchd)', () => {
     assert.equal(serviceStatus(host).loaded, true);
   });
 
-  test('restart of a stopped service refuses while another server owns its database', async () => {
+  // Reads the plist with plutil, which only macOS has.
+  test('restart of a stopped service refuses while another server owns its database', { skip: !onMac }, async () => {
     const { host, spec, dbPath, calls } = fixture();
     await installService(host, spec());
     await stopService(host);
@@ -309,7 +310,8 @@ describe('amon service (launchd)', () => {
     }
   });
 
-  test('restart of a stopped service checks the default database under the install when none is recorded', async () => {
+  // Reads the plist with plutil, which only macOS has.
+  test('restart of a stopped service checks the default database under the install when none is recorded', { skip: !onMac }, async () => {
     const { host, entryScript, env, root, install, calls } = fixture();
     const { AGENTMONITOR_DB_PATH: _recorded, ...withoutDb } = env;
     await installService(host, buildServiceSpec({ host, nodePath: 'node', entryScript, cwd: root, env: withoutDb }));
