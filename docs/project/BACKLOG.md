@@ -489,15 +489,6 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
-### Saved insights while no provider key is configured
-
-- **What**: Insights is hidden unless a provider has an API key (2026-10-14), so
-  insights saved under an earlier key cannot be read in the app until one is
-  set again. They remain in the database and in `amon insights list`.
-- **Revisit when**: someone needs to read saved insights on a keyless server;
-  then offer a read-only Insights view when saved rows exist, rather than
-  bringing back the empty setup page.
-
 ### Frontend testing
 
 #### Cover component behavior (mount + reactivity)

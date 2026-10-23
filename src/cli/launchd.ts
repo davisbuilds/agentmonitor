@@ -292,13 +292,77 @@ export function uninstallService(host: LaunchdHost): boolean {
   return state.loaded || existed;
 }
 
-/** Restart the service's server so it loads the build now on disk. */
-export function restartService(host: LaunchdHost): void {
+/**
+ * Stop the service's server and unload its agent, keeping the plist, so launchd
+ * neither restarts it nor counts it as installed-and-running. It starts again on
+ * `amon service restart` or at the next login (RunAtLoad).
+ */
+export async function stopService(host: LaunchdHost): Promise<'stopped' | 'already-stopped'> {
   assertSupported(host);
-  if (!readServiceState(host).loaded) {
-    throw notFound('The AgentMonitor service is not installed. Run `amon service install`.');
+  const state = readServiceState(host);
+  if (!state.loaded) {
+    if (!fs.existsSync(plistPath(host))) throw notInstalled();
+    return 'already-stopped';
   }
-  launchctl(host, ['kickstart', '-k', `${domain(host)}/${SERVICE_LABEL}`]);
+  launchctl(host, ['bootout', `${domain(host)}/${SERVICE_LABEL}`]);
+  if (state.pid !== null) await waitForExit(host, state.pid);
+  return 'stopped';
+}
+
+/**
+ * Restart the service's server so it loads the build now on disk, or start a
+ * stopped service from its plist. A stopped service is not started while
+ * another server owns its database, for the reason installService gives.
+ */
+export function restartService(host: LaunchdHost): 'restarted' | 'started' {
+  assertSupported(host);
+  if (readServiceState(host).loaded) {
+    launchctl(host, ['kickstart', '-k', `${domain(host)}/${SERVICE_LABEL}`]);
+    return 'restarted';
+  }
+  const file = plistPath(host);
+  const plist = readPlist(host, file);
+  if (!plist) throw notInstalled();
+  const dbPath = installedDbPath(plist);
+  const owner = dbPath ? readRuntimeOwner(dbPath) : null;
+  if (owner) {
+    throw new CliError(
+      `AgentMonitor PID ${owner.pid} already serves ${dbPath}. Stop it, then rerun \`amon service restart\`.`,
+    );
+  }
+  launchctl(host, ['bootstrap', domain(host), file]);
+  return 'started';
+}
+
+function notInstalled(): CliError {
+  return notFound('The AgentMonitor service is not installed. Run `amon service install`.');
+}
+
+interface InstalledPlist {
+  ProgramArguments?: unknown;
+  WorkingDirectory?: unknown;
+  EnvironmentVariables?: unknown;
+}
+
+function readPlist(host: LaunchdHost, file: string): InstalledPlist | null {
+  if (!fs.existsSync(file)) return null;
+  const converted = host.run('plutil', ['-convert', 'json', '-o', '-', file]);
+  if (converted.status !== 0) return {};
+  return JSON.parse(converted.stdout) as InstalledPlist;
+}
+
+/**
+ * The database the agent's server opens: the recorded AGENTMONITOR_DB_PATH (the
+ * install pins it absolute), else the default under the install root, which is
+ * the agent's working directory.
+ */
+function installedDbPath(plist: InstalledPlist): string | null {
+  const environment = plist.EnvironmentVariables as Record<string, unknown> | undefined;
+  const configured = environment?.AGENTMONITOR_DB_PATH;
+  if (typeof configured === 'string' && configured.trim()) return configured.trim();
+  return typeof plist.WorkingDirectory === 'string'
+    ? path.join(plist.WorkingDirectory, 'data', 'agentmonitor.db')
+    : null;
 }
 
 export interface ServiceStatus {
@@ -317,15 +381,9 @@ export interface ServiceStatus {
 export function serviceStatus(host: LaunchdHost): ServiceStatus {
   const state = readServiceState(host);
   const file = plistPath(host);
-  const installed = fs.existsSync(file);
-  let programArguments: string[] | null = null;
-  if (installed) {
-    const converted = host.run('plutil', ['-convert', 'json', '-o', '-', file]);
-    if (converted.status === 0) {
-      const parsed = JSON.parse(converted.stdout) as { ProgramArguments?: unknown };
-      if (Array.isArray(parsed.ProgramArguments)) programArguments = parsed.ProgramArguments.map(String);
-    }
-  }
+  const plist = readPlist(host, file);
+  const installed = plist !== null;
+  const programArguments = Array.isArray(plist?.ProgramArguments) ? plist.ProgramArguments.map(String) : null;
   const entry = programArguments?.[1];
   return {
     label: SERVICE_LABEL,

@@ -22,7 +22,7 @@ pnpm build
 node dist/cli.js serve --no-portless   # http://127.0.0.1:3141/app/
 ```
 
-`pnpm link --global` puts the same entrypoint on `PATH` as `amon` and `agentmonitor`.
+`pnpm add -g .` (pnpm 11 removed `pnpm link --global`) puts the same entrypoint on `PATH` as `amon` and `agentmonitor`.
 pnpm's global bin directory must be on `PATH` (`pnpm setup`). `amon <command>` and
 `node dist/cli.js <command>` are interchangeable from the checkout.
 
@@ -58,7 +58,8 @@ Provider quota polling always starts. For Codex it runs `codex app-server` from
 pnpm build
 amon service install     # or: node dist/cli.js service install
 amon service status
-amon service restart     # after every rebuild
+amon service restart     # after every rebuild; also starts a stopped service
+amon service stop        # stays installed; starts again on restart or at login
 amon service uninstall
 ```
 
@@ -66,8 +67,11 @@ amon service uninstall
 `~/Library/LaunchAgents/dev.agentmonitor.serve.plist` and starts it. The agent
 runs the build the installing CLI belongs to (`node <install>/dist/cli.js serve
 --no-portless`) from the install root, starts at login, and restarts the server
-when it exits with an error. A server that was stopped (`amon service uninstall`,
-`launchctl bootout`) exits cleanly and stays stopped. Output goes to
+when it exits with an error. A server that was stopped (`amon service stop`,
+`amon service uninstall`) exits cleanly and stays stopped: `stop` unloads the
+agent but keeps its plist, waits for the server to exit, and leaves it stopped
+until `amon service restart` or the next login. Restarting a stopped service
+refuses while another server owns its database. Output goes to
 `~/Library/Logs/agentmonitor/serve.log`, which nothing rotates.
 
 launchd starts the server without the shell's environment. The install records
@@ -78,7 +82,8 @@ recorded as the absolute paths they meant where the install ran. A setting whose
 name marks a secret (`KEY`, `TOKEN`, `SECRET`, `PASSWORD`, `CREDENTIAL`, `DSN`)
 is left out and named as skipped, and generic provider keys such as
 `OPENAI_API_KEY` are never read, so insights that need a provider key are
-unavailable under the service and the app hides its Insights view. After
+unavailable under the service: the app hides its Insights view unless insights
+are already saved, which stay readable but cannot be regenerated. After
 changing a setting, rerun the install: it stops the service's own server, waits
 for that process to exit, and starts the new one. It refuses while a server it does not run owns the database;
 stop that one first.
