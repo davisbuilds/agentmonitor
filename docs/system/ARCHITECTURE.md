@@ -300,7 +300,8 @@ to the other buckets counts those tokens twice.
 Codex can produce both live OTEL usage and later imported JSONL usage for the same
 session. Usage and stats reconcile that overlap at read time: imported usage is
 authoritative for matching timestamps, overlapping OTEL usage is excluded from
-rollups, and raw rows remain available to monitoring and session history.
+rollups (the Monitor's per-session token and cost totals among them), and raw
+rows remain available to monitoring and session history.
 
 Usage, analytics, skill health, budgets, tier feedback, benchmarks, and insights
 are derived from shared v2 query/service boundaries. Responses carry coverage
