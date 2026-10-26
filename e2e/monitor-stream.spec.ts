@@ -21,6 +21,8 @@ const summarySessionId = 'e2e-live-002';
 // On the Monitor, but with no live record behind it.
 const noLiveSessionId = 'e2e-live-003';
 const longSessionId = 'e2e-live-long';
+// A stream with an open tool call partway down, for a result that arrives below the reader.
+const anchorSessionId = 'e2e-live-anchor';
 
 test.beforeAll(async () => {
   const builtIndex = path.join(process.cwd(), 'frontend', 'dist', 'index.html');
@@ -187,6 +189,32 @@ test.beforeAll(async () => {
   }
 
   const secondsAgo = (n: number) => new Date(Date.now() - n * 1000).toISOString();
+  db.prepare(`
+    INSERT INTO browsing_sessions (
+      id, project, agent, first_message, started_at, ended_at, message_count,
+      user_message_count, live_status, last_item_at, integration_mode, fidelity, capabilities_json
+    ) VALUES (?, 'agentmonitor', 'claude', 'Anchor run', '2026-03-24T10:00:00.000Z', NULL, 60, 0, 'live',
+      '2026-03-24T11:00:00.000Z', 'claude-jsonl', 'full', ?)
+  `).run(anchorSessionId, JSON.stringify({ history: 'full', search: 'full', tool_analytics: 'full', live_items: 'full' }));
+  const anchorTurn = Number(db.prepare(`
+    INSERT INTO session_turns (session_id, agent_type, source_turn_id, status, title)
+    VALUES (?, 'claude', 'anchor-turn', 'running', 'Anchor run')
+  `).run(anchorSessionId).lastInsertRowid);
+  // Item 20 is an open call below the rows a test reads; item 55 one above them.
+  const anchorCalls: Record<number, { id: string; command: string }> = {
+    20: { id: 'toolu_anchor', command: 'long-running build' },
+    55: { id: 'toolu_anchor_above', command: 'quick lint' },
+  };
+  for (let n = 1; n <= 60; n++) {
+    const call = anchorCalls[n];
+    longItem.run(
+      anchorSessionId, anchorTurn, call ? call.id : `anchor:${n}`,
+      call ? 'tool_call' : 'assistant_message',
+      JSON.stringify(call ? { tool_name: 'Bash', input: { command: call.command } } : { text: `Anchor item ${n}` }),
+      new Date(Date.parse('2026-03-24T10:00:00.000Z') + n * 1000).toISOString(),
+    );
+  }
+
   // One event gives the Monitor's filter bar an Agent option to show. It is
   // backdated so an event a test posts later always sorts as the newest.
   db.prepare(`
@@ -288,6 +316,32 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await expect(events.first()).toContainText('250ms');
   await expect(summary).toContainText('4 events');
   await expect(page.getByTestId('session-summary-cost')).toHaveText('$1.75');
+
+  // Other sessions' activity can fill the Monitor's global feed; this session's events stay.
+  // Paced in small batches so the SSE connection never backs up and reconnects (a
+  // reconnect rereads the session, which would hide a lost event).
+  for (let batch = 0; batch < 21; batch++) {
+    const flood = await fetch(`${baseUrl}/api/events/batch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        events: Array.from({ length: 10 }, (_, n) => ({
+          session_id: 'e2e-busy-neighbour',
+          agent_type: 'codex',
+          event_type: 'tool_use',
+          tool_name: 'exec_command',
+          status: 'success',
+          metadata: { command: `neighbour ${batch * 10 + n}` },
+        })),
+      }),
+    });
+    expect(flood.ok).toBe(true);
+    await page.waitForTimeout(50);
+  }
+  await expect(page.getByTestId('filter-bar')).toContainText(/Events\s*215\b/);
+  await page.waitForTimeout(500);
+  await expect(events).toHaveCount(4);
+  await expect(events.first()).toContainText('tool_use › Grep');
   // Picking an item in the stream shows it again.
   await page.locator('button', { hasText: 'Initial live response from seeded session' }).click();
   await expect(inspector.getByRole('heading', { name: 'Payload' })).toBeVisible();
@@ -442,6 +496,50 @@ test('a session whose record fails to load offers a retry instead of loading for
   failing = false;
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByRole('heading', { name: 'Inspect the repo' })).toBeVisible();
+});
+
+test('a result folding into a call above or below the reader leaves the rows being read in place', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${baseUrl}/app/#monitor?session=${anchorSessionId}`);
+  const stream = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Anchor run' }) });
+  const scroller = stream.getByTestId('live-stream-scroller');
+  const reading = stream.getByText('Anchor item 50', { exact: true });
+  await expect(reading).toBeVisible();
+
+  // Scroll so item 50 heads the viewport; the open call (item 20) is well below it.
+  await scroller.evaluate((el) => {
+    const row = [...el.querySelectorAll('button')].find(b => b.textContent?.includes('Anchor item 50'));
+    // A whole pixel: Chrome snaps a fractional offset when the content height
+    // changes, which would read as a pixel of drift.
+    if (row) el.scrollTop = Math.round(el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top);
+  });
+  const call = stream.locator('button', { hasText: 'long-running build' });
+  await expect(call).not.toBeInViewport();
+  // Rows slide in as they render; measure once they have settled.
+  await page.waitForFunction(() => document.getAnimations().length === 0);
+  const before = (await reading.boundingBox())!.y;
+
+  // Its result folds into that call's row and makes it taller; nothing above the reader changed.
+  getDb().prepare(`
+    INSERT INTO session_items (session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at)
+    VALUES (?, (SELECT id FROM session_turns WHERE session_id = ?), 0, 'toolu_anchor', 'tool_result', 'success', ?, '2026-03-24T11:00:00.000Z')
+  `).run(anchorSessionId, anchorSessionId, JSON.stringify({ content: 'Build finished: 412 modules compiled, 0 warnings, artifacts written to dist/ and ready for the next stage of the pipeline run' }));
+  liveBroadcaster.broadcast('item_delta', { session_id: anchorSessionId, inserted_items: 1, last_item_at: '2026-03-24T11:00:00.000Z' });
+  await expect(call).toContainText('Build finished');
+  await expect.poll(async () => Math.abs((await reading.boundingBox())!.y - before)).toBeLessThan(2);
+
+  // A result for the call above the reader makes that row taller: the rows being read still stay put.
+  const above = stream.locator('button', { hasText: 'quick lint' });
+  await expect(above).not.toBeInViewport();
+  await page.waitForFunction(() => document.getAnimations().length === 0);
+  const beforeAbove = (await reading.boundingBox())!.y;
+  getDb().prepare(`
+    INSERT INTO session_items (session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at)
+    VALUES (?, (SELECT id FROM session_turns WHERE session_id = ?), 0, 'toolu_anchor_above', 'tool_result', 'success', ?, '2026-03-24T11:00:01.000Z')
+  `).run(anchorSessionId, anchorSessionId, JSON.stringify({ content: 'Lint passed: 0 problems found across every package in the workspace, including the frontend and the CLI entry points' }));
+  liveBroadcaster.broadcast('item_delta', { session_id: anchorSessionId, inserted_items: 1, last_item_at: '2026-03-24T11:00:01.000Z' });
+  await expect(above).toContainText('Lint passed');
+  await expect.poll(async () => Math.abs((await reading.boundingBox())!.y - beforeAbove)).toBeLessThan(2);
 });
 
 test('a long stream shows its newest item first and loads older ones below without losing your place', async ({ page }) => {

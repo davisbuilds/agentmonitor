@@ -103,6 +103,18 @@
     }
   }
 
+  // Live events for this session, held here: the Monitor's global feed keeps
+  // only its newest 200, so other sessions' activity would evict them. Keyed
+  // by session id, so a new session drops the last one's events.
+  let heldLiveEvents = $state<AgentEvent[]>([]);
+  $effect(() => {
+    const id = sessionId;
+    const live = getEvents();
+    untrack(() => {
+      heldLiveEvents = sessionRecentEvents(id, heldLiveEvents, live);
+    });
+  });
+
   $effect(() => {
     const id = sessionId;
     detailSession = null;
@@ -128,7 +140,7 @@
 
   const cardRow = $derived(getSessions().find(row => row.id === sessionId) ?? null);
   const summary = $derived(followedSessionSummary(cardRow, detailSession));
-  const recentEvents = $derived(sessionRecentEvents(sessionId, detailEvents, getEvents()));
+  const recentEvents = $derived(sessionRecentEvents(sessionId, detailEvents, heldLiveEvents));
   const agentLabel = $derived(summary ? buildActiveAgentLabel(summary.agent_type, recentEvents) : '');
   // With no live stream to follow, the events are the view.
   const eventsOnly = $derived(!liveEnabled || missing);

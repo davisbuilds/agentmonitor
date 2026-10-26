@@ -96,20 +96,36 @@
     ontogglekind(kind);
   }
 
-  // Before newer items render above you, note where you are, then shift by
-  // what they added. (Browser scroll anchoring is off on the scroller so the
-  // two never both apply; Safari has none.)
-  let newestShownId: number | null = null;
+  // Scrolled down, pin the first row in view: note its layout offset before
+  // the items render, then scroll by however far it moved. Rows added above
+  // move it; a result folding into a call below does not, nor do older pages
+  // loading at the bottom. The move is read from layout offsets, which ignore
+  // the rows' enter animation that a measured box would include. Browser
+  // scroll anchoring is off on the scroller so the two never both apply;
+  // Safari has none.
+  function firstVisibleRow(el: HTMLElement): HTMLElement | null {
+    const top = el.getBoundingClientRect().top;
+    for (const row of el.querySelectorAll<HTMLElement>('[data-row-id]')) {
+      if (row.getBoundingClientRect().bottom > top) return row;
+    }
+    return null;
+  }
+
   $effect.pre(() => {
-    const newest = items.length > 0 ? items[items.length - 1].id : null;
-    const previous = newestShownId;
-    newestShownId = newest;
+    void items;
     const el = untrack(() => scroller);
-    if (!el || atTop || previous === null || newest === null || newest === previous) return;
-    const heightBefore = el.scrollHeight;
-    const topBefore = el.scrollTop;
+    if (!el || atTop) return;
+    const anchor = firstVisibleRow(el);
+    if (!anchor) return;
+    const rowId = anchor.dataset.rowId;
+    const offsetBefore = anchor.offsetTop;
     void tick().then(() => {
-      el.scrollTop = topBefore + (el.scrollHeight - heightBefore);
+      const same = el.querySelector<HTMLElement>(`[data-row-id="${rowId}"]`);
+      if (!same) return;
+      // Content added above moves the row by at least a line of text; a pixel
+      // is offset rounding of fractional layout, and chasing it nudges the rows.
+      const moved = same.offsetTop - offsetBefore;
+      if (Math.abs(moved) >= 2) el.scrollTop += moved;
     });
   });
 
@@ -204,6 +220,7 @@
         {@const argument = row.item.kind === 'tool_call' ? toolArgument(row.item) : null}
         {@const body = rowBody(row)}
         <button
+          data-row-id={row.item.id}
           class="animate-row-enter w-full rounded-sm border px-3 py-2 text-left transition-colors {selectedItemId === row.item.id ? 'border-accent/50 bg-accent/10' : 'border-transparent hover:border-line hover:bg-surface-2'}"
           onclick={() => onselect(row.item.id)}
         >
