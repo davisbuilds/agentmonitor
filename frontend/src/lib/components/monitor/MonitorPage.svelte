@@ -2,7 +2,6 @@
   import { onMount } from 'svelte';
   import AgentCards from './AgentCards.svelte';
   import MonitorStream from './MonitorStream.svelte';
-  import SessionDetail from './SessionDetail.svelte';
   import StatsBar from './StatsBar.svelte';
   import {
     setEvents,
@@ -24,10 +23,11 @@
   } from '../../stores/monitor.svelte';
   import { fetchStats, fetchEvents, fetchMonitorSessions, fetchFilterOptions, fetchUsageSummary, statsParams } from '../../api/client';
   import { monitorCostWindowParams } from '../../monitor-analytics';
-  import { getFollowedLiveSessionId } from '../../stores/live.svelte';
+  import { getMonitorSessionId } from '../../stores/router.svelte';
   import { FilterBar, Select } from '../ui';
 
-  const followedSessionId = $derived(getFollowedLiveSessionId());
+  // A card's drill-in (`#monitor?session=…`): its live stream, or its events when it has none.
+  const followedSessionId = $derived(getMonitorSessionId());
 
   // Monitor filters by agent alone: it is the one filter every read here
   // honors (the stats, the cards, their recent events and the cost windows).
@@ -201,5 +201,3 @@
     <AgentCards />
   </main>
 {/if}
-
-<SessionDetail />

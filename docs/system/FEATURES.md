@@ -46,11 +46,15 @@ routing prefix, a long-context suffix, a Bedrock wrapper, or a release date
 stamp. The unpriced-models notice keeps the exact ID, since that is what a rate
 card must match.
 
-Clicking an agent card opens that session's live stream and inspector in place, at
-`#monitor?session=<id>`; old `#live` links land on Monitor. A session with no live
-record, and every session when the live view is turned off
-(`AGENTMONITOR_ENABLE_LIVE_TAB=false`, a name kept for compatibility), opens the
-recent-events drawer instead.
+Clicking an agent card opens that session in place, at `#monitor?session=<id>`;
+old `#live` links land on Monitor. A strip above it keeps the card's figures in
+view and current: agent and model, invocation mode, branch, start time, events,
+tokens, files and lines edited, and cost. The session's live stream sits beside
+an inspector whose Events view lists the session's recent Monitor events, newest
+first, with what each did (prompt, command, file or error) and how long it took
+where the source reports a duration. A session with no live record, and every
+session when the live view is turned off (`AGENTMONITOR_ENABLE_LIVE_TAB=false`, a
+name kept for compatibility), shows those events in place of the stream.
 
 Monitor filters by agent only, the one filter every Monitor read honors: the stats,
 the cards, their recent events, live updates, and the cost windows. Project and the
@@ -68,8 +72,10 @@ usage recorded on this machine: a harness's account-wide total can include
 other machines and cloud tasks that no local source records.
 
 The live stream exposes a session's normalized turns and items, updated over a
-dedicated live SSE stream. It opens at the session's newest items and follows
-new ones while you are at the bottom; scrolling to the top loads the page before.
+dedicated live SSE stream. Its newest item is at the top. New items appear there
+while you are at the top; scrolled further down, the rows you are reading stay
+put as they arrive. Scrolling to the bottom loads the page before. A tool call
+shows how long it took, from the call to its result.
 Instructions a harness injects for the model (Codex's developer-role messages:
 permissions, skills, memory) read as Instructions rather than as the assistant,
 and the prompt capture setting governs them as it does prompts. Its fidelity is

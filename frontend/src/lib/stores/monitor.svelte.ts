@@ -349,8 +349,3 @@ export function setQuotaMonitor(u: QuotaMonitorData[]): void { quotaMonitor = u;
 let connectionStatus = $state<'connected' | 'connecting' | 'disconnected'>('connecting');
 export function getConnectionStatus() { return connectionStatus; }
 export function setConnectionStatus(s: 'connected' | 'connecting' | 'disconnected'): void { connectionStatus = s; }
-
-// --- Session detail ---
-let selectedSessionId = $state<string | null>(null);
-export function getSelectedSessionId(): string | null { return selectedSessionId; }
-export function setSelectedSessionId(id: string | null): void { selectedSessionId = id; }

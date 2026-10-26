@@ -1,6 +1,9 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
-  import { timeAgo } from '../../format';
+  import { formatDuration, timeAgo } from '../../format';
+  import { rowDurationMs, turnDurationMs } from '../../live-stream-rows';
+  import { SubTabs } from '../ui';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { turnTitle } from '../../session-text';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
@@ -13,9 +16,16 @@
     item: LiveItem | null;
     /** The tool result folded into the selected call's row, if any. */
     result?: LiveItem | null;
+    /** The session's recent events; given, the Inspector offers them beside the details. */
+    events?: Snippet;
+    /** Which of the two shows; the page switches back to details when you pick an item. */
+    view?: 'details' | 'events';
   }
 
-  let { session, turns, item, result = null }: Props = $props();
+  let { session, turns, item, result = null, events, view = $bindable('details') }: Props = $props();
+
+  const itemDurationMs = $derived(item ? rowDurationMs({ item, result }) : null);
+  const itemTurnDurationMs = $derived(item?.turn_id != null ? turnDurationMs(turns.find(turn => turn.id === item.turn_id)) : null);
 
   // Every message is a turn, so the full list repeats the stream; only turns
   // that are still running or went wrong are worth listing here.
@@ -75,10 +85,22 @@
 </script>
 
 <aside class="flex flex-col xl:h-full xl:overflow-hidden">
-  <div class="shrink-0 border-b border-line px-4 py-3">
+  <div class="flex shrink-0 items-center justify-between gap-3 border-b border-line px-4 py-3">
     <h3 class="text-h3">Inspector</h3>
+    {#if events}
+      <SubTabs
+        tabs={[{ id: 'details', label: 'Details' }, { id: 'events', label: 'Events' }]}
+        active={view}
+        onchange={(id) => { view = id as 'details' | 'events'; }}
+      />
+    {/if}
   </div>
 
+  {#if events && view === 'events'}
+    <div class="px-2 py-2 xl:flex-1 xl:overflow-y-auto">
+      {@render events()}
+    </div>
+  {:else}
   <div class="space-y-5 px-4 py-4 xl:flex-1 xl:overflow-y-auto">
     {#if session}
       <section>
@@ -164,6 +186,18 @@
               <span>{isNotableStatus(result?.status) ? result?.status : item.status}</span>
             </div>
           {/if}
+          {#if itemDurationMs != null}
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-text-faint">Took</span>
+              <span class="tabular font-mono">{formatDuration(itemDurationMs)}</span>
+            </div>
+          {/if}
+          {#if itemTurnDurationMs != null}
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-text-faint">Turn took</span>
+              <span class="tabular font-mono">{formatDuration(itemTurnDurationMs)}</span>
+            </div>
+          {/if}
           <div class="flex items-center justify-between gap-3">
             <span class="text-text-faint">Ordinal</span>
             <span class="tabular font-mono">#{item.ordinal}</span>
@@ -200,4 +234,5 @@
       {/if}
     {/if}
   </div>
+  {/if}
 </aside>

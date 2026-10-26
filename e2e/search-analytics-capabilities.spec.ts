@@ -265,7 +265,7 @@ test('monitor active agent cards include model and reasoning effort when availab
   await expect(card).toContainText('Codex (gpt-5.5 high)');
 });
 
-test('monitor session detail drawer uses v2 detail and transcript endpoints', async ({ page }) => {
+test('a monitor session with no live record reads its v2 detail and shows its events in place', async ({ page }) => {
   const requestedPaths: string[] = [];
   page.on('request', (request) => {
     requestedPaths.push(new URL(request.url()).pathname);
@@ -273,14 +273,14 @@ test('monitor session detail drawer uses v2 detail and transcript endpoints', as
 
   await page.goto(`${baseUrl}/app/#monitor`);
 
-  // This session has no live record, so its card offers the recent-events drawer.
+  // This session has no live record, so its card opens its recent events.
   const card = page.locator('button').filter({ hasText: 'agentmonitor' }).first();
   await expect(card).toBeVisible();
   await card.click();
-  await page.getByRole('button', { name: 'Show recent events' }).click();
 
-  await expect(page.getByRole('heading', { name: 'Session Details' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Recent events' })).toBeVisible();
+  // The header keeps the card's model and reasoning-effort label.
+  await expect(page.getByTestId('session-summary')).toContainText('Codex (gpt-5.5 high)');
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/sessions/e2e-monitor-model-session')).toBe(true);
-  await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/sessions/e2e-monitor-model-session/transcript')).toBe(true);
   expect(requestedPaths.some(pathname => pathname.startsWith('/api/sessions/'))).toBe(false);
 });

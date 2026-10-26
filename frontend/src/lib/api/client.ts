@@ -904,11 +904,6 @@ export async function fetchSessionDetail(id: string, eventLimit = 10): Promise<{
   return checkedJson(res, 'fetchSessionDetail');
 }
 
-export async function fetchTranscript(id: string): Promise<{ transcript: Array<{ role: string; content: string; timestamp?: string }> }> {
-  const res = await fetch(`/api/v2/monitor/sessions/${encodeURIComponent(id)}/transcript`);
-  return checkedJson(res, 'fetchTranscript');
-}
-
 // V2 endpoints (Session browser)
 
 export async function fetchBrowsingSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: BrowsingSession[]; total: number; cursor?: string }> {
