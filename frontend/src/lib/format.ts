@@ -122,7 +122,10 @@ export function formatTimeOfDay(dateStr: string): string {
 export function formatDuration(ms: number | null | undefined): string {
   if (ms == null) return '-';
   if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  const totalSeconds = Math.floor(ms / 1000);
+  if (totalSeconds < 3600) return `${Math.floor(totalSeconds / 60)}m ${totalSeconds % 60}s`;
+  return `${Math.floor(totalSeconds / 3600)}h ${Math.floor((totalSeconds % 3600) / 60)}m`;
 }
 
 export function agentColor(agentType: string): string {

@@ -73,6 +73,15 @@ describe('formatDuration', () => {
     expect(formatDuration(250)).toBe('250ms');
     expect(formatDuration(1_500)).toBe('1.5s');
   });
+
+  it('renders minutes and hours for long runs', () => {
+    expect(formatDuration(59_900)).toBe('59.9s');
+    expect(formatDuration(60_000)).toBe('1m 0s');
+    expect(formatDuration(125_000)).toBe('2m 5s');
+    expect(formatDuration(3_599_999)).toBe('59m 59s');
+    expect(formatDuration(3_600_000)).toBe('1h 0m');
+    expect(formatDuration(5_520_000)).toBe('1h 32m');
+  });
 });
 
 describe('formatDateRange — cost window labels', () => {
