@@ -29,13 +29,13 @@
     quality: 'Quality',
   };
 
-  // Insights does nothing without an LLM API key, so it is offered only once a
-  // provider is known to be configured — and not while that is still loading.
+  // Insights is offered once a provider key or a saved insight is known to exist
+  // (saved ones stay readable after keys are removed) — not while that loads.
   const views = $derived(
     visibleAnalyticsViews(insights.availability).map(id => ({ id, label: viewLabels[id] })),
   );
-  // The view actually rendered: an Insights deep link with no key shows
-  // Overview, and shows nothing while the key status is unknown.
+  // The view actually rendered: an Insights deep link with neither a key nor a
+  // saved insight shows Overview, and shows nothing while that is unknown.
   const shown = $derived(resolveAnalyticsView(f.view, insights.availability));
 
   onMount(() => {

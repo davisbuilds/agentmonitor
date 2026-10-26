@@ -212,8 +212,9 @@ Monitor's today and 30-day figures.
   reported; expect a ratio a little under 1, because the harness also pays for
   requests that never reach a transcript, such as compaction. How that
   shortfall splits between them is unmeasured (see BACKLOG).
-- Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates;
-  raw events remain available in session and monitor history.
+- Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates,
+  including a Monitor card's and session detail's token and cost totals; raw
+  events remain available in session and monitor history.
 - Benchmark events are excluded from normal usage, analytics, and the Monitor's
   totals, event feed, and session list.
   Benchmark-aware reads can opt into them explicitly. Usage and analytics reads
@@ -242,10 +243,11 @@ Anthropic, and Gemini providers are optional; local monitoring works without any
 provider API key. Generated text remains visibly attached to its scope and evidence
 limits.
 
-The Insights sub-view is offered only once at least one provider has an API key.
-A link to `#analytics?view=insights` on a server with no key opens Overview
-instead. Saved insights stay in the database and reappear once a key is
-configured.
+The Insights sub-view is offered once at least one provider has an API key or
+any insight is saved. Saved insights stay readable after every key is removed,
+including when the current filters select none of them; generating a new one
+stays disabled until the selected provider has a key. A link to
+`#analytics?view=insights` on a server with neither opens Overview instead.
 
 ## Trace Quality
 
