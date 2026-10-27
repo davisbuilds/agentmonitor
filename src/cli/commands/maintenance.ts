@@ -316,9 +316,69 @@ export function registerMaintenanceCommands(): void {
   });
 
   registerCommand({
+    name: 'costs check-sessions',
+    group: 'Data Commands',
+    summary: "Compare amon's imported totals with each harness's own, per recent session",
+    usage: 'costs check-sessions [--source claude-code|codex|antigravity|all] [--limit <n>]',
+    examples: [
+      'costs check-sessions',
+      'costs check-sessions --source codex --limit 50',
+      'costs check-sessions --json',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--source', '--limit']), new Set());
+      rejectExtraPositionals(parsed.positionals, 'amon costs check-sessions [--source claude-code|codex|antigravity|all] [--limit <n>]');
+      const source = parseImportSource(parsed.values.get('--source'));
+      const limitValue = parsed.values.get('--limit');
+      const limit = limitValue === undefined ? 20 : Number(limitValue);
+      if (!Number.isInteger(limit) || limit < 1) throw invalidUsage('--limit must be a positive integer');
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb } = await import('../../db/connection.js');
+      const { createConfig } = await import('../../config.js');
+      const { checkSessionTotals } = await import('../../import/session-total-check.js');
+      const runtimeConfig = createConfig();
+      initSchema();
+      try {
+        const report = checkSessionTotals({
+          source,
+          claudeDir: runtimeConfig.claudeDir,
+          limit,
+          excludePatterns: runtimeConfig.sync.excludePatterns,
+        });
+        if (ctx.global.json) {
+          writeJson(ctx, report);
+          return;
+        }
+        const describe = {
+          'claude-code': "Claude Code's cost-state checkpoint, in dollars (expect a little under 1)",
+          codex: "Codex's thread total, in tokens (expect 1)",
+          antigravity: 'nothing: Antigravity records no total of its own',
+        } as const;
+        const amount = (unit: 'usd' | 'tokens' | null, value: number | null) =>
+          (value === null ? 'n/a' : unit === 'usd' ? `$${value.toFixed(2)}` : value.toLocaleString('en-US'));
+        const share = (value: number | null) => (value === null ? 'n/a' : value.toFixed(3));
+        const lines: string[] = [];
+        for (const [name, summary] of Object.entries(report.sources) as Array<[keyof typeof describe, NonNullable<typeof report.sources[keyof typeof describe]>]>) {
+          lines.push(`${name}: checked against ${describe[name]}`);
+          if (summary.instrument === null) continue;
+          lines.push(`  ${summary.checked} of ${summary.sessions} recent sessions checked; ratio median ${share(summary.ratio_median)} (min ${share(summary.ratio_min)}, max ${share(summary.ratio_max)})`);
+          for (const row of report.sessions.filter(check => check.source === name)) {
+            lines.push(row.status === 'checked'
+              ? `  ${row.session_id.slice(0, 8)}  harness ${amount(summary.unit, row.harness)}  amon ${amount(summary.unit, row.amon)}  ratio ${share(row.ratio)}`
+              : `  ${row.session_id.slice(0, 8)}  ${row.status.replaceAll('_', ' ')}`);
+          }
+        }
+        writeStdout(ctx, `${lines.join('\n')}\n`);
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'costs check-claude-sessions',
     group: 'Data Commands',
-    summary: "Compare imported Claude cost with Claude Code's own running cost per session",
+    summary: "Compare imported Claude cost with Claude Code's own running cost per session (every source: costs check-sessions)",
     usage: 'costs check-claude-sessions [--transcripts] [--limit <n>]',
     examples: [
       'costs check-claude-sessions',
