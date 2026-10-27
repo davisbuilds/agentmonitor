@@ -435,6 +435,22 @@ counted per content block again. No ratio is given while any imported row in
 the window has usage but no cost (an unpriced model), since the sum would skip
 it and read low.
 
+`amon costs check-claude-sessions --transcripts` needs no statusline bridge.
+
+- **Source.** It reads the latest `cost-state` line that Claude Code writes into
+  each transcript when a process exits or resumes. That line holds the
+  session's running cost and tokens per model, subagents included.
+- **Window.** A checkpoint has no timestamp. It is cut at the timestamped line
+  before it, and starts at its own `startTime`:
+  - a resumed process that restores the session's cost state keeps the original
+    start;
+  - one that does not, starts from zero.
+- **Output.** It compares the imported cost in that window per model. A model
+  the harness billed but amon holds no rows for is usage the transcript never
+  recorded, such as side requests on a smaller model.
+- **Scope.** It reads only the newest `--limit` top-level transcripts, and
+  writes nothing.
+
 The repair also fills in the 1-hour part of each row's cache writes. Claude
 transcripts split each request's cache writes into a 5-minute and a 1-hour part
 (`message.usage.cache_creation`), and the 1-hour part bills at 2x input rather

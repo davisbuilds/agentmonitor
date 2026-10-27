@@ -319,14 +319,15 @@ export function registerMaintenanceCommands(): void {
     name: 'costs check-claude-sessions',
     group: 'Data Commands',
     summary: "Compare imported Claude cost with Claude Code's own running cost per session",
-    usage: 'costs check-claude-sessions [--limit <n>]',
+    usage: 'costs check-claude-sessions [--transcripts] [--limit <n>]',
     examples: [
       'costs check-claude-sessions',
       'costs check-claude-sessions --limit 5 --json',
+      'costs check-claude-sessions --transcripts',
     ],
     async handler(ctx, args) {
-      const parsed = parseOptionSet(args, new Set(['--limit']), new Set());
-      rejectExtraPositionals(parsed.positionals, 'amon costs check-claude-sessions [--limit <n>]');
+      const parsed = parseOptionSet(args, new Set(['--limit']), new Set(['--transcripts']));
+      rejectExtraPositionals(parsed.positionals, 'amon costs check-claude-sessions [--transcripts] [--limit <n>]');
       const limitValue = parsed.values.get('--limit');
       const limit = limitValue === undefined ? 20 : Number(limitValue);
       if (!Number.isInteger(limit) || limit < 1) throw invalidUsage('--limit must be a positive integer');
@@ -335,6 +336,37 @@ export function registerMaintenanceCommands(): void {
       const { checkClaudeSessionCosts } = await import('../../db/queries.js');
       initSchema();
       try {
+        if (parsed.flags.has('--transcripts')) {
+          // Claude Code's own per-model totals, from the `cost-state` line it
+          // writes into each transcript when a process exits or resumes.
+          const { config } = await import('../../config.js');
+          const { checkClaudeTranscriptCosts } = await import('../../import/claude-cost-state.js');
+          const checks = checkClaudeTranscriptCosts({ claudeDir: config.claudeDir, limit });
+          if (ctx.global.json) {
+            writeJson(ctx, checks);
+            return;
+          }
+          const money = (value: number | null) => (value === null ? 'n/a' : `$${value.toFixed(2)}`);
+          const share = (value: number | null) => (value === null ? 'n/a' : value.toFixed(2));
+          const lines = checks.flatMap(check => (check.status !== 'checked'
+            ? [`${check.session_id.slice(0, 8)}  ${check.status === 'no_checkpoint' ? 'no cost-state checkpoint' : 'checkpoint has no time'}`]
+            : [
+                [
+                  check.session_id.slice(0, 8),
+                  `${check.since!.slice(0, 16).replace('T', ' ')} to ${check.cut!.slice(0, 16).replace('T', ' ')}`,
+                  `harness ${money(check.harness_cost_usd)}`,
+                  `amon ${money(check.amon_cost_usd)}`,
+                  check.unpriced_rows > 0 ? `ratio n/a (${check.unpriced_rows} unpriced)` : `ratio ${share(check.ratio)}`,
+                ].join('  '),
+                ...check.models.map(model => `    ${model.model}  harness ${money(model.harness_cost_usd)}  amon ${money(model.amon_cost_usd)}  ratio ${share(model.ratio)}${check.missing_models.includes(model.model) ? '  (no amon rows)' : ''}`),
+              ]));
+          writeStdout(ctx, [
+            'Imported Claude cost vs Claude Code\'s cost-state checkpoint, per model (a model with no amon rows is usage the transcript never recorded):',
+            ...lines,
+            '',
+          ].join('\n'));
+          return;
+        }
         const checks = checkClaudeSessionCosts(limit);
         if (ctx.global.json) {
           writeJson(ctx, checks);
