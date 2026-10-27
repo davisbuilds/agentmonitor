@@ -341,8 +341,8 @@ Task 0.
 - `src/import/codex-usage-repair.ts:229-237`: the final-counter check.
 - Corpus differential (2026-10-26, read-only): the final counter plus the
   records named by `compacted.compaction_response_id` equals the final
-  `thread_token_usage` in 20 of 21 rollouts. The remaining rollout has 3
-  compactions whose id names no record.
+  `thread_token_usage` in every rollout but one. The remaining rollout's gap is
+  a request from an aborted turn that no `compacted` line names.
 - No copied subagent prefix in the 30-day corpus contains a usage record, and
   every record's `thread_id` equals its rollout's own session id.
 
@@ -602,7 +602,7 @@ None
 | --- | --- | --- |
 | SC-01 | `node --import tsx --test tests/otel.test.ts` | SSE and websocket fragments store nothing; mutation red |
 | SC-02 | `node --import tsx --test tests/prune-codex-fragments.test.ts`, then the rehearsal comparison | zero fragments; non-fragment digests and Monitor cost unchanged |
-| SC-03 | `node --import tsx --test tests/codex-import-usage.test.ts` plus the corpus differential | compaction rows only; thread totals equal in 20 of 21 rollouts |
+| SC-03 | `node --import tsx --test tests/codex-import-usage.test.ts` plus the corpus differential | compaction rows only; thread totals equal in every rollout but one |
 | SC-04 | `node --import tsx --test tests/codex-usage-repair.test.ts`, then the rehearsal | cost delta accounted to the cent; second apply 0 |
 | SC-05 | `node --import tsx --test tests/codex-tool-evidence.test.ts` | paired ids; full equals incremental; counts unchanged |
 | SC-06 | `node --import tsx --test tests/claude-cost-state.test.ts` | per-model ratios; missing models named |

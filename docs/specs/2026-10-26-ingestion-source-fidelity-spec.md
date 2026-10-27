@@ -162,8 +162,9 @@ proven by rehearsal reports that meet the criteria below on a backup copy.
     before and after SC-03.
   - Every rollout with them differs only by the compaction rows.
   - Imported tokens equal the thread total wherever every compaction has a
-    record. Measured 2026-10-26: 20 of 21 rollouts are exact. The other has
-    three compactions without a record and is reported, not guessed.
+    record. Measured 2026-10-26: every rollout but one is exact. The other's
+    gap is a request from an aborted turn that no `compacted` line names; the
+    repair reports it rather than guessing.
 - **Fixtures** are synthetic and built from the measured shapes:
   - fragments of every kind on both transports;
   - fragment-like rows with extra metadata;
