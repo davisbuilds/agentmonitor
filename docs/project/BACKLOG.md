@@ -401,8 +401,8 @@ the build.
     the harness. Billing 1-hour cache writes at their own rate (2026-10-04)
     closed about half of that.
   - **Measured 2026-10-26** with `amon costs check-claude-sessions --transcripts`,
-    against each transcript's own `cost-state` checkpoint, over 22 recent
-    sessions:
+    against each transcript's own `cost-state` checkpoint, over the recent
+    sessions that carry one:
     - imported cost is 0.962 of the harness's, weighted by cost;
     - the median session reads 0.98, and all but one read 0.85-1.00;
     - the side-request models (Haiku) are about 0.1% of the harness's cost and
