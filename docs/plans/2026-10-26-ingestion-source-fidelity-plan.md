@@ -717,14 +717,23 @@ The closure critique re-checked each SC and EV id against a task and a proof
   - Non-fragment digests and Monitor costs were unchanged, and a second
     preview reported 0.
   - The store was compacted afterwards and shrank by about a third.
-- **Task 3: in review as #220.** Rehearsal moved subagents to the
-  thread-total check (see the spec's critique log).
-- **Task 5: in review as #221.**
-- **Task 4: in review.**
+- **Task 3: done.**
+  - Merged in #220 and applied live on 2026-10-26, with the backup
+    `data/backups/pre-compaction-repair-2026-10-26.db` taken first.
+  - The live preview matched the rehearsal.
+  - The Codex Monitor total moved by exactly the rehearsed amount.
+  - A sampled session's Monitor cost now equals its priced
+    `token_usage_record` total.
+  - Rehearsal moved subagents to the thread-total check (see the spec's
+    critique log).
+- **Task 5: done in #221.** Missing models are split into those no transcript
+  recorded and those the import missed.
+- **Task 4: in review as #222.**
   - Receipts attach to the call's message, and carry the output's arrival time,
     its size, and a preview under tool-argument capture.
   - The defaults were confirmed on 2026-10-26. No exit code or status is
     stored, because Codex links none to the call (see the spec's critique log).
+    Receipts project as `completed` with `outcome: unrecorded`.
   - The live apply is `amon sync sessions --source codex --force`, following
     the same procedure.
-- **Task 6: not started.**
+- **Task 6: in review as #223.**

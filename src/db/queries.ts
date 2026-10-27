@@ -1727,6 +1727,26 @@ export interface ClaudeSessionCostCheck extends ClaudeSessionAccounting {
  * never reach a transcript, such as compaction; the split is unmeasured. A ratio near 2 would mean
  * imports are counting every content-block line, as Claude Code's `/stats` does.
  */
+/**
+ * A Claude session's imported cost per model between two producer times, with
+ * the rows that carry usage but no cost (an unpriced model), which a sum skips.
+ */
+export function importedClaudeCostByModel(
+  sessionId: string,
+  since: string,
+  until: string,
+): Array<{ model: string | null; cost: number; unpriced: number }> {
+  return getDb().prepare(`
+    SELECT model, COALESCE(SUM(cost_usd), 0) AS cost,
+      SUM(CASE WHEN cost_usd IS NULL
+        AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0) THEN 1 ELSE 0 END) AS unpriced
+    FROM events
+    WHERE session_id = ? AND agent_type = 'claude_code' AND source = 'import'
+      AND client_timestamp >= ? AND client_timestamp <= ?
+    GROUP BY model
+  `).all(sessionId, since, until) as Array<{ model: string | null; cost: number; unpriced: number }>;
+}
+
 export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
   const rows = getDb().prepare(`
     SELECT a.session_id, a.observed_at, a.process_started_at, a.process_duration_ms, a.cost_usd, a.claude_version,
