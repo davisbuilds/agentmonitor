@@ -498,6 +498,30 @@ it and read low.
 - **Scope.** It reads only the newest `--limit` top-level transcripts, and
   writes nothing.
 
+`amon costs check-sessions [--source claude-code|codex|antigravity|all]` asks
+the same question of every source at once. Each source is checked against the
+total its harness records itself:
+
+| Source | Instrument | Unit | Expect |
+|---|---|---|---|
+| `claude-code` | the `cost-state` checkpoint above | dollars | a little under 1 |
+| `codex` | the thread total on the rollout's last own `token_usage_record` | tokens | exactly 1 |
+| `antigravity` | none: it records no total of its own | | |
+
+- **Statuses.** A session that cannot be compared is named, not left out:
+  - `no_checkpoint` and `no_cut` for Claude;
+  - `no_thread_total` for a Codex rollout from before 0.154;
+  - `not_imported` when amon holds no import rows for it.
+- **Summary.** Each source reports how many recent sessions were checked, and
+  the minimum, median and maximum ratio. `--json` adds each session's row,
+  with Claude's per-model split under `detail`.
+- **Reading a Codex ratio below 1.** On a rollout still being written, it is
+  the import's lag, and the next import closes it. On a finished one, it is
+  usage the import did not bill. The per-request import (see ARCHITECTURE)
+  bills every request Codex recorded.
+- **Scope.** It reads the newest `--limit` sessions per source and writes
+  nothing.
+
 The repair also fills in the 1-hour part of each row's cache writes. Claude
 transcripts split each request's cache writes into a 5-minute and a 1-hour part
 (`message.usage.cache_creation`), and the 1-hour part bills at 2x input rather

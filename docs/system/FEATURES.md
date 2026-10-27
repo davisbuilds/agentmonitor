@@ -230,6 +230,9 @@ Monitor's today and 30-day figures.
   reported; expect a ratio a little under 1, because the harness also pays for
   requests that never reach a transcript, such as compaction. How that
   shortfall splits between them is unmeasured (see BACKLOG).
+  `amon costs check-sessions` runs the same comparison for every source against
+  its harness's own total: Claude's `cost-state` checkpoint in dollars, Codex's
+  thread total in tokens. Antigravity is reported as recording none.
 - Imported transcript usage (Claude JSONL, Codex rollouts) wins over overlapping
   live OTEL usage of the same session in aggregates, including a Monitor card's
   and session detail's token and cost totals; raw events remain available in

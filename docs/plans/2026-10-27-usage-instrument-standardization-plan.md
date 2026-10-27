@@ -313,8 +313,10 @@ drift between stored rows and the rollout.
 2. Claude check: map `checkClaudeTranscriptCosts` into the shared row shape.
    Keep its per-model detail under `detail`.
 3. Antigravity: one source-level row, `no_instrument`.
-4. The JSON report carries a per-source summary (`checked`, `matched`,
-   `median_ratio`) and the rows. The text output is one line per session.
+4. The JSON report carries a per-source summary (`checked`, and the minimum,
+   median and maximum ratio) and the rows. The text output is one line per
+   session. There is no `matched` count: Claude is expected a little under 1,
+   so a match threshold would mean different things per source.
 5. `costs check-claude-sessions --transcripts` keeps working, and its help
    points to the new command.
 
@@ -381,3 +383,23 @@ drift between stored rows and the rollout.
   - Mutations: every new guard goes red. The copied-prefix `!inherited` guard
     from the compaction work survives, because a copied prefix carries the
     parent's thread id and the own-thread filter already excludes it.
+- **Task 2: implemented on its own branch, not yet merged.**
+  - The scratch-DB experiment (a Claude request plus its OTEL cost metric,
+    exported after the transcript's last request) now reports the request's
+    cost once, where it reported it twice.
+  - On the installed store, the old and new rules give identical per-agent
+    Monitor cost, to the microdollar.
+  - The hotspots probe found the correlated rule could not use the Codex-only
+    partial import index: the Codex Monitor sum fell back to a broader index
+    at about twice the time. An index over every source's import usage replaces
+    it, and the timings then matched main within noise, in both run orders.
+  - An existing test pinned "Claude sessions keep both OTEL and imported
+    usage". It came from the Codex session-totals fix and only fixed that fix's
+    scope, so it now pins the shared rule.
+- **Task 3: implemented, stacked on Task 1.**
+  - On a backup copy of the live store, Claude's recent sessions read a median
+    a little under 1, consistent with the 2026-10-26 cost-state measurement.
+  - Every checked Codex session read exactly 1 except a rollout still being
+    written, which read just under 1 from import lag. Rollouts from before
+    0.154 were reported as `no_thread_total`.
+  - Mutations: every guard goes red.
