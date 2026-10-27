@@ -373,19 +373,37 @@ const SKIP_EVENTS = new Set([
   'claude_code.response',
 ]);
 
-const SKIPPED_CODEX_WEBSOCKET_RESPONSE_KINDS = new Set([
-  'response.custom_tool_call_input.delta',
-  'response.function_call_arguments.delta',
-  'response.output_text.delta',
+const CODEX_STREAM_FRAGMENT_KINDS = new Set([
   'response.created',
   'response.in_progress',
+  'response.metadata',
   'response.output_item.added',
   'response.output_item.done',
   'response.content_part.added',
   'response.content_part.done',
   'response.output_text.done',
+  'response.function_call_arguments.done',
+  'response.custom_tool_call_input.done',
   'responsesapi.websocket_timing',
 ]);
+
+/** The Codex log event names that carry streamed response chunks: SSE, and the websocket transport under both spellings. */
+export const CODEX_STREAM_EVENT_NAMES: ReadonlySet<string> = new Set([
+  'codex.sse_event',
+  'codex.websocket_event',
+  'codex.websocket.event',
+]);
+
+/**
+ * A Codex streaming lifecycle marker or delta, on either transport
+ * (`codex.sse_event` or `codex.websocket_event`). Codex exports one per
+ * streamed chunk with no content, usage or error, so storing it adds only rows.
+ * `response.completed` (usage) and `response.failed` (error) are not fragments.
+ */
+export function isCodexStreamFragmentKind(kind: string | undefined): boolean {
+  if (kind === undefined) return false;
+  return CODEX_STREAM_FRAGMENT_KINDS.has(kind) || (kind.startsWith('response.') && kind.endsWith('.delta'));
+}
 
 const CODEX_RESPONSE_ITEM_TYPES = new Set([
   'assistant_message',
@@ -509,14 +527,15 @@ function resolveEventType(
         if (codexEventKind === 'response.failed' || hasCodexTransportFailure(logRecord, bodyJson)) {
           return 'error';
         }
+        if (isCodexStreamFragmentKind(codexEventKind)) return null;
         if (codexEventKind?.startsWith('response.')) return 'response';
         return null;
       }
-      if (eventName === 'codex.websocket_event' || eventName === 'codex.websocket.event') {
+      if (eventName !== 'codex.sse_event' && CODEX_STREAM_EVENT_NAMES.has(eventName)) {
         if (codexEventKind === 'response.failed' || hasCodexTransportFailure(logRecord, bodyJson)) {
           return 'error';
         }
-        if (codexEventKind && SKIPPED_CODEX_WEBSOCKET_RESPONSE_KINDS.has(codexEventKind)) {
+        if (isCodexStreamFragmentKind(codexEventKind)) {
           return null;
         }
         if (codexEventKind?.startsWith('response.')) {

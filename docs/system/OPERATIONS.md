@@ -377,6 +377,48 @@ changed values differ only by the UTC marker/ISO separator. A repeated preview
 must report zero eligible changes; `unresolvedFields` may remain nonzero. Restart
 the newly built runtime afterward so new fallbacks keep their timezone marker.
 
+### Codex stream fragment prune
+
+Before the ingest filter covered `codex.sse_event`, Codex's per-chunk stream
+fragments were stored as content-free `response` events, each with a projected
+turn. On one store they were about half of all event rows. The ingest filter
+stops new ones (see [ARCHITECTURE](ARCHITECTURE.md#events)). This command removes
+those already stored:
+
+```bash
+amon database prune-codex-fragments --json      # preview, no writes
+amon database prune-codex-fragments --apply --expect-digest <digest-from-preview>
+```
+
+A row is removed only if it meets all of these:
+
+- it is a Codex OTEL `response` row with no usage or cost;
+- its metadata holds exactly `otel_event_name` (`codex.sse_event`,
+  `codex.websocket_event`, or its alias `codex.websocket.event`) and a fragment
+  `event_kind`.
+
+A row with any other metadata key stays. The apply works in this order:
+
+1. It takes runtime ownership, so it refuses while the server runs.
+2. It recomputes the inventory and refuses unless the digest matches the
+   preview.
+3. In one transaction, it removes the rows and their projected turns and items,
+   recounts and re-bounds the affected projections, and rebuilds their trace
+   summaries.
+
+Order matters:
+
+1. Deploy the filter first.
+2. Stop the service.
+3. Take `amon database backup`.
+4. Rehearse the apply on a copy of that backup, and check the following against
+   the copy before the apply:
+   - non-fragment rows are unchanged;
+   - Monitor costs are unchanged to the cent;
+   - a second preview reports 0 rows.
+5. Apply to the live store, then restart.
+6. `amon database compact --backup <path>` returns the freed pages.
+
 ### Imported Claude usage repair
 
 Until 2026-09-22 the Claude Code importer billed one event per assistant JSONL

@@ -83,6 +83,59 @@ export function registerDatabaseCommands(): void {
   });
 
   registerCommand({
+    name: 'database prune-codex-fragments',
+    group: 'Data Commands',
+    summary: 'Remove stored Codex OTEL stream fragments and their projected turns',
+    // Reports by default; the apply needs the preview's digest and the server stopped.
+    usage: 'database prune-codex-fragments [--apply --expect-digest <sha256>] [--json]',
+    examples: [
+      'database prune-codex-fragments --json',
+      'database prune-codex-fragments --apply --expect-digest <sha256-from-preview>',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--expect-digest']), new Set(['--apply']));
+      rejectExtraPositionals(parsed.positionals, 'amon database prune-codex-fragments [--apply --expect-digest <sha256>]');
+      const apply = parsed.flags.has('--apply');
+      const expectDigest = parsed.values.get('--expect-digest');
+      if (apply !== (expectDigest !== undefined)) {
+        throw invalidUsage('--apply and --expect-digest go together: preview first, then apply with its digest.');
+      }
+      if (expectDigest !== undefined && !/^[a-f0-9]{64}$/.test(expectDigest)) {
+        throw invalidUsage('--expect-digest must be the 64-character sha256 a preview printed.');
+      }
+      const { config } = await import('../../config.js');
+      const { closeDb } = await import('../../db/connection.js');
+      const { pruneCodexStreamFragments } = await import('../../db/prune-codex-fragments.js');
+      const { RuntimeOwnershipError } = await import('../../runtime-ownership.js');
+      try {
+        const result = pruneCodexStreamFragments({ dbPath: config.dbPath, expectDigest });
+        if (ctx.global.json) {
+          writeJson(ctx, result);
+          return;
+        }
+        writeHuman(
+          ctx,
+          [
+            result.applied ? 'Codex stream fragments removed' : 'Codex stream fragment prune preview',
+            `  rows: ${result.rows}`,
+            `  sessions: ${result.sessions}`,
+            `  turns: ${result.turns}`,
+            `  items: ${result.items}`,
+            `  digest: ${result.digest}`,
+          ].join('\n') + '\n',
+        );
+      } catch (error) {
+        if (error instanceof RuntimeOwnershipError) {
+          throw new CliError(`${error.message}\nStop the server before pruning: the prune needs the database to itself.`);
+        }
+        throw new CliError(`Codex fragment prune failed: ${messageForError(error)}`);
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'database compact',
     group: 'Data Commands',
     summary: 'Back up, then reclaim free pages and dead search-index entries',
