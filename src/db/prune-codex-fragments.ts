@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import { getDb } from './connection.js';
-import { isCodexStreamFragmentKind } from '../otel/parser.js';
+import { CODEX_STREAM_EVENT_NAMES, isCodexStreamFragmentKind } from '../otel/parser.js';
 import { recountProjectedSummaryMessages, restoreProjectedSessionBounds } from '../live/projector.js';
 import { maintainSessionTraceSummary } from '../trace-quality/summary.js';
 import { acquireRuntimeOwnership } from '../runtime-ownership.js';
@@ -17,8 +17,6 @@ export interface CodexFragmentPruneResult {
   digest: string;
   applied: boolean;
 }
-
-const FRAGMENT_EVENT_NAMES = new Set(['codex.sse_event', 'codex.websocket_event']);
 
 interface Candidate {
   id: number;
@@ -44,7 +42,7 @@ function isStoredFragment(row: Candidate): boolean {
   const record = metadata as Record<string, unknown>;
   const keys = Object.keys(record).sort();
   return keys.length === 2 && keys[0] === 'event_kind' && keys[1] === 'otel_event_name'
-    && typeof record.otel_event_name === 'string' && FRAGMENT_EVENT_NAMES.has(record.otel_event_name)
+    && typeof record.otel_event_name === 'string' && CODEX_STREAM_EVENT_NAMES.has(record.otel_event_name)
     && typeof record.event_kind === 'string' && isCodexStreamFragmentKind(record.event_kind);
 }
 

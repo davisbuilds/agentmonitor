@@ -393,8 +393,9 @@ amon database prune-codex-fragments --apply --expect-digest <digest-from-preview
 A row is removed only if it meets all of these:
 
 - it is a Codex OTEL `response` row with no usage or cost;
-- its metadata holds exactly `otel_event_name` (`codex.sse_event` or
-  `codex.websocket_event`) and a fragment `event_kind`.
+- its metadata holds exactly `otel_event_name` (`codex.sse_event`,
+  `codex.websocket_event`, or its alias `codex.websocket.event`) and a fragment
+  `event_kind`.
 
 A row with any other metadata key stays. The apply works in this order:
 

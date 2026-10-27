@@ -387,6 +387,13 @@ const CODEX_STREAM_FRAGMENT_KINDS = new Set([
   'responsesapi.websocket_timing',
 ]);
 
+/** The Codex log event names that carry streamed response chunks: SSE, and the websocket transport under both spellings. */
+export const CODEX_STREAM_EVENT_NAMES: ReadonlySet<string> = new Set([
+  'codex.sse_event',
+  'codex.websocket_event',
+  'codex.websocket.event',
+]);
+
 /**
  * A Codex streaming lifecycle marker or delta, on either transport
  * (`codex.sse_event` or `codex.websocket_event`). Codex exports one per
@@ -524,7 +531,7 @@ function resolveEventType(
         if (codexEventKind?.startsWith('response.')) return 'response';
         return null;
       }
-      if (eventName === 'codex.websocket_event' || eventName === 'codex.websocket.event') {
+      if (eventName !== 'codex.sse_event' && CODEX_STREAM_EVENT_NAMES.has(eventName)) {
         if (codexEventKind === 'response.failed' || hasCodexTransportFailure(logRecord, bodyJson)) {
           return 'error';
         }

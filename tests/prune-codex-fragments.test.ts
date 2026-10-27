@@ -37,6 +37,8 @@ function seed(db: Database.Database): void {
   insertEvent(fragment('otel-frag-2', 'response.created'));
   insertEvent(fragment('otel-frag-3', 'response.output_item.done'));
   insertEvent(fragment('otel-frag-4', 'response.output_text.delta', 'codex.websocket_event'));
+  // The parser also accepts this alias for the websocket transport.
+  insertEvent(fragment('otel-frag-5', 'response.function_call_arguments.done', 'codex.websocket.event'));
   // Neighbours the prune must leave: usage, a non-fragment kind, a fragment
   // kind that carries more than the two marker keys, and other agents/sources.
   insertEvent({
@@ -54,7 +56,7 @@ function seed(db: Database.Database): void {
   maintainSessionTraceSummary(SESSION);
 }
 
-const FRAGMENT_IDS = ['otel-frag-1', 'otel-frag-2', 'otel-frag-3', 'otel-frag-4'];
+const FRAGMENT_IDS = ['otel-frag-1', 'otel-frag-2', 'otel-frag-3', 'otel-frag-4', 'otel-frag-5'];
 
 function rows(table: string, where = '1=1'): unknown[] {
   return getDb().prepare(`SELECT * FROM ${table} WHERE ${where} ORDER BY id`).all();
@@ -93,7 +95,7 @@ describe('pruneCodexStreamFragments', () => {
     assert.equal(preview.applied, false);
     assert.deepEqual(
       { rows: preview.rows, sessions: preview.sessions, turns: preview.turns, items: preview.items },
-      { rows: 4, sessions: 1, turns: 4, items: 0 },
+      { rows: 5, sessions: 1, turns: 5, items: 0 },
     );
     assert.match(preview.digest, /^[a-f0-9]{64}$/);
     assert.deepEqual(everything(), before);
@@ -106,12 +108,12 @@ describe('pruneCodexStreamFragments', () => {
     const applied = pruneCodexStreamFragments({ dbPath, expectDigest: preview.digest });
 
     assert.equal(applied.applied, true);
-    assert.equal(applied.rows, 4);
+    assert.equal(applied.rows, 5);
     const ids = FRAGMENT_IDS.map(id => `'${id}'`).join(',');
     assert.deepEqual(rows('events', `event_id IN (${ids})`), []);
     assert.deepEqual(rows('session_turns', `source_turn_id IN (${ids})`), []);
     assert.deepEqual(survivors(), kept);
-    assert.equal(observationCount(), observationsBefore - 4, 'the summary no longer counts the fragments');
+    assert.equal(observationCount(), observationsBefore - 5, 'the summary no longer counts the fragments');
 
     const again = pruneCodexStreamFragments({ dbPath });
     assert.equal(again.rows, 0);

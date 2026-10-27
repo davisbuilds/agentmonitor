@@ -1585,8 +1585,9 @@ describe('Codex OTLP integration', () => {
 
     const payload = buildLogPayload({
       serviceName: 'codex_cli_rs',
-      logRecords: ignoredKinds.map((eventKind, index) => ({
-        eventName: 'codex.websocket_event',
+      // The parser accepts the websocket transport under both spellings.
+      logRecords: ['codex.websocket_event', 'codex.websocket.event'].flatMap(eventName => ignoredKinds.map((eventKind, index) => ({
+        eventName,
         attributes: [
           { key: 'event.kind', value: { stringValue: eventKind } },
         ],
@@ -1597,7 +1598,7 @@ describe('Codex OTLP integration', () => {
             success: true,
           }),
         },
-      })),
+      }))),
     });
 
     await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
