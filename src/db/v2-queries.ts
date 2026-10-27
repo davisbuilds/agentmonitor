@@ -84,8 +84,8 @@ import { classifyModelForUsage, type ModelClassification } from '../pricing/mode
 import { getStatsForBroadcast, monitorUsageSql, sumMonitorUsage, updateIdleSessions } from './queries.js';
 import {
   excludeBenchmarkUsageCondition,
-  excludeOverlappingCodexOtelUsageCondition,
-  overlappingCodexOtelUsageCondition,
+  excludeOverlappingOtelUsageCondition,
+  overlappingOtelUsageCondition,
   usageMetricPresenceCondition,
 } from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
@@ -1602,9 +1602,9 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   const where = `WHERE ${conditions.join(' AND ')}`;
   const queryValues = [...values, limit];
 
-  // Codex usage seen by both OTEL and the import counts once, as Usage counts it,
+  // Usage seen by both OTEL and the import counts once, as Usage counts it,
   // so a card's cost agrees with the header's; the event count keeps both rows.
-  const countedUsage = excludeOverlappingCodexOtelUsageCondition('e');
+  const countedUsage = excludeOverlappingOtelUsageCondition('e');
 
   // Page the sessions first, then compute all seven event aggregates in a single
   // grouped pass restricted to that page, instead of running seven correlated
@@ -1915,7 +1915,7 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
   const usageConditions = conditions.map(condition => condition === 'e.agent_type = ?' ? '+e.agent_type = ?' : condition);
   const usageWhere = `WHERE ${usageConditions.join(' AND ')}
     AND ${usageMetricPresenceCondition('e')}
-    AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
+    AND ${excludeOverlappingOtelUsageCondition('e')}`;
   // Breakdowns break count ties by name, so their order does not depend on
   // which index the plan happens to read.
   const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
@@ -2054,7 +2054,7 @@ export function getMonitorSessionWithEvents(sessionId: string, eventLimit = 10):
   updateIdleSessions(config.sessionTimeoutMinutes);
   const limit = Math.min(Math.max(eventLimit, 0), 500);
   // Reconciled like the session list's totals (see listMonitorSessions).
-  const countedUsage = excludeOverlappingCodexOtelUsageCondition('e');
+  const countedUsage = excludeOverlappingOtelUsageCondition('e');
 
   const session = db.prepare(`
     SELECT s.*,
@@ -3116,7 +3116,7 @@ export function usageRowsStatement(params: UsageParams = {}): { sql: string; val
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
-    excludeOverlappingCodexOtelUsageCondition('e'),
+    excludeOverlappingOtelUsageCondition('e'),
   ].join(' AND ');
   const timestampExpr = usageTimestampExpr('e');
   const sql = `
@@ -3161,7 +3161,7 @@ export function usageCostTotalStatement(params: UsageParams = {}): { sql: string
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
-    excludeOverlappingCodexOtelUsageCondition('e'),
+    excludeOverlappingOtelUsageCondition('e'),
   ].join(' AND ');
   return {
     sql: `
@@ -3185,7 +3185,7 @@ function selectUsageCostTotal(params: UsageParams = {}): number {
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
-    excludeOverlappingCodexOtelUsageCondition('e'),
+    excludeOverlappingOtelUsageCondition('e'),
   ].join(' AND ');
 
   const groups = db.prepare(`
@@ -3286,7 +3286,7 @@ function selectUsageCoverageGroups(params: UsageParams = {}): UsageCoverageGroup
   const hasUsage = usageMetricsCondition('e');
   const where = [
     ...filter.conditions,
-    excludeOverlappingCodexOtelUsageCondition('e'),
+    excludeOverlappingOtelUsageCondition('e'),
   ].join(' AND ');
 
   const rows = db.prepare(`
@@ -3314,7 +3314,7 @@ function selectUsageMatchingGroups(params: UsageParams = {}): UsageMatchingGroup
   const filter = buildUsageFilterState(params, 'e');
   const where = [
     ...filter.conditions,
-    excludeOverlappingCodexOtelUsageCondition('e'),
+    excludeOverlappingOtelUsageCondition('e'),
   ].join(' AND ');
 
   if (!hasUsageClassificationFilter(params)) {
@@ -3351,8 +3351,8 @@ function selectUsageMatchingGroups(params: UsageParams = {}): UsageMatchingGroup
  * from the all-event covering index instead of grouping every session in SQL
  * and reconstructing the same totals in JavaScript.
  *
- * Reconciliation is intentionally split out: only metric-bearing Codex OTEL
- * rows can overlap an authoritative import row. Counting the broad population
+ * Reconciliation is intentionally split out: only metric-bearing OTEL rows
+ * can overlap an authoritative import row. Counting the broad population
  * without that correlated EXISTS lets SQLite stay index-only, then the small
  * overlap set is subtracted exactly. A session disappears only when every
  * matching row was excluded, which the bounded survivor EXISTS preserves.
@@ -3388,15 +3388,14 @@ function selectUsageMatchingAggregate(params: UsageParams = {}): UsageMatchingAg
     // included, but spelling the partial-index predicate lets SQLite prove that
     // idx_events_usage_covering is a valid forced plan in both modes.
     `(e.source IS NULL OR e.source != 'benchmark')`,
-    `e.agent_type = 'codex'`,
     `e.source = 'otel'`,
     usageMetricsCondition('e'),
-    overlappingCodexOtelUsageCondition('e'),
+    overlappingOtelUsageCondition('e'),
   ].join(' AND ');
   const survivorWhere = [
     `survivor.session_id = excluded.session_id`,
     ...survivorFilter.conditions,
-    excludeOverlappingCodexOtelUsageCondition('survivor'),
+    excludeOverlappingOtelUsageCondition('survivor'),
   ].join(' AND ');
 
   const excluded = db.prepare(`
@@ -4045,7 +4044,7 @@ export function getUsageFacets(params: UsageParams = {}): UsageFacets {
   const where = [
     ...filter.conditions,
     usageMetricsCondition('e'),
-    excludeOverlappingCodexOtelUsageCondition('e'),
+    excludeOverlappingOtelUsageCondition('e'),
   ].join(' AND ');
 
   const rows = db.prepare(`
