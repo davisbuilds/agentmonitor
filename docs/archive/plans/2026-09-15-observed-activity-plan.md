@@ -20,7 +20,7 @@ without changing the transcript browser or usage accounting.
 
 The initial slice adds a read endpoint and real HTTP/SQLite regression tests.
 The companion execution ledger, private spool import and schema version 8 are
-documented in [execution receipts](../api/execution-receipts.md). Neither slice
+documented in [execution receipts](../../api/execution-receipts.md). Neither slice
 changes public network configuration. Live deployment remains pending review.
 
 ## Assumptions And Constraints
