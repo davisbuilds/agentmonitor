@@ -47,6 +47,12 @@ so later readers know what still needs checking.
   file resync cannot recover absent files. See `tests/v2-session-identity.test.ts`
   and `tests/session-title-queries.test.ts` for the bounded list guarantees, not
   a claim that all read surfaces are reconciled.
+- **Write-side root (2026-10-26)**: in a 30-day sample, every rollout-backed
+  Codex session also held a native-UUID browser row. The alias CTEs in
+  `src/db/v2-queries.ts` exist because the watcher names rollout rows by file
+  basename. Keying those rows by `session_meta.id` when writing would retire
+  most of them, but it is an identity migration of stored rows, links and
+  summaries in its own right.
 - **Next**: define persisted provider-native identity plus child-agent identity
   and coverage provenance; preserve existing links and pins during any migration.
   Expose usage-only versus browsable coverage explicitly without fabricating
@@ -535,6 +541,22 @@ AI-agent session aggregator — same archetype as agentmonitor) against this rep
 The report is held outside this repository and is agent-generated. All three
 items were checked against current code and a local store on 2026-10-01; the
 entries below record what was measured, not the report's claims.
+
+#### Codex OTEL events project item-less turns
+- **What**: `syncCodexSummaryLiveEvent` ensures one projected turn for every
+  Codex OTEL event, whether or not the event yields an item. Request-side and
+  decision rows (`llm_request`, tool decisions) therefore each add a turn with
+  nothing in it.
+- **Why or evidence**: measured 2026-10-26 on the live store. Before the
+  stream-fragment prune, about two thirds of all projected turns were item-less
+  Codex turns. Most of them came from the fragments, which the prune removes
+  together with their turns. The remainder is smaller, but the shape persists
+  for every non-item event.
+- **Next**: decide whether a turn needs an item to exist. If so, skip the turn
+  for item-less events, and prune the stored ones with the same
+  preview/digest/ownership gate as `amon database prune-codex-fragments`.
+  Check first that the live view and trace projection never read an item-less
+  turn.
 
 #### Watcher re-sync still reads, hashes and summarizes the whole session
 - **What**: since 2026-10-07 a re-sync parses only the appended lines (see
