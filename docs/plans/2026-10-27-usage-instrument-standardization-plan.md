@@ -3,7 +3,7 @@ date: 2026-10-27
 author: claude
 topic: usage-instrument-standardization
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -369,7 +369,7 @@ drift between stored rows and the rollout.
 
 ## Progress
 
-- **Task 1: implemented, not yet merged or applied.**
+- **Task 1: merged (#225) and applied to the live store on 2026-10-27.**
   - The rehearsal on a backup copy changed only `instrument_switch` rows plus
     one `annotated` `session_end` per rollout. `orphaned`, `appended` and
     `unclassified` were 0, no session mismatched its thread total, and a
@@ -380,10 +380,20 @@ drift between stored rows and the rollout.
   - Claude and Antigravity Monitor costs were unchanged. The Codex Monitor
     moved by that request's cost, because newly covered OTEL rows offset the
     rest of the import change.
+  - Review added three completeness conditions before a rollout bills per
+    request: the records add up to the last thread total, the counter's own
+    growth stays within it, and no line before the last fails to parse.
+    Every per-request rollout in the local store still chose `request`.
+  - Live apply: the preview matched the rehearsal in every field, the apply
+    changed only `instrument_switch` and `annotated` rows, a second preview
+    changed nothing, and `quick_check` passed. Codex import tokens rose by
+    under 0.01%, and the Codex Monitor moved by the same amount the rehearsal
+    predicted. `costs check-sessions --source codex` then read exactly 1 on
+    every session with a thread total.
   - Mutations: every new guard goes red. The copied-prefix `!inherited` guard
     from the compaction work survives, because a copied prefix carries the
     parent's thread id and the own-thread filter already excludes it.
-- **Task 2: implemented on its own branch, not yet merged.**
+- **Task 2: merged (#226).**
   - The scratch-DB experiment (a Claude request plus its OTEL cost metric,
     exported after the transcript's last request) now reports the request's
     cost once, where it reported it twice.
@@ -396,7 +406,7 @@ drift between stored rows and the rollout.
   - An existing test pinned "Claude sessions keep both OTEL and imported
     usage". It came from the Codex session-totals fix and only fixed that fix's
     scope, so it now pins the shared rule.
-- **Task 3: implemented, stacked on Task 1.**
+- **Task 3: merged (#227).**
   - On a backup copy of the live store, Claude's recent sessions read a median
     a little under 1, consistent with the 2026-10-26 cost-state measurement.
   - Every checked Codex session read exactly 1 except a rollout still being
