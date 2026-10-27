@@ -43,7 +43,7 @@ describe('Codex tool evidence from the rollout', () => {
     const callMessage = parsed.messages.find(message => message.has_tool_use === 1)!;
     assert.deepEqual(blocks(callMessage.content), [
       { type: 'tool_use', id: 'call-1', name: 'exec_command', input: { cmd: 'pnpm build' } },
-      { type: 'tool_result', tool_use_id: 'call-1', content: 'Wall time: 3 seconds\nok', timestamp: at(5), output_bytes: 23 },
+      { type: 'tool_result', tool_use_id: 'call-1', content: 'Wall time: 3 seconds\nok', timestamp: at(5), output_bytes: 23, outcome: 'unrecorded' },
     ]);
     assert.equal(callMessage.content_length, callMessage.content.length);
     assert.equal(parsed.toolCalls[0].tool_use_id, 'call-1');
@@ -52,7 +52,7 @@ describe('Codex tool evidence from the rollout', () => {
   test('a custom tool output given as content parts is read the same way', () => {
     const parsed = parseCodexSessionMessages(jsonl([meta, prompt, customCall('call-2', 2), customOutput('call-2', 4, 'Script completed')]), SESSION);
     const receipt = blocks(parsed.messages.find(message => message.has_tool_use === 1)!.content)[1];
-    assert.deepEqual(receipt, { type: 'tool_result', tool_use_id: 'call-2', content: 'Script completed', timestamp: at(4), output_bytes: 16 });
+    assert.deepEqual(receipt, { type: 'tool_result', tool_use_id: 'call-2', content: 'Script completed', timestamp: at(4), output_bytes: 16, outcome: 'unrecorded' });
   });
 
   test('without tool capture the receipt keeps the timing and size but no preview', () => {
@@ -60,7 +60,7 @@ describe('Codex tool evidence from the rollout', () => {
       jsonl([meta, prompt, call('call-1', 2), output('call-1', 5, 'secret output')]), SESSION, undefined, { captureToolOutput: false },
     );
     const receipt = blocks(parsed.messages.find(message => message.has_tool_use === 1)!.content)[1];
-    assert.deepEqual(receipt, { type: 'tool_result', tool_use_id: 'call-1', content: '', timestamp: at(5), output_bytes: 13 });
+    assert.deepEqual(receipt, { type: 'tool_result', tool_use_id: 'call-1', content: '', timestamp: at(5), output_bytes: 13, outcome: 'unrecorded' });
   });
 
   test('a long output keeps only a bounded preview', () => {
@@ -107,7 +107,7 @@ describe('a receipt for a call stored by an earlier sync', () => {
 
     const sessionId = path.basename(file, '.jsonl');
     const stored = getDb().prepare('SELECT ordinal, content FROM messages WHERE session_id = ? AND ordinal = 1').get(sessionId) as { ordinal: number; content: string };
-    assert.deepEqual(blocks(stored.content)[1], { type: 'tool_result', tool_use_id: 'call-1', content: 'ok', timestamp: at(7), output_bytes: 2 });
+    assert.deepEqual(blocks(stored.content)[1], { type: 'tool_result', tool_use_id: 'call-1', content: 'ok', timestamp: at(7), output_bytes: 2, outcome: 'unrecorded' });
     const items = getDb().prepare(`
       SELECT i.ordinal, i.kind, i.source_item_id, i.created_at FROM session_items i JOIN session_turns t ON t.id = i.turn_id
       WHERE t.session_id = ? AND t.source_turn_id = 'codex-message:1' ORDER BY i.ordinal
@@ -116,6 +116,13 @@ describe('a receipt for a call stored by an earlier sync', () => {
       { ordinal: 0, kind: 'tool_call', source_item_id: 'call-1', created_at: at(2) },
       { ordinal: 1, kind: 'tool_result', source_item_id: 'call-1', created_at: at(7) },
     ]);
+    // Codex records no outcome for a call: the result says only that it completed.
+    const result = getDb().prepare(`
+      SELECT i.status, i.payload_json FROM session_items i JOIN session_turns t ON t.id = i.turn_id
+      WHERE t.session_id = ? AND i.kind = 'tool_result'
+    `).get(sessionId) as { status: string; payload_json: string };
+    assert.equal(result.status, 'completed');
+    assert.deepEqual(JSON.parse(result.payload_json), { content: 'ok', output_bytes: 2, outcome: 'unrecorded' });
     assert.equal((getDb().prepare('SELECT COUNT(*) AS n FROM messages WHERE session_id = ?').get(sessionId) as { n: number }).n, 3);
   });
 });

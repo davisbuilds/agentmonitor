@@ -98,7 +98,8 @@ explicit:
     is on (`AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`).
 
   Codex records no exit code or success flag linked to the call, so receipts
-  state neither. A Codex transcript stays `summary` fidelity: its reasoning is
+  state neither: the result projects as `completed` with
+  `outcome: unrecorded`, never as a success. A Codex transcript stays `summary` fidelity: its reasoning is
   encrypted.
 - Antigravity conversation files feed a summary-fidelity live projection when
   the watcher syncs them; this does not establish transcript-level parity.

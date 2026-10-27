@@ -469,6 +469,8 @@ export function parseCodexSessionChunk(
         content: captureToolOutput ? text.slice(0, TOOL_OUTPUT_PREVIEW_CHARS) : '',
         ...(timestamp ? { timestamp } : {}),
         output_bytes: Buffer.byteLength(text, 'utf8'),
+        // Codex links no exit code or success flag to a call.
+        outcome: 'unrecorded',
       };
       const index = chunkCalls.get(callId);
       if (index !== undefined) {

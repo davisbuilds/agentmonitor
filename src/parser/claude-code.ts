@@ -52,6 +52,8 @@ export interface ContentBlock {
   timestamp?: string;
   /** Size of the tool's whole output, recorded even when no preview of it is kept. */
   output_bytes?: number;
+  /** `unrecorded`: the producer states no success or failure for this result. */
+  outcome?: 'unrecorded';
 }
 
 /**
