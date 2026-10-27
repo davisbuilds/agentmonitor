@@ -496,6 +496,21 @@ describe('Codex usage repair bills compactions', () => {
     assert.equal(usageTotal(CHILD), 34_000 + 700);
   });
 
+  test('an unbillable compaction is named even in a subagent that falls back to the OTEL check', () => {
+    // No usage record of the child's own, so no thread total: the OTEL check
+    // applies, and the miss must still be reported.
+    const child: Line[] = [
+      meta(CHILD, spawnSource), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'),
+      count(10, 1_530_000, 1_225_000, 15_500), compacted(11, 'resp-unrecorded'), count(11, 1_540_000, 1_230_000, 15_600),
+    ];
+    storeAsBefore(CHILD, child);
+    getDb().prepare('UPDATE events SET tokens_in = tokens_in + 7 WHERE event_id = ?').run(llmRow(CHILD, 3));
+
+    const report = repair(true);
+    assert.equal(report.sessions_changed, 1);
+    assert.deepEqual(report.compaction_sessions_unbilled, [CHILD]);
+  });
+
   test('an apply refuses while another runtime owns the database, and a preview still runs', () => {
     const id = plain('000000000d3f');
     storeAsBefore(id, withCompaction(id));

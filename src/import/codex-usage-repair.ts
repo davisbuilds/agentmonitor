@@ -254,15 +254,18 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     // recorded. Without one, a subagent's counter includes its parent's, and
     // the subagent falls back to the OTEL check below.
     const thread = end.total_thread_tokens as { input_tokens?: number; output_tokens?: number } | undefined;
+    // Reported whichever instrument checks the session.
+    const unbilled = typeof end._compactions_unbilled === 'number' && end._compactions_unbilled > 0;
+    if (unbilled) report.compaction_sessions_unbilled.push(counts.session_id!);
     if (start._subagent_boundary === undefined || thread) {
       // Without a reset, the rows telescope to the counter Codex itself kept,
       // plus the compactions it leaves out: together, Codex's thread total.
       const expected = thread
         ? Number(thread.input_tokens ?? 0) + Number(thread.output_tokens ?? 0)
         : Number(end.total_tokens_in ?? 0) + Number(end.total_tokens_out ?? 0);
-      if (typeof end._compactions_unbilled === 'number' && end._compactions_unbilled > 0) {
-        report.compaction_sessions_unbilled.push(counts.session_id!);
-      } else if (typeof end._counter_resets === 'number' && end._counter_resets > 0) report.counter_sessions_reset++;
+      // An unbilled compaction is already named, and its total is not expected to match.
+      if (unbilled) continue;
+      if (typeof end._counter_resets === 'number' && end._counter_resets > 0) report.counter_sessions_reset++;
       else {
         report.counter_sessions_checked++;
         if (thread) report.thread_sessions_checked++;

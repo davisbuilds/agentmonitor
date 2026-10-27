@@ -595,8 +595,8 @@ instruments in the report:
     `counter_sessions_reset` and skipped, because their final counter
     understates what was billed.
   - A session holding a compaction the import could not bill is named in
-    `compaction_sessions_unbilled` instead. Its thread total is not expected to
-    match.
+    `compaction_sessions_unbilled`, whichever instrument checks it. It is left
+    out of the total check, because its total is not expected to match.
 - `subagent_otel` compares each changed subagent that has no thread total with
   Codex's per-request OTEL, before and after. `otel_ratios_moved_away` must be
   0. OTEL is the weaker instrument where a thread total exists. On 2026-10-26 it
