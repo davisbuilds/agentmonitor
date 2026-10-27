@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { tick } from 'svelte';
+  import { tick, untrack } from 'svelte';
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
-  import { formatNumber, timeAgo } from '../../format';
+  import { formatDuration, formatNumber, timeAgo } from '../../format';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { sessionTitle } from '../../session-text';
   import { hasSessionCapability } from '../../session-capabilities';
@@ -10,6 +10,7 @@
     buildLiveStreamRows,
     rowBody,
     rowFailed,
+    rowDurationMs,
     rowLabel,
     toolArgument,
     type LiveStreamRow,
@@ -59,35 +60,76 @@
     { value: 'plan_update', label: 'Plans' },
   ];
 
-  // The stream opens at its newest items and follows new ones while you are at
-  // the bottom; scrolling to the top loads the page before, keeping your place.
+  // The newest item is at the top. New ones appear there while you are at the
+  // top; scrolled further down, the rows you are reading stay put as they
+  // arrive above. Scrolling to the bottom loads the page before.
   let scroller = $state<HTMLDivElement>();
-  let atBottom = true;
+  let atTop = true;
   const NEAR_EDGE_PX = 48;
 
   async function loadEarlier(): Promise<void> {
-    if (!hasEarlier || loading || !scroller) return;
-    const heightBefore = scroller.scrollHeight;
-    const topBefore = scroller.scrollTop;
+    if (!hasEarlier || loading) return;
+    // Older items go below the rows shown, so nothing on screen moves.
     await onloadearlier();
-    await tick();
-    if (scroller) scroller.scrollTop = topBefore + (scroller.scrollHeight - heightBefore);
   }
 
   function handleScroll(): void {
     if (!scroller) return;
-    atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_EDGE_PX;
-    if (scroller.scrollTop < NEAR_EDGE_PX) void loadEarlier();
+    atTop = scroller.scrollTop < NEAR_EDGE_PX;
+    if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < NEAR_EDGE_PX) void loadEarlier();
   }
 
+  function backToTop(): void {
+    atTop = true;
+    if (scroller) scroller.scrollTop = 0;
+  }
+
+  // A new session or kind filter reopens the stream at its newest item.
+  const sessionId = $derived(session?.id ?? null);
   $effect(() => {
-    void items.length;
+    void sessionId;
+    untrack(backToTop);
+  });
+
+  function toggleKind(kind: string): void {
+    backToTop();
+    ontogglekind(kind);
+  }
+
+  // Scrolled down, pin the first row in view: note its layout offset before
+  // the items render, then scroll by however far it moved. Rows added above
+  // move it; a result folding into a call below does not, nor do older pages
+  // loading at the bottom. The move is read from layout offsets, which ignore
+  // the rows' enter animation that a measured box would include. Browser
+  // scroll anchoring is off on the scroller so the two never both apply;
+  // Safari has none.
+  function firstVisibleRow(el: HTMLElement): HTMLElement | null {
+    const top = el.getBoundingClientRect().top;
+    for (const row of el.querySelectorAll<HTMLElement>('[data-row-id]')) {
+      if (row.getBoundingClientRect().bottom > top) return row;
+    }
+    return null;
+  }
+
+  $effect.pre(() => {
+    void items;
+    const el = untrack(() => scroller);
+    if (!el || atTop) return;
+    const anchor = firstVisibleRow(el);
+    if (!anchor) return;
+    const rowId = anchor.dataset.rowId;
+    const offsetBefore = anchor.offsetTop;
     void tick().then(() => {
-      if (atBottom && scroller) scroller.scrollTop = scroller.scrollHeight;
+      const same = el.querySelector<HTMLElement>(`[data-row-id="${rowId}"]`);
+      if (!same) return;
+      // Content added above moves the row by at least a line of text; a pixel
+      // is offset rounding of fractional layout, and chasing it nudges the rows.
+      const moved = same.offsetTop - offsetBefore;
+      if (Math.abs(moved) >= 2) el.scrollTop += moved;
     });
   });
 
-  const rows = $derived(buildLiveStreamRows(items));
+  const rows = $derived(buildLiveStreamRows(items).reverse());
 
   function preview(text: string, max = 220): string {
     const flat = text.replace(/\s+/g, ' ').trim();
@@ -154,7 +196,7 @@
         <button
           class="rounded-sm border px-2 py-1 text-meta transition-colors {selectedKinds.includes(kind.value) ? 'border-accent/50 bg-accent/10 text-accent' : 'border-line text-text-muted hover:border-line-strong hover:text-text'}"
           aria-pressed={selectedKinds.includes(kind.value)}
-          onclick={() => ontogglekind(kind.value)}
+          onclick={() => toggleKind(kind.value)}
         >
           {kind.label}
         </button>
@@ -162,7 +204,7 @@
     </div>
   </div>
 
-  <div class="space-y-0.5 px-2 py-2 xl:flex-1 xl:overflow-y-auto" bind:this={scroller} onscroll={handleScroll}>
+  <div class="space-y-0.5 px-2 py-2 [overflow-anchor:none] xl:flex-1 xl:overflow-y-auto" bind:this={scroller} onscroll={handleScroll} data-testid="live-stream-scroller">
     {#if loading && items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">Loading live items…</div>
     {:else if error}
@@ -172,16 +214,13 @@
     {:else if items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">No live items for this session yet.</div>
     {:else}
-      {#if hasEarlier}
-        <div class="pb-2 text-center">
-          <Button variant="ghost" size="sm" disabled={loading} onclick={() => void loadEarlier()}>Load earlier items</Button>
-        </div>
-      {/if}
       {#each rows as row (row.item.id)}
         {@const failed = rowFailed(row)}
+        {@const durationMs = rowDurationMs(row)}
         {@const argument = row.item.kind === 'tool_call' ? toolArgument(row.item) : null}
         {@const body = rowBody(row)}
         <button
+          data-row-id={row.item.id}
           class="animate-row-enter w-full rounded-sm border px-3 py-2 text-left transition-colors {selectedItemId === row.item.id ? 'border-accent/50 bg-accent/10' : 'border-transparent hover:border-line hover:bg-surface-2'}"
           onclick={() => onselect(row.item.id)}
         >
@@ -198,6 +237,9 @@
             {:else if isNotableStatus(row.item.status)}
               <span class="shrink-0 text-meta text-warn">{row.item.status}</span>
             {/if}
+            {#if durationMs != null}
+              <span class="shrink-0 tabular font-mono text-meta text-text-faint" title="Took">{formatDuration(durationMs)}</span>
+            {/if}
             {#if row.item.created_at}
               <span class="shrink-0 tabular font-mono text-meta text-text-faint">{timeAgo(row.item.created_at)}</span>
             {/if}
@@ -207,7 +249,11 @@
           {/if}
         </button>
       {/each}
-
+      {#if hasEarlier}
+        <div class="pt-2 text-center">
+          <Button variant="ghost" size="sm" disabled={loading} onclick={() => void loadEarlier()}>Load older items</Button>
+        </div>
+      {/if}
     {/if}
   </div>
 </div>

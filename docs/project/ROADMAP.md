@@ -54,7 +54,7 @@ possibilities.
 - Preserve the Instrument Console design system and laptop-first layout while
   retaining usable narrow-width behavior.
 - Keep a manual built-product regression path for deep links, long transcripts,
-  live updates, and drawer/navigation behavior.
+  live updates, and drill-in/navigation behavior.
 
 ### Trace Quality
 

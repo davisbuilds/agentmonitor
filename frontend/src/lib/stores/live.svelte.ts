@@ -9,7 +9,6 @@ import {
   type LiveSettings,
   type LiveTurn,
 } from '../api/client';
-import { getMonitorSessionId } from './router.svelte';
 
 // The live stream of the one session Monitor is following (an agent card's
 // drill-in). There is no session list here: Monitor's agent cards are the list.
@@ -315,10 +314,3 @@ export function getSelectedLiveItem(): LiveItem | null {
 }
 export function getLiveConnectionStatus(): 'connected' | 'connecting' | 'disconnected' { return connectionStatus; }
 export function getLiveSettings(): LiveSettings { return settings; }
-/**
- * The session Monitor shows a live stream for: the one in its route, while the
- * live view is on. With it off, Monitor shows the cards (and their filters).
- */
-export function getFollowedLiveSessionId(): string | null {
-  return settings.enabled ? getMonitorSessionId() : null;
-}

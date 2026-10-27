@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { LiveItem } from './api/client';
-import { buildLiveStreamRows, pairedToolResult, rowBody, rowFailed, rowLabel, toolArgument } from './live-stream-rows';
+import { buildLiveStreamRows, pairedToolResult, rowBody, rowDurationMs, rowFailed, rowLabel, toolArgument, turnDurationMs } from './live-stream-rows';
 import { isNotableStatus } from './status';
 
 let nextId = 1;
@@ -162,5 +162,47 @@ describe('row content', () => {
     expect([rowLabel(command), rowBody({ item: command, result: null })]).toEqual(['Command', '/model']);
     expect([rowLabel(output), rowBody({ item: output, result: null })]).toEqual(['Command output', 'Set model to Opus 5']);
     expect([rowLabel(caveat), rowBody({ item: caveat, result: null })]).toEqual(['Command note', null]);
+  });
+});
+
+describe('rowDurationMs', () => {
+  it('measures a call to its folded result', () => {
+    const call = item('tool_call', 'toolu_d', {}, { created_at: '2026-10-26T10:00:00.000Z' });
+    const result = item('tool_result', 'toolu_d', {}, { created_at: '2026-10-26T10:00:02.500Z' });
+    const [row] = buildLiveStreamRows([call, result]);
+    expect(rowDurationMs(row)).toBe(2_500);
+  });
+
+  it('reads SQLite-style timestamps as UTC, like the rest of the app', () => {
+    const call = item('tool_call', 'toolu_s', {}, { created_at: '2026-10-26 10:00:00' });
+    const result = item('tool_result', 'toolu_s', {}, { created_at: '2026-10-26T10:00:01.000Z' });
+    expect(rowDurationMs(buildLiveStreamRows([call, result])[0])).toBe(1_000);
+  });
+
+  it('is unknown without a result, a time on both, or a result after the call', () => {
+    const open = item('tool_call', 'toolu_o', {}, { created_at: '2026-10-26T10:00:00.000Z' });
+    expect(rowDurationMs(buildLiveStreamRows([open])[0])).toBeNull();
+
+    const untimed = item('tool_call', 'toolu_u');
+    const untimedResult = item('tool_result', 'toolu_u', {}, { created_at: '2026-10-26T10:00:01.000Z' });
+    expect(rowDurationMs(buildLiveStreamRows([untimed, untimedResult])[0])).toBeNull();
+
+    const late = item('tool_call', 'toolu_l', {}, { created_at: '2026-10-26T10:00:05.000Z' });
+    const early = item('tool_result', 'toolu_l', {}, { created_at: '2026-10-26T10:00:01.000Z' });
+    expect(rowDurationMs(buildLiveStreamRows([late, early])[0])).toBeNull();
+  });
+
+  it('gives a message row no duration', () => {
+    const message = item('assistant_message', 'm:d', { text: 'hi' }, { created_at: '2026-10-26T10:00:00.000Z' });
+    expect(rowDurationMs(buildLiveStreamRows([message])[0])).toBeNull();
+  });
+});
+
+describe('turnDurationMs', () => {
+  it('measures an ended turn and leaves a running one unknown', () => {
+    expect(turnDurationMs({ started_at: '2026-10-26T10:00:00.000Z', ended_at: '2026-10-26T10:02:05.000Z' })).toBe(125_000);
+    expect(turnDurationMs({ started_at: '2026-10-26T10:00:00.000Z', ended_at: null })).toBeNull();
+    expect(turnDurationMs({ started_at: null, ended_at: '2026-10-26T10:00:00.000Z' })).toBeNull();
+    expect(turnDurationMs(null)).toBeNull();
   });
 });

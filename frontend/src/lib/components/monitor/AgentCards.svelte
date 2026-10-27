@@ -1,12 +1,11 @@
 <script lang="ts">
-  import { getSessions, getEvents, setSelectedSessionId, getSessionOccupancy } from '../../stores/monitor.svelte';
+  import { getSessions, getEvents, getSessionOccupancy } from '../../stores/monitor.svelte';
   import { formatCost, formatNumber, timeAgo, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
   import { buildActiveAgentLabel, collapseEventRuns } from '../../monitor-analytics';
   import { SectionHeader, StatusDot, EmptyState, Badge } from '../ui';
   import ContextPill from './ContextPill.svelte';
   import { openMonitorSession } from '../../stores/router.svelte';
-  import { getLiveSettings } from '../../stores/live.svelte';
 
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
@@ -33,11 +32,10 @@
     });
   });
 
-  // A card opens the session's live stream in place; with the live view turned
-  // off it falls back to the recent-events drawer.
+  // A card opens the session in place: its live stream, or its recent events
+  // when it has no live record or the live view is off.
   function openSession(id: string): void {
-    if (getLiveSettings().enabled) openMonitorSession(id);
-    else setSelectedSessionId(id);
+    openMonitorSession(id);
   }
 
   function eventLabel(e: AgentEvent): string {

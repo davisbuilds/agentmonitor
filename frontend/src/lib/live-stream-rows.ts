@@ -1,4 +1,5 @@
-import type { LiveItem } from './api/client';
+import type { LiveItem, LiveTurn } from './api/client';
+import { parseTimestamp } from './format';
 import { parseSessionText } from './session-text';
 
 /** One row of the Live stream: an item, plus the tool result folded into its call. */
@@ -198,4 +199,20 @@ export function rowBody(row: LiveStreamRow): string | null {
     default:
       return findText(payload);
   }
+}
+
+function elapsedMs(from: string | null | undefined, to: string | null | undefined): number | null {
+  if (!from || !to) return null;
+  const ms = parseTimestamp(to).getTime() - parseTimestamp(from).getTime();
+  return Number.isFinite(ms) && ms >= 0 ? ms : null;
+}
+
+/** How long a tool call took: from the call to the result folded into its row (only calls get one). */
+export function rowDurationMs(row: LiveStreamRow): number | null {
+  return row.result ? elapsedMs(row.item.created_at, row.result.created_at) : null;
+}
+
+/** How long a turn ran, once it has ended. */
+export function turnDurationMs(turn: Pick<LiveTurn, 'started_at' | 'ended_at'> | null | undefined): number | null {
+  return elapsedMs(turn?.started_at, turn?.ended_at);
 }
