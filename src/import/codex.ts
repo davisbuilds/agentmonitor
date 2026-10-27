@@ -189,6 +189,24 @@ export function parseCodexFile(
     }
   }
 
+  // Records that start at the thread's first request (the first one's usage is
+  // the whole thread so far) cover every request, so they are billed one row
+  // each. Records that start mid-thread, as in a session begun before Codex
+  // wrote them, leave earlier requests to the cumulative counter.
+  let instrument: 'request' | 'counter' = 'counter';
+  const namedCompactions = new Set<string>();
+  for (const [lineIndex, line] of parsedLines.entries()) {
+    if (!line || lineIndex < ownFrom) continue;
+    if (line.type === 'compacted' && typeof line.payload.compaction_response_id === 'string') {
+      namedCompactions.add(line.payload.compaction_response_id);
+    }
+    if (line.type !== 'token_usage_record' || instrument === 'request') continue;
+    const record = asUsageRecord(line);
+    if (!record || record.thread_id !== sessionId) continue;
+    if (sameUsage(record.usage, record.thread)) instrument = 'request';
+    else break;
+  }
+
   // Fall back to filename for session ID
   if (!sessionId) {
     const basename = path.basename(filePath, '.jsonl');
@@ -220,7 +238,7 @@ export function parseCodexFile(
   let threadTotal: CodexUsage3 | undefined;
   let counterGap: CodexUsage3 | undefined;
   let pendingCompactions: CodexUsageRecord[] = [];
-  const billedCompactions = new Set<string>();
+  const billedResponses = new Set<string>();
   let compactionsUnbilled = 0;
   let currentModel = defaultModel;
   let currentModelSource: 'turn_context' | 'config' | undefined = defaultModel ? 'config' : undefined;
@@ -241,42 +259,47 @@ export function parseCodexFile(
       return;
     }
     for (const record of held) {
-      billedCompactions.add(record.response_id);
-      const uncached = Math.max(0, record.usage.input - record.usage.cached);
-      const costUsd = record.model
-        ? pricingRegistry.calculate(record.model, { input: uncached, output: record.usage.output, cacheRead: record.usage.cached }, record.timestamp)
-        : undefined;
-      const eventId = crypto
-        .createHash('sha256')
-        .update(`codex:${sessionId}:response:${record.response_id}`)
-        .digest('hex')
-        .slice(0, 32);
-      // Keyed by the request, not the positional index, so counter rows keep their ids.
-      events.push({
-        event_id: `import-cdx-${eventId}`,
-        session_id: sessionId!,
-        agent_type: 'codex',
-        event_type: 'llm_response',
-        status: 'success',
-        tokens_in: uncached,
-        tokens_out: record.usage.output,
-        cache_read_tokens: record.usage.cached,
-        model: record.model,
-        cost_usd: costUsd ?? undefined,
-        cost_source: costUsd != null ? 'estimated' : undefined,
-        project,
-        client_timestamp: record.timestamp,
-        metadata: {
-          _synthetic: true,
-          _source: 'codex_session_jsonl',
-          _model_source: record.model_source,
-          _usage_source: 'compaction',
-          _response_id: record.response_id,
-        },
-        source: 'import',
-      });
+      billedResponses.add(record.response_id);
+      pushRequest(record, 'compaction');
     }
   };
+
+  /** One request's usage as its own row, keyed by its response. */
+  function pushRequest(record: CodexUsageRecord, usageSource: 'request' | 'compaction'): void {
+    const uncached = Math.max(0, record.usage.input - record.usage.cached);
+    const costUsd = record.model
+      ? pricingRegistry.calculate(record.model, { input: uncached, output: record.usage.output, cacheRead: record.usage.cached }, record.timestamp)
+      : undefined;
+    const eventId = crypto
+      .createHash('sha256')
+      .update(`codex:${sessionId}:response:${record.response_id}`)
+      .digest('hex')
+      .slice(0, 32);
+    // Keyed by the request, not the positional index, so counter rows keep their ids.
+    events.push({
+      event_id: `import-cdx-${eventId}`,
+      session_id: sessionId!,
+      agent_type: 'codex',
+      event_type: 'llm_response',
+      status: 'success',
+      tokens_in: uncached,
+      tokens_out: record.usage.output,
+      cache_read_tokens: record.usage.cached,
+      model: record.model,
+      cost_usd: costUsd ?? undefined,
+      cost_source: costUsd != null ? 'estimated' : undefined,
+      project,
+      client_timestamp: record.timestamp,
+      metadata: {
+        _synthetic: true,
+        _source: 'codex_session_jsonl',
+        _model_source: record.model_source,
+        _usage_source: usageSource,
+        _response_id: record.response_id,
+      },
+      source: 'import',
+    });
+  }
 
   for (const [lineIndex, line] of parsedLines.entries()) {
     if (!line) continue;
@@ -323,14 +346,23 @@ export function parseCodexFile(
 
     if (line.type === 'token_usage_record') {
       const record = !inherited ? asUsageRecord(line) : null;
-      if (record && record.thread_id === sessionId) threadTotal = record.thread;
+      if (!record || record.thread_id !== sessionId) continue;
+      threadTotal = record.thread;
+      if (instrument === 'request' && !billedResponses.has(record.response_id)) {
+        billedResponses.add(record.response_id);
+        pushRequest(
+          { ...record, model: currentModel, model_source: currentModelSource },
+          namedCompactions.has(record.response_id) ? 'compaction' : 'request',
+        );
+      }
       continue;
     }
 
     if (line.type === 'compacted') {
-      if (inherited) continue;
+      // Per-request records already bill the compaction they name.
+      if (inherited || instrument === 'request') continue;
       const responseId = typeof line.payload.compaction_response_id === 'string' ? line.payload.compaction_response_id : undefined;
-      if (!responseId || billedCompactions.has(responseId) || pendingCompactions.some(r => r.response_id === responseId)) continue;
+      if (!responseId || billedResponses.has(responseId) || pendingCompactions.some(r => r.response_id === responseId)) continue;
       const record = usageRecords.get(responseId);
       if (record) pendingCompactions.push({ ...record, model: currentModel, model_source: currentModelSource });
       else compactionsUnbilled++;
@@ -372,8 +404,10 @@ export function parseCodexFile(
 
       // Only emit if there's a meaningful delta
       if (deltaIn <= 0 && deltaOut <= 0) continue;
-      if (inherited) {
-        inheritedCountersSkipped++;
+      // The requests are billed from their records; the counter still takes
+      // its place in the event index, so file changes keep their ids.
+      if (inherited || instrument === 'request') {
+        if (inherited) inheritedCountersSkipped++;
         eventIndex++;
         continue;
       }
@@ -514,6 +548,7 @@ export function parseCodexFile(
         total_tokens_out: prevTokensOut,
         total_cache_read: prevCacheRead,
         _model_source: currentModelSource,
+        _usage_instrument: instrument,
         ...(boundary.kind === 'resolved' ? { _inherited_counters_skipped: inheritedCountersSkipped } : {}),
         ...(counterResets > 0 ? { _counter_resets: counterResets } : {}),
         ...(threadTotal ? {

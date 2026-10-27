@@ -588,17 +588,20 @@ const sessionEnd = () => parseCodexFile(rollout, { codexDir }).find(e => e.event
 /** Everything billed, cache-inclusive input plus output, as Codex's thread total counts it. */
 const billed = () => llmRows().reduce((sum, e) => sum + e.tokens_in + (e.cache_read_tokens ?? 0) + e.tokens_out, 0);
 
-// A request, a compaction the counter leaves out, then a request after it.
+// A session begun before Codex wrote per-request records: its first request is
+// in the counter only, so its records start mid-thread and the import keeps
+// billing from the counter. Then a request, a compaction the counter leaves
+// out, and a request after it.
 const compactionRollout = (overrides: { secondCounter?: Line; compactRecord?: Line; compactLine?: Line } = {}): Line[] => [
-  meta(), turn(),
-  record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50),
-  overrides.compactRecord ?? record(2, 'resp-compact', [5_000, 4_000, 300], [6_000, 4_800, 350]),
+  meta(), turn(), counter(0, 400, 0, 10),
+  record(1, 'resp-1', [1_000, 800, 50], [1_400, 800, 60]), counter(1, 1_400, 800, 60),
+  overrides.compactRecord ?? record(2, 'resp-compact', [5_000, 4_000, 300], [6_400, 4_800, 360]),
   overrides.compactLine ?? compacted(2, 'resp-compact'),
-  overrides.secondCounter ?? counter(2, 1_000, 800, 50),
-  record(3, 'resp-3', [2_000, 1_500, 70], [8_000, 6_300, 420]), counter(3, 3_000, 2_300, 120),
+  overrides.secondCounter ?? counter(2, 1_400, 800, 60),
+  record(3, 'resp-3', [2_000, 1_500, 70], [8_400, 6_300, 430]), counter(3, 3_400, 2_300, 130),
 ];
 
-describe('a compaction request is billed once', () => {
+describe('on the counter path, a compaction request is billed once', () => {
   before(() => { fs.mkdirSync(sessionsDir, { recursive: true }); });
 
   test('the compaction Codex recorded but left out of its counter becomes its own row', () => {
@@ -611,8 +614,9 @@ describe('a compaction request is billed once', () => {
     assert.equal(compaction.model, 'gpt-5.6-terra');
     assert.equal(compaction.client_timestamp, '2026-07-12T10:02:10Z');
     assert.ok((compaction.cost_usd ?? 0) > 0);
-    assert.equal(billed(), 8_000 + 420, 'the rows add up to Codex\'s own thread total');
-    assert.deepEqual(sessionEnd().total_thread_tokens, { input_tokens: 8_000, cached_input_tokens: 6_300, output_tokens: 420 });
+    assert.equal(billed(), 8_400 + 430, 'the rows add up to Codex\'s own thread total');
+    assert.deepEqual(sessionEnd().total_thread_tokens, { input_tokens: 8_400, cached_input_tokens: 6_300, output_tokens: 430 });
+    assert.equal(sessionEnd()._usage_instrument, 'counter');
   });
 
   test('counter rows keep the ids they had before compactions were billed', () => {
@@ -624,22 +628,22 @@ describe('a compaction request is billed once', () => {
   });
 
   test('a compaction already inside the counter is not billed twice', () => {
-    writeRollout(compactionRollout({ secondCounter: counter(2, 6_000, 4_800, 350) }));
+    writeRollout(compactionRollout({ secondCounter: counter(2, 6_400, 4_800, 360) }));
     assert.equal(llmRows().some(e => e.event_id === compactionId('resp-compact')), false);
     assert.equal(sessionEnd()._compactions_unbilled, 1);
   });
 
   test('a record from another thread is not this session\'s usage', () => {
-    writeRollout(compactionRollout({ compactRecord: record(2, 'resp-compact', [5_000, 4_000, 300], [6_000, 4_800, 350], 'another-thread') }));
+    writeRollout(compactionRollout({ compactRecord: record(2, 'resp-compact', [5_000, 4_000, 300], [6_400, 4_800, 360], 'another-thread') }));
     assert.equal(llmRows().some(e => e.event_id === compactionId('resp-compact')), false);
   });
 
   test('another thread\'s record is not billed even when this thread\'s total grows by its usage', () => {
     writeRollout([
-      meta(), turn(),
-      record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50),
+      meta(), turn(), counter(0, 400, 0, 10),
+      record(1, 'resp-1', [1_000, 800, 50], [1_400, 800, 60]), counter(1, 1_400, 800, 60),
       record(2, 'resp-compact', [5_000, 4_000, 300], [5_000, 4_000, 300], 'another-thread'), compacted(2, 'resp-compact'),
-      record(2, 'resp-own', [0, 0, 0], [6_000, 4_800, 350]), counter(2, 1_000, 800, 50),
+      record(2, 'resp-own', [0, 0, 0], [6_400, 4_800, 360]), counter(2, 1_400, 800, 60),
     ]);
     assert.equal(llmRows().some(e => e.event_id === compactionId('resp-compact')), false);
   });
@@ -666,12 +670,12 @@ describe('a compaction request is billed once', () => {
 
   test('a compaction at the end of the file is checked against the last counter', () => {
     writeRollout([
-      meta(), turn(),
-      record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50),
-      record(2, 'resp-compact', [5_000, 4_000, 300], [6_000, 4_800, 350]), compacted(2, 'resp-compact'),
+      meta(), turn(), counter(0, 400, 0, 10),
+      record(1, 'resp-1', [1_000, 800, 50], [1_400, 800, 60]), counter(1, 1_400, 800, 60),
+      record(2, 'resp-compact', [5_000, 4_000, 300], [6_400, 4_800, 360]), compacted(2, 'resp-compact'),
     ]);
     assert.ok(llmRows().some(e => e.event_id === compactionId('resp-compact')));
-    assert.equal(billed(), 6_000 + 350);
+    assert.equal(billed(), 6_400 + 360);
   });
 
   test('a compaction named twice is billed once', () => {
@@ -701,5 +705,119 @@ describe('a compaction request is billed once', () => {
     assert.equal(usage(file).some(e => e.event_id === compactionId('resp-parent-compact', CHILD)), false);
     const end = parseCodexFile(file, { codexDir }).find(e => e.event_type === 'session_end')!.metadata as Record<string, unknown>;
     assert.equal('_compactions_unbilled' in end, false, 'the parent\'s compaction is not the child\'s to bill or to miss');
+  });
+});
+
+// ─── Per-request usage ──────────────────────────────────────────────────
+
+const requestId = compactionId;
+const turnAbortedAt = (minute: number): Line => ({
+  type: 'event_msg', timestamp: `2026-07-12T10:${String(minute).padStart(2, '0')}:40Z`, payload: { type: 'turn_aborted', reason: 'interrupted' },
+});
+// Recorded per request from the first one: a request, a compaction, a request
+// of a turn that is then aborted (in no counter and named by no `compacted`
+// line), and a request after it. A patch sits between counters.
+const requestRollout = (): Line[] => [
+  meta(), turn(),
+  record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50), patch(1),
+  record(2, 'resp-compact', [5_000, 4_000, 300], [6_000, 4_800, 350]), compacted(2, 'resp-compact'), counter(2, 1_000, 800, 50),
+  record(3, 'resp-aborted', [700, 600, 20], [6_700, 5_400, 370]), turnAbortedAt(3),
+  turn('gpt-5.6-sol'), record(4, 'resp-4', [2_000, 1_500, 70], [8_700, 6_900, 440]), counter(4, 3_000, 2_300, 120), patch(4),
+];
+const patchIds = () => parseCodexFile(rollout, { codexDir }).filter(e => e.tool_name === 'apply_patch').map(e => e.event_id);
+
+describe('a rollout recorded per request from its first request is billed per request', () => {
+  before(() => { fs.mkdirSync(sessionsDir, { recursive: true }); });
+
+  test('each own request is one row keyed by its response, and no counter is billed', () => {
+    writeRollout(requestRollout());
+    assert.deepEqual(llmRows().map(e => e.event_id), ['resp-1', 'resp-compact', 'resp-aborted', 'resp-4'].map(id => requestId(id)));
+    const first = llmRows()[0];
+    assert.equal(first.tokens_in, 200, 'uncached input');
+    assert.equal(first.cache_read_tokens, 800);
+    assert.equal(first.tokens_out, 50);
+    assert.equal(first.client_timestamp, '2026-07-12T10:01:10Z');
+    assert.ok((first.cost_usd ?? 0) > 0);
+    assert.equal(sessionEnd()._usage_instrument, 'request');
+  });
+
+  test('the rows add up to Codex\'s thread total, the aborted turn\'s request included', () => {
+    writeRollout(requestRollout());
+    assert.equal(billed(), 8_700 + 440);
+    assert.equal('_compactions_unbilled' in sessionEnd(), false);
+  });
+
+  test('each request is priced with the model of its own turn', () => {
+    writeRollout(requestRollout());
+    assert.deepEqual(llmRows().map(e => e.model), ['gpt-5.6-terra', 'gpt-5.6-terra', 'gpt-5.6-terra', 'gpt-5.6-sol']);
+  });
+
+  test('a compaction keeps the id and the source it had on the counter path', () => {
+    writeRollout(requestRollout());
+    const sources = llmRows().map(e => (e.metadata as Record<string, unknown>)._usage_source);
+    assert.deepEqual(sources, ['request', 'compaction', 'request', 'request']);
+  });
+
+  test('a compaction named before its record is billed once, from the record', () => {
+    const lines = requestRollout();
+    const at = lines.findIndex(l => l.type === 'compacted');
+    const [named] = lines.splice(at, 1);
+    lines.splice(at - 1, 0, named);
+    writeRollout(lines);
+    assert.equal(llmRows().filter(e => e.event_id === requestId('resp-compact')).length, 1);
+    assert.equal(billed(), 8_700 + 440);
+    assert.equal('_compactions_unbilled' in sessionEnd(), false);
+  });
+
+  test('file changes keep the ids the counter path gave them', () => {
+    const lines = requestRollout();
+    writeRollout(lines.filter(l => l.type !== 'token_usage_record'));
+    const before = patchIds();
+    assert.equal(before.length, 2);
+    writeRollout(lines);
+    assert.deepEqual(patchIds(), before);
+  });
+
+  test('a request recorded twice is billed once', () => {
+    const lines = requestRollout();
+    lines.splice(3, 0, record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]));
+    writeRollout(lines);
+    assert.equal(llmRows().filter(e => e.event_id === requestId('resp-1')).length, 1);
+  });
+
+  test('another thread\'s record in the rollout is not billed', () => {
+    const lines = requestRollout();
+    lines.splice(3, 0, record(1, 'resp-foreign', [9, 9, 9], [9, 9, 9], 'another-thread'));
+    writeRollout(lines);
+    assert.equal(llmRows().some(e => e.event_id === requestId('resp-foreign')), false);
+    assert.equal(sessionEnd()._usage_instrument, 'request');
+  });
+
+  test('another thread\'s record ahead of the first own one does not decide the instrument', () => {
+    const lines = requestRollout();
+    lines.splice(2, 0, record(1, 'resp-foreign', [9, 9, 9], [99, 99, 99], 'another-thread'));
+    writeRollout(lines);
+    assert.equal(sessionEnd()._usage_instrument, 'request');
+  });
+
+  test('a subagent bills its own requests and none of its copied history', () => {
+    const own = (minute: number, responseId: string, usage3: Usage3, thread: Usage3): Line =>
+      ({ ...record(minute, responseId, usage3, thread, CHILD), timestamp: `2026-07-25T20:5${minute}:39Z` });
+    const file = writeChild([
+      spawnMeta(), turnAt('2026-07-20T09:00:01Z'), count(400_000, 300_000, 4_000, 400_000),
+      record(1, 'resp-parent', [400_000, 300_000, 4_000], [400_000, 300_000, 4_000], PARENT),
+      turnAt('2026-07-25T20:53:40Z'), own(4, 'resp-child-1', [3_000, 2_000, 100], [3_000, 2_000, 100]),
+      count(403_000, 302_000, 4_100), own(5, 'resp-child-2', [4_000, 3_000, 200], [7_000, 5_000, 300]),
+      count(407_000, 305_000, 4_300),
+    ]);
+    assert.deepEqual(usage(file).map(e => e.event_id), [compactionId('resp-child-1', CHILD), compactionId('resp-child-2', CHILD)]);
+    const end = parseCodexFile(file, { codexDir }).find(e => e.event_type === 'session_end')!.metadata as Record<string, unknown>;
+    assert.equal(end._usage_instrument, 'request');
+  });
+
+  test('a rollout whose records start mid-thread keeps the counter', () => {
+    writeRollout(compactionRollout());
+    assert.equal(sessionEnd()._usage_instrument, 'counter');
+    assert.equal(llmRows().filter(e => (e.metadata as Record<string, unknown>)._usage_source === undefined).length, 3);
   });
 });

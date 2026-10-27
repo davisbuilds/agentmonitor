@@ -143,31 +143,11 @@ so later readers know what still needs checking.
   Measured on 2026-09-24, they are about half of 1% of that fix's cost
   correction.
 - **Next**: price a multi-request span with the tier of its largest request,
-  once `last_token_usage` per request is read. Otherwise leave as is. Rollouts
-  from Codex 0.154 onward also carry per-request usage in
-  `token_usage_record`; compaction rows are already priced one request at a
-  time.
-
-#### Codex requests the import still does not bill
-- **What**: Codex's cumulative `token_count` leaves out some requests that its
-  own `token_usage_record` lines record.
-  - Compactions are now billed from those records (2026-10-26).
-  - Requests of turns that are later aborted are recorded but neither counted
-    nor named by a `compacted` line, so they stay unbilled.
-- **Why or evidence**: 2026-10-26 differential over every local rollout, from
-  Codex 0.154 onward:
-  - with compactions billed, imported tokens equal Codex's thread total in every
-    rollout but one;
-  - in that one, the remaining gap is a single request recorded just before a
-    `turn_aborted`;
-  - before compactions were billed, they were about 3% of 30-day Codex cost.
-
-  The 2026-09-24 hypothesis (failed or retried requests) was only partly right:
-  most of the excess OTEL saw was compactions.
-- **Next**: the repair's thread-total check names each such session in
-  `counter_mismatches`. If they become common, bill every own-thread
-  `token_usage_record` that no counter delta covers, keyed by `response_id` as
-  compactions are.
+  once `last_token_usage` per request is read. Otherwise leave as is. Since
+  2026-10-27 this applies only to the counter path: rollouts from before Codex
+  0.154, or whose records start mid-thread. A rollout recorded per request from
+  its first request is billed one request at a time. The counter path also
+  still leaves aborted-turn requests unbilled.
 
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
