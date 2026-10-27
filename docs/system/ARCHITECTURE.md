@@ -128,6 +128,12 @@ and optional `event_id` deduplication. OTLP records get a derived `event_id` so
 exporter retries collapse. `created_at` is server receive time;
 `client_timestamp` is producer time.
 
+Codex exports one OTLP log per streamed chunk (deltas and lifecycle markers such
+as `response.created` or `response.output_item.done`). These records carry no
+content, usage or error. The parser drops them on both transports,
+`codex.sse_event` and `codex.websocket_event`. It keeps `response.completed`
+(usage), `response.failed` (error) and every other response kind.
+
 `insertEvent` writes the agent, session, and event in one transaction, so a
 failed insert never leaves a session with no event. The Codex live projection
 runs after that commit; if it fails, the failure is logged and the stored event
