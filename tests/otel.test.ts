@@ -1260,13 +1260,15 @@ describe('a metric usage row is dated at the start of the interval it covers', (
     assert.deepEqual(await stamps('sess-delta-start'), ['2026-10-27T10:00:00.000Z']);
   });
 
-  test('a cumulative point is dated at the previous point of its series, and the first at the series start', async () => {
+  test('a cumulative point is dated at the previous point of its series, and the first one seen at its own time', async () => {
+    // The series may have started long before amon saw it (amon restarted), so
+    // its start says nothing about when the first delta's usage happened.
     const start = nanos('2026-10-27T09:00:00Z');
     for (const [value, time] of [[0.4, '2026-10-27T10:01:00Z'], [0.9, '2026-10-27T10:02:00Z']] as const) {
       const res = await postJson(`${baseUrl}/api/otel/v1/metrics`, costPayload('sess-cumulative-start', [{ value, start, time: nanos(time) }], 2));
       assert.equal(res.status, 200);
     }
-    assert.deepEqual(await stamps('sess-cumulative-start'), ['2026-10-27T09:00:00.000Z', '2026-10-27T10:01:00.000Z']);
+    assert.deepEqual(await stamps('sess-cumulative-start'), ['2026-10-27T10:01:00.000Z', '2026-10-27T10:01:00.000Z']);
   });
 
   test('a point without a start is dated at its own time, and one without any time is left to the receive time', async () => {

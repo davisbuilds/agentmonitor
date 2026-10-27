@@ -979,8 +979,8 @@ export interface ParsedMetricDelta {
   cost_usd_delta: number;
   /**
    * The start of the interval this delta covers, so it can be compared with
-   * imported usage: a delta point's start, a cumulative point's previous point
-   * (or its series start), else its own time. Absent when the point has no time.
+   * imported usage: a delta point's start, a cumulative point's previous point,
+   * else its own time. Absent when the point has no time.
    */
   client_timestamp?: string;
 }
@@ -1189,7 +1189,9 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
             const cacheKey = `${sessionId}|${agentType}|${metricName}|${model ?? ''}|${tokenType ?? ''}|${seriesStart}`;
             const delta = isCumulative ? computeDelta(cacheKey, rawValue) : rawValue;
             const pointTime = nanoToIso(dp.timeUnixNano);
-            const intervalStart = isCumulative && cumulativeTimes.has(cacheKey) ? cumulativeTimes.get(cacheKey) : nanoToIso(dp.startTimeUnixNano);
+            // A cumulative series' first point seen may follow a long unseen
+            // stretch (amon restarted), so only a previous point dates it.
+            const intervalStart = isCumulative ? cumulativeTimes.get(cacheKey) : nanoToIso(dp.startTimeUnixNano);
             if (isCumulative) cumulativeTimes.set(cacheKey, pointTime);
             if (delta <= 0) continue;
 

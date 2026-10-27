@@ -330,9 +330,14 @@ read time, by one rule for every source:
 
 A Codex OTEL row is dated at its request. A metric usage row, such as Claude
 Code's cost and token metrics, is dated at the start of the interval it covers:
-a delta point's start time, a cumulative point's previous point (or its series
-start for the first). A point exported after a transcript's last request is
-therefore still covered when its interval began before that request.
+a delta point's start time, a cumulative point's previous point. The first
+point amon sees of a cumulative series is dated at its own time, since the
+series may have started long before (amon restarted). A point exported after a
+transcript's last request is therefore still covered when its interval began
+before that request. Dating shifts a metric row earlier by at most one export
+interval; a row whose interval straddles the import's latest row is left out
+whole until the next import bills the rest, rather than counting the imported
+part twice.
 
 Usage, analytics, skill health, budgets, tier feedback, benchmarks, and insights
 are derived from shared v2 query/service boundaries. Responses carry coverage
