@@ -821,3 +821,47 @@ describe('a rollout recorded per request from its first request is billed per re
     assert.equal(llmRows().filter(e => (e.metadata as Record<string, unknown>)._usage_source === undefined).length, 3);
   });
 });
+
+describe('an insert-only import never bills a request beside its counter row', () => {
+  // A date-scoped import, and a rollout with a line that does not parse, only
+  // insert: they cannot delete the counter rows a switch would replace.
+  before(() => { fs.mkdirSync(sessionsDir, { recursive: true }); });
+  beforeEach(() => {
+    assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
+    getDb().exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM import_state; DELETE FROM session_items; DELETE FROM session_turns; DELETE FROM browsing_sessions;');
+  });
+  const usageTotal = () => importRows().reduce((sum, row) => sum + row.tokens_in + row.cache_read_tokens + row.tokens_out, 0);
+  const requestRows = () => (getDb().prepare(`
+    SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND json_extract(metadata, '$._usage_source') = 'request'
+  `).get(SESSION) as { n: number }).n;
+  const storeFromCounter = () => {
+    const lines = requestRollout();
+    writeRollout(lines.filter(l => l.type !== 'token_usage_record'));
+    runImport({ source: 'codex', codexDir });
+    return lines;
+  };
+
+  test('a date-scoped import of a session stored from the counter keeps the counter', () => {
+    const lines = storeFromCounter();
+    const before = usageTotal();
+    writeRollout(lines);
+    runImport({ source: 'codex', codexDir, from: new Date('2026-07-01T00:00:00Z'), force: true });
+    assert.equal(requestRows(), 0, 'no request row lands beside the counter row it repeats');
+    assert.equal(usageTotal(), before + 5_000 + 300, 'only the compaction the counter left out is added');
+  });
+
+  test('a rollout with a malformed line keeps a counter-stored session on the counter', () => {
+    const lines = storeFromCounter();
+    const before = usageTotal();
+    fs.writeFileSync(rollout, `${lines.map(l => JSON.stringify(l)).join("\n")}\n{not json`);
+    runImport({ source: 'codex', codexDir, force: true });
+    assert.equal(requestRows(), 0);
+    assert.equal(usageTotal(), before + 5_000 + 300);
+  });
+
+  test('a session not yet stored is billed per request on the insert-only path', () => {
+    writeRollout(requestRollout());
+    runImport({ source: 'codex', codexDir, from: new Date('2026-07-01T00:00:00Z') });
+    assert.equal(usageTotal(), 8_700 + 440);
+  });
+});
