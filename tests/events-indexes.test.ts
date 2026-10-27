@@ -92,10 +92,8 @@ test('covering composite event indexes exist', () => {
   const names = indexNames();
   assert.ok(names.has('idx_events_session_cost'), 'idx_events_session_cost should exist');
   assert.ok(names.has('idx_events_session_reconcile'), 'idx_events_session_reconcile should exist');
-  assert.ok(
-    names.has('idx_events_codex_import_usage_session_ts'),
-    'idx_events_codex_import_usage_session_ts should exist',
-  );
+  assert.ok(names.has('idx_events_import_usage_session_ts'), 'idx_events_import_usage_session_ts should exist');
+  assert.ok(!names.has('idx_events_codex_import_usage_session_ts'), 'the Codex-only import usage index is replaced');
   assert.ok(names.has('idx_events_usage_covering'), 'idx_events_usage_covering should exist');
   assert.ok(
     names.has('idx_events_usage_matching_covering'),
@@ -125,27 +123,16 @@ test('event-session reconciliation uses the dedicated composite index', () => {
   );
 });
 
-test('Codex usage reconciliation seeks imported rows by session and normalized timestamp', () => {
-  const plan = queryPlan(
-    `SELECT id FROM events imported_usage
-     WHERE imported_usage.session_id = ?
-       AND imported_usage.agent_type = 'codex'
-       AND imported_usage.source = 'import'
-       AND (
-         COALESCE(imported_usage.cost_usd, 0) > 0
-         OR COALESCE(imported_usage.tokens_in, 0) > 0
-         OR COALESCE(imported_usage.tokens_out, 0) > 0
-         OR COALESCE(imported_usage.cache_read_tokens, 0) > 0
-         OR COALESCE(imported_usage.cache_write_tokens, 0) > 0
-       )
-       AND datetime(COALESCE(imported_usage.client_timestamp, imported_usage.created_at)) >= ?`,
-    'session-1',
-    '2026-05-01',
-  );
+test('OTEL usage reconciliation seeks imported rows by session, agent and normalized timestamp', async () => {
+  // The rule's own SQL, correlated on the OTEL row's agent: a partial index
+  // restricted to one agent cannot serve it, and the lookup falls back to a
+  // broader session index that scans every imported row of the session.
+  const { overlappingOtelUsageCondition } = await import('../src/db/usage-reconciliation.js');
+  const plan = queryPlan(`SELECT e.id FROM events e WHERE e.session_id = ? AND ${overlappingOtelUsageCondition('e')}`, 'session-1');
   assert.match(
     plan,
-    /idx_events_codex_import_usage_session_ts \(session_id=\? AND <expr>>\?\)/,
-    `expected a session+timestamp range seek, got: ${plan}`,
+    /idx_events_import_usage_session_ts \(session_id=\? AND agent_type=\? AND <expr>>\?\)/,
+    `expected a session+agent+timestamp range seek, got: ${plan}`,
   );
 });
 

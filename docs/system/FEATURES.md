@@ -230,9 +230,10 @@ Monitor's today and 30-day figures.
   reported; expect a ratio a little under 1, because the harness also pays for
   requests that never reach a transcript, such as compaction. How that
   shortfall splits between them is unmeasured (see BACKLOG).
-- Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates,
-  including a Monitor card's and session detail's token and cost totals; raw
-  events remain available in session and monitor history.
+- Imported transcript usage (Claude JSONL, Codex rollouts) wins over overlapping
+  live OTEL usage of the same session in aggregates, including a Monitor card's
+  and session detail's token and cost totals; raw events remain available in
+  session and monitor history.
 - Benchmark events are excluded from normal usage, analytics, and the Monitor's
   totals, event feed, and session list.
   Benchmark-aware reads can opt into them explicitly. Usage and analytics reads

@@ -319,11 +319,25 @@ is not a further bucket: it is the share of `cache_write_tokens` written to
 Anthropic's 1-hour cache, which bills at 2x input rather than 1.25x, so adding it
 to the other buckets counts those tokens twice.
 
-Codex can produce both live OTEL usage and later imported JSONL usage for the same
-session. Usage and stats reconcile that overlap at read time: imported usage is
-authoritative for matching timestamps, overlapping OTEL usage is excluded from
-rollups (the Monitor's per-session token and cost totals among them), and raw
-rows remain available to monitoring and session history.
+Claude and Codex can each produce both live OTEL usage and later imported
+transcript usage for the same session. Usage and stats reconcile that overlap at
+read time, by one rule for every source:
+- an OTEL usage row is excluded from rollups (the Monitor's per-session token
+  and cost totals among them) when the session's import holds usage of the same
+  agent at or after the row's time;
+- OTEL usage the import has not reached yet, the live tail, still counts;
+- raw rows remain available to monitoring and session history.
+
+A Codex OTEL row is dated at its request. A metric usage row, such as Claude
+Code's cost and token metrics, is dated at the start of the interval it covers:
+a delta point's start time, a cumulative point's previous point. The first
+point amon sees of a cumulative series is dated at its own time, since the
+series may have started long before (amon restarted). A point exported after a
+transcript's last request is therefore still covered when its interval began
+before that request. Dating shifts a metric row earlier by at most one export
+interval; a row whose interval straddles the import's latest row is left out
+whole until the next import bills the rest, rather than counting the imported
+part twice.
 
 Usage, analytics, skill health, budgets, tier feedback, benchmarks, and insights
 are derived from shared v2 query/service boundaries. Responses carry coverage
