@@ -569,6 +569,15 @@ amon costs repair-codex-usage --json            # preview, no writes
 amon costs repair-codex-usage --apply
 ```
 
+`--apply` takes runtime ownership, so it refuses while a server owns the
+database, and a server cannot start partway through.
+
+Compaction requests were unbilled until 2026-10-26. Codex's cumulative
+`token_count` leaves them out. Rollouts from Codex 0.154 onward record each
+request in a `token_usage_record`, and each `compacted` line names its request.
+The import now bills them (see ARCHITECTURE), and the repair adds them to
+sessions stored earlier as `compaction` rows.
+
 It reconciles every discoverable rollout through the importer's own path, so a
 repaired session is exactly what a fresh import would store. The preview runs
 the same work and rolls it back.
@@ -608,19 +617,34 @@ carries:
 | `repriced` | same tokens, cost from older rates |
 | `subagent_model` | a subagent's session model, moved from its parent's first turn to its own |
 | `annotated` | only non-usage fields differ |
+| `compaction` | a compaction request Codex recorded but left out of its counter |
 | `appended` | new usage since the last import |
 | `unclassified` | none of the above |
 
 **Do not apply while `unclassified` is above 0.** Also check the two outside
 instruments in the report:
 
-- `counter_mismatches` must be empty. Each changed plain session's repaired
-  usage is compared with the final cumulative counter Codex wrote in its own
-  rollout. Rollouts whose counter restarts mid-session are counted in
-  `counter_sessions_reset` and skipped, because their final counter understates
-  what was billed.
-- `subagent_otel` compares each changed subagent with Codex's per-request OTEL,
-  before and after. `otel_ratios_moved_away` must be 0.
+- `counter_mismatches` must be empty. Each changed session's repaired usage is
+  compared with Codex's own total for it:
+  - the thread total on its last `token_usage_record`, for any session whose
+    rollout has one (Codex 0.154+, counted in `thread_sessions_checked`). This
+    includes subagents, because the total counts only the thread's own
+    requests;
+  - otherwise, for a plain session, the final cumulative counter.
+
+  Exceptions:
+  - Rollouts whose counter restarts mid-session are counted in
+    `counter_sessions_reset` and skipped, because their final counter
+    understates what was billed.
+  - A session holding a compaction the import could not bill is named in
+    `compaction_sessions_unbilled`, whichever instrument checks it. It is left
+    out of the total check, because its total is not expected to match.
+- `subagent_otel` compares each changed subagent that has no thread total with
+  Codex's per-request OTEL, before and after. `otel_ratios_moved_away` must be
+  0. OTEL is the weaker instrument where a thread total exists. On 2026-10-26 it
+  missed a request in a subagent that Codex itself recorded: after billing
+  compactions, that subagent's import equalled its thread total exactly and
+  read about 1.02× OTEL.
 
 A rollout that does not name its model is attributed to the `config.toml`
 model. The repair keeps the model already stored for such rows, because
