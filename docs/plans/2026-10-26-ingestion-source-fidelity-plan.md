@@ -3,7 +3,7 @@ date: 2026-10-26
 author: claude
 topic: ingestion-source-fidelity
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 spec: docs/specs/2026-10-26-ingestion-source-fidelity-spec.md
 risk_profile: high
@@ -728,12 +728,19 @@ The closure critique re-checked each SC and EV id against a task and a proof
     critique log).
 - **Task 5: done in #221.** Missing models are split into those no transcript
   recorded and those the import missed.
-- **Task 4: in review as #222.**
+- **Task 4: done.**
+  - Merged in #222 and applied live on 2026-10-27, with the backup
+    `data/backups/pre-codex-resync-2026-10-27.db` taken first.
   - Receipts attach to the call's message, and carry the output's arrival time,
     its size, and a preview under tool-argument capture.
   - The defaults were confirmed on 2026-10-26. No exit code or status is
     stored, because Codex links none to the call (see the spec's critique log).
     Receipts project as `completed` with `outcome: unrecorded`.
-  - The live apply is `amon sync sessions --source codex --force`, following
-    the same procedure.
-- **Task 6: in review as #223.**
+  - The live resync matched its rehearsal. No Codex session changed its message
+    or human-turn counts. Other sources' messages and every event were
+    byte-identical, and Monitor costs were unchanged.
+  - Receipts exist only where the rollout is still on disk: about one stored
+    Codex call in six has one. Every linked call but one, whose rollout holds no
+    output for it, has its receipt.
+- **Task 6: done in #223.** The first live probe run reported two Claude types
+  the catalog does not list, both backlogged.
