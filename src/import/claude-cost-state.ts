@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { getDb } from '../db/connection.js';
+import { importedClaudeCostByModel } from '../db/queries.js';
 
 export interface ClaudeCostStateModel {
   cost_usd: number;
@@ -162,16 +162,6 @@ function recentSessionFiles(claudeDir: string, limit: number): string[] {
  * transcript never recorded, such as side requests on a smaller model.
  */
 export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?: number }): ClaudeTranscriptCostCheck[] {
-  const db = getDb();
-  const perModel = db.prepare(`
-    SELECT model, COALESCE(SUM(cost_usd), 0) AS cost,
-      SUM(CASE WHEN cost_usd IS NULL
-        AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0) THEN 1 ELSE 0 END) AS unpriced
-    FROM events
-    WHERE session_id = ? AND agent_type = 'claude_code' AND source = 'import'
-      AND client_timestamp >= ? AND client_timestamp <= ?
-    GROUP BY model
-  `);
   return recentSessionFiles(options.claudeDir, options.limit ?? 20).map((file): ClaudeTranscriptCostCheck => {
     const sessionId = path.basename(file, '.jsonl');
     const { checkpoint, sightings } = scanTranscript(fs.readFileSync(file, 'utf-8'));
@@ -181,7 +171,7 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
       return { session_id: sessionId, status: 'no_cut', since: checkpoint.since, cut: checkpoint.cut, ...empty };
     }
 
-    const rows = perModel.all(sessionId, checkpoint.since, checkpoint.cut) as Array<{ model: string | null; cost: number; unpriced: number }>;
+    const rows = importedClaudeCostByModel(sessionId, checkpoint.since, checkpoint.cut);
     const amon = new Map(rows.map(row => [row.model ?? '', row]));
     const unpricedRows = rows.reduce((sum, row) => sum + row.unpriced, 0);
     // An unpriced row bills as NULL and the sum skips it, so the imported cost
