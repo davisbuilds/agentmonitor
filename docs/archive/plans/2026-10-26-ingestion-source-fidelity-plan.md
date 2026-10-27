@@ -5,7 +5,7 @@ topic: ingestion-source-fidelity
 stage: plan
 status: complete
 source: conversation
-spec: docs/specs/2026-10-26-ingestion-source-fidelity-spec.md
+spec: docs/archive/specs/2026-10-26-ingestion-source-fidelity-spec.md
 risk_profile: high
 readiness: ready
 ---
@@ -15,7 +15,7 @@ readiness: ready
 ## Goal
 
 This plan delivers the contract in
-`docs/specs/2026-10-26-ingestion-source-fidelity-spec.md`, criteria SC-01 to
+`docs/archive/specs/2026-10-26-ingestion-source-fidelity-spec.md`, criteria SC-01 to
 SC-07. It is the workoff of the 2026-10-26 source audit across Claude, Codex and
 Antigravity.
 
