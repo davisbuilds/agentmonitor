@@ -859,6 +859,19 @@ describe('an insert-only import never bills a request beside its counter row', (
     assert.equal(usageTotal(), before + 5_000 + 300);
   });
 
+  test('a session stored per request keeps its rows when a malformed first record drops the parse to the counter', () => {
+    const lines = requestRollout();
+    writeRollout(lines);
+    runImport({ source: 'codex', codexDir });
+    const before = usageTotal();
+    // The first record no longer parses, so the next one starts mid-thread and
+    // the parse falls back to the counter; the malformed line makes it insert-only.
+    const first = lines.findIndex(l => l.type === 'token_usage_record');
+    fs.writeFileSync(rollout, lines.map((l, i) => (i === first ? '{not json' : JSON.stringify(l))).join('\n'));
+    runImport({ source: 'codex', codexDir, force: true });
+    assert.equal(usageTotal(), before, 'no counter row lands beside the request rows it repeats');
+  });
+
   test('a session not yet stored is billed per request on the insert-only path', () => {
     writeRollout(requestRollout());
     runImport({ source: 'codex', codexDir, from: new Date('2026-07-01T00:00:00Z') });

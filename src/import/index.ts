@@ -5,7 +5,7 @@ import { eventIdExists, insertEvent, listImportedCodexRows, refreshImportedUsage
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import type { ParsedImportEvent } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashContent as hashCodexContent } from './codex.js';
-import { isCounterUsageRow, reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
+import { isCounterUsageRow, isRequestUsageRow, reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
@@ -278,12 +278,14 @@ function appendCodexEvents(
   options: ImportOptions,
   result: ImportFileResult,
 ): ImportFileResult {
-  // Inserting cannot delete the counter rows a move to per-request rows would
-  // replace, so a session stored from the counter stays on it until a full
-  // reconcile (or the usage repair) can switch it.
+  // Inserting cannot delete the rows a change of instrument would replace, so
+  // neither instrument may land beside the other's rows; a full reconcile (or
+  // the usage repair) makes the switch.
   const end = events.find(event => event.event_type === 'session_end');
   const instrument = (end?.metadata as Record<string, unknown> | undefined)?._usage_instrument;
-  if (instrument === 'request' && end && listImportedCodexRows(end.session_id).some(isCounterUsageRow)) {
+  const stored = end ? listImportedCodexRows(end.session_id) : [];
+  if (instrument === 'request' && stored.some(isCounterUsageRow)) {
+    // Stored from the counter: stay on it.
     events = parseCodexFile(filePath, {
       from: options.from,
       to: options.to,
@@ -291,6 +293,11 @@ function appendCodexEvents(
       content: read.bytes.toString('utf-8'),
       usageInstrument: 'counter',
     });
+    result.eventsFound = events.length;
+  } else if (instrument === 'counter' && stored.some(isRequestUsageRow)) {
+    // Stored per request, but this parse fell back to the counter (a record
+    // it could not read): its counter rows would repeat those requests.
+    events = events.filter(event => !isCounterUsageRow({ event_type: event.event_type, metadata: JSON.stringify(event.metadata ?? {}) }));
     result.eventsFound = events.length;
   }
   const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
