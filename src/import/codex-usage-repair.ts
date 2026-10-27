@@ -8,7 +8,7 @@ import {
   type ImportedCodexRow,
 } from '../db/queries.js';
 import { discoverCodexLogs, parseCodexFile } from './codex.js';
-import { importedRowMatches, reconciledEvent, sameCost } from './codex-reconcile.js';
+import { importedRowMatches, isCounterUsageRow, reconciledEvent, sameCost } from './codex-reconcile.js';
 import { readCodexRollout, reconcileCodexRollout, type CodexRolloutRead } from './index.js';
 import { acquireRuntimeOwnership } from '../runtime-ownership.js';
 
@@ -111,15 +111,6 @@ function sessionIdOf(filePath: string, read: CodexRolloutRead, codexDir: string 
     return events.find(event => event.event_type === 'session_start')?.session_id ?? null;
   } catch {
     return null;
-  }
-}
-
-function storedMetadata(row: ImportedCodexRow): Record<string, unknown> {
-  try {
-    const metadata: unknown = JSON.parse(row.metadata);
-    return metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata as Record<string, unknown> : {};
-  } catch {
-    return {};
   }
 }
 
@@ -241,11 +232,10 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     for (const [id, event] of parsed) parsed.set(id, reconciledEvent(storedById.get(id), event));
     // A session that now bills per request but still holds counter rows is
     // switching instrument: its counter rows give way to one row per request.
-    const isCounterRow = (row: ImportedCodexRow) => row.event_type === 'llm_response' && storedMetadata(row)._usage_source === undefined;
-    const switching = end._usage_instrument === 'request' && stored.some(isCounterRow);
+    const switching = end._usage_instrument === 'request' && stored.some(isCounterUsageRow);
     for (const row of stored) {
       const event = parsed.get(row.event_id);
-      if (!event) report.rows_by_class[switching && isCounterRow(row) ? 'instrument_switch' : skipped > 0 ? 'copied_history' : 'orphaned']++;
+      if (!event) report.rows_by_class[switching && isCounterUsageRow(row) ? 'instrument_switch' : skipped > 0 ? 'copied_history' : 'orphaned']++;
       else if (!importedRowMatches(row, event)) report.rows_by_class[classifyUpdate(row, event)]++;
     }
     for (const [id, event] of parsed) {

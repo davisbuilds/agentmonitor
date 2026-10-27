@@ -1,11 +1,11 @@
 import fs from 'fs';
 import path from 'path';
 import { getDb } from '../db/connection.js';
-import { eventIdExists, insertEvent, refreshImportedUsage, setSessionMode } from '../db/queries.js';
+import { eventIdExists, insertEvent, listImportedCodexRows, refreshImportedUsage, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import type { ParsedImportEvent } from './claude-code.js';
 import { discoverCodexLogs, parseCodexFile, hashContent as hashCodexContent } from './codex.js';
-import { reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
+import { isCounterUsageRow, reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
@@ -278,6 +278,21 @@ function appendCodexEvents(
   options: ImportOptions,
   result: ImportFileResult,
 ): ImportFileResult {
+  // Inserting cannot delete the counter rows a move to per-request rows would
+  // replace, so a session stored from the counter stays on it until a full
+  // reconcile (or the usage repair) can switch it.
+  const end = events.find(event => event.event_type === 'session_end');
+  const instrument = (end?.metadata as Record<string, unknown> | undefined)?._usage_instrument;
+  if (instrument === 'request' && end && listImportedCodexRows(end.session_id).some(isCounterUsageRow)) {
+    events = parseCodexFile(filePath, {
+      from: options.from,
+      to: options.to,
+      codexDir: options.codexDir,
+      content: read.bytes.toString('utf-8'),
+      usageInstrument: 'counter',
+    });
+    result.eventsFound = events.length;
+  }
   const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
   result.eventsImported = imported;
   result.skippedDuplicate = duplicates;

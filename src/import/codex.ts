@@ -123,6 +123,12 @@ export function parseCodexFile(
     content?: string;
     /** Filled in with what the parse had to skip. */
     diagnostics?: { malformedLines: number };
+    /**
+     * Bill from the cumulative counter even where per-request records would
+     * allow one row per request: for an insert-only import of a session whose
+     * counter rows are stored, which cannot delete the rows a switch replaces.
+     */
+    usageInstrument?: 'counter';
   },
 ): NormalizedIngestEvent[] {
   const events: NormalizedIngestEvent[] = [];
@@ -196,6 +202,7 @@ export function parseCodexFile(
   let instrument: 'request' | 'counter' = 'counter';
   const namedCompactions = new Set<string>();
   for (const [lineIndex, line] of parsedLines.entries()) {
+    if (options?.usageInstrument === 'counter') break;
     if (!line || lineIndex < ownFrom) continue;
     if (line.type === 'compacted' && typeof line.payload.compaction_response_id === 'string') {
       namedCompactions.add(line.payload.compaction_response_id);
