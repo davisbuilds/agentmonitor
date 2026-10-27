@@ -497,15 +497,20 @@ function initSchemaLocked(db: Database): void {
   // to help row *filtering*, but it covers the filter-option `SELECT DISTINCT
   // event_type ... ORDER BY` enumeration; without it that read sorts.
   //
-  // - idx_events_session_reconcile seeds the correlated Codex OTEL/import
+  // - idx_events_session_reconcile seeds the correlated OTEL/import
   //   usage-reconciliation subquery (src/db/usage-reconciliation.ts). That
-  //   subquery correlates on session_id (highly selective) then filters
-  //   agent_type='codex' AND source='import'. Without this index the planner
+  //   subquery correlates on session_id (highly selective) then filters the
+  //   OTEL row's agent_type AND source='import'. Without this index the planner
   //   falls back to seeking an agent_type index (agent_type=?), matching every
   //   Codex row, turning the full-history stats aggregate into an O(n^2) scan
   //   (measured ~95s per run on ~440k events; ~0.2s with this index).
-  // - idx_events_codex_import_usage_session_ts narrows that same reconciliation
-  //   lookup to metric-bearing imported Codex rows at or after the OTEL event.
+  // - idx_events_import_usage_session_ts narrows that same reconciliation
+  //   lookup to metric-bearing imported rows of the OTEL row's session and
+  //   agent, at or after the OTEL event. It replaced a Codex-only partial index
+  //   when the rule came to cover every source (2026-10-27): correlated on the
+  //   OTEL row's agent, the old index's agent predicate could not be proven, and
+  //   the Codex Monitor sum fell back to a broader session index at about twice
+  //   the time.
   //   Long sessions now contain tens of thousands of imported events, so the
   //   older session/agent/source index still left SQLite scanning and parsing
   //   every imported timestamp for each candidate OTEL row. The partial
@@ -570,10 +575,10 @@ function initSchemaLocked(db: Database): void {
     DROP INDEX IF EXISTS idx_events_created_model;
     CREATE INDEX IF NOT EXISTS idx_events_session_reconcile
       ON events(session_id, agent_type, source);
-    CREATE INDEX IF NOT EXISTS idx_events_codex_import_usage_session_ts
-      ON events(session_id, datetime(COALESCE(client_timestamp, created_at)))
-      WHERE agent_type = 'codex'
-        AND source = 'import'
+    DROP INDEX IF EXISTS idx_events_codex_import_usage_session_ts;
+    CREATE INDEX IF NOT EXISTS idx_events_import_usage_session_ts
+      ON events(session_id, agent_type, datetime(COALESCE(client_timestamp, created_at)))
+      WHERE source = 'import'
         AND (
           COALESCE(cost_usd, 0) > 0
           OR COALESCE(tokens_in, 0) > 0

@@ -13,7 +13,7 @@ import type {
 } from '../contracts/event-contract.js';
 import {
   excludeBenchmarkUsageCondition,
-  excludeOverlappingCodexOtelUsageCondition,
+  excludeOverlappingOtelUsageCondition,
   usageMetricPresenceCondition,
 } from './usage-reconciliation.js';
 
@@ -942,8 +942,8 @@ export function monitorUsageSql(usageWhere: string): string {
 }
 
 /**
- * Sum the Monitor's usage rows (`usageWhere` already reconciles overlapping
- * Codex OTEL away), per agent and in total. The v2 stats read and the SSE
+ * Sum the Monitor's usage rows (`usageWhere` already reconciles OTEL usage the
+ * import covers away), per agent and in total. The v2 stats read and the SSE
  * broadcast share this, so the bar they both feed never changes shape.
  */
 export function sumMonitorUsage(db: Database.Database, usageWhere: string, params: unknown[]): MonitorUsageTotals {
@@ -1018,7 +1018,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
       - (db.prepare("SELECT COUNT(*) as count FROM events WHERE source = 'benchmark'").get() as { count: number }).count;
   const usageWhere = `${where}
     AND ${usageMetricPresenceCondition('e')}
-    AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
+    AND ${excludeOverlappingOtelUsageCondition('e')}`;
   const usageTotals = sumMonitorUsage(db, usageWhere, params);
 
   const activeSessions = (db.prepare(
@@ -1539,7 +1539,7 @@ export function getCostOverTime(filters?: { since?: string; agentType?: string }
     conditions.push('datetime(COALESCE(e.client_timestamp, e.created_at)) >= datetime(?)');
     params.push(filters.since);
   }
-  conditions.push(excludeOverlappingCodexOtelUsageCondition('e'));
+  conditions.push(excludeOverlappingOtelUsageCondition('e'));
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -1567,7 +1567,7 @@ export interface ProjectCostRow {
 
 export function getCostByProject(limit: number = 10, filters?: { agentType?: string; since?: string }): ProjectCostRow[] {
   const db = getDb();
-  const conditions: string[] = ['e.cost_usd > 0', excludeOverlappingCodexOtelUsageCondition('e')];
+  const conditions: string[] = ['e.cost_usd > 0', excludeOverlappingOtelUsageCondition('e')];
   const params: unknown[] = [];
 
   if (filters?.agentType) {
@@ -1608,7 +1608,7 @@ export interface ModelCostRow {
 
 export function getCostByModel(filters?: { agentType?: string; since?: string }): ModelCostRow[] {
   const db = getDb();
-  const conditions: string[] = ['e.model IS NOT NULL', 'e.cost_usd > 0', excludeOverlappingCodexOtelUsageCondition('e')];
+  const conditions: string[] = ['e.model IS NOT NULL', 'e.cost_usd > 0', excludeOverlappingOtelUsageCondition('e')];
   const params: unknown[] = [];
 
   if (filters?.agentType) {

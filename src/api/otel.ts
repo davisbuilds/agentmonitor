@@ -149,6 +149,7 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
         ? delta.cost_usd_delta
         : undefined,
       model: delta.model,
+      client_timestamp: delta.client_timestamp,
       metadata: { _synthetic: true, _source: 'otel_metric' },
       source: 'otel',
     });

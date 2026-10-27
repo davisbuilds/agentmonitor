@@ -12,16 +12,24 @@ function usageTimestampExpression(alias: string): string {
   return `datetime(COALESCE(${alias}.client_timestamp, ${alias}.created_at))`;
 }
 
-export function overlappingCodexOtelUsageCondition(alias: string): string {
+/**
+ * An OTEL usage row the session's import already covers: the import holds
+ * usage for the same session and agent at or after the row's time. Import is
+ * authoritative for every source that has one (Claude transcripts, Codex
+ * rollouts); OTEL fills the live tail the import has not reached yet. A Codex
+ * OTEL row is dated at its request, and a metric row at the start of the
+ * interval it covers, so a point exported after the last imported request is
+ * still covered when its interval began before it.
+ */
+export function overlappingOtelUsageCondition(alias: string): string {
   return `(
-    ${alias}.agent_type = 'codex'
-    AND ${alias}.source = 'otel'
+    ${alias}.source = 'otel'
     AND ${usageMetricPresenceCondition(alias)}
     AND EXISTS (
       SELECT 1
       FROM events imported_usage
       WHERE imported_usage.session_id = ${alias}.session_id
-        AND imported_usage.agent_type = 'codex'
+        AND imported_usage.agent_type = ${alias}.agent_type
         AND imported_usage.source = 'import'
         AND ${usageMetricPresenceCondition('imported_usage')}
         AND ${usageTimestampExpression('imported_usage')} >= ${usageTimestampExpression(alias)}
@@ -29,8 +37,8 @@ export function overlappingCodexOtelUsageCondition(alias: string): string {
   )`;
 }
 
-export function excludeOverlappingCodexOtelUsageCondition(alias: string): string {
-  return `NOT ${overlappingCodexOtelUsageCondition(alias)}`;
+export function excludeOverlappingOtelUsageCondition(alias: string): string {
+  return `NOT ${overlappingOtelUsageCondition(alias)}`;
 }
 
 /**
