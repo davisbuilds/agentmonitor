@@ -20,7 +20,7 @@ Make Claude and Codex usage follow one model:
 - one check of amon's totals against what each harness recorded itself.
 
 This follows the 2026-10-26 ingestion source fidelity workoff
-([plan](2026-10-26-ingestion-source-fidelity-plan.md)), which fixed fidelity
+([plan](../archive/plans/2026-10-26-ingestion-source-fidelity-plan.md)), which fixed fidelity
 per source but left the instruments asymmetric. The conversation of 2026-10-27
 is the contract: a lightweight plan, no separate spec.
 
