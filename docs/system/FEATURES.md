@@ -233,9 +233,10 @@ Monitor's today and 30-day figures.
   `amon costs check-sessions` runs the same comparison for every source against
   its harness's own total: Claude's `cost-state` checkpoint in dollars, Codex's
   thread total in tokens. Antigravity is reported as recording none.
-- Imported Codex JSONL usage wins over overlapping live OTEL usage in aggregates,
-  including a Monitor card's and session detail's token and cost totals; raw
-  events remain available in session and monitor history.
+- Imported transcript usage (Claude JSONL, Codex rollouts) wins over overlapping
+  live OTEL usage of the same session in aggregates, including a Monitor card's
+  and session detail's token and cost totals; raw events remain available in
+  session and monitor history.
 - Benchmark events are excluded from normal usage, analytics, and the Monitor's
   totals, event feed, and session list.
   Benchmark-aware reads can opt into them explicitly. Usage and analytics reads

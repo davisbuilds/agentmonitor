@@ -20,7 +20,7 @@ Make Claude and Codex usage follow one model:
 - one check of amon's totals against what each harness recorded itself.
 
 This follows the 2026-10-26 ingestion source fidelity workoff
-([plan](2026-10-26-ingestion-source-fidelity-plan.md)), which fixed fidelity
+([plan](../archive/plans/2026-10-26-ingestion-source-fidelity-plan.md)), which fixed fidelity
 per source but left the instruments asymmetric. The conversation of 2026-10-27
 is the contract: a lightweight plan, no separate spec.
 
@@ -133,7 +133,9 @@ None
 **Implementation Steps**
 
 1. Choose the instrument per rollout: `request` when the first own-thread
-   record's usage equals its thread total, otherwise `counter`.
+   record's usage equals its thread total and the records are complete (their
+   usage adds up to the last thread total, and no line before the last fails
+   to parse), otherwise `counter`.
 2. On the `request` path, emit each own-thread record after the subagent
    boundary as an `llm_response`:
    - priced with the model of the latest `turn_context`, at the record's

@@ -11,7 +11,7 @@ process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 const { initSchema } = await import('../src/db/schema.js');
 const { closeDb, getDb } = await import('../src/db/connection.js');
 const { getStats, monitorUsageSql } = await import('../src/db/queries.js');
-const { excludeBenchmarkUsageCondition, excludeOverlappingCodexOtelUsageCondition, usageMetricPresenceCondition } = await import('../src/db/usage-reconciliation.js');
+const { excludeBenchmarkUsageCondition, excludeOverlappingOtelUsageCondition, usageMetricPresenceCondition } = await import('../src/db/usage-reconciliation.js');
 const { getMonitorStats } = await import('../src/db/v2-queries.js');
 const { formatMonitorStats } = await import('../src/cli/formatters/monitor.js');
 
@@ -105,7 +105,7 @@ test('the SSE stats broadcast carries the same usage as the REST read', () => {
 test('the usage sum scans the covering usage index, not a row-by-row agent index', () => {
   // Grouping by agent_type let SQLite pick an agent_type index that does not
   // cover the token columns: 4.4s against 18ms on a real store.
-  const where = `WHERE ${excludeBenchmarkUsageCondition('e')} AND ${usageMetricPresenceCondition('e')} AND ${excludeOverlappingCodexOtelUsageCondition('e')}`;
+  const where = `WHERE ${excludeBenchmarkUsageCondition('e')} AND ${usageMetricPresenceCondition('e')} AND ${excludeOverlappingOtelUsageCondition('e')}`;
   const plan = (getDb().prepare(`EXPLAIN QUERY PLAN ${monitorUsageSql(where)}`).all() as Array<{ detail: string }>)
     .map(row => row.detail);
   assert.ok(plan.some(detail => detail.includes('COVERING INDEX idx_events_usage_covering')), plan.join(' | '));

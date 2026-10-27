@@ -1,3 +1,8 @@
+---
+date: 2026-10-01
+status: reference
+---
+
 # AgentMonitor verification CLI pilot
 
 Date: 2026-10-01

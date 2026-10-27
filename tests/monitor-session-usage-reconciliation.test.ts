@@ -11,8 +11,8 @@ import type {
   listMonitorSessions as listMonitorSessionsType,
 } from '../src/db/v2-queries.js';
 
-// Codex reports each response's usage twice: live over OTEL, then again when the
-// rollout JSONL is imported. The Monitor's session totals (the Active Agents
+// Codex and Claude report each response's usage twice: live over OTEL, then
+// again when the transcript is imported. The Monitor's session totals (the Active Agents
 // cards and the session detail) must reconcile that overlap the way Usage does,
 // or a card shows roughly twice the cost the header's "Cost today" counts.
 
@@ -109,12 +109,15 @@ test('the session total matches the reconciled Usage cost', () => {
   assert.equal(usage.total_cost_usd, EXPECTED_CODEX.total_cost_usd);
 });
 
-test('Claude Code sessions keep both OTEL and imported usage', () => {
+test('Claude Code sessions reconcile the same way: the import covers earlier OTEL usage', () => {
   const { sessions } = listMonitorSessions({ exclude_status: 'ended', limit: 0 });
   const claude = sessions.find(row => row.id === 'claude-live');
   assert.ok(claude);
-  assert.equal(claude.tokens_in, 300);
-  const { session } = getMonitorSessionWithEvents('claude-live');
+  assert.equal(claude.tokens_in, 200);
+  const { session, events } = getMonitorSessionWithEvents('claude-live');
   assert.ok(session);
-  assert.equal(session.tokens_in, 300);
+  assert.equal(session.tokens_in, 200);
+  assert.equal(events.length, 2, 'the raw event stream keeps both sources');
+  const usage = getUsageSummary({ date_from: day, date_to: day, agent: 'claude_code' });
+  assert.equal(usage.total_cost_usd, 0.2);
 });

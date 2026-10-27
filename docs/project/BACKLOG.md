@@ -182,6 +182,20 @@ so later readers know what still needs checking.
   wanted. Watch openbench #5 (per-attempt cost) — landing it would drop the
   "cost is a floor" honesty caveat. Noted 2026-09-02, updated 2026-09-04.
 
+#### Claude OTEL logs and metrics may double-count each other (hypothesis)
+- **What**: Claude Code can export cost on both its `claude_code.api_request`
+  log events and its `claude_code.cost.usage` metric. If both are enabled, each
+  request may be stored as two OTEL usage rows.
+- **Why or evidence**: unmeasured. Since 2026-10-27 the import-precedence rule
+  excludes both once the session's transcript is imported, so the overlap
+  could only show in the live tail and in sessions the import never sees. The
+  installed store holds almost no Claude OTEL usage, so there is no local data
+  either way.
+- **Next**: with both exporters on, run one request against a scratch database
+  and compare `/api/v2/monitor/stats?agent=claude_code` before and after the
+  next import. If OTEL alone reads twice the request, pick one OTEL instrument
+  per source the way Codex token metrics are skipped in favour of its logs.
+
 ### Skill trigger health (2026-07-09)
 
 Phase 1 shipped. These are the deferred follow-ups surfaced during and after

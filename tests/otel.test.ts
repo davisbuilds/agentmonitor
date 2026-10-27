@@ -1222,6 +1222,63 @@ describe('POST /api/otel/v1/metrics', () => {
 
 // ─── Traces endpoint tests ─────────────────────────────────────────────
 
+describe('a metric usage row is dated at the start of the interval it covers', () => {
+  // The OTEL-vs-import rule compares this date with the session's imported
+  // usage, so a point exported after a transcript's last request still counts
+  // as covered when its interval began before that request.
+  const costPayload = (sessionId: string, points: Array<{ value: number; start?: string; time?: string }>, temporality: 1 | 2) => ({
+    resourceMetrics: [{
+      resource: { attributes: [
+        { key: 'service.name', value: { stringValue: 'claude_code' } },
+        { key: 'session.id', value: { stringValue: sessionId } },
+      ] },
+      scopeMetrics: [{ metrics: [{
+        name: 'claude_code.cost.usage',
+        sum: {
+          aggregationTemporality: temporality,
+          isMonotonic: true,
+          dataPoints: points.map(point => ({
+            asDouble: point.value,
+            attributes: [{ key: 'model', value: { stringValue: 'claude-sonnet-5' } }],
+            ...(point.start ? { startTimeUnixNano: point.start } : {}),
+            ...(point.time ? { timeUnixNano: point.time } : {}),
+          })),
+        },
+      }] }],
+    }],
+  });
+  const nanos = (iso: string) => `${BigInt(Date.parse(iso)) * 1_000_000n}`;
+  const stamps = async (sessionId: string) => (await getEvents(`session_id=${sessionId}`)).events
+    .map(event => event.client_timestamp as string | null)
+    .sort();
+
+  test('a delta point is dated at its start time', async () => {
+    const res = await postJson(`${baseUrl}/api/otel/v1/metrics`, costPayload('sess-delta-start', [
+      { value: 0.4, start: nanos('2026-10-27T10:00:00Z'), time: nanos('2026-10-27T10:01:00Z') },
+    ], 1));
+    assert.equal(res.status, 200);
+    assert.deepEqual(await stamps('sess-delta-start'), ['2026-10-27T10:00:00.000Z']);
+  });
+
+  test('a cumulative point is dated at the previous point of its series, and the first one seen at its own time', async () => {
+    // The series may have started long before amon saw it (amon restarted), so
+    // its start says nothing about when the first delta's usage happened.
+    const start = nanos('2026-10-27T09:00:00Z');
+    for (const [value, time] of [[0.4, '2026-10-27T10:01:00Z'], [0.9, '2026-10-27T10:02:00Z']] as const) {
+      const res = await postJson(`${baseUrl}/api/otel/v1/metrics`, costPayload('sess-cumulative-start', [{ value, start, time: nanos(time) }], 2));
+      assert.equal(res.status, 200);
+    }
+    assert.deepEqual(await stamps('sess-cumulative-start'), ['2026-10-27T10:01:00.000Z', '2026-10-27T10:01:00.000Z']);
+  });
+
+  test('a point without a start is dated at its own time, and one without any time is left to the receive time', async () => {
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, costPayload('sess-no-start', [{ value: 0.2, time: nanos('2026-10-27T10:03:00Z') }], 1));
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, costPayload('sess-no-time', [{ value: 0.2 }], 1));
+    assert.deepEqual(await stamps('sess-no-start'), ['2026-10-27T10:03:00.000Z']);
+    assert.deepEqual(await stamps('sess-no-time'), [null]);
+  });
+});
+
 describe('POST /api/otel/v1/traces', () => {
   test('returns 415 for protobuf content-type', async () => {
     const res = await postProtobuf(`${baseUrl}/api/otel/v1/traces`);

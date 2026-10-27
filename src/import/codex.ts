@@ -198,20 +198,35 @@ export function parseCodexFile(
   // Records that start at the thread's first request (the first one's usage is
   // the whole thread so far) cover every request, so they are billed one row
   // each. Records that start mid-thread, as in a session begun before Codex
-  // wrote them, leave earlier requests to the cumulative counter.
+  // wrote them, leave earlier requests to the cumulative counter. So do records
+  // with one missing: their usage must add up to the last one's thread total,
+  // and no line with lines after it may be unreadable, since it could have been
+  // a record. (A partial last line is a write still in progress.)
   let instrument: 'request' | 'counter' = 'counter';
   const namedCompactions = new Set<string>();
+  const ownRecords = new Map<string, CodexUsageRecord>();
+  let lastRecord: CodexUsageRecord | undefined;
+  let unreadable = false;
   for (const [lineIndex, line] of parsedLines.entries()) {
     if (options?.usageInstrument === 'counter') break;
-    if (!line || lineIndex < ownFrom) continue;
+    if (lineIndex < ownFrom) continue;
+    if (!line) {
+      if (lineIndex < parsedLines.length - 1) unreadable = true;
+      continue;
+    }
     if (line.type === 'compacted' && typeof line.payload.compaction_response_id === 'string') {
       namedCompactions.add(line.payload.compaction_response_id);
     }
-    if (line.type !== 'token_usage_record' || instrument === 'request') continue;
+    if (line.type !== 'token_usage_record') continue;
     const record = asUsageRecord(line);
     if (!record || record.thread_id !== sessionId) continue;
-    if (sameUsage(record.usage, record.thread)) instrument = 'request';
-    else break;
+    if (!ownRecords.has(record.response_id)) ownRecords.set(record.response_id, record);
+    lastRecord = record;
+  }
+  const firstRecord = ownRecords.values().next().value;
+  if (firstRecord && lastRecord && !unreadable && sameUsage(firstRecord.usage, firstRecord.thread)) {
+    const sum = [...ownRecords.values()].reduce((total, record) => addUsage(total, record.usage), { input: 0, cached: 0, output: 0 });
+    if (sameUsage(sum, lastRecord.thread)) instrument = 'request';
   }
 
   // Fall back to filename for session ID
