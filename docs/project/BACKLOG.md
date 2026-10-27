@@ -117,6 +117,17 @@ so later readers know what still needs checking.
   Unchanged files are cached; deploying a parser alone does not recover history.
   Live reparse and expanded retention remain separate rollout decisions.
 
+#### Claude custom session titles are not read
+- **What**: Claude Code transcripts can carry `custom-title` (`customTitle`)
+  and `agent-name` (`agentName`) lines, the name a user or the harness gave the
+  session. The session browser titles a session from `ai-title` or its first
+  prompt and ignores these, so a renamed session shows another name.
+- **Why or evidence**: the ingestion probe's first live run (2026-10-26)
+  reported both as `unknown`. They occur in a few older transcripts.
+- **Next**: decide the precedence (a user's custom title over `ai-title` seems
+  right), read them in the Claude parser's title path, and list them as read
+  in `src/parser/record-types.ts`.
+
 #### Codex inter-agent messages are not projected
 - **What**: Codex rollouts record messages between agents as
   `response_item/agent_message`, each with an author and recipient, beside
