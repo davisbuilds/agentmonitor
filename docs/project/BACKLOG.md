@@ -393,35 +393,36 @@ the build.
   Do not run a heuristic collapse without first measuring how often distinct
   turns legitimately share a usage tuple.
 
-#### Imported Claude cost runs below Claude Code's own running cost, cause unsplit
-- **What**: `amon costs check-claude-sessions` compares imported cost with the
-  statusline's `cost.total_cost_usd` for the same session and process window.
-  After the 2026-09-27 repair, the sessions checked read about 10-15% below the
-  harness. Billing 1-hour cache writes at their own rate (repair applied
-  2026-10-04) closed about half of that: re-measured 2026-10-05 on six sessions,
-  imported cost is about 0.95 of the harness's, weighted by cost (0.92 with the
-  outlier below), and five sessions read between 0.93 and 1.07. The harness also
-  pays for requests that never become transcript turns; which requests, and how
-  much each contributes, is unmeasured.
-- **Open question**: one resumed session reads about 0.05 of the harness's cost
-  after both repairs. Whether its statusline cost covers earlier processes of the
-  same session, or its transcript is missing turns, is unchecked; comparing its
-  process window against the transcript's turn timestamps would answer it.
-- **Why or evidence**: 2026-09-27, one long session: compaction records carry
-  `preTokens`/`postTokens` but no usage or cost, and pricing its compactions
-  from those sizes accounts for roughly 12% (context read from cache) to 55%
-  (read uncached) of that session's gap. The rest is unattributed; side requests
-  (titles, command checks, fetch summaries) are a hypothesis. Until split, a
-  shortfall this size cannot be told apart from a real import gap of the same
-  size.
-- **Next**: keep a history of statusline samples per session (write only when
-  the cost changes) instead of the latest. The harness's cost jump across each
-  compaction's window (`timestamp`, `durationMs`), less the transcript turns in
-  it, is that compaction's measured cost; what remains between compactions is
-  the other requests. Exact alternative: Claude Code's OpenTelemetry log export
-  records every API request with model, tokens and cost; pointing it at amon
-  needs a Claude Code configuration change and a check of how amon ingests
-  those events and whether they identify the request's purpose.
+#### Imported Claude cost runs below Claude Code's own running cost, inside the main models
+- **What**: imported Claude cost reads a few percent below Claude Code's own
+  figure. The shortfall is inside the main models, not in side requests.
+- **Why or evidence**:
+  - **History.** After the 2026-09-27 repair, sessions read about 10-15% below
+    the harness. Billing 1-hour cache writes at their own rate (2026-10-04)
+    closed about half of that.
+  - **Measured 2026-10-26** with `amon costs check-claude-sessions --transcripts`,
+    against each transcript's own `cost-state` checkpoint, over the recent
+    sessions that carry one:
+    - imported cost is 0.962 of the harness's, weighted by cost;
+    - the median session reads 0.98, and all but one read 0.85-1.00;
+    - the side-request models (Haiku) are about 0.1% of the harness's cost and
+      explain about 3% of the gap. No transcript, including the subagents',
+      records them in the window.
+
+    The rest is on the main models: in one long session, transcripts record
+    about 2-5% of the uncached input and 90-97% of the output that the harness
+    billed.
+  - **Compactions** are the measured candidate. Their records carry
+    `preTokens`/`postTokens` but no usage. Pricing one session's compactions
+    from those sizes covered roughly 12-55% of its gap (2026-09-27).
+  - **Retracted.** The earlier "0.05 resumed session" reading and a 3-19x
+    reading on 2026-10-26 were both window errors. `cost-state` totals restart
+    when a process does not restore the session's cost state, and its
+    `startTime` says when.
+- **Next**: split the main-model gap per compaction. Either take the
+  checkpoint's cost jump across each compaction window, or use Claude Code's
+  OTEL `api_request` export, which records every request. The latter needs an
+  overlap rule against the import first, or the Monitor double-counts.
 - **Revisit when**: the weighted ratio drifts outside about 0.9-1.0, or a
   decision rests on the absolute size of Claude cost.
 
