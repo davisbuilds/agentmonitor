@@ -10,6 +10,7 @@
     | { key: string; kind: 'session'; session: BrowsingSession }
     | { key: string; kind: 'result'; result: SearchResult };
 
+  let dialogRef = $state<HTMLDialogElement | undefined>(undefined);
   let inputRef = $state<HTMLInputElement | undefined>(undefined);
   let selectedIndex = $state(0);
 
@@ -76,12 +77,6 @@
   }
 
   function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      closePalette();
-      return;
-    }
-
     if (event.key === 'ArrowDown') {
       event.preventDefault();
       if (paletteItems.length === 0) return;
@@ -102,12 +97,36 @@
     }
   }
 
+  function handleTabKey(event: KeyboardEvent): void {
+    if (event.key !== 'Tab' || !dialogRef) return;
+    const controls = dialogRef.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)');
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    // Native modality makes the page inert; wrap the edges instead of tabbing
+    // into browser chrome. Query current controls as search results change.
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+
   onMount(() => {
-    void commandPaletteSearch.initialize().then(() => tick().then(() => inputRef?.focus()));
-    window.addEventListener('keydown', handleKeydown);
+    const invoker = document.activeElement;
+    const dialog = dialogRef;
+    dialog?.showModal();
+    inputRef?.focus();
+    void commandPaletteSearch.initialize();
 
     return () => {
-      window.removeEventListener('keydown', handleKeydown);
+      dialog?.close();
+      // Svelte removes this conditional dialog on dismissal. Restore after that
+      // update, including shortcut/backdrop paths that bypass native close.
+      void tick().then(() => {
+        if (invoker instanceof HTMLElement && invoker.isConnected) invoker.focus();
+      });
       commandPaletteSearch.cancelPending();
       commandPaletteSearch.reset();
     };
@@ -131,17 +150,17 @@
   });
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div
-  class="fixed inset-0 z-50 bg-canvas/80 px-4 py-[12vh] backdrop-blur-sm sm:px-6"
-  tabindex="-1"
+<dialog
+  bind:this={dialogRef}
+  aria-label="Jump to session or transcript"
+  onkeydown={handleTabKey}
+  class="fixed inset-0 m-0 h-dvh max-h-none w-screen max-w-none border-0 bg-canvas/80 px-4 py-[12vh] text-text backdrop-blur-sm backdrop:bg-transparent sm:px-6"
+  oncancel={(event) => {
+    event.preventDefault();
+    closePalette();
+  }}
   onclick={(event) => {
     if (event.target === event.currentTarget) {
-      closePalette();
-    }
-  }}
-  onkeydown={(event) => {
-    if (event.key === 'Escape') {
       closePalette();
     }
   }}
@@ -152,6 +171,8 @@
         <input
           bind:this={inputRef}
           type="text"
+          aria-label="Search sessions and transcripts"
+          onkeydown={handleKeydown}
           placeholder="Jump to a session or transcript match…"
           class="w-full rounded-sm border border-line bg-surface px-4 py-2.5 text-body text-text outline-none transition-colors placeholder:text-text-faint focus:border-accent"
           oninput={handleInput}
@@ -284,4 +305,4 @@
       Enter to open. Arrow keys move selection. Cmd/Ctrl+K toggles the palette.
     </div>
   </div>
-</div>
+</dialog>

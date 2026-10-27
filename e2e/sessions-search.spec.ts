@@ -250,3 +250,105 @@ test('the top tabs put Analytics second', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#sessions`);
   await expect(page.getByRole('navigation').getByRole('button')).toHaveText(['Monitor', 'Analytics', 'Sessions', 'Benchmarks']);
 });
+
+const paletteInput = (page: Page) => page.getByPlaceholder('Jump to a session or transcript match…');
+const paletteTrigger = (page: Page) => page.getByRole('button', { name: 'Jump to session or transcript', exact: true });
+
+async function openPalette(page: Page): Promise<void> {
+  await page.goto(`${baseUrl}/app/#`);
+  await paletteTrigger(page).click();
+  await expect(paletteInput(page)).toBeFocused();
+  await expect(page.getByRole('button', { name: /Quota investigation/ })).toBeVisible();
+}
+
+test('palette close button responds to Enter without opening a session', async ({ page }) => {
+  await openPalette(page);
+  await page.keyboard.press('Tab');
+  await expect(page.getByRole('button', { name: 'Esc', exact: true })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(paletteInput(page)).toHaveCount(0);
+  await expect(page).toHaveURL(`${baseUrl}/app/#`);
+  await expect(paletteTrigger(page)).toBeFocused();
+});
+
+test('palette contains forward and backward tab focus', async ({ page }) => {
+  await openPalette(page);
+  const lastResult = page.getByRole('button', { name: /Quota investigation/ });
+  await page.keyboard.press('Shift+Tab');
+  await expect(lastResult).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(paletteInput(page)).toBeFocused();
+  await expect(page.getByRole('dialog', { name: 'Jump to session or transcript' })).toBeVisible();
+
+  await paletteInput(page).fill('unmatchedword');
+  await expect(page.getByText('No transcript matches found.')).toBeVisible();
+  await page.keyboard.press('Shift+Tab');
+  await expect(page.getByRole('button', { name: 'Relevance', exact: true })).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(paletteInput(page)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(paletteInput(page)).toBeFocused();
+  await expect(page).toHaveURL(`${baseUrl}/app/#`);
+});
+
+test('palette dismissals restore focus and allow reopening', async ({ page }) => {
+  await openPalette(page);
+  for (const key of ['Escape', 'ControlOrMeta+k']) {
+    await page.keyboard.press(key);
+    await expect(paletteInput(page)).toHaveCount(0);
+    await expect(paletteTrigger(page)).toBeFocused();
+    await page.keyboard.press('ControlOrMeta+k');
+    await expect(paletteInput(page)).toBeFocused();
+  }
+  await page.mouse.click(5, 5);
+  await expect(paletteInput(page)).toHaveCount(0);
+  await expect(paletteTrigger(page)).toBeFocused();
+  await expect(page).toHaveURL(`${baseUrl}/app/#`);
+});
+
+test('Enter opens the focused result rather than the highlighted result', async ({ page }) => {
+  await openPalette(page);
+  await page.keyboard.press('Tab'); // Close button.
+  await page.keyboard.press('Tab'); // Newest result (Importer cleanup).
+  await page.keyboard.press('Tab'); // Older result, without moving the pointer.
+  await expect(page.getByRole('button', { name: /Quota investigation/ })).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#sessions\?session=sess-quota$/);
+  await expect(page.getByRole('heading', { name: 'Quota investigation' })).toBeVisible();
+});
+
+test('input arrow navigation still opens the selected session', async ({ page }) => {
+  await openPalette(page);
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(page).toHaveURL(/#sessions\?session=sess-quota$/);
+  await expect(page.getByRole('heading', { name: 'Quota investigation' })).toBeVisible();
+});
+
+test('Enter on palette sort controls changes search order without navigating', async ({ page }) => {
+  await openPalette(page);
+  await paletteInput(page).fill('quota');
+  await expect(page.getByText('Showing 1 of 1 transcript matches')).toBeVisible();
+  await page.keyboard.press('Tab'); // Close button.
+  await page.keyboard.press('Tab'); // Recent sort.
+  await page.keyboard.press('Tab'); // Relevance sort.
+  await expect(page.getByRole('button', { name: 'Relevance', exact: true })).toBeFocused();
+  const sorted = page.waitForResponse(response => response.url().includes('/api/v2/search?') && response.url().includes('sort=relevance'));
+  await page.keyboard.press('Enter');
+  expect((await sorted).ok()).toBe(true);
+  await expect(paletteInput(page)).toBeVisible();
+  await expect(page).toHaveURL(`${baseUrl}/app/#`);
+});
+
+
+test('shortcut dismissal restores the invoking control on another tab', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#`);
+  const sessionsTab = page.getByRole('button', { name: 'Sessions', exact: true });
+  await sessionsTab.click();
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(paletteInput(page)).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(paletteInput(page)).toHaveCount(0);
+  await expect(sessionsTab).toBeFocused();
+  await expect(page).toHaveURL(`${baseUrl}/app/#sessions`);
+});

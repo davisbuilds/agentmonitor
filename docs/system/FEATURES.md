@@ -142,7 +142,9 @@ product never substitutes a misleading `0%` for missing evidence.
   rather than searching every transcript. Old `#pinned` and
   `#sessions?view=pinned` links redirect to it.
 - The global `Cmd/Ctrl+K` palette searches recent sessions and transcript matches
-  from any tab.
+  from any tab. It keeps keyboard focus inside the dialog; dismissing it returns
+  focus to the invoking control. Arrow keys and Enter select results while the
+  search field is focused; focused buttons retain their normal keyboard actions.
 - A session reads as live while it was active in the last five minutes and as
   active within fifteen, whatever status was last stored; before 2026-10-16 a
   session whose producer went quiet, such as one known only from telemetry,
