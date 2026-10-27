@@ -200,7 +200,8 @@ the rows add up to Codex's own thread total.
 A rollout without records, or whose records start mid-thread (a session begun
 before 0.154), bills from the cumulative counter instead. So does one whose
 records may be incomplete: their usage does not add up to the last record's
-thread total, or a line with lines after it does not parse (a partial last line
+thread total, the counter grows past that total (it leaves requests out but
+adds none), or a line with lines after it does not parse (a partial last line
 is a write still in progress). On that path a
 compaction is billed as its own row when both of these hold:
 - the named record is this thread's own;
