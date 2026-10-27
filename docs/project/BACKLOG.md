@@ -383,7 +383,8 @@ the build.
     - imported cost is 0.962 of the harness's, weighted by cost;
     - the median session reads 0.98, and all but one read 0.85-1.00;
     - the side-request models (Haiku) are about 0.1% of the harness's cost and
-      explain about 3% of the gap.
+      explain about 3% of the gap. No transcript, including the subagents',
+      records them in the window.
 
     The rest is on the main models: in one long session, transcripts record
     about 2-5% of the uncached input and 90-97% of the output that the harness

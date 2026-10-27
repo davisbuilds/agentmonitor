@@ -358,10 +358,12 @@ export function registerMaintenanceCommands(): void {
                   `amon ${money(check.amon_cost_usd)}`,
                   check.unpriced_rows > 0 ? `ratio n/a (${check.unpriced_rows} unpriced)` : `ratio ${share(check.ratio)}`,
                 ].join('  '),
-                ...check.models.map(model => `    ${model.model}  harness ${money(model.harness_cost_usd)}  amon ${money(model.amon_cost_usd)}  ratio ${share(model.ratio)}${check.missing_models.includes(model.model) ? '  (no amon rows)' : ''}`),
+                ...check.models.map(model => `    ${model.model}  harness ${money(model.harness_cost_usd)}  amon ${money(model.amon_cost_usd)}  ratio ${share(model.ratio)}${
+                  check.missing_models.includes(model.model) ? '  (not in the transcripts)'
+                    : check.unimported_models.includes(model.model) ? '  (in the transcripts, not imported)' : ''}`),
               ]));
           writeStdout(ctx, [
-            'Imported Claude cost vs Claude Code\'s cost-state checkpoint, per model (a model with no amon rows is usage the transcript never recorded):',
+            'Imported Claude cost vs Claude Code\'s cost-state checkpoint, per model. "Not in the transcripts" is usage no transcript recorded; "not imported" is an import gap:',
             ...lines,
             '',
           ].join('\n'));

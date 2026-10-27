@@ -446,8 +446,13 @@ it and read low.
     start;
   - one that does not, starts from zero.
 - **Output.** It compares the imported cost in that window per model. A model
-  the harness billed but amon holds no rows for is usage the transcript never
-  recorded, such as side requests on a smaller model.
+  the harness billed but amon holds no rows for is reported one of two ways:
+  - **Not in the transcripts:** neither the session's transcript nor its
+    subagent transcripts record it in the window. This is usage no transcript
+    recorded, such as side requests on a smaller model.
+  - **Not imported:** the transcripts record it, so the import missed it. For
+    example, the session is excluded by `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS`, or
+    it was imported with a date filter.
 - **Scope.** It reads only the newest `--limit` top-level transcripts, and
   writes nothing.
 

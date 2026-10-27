@@ -35,8 +35,16 @@ const num = (value: unknown): number => (typeof value === 'number' && Number.isF
  * model, subagents included, so it is a checkpoint rather than a live meter.
  */
 export function readLatestCostState(content: string): ClaudeCostStateCheckpoint | null {
+  return scanTranscript(content).checkpoint;
+}
+
+/** The model of every assistant line that carries usage, with its time. */
+type ModelSighting = { timestamp: string; model: string };
+
+function scanTranscript(content: string): { checkpoint: ClaudeCostStateCheckpoint | null; sightings: ModelSighting[] } {
   let lastTimestamp: string | null = null;
   let latest: ClaudeCostStateCheckpoint | null = null;
+  const sightings: ModelSighting[] = [];
   for (const raw of content.split('\n')) {
     if (!raw) continue;
     let line: Record<string, unknown>;
@@ -68,9 +76,27 @@ export function readLatestCostState(content: string): ClaudeCostStateCheckpoint 
       };
       continue;
     }
-    if (typeof line.timestamp === 'string') lastTimestamp = line.timestamp;
+    if (typeof line.timestamp === 'string') {
+      lastTimestamp = line.timestamp;
+      const message = line.message as { model?: unknown; usage?: unknown } | undefined;
+      if (line.type === 'assistant' && typeof message?.model === 'string' && message.usage) {
+        sightings.push({ timestamp: line.timestamp, model: message.model });
+      }
+    }
   }
-  return latest;
+  return { checkpoint: latest, sightings };
+}
+
+/** A session's subagent transcripts, which the checkpoint's totals include. */
+function subagentSightings(sessionFile: string): ModelSighting[] {
+  const dir = path.join(path.dirname(sessionFile), path.basename(sessionFile, '.jsonl'), 'subagents');
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir).filter(name => name.endsWith('.jsonl'));
+  } catch {
+    return [];
+  }
+  return names.flatMap(name => scanTranscript(fs.readFileSync(path.join(dir, name), 'utf-8')).sightings);
 }
 
 export interface ClaudeModelCostCheck {
@@ -95,8 +121,10 @@ export interface ClaudeTranscriptCostCheck {
   ratio: number | null;
   unpriced_rows: number;
   models: ClaudeModelCostCheck[];
-  /** Models the harness billed that amon holds no rows for up to the cut. */
+  /** Models the harness billed that neither amon nor the session's transcripts record in the window. */
   missing_models: string[];
+  /** Models the harness billed that the transcripts record in the window but amon holds no rows for: an import gap. */
+  unimported_models: string[];
 }
 
 const SESSION_FILE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i;
@@ -146,8 +174,8 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
   `);
   return recentSessionFiles(options.claudeDir, options.limit ?? 20).map((file): ClaudeTranscriptCostCheck => {
     const sessionId = path.basename(file, '.jsonl');
-    const checkpoint = readLatestCostState(fs.readFileSync(file, 'utf-8'));
-    const empty = { harness_cost_usd: null, amon_cost_usd: null, ratio: null, unpriced_rows: 0, models: [], missing_models: [] };
+    const { checkpoint, sightings } = scanTranscript(fs.readFileSync(file, 'utf-8'));
+    const empty = { harness_cost_usd: null, amon_cost_usd: null, ratio: null, unpriced_rows: 0, models: [], missing_models: [], unimported_models: [] };
     if (!checkpoint) return { session_id: sessionId, status: 'no_checkpoint', since: null, cut: null, ...empty };
     if (!checkpoint.cut || !checkpoint.since) {
       return { session_id: sessionId, status: 'no_cut', since: checkpoint.since, cut: checkpoint.cut, ...empty };
@@ -170,6 +198,13 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
       };
     });
     const amonCost = rows.reduce((sum, row) => sum + row.cost, 0);
+    // A model amon holds no rows for is only unrecorded usage if the
+    // transcripts do not record it either; otherwise the import missed it.
+    const { since, cut } = checkpoint;
+    const recorded = new Set([...sightings, ...subagentSightings(file)]
+      .filter(sighting => sighting.timestamp >= since && sighting.timestamp <= cut)
+      .map(sighting => sighting.model));
+    const notInAmon = models.filter(model => model.harness_cost_usd > 0 && !amon.has(model.model)).map(model => model.model);
     return {
       session_id: sessionId,
       status: 'checked',
@@ -180,7 +215,8 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
       ratio: ratio(amonCost, checkpoint.total_cost_usd, unpricedRows),
       unpriced_rows: unpricedRows,
       models,
-      missing_models: models.filter(model => model.harness_cost_usd > 0 && !amon.has(model.model)).map(model => model.model),
+      missing_models: notInAmon.filter(model => !recorded.has(model)),
+      unimported_models: notInAmon.filter(model => recorded.has(model)),
     };
   });
 }

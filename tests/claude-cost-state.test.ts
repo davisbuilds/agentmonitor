@@ -19,7 +19,10 @@ const SESSION = '11111111-2222-4333-8444-555555555555';
 const BARE = '11111111-2222-4333-8444-666666666666';
 
 type Line = Record<string, unknown>;
-const assistant = (timestamp: string): Line => ({ type: 'assistant', timestamp, sessionId: SESSION, message: { id: `msg-${timestamp}` } });
+const assistant = (timestamp: string, model?: string): Line => ({
+  type: 'assistant', timestamp, sessionId: SESSION,
+  message: { id: `msg-${timestamp}`, ...(model ? { model, usage: { input_tokens: 1, output_tokens: 1 } } : {}) },
+});
 const modelUsage = (costUSD: number) => ({
   inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 30, cacheCreationInputTokens: 40, costUSD,
 });
@@ -68,7 +71,10 @@ describe('checkClaudeTranscriptCosts', () => {
     fs.mkdirSync(projectDir, { recursive: true });
   });
   beforeEach(() => {
-    getDb().exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM agents;');
+    const db = getDb();
+    // Fail closed before the table-wide deletes if the handle is not the fixture's.
+    assert.equal(fs.realpathSync(db.name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
+    db.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM agents;');
     for (const entry of fs.readdirSync(projectDir)) fs.rmSync(path.join(projectDir, entry), { recursive: true, force: true });
   });
   after(() => {
@@ -108,6 +114,31 @@ describe('checkClaudeTranscriptCosts', () => {
     assert.equal(check.since, '2026-10-23T09:00:00.000Z');
     assert.equal(check.amon_cost_usd, 3);
     assert.equal(check.ratio, 0.75);
+  });
+
+  test('a model the transcripts record but amon never imported is a coverage gap, not unrecorded usage', () => {
+    fs.mkdirSync(path.join(projectDir, SESSION, 'subagents'), { recursive: true });
+    // The Haiku request is in the session's own transcript; a subagent's model is in its own file.
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-21T09:00:00.000Z', 'claude-haiku-4-5-20251001'), assistant('2026-10-21T10:00:00.000Z'),
+      { ...costState(4, 0.5), modelUsage: { ...(costState(4, 0.5).modelUsage as object), 'claude-sonnet-5': modelUsage(2) } },
+    ]));
+    fs.writeFileSync(path.join(projectDir, SESSION, 'subagents', 'agent-a1.jsonl'), text([assistant('2026-10-21T09:30:00.000Z', 'claude-sonnet-5')]));
+    importedCost('claude-opus-5-5', 3, '2026-10-21T09:00:00.000Z', 'opus');
+
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    assert.deepEqual(check.unimported_models.sort(), ['claude-haiku-4-5-20251001', 'claude-sonnet-5']);
+    assert.deepEqual(check.missing_models, []);
+  });
+
+  test('a model recorded only outside the checkpoint window is still unrecorded within it', () => {
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-19T09:00:00.000Z', 'claude-haiku-4-5-20251001'), assistant('2026-10-21T10:00:00.000Z'), costState(4, 0.5),
+    ]));
+    importedCost('claude-opus-5-5', 3, '2026-10-21T09:00:00.000Z', 'opus');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    assert.deepEqual(check.missing_models, ['claude-haiku-4-5-20251001']);
+    assert.deepEqual(check.unimported_models, []);
   });
 
   test('a transcript without a checkpoint is reported as such, with no ratio', () => {
