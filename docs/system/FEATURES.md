@@ -89,6 +89,18 @@ explicit:
 - Codex OTEL provides summary-oriented live activity, including response-completion
   token and cost data. Historical Codex JSONL import enriches later analysis but is
   not the sole usage source.
+- Codex rollout transcripts link each tool call to its output by Codex's call id.
+  The output becomes a receipt on the call's message, so no message moves. The
+  receipt carries:
+  - when the output arrived, so the stream shows how long the call took;
+  - the output's size;
+  - a preview of at most 2,000 characters, kept only while tool-argument capture
+    is on (`AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`).
+
+  Codex records no exit code or success flag linked to the call, so receipts
+  state neither: the result projects as `completed` with
+  `outcome: unrecorded`, never as a success. A Codex transcript stays `summary` fidelity: its reasoning is
+  encrypted.
 - Antigravity conversation files feed a summary-fidelity live projection when
   the watcher syncs them; this does not establish transcript-level parity.
 

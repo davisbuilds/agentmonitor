@@ -31,6 +31,10 @@ export interface ClaudeLiveBlock {
   content?: string;
   is_error?: boolean;
   tool_use_id?: string;
+  timestamp?: string;
+  output_bytes?: number;
+  /** `unrecorded`: the producer states no success or failure for this result. */
+  outcome?: 'unrecorded';
 }
 
 export interface LivePlanStep {
@@ -160,6 +164,21 @@ export function normalizeClaudeBlock(
         },
       };
     case 'tool_result':
+      // A result whose producer records no outcome completed, but neither
+      // succeeded nor failed as far as anyone knows.
+      if (block.outcome === 'unrecorded') {
+        return {
+          kind: 'tool_result',
+          status: 'completed',
+          created_at: createdAt,
+          source_item_id: block.tool_use_id,
+          payload: {
+            content: block.content ?? '',
+            ...(typeof block.output_bytes === 'number' ? { output_bytes: block.output_bytes } : {}),
+            outcome: 'unrecorded',
+          },
+        };
+      }
       return {
         kind: 'tool_result',
         status: block.is_error ? 'error' : 'success',

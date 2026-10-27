@@ -34,7 +34,9 @@ them through the explicit procedure in [OPERATIONS.md](OPERATIONS.md).
 
 Historical sources expose different evidence. Claude session files may support a
 full transcript and tool tree, while Codex OTEL may expose summary usage without
-the underlying transcript. Trace responses declare transcript, tool, usage, cost,
+the underlying transcript. Codex rollout transcripts pair each tool call with a
+result receipt (arrival time, output size, and a bounded preview under
+tool-argument capture), but carry no recorded outcome or reasoning text. Trace responses declare transcript, tool, usage, cost,
 parent/child, projection-source, and confidence coverage rather than inventing
 missing structure.
 
