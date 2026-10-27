@@ -176,6 +176,22 @@ copied turns. Only inherited turns or requests mark a copy, so a child's own
 compaction before its first surviving turn stays. Plain forks (`forked_from_id` without `thread_spawn`) and
 unresolved subagents keep their whole rollout.
 
+Codex's cumulative `token_count` leaves out compaction requests. Codex 0.154+
+also writes a `token_usage_record` per API request, with the request's usage and
+the thread's running total, and each `compacted` line names its request by
+`compaction_response_id`. A compaction is billed as its own row when both of
+these hold:
+- the named record is this thread's own;
+- the counter's gap to the thread total grew by exactly that record's usage
+  since the previous counter.
+
+The row's id is keyed by the request's `response_id`, so positional counter ids
+never move. When the gap check fails, nothing is billed: for example, the
+counter already includes the compaction, it reset, or other unrecorded usage
+landed in the same window. The miss is counted on `session_end` as
+`_compactions_unbilled`, and `session_end` also carries Codex's
+`total_thread_tokens`, which the repair checks against.
+
 ### Session Browser And Live
 
 `src/watcher/` discovers and reparses supported local session files. Parsed session

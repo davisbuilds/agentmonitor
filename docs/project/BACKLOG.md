@@ -132,18 +132,31 @@ so later readers know what still needs checking.
   Measured on 2026-09-24, they are about half of 1% of that fix's cost
   correction.
 - **Next**: price a multi-request span with the tier of its largest request,
-  once `last_token_usage` per request is read. Otherwise leave as is.
+  once `last_token_usage` per request is read. Otherwise leave as is. Rollouts
+  from Codex 0.154 onward also carry per-request usage in
+  `token_usage_record`; compaction rows are already priced one request at a
+  time.
 
-#### Codex requests that only OTEL records
-- **What**: Codex's per-request OTEL often sees slightly more usage than the
-  rollout counters. Rollout import is authoritative where the two overlap, so
-  the difference is dropped.
-- **Why or evidence**: measured 2026-09-24 on subagent sessions the repair does
-  not change: they sit at 0.92–1.02× OTEL, mostly below 1. Plain sessions were
-  not measured this way. The cause is a hypothesis, unmeasured: requests that
-  fail or are retried without a counter update.
-- **Next**: compare per-request OTEL ids with rollout counters for one session
-  below 0.95×, before changing any reconciliation.
+#### Codex requests the import still does not bill
+- **What**: Codex's cumulative `token_count` leaves out some requests that its
+  own `token_usage_record` lines record.
+  - Compactions are now billed from those records (2026-10-26).
+  - Requests of turns that are later aborted are recorded but neither counted
+    nor named by a `compacted` line, so they stay unbilled.
+- **Why or evidence**: 2026-10-26 differential over every local rollout, from
+  Codex 0.154 onward:
+  - with compactions billed, imported tokens equal Codex's thread total in every
+    rollout but one;
+  - in that one, the remaining gap is a single request recorded just before a
+    `turn_aborted`;
+  - before compactions were billed, they were about 3% of 30-day Codex cost.
+
+  The 2026-09-24 hypothesis (failed or retried requests) was only partly right:
+  most of the excess OTEL saw was compactions.
+- **Next**: the repair's thread-total check names each such session in
+  `counter_mismatches`. If they become common, bill every own-thread
+  `token_usage_record` that no counter delta covers, keyed by `response_id` as
+  compactions are.
 
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
@@ -333,6 +346,10 @@ the build.
   for no measured gain. Two mutation-tested guards now make an accidental change loud:
   `skipped, malformed and zero-delta lines do not shift later event ids` and
   `pins the Codex event-id derivation against accidental re-keying`.
+- **Compaction rows (2026-10-26)** are keyed by the request's `response_id`,
+  not the positional index, and advance no counter. Adding them re-keyed no
+  stored row; the test `counter rows keep the ids they had before compactions
+  were billed` pins that.
 - **Revisit when**: a change to the set or order of emitted events makes a
   derivation change necessary. Rewritten rollout content is already reconciled
   under the current ids; a derivation change needs a legacy-id bridge first,

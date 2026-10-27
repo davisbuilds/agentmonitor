@@ -10,6 +10,7 @@ import {
 import { discoverCodexLogs, parseCodexFile } from './codex.js';
 import { importedRowMatches, reconciledEvent, sameCost } from './codex-reconcile.js';
 import { readCodexRollout, reconcileCodexRollout, type CodexRolloutRead } from './index.js';
+import { acquireRuntimeOwnership } from '../runtime-ownership.js';
 
 export interface CodexUsageRepairOptions {
   /** Root of the Codex installation holding `sessions/`. Defaults to `~/.codex`. */
@@ -17,6 +18,8 @@ export interface CodexUsageRepairOptions {
   /** Write corrections. When false (the default) the scan only reports. */
   apply?: boolean;
   excludePatterns?: string[];
+  /** The database file to take runtime ownership of while applying. Defaults to the open connection's file. */
+  dbPath?: string;
 }
 
 export interface CodexRepairFailure {
@@ -31,7 +34,7 @@ export interface CodexSubagentOtelCheck {
   otel_gap_hours: number;
 }
 
-type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'appended' | 'unclassified';
+type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'compaction' | 'appended' | 'unclassified';
 
 // A type alias, not an interface: `printSummary` takes `Record<string, unknown>`.
 export type CodexUsageRepairReport = {
@@ -57,9 +60,13 @@ export type CodexUsageRepairReport = {
   counter_sessions_checked: number;
   /** Changed sessions skipped by that check because their counter drops mid-rollout, so the final counter understates them. */
   counter_sessions_reset: number;
-  /** Checked sessions whose repaired usage does not equal the rollout's final counter. */
+  /** Checked sessions whose rollout records Codex's own thread total, compared with that instead of the counter. */
+  thread_sessions_checked: number;
+  /** Checked sessions whose repaired usage does not equal the thread total (or, without one, the final counter). */
   counter_mismatches: string[];
-  /** Changed subagent sessions compared with Codex OTEL. A plain session gets the counter check instead. */
+  /** Changed sessions holding a compaction the import could not bill; their thread total is not expected to match. */
+  compaction_sessions_unbilled: string[];
+  /** Changed subagent sessions without a thread total, compared with Codex OTEL. Others get the counter or thread check. */
   otel_sessions_checked: number;
   otel_ratios_moved_away: number;
   subagent_otel: CodexSubagentOtelCheck[];
@@ -131,6 +138,16 @@ export function repairCodexImportUsage(
   options: CodexUsageRepairOptions = {},
 ): CodexUsageRepairReport {
   const apply = options.apply === true;
+  // Applying rewrites stored history: no server may write or cache meanwhile.
+  const ownership = apply ? acquireRuntimeOwnership(options.dbPath ?? _db.name) : null;
+  try {
+    return repairWithin(apply, options);
+  } finally {
+    ownership?.release();
+  }
+}
+
+function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUsageRepairReport {
   const report: CodexUsageRepairReport = {
     apply,
     files_scanned: 0,
@@ -144,14 +161,16 @@ export function repairCodexImportUsage(
     rows_inserted: 0,
     rows_updated: 0,
     rows_deleted: 0,
-    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, subagent_model: 0, annotated: 0, appended: 0, unclassified: 0 },
+    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, subagent_model: 0, annotated: 0, compaction: 0, appended: 0, unclassified: 0 },
     tokens_before: 0,
     tokens_after: 0,
     cost_before_usd: 0,
     cost_after_usd: 0,
     counter_sessions_checked: 0,
     counter_sessions_reset: 0,
+    thread_sessions_checked: 0,
     counter_mismatches: [],
+    compaction_sessions_unbilled: [],
     otel_sessions_checked: 0,
     otel_ratios_moved_away: 0,
     subagent_otel: [],
@@ -216,7 +235,10 @@ export function repairCodexImportUsage(
       if (!event) report.rows_by_class[skipped > 0 ? 'copied_history' : 'orphaned']++;
       else if (!importedRowMatches(row, event)) report.rows_by_class[classifyUpdate(row, event)]++;
     }
-    for (const id of parsed.keys()) if (!storedById.has(id)) report.rows_by_class.appended++;
+    for (const [id, event] of parsed) {
+      if (storedById.has(id)) continue;
+      report.rows_by_class[metadataOf(event)._usage_source === 'compaction' ? 'compaction' : 'appended']++;
+    }
 
     const before: Usage = stored.reduce((u, row) => ({ tokens: u.tokens + tokensOf(row), cost: u.cost + (row.cost_usd ?? 0) }), { tokens: 0, cost: 0 });
     const after: Usage = [...parsed.values()].reduce((u, e) => ({ tokens: u.tokens + tokensOf(e), cost: u.cost + (e.cost_usd ?? 0) }), { tokens: 0, cost: 0 });
@@ -227,13 +249,24 @@ export function repairCodexImportUsage(
 
     if (before.tokens > 0 && after.tokens === 0) report.sessions_left_without_usage.push(counts.session_id!);
 
-    if (start._subagent_boundary === undefined) {
-      // Without a reset, the rows telescope to the counter Codex itself kept.
-      const finalCounter = Number(end.total_tokens_in ?? 0) + Number(end.total_tokens_out ?? 0);
-      if (typeof end._counter_resets === 'number' && end._counter_resets > 0) report.counter_sessions_reset++;
+    // Codex's thread total counts only this thread's own requests, so it checks
+    // a subagent as well as a plain session; OTEL can miss a request Codex
+    // recorded. Without one, a subagent's counter includes its parent's, and
+    // the subagent falls back to the OTEL check below.
+    const thread = end.total_thread_tokens as { input_tokens?: number; output_tokens?: number } | undefined;
+    if (start._subagent_boundary === undefined || thread) {
+      // Without a reset, the rows telescope to the counter Codex itself kept,
+      // plus the compactions it leaves out: together, Codex's thread total.
+      const expected = thread
+        ? Number(thread.input_tokens ?? 0) + Number(thread.output_tokens ?? 0)
+        : Number(end.total_tokens_in ?? 0) + Number(end.total_tokens_out ?? 0);
+      if (typeof end._compactions_unbilled === 'number' && end._compactions_unbilled > 0) {
+        report.compaction_sessions_unbilled.push(counts.session_id!);
+      } else if (typeof end._counter_resets === 'number' && end._counter_resets > 0) report.counter_sessions_reset++;
       else {
         report.counter_sessions_checked++;
-        if (after.tokens !== finalCounter) report.counter_mismatches.push(counts.session_id!);
+        if (thread) report.thread_sessions_checked++;
+        if (after.tokens !== expected) report.counter_mismatches.push(counts.session_id!);
       }
       continue;
     }

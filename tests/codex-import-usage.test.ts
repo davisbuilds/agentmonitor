@@ -559,3 +559,147 @@ describe('a subagent rollout bills only its own activity', () => {
     assert.equal((getDb().prepare(`SELECT COUNT(*) AS n FROM events WHERE session_id = ? AND event_type = 'tool_use'`).get(CHILD) as { n: number }).n, 0);
   });
 });
+
+// ─── Compaction requests (SC-03) ────────────────────────────────────────
+
+type Usage3 = [input: number, cached: number, output: number];
+const asUsage = ([input, cached, output]: Usage3) => ({
+  input_tokens: input, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: output,
+  reasoning_output_tokens: 0, total_tokens: input + output,
+});
+/** Codex's per-request usage line: the request's usage and the thread's running total after it. */
+const record = (minute: number, responseId: string, own: Usage3, thread: Usage3, threadId = SESSION): Line => ({
+  type: 'token_usage_record',
+  timestamp: `2026-07-12T10:${String(minute).padStart(2, '0')}:10Z`,
+  payload: {
+    session_id: threadId, thread_id: threadId, turn_id: 'turn', root_turn_id: 'turn', response_id: responseId,
+    usage: asUsage(own), turn_token_usage: asUsage(own), thread_token_usage: asUsage(thread),
+  },
+});
+const compacted = (minute: number, responseId: string): Line => ({
+  type: 'compacted',
+  timestamp: `2026-07-12T10:${String(minute).padStart(2, '0')}:20Z`,
+  payload: { message: '', replacement_history: [], compaction_response_id: responseId },
+});
+const compactionId = (responseId: string, sessionId = SESSION) =>
+  `import-cdx-${crypto.createHash('sha256').update(`codex:${sessionId}:response:${responseId}`).digest('hex').slice(0, 32)}`;
+const llmRows = () => parseCodexFile(rollout, { codexDir }).filter(e => e.event_type === 'llm_response');
+const sessionEnd = () => parseCodexFile(rollout, { codexDir }).find(e => e.event_type === 'session_end')!.metadata as Record<string, unknown>;
+/** Everything billed, cache-inclusive input plus output, as Codex's thread total counts it. */
+const billed = () => llmRows().reduce((sum, e) => sum + e.tokens_in + (e.cache_read_tokens ?? 0) + e.tokens_out, 0);
+
+// A request, a compaction the counter leaves out, then a request after it.
+const compactionRollout = (overrides: { secondCounter?: Line; compactRecord?: Line; compactLine?: Line } = {}): Line[] => [
+  meta(), turn(),
+  record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50),
+  overrides.compactRecord ?? record(2, 'resp-compact', [5_000, 4_000, 300], [6_000, 4_800, 350]),
+  overrides.compactLine ?? compacted(2, 'resp-compact'),
+  overrides.secondCounter ?? counter(2, 1_000, 800, 50),
+  record(3, 'resp-3', [2_000, 1_500, 70], [8_000, 6_300, 420]), counter(3, 3_000, 2_300, 120),
+];
+
+describe('a compaction request is billed once', () => {
+  before(() => { fs.mkdirSync(sessionsDir, { recursive: true }); });
+
+  test('the compaction Codex recorded but left out of its counter becomes its own row', () => {
+    writeRollout(compactionRollout());
+    const compaction = llmRows().find(e => e.event_id === compactionId('resp-compact'));
+    assert.ok(compaction, 'the compaction is billed');
+    assert.equal(compaction.tokens_in, 1_000, 'uncached input');
+    assert.equal(compaction.cache_read_tokens, 4_000);
+    assert.equal(compaction.tokens_out, 300);
+    assert.equal(compaction.model, 'gpt-5.6-terra');
+    assert.equal(compaction.client_timestamp, '2026-07-12T10:02:10Z');
+    assert.ok((compaction.cost_usd ?? 0) > 0);
+    assert.equal(billed(), 8_000 + 420, 'the rows add up to Codex\'s own thread total');
+    assert.deepEqual(sessionEnd().total_thread_tokens, { input_tokens: 8_000, cached_input_tokens: 6_300, output_tokens: 420 });
+  });
+
+  test('counter rows keep the ids they had before compactions were billed', () => {
+    const lines = compactionRollout();
+    writeRollout(lines.filter(l => l.type !== 'token_usage_record' && l.type !== 'compacted'));
+    const before = llmRows().map(e => e.event_id);
+    writeRollout(lines);
+    assert.deepEqual(llmRows().map(e => e.event_id).filter(id => id !== compactionId('resp-compact')), before);
+  });
+
+  test('a compaction already inside the counter is not billed twice', () => {
+    writeRollout(compactionRollout({ secondCounter: counter(2, 6_000, 4_800, 350) }));
+    assert.equal(llmRows().some(e => e.event_id === compactionId('resp-compact')), false);
+    assert.equal(sessionEnd()._compactions_unbilled, 1);
+  });
+
+  test('a record from another thread is not this session\'s usage', () => {
+    writeRollout(compactionRollout({ compactRecord: record(2, 'resp-compact', [5_000, 4_000, 300], [6_000, 4_800, 350], 'another-thread') }));
+    assert.equal(llmRows().some(e => e.event_id === compactionId('resp-compact')), false);
+  });
+
+  test('another thread\'s record is not billed even when this thread\'s total grows by its usage', () => {
+    writeRollout([
+      meta(), turn(),
+      record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50),
+      record(2, 'resp-compact', [5_000, 4_000, 300], [5_000, 4_000, 300], 'another-thread'), compacted(2, 'resp-compact'),
+      record(2, 'resp-own', [0, 0, 0], [6_000, 4_800, 350]), counter(2, 1_000, 800, 50),
+    ]);
+    assert.equal(llmRows().some(e => e.event_id === compactionId('resp-compact')), false);
+  });
+
+  test('another thread\'s record does not move this thread\'s total', () => {
+    const lines = compactionRollout();
+    const at = lines.findIndex(l => l.type === 'compacted');
+    lines.splice(at + 1, 0, record(2, 'resp-foreign', [9, 9, 9], [99_999, 99_999, 99_999], 'another-thread'));
+    writeRollout(lines);
+    assert.ok(llmRows().some(e => e.event_id === compactionId('resp-compact')), 'the own compaction is still billed');
+  });
+
+  test('a compaction whose request has no record is counted, not guessed', () => {
+    writeRollout(compactionRollout({ compactLine: compacted(2, 'resp-unrecorded') }));
+    assert.equal(llmRows().some(e => e.event_id === compactionId('resp-unrecorded')), false);
+    assert.equal(sessionEnd()._compactions_unbilled, 1);
+  });
+
+  test('a counter that resets after the compaction fails closed', () => {
+    writeRollout(compactionRollout({ secondCounter: counter(2, 10, 0, 1) }));
+    assert.equal(llmRows().some(e => e.event_id === compactionId('resp-compact')), false);
+    assert.equal(sessionEnd()._compactions_unbilled, 1);
+  });
+
+  test('a compaction at the end of the file is checked against the last counter', () => {
+    writeRollout([
+      meta(), turn(),
+      record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50),
+      record(2, 'resp-compact', [5_000, 4_000, 300], [6_000, 4_800, 350]), compacted(2, 'resp-compact'),
+    ]);
+    assert.ok(llmRows().some(e => e.event_id === compactionId('resp-compact')));
+    assert.equal(billed(), 6_000 + 350);
+  });
+
+  test('a compaction named twice is billed once', () => {
+    const lines = compactionRollout();
+    const at = lines.findIndex(l => l.type === 'compacted');
+    lines.splice(at + 1, 0, compacted(2, 'resp-compact'));
+    writeRollout(lines);
+    assert.equal(llmRows().filter(e => e.event_id === compactionId('resp-compact')).length, 1);
+  });
+
+  test('a rollout without usage records parses exactly as before', () => {
+    writeRollout([meta(), turn(), counter(1, 1_000, 800, 50), { type: 'compacted', timestamp: '2026-07-12T10:02:00Z', payload: { message: '' } }, counter(3, 3_000, 2_300, 120)]);
+    const events = parseCodexFile(rollout, { codexDir });
+    assert.equal(events.filter(e => e.event_type === 'llm_response').length, 2);
+    const end = events.find(e => e.event_type === 'session_end')!.metadata as Record<string, unknown>;
+    assert.equal('total_thread_tokens' in end, false);
+    assert.equal('_compactions_unbilled' in end, false);
+  });
+
+  test('a compaction copied into a subagent from its parent is not the child\'s', () => {
+    const file = writeChild([
+      spawnMeta(), turnAt('2026-07-20T09:00:01Z'), count(400_000, 300_000, 4_000, 400_000),
+      { ...record(2, 'resp-parent-compact', [5_000, 4_000, 300], [405_000, 304_000, 4_300], CHILD), timestamp: '2026-07-25T20:53:38Z' },
+      { ...compacted(2, 'resp-parent-compact'), timestamp: '2026-07-25T20:53:38Z' },
+      turnAt('2026-07-25T20:53:40Z'), count(430_000, 325_000, 4_500, 30_000),
+    ]);
+    assert.equal(usage(file).some(e => e.event_id === compactionId('resp-parent-compact', CHILD)), false);
+    const end = parseCodexFile(file, { codexDir }).find(e => e.event_type === 'session_end')!.metadata as Record<string, unknown>;
+    assert.equal('_compactions_unbilled' in end, false, 'the parent\'s compaction is not the child\'s to bill or to miss');
+  });
+});

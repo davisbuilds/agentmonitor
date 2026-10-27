@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseDateOption, parseOptionSet, rejectExtraPositionals } from '../args.js';
 import { registerCommand } from '../commands.js';
-import { invalidUsage, partialSuccess } from '../errors.js';
+import { CliError, invalidUsage, partialSuccess } from '../errors.js';
 import { writeJson, writeStdout } from '../output.js';
 import type { CliContext } from '../output.js';
 import type Database from 'better-sqlite3';
@@ -383,6 +383,7 @@ export function registerMaintenanceCommands(): void {
       const { initSchema } = await import('../../db/schema.js');
       const { closeDb, getDb } = await import('../../db/connection.js');
       const { repairCodexImportUsage } = await import('../../import/codex-usage-repair.js');
+      const { RuntimeOwnershipError } = await import('../../runtime-ownership.js');
       initSchema();
       try {
         const report = repairCodexImportUsage(getDb(), {
@@ -404,6 +405,11 @@ export function registerMaintenanceCommands(): void {
             `Codex usage repair: ${report.sessions_failed.length} session(s) failed and were left unchanged; rerun to retry them.`,
           );
         }
+      } catch (error) {
+        if (error instanceof RuntimeOwnershipError) {
+          throw new CliError(`${error.message}\nStop the server before applying: the repair needs the database to itself.`);
+        }
+        throw error;
       } finally {
         closeDb();
       }
