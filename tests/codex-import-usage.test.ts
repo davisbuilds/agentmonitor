@@ -820,6 +820,37 @@ describe('a rollout recorded per request from its first request is billed per re
     assert.equal(sessionEnd()._usage_instrument, 'counter');
     assert.equal(llmRows().filter(e => (e.metadata as Record<string, unknown>)._usage_source === undefined).length, 3);
   });
+
+  // Lines as written, one of them possibly not JSON.
+  const writeRaw = (lines: Array<Line | string>) =>
+    fs.writeFileSync(rollout, lines.map(l => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n'));
+
+  test('a record that does not parse, with lines after it, leaves the session to the counter', () => {
+    writeRaw([
+      meta(), turn(),
+      record(1, 'resp-1', [100, 0, 10], [100, 0, 10]), counter(1, 100, 0, 10),
+      '{"type":"token_usage_record","payload":{"response_id":"resp-2",', counter(2, 200, 0, 20),
+    ]);
+    assert.equal(sessionEnd()._usage_instrument, 'counter');
+    assert.equal(billed(), 200 + 20);
+  });
+
+  test('records that do not add up to the thread total leave the session to the counter', () => {
+    writeRollout([
+      meta(), turn(),
+      record(1, 'resp-1', [100, 0, 10], [100, 0, 10]), counter(1, 100, 0, 10),
+      counter(2, 200, 0, 20),
+      record(3, 'resp-3', [100, 0, 10], [300, 0, 30]), counter(3, 300, 0, 30),
+    ]);
+    assert.equal(sessionEnd()._usage_instrument, 'counter');
+    assert.equal(billed(), 300 + 30);
+  });
+
+  test('a partial last line, a write in progress, keeps the request path', () => {
+    writeRaw([...requestRollout(), '{"type":"token_usage_rec']);
+    assert.equal(sessionEnd()._usage_instrument, 'request');
+    assert.equal(billed(), 8_700 + 440);
+  });
 });
 
 describe('an insert-only import never bills a request beside its counter row', () => {
