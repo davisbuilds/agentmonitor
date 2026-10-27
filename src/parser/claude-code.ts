@@ -48,6 +48,19 @@ export interface ContentBlock {
   content?: string;
   is_error?: boolean;
   tool_use_id?: string;
+  /** When a tool result arrived, if the producer records it apart from its message. */
+  timestamp?: string;
+  /** Size of the tool's whole output, recorded even when no preview of it is kept. */
+  output_bytes?: number;
+}
+
+/**
+ * A tool result for a call stored by an earlier, continued parse. It is
+ * attached to that call's message in place, so no message ordinal moves.
+ */
+export interface ParsedToolReceipt {
+  ordinal: number;
+  block: ContentBlock;
 }
 
 interface ClaudeCodeLine {
@@ -133,6 +146,8 @@ export interface ParsedSession {
   toolCalls: ParsedToolCall[];
   metadata: ParsedSessionMetadata;
   skillContext?: ParsedSkillContext;
+  /** Results for calls stored before this continued parse (Codex only). */
+  receipts?: ParsedToolReceipt[];
 }
 
 function cleanPreviewText(text: string): string {
@@ -833,6 +848,23 @@ export function insertParsedSession(
         msg.content_length,
       );
       messageIds.set(msg.ordinal, Number(result.lastInsertRowid));
+    }
+
+    // A result for a call an earlier, continued parse stored goes onto that
+    // call's message in place, so no ordinal moves.
+    const storedMessage = db.prepare('SELECT id, content FROM messages WHERE session_id = ? AND ordinal = ?');
+    const updateContent = db.prepare('UPDATE messages SET content = ?, content_length = ? WHERE id = ?');
+    for (const receipt of parsed.receipts ?? []) {
+      const row = storedMessage.get(metadata.session_id, receipt.ordinal) as { id: number; content: string } | undefined;
+      if (!row) continue;
+      let blocks: ContentBlock[];
+      try {
+        blocks = JSON.parse(row.content) as ContentBlock[];
+      } catch {
+        continue;
+      }
+      const content = JSON.stringify([...blocks, receipt.block]);
+      updateContent.run(content, content.length, row.id);
     }
 
     // Insert tool calls linked to their messages

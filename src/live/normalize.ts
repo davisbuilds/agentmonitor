@@ -31,6 +31,8 @@ export interface ClaudeLiveBlock {
   content?: string;
   is_error?: boolean;
   tool_use_id?: string;
+  timestamp?: string;
+  output_bytes?: number;
 }
 
 export interface LivePlanStep {
@@ -168,6 +170,7 @@ export function normalizeClaudeBlock(
         payload: {
           content: block.content ?? '',
           is_error: Boolean(block.is_error),
+          ...(typeof block.output_bytes === 'number' ? { output_bytes: block.output_bytes } : {}),
         },
       };
     default:

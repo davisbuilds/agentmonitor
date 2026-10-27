@@ -1,5 +1,6 @@
 import path from 'path';
-import type { ContentBlock, ParsedChunk, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
+import type { ContentBlock, ParsedChunk, ParsedSession, ParsedMessage, ParsedToolCall, ParsedToolReceipt } from './claude-code.js';
+import { config } from '../config.js';
 import { findSubagentBoundary } from './codex-subagent-boundary.js';
 import { codexSubagentTitle, promptTitleFromTexts } from './session-title.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
@@ -107,6 +108,23 @@ function responseItemText(payload: Record<string, unknown>): string {
     .join('');
 }
 
+/** Longest tool-output preview a receipt keeps, in characters. */
+const TOOL_OUTPUT_PREVIEW_CHARS = 2_000;
+/** Calls kept waiting for an output across continued parses; older ones are given up. */
+const OPEN_CALL_LIMIT = 1_000;
+
+/** A tool output's text: a plain string, or the text of its content parts. */
+function toolOutputText(output: unknown): string {
+  if (typeof output === 'string') return output;
+  if (!Array.isArray(output)) return '';
+  return output
+    .map(part => {
+      const block = asRecord(part);
+      return typeof block?.['text'] === 'string' ? block['text'] : '';
+    })
+    .join('');
+}
+
 // --- Parse Codex JSONL content into ParsedSession ---
 
 /** What a Codex parse carries forward; see ClaudeParseState. */
@@ -132,14 +150,22 @@ export interface CodexParseState {
   malformedRecords: number;
   sawInstructionWorldState: boolean;
   sawCatalogPresentation: boolean;
+  /** Calls still waiting for their output, by call id, with their message ordinal. */
+  openCalls?: Record<string, number>;
+}
+
+export interface CodexParseOptions {
+  /** Keep a bounded preview of each tool output. Defaults to the live tool-argument capture setting. */
+  captureToolOutput?: boolean;
 }
 
 export function parseCodexSessionMessages(
   jsonlContent: string,
   sessionId: string,
   filePath?: string,
+  options?: CodexParseOptions,
 ): ParsedSession {
-  return parseCodexSessionChunk(jsonlContent, sessionId, filePath).parsed;
+  return parseCodexSessionChunk(jsonlContent, sessionId, filePath, undefined, options).parsed;
 }
 
 /**
@@ -154,9 +180,16 @@ export function parseCodexSessionChunk(
   sessionId: string,
   filePath?: string,
   state?: CodexParseState,
+  options?: CodexParseOptions,
 ): ParsedChunk<CodexParseState> {
   const messages: ParsedMessage[] = [];
   const toolCalls: ParsedToolCall[] = [];
+  const receipts: ParsedToolReceipt[] = [];
+  const captureToolOutput = options?.captureToolOutput ?? config.live.capture.toolArguments;
+  // A call waits here for its output: by message index when its message is in
+  // this parse, by stored ordinal when an earlier parse stored it.
+  const openCalls = new Map<string, number>(Object.entries(state?.openCalls ?? {}));
+  const chunkCalls = new Map<string, number>();
   const ordinalBase = state?.messageCount ?? 0;
   let firstUserMessage: string | null = state?.firstUserMessage ?? null;
   let title: string | null = state?.title ?? null;
@@ -424,11 +457,38 @@ export function parseCodexSessionChunk(
     const contentBlocks = line.payload.content;
     const toolName = line.payload.name;
     const toolInput = parseToolInput(line.payload);
+    const callId = typeof line.payload['call_id'] === 'string' && line.payload['call_id'] ? line.payload['call_id'] : undefined;
+
+    // A tool output: a receipt on its call's message, so no ordinal moves. An
+    // output whose call this session never stored has nothing to attach to.
+    if ((line.payload.type === 'function_call_output' || line.payload.type === 'custom_tool_call_output') && callId) {
+      const text = toolOutputText(line.payload['output']);
+      const receipt: ContentBlock = {
+        type: 'tool_result',
+        tool_use_id: callId,
+        content: captureToolOutput ? text.slice(0, TOOL_OUTPUT_PREVIEW_CHARS) : '',
+        ...(timestamp ? { timestamp } : {}),
+        output_bytes: Buffer.byteLength(text, 'utf8'),
+      };
+      const index = chunkCalls.get(callId);
+      if (index !== undefined) {
+        const message = messages[index];
+        const withReceipt = [...(JSON.parse(message.content) as ContentBlock[]), receipt];
+        message.content = JSON.stringify(withReceipt);
+        message.content_length = message.content.length;
+        chunkCalls.delete(callId);
+      } else if (openCalls.has(callId)) {
+        receipts.push({ ordinal: openCalls.get(callId)!, block: receipt });
+      }
+      openCalls.delete(callId);
+      continue;
+    }
 
     // Tool call response_item (no role, has name + input)
     if (toolName && !role) {
       const blocks: ContentBlock[] = [{
         type: 'tool_use',
+        ...(callId ? { id: callId } : {}),
         name: toolName,
         input: toolInput,
       }];
@@ -437,11 +497,15 @@ export function parseCodexSessionChunk(
         session_id: sessionId,
         tool_name: toolName,
         category: categorizeCodexToolName(toolName),
-        tool_use_id: null,
+        tool_use_id: callId ?? null,
         input_json: toolInput != null ? JSON.stringify(toolInput) : null,
         subagent_session_id: null,
         message_ordinal: ordinalBase + messages.length,
       });
+      if (callId) {
+        chunkCalls.set(callId, messages.length);
+        openCalls.set(callId, ordinalBase + messages.length);
+      }
 
       const contentJson = JSON.stringify(blocks);
       messages.push({
@@ -496,6 +560,7 @@ export function parseCodexSessionChunk(
   const parsed: ParsedSession = {
     messages,
     toolCalls,
+    ...(receipts.length > 0 ? { receipts } : {}),
     metadata: {
       session_id: sessionId,
       project,
@@ -559,6 +624,7 @@ export function parseCodexSessionChunk(
       malformedRecords,
       sawInstructionWorldState,
       sawCatalogPresentation,
+      openCalls: Object.fromEntries([...openCalls].slice(-OPEN_CALL_LIMIT)),
     },
     resumable,
   };

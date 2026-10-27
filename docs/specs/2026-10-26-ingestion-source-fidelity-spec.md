@@ -128,10 +128,13 @@ proven by rehearsal reports that meet the criteria below on a backup copy.
 - **SC-05 Codex tool calls carry their evidence.** In the session browser and
   live view, a rollout-parsed Codex tool call carries its native call id. Where
   the rollout records an output, the call has a result receipt carrying:
-  - success or failure;
-  - the exit code and duration, where Codex recorded them;
+  - when the output arrived, so the call's duration shows;
+  - the output's size;
   - an output preview, bounded in size, only when the live capture policy
     allows tool output.
+
+  An outcome (success or exit code) is carried only where Codex records one
+  linked to the call. On 2026-10-26 it recorded none.
 
   Further constraints:
   - Human-turn, message-role and usage counts are unchanged.
@@ -331,6 +334,15 @@ named.
   exactly and read about 1.02× OTEL. Codex's thread total counts only the
   thread's own requests, so SC-04 now checks subagents against it as well.
   OTEL stays the instrument only for rollouts without one.
+
+- **Amendment (2026-10-26, from Task 4).** Codex rollouts record no
+  structured outcome per call. Outputs are free text, and the `item_completed`
+  records that carry `exit_code` use their own ids. So SC-05 no longer
+  promises success or an exit code. Receipts attach to the call's message:
+  - a continued parse updates the stored message in place;
+  - the result joins the call's projected turn;
+  - a full parse and every split parse store the same messages, tool calls,
+    turns and items.
 
 The closure critique re-read the revised contract against the audit's goal.
 Each finding maps to one criterion. Both persisted changes keep a preview,

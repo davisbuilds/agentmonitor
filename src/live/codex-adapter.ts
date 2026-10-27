@@ -489,10 +489,11 @@ export function syncCodexLiveSession(
 
     let itemOrdinal = 0;
     for (const block of blocks) {
+      // A tool result carries its own arrival time, so the call's duration shows.
       const normalizedItem = normalizeClaudeBlock(
         message.role === 'user' ? 'user' : 'assistant',
         block,
-        message.timestamp ?? undefined,
+        block.timestamp ?? message.timestamp ?? undefined,
       );
       if (!normalizedItem) continue;
       // Codex injects instructions (permissions, skills, memory) as
@@ -513,6 +514,28 @@ export function syncCodexLiveSession(
       insertedItems++;
       itemOrdinal++;
     }
+  }
+
+  // Results for calls an earlier parse projected join that call's turn, after
+  // its items, exactly where a whole parse would have put them.
+  const turnFor = db.prepare('SELECT id FROM session_turns WHERE session_id = ? AND source_turn_id = ?');
+  const itemCount = db.prepare('SELECT COUNT(*) AS n FROM session_items WHERE turn_id = ?');
+  for (const receipt of parsed.receipts ?? []) {
+    const sourceTurnId = `codex-message:${receipt.ordinal}`;
+    const turn = turnFor.get(sessionId, sourceTurnId) as { id: number } | undefined;
+    const normalizedItem = turn ? normalizeClaudeBlock('assistant', receipt.block, receipt.block.timestamp) : null;
+    if (!turn || !normalizedItem) continue;
+    const ordinal = (itemCount.get(turn.id) as { n: number }).n;
+    const normalized = applyLivePrivacyPolicy(normalizedItem, privacyPolicy);
+    insertProjectedItem(db, sessionId, turn.id, {
+      ordinal,
+      source_item_id: normalized.source_item_id ?? `${sourceTurnId}:item:${ordinal}`,
+      kind: normalized.kind,
+      status: normalized.status ?? 'success',
+      payload: normalized.payload,
+      created_at: normalized.created_at ?? receipt.block.timestamp ?? null,
+    });
+    insertedItems++;
   }
 
   const liveStatus = liveStatusFromActivity(parsed.metadata.ended_at);

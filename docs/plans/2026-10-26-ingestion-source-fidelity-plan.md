@@ -720,8 +720,11 @@ The closure critique re-checked each SC and EV id against a task and a proof
 - **Task 3: in review as #220.** Rehearsal moved subagents to the
   thread-total check (see the spec's critique log).
 - **Task 5: in review as #221.**
-- **Tasks 4 and 6: not started.** The Task 4 defaults were confirmed on
-  2026-10-26:
-  - receipts attach to the call's message;
-  - exit code, duration and status are always stored;
-  - the output preview is stored only under tool-argument capture.
+- **Task 4: in review.**
+  - Receipts attach to the call's message, and carry the output's arrival time,
+    its size, and a preview under tool-argument capture.
+  - The defaults were confirmed on 2026-10-26. No exit code or status is
+    stored, because Codex links none to the call (see the spec's critique log).
+  - The live apply is `amon sync sessions --source codex --force`, following
+    the same procedure.
+- **Task 6: not started.**
