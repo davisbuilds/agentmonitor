@@ -709,7 +709,19 @@ Critiqued inline on 2026-10-26.
 The closure critique re-checked each SC and EV id against a task and a proof
 (Traceability). The live-apply order is checked against the Side Effects table.
 
-## Handoff
+## Progress
 
-Execution starts with Task 0, then Task 1 and Task 2 on the branch
-`fix/codex-stream-fragments`.
+- **Tasks 0-2: done.**
+  - Merged in #219 and applied live on 2026-10-26, with the backup
+    `data/backups/pre-fragment-prune-2026-10-26.db` taken first.
+  - Non-fragment digests and Monitor costs were unchanged, and a second
+    preview reported 0.
+  - The store was compacted afterwards and shrank by about a third.
+- **Task 3: in review as #220.** Rehearsal moved subagents to the
+  thread-total check (see the spec's critique log).
+- **Task 5: in review as #221.**
+- **Tasks 4 and 6: not started.** The Task 4 defaults were confirmed on
+  2026-10-26:
+  - receipts attach to the call's message;
+  - exit code, duration and status are always stored;
+  - the output preview is stored only under tool-argument capture.

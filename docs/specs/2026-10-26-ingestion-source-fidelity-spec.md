@@ -112,8 +112,9 @@ proven by rehearsal reports that meet the criteria below on a backup copy.
 - **SC-04 The repair brings stored sessions to compaction billing.**
   - `amon costs repair-codex-usage`:
     - classifies the new rows as `compaction`;
-    - for every changed plain session holding usage records, checks the result
-      against Codex's thread total, not the cumulative counter;
+    - for every changed session holding usage records, subagents included,
+      checks the result against Codex's thread total, not the cumulative
+      counter or OTEL;
     - names each session it cannot reconcile.
   - On the rehearsal copy:
     - the Codex Monitor total changes by exactly the inserted rows' cost, less
@@ -323,6 +324,13 @@ named.
   requires each apply to take runtime ownership, and EV-NEG-03 covers it.
 - **Downtime loss.** Hook and OTEL deliveries are lost while the service is
   stopped → recorded under Assumptions And Constraints.
+
+- **Amendment (2026-10-26, from the SC-04 rehearsal).** The Task 3 rehearsal
+  found OTEL missing a request that Codex recorded in a subagent. Once
+  compactions were billed, that subagent's import equalled its thread total
+  exactly and read about 1.02× OTEL. Codex's thread total counts only the
+  thread's own requests, so SC-04 now checks subagents against it as well.
+  OTEL stays the instrument only for rollouts without one.
 
 The closure critique re-read the revised contract against the audit's goal.
 Each finding maps to one criterion. Both persisted changes keep a preview,
