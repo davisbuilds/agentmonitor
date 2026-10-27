@@ -1585,8 +1585,9 @@ describe('Codex OTLP integration', () => {
 
     const payload = buildLogPayload({
       serviceName: 'codex_cli_rs',
-      logRecords: ignoredKinds.map((eventKind, index) => ({
-        eventName: 'codex.websocket_event',
+      // The parser accepts the websocket transport under both spellings.
+      logRecords: ['codex.websocket_event', 'codex.websocket.event'].flatMap(eventName => ignoredKinds.map((eventKind, index) => ({
+        eventName,
         attributes: [
           { key: 'event.kind', value: { stringValue: eventKind } },
         ],
@@ -1597,7 +1598,7 @@ describe('Codex OTLP integration', () => {
             success: true,
           }),
         },
-      })),
+      }))),
     });
 
     await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
@@ -1607,6 +1608,48 @@ describe('Codex OTLP integration', () => {
 
     const sessions = await getLiveSessions('agent=codex');
     assert.equal(sessions.total, 0);
+  });
+
+  test('drops codex.sse_event stream fragments but keeps completions, failures and other response kinds', async () => {
+    // Codex exports its streaming lifecycle as codex.sse_event since mid-2026;
+    // every kind below arrives with no content, usage or error.
+    const fragmentKinds = [
+      'response.custom_tool_call_input.delta',
+      'response.custom_tool_call_input.done',
+      'response.function_call_arguments.delta',
+      'response.function_call_arguments.done',
+      'response.output_text.delta',
+      'response.output_text.done',
+      'response.reasoning_summary_text.delta',
+      'response.created',
+      'response.in_progress',
+      'response.metadata',
+      'response.output_item.added',
+      'response.output_item.done',
+      'response.content_part.added',
+      'response.content_part.done',
+    ];
+    const keptKinds = ['response.completed', 'response.failed', 'response.compaction.compacting'];
+    const record = (eventKind: string) => ({
+      eventName: 'codex.sse_event',
+      attributes: [{ key: 'event.kind', value: { stringValue: eventKind } }],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [{ key: 'conversation.id', value: { stringValue: 'codex-sse-fragments' } }],
+      logRecords: fragmentKinds.map(record),
+    }));
+    assert.equal((await getEvents()).total, 0, 'no fragment is stored');
+    assert.equal((await getLiveSessions('agent=codex')).total, 0, 'no fragment opens a live session');
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [{ key: 'conversation.id', value: { stringValue: 'codex-sse-fragments' } }],
+      logRecords: keptKinds.map(record),
+    }));
+    const kept = (await getEvents()).events as Array<{ event_type: string }>;
+    assert.deepEqual(kept.map(event => event.event_type).sort(), ['error', 'llm_response', 'response']);
   });
 
   test('maps codex.websocket_event response.failed to error events', async () => {

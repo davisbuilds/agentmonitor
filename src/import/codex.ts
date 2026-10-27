@@ -49,6 +49,42 @@ interface CodexLogLine {
   };
 }
 
+interface CodexUsage3 {
+  input: number;
+  cached: number;
+  output: number;
+}
+
+interface CodexUsageRecord {
+  response_id: string;
+  thread_id: string;
+  timestamp: string;
+  usage: CodexUsage3;
+  thread: CodexUsage3;
+  model?: string;
+  model_source?: 'turn_context' | 'config';
+}
+
+function usage3(value: unknown): CodexUsage3 | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const usage = value as CodexTokenUsage;
+  const fields = [usage.input_tokens, usage.cached_input_tokens, usage.output_tokens];
+  if (!fields.every(field => typeof field === 'number' && Number.isFinite(field) && field >= 0)) return undefined;
+  return { input: usage.input_tokens!, cached: usage.cached_input_tokens!, output: usage.output_tokens! };
+}
+
+function asUsageRecord(line: CodexLogLine): CodexUsageRecord | null {
+  const payload = line.payload;
+  const usage = usage3(payload.usage);
+  const thread = usage3(payload.thread_token_usage);
+  if (typeof payload.response_id !== 'string' || typeof payload.thread_id !== 'string' || !usage || !thread) return null;
+  return { response_id: payload.response_id, thread_id: payload.thread_id, timestamp: line.timestamp, usage, thread };
+}
+
+const addUsage = (a: CodexUsage3, b: CodexUsage3): CodexUsage3 => ({ input: a.input + b.input, cached: a.cached + b.cached, output: a.output + b.output });
+const subtractUsage = (a: CodexUsage3, b: CodexUsage3): CodexUsage3 => ({ input: a.input - b.input, cached: a.cached - b.cached, output: a.output - b.output });
+const sameUsage = (a: CodexUsage3, b: CodexUsage3): boolean => a.input === b.input && a.cached === b.cached && a.output === b.output;
+
 // ─── Discover JSONL files ──────────────────────────────────────────────
 
 export function discoverCodexLogs(
@@ -140,6 +176,19 @@ export function parseCodexFile(
 
   const mode = codexInvocationMode(originator);
 
+  // Codex writes one `token_usage_record` per API request (0.154+), including
+  // compaction requests its cumulative `token_count` leaves out. Index this
+  // thread's own records so a `compacted` line can bill the request it names;
+  // a copied prefix's `compacted` lines are skipped where they are read.
+  const usageRecords = new Map<string, CodexUsageRecord>();
+  for (const line of parsedLines) {
+    if (!line || line.type !== 'token_usage_record') continue;
+    const record = asUsageRecord(line);
+    if (record && record.thread_id === sessionId && !usageRecords.has(record.response_id)) {
+      usageRecords.set(record.response_id, record);
+    }
+  }
+
   // Fall back to filename for session ID
   if (!sessionId) {
     const basename = path.basename(filePath, '.jsonl');
@@ -165,8 +214,69 @@ export function parseCodexFile(
   let prevTokensOut = 0;
   let prevCacheRead = 0;
   let eventIndex = 0;
+  // The thread total of the latest record, and its gap to the counter at the
+  // last token_count. A compaction is billed only when the gap grows by
+  // exactly its usage, so a counter that already includes it bills it once.
+  let threadTotal: CodexUsage3 | undefined;
+  let counterGap: CodexUsage3 | undefined;
+  let pendingCompactions: CodexUsageRecord[] = [];
+  const billedCompactions = new Set<string>();
+  let compactionsUnbilled = 0;
   let currentModel = defaultModel;
   let currentModelSource: 'turn_context' | 'config' | undefined = defaultModel ? 'config' : undefined;
+
+  /**
+   * Bill the held compactions when the counter's gap to the thread total grew
+   * by exactly their usage since the last counter; otherwise none of them, and
+   * count them. `gap` is undefined when it cannot be measured (no record yet,
+   * or the counter reset).
+   */
+  const settleCompactions = (gap: CodexUsage3 | undefined): void => {
+    if (pendingCompactions.length === 0) return;
+    const held = pendingCompactions;
+    pendingCompactions = [];
+    const sum = held.reduce((total, record) => addUsage(total, record.usage), { input: 0, cached: 0, output: 0 });
+    if (!gap || !counterGap || !sameUsage(subtractUsage(gap, counterGap), sum)) {
+      compactionsUnbilled += held.length;
+      return;
+    }
+    for (const record of held) {
+      billedCompactions.add(record.response_id);
+      const uncached = Math.max(0, record.usage.input - record.usage.cached);
+      const costUsd = record.model
+        ? pricingRegistry.calculate(record.model, { input: uncached, output: record.usage.output, cacheRead: record.usage.cached }, record.timestamp)
+        : undefined;
+      const eventId = crypto
+        .createHash('sha256')
+        .update(`codex:${sessionId}:response:${record.response_id}`)
+        .digest('hex')
+        .slice(0, 32);
+      // Keyed by the request, not the positional index, so counter rows keep their ids.
+      events.push({
+        event_id: `import-cdx-${eventId}`,
+        session_id: sessionId!,
+        agent_type: 'codex',
+        event_type: 'llm_response',
+        status: 'success',
+        tokens_in: uncached,
+        tokens_out: record.usage.output,
+        cache_read_tokens: record.usage.cached,
+        model: record.model,
+        cost_usd: costUsd ?? undefined,
+        cost_source: costUsd != null ? 'estimated' : undefined,
+        project,
+        client_timestamp: record.timestamp,
+        metadata: {
+          _synthetic: true,
+          _source: 'codex_session_jsonl',
+          _model_source: record.model_source,
+          _usage_source: 'compaction',
+          _response_id: record.response_id,
+        },
+        source: 'import',
+      });
+    }
+  };
 
   for (const [lineIndex, line] of parsedLines.entries()) {
     if (!line) continue;
@@ -211,6 +321,22 @@ export function parseCodexFile(
       continue;
     }
 
+    if (line.type === 'token_usage_record') {
+      const record = !inherited ? asUsageRecord(line) : null;
+      if (record && record.thread_id === sessionId) threadTotal = record.thread;
+      continue;
+    }
+
+    if (line.type === 'compacted') {
+      if (inherited) continue;
+      const responseId = typeof line.payload.compaction_response_id === 'string' ? line.payload.compaction_response_id : undefined;
+      if (!responseId || billedCompactions.has(responseId) || pendingCompactions.some(r => r.response_id === responseId)) continue;
+      const record = usageRecords.get(responseId);
+      if (record) pendingCompactions.push({ ...record, model: currentModel, model_source: currentModelSource });
+      else compactionsUnbilled++;
+      continue;
+    }
+
     // Extract token deltas from token_count events
     if (line.type === 'event_msg' && line.payload?.type === 'token_count') {
       const usage = line.payload.info?.total_token_usage;
@@ -220,7 +346,15 @@ export function parseCodexFile(
       const totalOut = (usage.output_tokens ?? 0);
       const totalCacheRead = (usage.cached_input_tokens ?? 0);
 
-      if (totalIn < prevTokensIn || totalOut < prevTokensOut) counterResets++;
+      const reset = totalIn < prevTokensIn || totalOut < prevTokensOut;
+      if (reset) counterResets++;
+      if (!inherited) {
+        const gap = threadTotal ? subtractUsage(threadTotal, { input: totalIn, cached: totalCacheRead, output: totalOut }) : undefined;
+        // After a reset the gap grows by more than any held compaction, so
+        // the exact-growth check fails closed on its own.
+        settleCompactions(gap);
+        counterGap = gap;
+      }
 
       // Compute deltas
       const deltaIn = totalIn - prevTokensIn;
@@ -347,6 +481,11 @@ export function parseCodexFile(
     // Skip other event types for now
   }
 
+  // A compaction after the last counter is checked against that counter.
+  if (pendingCompactions.length > 0) {
+    settleCompactions(threadTotal ? subtractUsage(threadTotal, { input: prevTokensIn, cached: prevCacheRead, output: prevTokensOut }) : undefined);
+  }
+
   // Add session_end event
   if (events.length > 0) {
     const lastTimestamp = lines.length > 0
@@ -377,6 +516,10 @@ export function parseCodexFile(
         _model_source: currentModelSource,
         ...(boundary.kind === 'resolved' ? { _inherited_counters_skipped: inheritedCountersSkipped } : {}),
         ...(counterResets > 0 ? { _counter_resets: counterResets } : {}),
+        ...(threadTotal ? {
+          total_thread_tokens: { input_tokens: threadTotal.input, cached_input_tokens: threadTotal.cached, output_tokens: threadTotal.output },
+        } : {}),
+        ...(compactionsUnbilled > 0 ? { _compactions_unbilled: compactionsUnbilled } : {}),
       },
       source: 'import',
     });

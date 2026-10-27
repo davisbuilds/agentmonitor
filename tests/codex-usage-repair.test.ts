@@ -14,6 +14,7 @@ const { closeDb, getDb } = await import('../src/db/connection.js');
 const { runImport } = await import('../src/import/index.js');
 const { hashContent } = await import('../src/import/codex.js');
 const { repairCodexImportUsage } = await import('../src/import/codex-usage-repair.js');
+const { acquireRuntimeOwnership, RuntimeOwnershipError } = await import('../src/runtime-ownership.js');
 
 const codexDir = path.join(tempDir, 'codex');
 const sessionsDir = path.join(codexDir, 'sessions', '2026', '07', '25');
@@ -417,5 +418,111 @@ describe('Codex usage repair', () => {
     assert.equal(report.counter_sessions_checked, 1, 'the child is not compared with a counter that includes its parent');
     assert.equal(report.otel_sessions_checked, 1, 'only the child is compared with OTEL');
     assert.deepEqual(report.subagent_otel.map(check => check.session_id), [CHILD]);
+  });
+});
+
+describe('Codex usage repair bills compactions', () => {
+  const plain = (tail: string) => v7('2026-07-25T20:53:37Z', tail);
+  type U = [number, number, number];
+  const asUsage = ([input, cached, output]: U) => ({ input_tokens: input, cached_input_tokens: cached, output_tokens: output });
+  const record = (minute: number, sessionId: string, responseId: string, own: U, thread: U): Line => ({
+    type: 'token_usage_record', timestamp: `2026-07-25T21:${String(minute).padStart(2, '0')}:10Z`,
+    payload: { thread_id: sessionId, response_id: responseId, usage: asUsage(own), thread_token_usage: asUsage(thread) },
+  });
+  const compacted = (minute: number, responseId: string): Line => ({
+    type: 'compacted', timestamp: `2026-07-25T21:${String(minute).padStart(2, '0')}:20Z`,
+    payload: { message: '', compaction_response_id: responseId },
+  });
+  const withCompaction = (id: string, compactionResponse = 'resp-compact'): Line[] => [
+    meta(id), turnAt('2026-07-25T20:53:40Z'),
+    record(1, id, 'resp-1', [1000, 0, 10], [1000, 0, 10]), count(1, 1000, 0, 10),
+    record(2, id, 'resp-compact', [4000, 3000, 200], [5000, 3000, 210]), compacted(2, compactionResponse), count(2, 1000, 0, 10),
+    record(3, id, 'resp-3', [2000, 1000, 20], [7000, 4000, 230]), count(3, 3000, 1000, 30),
+  ];
+  /** Store a session as the importer did before compactions were billed, then restore its full rollout. */
+  function storeAsBefore(id: string, lines: Line[]): void {
+    write(id, lines.filter(line => line.type !== 'token_usage_record' && line.type !== 'compacted'));
+    importAll();
+    write(id, lines);
+  }
+
+  test('a stored session gains its compaction, classified, and is checked against Codex\'s thread total', () => {
+    const id = plain('000000000d1f');
+    storeAsBefore(id, withCompaction(id));
+    const before = usageTotal(id);
+
+    const report = repair(true);
+    assert.equal(report.rows_inserted, 1);
+    assert.equal(report.rows_by_class.compaction, 1);
+    assert.equal(report.rows_by_class.appended, 0);
+    assert.equal(usageTotal(id) - before, 4000 + 200, 'exactly the compaction request');
+    assert.equal(report.counter_sessions_checked, 1);
+    assert.equal(report.thread_sessions_checked, 1);
+    assert.deepEqual(report.counter_mismatches, [], 'the rows add up to the thread total, not the counter');
+    assert.equal(repair(true).sessions_changed, 0, 'a second apply changes nothing');
+  });
+
+  test('a session with a compaction it cannot bill is named, not reported as a mismatch', () => {
+    const id = plain('000000000d2f');
+    storeAsBefore(id, withCompaction(id, 'resp-unrecorded'));
+    getDb().prepare('UPDATE events SET tokens_in = tokens_in + 7 WHERE event_id = ?').run(llmRow(id, 0));
+
+    const report = repair(true);
+    assert.equal(report.sessions_changed, 1);
+    assert.deepEqual(report.compaction_sessions_unbilled, [id]);
+    assert.deepEqual(report.counter_mismatches, []);
+  });
+
+  test('a subagent whose rollout carries Codex\'s thread total is checked against it, not against OTEL', () => {
+    // OTEL can miss a request Codex recorded (measured 2026-10-26), so where
+    // Codex's own per-thread total exists it is the instrument.
+    const child: Line[] = [
+      meta(CHILD, spawnSource), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'),
+      record(10, CHILD, 'resp-own', [30_000, 25_000, 500], [30_000, 25_000, 500]), count(10, 1_530_000, 1_225_000, 15_500),
+      record(11, CHILD, 'resp-compact', [4_000, 3_000, 200], [34_000, 28_000, 700]), compacted(11, 'resp-compact'),
+      count(11, 1_530_000, 1_225_000, 15_500),
+    ];
+    storeAsBefore(CHILD, child);
+    getDb().prepare(`
+      INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out, cache_read_tokens, source, client_timestamp)
+      VALUES ('otel-child', ?, 'codex', 'llm_response', 'success', 5000, 500, 25000, 'otel', '2026-07-25 21:10:00')
+    `).run(CHILD);
+
+    const report = repair(true);
+    assert.equal(report.rows_by_class.compaction, 1);
+    assert.equal(report.thread_sessions_checked, 1);
+    assert.deepEqual(report.counter_mismatches, []);
+    assert.equal(report.otel_sessions_checked, 0, 'OTEL checks only a subagent without a thread total');
+    assert.equal(usageTotal(CHILD), 34_000 + 700);
+  });
+
+  test('an unbillable compaction is named even in a subagent that falls back to the OTEL check', () => {
+    // No usage record of the child's own, so no thread total: the OTEL check
+    // applies, and the miss must still be reported.
+    const child: Line[] = [
+      meta(CHILD, spawnSource), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'),
+      count(10, 1_530_000, 1_225_000, 15_500), compacted(11, 'resp-unrecorded'), count(11, 1_540_000, 1_230_000, 15_600),
+    ];
+    storeAsBefore(CHILD, child);
+    getDb().prepare('UPDATE events SET tokens_in = tokens_in + 7 WHERE event_id = ?').run(llmRow(CHILD, 3));
+
+    const report = repair(true);
+    assert.equal(report.sessions_changed, 1);
+    assert.deepEqual(report.compaction_sessions_unbilled, [CHILD]);
+  });
+
+  test('an apply refuses while another runtime owns the database, and a preview still runs', () => {
+    const id = plain('000000000d3f');
+    storeAsBefore(id, withCompaction(id));
+    const before = snapshot();
+    const dbPath = process.env.AGENTMONITOR_DB_PATH!;
+    const owner = acquireRuntimeOwnership(dbPath);
+    try {
+      assert.equal(repairCodexImportUsage(getDb(), { codexDir, apply: false, dbPath }).rows_inserted, 1);
+      assert.throws(() => repairCodexImportUsage(getDb(), { codexDir, apply: true, dbPath }), RuntimeOwnershipError);
+    } finally {
+      owner.release();
+    }
+    assert.deepEqual(snapshot(), before);
   });
 });
