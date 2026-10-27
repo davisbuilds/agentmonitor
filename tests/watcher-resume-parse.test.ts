@@ -66,8 +66,10 @@ const CODEX_LINES = [
   JSON.stringify({ type: 'turn_context', timestamp: at(2), payload: { cwd: '/work/alpha', model: 'gpt-5.6-terra' } }),
   JSON.stringify({ type: 'event_msg', timestamp: at(3), payload: { type: 'token_count', info: { last_token_usage: { input_tokens: 1000 }, model_context_window: 258400 } } }),
   JSON.stringify({ type: 'response_item', timestamp: at(4), payload: { role: 'user', content: [{ type: 'input_text', text: 'run the tests' }] } }),
-  JSON.stringify({ type: 'response_item', timestamp: at(5), payload: { name: 'exec_command', arguments: JSON.stringify({ cmd: 'cat /skills/test-strategy/SKILL.md' }) } }),
+  JSON.stringify({ type: 'response_item', timestamp: at(5), payload: { type: 'function_call', name: 'exec_command', call_id: 'call-1', arguments: JSON.stringify({ cmd: 'cat /skills/test-strategy/SKILL.md' }) } }),
   JSON.stringify({ type: 'world_state', timestamp: at(6), payload: { state: { agents_md: { directory: '/work/alpha', text: 'instructions' } } } }),
+  // The call's output lands a line later, so a split between them attaches it to a stored message.
+  JSON.stringify({ type: 'response_item', timestamp: at(6), payload: { type: 'function_call_output', call_id: 'call-1', output: 'skill text' } }),
   JSON.stringify({ type: 'compacted', timestamp: at(7), payload: { replacement_history: [{ type: 'response_item', payload: { role: 'developer', content: [{ type: 'input_text', text: catalog.replace('Test behavior.', 'Test carefully.') }] } }] } }),
   JSON.stringify({ type: 'response_item', timestamp: at(8), payload: { role: 'assistant', content: [{ type: 'output_text', text: 'tests pass' }] } }),
   JSON.stringify({ type: 'turn_context', timestamp: at(9), payload: { cwd: '/work/beta', model: 'gpt-5.6-terra-mini' } }),
@@ -143,10 +145,13 @@ function snapshot(file: string): unknown {
       SELECT agent_type, source_turn_id, status, title, started_at, ended_at
       FROM session_turns WHERE session_id = ? ORDER BY id
     `),
+    // Items in their turn's order. Row order follows arrival: a Codex tool
+    // result whose call an earlier sync stored joins that call's turn later,
+    // as the live stream shows it.
     items: all(`
       SELECT t.source_turn_id, i.ordinal, i.source_item_id, i.kind, i.status, i.payload_json, i.created_at
       FROM session_items i JOIN session_turns t ON t.id = i.turn_id
-      WHERE i.session_id = ? ORDER BY i.id
+      WHERE i.session_id = ? ORDER BY t.id, i.ordinal
     `),
   };
 }
