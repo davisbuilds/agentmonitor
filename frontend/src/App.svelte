@@ -4,7 +4,6 @@
     getTab,
     setTab,
     isCommandPaletteOpen,
-    closeCommandPalette,
     toggleCommandPalette,
     openCommandPalette,
     type Tab,
@@ -36,10 +35,6 @@
       event.preventDefault();
       toggleCommandPalette();
       return;
-    }
-
-    if (event.key === 'Escape' && isCommandPaletteOpen()) {
-      closeCommandPalette();
     }
   }
 
