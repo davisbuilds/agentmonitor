@@ -25,6 +25,8 @@ const fragment = (eventId: string, kind: string, eventName = 'codex.sse_event') 
 });
 
 function seed(db: Database.Database): void {
+  // Fail closed before the table-wide deletes below if the handle is not the fixture's.
+  assert.equal(fs.realpathSync(db.name), fs.realpathSync(dbPath));
   for (const table of ['session_items', 'session_turns', 'session_trace_summary', 'browsing_sessions', 'events', 'sessions', 'agents']) {
     db.exec(`DELETE FROM ${table}`);
   }
