@@ -200,20 +200,33 @@ export function parseCodexFile(
   // each. Records that start mid-thread, as in a session begun before Codex
   // wrote them, leave earlier requests to the cumulative counter. So do records
   // with one missing: their usage must add up to the last one's thread total,
-  // and no line with lines after it may be unreadable, since it could have been
-  // a record. (A partial last line is a write still in progress.)
+  // no line with lines after it may be unreadable, since it could have been a
+  // record (a partial last line is a write still in progress), and the counter
+  // may not grow past that total, since it leaves requests out but adds none.
   let instrument: 'request' | 'counter' = 'counter';
   const namedCompactions = new Set<string>();
   const ownRecords = new Map<string, CodexUsageRecord>();
   let lastRecord: CodexUsageRecord | undefined;
   let unreadable = false;
+  // Counter growth in the thread's own span, from the counter at the boundary.
+  let lastCounter = { input: 0, output: 0 };
+  const counterGrowth = { input: 0, output: 0 };
   for (const [lineIndex, line] of parsedLines.entries()) {
     if (options?.usageInstrument === 'counter') break;
-    if (lineIndex < ownFrom) continue;
     if (!line) {
-      if (lineIndex < parsedLines.length - 1) unreadable = true;
+      if (lineIndex >= ownFrom && lineIndex < parsedLines.length - 1) unreadable = true;
       continue;
     }
+    const counted = line.type === 'event_msg' && line.payload?.type === 'token_count' ? line.payload.info?.total_token_usage : undefined;
+    if (counted) {
+      const current = { input: counted.input_tokens ?? 0, output: counted.output_tokens ?? 0 };
+      if (lineIndex >= ownFrom) {
+        counterGrowth.input += Math.max(0, current.input - lastCounter.input);
+        counterGrowth.output += Math.max(0, current.output - lastCounter.output);
+      }
+      lastCounter = current;
+    }
+    if (lineIndex < ownFrom) continue;
     if (line.type === 'compacted' && typeof line.payload.compaction_response_id === 'string') {
       namedCompactions.add(line.payload.compaction_response_id);
     }
@@ -226,7 +239,8 @@ export function parseCodexFile(
   const firstRecord = ownRecords.values().next().value;
   if (firstRecord && lastRecord && !unreadable && sameUsage(firstRecord.usage, firstRecord.thread)) {
     const sum = [...ownRecords.values()].reduce((total, record) => addUsage(total, record.usage), { input: 0, cached: 0, output: 0 });
-    if (sameUsage(sum, lastRecord.thread)) instrument = 'request';
+    const covered = counterGrowth.input <= lastRecord.thread.input && counterGrowth.output <= lastRecord.thread.output;
+    if (sameUsage(sum, lastRecord.thread) && covered) instrument = 'request';
   }
 
   // Fall back to filename for session ID

@@ -846,6 +846,16 @@ describe('a rollout recorded per request from its first request is billed per re
     assert.equal(billed(), 300 + 30);
   });
 
+  test('a counter that grows past the last record leaves the session to the counter', () => {
+    writeRollout([
+      meta(), turn(),
+      record(1, 'resp-1', [100, 0, 10], [100, 0, 10]), counter(1, 100, 0, 10),
+      counter(2, 200, 0, 20),
+    ]);
+    assert.equal(sessionEnd()._usage_instrument, 'counter');
+    assert.equal(billed(), 200 + 20);
+  });
+
   test('a partial last line, a write in progress, keeps the request path', () => {
     writeRaw([...requestRollout(), '{"type":"token_usage_rec']);
     assert.equal(sessionEnd()._usage_instrument, 'request');

@@ -134,8 +134,9 @@ None
 
 1. Choose the instrument per rollout: `request` when the first own-thread
    record's usage equals its thread total and the records are complete (their
-   usage adds up to the last thread total, and no line before the last fails
-   to parse), otherwise `counter`.
+   usage adds up to the last thread total, the counter's own growth stays
+   within it, and no line before the last fails to parse), otherwise
+   `counter`.
 2. On the `request` path, emit each own-thread record after the subagent
    boundary as an `llm_response`:
    - priced with the model of the latest `turn_context`, at the record's
