@@ -3,7 +3,7 @@ date: 2026-10-26
 author: claude
 topic: ingestion-source-fidelity
 stage: spec
-status: draft
+status: complete
 source: conversation
 risk_profile: high
 readiness: ready

@@ -99,6 +99,29 @@ so later readers know what still needs checking.
   receipt. Until then, a downstream reader that needs an outcome should read
   the preview, knowing it is absent when capture is off.
 
+#### Claude custom session titles are not read
+- **What**: Claude Code transcripts can carry `custom-title` (`customTitle`)
+  and `agent-name` (`agentName`) lines, the name a user or the harness gave the
+  session. The session browser titles a session from `ai-title` or its first
+  prompt and ignores these, so a renamed session shows another name.
+- **Why or evidence**: the ingestion probe's first live run (2026-10-26)
+  reported both as `unknown`. They occur in a few older transcripts.
+- **Next**: decide the precedence (a user's custom title over `ai-title` seems
+  right), read them in the Claude parser's title path, and list them as read
+  in `src/parser/record-types.ts`.
+
+#### Codex inter-agent messages are not projected
+- **What**: Codex rollouts record messages between agents as
+  `response_item/agent_message`, each with an author and recipient, beside
+  `inter_agent_communication_metadata`. The session browser shows neither, so a
+  parent's transcript omits what it sent to and heard from its subagents.
+- **Why or evidence**: 2026-10-26 inventory of local rollouts; the types are
+  listed as known-unused in `src/parser/record-types.ts`, so the ingestion probe
+  reports them under `known_unused`.
+- **Next**: decide whether these are transcript content (an author/recipient
+  message kind) or lineage metadata. Then project them like other messages, and
+  check how the subagent boundary treats them.
+
 #### Codex subagent boundary rests on the current rollout layout
 - **What**: the importer finds a `thread_spawn` subagent's own activity from
   UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out

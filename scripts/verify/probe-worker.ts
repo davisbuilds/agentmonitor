@@ -8,6 +8,7 @@ import type * as TraceService from '../../src/trace-quality/service.js';
 import type * as Connection from '../../src/db/connection.js';
 import type * as Schema from '../../src/db/schema.js';
 import type * as PathExcludes from '../../src/util/path-excludes.js';
+import type * as RecordTypes from '../../src/parser/record-types.js';
 import type * as Config from '../../src/config.js';
 import type * as App from '../../src/app.js';
 import type * as Storage from '../../src/db/storage.js';
@@ -80,6 +81,11 @@ async function ingestion(probeOptions: ProbeOptions) {
   const { discoverSessionFiles, discoverCodexSessionFiles, findMissingSessionProjections } = await import(built('watcher/index.js')) as typeof WatcherIndex;
   const config = createConfig(process.env);
   const { normalizeExcludePatterns } = await import(built('util/path-excludes.js')) as typeof PathExcludes;
+  const recordTypes = await import(built('parser/record-types.js')) as typeof RecordTypes;
+  const catalogs = {
+    claude: { catalog: recordTypes.CLAUDE_RECORD_TYPES, kindOf: recordTypes.claudeRecordKind },
+    codex: { catalog: recordTypes.CODEX_RECORD_TYPES, kindOf: recordTypes.codexRecordKind },
+  };
   const options = { excludePatterns: normalizeExcludePatterns(probeOptions.excludePatterns ?? config.sync.excludePatterns) };
   const claudeDir = probeOptions.claudeDir!;
   const codexHome = probeOptions.codexHome!;
@@ -112,11 +118,17 @@ async function ingestion(probeOptions: ProbeOptions) {
       if (!seen) watcher.unwatched++;
       else watcher[seen.status] = (watcher[seen.status] ?? 0) + 1;
     }
+    // Record types the parsers do not know, so a harness format change is
+    // visible instead of silently skipped. Counts only; no content leaves here.
+    const { catalog, kindOf } = catalogs[source as keyof typeof catalogs];
+    const record_types = recordTypes.emptyRecordTypeTally();
+    for (const file of list) recordTypes.tallyRecordTypes(fs.readFileSync(file, 'utf8'), kindOf, catalog, record_types);
     summary[source] = {
       discovered: list.length,
       import_state: imports,
       watcher,
       missing_browser_projection: findMissingSessionProjections(db, list).length,
+      record_types,
     };
   }
   const recency = db.prepare(`
