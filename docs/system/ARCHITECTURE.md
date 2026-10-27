@@ -182,21 +182,38 @@ copied turns. Only inherited turns or requests mark a copy, so a child's own
 compaction before its first surviving turn stays. Plain forks (`forked_from_id` without `thread_spawn`) and
 unresolved subagents keep their whole rollout.
 
-Codex's cumulative `token_count` leaves out compaction requests. Codex 0.154+
-also writes a `token_usage_record` per API request, with the request's usage and
-the thread's running total, and each `compacted` line names its request by
-`compaction_response_id`. A compaction is billed as its own row when both of
-these hold:
+Codex 0.154+ writes a `token_usage_record` per API request, with the
+request's usage and the thread's running total. When a rollout's own records
+start at the thread's first request (the first one's usage is the whole
+thread so far), the import bills one row per record, as the Claude import bills
+one row per assistant message:
+- each row is keyed by the request's `response_id`;
+- it is priced with its own turn's model, one request at a time;
+- its `_usage_source` is `compaction` when a `compacted` line names it by
+  `compaction_response_id`, and `request` otherwise.
+
+Counter lines then bill nothing but keep their place in the event index, so
+file-change ids do not move. This covers the requests the cumulative
+`token_count` leaves out (compactions, and requests of turns later aborted), so
+the rows add up to Codex's own thread total.
+
+A rollout without records, or whose records start mid-thread (a session begun
+before 0.154), bills from the cumulative counter instead. So does one whose
+records may be incomplete: their usage does not add up to the last record's
+thread total, the counter grows past that total (it leaves requests out but
+adds none), or a line with lines after it does not parse (a partial last line
+is a write still in progress). On that path a
+compaction is billed as its own row when both of these hold:
 - the named record is this thread's own;
 - the counter's gap to the thread total grew by exactly that record's usage
   since the previous counter.
 
-The row's id is keyed by the request's `response_id`, so positional counter ids
-never move. When the gap check fails, nothing is billed: for example, the
-counter already includes the compaction, it reset, or other unrecorded usage
-landed in the same window. The miss is counted on `session_end` as
-`_compactions_unbilled`, and `session_end` also carries Codex's
-`total_thread_tokens`, which the repair checks against.
+When the gap check fails, nothing is billed: for example, the counter already
+includes the compaction, it reset, or other unrecorded usage landed in the same
+window. The miss is counted on `session_end` as `_compactions_unbilled`.
+`session_end` names the instrument used in `_usage_instrument` (`request` or
+`counter`), and carries Codex's `total_thread_tokens`, which the repair checks
+against.
 
 ### Session Browser And Live
 

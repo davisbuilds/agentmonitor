@@ -599,6 +599,14 @@ request in a `token_usage_record`, and each `compacted` line names its request.
 The import now bills them (see ARCHITECTURE), and the repair adds them to
 sessions stored earlier as `compaction` rows.
 
+Since 2026-10-27, a rollout recorded per request from its first request is
+billed one row per request instead of one per counter step. The repair moves a
+session stored from the counter to per-request rows. Both the counter rows it
+removes and the request rows it adds are classed `instrument_switch`, so the
+preview shows the switch apart from real orphans. The session's token total is
+unchanged, apart from requests the counter had left out. A compaction already
+stored keeps its row, because both paths key it by `response_id`.
+
 It reconciles every discoverable rollout through the importer's own path, so a
 repaired session is exactly what a fresh import would store. The preview runs
 the same work and rolls it back.
@@ -639,6 +647,7 @@ carries:
 | `subagent_model` | a subagent's session model, moved from its parent's first turn to its own |
 | `annotated` | only non-usage fields differ |
 | `compaction` | a compaction request Codex recorded but left out of its counter |
+| `instrument_switch` | a counter row replaced, or a request row added, as a session moves to per-request billing |
 | `appended` | new usage since the last import |
 | `unclassified` | none of the above |
 

@@ -433,11 +433,13 @@ describe('Codex usage repair bills compactions', () => {
     type: 'compacted', timestamp: `2026-07-25T21:${String(minute).padStart(2, '0')}:20Z`,
     payload: { message: '', compaction_response_id: responseId },
   });
+  // Records start mid-thread (the first request predates them), so the import
+  // bills from the counter and these exercise its compaction check.
   const withCompaction = (id: string, compactionResponse = 'resp-compact'): Line[] => [
-    meta(id), turnAt('2026-07-25T20:53:40Z'),
-    record(1, id, 'resp-1', [1000, 0, 10], [1000, 0, 10]), count(1, 1000, 0, 10),
-    record(2, id, 'resp-compact', [4000, 3000, 200], [5000, 3000, 210]), compacted(2, compactionResponse), count(2, 1000, 0, 10),
-    record(3, id, 'resp-3', [2000, 1000, 20], [7000, 4000, 230]), count(3, 3000, 1000, 30),
+    meta(id), turnAt('2026-07-25T20:53:40Z'), count(0, 300, 0, 5),
+    record(1, id, 'resp-1', [1000, 0, 10], [1300, 0, 15]), count(1, 1300, 0, 15),
+    record(2, id, 'resp-compact', [4000, 3000, 200], [5300, 3000, 215]), compacted(2, compactionResponse), count(2, 1300, 0, 15),
+    record(3, id, 'resp-3', [2000, 1000, 20], [7300, 4000, 235]), count(3, 3300, 1000, 35),
   ];
   /** Store a session as the importer did before compactions were billed, then restore its full rollout. */
   function storeAsBefore(id: string, lines: Line[]): void {
@@ -476,11 +478,12 @@ describe('Codex usage repair bills compactions', () => {
   test('a subagent whose rollout carries Codex\'s thread total is checked against it, not against OTEL', () => {
     // OTEL can miss a request Codex recorded (measured 2026-10-26), so where
     // Codex's own per-thread total exists it is the instrument.
+    // The child's first own request predates its records.
     const child: Line[] = [
-      meta(CHILD, spawnSource), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'),
-      record(10, CHILD, 'resp-own', [30_000, 25_000, 500], [30_000, 25_000, 500]), count(10, 1_530_000, 1_225_000, 15_500),
-      record(11, CHILD, 'resp-compact', [4_000, 3_000, 200], [34_000, 28_000, 700]), compacted(11, 'resp-compact'),
-      count(11, 1_530_000, 1_225_000, 15_500),
+      meta(CHILD, spawnSource), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'), count(9, 1_501_000, 1_200_000, 15_020),
+      record(10, CHILD, 'resp-own', [30_000, 25_000, 500], [31_000, 25_000, 520]), count(10, 1_531_000, 1_225_000, 15_520),
+      record(11, CHILD, 'resp-compact', [4_000, 3_000, 200], [35_000, 28_000, 720]), compacted(11, 'resp-compact'),
+      count(11, 1_531_000, 1_225_000, 15_520),
     ];
     storeAsBefore(CHILD, child);
     getDb().prepare(`
@@ -493,7 +496,7 @@ describe('Codex usage repair bills compactions', () => {
     assert.equal(report.thread_sessions_checked, 1);
     assert.deepEqual(report.counter_mismatches, []);
     assert.equal(report.otel_sessions_checked, 0, 'OTEL checks only a subagent without a thread total');
-    assert.equal(usageTotal(CHILD), 34_000 + 700);
+    assert.equal(usageTotal(CHILD), 35_000 + 720);
   });
 
   test('an unbillable compaction is named even in a subagent that falls back to the OTEL check', () => {
@@ -509,6 +512,44 @@ describe('Codex usage repair bills compactions', () => {
     const report = repair(true);
     assert.equal(report.sessions_changed, 1);
     assert.deepEqual(report.compaction_sessions_unbilled, [CHILD]);
+  });
+
+  test('a session recorded per request from its first request moves to one row per request, classified as such', () => {
+    const id = plain('000000000d4f');
+    const lines: Line[] = [
+      meta(id), turnAt('2026-07-25T20:53:40Z'),
+      record(1, id, 'resp-1', [1000, 0, 10], [1000, 0, 10]), count(1, 1000, 0, 10),
+      record(2, id, 'resp-2', [2000, 1000, 20], [3000, 1000, 30]), count(2, 3000, 1000, 30),
+      // A request of a turn that is then aborted: in no counter.
+      record(3, id, 'resp-aborted', [500, 0, 5], [3500, 1000, 35]),
+    ];
+    storeAsBefore(id, lines);
+    assert.equal(usageTotal(id), 3000 + 30, 'stored from the counter');
+
+    const report = repair(true);
+    assert.equal(report.rows_by_class.instrument_switch, 2 + 3, 'two counter rows out, three request rows in');
+    assert.equal(report.rows_by_class.orphaned, 0);
+    assert.equal(report.rows_by_class.appended, 0);
+    assert.equal(report.rows_by_class.unclassified, 0);
+    assert.deepEqual(report.counter_mismatches, []);
+    assert.equal(report.thread_sessions_checked, 1);
+    assert.equal(usageTotal(id), 3500 + 35, 'Codex\'s thread total, the aborted request included');
+    assert.equal(repair(true).sessions_changed, 0, 'a second apply changes nothing');
+  });
+
+  test('a request appended to a session already billed per request is appended, not a switch', () => {
+    const id = plain('000000000d5f');
+    const lines: Line[] = [
+      meta(id), turnAt('2026-07-25T20:53:40Z'),
+      record(1, id, 'resp-1', [1000, 0, 10], [1000, 0, 10]), count(1, 1000, 0, 10),
+    ];
+    write(id, lines);
+    importAll();
+    write(id, [...lines, record(2, id, 'resp-2', [2000, 1000, 20], [3000, 1000, 30]), count(2, 3000, 1000, 30)]);
+
+    const report = repair(true);
+    assert.equal(report.rows_by_class.appended, 1);
+    assert.equal(report.rows_by_class.instrument_switch, 0);
   });
 
   test('an apply refuses while another runtime owns the database, and a preview still runs', () => {

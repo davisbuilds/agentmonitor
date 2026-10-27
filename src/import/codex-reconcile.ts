@@ -47,6 +47,28 @@ export interface CodexReconcileOptions {
 }
 
 const PREVIEW_ROLLBACK = Symbol('codex-reconcile-preview');
+
+/** A stored usage row billed from one per-request record (not a compaction the counter path billed). */
+export function isRequestUsageRow(row: Pick<ImportedCodexRow, 'event_type' | 'metadata'>): boolean {
+  if (row.event_type !== 'llm_response') return false;
+  try {
+    const metadata: unknown = JSON.parse(row.metadata);
+    return !!metadata && typeof metadata === 'object' && (metadata as Record<string, unknown>)._usage_source === 'request';
+  } catch {
+    return false;
+  }
+}
+
+/** A stored usage row billed from the cumulative counter, not from a per-request record. */
+export function isCounterUsageRow(row: Pick<ImportedCodexRow, 'event_type' | 'metadata'>): boolean {
+  if (row.event_type !== 'llm_response') return false;
+  try {
+    const metadata: unknown = JSON.parse(row.metadata);
+    return !(metadata && typeof metadata === 'object' && '_usage_source' in metadata);
+  } catch {
+    return true;
+  }
+}
 const OWN_ID_PREFIX = 'import-cdx-';
 // Browser rows the Codex summary projection owns. A full transcript projection
 // under the same id must not be rewritten into a summary.

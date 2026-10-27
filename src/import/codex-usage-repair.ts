@@ -8,7 +8,7 @@ import {
   type ImportedCodexRow,
 } from '../db/queries.js';
 import { discoverCodexLogs, parseCodexFile } from './codex.js';
-import { importedRowMatches, reconciledEvent, sameCost } from './codex-reconcile.js';
+import { importedRowMatches, isCounterUsageRow, reconciledEvent, sameCost } from './codex-reconcile.js';
 import { readCodexRollout, reconcileCodexRollout, type CodexRolloutRead } from './index.js';
 import { acquireRuntimeOwnership } from '../runtime-ownership.js';
 
@@ -34,7 +34,7 @@ export interface CodexSubagentOtelCheck {
   otel_gap_hours: number;
 }
 
-type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'compaction' | 'appended' | 'unclassified';
+type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'compaction' | 'instrument_switch' | 'appended' | 'unclassified';
 
 // A type alias, not an interface: `printSummary` takes `Record<string, unknown>`.
 export type CodexUsageRepairReport = {
@@ -161,7 +161,7 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     rows_inserted: 0,
     rows_updated: 0,
     rows_deleted: 0,
-    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, subagent_model: 0, annotated: 0, compaction: 0, appended: 0, unclassified: 0 },
+    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, subagent_model: 0, annotated: 0, compaction: 0, instrument_switch: 0, appended: 0, unclassified: 0 },
     tokens_before: 0,
     tokens_after: 0,
     cost_before_usd: 0,
@@ -230,14 +230,18 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     const storedById = new Map(stored.map(row => [row.event_id, row]));
     // What the reconcile wrote: a model known only from config keeps its stored value.
     for (const [id, event] of parsed) parsed.set(id, reconciledEvent(storedById.get(id), event));
+    // A session that now bills per request but still holds counter rows is
+    // switching instrument: its counter rows give way to one row per request.
+    const switching = end._usage_instrument === 'request' && stored.some(isCounterUsageRow);
     for (const row of stored) {
       const event = parsed.get(row.event_id);
-      if (!event) report.rows_by_class[skipped > 0 ? 'copied_history' : 'orphaned']++;
+      if (!event) report.rows_by_class[switching && isCounterUsageRow(row) ? 'instrument_switch' : skipped > 0 ? 'copied_history' : 'orphaned']++;
       else if (!importedRowMatches(row, event)) report.rows_by_class[classifyUpdate(row, event)]++;
     }
     for (const [id, event] of parsed) {
       if (storedById.has(id)) continue;
-      report.rows_by_class[metadataOf(event)._usage_source === 'compaction' ? 'compaction' : 'appended']++;
+      const source = metadataOf(event)._usage_source;
+      report.rows_by_class[source === 'compaction' ? 'compaction' : switching && source === 'request' ? 'instrument_switch' : 'appended']++;
     }
 
     const before: Usage = stored.reduce((u, row) => ({ tokens: u.tokens + tokensOf(row), cost: u.cost + (row.cost_usd ?? 0) }), { tokens: 0, cost: 0 });
