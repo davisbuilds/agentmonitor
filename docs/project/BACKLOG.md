@@ -117,6 +117,18 @@ so later readers know what still needs checking.
   Unchanged files are cached; deploying a parser alone does not recover history.
   Live reparse and expanded retention remain separate rollout decisions.
 
+#### Codex inter-agent messages are not projected
+- **What**: Codex rollouts record messages between agents as
+  `response_item/agent_message`, each with an author and recipient, beside
+  `inter_agent_communication_metadata`. The session browser shows neither, so a
+  parent's transcript omits what it sent to and heard from its subagents.
+- **Why or evidence**: 2026-10-26 inventory of local rollouts; the types are
+  listed as known-unused in `src/parser/record-types.ts`, so the ingestion probe
+  reports them under `known_unused`.
+- **Next**: decide whether these are transcript content (an author/recipient
+  message kind) or lineage metadata. Then project them like other messages, and
+  check how the subagent boundary treats them.
+
 #### Codex subagent boundary rests on the current rollout layout
 - **What**: the importer finds a `thread_spawn` subagent's own activity from
   UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out

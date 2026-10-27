@@ -998,6 +998,17 @@ The result records the resolved roots and exclusions in `observations.discovery`
 These are the probe's settings, not verified settings of the running server;
 provide the service's scope when investigating its ingestion state.
 
+Each source's `record_types` tallies the lines of every discovered transcript
+against `src/parser/record-types.ts`, in three buckets:
+- `read`: types a parser or check consumes;
+- `known_unused`: types skipped on purpose, each with a stated reason;
+- `unknown`: types that are neither.
+
+A type in `unknown` is a harness format change no parser looks at yet. Decide
+whether to read it, then list it in one of the two sets; the record-types test
+fails when a parser branches on a type that is not listed as read. Lines that
+are not JSON or carry no type count as `untyped`. Only counts leave the worker.
+
 Re-sync removes its copied transcripts and scratch database after success,
 failure, deadline expiry, or handled interruption. Parent-side cleanup runs after
 the worker exits, including when it is killed. `--retain-transcripts` explicitly

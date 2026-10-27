@@ -136,7 +136,11 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
         // Discovery joins paths under HOME, so state is keyed the same way.
         return file;
       });
-      const [stamped, unstamped, , touched] = transcripts;
+      const [stamped, unstamped, newTranscript, touched] = transcripts;
+      // A read type and one no parser knows: the unknown one must be reported.
+      fs.writeFileSync(newTranscript, '{"type":"user"}\n{"type":"brand-new-record"}\n');
+      fs.writeFileSync(path.join(home, '.codex', 'sessions', 'rollout-probe.jsonl'),
+        '{"type":"session_meta","payload":{}}\n{"type":"event_msg","payload":{"type":"agent_reasoning_v2"}}\n');
       const copy = path.join(home, 'probe.db');
       fs.copyFileSync(fixture, copy);
       const db = new Database(copy);
@@ -159,6 +163,10 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.equal(claude.discovered, 4);
       assert.deepEqual(claude.import_state, { unchanged: 1, changed_since_import: 1, unstamped: 1, invalidated: 0, never_imported: 1 });
       assert.deepEqual(claude.watcher, { parsed: 1, skipped: 0, error: 0, unwatched: 3 });
+      const types = (source: unknown) => (source as { record_types: { untyped: number; read: object; unknown: object } }).record_types;
+      assert.deepEqual(types(claude), { lines: 5, untyped: 3, read: { user: 1 }, known_unused: {}, unknown: { 'brand-new-record': 1 } });
+      assert.deepEqual(types(result.observations.codex).unknown, { 'event_msg/agent_reasoning_v2': 1 });
+      assert.deepEqual(types(result.observations.codex).read, { session_meta: 1 });
       assert.deepEqual(result.observations.discovery, {
         claude_dir: path.join(home, '.claude'), codex_home: path.join(home, '.codex'),
         exclude_patterns: ['excluded'], matches_running_service: 'unknown',
@@ -179,6 +187,7 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       ], { encoding: 'utf8' })));
       assert.equal(fromCli.status, 'observed');
       assert.equal(fromCli.observations.claude.discovered, 3);
+      assert.deepEqual(fromCli.observations.claude.record_types.unknown, {}, 'the excluded transcript held the only unknown type');
       assert.deepEqual(fromCli.observations.discovery.exclude_patterns, ['excluded', 'new.jsonl']);
 
 

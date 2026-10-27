@@ -24,8 +24,12 @@ export const probes = [
   {
     id: 'ingestion',
     target: 'installed',
-    description: 'Import and watcher state against the transcripts discoverable now: unstamped, pending, unwatched, and missing browser projections',
-    limits: ['Counts and resolved discovery scope only; no transcript content or individual file paths', 'Claude and Codex transcripts; Antigravity is not inspected'],
+    description: 'Import and watcher state against the transcripts discoverable now: unstamped, pending, unwatched, missing browser projections, and record types the parsers do not know',
+    limits: [
+      'Counts and resolved discovery scope only; no transcript content or individual file paths',
+      'Claude and Codex transcripts; Antigravity is not inspected',
+      'Record types are tallied against src/parser/record-types.ts: read, known but unused, and unknown',
+    ],
     deadline_ms: 60_000,
   },
   {
