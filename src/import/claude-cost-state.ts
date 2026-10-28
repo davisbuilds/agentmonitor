@@ -196,7 +196,14 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
       // The checkpoint does not split cache writes by TTL, so its writes take
       // the 1-hour share amon stored for the model (none: the 5-minute rate).
       const share1h = row && row.cache_write > 0 ? row.cache_write_1h / row.cache_write : 0;
-      const priced = pricingRegistry.calculate(model, {
+      // A tier is chosen per request by its prompt size, and the checkpoint
+      // holds only the session's totals. Within the lowest threshold no request
+      // can have crossed it; past it, the totals cannot say which tier each paid.
+      // Every dated period's tiers, the base period's (the inline tiers) among them.
+      const thresholds = (pricingRegistry.lookup(model)?.periods ?? [])
+        .flatMap(period => period.tiers ?? []).map(tier => tier.abovePromptTokens);
+      const prompt = usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
+      const priced = thresholds.some(threshold => prompt > threshold) ? null : pricingRegistry.calculate(model, {
         input: usage.input_tokens,
         output: usage.output_tokens,
         cacheRead: usage.cache_read_tokens,

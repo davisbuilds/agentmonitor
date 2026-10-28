@@ -207,6 +207,32 @@ describe('checkClaudeTranscriptCosts', () => {
     assert.ok(close(opus.rate_ratio, 1), `rate ${opus.rate_ratio}`);
   });
 
+  // Haiku 5.5 bills a request whose prompt passes 100K at 5x. A checkpoint holds
+  // only the session's totals, so they cannot say which tier each request paid.
+  test('a tiered model whose checkpoint total passes its threshold is not repriced as one request', () => {
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-haiku-5-5', { cr: 120_000, cw: 0, cost: 0.0012 }),
+    ]));
+    importedUsage('claude-haiku-5-5', { cr: 60_000, cw: 0, cw1h: 0, cost: 0.0006 }, 'haiku-1');
+    importedUsage('claude-haiku-5-5', { cr: 60_000, cw: 0, cw1h: 0, cost: 0.0006 }, 'haiku-2');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    assert.equal(check.models[0].harness_tokens_cost_usd, null);
+    assert.equal(check.models[0].coverage, null);
+    assert.equal(check.models[0].rate_ratio, null);
+    assert.equal(check.coverage, null);
+  });
+
+  test('a tiered model whose checkpoint total stays within its threshold is priced at its base rate', () => {
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-haiku-5-5', { cr: 80_000, cw: 0, cost: 0.0008 }),
+    ]));
+    importedUsage('claude-haiku-5-5', { cr: 40_000, cw: 0, cw1h: 0, cost: 0.0004 }, 'haiku-1');
+    importedUsage('claude-haiku-5-5', { cr: 40_000, cw: 0, cw1h: 0, cost: 0.0004 }, 'haiku-2');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    assert.ok(close(check.models[0].coverage, 1), `coverage ${check.models[0].coverage}`);
+    assert.ok(close(check.models[0].rate_ratio, 1), `rate ${check.models[0].rate_ratio}`);
+  });
+
   test('a model amon cannot price has no coverage, and neither does its session', () => {
     const line = usageLine('claude-sonnet-5-5', { cr: 1_000_000, cw: 0, cost: 0.1 });
     const usage = line.modelUsage as Record<string, unknown>;

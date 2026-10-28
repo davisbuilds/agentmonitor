@@ -425,7 +425,9 @@ the build.
   - **Where the rates disagree, the harness is the outlier.** Claude Code
     (2.1.311) bills Sonnet 5.5 cache reads at 0.1x base input. Anthropic's
     pricing page says 0.05x, which amon uses, so Sonnet 5.5 sessions read low
-    at full coverage. Its side-model rates (Haiku 4.5, Haiku 5.5) also differ.
+    at full coverage. Side-model rates cannot be compared this way: amon holds
+    no rows to give their cache-write TTL, and a tiered model's session totals
+    cannot be repriced (see OPERATIONS).
   - **Side models are never in a transcript.** Haiku requests, for example
     WebFetch summarizing a page, have near-zero coverage. They are a fraction
     of a percent of cost in long sessions, but up to about a third in a short

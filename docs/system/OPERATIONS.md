@@ -506,7 +506,11 @@ it and read low.
     Sonnet 5.5 session reads a ratio below 1 at full coverage.
 
   The checkpoint does not split cache writes by TTL, so they take the 1-hour
-  share amon stored for that model.
+  share amon stored for that model. A prompt-size tier is chosen per request,
+  and the checkpoint holds only totals. So a tiered model (Claude Haiku 5.5,
+  for example) is priced only while its total prompt stays within the lowest
+  threshold, where no request can have crossed it. Past that, it reports no
+  coverage, and neither does its session.
 - **Scope.** It reads only the newest `--limit` top-level transcripts, and
   writes nothing.
 
