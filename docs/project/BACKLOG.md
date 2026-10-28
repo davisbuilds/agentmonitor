@@ -322,13 +322,14 @@ the build.
 ### Pricing
 
 #### Some stored rates disagree with the vendors' live pricing pages
-- **What**: no model with recent usage is unpriced any more: Claude Haiku 5.5
+- **What**: no model with recent usage is unpriced. Claude Haiku 5.5
   (prompt-length tiered at 100K) and `gpt-5.6-cyber` were priced 2026-10-09 from
-  the vendors' live pages. The same day Sonnet 5.5 cache reads were corrected
-  from $0.20 to $0.10/MTok (the page's "0.05x the base input price"). Open items:
-  - **Stored Sonnet 5.5 costs**: `estimated` costs stored before the correction
-    used the $0.20 cache-read rate. Startup only fills NULL costs, so they need a
-    full recalc, not `--missing-only`. `reported` costs are never rewritten.
+  the vendors' live pages, and Sonnet 5.5 cache reads were corrected to
+  $0.10/MTok; a full `costs recalc --dry-run` on 2026-10-27 changed no row, so the
+  stored estimates already carry it. On 2026-10-27 the OpenAI page added GPT-5.4
+  mini and nano (Codex had used mini, billed $0 as unpriced), GPT-6.1 Terra, and
+  the >272K tier of GPT-5.5, GPT-5.5 Pro, GPT-5.4 and GPT-5.4 Pro, which had been
+  priced flat. Open items:
   - **GPT-5.6 cache writes**: the OpenAI page (checked 2026-09-23, again
     2026-10-09) lists a 1.25x cache-write column for every GPT-5.6 and GPT-6
     model, while `codex.json` bills GPT-5.6 Sol, Terra and Luna cache writes at
@@ -340,10 +341,11 @@ the build.
     could encode the promo.
 - **Why it matters**: a wrong rate is as silent as a missing one: the dashboard
   stays plausible.
-- **Next**: once the Sonnet 5.5 correction is running, run
-  `amon costs recalc --dry-run --json` and confirm that only Sonnet 5.5 rows
-  move, then apply it. Reconcile the GPT-5.6 cache-write column before Codex
-  starts emitting cache-write tokens.
+- **Next**: reconcile the GPT-5.6 cache-write column before Codex starts
+  emitting cache-write tokens. To find what bills $0, list stored models that
+  `pricingRegistry.calculate` cannot price; on 2026-10-27 the only ones with
+  usage were `codex-auto-review` (no public rate) and benchmark ids carrying an
+  effort suffix, which `import benchmark` strips before pricing.
 
 #### Processing-service tier is not captured with usage events
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not

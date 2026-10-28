@@ -760,6 +760,13 @@ describe('PricingRegistry', () => {
         { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 5], long: [10, 45, 1, 10] },
         { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 2], long: [4, 18, 0.4, 4] },
         { model: 'gpt-5.6-luna', base: [0.2, 1.2, 0.02, 0.2], long: [0.4, 1.8, 0.04, 0.4] },
+        // Pricing page (2026-10-27): GPT-6.1 Terra, and the 272K tier of GPT-5.5
+        // and GPT-5.4, which have no cache-write price.
+        { model: 'gpt-6.1-terra', base: [1, 5, 0.05, 1.25], long: [2, 7.5, 0.1, 2.5] },
+        { model: 'gpt-5.5', base: [5, 30, 0.5, 0], long: [10, 45, 1, 0] },
+        { model: 'gpt-5.5-pro', base: [30, 180, 0, 0], long: [60, 270, 0, 0] },
+        { model: 'gpt-5.4', base: [2.5, 15, 0.25, 0], long: [5, 22.5, 0.5, 0] },
+        { model: 'gpt-5.4-pro', base: [30, 180, 0, 0], long: [60, 270, 0, 0] },
       ] as const;
 
       for (const { model, base, long } of cases) {
@@ -780,6 +787,20 @@ describe('PricingRegistry', () => {
         const expectedLong = (190_001 * long[0] + 100_000 * long[1] + 72_000 * long[2] + 10_000 * long[3]) / 1_000_000;
         assert.ok(Math.abs(atBoundary - expectedBase) < 0.000001, `${model} base got ${atBoundary}`);
         assert.ok(Math.abs(aboveBoundary - expectedLong) < 0.000001, `${model} long got ${aboveBoundary}`);
+      }
+    });
+
+    test('GPT-5.4 mini and nano bill at one rate with no long-context tier', () => {
+      // Pricing page (2026-10-27). Codex used GPT-5.4 mini, which billed $0 unpriced.
+      for (const { model, rates } of [
+        { model: 'gpt-5.4-mini', rates: [0.75, 4.5, 0.075] },
+        { model: 'gpt-5.4-nano', rates: [0.2, 1.25, 0.02] },
+      ] as const) {
+        for (const input of [190_000, 400_000]) {
+          const cost = registry.calculate(model, { input, output: 100_000, cacheRead: 72_000 });
+          const expected = (input * rates[0] + 100_000 * rates[1] + 72_000 * rates[2]) / 1_000_000;
+          assert.ok(cost !== null && Math.abs(cost - expected) < 0.000001, `${model} at ${input} got ${cost}`);
+        }
       }
     });
 
