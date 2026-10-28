@@ -600,6 +600,7 @@ function parseLogRecord(
   const sessionId =
     getAttr(logRecord.attributes, 'gen_ai.session.id')
     ?? getAttr(logRecord.attributes, 'conversation.id')
+    ?? getAttr(logRecord.attributes, 'session.id') // Claude Code
     ?? getAttr(resourceAttrs, 'session.id')
     ?? getAttr(resourceAttrs, 'gen_ai.session.id')
     ?? getAttr(resourceAttrs, 'conversation.id')
@@ -1141,7 +1142,7 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
   for (const rm of payload.resourceMetrics) {
     const resourceAttrs = rm.resource?.attributes;
     const agentType = resolveServiceName(resourceAttrs);
-    const sessionId =
+    const resourceSessionId =
       getAttr(resourceAttrs, 'gen_ai.session.id')
       ?? getAttr(resourceAttrs, 'session.id')
       ?? getAttr(resourceAttrs, 'conversation.id')
@@ -1160,6 +1161,8 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
         const isUsage = TOKEN_METRICS.has(metricName) || COST_METRICS.has(metricName);
 
         for (const dp of dataPoints) {
+          // Claude Code names the session on each point, not on the resource.
+          const sessionId = getAttr(dp.attributes, 'session.id') ?? resourceSessionId;
           const rawValue = getDataPointValue(dp);
           // Retry identity of this data point, shared by usage and operational
           // points; absent without a time (see "Retry identity" above).

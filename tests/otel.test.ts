@@ -1857,3 +1857,69 @@ describe('Codex OTLP integration', () => {
     assert.equal(events.events[0].tokens_in, 750);
   });
 });
+
+// ─── Claude Code's session id ──────────────────────────────────────────
+
+// Claude Code (2.1.311, observed 2026-10-27) puts `session.id` on each metric
+// data point and log record, never on the resource, and sends its log
+// attributes under plain names (`cost_usd`, `input_tokens`), as strings.
+describe('Claude Code OTEL is stored under the session it names', () => {
+  const sessionAttr = (id: string) => ({ key: 'session.id', value: { stringValue: id } });
+  const monitorStats = async () =>
+    (await fetch(`${baseUrl}/api/v2/monitor/stats?agent=claude_code`)).json() as Promise<Record<string, number>>;
+  const costMetric = (session: string, cost: number) => buildMetricsPayload({
+    serviceName: 'claude-code',
+    metrics: [
+      { name: 'claude_code.cost.usage', dataPoints: [{ value: cost, attributes: [sessionAttr(session), { key: 'model', value: { stringValue: 'claude-opus-5-5' } }] }] },
+      { name: 'claude_code.token.usage', dataPoints: [{ value: 100, attributes: [sessionAttr(session), { key: 'model', value: { stringValue: 'claude-opus-5-5' } }, { key: 'type', value: { stringValue: 'input' } }] }] },
+    ],
+  });
+
+  test('a metric point carrying its session id is stored under that session', async () => {
+    assert.equal((await postJson(`${baseUrl}/api/otel/v1/metrics`, costMetric('sess-cc-point', 3))).status, 200);
+    const events = await getEvents();
+    assert.ok(events.total > 0);
+    assert.deepEqual([...new Set(events.events.map(e => e.session_id))], ['sess-cc-point']);
+  });
+
+  test('a log record carrying its session id is stored under that session', async () => {
+    const payload = buildLogPayload({
+      serviceName: 'claude-code',
+      logRecords: [{ eventName: 'claude_code.user_prompt', attributes: [sessionAttr('sess-cc-log')] }],
+    });
+    assert.equal((await postJson(`${baseUrl}/api/otel/v1/logs`, payload)).status, 200);
+    const events = await getEvents();
+    assert.equal(events.total, 1);
+    assert.equal(events.events[0].session_id, 'sess-cc-log');
+  });
+
+  test('the transcript import covers metric usage of the same session', async () => {
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, costMetric('sess-cc-covered', 3));
+    (getDb!() as unknown as { prepare: (sql: string) => { run: (...args: unknown[]) => void } }).prepare(`
+      INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, cost_usd, source, client_timestamp)
+      VALUES ('cc-import', 'sess-cc-covered', 'claude_code', 'llm_response', 'success', 100, 3, 'import', '2023-11-14T22:20:00.000Z')
+    `).run();
+    const stats = await monitorStats();
+    assert.equal(stats.total_cost_usd, 3);
+    assert.equal(stats.total_tokens_in, 100);
+  });
+
+  test('a request reported by both its api_request log and its metrics is counted once', async () => {
+    await postJson(`${baseUrl}/api/otel/v1/metrics`, costMetric('sess-cc-both', 3));
+    await postJson(`${baseUrl}/api/otel/v1/logs`, buildLogPayload({
+      serviceName: 'claude-code',
+      logRecords: [{
+        eventName: 'claude_code.api_request',
+        attributes: [
+          sessionAttr('sess-cc-both'),
+          { key: 'model', value: { stringValue: 'claude-opus-5-5' } },
+          { key: 'cost_usd', value: { stringValue: '3' } },
+          { key: 'input_tokens', value: { stringValue: '100' } },
+        ],
+      }],
+    }));
+    const stats = await monitorStats();
+    assert.equal(stats.total_cost_usd, 3);
+    assert.equal(stats.total_tokens_in, 100);
+  });
+});
