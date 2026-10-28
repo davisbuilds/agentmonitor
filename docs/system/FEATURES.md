@@ -230,8 +230,10 @@ Monitor's today and 30-day figures.
   twice as high. `amon costs check-claude-sessions` compares imported cost with
   Claude Code's own running cost for each session the statusline bridge has
   reported; expect a ratio a little under 1, because the harness also pays for
-  requests that never reach a transcript, such as compaction. How that
-  shortfall splits between them is unmeasured (see BACKLOG).
+  requests that never reach a transcript, such as compaction. Its `coverage`
+  prices the harness's own tokens at amon's rates, so it separates usage amon
+  does not hold from a disagreement about rates (see BACKLOG for the measured
+  split).
   `amon costs check-sessions` runs the same comparison for every source against
   its harness's own total: Claude's `cost-state` checkpoint in dollars, Codex's
   thread total in tokens. Antigravity is reported as recording none.
