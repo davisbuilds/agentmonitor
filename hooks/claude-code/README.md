@@ -250,32 +250,31 @@ observed-empty result.
 
 ## Alternative: OpenTelemetry Mode
 
-Instead of hook scripts, you can use Claude Code's native OTel export. This sends telemetry directly to AgentMonitor without any hook configuration.
+Claude Code can also export OpenTelemetry. AgentMonitor already bills every
+Claude request from the session transcript, so OTEL usage the import covers is
+counted once, and OTEL mostly adds a live lead of seconds and usage for
+sessions whose transcript never reaches this machine. AgentMonitor stores only
+the token and cost metrics; see the Backlog entry "Claude Code OTEL stays off"
+for the measured trade-off.
 
-Set these environment variables before launching Claude Code:
+To enable it, export metrics only:
 
 ```bash
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export OTEL_METRICS_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
 export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3141/api/otel
+export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://127.0.0.1:3141/api/otel/v1/metrics
 ```
 
-Or add them to your shell profile (`~/.bashrc`, `~/.zshrc`):
+Logs (`OTEL_LOGS_EXPORTER=otlp`) carry no usage AgentMonitor reads and roughly
+double the stored rows. Leave traces off: the traces route does not ingest
+spans yet.
 
-```bash
-# AgentMonitor OTel integration
-export CLAUDE_CODE_ENABLE_TELEMETRY=1
-export OTEL_METRICS_EXPORTER=otlp
-export OTEL_LOGS_EXPORTER=otlp
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/json
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3141/api/otel
-```
+**OTel vs Hooks:** Both integration paths can run simultaneously. Hooks give you
+safety checks (PreToolUse) and custom event shaping; OTEL metrics give the live
+token and cost lead.
 
-**OTel vs Hooks:** Both integration paths can run simultaneously. OTel captures richer data (token counts, model info, cost) automatically, while hooks give you safety checks (PreToolUse) and custom event shaping. Use both for full coverage.
-
-**Note:** Only JSON format is currently supported. Protobuf support is planned.
+**Note:** Only JSON format is currently supported. Protobuf requests get a 415.
 
 ## Environment Variables
 
@@ -284,7 +283,7 @@ export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:3141/api/otel
 | `AGENTMONITOR_URL` | `http://127.0.0.1:3141` | AgentMonitor server URL |
 | `AGENTMONITOR_SAFETY` | `1` | Set to `0` to disable safety checks |
 | `CLAUDE_CODE_ENABLE_TELEMETRY` | (unset) | Set to `1` to enable OTel export |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | (unset) | AgentMonitor OTLP endpoint base URL |
+| `OTEL_EXPORTER_OTLP_METRICS_ENDPOINT` | (unset) | AgentMonitor OTLP metrics endpoint |
 
 ## Requirements
 

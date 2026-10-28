@@ -345,6 +345,11 @@ read time, by one rule for every source:
 - OTEL usage the import has not reached yet, the live tail, still counts;
 - raw rows remain available to monitoring and session history.
 
+The rule matches rows by session id. Claude Code names the session on each
+metric point and log record (`session.id`), not on the resource, so the parser
+reads it there before falling back to the resource; a metric with neither is
+stored under `unknown`, which no import can cover.
+
 A Codex OTEL row is dated at its request. A metric usage row, such as Claude
 Code's cost and token metrics, is dated at the start of the interval it covers:
 a delta point's start time, a cumulative point's previous point. The first
