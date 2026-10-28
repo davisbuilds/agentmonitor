@@ -95,7 +95,8 @@ describe('checkClaudeTranscriptCosts', () => {
     assert.equal(check.harness_cost_usd, 4.5);
     assert.equal(check.amon_cost_usd, 3, 'usage after the checkpoint is not compared with it');
     assert.equal(check.ratio, 3 / 4.5);
-    assert.deepEqual(check.models.find(m => m.model === 'claude-opus-5-5'), {
+    const opus = check.models.find(m => m.model === 'claude-opus-5-5')!;
+    assert.deepEqual({ model: opus.model, harness_cost_usd: opus.harness_cost_usd, amon_cost_usd: opus.amon_cost_usd, ratio: opus.ratio }, {
       model: 'claude-opus-5-5', harness_cost_usd: 4, amon_cost_usd: 3, ratio: 0.75,
     });
     assert.deepEqual(check.missing_models, ['claude-haiku-4-5-20251001']);
@@ -161,6 +162,90 @@ describe('checkClaudeTranscriptCosts', () => {
     const [check] = checkClaudeTranscriptCosts({ claudeDir });
     assert.equal(check.unpriced_rows, 1);
     assert.equal(check.ratio, null);
+  });
+
+  // The harness's own tokens priced at amon's rates separate usage amon does not
+  // hold (coverage) from a disagreement about what a token costs (rate_ratio).
+  const usageLine = (model: string, u: { cr: number; cw: number; cost: number }): Line => ({
+    type: 'cost-state', sessionId: SESSION, totalCostUSD: u.cost, startTime: Date.parse('2026-10-20T00:00:00.000Z'),
+    modelUsage: { [model]: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: u.cr, cacheCreationInputTokens: u.cw, costUSD: u.cost } },
+  });
+  const importedUsage = (model: string, u: { cr: number; cw: number; cw1h: number; cost: number }, id: string) => insertEvent({
+    event_id: id, session_id: SESSION, agent_type: 'claude_code', event_type: 'llm_response', status: 'success',
+    tokens_in: 0, tokens_out: 0, cache_read_tokens: u.cr, cache_write_tokens: u.cw, cache_write_1h_tokens: u.cw1h,
+    model, cost_usd: u.cost, source: 'import', client_timestamp: '2026-10-21T09:00:00.000Z', metadata: null,
+  });
+  const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-9;
+
+  test('a harness that bills more per token reads as a rate disagreement, not missing usage', () => {
+    // Sonnet 5.5 cache reads: the pricing page's $0.10/MTok, which Claude Code bills at $0.20.
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-sonnet-5-5', { cr: 1_000_000, cw: 0, cost: 0.2 }),
+    ]));
+    importedUsage('claude-sonnet-5-5', { cr: 1_000_000, cw: 0, cw1h: 0, cost: 0.1 }, 'sonnet');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    const sonnet = check.models[0];
+    assert.ok(close(sonnet.ratio, 0.5));
+    assert.ok(close(sonnet.harness_tokens_cost_usd, 0.1));
+    assert.ok(close(sonnet.coverage, 1), `coverage ${sonnet.coverage}`);
+    assert.ok(close(sonnet.rate_ratio, 0.5), `rate ${sonnet.rate_ratio}`);
+    assert.ok(close(check.coverage, 1));
+    assert.ok(close(check.rate_ratio, 0.5));
+  });
+
+  test('usage amon does not hold reads as coverage below 1, cache writes at the rate amon stored them', () => {
+    // Opus 5.5: cache read $0.20, 1-hour cache write $8 per MTok. amon holds
+    // half the reads; its cache writes are all 1-hour, so the harness's are priced so.
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-opus-5-5', { cr: 2_000_000, cw: 100_000, cost: 1.2 }),
+    ]));
+    importedUsage('claude-opus-5-5', { cr: 1_000_000, cw: 100_000, cw1h: 100_000, cost: 1 }, 'opus');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    const opus = check.models[0];
+    assert.ok(close(opus.harness_tokens_cost_usd, 1.2), `priced ${opus.harness_tokens_cost_usd}`);
+    assert.ok(close(opus.coverage, 1 / 1.2), `coverage ${opus.coverage}`);
+    assert.ok(close(opus.rate_ratio, 1), `rate ${opus.rate_ratio}`);
+  });
+
+  // Haiku 5.5 bills a request whose prompt passes 100K at 5x. A checkpoint holds
+  // only the session's totals, so they cannot say which tier each request paid.
+  test('a tiered model whose checkpoint total passes its threshold is not repriced as one request', () => {
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-haiku-5-5', { cr: 120_000, cw: 0, cost: 0.0012 }),
+    ]));
+    importedUsage('claude-haiku-5-5', { cr: 60_000, cw: 0, cw1h: 0, cost: 0.0006 }, 'haiku-1');
+    importedUsage('claude-haiku-5-5', { cr: 60_000, cw: 0, cw1h: 0, cost: 0.0006 }, 'haiku-2');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    assert.equal(check.models[0].harness_tokens_cost_usd, null);
+    assert.equal(check.models[0].coverage, null);
+    assert.equal(check.models[0].rate_ratio, null);
+    assert.equal(check.coverage, null);
+  });
+
+  test('a tiered model whose checkpoint total stays within its threshold is priced at its base rate', () => {
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
+      assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-haiku-5-5', { cr: 80_000, cw: 0, cost: 0.0008 }),
+    ]));
+    importedUsage('claude-haiku-5-5', { cr: 40_000, cw: 0, cw1h: 0, cost: 0.0004 }, 'haiku-1');
+    importedUsage('claude-haiku-5-5', { cr: 40_000, cw: 0, cw1h: 0, cost: 0.0004 }, 'haiku-2');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    assert.ok(close(check.models[0].coverage, 1), `coverage ${check.models[0].coverage}`);
+    assert.ok(close(check.models[0].rate_ratio, 1), `rate ${check.models[0].rate_ratio}`);
+  });
+
+  test('a model amon cannot price has no coverage, and neither does its session', () => {
+    const line = usageLine('claude-sonnet-5-5', { cr: 1_000_000, cw: 0, cost: 0.1 });
+    const usage = line.modelUsage as Record<string, unknown>;
+    usage['claude-unknown-9'] = { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 1_000_000, cacheCreationInputTokens: 0, costUSD: 1 };
+    fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([assistant('2026-10-21T10:00:00.000Z'), { ...line, totalCostUSD: 1.1 }]));
+    importedUsage('claude-sonnet-5-5', { cr: 1_000_000, cw: 0, cw1h: 0, cost: 0.1 }, 'sonnet');
+    const [check] = checkClaudeTranscriptCosts({ claudeDir });
+    const unknown = check.models.find(m => m.model === 'claude-unknown-9')!;
+    assert.equal(unknown.coverage, null);
+    assert.equal(unknown.rate_ratio, null);
+    assert.ok(close(check.models.find(m => m.model === 'claude-sonnet-5-5')!.coverage, 1));
+    assert.equal(check.coverage, null, 'the priced model alone is not the session');
+    assert.equal(check.rate_ratio, null);
   });
 
   test('subagent transcripts are not sessions of their own', () => {

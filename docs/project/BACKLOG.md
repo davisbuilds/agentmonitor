@@ -412,35 +412,49 @@ the build.
 
 #### Imported Claude cost runs below Claude Code's own running cost, inside the main models
 - **What**: imported Claude cost reads a few percent below Claude Code's own
-  figure. The shortfall is inside the main models, not in side requests.
+  figure. On the main models the rates agree, so the shortfall is usage the
+  transcripts never record. About two fifths of it is compactions; the rest is
+  unidentified.
 - **Why or evidence**:
   - **History.** After the 2026-09-27 repair, sessions read about 10-15% below
     the harness. Billing 1-hour cache writes at their own rate (2026-10-04)
-    closed about half of that.
-  - **Measured 2026-10-26** with `amon costs check-claude-sessions --transcripts`,
-    against each transcript's own `cost-state` checkpoint, over the recent
-    sessions that carry one:
-    - imported cost is 0.962 of the harness's, weighted by cost;
-    - the median session reads 0.98, and all but one read 0.85-1.00;
-    - the side-request models (Haiku) are about 0.1% of the harness's cost and
-      explain about 3% of the gap. No transcript, including the subagents',
-      records them in the window.
-
-    The rest is on the main models: in one long session, transcripts record
-    about 2-5% of the uncached input and 90-97% of the output that the harness
-    billed.
-  - **Compactions** are the measured candidate. Their records carry
-    `preTokens`/`postTokens` but no usage. Pricing one session's compactions
-    from those sizes covered roughly 12-55% of its gap (2026-09-27).
+    closed about half of that. On 2026-10-26 imported cost was 0.962 of the
+    harness's, weighted by cost.
+  - **Rates agree on the main models (2026-10-27).** Pricing each checkpoint's
+    own tokens at amon's rates reproduces the harness's cost to within 0.1% on
+    Opus 5.5, Opus 4.8, Opus 5, Sonnet 5 and Fable 5.1. `costs check-sessions`
+    now reports this as `coverage` beside the ratio.
+  - **Where the rates disagree, the harness is the outlier.** Claude Code
+    (2.1.311) bills Sonnet 5.5 cache reads at 0.1x base input. Anthropic's
+    pricing page says 0.05x, which amon uses, so Sonnet 5.5 sessions read low
+    at full coverage. Side-model rates cannot be compared this way: amon holds
+    no rows to give their cache-write TTL, and a tiered model's session totals
+    cannot be repriced (see OPERATIONS).
+  - **Side models are never in a transcript.** Haiku requests, for example
+    WebFetch summarizing a page, have near-zero coverage. They are a fraction
+    of a percent of cost in long sessions, but up to about a third in a short
+    one.
+  - **Main-model coverage is about 0.96, weighted by cost.** Pricing each
+    compaction in the window as a request that reads `preTokens` from cache
+    and writes `postTokens` of output explains about 42% of the main-model gap.
+    That covers about 91% of the missing output, but only about 19% of the
+    missing cache reads. Sessions with no compaction still read 1-3.6% low.
+  - **Auto mode's permission classifier is a candidate, unconfirmed.** Sessions
+    mostly in auto mode keep a 3-4% residual after compactions. Sessions that
+    bypass permissions range from 0 to 3.4%. A headless `claude -p` run in auto
+    mode logged only `sdk` requests, all of them in its transcript, so it
+    neither confirms nor rules this out for interactive sessions.
   - **Retracted.** The earlier "0.05 resumed session" reading and a 3-19x
     reading on 2026-10-26 were both window errors. `cost-state` totals restart
     when a process does not restore the session's cost state, and its
     `startTime` says when.
-- **Next**: split the main-model gap per compaction. Either take the
-  checkpoint's cost jump across each compaction window, or use Claude Code's
-  OTEL `api_request` export, which records every request. The latter needs an
-  overlap rule against the import first, or the Monitor double-counts.
-- **Revisit when**: the weighted ratio drifts outside about 0.9-1.0, or a
+- **Next**: identify the unrecorded main-model requests. Export one
+  interactive session's OTEL logs to a scratch collector, not the live amon,
+  and compare its `api_request` records per `query_source` with the
+  transcript; the `repl_main_thread` records should match it one for one. If
+  compactions or a named source account for the rest, decide whether to
+  estimate them with explicit provenance or to disclose the gap.
+- **Revisit when**: weighted coverage drifts outside about 0.9-1.0, or a
   decision rests on the absolute size of Claude cost.
 
 #### The warehouse export still buckets UTC days

@@ -495,6 +495,22 @@ it and read low.
   - **Not imported:** the transcripts record it, so the import missed it. For
     example, the session is excluded by `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS`, or
     it was imported with a date filter.
+- **Coverage and rate.** The checkpoint's cost is Claude Code's own price, which
+  can disagree with the pricing page. So each model and session also prices
+  the checkpoint's own tokens at amon's rates:
+  - `coverage` is amon's cost over that figure: the share of the usage the
+    harness billed that amon holds;
+  - `rate` is that figure over the harness's cost: below 1, the harness bills
+    more per token than amon's rate card. Claude Code 2.1.311 bills Sonnet 5.5
+    cache reads at 0.1x base input where Anthropic's page says 0.05x, so a
+    Sonnet 5.5 session reads a ratio below 1 at full coverage.
+
+  The checkpoint does not split cache writes by TTL, so they take the 1-hour
+  share amon stored for that model. A prompt-size tier is chosen per request,
+  and the checkpoint holds only totals. So a tiered model (Claude Haiku 5.5,
+  for example) is priced only while its total prompt stays within the lowest
+  threshold, where no request can have crossed it. Past that, it reports no
+  coverage, and neither does its session.
 - **Scope.** It reads only the newest `--limit` top-level transcripts, and
   writes nothing.
 
@@ -513,8 +529,10 @@ total its harness records itself:
   - `no_thread_total` for a Codex rollout from before 0.154;
   - `not_imported` when amon holds no import rows for it.
 - **Summary.** Each source reports how many recent sessions were checked, and
-  the minimum, median and maximum ratio. `--json` adds each session's row,
-  with Claude's per-model split under `detail`.
+  the minimum, median and maximum ratio. Claude also reports the spread of
+  `coverage`, and each Claude row carries `coverage` and `rate_ratio`.
+  `--json` adds each session's row, with Claude's per-model split under
+  `detail`.
 - **Reading a Codex ratio below 1.** On a rollout still being written, it is
   the import's lag, and the next import closes it. On a finished one, it is
   usage the import did not bill. The per-request import (see ARCHITECTURE)

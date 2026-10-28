@@ -137,6 +137,28 @@ test('a Claude session is checked against its cost-state checkpoint, in dollars'
   assert.equal(report.sources['claude-code']?.unit, 'usd');
 });
 
+test('a Claude session reports its coverage apart from a disagreement in rates', () => {
+  // Every token imported, but the harness bills Sonnet 5.5 cache reads at twice amon's rate.
+  const line: Line = {
+    type: 'cost-state', sessionId: CLAUDE, totalCostUSD: 0.2, startTime: Date.parse('2026-10-27T00:00:00.000Z'),
+    modelUsage: { 'claude-sonnet-5-5': { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 1_000_000, cacheCreationInputTokens: 0, costUSD: 0.2 } },
+  };
+  fs.writeFileSync(path.join(claudeProject, `${CLAUDE}.jsonl`), jsonl([assistant('2026-10-27T10:00:00.000Z'), line]));
+  insertEvent({
+    event_id: 'cc-sonnet', session_id: CLAUDE, agent_type: 'claude_code', event_type: 'llm_response', status: 'success',
+    tokens_in: 0, tokens_out: 0, cache_read_tokens: 1_000_000, model: 'claude-sonnet-5-5', cost_usd: 0.1, source: 'import',
+    client_timestamp: '2026-10-27T09:00:00.000Z', metadata: null,
+  });
+  const report = check('claude-code');
+  const row = report.sessions.find(r => r.source === 'claude-code')!;
+  assert.equal(row.ratio, 0.5);
+  assert.equal(row.detail?.coverage, 1);
+  assert.equal(row.detail?.rate_ratio, 0.5);
+  const summary = report.sources['claude-code']!;
+  assert.equal(summary.ratio_median, 0.5);
+  assert.deepEqual([summary.coverage_min, summary.coverage_median, summary.coverage_max], [1, 1, 1]);
+});
+
 test('Antigravity is reported as having no instrument, not as matching', () => {
   const report = check('antigravity');
   assert.deepEqual(report.sources.antigravity, {
