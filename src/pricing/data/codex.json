@@ -1,6 +1,6 @@
 {
   "provider": "openai",
-  "lastUpdated": "2026-10-09T00:00:00Z",
+  "lastUpdated": "2026-10-27T00:00:00Z",
   "models": {
     "gpt-6-astra": {
       "aliases": [],
@@ -33,6 +33,23 @@
           "outputCostPerMTok": 15,
           "cacheReadCostPerMTok": 0.2,
           "cacheWriteCostPerMTok": 5
+        }
+      ]
+    },
+    "gpt-6.1-terra": {
+      "aliases": [],
+      "inputCostPerMTok": 1,
+      "outputCostPerMTok": 5,
+      "cacheReadCostPerMTok": 0.05,
+      "cacheWriteCostPerMTok": 1.25,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 2,
+          "outputCostPerMTok": 7.5,
+          "cacheReadCostPerMTok": 0.1,
+          "cacheWriteCostPerMTok": 2.5
         }
       ]
     },
@@ -148,7 +165,16 @@
       "outputCostPerMTok": 30,
       "cacheReadCostPerMTok": 0.5,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 10,
+          "outputCostPerMTok": 45,
+          "cacheReadCostPerMTok": 1,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gpt-5.5-pro": {
       "aliases": [],
@@ -156,7 +182,16 @@
       "outputCostPerMTok": 180,
       "cacheReadCostPerMTok": 0,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 60,
+          "outputCostPerMTok": 270,
+          "cacheReadCostPerMTok": 0,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gpt-5.4": {
       "aliases": [
@@ -165,6 +200,31 @@
       "inputCostPerMTok": 2.5,
       "outputCostPerMTok": 15,
       "cacheReadCostPerMTok": 0.25,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 5,
+          "outputCostPerMTok": 22.5,
+          "cacheReadCostPerMTok": 0.5,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
+    },
+    "gpt-5.4-mini": {
+      "aliases": [],
+      "inputCostPerMTok": 0.75,
+      "outputCostPerMTok": 4.5,
+      "cacheReadCostPerMTok": 0.075,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gpt-5.4-nano": {
+      "aliases": [],
+      "inputCostPerMTok": 0.2,
+      "outputCostPerMTok": 1.25,
+      "cacheReadCostPerMTok": 0.02,
       "cacheWriteCostPerMTok": 0,
       "deprecated": false
     },
@@ -176,7 +236,16 @@
       "outputCostPerMTok": 180,
       "cacheReadCostPerMTok": 0,
       "cacheWriteCostPerMTok": 0,
-      "deprecated": false
+      "deprecated": false,
+      "tiers": [
+        {
+          "abovePromptTokens": 272000,
+          "inputCostPerMTok": 60,
+          "outputCostPerMTok": 270,
+          "cacheReadCostPerMTok": 0,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
     },
     "gpt-5.3-chat-latest": {
       "aliases": [],
