@@ -182,19 +182,35 @@ so later readers know what still needs checking.
   wanted. Watch openbench #5 (per-attempt cost) — landing it would drop the
   "cost is a floor" honesty caveat. Noted 2026-09-02, updated 2026-09-04.
 
-#### Claude OTEL logs and metrics may double-count each other (hypothesis)
-- **What**: Claude Code can export cost on both its `claude_code.api_request`
-  log events and its `claude_code.cost.usage` metric. If both are enabled, each
-  request may be stored as two OTEL usage rows.
-- **Why or evidence**: unmeasured. Since 2026-10-27 the import-precedence rule
-  excludes both once the session's transcript is imported, so the overlap
-  could only show in the live tail and in sessions the import never sees. The
-  installed store holds almost no Claude OTEL usage, so there is no local data
-  either way.
-- **Next**: with both exporters on, run one request against a scratch database
-  and compare `/api/v2/monitor/stats?agent=claude_code` before and after the
-  next import. If OTEL alone reads twice the request, pick one OTEL instrument
-  per source the way Codex token metrics are skipped in favour of its logs.
+#### Claude Code OTEL stays off: it adds little the import lacks (2026-10-27)
+- **What**: amon ingests Claude Code's OTEL metrics correctly, but the installed
+  Claude Code does not export them, and enabling it is not planned.
+- **Why or evidence**: measured on 2026-10-27 with Claude Code 2.1.311 against a
+  scratch database:
+  - Before the parser fix in the same PR, every metric row was stored under
+    session `unknown` and every log record was dropped. Claude Code puts
+    `session.id` on each point and record, not on the resource, so enabling
+    export would have double-counted Claude cost permanently.
+  - With the fix, each session's metric cost equals its imported cost exactly,
+    and the import covers every metric row once the transcript lands.
+  - Logs and metrics do not double-count: amon stores Claude's `api_request`
+    log with no tokens or cost, because Claude sends `cost_usd` and
+    `input_tokens` under plain names. A test pins "counted once" so a parser
+    that learns those names must deduplicate.
+  - What enabling would add: a live lead of seconds over the file watcher, and
+    usage for sessions whose transcript never reaches this machine. Claude's
+    own cost is already checked through `cost-state` (`amon costs
+    check-sessions`). Active time, lines changed, commits and edit decisions
+    are exported but not stored.
+  - Space: about five rows per session, model and active export interval, each
+    about 1 KB with indexes. At the measured activity that is roughly 7-15% more
+    events rows a day, well under 1% of the database a month. Logs add about
+    as many rows again with no usage in them. Prompts and responses arrive
+    redacted by default; every point carries account identifiers, which amon
+    does not store.
+- **Revisit when**: Claude runs where its transcripts do not reach this machine,
+  or active-time or edit-decision metrics are wanted (that also needs metric
+  ingestion beyond tokens and cost). Enable metrics only.
 
 ### Skill trigger health (2026-07-09)
 
