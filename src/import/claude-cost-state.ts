@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { importedClaudeCostByModel } from '../db/queries.js';
+import { pricingRegistry } from '../pricing/index.js';
 
 export interface ClaudeCostStateModel {
   cost_usd: number;
@@ -105,6 +106,15 @@ export interface ClaudeModelCostCheck {
   amon_cost_usd: number;
   /** amon over the harness; null when the harness billed nothing or amon holds unpriced rows. */
   ratio: number | null;
+  /** The harness's own token counts priced at amon's rates; null when amon cannot price the model. */
+  harness_tokens_cost_usd: number | null;
+  /**
+   * amon's cost over the harness's tokens at amon's rates: how much of the usage
+   * the harness billed amon holds, with any disagreement in rates cancelled out.
+   */
+  coverage: number | null;
+  /** The harness's tokens at amon's rates over the harness's own cost; below 1, the harness bills more per token. */
+  rate_ratio: number | null;
 }
 
 export interface ClaudeTranscriptCostCheck {
@@ -119,6 +129,9 @@ export interface ClaudeTranscriptCostCheck {
   harness_cost_usd: number | null;
   amon_cost_usd: number | null;
   ratio: number | null;
+  /** The session's `coverage` and `rate_ratio`, over its models; null when one cannot be priced. */
+  coverage: number | null;
+  rate_ratio: number | null;
   unpriced_rows: number;
   models: ClaudeModelCostCheck[];
   /** Models the harness billed that neither amon nor the session's transcripts record in the window. */
@@ -165,7 +178,7 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
   return recentSessionFiles(options.claudeDir, options.limit ?? 20).map((file): ClaudeTranscriptCostCheck => {
     const sessionId = path.basename(file, '.jsonl');
     const { checkpoint, sightings } = scanTranscript(fs.readFileSync(file, 'utf-8'));
-    const empty = { harness_cost_usd: null, amon_cost_usd: null, ratio: null, unpriced_rows: 0, models: [], missing_models: [], unimported_models: [] };
+    const empty = { harness_cost_usd: null, amon_cost_usd: null, ratio: null, coverage: null, rate_ratio: null, unpriced_rows: 0, models: [], missing_models: [], unimported_models: [] };
     if (!checkpoint) return { session_id: sessionId, status: 'no_checkpoint', since: null, cut: null, ...empty };
     if (!checkpoint.cut || !checkpoint.since) {
       return { session_id: sessionId, status: 'no_cut', since: checkpoint.since, cut: checkpoint.cut, ...empty };
@@ -180,13 +193,30 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
       (harnessCost > 0 && unpriced === 0 ? amonCost / harnessCost : null);
     const models = Object.entries(checkpoint.models).map(([model, usage]) => {
       const row = amon.get(model);
+      // The checkpoint does not split cache writes by TTL, so its writes take
+      // the 1-hour share amon stored for the model (none: the 5-minute rate).
+      const share1h = row && row.cache_write > 0 ? row.cache_write_1h / row.cache_write : 0;
+      const priced = pricingRegistry.calculate(model, {
+        input: usage.input_tokens,
+        output: usage.output_tokens,
+        cacheRead: usage.cache_read_tokens,
+        cacheWrite: usage.cache_write_tokens,
+        cacheWrite1h: Math.round(usage.cache_write_tokens * share1h),
+      }, checkpoint.cut);
       return {
         model,
         harness_cost_usd: usage.cost_usd,
         amon_cost_usd: row?.cost ?? 0,
         ratio: ratio(row?.cost ?? 0, usage.cost_usd, row?.unpriced ?? 0),
+        harness_tokens_cost_usd: priced,
+        coverage: priced === null ? null : ratio(row?.cost ?? 0, priced, row?.unpriced ?? 0),
+        rate_ratio: priced === null || usage.cost_usd <= 0 ? null : priced / usage.cost_usd,
       };
     });
+    // A session's coverage needs every billed model priced, as its ratio needs every row priced.
+    const billed = models.filter(model => model.harness_cost_usd > 0);
+    const allPriced = billed.every(model => model.harness_tokens_cost_usd !== null);
+    const pricedHarness = billed.reduce((sum, model) => sum + (model.harness_tokens_cost_usd ?? 0), 0);
     const amonCost = rows.reduce((sum, row) => sum + row.cost, 0);
     // A model amon holds no rows for is only unrecorded usage if the
     // transcripts do not record it either; otherwise the import missed it.
@@ -203,6 +233,8 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
       harness_cost_usd: checkpoint.total_cost_usd,
       amon_cost_usd: amonCost,
       ratio: ratio(amonCost, checkpoint.total_cost_usd, unpricedRows),
+      coverage: allPriced ? ratio(amonCost, pricedHarness, unpricedRows) : null,
+      rate_ratio: allPriced && checkpoint.total_cost_usd > 0 ? pricedHarness / checkpoint.total_cost_usd : null,
       unpriced_rows: unpricedRows,
       models,
       missing_models: notInAmon.filter(model => !recorded.has(model)),

@@ -362,9 +362,14 @@ export function registerMaintenanceCommands(): void {
           lines.push(`${name}: checked against ${describe[name]}`);
           if (summary.instrument === null) continue;
           lines.push(`  ${summary.checked} of ${summary.sessions} recent sessions checked; ratio median ${share(summary.ratio_median)} (min ${share(summary.ratio_min)}, max ${share(summary.ratio_max)})`);
+          if (summary.coverage_median !== undefined) {
+            lines.push(`  coverage median ${share(summary.coverage_median)} (min ${share(summary.coverage_min ?? null)}, max ${share(summary.coverage_max ?? null)}): amon's cost over the harness's own tokens at amon's rates`);
+          }
           for (const row of report.sessions.filter(check => check.source === name)) {
+            const coverage = row.detail && 'coverage' in row.detail
+              ? `  coverage ${share(row.detail.coverage as number | null)}  rate ${share(row.detail.rate_ratio as number | null)}` : '';
             lines.push(row.status === 'checked'
-              ? `  ${row.session_id.slice(0, 8)}  harness ${amount(summary.unit, row.harness)}  amon ${amount(summary.unit, row.amon)}  ratio ${share(row.ratio)}`
+              ? `  ${row.session_id.slice(0, 8)}  harness ${amount(summary.unit, row.harness)}  amon ${amount(summary.unit, row.amon)}  ratio ${share(row.ratio)}${coverage}`
               : `  ${row.session_id.slice(0, 8)}  ${row.status.replaceAll('_', ' ')}`);
           }
         }
@@ -417,13 +422,15 @@ export function registerMaintenanceCommands(): void {
                   `harness ${money(check.harness_cost_usd)}`,
                   `amon ${money(check.amon_cost_usd)}`,
                   check.unpriced_rows > 0 ? `ratio n/a (${check.unpriced_rows} unpriced)` : `ratio ${share(check.ratio)}`,
+                  `coverage ${share(check.coverage)}`,
+                  `rate ${share(check.rate_ratio)}`,
                 ].join('  '),
-                ...check.models.map(model => `    ${model.model}  harness ${money(model.harness_cost_usd)}  amon ${money(model.amon_cost_usd)}  ratio ${share(model.ratio)}${
+                ...check.models.map(model => `    ${model.model}  harness ${money(model.harness_cost_usd)}  amon ${money(model.amon_cost_usd)}  ratio ${share(model.ratio)}  coverage ${share(model.coverage)}  rate ${share(model.rate_ratio)}${
                   check.missing_models.includes(model.model) ? '  (not in the transcripts)'
                     : check.unimported_models.includes(model.model) ? '  (in the transcripts, not imported)' : ''}`),
               ]));
           writeStdout(ctx, [
-            'Imported Claude cost vs Claude Code\'s cost-state checkpoint, per model. "Not in the transcripts" is usage no transcript recorded; "not imported" is an import gap:',
+            'Imported Claude cost vs Claude Code\'s cost-state checkpoint, per model. Coverage prices the harness\'s own tokens at amon\'s rates, so it is usage amon holds; rate below 1 means the harness bills more per token. "Not in the transcripts" is usage no transcript recorded; "not imported" is an import gap:',
             ...lines,
             '',
           ].join('\n'));

@@ -1735,16 +1735,17 @@ export function importedClaudeCostByModel(
   sessionId: string,
   since: string,
   until: string,
-): Array<{ model: string | null; cost: number; unpriced: number }> {
+): Array<{ model: string | null; cost: number; unpriced: number; cache_write: number; cache_write_1h: number }> {
   return getDb().prepare(`
     SELECT model, COALESCE(SUM(cost_usd), 0) AS cost,
+      COALESCE(SUM(cache_write_tokens), 0) AS cache_write, COALESCE(SUM(cache_write_1h_tokens), 0) AS cache_write_1h,
       SUM(CASE WHEN cost_usd IS NULL
         AND (tokens_in > 0 OR tokens_out > 0 OR cache_read_tokens > 0 OR cache_write_tokens > 0) THEN 1 ELSE 0 END) AS unpriced
     FROM events
     WHERE session_id = ? AND agent_type = 'claude_code' AND source = 'import'
       AND client_timestamp >= ? AND client_timestamp <= ?
     GROUP BY model
-  `).all(sessionId, since, until) as Array<{ model: string | null; cost: number; unpriced: number }>;
+  `).all(sessionId, since, until) as Array<{ model: string | null; cost: number; unpriced: number; cache_write: number; cache_write_1h: number }>;
 }
 
 export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {

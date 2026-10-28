@@ -50,6 +50,13 @@ export interface SessionTotalSourceSummary {
   ratio_min: number | null;
   ratio_median: number | null;
   ratio_max: number | null;
+  /**
+   * Claude only: the spread of each checked session's coverage, amon's cost over
+   * the harness's own tokens at amon's rates, which cancels any disagreement in rates.
+   */
+  coverage_min?: number | null;
+  coverage_median?: number | null;
+  coverage_max?: number | null;
 }
 
 export interface SessionTotalReport {
@@ -87,17 +94,30 @@ export function checkSessionTotals(options: SessionTotalCheckOptions): SessionTo
   return report;
 }
 
+/** The min, median and max of the values, nulls left out; all null when none remain. */
+function spread(values: Array<number | null | undefined>): [number | null, number | null, number | null] {
+  const sorted = values.filter((value): value is number => typeof value === 'number').sort((a, b) => a - b);
+  if (sorted.length === 0) return [null, null, null];
+  const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  return [sorted[0], median, sorted[sorted.length - 1]];
+}
+
 function summarize(source: SessionTotalSource, checks: SessionTotalCheck[]): SessionTotalSourceSummary {
-  const ratios = checks.filter(check => check.status === 'checked' && check.ratio !== null).map(check => check.ratio!).sort((a, b) => a - b);
-  const middle = Math.floor(ratios.length / 2);
-  return {
+  const checked = checks.filter(check => check.status === 'checked');
+  const [ratioMin, ratioMedian, ratioMax] = spread(checked.map(check => check.ratio));
+  const summary: SessionTotalSourceSummary = {
     ...INSTRUMENTS[source],
     sessions: checks.length,
-    checked: checks.filter(check => check.status === 'checked').length,
-    ratio_min: ratios.length > 0 ? ratios[0] : null,
-    ratio_median: ratios.length === 0 ? null : ratios.length % 2 === 1 ? ratios[middle] : (ratios[middle - 1] + ratios[middle]) / 2,
-    ratio_max: ratios.length > 0 ? ratios[ratios.length - 1] : null,
+    checked: checked.length,
+    ratio_min: ratioMin,
+    ratio_median: ratioMedian,
+    ratio_max: ratioMax,
   };
+  if (source === 'claude-code') {
+    [summary.coverage_min, summary.coverage_median, summary.coverage_max] = spread(checked.map(check => check.detail?.coverage as number | null));
+  }
+  return summary;
 }
 
 function checkClaude(claudeDir: string, limit: number): SessionTotalCheck[] {
@@ -109,6 +129,8 @@ function checkClaude(claudeDir: string, limit: number): SessionTotalCheck[] {
     amon: check.amon_cost_usd,
     ratio: check.ratio,
     detail: {
+      coverage: check.coverage,
+      rate_ratio: check.rate_ratio,
       since: check.since,
       cut: check.cut,
       unpriced_rows: check.unpriced_rows,
