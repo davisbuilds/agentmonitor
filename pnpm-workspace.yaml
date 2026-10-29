@@ -7,11 +7,6 @@ packages:
 # it once the release ages past the window.
 minimumReleaseAge: 10080
 
-# GHSA-27r3-jxmh-p828: qualified urgent parser fix, exact release only.
-# Ops owns removal after 2026-10-29T11:39:38.614Z (normal seven-day eligibility).
-minimumReleaseAgeExclude:
-  - 'body-parser@2.4.0'
-
 # pnpm 10 skipped every build script not listed in onlyBuiltDependencies;
 # false keeps that behavior under pnpm 11's strictDepBuilds.
 allowBuilds:
