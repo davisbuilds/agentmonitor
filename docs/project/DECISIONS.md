@@ -48,3 +48,30 @@ narrowing them by project matters. Then add project to the stats read with an
 index measured on a snapshot (`verify probe plans`), and apply it to the cards
 and live events in the same change. A `mode` facet would likewise want a
 dedicated column rather than `json_extract` on `sessions.metadata`.
+
+## Leave pre-fix Claude rows without a transcript as stored, and disclose (2026-10-29)
+
+**Decision:** Claude rows imported before the 2026-09-22 per-turn billing fix
+whose transcript is gone keep their stored usage and cost. FEATURES discloses
+that Claude cost from before mid-July 2026 likely reads high. No heuristic
+correction and no per-row marker for now.
+
+**Evidence:** the importer then billed a turn once per content-block line.
+`amon costs repair-claude-usage` corrects only rows whose transcript survives,
+and transcripts restored from offsite backups reach back only to mid-July.
+In the months they cover, the repeat lines were about half of July's checkable
+imported cost and about a third of August's; that earlier months carry
+similar inflation is a hypothesis. The alternatives each had a cost:
+
+- Collapsing identical `(session, timestamp, usage)` tuples would recover most
+  of the remainder, but it also collapses distinct turns that share a tuple. How
+  often they do is unmeasured, so it trades a known overstatement for an
+  unknown understatement.
+- A provenance marker that labels these rows in the UI is honest, but it is a
+  schema and read-path change across every cost surface. The disclosure gives
+  the same warning without that change.
+
+**Revisit when:** a decision rests on Claude cost from before mid-July 2026, or
+older transcripts turn up. Measure how often distinct turns share a usage tuple
+before any collapse; if a per-row warning is wanted instead, add the provenance
+marker.

@@ -238,6 +238,13 @@ Monitor's today and 30-day figures.
   `amon costs check-sessions` runs the same comparison for every source against
   its harness's own total: Claude's `cost-state` checkpoint in dollars, Codex's
   thread total in tokens. Antigravity is reported as recording none.
+- Claude cost from before mid-July 2026 likely reads high, by an unmeasured
+  amount. Until 2026-09-22 the importer billed a turn once per content-block
+  line. `amon costs repair-claude-usage` corrected the rows whose transcript
+  survives, but none survive from before mid-July, so those rows stay as
+  stored. Where transcripts did survive, the repeat lines were between a third
+  and a half of a month's imported cost. See DECISIONS for why they are left
+  as is.
 - Imported transcript usage (Claude JSONL, Codex rollouts) wins over overlapping
   live OTEL usage of the same session in aggregates, including a Monitor card's
   and session detail's token and cost totals; raw events remain available in

@@ -368,37 +368,6 @@ the build.
   mirroring `src/import/index.ts`'s ownership rule. Do not simply update the
   pinned expectation.
 
-#### Imported Claude rows with no surviving transcript stay inflated
-- **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
-  per-content-block billing fix) can only correct rows whose transcript still
-  exists. Rows whose source file is gone keep the inflated usage the old
-  importer wrote.
-- **Why or evidence**: the repair was **applied** on a local store 2026-09-22
-  and corrected roughly one matched row in six, re-deriving a summary per
-  affected session. What it could not reach remains: a small set of ambiguous
-  rows, and **a large majority of pre-fix imported rows whose transcript is
-  gone** — several times the repairable population. A separate estimate that groups
-  identical usage tuples within a session suggested the reachable repair
-  recovers only about a third of the total inflation, leaving the rest in rows
-  with no local evidence left to check them against. Historical cost views stay
-  wrong by an unknown-but-bounded amount.
-  On 2026-09-26 transcripts restored from offsite backups made mid-July onward
-  checkable again. In those months repeat-line billing was about half of July's
-  checkable imported cost and about a third of August's; the second repair pass
-  corrected them. Backups reach no further back, so the earlier rows are the
-  whole remaining population. That they carry similar inflation is a
-  hypothesis, not a measurement.
-- **Next / Revisit when**: now the only remaining inflation, so this is the whole
-  question rather than part of it. Decide deliberately between three options —
-  leave and disclose (cheapest, but every historical cost view silently
-  overstates), a
-  heuristic collapse of identical `(session, timestamp, usage)` tuples (recovers
-  most of the remainder but *will* over-collapse genuinely identical turns, so
-  it trades a known overstatement for an unmeasured understatement), or a
-  provenance marker that labels pre-fix imported rows as unreliable in the UI.
-  Do not run a heuristic collapse without first measuring how often distinct
-  turns legitimately share a usage tuple.
-
 #### Imported Claude cost runs below Claude Code's own running cost, inside the main models
 - **What**: imported Claude cost reads a few percent below Claude Code's own
   figure. On the main models the rates agree, so the shortfall is usage the
