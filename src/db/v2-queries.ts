@@ -1434,7 +1434,7 @@ export function getAnalyticsSummary(params: AnalyticsParams = {}): AnalyticsSumm
   let dailyAvgSessions = 0;
   let dailyAvgMessages = 0;
   if (row.earliest && row.latest) {
-    const days = inclusiveDateSpanDays(row.earliest, row.latest);
+    const days = Math.max(rangeSpanDays(params, row.earliest, row.latest), 1);
     dailyAvgSessions = roundMetric(row.total_sessions / days);
     dailyAvgMessages = roundMetric(row.total_messages / days);
   }
@@ -1482,6 +1482,21 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
   if (!from || !to) return [];
   return enumerateDateRange(from, to)
     .map(date => byDate.get(date) ?? { date, sessions: 0, messages: 0, user_messages: 0 });
+}
+
+/**
+ * The calendar days a per-day average divides by: the selected range, or,
+ * without one, the first to the last active day.
+ */
+function rangeSpanDays(
+  params: { date_from?: string; date_to?: string },
+  earliest: string | null,
+  latest: string | null,
+): number {
+  const from = rangeDay(params.date_from, 'from') ?? (earliest ? localDayOf(earliest) ?? undefined : undefined);
+  const to = rangeDay(params.date_to, 'to') ?? (latest ? localDayOf(latest) ?? undefined : undefined);
+  if (!from || !to) return 0;
+  return enumerateDateRange(from, to).length;
 }
 
 /** The local day a `date_from`/`date_to` param names. */
@@ -2657,7 +2672,7 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
       .filter((day): day is string => day !== null),
   ).size;
 
-  const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
+  const spanDays = row.total_sessions > 0 ? rangeSpanDays(params, row.earliest, row.latest) : 0;
 
   const safeActiveDays = Math.max(activeDays, 1);
   const safeSpanDays = Math.max(spanDays, 1);
@@ -3663,7 +3678,7 @@ export function getUsageSummary(
   sharedCoverage?: UsageCoverage,
 ): UsageSummary {
   const row = usageRowsToSummaryValues(usageRows);
-  const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
+  const spanDays = usageRows.length > 0 ? rangeSpanDays(params, row.earliest, row.latest) : 0;
   const safeActiveDays = Math.max(row.active_days, 1);
   const safeSessions = Math.max(row.total_sessions, 1);
   // The share of prompt tokens served from cache: a prompt is its uncached
