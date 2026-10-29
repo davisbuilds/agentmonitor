@@ -2,6 +2,7 @@
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatModelName, formatNumber } from '../../format';
   import { sessionTitle } from '../../session-text';
+  import { usageTokenSplit, usageTokenTotal } from '../../usage-tokens';
   import { Button, InfoTip } from '../ui';
   import TraceDrillInLink from '../trace-quality/TraceDrillInLink.svelte';
 
@@ -47,11 +48,11 @@
                 <span class="font-mono" title={row.primary_model}>{formatModelName(row.primary_model)}</span>
                 <span>{row.primary_provider} / {row.primary_tier}</span>
                 <span class="tabular font-mono">{formatNumber(row.usage_events)} usage events</span>
-                <span class="tabular font-mono">{formatNumber(row.input_tokens + row.output_tokens)} tokens</span>
+                <span class="tabular font-mono" title={usageTokenSplit(row)}>{formatNumber(usageTokenTotal(row))} all tokens</span>
               </div>
             </div>
             <div class="text-right">
-              <div class="tabular font-mono text-body text-ok">{formatCost(row.cost_usd)}</div>
+              <div class="tabular font-mono text-body text-text">{formatCost(row.cost_usd)}</div>
               <div class="mt-1 tabular font-mono text-meta text-text-faint">
                 {row.last_activity_at ? row.last_activity_at.slice(0, 10) : 'No timestamp'}
               </div>
