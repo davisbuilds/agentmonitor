@@ -174,7 +174,10 @@ removed. A directory outside any repository is named after itself; sessions that
 record no working directory (Codex OTEL-only, Antigravity) have no project. The
 shared agent filter names Claude `claude`, as the session browser does; events
 call it `claude_code`, and every Analytics, Usage, Skills, and Quality read
-accepts either spelling, so one filter value narrows every sub-view. Capability metadata distinguishes all-session
+accepts either spelling, so one filter value narrows every sub-view. A user
+message is a prompt: Claude Code returns each tool result to the model as a
+user-role transcript line, and those are counted as messages but not as user
+messages, as Codex already counts them. Capability metadata distinguishes all-session
 aggregates from tool or transcript analysis that excludes unsupported sources.
 
 Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of

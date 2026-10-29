@@ -1116,7 +1116,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 21;
+const DATA_SCHEMA_VERSION = 22;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1172,9 +1172,39 @@ export function runDataMigrations(db: Database): void {
     // v21 introduces no data correction: the schema guard replaces a search
     // index built over the raw JSON with one over the message text, which read
     // commands only install when the version advances.
+    if (current < 22) recountClaudeUserMessages(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v22 — the Claude parser counted every user-role line as a user message, and
+ * Claude Code returns each tool result to the model as one, so most of a
+ * session's "user messages" were tool results. The parser now counts only lines
+ * carrying something other than tool results; recount stored sessions from
+ * their messages by the same rule.
+ */
+function recountClaudeUserMessages(db: Database): void {
+  const tables = new Set((db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('browsing_sessions', 'messages')",
+  ).all() as Array<{ name: string }>).map(row => row.name));
+  if (!tables.has('browsing_sessions') || !tables.has('messages')) return;
+
+  const changed = db.prepare(`
+    UPDATE browsing_sessions
+    SET user_message_count = (
+      SELECT COUNT(*) FROM messages m
+      WHERE m.session_id = browsing_sessions.id AND m.role = 'user'
+        AND json_valid(m.content)
+        AND EXISTS (
+          SELECT 1 FROM json_each(m.content) block
+          WHERE COALESCE(json_extract(block.value, '$.type'), '') != 'tool_result'
+        )
+    )
+    WHERE agent = 'claude' AND integration_mode = 'claude-jsonl'
+  `).run().changes;
+  if (changed > 0) console.error(`[migration] recounted user messages for ${changed} Claude session(s)`);
 }
 
 /**

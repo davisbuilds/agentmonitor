@@ -539,9 +539,10 @@ export function parseSessionChunk(
       if (!endedAt || timestamp > endedAt) endedAt = timestamp;
     }
 
-    // Track first user message
+    // Track first user message. Claude Code returns each tool result to the
+    // model as a user-role line; only a line carrying anything else is a prompt.
     if (msg.role === 'user') {
-      userMessageCount++;
+      if (normalizedBlocks.some(block => block.type !== 'tool_result')) userMessageCount++;
       if (firstUserMessage === null) {
         firstUserMessage = previewTextFromBlocks(normalizedBlocks, line.isMeta === true);
       }
