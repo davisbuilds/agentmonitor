@@ -11,11 +11,11 @@
     <div>
       <div class="flex items-center gap-1.5">
         <h3 class="text-h3">Activity</h3>
-        <InfoTip label="Activity"><p>Sessions per day, by the day each started. Click a day to narrow the page to it.</p></InfoTip>
+        <InfoTip label="Activity"><p>Sessions per day, by the day each started. Subagents and Codex app jobs are not sessions of their own; their messages still count. Click a day to narrow the page to it.</p></InfoTip>
       </div>
     </div>
-    {#if analytics.coverage.activity}
-      <span class="tabular font-mono text-meta text-text-faint">{analytics.coverage.activity.included_sessions} sessions in range</span>
+    {#if chart.maxSessions > 0}
+      <span class="tabular font-mono text-meta text-text-faint">{chart.totalSessions} session{chart.totalSessions === 1 ? '' : 's'} in range</span>
     {/if}
   </div>
 

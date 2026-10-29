@@ -29,7 +29,7 @@
         <button class="block w-full text-left" onclick={() => analytics.drillDownToProject(project.project)}>
           <div class="mb-1 flex items-center justify-between gap-2 text-meta">
             <span class="truncate text-text">{project.project}</span>
-            <span class="tabular font-mono text-text-faint">{project.session_count} sessions · {formatNumber(project.message_count)} msgs</span>
+            <span class="tabular font-mono text-text-faint">{project.session_count} session{project.session_count === 1 ? '' : 's'} · {formatNumber(project.message_count)} msgs</span>
           </div>
           <div class="h-1.5 overflow-hidden rounded-sm bg-surface-2">
             <div class="h-full rounded-sm bg-accent/70" style={`width:${(project.message_count / maxMessages) * 100}%`}></div>

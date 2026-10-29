@@ -9,7 +9,7 @@ export interface ActivityBar {
 }
 
 /** Activity bars encode sessions per day, the measure the panel names. */
-export function activityBars(points: ActivityDataPoint[]): { bars: ActivityBar[]; maxSessions: number } {
+export function activityBars(points: ActivityDataPoint[]): { bars: ActivityBar[]; maxSessions: number; totalSessions: number } {
   const maxSessions = Math.max(0, ...points.map(point => point.sessions));
   const bars = points.map(point => ({
     date: point.date,
@@ -17,5 +17,6 @@ export function activityBars(points: ActivityDataPoint[]): { bars: ActivityBar[]
     messages: point.messages,
     heightPct: maxSessions > 0 ? (point.sessions / maxSessions) * 100 : 0,
   }));
-  return { bars, maxSessions };
+  const totalSessions = points.reduce((sum, point) => sum + point.sessions, 0);
+  return { bars, maxSessions, totalSessions };
 }

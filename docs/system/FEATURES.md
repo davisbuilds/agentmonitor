@@ -164,7 +164,10 @@ Analytics Overview covers activity over time, projects, agents, tools,
 hour-of-week patterns, and velocity. Activity charts sessions per day by the
 day each started, across every day of the range, idle days included. Per-day
 averages in Analytics and Usage divide by the days of the selected range, or,
-without one, by the first to the last active day. Top sessions appear once, in
+without one, by the first to the last active day. Session counts
+and per-session averages count the sessions someone started: a subagent, and a
+Codex app job, is not a session of its own, but its messages and tool calls
+count toward the range. Top sessions appear once, in
 Usage, ranked by cost; all skill evidence lives in Skills, which shows daily
 skill invocation volume above the consultation explorer and exports both as CSV.
 The shared date, project, and agent filters scope both Skills panels; the

@@ -225,6 +225,18 @@ const sessionListCte = `WITH ranked_sessions AS (
   ) AS identity_rank FROM browsing_sessions
 ), listed_sessions AS (SELECT * FROM ranked_sessions WHERE identity_rank = 1)`;
 
+/**
+ * A session someone started: not a subagent its parent delegated to, nor a
+ * Codex app job. Analytics counts these as sessions; the others' messages and
+ * tool calls still count toward the work of the range.
+ */
+const startedSessionCondition = "COALESCE(relationship_type, '') NOT IN ('subagent', 'internal')";
+const startedSessionCount = `SUM(CASE WHEN ${startedSessionCondition} THEN 1 ELSE 0 END)`;
+
+function isStartedSession(relationshipType: string | null): boolean {
+  return relationshipType !== 'subagent' && relationshipType !== 'internal';
+}
+
 /** The session a browser row stands for, by the same aliases sessionListCte collapses. */
 function browserSessionKey(alias: string): string {
   return `CASE
@@ -1416,7 +1428,7 @@ export function getAnalyticsSummary(params: AnalyticsParams = {}): AnalyticsSumm
 
   const row = db.prepare(`${sessionListCte}
     SELECT
-      COUNT(*) as total_sessions,
+      COALESCE(${startedSessionCount}, 0) as total_sessions,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
       MIN(started_at) as earliest,
@@ -1458,10 +1470,12 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
   const filter = buildAnalyticsFilterState(params);
 
   const rows = db.prepare(`${sessionListCte}
-    SELECT started_at, message_count, user_message_count
+    SELECT started_at, message_count, user_message_count, relationship_type
     FROM listed_sessions
     ${filter.where}
-  `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
+  `).all(...filter.values) as Array<{
+    started_at: string | null; message_count: number; user_message_count: number; relationship_type: string | null;
+  }>;
 
   // Bucket in JS: a local day cannot be expressed in SQLite for a configured zone.
   const byDate = new Map<string, ActivityDataPoint>();
@@ -1469,7 +1483,7 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
     const date = row.started_at ? localDayOf(row.started_at) : null;
     if (!date) continue;
     const point = byDate.get(date) ?? { date, sessions: 0, messages: 0, user_messages: 0 };
-    point.sessions += 1;
+    if (isStartedSession(row.relationship_type)) point.sessions += 1;
     point.messages += row.message_count ?? 0;
     point.user_messages += row.user_message_count ?? 0;
     byDate.set(date, point);
@@ -1514,7 +1528,7 @@ export function getAnalyticsProjects(params: AnalyticsParams = {}): ProjectBreak
   return db.prepare(`${sessionListCte}
     SELECT
       project,
-      COUNT(*) as session_count,
+      COALESCE(${startedSessionCount}, 0) as session_count,
       COALESCE(SUM(message_count), 0) as message_count,
       COALESCE(SUM(user_message_count), 0) as user_message_count
     FROM listed_sessions
@@ -2652,7 +2666,7 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
 
   const row = db.prepare(`${sessionListCte}
     SELECT
-      COUNT(*) as total_sessions,
+      COALESCE(${startedSessionCount}, 0) as total_sessions,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
       MIN(started_at) as earliest,
@@ -2702,13 +2716,13 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
   return db.prepare(`${sessionListCte}
     SELECT
       agent,
-      COUNT(*) as session_count,
+      COALESCE(${startedSessionCount}, 0) as session_count,
       COALESCE(SUM(message_count), 0) as message_count,
       COALESCE(SUM(user_message_count), 0) as user_message_count,
-      ROUND(COALESCE(1.0 * SUM(message_count) / NULLIF(COUNT(*), 0), 0), 2) as average_messages_per_session,
-      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'full' THEN 1 ELSE 0 END), 0) as full_fidelity_sessions,
-      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'summary' THEN 1 ELSE 0 END), 0) as summary_fidelity_sessions,
-      COALESCE(SUM(CASE WHEN ${toolAnalyticsCapableCondition()} THEN 1 ELSE 0 END), 0) as tool_analytics_capable_sessions,
+      ROUND(COALESCE(1.0 * SUM(message_count) / NULLIF(${startedSessionCount}, 0), 0), 2) as average_messages_per_session,
+      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'full' AND ${startedSessionCondition} THEN 1 ELSE 0 END), 0) as full_fidelity_sessions,
+      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'summary' AND ${startedSessionCondition} THEN 1 ELSE 0 END), 0) as summary_fidelity_sessions,
+      COALESCE(SUM(CASE WHEN ${toolAnalyticsCapableCondition()} AND ${startedSessionCondition} THEN 1 ELSE 0 END), 0) as tool_analytics_capable_sessions,
       MIN(started_at) as first_started_at,
       MAX(started_at) as last_started_at
     FROM listed_sessions
