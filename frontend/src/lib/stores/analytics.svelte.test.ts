@@ -72,3 +72,11 @@ describe('Skills requests', () => {
     }
   });
 });
+
+describe('the shared agent filter', () => {
+  it("holds Claude under the option list's spelling when a drill-down passes the event spelling", () => {
+    // Usage's By Agent rows name Claude `claude_code`; the filter options say `claude`.
+    analyticsFilters.setAgent('claude_code');
+    expect(analyticsFilters.agent).toBe('claude');
+  });
+});

@@ -27,6 +27,7 @@ import type {
   InsightProvider,
   InsightRow,
 } from '../api/v2/types.js';
+import { browserAgentName, eventAgentType } from '../util/agent-identity.js';
 
 interface InsightDatasetPacket {
   analytics_summary: InsightRow['analytics_summary'];
@@ -77,29 +78,19 @@ function kindLabel(kind: InsightKind): string {
   }
 }
 
-function normalizeAnalyticsAgent(agent: string | undefined): string | undefined {
-  if (!agent) return undefined;
-  return agent === 'claude_code' ? 'claude' : agent;
-}
-
-function normalizeUsageAgent(agent: string | undefined): string | undefined {
-  if (!agent) return undefined;
-  return agent === 'claude' ? 'claude_code' : agent;
-}
-
 function buildInsightDataset(params: GenerateInsightParams): InsightDatasetPacket {
   const analyticsParams = {
     date_from: params.date_from,
     date_to: params.date_to,
     project: params.project,
-    agent: normalizeAnalyticsAgent(params.agent),
+    agent: params.agent ? browserAgentName(params.agent) : undefined,
   };
 
   const usageParams = {
     date_from: params.date_from,
     date_to: params.date_to,
     project: params.project,
-    agent: normalizeUsageAgent(params.agent),
+    agent: params.agent ? eventAgentType(params.agent) : undefined,
   };
   const usageRows = getUsageRows(usageParams);
 

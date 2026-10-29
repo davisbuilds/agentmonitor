@@ -90,6 +90,7 @@ import {
 } from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
 import { getSkillConsultationAnalytics } from '../skills/consultation-analytics.js';
+import { browserAgentName, eventAgentType } from '../util/agent-identity.js';
 import {
   dateParamLowerBound,
   dateParamUpperExclusive,
@@ -1213,7 +1214,7 @@ function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string)
   }
   if (params.agent) {
     conditions.push(`${qualifyColumn(alias, 'agent')} = ?`);
-    values.push(params.agent);
+    values.push(browserAgentName(params.agent));
   }
   // Bare dates are the operator's local days (see src/util/local-day.ts).
   const startedAt = qualifyColumn(alias, 'started_at');
@@ -2928,7 +2929,7 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e', options: U
   if (params.agent) {
     const windowed = Boolean(params.date_from || params.date_to);
     conditions.push(`${options.windowLeads && windowed ? '+' : ''}${usageAgentExpr(alias)} = ?`);
-    values.push(params.agent);
+    values.push(eventAgentType(params.agent));
   }
   if (params.date_from) {
     conditions.push(`datetime(${timestampExpr}) >= datetime(?)`);

@@ -12,7 +12,7 @@ import {
   type AnalyticsSkillSort,
   type AnalyticsView,
 } from '../route-state';
-import { createDefaultAnalyticsFilters, matchingQuickRange, QUICK_RANGE_DAYS } from '../analytics-state';
+import { createDefaultAnalyticsFilters, filterAgentName, matchingQuickRange, QUICK_RANGE_DAYS } from '../analytics-state';
 
 function localDateString(date: Date): string {
   const year = date.getFullYear();
@@ -210,7 +210,7 @@ class AnalyticsFiltersStore {
     this.from = state.from;
     this.to = state.to;
     this.project = state.project;
-    this.agent = state.agent;
+    this.agent = filterAgentName(state.agent);
     this.model = state.model;
     this.provider = state.provider;
     this.tier = state.tier;
@@ -290,7 +290,7 @@ class AnalyticsFiltersStore {
   }
 
   setAgent(agent: string): void {
-    this.agent = agent;
+    this.agent = filterAgentName(agent);
     this.syncHash();
     this.notify();
   }

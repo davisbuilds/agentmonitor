@@ -5,6 +5,7 @@ import { extractCanonicalCodexSessionId } from './invocation-detection.js';
 import { selectSkillInvocationOccurrences, type SkillInvocationOccurrence } from './invocation-ledger.js';
 import { dateParamLowerBound, dateParamUpperExclusive } from '../util/local-day.js';
 import { effectiveLiveStatusSql } from '../live/live-status.js';
+import { browserAgentName } from '../util/agent-identity.js';
 
 interface SessionRow {
   id: string;
@@ -137,7 +138,7 @@ function sessionFilter(params: AnalyticsParams): SqlFilter {
   const values: unknown[] = [];
   if (params.agent) {
     clauses.push('agent = ?');
-    values.push(params.agent);
+    values.push(browserAgentName(params.agent));
   }
   if (params.project) {
     clauses.push('project = ?');

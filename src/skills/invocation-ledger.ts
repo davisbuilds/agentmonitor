@@ -9,6 +9,7 @@ import {
   fingerprintCodexCommand,
 } from './invocation-detection.js';
 import { dateParamLowerBound, dateParamUpperExclusive, localDayOf } from '../util/local-day.js';
+import { browserAgentName } from '../util/agent-identity.js';
 
 export type SkillInvocationDetectionSource =
   | 'explicit_skill_tool'
@@ -105,7 +106,7 @@ function enrichWithOrderedObservations(
     }
     if (params.agent) {
       filters.push('session.agent = ?');
-      values.push(params.agent);
+      values.push(browserAgentName(params.agent));
     }
     if (params.date_from) {
       filters.push('datetime(observation.observed_at) >= datetime(?)');
@@ -260,6 +261,8 @@ export function selectSkillInvocationOccurrences(
   db: Database.Database,
   params: AnalyticsParams = {},
 ): SkillInvocationOccurrence[] {
+  // Rows below carry the session browser's agent spelling.
+  if (params.agent) params = { ...params, agent: browserAgentName(params.agent) };
   const occurrences: Omit<
     SkillInvocationOccurrence,
     'occurrenceIndex' | 'matchedObservation' | 'classificationCapability'
