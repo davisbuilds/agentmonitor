@@ -2488,25 +2488,86 @@ export function getAnalyticsSkillHealthParts(
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
-  const sessions = db.prepare(`${sessionListCte}
-    SELECT started_at, message_count, user_message_count
+  // Messages land at their own times (resumed sessions span days), so the window
+  // selects messages, not session starts. Group them on the UTC quarter-hour
+  // grid, which every zone's hours align to, so the rows stay few and local
+  // bucketing below stays exact. The daily-activity index covers the instant,
+  // session, and role, so the counts read no message content.
+  const instant = observedInstant('m.timestamp');
+  const slot = `substr(${instant}, 1, 14)
+    || printf('%02d', (CAST(substr(${instant}, 15, 2) AS INTEGER) / 15) * 15) || ':00Z'`;
+  const scope = buildAnalyticsFilterState({ project: params.project, agent: params.agent });
+  const windowConditions = [`${instant} IS NOT NULL`];
+  const windowValues: unknown[] = [];
+  if (params.date_from) {
+    windowConditions.push(`${instant} >= ?`);
+    windowValues.push(dateParamLowerBound(params.date_from));
+  }
+  if (params.date_to) {
+    windowConditions.push(`${instant} < ?`);
+    windowValues.push(dateParamUpperExclusive(params.date_to));
+  }
+  const slots = db.prepare(`
+    SELECT m.session_id, ${slot} AS slot, COUNT(*) AS message_count
+    FROM messages m INDEXED BY idx_messages_daily_activity
+    WHERE ${windowConditions.join(' AND ')}
+    GROUP BY m.session_id, slot
+  `).all(...windowValues) as Array<{ session_id: string; slot: string; message_count: number }>;
+  // A user message is a prompt, as the parsers count it: a line carrying more
+  // than tool results. Only user rows read content, and ungrouped, so SQLite
+  // does not copy every row's content into a sorter.
+  const promptSlots = db.prepare(`
+    SELECT m.session_id, ${slot} AS slot
+    FROM messages m INDEXED BY idx_messages_daily_activity
+    WHERE ${windowConditions.join(' AND ')} AND m.role = 'user'
+      AND json_valid(m.content) AND EXISTS (
+        SELECT 1 FROM json_each(m.content) block
+        WHERE COALESCE(json_extract(block.value, '$.type'), '') != 'tool_result'
+      )
+  `).all(...windowValues) as Array<{ session_id: string; slot: string }>;
+  // Joining listed_sessions into the read above defeats its index range; the
+  // session list is small, so keep its ids and drop other sessions' rows here.
+  const inScope = new Set((db.prepare(`${sessionListCte}
+    SELECT id FROM listed_sessions ${scope.where}
+  `).all(...scope.values) as Array<{ id: string }>).map(row => row.id));
+  // Sessions with no timestamped message in the window (summary-only) keep
+  // their start hour.
+  const timed = new Set(slots.map(slot => slot.session_id));
+  const untimed = (db.prepare(`${sessionListCte}
+    SELECT id, started_at, message_count, user_message_count
     FROM listed_sessions
     ${filter.where}
-  `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
+  `).all(...filter.values) as Array<{ id: string; started_at: string | null; message_count: number; user_message_count: number }>)
+    .filter(session => !timed.has(session.id));
 
   // Bucket by the operator's local weekday and hour, the view's labeled axes.
   const buckets = new Map<string, HourOfWeekDataPoint>();
-  for (const session of sessions) {
-    const cell = session.started_at ? localWeekdayHour(session.started_at) : null;
-    if (!cell) continue;
+  const sessionsByBucket = new Map<string, Set<string>>();
+  const add = (sessionId: string, timestamp: string, messages: number, userMessages: number): void => {
+    const cell = localWeekdayHour(timestamp);
+    if (!cell) return;
     const key = `${cell.weekday}:${cell.hour}`;
     const point = buckets.get(key) ?? {
       day_of_week: cell.weekday, hour_of_day: cell.hour, session_count: 0, message_count: 0, user_message_count: 0,
     };
-    point.session_count += 1;
-    point.message_count += session.message_count ?? 0;
-    point.user_message_count += session.user_message_count ?? 0;
+    const seen = sessionsByBucket.get(key) ?? new Set<string>();
+    if (!seen.has(sessionId)) {
+      seen.add(sessionId);
+      point.session_count += 1;
+    }
+    point.message_count += messages;
+    point.user_message_count += userMessages;
     buckets.set(key, point);
+    sessionsByBucket.set(key, seen);
+  };
+  for (const row of slots) {
+    if (inScope.has(row.session_id)) add(row.session_id, row.slot, row.message_count, 0);
+  }
+  for (const row of promptSlots) {
+    if (inScope.has(row.session_id)) add(row.session_id, row.slot, 0, 1);
+  }
+  for (const session of untimed) {
+    if (session.started_at) add(session.id, session.started_at, session.message_count ?? 0, session.user_message_count ?? 0);
   }
   const rows = [...buckets.values()];
 
