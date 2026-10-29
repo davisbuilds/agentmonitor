@@ -20,7 +20,8 @@ export type ProjectRepairReport = {
   transcripts_scanned: number;
   sessions_changed: number;
   rows: { events: number; sessions: number; browsing_sessions: number };
-  renames: Array<{ from: string | null; to: string; sessions: number }>;
+  /** `to` is null where the session is scratch work, which names no project. */
+  renames: Array<{ from: string | null; to: string | null; sessions: number }>;
 };
 
 /** What one transcript says about the projects its stored rows should carry. */
@@ -29,9 +30,9 @@ interface TranscriptProjects {
   eventSessionIds: string[];
   /** Ids its session-browser rows are stored under. */
   browserIds: string[];
-  /** Each cwd's old name (its basename, as import and hooks stored it) to its canonical name. */
-  renames: Map<string, string>;
-  /** The name the session browser now derives, or null to leave the browser row alone. */
+  /** Each cwd's old name (its basename, as import and hooks stored it) to its canonical name, or null for scratch work. */
+  renames: Map<string, string | null>;
+  /** The name the session browser now derives from the transcript's cwd; null for scratch work. */
   browserProject: string | null;
 }
 
@@ -39,12 +40,12 @@ const DRY_RUN_ROLLBACK = Symbol('dry-run rollback');
 const CWD_FIELD = /"cwd"\s*:\s*("(?:[^"\\]|\\.)*")/g;
 const SESSION_ID_FIELD = /"sessionId"\s*:\s*"([^"\\]+)"/g;
 
-function cwdRenames(cwds: Iterable<string>): Map<string, string> {
-  const renames = new Map<string, string>();
+function cwdRenames(cwds: Iterable<string>): Map<string, string | null> {
+  const renames = new Map<string, string | null>();
   for (const cwd of cwds) {
     const before = path.basename(cwd.trim());
     const after = projectNameFromCwd(cwd);
-    if (before && after && before !== after) renames.set(before, after);
+    if (before && before !== after) renames.set(before, after);
   }
   return renames;
 }
@@ -105,7 +106,8 @@ function readCodexRollout(filePath: string): TranscriptProjects | null {
  * `src/util/project-identity.ts`), re-deriving each session from its
  * transcript. Event and Monitor session rows change only where they still carry
  * the old cwd basename, so rows named some other way are left alone. Browser
- * rows take the name the session parser now derives. A preview runs the same
+ * rows take the name the session parser now derives. Scratch work, which names
+ * no project, has its stored name cleared. A preview runs the same
  * writes and rolls them back, so its counts are what applying would change.
  */
 export function repairProjectNames(db: Database, options: ProjectRepairOptions): ProjectRepairReport {
@@ -124,7 +126,7 @@ export function repairProjectNames(db: Database, options: ProjectRepairOptions):
   }
 
   const rows = { events: 0, sessions: 0, browsing_sessions: 0 };
-  const renameCounts = new Map<string, { from: string | null; to: string; sessions: number }>();
+  const renameCounts = new Map<string, { from: string | null; to: string | null; sessions: number }>();
   let sessionsChanged = 0;
 
   const renameEvents = db.prepare('UPDATE events SET project = ? WHERE session_id = ? AND project = ?');
@@ -136,7 +138,7 @@ export function repairProjectNames(db: Database, options: ProjectRepairOptions):
   try {
     db.transaction(() => {
       for (const transcript of transcripts) {
-        const renamed = new Map<string, { from: string | null; to: string }>();
+        const renamed = new Map<string, { from: string | null; to: string | null }>();
         const touched = new Set<string>();
         for (const [from, to] of transcript.renames) {
           for (const id of transcript.eventSessionIds) {
@@ -149,17 +151,15 @@ export function repairProjectNames(db: Database, options: ProjectRepairOptions):
             renamed.set(JSON.stringify([from, to]), { from, to });
           }
         }
-        if (transcript.browserProject) {
-          for (const id of transcript.browserIds) {
-            const current = readBrowser.get(id) as { project: string | null } | undefined;
-            if (!current || current.project === transcript.browserProject) continue;
-            rows.browsing_sessions += renameBrowser.run(transcript.browserProject, id).changes;
-            touched.add(id);
-            renamed.set(JSON.stringify([current.project, transcript.browserProject]), {
-              from: current.project,
-              to: transcript.browserProject,
-            });
-          }
+        for (const id of transcript.browserIds) {
+          const current = readBrowser.get(id) as { project: string | null } | undefined;
+          if (!current || current.project === transcript.browserProject) continue;
+          rows.browsing_sessions += renameBrowser.run(transcript.browserProject, id).changes;
+          touched.add(id);
+          renamed.set(JSON.stringify([current.project, transcript.browserProject]), {
+            from: current.project,
+            to: transcript.browserProject,
+          });
         }
         if (touched.size === 0) continue;
         sessionsChanged += 1;
@@ -183,6 +183,6 @@ export function repairProjectNames(db: Database, options: ProjectRepairOptions):
     transcripts_scanned: scanned,
     sessions_changed: sessionsChanged,
     rows,
-    renames: [...renameCounts.values()].sort((a, b) => b.sessions - a.sessions || a.to.localeCompare(b.to)),
+    renames: [...renameCounts.values()].sort((a, b) => b.sessions - a.sessions || (a.to ?? '').localeCompare(b.to ?? '')),
   };
 }

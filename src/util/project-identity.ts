@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 /**
@@ -12,8 +13,8 @@ import path from 'node:path';
  * where its shape allows: an agent worktree folds into the repository above
  * it, a run directory in a worktree area folds into the longest sibling
  * repository name it starts with, and a removed directory inside a repository
- * that still exists belongs to that repository. Anything else keeps its own
- * name, as before.
+ * that still exists belongs to that repository. Scratch work (see isScratch)
+ * has no project; anything else keeps its own name.
  */
 
 // Resolution reads the filesystem, and an import resolves the same directories
@@ -117,6 +118,35 @@ function resolveRoot(dir: string): string {
   return dir;
 }
 
+let scratchRootsOverride: string[] | null = null;
+
+/** Where throwaway work happens: temp roots and app-support folders. */
+function scratchRoots(): string[] {
+  if (scratchRootsOverride) return scratchRootsOverride;
+  return [...new Set([
+    '/tmp', '/private/tmp', '/var/folders', '/private/var/folders',
+    os.tmpdir(), path.join(os.homedir(), 'Library'),
+  ])];
+}
+
+/**
+ * Scratch work names no project: a directory no repository holds that is a
+ * worktree container itself, or sits in a temp root or an app-support folder.
+ * Named after themselves, such directories filled project lists with `tmp`,
+ * `T`, and mkdtemp names. A repository there is still a project.
+ */
+function isScratch(root: string): boolean {
+  if (statOrNull(path.join(root, '.git'))) return false;
+  if (isWorktreeContainer(root)) return true;
+  return scratchRoots().some(scratch => root === scratch || root.startsWith(`${scratch}${path.sep}`));
+}
+
+/** Replace the scratch roots for a test; null restores the defaults. */
+export function setScratchRootsForTests(roots: string[] | null): void {
+  scratchRootsOverride = roots;
+  resolved.clear();
+}
+
 /** The project a working directory belongs to, or null without one. */
 export function projectNameFromCwd(cwd: string | null | undefined): string | null {
   const trimmed = cwd?.trim();
@@ -124,7 +154,8 @@ export function projectNameFromCwd(cwd: string | null | undefined): string | nul
   const dir = path.resolve(trimmed);
   const cached = fresh(resolved.get(dir));
   if (cached) return cached.name;
-  const name = path.basename(resolveRoot(dir)) || null;
+  const root = resolveRoot(dir);
+  const name = isScratch(root) ? null : path.basename(root) || null;
   resolved.set(dir, { name, at: Date.now() });
   return name;
 }

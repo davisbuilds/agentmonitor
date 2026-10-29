@@ -73,3 +73,30 @@ test('an ingested event with a cwd is named from it', () => {
   assert.ok(without.ok);
   assert.equal(without.event.project, 'app-task', 'without a cwd the given project stands');
 });
+
+// A scratch directory (here a removed temp run) has no project at any site,
+// and no site falls back to the folder or transcript path it would have used.
+test('every site names no project for scratch work', () => {
+  const scratch = '/tmp/agentmonitor-sites-scratch-run.g35Rbg';
+  const lines = claudeLines.map(line => ({ ...line, sessionId: 'c-2', cwd: scratch }));
+  const file = path.join(root, '-tmp-agentmonitor-sites-scratch-run-g35Rbg', 'c-2.jsonl');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, lines.map(line => JSON.stringify(line)).join('\n'));
+  assert.equal(parseSessionMessages(fs.readFileSync(file, 'utf8'), 'c-2', file).metadata.project, null);
+  assert.deepEqual([...new Set(parseClaudeCodeFile(file).map(event => event.project ?? null))], [null]);
+
+  const codex = codexLines.map(line => line.type === 'session_meta'
+    ? { ...line, payload: { ...line.payload, id: '01a0a5aa-cc7f-7b91-a14c-ffda7ce66b48', cwd: scratch } }
+    : line);
+  const rollout = path.join(root, 'rollout-2026-10-05T10-00-00-01a0a5aa-cc7f-7b91-a14c-ffda7ce66b48.jsonl');
+  fs.writeFileSync(rollout, codex.map(line => JSON.stringify(line)).join('\n'));
+  assert.equal(parseCodexSessionMessages(fs.readFileSync(rollout, 'utf8'), 'codex-2', rollout).metadata.project, null);
+  assert.deepEqual([...new Set(parseCodexFile(rollout).map(event => event.project ?? null))], [null]);
+
+  // Hooks send the cwd's basename as `project` beside the cwd itself.
+  const ingested = normalizeIngestEvent({
+    session_id: 's', agent_type: 'claude_code', event_type: 'tool_use', project: 'agentmonitor-sites-scratch-run.g35Rbg', cwd: scratch,
+  });
+  assert.ok(ingested.ok);
+  assert.equal(ingested.event.project ?? null, null);
+});
