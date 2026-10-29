@@ -1,8 +1,9 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
+  import { activityBars } from '../../activity-bars';
 
-  const maxMessages = $derived(Math.max(...analytics.activity.map((entry) => entry.messages), 1));
+  const chart = $derived(activityBars(analytics.activity));
 </script>
 
 <section class="rounded-lg border border-line bg-surface p-4">
@@ -10,7 +11,7 @@
     <div>
       <div class="flex items-center gap-1.5">
         <h3 class="text-h3">Activity</h3>
-        <InfoTip label="Activity"><p>Sessions per day. Click a day to narrow the page to it.</p></InfoTip>
+        <InfoTip label="Activity"><p>Sessions per day, by the day each started. Click a day to narrow the page to it.</p></InfoTip>
       </div>
     </div>
     {#if analytics.coverage.activity}
@@ -22,23 +23,35 @@
     <div class="py-12 text-center text-meta text-text-muted">Loading activity…</div>
   {:else if analytics.errors.activity}
     <div class="py-12 text-center text-meta text-danger">{analytics.errors.activity}</div>
-  {:else if analytics.activity.length > 0}
+  {:else if chart.maxSessions > 0}
     <div class="space-y-2">
-      <div class="flex h-36 items-end gap-1">
-        {#each analytics.activity as day}
-          <button
-            class="flex-1 rounded-t-sm bg-accent/60 transition-colors hover:bg-accent"
-            style={`height:${Math.max((day.messages / maxMessages) * 100, 4)}%`}
-            title={`${day.date}: ${day.messages} messages, ${day.sessions} sessions`}
-            onclick={() => analytics.drillDownToDay(day.date)}
-          >
-            <span class="sr-only">{day.date}</span>
-          </button>
-        {/each}
+      <div class="flex gap-2">
+        <!-- The axis names the busiest day's sessions at the top and zero at the baseline. -->
+        <div class="flex h-36 w-6 shrink-0 flex-col justify-between text-right tabular font-mono text-meta text-text-faint" aria-hidden="true">
+          <span>{chart.maxSessions}</span>
+          <span>0</span>
+        </div>
+        <div class="flex h-36 min-w-0 flex-1 items-end gap-px border-b border-line">
+          {#each chart.bars as day}
+            <button
+              class="group h-full flex-1 rounded-t-sm transition-colors hover:bg-surface-2"
+              title={`${day.date}: ${day.sessions} session${day.sessions === 1 ? '' : 's'}, ${day.messages} messages`}
+              onclick={() => analytics.drillDownToDay(day.date)}
+            >
+              <span class="sr-only">{day.date}: {day.sessions} sessions</span>
+              <span class="flex h-full items-end" aria-hidden="true">
+                {#if day.sessions > 0}
+                  <!-- At least 2px, so a quiet day still reads as active. -->
+                  <span class="block w-full rounded-t-sm bg-accent/60 transition-colors group-hover:bg-accent" style={`height:max(${day.heightPct}%, 2px)`}></span>
+                {/if}
+              </span>
+            </button>
+          {/each}
+        </div>
       </div>
-      <div class="flex justify-between tabular font-mono text-meta text-text-faint">
-        <span>{analytics.activity[0]?.date}</span>
-        <span>{analytics.activity[analytics.activity.length - 1]?.date}</span>
+      <div class="ml-8 flex justify-between tabular font-mono text-meta text-text-faint">
+        <span>{chart.bars[0]?.date}</span>
+        <span>{chart.bars[chart.bars.length - 1]?.date}</span>
       </div>
     </div>
   {:else}

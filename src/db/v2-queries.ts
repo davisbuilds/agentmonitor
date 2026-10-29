@@ -1474,7 +1474,21 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
     point.user_messages += row.user_message_count ?? 0;
     byDate.set(date, point);
   }
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  // List every day of the range, idle days as zero, so a chart's axis is time.
+  // Without a range, span the first to the last active day.
+  const active = [...byDate.keys()].sort();
+  const from = rangeDay(params.date_from, 'from') ?? active[0];
+  const to = rangeDay(params.date_to, 'to') ?? active[active.length - 1];
+  if (!from || !to) return [];
+  return enumerateDateRange(from, to)
+    .map(date => byDate.get(date) ?? { date, sessions: 0, messages: 0, user_messages: 0 });
+}
+
+/** The local day a `date_from`/`date_to` param names. */
+function rangeDay(param: string | undefined, side: 'from' | 'to'): string | undefined {
+  if (!param) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(param)) return param;
+  return localDayOf(side === 'from' ? dateParamLowerBound(param) : param) ?? undefined;
 }
 
 export function getAnalyticsProjects(params: AnalyticsParams = {}): ProjectBreakdown[] {
