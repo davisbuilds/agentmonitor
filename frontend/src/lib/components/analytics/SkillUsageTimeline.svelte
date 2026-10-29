@@ -104,9 +104,10 @@
                   class="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-sm"
                   style={`height:max(${(day.total / maxTotal) * 100}%, 2px)`}
                 >
-                  <div class="flex h-full w-full flex-col-reverse">
+                  <!-- A 2px gap between segments, so neighbors never fuse into one block. -->
+                  <div class="flex h-full w-full flex-col-reverse gap-[2px]">
                     {#each stackDay(day, series.top, series.colors) as segment}
-                      <div style={`height:${(segment.count / day.total) * 100}%;background:${segment.color}`}></div>
+                      <div style={`flex:${segment.count} 1 0;min-height:1px;background:${segment.color}`}></div>
                     {/each}
                   </div>
                 </div>

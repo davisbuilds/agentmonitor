@@ -40,6 +40,14 @@ Rules: one primary accent per surface; status colors only encode status; provide
 identify a provider. Don't reintroduce `sky`/`purple`/`orange`/`yellow`/raw `gray-*` as text.
 Verify any new text/surface pair clears AA (4.5:1 body, 3:1 large) before shipping.
 
+Chart series share one categorical palette, `SERIES_COLORS` in
+`frontend/src/lib/components/usage/model-colors.ts`: ten hues, validated on
+**all** pairs against the dark chart surface, because a stacked day omits the
+series it lacks and any two can end up touching. Charts name at most ten series
+(Daily Usage by Model five, Skills ten) and fold the rest into Other, a dark
+neutral that recedes toward the surface. Never cycle or generate an eleventh hue;
+`tests/series-palette.test.ts` reruns every check on a palette change.
+
 ## Typography
 
 | Role | Family | Utility |

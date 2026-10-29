@@ -25,15 +25,24 @@ export interface ModelDailyPointLike {
 
 export const TOP_N = 5;
 
-// Validated against the dark chart surface (#101419): lightness band, chroma
-// floor, adjacent-pair CVD separation (worst ΔE 15.7), and 3:1 contrast all pass.
-// Order is the CVD-safety mechanism, not cosmetic — do not reshuffle without
-// re-validating. Green and red are omitted deliberately: they read as the
-// reserved ok/danger status tokens.
-export const SERIES_COLORS = ['#3987e5', '#199e70', '#c98500', '#d55181', '#9085e9', '#d95926'];
+// Validated on ALL pairs against the dark chart surface (#101419): lightness
+// band, chroma floor, CVD separation (worst ΔE 8.0, deutan), the normal-vision
+// floor (worst ΔE 15.4) and 3:1 contrast. All pairs, not adjacent ones: a
+// stacked day omits the series it lacks, so any two can end up touching. Any
+// subset of the set passes too, so the order only picks which colors a short
+// chart opens with. tests/series-palette.test.ts reruns every check. Green and
+// red are omitted deliberately: they read as the ok/danger status tokens.
+export const SERIES_COLORS = [
+  '#3c8ac7', '#e46212', '#3aac83', '#f030c3', '#9e71fd',
+  '#8d5d1b', '#4b47ee', '#b05f8f', '#03785d', '#a318be',
+];
 
-/** Reserved for the aggregated series; never assigned to a named model. */
-export const OTHER_COLOR = '#82878c';
+/**
+ * Reserved for the aggregated series; never assigned to a named one. A dark
+ * neutral below the series band, so the remainder recedes toward the surface;
+ * the legend and tooltip name it.
+ */
+export const OTHER_COLOR = '#3d424a';
 export const OTHER_LABEL = 'Other';
 
 // A set needs at most TOP_N distinct hues, so this headroom is what lets

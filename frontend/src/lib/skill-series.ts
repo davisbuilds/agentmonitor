@@ -1,5 +1,12 @@
 import type { SkillUsageDay } from './api/client';
-import { OTHER_COLOR, OTHER_LABEL, SERIES_COLORS, TOP_N } from './components/usage/model-colors';
+import { OTHER_COLOR, OTHER_LABEL, SERIES_COLORS } from './components/usage/model-colors';
+
+/** The skills the daily chart names; the rest fold into Other. */
+export const SKILL_TOP_N = 10;
+
+if (SKILL_TOP_N > SERIES_COLORS.length) {
+  throw new Error(`The skills chart needs ${SKILL_TOP_N} series colors, got ${SERIES_COLORS.length}`);
+}
 
 export interface SkillSegment {
   name: string;
@@ -8,7 +15,7 @@ export interface SkillSegment {
 }
 
 /**
- * The skills the daily chart names: the range's top TOP_N by invocations, each
+ * The skills the daily chart names: the range's top SKILL_TOP_N by invocations, each
  * with its own color from the validated series palette. Every other skill folds
  * into Other, so no two named skills share a hue.
  */
@@ -20,7 +27,7 @@ export function skillSeries(days: readonly SkillUsageDay[]): { top: string[]; co
   const top = [...totals.entries()]
     .filter(([, total]) => total > 0)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .slice(0, TOP_N)
+    .slice(0, SKILL_TOP_N)
     .map(([name]) => name);
   return { top, colors: new Map(top.map((name, index) => [name, SERIES_COLORS[index]])) };
 }
