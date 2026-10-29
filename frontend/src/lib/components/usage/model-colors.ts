@@ -1,5 +1,6 @@
 /**
- * Series selection and color assignment for the Daily Usage by Model chart.
+ * Series selection and color assignment for the Daily Usage by Model chart. The
+ * palette and Other color also serve the Skills daily chart (skill-series.ts).
  *
  * Pure, and separate from the component, so the color invariants can actually be
  * tested: they are data-dependent and the failure mode is silent (two categories
