@@ -607,6 +607,32 @@ describe('Claude session titles and subagent parents', () => {
     assert.equal(third.parsed.metadata.title, 'Renamed work');
   });
 
+  test("a user's rename is the title over Claude Code's ai-title, and the latest rename wins", () => {
+    // Claude Code rewrites the rename beside each new ai-title; agent-name mirrors one of them.
+    const content = sampleJsonl([
+      userLine('sess-rename', [{ type: 'text', text: 'Start the work' }]),
+      { type: 'ai-title', aiTitle: 'Generated title', sessionId: 'sess-rename' },
+      { type: 'custom-title', customTitle: 'First name', sessionId: 'sess-rename' },
+      { type: 'agent-name', agentName: 'First name', sessionId: 'sess-rename' },
+      { type: 'custom-title', customTitle: '  Chosen\n name ', sessionId: 'sess-rename' },
+      { type: 'custom-title', customTitle: '   ', sessionId: 'sess-rename' },
+      { type: 'ai-title', aiTitle: 'Later generated title', sessionId: 'sess-rename' },
+      { type: 'agent-name', agentName: 'Later generated title', sessionId: 'sess-rename' },
+    ]);
+    assert.equal(parseSessionMessages(content, 'sess-rename').metadata.title, 'Chosen name');
+  });
+
+  test('a continued parse keeps a rename over a newer ai-title', () => {
+    const first = parseSessionChunk(sampleJsonl([
+      userLine('sess-rename-resume', [{ type: 'text', text: 'Start the work' }]),
+      { type: 'custom-title', customTitle: 'Chosen name', sessionId: 'sess-rename-resume' },
+    ]), 'sess-rename-resume');
+    const second = parseSessionChunk(sampleJsonl([
+      { type: 'ai-title', aiTitle: 'Generated title', sessionId: 'sess-rename-resume' },
+    ]), 'sess-rename-resume', undefined, first.state);
+    assert.equal(second.parsed.metadata.title, 'Chosen name');
+  });
+
   test('first_message skips injected blocks inside the first user message', () => {
     const content = sampleJsonl([
       userLine('sess-inject', [

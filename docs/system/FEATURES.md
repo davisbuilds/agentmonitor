@@ -114,8 +114,9 @@ product never substitutes a misleading `0%` for missing evidence.
   tool calls, metadata, and an activity minimap for long sessions. Codex's
   injected developer-role messages are labelled Instructions, with their own
   entry in the author filter.
-- A session is titled by the name its harness gave it (Claude Code's own title,
-  or a subagent's task), else by its first prompt, skipping the context harnesses
+- A session is titled by the name you gave it (a Claude Code rename), else the
+  name its harness gave it (Claude Code's own title, or a subagent's task), else
+  by its first prompt, skipping the context harnesses
   inject ahead of it (Codex AGENTS.md and environment blocks, Claude Code command
   wrappers), else "Untitled <agent> session". Every page uses the same title.
 - Session lists nest a subagent under its parent whenever the parent is stored,
