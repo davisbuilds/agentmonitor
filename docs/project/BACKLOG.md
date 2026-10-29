@@ -99,17 +99,6 @@ so later readers know what still needs checking.
   receipt. Until then, a downstream reader that needs an outcome should read
   the preview, knowing it is absent when capture is off.
 
-#### Claude custom session titles are not read
-- **What**: Claude Code transcripts can carry `custom-title` (`customTitle`)
-  and `agent-name` (`agentName`) lines, the name a user or the harness gave the
-  session. The session browser titles a session from `ai-title` or its first
-  prompt and ignores these, so a renamed session shows another name.
-- **Why or evidence**: the ingestion probe's first live run (2026-10-26)
-  reported both as `unknown`. They occur in a few older transcripts.
-- **Next**: decide the precedence (a user's custom title over `ai-title` seems
-  right), read them in the Claude parser's title path, and list them as read
-  in `src/parser/record-types.ts`.
-
 #### Codex inter-agent messages are not projected
 - **What**: Codex rollouts record messages between agents as
   `response_item/agent_message`, each with an author and recipient, beside
@@ -379,37 +368,6 @@ the build.
   mirroring `src/import/index.ts`'s ownership rule. Do not simply update the
   pinned expectation.
 
-#### Imported Claude rows with no surviving transcript stay inflated
-- **What**: `amon costs repair-claude-usage` (shipped 2026-09-22 with the
-  per-content-block billing fix) can only correct rows whose transcript still
-  exists. Rows whose source file is gone keep the inflated usage the old
-  importer wrote.
-- **Why or evidence**: the repair was **applied** on a local store 2026-09-22
-  and corrected roughly one matched row in six, re-deriving a summary per
-  affected session. What it could not reach remains: a small set of ambiguous
-  rows, and **a large majority of pre-fix imported rows whose transcript is
-  gone** — several times the repairable population. A separate estimate that groups
-  identical usage tuples within a session suggested the reachable repair
-  recovers only about a third of the total inflation, leaving the rest in rows
-  with no local evidence left to check them against. Historical cost views stay
-  wrong by an unknown-but-bounded amount.
-  On 2026-09-26 transcripts restored from offsite backups made mid-July onward
-  checkable again. In those months repeat-line billing was about half of July's
-  checkable imported cost and about a third of August's; the second repair pass
-  corrected them. Backups reach no further back, so the earlier rows are the
-  whole remaining population. That they carry similar inflation is a
-  hypothesis, not a measurement.
-- **Next / Revisit when**: now the only remaining inflation, so this is the whole
-  question rather than part of it. Decide deliberately between three options —
-  leave and disclose (cheapest, but every historical cost view silently
-  overstates), a
-  heuristic collapse of identical `(session, timestamp, usage)` tuples (recovers
-  most of the remainder but *will* over-collapse genuinely identical turns, so
-  it trades a known overstatement for an unmeasured understatement), or a
-  provenance marker that labels pre-fix imported rows as unreliable in the UI.
-  Do not run a heuristic collapse without first measuring how often distinct
-  turns legitimately share a usage tuple.
-
 #### Imported Claude cost runs below Claude Code's own running cost, inside the main models
 - **What**: imported Claude cost reads a few percent below Claude Code's own
   figure. On the main models the rates agree, so the shortfall is usage the
@@ -514,22 +472,19 @@ the build.
 - **Revisit when**: an operational insert failure shows up in the logs, or the
   metrics route gains another write. Then wrap both writes in one transaction.
 
-#### The OTLP traces route acknowledges spans and discards them
-- **What**: `POST /api/otel/v1/traces` in `src/api/otel.ts` checks that the body
-  is JSON and returns `200 {}` without parsing, storing, or counting the spans.
-  The logs and metrics routes admit records and report drops; this route reports
-  success for a batch it threw away, so an exporter sees no error.
-- **Why or evidence**: latent today. Checked 2026-10-22 on the Mac mini: Codex
-  exports only logs and metrics to amon (`~/.codex/config.toml`), and Claude Code
-  has no OTEL exporter configured, so no spans arrive. Claude Code 2.1.300 added
+#### OTLP spans are refused, not ingested
+- **What**: `POST /api/otel/v1/traces` stores nothing. Since 2026-10-29 it
+  reports every span as rejected in OTLP's partial-success reply and logs a
+  throttled warning; before that it answered `200 {}` and an exporter saw no
+  error.
+- **Why or evidence**: checked 2026-10-22 on the Mac mini: Codex exports only
+  logs and metrics to amon (`~/.codex/config.toml`), and Claude Code has no
+  OTEL exporter configured, so no spans arrive. Claude Code 2.1.300 added
   GenAI semantic-convention span attributes (`gen_ai.conversation.id`,
-  `gen_ai.tool.name`, `error.type`), which makes enabling its traces tempting;
-  doing so would lose every span without a signal.
-- **Next**: until ingestion exists, make the route honest (count the spans as
-  rejected the way the logs and metrics routes record drops, or return 501).
-  Before building ingestion, capture a sanitized Claude Code 2.1.301+ trace
-  export and compare its spans with the events hooks, session files, and OTEL
-  logs already produce. Ingest only what spans add, and deduplicate against
+  `gen_ai.tool.name`, `error.type`), which makes enabling its traces tempting.
+- **Next**: before building ingestion, capture a sanitized Claude Code 2.1.301+
+  trace export and compare its spans with the events hooks, session files, and
+  OTEL logs already produce. Ingest only what spans add, and deduplicate against
   those sources.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
@@ -557,16 +512,6 @@ the build.
   component's behavior (not just its markup) needs a regression guard. No
   coverage threshold is enforced yet; add one only once the surface is broad
   enough that a number is meaningful. Noted 2026-09-11, narrowed 2026-10-09.
-
-#### `test:verify` runs outside CI, so its browser scenarios can rot
-- **What**: the verification pilot's scenarios (`pnpm test:verify`) are neither a
-  CI job nor a pre-push gate.
-- **Why or evidence**: after Live folded into Monitor, the live-session scenario
-  kept opening `#live`, by then a redirect, and failed until 2026-10-15. Nothing
-  noticed, though it is the one check that runs the compiled watcher through to
-  the browser.
-- **Next**: time `pnpm test:verify` in the E2E job (which already builds and
-  installs Chromium) and add it there if the cost is acceptable.
 
 #### Frontend pure-module tests are split across two runners
 - **What**: most `frontend/src/lib` helper tests (`frontier-geometry`, chart

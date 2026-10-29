@@ -99,6 +99,10 @@ baseline the next sample is diffed against. The reply is OTLP's partial-success 
 `rejectedDataPoints` for metrics, and `{}` when nothing was refused. A
 fractional OTLP latency is rounded to whole milliseconds rather than refused.
 
+Spans are not ingested. `POST /api/otel/v1/traces` refuses every span it
+receives with `{"partialSuccess":{"rejectedSpans":N,"errorMessage":"..."}}`, so
+an exporter sees them discarded rather than stored; an empty batch gets `{}`.
+
 Exporters resend a batch on timeout or reset, so each OTLP log record and usage
 data point gets a derived `event_id` (`otel-log-…`/`otel-metric-…`, a hash of the
 record with its resource and instrumentation scope, keys sorted) and a resend is stored once. A record

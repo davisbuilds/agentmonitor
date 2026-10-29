@@ -170,7 +170,26 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
   res.status(200).json(admission.response('rejectedDataPoints'));
 });
 
-// POST /api/otel/v1/traces — stub for future implementation
+/** The spans an OTLP traces payload carries, counting only well-formed arrays. */
+function countSpans(payload: object): number {
+  const arrayAt = (value: unknown, key: string): unknown[] => {
+    const field = typeof value === 'object' && value !== null ? (value as Record<string, unknown>)[key] : undefined;
+    return Array.isArray(field) ? field : [];
+  };
+  let count = 0;
+  for (const resource of arrayAt(payload, 'resourceSpans')) {
+    for (const scope of arrayAt(resource, 'scopeSpans')) count += arrayAt(scope, 'spans').length;
+  }
+  return count;
+}
+
+// Spans are not ingested yet. The route says so in OTLP's partial-success
+// shape, so an exporter pointed here sees its spans refused rather than stored.
+// The warning is throttled: an exporter resends a batch every few seconds.
+let discardedSpans = 0;
+let lastSpanWarn = 0;
+
+// POST /api/otel/v1/traces
 otelRouter.post('/v1/traces', (req: Request, res: Response) => {
   if (!requireJson(req, res)) return;
   const payload = coerceJsonLikeBody(req.body);
@@ -179,6 +198,19 @@ otelRouter.post('/v1/traces', (req: Request, res: Response) => {
     return;
   }
 
-  // Accept and acknowledge traces but don't process them yet
-  res.status(200).json({});
+  const spans = countSpans(payload);
+  if (spans === 0) {
+    res.status(200).json({});
+    return;
+  }
+  discardedSpans += spans;
+  const now = Date.now();
+  if (now - lastSpanWarn >= DROP_FLUSH_INTERVAL_MS) {
+    console.warn(`[otel] discarded ${discardedSpans} spans since last warning: span ingestion is not implemented`);
+    discardedSpans = 0;
+    lastSpanWarn = now;
+  }
+  res.status(200).json({
+    partialSuccess: { rejectedSpans: spans, errorMessage: 'Span ingestion is not implemented; spans were discarded' },
+  });
 });

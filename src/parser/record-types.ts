@@ -18,6 +18,7 @@ export const CLAUDE_RECORD_TYPES: RecordTypeCatalog = {
     assistant: 'session browser, import (usage and cost)',
     system: 'session browser (compaction boundaries)',
     'ai-title': 'session title',
+    'custom-title': 'session title (a rename, over ai-title)',
     'cost-state': 'costs check-claude-sessions --transcripts',
     error: 'import (legacy event-style lines)',
     tool_use: 'import (legacy event-style lines)',
@@ -25,6 +26,7 @@ export const CLAUDE_RECORD_TYPES: RecordTypeCatalog = {
   },
   knownUnused: {
     attachment: 'harness context attachments; no transcript or usage content amon shows',
+    'agent-name': 'mirrors the custom-title or ai-title beside it',
     'last-prompt': 'harness UI state',
     'permission-mode': 'harness UI state',
     mode: 'harness UI state',

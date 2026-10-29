@@ -71,6 +71,8 @@ interface ClaudeCodeLine {
   sessionId?: string;
   // Claude Code's own short title for the session (`type: 'ai-title'` lines).
   aiTitle?: string;
+  // The name a user gave the session with a rename (`type: 'custom-title'`).
+  customTitle?: string;
   isSidechain?: boolean;
   isMeta?: boolean;
   cwd?: string;
@@ -299,6 +301,8 @@ export interface ClaudeParseState {
   messageCount: number;
   firstUserMessage: string | null;
   title: string | null;
+  // A user's rename, which outranks `title` (Claude Code's ai-title).
+  customTitle?: string;
   parentSessionId: string | null;
   startedAt: string | null;
   endedAt: string | null;
@@ -347,6 +351,7 @@ export function parseSessionChunk(
   const ordinalBase = state?.messageCount ?? 0;
   let firstUserMessage: string | null = state?.firstUserMessage ?? null;
   let title: string | null = state?.title ?? null;
+  let customTitle: string | undefined = state?.customTitle;
   let startedAt: string | null = state?.startedAt ?? null;
   let endedAt: string | null = state?.endedAt ?? null;
   let userMessageCount = state?.userMessageCount ?? 0;
@@ -418,6 +423,13 @@ export function parseSessionChunk(
       // Claude Code rewrites its title as the session goes; the latest one wins.
       const aiTitle = typeof line.aiTitle === 'string' ? cleanPreviewText(line.aiTitle) : '';
       if (aiTitle) title = aiTitle.slice(0, 200);
+      continue;
+    }
+
+    if (lineType === 'custom-title') {
+      // A rename is the user's choice, so it outranks ai-title; the latest one wins.
+      const renamed = typeof line.customTitle === 'string' ? cleanPreviewText(line.customTitle) : '';
+      if (renamed) customTitle = renamed.slice(0, 200);
       continue;
     }
 
@@ -584,7 +596,7 @@ export function parseSessionChunk(
       project,
       agent: 'claude',
       first_message: firstUserMessage,
-      title,
+      title: customTitle ?? title,
       started_at: startedAt,
       ended_at: endedAt,
       message_count: ordinalBase + messages.length,
@@ -623,6 +635,7 @@ export function parseSessionChunk(
       messageCount: ordinalBase + messages.length,
       firstUserMessage,
       title,
+      customTitle,
       parentSessionId,
       startedAt,
       endedAt,
