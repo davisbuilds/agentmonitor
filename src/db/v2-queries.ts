@@ -3666,7 +3666,9 @@ export function getUsageSummary(
   const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
   const safeActiveDays = Math.max(row.active_days, 1);
   const safeSessions = Math.max(row.total_sessions, 1);
-  const cacheHitDenominator = row.total_input_tokens + row.total_cache_read_tokens;
+  // The share of prompt tokens served from cache: a prompt is its uncached
+  // input, cache reads and cache writes, as the providers count it.
+  const cacheHitDenominator = row.total_input_tokens + row.total_cache_read_tokens + row.total_cache_write_tokens;
   let estimatedCacheSavingsUsd = 0;
   let pricingKnownEvents = 0;
   let pricingUnknownEvents = 0;

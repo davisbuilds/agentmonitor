@@ -214,6 +214,8 @@ Monitor's today and 30-day figures.
 
 - Stored `cost_usd` remains the authoritative event cost. Cache savings are an
   estimate from current pricing metadata and disclose incomplete pricing coverage.
+  The cache hit rate is cache reads over every prompt token: uncached input,
+  cache reads, and cache writes.
 - Input, output, cache-read, and cache-write tokens remain separate. Model views can
   show all four buckets.
 - Claude cache writes are priced by cache lifetime: the 1-hour part a transcript
