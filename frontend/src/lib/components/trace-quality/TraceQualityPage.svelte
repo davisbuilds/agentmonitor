@@ -4,15 +4,12 @@
   import { Badge, Button, InfoTip, Stat } from '../ui';
   import TraceCoverageBadge from './TraceCoverageBadge.svelte';
   import TraceTree from './TraceTree.svelte';
-  import { formatModelName } from '../../format';
+  import { formatCost, formatModelName } from '../../format';
 
   const tq = traceQuality;
 
   function formatNumber(value: number): string {
     return new Intl.NumberFormat('en-US').format(value);
-  }
-  function formatCost(value: number): string {
-    return `$${value.toFixed(value > 0 && value < 0.01 ? 4 : 2)}`;
   }
   function formatDuration(ms: number | null): string {
     if (ms == null) return '—';
