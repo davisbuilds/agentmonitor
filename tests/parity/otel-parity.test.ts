@@ -217,7 +217,7 @@ test('POST /api/otel/v1/metrics supports cumulative-to-delta conversion', async 
   assert.equal(tokenInValues.filter((n) => n === 0).length, 0);
 });
 
-test('POST /api/otel/v1/traces accepts JSON stub and returns empty object', async () => {
+test('POST /api/otel/v1/traces acknowledges an empty batch with an empty object', async () => {
   const res = await postJson('/api/otel/v1/traces', { resourceSpans: [] });
   assert.equal(res.status, 200);
   const body = await res.json();

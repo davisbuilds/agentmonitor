@@ -268,7 +268,7 @@ export OTEL_EXPORTER_OTLP_METRICS_ENDPOINT=http://127.0.0.1:3141/api/otel/v1/met
 
 Logs (`OTEL_LOGS_EXPORTER=otlp`) carry no usage AgentMonitor reads and roughly
 double the stored rows. Leave traces off: the traces route does not ingest
-spans yet.
+spans yet, and reports each batch's spans as rejected.
 
 **OTel vs Hooks:** Both integration paths can run simultaneously. Hooks give you
 safety checks (PreToolUse) and custom event shaping; OTEL metrics give the live

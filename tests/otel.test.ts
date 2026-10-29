@@ -1285,13 +1285,27 @@ describe('POST /api/otel/v1/traces', () => {
     assert.equal(res.status, 415);
   });
 
-  test('accepts traces and returns empty object (stub)', async () => {
+  test('an empty batch is acknowledged with nothing refused', async () => {
     const res = await postJson(`${baseUrl}/api/otel/v1/traces`, {
       resourceSpans: [],
     });
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.deepEqual(body, {});
+  });
+
+  test('spans are reported as refused, since none are stored', async () => {
+    const res = await postJson(`${baseUrl}/api/otel/v1/traces`, {
+      resourceSpans: [
+        { scopeSpans: [{ spans: [{ name: 'a' }, { name: 'b' }] }, { spans: [{ name: 'c' }] }] },
+        { scopeSpans: [{ spans: [{ name: 'd' }] }, { spans: 'not-an-array' }] },
+        { scopeSpans: 'not-an-array' },
+      ],
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json() as { partialSuccess?: { rejectedSpans?: number; errorMessage?: string } };
+    assert.equal(body.partialSuccess?.rejectedSpans, 4);
+    assert.match(body.partialSuccess?.errorMessage ?? '', /not implemented/);
   });
 });
 
