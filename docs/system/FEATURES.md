@@ -265,8 +265,8 @@ Monitor's today and 30-day figures.
   live OTEL usage of the same session in aggregates, including a Monitor card's
   and session detail's token and cost totals; raw events remain available in
   session and monitor history.
-- Benchmark events are excluded from normal usage, analytics, and the Monitor's
-  totals, event feed, and session list.
+- Benchmark events are excluded from normal usage, analytics, the Monitor's
+  totals, event feed, and session list, and Quality's trace list.
   Benchmark-aware reads can opt into them explicitly. Usage and analytics reads
   reject an unparseable `date_from`/`date_to` with a 400 rather than reporting
   an empty window.

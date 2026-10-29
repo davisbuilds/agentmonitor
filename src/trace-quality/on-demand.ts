@@ -96,7 +96,8 @@ function normalizedOffset(value: number | undefined): number {
 
 /** Build the WHERE clause for the summary-backed list from the supported filters. */
 function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string; values: unknown[] } {
-  const clauses: string[] = [];
+  // Imported benchmark runs stay out of personal activity, as in Usage and Analytics.
+  const clauses: string[] = ["session_id NOT IN (SELECT session_id FROM events WHERE source = 'benchmark')"];
   const values: unknown[] = [];
   if (params.session_id) {
     const keys = codexSessionAliases(params.session_id);
