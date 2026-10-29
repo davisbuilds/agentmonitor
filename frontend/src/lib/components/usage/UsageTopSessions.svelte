@@ -1,6 +1,6 @@
 <script lang="ts">
   import { usage } from '../../stores/usage.svelte';
-  import { formatCost, formatModelName, formatNumber } from '../../format';
+  import { agentName, formatCost, formatModelName, formatNumber } from '../../format';
   import { sessionTitle } from '../../session-text';
   import { usageTokenSplit, usageTokenTotal } from '../../usage-tokens';
   import { Button, InfoTip } from '../ui';
@@ -43,8 +43,8 @@
             <div class="min-w-0">
               <div class="truncate text-body font-medium text-text" title={row.id}>{sessionTitle(row)}</div>
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-text-faint">
-                <span>{row.project ?? 'unknown project'}</span>
-                <span>{row.agent}</span>
+                <span>{row.project ?? 'No project'}</span>
+                <span>{agentName(row.agent)}</span>
                 <span class="font-mono" title={row.primary_model}>{formatModelName(row.primary_model)}</span>
                 <span>{row.primary_provider} / {row.primary_tier}</span>
                 <span class="tabular font-mono">{formatNumber(row.usage_events)} usage events</span>

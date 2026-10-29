@@ -18,7 +18,7 @@ test('buildActiveAgentLabel includes model and reasoning effort when available',
 });
 
 test('buildActiveAgentLabel uses the friendly agent name and omits unavailable model metadata', () => {
-  assert.equal(buildActiveAgentLabel('claude_code', []), 'Claude');
+  assert.equal(buildActiveAgentLabel('claude_code', []), 'Claude Code');
   assert.equal(
     buildActiveAgentLabel('codex', [{ model: 'gpt-5.4', metadata: '{bad json' }]),
     'Codex (gpt-5.4)',
@@ -37,14 +37,14 @@ test('buildActiveAgentLabel skips the <synthetic> marker and falls through to th
       { model: '<synthetic>' },
       { model: 'anthropic/claude-opus-4-7' },
     ]),
-    'Claude (claude-opus-4-7)',
+    'Claude Code (claude-opus-4-7)',
   );
 });
 
 test('buildActiveAgentLabel drops the suffix when the only model is <synthetic>', () => {
   assert.equal(
     buildActiveAgentLabel('claude_code', [{ model: '<synthetic>' }]),
-    'Claude',
+    'Claude Code',
   );
 });
 
@@ -89,10 +89,10 @@ test('buildActiveAgentLabel shows effort only alongside a model', () => {
 });
 
 test('buildActiveAgentLabel names every recognized agent and strips only known provider prefixes', () => {
-  assert.equal(buildActiveAgentLabel('claude', []), 'Claude');
+  assert.equal(buildActiveAgentLabel('claude', []), 'Claude Code');
   assert.equal(buildActiveAgentLabel('antigravity', []), 'Antigravity');
   assert.equal(buildActiveAgentLabel('codex', [{ model: 'openai/gpt-5.5' }]), 'Codex (gpt-5.5)');
-  assert.equal(buildActiveAgentLabel('claude', [{ model: 'anthropic/claude-opus-4-7' }]), 'Claude (claude-opus-4-7)');
+  assert.equal(buildActiveAgentLabel('claude', [{ model: 'anthropic/claude-opus-4-7' }]), 'Claude Code (claude-opus-4-7)');
   assert.equal(buildActiveAgentLabel('antigravity', [{ model: 'google/gemini-3-pro' }]), 'Antigravity (gemini-3-pro)');
   // Unknown provider prefixes stay visible rather than being guessed away.
   assert.equal(buildActiveAgentLabel('amp', [{ model: 'x-ai/grok-5' }]), 'amp (x-ai/grok-5)');
@@ -133,11 +133,11 @@ test('monitor cost windows carry only the agent filter', () => {
 test('buildActiveAgentLabel spells the model the way every other page does', () => {
   assert.equal(
     buildActiveAgentLabel('claude_code', [{ model: 'us.anthropic.claude-opus-4-8-v1:0' }]),
-    'Claude (claude-opus-4-8)',
+    'Claude Code (claude-opus-4-8)',
   );
   assert.equal(
     buildActiveAgentLabel('claude_code', [{ model: 'claude-haiku-4-5-20251001' }]),
-    'Claude (claude-haiku-4-5)',
+    'Claude Code (claude-haiku-4-5)',
   );
 });
 

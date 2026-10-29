@@ -1,3 +1,4 @@
+import { agentName } from './format';
 import type { AgentEvent, MonitorAgentUsage, Stats } from './api/client';
 
 export interface AgentTokenRow {
@@ -6,12 +7,6 @@ export interface AgentTokenRow {
   total: number;
   usage: MonitorAgentUsage;
 }
-
-const AGENT_LABELS: Record<string, string> = {
-  claude_code: 'Claude Code',
-  codex: 'Codex',
-  antigravity: 'Antigravity',
-};
 
 /**
  * Every token an agent processed: uncached input, output, cache reads and
@@ -28,7 +23,7 @@ export function statsTotalTokens(stats: Stats): number {
 
 export function agentTokenRows(stats: Stats): AgentTokenRow[] {
   return Object.entries(stats.usage_by_agent ?? {})
-    .map(([agent, usage]) => ({ agent, label: AGENT_LABELS[agent] ?? agent, total: usageTotal(usage), usage }))
+    .map(([agent, usage]) => ({ agent, label: agentName(agent), total: usageTotal(usage), usage }))
     .sort((a, b) => b.total - a.total);
 }
 

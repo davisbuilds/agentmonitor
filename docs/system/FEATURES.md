@@ -176,11 +176,16 @@ A project is the git repository a session's
 working directory belongs to, named after the repository root: subdirectories
 and worktrees in a worktree area (`.worktrees/`, `*-worktrees/`,
 `.claude/worktrees/`, `.codex/worktrees/`) count as their repository, also once
-removed. A directory outside any repository is named after itself; sessions that
+removed. A directory outside any repository is named after itself, except scratch space (below); sessions that
 record no working directory (Codex OTEL-only, Antigravity) have no project. The
-shared agent filter names Claude `claude`, as the session browser does; events
-call it `claude_code`, and every Analytics, Usage, Skills, and Quality read
-accepts either spelling, so one filter value narrows every sub-view. A user
+shared agent filter holds Claude as `claude`, as the session browser does;
+events call it `claude_code`, and every Analytics, Usage, Skills, and Quality
+read accepts either spelling, so one filter value narrows every sub-view. The
+UI calls it Claude Code everywhere (the quota pill names the provider,
+Claude). Sessions run in scratch space, a temp directory, an app-support
+folder, or a worktree container that no repository holds, have no project;
+Usage lists their usage under No project. `amon sessions repair-projects
+--apply` clears the names older rows still carry. A user
 message is a prompt: Claude Code returns each tool result to the model as a
 user-role transcript line, and those are counted as messages but not as user
 messages, as Codex already counts them. Hour Of Week places each message at the hour it was

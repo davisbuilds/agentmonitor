@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   agentColor,
   agentDisplayName,
+  agentName,
   agentHexColor,
   formatCost,
   formatDateOnly,
@@ -212,10 +213,18 @@ describe('agent and status styling', () => {
     expect(agentHexColor('claude')).toBe('var(--color-claude)');
     expect(agentHexColor('codex')).toBe('var(--color-codex)');
     expect(agentHexColor('other')).toBe('var(--color-accent)');
-    expect(agentDisplayName('claude')).toBe('Claude');
-    expect(agentDisplayName('claude_code')).toBe('Claude');
+    expect(agentDisplayName('claude')).toBe('Claude Code');
+    expect(agentDisplayName('claude_code')).toBe('Claude Code');
     expect(agentDisplayName('codex')).toBe('Codex');
     expect(agentDisplayName('other')).toBe('Assistant');
+  });
+
+  it('calls Claude "Claude Code" under either stored spelling, and keeps an unknown agent\'s name', () => {
+    expect(agentName('claude')).toBe('Claude Code');
+    expect(agentName('claude_code')).toBe('Claude Code');
+    expect(agentName('codex')).toBe('Codex');
+    expect(agentName('antigravity')).toBe('Antigravity');
+    expect(agentName('opencode')).toBe('opencode');
   });
 
   it('maps statuses to their dot colors', () => {

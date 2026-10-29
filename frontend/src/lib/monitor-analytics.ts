@@ -1,5 +1,5 @@
 import { createDefaultAnalyticsFilters } from './analytics-state';
-import { formatModelName } from './format';
+import { agentName, formatModelName } from './format';
 
 export interface MonitorCostWindows {
   today: Record<string, string>;
@@ -64,21 +64,8 @@ function isRealModel(model: string | undefined): model is string {
   return !!trimmed && trimmed !== '<synthetic>';
 }
 
-// Friendly name for the agent in the live label. Recognized agents get their
-// product name (claude_code → "Claude"); anything else falls back to the raw
-// type so unknown runtimes stay identifiable rather than collapsing to a label.
-function agentLabelName(agentType: string): string {
-  switch (agentType) {
-    case 'claude':
-    case 'claude_code': return 'Claude';
-    case 'codex': return 'Codex';
-    case 'antigravity': return 'Antigravity';
-    default: return agentType;
-  }
-}
-
 export function buildActiveAgentLabel(agentType: string, events: ActiveAgentLabelEvent[]): string {
-  const name = agentLabelName(agentType);
+  const name = agentName(agentType);
   const model = events.map(event => event.model?.trim()).find(isRealModel);
   const reasoningEffort = events.map(reasoningEffortFromEvent).find((value): value is string => value != null);
 

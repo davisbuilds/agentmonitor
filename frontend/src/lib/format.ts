@@ -148,14 +148,25 @@ export function agentHexColor(agentType: string): string {
   }
 }
 
+/**
+ * What the UI calls an agent: one name for each harness, whichever spelling a
+ * table stores (the session browser says `claude`, events `claude_code`). An
+ * agent it does not know keeps its own name.
+ */
+const AGENT_NAMES: Record<string, string> = {
+  claude: 'Claude Code',
+  claude_code: 'Claude Code',
+  codex: 'Codex',
+  antigravity: 'Antigravity',
+};
+
+export function agentName(agentType: string): string {
+  return AGENT_NAMES[agentType] ?? agentType;
+}
+
+/** An agent's name where an unknown one should read as a generic speaker. */
 export function agentDisplayName(agentType: string): string {
-  switch (agentType) {
-    case 'claude':
-    case 'claude_code': return 'Claude';
-    case 'codex': return 'Codex';
-    case 'antigravity': return 'Antigravity';
-    default: return 'Assistant';
-  }
+  return AGENT_NAMES[agentType] ?? 'Assistant';
 }
 
 export function statusColor(status: string): string {

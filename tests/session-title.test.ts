@@ -114,7 +114,7 @@ describe('codexSubagentTitle', () => {
 describe('untitledSessionName', () => {
   test('names the agent when it is known', () => {
     assert.equal(untitledSessionName('codex'), 'Untitled Codex session');
-    assert.equal(untitledSessionName('claude_code'), 'Untitled Claude session');
+    assert.equal(untitledSessionName('claude_code'), 'Untitled Claude Code session');
     assert.equal(untitledSessionName('mystery'), 'Untitled session');
     assert.equal(untitledSessionName(null), 'Untitled session');
   });

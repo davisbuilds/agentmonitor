@@ -1,7 +1,7 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
   import { usage } from '../../stores/usage.svelte';
-  import { formatCost, formatModelName, formatNumber } from '../../format';
+  import { agentName, formatCost, formatModelName, formatNumber } from '../../format';
   import { usageTokenSplit, usageTokenTotal } from '../../usage-tokens';
   import type {
     UsageProjectBreakdown,
@@ -25,10 +25,10 @@
   } = $props();
 
   function labelForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): string {
-    if ('project' in row) return row.project;
+    if ('project' in row) return row.project === 'unknown' ? 'No project' : row.project;
     if ('model' in row) return formatModelName(row.model);
     if ('tier' in row) return `${row.provider} / ${row.tier}`;
-    return row.agent;
+    return agentName(row.agent);
   }
 
   function detailForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): string {

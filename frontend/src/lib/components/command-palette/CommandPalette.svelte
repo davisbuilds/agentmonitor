@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from 'svelte';
   import type { BrowsingSession, SearchResult } from '../../api/client';
-  import { agentHexColor, timeAgo } from '../../format';
+  import { agentHexColor, agentName, timeAgo } from '../../format';
   import { sessionTitle } from '../../session-text';
   import { closeCommandPalette } from '../../stores/router.svelte';
   import { commandPaletteSearch } from '../../stores/search.svelte';
@@ -288,7 +288,7 @@
                   </div>
                 </div>
                 <div class="mt-2 flex flex-wrap items-center gap-2 text-meta text-text-faint">
-                  <span>{item.session.agent}</span>
+                  <span>{agentName(item.session.agent)}</span>
                   {#if item.session.project}
                     <span>· {item.session.project}</span>
                   {/if}

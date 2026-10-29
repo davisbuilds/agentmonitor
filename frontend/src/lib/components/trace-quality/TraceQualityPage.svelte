@@ -4,7 +4,7 @@
   import { Badge, Button, InfoTip, Stat } from '../ui';
   import TraceCoverageBadge from './TraceCoverageBadge.svelte';
   import TraceTree from './TraceTree.svelte';
-  import { formatCost, formatModelName } from '../../format';
+  import { agentName, formatCost, formatModelName } from '../../format';
 
   const tq = traceQuality;
 
@@ -21,9 +21,6 @@
     if (!value) return '—';
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
-  }
-  function formatAgent(agent: string): string {
-    return agent === 'claude_code' ? 'claude' : agent;
   }
 
   onMount(() => {
@@ -79,7 +76,7 @@
                 </div>
                 <TraceCoverageBadge {trace} compact />
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-meta text-text-faint">
-                  <span>{formatAgent(trace.agent_type)}</span>
+                  <span>{agentName(trace.agent_type)}</span>
                   <span class="font-mono">{formatNumber(trace.aggregate.observation_count)} obs</span>
                   {#if trace.aggregate.error_count > 0}<Badge tone="danger">{trace.aggregate.error_count} err</Badge>{/if}
                 </div>
@@ -103,7 +100,7 @@
             <div class="min-w-0">
               <h2 class="text-h2 truncate">{d.name}</h2>
               <div class="mt-2 flex flex-wrap items-center gap-2 text-meta text-text-faint">
-                <span>{formatAgent(d.agent_type)}</span>
+                <span>{agentName(d.agent_type)}</span>
                 {#if d.status}<Badge tone={d.status === 'error' ? 'danger' : 'neutral'}>{d.status}</Badge>{/if}
                 {#if d.project}<span>{d.project}</span>{/if}
                 <span class="font-mono">{formatDateTime(d.started_at)}</span>
