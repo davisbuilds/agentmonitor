@@ -1086,7 +1086,8 @@ modifies a local `dist` file and restores it; run it serially without concurrent
 builds or other verification against that checkout. Its probe tests run against
 fixture databases from the disposable host, never the installed one. The normal
 tests do not require Chromium or a built app; they cover the probes' read-only
-opener and target guards.
+opener and target guards. CI runs it last in the `E2E (Playwright)` job; locally,
+run it in a worktree, never the checkout the login service loads.
 
 The pre-push checks are:
 

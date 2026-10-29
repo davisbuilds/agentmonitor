@@ -100,6 +100,11 @@ jobs:
       - name: Verify built skill context runtime
         run: pnpm verify:skill-context-built
 
+      # Drives the compiled server through to the browser. It edits a dist file
+      # and restores it, so it runs after every other step that reads dist.
+      - name: Run verification scenarios
+        run: pnpm test:verify
+
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

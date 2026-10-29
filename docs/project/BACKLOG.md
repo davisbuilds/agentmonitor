@@ -544,16 +544,6 @@ the build.
   coverage threshold is enforced yet; add one only once the surface is broad
   enough that a number is meaningful. Noted 2026-09-11, narrowed 2026-10-09.
 
-#### `test:verify` runs outside CI, so its browser scenarios can rot
-- **What**: the verification pilot's scenarios (`pnpm test:verify`) are neither a
-  CI job nor a pre-push gate.
-- **Why or evidence**: after Live folded into Monitor, the live-session scenario
-  kept opening `#live`, by then a redirect, and failed until 2026-10-15. Nothing
-  noticed, though it is the one check that runs the compiled watcher through to
-  the browser.
-- **Next**: time `pnpm test:verify` in the E2E job (which already builds and
-  installs Chromium) and add it there if the cost is acceptable.
-
 #### Frontend pure-module tests are split across two runners
 - **What**: most `frontend/src/lib` helper tests (`frontier-geometry`, chart
   `scales`, `monitor-analytics`, `route-state`, the `*-state.ts` helpers,
