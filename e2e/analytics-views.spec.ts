@@ -256,6 +256,10 @@ test('Overview opens on the headline row, with Velocity folded into it', async (
   }
   await expect(page.getByRole('heading', { name: 'Velocity' })).toHaveCount(0);
   await expect(page.getByRole('region', { name: 'Session Depth' })).toBeVisible();
+  const delegated = page.getByRole('region', { name: 'Delegated Work' });
+  await expect(delegated).toBeVisible();
+  await delegated.getByRole('button', { name: 'Cost' }).click();
+  await expect(delegated.getByRole('button', { name: 'Cost' })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText('Active filters')).toHaveCount(0);
 });
 

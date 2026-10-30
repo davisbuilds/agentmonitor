@@ -8,6 +8,7 @@
   import HourOfWeekHeatmap from './HourOfWeekHeatmap.svelte';
   import AgentComparison from './AgentComparison.svelte';
   import SessionDepth from './SessionDepth.svelte';
+  import DelegatedWork from './DelegatedWork.svelte';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -31,6 +32,7 @@
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-12">
     <div class="space-y-4 xl:col-span-7">
       <ActivityTimeline />
+      <DelegatedWork />
       <ProjectBreakdown />
       <HourOfWeekHeatmap />
     </div>
