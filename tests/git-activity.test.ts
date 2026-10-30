@@ -159,3 +159,21 @@ test('merge commits are kept, flagged, so a merged pull request can be found', a
   assert.equal(flagged[merge], 1);
   assert.equal(flagged[work], 0);
 });
+
+test('signature verification in the user\'s git config does not leak into stored paths', async () => {
+  const dir = freshRepository('iota', '2026-03-01T09:00:00Z');
+  const key = path.join(tempDir, 'signing-key');
+  execFileSync('ssh-keygen', ['-q', '-t', 'ed25519', '-N', '', '-f', key]);
+  git(dir, ['config', 'gpg.format', 'ssh']);
+  git(dir, ['config', 'user.signingkey', key]);
+  git(dir, ['config', 'log.showSignature', 'true']);
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'x\n');
+  git(dir, ['add', 'a.txt']);
+  git(dir, ['commit', '-q', '-S', '-m', 'feat: signed'], '2026-03-01T10:00:00Z');
+  fs.writeFileSync(path.join(dir, 'b.txt'), 'y\n');
+  git(dir, ['add', 'b.txt']);
+  git(dir, ['commit', '-q', '-S', '-m', 'feat: signed again'], '2026-03-01T11:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  const rows = db.prepare('SELECT subject, files_json FROM git_commits WHERE repo_root = ? ORDER BY authored_at').all(dir) as Array<{ subject: string; files_json: string }>;
+  assert.deepEqual(rows.map(row => [row.subject, JSON.parse(row.files_json)]), [['feat: signed', ['a.txt']], ['feat: signed again', ['b.txt']]]);
+});

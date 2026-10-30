@@ -75,8 +75,10 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
   // --since stops walking at the first commit older than the cutoff, so a
   // backdated commit would hide the recent ones behind it, and the pass would
   // then remove them as rewritten. --since-as-filter (git 2.38) visits them all.
-  // Merges are kept, flagged: a merged pull request leaves one.
-  const output = await git(root, ['log', '--all', '-z', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
+  // Merges are kept, flagged: a merged pull request leaves one. The output is
+  // parsed, so no user config may add to it: log.showSignature would print
+  // verification text between commits, and color would add escapes.
+  const output = await git(root, ['log', '--all', '-z', '--no-show-signature', '--no-color', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
   const commits = new Map<string, CommitRecord>();
   for (const record of output.split('\x1e').slice(1)) {
     const headerEnd = record.indexOf('\0');
