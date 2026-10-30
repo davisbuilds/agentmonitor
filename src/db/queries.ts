@@ -401,9 +401,18 @@ function safeJsonStringify(value: unknown): string {
   }
 }
 
+/**
+ * When the priority values alone overflow the cap, each long one keeps its
+ * opening characters. A prompt over the cap otherwise vanished whole, and its
+ * opening words are what mark a Codex app job (a title or catch-up prompt
+ * embeds the entire thread it describes).
+ */
+const TRUNCATED_VALUE_HEAD_CHARS = 256;
+
 function buildTruncatedObjectSummary(
   metadata: Record<string, unknown>,
-  originalBytes: number
+  originalBytes: number,
+  headChars = Infinity,
 ): string {
   const summary: Record<string, unknown> = {
     _truncated: true,
@@ -412,7 +421,8 @@ function buildTruncatedObjectSummary(
 
   for (const key of METADATA_PRIORITY_KEYS) {
     if (Object.prototype.hasOwnProperty.call(metadata, key)) {
-      summary[key] = metadata[key];
+      const value = metadata[key];
+      summary[key] = typeof value === 'string' && value.length > headChars ? value.slice(0, headChars) : value;
     }
   }
 
@@ -443,6 +453,9 @@ function truncateMetadata(metadata: unknown): { value: string; truncated: boolea
   let summary = buildTruncatedGenericSummary(serializedBytes);
   if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
     summary = buildTruncatedObjectSummary(metadata as Record<string, unknown>, serializedBytes);
+    if (Buffer.byteLength(summary, 'utf8') > maxBytes) {
+      summary = buildTruncatedObjectSummary(metadata as Record<string, unknown>, serializedBytes, TRUNCATED_VALUE_HEAD_CHARS);
+    }
   }
 
   if (Buffer.byteLength(summary, 'utf8') <= maxBytes) {
