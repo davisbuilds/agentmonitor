@@ -764,6 +764,15 @@ function parseLogRecord(
       meta.response_item_type ??= codexPayloadType;
     }
 
+    // The client a thread came from (the CLI, the app, an ephemeral exec), on
+    // the events that open a thread; every other event would only repeat it.
+    if (eventType === 'session_start' || eventType === 'user_prompt') {
+      const clientAttr = (key: string) => getAttr(logRecord.attributes, key) ?? getAttr(resourceAttrs, key);
+      meta.originator ??= clientAttr('originator');
+      meta.terminal_type ??= clientAttr('terminal.type');
+      meta.app_version ??= clientAttr('app.version');
+    }
+
     if (resolvedEventName === 'codex.conversation_starts') {
       const mcpServers = splitCommaSeparatedList(
         getAttr(logRecord.attributes, 'mcp_servers')
