@@ -61,17 +61,52 @@ so later readers know what still needs checking.
 ### Codex thread names and app-job detection
 
 - **What**: Codex sessions are titled by their first real prompt, or a subagent
-  by its task name. The Codex app's own generated thread names are not read, and
-  its background threads (thread naming, catch-up summaries, memory
-  consolidation) are recognized only by their prompt's opening words.
+  by its task name. The Codex app's own generated thread names are not read. Its
+  background threads (thread naming, catch-up summaries, memory consolidation)
+  are recognized by their prompt's opening words, and approval reviews by their
+  reviewer model; a thread with no prompt event and no reviewer model still
+  counts as a session someone started.
 - **Why or evidence**: the names live in Codex's internal state database, not in
   rollouts or telemetry, and on one host on 2026-10-13 fewer than a tenth of
   threads had one; reading it would couple amon to that schema. The background
-  threads leave no rollout and their telemetry carries no originator, so a
-  reworded prompt would list them as ordinary sessions again
-  (`CODEX_APP_JOB_PREFIXES` in `src/parser/session-title.ts`).
+  threads leave no rollout, so a reworded prompt would list them as ordinary
+  sessions again (`CODEX_APP_JOB_PREFIXES` in `src/parser/session-title.ts`).
+  Until 2026-10-29 a prompt over the metadata cap lost its opening words, and
+  the reviews were never recognized; together they were most of the Codex
+  "sessions" in a 30-day window on one host, and data migration v24 marked the
+  stored ones internal (by model exactly, by a cut-away prompt and no rollout
+  heuristically). Thread-opening events now keep Codex's `originator`,
+  `terminal_type`, and `app_version`.
+- **Next**: once a few weeks of `originator` values are stored, check whether
+  they tell the app's own threads apart (including the prompt-less ones) and,
+  if so, classify by originator rather than by prompt text.
 - **Revisit when**: Codex writes thread names or a job marker into rollouts or
   telemetry, or Codex app jobs reappear in the Sessions list.
+
+### Compressed Codex rollouts are invisible to discovery
+
+- **What**: Codex compresses older rollouts to `.jsonl.zst`; discovery accepts
+  only names ending `.jsonl` (`src/util/file-discovery.ts`), so the watcher,
+  `amon import`, and `amon sync sessions --force` never read them.
+- **Why or evidence**: on one host on 2026-10-29 about 86% of rollouts were
+  compressed. Nothing is lost today, since each file was parsed before Codex
+  compressed it, but the documented recovery (`amon sync sessions --source all
+  --force` after losing the browser tables) would rebuild only the uncompressed
+  minority of Codex transcripts, and the missing-projection warning would not
+  notice.
+- **Next**: decode `.jsonl.zst` in discovery and the Codex parsers (check the
+  Node runtime's zstd support first), keyed so a file compressed after parsing
+  is recognized as the same rollout.
+
+### Codex activity on the Mac mini is not recorded
+
+- **What**: the mini's Codex exports OTEL to its own `127.0.0.1:3141`, where no
+  amon runs, and its rollouts never reach the MacBook's store.
+- **Why or evidence**: on 2026-10-29 the mini's recent rollouts had no rows in
+  the MacBook store, and its own amon database was last written months earlier.
+- **Next**: choose between running amon on the mini (a separate store),
+  forwarding its OTEL to the MacBook (ingestion is loopback-only today), or a
+  periodic rollout import.
 
 ### Explicit provenance for unresolved historical timestamps
 

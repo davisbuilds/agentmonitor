@@ -120,7 +120,8 @@ product never substitutes a misleading `0%` for missing evidence.
   inject ahead of it (Codex AGENTS.md and environment blocks, Claude Code command
   wrappers), else "Untitled <agent> session". Every page uses the same title.
 - Session lists nest a subagent under its parent whenever the parent is stored,
-  and hide internal jobs, including the Codex app's own background threads.
+  and hide internal jobs: the Codex app's own background threads and its
+  approval reviews.
 - Full-text search lives in the Sessions list: while a query is entered, matching
   messages replace the list, with recency or relevance ordering and the list's
   project and agent filters; clearing the query returns to the list. A result
@@ -174,7 +175,7 @@ day each started, across every day of the range, idle days included. Per-day
 averages in Analytics and Usage divide by the days of the selected range, or,
 without one, by the first to the last active day. Session counts
 and per-session averages count the sessions someone started: a subagent, and a
-Codex app job, is not a session of its own, but its messages and tool calls
+Codex app job or approval review, is not a session of its own, but its messages and tool calls
 count toward the range. Top sessions appear once, in
 Usage, ranked by cost; all skill evidence lives in Skills, which shows daily
 skill invocation volume above the consultation explorer and exports both as CSV.

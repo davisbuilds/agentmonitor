@@ -4,7 +4,7 @@ import { getDb } from './connection.js';
 import { stripInlineImages } from '../util/inline-images.js';
 import { config } from '../config.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from '../live/normalize.js';
-import { isCodexAppJobPrompt } from '../parser/session-title.js';
+import { CODEX_AUTO_REVIEW_MODEL, isCodexAppJobPrompt } from '../parser/session-title.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import {
@@ -1124,7 +1124,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 23;
+const DATA_SCHEMA_VERSION = 24;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1184,9 +1184,53 @@ export function runDataMigrations(db: Database): void {
     // v23 introduces no data correction: the schema guard rebuilds the usage
     // covering index with cache_write_1h_tokens, which read commands only
     // install when the version advances.
+    if (current < 24) classifyCodexInternalThreads(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
+}
+
+/**
+ * v24 — Codex runs approval reviews and app jobs (titles, catch-ups, memory
+ * consolidation) as threads of their own, which OTEL reports like any session.
+ * A review sends no prompt, and a job's prompt often passed the metadata cap,
+ * which dropped the text that marks it, so both counted as sessions someone
+ * started. Mark them internal: a review exactly, by its model; a job by what
+ * is left, an OTEL-only thread whose prompt was cut away and that saved no
+ * rollout, as every session someone ran does.
+ */
+function classifyCodexInternalThreads(db: Database): void {
+  const tables = new Set((db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('browsing_sessions', 'messages', 'events')",
+  ).all() as Array<{ name: string }>).map(row => row.name));
+  if (tables.size < 3) return;
+  const sessionColumns = new Set((db.prepare('PRAGMA table_info(browsing_sessions)').all() as Array<{ name: string }>)
+    .map(col => col.name));
+  if (!sessionColumns.has('relationship_type') || !sessionColumns.has('integration_mode')) return;
+
+  const marked = db.prepare(`
+    UPDATE browsing_sessions SET relationship_type = 'internal'
+    WHERE agent = 'codex' AND relationship_type IS NULL AND (
+      EXISTS (SELECT 1 FROM events e WHERE e.session_id = browsing_sessions.id AND e.model = ?)
+      OR (
+        integration_mode = 'codex-otel'
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = browsing_sessions.id)
+        AND NOT EXISTS (
+          SELECT 1 FROM browsing_sessions twin
+          WHERE twin.agent = 'codex' AND twin.id GLOB 'rollout-*' AND lower(substr(twin.id, -36)) = lower(browsing_sessions.id)
+        )
+        AND EXISTS (
+          SELECT 1 FROM events e WHERE e.session_id = browsing_sessions.id AND e.event_type = 'user_prompt'
+            AND json_extract(e.metadata, '$._truncated') IS NOT NULL AND json_extract(e.metadata, '$.message') IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM events e WHERE e.session_id = browsing_sessions.id AND e.event_type = 'user_prompt'
+            AND json_extract(e.metadata, '$.message') IS NOT NULL
+        )
+      )
+    )
+  `).run(CODEX_AUTO_REVIEW_MODEL).changes;
+  if (marked > 0) console.error(`[migration] marked ${marked} Codex review or app-job thread(s) internal`);
 }
 
 /**
