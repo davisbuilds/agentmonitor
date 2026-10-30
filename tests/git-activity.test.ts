@@ -189,3 +189,19 @@ test('a session found later, older than any read so far, extends the next read b
   await syncGitActivity(db, { now: new Date('2026-04-03T00:00:00Z') });
   assert.deepEqual(shasIn(dir), [older, recent]);
 });
+
+test('stashes and notes are not anyone\'s commits', async () => {
+  const dir = freshRepository('lambda', '2026-03-01T09:00:00Z');
+  const real = commit(dir, 'a.txt', 'feat: real work', '2026-03-01T10:00:00Z');
+  fs.writeFileSync(path.join(dir, 'a.txt'), 'changed\n');
+  git(dir, ['stash', '-q'], '2026-03-01T11:00:00Z');
+  git(dir, ['notes', 'add', '-m', 'a note', real], '2026-03-01T12:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  assert.deepEqual(shasIn(dir), [real]);
+});
+
+test('a repository with no commits yet reads as empty, not as an error', async () => {
+  freshRepository('mu', '2026-03-01T09:00:00Z');
+  const report = await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  assert.equal(report.errors, 0);
+});

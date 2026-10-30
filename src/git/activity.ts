@@ -78,7 +78,12 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
   // Merges are kept, flagged: a merged pull request leaves one. The output is
   // parsed, so no user config may add to it: log.showSignature would print
   // verification text between commits, and color would add escapes.
-  const output = await git(root, ['log', '--all', '-z', '--no-show-signature', '--no-color', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
+  // Branches (worktrees' included), tags, fetched remote history and HEAD,
+  // rather than --all, which also walks refs/stash and refs/notes: a stash's
+  // synthetic commits are nobody's work, and with two parents read as merges.
+  // --ignore-missing, which must precede HEAD, lets a repository with no
+  // commits yet read as empty.
+  const output = await git(root, ['log', '--branches', '--tags', '--remotes', '--ignore-missing', 'HEAD', '-z', '--no-show-signature', '--no-color', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
   const commits = new Map<string, CommitRecord>();
   for (const record of output.split('\x1e').slice(1)) {
     const headerEnd = record.indexOf('\0');
