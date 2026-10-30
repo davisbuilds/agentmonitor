@@ -126,11 +126,15 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
   }
   report.repos = firstSessionByRoot.size;
 
-  const lastScan = db.prepare('SELECT last_scanned_at FROM git_repos WHERE root = ?');
+  const lastScan = db.prepare('SELECT last_scanned_at, covered_from FROM git_repos WHERE root = ?');
   const recordScan = db.prepare(`
-    INSERT INTO git_repos (root, last_scanned_at, last_error) VALUES (?, ?, ?)
+    INSERT INTO git_repos (root, last_scanned_at, covered_from, last_error) VALUES (?, ?, ?, ?)
     ON CONFLICT(root) DO UPDATE SET
       last_scanned_at = COALESCE(excluded.last_scanned_at, git_repos.last_scanned_at),
+      covered_from = CASE
+        WHEN excluded.covered_from IS NULL THEN git_repos.covered_from
+        WHEN git_repos.covered_from IS NULL OR excluded.covered_from < git_repos.covered_from THEN excluded.covered_from
+        ELSE git_repos.covered_from END,
       last_error = excluded.last_error
   `);
   const upsert = db.prepare(`
@@ -146,18 +150,23 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
 
   for (const [root, firstSession] of firstSessionByRoot) {
     const floor = now.getTime() - MAX_HISTORY_DAYS * DAY_MS;
-    const scanned = (lastScan.get(root) as { last_scanned_at: string | null } | undefined)?.last_scanned_at;
+    const state = lastScan.get(root) as { last_scanned_at: string | null; covered_from: string | null } | undefined;
+    // History to cover reaches the day before the repository's first session.
     // A reread overlaps the last read by RESCAN_DAYS, however long ago it was,
-    // so downtime never leaves a gap.
-    const since = new Date(Math.max(floor, scanned
-      ? Math.min(now.getTime(), Date.parse(scanned)) - RESCAN_DAYS * DAY_MS
-      : Number.isNaN(firstSession) ? floor : firstSession - DAY_MS));
+    // so downtime never leaves a gap, and reaches further back when a session
+    // older than anything read so far has turned up (a forced session sync).
+    const wanted = Math.max(floor, Number.isNaN(firstSession) ? floor : firstSession - DAY_MS);
+    const covered = state?.covered_from ? Date.parse(state.covered_from) : Number.NaN;
+    const reread = state?.last_scanned_at
+      ? Math.min(now.getTime(), Date.parse(state.last_scanned_at)) - RESCAN_DAYS * DAY_MS
+      : wanted;
+    const since = new Date(Math.max(floor, Number.isNaN(covered) || wanted < covered ? Math.min(reread, wanted) : reread));
     let commits: CommitRecord[];
     try {
       commits = await readCommits(root, since);
     } catch (err) {
       report.errors += 1;
-      recordScan.run(root, null, err instanceof Error ? err.message.slice(0, 500) : String(err));
+      recordScan.run(root, null, null, err instanceof Error ? err.message.slice(0, 500) : String(err));
       continue;
     }
     db.transaction(() => {
@@ -182,7 +191,7 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
         remove.run(root, sha);
         report.commits_removed += 1;
       }
-      recordScan.run(root, now.toISOString(), null);
+      recordScan.run(root, now.toISOString(), since.toISOString(), null);
     })();
     report.scanned += 1;
     report.commits_seen += commits.length;

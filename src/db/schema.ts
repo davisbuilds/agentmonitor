@@ -227,6 +227,8 @@ function initSchemaLocked(db: Database): void {
     CREATE TABLE IF NOT EXISTS git_repos (
       root TEXT PRIMARY KEY,
       last_scanned_at TEXT,
+      -- How far back reads have covered: a session older than this extends the next.
+      covered_from TEXT,
       last_error TEXT
     );
 

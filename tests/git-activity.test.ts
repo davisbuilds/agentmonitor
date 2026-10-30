@@ -177,3 +177,15 @@ test('signature verification in the user\'s git config does not leak into stored
   const rows = db.prepare('SELECT subject, files_json FROM git_commits WHERE repo_root = ? ORDER BY authored_at').all(dir) as Array<{ subject: string; files_json: string }>;
   assert.deepEqual(rows.map(row => [row.subject, JSON.parse(row.files_json)]), [['feat: signed', ['a.txt']], ['feat: signed again', ['b.txt']]]);
 });
+
+test('a session found later, older than any read so far, extends the next read back to it', async () => {
+  const dir = freshRepository('kappa', '2026-04-01T09:00:00Z');
+  const older = commit(dir, 'a.txt', 'feat: from an older session', '2026-03-01T10:00:00Z');
+  const recent = commit(dir, 'b.txt', 'feat: recent', '2026-04-01T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-04-02T00:00:00Z') });
+  assert.deepEqual(shasIn(dir), [recent], 'the first read reaches back only to the day before its first session');
+  // A forced session sync restores a March session in the same repository.
+  session.run('s-kappa-march', dir, '2026-03-01T09:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-04-03T00:00:00Z') });
+  assert.deepEqual(shasIn(dir), [older, recent]);
+});
