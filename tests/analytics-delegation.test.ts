@@ -79,3 +79,10 @@ test('the page filters narrow every measure', () => {
   const { totals } = queries.getAnalyticsDelegation({ ...range, agent: 'claude' });
   assert.deepEqual(totals, { sessions: split(1, 1, 0), messages: split(10, 4, 0), cost_usd: split(1, 0.25, 0) });
 });
+
+test('a model filter keeps out the Claude subagent usage it excludes', () => {
+  // Usage applies model, provider and tier filters after the read; the subagent pass must too.
+  const { days, totals } = queries.getAnalyticsDelegation({ ...range, model: 'gpt-6-astra' });
+  assert.deepEqual(days[0].cost_usd, split(0, 0, 0));
+  assert.deepEqual(totals.cost_usd, split(2, 0.5, 0));
+});

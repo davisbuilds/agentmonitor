@@ -2961,14 +2961,17 @@ function delegationKind(relationshipType: string | null): keyof DelegationSplit 
   return relationshipType === 'subagent' || relationshipType === 'internal' ? relationshipType : 'started';
 }
 
-/** Claude usage a subagent spent, which Claude records under its parent session with the subagent's agent_id. */
-function claudeSubagentUsageRows(params: AnalyticsParams): UsageDbRow[] {
-  const statement = usageRowsStatement(params, [
+/**
+ * Claude usage a subagent spent, which Claude records under its parent session
+ * with the subagent's agent_id. Read through getUsageRows, so every filter that
+ * shaped the range's cost shapes this part of it too.
+ */
+function claudeSubagentUsageRows(params: AnalyticsParams): UsageRow[] {
+  return getUsageRows(params, [
     "e.agent_type = 'claude_code'",
     `e.metadata LIKE '%"agent_id"%'`,
     "CASE WHEN json_valid(e.metadata) THEN json_extract(e.metadata, '$.agent_id') END IS NOT NULL",
   ]);
-  return getDb().prepare(statement.sql).all(...statement.values) as UsageDbRow[];
 }
 
 export function getAnalyticsSessionDepth(params: AnalyticsParams = {}): AnalyticsSessionDepth {
@@ -3631,9 +3634,13 @@ export function usageRowsStatement(params: UsageParams = {}, extraConditions: st
   return { sql, values: filter.values };
 }
 
-/** Usage-bearing rows for the filter; pass them to several rollups to scan once. */
-export function getUsageRows(params: UsageParams = {}): UsageRow[] {
-  const statement = usageRowsStatement(params);
+/**
+ * Usage-bearing rows for the filter; pass them to several rollups to scan once.
+ * Model, provider and tier filters apply here, after the read; `extraConditions`
+ * narrow the read itself.
+ */
+export function getUsageRows(params: UsageParams = {}, extraConditions: string[] = []): UsageRow[] {
+  const statement = usageRowsStatement(params, extraConditions);
   const rows = getDb().prepare(statement.sql).all(...statement.values) as UsageDbRow[];
 
   const selected: UsageRow[] = [];
