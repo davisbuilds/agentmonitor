@@ -2573,15 +2573,15 @@ export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeek
   const inScope = new Set((db.prepare(`${sessionListCte}
     SELECT id FROM listed_sessions ${scope.where}
   `).all(...scope.values) as Array<{ id: string }>).map(row => row.id));
-  // Sessions with no timestamped message in the window (summary-only) keep
-  // their start hour.
-  const timed = new Set(slots.map(slot => slot.session_id));
-  const untimed = (db.prepare(`${sessionListCte}
+  // Sessions with no timestamped message at all (summary-only) keep their
+  // start hour. One whose messages all fall outside the window has none here.
+  const untimed = db.prepare(`${sessionListCte}
     SELECT id, started_at, message_count, user_message_count
     FROM listed_sessions
-    ${filter.where}
-  `).all(...filter.values) as Array<{ id: string; started_at: string | null; message_count: number; user_message_count: number }>)
-    .filter(session => !timed.has(session.id));
+    ${filter.where}${filter.where ? ' AND' : ' WHERE'} NOT EXISTS (
+      SELECT 1 FROM messages m WHERE m.session_id = listed_sessions.id AND ${instant} IS NOT NULL
+    )
+  `).all(...filter.values) as Array<{ id: string; started_at: string | null; message_count: number; user_message_count: number }>;
 
   // Bucket by the operator's local weekday and hour, the view's labeled axes.
   const buckets = new Map<string, HourOfWeekDataPoint>();

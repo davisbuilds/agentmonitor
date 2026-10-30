@@ -48,3 +48,17 @@ test('the heatmap places each message at its own local hour', () => {
     [1, 9, 1, 5, 1],
   ]);
 });
+
+test('a session whose messages all fall outside the window adds nothing at its start hour', () => {
+  // Started Monday evening, every message sent two days later.
+  session.run('carried', 'claude', 'claude-jsonl', '2026-03-02T15:00:00Z', 2, 1); // Mon 20:45
+  message.run('carried', 0, 'user', prompt, '2026-03-04T06:00:00Z');
+  message.run('carried', 1, 'assistant', reply, '2026-03-04T06:01:00Z');
+  const cells = queries.getAnalyticsHourOfWeek({ date_from: '2026-03-02', date_to: '2026-03-02' })
+    .filter(cell => cell.message_count > 0)
+    .map(cell => [cell.day_of_week, cell.hour_of_day, cell.session_count, cell.message_count, cell.user_message_count]);
+  assert.deepEqual(cells, [
+    [0, 10, 1, 3, 1],
+    [0, 20, 1, 1, 1],
+  ]);
+});
