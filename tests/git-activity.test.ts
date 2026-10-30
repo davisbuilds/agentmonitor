@@ -205,3 +205,13 @@ test('a repository with no commits yet reads as empty, not as an error', async (
   const report = await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
   assert.equal(report.errors, 0);
 });
+
+test('a commit in a detached worktree is read with its repository', async () => {
+  const dir = freshRepository('nu', '2026-03-01T09:00:00Z');
+  commit(dir, 'a.txt', 'feat: base', '2026-03-01T10:00:00Z');
+  const detached = path.join(tempDir, 'nu-detached');
+  git(dir, ['worktree', 'add', '-q', '--detach', detached]);
+  const there = commit(detached, 'b.txt', 'feat: on a detached head', '2026-03-01T11:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  assert.ok(shasIn(dir).includes(there));
+});
