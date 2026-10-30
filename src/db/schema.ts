@@ -523,7 +523,9 @@ function initSchemaLocked(db: Database): void {
   // - idx_events_usage_covering covers the metric-bearing, non-benchmark rows
   //   needed by both lifetime Monitor sums and the canonical Usage row selector.
   //   Its normalized timestamp prefix supports window range seeks; the remaining
-  //   columns keep those reads off the metadata-heavy events table.
+  //   columns keep those reads off the metadata-heavy events table. v23 added
+  //   cache_write_1h_tokens for the cache-savings estimate; an index built
+  //   without it is dropped and rebuilt below, since IF NOT EXISTS keeps it.
   // - idx_events_usage_matching_covering serves Usage coverage's broader
   //   denominator, which includes events without token/cost metrics. Project and
   //   agent stay in the index so filtered coverage does not fall back to the
@@ -566,6 +568,11 @@ function initSchemaLocked(db: Database): void {
   //   a string compare would silently mis-bucket same-day rows. Indexing the
   //   normalized expression keeps the semantics and gets the seek:
   //   SCAN (497k rows) -> SEARCH USING INDEX.
+  const usageCovering = db.prepare(`SELECT sql FROM sqlite_master WHERE name = 'idx_events_usage_covering'`)
+    .get() as { sql: string } | undefined;
+  if (usageCovering && !usageCovering.sql.includes('cache_write_1h_tokens')) {
+    db.exec('DROP INDEX idx_events_usage_covering');
+  }
   db.exec(`
     DROP INDEX IF EXISTS idx_events_session_id;
     CREATE INDEX IF NOT EXISTS idx_events_model ON events(model);
@@ -601,7 +608,8 @@ function initSchemaLocked(db: Database): void {
         tokens_in,
         tokens_out,
         cache_read_tokens,
-        cache_write_tokens
+        cache_write_tokens,
+        cache_write_1h_tokens
       )
       WHERE (source IS NULL OR source != 'benchmark')
         AND (
@@ -1116,7 +1124,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 22;
+const DATA_SCHEMA_VERSION = 23;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1173,6 +1181,9 @@ export function runDataMigrations(db: Database): void {
     // index built over the raw JSON with one over the message text, which read
     // commands only install when the version advances.
     if (current < 22) recountClaudeUserMessages(db);
+    // v23 introduces no data correction: the schema guard rebuilds the usage
+    // covering index with cache_write_1h_tokens, which read commands only
+    // install when the version advances.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

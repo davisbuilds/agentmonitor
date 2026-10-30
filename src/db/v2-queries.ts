@@ -2971,6 +2971,8 @@ interface UsageDbRow {
   tokens_out: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  /** The part of cache_write_tokens written for 1 hour, which bills higher. */
+  cache_write_1h_tokens: number;
   timestamp: string | null;
 }
 
@@ -3243,6 +3245,7 @@ export function usageRowsStatement(params: UsageParams = {}): { sql: string; val
       COALESCE(e.tokens_out, 0) as tokens_out,
       COALESCE(e.cache_read_tokens, 0) as cache_read_tokens,
       COALESCE(e.cache_write_tokens, 0) as cache_write_tokens,
+      COALESCE(e.cache_write_1h_tokens, 0) as cache_write_1h_tokens,
       ${timestampExpr} as timestamp
     FROM events e
     WHERE ${usageWhere}
@@ -3326,9 +3329,13 @@ function estimateCacheSavings(row: UsageRow): number {
     cacheWrite: row.cache_write_tokens,
   }, row.timestamp);
   if (!rates) return 0;
+  // A write costs more than the input it caches, by a larger premium for the
+  // 1-hour part, priced as `calculate()` bills it.
+  const cacheWrite1h = Math.min(Math.max(row.cache_write_1h_tokens, 0), row.cache_write_tokens);
   return (
     row.cache_read_tokens * (rates.inputCostPerToken - rates.cacheReadCostPerToken)
-    + row.cache_write_tokens * (rates.inputCostPerToken - rates.cacheWriteCostPerToken)
+    + (row.cache_write_tokens - cacheWrite1h) * (rates.inputCostPerToken - rates.cacheWriteCostPerToken)
+    + cacheWrite1h * (rates.inputCostPerToken - (rates.cacheWrite1hCostPerToken ?? rates.cacheWriteCostPerToken))
   );
 }
 
