@@ -78,6 +78,16 @@ const timed = db.prepare('INSERT INTO messages (session_id, ordinal, role, conte
 for (const ordinal of [0, 1, 2, 3]) timed.run(rollout2, ordinal, 'assistant', text(`step ${ordinal}`), at(ordinal * 10));
 ['inner_1', 'inner_2', 'inner_3'].forEach((call, index) => item.run(uuid2, null, `${call}:result`, 'error', at(15 + index)));
 
+// Codex, beta: a fast code-mode call. The fallback must keep fractions of a
+// second, or a message just after the failure reads as before it.
+const uuid3 = '01990000-0000-7000-8000-000000000003';
+const rollout3 = `rollout-2026-03-05T09-00-00-${uuid3}`;
+session.run(rollout3, 'codex', 'codex-jsonl', 'beta', 'Fast calls', '2026-03-05T09:00:00Z', null, null);
+session.run(uuid3, 'codex', 'codex-otel', 'beta', null, '2026-03-05T09:00:00Z', null, null);
+timed.run(rollout3, 0, 'assistant', text('before'), '2026-03-05T09:00:15.100Z');
+timed.run(rollout3, 1, 'assistant', text('after'), '2026-03-05T09:00:15.900Z');
+['fast_1', 'fast_2', 'fast_3'].forEach((call, index) => item.run(uuid3, null, `${call}:result`, 'error', `2026-03-05T09:00:15.${200 + index * 100}Z`));
+
 // Delegated work meets friction on its own clock and is left out.
 session.run('c-sub', 'claude', 'claude-jsonl', 'alpha', null, '2026-03-02T10:30:00Z', 'c1', 'subagent');
 claudeResults('c-sub', [[1, 'error'], [2, 'error'], [3, 'error']]);
@@ -94,12 +104,14 @@ test('each session shows its signals, each opening where it starts', () => {
   assert.deepEqual(queries.getSessionFriction(rollout), codexSignals, 'the UUID row\'s outcomes reach the listed rollout');
   assert.deepEqual(queries.getSessionFriction('c2'), [], 'scattered failures are not a streak');
   assert.deepEqual(queries.getSessionFriction(rollout2), [{ kind: 'failure_streak', count: 3, ordinal: 1 }]);
+  assert.deepEqual(queries.getSessionFriction(rollout3), [{ kind: 'failure_streak', count: 3, ordinal: 0 }]);
 });
 
 test('the range counts sessions per signal and lists the latest that met friction', () => {
   const friction = queries.getAnalyticsFriction(range);
-  assert.deepEqual([friction.sessions, friction.with_friction, friction.failure_streaks, friction.interruptions], [4, 3, 3, 1]);
+  assert.deepEqual([friction.sessions, friction.with_friction, friction.failure_streaks, friction.interruptions], [5, 4, 4, 1]);
   assert.deepEqual(friction.recent.map(row => [row.id, row.title, row.signals]), [
+    [rollout3, 'Fast calls', [{ kind: 'failure_streak', count: 3, ordinal: 0 }]],
     [rollout2, 'Nested calls', [{ kind: 'failure_streak', count: 3, ordinal: 1 }]],
     [rollout, 'Port the parser', codexSignals],
     ['c1', 'Refactor', c1Signals],

@@ -3085,10 +3085,11 @@ function frictionSignals(targets: Array<{ id: string; session_key: string }>): M
 
     // A failure inside a Codex code-mode exec, or from a rollout parsed before
     // call ids were kept, matches no stored call: open at the last message
-    // before it instead.
+    // before it instead. julianday keeps fractions of a second, which a fast
+    // call needs; datetime() drops them.
     const messageBefore = db.prepare(`
       SELECT MAX(ordinal) AS ordinal FROM messages
-      WHERE session_id = ? AND timestamp IS NOT NULL AND datetime(timestamp) <= datetime(?)
+      WHERE session_id = ? AND timestamp IS NOT NULL AND julianday(timestamp) <= julianday(?)
     `);
     const boundaries = loadUserTurnBoundaries(ids);
     for (const id of ids) {
