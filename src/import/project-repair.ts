@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
 
 import type { Database } from 'better-sqlite3';
 
@@ -77,7 +78,7 @@ function readClaudeTranscript(filePath: string): TranscriptProjects | null {
 }
 
 function readCodexRollout(filePath: string): TranscriptProjects | null {
-  const content = fs.readFileSync(filePath, 'utf8');
+  const content = readTranscriptFile(filePath).toString('utf8');
   for (const line of content.split('\n', 20)) {
     let record: { type?: string; payload?: { id?: unknown; cwd?: unknown } };
     try {
@@ -88,7 +89,7 @@ function readCodexRollout(filePath: string): TranscriptProjects | null {
     if (record.type !== 'session_meta') continue;
     const cwd = record.payload?.cwd;
     if (typeof cwd !== 'string' || !cwd.trim()) return null;
-    const rolloutId = path.basename(filePath, '.jsonl');
+    const rolloutId = transcriptBaseName(filePath);
     const uuid = typeof record.payload?.id === 'string' ? record.payload.id
       : /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i.exec(rolloutId)?.[1] ?? rolloutId;
     return {

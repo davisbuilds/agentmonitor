@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
 import { startSession, stopSession } from './session.js';
+import { zstdCompressSync } from 'node:zlib';
 import { runProbe, snapshotPrefix } from './probe.js';
 
 // Explicit opt-in: needs the compiled app (pnpm build). Fixture databases come
@@ -141,6 +142,9 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       fs.writeFileSync(newTranscript, '{"type":"user"}\n{"type":"brand-new-record"}\n');
       fs.writeFileSync(path.join(home, '.codex', 'sessions', 'rollout-probe.jsonl'),
         '{"type":"session_meta","payload":{}}\n{"type":"event_msg","payload":{"type":"agent_reasoning_v2"}}\n');
+      // A rollout Codex compressed is read as its records, not as binary.
+      fs.writeFileSync(path.join(home, '.codex', 'sessions', 'rollout-probe-old.jsonl.zst'),
+        zstdCompressSync(Buffer.from('{"type":"session_meta","payload":{}}\n{"type":"event_msg","payload":{"type":"compressed_v3"}}\n')));
       const copy = path.join(home, 'probe.db');
       fs.copyFileSync(fixture, copy);
       const db = new Database(copy);
@@ -165,8 +169,9 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.deepEqual(claude.watcher, { parsed: 1, skipped: 0, error: 0, unwatched: 3 });
       const types = (source: unknown) => (source as { record_types: { untyped: number; read: object; unknown: object } }).record_types;
       assert.deepEqual(types(claude), { lines: 5, untyped: 3, read: { user: 1 }, known_unused: {}, unknown: { 'brand-new-record': 1 } });
-      assert.deepEqual(types(result.observations.codex).unknown, { 'event_msg/agent_reasoning_v2': 1 });
-      assert.deepEqual(types(result.observations.codex).read, { session_meta: 1 });
+      assert.deepEqual(types(result.observations.codex).unknown, { 'event_msg/agent_reasoning_v2': 1, 'event_msg/compressed_v3': 1 });
+      assert.equal(types(result.observations.codex).untyped, 0);
+      assert.deepEqual(types(result.observations.codex).read, { session_meta: 2 });
       assert.deepEqual(result.observations.discovery, {
         claude_dir: path.join(home, '.claude'), codex_home: path.join(home, '.codex'),
         exclude_patterns: ['excluded'], matches_running_service: 'unknown',

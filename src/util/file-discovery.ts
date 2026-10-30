@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { normalizeExcludePatterns, shouldExcludePath } from './path-excludes.js';
+import { COMPRESSED_ROLLOUT_SUFFIX } from './transcript-file.js';
 
 interface DiscoveryOptions {
   excludePatterns?: string[];
@@ -42,6 +43,20 @@ function discoverFilesRecursive(
 
 export function discoverJsonlFilesRecursive(rootDir: string, options: DiscoveryOptions = {}): string[] {
   return discoverFilesRecursive(rootDir, entry => entry.isFile() && entry.name.endsWith('.jsonl'), options);
+}
+
+/**
+ * Codex rollouts, plain or compressed. A rollout seen in both forms, as while
+ * Codex compresses it, is listed once, as the plain file a live session appends to.
+ */
+export function discoverCodexRolloutFilesRecursive(rootDir: string, options: DiscoveryOptions = {}): string[] {
+  const files = discoverFilesRecursive(
+    rootDir,
+    entry => entry.isFile() && (entry.name.endsWith('.jsonl') || entry.name.endsWith(COMPRESSED_ROLLOUT_SUFFIX)),
+    options,
+  );
+  const plain = new Set(files.filter(file => file.endsWith('.jsonl')));
+  return files.filter(file => !file.endsWith(COMPRESSED_ROLLOUT_SUFFIX) || !plain.has(file.slice(0, -'.zst'.length)));
 }
 
 export function discoverDbFilesRecursive(rootDir: string, options: DiscoveryOptions = {}): string[] {
