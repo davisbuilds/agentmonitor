@@ -51,6 +51,9 @@ import type {
   AnalyticsDelegation,
   DelegationDay,
   DelegationSplit,
+  AnalyticsFriction,
+  FrictionSession,
+  FrictionSignal,
   AgentComparisonRow,
   UsageParams,
   UsageCoverage,
@@ -2972,6 +2975,137 @@ function claudeSubagentUsageRows(params: AnalyticsParams): UsageRow[] {
     `e.metadata LIKE '%"agent_id"%'`,
     "CASE WHEN json_valid(e.metadata) THEN json_extract(e.metadata, '$.agent_id') END IS NOT NULL",
   ]);
+}
+
+/** Friction over the range's started sessions, with the latest sessions that met it. */
+export function getAnalyticsFriction(params: AnalyticsParams = {}): AnalyticsFriction {
+  const filter = buildAnalyticsFilterState(params);
+  const where = [startedSessionCondition, ...filter.conditions].join(' AND ');
+  const sessions = getDb().prepare(`${sessionListCte}
+    SELECT id, title, substr(first_message, 1, 500) AS first_message, project, agent, started_at,
+      ${browserSessionKey('listed_sessions')} AS session_key
+    FROM listed_sessions WHERE ${where}
+  `).all(...filter.values) as Array<Omit<FrictionSession, 'signals'> & { session_key: string }>;
+  const signals = frictionSignals(sessions);
+
+  const met: FrictionSession[] = [];
+  const bySignal = { failure_streak: 0, interruptions: 0 };
+  for (const { session_key: _key, ...row } of sessions) {
+    const found = signals.get(row.id);
+    if (!found) continue;
+    met.push({ ...row, signals: found });
+    for (const signal of found) bySignal[signal.kind] += 1;
+  }
+  met.sort((a, b) => (b.started_at ?? '').localeCompare(a.started_at ?? '') || a.id.localeCompare(b.id));
+  return {
+    sessions: sessions.length,
+    with_friction: met.length,
+    failure_streaks: bySignal.failure_streak,
+    interruptions: bySignal.interruptions,
+    recent: met.slice(0, params.limit ?? FRICTION_RECENT_SESSIONS),
+  };
+}
+
+/** One session's friction signals, for its viewer. */
+export function getSessionFriction(sessionId: string): FrictionSignal[] {
+  const row = getDb().prepare(`SELECT id, ${browserSessionKey('b')} AS session_key FROM browsing_sessions b WHERE b.id = ?`)
+    .get(sessionId) as { id: string; session_key: string } | undefined;
+  return row ? frictionSignals([row]).get(row.id) ?? [] : [];
+}
+
+/** Tool calls failing this many times in a row is a signal: the agent was stuck, however long the session. */
+const FRICTION_FAILURE_STREAK = 3;
+const FRICTION_RECENT_SESSIONS = 5;
+const MESSAGE_TURN_PATTERN = /^(?:claude|codex)-message:(\d+)$/;
+
+/**
+ * Friction signals per session, keyed by the row id given. Both are independent
+ * of how long a session ran: a count of edits or failures grows with depth, so
+ * neither is used.
+ * - A failure streak: tool calls that failed in a row, in the order their
+ *   outcomes arrived, over every row of the session, since Codex records
+ *   outcomes on its UUID row (by call id) while the list shows the rollout. A
+ *   rollout's own 'completed' records no outcome and is skipped.
+ * - Interruptions: user turns that stopped the agent (Claude's marker).
+ * Reads browser rows directly: it looks sessions up by id and counts none.
+ */
+function frictionSignals(targets: Array<{ id: string; session_key: string }>): Map<string, FrictionSignal[]> {
+  const db = getDb();
+  const result = new Map<string, FrictionSignal[]>();
+  const CHUNK = 400;
+  for (let start = 0; start < targets.length; start += CHUNK) {
+    const chunk = targets.slice(start, start + CHUNK);
+    const ids = chunk.map(target => target.id);
+    const byKey = new Map(chunk.map(target => [target.session_key.toLowerCase(), target.id]));
+    const rowIds = [...new Set([...ids, ...byKey.keys()])];
+    const marks = (values: unknown[]) => values.map(() => '?').join(', ');
+
+    // Where each tool call sits, to open a streak at its first failure.
+    const callOrdinal = new Map((db.prepare(`
+      SELECT tc.session_id, tc.tool_use_id, m.ordinal
+      FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
+      WHERE tc.session_id IN (${marks(ids)}) AND tc.tool_use_id IS NOT NULL
+    `).all(...ids) as Array<{ session_id: string; tool_use_id: string; ordinal: number }>)
+      .map(call => [`${call.session_id}\u0000${call.tool_use_id}`, call.ordinal]));
+
+    const streaks = new Map<string, {
+      run: number; runStart: number | null; runAt: string | null; best: number; bestStart: number | null; bestAt: string | null;
+    }>();
+    const outcomes = db.prepare(`
+      SELECT ${browserSessionKey('b')} AS session_key, i.status, i.source_item_id, i.created_at, t.source_turn_id
+      FROM session_items i JOIN browsing_sessions b ON b.id = i.session_id
+      LEFT JOIN session_turns t ON t.id = i.turn_id
+      WHERE i.session_id IN (${marks(rowIds)}) AND i.kind = 'tool_result' AND i.status IN ('success', 'error')
+      ORDER BY COALESCE(i.created_at, ''), i.id
+    `).all(...rowIds) as Array<{
+      session_key: string; status: string; source_item_id: string | null; created_at: string | null; source_turn_id: string | null;
+    }>;
+    for (const row of outcomes) {
+      const id = byKey.get(row.session_key.toLowerCase());
+      if (!id) continue;
+      const tally = streaks.get(id) ?? { run: 0, runStart: null, runAt: null, best: 0, bestStart: null, bestAt: null };
+      if (row.status === 'error') {
+        if (tally.run === 0) {
+          const turnOrdinal = row.source_turn_id?.match(MESSAGE_TURN_PATTERN)?.[1];
+          const callId = row.source_item_id?.replace(/:result$/, '');
+          tally.runStart = turnOrdinal !== undefined ? Number(turnOrdinal) : callOrdinal.get(`${id}\u0000${callId}`) ?? null;
+          tally.runAt = row.created_at;
+        }
+        tally.run += 1;
+        if (tally.run > tally.best) {
+          tally.best = tally.run;
+          tally.bestStart = tally.runStart;
+          tally.bestAt = tally.runAt;
+        }
+      } else {
+        tally.run = 0;
+      }
+      streaks.set(id, tally);
+    }
+
+    // A failure inside a Codex code-mode exec, or from a rollout parsed before
+    // call ids were kept, matches no stored call: open at the last message
+    // before it instead. julianday keeps fractions of a second, which a fast
+    // call needs; datetime() drops them.
+    const messageBefore = db.prepare(`
+      SELECT MAX(ordinal) AS ordinal FROM messages
+      WHERE session_id = ? AND timestamp IS NOT NULL AND julianday(timestamp) <= julianday(?)
+    `);
+    const boundaries = loadUserTurnBoundaries(ids);
+    for (const id of ids) {
+      const signals: FrictionSignal[] = [];
+      const streak = streaks.get(id);
+      if (streak && streak.best >= FRICTION_FAILURE_STREAK) {
+        const ordinal = streak.bestStart
+          ?? (streak.bestAt ? (messageBefore.get(id, streak.bestAt) as { ordinal: number | null }).ordinal : null);
+        signals.push({ kind: 'failure_streak', count: streak.best, ordinal });
+      }
+      const interrupts = (boundaries.get(id) ?? []).filter(boundary => boundary.kind === 'interrupt');
+      if (interrupts.length > 0) signals.push({ kind: 'interruptions', count: interrupts.length, ordinal: interrupts[0].ordinal });
+      if (signals.length > 0) result.set(id, signals);
+    }
+  }
+  return result;
 }
 
 export function getAnalyticsSessionDepth(params: AnalyticsParams = {}): AnalyticsSessionDepth {

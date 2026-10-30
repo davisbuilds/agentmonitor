@@ -3,6 +3,7 @@ import {
   fetchAnalyticsHeadlines,
   fetchAnalyticsSessionDepth,
   fetchAnalyticsDelegation,
+  fetchAnalyticsFriction,
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
@@ -15,6 +16,7 @@ import {
   type AnalyticsHeadlines,
   type AnalyticsSessionDepth,
   type AnalyticsDelegation,
+  type AnalyticsFriction,
   type AnalyticsCoverage,
   type ActivityDataPoint,
   type ProjectBreakdown,
@@ -25,7 +27,7 @@ import {
   type VelocityMetrics,
   type AgentComparisonRow,
 } from '../api/client';
-import { navigateToSession } from './router.svelte';
+import { navigateToSession, navigateToSessionMessage } from './router.svelte';
 import { analyticsFilters } from './analytics-filters.svelte';
 import {
   buildAnalyticsCsv,
@@ -37,6 +39,7 @@ type PanelKey =
   | 'headlines'
   | 'depth'
   | 'delegation'
+  | 'friction'
   | 'activity'
   | 'projects'
   | 'tools'
@@ -59,6 +62,7 @@ class AnalyticsStore {
     headlines: 0,
     depth: 0,
     delegation: 0,
+    friction: 0,
     activity: 0,
     projects: 0,
     tools: 0,
@@ -85,6 +89,7 @@ class AnalyticsStore {
   headlines = $state<AnalyticsHeadlines | null>(null);
   sessionDepth = $state<AnalyticsSessionDepth | null>(null);
   delegation = $state<AnalyticsDelegation | null>(null);
+  friction = $state<AnalyticsFriction | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
@@ -99,6 +104,7 @@ class AnalyticsStore {
     headlines: null,
     depth: null,
     delegation: null,
+    friction: null,
     activity: null,
     projects: null,
     tools: null,
@@ -114,6 +120,7 @@ class AnalyticsStore {
     headlines: false,
     depth: false,
     delegation: false,
+    friction: false,
     activity: false,
     projects: false,
     tools: false,
@@ -129,6 +136,7 @@ class AnalyticsStore {
     headlines: null,
     depth: null,
     delegation: null,
+    friction: null,
     activity: null,
     projects: null,
     tools: null,
@@ -198,6 +206,7 @@ class AnalyticsStore {
       this.fetchHeadlines(),
       this.fetchSessionDepth(),
       this.fetchDelegation(),
+      this.fetchFriction(),
       this.fetchActivity(),
       this.fetchProjects(),
       this.fetchTools(),
@@ -269,6 +278,25 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.delegation) {
         this.loading.delegation = false;
+      }
+    }
+  }
+
+  async fetchFriction(): Promise<void> {
+    const version = ++this.versions.friction;
+    this.loading.friction = true;
+    this.errors.friction = null;
+    try {
+      const result = await fetchAnalyticsFriction(this.queryParams);
+      if (version !== this.versions.friction) return;
+      this.friction = result;
+    } catch (err) {
+      if (version !== this.versions.friction) return;
+      console.error('Failed to load session friction:', err);
+      this.errors.friction = 'Failed to load session friction.';
+    } finally {
+      if (version === this.versions.friction) {
+        this.loading.friction = false;
       }
     }
   }
@@ -488,6 +516,12 @@ class AnalyticsStore {
 
   openSession(sessionId: string): void {
     navigateToSession(sessionId);
+  }
+
+  /** Open a session at one message, or at its start when the message is not known. */
+  openSessionAt(sessionId: string, ordinal: number | null): void {
+    if (ordinal === null) navigateToSession(sessionId);
+    else navigateToSessionMessage(sessionId, ordinal);
   }
 
   exportCsv(): void {

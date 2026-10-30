@@ -113,7 +113,8 @@ product never substitutes a misleading `0%` for missing evidence.
 - Session browsing provides incremental transcript loading, child-session context,
   tool calls, metadata, and an activity minimap for long sessions. Codex's
   injected developer-role messages are labelled Instructions, with their own
-  entry in the author filter.
+  entry in the author filter. A session that met friction shows it above the
+  transcript, and each signal jumps to the message where it starts.
 - A session is titled by the name you gave it (a Claude Code rename), else the
   name its harness gave it (Claude Code's own title, or a subagent's task), else
   by its first prompt, skipping the context harnesses
@@ -176,7 +177,14 @@ compacts at its own context window, over the started sessions whose transcript
 records compactions, with the share that compacted, their spread, messages per
 session at the median and p90, and the deepest sessions. Sessions that can't
 show compactions (telemetry only, or a transcript with malformed records) are
-counted apart. Activity charts sessions per day by the
+counted apart. Friction counts the started sessions where the agent got stuck,
+by two signals that do not grow with how long a session ran: three or more
+tool calls failing in a row (in the order their outcomes arrived, across a
+Codex session's rollout and UUID rows), and the user interrupting the agent.
+Codex interruptions are not recorded yet. Counts of failed calls or of edits
+to one file were tried and left out: on the maintainer's store every session
+they flagged was long, at ordinary error rates. Friction lists the latest such
+sessions, and each signal opens the session where it starts. Activity charts sessions per day by the
 day each started, across every day of the range, idle days included. Delegated
 Work, below it, stacks each day's sessions, messages or cost into the work
 someone started and the work it delegated: subagents, and Codex's own threads.

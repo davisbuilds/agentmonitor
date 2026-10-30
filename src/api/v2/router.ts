@@ -9,6 +9,7 @@ import {
   getSessionChildren,
   getSessionMessages,
   getSessionActivity,
+  getSessionFriction,
   listPinnedMessages,
   pinMessage,
   unpinMessage,
@@ -49,6 +50,7 @@ import {
   getAnalyticsHeadlinesResponse,
   getAnalyticsSessionDepthResponse,
   getAnalyticsDelegationResponse,
+  getAnalyticsFrictionResponse,
   getAnalyticsHourOfWeekResponse,
   getAnalyticsProjectsResponse,
   getAnalyticsSkillHealthResponse,
@@ -417,6 +419,21 @@ v2Router.get('/sessions/:id/activity', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/sessions/:id/activity] Error:', err);
     res.status(500).json({ error: 'Failed to get session activity' });
+  }
+});
+
+v2Router.get('/sessions/:id/friction', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.params['id'] as string;
+    const session = getBrowsingSession(sessionId);
+    if (!session) {
+      res.status(404).json({ error: 'Session not found' });
+      return;
+    }
+    res.json({ signals: getSessionFriction(sessionId) });
+  } catch (err) {
+    console.error('[v2/sessions/:id/friction] Error:', err);
+    res.status(500).json({ error: 'Failed to get session friction' });
   }
 });
 
@@ -876,6 +893,16 @@ v2Router.get('/analytics/delegation', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/delegation] Error:', err);
     res.status(500).json({ error: 'Failed to get delegated work' });
+  }
+});
+
+v2Router.get('/analytics/friction', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getAnalyticsFrictionResponse(params));
+  } catch (err) {
+    console.error('[v2/analytics/friction] Error:', err);
+    res.status(500).json({ error: 'Failed to get session friction' });
   }
 });
 

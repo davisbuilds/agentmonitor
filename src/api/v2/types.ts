@@ -274,6 +274,43 @@ export interface AnalyticsDelegation {
   totals: { sessions: DelegationSplit; messages: DelegationSplit; cost_usd: DelegationSplit };
 }
 
+/**
+ * Evidence that a session met friction, inferred from its transcript and
+ * telemetry: heuristics to look into, not a verdict. Both are independent of
+ * how long a session ran, so a deep session is not read as a troubled one.
+ */
+export type FrictionKind = 'failure_streak' | 'interruptions';
+
+export interface FrictionSignal {
+  kind: FrictionKind;
+  /** The longest run of tool calls that failed in a row, or the times the user interrupted. */
+  count: number;
+  /** The message where the signal starts, to open the session there; null when not known. */
+  ordinal: number | null;
+}
+
+export interface FrictionSession {
+  id: string;
+  title: string | null;
+  /** The opening of the first message, for a session with no title. */
+  first_message: string | null;
+  project: string | null;
+  agent: string;
+  started_at: string | null;
+  signals: FrictionSignal[];
+}
+
+/** Friction over the range's started sessions, with the latest sessions that met it. */
+export interface AnalyticsFriction {
+  sessions: number;
+  /** Sessions with at least one signal. */
+  with_friction: number;
+  /** Sessions with each signal. */
+  failure_streaks: number;
+  interruptions: number;
+  recent: FrictionSession[];
+}
+
 export interface ProjectBreakdown {
   project: string;
   session_count: number;

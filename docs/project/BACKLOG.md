@@ -98,6 +98,18 @@ so later readers know what still needs checking.
   Node runtime's zstd support first), keyed so a file compressed after parsing
   is recognized as the same rollout.
 
+### Codex interruptions are not recorded
+
+- **What**: Friction counts a Claude session's interruptions from the marker in
+  its transcript, but the Codex parser drops the rollout's
+  `event_msg` `turn_aborted` (`reason: "interrupted"`), so no Codex session
+  shows one.
+- **Why or evidence**: on 2026-10-30 a rollout with two aborted turns had no
+  trace of them in the store.
+- **Next**: have the parser keep aborted turns (a `status_change` item needs no
+  schema change), read them in `frictionSignals`, and re-sync stored rollouts
+  with `amon sync sessions --source codex --force`.
+
 ### Codex activity on the Mac mini is not recorded
 
 - **What**: the mini's Codex exports OTEL to its own `127.0.0.1:3141`, where no

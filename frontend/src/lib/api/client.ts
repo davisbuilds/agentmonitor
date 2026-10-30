@@ -351,6 +351,32 @@ export interface AnalyticsDelegation {
   totals: { sessions: DelegationSplit; messages: DelegationSplit; cost_usd: DelegationSplit };
 }
 
+export type FrictionKind = 'failure_streak' | 'interruptions';
+
+export interface FrictionSignal {
+  kind: FrictionKind;
+  count: number;
+  ordinal: number | null;
+}
+
+export interface FrictionSession {
+  id: string;
+  title: string | null;
+  first_message: string | null;
+  project: string | null;
+  agent: string;
+  started_at: string | null;
+  signals: FrictionSignal[];
+}
+
+export interface AnalyticsFriction {
+  sessions: number;
+  with_friction: number;
+  failure_streaks: number;
+  interruptions: number;
+  recent: FrictionSession[];
+}
+
 export interface AnalyticsHeadlines {
   days: string[];
   prior_range: { from: string; to: string } | null;
@@ -985,6 +1011,11 @@ export async function fetchSessionActivity(sessionId: string): Promise<SessionAc
   return checkedJson(res, 'fetchSessionActivity');
 }
 
+export async function fetchSessionFriction(sessionId: string): Promise<{ signals: FrictionSignal[] }> {
+  const res = await fetch(`/api/v2/sessions/${sessionId}/friction`);
+  return checkedJson(res, 'fetchSessionFriction');
+}
+
 export async function fetchSessionChildren(id: string): Promise<{ data: BrowsingSession[] }> {
   const res = await fetch(`/api/v2/sessions/${id}/children`);
   return checkedJson(res, 'fetchSessionChildren');
@@ -1090,6 +1121,11 @@ export async function fetchAnalyticsSessionDepth(params: Record<string, string |
 export async function fetchAnalyticsDelegation(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsDelegation> {
   const res = await fetch(`/api/v2/analytics/delegation${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsDelegation');
+}
+
+export async function fetchAnalyticsFriction(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsFriction> {
+  const res = await fetch(`/api/v2/analytics/friction${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsFriction');
 }
 
 export async function fetchAnalyticsHeadlines(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsHeadlines> {
