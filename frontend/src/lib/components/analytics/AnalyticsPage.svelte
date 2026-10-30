@@ -9,6 +9,7 @@
   import AgentComparison from './AgentComparison.svelte';
   import SessionDepth from './SessionDepth.svelte';
   import DelegatedWork from './DelegatedWork.svelte';
+  import SessionFriction from './SessionFriction.svelte';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -39,6 +40,7 @@
 
     <div class="space-y-4 xl:col-span-5">
       <SessionDepth />
+      <SessionFriction />
       <ToolUsage />
       <AgentComparison />
     </div>

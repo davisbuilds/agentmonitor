@@ -292,6 +292,8 @@ export interface FrictionSignal {
 export interface FrictionSession {
   id: string;
   title: string | null;
+  /** The opening of the first message, for a session with no title. */
+  first_message: string | null;
   project: string | null;
   agent: string;
   started_at: string | null;

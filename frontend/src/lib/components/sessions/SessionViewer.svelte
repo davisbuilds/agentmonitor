@@ -5,7 +5,9 @@
     fetchMessages,
     fetchSessionActivity,
     fetchSessionChildren,
+    fetchSessionFriction,
     type BrowsingSession,
+    type FrictionSignal,
     type Message,
     type SessionActivity,
     type SessionActivityBucket,
@@ -13,6 +15,7 @@
   import { timeAgo, agentHexColor, agentDisplayName } from '../../format';
   import { getMessagePreviewText, sessionTitle } from '../../session-text';
   import { classifyMessageAuthor, type MessageAuthor } from '../../session-roles';
+  import { frictionDescription, frictionLabel } from '../../friction-signals';
   import { hasVisibleContent } from '../../transcript-blocks';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { hasSessionCapability, sessionSourceLabel } from '../../session-capabilities';
@@ -34,6 +37,7 @@
   let session = $state<BrowsingSession | null>(null);
   let messages = $state<Message[]>([]);
   let children = $state<BrowsingSession[]>([]);
+  let frictionSignals = $state<FrictionSignal[]>([]);
   let totalMessages = $state(0);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -239,10 +243,11 @@
     activityLoading = true;
     activityError = null;
     activity = null;
+    frictionSignals = [];
     activeBucketIndex = null;
     markHighlightedOrdinal(null);
     try {
-      const [sess, msgs, kids, activityData] = await Promise.all([
+      const [sess, msgs, kids, activityData, friction] = await Promise.all([
         fetchBrowsingSession(sessionId),
         fetchMessages(sessionId, initialMessageOrdinal != null
           ? { around_ordinal: initialMessageOrdinal, limit: PAGE_SIZE }
@@ -253,12 +258,18 @@
           activityError = 'Failed to load activity map.';
           return null;
         }),
+        // Friction is an aside; the transcript loads without it.
+        fetchSessionFriction(sessionId).catch((err) => {
+          console.error('Failed to load session friction:', err);
+          return { signals: [] };
+        }),
       ]);
       session = sess;
       messages = msgs.data;
       totalMessages = msgs.total;
       children = kids.data;
       activity = activityData;
+      frictionSignals = friction.signals;
       try {
         await pins.loadSession(sessionId);
       } catch (err) {
@@ -378,6 +389,21 @@
 
   {#if session}
     <div class="flex flex-wrap items-center gap-2 border-b border-line px-4 sm:px-6 py-2">
+      {#if frictionSignals.length > 0}
+        <div class="flex flex-wrap items-center gap-1.5 text-meta text-text-muted" role="group" aria-label="Friction">
+          <span>Friction:</span>
+          {#each frictionSignals as signal (signal.kind)}
+            <button
+              type="button"
+              class="rounded-sm border border-line px-1.5 py-0.5 text-meta text-text-muted transition-colors hover:border-line-strong hover:text-text focus-visible:border-line-strong focus-visible:text-text disabled:cursor-default disabled:hover:border-line disabled:hover:text-text-muted"
+              title={frictionDescription(signal)}
+              aria-label={`${frictionLabel(signal)}. ${frictionDescription(signal)}`}
+              disabled={signal.ordinal === null}
+              onclick={() => { if (signal.ordinal !== null) void jumpToOrdinal(signal.ordinal); }}
+            >{frictionLabel(signal)}</button>
+          {/each}
+        </div>
+      {/if}
       <div class="ml-auto flex items-center gap-2">
         {#if authorFilter !== 'all'}
           <span class="tabular font-mono text-meta text-text-faint">

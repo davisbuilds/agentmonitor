@@ -2982,7 +2982,8 @@ export function getAnalyticsFriction(params: AnalyticsParams = {}): AnalyticsFri
   const filter = buildAnalyticsFilterState(params);
   const where = [startedSessionCondition, ...filter.conditions].join(' AND ');
   const sessions = getDb().prepare(`${sessionListCte}
-    SELECT id, title, project, agent, started_at, ${browserSessionKey('listed_sessions')} AS session_key
+    SELECT id, title, substr(first_message, 1, 500) AS first_message, project, agent, started_at,
+      ${browserSessionKey('listed_sessions')} AS session_key
     FROM listed_sessions WHERE ${where}
   `).all(...filter.values) as Array<Omit<FrictionSession, 'signals'> & { session_key: string }>;
   const signals = frictionSignals(sessions);
