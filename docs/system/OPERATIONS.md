@@ -251,6 +251,9 @@ Preserve the database, then rebuild browser history explicitly:
 amon sync sessions --source all --force
 ```
 
+The same forced sync fills a field added to the browser projection for sessions
+stored before it, such as the `cwd` a session started in (schema v26).
+
 `amon import --force` cannot restore tool-call or inferred-skill history. Date
 scoped imports intentionally do not update whole-file skip state. Benchmark import
 creates segregated `source='benchmark'` rows; it does not fabricate transcripts for

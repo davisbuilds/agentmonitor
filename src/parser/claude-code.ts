@@ -123,6 +123,9 @@ export interface ParsedSessionMetadata {
   project: string | null;
   agent: string;
   first_message: string | null;
+  // The directory the session started in, which names its repository. Local
+  // only: never in an API response or an export.
+  cwd?: string | null;
   // A name for the session the harness or its parent gave it, preferred over
   // first_message for display. Undefined when the parser has none.
   title?: string | null;
@@ -598,6 +601,7 @@ export function parseSessionChunk(
       project,
       agent: 'claude',
       first_message: firstUserMessage,
+      cwd: firstCwd,
       title: customTitle ?? title,
       started_at: startedAt,
       ended_at: endedAt,
@@ -818,18 +822,19 @@ export function insertParsedSession(
     // Insert browsing session
     db.prepare(`
       INSERT INTO browsing_sessions (
-        id, project, agent, first_message, title, started_at, ended_at, message_count,
+        id, project, agent, first_message, title, cwd, started_at, ended_at, message_count,
         user_message_count, parent_session_id, relationship_type, file_path,
         file_size, file_hash, context_used_tokens, context_window_tokens,
         project_identity, skill_context_capabilities_json
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       metadata.session_id,
       metadata.project,
       metadata.agent,
       metadata.first_message,
       metadata.title ?? null,
+      metadata.cwd ?? null,
       metadata.started_at,
       metadata.ended_at,
       metadata.message_count,
