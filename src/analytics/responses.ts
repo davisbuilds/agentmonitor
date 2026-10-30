@@ -3,6 +3,7 @@ import {
   getAnalyticsAgents,
   getAnalyticsCoverage,
   getAnalyticsHeadlines,
+  getAnalyticsSessionDepth,
   getAnalyticsHourOfWeek,
   getAnalyticsProjects,
   getAnalyticsSkillHealthParts,
@@ -20,6 +21,7 @@ import type {
   AnalyticsCoverage,
   AnalyticsDataResponse,
   AnalyticsHeadlines,
+  AnalyticsSessionDepth,
   AnalyticsOverview,
   AnalyticsParams,
   AnalyticsSummary,
@@ -118,6 +120,10 @@ export function getAnalyticsAgentsResponse(
 
 export function getAnalyticsVelocityResponse(params: AnalyticsParams = {}): VelocityMetrics {
   return getAnalyticsVelocity(params);
+}
+
+export function getAnalyticsSessionDepthResponse(params: AnalyticsParams = {}): AnalyticsSessionDepth {
+  return getDb().transaction(() => getAnalyticsSessionDepth(params))();
 }
 
 export function getAnalyticsHeadlinesResponse(params: AnalyticsParams = {}): AnalyticsHeadlines {
