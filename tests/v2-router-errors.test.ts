@@ -88,6 +88,7 @@ test('v2 router returns scoped 500 errors when the backing database is unavailab
     ['/api/v2/analytics/velocity', 'Failed to get velocity analytics'],
     ['/api/v2/analytics/headlines', 'Failed to get analytics headlines'],
     ['/api/v2/analytics/session-depth', 'Failed to get session depth'],
+    ['/api/v2/analytics/delegation', 'Failed to get delegated work'],
     ['/api/v2/analytics/agents', 'Failed to get agent analytics'],
     ['/api/v2/usage/summary', 'Failed to get usage summary'],
     ['/api/v2/usage/daily', 'Failed to get daily usage'],

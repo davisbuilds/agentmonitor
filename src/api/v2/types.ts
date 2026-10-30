@@ -249,6 +249,31 @@ export interface AnalyticsSessionDepth {
   agents: SessionDepthAgent[];
 }
 
+/** One measure split by who did the work: sessions someone started, or the work they delegated. */
+export interface DelegationSplit {
+  started: number;
+  /** Subagents a session spawned. */
+  subagent: number;
+  /** Codex's own threads: approval reviews, app jobs. */
+  internal: number;
+}
+
+export interface DelegationDay {
+  date: string;
+  /** Session rows by the day each started. */
+  sessions: DelegationSplit;
+  /** Messages, by the day their session started, as Activity counts them. */
+  messages: DelegationSplit;
+  /** Cost by the day it was spent, as Usage counts it. */
+  cost_usd: DelegationSplit;
+}
+
+/** How much of the range's work was delegated, per day. */
+export interface AnalyticsDelegation {
+  days: DelegationDay[];
+  totals: { sessions: DelegationSplit; messages: DelegationSplit; cost_usd: DelegationSplit };
+}
+
 export interface ProjectBreakdown {
   project: string;
   session_count: number;

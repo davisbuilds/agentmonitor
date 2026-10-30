@@ -48,6 +48,9 @@ import type {
   VelocityMetrics,
   AnalyticsHeadlines,
   AnalyticsSessionDepth,
+  AnalyticsDelegation,
+  DelegationDay,
+  DelegationSplit,
   AgentComparisonRow,
   UsageParams,
   UsageCoverage,
@@ -2886,6 +2889,91 @@ function activeMinutesByDay(params: AnalyticsParams): Map<string, number> {
  * struggled. Agents are never pooled: each compacts at its own context window.
  * Only a transcript records compactions, so a session without one counts apart.
  */
+/**
+ * Per day, how much work was delegated: session rows and messages by the day
+ * each session started, as Activity counts them, and cost by the day it was
+ * spent, as Usage counts it. A Codex row is delegated by its session's
+ * relationship. Claude records a subagent's usage under its parent session,
+ * marked with the subagent's agent_id.
+ */
+export function getAnalyticsDelegation(params: AnalyticsParams = {}): AnalyticsDelegation {
+  const db = getDb();
+  const filter = buildAnalyticsFilterState(params);
+  const empty = (): DelegationSplit => ({ started: 0, subagent: 0, internal: 0 });
+  const byDay = new Map<string, DelegationDay>();
+  const dayOf = (date: string) => {
+    let day = byDay.get(date);
+    if (!day) byDay.set(date, day = { date, sessions: empty(), messages: empty(), cost_usd: empty() });
+    return day;
+  };
+
+  const sessions = db.prepare(`${sessionListCte}
+    SELECT started_at, message_count, relationship_type FROM listed_sessions ${filter.where}
+  `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; relationship_type: string | null }>;
+  for (const row of sessions) {
+    const date = row.started_at ? localDayOf(row.started_at) : null;
+    if (!date) continue;
+    const day = dayOf(date);
+    const kind = delegationKind(row.relationship_type);
+    day.sessions[kind] += 1;
+    day.messages[kind] += row.message_count ?? 0;
+  }
+
+  // Usage keys a session by its native id; the listed row says who ran it.
+  const delegated = new Map((db.prepare(`${sessionListCte}
+    SELECT ${browserSessionKey('listed_sessions')} AS session_key, relationship_type FROM listed_sessions
+    WHERE relationship_type IN ('subagent', 'internal')
+  `).all() as Array<{ session_key: string; relationship_type: string }>)
+    .map(row => [row.session_key.toLowerCase(), delegationKind(row.relationship_type)]));
+  const usageDay = (timestamp: string) => dayOf(localDayOf(timestamp) ?? timestamp.slice(0, 10));
+  for (const row of getUsageRows(params)) {
+    if (!row.timestamp) continue;
+    usageDay(row.timestamp).cost_usd[delegated.get(row.session_id.toLowerCase()) ?? 'started'] += row.cost_usd;
+  }
+  for (const row of claudeSubagentUsageRows(params)) {
+    if (!row.timestamp || delegated.has(row.session_id.toLowerCase())) continue;
+    const cost = usageDay(row.timestamp).cost_usd;
+    cost.started -= row.cost_usd;
+    cost.subagent += row.cost_usd;
+  }
+
+  // Every day of the range, idle days as zero; without one, the active span.
+  const active = [...byDay.keys()].sort();
+  const from = rangeDay(params.date_from, 'from') ?? active[0];
+  const to = rangeDay(params.date_to, 'to') ?? active[active.length - 1];
+  const days = from && to ? enumerateDateRange(from, to).map(date => byDay.get(date) ?? dayOf(date)) : [];
+  const totals = { sessions: empty(), messages: empty(), cost_usd: empty() };
+  for (const day of days) {
+    for (const kind of DELEGATION_KINDS) {
+      day.cost_usd[kind] = roundCost(day.cost_usd[kind]);
+      totals.sessions[kind] += day.sessions[kind];
+      totals.messages[kind] += day.messages[kind];
+      totals.cost_usd[kind] += day.cost_usd[kind];
+    }
+  }
+  for (const kind of DELEGATION_KINDS) totals.cost_usd[kind] = roundCost(totals.cost_usd[kind]);
+  return { days, totals };
+}
+
+const DELEGATION_KINDS = ['started', 'subagent', 'internal'] as const;
+
+function delegationKind(relationshipType: string | null): keyof DelegationSplit {
+  return relationshipType === 'subagent' || relationshipType === 'internal' ? relationshipType : 'started';
+}
+
+/**
+ * Claude usage a subagent spent, which Claude records under its parent session
+ * with the subagent's agent_id. Read through getUsageRows, so every filter that
+ * shaped the range's cost shapes this part of it too.
+ */
+function claudeSubagentUsageRows(params: AnalyticsParams): UsageRow[] {
+  return getUsageRows(params, [
+    "e.agent_type = 'claude_code'",
+    `e.metadata LIKE '%"agent_id"%'`,
+    "CASE WHEN json_valid(e.metadata) THEN json_extract(e.metadata, '$.agent_id') END IS NOT NULL",
+  ]);
+}
+
 export function getAnalyticsSessionDepth(params: AnalyticsParams = {}): AnalyticsSessionDepth {
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
@@ -3515,12 +3603,14 @@ function usageRowsToSummaryValues(rows: UsageRow[]): {
 }
 
 /** The usage-bearing rows every Usage rollup is computed from. */
-export function usageRowsStatement(params: UsageParams = {}): { sql: string; values: unknown[] } {
+/** `extraConditions` narrow the rows further, over alias `e`. */
+export function usageRowsStatement(params: UsageParams = {}, extraConditions: string[] = []): { sql: string; values: unknown[] } {
   const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
   const usageWhere = [
     ...filter.conditions,
     usageMetricsCondition('e'),
     excludeOverlappingOtelUsageCondition('e'),
+    ...extraConditions,
   ].join(' AND ');
   const timestampExpr = usageTimestampExpr('e');
   const sql = `
@@ -3544,9 +3634,13 @@ export function usageRowsStatement(params: UsageParams = {}): { sql: string; val
   return { sql, values: filter.values };
 }
 
-/** Usage-bearing rows for the filter; pass them to several rollups to scan once. */
-export function getUsageRows(params: UsageParams = {}): UsageRow[] {
-  const statement = usageRowsStatement(params);
+/**
+ * Usage-bearing rows for the filter; pass them to several rollups to scan once.
+ * Model, provider and tier filters apply here, after the read; `extraConditions`
+ * narrow the read itself.
+ */
+export function getUsageRows(params: UsageParams = {}, extraConditions: string[] = []): UsageRow[] {
+  const statement = usageRowsStatement(params, extraConditions);
   const rows = getDb().prepare(statement.sql).all(...statement.values) as UsageDbRow[];
 
   const selected: UsageRow[] = [];

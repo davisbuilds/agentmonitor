@@ -2,6 +2,7 @@ import {
   fetchAnalyticsSummary,
   fetchAnalyticsHeadlines,
   fetchAnalyticsSessionDepth,
+  fetchAnalyticsDelegation,
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
@@ -13,6 +14,7 @@ import {
   type AnalyticsSummary,
   type AnalyticsHeadlines,
   type AnalyticsSessionDepth,
+  type AnalyticsDelegation,
   type AnalyticsCoverage,
   type ActivityDataPoint,
   type ProjectBreakdown,
@@ -34,6 +36,7 @@ type PanelKey =
   | 'summary'
   | 'headlines'
   | 'depth'
+  | 'delegation'
   | 'activity'
   | 'projects'
   | 'tools'
@@ -55,6 +58,7 @@ class AnalyticsStore {
     summary: 0,
     headlines: 0,
     depth: 0,
+    delegation: 0,
     activity: 0,
     projects: 0,
     tools: 0,
@@ -80,6 +84,7 @@ class AnalyticsStore {
   summary = $state<AnalyticsSummary | null>(null);
   headlines = $state<AnalyticsHeadlines | null>(null);
   sessionDepth = $state<AnalyticsSessionDepth | null>(null);
+  delegation = $state<AnalyticsDelegation | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
@@ -93,6 +98,7 @@ class AnalyticsStore {
     summary: null,
     headlines: null,
     depth: null,
+    delegation: null,
     activity: null,
     projects: null,
     tools: null,
@@ -107,6 +113,7 @@ class AnalyticsStore {
     summary: false,
     headlines: false,
     depth: false,
+    delegation: false,
     activity: false,
     projects: false,
     tools: false,
@@ -121,6 +128,7 @@ class AnalyticsStore {
     summary: null,
     headlines: null,
     depth: null,
+    delegation: null,
     activity: null,
     projects: null,
     tools: null,
@@ -189,6 +197,7 @@ class AnalyticsStore {
       this.fetchSummary(),
       this.fetchHeadlines(),
       this.fetchSessionDepth(),
+      this.fetchDelegation(),
       this.fetchActivity(),
       this.fetchProjects(),
       this.fetchTools(),
@@ -241,6 +250,25 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.headlines) {
         this.loading.headlines = false;
+      }
+    }
+  }
+
+  async fetchDelegation(): Promise<void> {
+    const version = ++this.versions.delegation;
+    this.loading.delegation = true;
+    this.errors.delegation = null;
+    try {
+      const result = await fetchAnalyticsDelegation(this.queryParams);
+      if (version !== this.versions.delegation) return;
+      this.delegation = result;
+    } catch (err) {
+      if (version !== this.versions.delegation) return;
+      console.error('Failed to load delegated work:', err);
+      this.errors.delegation = 'Failed to load delegated work.';
+    } finally {
+      if (version === this.versions.delegation) {
+        this.loading.delegation = false;
       }
     }
   }

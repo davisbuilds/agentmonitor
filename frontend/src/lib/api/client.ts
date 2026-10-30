@@ -333,6 +333,24 @@ export interface AnalyticsSessionDepth {
   agents: SessionDepthAgent[];
 }
 
+export interface DelegationSplit {
+  started: number;
+  subagent: number;
+  internal: number;
+}
+
+export interface DelegationDay {
+  date: string;
+  sessions: DelegationSplit;
+  messages: DelegationSplit;
+  cost_usd: DelegationSplit;
+}
+
+export interface AnalyticsDelegation {
+  days: DelegationDay[];
+  totals: { sessions: DelegationSplit; messages: DelegationSplit; cost_usd: DelegationSplit };
+}
+
 export interface AnalyticsHeadlines {
   days: string[];
   prior_range: { from: string; to: string } | null;
@@ -1067,6 +1085,11 @@ export async function fetchAnalyticsHourOfWeek(params: Record<string, string | n
 export async function fetchAnalyticsSessionDepth(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsSessionDepth> {
   const res = await fetch(`/api/v2/analytics/session-depth${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsSessionDepth');
+}
+
+export async function fetchAnalyticsDelegation(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsDelegation> {
+  const res = await fetch(`/api/v2/analytics/delegation${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsDelegation');
 }
 
 export async function fetchAnalyticsHeadlines(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsHeadlines> {

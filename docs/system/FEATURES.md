@@ -177,7 +177,13 @@ records compactions, with the share that compacted, their spread, messages per
 session at the median and p90, and the deepest sessions. Sessions that can't
 show compactions (telemetry only, or a transcript with malformed records) are
 counted apart. Activity charts sessions per day by the
-day each started, across every day of the range, idle days included. Per-day
+day each started, across every day of the range, idle days included. Delegated
+Work, below it, stacks each day's sessions, messages or cost into the work
+someone started and the work it delegated: subagents, and Codex's own threads.
+Sessions and messages count by the day a session started, as Activity does, and
+cost by the day it was spent, as Usage does, so each measure adds up to its own
+panel. Claude records a subagent's usage under its parent session, marked with
+the subagent's id, which is how its cost is told apart. Per-day
 averages in Analytics and Usage divide by the days of the selected range, or,
 without one, by the first to the last active day. Session counts
 and per-session averages count the sessions someone started: a subagent, and a
