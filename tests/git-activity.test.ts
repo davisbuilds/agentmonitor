@@ -80,3 +80,44 @@ test('a commit rewritten since the last scan is replaced, not counted twice', as
   assert.equal(report.commits_removed, 1);
   assert.deepEqual(commits().map(row => row.sha), [first, second, amended]);
 });
+
+/** A repository of its own with one session in it, for a scenario that must not see the others' commits. */
+function freshRepository(name: string, sessionStarted: string): string {
+  const dir = path.join(tempDir, name);
+  fs.mkdirSync(dir);
+  git(dir, ['init', '-q', '-b', 'main']);
+  session.run(`s-${name}`, dir, sessionStarted);
+  return dir;
+}
+const shasIn = (root: string) => (db.prepare('SELECT sha FROM git_commits WHERE repo_root = ? ORDER BY authored_at').all(root) as Array<{ sha: string }>)
+  .map(row => row.sha);
+
+test('a read after downtime reaches back to the last one, not only the last two weeks', async () => {
+  const dir = freshRepository('gamma', '2026-03-01T09:00:00Z');
+  const before = commit(dir, 'a.txt', 'feat: before', '2026-03-01T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  const during = commit(dir, 'b.txt', 'feat: while the server was down', '2026-03-05T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-04-01T00:00:00Z') });
+  assert.deepEqual(shasIn(dir), [before, during]);
+});
+
+test('a directory that becomes a repository is read once it does', async () => {
+  const dir = path.join(tempDir, 'delta');
+  fs.mkdirSync(dir);
+  session.run('s-delta', dir, '2026-03-01T09:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  git(dir, ['init', '-q', '-b', 'main']);
+  const first = commit(dir, 'a.txt', 'feat: first', '2026-03-02T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-03T00:00:00Z') });
+  assert.deepEqual(shasIn(dir), [first]);
+});
+
+test('a backdated commit does not hide a recent one behind it from the reread', async () => {
+  const dir = freshRepository('epsilon', '2026-04-01T09:00:00Z');
+  const recent = commit(dir, 'a.txt', 'feat: recent', '2026-04-01T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-04-02T00:00:00Z') });
+  // A child whose committer date is older than the reread window.
+  commit(dir, 'b.txt', 'chore: backdated', '2026-01-01T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-04-03T00:00:00Z') });
+  assert.ok(shasIn(dir).includes(recent), 'the recent commit is still reachable, so it stays');
+});

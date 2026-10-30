@@ -21,7 +21,7 @@ export interface GitSyncOptions {
 }
 
 const DAY_MS = 86_400_000;
-/** A later pass rereads this much, to pick up fetched commits and drop rewritten ones. */
+/** A later pass rereads from this long before the last one, to pick up fetched commits and drop rewritten ones. */
 const RESCAN_DAYS = 14;
 /** A repository's first pass reaches back to its first session, but never further than this. */
 const MAX_HISTORY_DAYS = 365;
@@ -52,28 +52,31 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-// A directory's repository does not change while the server runs; resolving it
-// once spares a git process per session directory on every pass.
-const rootByCwd = new Map<string, string | null>();
+// A directory inside a repository stays in it, so a found root is resolved
+// once. A directory outside one is asked again each pass: an agent may run
+// `git init` there later.
+const rootByCwd = new Map<string, string>();
 
 /** The repository a directory belongs to, a worktree resolved to its main repository; null outside one. */
 async function repositoryRoot(cwd: string): Promise<string | null> {
-  if (rootByCwd.has(cwd)) return rootByCwd.get(cwd)!;
-  let root: string | null = null;
-  if (fs.existsSync(cwd)) {
-    try {
-      const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim();
-      root = path.basename(common) === '.git' ? path.dirname(common) : common;
-    } catch {
-      root = null;
-    }
+  const known = rootByCwd.get(cwd);
+  if (known) return known;
+  if (!fs.existsSync(cwd)) return null;
+  try {
+    const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim();
+    const root = path.basename(common) === '.git' ? path.dirname(common) : common;
+    rootByCwd.set(cwd, root);
+    return root;
+  } catch {
+    return null;
   }
-  rootByCwd.set(cwd, root);
-  return root;
 }
 
 async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
-  const output = await git(root, ['log', '--all', '--no-merges', `--since=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
+  // --since stops walking at the first commit older than the cutoff, so a
+  // backdated commit would hide the recent ones behind it, and the pass would
+  // then remove them as rewritten. --since-as-filter (git 2.38) visits them all.
+  const output = await git(root, ['log', '--all', '--no-merges', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
   const commits = new Map<string, CommitRecord>();
   for (const record of output.split('\x1e').slice(1)) {
     const [header, ...paths] = record.split('\n');
@@ -96,7 +99,7 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
 /**
  * Read commits from the repositories sessions ran in, into git_commits. A
  * repository's first pass reaches back to the day before its first session; a
- * later one rereads the last RESCAN_DAYS, and a commit stored in that window
+ * later one rereads from RESCAN_DAYS before the last, and a commit stored in that window
  * that git no longer lists (rebased, amended, or on a deleted branch) is
  * removed, so rewritten history is not counted twice. Git runs as a child
  * process, so a pass never blocks the server.
@@ -139,9 +142,11 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
   for (const [root, firstSession] of firstSessionByRoot) {
     const floor = now.getTime() - MAX_HISTORY_DAYS * DAY_MS;
     const scanned = (lastScan.get(root) as { last_scanned_at: string | null } | undefined)?.last_scanned_at;
-    const since = new Date(scanned
-      ? now.getTime() - RESCAN_DAYS * DAY_MS
-      : Math.max(Number.isNaN(firstSession) ? floor : firstSession - DAY_MS, floor));
+    // A reread overlaps the last read by RESCAN_DAYS, however long ago it was,
+    // so downtime never leaves a gap.
+    const since = new Date(Math.max(floor, scanned
+      ? Math.min(now.getTime(), Date.parse(scanned)) - RESCAN_DAYS * DAY_MS
+      : Number.isNaN(firstSession) ? floor : firstSession - DAY_MS));
     let commits: CommitRecord[];
     try {
       commits = await readCommits(root, since);

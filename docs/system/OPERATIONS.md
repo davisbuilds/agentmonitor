@@ -264,8 +264,8 @@ earlier pass had not yet seen; event ids dedupe the rest.
 The server reads commits from the repositories sessions ran in, every
 `AGENTMONITOR_GIT_POLL_INTERVAL_MS`, starting 30 seconds after startup. A
 repository's first read reaches back to the day before its first session, at
-most a year; later reads reread the last 14 days and drop commits git no longer
-lists. `amon sync git` runs one pass on demand, for instance right after the
+most a year; later reads reread from 14 days before the previous read, so
+downtime leaves no gap, and drop commits git no longer lists. `amon sync git` runs one pass on demand, for instance right after the
 forced session sync above fills session directories.
 
 `amon import --force` cannot restore tool-call or inferred-skill history. Date
