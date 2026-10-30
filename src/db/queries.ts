@@ -1333,6 +1333,69 @@ export function upsertProviderQuotaSnapshot(input: ProviderQuotaSnapshotInput): 
     credits?.balance ?? null,
     input.raw_payload == null ? null : JSON.stringify(input.raw_payload),
   );
+
+  if ((input.status ?? 'available') === 'available' && (primary || secondary)) {
+    recordProviderQuotaSample(input.provider, normalizeQuotaTimestamp(input.updated_at),
+      input.plan_type ?? defaults.plan_type, primary, secondary);
+  }
+}
+
+/** The least time between two quota samples of one provider. */
+const QUOTA_SAMPLE_INTERVAL_MS = 5 * 60_000;
+
+/**
+ * Keep a provider's quota history without a row per poll. Codex is polled every
+ * minute whether or not anything runs, and Claude posts on every statusline
+ * render. A reading that changed starts a row, at most one per interval, so
+ * rows come only while usage moves. A reading that held extends the latest
+ * row's observed_until, at most once per interval, so an idle stretch reads as
+ * flat rather than as a slow climb to the next row.
+ */
+function recordProviderQuotaSample(
+  provider: string,
+  observedAt: string,
+  planType: string | null,
+  primary: ProviderQuotaWindow | null,
+  secondary: ProviderQuotaWindow | null,
+): void {
+  const db = getDb();
+  const reading = {
+    plan_type: planType,
+    primary_used_percent: primary?.used_percent ?? null,
+    primary_window_minutes: primary?.window_minutes ?? null,
+    primary_resets_at: primary?.resets_at ?? null,
+    secondary_used_percent: secondary?.used_percent ?? null,
+    secondary_window_minutes: secondary?.window_minutes ?? null,
+    secondary_resets_at: secondary?.resets_at ?? null,
+  };
+  const latest = db.prepare(`
+    SELECT id, sampled_at, observed_until, plan_type, primary_used_percent, primary_window_minutes,
+      primary_resets_at, secondary_used_percent, secondary_window_minutes, secondary_resets_at
+    FROM provider_quota_samples WHERE provider = ? ORDER BY sampled_at DESC, id DESC LIMIT 1
+  `).get(provider) as ({ id: number; sampled_at: string; observed_until: string } & typeof reading) | undefined;
+
+  const now = Date.parse(observedAt);
+  if (latest) {
+    // A reading older than one already kept adds nothing.
+    if (now <= Date.parse(latest.observed_until)) return;
+    const held = (Object.keys(reading) as Array<keyof typeof reading>).every(key => latest[key] === reading[key]);
+    if (held) {
+      if (now - Date.parse(latest.observed_until) >= QUOTA_SAMPLE_INTERVAL_MS) {
+        db.prepare('UPDATE provider_quota_samples SET observed_until = ? WHERE id = ?').run(observedAt, latest.id);
+      }
+      return;
+    }
+    if (now - Date.parse(latest.sampled_at) < QUOTA_SAMPLE_INTERVAL_MS) return;
+  }
+  db.prepare(`
+    INSERT INTO provider_quota_samples (
+      provider, sampled_at, observed_until, plan_type, primary_used_percent, primary_window_minutes,
+      primary_resets_at, secondary_used_percent, secondary_window_minutes, secondary_resets_at
+    ) VALUES (
+      @provider, @observed_at, @observed_at, @plan_type, @primary_used_percent, @primary_window_minutes,
+      @primary_resets_at, @secondary_used_percent, @secondary_window_minutes, @secondary_resets_at
+    )
+  `).run({ provider, observed_at: observedAt, ...reading });
 }
 
 export function getProviderQuotas(): ProviderQuotaSnapshot[] {

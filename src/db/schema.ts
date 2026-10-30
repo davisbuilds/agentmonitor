@@ -201,6 +201,26 @@ function initSchemaLocked(db: Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
 
+    -- How each provider's quota moved, for burn rate. provider_quotas keeps
+    -- only the latest reading. A row is one reading, held from sampled_at to
+    -- observed_until; see recordProviderQuotaSample for when rows are written.
+    CREATE TABLE IF NOT EXISTS provider_quota_samples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL,
+      sampled_at TEXT NOT NULL,
+      observed_until TEXT NOT NULL,
+      plan_type TEXT,
+      primary_used_percent REAL,
+      primary_window_minutes INTEGER,
+      primary_resets_at TEXT,
+      secondary_used_percent REAL,
+      secondary_window_minutes INTEGER,
+      secondary_resets_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_provider_quota_samples_provider_time
+      ON provider_quota_samples(provider, sampled_at);
+
     -- Claude Code's own running cost for each session, from its statusline
     -- payload. It is counted in memory once per API response, independently of
     -- the transcripts imports read, so it checks imported cost.
@@ -1124,7 +1144,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 24;
+const DATA_SCHEMA_VERSION = 25;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1185,6 +1205,8 @@ export function runDataMigrations(db: Database): void {
     // covering index with cache_write_1h_tokens, which read commands only
     // install when the version advances.
     if (current < 24) classifyCodexInternalThreads(db);
+    // v25 introduces no data correction: it adds provider_quota_samples, which
+    // read commands only install when the version advances.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
