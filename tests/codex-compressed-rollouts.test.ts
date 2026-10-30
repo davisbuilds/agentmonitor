@@ -64,6 +64,12 @@ test('a rollout Codex compressed after amon read it stays one session, with noth
   assert.equal(storedMessages(), before.messages);
   assert.equal(usageRows(), before.usage, 'its usage events dedupe against the ones already imported');
   assert.equal(imported.files.find(file => file.path === compressed)?.eventsImported, 0);
+
+  // Import state records the size on disk, so the next pass skips the file
+  // without reading and decompressing it.
+  assert.equal((db().prepare('SELECT file_size FROM import_state WHERE file_path = ?').get(compressed) as { file_size: number }).file_size,
+    fs.statSync(compressed).size);
+  assert.equal(runImport({ source: 'codex', codexDir }).files.find(file => file.path === compressed)?.skippedUnchanged, true);
 });
 
 test('a rollout amon first sees compressed is read whole', () => {

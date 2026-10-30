@@ -304,21 +304,23 @@ function appendCodexEvents(
   const { imported, duplicates } = importEvents(events, options.dryRun ?? false);
   result.eventsImported = imported;
   result.skippedDuplicate = duplicates;
-  recordImportState(filePath, read.hash, read.bytes.length, read.mtime, 'codex', imported, options);
+  recordImportState(filePath, read.hash, read.size, read.mtime, 'codex', imported, options);
   return result;
 }
 
 export interface CodexRolloutRead {
+  /** The rollout's lines, decompressed when the file is compressed. */
   bytes: Buffer;
   hash: string;
-  /** The file's mtime from just before the read. */
+  /** The file's mtime and size on disk from just before the read: what the unchanged check compares. */
   mtime: string;
+  size: number;
 }
 
 export function readCodexRollout(filePath: string): CodexRolloutRead {
-  const { mtime } = diskStamp(filePath);
+  const { mtime, size } = diskStamp(filePath);
   const bytes = readTranscriptFile(filePath);
-  return { bytes, hash: hashCodexContent(bytes), mtime };
+  return { bytes, hash: hashCodexContent(bytes), mtime, size };
 }
 
 /**
@@ -347,7 +349,7 @@ export function reconcileCodexRollout(
     apply: options.apply,
     onCommit: committed => {
       applySessionModes(events);
-      setImportState(filePath, read.hash, read.bytes.length, read.mtime, 'codex', committed.inserted);
+      setImportState(filePath, read.hash, read.size, read.mtime, 'codex', committed.inserted);
     },
   });
   return { events, counts };
