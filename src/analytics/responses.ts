@@ -4,6 +4,7 @@ import {
   getAnalyticsCoverage,
   getAnalyticsHeadlines,
   getAnalyticsSessionDepth,
+  getAnalyticsDelegation,
   getAnalyticsHourOfWeek,
   getAnalyticsProjects,
   getAnalyticsSkillHealthParts,
@@ -22,6 +23,7 @@ import type {
   AnalyticsDataResponse,
   AnalyticsHeadlines,
   AnalyticsSessionDepth,
+  AnalyticsDelegation,
   AnalyticsOverview,
   AnalyticsParams,
   AnalyticsSummary,
@@ -124,6 +126,10 @@ export function getAnalyticsVelocityResponse(params: AnalyticsParams = {}): Velo
 
 export function getAnalyticsSessionDepthResponse(params: AnalyticsParams = {}): AnalyticsSessionDepth {
   return getDb().transaction(() => getAnalyticsSessionDepth(params))();
+}
+
+export function getAnalyticsDelegationResponse(params: AnalyticsParams = {}): AnalyticsDelegation {
+  return getDb().transaction(() => getAnalyticsDelegation(params))();
 }
 
 export function getAnalyticsHeadlinesResponse(params: AnalyticsParams = {}): AnalyticsHeadlines {

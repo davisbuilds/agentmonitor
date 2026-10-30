@@ -48,6 +48,7 @@ import {
   getAnalyticsAgentsResponse,
   getAnalyticsHeadlinesResponse,
   getAnalyticsSessionDepthResponse,
+  getAnalyticsDelegationResponse,
   getAnalyticsHourOfWeekResponse,
   getAnalyticsProjectsResponse,
   getAnalyticsSkillHealthResponse,
@@ -865,6 +866,16 @@ v2Router.get('/analytics/session-depth', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/session-depth] Error:', err);
     res.status(500).json({ error: 'Failed to get session depth' });
+  }
+});
+
+v2Router.get('/analytics/delegation', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getAnalyticsDelegationResponse(params));
+  } catch (err) {
+    console.error('[v2/analytics/delegation] Error:', err);
+    res.status(500).json({ error: 'Failed to get delegated work' });
   }
 });
 
