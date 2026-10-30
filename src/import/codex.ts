@@ -6,7 +6,8 @@ import type { NormalizedIngestEvent } from '../contracts/event-contract.js';
 import { findSubagentBoundary } from '../parser/codex-subagent-boundary.js';
 import { pricingRegistry } from '../pricing/index.js';
 import { parsePatchMeta } from '../otel/parser.js';
-import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
+import { discoverCodexRolloutFilesRecursive } from '../util/file-discovery.js';
+import { readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
 import { codexInvocationMode } from '../util/invocation-mode.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 
@@ -93,7 +94,7 @@ export function discoverCodexLogs(
 ): string[] {
   const codexHome = baseDir ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   const sessionsDir = path.join(codexHome, 'sessions');
-  return discoverJsonlFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
+  return discoverCodexRolloutFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
 }
 
 // ─── Read model from config.toml ────────────────────────────────────────
@@ -132,7 +133,7 @@ export function parseCodexFile(
   },
 ): NormalizedIngestEvent[] {
   const events: NormalizedIngestEvent[] = [];
-  const content = options?.content ?? fs.readFileSync(filePath, 'utf-8');
+  const content = options?.content ?? readTranscriptFile(filePath).toString('utf-8');
   const lines = content.split('\n').filter(l => l.trim());
 
   const defaultModel = readCodexModel(options?.codexDir);
@@ -245,7 +246,7 @@ export function parseCodexFile(
 
   // Fall back to filename for session ID
   if (!sessionId) {
-    const basename = path.basename(filePath, '.jsonl');
+    const basename = transcriptBaseName(filePath);
     // Extract UUID from filename like "rollout-2026-02-18T20-10-57-019c7373-39f7..."
     const uuidMatch = basename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
     sessionId = uuidMatch?.[1] ?? basename;
@@ -604,7 +605,7 @@ export function parseCodexFile(
 // ─── File hash for import state tracking ────────────────────────────────
 
 export function hashFile(filePath: string): string {
-  return hashContent(fs.readFileSync(filePath));
+  return hashContent(readTranscriptFile(filePath));
 }
 
 export function hashContent(content: Buffer): string {

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { readTranscriptFile } from '../util/transcript-file.js';
 import { getDb } from '../db/connection.js';
 import { eventIdExists, insertEvent, listImportedCodexRows, refreshImportedUsage, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
@@ -316,7 +317,7 @@ export interface CodexRolloutRead {
 
 export function readCodexRollout(filePath: string): CodexRolloutRead {
   const { mtime } = diskStamp(filePath);
-  const bytes = fs.readFileSync(filePath);
+  const bytes = readTranscriptFile(filePath);
   return { bytes, hash: hashCodexContent(bytes), mtime };
 }
 

@@ -254,6 +254,12 @@ amon sync sessions --source all --force
 The same forced sync fills a field added to the browser projection for sessions
 stored before it, such as the `cwd` a session started in (schema v26).
 
+Codex compresses a finished rollout to `.jsonl.zst` and removes the plain file.
+Discovery, the watcher, `amon import` and the repairs read both forms as one
+rollout, keyed by the same name, so recovery rebuilds compressed history too.
+Re-reading a rollout imported before it was compressed adds only the usage the
+earlier pass had not yet seen; event ids dedupe the rest.
+
 `amon import --force` cannot restore tool-call or inferred-skill history. Date
 scoped imports intentionally do not update whole-file skip state. Benchmark import
 creates segregated `source='benchmark'` rows; it does not fabricate transcripts for

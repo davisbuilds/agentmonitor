@@ -83,21 +83,6 @@ so later readers know what still needs checking.
 - **Revisit when**: Codex writes thread names or a job marker into rollouts or
   telemetry, or Codex app jobs reappear in the Sessions list.
 
-### Compressed Codex rollouts are invisible to discovery
-
-- **What**: Codex compresses older rollouts to `.jsonl.zst`; discovery accepts
-  only names ending `.jsonl` (`src/util/file-discovery.ts`), so the watcher,
-  `amon import`, and `amon sync sessions --force` never read them.
-- **Why or evidence**: on one host on 2026-10-29 about 86% of rollouts were
-  compressed. Nothing is lost today, since each file was parsed before Codex
-  compressed it, but the documented recovery (`amon sync sessions --source all
-  --force` after losing the browser tables) would rebuild only the uncompressed
-  minority of Codex transcripts, and the missing-projection warning would not
-  notice.
-- **Next**: decode `.jsonl.zst` in discovery and the Codex parsers (check the
-  Node runtime's zstd support first), keyed so a file compressed after parsing
-  is recognized as the same rollout.
-
 ### Codex interruptions are not recorded
 
 - **What**: Friction counts a Claude session's interruptions from the marker in

@@ -11,6 +11,7 @@
 import fs from 'node:fs';
 import { listImportedCodexRows } from '../db/queries.js';
 import { checkClaudeTranscriptCosts } from './claude-cost-state.js';
+import { readTranscriptFile } from '../util/transcript-file.js';
 import { discoverCodexLogs } from './codex.js';
 
 export type SessionTotalSource = 'claude-code' | 'codex' | 'antigravity';
@@ -181,7 +182,7 @@ function checkCodex(codexDir: string | undefined, limit: number, excludePatterns
   for (const { file } of recent) {
     let content: string;
     try {
-      content = fs.readFileSync(file, 'utf-8');
+      content = readTranscriptFile(file).toString('utf-8');
     } catch {
       continue;
     }

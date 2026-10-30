@@ -1,4 +1,5 @@
 import path from 'path';
+import { COMPRESSED_ROLLOUT_SUFFIX, transcriptBaseName } from '../util/transcript-file.js';
 import os from 'os';
 import { watch, type FSWatcher } from 'chokidar';
 import { getDb } from '../db/connection.js';
@@ -17,6 +18,12 @@ import { liveBroadcaster } from '../api/v2/live-stream.js';
 import { config } from '../config.js';
 import { shouldExcludePath } from '../util/path-excludes.js';
 import { syncExecutionReceipts } from '../import/executions.js';
+
+/** A Claude transcript, or a Codex rollout, plain or as Codex compresses it once finished. */
+function isWatchedTranscript(filePath: string, codexSessionsDir: string): boolean {
+  return filePath.endsWith('.jsonl')
+    || (filePath.startsWith(codexSessionsDir) && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX));
+}
 
 let watcher: FSWatcher | undefined;
 let resyncTimer: ReturnType<typeof setInterval> | undefined;
@@ -68,7 +75,7 @@ function handleFileChange(
       : syncSessionFileDetailed(db, filePath);
 
     if (outcome.result === 'parsed') {
-      const sessionId = path.basename(filePath, '.jsonl');
+      const sessionId = transcriptBaseName(filePath);
       const integrationMode = source === 'codex' ? 'codex-jsonl' : 'claude-jsonl';
       const fidelity = source === 'codex' ? 'summary' : 'full';
       console.log(`[watcher] Parsed ${source} session: ${sessionId}`);
@@ -180,7 +187,7 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
       // chokidar keeps traversing into them.
       !!stats?.isFile()
       && (
-        !filePath.endsWith('.jsonl')
+        !isWatchedTranscript(filePath, codexSessionsDir)
         || shouldExcludePath(projectsDir, filePath, config.sync.excludePatterns)
         || shouldExcludePath(codexSessionsDir, filePath, config.sync.excludePatterns)
       )
@@ -192,7 +199,7 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   });
 
   const onFsEvent = (filePath: string) => {
-    if (!filePath.endsWith('.jsonl')) return;
+    if (!isWatchedTranscript(filePath, codexSessionsDir)) return;
     const source = filePath.startsWith(codexSessionsDir) ? 'codex' : 'claude';
     handleFileChange(filePath, source, projectsDir, codexSessionsDir);
   };

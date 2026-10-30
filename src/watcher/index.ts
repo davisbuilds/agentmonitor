@@ -15,7 +15,8 @@ import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
 import { syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
 import { discoverAntigravityLogs } from '../import/antigravity.js';
-import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
+import { discoverCodexRolloutFilesRecursive, discoverJsonlFilesRecursive } from '../util/file-discovery.js';
+import { readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { setSessionMode } from '../db/queries.js';
 
@@ -325,7 +326,7 @@ export function syncAllFiles(db: Database.Database, claudeDir: string, options: 
 export function discoverCodexSessionFiles(codexHome?: string, options: SyncOptions = {}): string[] {
   const base = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   const sessionsDir = path.join(base, 'sessions');
-  return discoverJsonlFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
+  return discoverCodexRolloutFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
 }
 
 export function syncCodexSessionFileDetailed(
@@ -337,9 +338,10 @@ export function syncCodexSessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    // One read serves the change check, the checkpoint check and the parse.
-    const bytes = fs.readFileSync(filePath);
-    const sessionId = path.basename(filePath, '.jsonl');
+    // One read serves the change check, the checkpoint check and the parse. A
+    // compressed rollout reads as its lines, under the same session id.
+    const bytes = readTranscriptFile(filePath);
+    const sessionId = transcriptBaseName(filePath);
     const read = options.force
       ? { fileHash: hashBytes(bytes), checkpoint: undefined }
       : readCheckpoint<CodexParseState>(db, filePath, sessionId, bytes);
