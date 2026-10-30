@@ -2743,13 +2743,18 @@ export function getAnalyticsHeadlines(params: AnalyticsParams = {}): AnalyticsHe
 }
 
 /**
- * The session id behind every transcript row, lowercased, as usage events key
- * it. A set of ids, so a Codex session stored under its rollout and its UUID
+ * The session id behind every row with a transcript, lowercased, as usage
+ * events key it. A transcript is stored message history, by the rule behind
+ * `transcript_available`: a telemetry-only Codex session has a summary row
+ * but none. A set of ids, so a session stored under its rollout and its UUID
  * is one entry; it counts nothing, which is why it may read the rows directly.
  */
 function transcriptSessionKeys(): Set<string> {
-  return new Set((getDb().prepare(`SELECT ${browserSessionKey('b')} AS session_key FROM browsing_sessions b`)
-    .all() as Array<{ session_key: string }>).map(row => row.session_key.toLowerCase()));
+  return new Set((getDb().prepare(`
+    SELECT ${browserSessionKey('b')} AS session_key FROM browsing_sessions b
+    WHERE ${analyticsCapabilityExpr('history', 'b')} != 'none'
+      AND EXISTS (SELECT 1 FROM messages m WHERE m.session_id = b.id)
+  `).all() as Array<{ session_key: string }>).map(row => row.session_key.toLowerCase()));
 }
 
 /** Per start day: every listed session row, and the ones that are delegated work. */

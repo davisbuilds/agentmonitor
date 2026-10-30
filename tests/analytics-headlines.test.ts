@@ -93,3 +93,11 @@ test('an agent filter narrows every headline to that agent', () => {
   assert.deepEqual(overview.tool_errors.map(row => row.agent), ['codex']);
   assert.equal(overview.active_hours.value, 0.25);
 });
+
+test('a telemetry-only session has a row but no transcript, so cost per session leaves it out', () => {
+  const summaryOnly = '01990000-0000-7000-8000-000000000002';
+  session.run(summaryOnly, 'codex', 'codex-summary', '2026-03-03T08:00:00Z', 0, 0, null, null);
+  usage.run(summaryOnly, 'codex', 0.25, '2026-03-03T08:01:00Z');
+  const { cost } = queries.getAnalyticsHeadlines(range);
+  assert.deepEqual([cost.per_session_usd, cost.sessions_with_transcript, cost.usage_sessions], [0.75, 2, 4]);
+});
