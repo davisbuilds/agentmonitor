@@ -182,6 +182,7 @@ instead. Common controls include:
 | Discovery and sync | `AGENTMONITOR_PROJECTS_DIR`, `AGENTMONITOR_CLAUDE_DIR`, `AGENTMONITOR_AUTO_IMPORT_MINUTES`, `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` |
 | Live fidelity/privacy | `AGENTMONITOR_ENABLE_LIVE_TAB`, `AGENTMONITOR_CODEX_LIVE_MODE`, `AGENTMONITOR_CODEX_CONTEXT_WINDOW`, `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `AGENTMONITOR_LIVE_CAPTURE_REASONING`, `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`, `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` |
 | Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
+| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off) |
 | Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
 | Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
 | Reporting zone | `AGENTMONITOR_TIMEZONE` |
@@ -259,6 +260,13 @@ Discovery, the watcher, `amon import` and the repairs read both forms as one
 rollout, keyed by the same name, so recovery rebuilds compressed history too.
 Re-reading a rollout imported before it was compressed adds only the usage the
 earlier pass had not yet seen; event ids dedupe the rest.
+
+The server reads commits from the repositories sessions ran in, every
+`AGENTMONITOR_GIT_POLL_INTERVAL_MS`, starting 30 seconds after startup. A
+repository's first read reaches back to the day before its first session, at
+most a year; later reads reread the last 14 days and drop commits git no longer
+lists. `amon sync git` runs one pass on demand, for instance right after the
+forced session sync above fills session directories.
 
 `amon import --force` cannot restore tool-call or inferred-skill history. Date
 scoped imports intentionally do not update whole-file skip state. Benchmark import

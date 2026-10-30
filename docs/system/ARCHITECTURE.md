@@ -81,6 +81,11 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   transcript sources. A session keeps the directory it started in (`cwd`),
   which names its repository for git activity; it stays local, out of API
   responses and exports.
+- **Git activity:** commits in those repositories (`git_commits`, with
+  `git_repos` recording each one's last read), read from local git by a
+  background child process: hashes, times, authors, subjects, co-author
+  trailers and changed paths, never contents. Attributing a commit to the
+  session that made it happens at read time.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots, with a sampled quota history (`provider_quota_samples`): a row per
   changed reading at most every five minutes, each held until `observed_until`,

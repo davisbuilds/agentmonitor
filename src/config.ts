@@ -43,6 +43,11 @@ interface QuotaConfig {
   codexPollIntervalMs: number;
 }
 
+interface GitConfig {
+  /** How often to read commits from the repositories sessions ran in; 0 turns it off. */
+  pollIntervalMs: number;
+}
+
 interface LiveConfig {
   enabled: boolean;
   codexMode: CodexLiveMode;
@@ -122,6 +127,10 @@ function parseQuotaConfig(env: EnvMap): QuotaConfig {
   return {
     codexPollIntervalMs: parseEnvInt(env.AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS, 60_000, 1_000),
   };
+}
+
+function parseGitConfig(env: EnvMap): GitConfig {
+  return { pollIntervalMs: parseEnvInt(env.AGENTMONITOR_GIT_POLL_INTERVAL_MS, 600_000, 0) };
 }
 
 function parseCodexLiveMode(value: string | undefined): CodexLiveMode {
@@ -238,6 +247,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     executionSpoolDir: env.AGENTMONITOR_EXECUTIONS_DIR
       ? path.resolve(cwd, expandTilde(env.AGENTMONITOR_EXECUTIONS_DIR)) : undefined,
     quotas: parseQuotaConfig(env),
+    git: parseGitConfig(env),
     contextWindow: {
       codexDefault: parseEnvInt(env.AGENTMONITOR_CODEX_CONTEXT_WINDOW, 256_000, 1),
     },
