@@ -23,7 +23,7 @@
     <div>
       <div class="flex items-center gap-1.5">
         <h3 class="text-h3">Hour Of Week</h3>
-        <InfoTip label="Hour Of Week"><p>Messages by weekday and hour, in your local time.</p></InfoTip>
+        <InfoTip label="Hour Of Week"><p>Messages by the weekday and hour they were sent, in your local time. A session with no message times counts at its start.</p></InfoTip>
       </div>
     </div>
     <span class="text-meta text-text-faint">24h local time</span>

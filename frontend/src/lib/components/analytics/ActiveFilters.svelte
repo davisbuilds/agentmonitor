@@ -1,5 +1,6 @@
 <script lang="ts">
   import { analytics } from '../../stores/analytics.svelte';
+  import { agentName } from '../../format';
 
   const showingDate = $derived(analytics.from !== analytics.defaultFrom || analytics.to !== analytics.defaultTo);
   const dateLabel = $derived(showingDate ? `${analytics.from} to ${analytics.to}` : '');
@@ -20,7 +21,7 @@
     {/if}
 
     {#if analytics.agent}
-      <button class={chip} onclick={() => analytics.clearAgent()}>Agent: {analytics.agent} ×</button>
+      <button class={chip} onclick={() => analytics.clearAgent()}>Agent: {agentName(analytics.agent)} ×</button>
     {/if}
 
     <button class="text-meta text-text-muted transition-colors hover:text-text" onclick={() => analytics.clearAllFilters()}>

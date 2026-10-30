@@ -1,7 +1,8 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
   import { usage } from '../../stores/usage.svelte';
-  import { formatCost, formatModelName, formatNumber } from '../../format';
+  import { agentName, formatCost, formatModelName, formatNumber } from '../../format';
+  import { usageTokenSplit, usageTokenTotal } from '../../usage-tokens';
   import type {
     UsageProjectBreakdown,
     UsageModelBreakdown,
@@ -24,10 +25,10 @@
   } = $props();
 
   function labelForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): string {
-    if ('project' in row) return row.project;
+    if ('project' in row) return row.project === 'unknown' ? 'No project' : row.project;
     if ('model' in row) return formatModelName(row.model);
     if ('tier' in row) return `${row.provider} / ${row.tier}`;
-    return row.agent;
+    return agentName(row.agent);
   }
 
   function detailForRow(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): string {
@@ -35,11 +36,6 @@
     if ('pricing_status' in row && row.pricing_status !== 'known') return `${base} • ${row.pricing_status}`;
     if ('unknown_model_events' in row && row.unknown_model_events > 0) return `${base} • ${formatNumber(row.unknown_model_events)} unknown`;
     return base;
-  }
-
-  function tokenTotal(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): number {
-    const base = row.input_tokens + row.output_tokens;
-    return kind === 'model' ? base + row.cache_read_tokens + row.cache_write_tokens : base;
   }
 
   function handleSelect(row: UsageProjectBreakdown | UsageModelBreakdown | UsageTierBreakdown | UsageAgentBreakdown): void {
@@ -96,9 +92,9 @@
               </div>
             </div>
             <div class="text-right">
-              <div class="tabular font-mono text-body text-ok">{formatCost(row.cost_usd)}</div>
-              <div class="mt-0.5 tabular font-mono text-meta text-text-faint">
-                {formatNumber(tokenTotal(row))} {kind === 'model' ? 'all tokens' : 'tokens'}
+              <div class="tabular font-mono text-body text-text">{formatCost(row.cost_usd)}</div>
+              <div class="mt-0.5 tabular font-mono text-meta text-text-faint" title={usageTokenSplit(row)}>
+                {formatNumber(usageTokenTotal(row))} all tokens
               </div>
             </div>
           </div>

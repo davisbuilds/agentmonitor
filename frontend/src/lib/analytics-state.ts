@@ -47,6 +47,15 @@ export function createDefaultAnalyticsFilters(now = new Date()): AnalyticsFilter
   };
 }
 
+/**
+ * The spelling the shared agent filter holds. Its options come from the session
+ * browser, which names Claude `claude`; Usage rows (from events) say `claude_code`.
+ * The server accepts either, so this only keeps a drill-down's value selectable.
+ */
+export function filterAgentName(agent: string): string {
+  return agent === 'claude_code' ? 'claude' : agent;
+}
+
 /** The Analytics bar's quick ranges, in days ending today. */
 export const QUICK_RANGE_DAYS = [7, 30, 90];
 

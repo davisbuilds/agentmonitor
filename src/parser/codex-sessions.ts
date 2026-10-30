@@ -555,7 +555,8 @@ export function parseCodexSessionChunk(
     });
   }
 
-  const project = projectNameFromCwd(cwd) ?? (filePath ? projectFromCodexPath(filePath) : null);
+  // A recorded cwd decides, even when it names no project (scratch work).
+  const project = cwd ? projectNameFromCwd(cwd) : (filePath ? projectFromCodexPath(filePath) : null);
   const sawCatalogPresentation = (state?.sawCatalogPresentation ?? false)
     || contextObservations.some(observation => observation.kind === 'catalog_presentation');
 

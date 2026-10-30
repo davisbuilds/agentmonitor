@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Snippet } from 'svelte';
   import type { LiveItem, LiveSession, LiveTurn } from '../../api/client';
-  import { formatDuration, timeAgo } from '../../format';
+  import { agentName, formatDuration, timeAgo } from '../../format';
   import { rowDurationMs, turnDurationMs } from '../../live-stream-rows';
   import { SubTabs } from '../ui';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
@@ -116,7 +116,7 @@
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-text-faint">Agent</span>
-            <span>{session.agent}</span>
+            <span>{agentName(session.agent)}</span>
           </div>
           <div class="flex items-center justify-between gap-3">
             <span class="text-text-faint">Detail</span>

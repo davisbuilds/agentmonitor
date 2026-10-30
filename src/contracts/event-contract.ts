@@ -237,9 +237,11 @@ export function normalizeIngestEvent(input: unknown): NormalizeEventResult {
   const toolName = getOptionalString(input, 'tool_name', errors);
   const branch = getOptionalString(input, 'branch', errors);
   // A client that sends its working directory gets the canonical project name
-  // for it; the directory itself is not stored.
+  // for it, or none for scratch work, rather than the `project` it sent beside
+  // it (hooks send the cwd's basename); the directory itself is not stored.
   const cwd = getOptionalString(input, 'cwd', errors);
-  const project = projectNameFromCwd(cwd) ?? getOptionalString(input, 'project', errors);
+  const givenProject = getOptionalString(input, 'project', errors);
+  const project = cwd?.trim() ? projectNameFromCwd(cwd) ?? undefined : givenProject;
   const model = getOptionalString(input, 'model', errors);
   const durationMs = getOptionalNonNegativeInt(input, 'duration_ms', errors);
   const tokensIn = getOptionalNonNegativeInt(input, 'tokens_in', errors) ?? 0;

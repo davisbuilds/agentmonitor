@@ -42,7 +42,7 @@ test('Skills shows invocation volume and a filterable consultation explorer', as
 
   const claude = region.locator('section[aria-labelledby="skill-harness-claude"]');
   const codex = region.locator('section[aria-labelledby="skill-harness-codex"]');
-  await expect(claude.getByRole('heading', { name: 'Claude' })).toBeVisible();
+  await expect(claude.getByRole('heading', { name: 'Claude Code' })).toBeVisible();
   await expect(codex.getByRole('heading', { name: 'Codex' })).toBeVisible();
   for (const harnessName of await region.locator('section h4').allTextContents()) {
     await expect(comparability).toContainText(harnessName.trim());

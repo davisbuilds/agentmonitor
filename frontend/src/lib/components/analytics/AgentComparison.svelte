@@ -1,7 +1,7 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
-  import { formatNumber } from '../../format';
+  import { agentName, formatNumber } from '../../format';
 </script>
 
 <section class="rounded-lg border border-line bg-surface p-4">
@@ -13,7 +13,7 @@
       </div>
     </div>
     {#if analytics.agent}
-      <span class="text-meta text-accent">Filtered to {analytics.agent}</span>
+      <span class="text-meta text-accent">Filtered to {agentName(analytics.agent)}</span>
     {/if}
   </div>
 
@@ -40,7 +40,7 @@
             <tr class="border-t border-line">
               <td class="py-2">
                 <button class="text-left font-medium text-text transition-colors hover:text-accent" onclick={() => analytics.drillDownToAgent(row.agent)}>
-                  {row.agent}
+                  {agentName(row.agent)}
                 </button>
               </td>
               <td class="py-2 text-right tabular font-mono">{formatNumber(row.session_count)}</td>

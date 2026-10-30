@@ -3,25 +3,14 @@
   import { analytics } from '../../stores/analytics.svelte';
   import { formatDateOnly, formatNumber } from '../../format';
   import type { SkillUsageDay } from '../../api/client';
+  import { skillSeries, stackDay } from '../../skill-series';
+  import { OTHER_COLOR, OTHER_LABEL } from '../usage/model-colors';
 
   type TooltipState = {
     day: SkillUsageDay;
     x: number;
     y: number;
   };
-
-  const palette = [
-    '#60a5fa',
-    '#fb7185',
-    '#f59e0b',
-    '#34d399',
-    '#a78bfa',
-    '#f472b6',
-    '#38bdf8',
-    '#f97316',
-    '#22c55e',
-    '#c084fc',
-  ];
 
   let tooltip = $state<TooltipState | null>(null);
 
@@ -39,30 +28,27 @@
     return dates;
   }
 
-  function colorForSkill(skillName: string): string {
-    let hash = 0;
-    for (let i = 0; i < skillName.length; i++) {
-      hash = ((hash << 5) - hash + skillName.charCodeAt(i)) | 0;
-    }
-    return palette[Math.abs(hash) % palette.length] ?? palette[0];
+  // The tooltip is min-w-56 (224px); flip it left of the pointer near the right
+  // edge so its counts stay inside the viewport.
+  const TOOLTIP_WIDTH = 240;
+
+  function placeTooltip(event: MouseEvent, day: SkillUsageDay): void {
+    const right = event.clientX + 12 + TOOLTIP_WIDTH > window.innerWidth;
+    tooltip = {
+      day,
+      x: right ? Math.max(event.clientX - 12 - TOOLTIP_WIDTH, 0) : event.clientX + 12,
+      y: event.clientY - 12,
+    };
   }
 
   function showTooltip(event: MouseEvent, day: SkillUsageDay): void {
     if (day.total === 0) return;
-    tooltip = {
-      day,
-      x: event.clientX + 12,
-      y: event.clientY - 12,
-    };
+    placeTooltip(event, day);
   }
 
   function moveTooltip(event: MouseEvent, day: SkillUsageDay): void {
     if (day.total === 0 || !tooltip) return;
-    tooltip = {
-      day,
-      x: event.clientX + 12,
-      y: event.clientY - 12,
-    };
+    placeTooltip(event, day);
   }
 
   const dayMap = $derived.by(() => new Map(analytics.skillUsageDaily.map((day) => [day.date, day])));
@@ -74,19 +60,9 @@
 
   const maxTotal = $derived.by(() => Math.max(...days.map((day) => day.total), 1));
 
-  const legendSkills = $derived.by(() => {
-    const totals = new Map<string, number>();
-    for (const day of analytics.skillUsageDaily) {
-      for (const skill of day.skills) {
-        totals.set(skill.skill_name, (totals.get(skill.skill_name) ?? 0) + skill.count);
-      }
-    }
-
-    return [...totals.entries()]
-      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
-      .slice(0, 8)
-      .map(([skill_name]) => skill_name);
-  });
+  // The range's top skills keep one palette color each; the rest fold into Other.
+  const series = $derived(skillSeries(analytics.skillUsageDaily));
+  const hasOther = $derived(analytics.skillUsageDaily.some(day => day.skills.some(skill => !series.top.includes(skill.skill_name))));
 </script>
 
 <section class="rounded-lg border border-line bg-surface p-4">
@@ -108,52 +84,59 @@
     <div class="py-12 text-center text-meta text-danger">{analytics.errors.skills}</div>
   {:else if analytics.skillUsageDaily.length > 0}
     <div class="space-y-3">
-      <div class="flex items-center justify-between tabular font-mono text-meta text-text-faint">
-        <span>0</span>
-        <span>{formatNumber(maxTotal)}</span>
-      </div>
-
-      <div class="flex h-40 items-end gap-1">
-        {#each days as day}
-          <button
-            class="relative flex h-full flex-1 items-end rounded-t-sm bg-surface-2 transition-colors hover:bg-line"
-            title={`${formatDateOnly(day.date)}: ${day.total} skill invocation${day.total === 1 ? '' : 's'}`}
-            onmouseenter={(event) => showTooltip(event, day)}
-            onmousemove={(event) => moveTooltip(event, day)}
-            onmouseleave={() => (tooltip = null)}
-          >
-            {#if day.total > 0}
-              <div
-                class="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-sm"
-                style={`height:${Math.max((day.total / maxTotal) * 100, 4)}%`}
-              >
-                <div class="flex h-full w-full flex-col-reverse">
-                  {#each day.skills as skill}
-                    <div
-                      style={`height:${(skill.count / day.total) * 100}%;background:${colorForSkill(skill.skill_name)}`}
-                    ></div>
-                  {/each}
+      <div class="flex gap-2">
+        <!-- The axis names the busiest day's invocations at the top and zero at the baseline. -->
+        <div class="flex h-40 w-8 shrink-0 flex-col justify-between text-right tabular font-mono text-meta text-text-faint" aria-hidden="true">
+          <span>{formatNumber(maxTotal)}</span>
+          <span>0</span>
+        </div>
+        <div class="flex h-40 min-w-0 flex-1 items-end gap-px border-b border-line">
+          {#each days as day}
+            <button
+              class="relative flex h-full flex-1 items-end rounded-t-sm transition-colors hover:bg-surface-2"
+              title={`${formatDateOnly(day.date)}: ${day.total} skill invocation${day.total === 1 ? '' : 's'}`}
+              onmouseenter={(event) => showTooltip(event, day)}
+              onmousemove={(event) => moveTooltip(event, day)}
+              onmouseleave={() => (tooltip = null)}
+            >
+              {#if day.total > 0}
+                <div
+                  class="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-sm"
+                  style={`height:max(${(day.total / maxTotal) * 100}%, 2px)`}
+                >
+                  <!-- A 2px gap between segments, so neighbors never fuse into one block. -->
+                  <div class="flex h-full w-full flex-col-reverse gap-[2px]">
+                    {#each stackDay(day, series.top, series.colors) as segment}
+                      <div style={`flex:${segment.count} 1 0;min-height:1px;background:${segment.color}`}></div>
+                    {/each}
+                  </div>
                 </div>
-              </div>
-            {/if}
-            <span class="sr-only">{day.date}</span>
-          </button>
-        {/each}
+              {/if}
+              <span class="sr-only">{day.date}</span>
+            </button>
+          {/each}
+        </div>
       </div>
 
-      <div class="flex justify-between tabular font-mono text-meta text-text-faint">
+      <div class="ml-10 flex justify-between tabular font-mono text-meta text-text-faint">
         <span>{days[0]?.date}</span>
         <span>{days[days.length - 1]?.date}</span>
       </div>
 
-      {#if legendSkills.length > 0}
+      {#if series.top.length > 0}
         <div class="flex flex-wrap gap-1.5">
-          {#each legendSkills as skillName}
+          {#each series.top as skillName}
             <div class="inline-flex items-center gap-2 rounded-sm border border-line bg-surface-2 px-2 py-0.5 text-meta text-text-muted">
-              <span class="h-2 w-2 rounded-full" style={`background:${colorForSkill(skillName)}`}></span>
+              <span class="h-2 w-2 rounded-full" style={`background:${series.colors.get(skillName)}`}></span>
               <span>{skillName}</span>
             </div>
           {/each}
+          {#if hasOther}
+            <div class="inline-flex items-center gap-2 rounded-sm border border-line bg-surface-2 px-2 py-0.5 text-meta text-text-muted">
+              <span class="h-2 w-2 rounded-full" style={`background:${OTHER_COLOR}`}></span>
+              <span>{OTHER_LABEL}</span>
+            </div>
+          {/if}
         </div>
       {/if}
 
@@ -167,7 +150,7 @@
             {#each tooltip.day.skills as skill}
               <div class="flex items-center justify-between gap-3">
                 <div class="flex min-w-0 items-center gap-2 text-text-muted">
-                  <span class="h-2.5 w-2.5 shrink-0 rounded-full" style={`background:${colorForSkill(skill.skill_name)}`}></span>
+                  <span class="h-2.5 w-2.5 shrink-0 rounded-full" style={`background:${series.colors.get(skill.skill_name) ?? OTHER_COLOR}`}></span>
                   <span class="truncate">{skill.skill_name}</span>
                 </div>
                 <span class="shrink-0 tabular font-mono text-text">{formatNumber(skill.count)}</span>

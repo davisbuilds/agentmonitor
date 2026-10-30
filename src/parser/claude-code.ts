@@ -539,9 +539,10 @@ export function parseSessionChunk(
       if (!endedAt || timestamp > endedAt) endedAt = timestamp;
     }
 
-    // Track first user message
+    // Track first user message. Claude Code returns each tool result to the
+    // model as a user-role line; only a line carrying anything else is a prompt.
     if (msg.role === 'user') {
-      userMessageCount++;
+      if (normalizedBlocks.some(block => block.type !== 'tool_result')) userMessageCount++;
       if (firstUserMessage === null) {
         firstUserMessage = previewTextFromBlocks(normalizedBlocks, line.isMeta === true);
       }
@@ -581,7 +582,8 @@ export function parseSessionChunk(
   // The transcript's own cwd names the project; the encoded directory name is
   // ambiguous (a dash may be a separator or part of a name), so it is only the
   // fallback for transcripts that record no cwd.
-  const project = projectNameFromCwd(firstCwd) ?? (filePath ? projectFromPath(filePath) : null);
+  // A recorded cwd decides, even when it names no project (scratch work).
+  const project = firstCwd ? projectNameFromCwd(firstCwd) : (filePath ? projectFromPath(filePath) : null);
   if (sessionId.startsWith('agent-')) {
     relationshipType = 'subagent';
   } else if (sawSidechain) {

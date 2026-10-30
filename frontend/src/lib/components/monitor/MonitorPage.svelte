@@ -25,6 +25,7 @@
   import { monitorCostWindowParams } from '../../monitor-analytics';
   import { getMonitorSessionId } from '../../stores/router.svelte';
   import { FilterBar, Select } from '../ui';
+  import { agentName } from '../../format';
 
   // A card's drill-in (`#monitor?session=…`): its live stream, or its events when it has none.
   const followedSessionId = $derived(getMonitorSessionId());
@@ -32,7 +33,7 @@
   // Monitor filters by agent alone: it is the one filter every read here
   // honors (the stats, the cards, their recent events and the cost windows).
   const agentFilter = $derived(getFilters().agent_type ?? '');
-  const agentOptions = $derived(getFilterOptions().agent_types);
+  const agentOptions = $derived(getFilterOptions().agent_types.map(agent => ({ value: agent, label: agentName(agent) })));
   function setAgentFilter(agent: string): void {
     const next: Record<string, string> = agent ? { agent_type: agent } : {};
     setFilters(next);

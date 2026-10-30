@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { insights } from '../../stores/insights.svelte';
   import { Badge, Button, Stat } from '../ui';
+  import { agentName } from '../../format';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -13,7 +14,7 @@
 
   function formatAgent(agent: string | null): string {
     if (!agent) return 'All agents';
-    return agent === 'claude_code' ? 'claude' : agent;
+    return agentName(agent);
   }
 
   function formatCost(value: number): string {

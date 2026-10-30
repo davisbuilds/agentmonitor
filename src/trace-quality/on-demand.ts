@@ -29,6 +29,7 @@ import {
 import { readTraceQualityProjectionInputForSession } from './source-readers.js';
 import type { TraceQualityCoverage } from './types.js';
 import { dateParamLowerBound, dateParamUpperExclusive } from '../util/local-day.js';
+import { agentSpellings } from '../util/agent-identity.js';
 
 /**
  * Append date-range conditions. Bare dates are the operator's local days, so a
@@ -95,7 +96,8 @@ function normalizedOffset(value: number | undefined): number {
 
 /** Build the WHERE clause for the summary-backed list from the supported filters. */
 function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string; values: unknown[] } {
-  const clauses: string[] = [];
+  // Imported benchmark runs stay out of personal activity, as in Usage and Analytics.
+  const clauses: string[] = ["session_id NOT IN (SELECT session_id FROM events WHERE source = 'benchmark')"];
   const values: unknown[] = [];
   if (params.session_id) {
     const keys = codexSessionAliases(params.session_id);
@@ -107,8 +109,9 @@ function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string
     values.push(params.project);
   }
   if (params.agent) {
-    clauses.push('agent_type = ?');
-    values.push(params.agent);
+    const spellings = agentSpellings(params.agent);
+    clauses.push(`agent_type IN (${spellings.map(() => '?').join(', ')})`);
+    values.push(...spellings);
   }
   // Reuse the shared helper so a date-only `date_to` is treated as the exclusive
   // next day (otherwise `<= 'YYYY-MM-DD'` drops every timestamped row on that day).

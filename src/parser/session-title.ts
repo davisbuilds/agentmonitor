@@ -89,8 +89,8 @@ export function codexSubagentTitle(agentPath: unknown): string | null {
 }
 
 const AGENT_NAMES: Record<string, string> = {
-  claude: 'Claude',
-  claude_code: 'Claude',
+  claude: 'Claude Code',
+  claude_code: 'Claude Code',
   codex: 'Codex',
   antigravity: 'Antigravity',
 };

@@ -161,7 +161,13 @@ product never substitutes a misleading `0%` for missing evidence.
 ## Analytics And Skill Evidence
 
 Analytics Overview covers activity over time, projects, agents, tools,
-hour-of-week patterns, and velocity. Top sessions appear once, in
+hour-of-week patterns, and velocity. Activity charts sessions per day by the
+day each started, across every day of the range, idle days included. Per-day
+averages in Analytics and Usage divide by the days of the selected range, or,
+without one, by the first to the last active day. Session counts
+and per-session averages count the sessions someone started: a subagent, and a
+Codex app job, is not a session of its own, but its messages and tool calls
+count toward the range. Top sessions appear once, in
 Usage, ranked by cost; all skill evidence lives in Skills, which shows daily
 skill invocation volume above the consultation explorer and exports both as CSV.
 The shared date, project, and agent filters scope both Skills panels; the
@@ -170,8 +176,21 @@ A project is the git repository a session's
 working directory belongs to, named after the repository root: subdirectories
 and worktrees in a worktree area (`.worktrees/`, `*-worktrees/`,
 `.claude/worktrees/`, `.codex/worktrees/`) count as their repository, also once
-removed. A directory outside any repository is named after itself; sessions that
-record no working directory (Codex OTEL-only, Antigravity) have no project. Capability metadata distinguishes all-session
+removed. A directory outside any repository is named after itself, except scratch space (below); sessions that
+record no working directory (Codex OTEL-only, Antigravity) have no project. The
+shared agent filter holds Claude as `claude`, as the session browser does;
+events call it `claude_code`, and every Analytics, Usage, Skills, and Quality
+read accepts either spelling, so one filter value narrows every sub-view. The
+UI calls it Claude Code everywhere (the quota pill names the provider,
+Claude). Sessions run in scratch space, a temp directory, an app-support
+folder, or a worktree container that no repository holds, have no project;
+Usage lists their usage under No project. `amon sessions repair-projects
+--apply` clears the names older rows still carry. A user
+message is a prompt: Claude Code returns each tool result to the model as a
+user-role transcript line, and those are counted as messages but not as user
+messages, as Codex already counts them. Hour Of Week places each message at the hour it was
+sent, within the selected dates, so a resumed session counts in every hour it
+was active; a session with no message times counts at its start. Capability metadata distinguishes all-session
 aggregates from tool or transcript analysis that excludes unsupported sources.
 
 Skill analytics combine explicit Claude `Skill` calls with concrete Codex reads of
@@ -205,6 +224,8 @@ Monitor's today and 30-day figures.
 
 - Stored `cost_usd` remains the authoritative event cost. Cache savings are an
   estimate from current pricing metadata and disclose incomplete pricing coverage.
+  The cache hit rate is cache reads over every prompt token: uncached input,
+  cache reads, and cache writes.
 - Input, output, cache-read, and cache-write tokens remain separate. Model views can
   show all four buckets.
 - Claude cache writes are priced by cache lifetime: the 1-hour part a transcript
@@ -249,8 +270,8 @@ Monitor's today and 30-day figures.
   live OTEL usage of the same session in aggregates, including a Monitor card's
   and session detail's token and cost totals; raw events remain available in
   session and monitor history.
-- Benchmark events are excluded from normal usage, analytics, and the Monitor's
-  totals, event feed, and session list.
+- Benchmark events are excluded from normal usage, analytics, the Monitor's
+  totals, event feed, and session list, and Quality's trace list.
   Benchmark-aware reads can opt into them explicitly. Usage and analytics reads
   reject an unparseable `date_from`/`date_to` with a 400 rather than reporting
   an empty window.

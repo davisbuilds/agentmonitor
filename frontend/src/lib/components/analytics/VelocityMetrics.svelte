@@ -6,11 +6,9 @@
     const velocity = analytics.velocity;
     if (!velocity) return [];
     return [
-      { label: 'Active Days', value: String(velocity.active_days) },
-      { label: 'Span Days', value: String(velocity.span_days) },
+      { label: 'Active Days', value: `${velocity.active_days} of ${velocity.span_days}` },
       { label: 'Sessions / Active Day', value: velocity.sessions_per_active_day.toFixed(1) },
       { label: 'Messages / Active Day', value: velocity.messages_per_active_day.toFixed(1) },
-      { label: 'Sessions / Calendar Day', value: velocity.sessions_per_calendar_day.toFixed(1) },
       { label: 'Avg Messages / Session', value: velocity.average_messages_per_session.toFixed(1) },
     ];
   });
@@ -21,7 +19,7 @@
     <div>
       <div class="flex items-center gap-1.5">
         <h3 class="text-h3">Velocity</h3>
-        <InfoTip label="Velocity"><p>Pace across the days you were active and across the whole date range.</p></InfoTip>
+        <InfoTip label="Velocity"><p>Pace on the days you were active. Per-day figures across the whole range are in the summary above.</p></InfoTip>
       </div>
     </div>
   </div>
@@ -31,7 +29,7 @@
   {:else if analytics.errors.velocity}
     <div class="py-12 text-center text-meta text-danger">{analytics.errors.velocity}</div>
   {:else if analytics.velocity}
-    <div class="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-line bg-line sm:grid-cols-3">
+    <div class="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-line bg-line">
       {#each cards as card}
         <div class="bg-surface p-3">
           <Stat label={card.label} value={card.value} />

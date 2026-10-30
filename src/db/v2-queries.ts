@@ -90,6 +90,7 @@ import {
 } from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
 import { getSkillConsultationAnalytics } from '../skills/consultation-analytics.js';
+import { browserAgentName, eventAgentType } from '../util/agent-identity.js';
 import {
   dateParamLowerBound,
   dateParamUpperExclusive,
@@ -223,6 +224,18 @@ const sessionListCte = `WITH ranked_sessions AS (
       message_count DESC, id ASC
   ) AS identity_rank FROM browsing_sessions
 ), listed_sessions AS (SELECT * FROM ranked_sessions WHERE identity_rank = 1)`;
+
+/**
+ * A session someone started: not a subagent its parent delegated to, nor a
+ * Codex app job. Analytics counts these as sessions; the others' messages and
+ * tool calls still count toward the work of the range.
+ */
+const startedSessionCondition = "COALESCE(relationship_type, '') NOT IN ('subagent', 'internal')";
+const startedSessionCount = `SUM(CASE WHEN ${startedSessionCondition} THEN 1 ELSE 0 END)`;
+
+function isStartedSession(relationshipType: string | null): boolean {
+  return relationshipType !== 'subagent' && relationshipType !== 'internal';
+}
 
 /** The session a browser row stands for, by the same aliases sessionListCte collapses. */
 function browserSessionKey(alias: string): string {
@@ -1213,7 +1226,7 @@ function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string)
   }
   if (params.agent) {
     conditions.push(`${qualifyColumn(alias, 'agent')} = ?`);
-    values.push(params.agent);
+    values.push(browserAgentName(params.agent));
   }
   // Bare dates are the operator's local days (see src/util/local-day.ts).
   const startedAt = qualifyColumn(alias, 'started_at');
@@ -1415,7 +1428,7 @@ export function getAnalyticsSummary(params: AnalyticsParams = {}): AnalyticsSumm
 
   const row = db.prepare(`${sessionListCte}
     SELECT
-      COUNT(*) as total_sessions,
+      COALESCE(${startedSessionCount}, 0) as total_sessions,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
       MIN(started_at) as earliest,
@@ -1433,7 +1446,7 @@ export function getAnalyticsSummary(params: AnalyticsParams = {}): AnalyticsSumm
   let dailyAvgSessions = 0;
   let dailyAvgMessages = 0;
   if (row.earliest && row.latest) {
-    const days = inclusiveDateSpanDays(row.earliest, row.latest);
+    const days = Math.max(rangeSpanDays(params, row.earliest, row.latest), 1);
     dailyAvgSessions = roundMetric(row.total_sessions / days);
     dailyAvgMessages = roundMetric(row.total_messages / days);
   }
@@ -1457,10 +1470,12 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
   const filter = buildAnalyticsFilterState(params);
 
   const rows = db.prepare(`${sessionListCte}
-    SELECT started_at, message_count, user_message_count
+    SELECT started_at, message_count, user_message_count, relationship_type
     FROM listed_sessions
     ${filter.where}
-  `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
+  `).all(...filter.values) as Array<{
+    started_at: string | null; message_count: number; user_message_count: number; relationship_type: string | null;
+  }>;
 
   // Bucket in JS: a local day cannot be expressed in SQLite for a configured zone.
   const byDate = new Map<string, ActivityDataPoint>();
@@ -1468,12 +1483,41 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
     const date = row.started_at ? localDayOf(row.started_at) : null;
     if (!date) continue;
     const point = byDate.get(date) ?? { date, sessions: 0, messages: 0, user_messages: 0 };
-    point.sessions += 1;
+    if (isStartedSession(row.relationship_type)) point.sessions += 1;
     point.messages += row.message_count ?? 0;
     point.user_messages += row.user_message_count ?? 0;
     byDate.set(date, point);
   }
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+  // List every day of the range, idle days as zero, so a chart's axis is time.
+  // Without a range, span the first to the last active day.
+  const active = [...byDate.keys()].sort();
+  const from = rangeDay(params.date_from, 'from') ?? active[0];
+  const to = rangeDay(params.date_to, 'to') ?? active[active.length - 1];
+  if (!from || !to) return [];
+  return enumerateDateRange(from, to)
+    .map(date => byDate.get(date) ?? { date, sessions: 0, messages: 0, user_messages: 0 });
+}
+
+/**
+ * The calendar days a per-day average divides by: the selected range, or,
+ * without one, the first to the last active day.
+ */
+function rangeSpanDays(
+  params: { date_from?: string; date_to?: string },
+  earliest: string | null,
+  latest: string | null,
+): number {
+  const from = rangeDay(params.date_from, 'from') ?? (earliest ? localDayOf(earliest) ?? undefined : undefined);
+  const to = rangeDay(params.date_to, 'to') ?? (latest ? localDayOf(latest) ?? undefined : undefined);
+  if (!from || !to) return 0;
+  return enumerateDateRange(from, to).length;
+}
+
+/** The local day a `date_from`/`date_to` param names. */
+function rangeDay(param: string | undefined, side: 'from' | 'to'): string | undefined {
+  if (!param) return undefined;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(param)) return param;
+  return localDayOf(side === 'from' ? dateParamLowerBound(param) : param) ?? undefined;
 }
 
 export function getAnalyticsProjects(params: AnalyticsParams = {}): ProjectBreakdown[] {
@@ -1484,7 +1528,7 @@ export function getAnalyticsProjects(params: AnalyticsParams = {}): ProjectBreak
   return db.prepare(`${sessionListCte}
     SELECT
       project,
-      COUNT(*) as session_count,
+      COALESCE(${startedSessionCount}, 0) as session_count,
       COALESCE(SUM(message_count), 0) as message_count,
       COALESCE(SUM(user_message_count), 0) as user_message_count
     FROM listed_sessions
@@ -2487,25 +2531,86 @@ export function getAnalyticsSkillHealthParts(
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
-  const sessions = db.prepare(`${sessionListCte}
-    SELECT started_at, message_count, user_message_count
+  // Messages land at their own times (resumed sessions span days), so the window
+  // selects messages, not session starts. Group them on the UTC quarter-hour
+  // grid, which every zone's hours align to, so the rows stay few and local
+  // bucketing below stays exact. The daily-activity index covers the instant,
+  // session, and role, so the counts read no message content.
+  const instant = observedInstant('m.timestamp');
+  const slot = `substr(${instant}, 1, 14)
+    || printf('%02d', (CAST(substr(${instant}, 15, 2) AS INTEGER) / 15) * 15) || ':00Z'`;
+  const scope = buildAnalyticsFilterState({ project: params.project, agent: params.agent });
+  const windowConditions = [`${instant} IS NOT NULL`];
+  const windowValues: unknown[] = [];
+  if (params.date_from) {
+    windowConditions.push(`${instant} >= ?`);
+    windowValues.push(dateParamLowerBound(params.date_from));
+  }
+  if (params.date_to) {
+    windowConditions.push(`${instant} < ?`);
+    windowValues.push(dateParamUpperExclusive(params.date_to));
+  }
+  const slots = db.prepare(`
+    SELECT m.session_id, ${slot} AS slot, COUNT(*) AS message_count
+    FROM messages m INDEXED BY idx_messages_daily_activity
+    WHERE ${windowConditions.join(' AND ')}
+    GROUP BY m.session_id, slot
+  `).all(...windowValues) as Array<{ session_id: string; slot: string; message_count: number }>;
+  // A user message is a prompt, as the parsers count it: a line carrying more
+  // than tool results. Only user rows read content, and ungrouped, so SQLite
+  // does not copy every row's content into a sorter.
+  const promptSlots = db.prepare(`
+    SELECT m.session_id, ${slot} AS slot
+    FROM messages m INDEXED BY idx_messages_daily_activity
+    WHERE ${windowConditions.join(' AND ')} AND m.role = 'user'
+      AND json_valid(m.content) AND EXISTS (
+        SELECT 1 FROM json_each(m.content) block
+        WHERE COALESCE(json_extract(block.value, '$.type'), '') != 'tool_result'
+      )
+  `).all(...windowValues) as Array<{ session_id: string; slot: string }>;
+  // Joining listed_sessions into the read above defeats its index range; the
+  // session list is small, so keep its ids and drop other sessions' rows here.
+  const inScope = new Set((db.prepare(`${sessionListCte}
+    SELECT id FROM listed_sessions ${scope.where}
+  `).all(...scope.values) as Array<{ id: string }>).map(row => row.id));
+  // Sessions with no timestamped message at all (summary-only) keep their
+  // start hour. One whose messages all fall outside the window has none here.
+  const untimed = db.prepare(`${sessionListCte}
+    SELECT id, started_at, message_count, user_message_count
     FROM listed_sessions
-    ${filter.where}
-  `).all(...filter.values) as Array<{ started_at: string | null; message_count: number; user_message_count: number }>;
+    ${filter.where}${filter.where ? ' AND' : ' WHERE'} NOT EXISTS (
+      SELECT 1 FROM messages m WHERE m.session_id = listed_sessions.id AND ${instant} IS NOT NULL
+    )
+  `).all(...filter.values) as Array<{ id: string; started_at: string | null; message_count: number; user_message_count: number }>;
 
   // Bucket by the operator's local weekday and hour, the view's labeled axes.
   const buckets = new Map<string, HourOfWeekDataPoint>();
-  for (const session of sessions) {
-    const cell = session.started_at ? localWeekdayHour(session.started_at) : null;
-    if (!cell) continue;
+  const sessionsByBucket = new Map<string, Set<string>>();
+  const add = (sessionId: string, timestamp: string, messages: number, userMessages: number): void => {
+    const cell = localWeekdayHour(timestamp);
+    if (!cell) return;
     const key = `${cell.weekday}:${cell.hour}`;
     const point = buckets.get(key) ?? {
       day_of_week: cell.weekday, hour_of_day: cell.hour, session_count: 0, message_count: 0, user_message_count: 0,
     };
-    point.session_count += 1;
-    point.message_count += session.message_count ?? 0;
-    point.user_message_count += session.user_message_count ?? 0;
+    const seen = sessionsByBucket.get(key) ?? new Set<string>();
+    if (!seen.has(sessionId)) {
+      seen.add(sessionId);
+      point.session_count += 1;
+    }
+    point.message_count += messages;
+    point.user_message_count += userMessages;
     buckets.set(key, point);
+    sessionsByBucket.set(key, seen);
+  };
+  for (const row of slots) {
+    if (inScope.has(row.session_id)) add(row.session_id, row.slot, row.message_count, 0);
+  }
+  for (const row of promptSlots) {
+    if (inScope.has(row.session_id)) add(row.session_id, row.slot, 0, 1);
+  }
+  for (const session of untimed) {
+    if (session.started_at) add(session.id, session.started_at, session.message_count ?? 0, session.user_message_count ?? 0);
   }
   const rows = [...buckets.values()];
 
@@ -2561,7 +2666,8 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
 
   const row = db.prepare(`${sessionListCte}
     SELECT
-      COUNT(*) as total_sessions,
+      COALESCE(${startedSessionCount}, 0) as total_sessions,
+      COUNT(*) as matched_rows,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
       MIN(started_at) as earliest,
@@ -2570,6 +2676,7 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
     ${filter.where}
   `).get(...filter.values) as {
     total_sessions: number;
+    matched_rows: number;
     total_messages: number;
     total_user_messages: number;
     earliest: string | null;
@@ -2581,7 +2688,12 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
       .filter((day): day is string => day !== null),
   ).size;
 
-  const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
+  // Delegated work (subagents, internal jobs) is activity without a started
+  // session: it fills days and messages, and only the per-session rates need
+  // a session to divide by.
+  const hasActivity = row.matched_rows > 0;
+  const hasSessions = row.total_sessions > 0;
+  const spanDays = hasActivity ? rangeSpanDays(params, row.earliest, row.latest) : 0;
 
   const safeActiveDays = Math.max(activeDays, 1);
   const safeSpanDays = Math.max(spanDays, 1);
@@ -2591,14 +2703,14 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
     total_sessions: row.total_sessions,
     total_messages: row.total_messages,
     total_user_messages: row.total_user_messages,
-    active_days: row.total_sessions > 0 ? activeDays : 0,
+    active_days: hasActivity ? activeDays : 0,
     span_days: spanDays,
-    sessions_per_active_day: row.total_sessions > 0 ? roundMetric(row.total_sessions / safeActiveDays) : 0,
-    messages_per_active_day: row.total_sessions > 0 ? roundMetric(row.total_messages / safeActiveDays) : 0,
-    sessions_per_calendar_day: row.total_sessions > 0 ? roundMetric(row.total_sessions / safeSpanDays) : 0,
-    messages_per_calendar_day: row.total_sessions > 0 ? roundMetric(row.total_messages / safeSpanDays) : 0,
-    average_messages_per_session: row.total_sessions > 0 ? roundMetric(row.total_messages / safeSessions) : 0,
-    average_user_messages_per_session: row.total_sessions > 0 ? roundMetric(row.total_user_messages / safeSessions) : 0,
+    sessions_per_active_day: hasSessions ? roundMetric(row.total_sessions / safeActiveDays) : 0,
+    messages_per_active_day: hasActivity ? roundMetric(row.total_messages / safeActiveDays) : 0,
+    sessions_per_calendar_day: hasSessions ? roundMetric(row.total_sessions / safeSpanDays) : 0,
+    messages_per_calendar_day: hasActivity ? roundMetric(row.total_messages / safeSpanDays) : 0,
+    average_messages_per_session: hasSessions ? roundMetric(row.total_messages / safeSessions) : 0,
+    average_user_messages_per_session: hasSessions ? roundMetric(row.total_user_messages / safeSessions) : 0,
     coverage: getAnalyticsCoverage(params, 'all_sessions'),
   };
 }
@@ -2611,13 +2723,13 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
   return db.prepare(`${sessionListCte}
     SELECT
       agent,
-      COUNT(*) as session_count,
+      COALESCE(${startedSessionCount}, 0) as session_count,
       COALESCE(SUM(message_count), 0) as message_count,
       COALESCE(SUM(user_message_count), 0) as user_message_count,
-      ROUND(COALESCE(1.0 * SUM(message_count) / NULLIF(COUNT(*), 0), 0), 2) as average_messages_per_session,
-      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'full' THEN 1 ELSE 0 END), 0) as full_fidelity_sessions,
-      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'summary' THEN 1 ELSE 0 END), 0) as summary_fidelity_sessions,
-      COALESCE(SUM(CASE WHEN ${toolAnalyticsCapableCondition()} THEN 1 ELSE 0 END), 0) as tool_analytics_capable_sessions,
+      ROUND(COALESCE(1.0 * SUM(message_count) / NULLIF(${startedSessionCount}, 0), 0), 2) as average_messages_per_session,
+      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'full' AND ${startedSessionCondition} THEN 1 ELSE 0 END), 0) as full_fidelity_sessions,
+      COALESCE(SUM(CASE WHEN ${fidelityExpr} = 'summary' AND ${startedSessionCondition} THEN 1 ELSE 0 END), 0) as summary_fidelity_sessions,
+      COALESCE(SUM(CASE WHEN ${toolAnalyticsCapableCondition()} AND ${startedSessionCondition} THEN 1 ELSE 0 END), 0) as tool_analytics_capable_sessions,
       MIN(started_at) as first_started_at,
       MAX(started_at) as last_started_at
     FROM listed_sessions
@@ -2928,7 +3040,7 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e', options: U
   if (params.agent) {
     const windowed = Boolean(params.date_from || params.date_to);
     conditions.push(`${options.windowLeads && windowed ? '+' : ''}${usageAgentExpr(alias)} = ?`);
-    values.push(params.agent);
+    values.push(eventAgentType(params.agent));
   }
   if (params.date_from) {
     conditions.push(`datetime(${timestampExpr}) >= datetime(?)`);
@@ -3587,10 +3699,12 @@ export function getUsageSummary(
   sharedCoverage?: UsageCoverage,
 ): UsageSummary {
   const row = usageRowsToSummaryValues(usageRows);
-  const spanDays = inclusiveDateSpanDays(row.earliest, row.latest);
+  const spanDays = usageRows.length > 0 ? rangeSpanDays(params, row.earliest, row.latest) : 0;
   const safeActiveDays = Math.max(row.active_days, 1);
   const safeSessions = Math.max(row.total_sessions, 1);
-  const cacheHitDenominator = row.total_input_tokens + row.total_cache_read_tokens;
+  // The share of prompt tokens served from cache: a prompt is its uncached
+  // input, cache reads and cache writes, as the providers count it.
+  const cacheHitDenominator = row.total_input_tokens + row.total_cache_read_tokens + row.total_cache_write_tokens;
   let estimatedCacheSavingsUsd = 0;
   let pricingKnownEvents = 0;
   let pricingUnknownEvents = 0;

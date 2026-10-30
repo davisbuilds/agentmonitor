@@ -278,7 +278,7 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await expect(summary).toContainText('1.2K in');
   await expect(summary).toContainText('300 out');
   await expect(summary).toContainText('main');
-  await expect(summary).toContainText('Claude (claude-opus-4-7)');
+  await expect(summary).toContainText('Claude Code (claude-opus-4-7)');
   await expect(page.getByTestId('session-summary-cost')).toHaveText('$1.25');
 
   // The Inspector lists the session's recent events, newest first, with what each did and how long it took.

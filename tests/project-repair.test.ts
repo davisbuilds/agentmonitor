@@ -12,6 +12,11 @@ const { initSchema } = await import('../src/db/schema.js');
 const { closeDb, getDb } = await import('../src/db/connection.js');
 const { repairProjectNames } = await import('../src/import/project-repair.js');
 const { maintainSessionTraceSummary } = await import('../src/trace-quality/summary.js');
+const { setScratchRootsForTests } = await import('../src/util/project-identity.js');
+// The fixtures live in a temp directory, which is scratch space; name none, so
+// the plain folder below keeps its name (tests/project-repair-scratch.test.ts
+// covers scratch work).
+setScratchRootsForTests([]);
 
 // A repo with a worktree that has since been removed, as transcripts outlive them.
 const dev = path.join(tempDir, 'Dev');

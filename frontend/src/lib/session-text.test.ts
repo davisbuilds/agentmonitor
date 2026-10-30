@@ -128,12 +128,12 @@ describe('sessionTitle', () => {
       title: null,
       first_message: '<command-name>/clear</command-name><command-message>clear</command-message><command-args></command-args>',
       agent: 'claude',
-    })).toBe('Untitled Claude session');
+    })).toBe('Untitled Claude Code session');
   });
 
   it('names an untitled session by its agent, never by its id', () => {
     expect(sessionTitle({ title: null, first_message: null, agent: 'codex' })).toBe('Untitled Codex session');
-    expect(sessionTitle({ title: null, first_message: null, agent: 'claude_code' })).toBe('Untitled Claude session');
+    expect(sessionTitle({ title: null, first_message: null, agent: 'claude_code' })).toBe('Untitled Claude Code session');
     expect(sessionTitle({ title: null, first_message: null, agent: 'mystery' })).toBe('Untitled session');
     expect(sessionTitle({})).toBe('Untitled session');
   });

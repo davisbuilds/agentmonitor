@@ -219,7 +219,8 @@ describe('GET /api/v2/usage/summary', () => {
     assert.equal(body.total_usage_events, 5);
     assert.equal(body.total_sessions, 4);
     assert.equal(body.active_days, 3);
-    assert.equal(body.cache_hit_rate, 0.080068);
+    // Cache reads over every prompt token: uncached input, cache reads and writes.
+    assert.equal(body.cache_hit_rate, 0.078727);
     assert.equal(body.estimated_cache_savings_usd, 0.001005);
     assert.equal(body.pricing_known_events, 4);
     assert.equal(body.pricing_unknown_events, 1);

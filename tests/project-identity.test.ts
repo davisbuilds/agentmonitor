@@ -4,10 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, mock } from 'node:test';
 
-import { projectNameFromCwd } from '../src/util/project-identity.js';
+import { projectNameFromCwd, setScratchRootsForTests } from '../src/util/project-identity.js';
 
+// The suite runs in a temp directory, which is scratch space; name none, so the
+// fixture repositories and folders below resolve as they would anywhere else.
+setScratchRootsForTests([]);
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-project-identity-')));
-after(() => fs.rmSync(root, { recursive: true, force: true }));
+after(() => {
+  setScratchRootsForTests(null);
+  fs.rmSync(root, { recursive: true, force: true });
+});
 
 function repo(dir: string): string {
   fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
@@ -93,4 +99,29 @@ test('a long-running process sees a worktree repointed to another repo', () => {
   } finally {
     mock.timers.reset();
   }
+});
+
+// Scratch work has no project: a temp directory, an app-support folder, or a
+// worktree container, when no repository holds it. This test names a scratch
+// root of its own.
+test('a scratch directory outside any repo has no project', () => {
+  const scratch = path.join(root, 'scratch');
+  const loose = path.join(scratch, 'tm-terra.g35Rbg');
+  fs.mkdirSync(loose, { recursive: true });
+  const cloned = repo(path.join(scratch, 'vetting-clone'));
+  fs.mkdirSync(path.join(cloned, 'src'), { recursive: true });
+  setScratchRootsForTests([scratch]);
+  try {
+    assert.equal(projectNameFromCwd(loose), null);
+    assert.equal(projectNameFromCwd(path.join(scratch, 'removed-run', 'deep')), null, 'a removed scratch directory');
+    assert.equal(projectNameFromCwd(path.join(cloned, 'src')), 'vetting-clone', 'a repository in scratch space is a project');
+    assert.equal(projectNameFromCwd(path.join(dev, 'plain')), 'plain', 'a plain folder elsewhere keeps its name');
+  } finally {
+    setScratchRootsForTests([]);
+  }
+});
+
+test('a worktree container itself has no project', () => {
+  fs.mkdirSync(path.join(dev, '.worktrees'), { recursive: true });
+  assert.equal(projectNameFromCwd(path.join(dev, '.worktrees')), null);
 });

@@ -6,7 +6,7 @@
   import { insights } from '../../stores/insights.svelte';
   import { traceQuality } from '../../stores/trace-quality.svelte';
   import { Button, Field, FilterBar, MoreFilters, Popover, Select, SubTabs } from '../ui';
-  import { formatDateRange, modelSelectOptions } from '../../format';
+  import { agentName, formatDateRange, modelSelectOptions } from '../../format';
   import { QUICK_RANGE_DAYS } from '../../analytics-state';
   import type { AnalyticsView } from '../../route-state';
   import { resolveAnalyticsView, visibleAnalyticsViews } from '../../analytics-views';
@@ -132,7 +132,7 @@
     />
     <Select
       value={f.agent}
-      options={f.agentOptions}
+      options={f.agentOptions.map(agent => ({ value: agent, label: agentName(agent) }))}
       placeholder="All Agents"
       aria-label="Filter by agent"
       onchange={(value) => f.setAgent(value)}
