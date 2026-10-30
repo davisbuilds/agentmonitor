@@ -118,6 +118,11 @@ Animate `transform`/`opacity` only. Default duration 140ms, `ease-out`
   `normalizeModelId`.
 - **Quiet per-row actions.** An action repeated on every row (Pin) appears on hover or focus,
   and stays visible once it holds state (Pinned).
+- **One daily bar chart.** A per-day series renders `ui/chart/DailyBarChart`: HTML bars that
+  stretch to any width with labels at true size, round y ticks with faint gridlines, a few date
+  labels (the ends aligned to the plot edges), a 2px gap between stacked segments, and a tooltip
+  that hover and keyboard focus both open. Each day is a button named by its totals; clicking it
+  narrows the page to that day. `PlotFrame` stays for small fixed-aspect SVG plots (Benchmarks).
 - **Name every cost's window.** A cost figure says which period it covers ("Cost today",
   "Sep 16 – Oct 15"); an unlabeled total invites comparison with a different window elsewhere.
 - **Constrain prose** to `max-w-[65ch]`; collapse stacked heading+subtitle+banner+pill into one

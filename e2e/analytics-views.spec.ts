@@ -247,6 +247,17 @@ test('Overview leaves top sessions to Usage and skill panels to Skills', async (
   expect((await download).suggestedFilename()).toMatch(/^agentmonitor-skills-.*\.csv$/);
 });
 
+test('Overview opens on the headline row, with Velocity folded into it', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#analytics`);
+  const headlines = page.getByRole('region', { name: 'Overview headlines' });
+  await expect(headlines).toBeVisible();
+  for (const tile of ['cost', 'prompts', 'sessions', 'tool-errors', 'active-hours']) {
+    await expect(headlines.getByTestId(`headline-${tile}`)).toBeVisible();
+  }
+  await expect(page.getByRole('heading', { name: 'Velocity' })).toHaveCount(0);
+  await expect(page.getByText('Active filters')).toHaveCount(0);
+});
+
 test('the shared project filter scopes the skill volume chart on Skills', async ({ page }) => {
   const skillRequests: URL[] = [];
   page.on('request', (request) => {

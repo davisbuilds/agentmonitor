@@ -428,20 +428,6 @@ the build.
   the zone per row; either needs a migration of the existing table, not just a
   code change.
 
-#### The cache savings estimate prices every cache write at the 5-minute rate
-- **What**: stored costs bill Claude's 1-hour cache writes at their own rate
-  (2x input), but `estimateCacheSavings` in `src/db/v2-queries.ts` charges every
-  cache write the 5-minute premium (1.25x), so it overstates savings by 0.75x
-  input per 1-hour write token.
-- **Why or evidence**: since mid-2026 roughly 90% of Claude cache-write tokens
-  are 1-hour writes (measured 2026-10-04). The usage read that feeds the
-  estimate is served by `idx_events_usage_covering`; adding
-  `cache_write_1h_tokens` to it would break the covering read or grow the index.
-  Cache reads dominate the savings, so the error is smaller than the share
-  suggests; it is unmeasured.
-- **Revisit when**: a decision rests on the savings figure. Measure the
-  overstatement first, then add the column to the covering index if it matters.
-
 ### Reliability And Observability
 
 #### Cumulative OTLP baselines live only in memory

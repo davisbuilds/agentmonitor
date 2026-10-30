@@ -2,6 +2,7 @@ import {
   getAnalyticsActivity,
   getAnalyticsAgents,
   getAnalyticsCoverage,
+  getAnalyticsHeadlines,
   getAnalyticsHourOfWeek,
   getAnalyticsProjects,
   getAnalyticsSkillHealthParts,
@@ -18,6 +19,7 @@ import type {
   AgentComparisonRow,
   AnalyticsCoverage,
   AnalyticsDataResponse,
+  AnalyticsHeadlines,
   AnalyticsOverview,
   AnalyticsParams,
   AnalyticsSummary,
@@ -116,6 +118,10 @@ export function getAnalyticsAgentsResponse(
 
 export function getAnalyticsVelocityResponse(params: AnalyticsParams = {}): VelocityMetrics {
   return getAnalyticsVelocity(params);
+}
+
+export function getAnalyticsHeadlinesResponse(params: AnalyticsParams = {}): AnalyticsHeadlines {
+  return getDb().transaction(() => getAnalyticsHeadlines(params))();
 }
 
 export function getAnalyticsOverview(params: AnalyticsParams = {}): AnalyticsOverview {

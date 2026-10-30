@@ -1,5 +1,6 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
+  import { DailyBarChart, formatUsd, type DailyBar } from '../ui/chart';
   import { usage } from '../../stores/usage.svelte';
   import { formatCost, formatModelName, formatNumber } from '../../format';
   import type { UsageDailyPoint, UsageModelDailyPoint } from '../../api/client';
@@ -65,7 +66,6 @@
     }),
   );
 
-  const maxTotal = $derived(rows.reduce((max, row) => Math.max(max, row.total), 0));
   const rangeTotal = $derived(rows.reduce((sum, row) => sum + row.total, 0));
   // Empty only when there is no usage at all: unpriced models record tokens at
   // $0, and their days must still show under the Cost view.
@@ -76,36 +76,24 @@
   // The day's totals, from the daily series, so each bar says what the old
   // Daily Usage list did.
   const dailyByDate = $derived(new Map(usage.daily.map((row: UsageDailyPoint) => [row.date, row])));
-  function dayLabel(row: Row): string {
-    const day = dailyByDate.get(row.date);
-    if (!day) return `${row.date}: ${formatMetric(row.total, metric)}`;
+  const rowByDate = $derived(new Map(rows.map(row => [row.date, row])));
+  const days = $derived(rows.map((row): DailyBar => ({
+    date: row.date,
+    segments: row.segments.map(segment => ({ key: segment.model, value: segment.value, color: colorFor(segment.model) })),
+  })));
+
+  function dayLabel(bar: DailyBar): string {
+    const row = rowByDate.get(bar.date);
+    const day = dailyByDate.get(bar.date);
+    if (!day) return `${bar.date}: ${formatMetric(row?.total ?? 0, metric)}`;
     const tokens = day.input_tokens + day.output_tokens + day.cache_read_tokens + day.cache_write_tokens;
     return [
-      `${row.date}: ${formatCost(day.cost_usd)}`,
+      `${bar.date}: ${formatCost(day.cost_usd)}`,
       `${formatNumber(tokens)} tokens`,
       `${formatNumber(day.usage_events)} usage event${day.usage_events === 1 ? '' : 's'}`,
       `${formatNumber(day.session_count)} session${day.session_count === 1 ? '' : 's'}`,
     ].join(' · ');
   }
-
-  function shortDate(date: string): string {
-    return date.slice(5).replace('-', '/');
-  }
-
-  /**
-   * Label a handful of columns, never all of them — a tick under every day
-   * collides on a 30-day range. Always anchor the first and last.
-   */
-  const tickIndexes = $derived.by(() => {
-    const count = rows.length;
-    if (count === 0) return new Set<number>();
-    const target = Math.min(6, count);
-    const step = Math.max(1, Math.round((count - 1) / Math.max(1, target - 1)));
-    const ticks = new Set<number>();
-    for (let i = 0; i < count; i += step) ticks.add(i);
-    ticks.add(count - 1);
-    return ticks;
-  });
 </script>
 
 <section
@@ -174,52 +162,39 @@
     </ul>
 
     <div class="mt-4 flex min-h-[15rem] flex-1 flex-col">
-      <div class="flex min-h-0 flex-1 gap-2">
-        <!-- y-axis: just the extremes; a full gridded scale would out-shout the data -->
-        <div class="flex w-16 shrink-0 flex-col justify-between text-right text-meta tabular font-mono text-text-faint">
-          <span>{formatMetric(maxTotal, metric)}</span>
-          <span>0</span>
-        </div>
-
-        <div class="flex min-w-0 flex-1 items-end gap-[2px] border-b border-line pb-px">
-          {#each rows as row}
-            <button
-              class="group flex h-full min-w-0 flex-1 flex-col justify-end rounded-t-sm transition-colors hover:bg-surface-2"
-              onclick={() => usage.setDateRange(row.date, row.date)}
-              title={dayLabel(row)}
-              aria-label={dayLabel(row)}
-            >
-              {#if row.total > 0}
-                <div
-                  class="flex w-full flex-col-reverse gap-[2px] overflow-hidden rounded-t-[4px]"
-                  style={`height:${Math.max((row.total / maxTotal) * 100, 1)}%`}
-                >
-                  {#each row.segments as segment}
-                    <div
-                      class="w-full"
-                      style={`background:${colorFor(segment.model)}; flex:${segment.value} 1 0; min-height:2px`}
-                      title={`${row.date} · ${formatModelName(segment.model)} · ${formatMetric(segment.value, metric)} (${Math.round((segment.value / row.total) * 100)}%)`}
-                    ></div>
-                  {/each}
+      <DailyBarChart
+        class="flex-1"
+        plotClass="h-full"
+        axisClass="w-16"
+        {days}
+        label={dayLabel}
+        formatTick={(value) => (metric === 'cost' ? formatUsd(value) : formatNumber(value))}
+        onSelect={(date) => usage.setDateRange(date, date)}
+      >
+        {#snippet tooltip(bar)}
+          {@const row = rowByDate.get(bar.date)}
+          {@const day = dailyByDate.get(bar.date)}
+          <div class="mb-2 text-body font-medium text-text">{bar.date}</div>
+          {#if row && row.total > 0}
+            <div class="space-y-1">
+              {#each row.segments as segment}
+                <div class="flex items-center justify-between gap-3">
+                  <div class="flex min-w-0 items-center gap-2 text-text-muted">
+                    <span class="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={`background:${colorFor(segment.model)}`}></span>
+                    <span class="truncate font-mono">{formatModelName(segment.model)}</span>
+                  </div>
+                  <span class="shrink-0 tabular font-mono text-text">{formatMetric(segment.value, metric)} · {Math.round((segment.value / row.total) * 100)}%</span>
                 </div>
-              {:else}
-                <div class="h-px w-full bg-line" aria-hidden="true"></div>
-              {/if}
-            </button>
-          {/each}
-        </div>
-      </div>
-
-      <div class="flex gap-2 pt-1.5">
-        <div class="w-16 shrink-0" aria-hidden="true"></div>
-        <div class="flex min-w-0 flex-1 gap-[2px]">
-          {#each rows as row, index}
-            <span class="min-w-0 flex-1 text-center text-meta tabular font-mono text-text-faint">
-              {tickIndexes.has(index) ? shortDate(row.date) : ''}
-            </span>
-          {/each}
-        </div>
-      </div>
+              {/each}
+            </div>
+          {/if}
+          {#if day}
+            <div class="mt-2 border-t border-line pt-2 tabular font-mono text-text-muted">
+              {formatCost(day.cost_usd)} · {formatNumber(day.usage_events)} usage event{day.usage_events === 1 ? '' : 's'} · {formatNumber(day.session_count)} session{day.session_count === 1 ? '' : 's'}
+            </div>
+          {/if}
+        {/snippet}
+      </DailyBarChart>
     </div>
   {/if}
 </section>

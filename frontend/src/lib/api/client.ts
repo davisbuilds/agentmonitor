@@ -302,6 +302,31 @@ export interface ActivityDataPoint {
   user_messages: number;
 }
 
+/** One Overview headline: the range's value, the period before's, and a value per day. */
+export interface HeadlineMetric {
+  value: number;
+  prior: number | null;
+  daily: number[];
+}
+
+export interface HeadlineToolErrors {
+  agent: string;
+  results: number;
+  errors: number;
+  rate: number | null;
+  prior_rate: number | null;
+}
+
+export interface AnalyticsHeadlines {
+  days: string[];
+  prior_range: { from: string; to: string } | null;
+  cost: HeadlineMetric & { per_session_usd: number | null; sessions_with_transcript: number; usage_sessions: number };
+  prompts: HeadlineMetric;
+  sessions: HeadlineMetric & { delegated_share: number; daily_delegated_share: Array<number | null> };
+  tool_errors: HeadlineToolErrors[];
+  active_hours: HeadlineMetric;
+}
+
 export interface ProjectBreakdown {
   project: string;
   session_count: number;
@@ -1021,6 +1046,11 @@ export async function fetchAnalyticsSkillsHealth(params: Record<string, string |
 export async function fetchAnalyticsHourOfWeek(params: Record<string, string | number | undefined> = {}): Promise<{ data: HourOfWeekDataPoint[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/hour-of-week${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsHourOfWeek');
+}
+
+export async function fetchAnalyticsHeadlines(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsHeadlines> {
+  const res = await fetch(`/api/v2/analytics/headlines${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsHeadlines');
 }
 
 export async function fetchAnalyticsVelocity(params: Record<string, string | number | undefined> = {}): Promise<VelocityMetrics> {

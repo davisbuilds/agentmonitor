@@ -160,8 +160,16 @@ product never substitutes a misleading `0%` for missing evidence.
 
 ## Analytics And Skill Evidence
 
-Analytics Overview covers activity over time, projects, agents, tools,
-hour-of-week patterns, and velocity. Activity charts sessions per day by the
+Analytics Overview opens on five headlines, each against the equal-length
+period just before and with a daily trend: cost (counted as Usage counts it,
+with cost per session over the usage sessions that have a transcript), prompts,
+sessions started (with the share of delegated work), tool error rate, and active
+hours. Tool error rates stay per agent, each from that agent's own record of
+failures (Claude Code transcripts, Codex telemetry), and are never pooled.
+Active hours are inferred from message times on one timeline across sessions,
+each gap counting up to 15 minutes, so parallel sessions add no time. Below
+them, Overview covers activity over time, projects, agents, tools, and
+hour-of-week patterns. Activity charts sessions per day by the
 day each started, across every day of the range, idle days included. Per-day
 averages in Analytics and Usage divide by the days of the selected range, or,
 without one, by the first to the last active day. Session counts
@@ -233,8 +241,8 @@ Monitor's today and 30-day figures.
   recording the split in mid-2026. An estimated cost on an earlier row, on a row
   whose transcript is gone, or on a token-only OTEL export prices every cache
   write at the 5-minute rate; Claude Code's own reported cost already includes
-  the 1-hour price. The cache savings estimate still uses the 5-minute rate for
-  every write.
+  the 1-hour price. The cache savings estimate charges each write the premium
+  its stored split implies, the same way.
 - Unknown and deprecated models stay visible. A persistent warning identifies
   unpriced use or known pricing that has not yet been applied to zero-cost history.
   Every page's header also names models whose last week of usage has no rate
