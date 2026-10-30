@@ -174,8 +174,9 @@ hour-of-week patterns, and session depth. Session depth reads compactions as
 depth (a session that outgrew its context), not trouble: per agent, since each
 compacts at its own context window, over the started sessions whose transcript
 records compactions, with the share that compacted, their spread, messages per
-session at the median and p90, and the deepest sessions. Sessions without a
-transcript (telemetry only) are counted apart. Activity charts sessions per day by the
+session at the median and p90, and the deepest sessions. Sessions that can't
+show compactions (telemetry only, or a transcript with malformed records) are
+counted apart. Activity charts sessions per day by the
 day each started, across every day of the range, idle days included. Per-day
 averages in Analytics and Usage divide by the days of the selected range, or,
 without one, by the first to the last active day. Session counts

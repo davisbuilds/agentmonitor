@@ -29,7 +29,7 @@
   <div class="mb-3 flex items-center gap-1.5">
     <h3 id="session-depth-heading" class="text-h3">Session Depth</h3>
     <InfoTip label="Session Depth">
-      <p>How far sessions you started ran. A compaction means a session outgrew its context: a long investigation, a backlog sweep, cross-repo work. It marks depth, not trouble. Each agent compacts at its own context window, so they are never pooled. Only a transcript records compactions, so sessions without one are counted apart.</p>
+      <p>How far sessions you started ran. A compaction means a session outgrew its context: a long investigation, a backlog sweep, cross-repo work. It marks depth, not trouble. Each agent compacts at its own context window, so they are never pooled. Only a complete transcript shows compactions, so sessions with no transcript, or one with damaged records, are counted apart.</p>
     </InfoTip>
   </div>
 
@@ -48,12 +48,12 @@
               <span class="h-2 w-2 rounded-full" style={`background:${agentColor[row.agent] ?? 'var(--color-accent)'}`} aria-hidden="true"></span>
               <span class="text-body font-medium text-text">{agentName(row.agent)}</span>
             </div>
-            <span class="text-meta text-text-faint">
-              {`${formatNumber(row.sessions)} with a transcript${row.unobservable_sessions > 0 ? ` · ${formatNumber(row.unobservable_sessions)} without` : ''}`}
+            <span class="text-meta text-text-muted">
+              {`${formatNumber(row.sessions)} session${row.sessions === 1 ? '' : 's'}${row.unobservable_sessions > 0 ? ` · ${formatNumber(row.unobservable_sessions)} more can't show compactions` : ''}`}
             </span>
           </div>
 
-          <!-- With no transcript there is nothing to read; the header already says so. -->
+          <!-- With no session that can show compactions there is nothing to read; the header already says so. -->
           {#if row.sessions > 0}
             <div class="mt-2 flex items-baseline gap-2">
               <span class="tabular font-mono text-h3 text-text">{percent(row.compacted_sessions, row.sessions)}</span>
@@ -68,11 +68,11 @@
                 {/if}
               {/each}
             </div>
-            <div class="mt-1 flex flex-wrap gap-x-3 text-meta text-text-faint" aria-hidden="true">
+            <div class="mt-1 flex flex-wrap gap-x-3 text-meta text-text-muted" aria-hidden="true">
               {#each bucketSteps as step}
                 <span class="flex items-center gap-1">
                   <span class="h-2 w-2 rounded-[2px]" style={`background:${bucketColor(step.mix)}`}></span>
-                  <span class="tabular font-mono text-text-muted">{formatNumber(row.buckets[step.key])}</span> {step.label}
+                  <span class="tabular font-mono text-text">{formatNumber(row.buckets[step.key])}</span> {step.label}
                 </span>
               {/each}
             </div>
