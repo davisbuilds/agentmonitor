@@ -121,3 +121,26 @@ test('a backdated commit does not hide a recent one behind it from the reread', 
   await syncGitActivity(db, { now: new Date('2026-04-03T00:00:00Z') });
   assert.ok(shasIn(dir).includes(recent), 'the recent commit is still reachable, so it stays');
 });
+
+test('a repository created inside another is read on its own once it exists', async () => {
+  const parent = freshRepository('zeta', '2026-03-01T09:00:00Z');
+  commit(parent, 'top.txt', 'feat: parent', '2026-03-01T10:00:00Z');
+  const nested = path.join(parent, 'nested');
+  fs.mkdirSync(nested);
+  session.run('s-zeta-nested', nested, '2026-03-01T09:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  git(nested, ['init', '-q', '-b', 'main']);
+  const own = commit(nested, 'a.txt', 'feat: nested', '2026-03-02T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-03T00:00:00Z') });
+  assert.deepEqual(shasIn(nested), [own]);
+});
+
+test('changed paths are stored as git names them, unquoted and untrimmed', async () => {
+  const dir = freshRepository('eta', '2026-03-01T09:00:00Z');
+  for (const name of ['日本.ts', ' spaced .ts']) fs.writeFileSync(path.join(dir, name), 'x\n');
+  git(dir, ['add', '-A']);
+  git(dir, ['commit', '-q', '-m', 'feat: odd names'], '2026-03-01T10:00:00Z');
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  const files = JSON.parse((db.prepare('SELECT files_json FROM git_commits WHERE repo_root = ?').get(dir) as { files_json: string }).files_json);
+  assert.deepEqual([...files].sort(), [' spaced .ts', '日本.ts']);
+});

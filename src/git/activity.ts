@@ -32,7 +32,9 @@ const GIT_TIMEOUT_MS = 60_000;
 /**
  * The fields read per commit, separated so no subject or trailer can break a
  * record: \x1e starts a commit, \x1f separates fields, \x1d separates
- * co-authors. `--name-only` follows each header with the paths it changed.
+ * co-authors. With `-z`, the header ends in NUL and `--name-only` follows it
+ * with each changed path NUL-terminated and unquoted, so a path is kept as git
+ * names it, spaces and non-ASCII included.
  */
 const LOG_FORMAT = '%x1e%H%x1f%aI%x1f%cI%x1f%an%x1f%ae%x1f%s%x1f%(trailers:key=Co-authored-by,valueonly,separator=%x1d)';
 
@@ -52,21 +54,17 @@ async function git(cwd: string, args: string[]): Promise<string> {
   return stdout;
 }
 
-// A directory inside a repository stays in it, so a found root is resolved
-// once. A directory outside one is asked again each pass: an agent may run
-// `git init` there later.
-const rootByCwd = new Map<string, string>();
-
-/** The repository a directory belongs to, a worktree resolved to its main repository; null outside one. */
+/**
+ * The repository a directory belongs to, a worktree resolved to its main
+ * repository; null outside one. Asked again on every pass rather than cached:
+ * an agent may run `git init` in a directory, inside another repository or
+ * not, and the answer changes.
+ */
 async function repositoryRoot(cwd: string): Promise<string | null> {
-  const known = rootByCwd.get(cwd);
-  if (known) return known;
   if (!fs.existsSync(cwd)) return null;
   try {
     const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim();
-    const root = path.basename(common) === '.git' ? path.dirname(common) : common;
-    rootByCwd.set(cwd, root);
-    return root;
+    return path.basename(common) === '.git' ? path.dirname(common) : common;
   } catch {
     return null;
   }
@@ -76,10 +74,12 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
   // --since stops walking at the first commit older than the cutoff, so a
   // backdated commit would hide the recent ones behind it, and the pass would
   // then remove them as rewritten. --since-as-filter (git 2.38) visits them all.
-  const output = await git(root, ['log', '--all', '--no-merges', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
+  const output = await git(root, ['log', '--all', '--no-merges', '-z', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
   const commits = new Map<string, CommitRecord>();
   for (const record of output.split('\x1e').slice(1)) {
-    const [header, ...paths] = record.split('\n');
+    const headerEnd = record.indexOf('\0');
+    const header = headerEnd === -1 ? record : record.slice(0, headerEnd);
+    const paths = headerEnd === -1 ? [] : record.slice(headerEnd + 1).replace(/^\n/, '').split('\0');
     const [sha, authored, committed, authorName, authorEmail, subject, trailers] = header.split('\x1f');
     if (!sha || commits.has(sha)) continue;
     commits.set(sha, {
@@ -90,7 +90,7 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
       author_email: authorEmail,
       subject,
       co_authors: (trailers ?? '').split('\x1d').map(value => value.trim()).filter(Boolean),
-      files: paths.map(file => file.trim()).filter(Boolean).slice(0, MAX_FILES),
+      files: paths.filter(file => file.length > 0).slice(0, MAX_FILES),
     });
   }
   return [...commits.values()];
