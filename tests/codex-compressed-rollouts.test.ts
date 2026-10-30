@@ -80,4 +80,13 @@ test('a rollout amon first sees compressed is read whole', () => {
   assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'parsed');
   assert.deepEqual(db().prepare('SELECT message_count, cwd FROM browsing_sessions WHERE id = ?').get(otherId), { message_count: 2, cwd: '/work/beta' });
   assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped', 'an unchanged compressed file is skipped like any other');
+
+  // Codex never writes to a compressed rollout again, so a resync skips one
+  // it has parsed by its mtime alone, without decompressing it.
+  fs.chmodSync(file, 0o000);
+  try {
+    assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped');
+  } finally {
+    fs.chmodSync(file, 0o644);
+  }
 });

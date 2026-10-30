@@ -16,7 +16,7 @@ import { syncCodexLiveSession } from '../live/codex-adapter.js';
 import { syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
 import { discoverAntigravityLogs } from '../import/antigravity.js';
 import { discoverCodexRolloutFilesRecursive, discoverJsonlFilesRecursive } from '../util/file-discovery.js';
-import { readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
+import { COMPRESSED_ROLLOUT_SUFFIX, readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { setSessionMode } from '../db/queries.js';
 
@@ -157,6 +157,7 @@ export interface SyncSessionOutcome {
 
 interface WatchedFileState {
   file_hash: string;
+  file_mtime: string | null;
   status: SyncResult;
 }
 
@@ -166,7 +167,7 @@ interface MissingProjectionRow {
 
 function getWatchedFileState(db: Database.Database, filePath: string): WatchedFileState | undefined {
   return db.prepare(
-    'SELECT file_hash, status FROM watched_files WHERE file_path = ?'
+    'SELECT file_hash, file_mtime, status FROM watched_files WHERE file_path = ?'
   ).get(filePath) as WatchedFileState | undefined;
 }
 
@@ -338,6 +339,13 @@ export function syncCodexSessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
+    // Codex never writes to a rollout it compressed, so one parsed at this
+    // mtime is current without decompressing it again, which every resync
+    // would otherwise do for all of compressed history.
+    if (!options.force && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)) {
+      const seen = getWatchedFileState(db, filePath);
+      if (seen && seen.status !== 'error' && seen.file_mtime === stat.mtime.toISOString()) return { result: 'skipped' };
+    }
     // One read serves the change check, the checkpoint check and the parse. A
     // compressed rollout reads as its lines, under the same session id.
     const bytes = readTranscriptFile(filePath);
