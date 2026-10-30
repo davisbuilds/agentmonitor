@@ -46,3 +46,11 @@ test('Analytics counts the sessions someone started, with their subagents\' mess
   const agents = Object.fromEntries(queries.getAnalyticsAgents(range).map(row => [row.agent, [row.session_count, row.message_count]]));
   assert.deepEqual(agents, { claude: [1, 16], codex: [0, 2] });
 });
+
+test('a view holding only delegated work still reports its activity, with no sessions to average over', () => {
+  const velocity = queries.getAnalyticsVelocity({ ...range, agent: 'codex' });
+  assert.equal(velocity.total_sessions, 0);
+  assert.deepEqual([velocity.active_days, velocity.span_days, velocity.messages_per_active_day], [1, 31, 2]);
+  assert.equal(velocity.messages_per_calendar_day, 0.06);
+  assert.deepEqual([velocity.sessions_per_active_day, velocity.average_messages_per_session], [0, 0]);
+});

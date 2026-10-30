@@ -2667,6 +2667,7 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
   const row = db.prepare(`${sessionListCte}
     SELECT
       COALESCE(${startedSessionCount}, 0) as total_sessions,
+      COUNT(*) as matched_rows,
       COALESCE(SUM(message_count), 0) as total_messages,
       COALESCE(SUM(user_message_count), 0) as total_user_messages,
       MIN(started_at) as earliest,
@@ -2675,6 +2676,7 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
     ${filter.where}
   `).get(...filter.values) as {
     total_sessions: number;
+    matched_rows: number;
     total_messages: number;
     total_user_messages: number;
     earliest: string | null;
@@ -2686,7 +2688,12 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
       .filter((day): day is string => day !== null),
   ).size;
 
-  const spanDays = row.total_sessions > 0 ? rangeSpanDays(params, row.earliest, row.latest) : 0;
+  // Delegated work (subagents, internal jobs) is activity without a started
+  // session: it fills days and messages, and only the per-session rates need
+  // a session to divide by.
+  const hasActivity = row.matched_rows > 0;
+  const hasSessions = row.total_sessions > 0;
+  const spanDays = hasActivity ? rangeSpanDays(params, row.earliest, row.latest) : 0;
 
   const safeActiveDays = Math.max(activeDays, 1);
   const safeSpanDays = Math.max(spanDays, 1);
@@ -2696,14 +2703,14 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
     total_sessions: row.total_sessions,
     total_messages: row.total_messages,
     total_user_messages: row.total_user_messages,
-    active_days: row.total_sessions > 0 ? activeDays : 0,
+    active_days: hasActivity ? activeDays : 0,
     span_days: spanDays,
-    sessions_per_active_day: row.total_sessions > 0 ? roundMetric(row.total_sessions / safeActiveDays) : 0,
-    messages_per_active_day: row.total_sessions > 0 ? roundMetric(row.total_messages / safeActiveDays) : 0,
-    sessions_per_calendar_day: row.total_sessions > 0 ? roundMetric(row.total_sessions / safeSpanDays) : 0,
-    messages_per_calendar_day: row.total_sessions > 0 ? roundMetric(row.total_messages / safeSpanDays) : 0,
-    average_messages_per_session: row.total_sessions > 0 ? roundMetric(row.total_messages / safeSessions) : 0,
-    average_user_messages_per_session: row.total_sessions > 0 ? roundMetric(row.total_user_messages / safeSessions) : 0,
+    sessions_per_active_day: hasSessions ? roundMetric(row.total_sessions / safeActiveDays) : 0,
+    messages_per_active_day: hasActivity ? roundMetric(row.total_messages / safeActiveDays) : 0,
+    sessions_per_calendar_day: hasSessions ? roundMetric(row.total_sessions / safeSpanDays) : 0,
+    messages_per_calendar_day: hasActivity ? roundMetric(row.total_messages / safeSpanDays) : 0,
+    average_messages_per_session: hasSessions ? roundMetric(row.total_messages / safeSessions) : 0,
+    average_user_messages_per_session: hasSessions ? roundMetric(row.total_user_messages / safeSessions) : 0,
     coverage: getAnalyticsCoverage(params, 'all_sessions'),
   };
 }
