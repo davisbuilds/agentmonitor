@@ -80,7 +80,10 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   watcher checkpoints, pins, and skill-context evidence derived from local
   transcript sources.
 - **Operational state:** content-free OTEL metrics and provider-native quota
-  snapshots. Operational metrics never enter usage or event-count aggregates.
+  snapshots, with a sampled quota history (`provider_quota_samples`): a row per
+  changed reading at most every five minutes, each held until `observed_until`,
+  so an idle stretch reads as flat. Operational metrics never enter usage or
+  event-count aggregates.
   Each OTLP point carries the same retry key as usage points, so an exporter
   resend is stored once.
 - **Execution receipts:** opt-in host-authored launcher attempts, imported from a

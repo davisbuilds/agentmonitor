@@ -52,7 +52,7 @@ test('v19 flags transcripts for reparse and corrects rows that cannot be reparse
   db.pragma('user_version = 18');
   runDataMigrations(db);
 
-  assert.equal(db.pragma('user_version', { simple: true }), 24);
+  assert.equal(db.pragma('user_version', { simple: true }), 25);
 
   const hashes = Object.fromEntries((db.prepare('SELECT file_path, file_hash FROM watched_files').all() as Array<{
     file_path: string; file_hash: string;

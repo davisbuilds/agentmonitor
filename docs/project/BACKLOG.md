@@ -108,6 +108,17 @@ so later readers know what still needs checking.
   forwarding its OTEL to the MacBook (ingestion is loopback-only today), or a
   periodic rollout import.
 
+### Quota burn rate
+
+- **What**: project when each provider's 5-hour and weekly windows run out at
+  the current pace, from `provider_quota_samples`.
+- **Why or evidence**: the Monitor's quota pill shows only the latest reading.
+  History collection started 2026-10-30, at most one row per five minutes while
+  a reading moves.
+- **Revisit when**: two weeks of samples exist, enough to cover two weekly
+  resets. Then check whether the pace over the last hour or the window so far
+  predicts the reset-time reading better before choosing one.
+
 ### Explicit provenance for unresolved historical timestamps
 
 - **What**: the conservative timestamp repair leaves fields without matching
