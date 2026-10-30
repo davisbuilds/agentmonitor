@@ -47,6 +47,7 @@ import type {
   TopSessionStat,
   VelocityMetrics,
   AnalyticsHeadlines,
+  AnalyticsSessionDepth,
   AgentComparisonRow,
   UsageParams,
   UsageCoverage,
@@ -2876,6 +2877,77 @@ function activeMinutesByDay(params: AnalyticsParams): Map<string, number> {
     previous = at;
   }
   return byDay;
+}
+
+/**
+ * Session depth per agent: how many of the range's started sessions compacted,
+ * how often, and how long sessions ran. A compaction marks a session that went
+ * deep (a long investigation, a backlog sweep, cross-repo work), not one that
+ * struggled. Agents are never pooled: each compacts at its own context window.
+ * Only a transcript records compactions, so a session without one counts apart.
+ */
+export function getAnalyticsSessionDepth(params: AnalyticsParams = {}): AnalyticsSessionDepth {
+  const db = getDb();
+  const filter = buildAnalyticsFilterState(params);
+  const where = [...filter.conditions, startedSessionCondition].join(' AND ');
+  const sessions = db.prepare(`${sessionListCte}
+    SELECT id, agent, project, started_at, message_count, COALESCE(title, substr(first_message, 1, 120)) AS title,
+      COALESCE(json_extract(skill_context_capabilities_json, '$.compactionVisibility.observable'), 0) = 1 AS observable
+    FROM listed_sessions WHERE ${where}
+  `).all(...filter.values) as Array<{
+    id: string; agent: string; project: string | null; started_at: string | null;
+    message_count: number | null; title: string | null; observable: number;
+  }>;
+
+  const observed = sessions.filter(row => row.observable);
+  const compactions = new Map<string, number>();
+  const ids = observed.map(row => row.id);
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    for (const row of db.prepare(`
+      SELECT session_id, COUNT(*) AS compactions FROM session_context_observations
+      WHERE kind = 'compaction' AND session_id IN (${chunk.map(() => '?').join(', ')})
+      GROUP BY session_id
+    `).all(...chunk) as Array<{ session_id: string; compactions: number }>) {
+      compactions.set(row.session_id, row.compactions);
+    }
+  }
+
+  const agents = [...new Set(sessions.map(row => row.agent))].sort();
+  return {
+    agents: agents.map(agent => {
+      const rows = observed.filter(row => row.agent === agent)
+        .map(row => ({ ...row, compactions: compactions.get(row.id) ?? 0, messages: row.message_count ?? 0 }));
+      const messages = rows.map(row => row.messages).sort((a, b) => a - b);
+      const buckets = { none: 0, one: 0, few: 0, many: 0 };
+      for (const row of rows) {
+        if (row.compactions === 0) buckets.none += 1;
+        else if (row.compactions === 1) buckets.one += 1;
+        else if (row.compactions <= 3) buckets.few += 1;
+        else buckets.many += 1;
+      }
+      return {
+        agent,
+        sessions: rows.length,
+        unobservable_sessions: sessions.filter(row => row.agent === agent && !row.observable).length,
+        compacted_sessions: rows.filter(row => row.compactions > 0).length,
+        compactions: rows.reduce((sum, row) => sum + row.compactions, 0),
+        buckets,
+        median_messages: nearestRank(messages, 0.5),
+        p90_messages: nearestRank(messages, 0.9),
+        deepest: rows.filter(row => row.compactions > 0)
+          .sort((a, b) => b.compactions - a.compactions || b.messages - a.messages || a.id.localeCompare(b.id))
+          .slice(0, 3)
+          .map(row => ({ id: row.id, title: row.title, project: row.project, started_at: row.started_at, compactions: row.compactions, messages: row.messages })),
+      };
+    }),
+  };
+}
+
+/** The nearest-rank percentile of ascending values; null with none. */
+function nearestRank(sorted: number[], p: number): number | null {
+  if (sorted.length === 0) return null;
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(p * sorted.length) - 1))];
 }
 
 export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetrics {

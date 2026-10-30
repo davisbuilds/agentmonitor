@@ -1,6 +1,7 @@
 import {
   fetchAnalyticsSummary,
   fetchAnalyticsHeadlines,
+  fetchAnalyticsSessionDepth,
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
@@ -11,6 +12,7 @@ import {
   fetchAnalyticsAgents,
   type AnalyticsSummary,
   type AnalyticsHeadlines,
+  type AnalyticsSessionDepth,
   type AnalyticsCoverage,
   type ActivityDataPoint,
   type ProjectBreakdown,
@@ -31,6 +33,7 @@ import {
 type PanelKey =
   | 'summary'
   | 'headlines'
+  | 'depth'
   | 'activity'
   | 'projects'
   | 'tools'
@@ -51,6 +54,7 @@ class AnalyticsStore {
   private readonly versions: Record<PanelKey, number> = {
     summary: 0,
     headlines: 0,
+    depth: 0,
     activity: 0,
     projects: 0,
     tools: 0,
@@ -75,6 +79,7 @@ class AnalyticsStore {
 
   summary = $state<AnalyticsSummary | null>(null);
   headlines = $state<AnalyticsHeadlines | null>(null);
+  sessionDepth = $state<AnalyticsSessionDepth | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
@@ -87,6 +92,7 @@ class AnalyticsStore {
   coverage = $state<Record<PanelKey, AnalyticsCoverage | null>>({
     summary: null,
     headlines: null,
+    depth: null,
     activity: null,
     projects: null,
     tools: null,
@@ -100,6 +106,7 @@ class AnalyticsStore {
   loading = $state<Record<PanelKey, boolean>>({
     summary: false,
     headlines: false,
+    depth: false,
     activity: false,
     projects: false,
     tools: false,
@@ -113,6 +120,7 @@ class AnalyticsStore {
   errors = $state<Record<PanelKey, string | null>>({
     summary: null,
     headlines: null,
+    depth: null,
     activity: null,
     projects: null,
     tools: null,
@@ -180,6 +188,7 @@ class AnalyticsStore {
     await Promise.all([
       this.fetchSummary(),
       this.fetchHeadlines(),
+      this.fetchSessionDepth(),
       this.fetchActivity(),
       this.fetchProjects(),
       this.fetchTools(),
@@ -232,6 +241,25 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.headlines) {
         this.loading.headlines = false;
+      }
+    }
+  }
+
+  async fetchSessionDepth(): Promise<void> {
+    const version = ++this.versions.depth;
+    this.loading.depth = true;
+    this.errors.depth = null;
+    try {
+      const result = await fetchAnalyticsSessionDepth(this.queryParams);
+      if (version !== this.versions.depth) return;
+      this.sessionDepth = result;
+    } catch (err) {
+      if (version !== this.versions.depth) return;
+      console.error('Failed to load session depth:', err);
+      this.errors.depth = 'Failed to load session depth.';
+    } finally {
+      if (version === this.versions.depth) {
+        this.loading.depth = false;
       }
     }
   }

@@ -226,6 +226,29 @@ export interface AnalyticsHeadlines {
   active_hours: HeadlineMetric;
 }
 
+/** One agent's session depth: how far its sessions ran, read as depth, not as trouble. */
+export interface SessionDepthAgent {
+  agent: string;
+  /** Sessions someone started whose transcript can show compactions. */
+  sessions: number;
+  /** Started sessions with no transcript to show compactions (telemetry-only rows). */
+  unobservable_sessions: number;
+  compacted_sessions: number;
+  compactions: number;
+  /** Sessions by compaction count: none, one, two or three, four or more. */
+  buckets: { none: number; one: number; few: number; many: number };
+  /** Messages per session, over `sessions`; null with none. */
+  median_messages: number | null;
+  p90_messages: number | null;
+  /** Up to three sessions that compacted most, then ran longest. */
+  deepest: Array<{ id: string; title: string | null; project: string | null; started_at: string | null; compactions: number; messages: number }>;
+}
+
+/** Per agent, never pooled: each compacts at its own context window. */
+export interface AnalyticsSessionDepth {
+  agents: SessionDepthAgent[];
+}
+
 export interface ProjectBreakdown {
   project: string;
   session_count: number;

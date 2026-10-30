@@ -47,6 +47,7 @@ import {
   getAnalyticsActivityResponse,
   getAnalyticsAgentsResponse,
   getAnalyticsHeadlinesResponse,
+  getAnalyticsSessionDepthResponse,
   getAnalyticsHourOfWeekResponse,
   getAnalyticsProjectsResponse,
   getAnalyticsSkillHealthResponse,
@@ -854,6 +855,16 @@ v2Router.get('/analytics/headlines', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/headlines] Error:', err);
     res.status(500).json({ error: 'Failed to get analytics headlines' });
+  }
+});
+
+v2Router.get('/analytics/session-depth', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getAnalyticsSessionDepthResponse(params));
+  } catch (err) {
+    console.error('[v2/analytics/session-depth] Error:', err);
+    res.status(500).json({ error: 'Failed to get session depth' });
   }
 });
 

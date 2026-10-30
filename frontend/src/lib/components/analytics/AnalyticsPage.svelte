@@ -7,6 +7,7 @@
   import ToolUsage from './ToolUsage.svelte';
   import HourOfWeekHeatmap from './HourOfWeekHeatmap.svelte';
   import AgentComparison from './AgentComparison.svelte';
+  import SessionDepth from './SessionDepth.svelte';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
@@ -35,6 +36,7 @@
     </div>
 
     <div class="space-y-4 xl:col-span-5">
+      <SessionDepth />
       <ToolUsage />
       <AgentComparison />
     </div>

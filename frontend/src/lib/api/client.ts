@@ -317,6 +317,22 @@ export interface HeadlineToolErrors {
   prior_rate: number | null;
 }
 
+export interface SessionDepthAgent {
+  agent: string;
+  sessions: number;
+  unobservable_sessions: number;
+  compacted_sessions: number;
+  compactions: number;
+  buckets: { none: number; one: number; few: number; many: number };
+  median_messages: number | null;
+  p90_messages: number | null;
+  deepest: Array<{ id: string; title: string | null; project: string | null; started_at: string | null; compactions: number; messages: number }>;
+}
+
+export interface AnalyticsSessionDepth {
+  agents: SessionDepthAgent[];
+}
+
 export interface AnalyticsHeadlines {
   days: string[];
   prior_range: { from: string; to: string } | null;
@@ -1046,6 +1062,11 @@ export async function fetchAnalyticsSkillsHealth(params: Record<string, string |
 export async function fetchAnalyticsHourOfWeek(params: Record<string, string | number | undefined> = {}): Promise<{ data: HourOfWeekDataPoint[]; coverage: AnalyticsCoverage }> {
   const res = await fetch(`/api/v2/analytics/hour-of-week${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsHourOfWeek');
+}
+
+export async function fetchAnalyticsSessionDepth(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsSessionDepth> {
+  const res = await fetch(`/api/v2/analytics/session-depth${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsSessionDepth');
 }
 
 export async function fetchAnalyticsHeadlines(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsHeadlines> {
