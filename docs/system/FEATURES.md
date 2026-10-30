@@ -169,8 +169,13 @@ hours. Tool error rates stay per agent, each from that agent's own record of
 failures (Claude Code transcripts, Codex telemetry), and are never pooled.
 Active hours are inferred from message times on one timeline across sessions,
 each gap counting up to 15 minutes, so parallel sessions add no time. Below
-them, Overview covers activity over time, projects, agents, tools, and
-hour-of-week patterns. Activity charts sessions per day by the
+them, Overview covers activity over time, projects, agents, tools,
+hour-of-week patterns, and session depth. Session depth reads compactions as
+depth (a session that outgrew its context), not trouble: per agent, since each
+compacts at its own context window, over the started sessions whose transcript
+records compactions, with the share that compacted, their spread, messages per
+session at the median and p90, and the deepest sessions. Sessions without a
+transcript (telemetry only) are counted apart. Activity charts sessions per day by the
 day each started, across every day of the range, idle days included. Per-day
 averages in Analytics and Usage divide by the days of the selected range, or,
 without one, by the first to the last active day. Session counts

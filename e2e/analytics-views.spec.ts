@@ -255,6 +255,7 @@ test('Overview opens on the headline row, with Velocity folded into it', async (
     await expect(headlines.getByTestId(`headline-${tile}`)).toBeVisible();
   }
   await expect(page.getByRole('heading', { name: 'Velocity' })).toHaveCount(0);
+  await expect(page.getByRole('region', { name: 'Session Depth' })).toBeVisible();
   await expect(page.getByText('Active filters')).toHaveCount(0);
 });
 
