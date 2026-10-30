@@ -1,5 +1,6 @@
 import {
   fetchAnalyticsSummary,
+  fetchAnalyticsHeadlines,
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
@@ -9,6 +10,7 @@ import {
   fetchAnalyticsVelocity,
   fetchAnalyticsAgents,
   type AnalyticsSummary,
+  type AnalyticsHeadlines,
   type AnalyticsCoverage,
   type ActivityDataPoint,
   type ProjectBreakdown,
@@ -28,6 +30,7 @@ import {
 
 type PanelKey =
   | 'summary'
+  | 'headlines'
   | 'activity'
   | 'projects'
   | 'tools'
@@ -47,6 +50,7 @@ type FiltersSnapshot = {
 class AnalyticsStore {
   private readonly versions: Record<PanelKey, number> = {
     summary: 0,
+    headlines: 0,
     activity: 0,
     projects: 0,
     tools: 0,
@@ -70,6 +74,7 @@ class AnalyticsStore {
   get agentOptions(): string[] { return analyticsFilters.agentOptions; }
 
   summary = $state<AnalyticsSummary | null>(null);
+  headlines = $state<AnalyticsHeadlines | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
@@ -81,6 +86,7 @@ class AnalyticsStore {
 
   coverage = $state<Record<PanelKey, AnalyticsCoverage | null>>({
     summary: null,
+    headlines: null,
     activity: null,
     projects: null,
     tools: null,
@@ -93,6 +99,7 @@ class AnalyticsStore {
 
   loading = $state<Record<PanelKey, boolean>>({
     summary: false,
+    headlines: false,
     activity: false,
     projects: false,
     tools: false,
@@ -105,6 +112,7 @@ class AnalyticsStore {
 
   errors = $state<Record<PanelKey, string | null>>({
     summary: null,
+    headlines: null,
     activity: null,
     projects: null,
     tools: null,
@@ -122,18 +130,6 @@ class AnalyticsStore {
       project: this.project,
       agent: this.agent,
     };
-  }
-
-  get hasActiveFilters(): boolean {
-    return analyticsFilters.hasActiveSharedFilters;
-  }
-
-  get defaultFrom(): string {
-    return analyticsFilters.defaultFrom;
-  }
-
-  get defaultTo(): string {
-    return analyticsFilters.defaultTo;
   }
 
   get anyLoading(): boolean {
@@ -183,6 +179,7 @@ class AnalyticsStore {
   async fetchAll(): Promise<void> {
     await Promise.all([
       this.fetchSummary(),
+      this.fetchHeadlines(),
       this.fetchActivity(),
       this.fetchProjects(),
       this.fetchTools(),
@@ -216,6 +213,25 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.summary) {
         this.loading.summary = false;
+      }
+    }
+  }
+
+  async fetchHeadlines(): Promise<void> {
+    const version = ++this.versions.headlines;
+    this.loading.headlines = true;
+    this.errors.headlines = null;
+    try {
+      const result = await fetchAnalyticsHeadlines(this.queryParams);
+      if (version !== this.versions.headlines) return;
+      this.headlines = result;
+    } catch (err) {
+      if (version !== this.versions.headlines) return;
+      console.error('Failed to load analytics headlines:', err);
+      this.errors.headlines = 'Failed to load the overview headlines.';
+    } finally {
+      if (version === this.versions.headlines) {
+        this.loading.headlines = false;
       }
     }
   }
@@ -400,22 +416,6 @@ class AnalyticsStore {
 
   async setAgent(agent: string): Promise<void> {
     analyticsFilters.setAgent(agent);
-  }
-
-  async clearDateRange(): Promise<void> {
-    analyticsFilters.setDateRange(analyticsFilters.defaultFrom, analyticsFilters.defaultTo);
-  }
-
-  async clearProject(): Promise<void> {
-    analyticsFilters.setProject('');
-  }
-
-  async clearAgent(): Promise<void> {
-    analyticsFilters.setAgent('');
-  }
-
-  async clearAllFilters(): Promise<void> {
-    analyticsFilters.clearSharedFilters();
   }
 
   async drillDownToDay(date: string): Promise<void> {

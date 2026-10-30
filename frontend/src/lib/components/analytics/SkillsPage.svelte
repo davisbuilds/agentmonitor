@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { analytics } from '../../stores/analytics.svelte';
-  import ActiveFilters from './ActiveFilters.svelte';
   import SkillConsultationExplorer from './SkillConsultationExplorer.svelte';
   import SkillUsageTimeline from './SkillUsageTimeline.svelte';
 
@@ -22,7 +21,6 @@
 
 <main class="flex-1 overflow-y-auto p-4 sm:p-6">
   <div class="mx-auto max-w-[1600px] space-y-4">
-    <ActiveFilters />
     <SkillUsageTimeline />
     <SkillConsultationExplorer />
   </div>
