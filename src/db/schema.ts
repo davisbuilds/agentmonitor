@@ -1195,7 +1195,8 @@ export function runDataMigrations(db: Database): void {
  * consolidation) as threads of their own, which OTEL reports like any session.
  * A review sends no prompt, and a job's prompt often passed the metadata cap,
  * which dropped the text that marks it, so both counted as sessions someone
- * started. Mark them internal: a review exactly, by its model; a job by what
+ * started. Mark them internal: a review exactly, by its model, on both its
+ * OTEL row and any rollout row (the one the session list shows); a job by what
  * is left, an OTEL-only thread whose prompt was cut away and that saved no
  * rollout, as every session someone ran does.
  */
@@ -1213,6 +1214,11 @@ function classifyCodexInternalThreads(db: Database): void {
     WHERE agent = 'codex' AND relationship_type IS NULL AND (
       EXISTS (SELECT 1 FROM events e WHERE e.session_id = browsing_sessions.id AND e.model = ?)
       OR (
+        -- A review's rollout row: its events are keyed by the native UUID.
+        integration_mode = 'codex-jsonl' AND id GLOB 'rollout-*'
+        AND EXISTS (SELECT 1 FROM events e WHERE e.session_id = lower(substr(browsing_sessions.id, -36)) AND e.model = ?)
+      )
+      OR (
         integration_mode = 'codex-otel'
         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.session_id = browsing_sessions.id)
         AND NOT EXISTS (
@@ -1229,7 +1235,7 @@ function classifyCodexInternalThreads(db: Database): void {
         )
       )
     )
-  `).run(CODEX_AUTO_REVIEW_MODEL).changes;
+  `).run(CODEX_AUTO_REVIEW_MODEL, CODEX_AUTO_REVIEW_MODEL).changes;
   if (marked > 0) console.error(`[migration] marked ${marked} Codex review or app-job thread(s) internal`);
 }
 

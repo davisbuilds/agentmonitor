@@ -13,6 +13,10 @@ test('Codex native source evidence distinguishes conversations, delegation and i
   assert.equal(child.parent_session_id, 'parent');
   assert.equal(parse({ source: { subagent: 'compact' } }).relationship_type, 'internal');
   assert.equal(parse({ source: { subagent: 'memory_consolidation' } }).relationship_type, 'internal');
+  // An approval review, as Codex Desktop writes it: no prompt of anyone's, so not delegated work either.
+  assert.equal(parse({
+    source: { subagent: { other: 'guardian' } }, thread_source: 'guardian_review', parent_thread_id: 'parent',
+  }).relationship_type, 'internal');
   assert.equal(parse({ source: 'future-source' }).relationship_type, null);
   assert.equal(parse({ source: { subagent: 'future-source' } }).relationship_type, null);
   assert.equal(parse({ originator: 'codex-tui' }).relationship_type, null,
