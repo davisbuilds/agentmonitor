@@ -1098,7 +1098,17 @@ export interface UsageOverview {
   tiers: UsageTierBreakdown[];
   agents: UsageAgentBreakdown[];
   top_sessions: UsageTopSessionRow[];
+  prior_costs: UsagePriorCosts;
   coverage: UsageCoverage;
+}
+
+/** Each breakdown's cost in the period before, keyed by project, model, `provider/tier`, agent. */
+export interface UsagePriorCosts {
+  range: { from: string; to: string } | null;
+  projects: Record<string, number>;
+  models: Record<string, number>;
+  tiers: Record<string, number>;
+  agents: Record<string, number>;
 }
 
 export interface UsageFacets {
