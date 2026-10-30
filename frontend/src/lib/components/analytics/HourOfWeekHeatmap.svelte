@@ -1,6 +1,7 @@
 <script lang="ts">
   import { InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
+  import { formatNumber } from '../../format';
 
   const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const maxMessages = $derived(Math.max(...analytics.hourOfWeek.map((entry) => entry.message_count), 1));
@@ -54,6 +55,14 @@
           </div>
         </div>
       {/each}
+      <!-- The scale: an empty hour, then four steps up to the busiest hour. -->
+      <div class="ml-12 flex items-center justify-end gap-1.5 pt-1 text-meta tabular font-mono text-text-faint">
+        <span>0</span>
+        {#each [0, 0.25, 0.5, 0.75, 1] as step}
+          <span class="h-3 w-3 rounded-sm" style={`background:${intensity(step * maxMessages)}`} aria-hidden="true"></span>
+        {/each}
+        <span>{formatNumber(maxMessages)} message{maxMessages === 1 ? '' : 's'}</span>
+      </div>
     </div>
   {/if}
 </section>
