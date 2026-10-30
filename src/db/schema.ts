@@ -240,6 +240,8 @@ function initSchemaLocked(db: Database): void {
       subject TEXT,
       co_authors_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(co_authors_json)),
       files_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(files_json)),
+      -- A merge, such as a merged pull request; not anyone's commit of work.
+      is_merge INTEGER NOT NULL DEFAULT 0,
       PRIMARY KEY (repo_root, sha)
     );
 

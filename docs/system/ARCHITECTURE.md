@@ -84,7 +84,8 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
 - **Git activity:** commits in those repositories (`git_commits`, with
   `git_repos` recording each one's last read), read from local git by a
   background child process: hashes, times, authors, subjects, co-author
-  trailers and changed paths, never contents. Attributing a commit to the
+  trailers and changed paths, never contents. Merge commits are kept, flagged
+  `is_merge`: they record merged pull requests. Attributing a commit to the
   session that made it happens at read time.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots, with a sampled quota history (`provider_quota_samples`): a row per

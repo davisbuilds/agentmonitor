@@ -144,3 +144,18 @@ test('changed paths are stored as git names them, unquoted and untrimmed', async
   const files = JSON.parse((db.prepare('SELECT files_json FROM git_commits WHERE repo_root = ?').get(dir) as { files_json: string }).files_json);
   assert.deepEqual([...files].sort(), [' spaced .ts', '日本.ts']);
 });
+
+test('merge commits are kept, flagged, so a merged pull request can be found', async () => {
+  const dir = freshRepository('theta', '2026-03-01T09:00:00Z');
+  commit(dir, 'a.txt', 'feat: base', '2026-03-01T10:00:00Z');
+  git(dir, ['checkout', '-q', '-b', 'feature']);
+  const work = commit(dir, 'b.txt', 'feat: the change', '2026-03-01T11:00:00Z');
+  git(dir, ['checkout', '-q', 'main']);
+  git(dir, ['merge', '-q', '--no-ff', '-m', 'Merge pull request #12 from example/feature', 'feature'], '2026-03-01T12:00:00Z');
+  const merge = git(dir, ['rev-parse', 'HEAD']);
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  const flagged = Object.fromEntries((db.prepare('SELECT sha, is_merge FROM git_commits WHERE repo_root = ?').all(dir) as Array<{ sha: string; is_merge: number }>)
+    .map(row => [row.sha, row.is_merge]));
+  assert.equal(flagged[merge], 1);
+  assert.equal(flagged[work], 0);
+});

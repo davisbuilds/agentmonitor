@@ -36,7 +36,7 @@ const GIT_TIMEOUT_MS = 60_000;
  * with each changed path NUL-terminated and unquoted, so a path is kept as git
  * names it, spaces and non-ASCII included.
  */
-const LOG_FORMAT = '%x1e%H%x1f%aI%x1f%cI%x1f%an%x1f%ae%x1f%s%x1f%(trailers:key=Co-authored-by,valueonly,separator=%x1d)';
+const LOG_FORMAT = '%x1e%H%x1f%P%x1f%aI%x1f%cI%x1f%an%x1f%ae%x1f%s%x1f%(trailers:key=Co-authored-by,valueonly,separator=%x1d)';
 
 interface CommitRecord {
   sha: string;
@@ -47,6 +47,7 @@ interface CommitRecord {
   subject: string;
   co_authors: string[];
   files: string[];
+  is_merge: boolean;
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -74,13 +75,14 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
   // --since stops walking at the first commit older than the cutoff, so a
   // backdated commit would hide the recent ones behind it, and the pass would
   // then remove them as rewritten. --since-as-filter (git 2.38) visits them all.
-  const output = await git(root, ['log', '--all', '--no-merges', '-z', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
+  // Merges are kept, flagged: a merged pull request leaves one.
+  const output = await git(root, ['log', '--all', '-z', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
   const commits = new Map<string, CommitRecord>();
   for (const record of output.split('\x1e').slice(1)) {
     const headerEnd = record.indexOf('\0');
     const header = headerEnd === -1 ? record : record.slice(0, headerEnd);
     const paths = headerEnd === -1 ? [] : record.slice(headerEnd + 1).replace(/^\n/, '').split('\0');
-    const [sha, authored, committed, authorName, authorEmail, subject, trailers] = header.split('\x1f');
+    const [sha, parents, authored, committed, authorName, authorEmail, subject, trailers] = header.split('\x1f');
     if (!sha || commits.has(sha)) continue;
     commits.set(sha, {
       sha,
@@ -91,6 +93,7 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
       subject,
       co_authors: (trailers ?? '').split('\x1d').map(value => value.trim()).filter(Boolean),
       files: paths.filter(file => file.length > 0).slice(0, MAX_FILES),
+      is_merge: (parents ?? '').trim().split(/\s+/).filter(Boolean).length > 1,
     });
   }
   return [...commits.values()];
@@ -129,12 +132,12 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
       last_error = excluded.last_error
   `);
   const upsert = db.prepare(`
-    INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, author_name, author_email, subject, co_authors_json, files_json)
-    VALUES (@repo_root, @sha, @authored_at, @committed_at, @author_name, @author_email, @subject, @co_authors_json, @files_json)
+    INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, author_name, author_email, subject, co_authors_json, files_json, is_merge)
+    VALUES (@repo_root, @sha, @authored_at, @committed_at, @author_name, @author_email, @subject, @co_authors_json, @files_json, @is_merge)
     ON CONFLICT(repo_root, sha) DO UPDATE SET
       authored_at = excluded.authored_at, committed_at = excluded.committed_at,
       author_name = excluded.author_name, author_email = excluded.author_email, subject = excluded.subject,
-      co_authors_json = excluded.co_authors_json, files_json = excluded.files_json
+      co_authors_json = excluded.co_authors_json, files_json = excluded.files_json, is_merge = excluded.is_merge
   `);
   const storedInWindow = db.prepare('SELECT sha FROM git_commits WHERE repo_root = ? AND committed_at >= ?');
   const remove = db.prepare('DELETE FROM git_commits WHERE repo_root = ? AND sha = ?');
@@ -169,6 +172,7 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
           subject: commit.subject,
           co_authors_json: JSON.stringify(commit.co_authors),
           files_json: JSON.stringify(commit.files),
+          is_merge: commit.is_merge ? 1 : 0,
         });
       }
       for (const { sha } of storedInWindow.all(root, since.toISOString()) as Array<{ sha: string }>) {
