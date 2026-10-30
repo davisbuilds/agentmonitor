@@ -224,8 +224,10 @@ with observed consultation and instruction evidence without rewriting history.
 
 Usage is event-derived and includes totals, one daily chart split by the top
 models (each day carries its cost, tokens, events, and sessions, and clicking it
-narrows the page to that day), project/model/tier/agent attribution, and top
-sessions. The shared filters cover date, project,
+narrows the page to that day), one breakdown table that switches between model,
+project, agent, and tier (each row's share of the range's cost and its change
+against the equal-length period before; a project or agent row narrows the
+page), and top sessions. The shared filters cover date, project,
 and agent; Usage adds model, provider, and provider-neutral tier behind the bar's
 Filters button. The total cost names its date range, so it reads apart from
 Monitor's today and 30-day figures.

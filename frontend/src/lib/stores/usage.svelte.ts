@@ -10,6 +10,7 @@ import {
   type UsageTierBreakdown,
   type UsageAgentBreakdown,
   type UsageTopSessionRow,
+  type UsagePriorCosts,
 } from '../api/client';
 import { navigateToSession } from './router.svelte';
 import { analyticsFilters } from './analytics-filters.svelte';
@@ -88,6 +89,7 @@ class UsageStore {
   tiers = $state<UsageTierBreakdown[]>([]);
   agents = $state<UsageAgentBreakdown[]>([]);
   topSessions = $state<UsageTopSessionRow[]>([]);
+  priorCosts = $state<UsagePriorCosts | null>(null);
 
   coverage = $state<UsageCoverage | null>(null);
 
@@ -219,6 +221,7 @@ class UsageStore {
       this.tiers = overview.tiers;
       this.agents = overview.agents;
       this.topSessions = overview.top_sessions;
+      this.priorCosts = overview.prior_costs;
       this.coverage = overview.coverage;
     } catch (err) {
       if (isAbortError(err) || stale()) return;

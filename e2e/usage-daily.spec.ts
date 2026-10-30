@@ -78,3 +78,16 @@ test('days with usage but no cost still show, with a pointer to the token view',
   await expect(chart.getByText(/No cost recorded/)).toHaveCount(0);
   await expect(chart.getByText('mystery-model-1', { exact: true })).toBeVisible();
 });
+
+test('one breakdown table switches dimension, compares each row with the period before, and narrows by agent', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#analytics?view=usage&from=2026-09-10&to=2026-09-11`);
+  const breakdown = page.getByRole('region', { name: 'Breakdown' });
+  await expect(breakdown.getByRole('button', { name: 'Model', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(breakdown.getByText('claude-haiku-4-5', { exact: true })).toBeVisible();
+
+  await breakdown.getByRole('button', { name: 'Agent', exact: true }).click();
+  // Nothing ran the two days before, so every row is new.
+  await expect(breakdown.getByText('new')).toHaveCount(2);
+  await breakdown.getByRole('button', { name: 'Claude Code' }).click();
+  await expect(page).toHaveURL(/agent=claude(&|$)/);
+});
