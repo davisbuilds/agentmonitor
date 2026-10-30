@@ -221,6 +221,35 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_provider_quota_samples_provider_time
       ON provider_quota_samples(provider, sampled_at);
 
+    -- Commits in the repositories sessions ran in, read from local git: the
+    -- evidence agent git activity is attributed from. Metadata and changed
+    -- paths only, never contents. See src/git/activity.ts.
+    CREATE TABLE IF NOT EXISTS git_repos (
+      root TEXT PRIMARY KEY,
+      last_scanned_at TEXT,
+      -- How far back reads have covered: a session older than this extends the next.
+      covered_from TEXT,
+      last_error TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS git_commits (
+      repo_root TEXT NOT NULL,
+      sha TEXT NOT NULL,
+      authored_at TEXT NOT NULL,
+      committed_at TEXT NOT NULL,
+      author_name TEXT,
+      author_email TEXT,
+      subject TEXT,
+      co_authors_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(co_authors_json)),
+      files_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(files_json)),
+      -- A merge, such as a merged pull request; not anyone's commit of work.
+      is_merge INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (repo_root, sha)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_git_commits_authored_at ON git_commits(authored_at);
+    CREATE INDEX IF NOT EXISTS idx_git_commits_repo_committed ON git_commits(repo_root, committed_at);
+
     -- Claude Code's own running cost for each session, from its statusline
     -- payload. It is counted in memory once per API response, independently of
     -- the transcripts imports read, so it checks imported cost.
@@ -1147,7 +1176,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 26;
+const DATA_SCHEMA_VERSION = 27;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1211,6 +1240,7 @@ export function runDataMigrations(db: Database): void {
     // v25 introduces no data correction: it adds provider_quota_samples, which
     // read commands only install when the version advances. v26 likewise only
     // adds browsing_sessions.cwd; a forced session sync fills it for stored rows.
+    // v27 likewise only adds git_repos and git_commits.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
