@@ -328,6 +328,26 @@ test('POST /api/events stores byte-capped metadata and payload_truncated marker'
   assert.equal(metadata.command, 'pnpm test');
 });
 
+test('a prompt over the cap keeps its opening words, so a Codex app job is still recognized', async () => {
+  // The Codex app embeds a whole thread in its title and catch-up prompts; past
+  // the cap, the prompt used to vanish with the prefix that marks the job.
+  const prompt = `Generate a concise, single-line task title of at most 36 characters. ${'x'.repeat(4000)}`;
+  const response = await postJson(`${baseUrl}/api/events`, {
+    session_id: 'codex-app-job-big',
+    agent_type: 'codex',
+    event_type: 'user_prompt',
+    source: 'otel',
+    metadata: { message: prompt },
+  });
+  assert.equal(response.status, 201);
+
+  const event = (await getEvents()).events.find(row => (row as { session_id: string }).session_id === 'codex-app-job-big') as Record<string, unknown>;
+  assert.equal(event.payload_truncated, 1);
+  assert.ok(Buffer.byteLength(String(event.metadata), 'utf8') <= 1024);
+  const metadata = JSON.parse(String(event.metadata)) as { message?: string };
+  assert.ok(metadata.message?.startsWith('Generate a concise, single-line task title'), String(event.metadata));
+});
+
 test('session_end transitions to idle, subsequent events reactivate', async () => {
   const sessionId = 'session-ended-1';
 

@@ -21,7 +21,7 @@ import {
 } from './projector.js';
 import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
-import { isCodexAppJobPrompt, promptTitleFromTexts } from '../parser/session-title.js';
+import { CODEX_AUTO_REVIEW_MODEL, isCodexAppJobPrompt, promptTitleFromTexts } from '../parser/session-title.js';
 import { liveStatusFromActivity } from './live-status.js';
 
 export interface CodexSummaryLiveSyncResult {
@@ -343,6 +343,15 @@ export function codexSummaryItemSourceId(row: EventRow): string | null {
   return item.source_item_id ?? row.event_id ?? `codex-event:${row.id}`;
 }
 
+/**
+ * A thread Codex runs on its own: an app job (named by its prompt) or an
+ * approval review (named by its reviewer model, since it sends no prompt).
+ * Neither leaves a rollout, and neither is a session someone started.
+ */
+function isCodexInternalThread(row: EventRow, prompt: string | null): boolean {
+  return row.model === CODEX_AUTO_REVIEW_MODEL || (prompt !== null && isCodexAppJobPrompt(prompt));
+}
+
 export function syncCodexSummaryLiveEvent(
   db: Database.Database,
   row: EventRow,
@@ -379,7 +388,7 @@ export function syncCodexSummaryLiveEvent(
     user_message_count_delta: userMessageCount,
     live_status: liveStatus,
     last_item_at: timestamp,
-    relationship_type: prompt !== null && isCodexAppJobPrompt(prompt) ? 'internal' : null,
+    relationship_type: isCodexInternalThread(row, prompt) ? 'internal' : null,
   }, {
     integration_mode: integrationMode,
     fidelity: 'summary',

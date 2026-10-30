@@ -1375,6 +1375,35 @@ describe('Codex OTLP integration', () => {
     assert.deepEqual(meta.mcp_servers, ['github', 'slack']);
   });
 
+  test('keeps the client a Codex thread came from on its start and prompt events', async () => {
+    // Which client ran a thread (the CLI, the app, an ephemeral exec) tells a
+    // session someone started from a job Codex ran on its own.
+    const client = [
+      { key: 'originator', value: { stringValue: 'codex_cli_rs' } },
+      { key: 'terminal.type', value: { stringValue: 'ghostty' } },
+      { key: 'app.version', value: { stringValue: '0.166.0' } },
+    ];
+    const payload = buildLogPayload({
+      serviceName: 'codex_cli_rs',
+      resourceAttrs: [{ key: 'session.id', value: { stringValue: 'codex-client-1' } }],
+      logRecords: [
+        { eventName: 'codex.conversation_starts', attributes: client },
+        { eventName: 'codex.user_prompt', attributes: [...client, { key: 'prompt', value: { stringValue: 'Fix the flaky test' } }] },
+        { eventName: 'codex.api_request', attributes: [...client, { key: 'gen_ai.request.model', value: { stringValue: 'o3' } }] },
+      ],
+    });
+
+    await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
+
+    const events = (await getEvents()).events as Array<{ event_type: string; metadata: string }>;
+    const meta = (type: string) => JSON.parse(String(events.find(event => event.event_type === type)?.metadata)) as Record<string, unknown>;
+    for (const type of ['session_start', 'user_prompt']) {
+      assert.deepEqual([meta(type).originator, meta(type).terminal_type, meta(type).app_version], ['codex_cli_rs', 'ghostty', '0.166.0'], type);
+    }
+    // Every other event would only repeat it.
+    assert.equal(meta('llm_request').originator, undefined);
+  });
+
   test('maps codex.user_message logs to user_prompt events', async () => {
     const payload = buildLogPayload({
       serviceName: 'codex_cli_rs',

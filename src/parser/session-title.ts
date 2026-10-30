@@ -71,6 +71,12 @@ const CODEX_APP_JOB_PREFIXES = [
   'Consolidate the supplied rollout summaries into `memory_summary.md`',
 ];
 
+/**
+ * The model Codex reviews approvals with (`approvals_reviewer = "auto_review"`).
+ * A review runs as a thread of its own with no prompt and no rollout file.
+ */
+export const CODEX_AUTO_REVIEW_MODEL = 'codex-auto-review';
+
 export function isCodexAppJobPrompt(text: string): boolean {
   const trimmed = text.trimStart();
   return CODEX_APP_JOB_PREFIXES.some(prefix => trimmed.startsWith(prefix));

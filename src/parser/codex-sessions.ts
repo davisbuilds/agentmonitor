@@ -266,6 +266,9 @@ export function parseCodexSessionChunk(
       } else if (typeof subagent === 'string'
         && ['compact', 'memory_consolidation', 'memory_extraction'].includes(subagent)) {
         relationshipType = 'internal';
+      } else if (asRecord(subagent)?.['other'] === 'guardian' || line.payload['thread_source'] === 'guardian_review') {
+        // An approval review: Codex's own thread, though it names the thread it reviews as parent.
+        relationshipType = 'internal';
       } else if (typeof source === 'string' && ['cli', 'vscode', 'exec'].includes(source)) {
         relationshipType = 'conversation';
       }

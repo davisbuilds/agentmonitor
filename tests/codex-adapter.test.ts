@@ -373,6 +373,18 @@ test('OTEL prompts title the session with the first prompt that is not injected 
   assert.deepEqual(session, { first_message: 'Tidy the release notes', relationship_type: null });
 });
 
+test('an auto-review approval thread is internal from its first event', () => {
+  // Codex reviews approvals on threads of their own: no prompt, no rollout,
+  // only the reviewer model marks them.
+  const db = getDb();
+  syncCodexSummaryLiveEvent(db, makeEventRow({
+    id: 9301, session_id: 'codex-auto-review-thread', event_type: 'session_start', model: 'codex-auto-review',
+  }));
+  const row = db.prepare('SELECT relationship_type FROM browsing_sessions WHERE id = ?')
+    .get('codex-auto-review-thread') as { relationship_type: string | null };
+  assert.equal(row.relationship_type, 'internal');
+});
+
 test("the Codex app's background-job threads are classified as internal", () => {
   const db = getDb();
   syncCodexSummaryLiveEvent(db, makeEventRow({
