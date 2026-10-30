@@ -1108,6 +1108,19 @@ export interface UsageFacets {
 }
 
 /** Every Usage-page panel from a single scan. Fields mirror the per-panel endpoints. */
+/**
+ * Each breakdown's cost over the equal-length period just before, keyed by the
+ * row's identity: project, model, `provider/tier`, agent. A row the period
+ * before lacks costs 0 there; without a date range there is no period before.
+ */
+export interface UsagePriorCosts {
+  range: { from: string; to: string } | null;
+  projects: Record<string, number>;
+  models: Record<string, number>;
+  tiers: Record<string, number>;
+  agents: Record<string, number>;
+}
+
 export interface UsageOverview {
   summary: UsageSummary;
   daily: UsageDailyPoint[];
@@ -1117,6 +1130,7 @@ export interface UsageOverview {
   tiers: UsageTierBreakdown[];
   agents: UsageAgentBreakdown[];
   top_sessions: UsageTopSessionRow[];
+  prior_costs: UsagePriorCosts;
   coverage: UsageCoverage;
 }
 

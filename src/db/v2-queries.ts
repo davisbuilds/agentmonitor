@@ -57,6 +57,7 @@ import type {
   UsageModelBreakdown,
   UsageModelDailyPoint,
   UsageOverview,
+  UsagePriorCosts,
   UsageFacets,
   UsageTierBreakdown,
   UsageAgentBreakdown,
@@ -3947,19 +3948,10 @@ export function getUsageSummary(
     estimatedCacheSavingsUsd += estimateCacheSavings(usageRow);
   }
 
-  let priorTotalCostUsd = 0;
-  if (params.date_from && params.date_to && params.date_from <= params.date_to) {
-    const rangeDays = inclusiveDateSpanDays(params.date_from, params.date_to);
-    const priorTo = addDaysToDateString(params.date_from, -1);
-    const priorFrom = priorTo ? addDaysToDateString(priorTo, -(rangeDays - 1)) : null;
-    if (priorFrom && priorTo) {
-      priorTotalCostUsd = selectUsageCostTotal({
-        ...params,
-        date_from: priorFrom,
-        date_to: priorTo,
-      });
-    }
-  }
+  const priorRange = priorUsageRange(params);
+  const priorTotalCostUsd = priorRange
+    ? selectUsageCostTotal({ ...params, date_from: priorRange.from, date_to: priorRange.to })
+    : 0;
   const costDeltaPct = priorTotalCostUsd > 0
     ? roundMetric(((row.total_cost_usd - priorTotalCostUsd) / priorTotalCostUsd) * 100)
     : 0;
@@ -4445,9 +4437,36 @@ export function getUsageOverview(params: UsageParams = {}): UsageOverview {
       tiers: getUsageTiers(params, usageRows),
       agents: getUsageAgents(params, usageRows),
       top_sessions: getUsageTopSessions(params, usageRows),
+      prior_costs: getUsagePriorCosts(params),
       coverage,
     };
   })();
+}
+
+/** The equal-length period just before the range, as Usage compares against it. */
+function priorUsageRange(params: UsageParams): { from: string; to: string } | null {
+  if (!params.date_from || !params.date_to || params.date_from > params.date_to) return null;
+  const rangeDays = inclusiveDateSpanDays(params.date_from, params.date_to);
+  const to = addDaysToDateString(params.date_from, -1);
+  const from = to ? addDaysToDateString(to, -(rangeDays - 1)) : null;
+  return from && to ? { from, to } : null;
+}
+
+/** Each breakdown's cost in the period before, by the same rollups as the range. */
+function getUsagePriorCosts(params: UsageParams = {}): UsagePriorCosts {
+  const range = priorUsageRange(params);
+  if (!range) return { range: null, projects: {}, models: {}, tiers: {}, agents: {} };
+  const prior = { ...params, date_from: range.from, date_to: range.to };
+  const rows = getUsageRows(prior);
+  const costs = <T extends { cost_usd: number }>(breakdown: T[], key: (row: T) => string) =>
+    Object.fromEntries(breakdown.map(row => [key(row), row.cost_usd]));
+  return {
+    range,
+    projects: costs(getUsageProjects(prior, rows), row => row.project),
+    models: costs(getUsageModels(prior, rows), row => row.model),
+    tiers: costs(getUsageTiers(prior, rows), row => `${row.provider}/${row.tier}`),
+    agents: costs(getUsageAgents(prior, rows), row => row.agent),
+  };
 }
 
 // --- Insights ---

@@ -410,7 +410,7 @@ test('usage overview and facets preserve the exact UI query contracts', async ()
   assert.deepEqual(facetsJson.projects, ['agentmonitor']);
   assert.deepEqual(facetsJson.models, ['gpt-5.4']);
   assert.deepEqual(Object.keys(overviewJson).sort(), [
-    'agents', 'coverage', 'daily', 'models', 'models_daily', 'projects', 'summary', 'tiers', 'top_sessions',
+    'agents', 'coverage', 'daily', 'models', 'models_daily', 'prior_costs', 'projects', 'summary', 'tiers', 'top_sessions',
   ]);
   assert.deepEqual(Object.keys(facetsJson).sort(), [
     'agents', 'models', 'projects', 'providers', 'tiers',
