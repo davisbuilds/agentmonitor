@@ -78,7 +78,9 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   state, and deduplication.
 - **Session browser:** browsing sessions, messages, turns, items, tool calls,
   watcher checkpoints, pins, and skill-context evidence derived from local
-  transcript sources.
+  transcript sources. A session keeps the directory it started in (`cwd`),
+  which names its repository for git activity; it stays local, out of API
+  responses and exports.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots, with a sampled quota history (`provider_quota_samples`): a row per
   changed reading at most every five minutes, each held until `observed_until`,

@@ -754,6 +754,9 @@ function initSchemaLocked(db: Database): void {
   if (!browsingSessionColumns.has('title')) {
     db.exec('ALTER TABLE browsing_sessions ADD COLUMN title TEXT');
   }
+  if (!browsingSessionColumns.has('cwd')) {
+    db.exec('ALTER TABLE browsing_sessions ADD COLUMN cwd TEXT');
+  }
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_parent ON browsing_sessions(parent_session_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');
@@ -1144,7 +1147,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 25;
+const DATA_SCHEMA_VERSION = 26;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1206,7 +1209,8 @@ export function runDataMigrations(db: Database): void {
     // install when the version advances.
     if (current < 24) classifyCodexInternalThreads(db);
     // v25 introduces no data correction: it adds provider_quota_samples, which
-    // read commands only install when the version advances.
+    // read commands only install when the version advances. v26 likewise only
+    // adds browsing_sessions.cwd; a forced session sync fills it for stored rows.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

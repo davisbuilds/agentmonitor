@@ -572,6 +572,7 @@ export function parseCodexSessionChunk(
       project,
       agent: 'codex',
       first_message: firstUserMessage,
+      cwd,
       title,
       started_at: startedAt,
       ended_at: endedAt,
