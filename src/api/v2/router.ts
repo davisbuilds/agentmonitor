@@ -46,6 +46,7 @@ import {
 import {
   getAnalyticsActivityResponse,
   getAnalyticsAgentsResponse,
+  getAnalyticsHeadlinesResponse,
   getAnalyticsHourOfWeekResponse,
   getAnalyticsProjectsResponse,
   getAnalyticsSkillHealthResponse,
@@ -843,6 +844,16 @@ v2Router.get('/analytics/top-sessions', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/top-sessions] Error:', err);
     res.status(500).json({ error: 'Failed to get top sessions analytics' });
+  }
+});
+
+v2Router.get('/analytics/headlines', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getAnalyticsHeadlinesResponse(params));
+  } catch (err) {
+    console.error('[v2/analytics/headlines] Error:', err);
+    res.status(500).json({ error: 'Failed to get analytics headlines' });
   }
 });
 

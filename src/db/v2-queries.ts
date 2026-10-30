@@ -46,6 +46,7 @@ import type {
   HourOfWeekDataPoint,
   TopSessionStat,
   VelocityMetrics,
+  AnalyticsHeadlines,
   AgentComparisonRow,
   UsageParams,
   UsageCoverage,
@@ -2658,6 +2659,217 @@ export function getAnalyticsTopSessions(params: AnalyticsParams = {}): TopSessio
     ORDER BY bs.message_count DESC, bs.started_at DESC, bs.id DESC
     LIMIT ?
   `).all(...filter.values, limit) as TopSessionStat[];
+}
+
+// Overview's headlines: each the range's value, the equal-length period just
+// before, and one value per day. Sessions, prompts and tool outcomes come from
+// the session list (by session start, as the rest of Overview counts); cost
+// from usage events, as Usage counts it; active time from message times.
+export function getAnalyticsHeadlines(params: AnalyticsParams = {}): AnalyticsHeadlines {
+  const from = rangeDay(params.date_from, 'from');
+  const to = rangeDay(params.date_to, 'to');
+  const days = from && to ? enumerateDateRange(from, to) : [];
+  const priorTo = from ? addDaysToDateString(from, -1) : null;
+  const priorFrom = priorTo && days.length > 0 ? addDaysToDateString(priorTo, -(days.length - 1)) : null;
+  const prior = priorFrom && priorTo ? { ...params, date_from: priorFrom, date_to: priorTo } : null;
+  const daily = (byDay: Map<string, number>, round: (value: number) => number = value => value) =>
+    days.map(day => round(byDay.get(day) ?? 0));
+
+  // Cost, as Usage counts it; per session only over sessions with a transcript.
+  const usageRows = getUsageRows(params);
+  const costByDay = new Map(getUsageDaily(params, usageRows).map(point => [point.date, point.cost_usd]));
+  const costBySession = new Map<string, number>();
+  for (const row of usageRows) {
+    const key = row.session_id.toLowerCase();
+    costBySession.set(key, (costBySession.get(key) ?? 0) + row.cost_usd);
+  }
+  const transcriptKeys = transcriptSessionKeys();
+  const transcribed = [...costBySession].filter(([key]) => transcriptKeys.has(key));
+  const transcribedCost = transcribed.reduce((sum, [, cost]) => sum + cost, 0);
+
+  const summary = getAnalyticsSummary(params);
+  const priorSummary = prior ? getAnalyticsSummary(prior) : null;
+  const activity = new Map(getAnalyticsActivity(params).map(point => [point.date, point]));
+  const delegation = sessionDelegationByDay(params);
+  const delegatedRows = [...delegation.values()].reduce((sum, day) => sum + day.delegated, 0);
+  const allRows = [...delegation.values()].reduce((sum, day) => sum + day.rows, 0);
+
+  const toolErrors = toolOutcomesByAgent(params);
+  const priorToolErrors = prior ? toolOutcomesByAgent(prior) : new Map<string, ToolOutcomeTally>();
+  const activeMinutes = activeMinutesByDay(params);
+  const totalActiveMinutes = [...activeMinutes.values()].reduce((sum, minutes) => sum + minutes, 0);
+  const priorActiveMinutes = prior ? [...activeMinutesByDay(prior).values()].reduce((sum, minutes) => sum + minutes, 0) : null;
+  const hours = (minutes: number) => roundMetric(minutes / 60);
+
+  return {
+    days,
+    prior_range: priorFrom && priorTo ? { from: priorFrom, to: priorTo } : null,
+    cost: {
+      value: roundCost(usageRows.reduce((sum, row) => sum + row.cost_usd, 0)),
+      prior: prior ? selectUsageCostTotal(prior) : null,
+      daily: daily(costByDay, roundCost),
+      per_session_usd: transcribed.length > 0 ? roundCost(transcribedCost / transcribed.length) : null,
+      sessions_with_transcript: transcribed.length,
+      usage_sessions: costBySession.size,
+    },
+    prompts: {
+      value: summary.total_user_messages,
+      prior: priorSummary?.total_user_messages ?? null,
+      daily: days.map(day => activity.get(day)?.user_messages ?? 0),
+    },
+    sessions: {
+      value: summary.total_sessions,
+      prior: priorSummary?.total_sessions ?? null,
+      daily: days.map(day => activity.get(day)?.sessions ?? 0),
+      delegated_share: allRows > 0 ? roundMetric(delegatedRows / allRows) : 0,
+      daily_delegated_share: days.map(day => {
+        const tally = delegation.get(day);
+        return tally && tally.rows > 0 ? roundMetric(tally.delegated / tally.rows) : null;
+      }),
+    },
+    tool_errors: [...toolErrors.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([agent, tally]) => ({
+      agent,
+      results: tally.results,
+      errors: tally.errors,
+      rate: outcomeRate(tally),
+      prior_rate: priorToolErrors.has(agent) ? outcomeRate(priorToolErrors.get(agent)!) : null,
+    })),
+    active_hours: {
+      value: hours(totalActiveMinutes),
+      prior: priorActiveMinutes === null ? null : hours(priorActiveMinutes),
+      daily: daily(activeMinutes, hours),
+    },
+  };
+}
+
+/**
+ * The session id behind every transcript row, lowercased, as usage events key
+ * it. A set of ids, so a Codex session stored under its rollout and its UUID
+ * is one entry; it counts nothing, which is why it may read the rows directly.
+ */
+function transcriptSessionKeys(): Set<string> {
+  return new Set((getDb().prepare(`SELECT ${browserSessionKey('b')} AS session_key FROM browsing_sessions b`)
+    .all() as Array<{ session_key: string }>).map(row => row.session_key.toLowerCase()));
+}
+
+/** Per start day: every listed session row, and the ones that are delegated work. */
+function sessionDelegationByDay(params: AnalyticsParams): Map<string, { rows: number; delegated: number }> {
+  const filter = buildAnalyticsFilterState(params);
+  const rows = getDb().prepare(`${sessionListCte}
+    SELECT started_at, relationship_type FROM listed_sessions ${filter.where}
+  `).all(...filter.values) as Array<{ started_at: string | null; relationship_type: string | null }>;
+  const byDay = new Map<string, { rows: number; delegated: number }>();
+  for (const row of rows) {
+    const day = row.started_at ? localDayOf(row.started_at) : null;
+    if (!day) continue;
+    const tally = byDay.get(day) ?? { rows: 0, delegated: 0 };
+    tally.rows += 1;
+    if (!isStartedSession(row.relationship_type)) tally.delegated += 1;
+    byDay.set(day, tally);
+  }
+  return byDay;
+}
+
+interface ToolOutcomeTally {
+  results: number;
+  errors: number;
+}
+
+function outcomeRate(tally: ToolOutcomeTally): number | null {
+  return tally.results > 0 ? roundRate(tally.errors / tally.results) : null;
+}
+
+/**
+ * Tool outcomes per agent, by session start. Claude records them in the
+ * transcript (is_error); Codex in its OTEL tool results, which land on the
+ * session's UUID row rather than the rollout row the session list shows, so
+ * every row of a listed session contributes. A rollout's 'completed' records
+ * no outcome and counts neither way.
+ */
+function toolOutcomesByAgent(params: AnalyticsParams): Map<string, ToolOutcomeTally> {
+  const db = getDb();
+  const filter = buildAnalyticsFilterState(params);
+  const listed = db.prepare(`${sessionListCte}
+    SELECT agent, ${browserSessionKey('listed_sessions')} AS session_key FROM listed_sessions ${filter.where}
+  `).all(...filter.values) as Array<{ agent: string; session_key: string }>;
+  const sessionByKey = new Map(listed.map(row => [`${row.agent}:${row.session_key.toLowerCase()}`, row]));
+  // Every row of each listed session, then only those rows' items: the
+  // session_id index seeks them, where a scan reads every item in the store.
+  const sessionById = new Map<string, (typeof listed)[number]>();
+  for (const row of db.prepare(`SELECT id, agent, ${browserSessionKey('b')} AS session_key FROM browsing_sessions b`)
+    .all() as Array<{ id: string; agent: string; session_key: string }>) {
+    const session = sessionByKey.get(`${row.agent}:${row.session_key.toLowerCase()}`);
+    if (session) sessionById.set(row.id, session);
+  }
+  const ids = [...sessionById.keys()];
+  const outcomes: Array<{ session_id: string; results: number; errors: number }> = [];
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    outcomes.push(...db.prepare(`
+      SELECT session_id, COUNT(*) AS results, SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END) AS errors
+      FROM session_items
+      WHERE session_id IN (${chunk.map(() => '?').join(', ')}) AND kind = 'tool_result' AND status IN ('success', 'error')
+      GROUP BY session_id
+    `).all(...chunk) as typeof outcomes);
+  }
+
+  const byAgent = new Map<string, ToolOutcomeTally>();
+  for (const row of outcomes) {
+    const session = sessionById.get(row.session_id);
+    if (!session) continue;
+    const tally = byAgent.get(session.agent) ?? { results: 0, errors: 0 };
+    tally.results += row.results;
+    tally.errors += row.errors;
+    byAgent.set(session.agent, tally);
+  }
+  return byAgent;
+}
+
+/** An idle gap longer than this ends a stretch of activity. */
+const ACTIVE_GAP_CAP_MS = 15 * 60 * 1000;
+
+/**
+ * Inferred active time per local day: the range's messages, from every
+ * session in scope, on one timeline, each gap to the previous message counted
+ * up to ACTIVE_GAP_CAP_MS and credited to the later message's day. One
+ * timeline, so parallel sessions and subagents add no time of their own.
+ */
+function activeMinutesByDay(params: AnalyticsParams): Map<string, number> {
+  const db = getDb();
+  const instant = observedInstant('m.timestamp');
+  const conditions = [`${instant} IS NOT NULL`];
+  const values: unknown[] = [];
+  if (params.date_from) {
+    conditions.push(`${instant} >= ?`);
+    values.push(dateParamLowerBound(params.date_from));
+  }
+  if (params.date_to) {
+    conditions.push(`${instant} < ?`);
+    values.push(dateParamUpperExclusive(params.date_to));
+  }
+  const scope = buildAnalyticsFilterState({ project: params.project, agent: params.agent });
+  const inScope = new Set((db.prepare(`${sessionListCte} SELECT id FROM listed_sessions ${scope.where}`)
+    .all(...scope.values) as Array<{ id: string }>).map(row => row.id));
+  const rows = db.prepare(`
+    SELECT m.session_id, ${instant} AS instant
+    FROM messages m INDEXED BY idx_messages_daily_activity
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY ${instant}
+  `).all(...values) as Array<{ session_id: string; instant: string }>;
+
+  const byDay = new Map<string, number>();
+  let previous: number | null = null;
+  for (const row of rows) {
+    if (!inScope.has(row.session_id)) continue;
+    const at = Date.parse(row.instant);
+    if (Number.isNaN(at)) continue;
+    if (previous !== null) {
+      const day = localDayOf(row.instant);
+      if (day) byDay.set(day, (byDay.get(day) ?? 0) + Math.min(at - previous, ACTIVE_GAP_CAP_MS) / 60_000);
+    }
+    previous = at;
+  }
+  return byDay;
 }
 
 export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetrics {

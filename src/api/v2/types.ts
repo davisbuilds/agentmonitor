@@ -186,6 +186,46 @@ export interface ActivityDataPoint {
   user_messages: number;
 }
 
+/** One Overview headline: the range's value, the period before's, and a value per day. */
+export interface HeadlineMetric {
+  value: number;
+  /** The same measure over the equal-length period just before; null without a range. */
+  prior: number | null;
+  /** One value per day of `AnalyticsHeadlines.days`. */
+  daily: number[];
+}
+
+export interface HeadlineToolErrors {
+  agent: string;
+  /** Tool results whose outcome the agent records (success or error). */
+  results: number;
+  errors: number;
+  /** errors / results; null with no results. */
+  rate: number | null;
+  prior_rate: number | null;
+}
+
+export interface AnalyticsHeadlines {
+  days: string[];
+  prior_range: { from: string; to: string } | null;
+  cost: HeadlineMetric & {
+    /** Cost per session, over the usage sessions that have a transcript; null with none. */
+    per_session_usd: number | null;
+    sessions_with_transcript: number;
+    usage_sessions: number;
+  };
+  prompts: HeadlineMetric;
+  sessions: HeadlineMetric & {
+    /** Share of the range's session rows that are delegated work (subagents, Codex app jobs). */
+    delegated_share: number;
+    daily_delegated_share: Array<number | null>;
+  };
+  /** One entry per agent with recorded tool outcomes; never pooled across agents. */
+  tool_errors: HeadlineToolErrors[];
+  /** Inferred: time with agent activity, each gap between messages capped at 15 minutes. */
+  active_hours: HeadlineMetric;
+}
+
 export interface ProjectBreakdown {
   project: string;
   session_count: number;
