@@ -6,8 +6,10 @@
     fetchSessionActivity,
     fetchSessionChildren,
     fetchSessionFriction,
+    fetchSessionGitActivity,
     type BrowsingSession,
     type FrictionSignal,
+    type SessionGitActivity,
     type Message,
     type SessionActivity,
     type SessionActivityBucket,
@@ -38,6 +40,7 @@
   let messages = $state<Message[]>([]);
   let children = $state<BrowsingSession[]>([]);
   let frictionSignals = $state<FrictionSignal[]>([]);
+  let git = $state<SessionGitActivity>({ commits: [], pull_requests: [] });
   let totalMessages = $state(0);
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -244,10 +247,11 @@
     activityError = null;
     activity = null;
     frictionSignals = [];
+    git = { commits: [], pull_requests: [] };
     activeBucketIndex = null;
     markHighlightedOrdinal(null);
     try {
-      const [sess, msgs, kids, activityData, friction] = await Promise.all([
+      const [sess, msgs, kids, activityData, friction, gitActivity] = await Promise.all([
         fetchBrowsingSession(sessionId),
         fetchMessages(sessionId, initialMessageOrdinal != null
           ? { around_ordinal: initialMessageOrdinal, limit: PAGE_SIZE }
@@ -263,6 +267,11 @@
           console.error('Failed to load session friction:', err);
           return { signals: [] };
         }),
+        // So is what it committed and opened.
+        fetchSessionGitActivity(sessionId).catch((err): SessionGitActivity => {
+          console.error('Failed to load session git activity:', err);
+          return { commits: [], pull_requests: [] };
+        }),
       ]);
       session = sess;
       messages = msgs.data;
@@ -270,6 +279,7 @@
       children = kids.data;
       activity = activityData;
       frictionSignals = friction.signals;
+      git = gitActivity;
       try {
         await pins.loadSession(sessionId);
       } catch (err) {
@@ -401,6 +411,26 @@
               disabled={signal.ordinal === null}
               onclick={() => { if (signal.ordinal !== null) void jumpToOrdinal(signal.ordinal); }}
             >{frictionLabel(signal)}</button>
+          {/each}
+        </div>
+      {/if}
+      {#if git.commits.length > 0 || git.pull_requests.length > 0}
+        <div class="flex flex-wrap items-center gap-1.5 text-meta text-text-muted" role="group" aria-label="Git activity">
+          <span>Git:</span>
+          {#if git.commits.length > 0}
+            <span
+              class="rounded-sm border border-line px-1.5 py-0.5"
+              title={git.commits.map(commit => `${commit.sha.slice(0, 7)} ${commit.subject}`).join('\n')}
+            >{git.commits.length} commit{git.commits.length === 1 ? '' : 's'}</span>
+          {/if}
+          {#each git.pull_requests as pr (pr.url)}
+            <a
+              class="rounded-sm border border-line px-1.5 py-0.5 tabular font-mono transition-colors hover:border-line-strong hover:text-text focus-visible:border-line-strong focus-visible:text-text"
+              href={pr.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={pr.merged ? 'Merged' : 'Not merged'}
+            >{pr.repo}#{pr.number}{pr.merged ? ' · merged' : ''}</a>
           {/each}
         </div>
       {/if}

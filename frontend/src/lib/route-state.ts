@@ -3,7 +3,7 @@ export type AppTab = 'monitor' | 'sessions' | 'analytics' | 'benchmarks';
 const TAB_SET = new Set<AppTab>(['monitor', 'sessions', 'analytics', 'benchmarks']);
 
 /** Sub-views inside the consolidated Analytics tab. */
-export type AnalyticsView = 'overview' | 'usage' | 'skills' | 'insights' | 'quality';
+export type AnalyticsView = 'overview' | 'usage' | 'skills' | 'git' | 'insights' | 'quality';
 export type AnalyticsSkillSignal =
   | 'all'
   | 'first_read'
@@ -184,6 +184,7 @@ export function parseAnalyticsRouteHash(hash: string, fallback: AnalyticsRouteSt
   const rawView = params.get('view');
   const view: AnalyticsView = rawView === 'usage'
     || rawView === 'skills'
+    || rawView === 'git'
     || rawView === 'insights'
     || rawView === 'quality'
     ? rawView

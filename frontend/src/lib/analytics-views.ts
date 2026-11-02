@@ -18,7 +18,7 @@ export function insightsViewAvailable(generation: InsightGenerationStatus, hasSa
 
 /** The Analytics sub-views to offer. Insights is hidden until a key or a saved insight is known to exist. */
 export function visibleAnalyticsViews(insights: InsightsAvailability): AnalyticsView[] {
-  const views: AnalyticsView[] = ['overview', 'usage', 'skills', 'insights', 'quality'];
+  const views: AnalyticsView[] = ['overview', 'usage', 'skills', 'git', 'insights', 'quality'];
   return insights === true ? views : views.filter(view => view !== 'insights');
 }
 

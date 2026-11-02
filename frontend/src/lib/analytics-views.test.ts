@@ -46,8 +46,8 @@ describe('insightsViewAvailable', () => {
 
 describe('visibleAnalyticsViews', () => {
   it('offers Insights only once a key is known to exist', () => {
-    expect(visibleAnalyticsViews(true)).toEqual(['overview', 'usage', 'skills', 'insights', 'quality']);
-    expect(visibleAnalyticsViews(false)).toEqual(['overview', 'usage', 'skills', 'quality']);
+    expect(visibleAnalyticsViews(true)).toEqual(['overview', 'usage', 'skills', 'git', 'insights', 'quality']);
+    expect(visibleAnalyticsViews(false)).toEqual(['overview', 'usage', 'skills', 'git', 'quality']);
   });
 
   it('hides Insights while the status is loading, so the tab never flashes', () => {
@@ -69,7 +69,7 @@ describe('resolveAnalyticsView', () => {
   });
 
   it('leaves every other view alone regardless of Insights availability', () => {
-    for (const view of ['overview', 'usage', 'skills', 'quality'] as const) {
+    for (const view of ['overview', 'usage', 'skills', 'git', 'quality'] as const) {
       for (const availability of [true, false, null]) {
         expect(resolveAnalyticsView(view, availability)).toBe(view);
       }
