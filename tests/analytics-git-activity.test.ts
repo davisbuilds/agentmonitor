@@ -94,3 +94,24 @@ test('a session shows the commits it proved and the pull requests it opened', ()
   });
   assert.deepEqual(queries.getSessionGitActivity('c2'), { commits: [], pull_requests: [] }, 'being near a commit proves nothing');
 });
+
+test('a pull request whose URL arrived in a later poll of the running process counts for its session', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 3, hour, minute)).toISOString();
+  const id = '01990000-0000-7000-8000-000000000002';
+  const polled = `rollout-2026-03-03T09-00-00-${id}`;
+  session.run(polled, 'codex', 'codex-jsonl', root, 'Open a PR', day(9), day(10));
+  const toolCall = (when: string, toolName: string, input: string, callId: string, output: string) => {
+    const messageId = Number(message.run(polled, ordinal++, when).lastInsertRowid);
+    call.run(messageId, polled, toolName, callId, input);
+    result.run(id, `${callId}:result`, JSON.stringify({ output }));
+  };
+  toolCall(day(9, 10), 'exec_command', JSON.stringify({ cmd: 'gh pr create --fill' }), 'call_open',
+    'Chunk ID: aa\nProcess running with session ID 4242\nOutput:\n');
+  // A poll of another process names an existing pull request: it opened nothing here.
+  toolCall(day(9, 11), 'write_stdin', JSON.stringify({ session_id: 5151, chars: '' }), 'call_other', prUrl(3));
+  toolCall(day(9, 12), 'write_stdin', JSON.stringify({ session_id: 4242, chars: '' }), 'call_poll', `Output:\n${prUrl(9)}\n`);
+
+  assert.deepEqual(queries.getSessionGitActivity(polled).pull_requests.map(pr => pr.number), [9]);
+  const activity = queries.getAnalyticsGitActivity({ date_from: '2026-03-03', date_to: '2026-03-03' });
+  assert.deepEqual(activity.agents.map(row => [row.agent, row.prs_opened]), [['codex', 1]]);
+});

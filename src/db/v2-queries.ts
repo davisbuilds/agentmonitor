@@ -110,7 +110,10 @@ import {
   attributeCommit,
   COMMIT_CALL_WINDOW_MS,
   mergedPullRequestNumber,
+  pollsProcess,
+  PROCESS_POLL_WINDOW_MS,
   pullRequestUrls,
+  runningProcessIds,
   type CommitAttribution,
   type CommitCall,
 } from '../git/attribution.js';
@@ -3061,19 +3064,53 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
     WHERE kind = 'tool_result' AND source_item_id IN (?, ?) AND session_id IN (?, ?)
     LIMIT 1
   `);
+  const resultOf = (sessionId: string, toolUseId: string | null): string => {
+    if (!toolUseId) return '';
+    const uuidRow = sessionId.startsWith('rollout-') ? sessionId.slice(-36).toLowerCase() : sessionId;
+    return (result.get(toolUseId, `${toolUseId}:result`, sessionId, uuidRow) as { payload_json: string } | undefined)?.payload_json ?? '';
+  };
+  const pollRows = db.prepare(`
+    SELECT tc.tool_name, tc.input_json, tc.tool_use_id, m.timestamp FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
+    WHERE tc.session_id = ? AND (tc.tool_name = 'write_stdin' OR tc.input_json LIKE '%write_stdin%')
+      AND m.timestamp IS NOT NULL AND julianday(m.timestamp) > julianday(?) AND julianday(m.timestamp) <= julianday(?)
+    ORDER BY julianday(m.timestamp), tc.id
+  `);
+  // Read once per session: most of a code-mode session's calls leave a process running.
+  const pollsBySession = new Map<string, Array<{ tool_name: string; input: string; tool_use_id: string | null; at: number }>>();
+  const pollsOf = (sessionId: string) => {
+    let found = pollsBySession.get(sessionId);
+    if (!found) {
+      const rows = pollRows.all(sessionId, from, new Date(toMs + PROCESS_POLL_WINDOW_MS).toISOString()) as Array<{
+        tool_name: string; input_json: string | null; tool_use_id: string | null; timestamp: string;
+      }>;
+      found = rows.map(row => ({ tool_name: row.tool_name, input: row.input_json ?? '', tool_use_id: row.tool_use_id, at: Date.parse(row.timestamp) }));
+      pollsBySession.set(sessionId, found);
+    }
+    return found;
+  };
+  // A Codex call that returned while its process ran (a push hook, a slow
+  // `gh`) printed the rest to the polls of that process, so they are read as
+  // part of its result.
+  const withPolls = (sessionId: string, at: number, own: string): string => {
+    const ids = runningProcessIds(own);
+    if (ids.length === 0) return own;
+    const outputs = pollsOf(sessionId)
+      .filter(poll => poll.at > at && poll.at <= at + PROCESS_POLL_WINDOW_MS)
+      .filter(poll => ids.some(id => pollsProcess(poll.tool_name, poll.input, id)))
+      .map(poll => resultOf(sessionId, poll.tool_use_id));
+    return [own, ...outputs].join('\n');
+  };
   const commits: GitToolCall[] = [];
   const pullRequests: GitToolCall[] = [];
   for (const row of rows) {
-    const uuidRow = row.session_id.startsWith('rollout-') ? row.session_id.slice(-36).toLowerCase() : row.session_id;
-    const found = row.tool_use_id
-      ? result.get(row.tool_use_id, `${row.tool_use_id}:result`, row.session_id, uuidRow) as { payload_json: string } | undefined
-      : undefined;
+    const at = Date.parse(row.timestamp);
+    const own = resultOf(row.session_id, row.tool_use_id);
     const call: GitToolCall = {
       session_id: row.session_id,
       agent: row.agent,
-      at: Date.parse(row.timestamp),
+      at,
       input: row.input_json ?? '',
-      result: found?.payload_json ?? '',
+      result: row.agent === 'codex' ? withPolls(row.session_id, at, own) : own,
       cwd: row.cwd,
       title: row.title,
       first_message: row.first_message,

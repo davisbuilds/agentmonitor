@@ -4,7 +4,9 @@ import {
   attributeCommit,
   githubRepoOfRemote,
   mergedPullRequestNumber,
+  pollsProcess,
   pullRequestUrls,
+  runningProcessIds,
   type CommitCall,
 } from '../src/git/attribution.js';
 
@@ -62,4 +64,19 @@ test('pull requests come from their URLs, merges from their commits, repositorie
   assert.equal(githubRepoOfRemote('git@github.com:Owner/Repo.git'), 'owner/repo');
   assert.equal(githubRepoOfRemote('https://github.com/owner/repo'), 'owner/repo');
   assert.equal(githubRepoOfRemote('https://gitlab.com/owner/repo.git'), null);
+});
+
+test('a Codex call left running names its processes, and a poll of one carries the rest of its output', () => {
+  const native = JSON.stringify({ output: 'Chunk ID: e82876\nWall time: 1.0020 seconds\nProcess running with session ID 23171\nOutput:\n' });
+  assert.deepEqual(runningProcessIds(native), ['23171']);
+  const chunks = '{"chunk_id":"451d0f","exit_code":0,"output":""}{"chunk_id":"3b73f0","session_id":62286,"output":""}';
+  const codeMode = JSON.stringify({ content: `Script completed\nOutput:\n${chunks}` });
+  assert.deepEqual(runningProcessIds(codeMode), ['62286'], 'a finished chunk has an exit code, not a process');
+  assert.deepEqual(runningProcessIds(JSON.stringify({ content: '[main abc1234] fix: done' })), []);
+
+  assert.ok(pollsProcess('write_stdin', '{"session_id":23171,"chars":""}', '23171'));
+  assert.ok(pollsProcess('exec', JSON.stringify('text(await tools.write_stdin({session_id:62286,chars:""}));'), '62286'));
+  assert.ok(pollsProcess('exec', JSON.stringify('for (const id of [63370,36264])text(await tools.write_stdin({session_id:id}));'), '36264'));
+  assert.ok(!pollsProcess('write_stdin', '{"session_id":231710,"chars":""}', '23171'), 'another process whose id contains this one');
+  assert.ok(!pollsProcess('exec', JSON.stringify('text(await tools.exec_command({cmd:"sleep 23171"}));'), '23171'), 'not a poll');
 });

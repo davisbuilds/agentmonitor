@@ -31,6 +31,8 @@ export type CommitAttribution =
 export const COMMIT_CALL_WINDOW_MS = 2 * 60_000;
 /** How long before its commit a session may have written the message (a `-F` file). */
 export const MESSAGE_LEAD_MS = 15 * 60_000;
+/** How long after a call a poll of a process it left running still carries that call's output. */
+export const PROCESS_POLL_WINDOW_MS = 30 * 60_000;
 const SUBJECT_PROBE_LENGTH = 50;
 
 /** Ways a subject can appear in a stored input: raw, or escaped once or twice for JSON. */
@@ -81,6 +83,25 @@ export function attributeCommit(
     .some(input => mentionsSubject(input, commit.subject)));
   if (wrote.length === 1) return { kind: 'session', session_id: wrote[0][0], agent: wrote[0][1], evidence: 'subject' };
   return { kind: 'time_only' };
+}
+
+/**
+ * Processes a Codex call left running when its result came back: the rest of
+ * their output, a `gh pr create` URL or a commit line, arrives in later polls.
+ * Native calls say `Process running with session ID N`; code mode returns a
+ * chunk carrying `"session_id":N`, escaped once more inside the stored result.
+ */
+export function runningProcessIds(result: string): string[] {
+  const ids = new Set<string>();
+  for (const match of result.matchAll(/Process running with session ID (\d+)/g)) ids.add(match[1]);
+  for (const match of result.matchAll(/\\*"session_id\\*"\s*:\s*(\d+)/g)) ids.add(match[1]);
+  return [...ids];
+}
+
+/** Whether a call polls one of a session's processes: `write_stdin`, called as a tool or from a script. */
+export function pollsProcess(toolName: string, input: string, id: string): boolean {
+  if (toolName !== 'write_stdin' && !input.includes('write_stdin')) return false;
+  return new RegExp(`(?<!\\d)${id}(?!\\d)`).test(input);
 }
 
 export interface PullRequestRef {
