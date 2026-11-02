@@ -52,6 +52,13 @@ import type {
   DelegationDay,
   DelegationSplit,
   AnalyticsFriction,
+  AnalyticsGitActivity,
+  GitActivityAgent,
+  GitActivityCoverage,
+  GitActivityDay,
+  GitActivityProject,
+  GitPullRequest,
+  SessionGitActivity,
   FrictionSession,
   FrictionSignal,
   AgentComparisonRow,
@@ -99,6 +106,15 @@ import {
 } from './usage-reconciliation.js';
 import { selectSkillInvocationOccurrences } from '../skills/invocation-ledger.js';
 import { getSkillConsultationAnalytics } from '../skills/consultation-analytics.js';
+import {
+  attributeCommit,
+  COMMIT_CALL_WINDOW_MS,
+  mergedPullRequestNumber,
+  pullRequestUrls,
+  type CommitAttribution,
+  type CommitCall,
+} from '../git/attribution.js';
+import { projectNameFromCwd } from '../util/project-identity.js';
 import { browserAgentName, eventAgentType } from '../util/agent-identity.js';
 import {
   dateParamLowerBound,
@@ -3004,6 +3020,251 @@ export function getAnalyticsFriction(params: AnalyticsParams = {}): AnalyticsFri
     interruptions: bySignal.interruptions,
     recent: met.slice(0, params.limit ?? FRICTION_RECENT_SESSIONS),
   };
+}
+
+/** A `git commit` or `gh pr create` a session ran, with its result, timed by the message that ran it. */
+interface GitToolCall extends CommitCall {
+  /** The session's directory, for the project of a pull request it opened. */
+  cwd: string | null;
+  title: string | null;
+  first_message: string | null;
+}
+
+/**
+ * The `git commit` and `gh pr create` calls made between two instants, each
+ * with its result, read from the session's items under the call's id on the
+ * rollout row or, for Codex, on its UUID row. One scan serves both commands,
+ * over the sessions whose span overlaps the window rather than all of history.
+ * Reads browser rows directly: it looks calls up by session and counts no
+ * sessions.
+ */
+function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commits: GitToolCall[]; pullRequests: GitToolCall[] } {
+  const db = getDb();
+  const from = new Date(fromMs).toISOString();
+  const to = new Date(toMs).toISOString();
+  const rows = db.prepare(`
+    SELECT tc.session_id, b.agent, b.cwd, b.title, substr(b.first_message, 1, 500) AS first_message,
+      m.timestamp, tc.input_json, tc.tool_use_id, instr(tc.input_json, 'gh pr create') > 0 AS opens_pr
+    FROM browsing_sessions b
+    JOIN tool_calls tc ON tc.session_id = b.id
+    JOIN messages m ON m.id = tc.message_id
+    WHERE ${sessionId ? 'b.id = @session' : `(b.started_at IS NULL OR julianday(b.started_at) <= julianday(@to))
+      AND (COALESCE(b.last_item_at, b.ended_at) IS NULL OR julianday(COALESCE(b.last_item_at, b.ended_at)) >= julianday(@from))`}
+      AND (tc.input_json LIKE '%git commit%' OR tc.input_json LIKE '%gh pr create%')
+      AND m.timestamp IS NOT NULL AND julianday(m.timestamp) BETWEEN julianday(@from) AND julianday(@to)
+  `).all({ from, to, ...(sessionId ? { session: sessionId } : {}) }) as Array<{
+    session_id: string; agent: string; cwd: string | null; title: string | null; first_message: string | null;
+    timestamp: string; input_json: string | null; tool_use_id: string | null; opens_pr: number;
+  }>;
+  const result = db.prepare(`
+    SELECT payload_json FROM session_items
+    WHERE kind = 'tool_result' AND source_item_id IN (?, ?) AND session_id IN (?, ?)
+    LIMIT 1
+  `);
+  const commits: GitToolCall[] = [];
+  const pullRequests: GitToolCall[] = [];
+  for (const row of rows) {
+    const uuidRow = row.session_id.startsWith('rollout-') ? row.session_id.slice(-36).toLowerCase() : row.session_id;
+    const found = row.tool_use_id
+      ? result.get(row.tool_use_id, `${row.tool_use_id}:result`, row.session_id, uuidRow) as { payload_json: string } | undefined
+      : undefined;
+    const call: GitToolCall = {
+      session_id: row.session_id,
+      agent: row.agent,
+      at: Date.parse(row.timestamp),
+      input: row.input_json ?? '',
+      result: found?.payload_json ?? '',
+      cwd: row.cwd,
+      title: row.title,
+      first_message: row.first_message,
+    };
+    if (call.input.includes('git commit')) commits.push(call);
+    if (row.opens_pr) pullRequests.push(call);
+  }
+  const byTime = (a: GitToolCall, b: GitToolCall) => a.at - b.at;
+  return { commits: commits.sort(byTime), pullRequests: pullRequests.sort(byTime) };
+}
+
+/** A session's tool call inputs between two instants, for a commit message written before its commit. */
+function sessionInputsBetween(sessionId: string, fromMs: number, toMs: number): string[] {
+  return (getDb().prepare(`
+    SELECT tc.input_json FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
+    WHERE tc.session_id = ? AND m.timestamp IS NOT NULL AND julianday(m.timestamp) BETWEEN julianday(?) AND julianday(?)
+  `).all(sessionId, new Date(fromMs).toISOString(), new Date(toMs).toISOString()) as Array<{ input_json: string | null }>)
+    .map(row => row.input_json ?? '');
+}
+
+interface AttributedCommit {
+  repo_root: string;
+  sha: string;
+  subject: string;
+  authored_at: string;
+  project: string;
+  co_authors: string[];
+  attribution: CommitAttribution;
+}
+
+/** The range's commits, each credited to the session that proves it, if any. Merges are nobody's work. */
+function attributedCommits(fromMs: number, toMs: number, calls: GitToolCall[]): AttributedCommit[] {
+  const commits = getDb().prepare(`
+    SELECT repo_root, sha, subject, authored_at, co_authors_json FROM git_commits
+    WHERE is_merge = 0 AND authored_at >= ? AND authored_at < ?
+    ORDER BY authored_at, sha
+  `).all(new Date(fromMs).toISOString(), new Date(toMs).toISOString()) as Array<{
+    repo_root: string; sha: string; subject: string | null; authored_at: string; co_authors_json: string;
+  }>;
+  return commits.map(row => {
+    const fact = { sha: row.sha, subject: row.subject ?? '', at: Date.parse(row.authored_at) };
+    return {
+      repo_root: row.repo_root,
+      sha: row.sha,
+      subject: row.subject ?? '',
+      authored_at: row.authored_at,
+      project: projectNameFromCwd(row.repo_root) ?? row.repo_root.split('/').filter(Boolean).pop() ?? row.repo_root,
+      co_authors: parseJsonString(row.co_authors_json) as string[] ?? [],
+      attribution: attributeCommit(fact, calls, sessionInputsBetween),
+    };
+  });
+}
+
+/** Merged pull requests by `owner/name#number`, from merge commits in repositories with a GitHub remote. */
+function mergedPullRequests(): Set<string> {
+  const merged = new Set<string>();
+  const rows = getDb().prepare(`
+    SELECT r.github_repo, c.subject, c.is_merge FROM git_commits c JOIN git_repos r ON r.root = c.repo_root
+    WHERE r.github_repo IS NOT NULL AND (c.is_merge = 1 OR c.subject LIKE '%(#%)')
+  `).all() as Array<{ github_repo: string; subject: string | null; is_merge: number }>;
+  for (const row of rows) {
+    const number = mergedPullRequestNumber(row.subject ?? '', row.is_merge === 1);
+    if (number !== null) merged.add(`${row.github_repo}#${number}`);
+  }
+  return merged;
+}
+
+/** The pull requests sessions opened between two instants, once each, by the first call that named them. */
+function openedPullRequests(calls: GitToolCall[]): Array<GitPullRequest & { project: string | null }> {
+  const merged = mergedPullRequests();
+  const opened = new Map<string, GitPullRequest & { project: string | null }>();
+  for (const call of calls) {
+    for (const ref of pullRequestUrls(call.result)) {
+      const key = `${ref.repo}#${ref.number}`;
+      if (opened.has(key)) continue;
+      opened.set(key, {
+        url: ref.url,
+        repo: ref.repo,
+        number: ref.number,
+        opened_at: new Date(call.at).toISOString(),
+        merged: merged.has(key),
+        session_id: call.session_id,
+        agent: call.agent,
+        title: call.title,
+        first_message: call.first_message,
+        project: call.cwd ? projectNameFromCwd(call.cwd) : null,
+      });
+    }
+  }
+  return [...opened.values()];
+}
+
+const GIT_RECENT_PULL_REQUESTS = 10;
+
+/**
+ * Commits and pull requests in the range, by agent, project and day. A commit
+ * counts for an agent only when one of its sessions proves it (see
+ * attributeCommit); every other commit counts as outside, and coverage says
+ * how many were only near a session's commit, or carry a Claude trailer with
+ * no session left. A pull request is merged when a merge commit for it is in
+ * local git.
+ */
+export function getAnalyticsGitActivity(params: AnalyticsParams = {}): AnalyticsGitActivity {
+  const fromDay = rangeDay(params.date_from, 'from');
+  const toDay = rangeDay(params.date_to, 'to');
+  const fromMs = params.date_from ? Date.parse(dateParamLowerBound(params.date_from)) : 0;
+  const toMs = params.date_to ? Date.parse(dateParamUpperExclusive(params.date_to)) : Date.now() + COMMIT_CALL_WINDOW_MS;
+  const wantAgent = params.agent ? browserAgentName(params.agent) : null;
+
+  const calls = gitToolCalls(fromMs - COMMIT_CALL_WINDOW_MS, toMs + COMMIT_CALL_WINDOW_MS);
+  const commits = attributedCommits(fromMs, toMs, calls.commits)
+    .filter(commit => !params.project || commit.project === params.project)
+    .filter(commit => !wantAgent || (commit.attribution.kind === 'session' && commit.attribution.agent === wantAgent));
+  const pullRequests = openedPullRequests(calls.pullRequests.filter(call => call.at >= fromMs && call.at < toMs))
+    .filter(pr => !params.project || pr.project === params.project)
+    .filter(pr => !wantAgent || pr.agent === wantAgent);
+
+  const byDay = new Map<string, GitActivityDay>();
+  const agents = new Map<string, GitActivityAgent & { sessionIds: Set<string> }>();
+  const projects = new Map<string, GitActivityProject>();
+  const coverage: GitActivityCoverage = { commits: 0, proven: 0, time_only: 0, trailer_without_session: 0 };
+  const agentOf = (agent: string) => {
+    let row = agents.get(agent);
+    if (!row) agents.set(agent, row = { agent, commits: 0, sessions: 0, prs_opened: 0, prs_merged: 0, sessionIds: new Set() });
+    return row;
+  };
+  for (const commit of commits) {
+    const date = localDayOf(commit.authored_at) ?? commit.authored_at.slice(0, 10);
+    const day = byDay.get(date) ?? { date, by_agent: {}, outside: 0 };
+    const project = projects.get(commit.project) ?? { project: commit.project, commits: 0, by_agent: {}, outside: 0 };
+    coverage.commits += 1;
+    project.commits += 1;
+    if (commit.attribution.kind === 'session') {
+      const { agent, session_id } = commit.attribution;
+      coverage.proven += 1;
+      day.by_agent[agent] = (day.by_agent[agent] ?? 0) + 1;
+      project.by_agent[agent] = (project.by_agent[agent] ?? 0) + 1;
+      const row = agentOf(agent);
+      row.commits += 1;
+      row.sessionIds.add(session_id);
+    } else {
+      if (commit.attribution.kind === 'time_only') coverage.time_only += 1;
+      if (commit.co_authors.some(author => /^Claude\b/i.test(author))) coverage.trailer_without_session += 1;
+      day.outside += 1;
+      project.outside += 1;
+    }
+    byDay.set(date, day);
+    projects.set(commit.project, project);
+  }
+  for (const pr of pullRequests) {
+    const row = agentOf(pr.agent);
+    row.prs_opened += 1;
+    if (pr.merged) row.prs_merged += 1;
+  }
+
+  const active = [...byDay.keys()].sort();
+  const first = fromDay ?? active[0];
+  const last = toDay ?? active[active.length - 1];
+  const days = first && last
+    ? enumerateDateRange(first, last).map(date => byDay.get(date) ?? { date, by_agent: {}, outside: 0 })
+    : [];
+  return {
+    days,
+    agents: [...agents.values()]
+      .map(({ sessionIds, ...row }) => ({ ...row, sessions: sessionIds.size }))
+      .sort((a, b) => b.commits - a.commits || b.prs_opened - a.prs_opened || a.agent.localeCompare(b.agent)),
+    projects: [...projects.values()].sort((a, b) => b.commits - a.commits || a.project.localeCompare(b.project)),
+    pull_requests: pullRequests
+      .sort((a, b) => b.opened_at.localeCompare(a.opened_at))
+      .slice(0, GIT_RECENT_PULL_REQUESTS)
+      .map(({ project: _project, ...pr }) => pr),
+    coverage,
+  };
+}
+
+/** One session's proven commits and the pull requests it opened, for its viewer. */
+export function getSessionGitActivity(sessionId: string): SessionGitActivity {
+  const session = getDb().prepare('SELECT started_at, ended_at, last_item_at FROM browsing_sessions WHERE id = ?')
+    .get(sessionId) as { started_at: string | null; ended_at: string | null; last_item_at: string | null } | undefined;
+  const start = session?.started_at ? Date.parse(session.started_at) : Number.NaN;
+  if (!session || Number.isNaN(start)) return { commits: [], pull_requests: [] };
+  const endIso = session.ended_at ?? session.last_item_at;
+  const end = endIso ? Date.parse(endIso) : Date.now();
+  // Other sessions' calls compete for the same commits, so read them all for the span.
+  const calls = gitToolCalls(start - 2 * COMMIT_CALL_WINDOW_MS, end + 2 * COMMIT_CALL_WINDOW_MS);
+  const commits = attributedCommits(start - COMMIT_CALL_WINDOW_MS, end + COMMIT_CALL_WINDOW_MS, calls.commits)
+    .filter(commit => commit.attribution.kind === 'session' && commit.attribution.session_id === sessionId)
+    .map(commit => ({ sha: commit.sha, subject: commit.subject, project: commit.project, authored_at: commit.authored_at }));
+  const pullRequests = openedPullRequests(calls.pullRequests.filter(call => call.session_id === sessionId))
+    .map(pr => ({ url: pr.url, repo: pr.repo, number: pr.number, opened_at: pr.opened_at, merged: pr.merged }));
+  return { commits, pull_requests: pullRequests };
 }
 
 /** One session's friction signals, for its viewer. */

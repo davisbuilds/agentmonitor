@@ -44,6 +44,7 @@ const commit = (cwd: string, file: string, message: string, at: string) => {
 
 fs.mkdirSync(repo);
 git(repo, ['init', '-q', '-b', 'main']);
+git(repo, ['remote', 'add', 'origin', 'git@github.com:Example/alpha.git']);
 // Within the history cap but before any session here: the first scan does not reach it.
 commit(repo, 'old.txt', 'chore: before the sessions', '2026-01-15T00:00:00Z');
 const first = commit(repo, 'a.ts', 'feat: add a', '2026-03-02T10:00:00Z');
@@ -73,6 +74,8 @@ test('commits come from the repositories sessions ran in, a worktree folded into
   assert.deepEqual(JSON.parse(rows[1].co_authors_json), ['Claude Opus 5.5 <noreply@anthropic.com>']);
   assert.deepEqual(JSON.parse(rows[1].files_json), ['AGENTS.md']);
   assert.deepEqual(JSON.parse(rows[0].co_authors_json), []);
+  assert.equal((db.prepare('SELECT github_repo FROM git_repos WHERE root = ?').get(repo) as { github_repo: string | null }).github_repo,
+    'example/alpha', 'the GitHub repository origin points at');
 });
 
 test('a commit rewritten since the last scan is replaced, not counted twice', async () => {

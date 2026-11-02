@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Database } from 'better-sqlite3';
+import { githubRepoOfRemote } from './attribution.js';
 
 const run = promisify(execFile);
 
@@ -98,6 +99,15 @@ async function repositoriesInside(dir: string): Promise<string[]> {
   return [...roots];
 }
 
+/** The GitHub repository `origin` points at, which names this repository's pull requests; null without one. */
+async function originGithubRepo(root: string): Promise<string | null> {
+  try {
+    return githubRepoOfRemote(await git(root, ['remote', 'get-url', 'origin']));
+  } catch {
+    return null;
+  }
+}
+
 async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
   // --since stops walking at the first commit older than the cutoff, so a
   // backdated commit would hide the recent ones behind it, and the pass would
@@ -164,14 +174,15 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
 
   const lastScan = db.prepare('SELECT last_scanned_at, covered_from FROM git_repos WHERE root = ?');
   const recordScan = db.prepare(`
-    INSERT INTO git_repos (root, last_scanned_at, covered_from, last_error) VALUES (?, ?, ?, ?)
+    INSERT INTO git_repos (root, last_scanned_at, covered_from, last_error, github_repo) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(root) DO UPDATE SET
       last_scanned_at = COALESCE(excluded.last_scanned_at, git_repos.last_scanned_at),
       covered_from = CASE
         WHEN excluded.covered_from IS NULL THEN git_repos.covered_from
         WHEN git_repos.covered_from IS NULL OR excluded.covered_from < git_repos.covered_from THEN excluded.covered_from
         ELSE git_repos.covered_from END,
-      last_error = excluded.last_error
+      last_error = excluded.last_error,
+      github_repo = COALESCE(excluded.github_repo, git_repos.github_repo)
   `);
   const upsert = db.prepare(`
     INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, author_name, author_email, subject, co_authors_json, files_json, is_merge)
@@ -197,12 +208,13 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
       ? Math.min(now.getTime(), Date.parse(state.last_scanned_at)) - RESCAN_DAYS * DAY_MS
       : wanted;
     const since = new Date(Math.max(floor, Number.isNaN(covered) || wanted < covered ? Math.min(reread, wanted) : reread));
+    const githubRepo = await originGithubRepo(root);
     let commits: CommitRecord[];
     try {
       commits = await readCommits(root, since);
     } catch (err) {
       report.errors += 1;
-      recordScan.run(root, null, null, err instanceof Error ? err.message.slice(0, 500) : String(err));
+      recordScan.run(root, null, null, err instanceof Error ? err.message.slice(0, 500) : String(err), null);
       continue;
     }
     db.transaction(() => {
@@ -227,7 +239,7 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
         remove.run(root, sha);
         report.commits_removed += 1;
       }
-      recordScan.run(root, now.toISOString(), since.toISOString(), null);
+      recordScan.run(root, now.toISOString(), since.toISOString(), null, githubRepo);
     })();
     report.scanned += 1;
     report.commits_seen += commits.length;
