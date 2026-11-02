@@ -115,3 +115,12 @@ test('a pull request whose URL arrived in a later poll of the running process co
   const activity = queries.getAnalyticsGitActivity({ date_from: '2026-03-03', date_to: '2026-03-03' });
   assert.deepEqual(activity.agents.map(row => [row.agent, row.prs_opened]), [['codex', 1]]);
 });
+
+test('GitHub\'s word marks a pull request merged that local git never saw merge', () => {
+  assert.equal(queries.getSessionGitActivity(rollout).pull_requests[0].merged, false);
+  const cache = db.prepare("INSERT INTO github_pull_requests (repo, number, state, merged_at, checked_at) VALUES ('owner/alpha', ?, ?, ?, ?)");
+  cache.run(8, 'MERGED', at(21), at(22));
+  // Local git's merge commit for #7 stands, whatever a stale answer says.
+  cache.run(7, 'OPEN', null, at(9));
+  assert.deepEqual(queries.getAnalyticsGitActivity(range).pull_requests.map(pr => [pr.number, pr.merged]), [[8, true], [7, true]]);
+});

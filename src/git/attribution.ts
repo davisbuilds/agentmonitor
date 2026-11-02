@@ -30,7 +30,7 @@ export type CommitAttribution =
 /** A commit's call ran within this long of its author date. */
 export const COMMIT_CALL_WINDOW_MS = 2 * 60_000;
 /** How long before its commit a session may have written the message (a `-F` file). */
-export const MESSAGE_LEAD_MS = 15 * 60_000;
+const MESSAGE_LEAD_MS = 15 * 60_000;
 /** How long after a call a poll of a process it left running still carries that call's output. */
 export const PROCESS_POLL_WINDOW_MS = 30 * 60_000;
 const SUBJECT_PROBE_LENGTH = 50;
@@ -44,7 +44,7 @@ function subjectProbes(subject: string): string[] {
   return [...new Set([head, once, twice])];
 }
 
-export function mentionsSubject(text: string, subject: string): boolean {
+function mentionsSubject(text: string, subject: string): boolean {
   return subjectProbes(subject).some(probe => text.includes(probe));
 }
 

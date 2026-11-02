@@ -21,7 +21,8 @@ for (const cache of TOOL_CACHES) {
 }
 const child = spawn(process.execPath, ['--import', 'tsx', '--test', ...process.argv.slice(2)], {
   stdio: 'inherit',
-  env: { ...process.env, TMPDIR: privateTmp, TMP: privateTmp, TEMP: privateTmp },
+  // No test asks GitHub anything: a server a test starts keeps its git pass offline.
+  env: { ...process.env, TMPDIR: privateTmp, TMP: privateTmp, TEMP: privateTmp, AGENTMONITOR_GITHUB_LOOKUPS: '0' },
 });
 
 const forward = signal => child.kill(signal);

@@ -3164,9 +3164,15 @@ function attributedCommits(fromMs: number, toMs: number, calls: GitToolCall[]): 
   });
 }
 
-/** Merged pull requests by `owner/name#number`, from merge commits in repositories with a GitHub remote. */
+/**
+ * Merged pull requests by `owner/name#number`: GitHub's word where it was
+ * asked (src/git/github.ts), and merge commits in local repositories with a
+ * GitHub remote, which show a merge only once it was pulled.
+ */
 function mergedPullRequests(): Set<string> {
   const merged = new Set<string>();
+  const onGithub = getDb().prepare("SELECT repo, number FROM github_pull_requests WHERE state = 'MERGED'").all() as Array<{ repo: string; number: number }>;
+  for (const row of onGithub) merged.add(`${row.repo}#${row.number}`);
   const rows = getDb().prepare(`
     SELECT r.github_repo, c.subject, c.is_merge FROM git_commits c JOIN git_repos r ON r.root = c.repo_root
     WHERE r.github_repo IS NOT NULL AND (c.is_merge = 1 OR c.subject LIKE '%(#%)')
@@ -3203,6 +3209,11 @@ function openedPullRequests(calls: GitToolCall[]): Array<GitPullRequest & { proj
   return [...opened.values()];
 }
 
+/** The pull requests sessions opened between two instants, for asking GitHub about. */
+export function pullRequestsOpenedBetween(fromMs: number, toMs: number): Array<{ repo: string; number: number }> {
+  return openedPullRequests(gitToolCalls(fromMs, toMs).pullRequests).map(pr => ({ repo: pr.repo, number: pr.number }));
+}
+
 const GIT_RECENT_PULL_REQUESTS = 10;
 
 /**
@@ -3210,8 +3221,8 @@ const GIT_RECENT_PULL_REQUESTS = 10;
  * counts for an agent only when one of its sessions proves it (see
  * attributeCommit); every other commit counts as outside, and coverage says
  * how many were only near a session's commit, or carry a Claude trailer with
- * no session left. A pull request is merged when a merge commit for it is in
- * local git.
+ * no session left. A pull request is merged when GitHub says so or a merge
+ * commit for it is in local git.
  */
 export function getAnalyticsGitActivity(params: AnalyticsParams = {}): AnalyticsGitActivity {
   const fromDay = rangeDay(params.date_from, 'from');
