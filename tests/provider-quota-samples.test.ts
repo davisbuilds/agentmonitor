@@ -96,5 +96,5 @@ test('a read command on a store from before quota history still gets the table',
   db.exec('DROP TABLE provider_quota_samples; PRAGMA user_version = 24');
   ensureSchemaForRead();
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'provider_quota_samples'").get());
-  assert.equal(db.pragma('user_version', { simple: true }), 26);
+  assert.equal(db.pragma('user_version', { simple: true }), 27);
 });

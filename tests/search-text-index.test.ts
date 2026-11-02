@@ -113,7 +113,7 @@ test('a database indexed the old way is reindexed on upgrade', () => {
   assert.equal(keyHits, 4, 'control: the old index matches the "text" key');
 
   initSchema();
-  assert.equal(db.pragma('user_version', { simple: true }), 26);
+  assert.equal(db.pragma('user_version', { simple: true }), 27);
   assert.deepEqual(ordinals('text'), []);
   assert.deepEqual(ordinals('fibonacci'), [0]);
   assertSearchIndexMatchesMessages(db);

@@ -110,7 +110,7 @@ test('v20 relabels stored Codex developer items as instructions and leaves the r
   assert.deepEqual(items('codex-instructions-v20').map(item => item.kind), ['instructions', 'user_message', 'assistant_message']);
   assert.deepEqual(items('codex-instructions-v20')[0].payload, { text: 'Injected instructions' });
   assert.deepEqual(items('claude-not-codex-v20').map(item => item.kind), ['assistant_message', 'user_message', 'assistant_message']);
-  assert.equal(db.pragma('user_version', { simple: true }), 26);
+  assert.equal(db.pragma('user_version', { simple: true }), 27);
 });
 
 test('v20 applies the current prompt capture policy to what it relabels', () => {

@@ -61,5 +61,5 @@ test('v24 marks the Codex threads no one started as internal, and leaves real se
   assert.deepEqual([1, 2, 3, 4, 5, 6].map(relationship), ['internal', 'internal', null, null, 'subagent', 'internal']);
   assert.equal(relationship(-6), 'internal', 'the review\'s rollout row');
   assert.equal(relationship(-3), null, 'a real session\'s rollout row');
-  assert.equal(db.pragma('user_version', { simple: true }), 26);
+  assert.equal(db.pragma('user_version', { simple: true }), 27);
 });

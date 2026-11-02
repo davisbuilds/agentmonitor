@@ -10,6 +10,7 @@ import { broadcaster } from './sse/emitter.js';
 import { createApp } from './app.js';
 import { runImport } from './import/index.js';
 import { startProviderQuotaPolling, stopProviderQuotaPolling } from './provider-quotas/service.js';
+import { startGitActivityPolling, stopGitActivityPolling } from './git/service.js';
 import { acquireRuntimeOwnership } from './runtime-ownership.js';
 import { startServerBuildWatch } from './build-fingerprint.js';
 import { startWatcher, stopWatcher } from './watcher/service.js';
@@ -92,6 +93,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       server?.closeIdleConnections();
 
       await attempt(stopProviderQuotaPolling);
+      await attempt(stopGitActivityPolling);
       await attempt(stopWatcher);
       await attempt(() => searchIndexMaintenance?.stop());
       if (serverClosePromise) await attempt(() => serverClosePromise);
@@ -141,6 +143,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
     startStatsBroadcast();
     if (!options.noWatch) startWatcher();
     startProviderQuotaPolling();
+    startGitActivityPolling();
 
     sessionChecker = setInterval(() => {
       const idled = updateIdleSessions(config.sessionTimeoutMinutes);

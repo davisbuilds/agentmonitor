@@ -278,6 +278,29 @@ export function registerMaintenanceCommands(): void {
   });
 
   registerCommand({
+    name: 'sync git',
+    group: 'Data Commands',
+    summary: 'Read commits from the repositories sessions ran in',
+    usage: 'sync git',
+    examples: ['sync git', 'sync git --json'],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(), new Set());
+      rejectExtraPositionals(parsed.positionals, 'amon sync git');
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb, getDb } = await import('../../db/connection.js');
+      const { syncGitActivity } = await import('../../git/activity.js');
+      initSchema();
+      try {
+        const report = await syncGitActivity(getDb());
+        printSummary(ctx, 'Git activity sync results', { ...report });
+        if (report.errors > 0) throw partialSuccess(`Git activity sync could not read ${report.errors} repositor${report.errors === 1 ? 'y' : 'ies'}.`);
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'costs repair-claude-usage',
     group: 'Data Commands',
     summary: 'Correct imported Claude events from their transcripts (per-turn usage, 1-hour cache writes)',
