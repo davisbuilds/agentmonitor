@@ -54,7 +54,9 @@ const onBranch = commit(worktree, 'b.ts', 'fix: in the worktree', '2026-03-04T10
 const session = db.prepare("INSERT INTO browsing_sessions (id, agent, cwd, started_at, message_count, user_message_count) VALUES (?, 'claude', ?, ?, 1, 1)");
 session.run('s-repo', repo, '2026-03-02T09:00:00Z');
 session.run('s-worktree', worktree, '2026-03-04T09:00:00Z');
-session.run('s-scratch', tempDir, '2026-03-02T09:00:00Z');
+const scratch = path.join(tempDir, 'scratch');
+fs.mkdirSync(scratch);
+session.run('s-scratch', scratch, '2026-03-02T09:00:00Z');
 session.run('s-gone', path.join(tempDir, 'deleted'), '2026-03-02T09:00:00Z');
 
 const commits = () => db.prepare(`SELECT repo_root, sha, authored_at, subject, co_authors_json, files_json FROM git_commits ORDER BY authored_at`).all() as Array<{
@@ -214,4 +216,25 @@ test('a commit in a detached worktree is read with its repository', async () => 
   const there = commit(detached, 'b.txt', 'feat: on a detached head', '2026-03-01T11:00:00Z');
   await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
   assert.ok(shasIn(dir).includes(there));
+});
+
+test('a session in a directory of repositories reads each one directly inside it', async () => {
+  const workspace = path.join(tempDir, 'workspace');
+  fs.mkdirSync(workspace);
+  session.run('s-workspace', workspace, '2026-03-01T09:00:00Z');
+  const inside = (relative: string) => {
+    const dir = path.join(workspace, relative);
+    fs.mkdirSync(dir, { recursive: true });
+    git(dir, ['init', '-q', '-b', 'main']);
+    commit(dir, 'old.txt', `chore: long before, in ${relative}`, '2026-02-01T10:00:00Z');
+    return { dir, sha: commit(dir, 'a.txt', `feat: in ${relative}`, '2026-03-01T10:00:00Z') };
+  };
+  const project = inside('project');
+  const hidden = inside('.config');
+  const deeper = inside('group/deeper');
+  fs.mkdirSync(path.join(workspace, 'notes'));
+  await syncGitActivity(db, { now: new Date('2026-03-02T00:00:00Z') });
+  assert.deepEqual(shasIn(project.dir), [project.sha], 'read back to the day before the session in the directory above it');
+  assert.deepEqual(shasIn(hidden.dir), [], 'a hidden directory is configuration, not a project');
+  assert.deepEqual(shasIn(deeper.dir), [], 'only the level directly inside');
 });

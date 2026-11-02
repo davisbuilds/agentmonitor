@@ -263,6 +263,8 @@ earlier pass had not yet seen; event ids dedupe the rest.
 
 The server reads commits from the repositories sessions ran in, every
 `AGENTMONITOR_GIT_POLL_INTERVAL_MS`, starting 30 seconds after startup. A
+session started in a directory that is not a repository, such as `~/Dev`,
+covers the repositories directly inside it (not hidden ones, not deeper). A
 repository's first read reaches back to the day before its first session, at
 most a year; later reads reread from 14 days before the previous read, so
 downtime leaves no gap, and drop commits git no longer lists. `amon sync git` runs one pass on demand, for instance right after the

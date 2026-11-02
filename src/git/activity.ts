@@ -8,7 +8,7 @@ const run = promisify(execFile);
 
 /** What one pass over the repositories found. */
 export interface GitSyncReport {
-  /** Repositories the stored sessions ran in. */
+  /** Repositories the stored sessions ran in, or directly inside the directory they ran in. */
   repos: number;
   scanned: number;
   commits_seen: number;
@@ -71,6 +71,33 @@ async function repositoryRoot(cwd: string): Promise<string | null> {
   }
 }
 
+/**
+ * The repositories directly inside a directory that is not one, for a session
+ * started in a folder of projects (`~/Dev`) that then worked in them. Hidden
+ * directories hold configuration, not projects, and a deeper level is a
+ * container's business, so neither is read; nor is a link to a directory
+ * elsewhere (a synced vault in the home directory).
+ */
+async function repositoriesInside(dir: string): Promise<string[]> {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const roots = new Set<string>();
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+    const child = path.join(dir, entry.name);
+    // Only a directory with its own .git is a repository's top; this spares a
+    // git process for every plain folder.
+    if (!fs.existsSync(path.join(child, '.git'))) continue;
+    const root = await repositoryRoot(child);
+    if (root) roots.add(root);
+  }
+  return [...roots];
+}
+
 async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
   // --since stops walking at the first commit older than the cutoff, so a
   // backdated commit would hide the recent ones behind it, and the pass would
@@ -108,7 +135,8 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
 }
 
 /**
- * Read commits from the repositories sessions ran in, into git_commits. A
+ * Read commits from the repositories sessions ran in, into git_commits; for a
+ * session in a directory that is not a repository, the ones directly inside it. A
  * repository's first pass reaches back to the day before its first session; a
  * later one rereads from RESCAN_DAYS before the last, and a commit stored in that window
  * that git no longer lists (rebased, amended, or on a deleted branch) is
@@ -125,10 +153,12 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
   `).all() as Array<{ cwd: string; first_started: string | null }>;
   for (const row of directories) {
     const root = await repositoryRoot(row.cwd);
-    if (!root) continue;
+    const roots = root ? [root] : await repositoriesInside(row.cwd);
     const first = row.first_started ? Date.parse(row.first_started) : Number.NaN;
-    const known = firstSessionByRoot.get(root);
-    firstSessionByRoot.set(root, Number.isNaN(first) ? known ?? Number.NaN : Math.min(known ?? first, first));
+    for (const each of roots) {
+      const known = firstSessionByRoot.get(each);
+      firstSessionByRoot.set(each, Number.isNaN(first) ? known ?? Number.NaN : Math.min(known ?? first, first));
+    }
   }
   report.repos = firstSessionByRoot.size;
 

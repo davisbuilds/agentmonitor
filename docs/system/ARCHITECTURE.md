@@ -81,7 +81,8 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   transcript sources. A session keeps the directory it started in (`cwd`),
   which names its repository for git activity; it stays local, out of API
   responses and exports.
-- **Git activity:** commits in those repositories (`git_commits`, with
+- **Git activity:** commits in those repositories, or for a directory that
+  is not one, the repositories directly inside it (`git_commits`, with
   `git_repos` recording each one's last read), read from local git by a
   background child process: hashes, times, authors, subjects, co-author
   trailers and changed paths, never contents. Merge commits are kept, flagged
