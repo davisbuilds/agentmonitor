@@ -423,6 +423,29 @@ export interface SessionGitActivity {
   pull_requests: Array<{ url: string; repo: string; number: number; opened_at: string; merged: boolean }>;
 }
 
+export interface ModelChangeMarker {
+  kind: 'model';
+  date: string;
+  at: string;
+  agent: string;
+  model: string;
+}
+
+export interface InstructionsChangeMarker {
+  kind: 'instructions';
+  date: string;
+  at: string;
+  project: string;
+  files: string[];
+  commits: Array<{ sha: string; subject: string }>;
+}
+
+export type ChangeMarker = ModelChangeMarker | InstructionsChangeMarker;
+
+export interface AnalyticsChangeMarkers {
+  markers: ChangeMarker[];
+}
+
 export interface AnalyticsFriction {
   sessions: number;
   with_friction: number;
@@ -1185,6 +1208,11 @@ export async function fetchAnalyticsGitActivity(params: Record<string, string | 
 export async function fetchSessionGitActivity(sessionId: string): Promise<SessionGitActivity> {
   const res = await fetch(`/api/v2/sessions/${sessionId}/git`);
   return checkedJson(res, 'fetchSessionGitActivity');
+}
+
+export async function fetchAnalyticsChangeMarkers(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsChangeMarkers> {
+  const res = await fetch(`/api/v2/analytics/change-markers${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsChangeMarkers');
 }
 
 export async function fetchAnalyticsFriction(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsFriction> {

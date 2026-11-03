@@ -4,6 +4,7 @@ import {
   fetchAnalyticsSessionDepth,
   fetchAnalyticsDelegation,
   fetchAnalyticsFriction,
+  fetchAnalyticsChangeMarkers,
   fetchAnalyticsGitActivity,
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
@@ -18,6 +19,7 @@ import {
   type AnalyticsSessionDepth,
   type AnalyticsDelegation,
   type AnalyticsFriction,
+  type AnalyticsChangeMarkers,
   type AnalyticsGitActivity,
   type AnalyticsCoverage,
   type ActivityDataPoint,
@@ -42,6 +44,7 @@ type PanelKey =
   | 'depth'
   | 'delegation'
   | 'friction'
+  | 'markers'
   | 'git'
   | 'activity'
   | 'projects'
@@ -66,6 +69,7 @@ class AnalyticsStore {
     depth: 0,
     delegation: 0,
     friction: 0,
+    markers: 0,
     git: 0,
     activity: 0,
     projects: 0,
@@ -94,6 +98,9 @@ class AnalyticsStore {
   sessionDepth = $state<AnalyticsSessionDepth | null>(null);
   delegation = $state<AnalyticsDelegation | null>(null);
   friction = $state<AnalyticsFriction | null>(null);
+  changeMarkers = $state<AnalyticsChangeMarkers | null>(null);
+  /** The query `changeMarkers` answers. */
+  private changeMarkersSlice: string | null = null;
   gitActivity = $state<AnalyticsGitActivity | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
@@ -110,6 +117,7 @@ class AnalyticsStore {
     depth: null,
     delegation: null,
     friction: null,
+    markers: null,
     git: null,
     activity: null,
     projects: null,
@@ -127,6 +135,7 @@ class AnalyticsStore {
     depth: false,
     delegation: false,
     friction: false,
+    markers: false,
     git: false,
     activity: false,
     projects: false,
@@ -144,6 +153,7 @@ class AnalyticsStore {
     depth: null,
     delegation: null,
     friction: null,
+    markers: null,
     git: null,
     activity: null,
     projects: null,
@@ -222,6 +232,7 @@ class AnalyticsStore {
       this.fetchSessionDepth(),
       this.fetchDelegation(),
       this.fetchFriction(),
+      this.fetchChangeMarkers(),
       this.fetchActivity(),
       this.fetchProjects(),
       this.fetchTools(),
@@ -331,6 +342,32 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.git) {
         this.loading.git = false;
+      }
+    }
+  }
+
+  async fetchChangeMarkers(): Promise<void> {
+    const version = ++this.versions.markers;
+    const params = this.queryParams;
+    const slice = JSON.stringify(params);
+    this.loading.markers = true;
+    this.errors.markers = null;
+    // The charts draw markers without an error notice, so another slice's
+    // markers are dropped rather than drawn on this slice's charts.
+    if (slice !== this.changeMarkersSlice) this.changeMarkers = null;
+    try {
+      const result = await fetchAnalyticsChangeMarkers(params);
+      if (version !== this.versions.markers) return;
+      this.changeMarkers = result;
+      this.changeMarkersSlice = slice;
+    } catch (err) {
+      if (version !== this.versions.markers) return;
+      // Markers annotate the charts; without them the charts still stand.
+      console.error('Failed to load change markers:', err);
+      this.errors.markers = 'Failed to load change markers.';
+    } finally {
+      if (version === this.versions.markers) {
+        this.loading.markers = false;
       }
     }
   }

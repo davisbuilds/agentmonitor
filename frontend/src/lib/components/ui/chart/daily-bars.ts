@@ -8,6 +8,12 @@ export interface BarSegment {
   color: string;
 }
 
+/** A note pinned to a day above the bars: a shape and what it marks. */
+export interface DayMarkerGlyph {
+  shape: 'diamond' | 'square';
+  label: string;
+}
+
 export interface DailyBar {
   date: string;
   segments: BarSegment[];

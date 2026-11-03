@@ -5,7 +5,7 @@
   // HTML bars rather than SVG so the strip stretches to any width while its
   // labels keep their size. See docs/system/DESIGN.md.
   import type { Snippet } from 'svelte';
-  import { dailyBarLayout, shortDate, type DailyBar } from './daily-bars';
+  import { dailyBarLayout, shortDate, type DailyBar, type DayMarkerGlyph } from './daily-bars';
 
   interface Props {
     days: DailyBar[];
@@ -20,6 +20,8 @@
     /** Width of the y-axis label column. */
     axisClass?: string;
     tooltip?: Snippet<[DailyBar]>;
+    /** Notes pinned to days, drawn above their bars and listed in their tooltips. */
+    markers?: Map<string, DayMarkerGlyph[]>;
     class?: string;
   }
 
@@ -32,10 +34,18 @@
     plotClass = 'h-36',
     axisClass = 'w-8',
     tooltip,
+    markers,
     class: klass = '',
   }: Props = $props();
 
   const layout = $derived(dailyBarLayout(days, { integer }));
+
+  const markersOf = (date: string) => markers?.get(date) ?? [];
+  const hasMarkers = $derived(layout.columns.some(column => markersOf(column.date).length > 0));
+  function dayLabel(day: DailyBar): string {
+    const notes = markersOf(day.date).map(marker => marker.label);
+    return notes.length > 0 ? `${label(day)}. ${notes.join('. ')}` : label(day);
+  }
   const tooltipId = `daily-bar-tip-${Math.random().toString(36).slice(2)}`;
   let active = $state<number | null>(null);
   const activeColumn = $derived(active === null ? null : layout.columns[active] ?? null);
@@ -44,7 +54,29 @@
   const activeLeftPct = $derived(active === null || layout.columns.length === 0 ? 0 : ((active + 0.5) / layout.columns.length) * 100);
 </script>
 
+{#snippet glyph(shape: DayMarkerGlyph['shape'])}
+  <span class="block h-[7px] w-[7px] bg-text-muted {shape === 'diamond' ? 'rotate-45 rounded-[1px]' : 'rounded-[1px]'}"></span>
+{/snippet}
+
 <div class="flex min-h-0 flex-col {klass}">
+  {#if hasMarkers}
+    <!-- The marker row lines up with the bars below; hovering a mark opens its day. -->
+    <div class="flex gap-2 pb-1" aria-hidden="true">
+      <div class="{axisClass} shrink-0"></div>
+      <div class="flex h-3 min-w-0 flex-1 gap-[2px]">
+        {#each layout.columns as column, index}
+          {@const notes = markersOf(column.date)}
+          <span role="presentation" class="flex min-w-0 flex-1 items-center justify-center gap-[3px]"
+            onmouseenter={() => { if (notes.length > 0) active = index; }}
+            onmouseleave={() => { if (notes.length > 0) active = null; }}>
+            {#each [...new Set(notes.map(note => note.shape))] as shape}
+              {@render glyph(shape)}
+            {/each}
+          </span>
+        {/each}
+      </div>
+    </div>
+  {/if}
   <div class="flex min-h-0 flex-1 gap-2">
     <div class="relative {axisClass} {plotClass} shrink-0 text-right tabular font-mono text-meta text-text-faint" aria-hidden="true">
       {#each layout.ticks as tick}
@@ -56,12 +88,19 @@
       {#each layout.ticks.slice(1) as tick}
         <div class="pointer-events-none absolute inset-x-0 border-t border-line/50" style={`bottom:${(tick / layout.top) * 100}%`} aria-hidden="true"></div>
       {/each}
+      <!-- A marked day's line runs through the plot, so before and after read at a glance. -->
+      {#each layout.columns as column, index}
+        {#if markersOf(column.date).length > 0}
+          <div class="pointer-events-none absolute inset-y-0 border-l border-dashed border-line-strong"
+            style={`left:${((index + 0.5) / layout.columns.length) * 100}%`} aria-hidden="true"></div>
+        {/if}
+      {/each}
 
       <div class="relative flex h-full items-end gap-[2px]">
         {#each layout.columns as column, index}
           <button
             class="group flex h-full min-w-0 flex-1 flex-col justify-end rounded-t-sm transition-colors hover:bg-surface-2 focus-visible:bg-surface-2"
-            aria-label={label(column.day)}
+            aria-label={dayLabel(column.day)}
             aria-describedby={active === index ? tooltipId : undefined}
             onmouseenter={() => (active = index)}
             onmouseleave={() => (active = null)}
@@ -96,6 +135,16 @@
             {@render tooltip(activeColumn.day)}
           {:else}
             <span class="tabular font-mono text-text">{label(activeColumn.day)}</span>
+          {/if}
+          {#if markersOf(activeColumn.date).length > 0}
+            <ul class="mt-2 space-y-1 border-t border-line pt-2 text-text-muted">
+              {#each markersOf(activeColumn.date) as note}
+                <li class="flex items-start gap-2">
+                  <span class="mt-[5px] shrink-0">{@render glyph(note.shape)}</span>
+                  <span>{note.label}</span>
+                </li>
+              {/each}
+            </ul>
           {/if}
         </div>
       {/if}

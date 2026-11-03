@@ -4,10 +4,13 @@
   import { analytics } from '../../stores/analytics.svelte';
   import { formatCost, formatNumber } from '../../format';
   import { DELEGATION_COLORS, DELEGATION_METRICS, delegationBars, type DelegationMetric } from '../../delegation-bars';
+  import { changeMarkerDays } from '../../change-markers';
+  import ChangeMarkerLegend from './ChangeMarkerLegend.svelte';
 
   let metric = $state<DelegationMetric>('sessions');
   const chart = $derived(delegationBars(analytics.delegation, metric));
   const hasWork = $derived(chart.started + chart.delegated > 0);
+  const markers = $derived(changeMarkerDays(analytics.changeMarkers?.markers, { instructions: analytics.project !== '' }));
 
   const formatValue = (value: number) => (metric === 'cost_usd' ? formatCost(value) : formatNumber(value));
   const noun = $derived(DELEGATION_METRICS.find(option => option.id === metric)!.label.toLowerCase());
@@ -24,7 +27,7 @@
     <div class="flex items-center gap-1.5">
       <h3 id="delegated-work-heading" class="text-h3">Delegated Work</h3>
       <InfoTip label="Delegated Work">
-        <p>Each day's work split by who did it: sessions someone started, or work they delegated, meaning the subagents a session spawned and Codex's own threads (approval reviews, app jobs). Sessions and messages count by the day a session started, as Activity does; cost by the day it was spent, as Usage does. Click a day to narrow the page to it.</p>
+        <p>Each day's work split by who did it: sessions someone started, or work they delegated, meaning the subagents a session spawned and Codex's own threads (approval reviews, app jobs). Sessions and messages count by the day a session started, as Activity does; cost by the day it was spent, as Usage does. Marks above the bars show changes to how agents work, as on Activity. Click a day to narrow the page to it.</p>
       </InfoTip>
     </div>
 
@@ -64,6 +67,7 @@
     <DailyBarChart
       days={chart.days}
       {label}
+      {markers}
       integer={metric !== 'cost_usd'}
       axisClass={metric === 'cost_usd' ? 'w-12' : 'w-8'}
       formatTick={(value) => (metric === 'cost_usd' ? formatUsd(value) : formatNumber(value))}
@@ -99,6 +103,7 @@
         {/if}
       {/snippet}
     </DailyBarChart>
+    <ChangeMarkerLegend />
   {:else}
     <div class="py-12 text-center text-meta text-text-muted">No {noun} in the selected range.</div>
   {/if}

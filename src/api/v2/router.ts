@@ -53,6 +53,7 @@ import {
   getAnalyticsDelegationResponse,
   getAnalyticsFrictionResponse,
   getAnalyticsGitActivityResponse,
+  getAnalyticsChangeMarkersResponse,
   getAnalyticsHourOfWeekResponse,
   getAnalyticsProjectsResponse,
   getAnalyticsSkillHealthResponse,
@@ -920,6 +921,16 @@ v2Router.get('/analytics/friction', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/friction] Error:', err);
     res.status(500).json({ error: 'Failed to get session friction' });
+  }
+});
+
+v2Router.get('/analytics/change-markers', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getAnalyticsChangeMarkersResponse(params));
+  } catch (err) {
+    console.error('[v2/analytics/change-markers] Error:', err);
+    res.status(500).json({ error: 'Failed to get change markers' });
   }
 });
 

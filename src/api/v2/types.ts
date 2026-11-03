@@ -377,6 +377,34 @@ export interface SessionGitActivity {
   pull_requests: Array<{ url: string; repo: string; number: number; opened_at: string; merged: boolean }>;
 }
 
+/** An agent's first day on a model it went on to use: a change to how it works, marked on the timelines. */
+export interface ModelChangeMarker {
+  kind: 'model';
+  /** Local day. */
+  date: string;
+  at: string;
+  agent: string;
+  model: string;
+}
+
+/** A project's commits on one day that changed its agent instructions (AGENTS.md, CLAUDE.md). */
+export interface InstructionsChangeMarker {
+  kind: 'instructions';
+  date: string;
+  /** The day's first such commit. */
+  at: string;
+  project: string;
+  /** The instruction files they changed, as paths in the repository. */
+  files: string[];
+  commits: Array<{ sha: string; subject: string }>;
+}
+
+export type ChangeMarker = ModelChangeMarker | InstructionsChangeMarker;
+
+export interface AnalyticsChangeMarkers {
+  markers: ChangeMarker[];
+}
+
 export interface ProjectBreakdown {
   project: string;
   session_count: number;

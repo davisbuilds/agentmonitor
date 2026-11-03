@@ -59,6 +59,8 @@ import type {
   GitActivityProject,
   GitPullRequest,
   SessionGitActivity,
+  AnalyticsChangeMarkers,
+  ChangeMarker,
   FrictionSession,
   FrictionSignal,
   AgentComparisonRow,
@@ -124,6 +126,7 @@ import {
   type CommitCall,
 } from '../git/attribution.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
+import { CODEX_AUTO_REVIEW_MODEL } from '../parser/session-title.js';
 import { browserAgentName, eventAgentType } from '../util/agent-identity.js';
 import {
   dateParamLowerBound,
@@ -3208,10 +3211,15 @@ function commitCallSpan(commits: CommitRow[], fromMs: number, toMs: number): [nu
   return [from - COMMIT_CALL_WINDOW_MS, to + COMMIT_CALL_WINDOW_MS];
 }
 
+/** The project a repository names, as a session there is named; its folder's name where that gives none (scratch space). */
+function repositoryProject(root: string): string {
+  return projectNameFromCwd(root) ?? root.split('/').filter(Boolean).pop() ?? root;
+}
+
 function attributedCommits(commits: CommitRow[], calls: GitToolCall[]): AttributedCommit[] {
   const sessionInputsBetween = sessionInputReader();
   return commits.map(row => {
-    const project = projectNameFromCwd(row.repo_root) ?? row.repo_root.split('/').filter(Boolean).pop() ?? row.repo_root;
+    const project = repositoryProject(row.repo_root);
     const fact = {
       sha: row.sha,
       subject: row.subject ?? '',
@@ -3400,6 +3408,94 @@ export function getSessionGitActivity(sessionId: string): SessionGitActivity {
     .map(pr => ({ url: pr.url, repo: pr.repo, number: pr.number, opened_at: pr.opened_at, merged: pr.merged }));
   return { commits, pull_requests: pullRequests };
 }
+
+/**
+ * Changes to how agents work in the range, to mark on the timelines.
+ * - An agent's first day on a model it then used on MODEL_ADOPTION_DAYS or more
+ *   days, by the events' own times: a model tried once is not a change.
+ *   Benchmark runs, Codex's internal auto-review model, and Claude Code's
+ *   `<synthetic>` notices (local errors and rate limits) are left out.
+ * - A project's commits on one day that changed an AGENTS.md or CLAUDE.md, at
+ *   any depth, merges left out; one marker per project and day, so a branch
+ *   commit and its squash on the same day count once.
+ * A model applies to every project, and instructions to every agent, so the
+ * project filter narrows only instructions and the agent filter only models.
+ */
+export function getAnalyticsChangeMarkers(params: AnalyticsParams = {}): AnalyticsChangeMarkers {
+  const db = getDb();
+  const from = params.date_from ? dateParamLowerBound(params.date_from) : '0000';
+  const to = params.date_to ? dateParamUpperExclusive(params.date_to) : '9999';
+  const wantAgent = params.agent ? browserAgentName(params.agent) : null;
+  const markers: ChangeMarker[] = [];
+
+  // Days are the reporting zone's, so uses are grouped by UTC quarter-hour, which
+  // every zone offset in use keeps within one local day. julianday reads both
+  // stored formats as UTC instants (their raw text does not sort as time), and
+  // the block is taken from whole milliseconds so float error can't move an
+  // instant on a boundary. It costs about half what strftime per row does.
+  const uses = db.prepare(`
+    SELECT agent_type, model, strftime('%Y-%m-%dT%H:%M:%fZ', MIN(jd)) AS first_at
+    FROM (
+      SELECT agent_type, model, julianday(COALESCE(client_timestamp, created_at)) AS jd
+      FROM events
+      WHERE model IS NOT NULL AND model NOT IN ('', ?, ?) AND source != 'benchmark'
+    )
+    WHERE jd IS NOT NULL
+    GROUP BY agent_type, model, CAST((jd - 2440587.5) * 86400000 + 0.5 AS INTEGER) / 900000
+  `).all(CODEX_AUTO_REVIEW_MODEL, CLAUDE_SYNTHETIC_MODEL) as Array<{ agent_type: string; model: string; first_at: string }>;
+  const models = new Map<string, { agent_type: string; model: string; first_at: string; days: Set<string> }>();
+  for (const use of uses) {
+    const key = `${use.agent_type}\0${use.model}`;
+    let model = models.get(key);
+    if (!model) {
+      model = { ...use, days: new Set() };
+      models.set(key, model);
+    } else if (use.first_at < model.first_at) {
+      model.first_at = use.first_at;
+    }
+    model.days.add(localDayOf(use.first_at) ?? use.first_at.slice(0, 10));
+  }
+  for (const row of models.values()) {
+    const at = row.first_at;
+    const agent = browserAgentName(row.agent_type);
+    if (row.days.size < MODEL_ADOPTION_DAYS || at < from || at >= to) continue;
+    if (wantAgent && agent !== wantAgent) continue;
+    markers.push({ kind: 'model', date: localDayOf(at) ?? at.slice(0, 10), at, agent, model: row.model });
+  }
+
+  const commits = db.prepare(`
+    SELECT c.repo_root, c.sha, c.authored_at, c.subject, j.value AS file
+    FROM git_commits c, json_each(c.files_json) j
+    WHERE c.is_merge = 0 AND c.authored_at >= ? AND c.authored_at < ?
+      AND (j.value IN ('AGENTS.md', 'CLAUDE.md') OR j.value LIKE '%/AGENTS.md' OR j.value LIKE '%/CLAUDE.md')
+    ORDER BY c.authored_at, c.sha, j.value
+  `).all(from, to) as Array<{ repo_root: string; sha: string; authored_at: string; subject: string | null; file: string }>;
+  const byProjectDay = new Map<string, Extract<ChangeMarker, { kind: 'instructions' }>>();
+  for (const row of commits) {
+    const project = repositoryProject(row.repo_root);
+    if (params.project && project !== params.project) continue;
+    const date = localDayOf(row.authored_at) ?? row.authored_at.slice(0, 10);
+    const key = `${project}\0${date}`;
+    let marker = byProjectDay.get(key);
+    if (!marker) {
+      marker = { kind: 'instructions', date, at: row.authored_at, project, files: [], commits: [] };
+      byProjectDay.set(key, marker);
+      markers.push(marker);
+    }
+    if (!marker.files.includes(row.file)) marker.files.push(row.file);
+    if (!marker.commits.some(commit => commit.sha === row.sha)) marker.commits.push({ sha: row.sha, subject: row.subject ?? '' });
+  }
+  for (const marker of byProjectDay.values()) marker.files.sort();
+
+  markers.sort((a, b) => a.at.localeCompare(b.at) || a.kind.localeCompare(b.kind));
+  return { markers };
+}
+
+/** A model used on fewer days than this was tried, not taken up. */
+const MODEL_ADOPTION_DAYS = 3;
+
+/** The model Claude Code records on notices it writes itself, such as errors and rate limits. */
+const CLAUDE_SYNTHETIC_MODEL = '<synthetic>';
 
 /** One session's friction signals, for its viewer. */
 export function getSessionFriction(sessionId: string): FrictionSignal[] {
