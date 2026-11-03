@@ -56,6 +56,27 @@ test('one query asks for every pull request, and an answer keeps what GitHub cou
     [missing.key, null],
     [gone.key, null],
   ]));
+  const detailed = (nodes: unknown[]) => ({
+    state: 'MERGED', mergedAt: '2026-03-02T20:00:00Z', createdAt: '2026-03-02T10:05:00Z',
+    additions: 5, deletions: 1, changedFiles: 1, author: { __typename: 'User' }, commits: { totalCount: nodes.length, nodes },
+  });
+  const merged = { state: 'MERGED', merged_at: '2026-03-02T20:00:00Z', created_at: '2026-03-02T10:05:00Z' } as const;
+  const whole = JSON.stringify({ data: { [repoAlias]: { [prAlias]: detailed([{ commit: { oid: 'c1' } }]) } } });
+  assert.deepEqual(parseLookupResponse(whole, aliases).get(seven.key), {
+    ...merged, details: { additions: 5, deletions: 1, changed_files: 1, commit_count: 1, author_is_bot: false, commits: ['c1'] },
+  });
+  const erred = JSON.stringify({
+    data: { [repoAlias]: { [prAlias]: { ...detailed([{ commit: { oid: 'c1' } }]), author: null } } },
+    errors: [{ type: 'SERVICE_UNAVAILABLE', path: [repoAlias, prAlias, 'author'] }],
+  });
+  assert.deepEqual(parseLookupResponse(erred, aliases).get(seven.key), { ...merged, partial: true }, 'details GitHub answered in part are not taken');
+  const unresolved = JSON.stringify({ data: { [repoAlias]: { [prAlias]: detailed([{ commit: { oid: 'c1' } }, { commit: null }]) } } });
+  assert.deepEqual(parseLookupResponse(unresolved, aliases).get(seven.key), { ...merged, partial: true }, 'nor a commit that did not resolve');
+  const elsewhere = JSON.stringify({
+    data: { [repoAlias]: { [prAlias]: detailed([{ commit: { oid: 'c1' } }]) } },
+    errors: [{ type: 'NOT_FOUND', path: [goneRepo] }],
+  });
+  assert.equal(parseLookupResponse(elsewhere, aliases).get(seven.key)?.partial, undefined, 'an error under another pull request leaves this one whole');
   const forbidden = JSON.stringify({ data: { [goneRepo]: null }, errors: [{ type: 'FORBIDDEN', path: [goneRepo] }] });
   assert.equal(parseLookupResponse(forbidden, aliases).has(gone.key), false, 'a repository GitHub would not show is no answer');
   assert.equal(parseLookupResponse('gh: not logged in', aliases).size, 0);
@@ -131,6 +152,32 @@ test('an answer with details records size, author and commits, and a merged pull
   assert.equal(asked.length, 1, 'and never again');
 });
 
+test('a merged pull request whose details answered in part keeps what was known, and is asked about again', async () => {
+  db.prepare("INSERT INTO github_pull_requests (repo, number, state, checked_at, additions, details_at) VALUES ('owner/epsilon', 2, 'OPEN', '2026-03-01T00:00:00Z', 7, '2026-03-01T00:00:00Z')").run();
+  db.prepare("INSERT INTO github_pull_request_commits (repo, number, sha, source) VALUES ('owner/epsilon', 2, 'from-a-merge', 'local')").run();
+  const keys = [{ repo: 'owner/epsilon', number: 2 }];
+  const merged = { state: 'MERGED', merged_at: '2026-03-06T00:00:00Z', created_at: '2026-03-01T00:00:00Z' } as const;
+  let answer: State = { ...merged, partial: true };
+  const asked: string[] = [];
+  const lookup: Lookup = async keysAsked => {
+    asked.push(...keysAsked.map(pullRequestKey));
+    return new Map(keysAsked.map(key => [pullRequestKey(key), answer]));
+  };
+  const row = () => db.prepare("SELECT state, merged_at, additions, details_at FROM github_pull_requests WHERE repo = 'owner/epsilon'").get();
+
+  await syncPullRequestStates(db, keys, { lookup, now: new Date('2026-03-07T00:00:00Z') });
+  assert.deepEqual(row(), { state: 'MERGED', merged_at: '2026-03-06T00:00:00Z', additions: 7, details_at: null }, 'the state is recorded, and the details left due');
+  assert.deepEqual(members('owner/epsilon', 2), ['from-a-merge local'], 'a partial list replaces nothing');
+
+  answer = { ...merged, details: { additions: 9, deletions: 0, changed_files: 1, commit_count: 1, author_is_bot: false, commits: ['e1'] } };
+  await syncPullRequestStates(db, keys, { lookup, now: new Date('2026-03-07T00:05:00Z') });
+  assert.equal(asked.length, 2, 'asked again on the next pass, without waiting for the recheck interval');
+  assert.deepEqual(row(), { state: 'MERGED', merged_at: '2026-03-06T00:00:00Z', additions: 9, details_at: '2026-03-07T00:05:00.000Z' });
+  assert.deepEqual(members('owner/epsilon', 2), ['e1 github']);
+  await syncPullRequestStates(db, keys, { lookup, now: new Date('2026-03-08T00:00:00Z') });
+  assert.equal(asked.length, 2, 'and, whole, never again');
+});
+
 test("the search asks for the user's pull requests merged in a window, a page at a time, with their size and commits", () => {
   const query = searchQuery({ from: '2026-10-01', to: '2026-10-31' }, 'Y3Vyc29y');
   assert.match(query, /search\(type: ISSUE, first: 25, after: "Y3Vyc29y", query: "is:pr is:merged author:@me merged:2026-10-01\.\.2026-10-31"\)/);
@@ -166,6 +213,10 @@ test("the search asks for the user's pull requests merged in a window, a page at
     errors: [{ type: 'SERVICE_UNAVAILABLE', path: ['search', 'nodes', '0', 'commits'] }],
   }));
   assert.equal(flagged?.complete, false, 'an error beside an answer leaves it incomplete too');
+  const commitless = parseSearchResponse(JSON.stringify({
+    data: { search: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ ...node, commits: { totalCount: 2, nodes: [{ commit: { oid: 'a1' } }, { commit: null }] } }] } },
+  }));
+  assert.deepEqual([commitless?.pulls.length, commitless?.complete], [0, false], 'as does a commit that did not resolve');
   assert.equal(parseSearchResponse('gh: not logged in'), null);
   assert.equal(parseSearchResponse(JSON.stringify({ errors: [{ type: 'RATE_LIMITED' }] })), null);
 });

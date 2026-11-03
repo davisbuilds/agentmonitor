@@ -277,7 +277,9 @@ last year, a month at a time with their size and commits (the current month
 again at most hourly, an ended one once more a day after it ends, then never),
 and about the pull requests sessions opened
 in the last year: one GraphQL request per 50, never
-again for one already merged, and at most hourly for the rest. Local git alone
+again for one already merged, and at most hourly for the rest. A month or a
+merged pull request GitHub answered only in part (an error beside the data)
+is asked about again on the next pass. Local git alone
 shows a merge only once its commit is pulled. Without `gh`, or signed out, the
 pass logs that GitHub did not answer, and merged counts fall back to local
 merge commits, as they are with lookups off. The login service keeps the

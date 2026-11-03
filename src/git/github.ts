@@ -18,6 +18,12 @@ export interface PullRequestState {
   created_at: string | null;
   /** Its size and commits, when the answer carried them. */
   details?: PullRequestDetails;
+  /**
+   * The state answered but its details did not all (an error under it, or a
+   * commit that did not resolve): nothing of them is recorded, and a merged
+   * one is asked about again.
+   */
+  partial?: boolean;
 }
 
 /** A pull request's size, whether a bot opened it, and its commits (the first COMMITS_PER_PULL_REQUEST). */
@@ -60,9 +66,10 @@ interface DetailNode {
   commits?: { totalCount?: number; nodes?: Array<{ commit?: { oid?: string } } | null> };
 }
 
-/** Size, author and commits from a pull request's GraphQL node; undefined without them. */
+/** Size, author and commits from a pull request's GraphQL node; undefined without them, or when a commit did not resolve. */
 function detailsOf(node: DetailNode): PullRequestDetails | undefined {
   if (typeof node.additions !== 'number' || typeof node.commits?.totalCount !== 'number') return undefined;
+  if ((node.commits.nodes ?? []).some(entry => typeof entry?.commit?.oid !== 'string')) return undefined;
   return {
     additions: node.additions,
     deletions: node.deletions ?? 0,
@@ -70,7 +77,7 @@ function detailsOf(node: DetailNode): PullRequestDetails | undefined {
     commit_count: node.commits.totalCount,
     // A deleted account reads as null, not as a bot.
     author_is_bot: node.author?.__typename === 'Bot',
-    commits: (node.commits.nodes ?? []).map(entry => entry?.commit?.oid).filter((oid): oid is string => typeof oid === 'string'),
+    commits: (node.commits.nodes ?? []).map(entry => entry!.commit!.oid!),
   };
 }
 const GH_TIMEOUT_MS = 60_000;
@@ -129,8 +136,11 @@ export function parseLookupResponse(body: string, aliases: Map<string, string>):
       continue;
     }
     if (pull?.state === 'OPEN' || pull?.state === 'CLOSED' || pull?.state === 'MERGED') {
+      const state: PullRequestState = { state: pull.state, merged_at: pull.mergedAt ?? null, created_at: pull.createdAt ?? null };
       const details = detailsOf(pull);
-      answers.set(key, { state: pull.state, merged_at: pull.mergedAt ?? null, created_at: pull.createdAt ?? null, ...(details ? { details } : {}) });
+      const erred = (parsed.errors ?? []).some(error => error.path?.[0] === repoAlias && error.path?.[1] === pullAlias);
+      if (erred || (pull.commits !== undefined && !details)) answers.set(key, { ...state, partial: true });
+      else answers.set(key, { ...state, ...(details ? { details } : {}) });
     }
   }
   return answers;
@@ -203,14 +213,14 @@ export async function syncPullRequestStates(
 /**
  * Store one answer: its state, and its size, author and commits when it
  * carried them. GitHub's commit list replaces any found from a local merge.
- * details_at is set by any answer, so one without details is not asked again
- * for them.
+ * details_at is set by any answer but a partial one, so one without details
+ * is not asked again for them, and a partial one is.
  */
 function recorder(db: Database): (key: PullRequestKey, answer: PullRequestState | null, now: Date) => void {
   const upsert = db.prepare(`
     INSERT INTO github_pull_requests (repo, number, state, merged_at, created_at, checked_at,
       additions, deletions, changed_files, commit_count, author_is_bot, details_at)
-    VALUES (@repo, @number, @state, @merged_at, @created_at, @now, @additions, @deletions, @changed_files, @commit_count, @author_is_bot, @now)
+    VALUES (@repo, @number, @state, @merged_at, @created_at, @now, @additions, @deletions, @changed_files, @commit_count, @author_is_bot, @details_at)
     ON CONFLICT(repo, number) DO UPDATE SET
       state = excluded.state, merged_at = excluded.merged_at, created_at = excluded.created_at, checked_at = excluded.checked_at,
       additions = COALESCE(excluded.additions, github_pull_requests.additions),
@@ -229,6 +239,7 @@ function recorder(db: Database): (key: PullRequestKey, answer: PullRequestState 
       created_at: answer?.created_at ?? null, now: now.toISOString(),
       additions: details?.additions ?? null, deletions: details?.deletions ?? null, changed_files: details?.changed_files ?? null,
       commit_count: details?.commit_count ?? null, author_is_bot: details ? Number(details.author_is_bot) : null,
+      details_at: answer?.partial ? null : now.toISOString(),
     });
     if (!details) return;
     clearCommits.run(key.repo, key.number);
