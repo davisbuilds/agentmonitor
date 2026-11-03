@@ -146,13 +146,26 @@ test("the search asks for the user's pull requests merged in a window, a page at
   };
   const page = parseSearchResponse(JSON.stringify({ data: { search: { issueCount: 2, pageInfo: { hasNextPage: true, endCursor: 'next' }, nodes: [node, {}] } } }));
   assert.deepEqual(page, {
-    total: 2, next: 'next',
+    total: 2, next: 'next', complete: false,
     pulls: [{
       repo: 'owner/alpha', number: 6, created_at: '2026-10-02T10:00:00Z', merged_at: '2026-10-03T10:00:00Z',
       additions: 10, deletions: 2, changed_files: 3, commit_count: 1, author_is_bot: false, commits: ['a1'],
     }],
   });
-  assert.equal(parseSearchResponse(JSON.stringify({ data: { search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } }))?.next, null);
+  assert.equal(page?.pulls.length, 1, 'a result that did not answer leaves the page incomplete, keeping the rest');
+  const whole = parseSearchResponse(JSON.stringify({ data: { search: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [node] } } }));
+  assert.equal(whole?.complete, true);
+  assert.equal(whole?.next, null);
+  const partial = parseSearchResponse(JSON.stringify({
+    data: { search: { issueCount: 2, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [node, null] } },
+    errors: [{ type: 'SERVICE_UNAVAILABLE', path: ['search', 'nodes', '1'] }],
+  }));
+  assert.deepEqual([partial?.pulls.length, partial?.complete], [1, false], 'GitHub answering part of a page, with an error');
+  const flagged = parseSearchResponse(JSON.stringify({
+    data: { search: { issueCount: 1, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [node] } },
+    errors: [{ type: 'SERVICE_UNAVAILABLE', path: ['search', 'nodes', '0', 'commits'] }],
+  }));
+  assert.equal(flagged?.complete, false, 'an error beside an answer leaves it incomplete too');
   assert.equal(parseSearchResponse('gh: not logged in'), null);
   assert.equal(parseSearchResponse(JSON.stringify({ errors: [{ type: 'RATE_LIMITED' }] })), null);
 });
@@ -164,9 +177,10 @@ test('merged pull requests are read window by window: a full window splits, page
   });
   // What GitHub holds, by merge day.
   const held = [pull(1, '2026-03-02T10:00:00Z'), pull(2, '2026-03-10T10:00:00Z'), pull(3, '2026-03-20T10:00:00Z'), pull(4, '2026-03-28T10:00:00Z'),
-    pull(5, '2026-06-05T10:00:00Z'), pull(6, '2026-06-06T10:00:00Z'), pull(7, '2026-10-20T10:00:00Z')];
+    pull(5, '2026-06-05T10:00:00Z'), pull(6, '2026-06-06T10:00:00Z'), pull(8, '2026-07-07T10:00:00Z'), pull(9, '2026-08-08T10:00:00Z'), pull(7, '2026-10-20T10:00:00Z')];
   db.prepare("INSERT INTO github_pull_request_commits (repo, number, sha, source) VALUES ('owner/delta', 7, 'from-a-merge', 'local')").run();
   let failJuneSecondPage = true;
+  let partialPages = true;
   const asked: string[] = [];
   const search: PullRequestSearch = async (window, after) => {
     asked.push(`${window.from}..${window.to}${after ? ` after ${after}` : ''}`);
@@ -174,9 +188,17 @@ test('merged pull requests are read window by window: a full window splits, page
     const offset = after ? Number(after) : 0;
     if (window.from.startsWith('2026-06') && offset > 0 && failJuneSecondPage) return null;
     // As GitHub does, a search returns no result past the cap.
-    if (offset >= 3) return { total: inWindow.length, pulls: [], next: null };
+    if (offset >= 3) return { total: inWindow.length, pulls: [], next: null, complete: true };
+    // On the first pass July's second page answers only in part: its one result does not.
+    if (window.from.startsWith('2026-07') && partialPages) {
+      return offset === 0
+        ? { total: inWindow.length + 1, pulls: inWindow, next: '1', complete: true }
+        : { total: inWindow.length + 1, pulls: [], next: null, complete: false };
+    }
+    // And August's only page.
+    if (window.from.startsWith('2026-08') && partialPages) return { total: inWindow.length + 1, pulls: inWindow, next: null, complete: false };
     // One per page, to exercise paging.
-    return { total: inWindow.length, pulls: inWindow.slice(offset, offset + 1), next: offset + 1 < inWindow.length ? String(offset + 1) : null };
+    return { total: inWindow.length, pulls: inWindow.slice(offset, offset + 1), next: offset + 1 < inWindow.length ? String(offset + 1) : null, complete: true };
   };
   const now = new Date('2026-11-15T00:00:00Z');
   const report = await syncAuthoredPullRequests(db, { search, now, cap: 3 });
@@ -185,20 +207,22 @@ test('merged pull requests are read window by window: a full window splits, page
   assert.ok(asked.includes('2026-03-01..2026-03-16') && asked.includes('2026-03-17..2026-03-31'), 'and, holding more than the cap, in halves');
   assert.ok(asked.some(a => a.startsWith('2026-03-17..2026-03-31 after')), 'each half paged through');
   assert.ok(asked[0].startsWith('2025-11-01'), 'reaching back a year, from the start of that month');
-  assert.deepEqual(report, { windows: 12, pull_requests: 6, unanswered: 1 });
+  assert.deepEqual(report, { windows: 10, pull_requests: 8, unanswered: 3 });
   const stored = db.prepare("SELECT number, state, merged_at, additions, details_at FROM github_pull_requests WHERE repo = 'owner/delta' ORDER BY number").all() as Array<{ number: number; state: string; details_at: string }>;
-  assert.deepEqual(stored.map(row => row.number), [1, 2, 3, 4, 5, 7], "June's second page went unanswered");
+  assert.deepEqual(stored.map(row => row.number), [1, 2, 3, 4, 5, 7, 8, 9], "June's second page went unanswered; July's and August's answered parts are kept");
   assert.ok(stored.every(row => row.state === 'MERGED' && row.details_at === now.toISOString()));
   assert.deepEqual(members('owner/delta', 7), ['sha-7 github']);
   const windows = (db.prepare('SELECT window_start FROM github_pull_request_search ORDER BY window_start').all() as Array<{ window_start: string }>).map(row => row.window_start);
   assert.ok(!windows.includes('2026-06-01'), 'June is not read until every page is');
+  assert.ok(!windows.includes('2026-07-01') && !windows.includes('2026-08-01'), 'nor July or August until every result on their pages is');
   assert.ok(windows.includes('2026-03-01'), 'a split month is read once both halves are');
-  assert.equal(windows.length, 12);
+  assert.equal(windows.length, 10);
 
   asked.length = 0;
   failJuneSecondPage = false;
+  partialPages = false;
   await syncAuthoredPullRequests(db, { search, now: new Date(now.getTime() + 10 * 60_000), cap: 3 });
-  assert.deepEqual(asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i), ['2026-06-01..2026-06-30'],
+  assert.deepEqual(asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i), ['2026-06-01..2026-06-30', '2026-07-01..2026-07-31', '2026-08-01..2026-08-31'],
     'a read window is not asked again, and recent months wait for the recheck interval');
   assert.ok(db.prepare("SELECT 1 FROM github_pull_requests WHERE repo = 'owner/delta' AND number = 6").get());
 

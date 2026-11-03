@@ -251,11 +251,15 @@ export interface AuthoredPullRequest extends PullRequestKey, PullRequestDetails 
   created_at: string;
 }
 
-/** One page of the search: how many the window holds, this page's pull requests, and the next page's cursor. */
+/**
+ * One page of the search: how many the window holds, this page's pull
+ * requests, the next page's cursor, and whether every result on it answered.
+ */
 export interface PullRequestSearchPage {
   total: number;
   pulls: AuthoredPullRequest[];
   next: string | null;
+  complete: boolean;
 }
 
 /**
@@ -293,7 +297,10 @@ export function searchQuery(window: { from: string; to: string }, after: string 
     + `nodes { ... on PullRequest { number repository { nameWithOwner } createdAt mergedAt ${DETAIL_FIELDS} } } } }`;
 }
 
-/** One page from a search response; null when it holds no answer (an error, or not JSON). */
+/**
+ * One page from a search response; null when it holds no answer (an error, or
+ * not JSON). A page with an error or a result that did not answer is incomplete.
+ */
 export function parseSearchResponse(body: string): PullRequestSearchPage | null {
   let parsed: {
     data?: { search?: {
@@ -301,6 +308,7 @@ export function parseSearchResponse(body: string): PullRequestSearchPage | null 
       pageInfo?: { hasNextPage?: boolean; endCursor?: string | null };
       nodes?: Array<({ number?: number; repository?: { nameWithOwner?: string }; createdAt?: string; mergedAt?: string } & DetailNode) | null>;
     } | null } | null;
+    errors?: unknown[];
   };
   try {
     parsed = JSON.parse(body);
@@ -310,13 +318,18 @@ export function parseSearchResponse(body: string): PullRequestSearchPage | null 
   const search = parsed.data?.search;
   if (!search || typeof search.issueCount !== 'number') return null;
   const pulls: AuthoredPullRequest[] = [];
+  // GitHub answers what it can beside its errors; a page with any is kept but not whole.
+  let complete = !parsed.errors?.length;
   for (const node of search.nodes ?? []) {
     const repo = node?.repository?.nameWithOwner?.toLowerCase();
     const details = node ? detailsOf(node) : undefined;
-    if (!node || !repo || typeof node.number !== 'number' || !node.mergedAt || !node.createdAt || !details) continue;
+    if (!node || !repo || typeof node.number !== 'number' || !node.mergedAt || !node.createdAt || !details) {
+      complete = false;
+      continue;
+    }
     pulls.push({ repo, number: node.number, created_at: node.createdAt, merged_at: node.mergedAt, ...details });
   }
-  return { total: search.issueCount, pulls, next: search.pageInfo?.hasNextPage ? search.pageInfo.endCursor ?? null : null };
+  return { total: search.issueCount, pulls, next: search.pageInfo?.hasNextPage ? search.pageInfo.endCursor ?? null : null, complete };
 }
 
 /** Search GitHub through the `gh` CLI, read-only, as its signed-in user. */
@@ -335,7 +348,8 @@ const DAY_MS = 86_400_000;
 
 /**
  * Every pull request a window holds, splitting it while it holds more than the
- * cap. `complete` is false when a page went unanswered; what was read is kept.
+ * cap. `complete` is false when a page went unanswered or answered in part;
+ * what was read is kept.
  */
 async function readWindow(
   search: PullRequestSearch, window: { from: string; to: string }, cap: number,
@@ -356,13 +370,15 @@ async function readWindow(
   }
   // A single day over the cap is read as far as the search will go.
   const pulls = [...first.pulls];
+  let complete = first.complete;
   for (let next = first.next; next !== null;) {
     const page = await search(window, next);
     if (!page) return { total: first.total, pulls, complete: false };
     pulls.push(...page.pulls);
+    complete &&= page.complete;
     next = page.next;
   }
-  return { total: first.total, pulls, complete: true };
+  return { total: first.total, pulls, complete };
 }
 
 /**
