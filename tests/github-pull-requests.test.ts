@@ -30,7 +30,7 @@ test('one query asks for every pull request, and an answer keeps what GitHub cou
   const keys = [{ repo: 'owner/alpha', number: 7 }, { repo: 'owner/alpha', number: 999 }, { repo: 'owner/gone', number: 1 }];
   const { query, aliases } = lookupQuery(keys);
   assert.match(query, /repository\(owner: "owner", name: "alpha"\)/);
-  assert.match(query, /pullRequest\(number: 7\)/);
+  assert.match(query, /pullRequest\(number: 7\) \{ state mergedAt createdAt \}/);
   assert.match(query, /pullRequest\(number: 999\)/);
   assert.match(query, /repository\(owner: "owner", name: "gone"\)/);
   assert.equal(aliases.size, 3);
@@ -41,13 +41,13 @@ test('one query asks for every pull request, and an answer keeps what GitHub cou
   const goneRepo = gone.alias.split('.')[0];
   const body = JSON.stringify({
     data: {
-      [repoAlias]: { [prAlias]: { state: 'MERGED', mergedAt: '2026-03-02T20:00:00Z' }, [missing.alias.split('.')[1]]: null },
+      [repoAlias]: { [prAlias]: { state: 'MERGED', mergedAt: '2026-03-02T20:00:00Z', createdAt: '2026-03-02T10:05:00Z' }, [missing.alias.split('.')[1]]: null },
       [goneRepo]: null,
     },
     errors: [{ type: 'NOT_FOUND', path: [repoAlias, missing.alias.split('.')[1]] }, { type: 'NOT_FOUND', path: [goneRepo] }],
   });
   assert.deepEqual(parseLookupResponse(body, aliases), new Map<string, State | null>([
-    [seven.key, { state: 'MERGED', merged_at: '2026-03-02T20:00:00Z' }],
+    [seven.key, { state: 'MERGED', merged_at: '2026-03-02T20:00:00Z', created_at: '2026-03-02T10:05:00Z' }],
     [missing.key, null],
     [gone.key, null],
   ]));
@@ -59,8 +59,8 @@ test('one query asks for every pull request, and an answer keeps what GitHub cou
 test('states are recorded, and only what may still change is asked about again, once the recheck interval passes', async () => {
   const asked: string[][] = [];
   const answers = new Map<string, State | null>([
-    ['owner/alpha#1', { state: 'MERGED', merged_at: '2026-03-02T20:00:00Z' }],
-    ['owner/alpha#2', { state: 'OPEN', merged_at: null }],
+    ['owner/alpha#1', { state: 'MERGED', merged_at: '2026-03-02T20:00:00Z', created_at: '2026-03-01T09:00:00Z' }],
+    ['owner/alpha#2', { state: 'OPEN', merged_at: null, created_at: '2026-03-02T09:00:00Z' }],
     ['owner/alpha#3', null],
   ]);
   const lookup: Lookup = async keys => {
@@ -72,16 +72,16 @@ test('states are recorded, and only what may still change is asked about again, 
 
   const report = await syncPullRequestStates(db, keys, { lookup, now: t0 });
   assert.deepEqual(report, { checked: 3, merged: 1, unanswered: 0 });
-  assert.deepEqual(db.prepare('SELECT number, state, merged_at FROM github_pull_requests ORDER BY number').all(), [
-    { number: 1, state: 'MERGED', merged_at: '2026-03-02T20:00:00Z' },
-    { number: 2, state: 'OPEN', merged_at: null },
-    { number: 3, state: null, merged_at: null },
+  assert.deepEqual(db.prepare('SELECT number, state, merged_at, created_at FROM github_pull_requests ORDER BY number').all(), [
+    { number: 1, state: 'MERGED', merged_at: '2026-03-02T20:00:00Z', created_at: '2026-03-01T09:00:00Z' },
+    { number: 2, state: 'OPEN', merged_at: null, created_at: '2026-03-02T09:00:00Z' },
+    { number: 3, state: null, merged_at: null, created_at: null },
   ]);
 
   await syncPullRequestStates(db, keys, { lookup, now: new Date(t0.getTime() + PULL_REQUEST_RECHECK_MS - 1) });
   assert.equal(asked.length, 1, 'nothing is asked again within the interval');
 
-  answers.set('owner/alpha#2', { state: 'MERGED', merged_at: '2026-03-03T12:00:00Z' });
+  answers.set('owner/alpha#2', { state: 'MERGED', merged_at: '2026-03-03T12:00:00Z', created_at: '2026-03-02T09:00:00Z' });
   await syncPullRequestStates(db, keys, { lookup, now: new Date(t0.getTime() + PULL_REQUEST_RECHECK_MS + 1) });
   assert.deepEqual(asked[1], ['owner/alpha#2', 'owner/alpha#3'], 'a merged pull request is never asked about again');
   assert.equal((db.prepare('SELECT state FROM github_pull_requests WHERE number = 2').get() as { state: string }).state, 'MERGED');
@@ -90,7 +90,7 @@ test('states are recorded, and only what may still change is asked about again, 
 test('a pull request GitHub did not answer keeps what was known, and is asked about on the next pass', async () => {
   const keys = [{ repo: 'owner/beta', number: 4 }];
   const t0 = new Date('2026-03-04T00:00:00Z');
-  await syncPullRequestStates(db, keys, { lookup: async () => new Map([['owner/beta#4', { state: 'OPEN', merged_at: null }]]), now: t0 });
+  await syncPullRequestStates(db, keys, { lookup: async () => new Map([['owner/beta#4', { state: 'OPEN', merged_at: null, created_at: '2026-03-03T09:00:00Z' }]]), now: t0 });
   const later = new Date(t0.getTime() + PULL_REQUEST_RECHECK_MS + 1);
   const report = await syncPullRequestStates(db, keys, { lookup: async () => new Map(), now: later });
   assert.deepEqual(report, { checked: 1, merged: 0, unanswered: 1 });

@@ -258,6 +258,9 @@ function initSchemaLocked(db: Database): void {
       -- OPEN, CLOSED or MERGED; NULL when GitHub has no such pull request.
       state TEXT,
       merged_at TEXT,
+      -- When GitHub says it was opened: a link in a call's output names a pull
+      -- request the call opened only when this falls in the call's window.
+      created_at TEXT,
       checked_at TEXT NOT NULL,
       PRIMARY KEY (repo, number)
     );

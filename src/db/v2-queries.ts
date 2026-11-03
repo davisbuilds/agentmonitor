@@ -3180,14 +3180,12 @@ function attributedCommits(fromMs: number, toMs: number, calls: GitToolCall[]): 
 }
 
 /**
- * Merged pull requests by `owner/name#number`: GitHub's word where it was
- * asked (src/git/github.ts), and merge commits in local repositories with a
- * GitHub remote, which show a merge only once it was pulled.
+ * Pull requests merged by `owner/name#number`, from merge commits in local
+ * repositories with a GitHub remote, which show a merge only once it was
+ * pulled. GitHub's own word is read beside it (openedPullRequests).
  */
-function mergedPullRequests(): Set<string> {
+function locallyMergedPullRequests(): Set<string> {
   const merged = new Set<string>();
-  const onGithub = getDb().prepare("SELECT repo, number FROM github_pull_requests WHERE state = 'MERGED'").all() as Array<{ repo: string; number: number }>;
-  for (const row of onGithub) merged.add(`${row.repo}#${row.number}`);
   const rows = getDb().prepare(`
     SELECT r.github_repo, c.subject, c.is_merge FROM git_commits c JOIN git_repos r ON r.root = c.repo_root
     WHERE r.github_repo IS NOT NULL AND (c.is_merge = 1 OR c.subject LIKE '%(#%)')
@@ -3199,20 +3197,38 @@ function mergedPullRequests(): Set<string> {
   return merged;
 }
 
-/** The pull requests sessions opened between two instants, once each, by the first call that named them. */
+/**
+ * The pull requests sessions opened between two instants, once each, by the
+ * first call that named them. A call's output can list existing pull requests
+ * beside the one it created (`gh pr list; gh pr create`), so where GitHub has
+ * said when a pull request was opened, a call names one opened before it ran
+ * as listed, not opened; without GitHub's word, the link stands. A pull
+ * request is merged on local git's merge commit, or on GitHub's word about it.
+ */
 function openedPullRequests(calls: GitToolCall[]): Array<GitPullRequest & { project: string | null }> {
-  const merged = mergedPullRequests();
+  const mergedLocally = locallyMergedPullRequests();
+  const onGithub = new Map((getDb().prepare('SELECT repo, number, state, created_at FROM github_pull_requests')
+    .all() as Array<{ repo: string; number: number; state: string | null; created_at: string | null }>)
+    .map(row => [`${row.repo}#${row.number}`, { state: row.state, created: row.created_at ? Date.parse(row.created_at) : null }]));
   const opened = new Map<string, GitPullRequest & { project: string | null }>();
   for (const call of calls) {
     for (const ref of pullRequestUrls(call.result)) {
       const key = `${ref.repo}#${ref.number}`;
       if (opened.has(key)) continue;
+      const github = onGithub.get(key);
+      const created = github?.created ?? null;
+      // Opened before the call: an existing pull request the call listed.
+      if (created !== null && created < call.at - COMMIT_CALL_WINDOW_MS) continue;
+      // Opened after it: GitHub answered about another pull request that has
+      // since taken the name (a renamed repository's name reused), so its
+      // state says nothing about this one.
+      const aboutThis = created === null || created <= call.at + PROCESS_POLL_WINDOW_MS;
       opened.set(key, {
         url: ref.url,
         repo: ref.repo,
         number: ref.number,
         opened_at: new Date(call.at).toISOString(),
-        merged: merged.has(key),
+        merged: mergedLocally.has(key) || (aboutThis && github?.state === 'MERGED'),
         session_id: call.session_id,
         agent: call.agent,
         title: call.title,

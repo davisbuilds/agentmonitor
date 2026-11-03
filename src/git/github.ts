@@ -15,6 +15,7 @@ export interface PullRequestKey {
 export interface PullRequestState {
   state: 'OPEN' | 'CLOSED' | 'MERGED';
   merged_at: string | null;
+  created_at: string | null;
 }
 
 /**
@@ -55,7 +56,7 @@ export function lookupQuery(keys: PullRequestKey[]): { query: string; aliases: M
     const [owner, name] = repo.split('/');
     const pulls = [...numbers].map(number => {
       aliases.set(`r${index}.p${number}`, pullRequestKey({ repo, number }));
-      return `p${number}: pullRequest(number: ${number}) { state mergedAt }`;
+      return `p${number}: pullRequest(number: ${number}) { state mergedAt createdAt }`;
     });
     return `r${index}: repository(owner: "${owner}", name: "${name}") { ${pulls.join(' ')} }`;
   });
@@ -65,7 +66,10 @@ export function lookupQuery(keys: PullRequestKey[]): { query: string; aliases: M
 /** States from a GraphQL response, which keeps the data it could answer beside its errors. */
 export function parseLookupResponse(body: string, aliases: Map<string, string>): Map<string, PullRequestState | null> {
   const answers = new Map<string, PullRequestState | null>();
-  let parsed: { data?: Record<string, Record<string, { state?: string; mergedAt?: string | null } | null> | null>; errors?: Array<{ type?: string; path?: string[] }> };
+  let parsed: {
+    data?: Record<string, Record<string, { state?: string; mergedAt?: string | null; createdAt?: string | null } | null> | null>;
+    errors?: Array<{ type?: string; path?: string[] }>;
+  };
   try {
     parsed = JSON.parse(body);
   } catch {
@@ -87,7 +91,7 @@ export function parseLookupResponse(body: string, aliases: Map<string, string>):
       continue;
     }
     if (pull?.state === 'OPEN' || pull?.state === 'CLOSED' || pull?.state === 'MERGED') {
-      answers.set(key, { state: pull.state, merged_at: pull.mergedAt ?? null });
+      answers.set(key, { state: pull.state, merged_at: pull.mergedAt ?? null, created_at: pull.createdAt ?? null });
     }
   }
   return answers;
@@ -138,9 +142,9 @@ export async function syncPullRequestStates(
 
   const answers = await lookup([...due.values()]);
   const record = db.prepare(`
-    INSERT INTO github_pull_requests (repo, number, state, merged_at, checked_at) VALUES (?, ?, ?, ?, ?)
+    INSERT INTO github_pull_requests (repo, number, state, merged_at, created_at, checked_at) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(repo, number) DO UPDATE SET
-      state = excluded.state, merged_at = excluded.merged_at, checked_at = excluded.checked_at
+      state = excluded.state, merged_at = excluded.merged_at, created_at = excluded.created_at, checked_at = excluded.checked_at
   `);
   db.transaction(() => {
     for (const [id, key] of due) {
@@ -150,7 +154,7 @@ export async function syncPullRequestStates(
       }
       const answer = answers.get(id) ?? null;
       if (answer?.state === 'MERGED') report.merged += 1;
-      record.run(key.repo, key.number, answer?.state ?? null, answer?.merged_at ?? null, now.toISOString());
+      record.run(key.repo, key.number, answer?.state ?? null, answer?.merged_at ?? null, answer?.created_at ?? null, now.toISOString());
     }
   })();
   return report;

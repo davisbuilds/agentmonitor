@@ -132,3 +132,27 @@ test('a commit run as `git -C <repo> commit` counts for its session', () => {
   addCommit('fff6666ffff', new Date(Date.UTC(2026, 2, 4, 9, 30, 20)).toISOString(), 'feat: through -C');
   assert.deepEqual(queries.getSessionGitActivity('c-dash-c').commits.map(row => row.sha), ['fff6666ffff']);
 });
+
+test('a pull request listed beside the one a call created is not one the session opened, on GitHub\'s word', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 5, hour, minute)).toISOString();
+  session.run('c-list', 'claude', 'claude-jsonl', root, 'List and open', day(9), day(10));
+  const messageId = Number(message.run('c-list', ordinal++, day(9, 30)).lastInsertRowid);
+  call.run(messageId, 'c-list', 'Bash', 'toolu_list', JSON.stringify({ command: 'gh pr list --json url; gh pr create --fill' }));
+  result.run('c-list', 'toolu_list', JSON.stringify({ content: `[{"url":"${prUrl(2)}"},{"url":"${prUrl(1)}"}]\n${prUrl(11)}` }));
+  const cache = db.prepare("INSERT OR REPLACE INTO github_pull_requests (repo, number, state, merged_at, created_at, checked_at) VALUES ('owner/alpha', ?, 'OPEN', NULL, ?, ?)");
+  cache.run(2, '2026-02-01T00:00:00Z', day(11));
+  cache.run(11, new Date(Date.UTC(2026, 2, 5, 9, 31)).toISOString(), day(11));
+  // #1 is not known to GitHub's cache yet, so its URL stands, as without GitHub.
+  assert.deepEqual(queries.getSessionGitActivity('c-list').pull_requests.map(pr => pr.number), [1, 11]);
+});
+
+test('GitHub\'s answer about a pull request opened after the call is about another one that took the name, so it decides nothing', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 6, hour, minute)).toISOString();
+  session.run('c-renamed', 'claude', 'claude-jsonl', root, 'Before the rename', day(9), day(10));
+  runs('c-renamed', day(9, 30), 'gh pr create --fill', 'toolu_renamed');
+  result.run('c-renamed', 'toolu_renamed', JSON.stringify({ content: prUrl(12) }));
+  // The repository was renamed and its name reused; #12 there was opened weeks later and merged.
+  db.prepare("INSERT OR REPLACE INTO github_pull_requests (repo, number, state, merged_at, created_at, checked_at) VALUES ('owner/alpha', 12, 'MERGED', ?, ?, ?)")
+    .run('2026-04-01T00:00:00Z', '2026-03-28T00:00:00Z', '2026-04-02T00:00:00Z');
+  assert.deepEqual(queries.getSessionGitActivity('c-renamed').pull_requests.map(pr => [pr.number, pr.merged]), [[12, false]]);
+});
