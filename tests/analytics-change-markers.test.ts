@@ -76,3 +76,36 @@ test('a model first used before the range is no change within it', () => {
     '2026-03-08 model codex gpt-6',
   ]);
 });
+
+const { setReportingTimeZoneForTests } = await import('../src/util/local-day.js');
+const at = (agent: string, model: string, instants: string[]) => {
+  for (const instant of instants) event.run(`e${eventId++}`, agent, model, 'import', instant);
+};
+// Three UTC days but two in Los Angeles: tried, not taken up there.
+at('claude_code', 'claude-late-night', ['2026-04-01T23:30:00Z', '2026-04-02T00:30:00Z', '2026-04-03T00:30:00Z']);
+// Two UTC days but three in Los Angeles, the first of them Apr 19.
+at('claude_code', 'claude-west', ['2026-04-20T05:00:00Z', '2026-04-20T15:00:00Z', '2026-04-21T08:00:00Z']);
+
+test('a model is taken up on three days of the reporting zone, not of UTC', () => {
+  setReportingTimeZoneForTests('America/Los_Angeles');
+  try {
+    assert.deepEqual(summary(queries.getAnalyticsChangeMarkers({ date_from: '2026-04-01', date_to: '2026-04-30' }).markers), [
+      '2026-04-19 model claude claude-west',
+    ]);
+  } finally {
+    setReportingTimeZoneForTests(null);
+  }
+});
+
+test("a model's first use is its earliest instant, whichever column holds the time", () => {
+  const stored = db.prepare(`INSERT INTO events (event_id, session_id, agent_type, event_type, model, source, created_at, client_timestamp)
+    VALUES (?, 's', 'claude_code', 'llm_response', 'claude-mixed', 'import', ?, ?)`);
+  // SQLite's own `YYYY-MM-DD HH:MM:SS` sorts before any ISO time on its date.
+  stored.run(`e${eventId++}`, '2026-05-04 10:00:00', null);
+  stored.run(`e${eventId++}`, '2026-05-04 09:00:00', '2026-05-04T07:00:00Z');
+  stored.run(`e${eventId++}`, '2026-05-05 10:00:00', null);
+  stored.run(`e${eventId++}`, '2026-05-06 10:00:00', null);
+  const [marker] = queries.getAnalyticsChangeMarkers({ date_from: '2026-05-01', date_to: '2026-05-31' }).markers;
+  assert.equal(marker?.kind === 'model' && marker.model, 'claude-mixed');
+  assert.equal(marker.at, '2026-05-04T07:00:00.000Z');
+});

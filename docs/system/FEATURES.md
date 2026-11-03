@@ -195,7 +195,7 @@ cost by the day it was spent, as Usage does, so each measure adds up to its own
 panel. Claude records a subagent's usage under its parent session, marked with
 the subagent's id, which is how its cost is told apart. Both timelines mark
 changes to how agents work, to read a trend before and after: the day an agent
-first used a model it then used on three or more days (by the events' own
+first used a model it then used on three or more local days (by the events' own
 times, benchmark runs and Codex's internal auto-review model left out), and,
 with a project selected, the days that project's commits changed an
 AGENTS.md or CLAUDE.md at any depth (merges left out, one mark per day).

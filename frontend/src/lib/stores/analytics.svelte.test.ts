@@ -80,3 +80,54 @@ describe('the shared agent filter', () => {
     expect(analyticsFilters.agent).toBe('claude');
   });
 });
+
+describe('change markers', () => {
+  // The timelines read markers without an error notice, so a slice's markers
+  // must never be drawn on another slice's charts.
+  const markersFor = (project: string) => ({
+    markers: [{ kind: 'instructions', date: '2026-03-03', at: '2026-03-03T10:00:00Z', project, files: ['AGENTS.md'], commits: [] }],
+  });
+
+  function answerMarkers(answer: (url: URL) => Promise<Response>): void {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = new URL(String(input), 'http://localhost');
+      requested.push(url);
+      return answer(url);
+    }));
+  }
+  const ok = (body: unknown) => ({ ok: true, status: 200, json: async () => body, text: async () => '' }) as unknown as Response;
+  const failed = { ok: false, status: 500, json: async () => ({ error: 'boom' }), text: async () => 'boom' } as unknown as Response;
+
+  it("drops a slice's markers when the next slice's markers fail to load", async () => {
+    answerMarkers(async url => ok(markersFor(url.searchParams.get('project') ?? '')));
+    analyticsFilters.setProject('alpha');
+    await analytics.fetchChangeMarkers();
+    expect(analytics.changeMarkers).toEqual(markersFor('alpha'));
+
+    answerMarkers(async () => failed);
+    analyticsFilters.setProject('beta');
+    await analytics.fetchChangeMarkers();
+    expect(analytics.errors.markers).not.toBeNull();
+    expect(analytics.changeMarkers).toBeNull();
+  });
+
+  it("hides a slice's markers while another slice's load, but keeps them through a refresh of the same slice", async () => {
+    answerMarkers(async url => ok(markersFor(url.searchParams.get('project') ?? '')));
+    analyticsFilters.setProject('alpha');
+    await analytics.fetchChangeMarkers();
+
+    let release: (response: Response) => void = () => {};
+    answerMarkers(() => new Promise(resolve => { release = resolve; }));
+    const refresh = analytics.fetchChangeMarkers();
+    expect(analytics.changeMarkers).toEqual(markersFor('alpha'));
+    release(ok(markersFor('alpha')));
+    await refresh;
+
+    analyticsFilters.setProject('beta');
+    const next = analytics.fetchChangeMarkers();
+    expect(analytics.changeMarkers).toBeNull();
+    release(ok(markersFor('beta')));
+    await next;
+    expect(analytics.changeMarkers).toEqual(markersFor('beta'));
+  });
+});

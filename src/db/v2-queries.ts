@@ -3427,17 +3427,37 @@ export function getAnalyticsChangeMarkers(params: AnalyticsParams = {}): Analyti
   const wantAgent = params.agent ? browserAgentName(params.agent) : null;
   const markers: ChangeMarker[] = [];
 
-  const models = db.prepare(`
-    SELECT agent_type, model, MIN(COALESCE(client_timestamp, created_at)) AS first_at,
-      COUNT(DISTINCT date(COALESCE(client_timestamp, created_at))) AS days
-    FROM events
-    WHERE model IS NOT NULL AND model != '' AND model != ? AND source != 'benchmark'
-    GROUP BY agent_type, model
-  `).all(CODEX_AUTO_REVIEW_MODEL) as Array<{ agent_type: string; model: string; first_at: string; days: number }>;
-  for (const row of models) {
-    const at = new Date(row.first_at).toISOString();
+  // Days are the reporting zone's, so uses are grouped by UTC quarter-hour, which
+  // every zone offset in use keeps within one local day. julianday reads both
+  // stored formats as UTC instants (their raw text does not sort as time), and
+  // the block is taken from whole milliseconds so float error can't move an
+  // instant on a boundary. It costs about half what strftime per row does.
+  const uses = db.prepare(`
+    SELECT agent_type, model, strftime('%Y-%m-%dT%H:%M:%fZ', MIN(jd)) AS first_at
+    FROM (
+      SELECT agent_type, model, julianday(COALESCE(client_timestamp, created_at)) AS jd
+      FROM events
+      WHERE model IS NOT NULL AND model != '' AND model != ? AND source != 'benchmark'
+    )
+    WHERE jd IS NOT NULL
+    GROUP BY agent_type, model, CAST((jd - 2440587.5) * 86400000 + 0.5 AS INTEGER) / 900000
+  `).all(CODEX_AUTO_REVIEW_MODEL) as Array<{ agent_type: string; model: string; first_at: string }>;
+  const models = new Map<string, { agent_type: string; model: string; first_at: string; days: Set<string> }>();
+  for (const use of uses) {
+    const key = `${use.agent_type}\0${use.model}`;
+    let model = models.get(key);
+    if (!model) {
+      model = { ...use, days: new Set() };
+      models.set(key, model);
+    } else if (use.first_at < model.first_at) {
+      model.first_at = use.first_at;
+    }
+    model.days.add(localDayOf(use.first_at) ?? use.first_at.slice(0, 10));
+  }
+  for (const row of models.values()) {
+    const at = row.first_at;
     const agent = browserAgentName(row.agent_type);
-    if (row.days < MODEL_ADOPTION_DAYS || at < from || at >= to) continue;
+    if (row.days.size < MODEL_ADOPTION_DAYS || at < from || at >= to) continue;
     if (wantAgent && agent !== wantAgent) continue;
     markers.push({ kind: 'model', date: localDayOf(at) ?? at.slice(0, 10), at, agent, model: row.model });
   }

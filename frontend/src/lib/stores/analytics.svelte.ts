@@ -99,6 +99,8 @@ class AnalyticsStore {
   delegation = $state<AnalyticsDelegation | null>(null);
   friction = $state<AnalyticsFriction | null>(null);
   changeMarkers = $state<AnalyticsChangeMarkers | null>(null);
+  /** The query `changeMarkers` answers. */
+  private changeMarkersSlice: string | null = null;
   gitActivity = $state<AnalyticsGitActivity | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
@@ -346,12 +348,18 @@ class AnalyticsStore {
 
   async fetchChangeMarkers(): Promise<void> {
     const version = ++this.versions.markers;
+    const params = this.queryParams;
+    const slice = JSON.stringify(params);
     this.loading.markers = true;
     this.errors.markers = null;
+    // The charts draw markers without an error notice, so another slice's
+    // markers are dropped rather than drawn on this slice's charts.
+    if (slice !== this.changeMarkersSlice) this.changeMarkers = null;
     try {
-      const result = await fetchAnalyticsChangeMarkers(this.queryParams);
+      const result = await fetchAnalyticsChangeMarkers(params);
       if (version !== this.versions.markers) return;
       this.changeMarkers = result;
+      this.changeMarkersSlice = slice;
     } catch (err) {
       if (version !== this.versions.markers) return;
       // Markers annotate the charts; without them the charts still stand.
