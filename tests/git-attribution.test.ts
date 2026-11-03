@@ -200,4 +200,13 @@ test('a GitHub tool that creates a pull request is known by its name, and its re
   const stored = JSON.stringify({ content: `Output:\n${JSON.stringify({ html_url: 'https://github.com/Owner/Repo/pull/9', body: 'after https://github.com/owner/repo/pull/3' })}` });
   assert.deepEqual(createdPullRequestUrls(stored), [{ repo: 'owner/repo', number: 9, url: 'https://github.com/Owner/Repo/pull/9' }]);
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: 'Error: validation failed' })), []);
+  // A body quoting JSON with its own url field, ahead of the result's.
+  const quoting = { body: 'Related: {"url":"https://github.com/owner/repo/pull/3"}', url: 'https://github.com/owner/repo/pull/15' };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: `Wall time: 1.5 seconds\nOutput:\n${JSON.stringify(quoting)}` })).map(ref => ref.number), [15]);
+  // Cut off mid-body, as a stored result keeps only its first part.
+  const cut = `Output:\n${JSON.stringify({ url: 'https://github.com/owner/repo/pull/17', number: 17, body: 'x'.repeat(50) + ' see https://github.com/owner/repo/pull/3' })}`.slice(0, 120);
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: cut })).map(ref => ref.number), [17]);
+  // An MCP result: content blocks of text.
+  const blocks = { content: [{ type: 'text', text: JSON.stringify({ number: 16, html_url: 'https://github.com/owner/repo/pull/16' }) }] };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify(blocks)).map(ref => ref.number), [16]);
 });

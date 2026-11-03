@@ -224,13 +224,77 @@ export function isPullRequestTool(toolName: string): boolean {
 }
 
 /**
- * The pull request a GitHub tool's result says it created: the first `url` or
- * `html_url` field naming one, escaped as stored. Links in the body it echoes
- * back point at other pull requests.
+ * The string fields at the top level of a JSON object, read in order and
+ * tolerating a cut-off end: a stored result keeps only its first part, and the
+ * fields a tool returns first (GitHub's `url`) survive the cut while the body
+ * after them may not.
+ */
+function topLevelStrings(text: string): Map<string, string> {
+  const fields = new Map<string, string>();
+  const start = text.indexOf('{');
+  if (start === -1) return fields;
+  let depth = 0;
+  let key: string | null = null;
+  let expectValue = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === '"') {
+      // A whole string: the JSON escapes in it end at its closing quote.
+      let end = index + 1;
+      while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+      if (end >= text.length) break;
+      let value: string;
+      try {
+        value = JSON.parse(text.slice(index, end + 1)) as string;
+      } catch {
+        break;
+      }
+      if (depth === 1 && expectValue && key !== null) fields.set(key, value);
+      else if (depth === 1 && !expectValue) key = value;
+      expectValue = false;
+      index = end;
+    } else if (char === ':' && depth === 1) expectValue = true;
+    else if (char === ',' && depth === 1) { key = null; expectValue = false; }
+    else if (char === '{' || char === '[') { depth += 1; expectValue = false; }
+    else if (char === '}' || char === ']') { depth -= 1; if (depth === 0) break; }
+  }
+  return fields;
+}
+
+/**
+ * The pull request a GitHub tool's result says it created: the `html_url` or
+ * `url` of the object it returned, read from the object's own top level. The
+ * stored result wraps that object (a string after `Output:`, or MCP text
+ * blocks), so it is unwrapped rather than searched: a body quoting other pull
+ * requests, even as JSON, is not read.
  */
 export function createdPullRequestUrls(result: string): PullRequestRef[] {
-  const match = /\\*"(?:html_)?url\\*"\s*:\s*\\*"(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)(?![\d#])/.exec(result);
-  return match ? pullRequestUrls(match[1]) : [];
+  const texts: string[] = [];
+  const collect = (value: unknown): void => {
+    if (typeof value === 'string') texts.push(value);
+    else if (Array.isArray(value)) value.forEach(item => collect((item as { text?: unknown } | null)?.text));
+    else if (value && typeof value === 'object') {
+      const record = value as Record<string, unknown>;
+      if (typeof record.url === 'string' || typeof record.html_url === 'string') texts.push(JSON.stringify(record));
+      else for (const key of ['content', 'output', 'text']) collect(record[key]);
+    }
+  };
+  try {
+    collect(JSON.parse(result));
+  } catch {
+    texts.push(result);
+  }
+  for (const text of texts) {
+    const output = text.lastIndexOf('Output:\n');
+    const fields = topLevelStrings(output === -1 ? text : text.slice(output + 'Output:\n'.length));
+    for (const field of ['html_url', 'url']) {
+      const url = fields.get(field);
+      if (url === undefined) continue;
+      const refs = pullRequestUrls(url);
+      if (refs.length === 1 && refs[0].url.length === url.replace(/\/$/, '').length) return refs;
+    }
+  }
+  return [];
 }
 
 /** The pull requests a `gh pr create` result names, in order, once each. */
