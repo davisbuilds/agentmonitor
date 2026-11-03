@@ -7,6 +7,7 @@ import {
   getAnalyticsDelegation,
   getAnalyticsFriction,
   getAnalyticsGitActivity,
+  getAnalyticsChangeMarkers,
   getAnalyticsHourOfWeek,
   getAnalyticsProjects,
   getAnalyticsSkillHealthParts,
@@ -28,6 +29,7 @@ import type {
   AnalyticsDelegation,
   AnalyticsFriction,
   AnalyticsGitActivity,
+  AnalyticsChangeMarkers,
   AnalyticsOverview,
   AnalyticsParams,
   AnalyticsSummary,
@@ -138,6 +140,10 @@ export function getAnalyticsDelegationResponse(params: AnalyticsParams = {}): An
 
 export function getAnalyticsFrictionResponse(params: AnalyticsParams = {}): AnalyticsFriction {
   return getDb().transaction(() => getAnalyticsFriction(params))();
+}
+
+export function getAnalyticsChangeMarkersResponse(params: AnalyticsParams = {}): AnalyticsChangeMarkers {
+  return getDb().transaction(() => getAnalyticsChangeMarkers(params))();
 }
 
 export function getAnalyticsGitActivityResponse(params: AnalyticsParams = {}): AnalyticsGitActivity {
