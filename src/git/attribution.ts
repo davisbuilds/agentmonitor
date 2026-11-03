@@ -218,6 +218,21 @@ export interface PullRequestRef {
 // prints; it opened nothing.
 const PULL_REQUEST_URL = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?![\d#])/g;
 
+/** Whether a tool creates a pull request itself: a GitHub app's or MCP server's `create_pull_request`. */
+export function isPullRequestTool(toolName: string): boolean {
+  return /(?:^|[_.-])create_pull_request$/i.test(toolName);
+}
+
+/**
+ * The pull request a GitHub tool's result says it created: the first `url` or
+ * `html_url` field naming one, escaped as stored. Links in the body it echoes
+ * back point at other pull requests.
+ */
+export function createdPullRequestUrls(result: string): PullRequestRef[] {
+  const match = /\\*"(?:html_)?url\\*"\s*:\s*\\*"(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+)(?![\d#])/.exec(result);
+  return match ? pullRequestUrls(match[1]) : [];
+}
+
 /** The pull requests a `gh pr create` result names, in order, once each. */
 export function pullRequestUrls(text: string): PullRequestRef[] {
   const found = new Map<string, PullRequestRef>();

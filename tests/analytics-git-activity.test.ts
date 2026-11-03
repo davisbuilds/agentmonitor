@@ -209,3 +209,13 @@ test('a process a cell\'s wait names is followed in turn, to the poll that print
   toolCall(day(9, 12), 'write_stdin', JSON.stringify({ session_id: 4343, chars: '' }), 'call_chain_poll', `Output:\n${prUrl(14)}\n`);
   assert.deepEqual(queries.getSessionGitActivity(chained).pull_requests.map(pr => pr.number), [14]);
 });
+
+test('a pull request a GitHub tool created counts by the URL it returned, not links in its body', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 11, hour, minute)).toISOString();
+  session.run('x-tool', 'codex', 'codex-jsonl', root, 'Open through the app', day(9), day(10));
+  const messageId = Number(message.run('x-tool', ordinal++, day(9, 30)).lastInsertRowid);
+  call.run(messageId, 'x-tool', 'mcp__codex_apps__github_create_pull_request', 'call_app_pr', JSON.stringify({ repo: 'owner/alpha', title: 'feat: through the app' }));
+  const created = { url: prUrl(15), number: 15, state: 'open', body: `Follows ${prUrl(7)} and ${prUrl(8)}.` };
+  result.run('x-tool', 'call_app_pr', JSON.stringify({ content: `Wall time: 1.5 seconds\nOutput:\n${JSON.stringify(created)}` }));
+  assert.deepEqual(queries.getSessionGitActivity('x-tool').pull_requests.map(pr => pr.number), [15]);
+});

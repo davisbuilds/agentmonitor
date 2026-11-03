@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   attributeCommit,
   createdCommit,
+  createdPullRequestUrls,
+  isPullRequestTool,
   githubRepoOfRemote,
   mergedPullRequestNumber,
   opensPullRequest,
@@ -190,4 +192,12 @@ test('a poll follows a process only by its session_id argument', () => {
   assert.ok(!pollsProcess('write_stdin', '{"session_id":5151,"chars":"","yield_time_ms":1000}', '1000'), 'an option value');
   assert.ok(!pollsProcess('exec', JSON.stringify('text(await tools.write_stdin({session_id:5151,chars:"1000"}));'), '1000'), 'stdin text');
   assert.ok(pollsProcess('exec', JSON.stringify('text(await tools.write_stdin({"session_id":1000,chars:""}));'), '1000'));
+});
+
+test('a GitHub tool that creates a pull request is known by its name, and its result by its url field', () => {
+  for (const name of ['_create_pull_request', 'mcp__github__create_pull_request', 'mcp__codex_apps__github_create_pull_request']) assert.ok(isPullRequestTool(name), name);
+  for (const name of ['mcp__github__create_pull_request_review', '_update_pull_request', 'mcp__github__list_pull_requests', 'Bash']) assert.ok(!isPullRequestTool(name), name);
+  const stored = JSON.stringify({ content: `Output:\n${JSON.stringify({ html_url: 'https://github.com/Owner/Repo/pull/9', body: 'after https://github.com/owner/repo/pull/3' })}` });
+  assert.deepEqual(createdPullRequestUrls(stored), [{ repo: 'owner/repo', number: 9, url: 'https://github.com/Owner/Repo/pull/9' }]);
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: 'Error: validation failed' })), []);
 });
