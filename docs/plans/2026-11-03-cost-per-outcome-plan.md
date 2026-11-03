@@ -167,8 +167,8 @@ Store PR size, author and commits, and each commit's landing.
 **Files**
 
 - Modify: `src/db/schema.ts`
-- Modify: `tests/monitor-agent-filter-index-upgrade.test.ts`, `tests/provider-quota-samples.test.ts`, `tests/session-title-migration.test.ts`, `tests/metric-cost-correction-migration.test.ts`, `tests/daily-conversation-activity.test.ts` (version 28 → 29)
-- Test: `tests/schema-migrations.test.ts`
+- Modify: every test asserting the current `user_version` (15 files: `grep -rl "pragma('user_version', { simple: true }), 28)" tests`), 28 → 29
+- Test: `tests/git-outcome-schema.test.ts`
 
 **Dependencies**
 
@@ -179,7 +179,7 @@ None
 - `src/db/schema.ts:255` creates `github_pull_requests(repo, number, state, merged_at, created_at, checked_at)`.
 - `src/db/schema.ts:804-808` adds `git_repos.github_repo` with a `PRAGMA table_info` guard. New columns follow that pattern.
 - `src/db/schema.ts:1199` has `DATA_SCHEMA_VERSION = 28`. The comment at `:1263` records additive-only versions.
-- The five test files above assert `user_version` 28 (grep observed 2026-11-03).
+- Fifteen test files assert `user_version` 28 after an upgrade (grep observed 2026-11-03).
 
 **Implementation Steps**
 
@@ -192,12 +192,12 @@ None
 
 **Verification**
 
-- Run: `pnpm test -- tests/schema-migrations.test.ts`
+- Run: `node --import tsx --test tests/git-outcome-schema.test.ts`
 - Expect: a v28 database upgrades to 29 with the new columns and tables, and existing rows are unchanged.
 
 **Test Discovery Verified**
 
-- `scripts/test/run-node-tests.mjs` runs `tests/**/*.test.ts`. The five version-pinning files are in that tree.
+- `scripts/test/run-node-tests.mjs` runs `tests/**/*.test.ts`. The version-pinning files are in that tree.
 
 **Done When**
 
@@ -240,7 +240,7 @@ Task 1
 
 **Verification**
 
-- Run: `pnpm test -- tests/git-activity.test.ts`
+- Run: `node --import tsx --test tests/git-activity.test.ts`
 - Expect, in a temp-repo fixture:
   - a commit pushed to main is `direct`;
   - a branch merged by merge commit is `merged`;
@@ -306,7 +306,7 @@ Task 1
 
 **Verification**
 
-- Run: `pnpm test -- tests/github-pull-requests.test.ts`
+- Run: `node --import tsx --test tests/github-pull-requests.test.ts`
 - Expect, with an injected search:
   - a window over 1,000 splits;
   - pages are followed;
@@ -374,7 +374,7 @@ Tasks 2 and 3
 
 **Verification**
 
-- Run: `pnpm test -- tests/outcomes-allocation.test.ts tests/analytics-outcomes.test.ts tests/v2-router-errors.test.ts`
+- Run: `node --import tsx --test tests/outcomes-allocation.test.ts tests/analytics-outcomes.test.ts tests/v2-router-errors.test.ts`
 - Expect, from fixture sessions, commits, PRs and usage:
   - a session's cost splits across its PRs by timeline;
   - a Codex session's two rows count once;
@@ -510,11 +510,11 @@ Tasks 2-5
 
 | Requirement | Proof command | Expected signal |
 | --- | --- | --- |
-| v29 upgrades in place | `pnpm test -- tests/schema-migrations.test.ts` | v28 fixture → 29, rows intact |
-| Landing across remotes, late merges | `pnpm test -- tests/git-activity.test.ts` | six fixture cases pass; origin-only mutation red |
-| Authored PR search, windows, pages | `pnpm test -- tests/github-pull-requests.test.ts` | split, paging, partial, no-`gh`-when-off pass |
-| Allocation and read | `pnpm test -- tests/outcomes-allocation.test.ts tests/analytics-outcomes.test.ts` | timeline split, key dedupe, rollup, pooling; shares sum to 1; dollars equal Usage |
-| Route and errors | `pnpm test -- tests/v2-router-errors.test.ts` | new route's 500 entry passes |
+| v29 upgrades in place | `node --import tsx --test tests/git-outcome-schema.test.ts` | v28 fixture → 29, rows intact |
+| Landing across remotes, late merges | `node --import tsx --test tests/git-activity.test.ts` | six fixture cases pass; origin-only mutation red |
+| Authored PR search, windows, pages | `node --import tsx --test tests/github-pull-requests.test.ts` | split, paging, partial, no-`gh`-when-off pass |
+| Allocation and read | `node --import tsx --test tests/outcomes-allocation.test.ts tests/analytics-outcomes.test.ts` | timeline split, key dedupe, rollup, pooling; shares sum to 1; dollars equal Usage |
+| Route and errors | `node --import tsx --test tests/v2-router-errors.test.ts` | new route's 500 entry passes |
 | Built path | `pnpm build && pnpm verify:skill-context-built && pnpm exec playwright test` | pass, including the Git section |
 | UI | `pnpm frontend:check && pnpm frontend:test` | 0 errors; transforms and store tests pass |
 | Real data | snapshot read, recorded in the PR | class shares match the exploration; 30-day read ≤1 s warm |
