@@ -113,6 +113,8 @@ import {
   pollsProcess,
   PROCESS_POLL_WINDOW_MS,
   pullRequestUrls,
+  createdPullRequestUrls,
+  isPullRequestTool,
   opensPullRequest,
   runningProcessIds,
   runsGitCommit,
@@ -3049,17 +3051,17 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
   const to = new Date(toMs).toISOString();
   const rows = db.prepare(`
     SELECT tc.session_id, b.agent, b.cwd, b.title, substr(b.first_message, 1, 500) AS first_message,
-      m.timestamp, tc.input_json, tc.tool_use_id
+      m.timestamp, tc.tool_name, tc.input_json, tc.tool_use_id
     FROM browsing_sessions b
     JOIN tool_calls tc ON tc.session_id = b.id
     JOIN messages m ON m.id = tc.message_id
     WHERE ${sessionId ? 'b.id = @session' : `(b.started_at IS NULL OR julianday(b.started_at) <= julianday(@to))
       AND (COALESCE(b.last_item_at, b.ended_at) IS NULL OR julianday(COALESCE(b.last_item_at, b.ended_at)) >= julianday(@from))`}
-      AND ((tc.input_json LIKE '%git %' AND tc.input_json LIKE '%commit%') OR (tc.input_json LIKE '%gh %' AND tc.input_json LIKE '% create%'))
+      AND ((tc.input_json LIKE '%git %' AND tc.input_json LIKE '%commit%') OR (tc.input_json LIKE '%gh %' AND tc.input_json LIKE '% create%') OR tc.tool_name LIKE '%create_pull_request')
       AND m.timestamp IS NOT NULL AND julianday(m.timestamp) BETWEEN julianday(@from) AND julianday(@to)
   `).all({ from, to, ...(sessionId ? { session: sessionId } : {}) }) as Array<{
     session_id: string; agent: string; cwd: string | null; title: string | null; first_message: string | null;
-    timestamp: string; input_json: string | null; tool_use_id: string | null;
+    timestamp: string; tool_name: string; input_json: string | null; tool_use_id: string | null;
   }>;
   const result = db.prepare(`
     SELECT payload_json FROM session_items
@@ -3131,7 +3133,8 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
       first_message: row.first_message,
     };
     if (runsGitCommit(call.input)) commits.push(call);
-    if (opensPullRequest(call.input)) pullRequests.push(call);
+    if (isPullRequestTool(row.tool_name)) pullRequests.push({ ...call, result: createdPullRequestUrls(call.result).map(ref => ref.url).join('\n') });
+    else if (opensPullRequest(call.input)) pullRequests.push(call);
   }
   const byTime = (a: GitToolCall, b: GitToolCall) => a.at - b.at;
   return { commits: commits.sort(byTime), pullRequests: pullRequests.sort(byTime) };

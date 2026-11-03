@@ -3,6 +3,8 @@ import test from 'node:test';
 import {
   attributeCommit,
   createdCommit,
+  createdPullRequestUrls,
+  isPullRequestTool,
   githubRepoOfRemote,
   mergedPullRequestNumber,
   opensPullRequest,
@@ -190,4 +192,29 @@ test('a poll follows a process only by its session_id argument', () => {
   assert.ok(!pollsProcess('write_stdin', '{"session_id":5151,"chars":"","yield_time_ms":1000}', '1000'), 'an option value');
   assert.ok(!pollsProcess('exec', JSON.stringify('text(await tools.write_stdin({session_id:5151,chars:"1000"}));'), '1000'), 'stdin text');
   assert.ok(pollsProcess('exec', JSON.stringify('text(await tools.write_stdin({"session_id":1000,chars:""}));'), '1000'));
+});
+
+test('a GitHub tool that creates a pull request is known by its name, and its result by its url field', () => {
+  for (const name of ['_create_pull_request', 'mcp__github__create_pull_request', 'mcp__codex_apps__github_create_pull_request']) assert.ok(isPullRequestTool(name), name);
+  for (const name of ['mcp__github__create_pull_request_review', '_update_pull_request', 'mcp__github__list_pull_requests', 'Bash']) assert.ok(!isPullRequestTool(name), name);
+  const stored = JSON.stringify({ content: `Output:\n${JSON.stringify({ html_url: 'https://github.com/Owner/Repo/pull/9', body: 'after https://github.com/owner/repo/pull/3' })}` });
+  assert.deepEqual(createdPullRequestUrls(stored), [{ repo: 'owner/repo', number: 9, url: 'https://github.com/Owner/Repo/pull/9' }]);
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: 'Error: validation failed' })), []);
+  // A body quoting JSON with its own url field, ahead of the result's.
+  const quoting = { body: 'Related: {"url":"https://github.com/owner/repo/pull/3"}', url: 'https://github.com/owner/repo/pull/15' };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: `Wall time: 1.5 seconds\nOutput:\n${JSON.stringify(quoting)}` })).map(ref => ref.number), [15]);
+  // Cut off mid-body, as a stored result keeps only its first part.
+  const cut = `Output:\n${JSON.stringify({ url: 'https://github.com/owner/repo/pull/17', number: 17, body: 'x'.repeat(50) + ' see https://github.com/owner/repo/pull/3' })}`.slice(0, 120);
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: cut })).map(ref => ref.number), [17]);
+  // A nested object's own html_url, ahead of the result's.
+  const nested = { base: { html_url: 'https://github.com/owner/repo/pull/3' }, html_url: 'https://github.com/owner/repo/pull/18' };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: `Output:\n${JSON.stringify(nested)}` })).map(ref => ref.number), [18]);
+  // An MCP result: content blocks of text.
+  const blocks = { content: [{ type: 'text', text: JSON.stringify({ number: 16, html_url: 'https://github.com/owner/repo/pull/16' }) }] };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify(blocks)).map(ref => ref.number), [16]);
+  // The same MCP result, serialized into a stored receipt's content.
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: JSON.stringify(blocks), outcome: 'success' })).map(ref => ref.number), [16]);
+  // Serialized and cut off at 2,000 characters, as the parser stores a long one.
+  const long = { content: [{ type: 'text', text: JSON.stringify({ html_url: 'https://github.com/owner/repo/pull/19', body: 'y'.repeat(3000) }) }] };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: JSON.stringify(long).slice(0, 2000) })).map(ref => ref.number), [19]);
 });

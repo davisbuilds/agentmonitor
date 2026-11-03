@@ -251,8 +251,9 @@ outside ones on top, says how many outside commits were only close in time to a
 session's commit or carry a Claude co-author trailer with no session here, and
 lists commits and pull requests by agent and project. Pull requests are the
 links `gh pr create` printed, including those a Codex call printed after it
-returned, in later polls of its process. One is merged when GitHub says so
-(asked through `gh`) or local git has its merge commit. Merge commits are not
+returned, in later polls of its process, and the `url` a GitHub tool's
+`create_pull_request` returned (an MCP server or a Codex app). One is merged
+when local git has its merge commit or, with GitHub lookups on, GitHub says so. Merge commits are not
 counted as anyone's work. A repository renamed after its pull requests were
 opened is asked about under the name the link used, which GitHub follows to the
 renamed repository unless another repository has since taken that name.
@@ -394,11 +395,13 @@ enter activity or usage totals.
   does not read or emit instruction contents.
 - Trace-quality list rows and aggregate warehouse exports are content-free.
 - Insight generation is the sole product path that sends an analysis request to a
-  configured external model provider. (Git activity asks GitHub, through `gh`,
-  only for the state of pull requests sessions opened, by repository and number.) The request carries the selected scope's
+  configured external model provider. The request carries the selected scope's
   analytics and usage rollups. These include project, model, and tool names plus
   selected top-session titles and opening prompts. It does not carry
   full transcripts.
+- With `AGENTMONITOR_GITHUB_LOOKUPS=1`, git activity asks GitHub, through `gh`,
+  for the state of pull requests sessions opened, naming only repositories and
+  numbers. It is off by default.
 - Session sync copies transcript text, tool calls, and usage from local history
   files into the local database for search and analysis; it never modifies those
   files. `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` skips matching paths.

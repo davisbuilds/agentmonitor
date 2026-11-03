@@ -280,7 +280,7 @@ export function registerMaintenanceCommands(): void {
   registerCommand({
     name: 'sync git',
     group: 'Data Commands',
-    summary: 'Read commits from the repositories sessions ran in, and ask GitHub which of their pull requests merged',
+    summary: 'Read commits from the repositories sessions ran in (and, with AGENTMONITOR_GITHUB_LOOKUPS=1, ask GitHub which of their pull requests merged)',
     usage: 'sync git',
     examples: ['sync git', 'sync git --json'],
     async handler(ctx, args) {
