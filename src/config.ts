@@ -134,7 +134,8 @@ function parseQuotaConfig(env: EnvMap): QuotaConfig {
 function parseGitConfig(env: EnvMap): GitConfig {
   return {
     pollIntervalMs: parseEnvInt(env.AGENTMONITOR_GIT_POLL_INTERVAL_MS, 600_000, 0),
-    githubLookups: parseEnvBool(env.AGENTMONITOR_GITHUB_LOOKUPS, true),
+    // Off unless asked for: it is the only git activity that leaves the machine.
+    githubLookups: parseEnvBool(env.AGENTMONITOR_GITHUB_LOOKUPS, false),
   };
 }
 
