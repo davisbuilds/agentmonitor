@@ -274,8 +274,14 @@ export interface AuthoredPullRequestReport {
 const SEARCH_RESULT_CAP = 1000;
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-/** Pull requests per search page, GitHub's most. */
-const SEARCH_PAGE = 100;
+/**
+ * Pull requests per search page. With each one's commits, a page of GitHub's
+ * most (100) timed out as HTTP 502 on a month of a few hundred; 25 read the
+ * same months whole, at a few seconds a page (measured 2026-11-03).
+ */
+const SEARCH_PAGE = 25;
+/** How long after a month ends its last read waits, for merges the search had not indexed yet. */
+const SEARCH_SETTLE_MS = 86_400_000;
 
 /** The query for one page of a window's merged pull requests by the signed-in user. */
 export function searchQuery(window: { from: string; to: string }, after: string | null): string {
@@ -363,10 +369,10 @@ async function readWindow(
  * Record the pull requests the signed-in user merged in the last year, with
  * their size and commits, so work no session here opened (another machine,
  * or a pull request opened by hand) is known too, and coverage can be
- * measured against all of it. Reads month by month: a month is read once,
- * and the last two, which still gain merges, again after
- * PULL_REQUEST_RECHECK_MS. A month counts as read only when every page of it
- * answered.
+ * measured against all of it. Reads month by month. The current month, which
+ * still gains merges, is read again after PULL_REQUEST_RECHECK_MS; an ended
+ * month once more on the first pass SEARCH_SETTLE_MS after its end, then never.
+ * A month counts as read only when every page of it answered.
  */
 export async function syncAuthoredPullRequests(
   db: Database,
@@ -385,12 +391,11 @@ export async function syncAuthoredPullRequests(
 
   const start = new Date(now.getTime() - SESSION_HISTORY_MS);
   const thisMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-  const lastMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1);
   for (let month = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1); month <= thisMonth;) {
     const next = Date.UTC(new Date(month).getUTCFullYear(), new Date(month).getUTCMonth() + 1, 1);
     const window = { from: day(month), to: day(next - DAY_MS) };
     const previous = read.get(window.from) as { synced_at: string } | undefined;
-    const settled = month < lastMonth;
+    const settled = previous !== undefined && Date.parse(previous.synced_at) >= next + SEARCH_SETTLE_MS;
     month = next;
     if (previous && (settled || now.getTime() - Date.parse(previous.synced_at) < PULL_REQUEST_RECHECK_MS)) continue;
 

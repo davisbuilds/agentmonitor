@@ -133,7 +133,7 @@ test('an answer with details records size, author and commits, and a merged pull
 
 test("the search asks for the user's pull requests merged in a window, a page at a time, with their size and commits", () => {
   const query = searchQuery({ from: '2026-10-01', to: '2026-10-31' }, 'Y3Vyc29y');
-  assert.match(query, /search\(type: ISSUE, first: 100, after: "Y3Vyc29y", query: "is:pr is:merged author:@me merged:2026-10-01\.\.2026-10-31"\)/);
+  assert.match(query, /search\(type: ISSUE, first: 25, after: "Y3Vyc29y", query: "is:pr is:merged author:@me merged:2026-10-01\.\.2026-10-31"\)/);
   assert.match(query, /\.\.\. on PullRequest \{ number repository \{ nameWithOwner \} createdAt mergedAt additions deletions changedFiles author \{ __typename \} commits\(first: 100\)/);
   assert.doesNotMatch(searchQuery({ from: '2026-10-01', to: '2026-10-31' }, null), /after:/);
   assert.throws(() => searchQuery({ from: '2026-10-01" author:x', to: '2026-10-31' }, null), /window/);
@@ -202,8 +202,17 @@ test('merged pull requests are read window by window: a full window splits, page
     'a read window is not asked again, and recent months wait for the recheck interval');
   assert.ok(db.prepare("SELECT 1 FROM github_pull_requests WHERE repo = 'owner/delta' AND number = 6").get());
 
+  const windowsAsked = () => asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i);
   asked.length = 0;
   await syncAuthoredPullRequests(db, { search, now: new Date(now.getTime() + PULL_REQUEST_RECHECK_MS + 60_000), cap: 3 });
-  assert.deepEqual(asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i), ['2026-10-01..2026-10-31', '2026-11-01..2026-11-30'],
-    'the last two months are read again after it');
+  assert.deepEqual(windowsAsked(), ['2026-11-01..2026-11-30'],
+    'the month still gaining merges is read again after the interval; October, read after it ended, is settled');
+
+  asked.length = 0;
+  await syncAuthoredPullRequests(db, { search, now: new Date('2026-12-02T12:00:00Z'), cap: 3 });
+  assert.deepEqual(windowsAsked(), ['2026-11-01..2026-11-30', '2026-12-01..2026-12-31'],
+    'a month last read before it ended is read once more, a day after');
+  asked.length = 0;
+  await syncAuthoredPullRequests(db, { search, now: new Date('2026-12-02T14:00:00Z'), cap: 3 });
+  assert.deepEqual(windowsAsked(), ['2026-12-01..2026-12-31'], 'and then never again');
 });

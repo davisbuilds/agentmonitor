@@ -273,8 +273,9 @@ from the remote-tracking branches as the last `git fetch` left them: the pass
 never fetches. With
 `AGENTMONITOR_GITHUB_LOOKUPS=1`, each pass then asks GitHub, read-only through
 `gh` and as its signed-in user, for the pull requests that user merged in the
-last year, a month at a time with their size and commits (a month is read once,
-the last two again at most hourly), and about the pull requests sessions opened
+last year, a month at a time with their size and commits (the current month
+again at most hourly, an ended one once more a day after it ends, then never),
+and about the pull requests sessions opened
 in the last year: one GraphQL request per 50, never
 again for one already merged, and at most hourly for the rest. Local git alone
 shows a merge only once its commit is pulled. Without `gh`, or signed out, the
