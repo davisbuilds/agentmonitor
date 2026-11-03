@@ -261,6 +261,24 @@ function topLevelStrings(text: string): Map<string, string> {
   return fields;
 }
 
+/** The string values of a key in cut-off JSON, each decoded as far as it goes. */
+function cutStringValues(json: string, key: string): string[] {
+  const values: string[] = [];
+  for (const match of json.matchAll(new RegExp(`"${key}"\\s*:\\s*"`, 'g'))) {
+    const start = (match.index ?? 0) + match[0].length;
+    let end = start;
+    while (end < json.length && json[end] !== '"') end += json[end] === '\\' ? 2 : 1;
+    // Drop an escape the cut split, then close the string to decode it.
+    const body = json.slice(start, Math.min(end, json.length)).replace(/\\(u[0-9a-fA-F]{0,3})?$/, '');
+    try {
+      values.push(JSON.parse(`"${body}"`) as string);
+    } catch {
+      // An escape cut mid-way that the trim missed: nothing to read.
+    }
+  }
+  return values;
+}
+
 /**
  * The pull request a GitHub tool's result says it created: the `html_url` or
  * `url` of the object it returned, read from the object's own top level. The
@@ -280,7 +298,9 @@ export function createdPullRequestUrls(result: string): PullRequestRef[] {
         try {
           collect(JSON.parse(trimmed), depth + 1);
         } catch {
-          // Not JSON, or cut off: read as text.
+          // Cut off: a wrapper's text blocks still start whole, so read each
+          // one as far as it goes.
+          for (const text of cutStringValues(trimmed, 'text')) collect(text, depth + 1);
         }
       }
     }

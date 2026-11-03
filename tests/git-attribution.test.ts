@@ -214,4 +214,7 @@ test('a GitHub tool that creates a pull request is known by its name, and its re
   assert.deepEqual(createdPullRequestUrls(JSON.stringify(blocks)).map(ref => ref.number), [16]);
   // The same MCP result, serialized into a stored receipt's content.
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: JSON.stringify(blocks), outcome: 'success' })).map(ref => ref.number), [16]);
+  // Serialized and cut off at 2,000 characters, as the parser stores a long one.
+  const long = { content: [{ type: 'text', text: JSON.stringify({ html_url: 'https://github.com/owner/repo/pull/19', body: 'y'.repeat(3000) }) }] };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: JSON.stringify(long).slice(0, 2000) })).map(ref => ref.number), [19]);
 });
