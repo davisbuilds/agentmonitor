@@ -114,6 +114,7 @@ import {
   PROCESS_POLL_WINDOW_MS,
   pullRequestUrls,
   runningProcessIds,
+  runsGitCommit,
   type CommitAttribution,
   type CommitCall,
 } from '../git/attribution.js';
@@ -3051,7 +3052,7 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
     JOIN messages m ON m.id = tc.message_id
     WHERE ${sessionId ? 'b.id = @session' : `(b.started_at IS NULL OR julianday(b.started_at) <= julianday(@to))
       AND (COALESCE(b.last_item_at, b.ended_at) IS NULL OR julianday(COALESCE(b.last_item_at, b.ended_at)) >= julianday(@from))`}
-      AND (tc.input_json LIKE '%git commit%' OR tc.input_json LIKE '%gh pr create%')
+      AND ((tc.input_json LIKE '%git %' AND tc.input_json LIKE '%commit%') OR tc.input_json LIKE '%gh pr create%')
       AND m.timestamp IS NOT NULL AND julianday(m.timestamp) BETWEEN julianday(@from) AND julianday(@to)
   `).all({ from, to, ...(sessionId ? { session: sessionId } : {}) }) as Array<{
     session_id: string; agent: string; cwd: string | null; title: string | null; first_message: string | null;
@@ -3114,7 +3115,7 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
       title: row.title,
       first_message: row.first_message,
     };
-    if (call.input.includes('git commit')) commits.push(call);
+    if (runsGitCommit(call.input)) commits.push(call);
     if (row.opens_pr) pullRequests.push(call);
   }
   const byTime = (a: GitToolCall, b: GitToolCall) => a.at - b.at;

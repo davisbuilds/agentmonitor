@@ -124,3 +124,11 @@ test('GitHub\'s word marks a pull request merged that local git never saw merge'
   cache.run(7, 'OPEN', null, at(9));
   assert.deepEqual(queries.getAnalyticsGitActivity(range).pull_requests.map(pr => [pr.number, pr.merged]), [[8, true], [7, true]]);
 });
+
+test('a commit run as `git -C <repo> commit` counts for its session', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 4, hour, minute)).toISOString();
+  session.run('c-dash-c', 'claude', 'claude-jsonl', root, 'Commit from outside', day(9), day(10));
+  runs('c-dash-c', day(9, 30), `git -C ${root} commit -m "feat: through -C"`, 'toolu_dash_c');
+  addCommit('fff6666ffff', new Date(Date.UTC(2026, 2, 4, 9, 30, 20)).toISOString(), 'feat: through -C');
+  assert.deepEqual(queries.getSessionGitActivity('c-dash-c').commits.map(row => row.sha), ['fff6666ffff']);
+});

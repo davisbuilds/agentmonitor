@@ -50,6 +50,25 @@ function subjectProbes(subject: string): string[] {
   return [...new Set([head, once, twice])];
 }
 
+/** Whether a command runs `git commit`, global options (`-C <path>`, `-c <key>=<value>`, `--no-pager`) included. */
+// An option git takes before its command: `-C <path>` or `-c <key>=<value>`
+// (a path possibly quoted, and escaped once more in stored JSON), or a flag.
+const GIT_GLOBAL_OPTION = String.raw`(?:-[Cc]\s+(?:\\?"[^"\\]*\\?"|'[^']*'|\S+)|--[\w-]+(?:=\S+)?|-[a-zA-Z])`;
+// `git` starts a word, or a line of a script stored as JSON (`\ngit`).
+const GIT_COMMIT = new RegExp(String.raw`(?:(?<![\w-])|(?<=\\[nt]))git(?:\s+${GIT_GLOBAL_OPTION})*\s+commit(?![\w-])`);
+
+export function runsGitCommit(input: string): boolean {
+  return GIT_COMMIT.test(input);
+}
+
+/** Whether a result shows git creating this commit: its `[branch abc1234] subject` line, not a hash a log printed. */
+export function createdCommit(result: string, sha: string): boolean {
+  for (const match of result.matchAll(/\[[^\]\n]* ([0-9a-f]{7,40})\]/g)) {
+    if (sha.startsWith(match[1])) return true;
+  }
+  return false;
+}
+
 function mentionsSubject(text: string, subject: string): boolean {
   return subjectProbes(subject).some(probe => text.includes(probe));
 }
@@ -68,7 +87,7 @@ function namesRepository(text: string, commit: CommitFact): boolean {
 /**
  * The session that made a commit, by the strongest evidence among the sessions
  * that ran `git commit` within the window, tried in order:
- * 1. Its result names the commit's hash (Codex prints `[branch abc1234]`).
+ * 1. Its result shows git creating the commit (`[branch abc1234] subject`).
  * 2. Its command carries the commit's subject (`-m`).
  * 3. A call it made in the minutes before carries the subject (a message
  *    file for `-F`).
@@ -98,8 +117,7 @@ export function attributeCommit(
     return { kind: 'session', session_id, agent, evidence };
   };
 
-  const shortSha = commit.sha.slice(0, 7);
-  const byHash = verdict(sessionsOf(candidates.filter(call => call.result.includes(shortSha))), 'hash');
+  const byHash = verdict(sessionsOf(candidates.filter(call => createdCommit(call.result, commit.sha))), 'hash');
   if (byHash) return byHash;
 
   // A session works in the commit's repository when it started there (or in

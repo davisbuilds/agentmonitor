@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   attributeCommit,
+  createdCommit,
   githubRepoOfRemote,
   mergedPullRequestNumber,
   pollsProcess,
   pullRequestUrls,
   runningProcessIds,
+  runsGitCommit,
   type CommitCall,
 } from '../src/git/attribution.js';
 
@@ -112,4 +114,27 @@ test('the strongest evidence pointing at two sessions proves neither, whatever w
   const wrote = (sessionId: string) => sessionId === 'c' ? [`echo '${commit.subject}' > msg.txt`] : [];
   assert.deepEqual(attributeCommit(commit, [call('a', 'claude', 1, subject), call('b', 'claude', 2, subject), call('c', 'claude', 3)], wrote),
     { kind: 'time_only' });
+});
+
+test('only git\'s line for the commit it created proves a hash, not one a log printed', () => {
+  const sha = 'abc1234def5678';
+  assert.ok(createdCommit('[main abc1234] fix: done', sha));
+  assert.ok(createdCommit('[main (root-commit) abc1234] first', sha));
+  assert.ok(createdCommit('[detached HEAD abc1234] fix', sha));
+  assert.ok(createdCommit(JSON.stringify({ output: '[feat/git-view abc1234] fix: done\n 2 files changed' }), sha));
+  assert.ok(!createdCommit('abc1234 human change\n[main def5678] agent change', sha), 'a log line before the commit');
+  assert.ok(!createdCommit('[main abc12345] other', sha), 'another commit sharing the prefix');
+  const logged = call('codex-1', 'codex', 3, '{"command":"git log -1 --oneline; git commit -m \\"agent change\\""}', 'abc1234 human change\n[main def5678] agent change');
+  assert.deepEqual(attributeCommit(commit, [logged], none), { kind: 'time_only' });
+});
+
+test('a commit is a commit with git\'s global options before it', () => {
+  assert.ok(runsGitCommit(JSON.stringify({ command: 'cd /w/alpha\ngit add -A\ngit commit -m x' })), 'a line of a stored script');
+  assert.ok(runsGitCommit(JSON.stringify({ command: 'make\tgit commit -m x' })));
+  for (const command of ['git commit -m x', 'git -C /w/alpha commit -m x', 'git -c user.name=Dev commit -F msg', 'git --no-pager -C "$repo" commit -q']) {
+    assert.ok(runsGitCommit(JSON.stringify({ command })), command);
+  }
+  for (const command of ['git log --grep commit', 'git commit-tree HEAD^{tree}', 'git show --stat', 'echo "git -C x status"; commit=1']) {
+    assert.ok(!runsGitCommit(JSON.stringify({ command })), command);
+  }
 });
