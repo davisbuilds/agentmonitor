@@ -270,13 +270,25 @@ function topLevelStrings(text: string): Map<string, string> {
  */
 export function createdPullRequestUrls(result: string): PullRequestRef[] {
   const texts: string[] = [];
-  const collect = (value: unknown): void => {
-    if (typeof value === 'string') texts.push(value);
-    else if (Array.isArray(value)) value.forEach(item => collect((item as { text?: unknown } | null)?.text));
+  const collect = (value: unknown, depth = 0): void => {
+    if (depth > 4) return;
+    if (typeof value === 'string') {
+      texts.push(value);
+      // A wrapper serialized into a string (an MCP result in a receipt's content).
+      const trimmed = value.trim();
+      if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+        try {
+          collect(JSON.parse(trimmed), depth + 1);
+        } catch {
+          // Not JSON, or cut off: read as text.
+        }
+      }
+    }
+    else if (Array.isArray(value)) value.forEach(item => collect((item as { text?: unknown } | null)?.text, depth + 1));
     else if (value && typeof value === 'object') {
       const record = value as Record<string, unknown>;
       if (typeof record.url === 'string' || typeof record.html_url === 'string') texts.push(JSON.stringify(record));
-      else for (const key of ['content', 'output', 'text']) collect(record[key]);
+      else for (const key of ['content', 'output', 'text']) collect(record[key], depth + 1);
     }
   };
   try {

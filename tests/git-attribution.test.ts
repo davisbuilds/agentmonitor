@@ -212,4 +212,6 @@ test('a GitHub tool that creates a pull request is known by its name, and its re
   // An MCP result: content blocks of text.
   const blocks = { content: [{ type: 'text', text: JSON.stringify({ number: 16, html_url: 'https://github.com/owner/repo/pull/16' }) }] };
   assert.deepEqual(createdPullRequestUrls(JSON.stringify(blocks)).map(ref => ref.number), [16]);
+  // The same MCP result, serialized into a stored receipt's content.
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: JSON.stringify(blocks), outcome: 'success' })).map(ref => ref.number), [16]);
 });
