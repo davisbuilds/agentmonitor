@@ -48,7 +48,7 @@ export const PULL_REQUEST_RECHECK_MS = 60 * 60_000;
 /** Pull requests per GraphQL request. */
 const LOOKUP_BATCH = 50;
 /** Commits read per pull request; a longer one keeps its count and its first this many. */
-export const COMMITS_PER_PULL_REQUEST = 100;
+const COMMITS_PER_PULL_REQUEST = 100;
 /** A pull request's fields beyond its state: size, author and commits. */
 const DETAIL_FIELDS = `additions deletions changedFiles author { __typename } commits(first: ${COMMITS_PER_PULL_REQUEST}) { totalCount nodes { commit { oid } } }`;
 
@@ -271,7 +271,7 @@ export interface AuthoredPullRequestReport {
 }
 
 /** Results GitHub's search returns at most for one query; a window holding more is split. */
-export const SEARCH_RESULT_CAP = 1000;
+const SEARCH_RESULT_CAP = 1000;
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 /** Pull requests per search page, GitHub's most. */
