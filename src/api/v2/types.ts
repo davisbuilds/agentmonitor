@@ -329,7 +329,7 @@ export interface GitActivityAgent {
   /** Sessions that made at least one of them. */
   sessions: number;
   prs_opened: number;
-  /** Of the pull requests this agent opened, those a merge in local git shows merged. */
+  /** Of the pull requests this agent opened, those GitHub or a merge commit in local git shows merged. */
   prs_merged: number;
 }
 
