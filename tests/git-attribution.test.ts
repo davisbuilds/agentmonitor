@@ -16,7 +16,7 @@ import {
 } from '../src/git/attribution.js';
 
 const at = (second: number) => Date.UTC(2026, 2, 2, 10, 0, 0) + second * 1000;
-const commit = { sha: 'abc1234def5678', subject: 'fix(git): keep paths as git names them', at: at(0), repo_root: '/w/alpha', project: 'alpha' };
+const commit = { sha: 'abc1234def5678', subject: 'fix(git): keep paths as git names them', at: at(0), committed_at: at(0), repo_root: '/w/alpha', project: 'alpha' };
 const call = (session_id: string, agent: string, second: number, input = '{"command":"git commit -F msg.txt"}', result = '', project: string | null = 'alpha'): CommitCall =>
   ({ session_id, agent, at: at(second), input, result, cwd: project ? `/w/${project}` : null, project });
 const none = () => [];
@@ -158,4 +158,15 @@ test('a pull request is opened by gh pr create, with the repository flag anywher
   for (const command of ['gh pr view 12', 'gh -R owner/repo pr list', 'echo "gh pr" && create-thing', 'gh pr create-draft']) {
     assert.ok(!opensPullRequest(JSON.stringify({ command })), command);
   }
+});
+
+test('a commit is matched to the call that created it, an amend moving only its committer date', () => {
+  // Amended ten minutes after it was first authored: the author date stays.
+  const amended = { ...commit, committed_at: at(600) };
+  const amend = call('claude-1', 'claude', 601, '{"command":"git commit --amend --no-edit"}', '[main abc1234] fix(git): keep paths');
+  assert.deepEqual(attributeCommit(amended, [amend], none), { kind: 'session', session_id: 'claude-1', agent: 'claude', evidence: 'hash' });
+  // Rebased an hour later: the original commit call, by the author date, still proves it by subject.
+  const rebased = { ...commit, committed_at: at(3600) };
+  const original = call('claude-2', 'claude', 1, JSON.stringify({ command: `git commit -m "${commit.subject}"` }));
+  assert.deepEqual(attributeCommit(rebased, [original], none), { kind: 'session', session_id: 'claude-2', agent: 'claude', evidence: 'subject' });
 });

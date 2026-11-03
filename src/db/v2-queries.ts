@@ -3161,18 +3161,53 @@ interface AttributedCommit {
 }
 
 /** The range's commits, each credited to the session that proves it, if any. Merges are nobody's work. */
-function attributedCommits(fromMs: number, toMs: number, calls: GitToolCall[]): AttributedCommit[] {
-  const commits = getDb().prepare(`
-    SELECT repo_root, sha, subject, authored_at, co_authors_json FROM git_commits
-    WHERE is_merge = 0 AND authored_at >= ? AND authored_at < ?
+interface CommitRow {
+  repo_root: string;
+  sha: string;
+  subject: string | null;
+  authored_at: string;
+  committed_at: string;
+  co_authors_json: string;
+}
+
+/**
+ * Commits that are no merge, authored in a range or, with `orCommitted`,
+ * created in it: an amend keeps its author date, so a session's own commits
+ * are found by either.
+ */
+function commitRows(fromMs: number, toMs: number, orCommitted = false): CommitRow[] {
+  return getDb().prepare(`
+    SELECT repo_root, sha, subject, authored_at, committed_at, co_authors_json FROM git_commits
+    WHERE is_merge = 0 AND ((authored_at >= @from AND authored_at < @to)${orCommitted ? ' OR (committed_at >= @from AND committed_at < @to)' : ''})
     ORDER BY authored_at, sha
-  `).all(new Date(fromMs).toISOString(), new Date(toMs).toISOString()) as Array<{
-    repo_root: string; sha: string; subject: string | null; authored_at: string; co_authors_json: string;
-  }>;
+  `).all({ from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() }) as CommitRow[];
+}
+
+/** The span of calls that could have made these commits, around both of each one's dates, and the range itself. */
+function commitCallSpan(commits: CommitRow[], fromMs: number, toMs: number): [number, number] {
+  let from = fromMs;
+  let to = toMs;
+  for (const row of commits) {
+    for (const time of [Date.parse(row.authored_at), Date.parse(row.committed_at)]) {
+      if (time < from) from = time;
+      if (time > to) to = time;
+    }
+  }
+  return [from - COMMIT_CALL_WINDOW_MS, to + COMMIT_CALL_WINDOW_MS];
+}
+
+function attributedCommits(commits: CommitRow[], calls: GitToolCall[]): AttributedCommit[] {
   const sessionInputsBetween = sessionInputReader();
   return commits.map(row => {
     const project = projectNameFromCwd(row.repo_root) ?? row.repo_root.split('/').filter(Boolean).pop() ?? row.repo_root;
-    const fact = { sha: row.sha, subject: row.subject ?? '', at: Date.parse(row.authored_at), repo_root: row.repo_root, project };
+    const fact = {
+      sha: row.sha,
+      subject: row.subject ?? '',
+      at: Date.parse(row.authored_at),
+      committed_at: Date.parse(row.committed_at),
+      repo_root: row.repo_root,
+      project,
+    };
     return {
       repo_root: row.repo_root,
       sha: row.sha,
@@ -3268,8 +3303,9 @@ export function getAnalyticsGitActivity(params: AnalyticsParams = {}): Analytics
   const toMs = params.date_to ? Date.parse(dateParamUpperExclusive(params.date_to)) : Date.now() + COMMIT_CALL_WINDOW_MS;
   const wantAgent = params.agent ? browserAgentName(params.agent) : null;
 
-  const calls = gitToolCalls(fromMs - COMMIT_CALL_WINDOW_MS, toMs + COMMIT_CALL_WINDOW_MS);
-  const commits = attributedCommits(fromMs, toMs, calls.commits)
+  const rows = commitRows(fromMs, toMs);
+  const calls = gitToolCalls(...commitCallSpan(rows, fromMs, toMs));
+  const commits = attributedCommits(rows, calls.commits)
     .filter(commit => !params.project || commit.project === params.project)
     .filter(commit => !wantAgent || (commit.attribution.kind === 'session' && commit.attribution.agent === wantAgent));
   const pullRequests = openedPullRequests(calls.pullRequests.filter(call => call.at >= fromMs && call.at < toMs))
@@ -3343,8 +3379,9 @@ export function getSessionGitActivity(sessionId: string): SessionGitActivity {
   const endIso = session.ended_at ?? session.last_item_at;
   const end = endIso ? Date.parse(endIso) : Date.now();
   // Other sessions' calls compete for the same commits, so read them all for the span.
-  const calls = gitToolCalls(start - 2 * COMMIT_CALL_WINDOW_MS, end + 2 * COMMIT_CALL_WINDOW_MS);
-  const commits = attributedCommits(start - COMMIT_CALL_WINDOW_MS, end + COMMIT_CALL_WINDOW_MS, calls.commits)
+  const rows = commitRows(start - COMMIT_CALL_WINDOW_MS, end + COMMIT_CALL_WINDOW_MS, true);
+  const calls = gitToolCalls(...commitCallSpan(rows, start - COMMIT_CALL_WINDOW_MS, end + COMMIT_CALL_WINDOW_MS));
+  const commits = attributedCommits(rows, calls.commits)
     .filter(commit => commit.attribution.kind === 'session' && commit.attribution.session_id === sessionId)
     .map(commit => ({ sha: commit.sha, subject: commit.subject, project: commit.project, authored_at: commit.authored_at }));
   const pullRequests = openedPullRequests(calls.pullRequests.filter(call => call.session_id === sessionId))

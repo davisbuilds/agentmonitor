@@ -173,3 +173,23 @@ test('a pull request opened from a yielded cell, with the repository flag, count
   toolCall(day(9, 12), 'wait', JSON.stringify({ cell_id: '67', yield_time_ms: 1000 }), 'call_wait', `Script completed\nOutput:\n${prUrl(13)}\n`);
   assert.deepEqual(queries.getSessionGitActivity(cell).pull_requests.map(pr => pr.number), [13]);
 });
+
+test('an amend counts for the session that made it, though the author date predates the session', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 8, hour, minute)).toISOString();
+  session.run('c-amend', 'claude', 'claude-jsonl', root, 'Amend it', day(10), day(11));
+  runs('c-amend', day(10, 30), 'git commit --amend --no-edit', 'toolu_amend', { row: 'c-amend', id: 'toolu_amend' });
+  db.prepare("UPDATE session_items SET payload_json = ? WHERE session_id = 'c-amend' AND source_item_id = 'toolu_amend'")
+    .run(JSON.stringify({ content: '[main 99aa111] feat: amended' }));
+  db.prepare(`INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, author_name, author_email, subject, co_authors_json, is_merge)
+    VALUES (?, '99aa1112222', ?, ?, 'Dev', 'dev@example.com', 'feat: amended', '[]', 0)`).run(root, day(8), new Date(Date.UTC(2026, 2, 8, 10, 30, 5)).toISOString());
+  assert.deepEqual(queries.getSessionGitActivity('c-amend').commits.map(row => row.sha), ['99aa1112222']);
+  // Authored late on the 8th, amended by a session on the 9th: still the 8th's commit, and that session's.
+  session.run('c-amend-next', 'claude', 'claude-jsonl', root, 'Amend the next day', '2026-03-09T00:30:00.000Z', '2026-03-09T02:00:00.000Z');
+  runs('c-amend-next', '2026-03-09T01:00:00.000Z', 'git commit --amend --no-edit', 'toolu_amend_next', { row: 'c-amend-next', id: 'toolu_amend_next' });
+  db.prepare("UPDATE session_items SET payload_json = ? WHERE session_id = 'c-amend-next' AND source_item_id = 'toolu_amend_next'")
+    .run(JSON.stringify({ content: '[main 77bb333] feat: amended next day' }));
+  db.prepare(`INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, author_name, author_email, subject, co_authors_json, is_merge)
+    VALUES (?, '77bb3334444', ?, ?, 'Dev', 'dev@example.com', 'feat: amended next day', '[]', 0)`).run(root, day(23), '2026-03-09T01:00:05.000Z');
+  const activity = queries.getAnalyticsGitActivity({ date_from: '2026-03-08', date_to: '2026-03-08' });
+  assert.deepEqual(activity.agents.map(row => [row.agent, row.commits, row.sessions]), [['claude', 2, 2]]);
+});

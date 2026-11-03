@@ -21,6 +21,8 @@ export interface CommitFact {
   subject: string;
   /** Epoch ms of the commit's author date. */
   at: number;
+  /** Epoch ms of its committer date: when it was created, which an amend or a rebase moves and the author date keeps. */
+  committed_at: number;
   /** The repository's top directory, and the project it names. */
   repo_root: string;
   project: string;
@@ -96,16 +98,20 @@ function namesRepository(text: string, commit: CommitFact): boolean {
  * evidence found points at two sessions, it proves neither, and weaker
  * evidence is not consulted.
  *
- * `earlierInputs` returns a session's call inputs between two instants: from
- * MESSAGE_LEAD_MS before the commit for its message, and from the start for
- * the repository it reached. It is asked only when no hash proves the commit.
+ * A call is a candidate when it ran within the window of the commit's author
+ * date or its committer date. `earlierInputs` returns a session's call inputs
+ * between two instants: from MESSAGE_LEAD_MS before either date for its
+ * message, and from the start for the repository it reached. It is asked only when no hash proves the commit.
  */
 export function attributeCommit(
   commit: CommitFact,
   calls: CommitCall[],
   earlierInputs: (sessionId: string, from: number, to: number) => string[],
 ): CommitAttribution {
-  const candidates = calls.filter(call => Math.abs(call.at - commit.at) <= COMMIT_CALL_WINDOW_MS);
+  // The call that made a commit ran by its committer date, which an amend
+  // moves; a rebase moves it too, leaving the original call by its author date.
+  const times = [...new Set([commit.at, commit.committed_at])];
+  const candidates = calls.filter(call => times.some(time => Math.abs(call.at - time) <= COMMIT_CALL_WINDOW_MS));
   if (candidates.length === 0) return { kind: 'outside' };
 
   const sessionsOf = (matching: Array<{ session_id: string; agent: string }>) =>
@@ -124,7 +130,7 @@ export function attributeCommit(
   // one of its worktrees), or when a call of its names the repository: the
   // commit call, or any call before it, since the shell keeps the directory an
   // earlier `cd` moved it to.
-  const end = commit.at + COMMIT_CALL_WINDOW_MS;
+  const end = Math.max(...times) + COMMIT_CALL_WINDOW_MS;
   const reached = new Map<string, boolean>();
   const reaches = (sessionId: string): boolean => {
     let found = reached.get(sessionId);
@@ -142,7 +148,8 @@ export function attributeCommit(
   if (bySubject) return bySubject;
 
   const wrote = [...sessionsOf(candidates)].filter(([sessionId]) =>
-    earlierInputs(sessionId, commit.at - MESSAGE_LEAD_MS, end).some(input => mentionsSubject(input, commit.subject)) && reaches(sessionId))
+    times.some(time => earlierInputs(sessionId, time - MESSAGE_LEAD_MS, time + COMMIT_CALL_WINDOW_MS).some(input => mentionsSubject(input, commit.subject)))
+    && reaches(sessionId))
     .map(([session_id, agent]) => ({ session_id, agent }));
   return verdict(sessionsOf(wrote), 'subject') ?? { kind: 'time_only' };
 }
