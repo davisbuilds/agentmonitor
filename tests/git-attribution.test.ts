@@ -206,6 +206,9 @@ test('a GitHub tool that creates a pull request is known by its name, and its re
   // Cut off mid-body, as a stored result keeps only its first part.
   const cut = `Output:\n${JSON.stringify({ url: 'https://github.com/owner/repo/pull/17', number: 17, body: 'x'.repeat(50) + ' see https://github.com/owner/repo/pull/3' })}`.slice(0, 120);
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: cut })).map(ref => ref.number), [17]);
+  // A nested object's own html_url, ahead of the result's.
+  const nested = { base: { html_url: 'https://github.com/owner/repo/pull/3' }, html_url: 'https://github.com/owner/repo/pull/18' };
+  assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: `Output:\n${JSON.stringify(nested)}` })).map(ref => ref.number), [18]);
   // An MCP result: content blocks of text.
   const blocks = { content: [{ type: 'text', text: JSON.stringify({ number: 16, html_url: 'https://github.com/owner/repo/pull/16' }) }] };
   assert.deepEqual(createdPullRequestUrls(JSON.stringify(blocks)).map(ref => ref.number), [16]);
