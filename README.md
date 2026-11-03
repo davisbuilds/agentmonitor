@@ -226,10 +226,11 @@ current settings. Run them in the same environment as `serve`.
     makes that request with its own sign-in.
   - **Warehouse export**, only when you run `amon warehouse publish` with a
     Postgres address. It sends content-free session summaries.
-  - **Pull request state.** If the GitHub CLI (`gh`) is installed and signed in,
-    AgentMonitor asks GitHub, through it, whether the pull requests your sessions
-    opened have merged. Each request names only repositories and pull request
-    numbers. `AGENTMONITOR_GITHUB_LOOKUPS=0` turns this off.
+  - **Pull request state**, only if you set `AGENTMONITOR_GITHUB_LOOKUPS=1`.
+    AgentMonitor then asks GitHub, through the GitHub CLI (`gh`) and its
+    sign-in, whether the pull requests your sessions opened have merged. Each
+    request names only repositories and pull request numbers. Without it,
+    merged counts come from merge commits in your local repositories.
 
 ## Configuration
 
