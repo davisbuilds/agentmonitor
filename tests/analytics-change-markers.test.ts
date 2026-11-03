@@ -32,6 +32,8 @@ uses('claude_code', 'claude-trial', ['2026-03-05', '2026-03-07']);
 uses('codex', 'gpt-6', ['2026-03-08', '2026-03-10', '2026-03-12']);
 uses('codex', 'codex-auto-review', ['2026-03-02', '2026-03-03', '2026-03-04']);
 uses('codex', 'gpt-bench', ['2026-03-02', '2026-03-03', '2026-03-04'], 'benchmark');
+// Claude Code's own error and rate-limit notices name no real model.
+uses('claude_code', '<synthetic>', ['2026-03-02', '2026-03-03', '2026-03-04']);
 
 const root = path.join(tempDir, 'alpha');
 const commit = db.prepare(`INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, subject, files_json, is_merge)

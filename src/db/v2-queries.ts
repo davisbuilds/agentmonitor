@@ -3413,7 +3413,8 @@ export function getSessionGitActivity(sessionId: string): SessionGitActivity {
  * Changes to how agents work in the range, to mark on the timelines.
  * - An agent's first day on a model it then used on MODEL_ADOPTION_DAYS or more
  *   days, by the events' own times: a model tried once is not a change.
- *   Benchmark runs and Codex's internal auto-review model are left out.
+ *   Benchmark runs, Codex's internal auto-review model, and Claude Code's
+ *   `<synthetic>` notices (local errors and rate limits) are left out.
  * - A project's commits on one day that changed an AGENTS.md or CLAUDE.md, at
  *   any depth, merges left out; one marker per project and day, so a branch
  *   commit and its squash on the same day count once.
@@ -3437,11 +3438,11 @@ export function getAnalyticsChangeMarkers(params: AnalyticsParams = {}): Analyti
     FROM (
       SELECT agent_type, model, julianday(COALESCE(client_timestamp, created_at)) AS jd
       FROM events
-      WHERE model IS NOT NULL AND model != '' AND model != ? AND source != 'benchmark'
+      WHERE model IS NOT NULL AND model NOT IN ('', ?, ?) AND source != 'benchmark'
     )
     WHERE jd IS NOT NULL
     GROUP BY agent_type, model, CAST((jd - 2440587.5) * 86400000 + 0.5 AS INTEGER) / 900000
-  `).all(CODEX_AUTO_REVIEW_MODEL) as Array<{ agent_type: string; model: string; first_at: string }>;
+  `).all(CODEX_AUTO_REVIEW_MODEL, CLAUDE_SYNTHETIC_MODEL) as Array<{ agent_type: string; model: string; first_at: string }>;
   const models = new Map<string, { agent_type: string; model: string; first_at: string; days: Set<string> }>();
   for (const use of uses) {
     const key = `${use.agent_type}\0${use.model}`;
@@ -3492,6 +3493,9 @@ export function getAnalyticsChangeMarkers(params: AnalyticsParams = {}): Analyti
 
 /** A model used on fewer days than this was tried, not taken up. */
 const MODEL_ADOPTION_DAYS = 3;
+
+/** The model Claude Code records on notices it writes itself, such as errors and rate limits. */
+const CLAUDE_SYNTHETIC_MODEL = '<synthetic>';
 
 /** One session's friction signals, for its viewer. */
 export function getSessionFriction(sessionId: string): FrictionSignal[] {
