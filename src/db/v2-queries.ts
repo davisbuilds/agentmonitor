@@ -3094,15 +3094,24 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
   // `gh`) printed the rest to the polls of that process, and a code-mode
   // script that yielded printed it to the waits on its cell, so they are read
   // as part of its result.
+  // A continuation can itself leave something running (a cell's wait returns
+  // a live process), so the polls are walked in order, following each id a
+  // matched one names.
   const withPolls = (sessionId: string, at: number, own: string): string => {
-    const processes = runningProcessIds(own);
-    const cells = yieldedCellIds(own);
-    if (processes.length === 0 && cells.length === 0) return own;
-    const outputs = pollsOf(sessionId)
-      .filter(poll => poll.at > at && poll.at <= at + PROCESS_POLL_WINDOW_MS)
-      .filter(poll => processes.some(id => pollsProcess(poll.tool_name, poll.input, id))
-        || cells.some(id => waitsOnCell(poll.tool_name, poll.input, id)))
-      .map(poll => resultOf(sessionId, poll.tool_use_id));
+    const processes = new Set(runningProcessIds(own));
+    const cells = new Set(yieldedCellIds(own));
+    if (processes.size === 0 && cells.size === 0) return own;
+    const outputs: string[] = [];
+    for (const poll of pollsOf(sessionId)) {
+      if (poll.at <= at || poll.at > at + PROCESS_POLL_WINDOW_MS) continue;
+      const follows = [...processes].some(id => pollsProcess(poll.tool_name, poll.input, id))
+        || [...cells].some(id => waitsOnCell(poll.tool_name, poll.input, id));
+      if (!follows) continue;
+      const output = resultOf(sessionId, poll.tool_use_id);
+      outputs.push(output);
+      for (const id of runningProcessIds(output)) processes.add(id);
+      for (const id of yieldedCellIds(output)) cells.add(id);
+    }
     return [own, ...outputs].join('\n');
   };
   const commits: GitToolCall[] = [];

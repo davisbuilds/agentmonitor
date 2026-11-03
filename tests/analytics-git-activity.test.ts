@@ -193,3 +193,19 @@ test('an amend counts for the session that made it, though the author date preda
   const activity = queries.getAnalyticsGitActivity({ date_from: '2026-03-08', date_to: '2026-03-08' });
   assert.deepEqual(activity.agents.map(row => [row.agent, row.commits, row.sessions]), [['claude', 2, 2]]);
 });
+
+test('a process a cell\'s wait names is followed in turn, to the poll that prints the URL', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 10, hour, minute)).toISOString();
+  const id = '01990000-0000-7000-8000-000000000004';
+  const chained = `rollout-2026-03-10T09-00-00-${id}`;
+  session.run(chained, 'codex', 'codex-jsonl', root, 'Chained continuation', day(9), day(10));
+  const toolCall = (when: string, toolName: string, input: string, callId: string, output: string) => {
+    const messageId = Number(message.run(chained, ordinal++, when).lastInsertRowid);
+    call.run(messageId, chained, toolName, callId, input);
+    result.run(id, `${callId}:result`, JSON.stringify({ output }));
+  };
+  toolCall(day(9, 10), 'exec', JSON.stringify('text(await tools.exec_command({cmd:"gh pr create --fill"}))'), 'call_chain', 'Script running with cell ID 5\nOutput:\n');
+  toolCall(day(9, 11), 'wait', JSON.stringify({ cell_id: '5' }), 'call_chain_wait', 'Script completed\nOutput:\n{"chunk_id":"aa","session_id":4343,"output":""}');
+  toolCall(day(9, 12), 'write_stdin', JSON.stringify({ session_id: 4343, chars: '' }), 'call_chain_poll', `Output:\n${prUrl(14)}\n`);
+  assert.deepEqual(queries.getSessionGitActivity(chained).pull_requests.map(pr => pr.number), [14]);
+});
