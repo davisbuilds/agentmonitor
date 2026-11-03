@@ -41,24 +41,15 @@ export const COMMIT_CALL_WINDOW_MS = 2 * 60_000;
 const MESSAGE_LEAD_MS = 15 * 60_000;
 /** How long after a call a poll of a process it left running still carries that call's output. */
 export const PROCESS_POLL_WINDOW_MS = 30 * 60_000;
-const SUBJECT_PROBE_LENGTH = 50;
 
-/** Ways a subject can appear in a stored input: raw, or escaped once or twice for JSON. */
-function subjectProbes(subject: string): string[] {
-  const head = subject.slice(0, SUBJECT_PROBE_LENGTH);
-  if (!head.trim()) return [];
-  const once = JSON.stringify(head).slice(1, -1);
-  const twice = JSON.stringify(once).slice(1, -1);
-  return [...new Set([head, once, twice])];
-}
 
-/** Whether a command runs `git commit`, global options (`-C <path>`, `-c <key>=<value>`, `--no-pager`) included. */
 // An option git takes before its command: `-C <path>` or `-c <key>=<value>`
 // (a path possibly quoted, and escaped once more in stored JSON), or a flag.
 const GIT_GLOBAL_OPTION = String.raw`(?:-[Cc]\s+(?:\\?"[^"\\]*\\?"|'[^']*'|\S+)|--[\w-]+(?:=\S+)?|-[a-zA-Z])`;
 // `git` starts a word, or a line of a script stored as JSON (`\ngit`).
 const GIT_COMMIT = new RegExp(String.raw`(?:(?<![\w-])|(?<=\\[nt]))git(?:\s+${GIT_GLOBAL_OPTION})*\s+commit(?![\w-])`);
 
+/** Whether a command runs `git commit`, global options (`-C <path>`, `-c <key>=<value>`, `--no-pager`) included. */
 export function runsGitCommit(input: string): boolean {
   return GIT_COMMIT.test(input);
 }
@@ -71,8 +62,27 @@ export function createdCommit(result: string, sha: string): boolean {
   return false;
 }
 
+// Quotes and escapes, which shells and stored JSON (once or twice) spell
+// differently around the same text, collapse to one marker on both sides.
+const QUOTING = /[\\"'`]+/g;
+const MARK = '\0';
+
+/**
+ * Whether a call's input carries a commit's whole subject: however it was
+ * quoted or escaped, and ending where the subject ends (a quote, an escape
+ * such as `\n`, a newline, or the end), not the opening of a longer one.
+ */
 function mentionsSubject(text: string, subject: string): boolean {
-  return subjectProbes(subject).some(probe => text.includes(probe));
+  const probe = subject.replace(QUOTING, MARK).replace(/^\0+|\0+$/g, '');
+  if (!probe.trim()) return false;
+  const haystack = text.replace(QUOTING, MARK);
+  for (let from = 0; ;) {
+    const index = haystack.indexOf(probe, from);
+    if (index === -1) return false;
+    const next = haystack[index + probe.length];
+    if (next === undefined || next === MARK || next === '\n') return true;
+    from = index + 1;
+  }
 }
 
 /**
@@ -170,7 +180,12 @@ export function runningProcessIds(result: string): string[] {
 /** Whether a call polls one of a session's processes: `write_stdin`, called as a tool or from a script. */
 export function pollsProcess(toolName: string, input: string, id: string): boolean {
   if (toolName !== 'write_stdin' && !input.includes('write_stdin')) return false;
-  return new RegExp(`(?<!\\d)${id}(?!\\d)`).test(input);
+  // `session_id: N`, its key quoted or not and escaped as stored, or a loop
+  // over a list of ids passing a variable (`for (const id of [N, M])`).
+  const argument = new RegExp(String.raw`session_id\\*"?\s*:\s*${id}(?!\d)`);
+  const loop = new RegExp(String.raw`session_id\\*"?\s*:\s*[A-Za-z_]`).test(input)
+    && new RegExp(String.raw`\[[\d,\s]*(?<!\d)${id}(?!\d)[\d,\s]*\]`).test(input);
+  return argument.test(input) || loop;
 }
 
 /** Code-mode cells a Codex call yielded (`Script running with cell ID N`), whose output a later `wait` returns. */

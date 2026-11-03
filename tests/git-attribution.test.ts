@@ -170,3 +170,24 @@ test('a commit is matched to the call that created it, an amend moving only its 
   const original = call('claude-2', 'claude', 1, JSON.stringify({ command: `git commit -m "${commit.subject}"` }));
   assert.deepEqual(attributeCommit(rebased, [original], none), { kind: 'session', session_id: 'claude-2', agent: 'claude', evidence: 'subject' });
 });
+
+test('a subject proves a commit only whole, not by a shared opening', () => {
+  const backend = { ...commit, subject: 'chore(deps): update production dependencies for the backend' };
+  const frontend = JSON.stringify({ command: 'git commit -m "chore(deps): update production dependencies for the frontend"' });
+  assert.deepEqual(attributeCommit(backend, [call('a', 'claude', 1, frontend)], none), { kind: 'time_only' });
+  const short = { ...commit, subject: 'fix: paths' };
+  assert.equal(attributeCommit(short, [call('b', 'claude', 1, JSON.stringify({ command: 'git commit -m "fix: paths and names"' }))], none).kind, 'time_only',
+    'the opening of a longer subject');
+  const heredoc = JSON.stringify({ command: "git commit -F - <<'EOF'\nfix: paths\n\nBody.\nEOF" });
+  assert.equal(attributeCommit(short, [call('c', 'claude', 1, heredoc)], none).kind, 'session', 'a subject line in a message');
+  // Shell quoting inside the subject, as stored: escaped double quotes, and a single quote closed and reopened.
+  const quoted = { ...commit, subject: 'docs: describe Quality\'s "missing" state' };
+  const shell = JSON.stringify({ command: `git commit -m 'docs: describe Quality'"'"'s \\"missing\\" state'` });
+  assert.equal(attributeCommit(quoted, [call('d', 'claude', 1, shell)], none).kind, 'session', 'shell quoting');
+});
+
+test('a poll follows a process only by its session_id argument', () => {
+  assert.ok(!pollsProcess('write_stdin', '{"session_id":5151,"chars":"","yield_time_ms":1000}', '1000'), 'an option value');
+  assert.ok(!pollsProcess('exec', JSON.stringify('text(await tools.write_stdin({session_id:5151,chars:"1000"}));'), '1000'), 'stdin text');
+  assert.ok(pollsProcess('exec', JSON.stringify('text(await tools.write_stdin({"session_id":1000,chars:""}));'), '1000'));
+});
