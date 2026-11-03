@@ -3027,8 +3027,6 @@ export function getAnalyticsFriction(params: AnalyticsParams = {}): AnalyticsFri
 
 /** A `git commit` or `gh pr create` a session ran, with its result, timed by the message that ran it. */
 interface GitToolCall extends CommitCall {
-  /** The session's directory, for the project of a pull request it opened. */
-  cwd: string | null;
   title: string | null;
   first_message: string | null;
 }
@@ -3111,6 +3109,7 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
       at,
       input: row.input_json ?? '',
       result: row.agent === 'codex' ? withPolls(row.session_id, at, own) : own,
+      project: row.cwd ? projectNameFromCwd(row.cwd) : null,
       cwd: row.cwd,
       title: row.title,
       first_message: row.first_message,
@@ -3122,13 +3121,26 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
   return { commits: commits.sort(byTime), pullRequests: pullRequests.sort(byTime) };
 }
 
-/** A session's tool call inputs between two instants, for a commit message written before its commit. */
-function sessionInputsBetween(sessionId: string, fromMs: number, toMs: number): string[] {
-  return (getDb().prepare(`
-    SELECT tc.input_json FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
-    WHERE tc.session_id = ? AND m.timestamp IS NOT NULL AND julianday(m.timestamp) BETWEEN julianday(?) AND julianday(?)
-  `).all(sessionId, new Date(fromMs).toISOString(), new Date(toMs).toISOString()) as Array<{ input_json: string | null }>)
-    .map(row => row.input_json ?? '');
+/**
+ * A session's tool call inputs between two instants, for a commit message
+ * written before its commit or the repository an earlier call moved into.
+ * Each session is read once per use: a range asks about it for every commit.
+ */
+function sessionInputReader(): (sessionId: string, fromMs: number, toMs: number) => string[] {
+  const statement = getDb().prepare(`
+    SELECT m.timestamp, tc.input_json FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
+    WHERE tc.session_id = ? AND m.timestamp IS NOT NULL
+  `);
+  const bySession = new Map<string, Array<{ at: number; input: string }>>();
+  return (sessionId, fromMs, toMs) => {
+    let inputs = bySession.get(sessionId);
+    if (!inputs) {
+      inputs = (statement.all(sessionId) as Array<{ timestamp: string; input_json: string | null }>)
+        .map(row => ({ at: Date.parse(row.timestamp), input: row.input_json ?? '' }));
+      bySession.set(sessionId, inputs);
+    }
+    return inputs.filter(row => row.at >= fromMs && row.at <= toMs).map(row => row.input);
+  };
 }
 
 interface AttributedCommit {
@@ -3150,14 +3162,16 @@ function attributedCommits(fromMs: number, toMs: number, calls: GitToolCall[]): 
   `).all(new Date(fromMs).toISOString(), new Date(toMs).toISOString()) as Array<{
     repo_root: string; sha: string; subject: string | null; authored_at: string; co_authors_json: string;
   }>;
+  const sessionInputsBetween = sessionInputReader();
   return commits.map(row => {
-    const fact = { sha: row.sha, subject: row.subject ?? '', at: Date.parse(row.authored_at) };
+    const project = projectNameFromCwd(row.repo_root) ?? row.repo_root.split('/').filter(Boolean).pop() ?? row.repo_root;
+    const fact = { sha: row.sha, subject: row.subject ?? '', at: Date.parse(row.authored_at), repo_root: row.repo_root, project };
     return {
       repo_root: row.repo_root,
       sha: row.sha,
       subject: row.subject ?? '',
       authored_at: row.authored_at,
-      project: projectNameFromCwd(row.repo_root) ?? row.repo_root.split('/').filter(Boolean).pop() ?? row.repo_root,
+      project,
       co_authors: parseJsonString(row.co_authors_json) as string[] ?? [],
       attribution: attributeCommit(fact, calls, sessionInputsBetween),
     };

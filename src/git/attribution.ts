@@ -11,6 +11,9 @@ export interface CommitCall {
   input: string;
   /** The call's result text, as stored; empty when none was kept. */
   result: string;
+  /** The directory the session started in, and the project it names; null without either. */
+  cwd: string | null;
+  project: string | null;
 }
 
 export interface CommitFact {
@@ -18,6 +21,9 @@ export interface CommitFact {
   subject: string;
   /** Epoch ms of the commit's author date. */
   at: number;
+  /** The repository's top directory, and the project it names. */
+  repo_root: string;
+  project: string;
 }
 
 export type CommitAttribution =
@@ -49,15 +55,31 @@ function mentionsSubject(text: string, subject: string): boolean {
 }
 
 /**
+ * Whether a call's text reaches a commit's repository: its top directory, a
+ * path ending in its name, or one of its worktrees (`worktrees/<name>-…`), as
+ * a session started in a folder of projects names the one it commits in.
+ */
+function namesRepository(text: string, commit: CommitFact): boolean {
+  if (text.includes(commit.repo_root)) return true;
+  const name = commit.project.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`/${name}(?![\\w.-])|worktrees/${name}-`).test(text);
+}
+
+/**
  * The session that made a commit, by the strongest evidence among the sessions
- * that ran `git commit` within the window: its result names the commit's hash
- * (Codex prints `[branch abc1234]`), or its command, or a call it made in the
- * minutes before, carries the commit's subject (`-m`, or a message file for
- * `-F`). Evidence that points at two sessions proves neither.
+ * that ran `git commit` within the window, tried in order:
+ * 1. Its result names the commit's hash (Codex prints `[branch abc1234]`).
+ * 2. Its command carries the commit's subject (`-m`).
+ * 3. A call it made in the minutes before carries the subject (a message
+ *    file for `-F`).
+ * A subject proves a session only for a commit in the repository it worked
+ * in: the one its directory is in or names (a worktree), or one its calls name. Where the strongest
+ * evidence found points at two sessions, it proves neither, and weaker
+ * evidence is not consulted.
  *
- * `earlierInputs` returns a session's call inputs from MESSAGE_LEAD_MS before
- * the commit to the window's end; it is asked only when no call proves the
- * commit outright.
+ * `earlierInputs` returns a session's call inputs between two instants: from
+ * MESSAGE_LEAD_MS before the commit for its message, and from the start for
+ * the repository it reached. It is asked only when no hash proves the commit.
  */
 export function attributeCommit(
   commit: CommitFact,
@@ -67,22 +89,44 @@ export function attributeCommit(
   const candidates = calls.filter(call => Math.abs(call.at - commit.at) <= COMMIT_CALL_WINDOW_MS);
   if (candidates.length === 0) return { kind: 'outside' };
 
-  const shortSha = commit.sha.slice(0, 7);
-  const proof = (match: (call: CommitCall) => boolean, evidence: 'hash' | 'subject'): CommitAttribution | null => {
-    const sessions = new Map(candidates.filter(match).map(call => [call.session_id, call.agent]));
-    if (sessions.size !== 1) return null;
+  const sessionsOf = (matching: Array<{ session_id: string; agent: string }>) =>
+    new Map(matching.map(call => [call.session_id, call.agent]));
+  const verdict = (sessions: Map<string, string>, evidence: 'hash' | 'subject'): CommitAttribution | null => {
+    if (sessions.size === 0) return null;
+    if (sessions.size > 1) return { kind: 'time_only' };
     const [[session_id, agent]] = sessions;
     return { kind: 'session', session_id, agent, evidence };
   };
-  const proven = proof(call => call.result.includes(shortSha), 'hash')
-    ?? proof(call => mentionsSubject(call.input, commit.subject), 'subject');
-  if (proven) return proven;
 
-  const bySessions = new Map(candidates.map(call => [call.session_id, call.agent]));
-  const wrote = [...bySessions].filter(([sessionId]) => earlierInputs(sessionId, commit.at - MESSAGE_LEAD_MS, commit.at + COMMIT_CALL_WINDOW_MS)
-    .some(input => mentionsSubject(input, commit.subject)));
-  if (wrote.length === 1) return { kind: 'session', session_id: wrote[0][0], agent: wrote[0][1], evidence: 'subject' };
-  return { kind: 'time_only' };
+  const shortSha = commit.sha.slice(0, 7);
+  const byHash = verdict(sessionsOf(candidates.filter(call => call.result.includes(shortSha))), 'hash');
+  if (byHash) return byHash;
+
+  // A session works in the commit's repository when it started there (or in
+  // one of its worktrees), or when a call of its names the repository: the
+  // commit call, or any call before it, since the shell keeps the directory an
+  // earlier `cd` moved it to.
+  const end = commit.at + COMMIT_CALL_WINDOW_MS;
+  const reached = new Map<string, boolean>();
+  const reaches = (sessionId: string): boolean => {
+    let found = reached.get(sessionId);
+    if (found === undefined) {
+      found = candidates.some(call => call.session_id === sessionId && (
+        (call.cwd !== null && (call.cwd === commit.repo_root || call.cwd.startsWith(`${commit.repo_root}/`)))
+        || (call.project !== null && call.project === commit.project)
+        || namesRepository(call.input, commit)))
+        || earlierInputs(sessionId, 0, end).some(input => namesRepository(input, commit));
+      reached.set(sessionId, found);
+    }
+    return found;
+  };
+  const bySubject = verdict(sessionsOf(candidates.filter(call => mentionsSubject(call.input, commit.subject) && reaches(call.session_id))), 'subject');
+  if (bySubject) return bySubject;
+
+  const wrote = [...sessionsOf(candidates)].filter(([sessionId]) =>
+    earlierInputs(sessionId, commit.at - MESSAGE_LEAD_MS, end).some(input => mentionsSubject(input, commit.subject)) && reaches(sessionId))
+    .map(([session_id, agent]) => ({ session_id, agent }));
+  return verdict(sessionsOf(wrote), 'subject') ?? { kind: 'time_only' };
 }
 
 /**

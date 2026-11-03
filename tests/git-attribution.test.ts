@@ -11,9 +11,9 @@ import {
 } from '../src/git/attribution.js';
 
 const at = (second: number) => Date.UTC(2026, 2, 2, 10, 0, 0) + second * 1000;
-const commit = { sha: 'abc1234def5678', subject: 'fix(git): keep paths as git names them', at: at(0) };
-const call = (session_id: string, agent: string, second: number, input = '{"command":"git commit -F msg.txt"}', result = ''): CommitCall =>
-  ({ session_id, agent, at: at(second), input, result });
+const commit = { sha: 'abc1234def5678', subject: 'fix(git): keep paths as git names them', at: at(0), repo_root: '/w/alpha', project: 'alpha' };
+const call = (session_id: string, agent: string, second: number, input = '{"command":"git commit -F msg.txt"}', result = '', project: string | null = 'alpha'): CommitCall =>
+  ({ session_id, agent, at: at(second), input, result, cwd: project ? `/w/${project}` : null, project });
 const none = () => [];
 
 test('the hash in a result proves the session, over a rival that only ran close by', () => {
@@ -79,4 +79,37 @@ test('a Codex call left running names its processes, and a poll of one carries t
   assert.ok(pollsProcess('exec', JSON.stringify('for (const id of [63370,36264])text(await tools.write_stdin({session_id:id}));'), '36264'));
   assert.ok(!pollsProcess('write_stdin', '{"session_id":231710,"chars":""}', '23171'), 'another process whose id contains this one');
   assert.ok(!pollsProcess('exec', JSON.stringify('text(await tools.exec_command({cmd:"sleep 23171"}));'), '23171'), 'not a poll');
+});
+
+test('a subject proves a session only for a commit in the repository it worked in', () => {
+  const subject = JSON.stringify({ command: `git commit -m "${commit.subject}"` });
+  // The same subject committed in another repository a moment later.
+  assert.deepEqual(attributeCommit(commit, [call('beta-1', 'claude', 1, subject, '', 'beta')], none), { kind: 'time_only' });
+  // A session in a folder of projects proves it when its command reaches the repository.
+  const reaches = JSON.stringify({ command: `cd /w/alpha && git commit -m "${commit.subject}"` });
+  assert.deepEqual(attributeCommit(commit, [call('dev-1', 'codex', 1, reaches, '', 'Dev')], none),
+    { kind: 'session', session_id: 'dev-1', agent: 'codex', evidence: 'subject' });
+  // So does an earlier call that wrote the message there.
+  const earlier = () => [`cd /w/alpha && printf '${commit.subject}' > msg.txt`];
+  assert.equal(attributeCommit(commit, [call('dev-2', 'codex', 1, '{"command":"git commit -F msg.txt"}', '', 'Dev')], earlier).kind, 'session');
+  const elsewhere = () => [`printf '${commit.subject}' > msg.txt`];
+  assert.deepEqual(attributeCommit(commit, [call('beta-3', 'claude', 1, '{"command":"git commit -F msg.txt"}', '', 'beta')], elsewhere),
+    { kind: 'time_only' }, 'a message written in another repository');
+  // The shell keeps the directory an earlier call moved it to, however long ago.
+  const movedEarlier = (_sessionId: string, from: number) => from < commit.at - 15 * 60_000
+    ? ['cd /w/alpha', JSON.stringify({ command: `git commit -m "${commit.subject}"` })]
+    : [JSON.stringify({ command: `git commit -m "${commit.subject}"` })];
+  assert.equal(attributeCommit(commit, [call('dev-3', 'claude', 1, JSON.stringify({ command: `git commit -m "${commit.subject}"` }), '', 'Dev')], movedEarlier).kind,
+    'session', 'a session that moved into the repository before');
+  // A hash names one commit wherever it ran.
+  assert.equal(attributeCommit(commit, [call('beta-2', 'codex', 1, '{}', '[main abc1234] fix', 'beta')], none).kind, 'session');
+});
+
+test('the strongest evidence pointing at two sessions proves neither, whatever weaker evidence says', () => {
+  const subject = JSON.stringify({ command: `git commit -m "${commit.subject}"` });
+  const hash = '[main abc1234] fix';
+  assert.deepEqual(attributeCommit(commit, [call('a', 'codex', 1, subject, hash), call('b', 'codex', 2, '{}', hash)], none), { kind: 'time_only' });
+  const wrote = (sessionId: string) => sessionId === 'c' ? [`echo '${commit.subject}' > msg.txt`] : [];
+  assert.deepEqual(attributeCommit(commit, [call('a', 'claude', 1, subject), call('b', 'claude', 2, subject), call('c', 'claude', 3)], wrote),
+    { kind: 'time_only' });
 });
