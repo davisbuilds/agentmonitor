@@ -241,3 +241,60 @@ test('a session in a directory of repositories reads each one directly inside it
   assert.deepEqual(shasIn(hidden.dir), [], 'a hidden directory is configuration, not a project');
   assert.deepEqual(shasIn(deeper.dir), [], 'only the level directly inside');
 });
+
+test('each commit records whether it reached any remote\'s main, and a merge records its pull request\'s commits', async () => {
+  const dir = freshRepository('landing', '2026-03-01T09:00:00Z');
+  git(dir, ['remote', 'add', 'origin', 'git@github.com:Example/landing.git']);
+  git(dir, ['remote', 'add', 'fork', 'git@github.com:Me/landing.git']);
+  const base = commit(dir, 'a.txt', 'feat: base', '2026-03-01T10:00:00Z');
+  git(dir, ['checkout', '-q', '-b', 'feature']);
+  const branchWork = commit(dir, 'b.txt', 'feat: on a branch', '2026-03-01T11:00:00Z');
+  git(dir, ['checkout', '-q', 'main']);
+  git(dir, ['merge', '-q', '--no-ff', '-m', 'Merge pull request #5 from example/feature', 'feature'], '2026-03-01T12:00:00Z');
+  const merge = git(dir, ['rev-parse', 'HEAD']);
+  const pushed = commit(dir, 'c.txt', 'fix: pushed to main', '2026-03-01T13:00:00Z');
+  git(dir, ['checkout', '-q', '-b', 'late', base]);
+  const late = commit(dir, 'd.txt', 'feat: merged weeks later', '2026-03-01T14:00:00Z');
+  git(dir, ['checkout', '-q', '-b', 'wip', 'main']);
+  const wip = commit(dir, 'e.txt', 'wip: never merged', '2026-03-01T15:00:00Z');
+  // The fork's own main: work there, and a pull request merged on the fork.
+  git(dir, ['checkout', '-q', '-b', 'forkmain', 'main']);
+  const forked = commit(dir, 'f.txt', 'feat: on the fork only', '2026-03-01T16:00:00Z');
+  git(dir, ['checkout', '-q', '-b', 'forkfeature']);
+  const forkBranch = commit(dir, 'g.txt', 'feat: a fork pull request', '2026-03-01T17:00:00Z');
+  git(dir, ['checkout', '-q', 'forkmain']);
+  git(dir, ['merge', '-q', '--no-ff', '-m', 'Merge pull request #3 from me/forkfeature', 'forkfeature'], '2026-03-01T18:00:00Z');
+  const forkMerge = git(dir, ['rev-parse', 'HEAD']);
+  git(dir, ['checkout', '-q', 'main']);
+  const remoteMain = (remote: string, sha: string) => {
+    git(dir, ['update-ref', `refs/remotes/${remote}/main`, sha]);
+    git(dir, ['symbolic-ref', `refs/remotes/${remote}/HEAD`, `refs/remotes/${remote}/main`]);
+  };
+  remoteMain('origin', pushed);
+  remoteMain('fork', forkMerge);
+
+  const landing = () => Object.fromEntries((db.prepare('SELECT sha, landing FROM git_commits WHERE repo_root = ?').all(dir) as Array<{ sha: string; landing: string | null }>)
+    .map(row => [row.sha, row.landing]));
+  const members = (repo: string, number: number) => (db.prepare('SELECT sha, source FROM github_pull_request_commits WHERE repo = ? AND number = ? ORDER BY sha').all(repo, number) as Array<{ sha: string; source: string }>)
+    .map(row => `${row.sha.slice(0, 7)} ${row.source}`);
+
+  await syncGitActivity(db, { now: new Date('2026-03-20T00:00:00Z') });
+  assert.deepEqual(landing(), {
+    [base]: 'direct', [branchWork]: 'merged', [merge]: 'direct', [pushed]: 'direct',
+    [late]: null, [wip]: null, [forked]: 'direct', [forkBranch]: 'merged', [forkMerge]: 'direct',
+  });
+  assert.deepEqual(members('example/landing', 5), [`${branchWork.slice(0, 7)} local`]);
+  assert.deepEqual(members('me/landing', 3), [`${forkBranch.slice(0, 7)} local`], "a fork's merge is the fork's pull request");
+  assert.deepEqual(members('example/landing', 3), []);
+
+  // Merged three weeks on, past the reread window. GitHub has already listed
+  // its commits, as they were before a rebase there, so they differ from git's.
+  git(dir, ['merge', '-q', '--no-ff', '-m', 'Merge pull request #6 from example/late', 'late'], '2026-04-05T12:00:00Z');
+  remoteMain('origin', git(dir, ['rev-parse', 'HEAD']));
+  const listedOnGithub = 'f'.repeat(40);
+  db.prepare("INSERT INTO github_pull_request_commits (repo, number, sha, source) VALUES ('example/landing', 6, ?, 'github')").run(listedOnGithub);
+  await syncGitActivity(db, { now: new Date('2026-04-10T00:00:00Z') });
+  assert.equal(landing()[late], 'merged', 'a commit merged after an earlier pass lands on the next');
+  assert.equal(landing()[wip], null);
+  assert.deepEqual(members('example/landing', 6), [`${listedOnGithub.slice(0, 7)} github`], "GitHub's list is never added to");
+});

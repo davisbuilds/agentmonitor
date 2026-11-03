@@ -14,7 +14,7 @@ function refreshGitActivity(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = syncGitActivity(getDb())
     .then(async report => {
-      if (report.errors > 0) console.error(`[git] ${report.errors} of ${report.repos} repositories could not be read`);
+      if (report.errors > 0) console.error(`[git] ${report.errors} of ${report.repos} repositories could not be read in full`);
       if (!config.git.githubLookups) return;
       const pulls = await syncSessionPullRequests(getDb());
       if (pulls.unanswered > 0) console.error(`[git] GitHub did not answer for ${pulls.unanswered} of ${pulls.checked} pull requests`);

@@ -42,15 +42,14 @@ test('v29 adds pull request size, membership and commit landing to a v28 store, 
 
   initSchema();
 
-  for (const column of ['parents_json', 'landing']) assert.ok(columns('git_commits').has(column), column);
+  assert.ok(columns('git_commits').has('landing'));
   for (const column of ['additions', 'deletions', 'changed_files', 'commit_count', 'author_is_bot', 'details_at']) {
     assert.ok(columns('github_pull_requests').has(column), column);
   }
   assert.deepEqual([...columns('github_pull_request_commits')].sort(), ['number', 'repo', 'sha', 'source']);
   assert.ok(columns('github_pull_request_search').has('window_start'));
 
-  assert.deepEqual(db.prepare('SELECT subject, parents_json, landing FROM git_commits').get(),
-    { subject: 'feat: kept', parents_json: '[]', landing: null });
+  assert.deepEqual(db.prepare('SELECT subject, landing FROM git_commits').get(), { subject: 'feat: kept', landing: null });
   assert.deepEqual(db.prepare('SELECT state, additions FROM github_pull_requests').get(), { state: 'MERGED', additions: null });
   assert.throws(() => db.prepare("UPDATE git_commits SET landing = 'elsewhere'").run(), /CHECK/);
   assert.throws(() => db.prepare("INSERT INTO github_pull_request_commits VALUES ('owner/repo', 7, 'abc', 'guess')").run(), /CHECK/);

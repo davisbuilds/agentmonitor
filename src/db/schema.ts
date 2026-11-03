@@ -828,9 +828,6 @@ function initSchemaLocked(db: Database): void {
     db.exec('ALTER TABLE git_repos ADD COLUMN github_repo TEXT');
   }
   const gitCommitColumns = new Set((db.prepare('PRAGMA table_info(git_commits)').all() as Array<{ name: string }>).map(col => col.name));
-  if (!gitCommitColumns.has('parents_json')) {
-    db.exec("ALTER TABLE git_commits ADD COLUMN parents_json TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(parents_json))");
-  }
   // Whether a commit reached a main branch (any remote's default): `direct` on
   // its first-parent line, a push; `merged` reachable another way; NULL not yet.
   if (!gitCommitColumns.has('landing')) {
@@ -1299,7 +1296,7 @@ export function runDataMigrations(db: Database): void {
     // read commands only install when the version advances. v26 likewise only
     // adds browsing_sessions.cwd; a forced session sync fills it for stored rows.
     // v27 likewise only adds git_repos and git_commits, v28 git_repos.github_repo
-    // and github_pull_requests, and v29 commit parents and landing, pull request
+    // and github_pull_requests, and v29 commit landing, pull request
     // size and author, github_pull_request_commits and github_pull_request_search;
     // the next git pass fills them.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);

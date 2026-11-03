@@ -185,7 +185,7 @@ None
 
 1. Add guarded columns:
    - `github_pull_requests`: `additions`, `deletions`, `changed_files`, `commit_count`, `author_is_bot`, `details_at`;
-   - `git_commits`: `landing` ('direct' | 'merged' | NULL) and `parents_json`.
+   - `git_commits`: `landing` ('direct' | 'merged' | NULL).
 2. Create `github_pull_request_commits(repo, number, sha, source CHECK (source IN ('github','local')), PRIMARY KEY (repo, number, sha))` with an index on `sha`.
 3. Create `github_pull_request_search(window_start PRIMARY KEY, synced_at, result_count)`, a per-window watermark.
 4. Bump to 29 and extend the additive-versions comment.
@@ -222,21 +222,20 @@ Task 1
 
 **Assumptions Verified**
 
-- `src/git/activity.ts:116` `readCommits` already reads `%P` and discards it after computing `is_merge`.
+- `src/git/activity.ts:116` `readCommits` reads `%P` only to compute `is_merge`. Membership asks git for a merge's parents instead, so no parents column is stored.
 - `syncGitActivity` (`:157`) runs one transaction per repository; landing slots in after the upsert.
 - `originGithubRepo` (`:107`) reads `origin` only, which is upstream for a fork (observed in the exploration).
 
 **Implementation Steps**
 
-1. Store `parents_json` from `%P`.
-2. For each repository, take every remote's default branch: `refs/remotes/<remote>/HEAD`, else `<remote>/main`, then `<remote>/master`, else the local `main` or `master`.
-3. Set landing for stored commits whose `landing` is NULL or that are in the reread window:
+1. For each repository, take every remote's default branch: `refs/remotes/<remote>/HEAD`, else `<remote>/main`, then `<remote>/master`, else the local `main` or `master`.
+2. Set landing for stored commits whose `landing` is NULL or that are in the reread window:
    - `direct`: on some main's `--first-parent` line;
    - `merged`: reachable from a main otherwise;
    - NULL otherwise.
 
    Bound the `rev-list` walks with `--since-as-filter` at the oldest unlanded commit, so a branch merged weeks later is picked up.
-4. For a merge commit whose subject names PR #N (`mergedPullRequestNumber`), insert `github_pull_request_commits` rows (`source='local'`) for `rev-list <first parent>..<second parent>`. Do this only for repositories with a `github_repo`, and never over `source='github'` rows.
+3. For a stored merge commit whose subject names PR #N (`mergedPullRequestNumber`) and whose PR has no membership yet, insert `github_pull_request_commits` rows (`source='local'`) for `rev-list <sha>^1..<sha>^2`, asked of git directly so merges stored before v29 are covered too. Key the PR by the GitHub repository of the remote whose main carries the merge on its first-parent line (a fork's merges are the fork's PRs), else origin's. Never write over `source='github'` rows.
 
 **Verification**
 

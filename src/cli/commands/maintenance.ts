@@ -299,7 +299,7 @@ export function registerMaintenanceCommands(): void {
           ...report,
           ...(pulls ? { pull_requests_checked: pulls.checked, pull_requests_merged: pulls.merged, pull_requests_unanswered: pulls.unanswered } : {}),
         });
-        if (report.errors > 0) throw partialSuccess(`Git activity sync could not read ${report.errors} repositor${report.errors === 1 ? 'y' : 'ies'}.`);
+        if (report.errors > 0) throw partialSuccess(`Git activity sync could not fully read ${report.errors} repositor${report.errors === 1 ? 'y' : 'ies'}.`);
         if (pulls && pulls.unanswered > 0) throw partialSuccess(`GitHub did not answer for ${pulls.unanswered} pull request${pulls.unanswered === 1 ? '' : 's'}; is \`gh\` signed in?`);
       } finally {
         closeDb();
