@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { chromium, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { launchPatchedChromium } from '../browser-runtime.cjs';
 import { assertUsage, scenarioById, usageExpected, type Check, type Scenario } from './contracts.js';
 import { control, provenance, readSession, repoRoot, startSession, StartupError, stopSession, writeJson, type Session } from './session.js';
 
@@ -83,7 +84,7 @@ export async function runScenario(id: Scenario, options: RunOptions = {}) {
     fs.closeSync(fs.openSync(path.join(session.directory, 'verification.lock'), 'wx', 0o600));
     locked = true;
     options.signal?.throwIfAborted();
-    browser = await chromium.launch({ timeout: 15_000 });
+    browser = await launchPatchedChromium({ timeout: 15_000 });
     result.browser = browser.version();
     options.signal?.addEventListener('abort', interrupted, { once: true });
     options.signal?.throwIfAborted();
