@@ -86,12 +86,18 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   `git_repos` recording each one's last read), read from local git by a
   background child process: hashes, times, authors, subjects, co-author
   trailers and changed paths, never contents. Merge commits are kept, flagged
-  `is_merge`: they record merged pull requests. GitHub's answer for each pull
-  request sessions opened is cached in `github_pull_requests` (state, merge
-  and opening times, when asked), asked read-only through `gh` only with
-  `AGENTMONITOR_GITHUB_LOOKUPS=1`; it is the only git activity that leaves the
-  machine, and names only repositories and numbers. Attributing
-  a commit to the session that made it happens at read time.
+  `is_merge`: they record merged pull requests. Each commit's `landing` says
+  whether it reached a main branch: any remote's default, since a fork's
+  `origin` is upstream. GitHub's answer for each pull request sessions opened,
+  and for each the signed-in user merged in the last year, is cached in
+  `github_pull_requests` (state, times, size, author kind), with its commits in
+  `github_pull_request_commits`; `github_pull_request_search` records which
+  months of merges were read. These are asked read-only through `gh` only with
+  `AGENTMONITOR_GITHUB_LOOKUPS=1`, the only git activity that leaves the
+  machine, naming only repositories, numbers and merge dates. Without it, a
+  local merge commit gives its pull request's commits (`source = 'local'`),
+  which GitHub's list replaces when one arrives. Attributing a commit to the
+  session that made it happens at read time.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots, with a sampled quota history (`provider_quota_samples`): a row per
   changed reading at most every five minutes, each held until `observed_until`,

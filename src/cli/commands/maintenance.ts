@@ -280,7 +280,7 @@ export function registerMaintenanceCommands(): void {
   registerCommand({
     name: 'sync git',
     group: 'Data Commands',
-    summary: 'Read commits from the repositories sessions ran in (and, with AGENTMONITOR_GITHUB_LOOKUPS=1, ask GitHub which of their pull requests merged)',
+    summary: 'Read commits from the repositories sessions ran in and whether each landed on a main branch (and, with AGENTMONITOR_GITHUB_LOOKUPS=1, read your merged pull requests and which of the sessions\' pull requests merged from GitHub)',
     usage: 'sync git',
     examples: ['sync git', 'sync git --json'],
     async handler(ctx, args) {
@@ -289,18 +289,21 @@ export function registerMaintenanceCommands(): void {
       const { initSchema } = await import('../../db/schema.js');
       const { closeDb, getDb } = await import('../../db/connection.js');
       const { syncGitActivity } = await import('../../git/activity.js');
-      const { syncSessionPullRequests } = await import('../../git/github.js');
+      const { syncAuthoredPullRequests, syncSessionPullRequests } = await import('../../git/github.js');
       const { config } = await import('../../config.js');
       initSchema();
       try {
         const report = await syncGitActivity(getDb());
+        const authored = config.git.githubLookups ? await syncAuthoredPullRequests(getDb()) : null;
         const pulls = config.git.githubLookups ? await syncSessionPullRequests(getDb()) : null;
         printSummary(ctx, 'Git activity sync results', {
           ...report,
+          ...(authored ? { merged_months_read: authored.windows, merged_pull_requests_read: authored.pull_requests, merged_months_unanswered: authored.unanswered } : {}),
           ...(pulls ? { pull_requests_checked: pulls.checked, pull_requests_merged: pulls.merged, pull_requests_unanswered: pulls.unanswered } : {}),
         });
         if (report.errors > 0) throw partialSuccess(`Git activity sync could not fully read ${report.errors} repositor${report.errors === 1 ? 'y' : 'ies'}.`);
-        if (pulls && pulls.unanswered > 0) throw partialSuccess(`GitHub did not answer for ${pulls.unanswered} pull request${pulls.unanswered === 1 ? '' : 's'}; is \`gh\` signed in?`);
+        const unanswered = (pulls?.unanswered ?? 0) + (authored?.unanswered ?? 0);
+        if (unanswered > 0) throw partialSuccess(`GitHub did not answer for ${pulls?.unanswered ?? 0} pull request(s) and ${authored?.unanswered ?? 0} month(s) of merged pull requests; is \`gh\` signed in?`);
       } finally {
         closeDb();
       }

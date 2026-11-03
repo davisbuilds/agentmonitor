@@ -3,7 +3,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
-import type { PullRequestLookup as Lookup, PullRequestState as State } from '../src/git/github.js';
+import type {
+  AuthoredPullRequest, PullRequestLookup as Lookup, PullRequestSearch, PullRequestState as State,
+} from '../src/git/github.js';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-github-prs-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
@@ -12,8 +14,11 @@ const { initSchema } = await import('../src/db/schema.js');
 const {
   lookupQuery,
   parseLookupResponse,
+  parseSearchResponse,
   PULL_REQUEST_RECHECK_MS,
   pullRequestKey,
+  searchQuery,
+  syncAuthoredPullRequests,
   syncPullRequestStates,
 } = await import('../src/git/github.js');
 
@@ -30,7 +35,7 @@ test('one query asks for every pull request, and an answer keeps what GitHub cou
   const keys = [{ repo: 'owner/alpha', number: 7 }, { repo: 'owner/alpha', number: 999 }, { repo: 'owner/gone', number: 1 }];
   const { query, aliases } = lookupQuery(keys);
   assert.match(query, /repository\(owner: "owner", name: "alpha"\)/);
-  assert.match(query, /pullRequest\(number: 7\) \{ state mergedAt createdAt \}/);
+  assert.match(query, /pullRequest\(number: 7\) \{ state mergedAt createdAt additions deletions changedFiles author \{ __typename \} commits\(first: 100\) \{ totalCount nodes \{ commit \{ oid \} \} \} \}/);
   assert.match(query, /pullRequest\(number: 999\)/);
   assert.match(query, /repository\(owner: "owner", name: "gone"\)/);
   assert.equal(aliases.size, 3);
@@ -99,4 +104,106 @@ test('a pull request GitHub did not answer keeps what was known, and is asked ab
   let asked = 0;
   await syncPullRequestStates(db, keys, { lookup: async keysAsked => { asked += keysAsked.length; return new Map(); }, now: new Date(later.getTime() + 1) });
   assert.equal(asked, 1);
+});
+
+const members = (repo: string, number: number) => (db.prepare(
+  'SELECT sha, source FROM github_pull_request_commits WHERE repo = ? AND number = ? ORDER BY sha',
+).all(repo, number) as Array<{ sha: string; source: string }>).map(row => `${row.sha} ${row.source}`);
+
+test('an answer with details records size, author and commits, and a merged pull request without them is asked once more', async () => {
+  db.prepare("INSERT INTO github_pull_requests (repo, number, state, merged_at, created_at, checked_at) VALUES ('owner/gamma', 9, 'MERGED', '2026-03-05T00:00:00Z', '2026-03-04T00:00:00Z', '2026-03-05T01:00:00Z')").run();
+  db.prepare("INSERT INTO github_pull_request_commits (repo, number, sha, source) VALUES ('owner/gamma', 9, 'from-a-merge', 'local')").run();
+  const asked: string[] = [];
+  const lookup: Lookup = async keys => {
+    asked.push(...keys.map(pullRequestKey));
+    return new Map(keys.map(key => [pullRequestKey(key), {
+      state: 'MERGED', merged_at: '2026-03-05T00:00:00Z', created_at: '2026-03-04T00:00:00Z',
+      details: { additions: 40, deletions: 4, changed_files: 3, commit_count: 2, author_is_bot: true, commits: ['c1', 'c2'] },
+    } satisfies State]));
+  };
+  const keys = [{ repo: 'owner/gamma', number: 9 }];
+  await syncPullRequestStates(db, keys, { lookup, now: new Date('2026-03-06T00:00:00Z') });
+  assert.deepEqual(asked, ['owner/gamma#9'], 'stored before details were read, so asked once more');
+  assert.deepEqual(db.prepare("SELECT additions, deletions, changed_files, commit_count, author_is_bot FROM github_pull_requests WHERE repo = 'owner/gamma'").get(),
+    { additions: 40, deletions: 4, changed_files: 3, commit_count: 2, author_is_bot: 1 });
+  assert.deepEqual(members('owner/gamma', 9), ['c1 github', 'c2 github'], "GitHub's list replaces a local merge's");
+  await syncPullRequestStates(db, keys, { lookup, now: new Date('2026-03-08T00:00:00Z') });
+  assert.equal(asked.length, 1, 'and never again');
+});
+
+test("the search asks for the user's pull requests merged in a window, a page at a time, with their size and commits", () => {
+  const query = searchQuery({ from: '2026-10-01', to: '2026-10-31' }, 'Y3Vyc29y');
+  assert.match(query, /search\(type: ISSUE, first: 100, after: "Y3Vyc29y", query: "is:pr is:merged author:@me merged:2026-10-01\.\.2026-10-31"\)/);
+  assert.match(query, /\.\.\. on PullRequest \{ number repository \{ nameWithOwner \} createdAt mergedAt additions deletions changedFiles author \{ __typename \} commits\(first: 100\)/);
+  assert.doesNotMatch(searchQuery({ from: '2026-10-01', to: '2026-10-31' }, null), /after:/);
+  assert.throws(() => searchQuery({ from: '2026-10-01" author:x', to: '2026-10-31' }, null), /window/);
+  assert.match(searchQuery({ from: '2026-10-01', to: '2026-10-31' }, 'a"b'), /after: "a\\"b"/, 'a cursor is quoted, never spliced in');
+
+  const node = {
+    number: 6, repository: { nameWithOwner: 'Owner/Alpha' }, createdAt: '2026-10-02T10:00:00Z', mergedAt: '2026-10-03T10:00:00Z',
+    additions: 10, deletions: 2, changedFiles: 3, author: { __typename: 'User' },
+    commits: { totalCount: 1, nodes: [{ commit: { oid: 'a1' } }] },
+  };
+  const page = parseSearchResponse(JSON.stringify({ data: { search: { issueCount: 2, pageInfo: { hasNextPage: true, endCursor: 'next' }, nodes: [node, {}] } } }));
+  assert.deepEqual(page, {
+    total: 2, next: 'next',
+    pulls: [{
+      repo: 'owner/alpha', number: 6, created_at: '2026-10-02T10:00:00Z', merged_at: '2026-10-03T10:00:00Z',
+      additions: 10, deletions: 2, changed_files: 3, commit_count: 1, author_is_bot: false, commits: ['a1'],
+    }],
+  });
+  assert.equal(parseSearchResponse(JSON.stringify({ data: { search: { issueCount: 0, pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] } } }))?.next, null);
+  assert.equal(parseSearchResponse('gh: not logged in'), null);
+  assert.equal(parseSearchResponse(JSON.stringify({ errors: [{ type: 'RATE_LIMITED' }] })), null);
+});
+
+test('merged pull requests are read window by window: a full window splits, pages are followed, and only a whole window counts as read', async () => {
+  const pull = (number: number, mergedAt: string): AuthoredPullRequest => ({
+    repo: 'owner/delta', number, created_at: mergedAt, merged_at: mergedAt,
+    additions: number, deletions: 0, changed_files: 1, commit_count: 1, author_is_bot: false, commits: [`sha-${number}`],
+  });
+  // What GitHub holds, by merge day.
+  const held = [pull(1, '2026-03-02T10:00:00Z'), pull(2, '2026-03-10T10:00:00Z'), pull(3, '2026-03-20T10:00:00Z'), pull(4, '2026-03-28T10:00:00Z'),
+    pull(5, '2026-06-05T10:00:00Z'), pull(6, '2026-06-06T10:00:00Z'), pull(7, '2026-10-20T10:00:00Z')];
+  db.prepare("INSERT INTO github_pull_request_commits (repo, number, sha, source) VALUES ('owner/delta', 7, 'from-a-merge', 'local')").run();
+  let failJuneSecondPage = true;
+  const asked: string[] = [];
+  const search: PullRequestSearch = async (window, after) => {
+    asked.push(`${window.from}..${window.to}${after ? ` after ${after}` : ''}`);
+    const inWindow = held.filter(p => p.merged_at.slice(0, 10) >= window.from && p.merged_at.slice(0, 10) <= window.to);
+    const offset = after ? Number(after) : 0;
+    if (window.from.startsWith('2026-06') && offset > 0 && failJuneSecondPage) return null;
+    // As GitHub does, a search returns no result past the cap.
+    if (offset >= 3) return { total: inWindow.length, pulls: [], next: null };
+    // One per page, to exercise paging.
+    return { total: inWindow.length, pulls: inWindow.slice(offset, offset + 1), next: offset + 1 < inWindow.length ? String(offset + 1) : null };
+  };
+  const now = new Date('2026-11-15T00:00:00Z');
+  const report = await syncAuthoredPullRequests(db, { search, now, cap: 3 });
+
+  assert.ok(asked.includes('2026-03-01..2026-03-31'), 'March is asked whole first');
+  assert.ok(asked.includes('2026-03-01..2026-03-16') && asked.includes('2026-03-17..2026-03-31'), 'and, holding more than the cap, in halves');
+  assert.ok(asked.some(a => a.startsWith('2026-03-17..2026-03-31 after')), 'each half paged through');
+  assert.ok(asked[0].startsWith('2025-11-01'), 'reaching back a year, from the start of that month');
+  assert.deepEqual(report, { windows: 12, pull_requests: 6, unanswered: 1 });
+  const stored = db.prepare("SELECT number, state, merged_at, additions, details_at FROM github_pull_requests WHERE repo = 'owner/delta' ORDER BY number").all() as Array<{ number: number; state: string; details_at: string }>;
+  assert.deepEqual(stored.map(row => row.number), [1, 2, 3, 4, 5, 7], "June's second page went unanswered");
+  assert.ok(stored.every(row => row.state === 'MERGED' && row.details_at === now.toISOString()));
+  assert.deepEqual(members('owner/delta', 7), ['sha-7 github']);
+  const windows = (db.prepare('SELECT window_start FROM github_pull_request_search ORDER BY window_start').all() as Array<{ window_start: string }>).map(row => row.window_start);
+  assert.ok(!windows.includes('2026-06-01'), 'June is not read until every page is');
+  assert.ok(windows.includes('2026-03-01'), 'a split month is read once both halves are');
+  assert.equal(windows.length, 12);
+
+  asked.length = 0;
+  failJuneSecondPage = false;
+  await syncAuthoredPullRequests(db, { search, now: new Date(now.getTime() + 10 * 60_000), cap: 3 });
+  assert.deepEqual(asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i), ['2026-06-01..2026-06-30'],
+    'a read window is not asked again, and recent months wait for the recheck interval');
+  assert.ok(db.prepare("SELECT 1 FROM github_pull_requests WHERE repo = 'owner/delta' AND number = 6").get());
+
+  asked.length = 0;
+  await syncAuthoredPullRequests(db, { search, now: new Date(now.getTime() + PULL_REQUEST_RECHECK_MS + 60_000), cap: 3 });
+  assert.deepEqual(asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i), ['2026-10-01..2026-10-31', '2026-11-01..2026-11-30'],
+    'the last two months are read again after it');
 });

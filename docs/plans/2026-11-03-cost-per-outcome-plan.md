@@ -454,7 +454,10 @@ Task 4
 
 **Objective**
 
-Owning references describe the behavior, coverage and outbound traffic.
+Owning references describe the behavior, coverage and outbound traffic. The
+collection's own statements (README outbound list, ARCHITECTURE tables,
+OPERATIONS pass, FEATURES privacy bullet) land with PR 1, which changes them;
+this task covers the read and the view.
 
 **Files**
 
