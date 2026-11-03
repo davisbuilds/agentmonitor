@@ -46,6 +46,8 @@ interface QuotaConfig {
 interface GitConfig {
   /** How often to read commits from the repositories sessions ran in; 0 turns it off. */
   pollIntervalMs: number;
+  /** Whether each pass also asks GitHub, through `gh`, whether sessions' pull requests merged. */
+  githubLookups: boolean;
 }
 
 interface LiveConfig {
@@ -130,7 +132,10 @@ function parseQuotaConfig(env: EnvMap): QuotaConfig {
 }
 
 function parseGitConfig(env: EnvMap): GitConfig {
-  return { pollIntervalMs: parseEnvInt(env.AGENTMONITOR_GIT_POLL_INTERVAL_MS, 600_000, 0) };
+  return {
+    pollIntervalMs: parseEnvInt(env.AGENTMONITOR_GIT_POLL_INTERVAL_MS, 600_000, 0),
+    githubLookups: parseEnvBool(env.AGENTMONITOR_GITHUB_LOOKUPS, true),
+  };
 }
 
 function parseCodexLiveMode(value: string | undefined): CodexLiveMode {

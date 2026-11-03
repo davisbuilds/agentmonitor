@@ -10,7 +10,7 @@ the v2 route/query source and [API index](../api/README.md).
 - Monitor, Analytics, and Sessions are the primary workflows. Sessions holds
   full-text search and pinned messages; the live stream is Monitor's drill-in
   rather than a tab of its own.
-- Analytics contains Overview, Usage, Skills, Insights, and Quality sub-views under
+- Analytics contains Overview, Usage, Skills, Git, Insights, and Quality sub-views under
   one shared date/project/agent filter context. Insights appears only once an LLM
   provider API key is configured.
 - Monitor, Analytics, and Sessions each lay their filters out in one bar under the
@@ -114,7 +114,9 @@ product never substitutes a misleading `0%` for missing evidence.
   tool calls, metadata, and an activity minimap for long sessions. Codex's
   injected developer-role messages are labelled Instructions, with their own
   entry in the author filter. A session that met friction shows it above the
-  transcript, and each signal jumps to the message where it starts.
+  transcript, and each signal jumps to the message where it starts. Beside it,
+  the commits the session proved it made and the pull requests it opened, each
+  linked to GitHub and marked when merged.
 - A session is titled by the name you gave it (a Claude Code rename), else the
   name its harness gave it (Claude Code's own title, or a subagent's task), else
   by its first prompt, skipping the context harnesses
@@ -236,6 +238,24 @@ evidence. They do not by themselves prove skill value, correct placement, or a
 reason to remove a skill. Missing denominators remain unavailable with a reason
 rather than becoming zero. A skill's current files on disk are not treated as
 evidence of what a past session loaded.
+
+Git activity counts what agents committed and opened in the repositories
+sessions worked in, from local git (see OPERATIONS for which repositories and
+how far back). A commit is an agent's only when one of its sessions proves it:
+the commit's hash in a commit call's output, or its subject in that call or in
+a call the session made in the 15 minutes before. Timing alone proves nothing,
+and evidence pointing at two sessions proves neither, so every other commit
+counts as made outside a session: by hand, on another machine, or by a session
+no longer on disk. The Git sub-view charts each day's commits by agent with the
+outside ones on top, says how many outside commits were only close in time to a
+session's commit or carry a Claude co-author trailer with no session here, and
+lists commits and pull requests by agent and project. Pull requests are the
+links `gh pr create` printed, including those a Codex call printed after it
+returned, in later polls of its process. One is merged when GitHub says so
+(asked through `gh`) or local git has its merge commit. Merge commits are not
+counted as anyone's work. A repository renamed after its pull requests were
+opened is asked about under the name the link used, which GitHub follows to the
+renamed repository unless another repository has since taken that name.
 
 External profile authorities may attach bounded, immutable expected-realization
 evidence to a compatible session. The session view then compares desired context
@@ -374,7 +394,8 @@ enter activity or usage totals.
   does not read or emit instruction contents.
 - Trace-quality list rows and aggregate warehouse exports are content-free.
 - Insight generation is the sole product path that sends an analysis request to a
-  configured external model provider. The request carries the selected scope's
+  configured external model provider. (Git activity asks GitHub, through `gh`,
+  only for the state of pull requests sessions opened, by repository and number.) The request carries the selected scope's
   analytics and usage rollups. These include project, model, and tool names plus
   selected top-session titles and opening prompts. It does not carry
   full transcripts.

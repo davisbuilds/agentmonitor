@@ -327,3 +327,10 @@ test('buildAnalyticsQualityHash always targets the quality view and adds only th
   assert.equal(buildAnalyticsQualityHash({ traceId: 't1' }), 'analytics?view=quality&trace=t1');
   assert.equal(buildAnalyticsQualityHash({ sessionId: 's1', traceId: 't1' }), 'analytics?view=quality&session=s1&trace=t1');
 });
+
+test('the git view round-trips through the hash, keeping only the shared filters', () => {
+  const hash = buildAnalyticsRouteHash({ ...analyticsFallback, view: 'git', project: 'alpha' });
+  assert.equal(hash, 'analytics?view=git&from=2026-01-01&to=2026-01-30&project=alpha');
+  const parsed = parseAnalyticsRouteHash(`#${hash}`, analyticsFallback);
+  assert.deepEqual([parsed.view, parsed.project], ['git', 'alpha']);
+});

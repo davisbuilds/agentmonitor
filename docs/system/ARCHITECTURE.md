@@ -86,8 +86,11 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   `git_repos` recording each one's last read), read from local git by a
   background child process: hashes, times, authors, subjects, co-author
   trailers and changed paths, never contents. Merge commits are kept, flagged
-  `is_merge`: they record merged pull requests. Attributing a commit to the
-  session that made it happens at read time.
+  `is_merge`: they record merged pull requests. GitHub's answer for each pull
+  request sessions opened is cached in `github_pull_requests` (state, merge
+  time, when asked), asked read-only through `gh`; it is the only git activity
+  that leaves the machine, and names only repositories and numbers. Attributing
+  a commit to the session that made it happens at read time.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots, with a sampled quota history (`provider_quota_samples`): a row per
   changed reading at most every five minutes, each held until `observed_until`,

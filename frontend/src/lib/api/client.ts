@@ -369,6 +369,60 @@ export interface FrictionSession {
   signals: FrictionSignal[];
 }
 
+export interface GitActivityDay {
+  date: string;
+  /** Commits sessions of each agent proved, by agent. */
+  by_agent: Record<string, number>;
+  outside: number;
+}
+
+export interface GitActivityAgent {
+  agent: string;
+  commits: number;
+  sessions: number;
+  prs_opened: number;
+  prs_merged: number;
+}
+
+export interface GitActivityProject {
+  project: string;
+  commits: number;
+  by_agent: Record<string, number>;
+  outside: number;
+}
+
+export interface GitPullRequest {
+  url: string;
+  repo: string;
+  number: number;
+  opened_at: string;
+  merged: boolean;
+  session_id: string;
+  agent: string;
+  title: string | null;
+  first_message: string | null;
+}
+
+export interface GitActivityCoverage {
+  commits: number;
+  proven: number;
+  time_only: number;
+  trailer_without_session: number;
+}
+
+export interface AnalyticsGitActivity {
+  days: GitActivityDay[];
+  agents: GitActivityAgent[];
+  projects: GitActivityProject[];
+  pull_requests: GitPullRequest[];
+  coverage: GitActivityCoverage;
+}
+
+export interface SessionGitActivity {
+  commits: Array<{ sha: string; subject: string; project: string; authored_at: string }>;
+  pull_requests: Array<{ url: string; repo: string; number: number; opened_at: string; merged: boolean }>;
+}
+
 export interface AnalyticsFriction {
   sessions: number;
   with_friction: number;
@@ -1121,6 +1175,16 @@ export async function fetchAnalyticsSessionDepth(params: Record<string, string |
 export async function fetchAnalyticsDelegation(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsDelegation> {
   const res = await fetch(`/api/v2/analytics/delegation${qs(params)}`);
   return checkedJson(res, 'fetchAnalyticsDelegation');
+}
+
+export async function fetchAnalyticsGitActivity(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsGitActivity> {
+  const res = await fetch(`/api/v2/analytics/git-activity${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsGitActivity');
+}
+
+export async function fetchSessionGitActivity(sessionId: string): Promise<SessionGitActivity> {
+  const res = await fetch(`/api/v2/sessions/${sessionId}/git`);
+  return checkedJson(res, 'fetchSessionGitActivity');
 }
 
 export async function fetchAnalyticsFriction(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsFriction> {

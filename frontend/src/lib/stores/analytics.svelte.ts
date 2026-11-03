@@ -4,6 +4,7 @@ import {
   fetchAnalyticsSessionDepth,
   fetchAnalyticsDelegation,
   fetchAnalyticsFriction,
+  fetchAnalyticsGitActivity,
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
@@ -17,6 +18,7 @@ import {
   type AnalyticsSessionDepth,
   type AnalyticsDelegation,
   type AnalyticsFriction,
+  type AnalyticsGitActivity,
   type AnalyticsCoverage,
   type ActivityDataPoint,
   type ProjectBreakdown,
@@ -40,6 +42,7 @@ type PanelKey =
   | 'depth'
   | 'delegation'
   | 'friction'
+  | 'git'
   | 'activity'
   | 'projects'
   | 'tools'
@@ -63,6 +66,7 @@ class AnalyticsStore {
     depth: 0,
     delegation: 0,
     friction: 0,
+    git: 0,
     activity: 0,
     projects: 0,
     tools: 0,
@@ -73,7 +77,7 @@ class AnalyticsStore {
     agents: 0,
   };
   private unsubscribe: (() => void) | null = null;
-  private subscriptionMode: 'overview' | 'skills' | null = null;
+  private subscriptionMode: 'overview' | 'skills' | 'git' | null = null;
 
   // Shared filters live in the consolidated analytics filter store; the Overview
   // sub-view reads from it and refetches when it changes.
@@ -90,6 +94,7 @@ class AnalyticsStore {
   sessionDepth = $state<AnalyticsSessionDepth | null>(null);
   delegation = $state<AnalyticsDelegation | null>(null);
   friction = $state<AnalyticsFriction | null>(null);
+  gitActivity = $state<AnalyticsGitActivity | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
@@ -105,6 +110,7 @@ class AnalyticsStore {
     depth: null,
     delegation: null,
     friction: null,
+    git: null,
     activity: null,
     projects: null,
     tools: null,
@@ -121,6 +127,7 @@ class AnalyticsStore {
     depth: false,
     delegation: false,
     friction: false,
+    git: false,
     activity: false,
     projects: false,
     tools: false,
@@ -137,6 +144,7 @@ class AnalyticsStore {
     depth: null,
     delegation: null,
     friction: null,
+    git: null,
     activity: null,
     projects: null,
     tools: null,
@@ -176,18 +184,25 @@ class AnalyticsStore {
     await this.fetchAll();
   }
 
+  async initializeGit(): Promise<void> {
+    this.bindFilterSubscription('git');
+    await analyticsFilters.initialize();
+    await this.fetchGitActivity();
+  }
+
   async initializeSkills(): Promise<void> {
     this.bindFilterSubscription('skills');
     await analyticsFilters.initialize();
     await this.fetchSkillsView();
   }
 
-  private bindFilterSubscription(mode: 'overview' | 'skills'): void {
+  private bindFilterSubscription(mode: 'overview' | 'skills' | 'git'): void {
     if (this.unsubscribe && this.subscriptionMode === mode) return;
     this.unsubscribe?.();
     this.subscriptionMode = mode;
     this.unsubscribe = analyticsFilters.subscribe(() => {
       if (mode === 'overview') void this.fetchAll();
+      else if (mode === 'git') void this.fetchGitActivity();
       else void this.fetchSkillsView();
     });
   }
@@ -297,6 +312,25 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.friction) {
         this.loading.friction = false;
+      }
+    }
+  }
+
+  async fetchGitActivity(): Promise<void> {
+    const version = ++this.versions.git;
+    this.loading.git = true;
+    this.errors.git = null;
+    try {
+      const result = await fetchAnalyticsGitActivity(this.queryParams);
+      if (version !== this.versions.git) return;
+      this.gitActivity = result;
+    } catch (err) {
+      if (version !== this.versions.git) return;
+      console.error('Failed to load git activity:', err);
+      this.errors.git = 'Failed to load git activity.';
+    } finally {
+      if (version === this.versions.git) {
+        this.loading.git = false;
       }
     }
   }

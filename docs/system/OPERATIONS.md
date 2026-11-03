@@ -182,7 +182,7 @@ instead. Common controls include:
 | Discovery and sync | `AGENTMONITOR_PROJECTS_DIR`, `AGENTMONITOR_CLAUDE_DIR`, `AGENTMONITOR_AUTO_IMPORT_MINUTES`, `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` |
 | Live fidelity/privacy | `AGENTMONITOR_ENABLE_LIVE_TAB`, `AGENTMONITOR_CODEX_LIVE_MODE`, `AGENTMONITOR_CODEX_CONTEXT_WINDOW`, `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `AGENTMONITOR_LIVE_CAPTURE_REASONING`, `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`, `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` |
 | Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
-| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off) |
+| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default on; `0` stops asking GitHub about pull requests) |
 | Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
 | Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
 | Reporting zone | `AGENTMONITOR_TIMEZONE` |
@@ -267,7 +267,13 @@ session started in a directory that is not a repository, such as `~/Dev`,
 covers the repositories directly inside it (not hidden ones, not deeper). A
 repository's first read reaches back to the day before its first session, at
 most a year; later reads reread from 14 days before the previous read, so
-downtime leaves no gap, and drop commits git no longer lists. `amon sync git` runs one pass on demand, for instance right after the
+downtime leaves no gap, and drop commits git no longer lists. Each pass then
+asks GitHub, read-only through `gh` and as its signed-in user, about the pull
+requests sessions opened in the last year: one GraphQL request per 50, never
+again for one already merged, and at most hourly for the rest. Local git alone
+shows a merge only once its commit is pulled. Without `gh`, or signed out, the
+pass logs that GitHub did not answer, and merged counts fall back to local
+merge commits. `amon sync git` runs one pass on demand, for instance right after the
 forced session sync above fills session directories.
 
 `amon import --force` cannot restore tool-call or inferred-skill history. Date

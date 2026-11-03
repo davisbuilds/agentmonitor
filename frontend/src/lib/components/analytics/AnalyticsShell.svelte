@@ -15,6 +15,7 @@
   import UsagePage from '../usage/UsagePage.svelte';
   import InsightsPage from '../insights/InsightsPage.svelte';
   import TraceQualityPage from '../trace-quality/TraceQualityPage.svelte';
+  import GitPage from '../git/GitPage.svelte';
 
   const f = analyticsFilters;
   // Apply a deep link before the first render, so `#analytics?view=usage`
@@ -25,6 +26,7 @@
     overview: 'Overview',
     usage: 'Usage',
     skills: 'Skills',
+    git: 'Git',
     insights: 'Insights',
     quality: 'Quality',
   };
@@ -59,6 +61,7 @@
     else if (f.view === 'usage') void usage.fetchAll();
     else if (f.view === 'skills') void analytics.fetchSkillsView();
     else if (f.view === 'quality') void traceQuality.load();
+    else if (f.view === 'git') void analytics.fetchGitActivity();
     else void insights.load();
   }
 
@@ -190,6 +193,8 @@
     <UsagePage />
   {:else if shown === 'skills'}
     <SkillsPage />
+  {:else if shown === 'git'}
+    <GitPage />
   {:else if shown === 'quality'}
     <TraceQualityPage />
   {:else if shown === 'insights'}

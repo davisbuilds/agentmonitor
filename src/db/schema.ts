@@ -250,6 +250,21 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_git_commits_authored_at ON git_commits(authored_at);
     CREATE INDEX IF NOT EXISTS idx_git_commits_repo_committed ON git_commits(repo_root, committed_at);
 
+    -- What GitHub says of the pull requests sessions opened, cached: local git
+    -- shows a merge only when its commit was pulled. See src/git/github.ts.
+    CREATE TABLE IF NOT EXISTS github_pull_requests (
+      repo TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      -- OPEN, CLOSED or MERGED; NULL when GitHub has no such pull request.
+      state TEXT,
+      merged_at TEXT,
+      -- When GitHub says it was opened: a link in a call's output names a pull
+      -- request the call opened only when this falls in the call's window.
+      created_at TEXT,
+      checked_at TEXT NOT NULL,
+      PRIMARY KEY (repo, number)
+    );
+
     -- Claude Code's own running cost for each session, from its statusline
     -- payload. It is counted in memory once per API response, independently of
     -- the transcripts imports read, so it checks imported cost.
@@ -786,6 +801,11 @@ function initSchemaLocked(db: Database): void {
   if (!browsingSessionColumns.has('cwd')) {
     db.exec('ALTER TABLE browsing_sessions ADD COLUMN cwd TEXT');
   }
+  const gitRepoColumns = new Set((db.prepare('PRAGMA table_info(git_repos)').all() as Array<{ name: string }>).map(col => col.name));
+  // The GitHub repository a local one pushes to (`owner/name`), which names its pull requests.
+  if (!gitRepoColumns.has('github_repo')) {
+    db.exec('ALTER TABLE git_repos ADD COLUMN github_repo TEXT');
+  }
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_parent ON browsing_sessions(parent_session_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');
@@ -1176,7 +1196,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 27;
+const DATA_SCHEMA_VERSION = 28;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1240,7 +1260,8 @@ export function runDataMigrations(db: Database): void {
     // v25 introduces no data correction: it adds provider_quota_samples, which
     // read commands only install when the version advances. v26 likewise only
     // adds browsing_sessions.cwd; a forced session sync fills it for stored rows.
-    // v27 likewise only adds git_repos and git_commits.
+    // v27 likewise only adds git_repos and git_commits, and v28 git_repos.github_repo
+    // and github_pull_requests.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

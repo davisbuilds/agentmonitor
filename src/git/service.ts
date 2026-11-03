@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
 import { syncGitActivity } from './activity.js';
+import { syncSessionPullRequests } from './github.js';
 
 /** The first pass waits for startup's own transcript sync, which fills the session directories it reads. */
 const FIRST_PASS_DELAY_MS = 30_000;
@@ -12,8 +13,11 @@ let inFlight: Promise<void> | null = null;
 function refreshGitActivity(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = syncGitActivity(getDb())
-    .then(report => {
+    .then(async report => {
       if (report.errors > 0) console.error(`[git] ${report.errors} of ${report.repos} repositories could not be read`);
+      if (!config.git.githubLookups) return;
+      const pulls = await syncSessionPullRequests(getDb());
+      if (pulls.unanswered > 0) console.error(`[git] GitHub did not answer for ${pulls.unanswered} of ${pulls.checked} pull requests`);
     })
     .catch(err => console.error('[git] Failed to read git activity:', err))
     .finally(() => { inFlight = null; });

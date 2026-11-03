@@ -311,6 +311,72 @@ export interface AnalyticsFriction {
   recent: FrictionSession[];
 }
 
+/**
+ * Commits and pull requests agents made, read from local git and credited to
+ * a session only on evidence it left: the commit's hash in a result, or its
+ * subject in a command. A commit no session proves counts as outside.
+ */
+export interface GitActivityDay {
+  date: string;
+  /** Commits sessions of each agent proved, by agent. */
+  by_agent: Record<string, number>;
+  outside: number;
+}
+
+export interface GitActivityAgent {
+  agent: string;
+  commits: number;
+  /** Sessions that made at least one of them. */
+  sessions: number;
+  prs_opened: number;
+  /** Of the pull requests this agent opened, those GitHub or a merge commit in local git shows merged. */
+  prs_merged: number;
+}
+
+export interface GitActivityProject {
+  project: string;
+  commits: number;
+  by_agent: Record<string, number>;
+  outside: number;
+}
+
+export interface GitPullRequest {
+  url: string;
+  repo: string;
+  number: number;
+  opened_at: string;
+  merged: boolean;
+  session_id: string;
+  agent: string;
+  title: string | null;
+  first_message: string | null;
+}
+
+export interface GitActivityCoverage {
+  commits: number;
+  /** Credited to a session by its hash or subject. */
+  proven: number;
+  /** A session committed close by, but nothing proved this commit was its. */
+  time_only: number;
+  /** Claude co-authored, by its trailer, with no session left to prove which. */
+  trailer_without_session: number;
+}
+
+export interface AnalyticsGitActivity {
+  days: GitActivityDay[];
+  agents: GitActivityAgent[];
+  projects: GitActivityProject[];
+  /** The latest pull requests sessions opened in the range. */
+  pull_requests: GitPullRequest[];
+  coverage: GitActivityCoverage;
+}
+
+/** One session's commits and pull requests, for its viewer. */
+export interface SessionGitActivity {
+  commits: Array<{ sha: string; subject: string; project: string; authored_at: string }>;
+  pull_requests: Array<{ url: string; repo: string; number: number; opened_at: string; merged: boolean }>;
+}
+
 export interface ProjectBreakdown {
   project: string;
   session_count: number;
