@@ -156,3 +156,20 @@ test('GitHub\'s answer about a pull request opened after the call is about anoth
     .run('2026-04-01T00:00:00Z', '2026-03-28T00:00:00Z', '2026-04-02T00:00:00Z');
   assert.deepEqual(queries.getSessionGitActivity('c-renamed').pull_requests.map(pr => [pr.number, pr.merged]), [[12, false]]);
 });
+
+test('a pull request opened from a yielded cell, with the repository flag, counts once its wait returns the URL', () => {
+  const day = (hour: number, minute = 0) => new Date(Date.UTC(2026, 2, 7, hour, minute)).toISOString();
+  const id = '01990000-0000-7000-8000-000000000003';
+  const cell = `rollout-2026-03-07T09-00-00-${id}`;
+  session.run(cell, 'codex', 'codex-jsonl', root, 'Open from a cell', day(9), day(10));
+  const toolCall = (when: string, toolName: string, input: string, callId: string, output: string) => {
+    const messageId = Number(message.run(cell, ordinal++, when).lastInsertRowid);
+    call.run(messageId, cell, toolName, callId, input);
+    result.run(id, `${callId}:result`, JSON.stringify({ output }));
+  };
+  toolCall(day(9, 10), 'exec', JSON.stringify('text(await tools.exec_command({cmd:"gh -R owner/alpha pr create --fill"}))'), 'call_cell',
+    'Script running with cell ID 67\nWall time 10.0 seconds\nOutput:\n');
+  toolCall(day(9, 11), 'wait', JSON.stringify({ cell_id: '68', yield_time_ms: 1000 }), 'call_wait_other', prUrl(4));
+  toolCall(day(9, 12), 'wait', JSON.stringify({ cell_id: '67', yield_time_ms: 1000 }), 'call_wait', `Script completed\nOutput:\n${prUrl(13)}\n`);
+  assert.deepEqual(queries.getSessionGitActivity(cell).pull_requests.map(pr => pr.number), [13]);
+});

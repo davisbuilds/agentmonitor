@@ -5,10 +5,13 @@ import {
   createdCommit,
   githubRepoOfRemote,
   mergedPullRequestNumber,
+  opensPullRequest,
   pollsProcess,
   pullRequestUrls,
   runningProcessIds,
   runsGitCommit,
+  waitsOnCell,
+  yieldedCellIds,
   type CommitCall,
 } from '../src/git/attribution.js';
 
@@ -136,5 +139,23 @@ test('a commit is a commit with git\'s global options before it', () => {
   }
   for (const command of ['git log --grep commit', 'git commit-tree HEAD^{tree}', 'git show --stat', 'echo "git -C x status"; commit=1']) {
     assert.ok(!runsGitCommit(JSON.stringify({ command })), command);
+  }
+});
+
+test('a yielded code-mode cell names its id, and a wait on it carries the rest of its output', () => {
+  const yielded = JSON.stringify({ tool_name: 'exec', output: 'Script running with cell ID 67\nWall time 10.0 seconds\nOutput:\n' });
+  assert.deepEqual(yieldedCellIds(yielded), ['67']);
+  assert.deepEqual(yieldedCellIds(JSON.stringify({ output: 'Script completed\nOutput:\n' })), []);
+  assert.ok(waitsOnCell('wait', '{"cell_id":"67","yield_time_ms":1000}', '67'));
+  assert.ok(!waitsOnCell('wait', '{"cell_id":"670","yield_time_ms":1000}', '67'), 'another cell');
+  assert.ok(!waitsOnCell('exec', 'text(await tools.exec_command({cmd:"echo 67"}))', '67'), 'not a wait');
+});
+
+test('a pull request is opened by gh pr create, with the repository flag anywhere gh takes it', () => {
+  for (const command of ['gh pr create --fill', 'gh -R owner/repo pr create --fill', 'gh pr --repo owner/repo create', 'gh pr -R=owner/repo create -t x', 'cd x\ngh pr create']) {
+    assert.ok(opensPullRequest(JSON.stringify({ command })), command);
+  }
+  for (const command of ['gh pr view 12', 'gh -R owner/repo pr list', 'echo "gh pr" && create-thing', 'gh pr create-draft']) {
+    assert.ok(!opensPullRequest(JSON.stringify({ command })), command);
   }
 });

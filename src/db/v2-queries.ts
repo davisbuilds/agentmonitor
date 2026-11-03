@@ -113,8 +113,11 @@ import {
   pollsProcess,
   PROCESS_POLL_WINDOW_MS,
   pullRequestUrls,
+  opensPullRequest,
   runningProcessIds,
   runsGitCommit,
+  waitsOnCell,
+  yieldedCellIds,
   type CommitAttribution,
   type CommitCall,
 } from '../git/attribution.js';
@@ -3046,17 +3049,17 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
   const to = new Date(toMs).toISOString();
   const rows = db.prepare(`
     SELECT tc.session_id, b.agent, b.cwd, b.title, substr(b.first_message, 1, 500) AS first_message,
-      m.timestamp, tc.input_json, tc.tool_use_id, instr(tc.input_json, 'gh pr create') > 0 AS opens_pr
+      m.timestamp, tc.input_json, tc.tool_use_id
     FROM browsing_sessions b
     JOIN tool_calls tc ON tc.session_id = b.id
     JOIN messages m ON m.id = tc.message_id
     WHERE ${sessionId ? 'b.id = @session' : `(b.started_at IS NULL OR julianday(b.started_at) <= julianday(@to))
       AND (COALESCE(b.last_item_at, b.ended_at) IS NULL OR julianday(COALESCE(b.last_item_at, b.ended_at)) >= julianday(@from))`}
-      AND ((tc.input_json LIKE '%git %' AND tc.input_json LIKE '%commit%') OR tc.input_json LIKE '%gh pr create%')
+      AND ((tc.input_json LIKE '%git %' AND tc.input_json LIKE '%commit%') OR (tc.input_json LIKE '%gh %' AND tc.input_json LIKE '% create%'))
       AND m.timestamp IS NOT NULL AND julianday(m.timestamp) BETWEEN julianday(@from) AND julianday(@to)
   `).all({ from, to, ...(sessionId ? { session: sessionId } : {}) }) as Array<{
     session_id: string; agent: string; cwd: string | null; title: string | null; first_message: string | null;
-    timestamp: string; input_json: string | null; tool_use_id: string | null; opens_pr: number;
+    timestamp: string; input_json: string | null; tool_use_id: string | null;
   }>;
   const result = db.prepare(`
     SELECT payload_json FROM session_items
@@ -3070,7 +3073,7 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
   };
   const pollRows = db.prepare(`
     SELECT tc.tool_name, tc.input_json, tc.tool_use_id, m.timestamp FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
-    WHERE tc.session_id = ? AND (tc.tool_name = 'write_stdin' OR tc.input_json LIKE '%write_stdin%')
+    WHERE tc.session_id = ? AND (tc.tool_name IN ('write_stdin', 'wait') OR tc.input_json LIKE '%write_stdin%')
       AND m.timestamp IS NOT NULL AND julianday(m.timestamp) > julianday(?) AND julianday(m.timestamp) <= julianday(?)
     ORDER BY julianday(m.timestamp), tc.id
   `);
@@ -3088,14 +3091,17 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
     return found;
   };
   // A Codex call that returned while its process ran (a push hook, a slow
-  // `gh`) printed the rest to the polls of that process, so they are read as
-  // part of its result.
+  // `gh`) printed the rest to the polls of that process, and a code-mode
+  // script that yielded printed it to the waits on its cell, so they are read
+  // as part of its result.
   const withPolls = (sessionId: string, at: number, own: string): string => {
-    const ids = runningProcessIds(own);
-    if (ids.length === 0) return own;
+    const processes = runningProcessIds(own);
+    const cells = yieldedCellIds(own);
+    if (processes.length === 0 && cells.length === 0) return own;
     const outputs = pollsOf(sessionId)
       .filter(poll => poll.at > at && poll.at <= at + PROCESS_POLL_WINDOW_MS)
-      .filter(poll => ids.some(id => pollsProcess(poll.tool_name, poll.input, id)))
+      .filter(poll => processes.some(id => pollsProcess(poll.tool_name, poll.input, id))
+        || cells.some(id => waitsOnCell(poll.tool_name, poll.input, id)))
       .map(poll => resultOf(sessionId, poll.tool_use_id));
     return [own, ...outputs].join('\n');
   };
@@ -3116,7 +3122,7 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
       first_message: row.first_message,
     };
     if (runsGitCommit(call.input)) commits.push(call);
-    if (row.opens_pr) pullRequests.push(call);
+    if (opensPullRequest(call.input)) pullRequests.push(call);
   }
   const byTime = (a: GitToolCall, b: GitToolCall) => a.at - b.at;
   return { commits: commits.sort(byTime), pullRequests: pullRequests.sort(byTime) };

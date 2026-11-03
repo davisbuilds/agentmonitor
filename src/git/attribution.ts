@@ -166,6 +166,24 @@ export function pollsProcess(toolName: string, input: string, id: string): boole
   return new RegExp(`(?<!\\d)${id}(?!\\d)`).test(input);
 }
 
+/** Code-mode cells a Codex call yielded (`Script running with cell ID N`), whose output a later `wait` returns. */
+export function yieldedCellIds(result: string): string[] {
+  return [...new Set([...result.matchAll(/Script running with cell ID (\d+)/g)].map(match => match[1]))];
+}
+
+/** Whether a call waits on one of a session's yielded cells. */
+export function waitsOnCell(toolName: string, input: string, id: string): boolean {
+  return toolName === 'wait' && new RegExp(String.raw`\\*"cell_id\\*"\s*:\s*\\*"?${id}(?!\d)`).test(input);
+}
+
+/** Whether a command runs `gh pr create`, with `-R`/`--repo` before or after `pr`. */
+const GH_REPO_FLAG = String.raw`(?:\s+(?:-R|--repo)(?:\s+|=)\S+)*`;
+const GH_PR_CREATE = new RegExp(String.raw`(?:(?<![\w-])|(?<=\\[nt]))gh${GH_REPO_FLAG}\s+pr${GH_REPO_FLAG}\s+create(?![\w-])`);
+
+export function opensPullRequest(input: string): boolean {
+  return GH_PR_CREATE.test(input);
+}
+
 export interface PullRequestRef {
   /** `owner/name`, lowercased. */
   repo: string;
