@@ -542,8 +542,8 @@ the build.
 
 ### Cost per outcome
 
-Shipped 2026-11 (plan `docs/plans/2026-11-03-cost-per-outcome-plan.md`). The
-bar is "landed on main"; these were left out by decision.
+Shipped 2026-11 (#253, #255 and the Git view's section). The bar is "landed
+on main"; these were left out by decision.
 
 #### Whether merged work stayed merged
 - **What**: a merged pull request counts as an outcome even if it was
