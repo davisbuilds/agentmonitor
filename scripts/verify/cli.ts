@@ -98,7 +98,7 @@ try {
     };
     let output: unknown;
     switch (command) {
-      case 'list': output = { schema_version: 1, prerequisites: ['pnpm install', 'pnpm build', 'pnpm exec playwright install chromium'], scenarios, probes }; break;
+      case 'list': output = { schema_version: 1, prerequisites: ['pnpm install', 'pnpm build', 'patched Google Chrome (>= 156.0.8078.79)'], scenarios, probes }; break;
       case 'probe': {
         const result = await runProbe(target, {
           retainTranscripts: values['retain-transcripts'], claudeDir: values['claude-dir'], codexHome: values['codex-home'], excludePatterns: values.exclude,

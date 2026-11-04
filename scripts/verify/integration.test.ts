@@ -7,7 +7,7 @@ import { spawnSync } from 'node:child_process';
 import { startSession, stopSession, control, readSession, repoRoot } from './session.js';
 import { runScenario } from './run.js';
 
-// Explicit opt-in: these checks require the compiled app and Chromium.
+// Explicit opt-in: these checks require the compiled app and patched Chrome.
 // Run serially; the mutation test temporarily changes one local dist file.
 
 // Evidence and session directories outlive a run by design; the tests remove
@@ -151,21 +151,19 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
       assert.equal(result.cleanup, 'host_exited');
       assert.ok(result.artifacts.some(artifact => artifact.endsWith('host.log')));
     } finally { fs.writeFileSync(file, builtApp); }
-    const original = process.env.PLAYWRIGHT_BROWSERS_PATH;
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-browser-'));
     try {
-      // Separate process: Playwright reads its browser path at module import.
+      // Separate process: browser selection is captured at module import.
       const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/verify/cli.ts', 'run', 'usage', '--json'], {
         cwd: repoRoot, encoding: 'utf8', timeout: 30_000,
-        env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: empty },
+        env: { ...process.env, PLAYWRIGHT_CHROME_EXECUTABLE_PATH: path.join(empty, 'missing-chrome') },
       });
       assert.equal(result.status, 2, result.stderr);
       const evidence = keep(JSON.parse(result.stdout));
       assert.equal(evidence.status, 'blocked');
       assert.equal(evidence.cleanup, 'stopped');
-      assert.ok(evidence.errors.some((error: string) => error.includes("Executable doesn't exist")));
+      assert.ok(evidence.errors.some((error: string) => /executable.*doesn't exist/i.test(error)));
     } finally {
-      if (original === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH; else process.env.PLAYWRIGHT_BROWSERS_PATH = original;
       fs.rmSync(empty, { recursive: true });
     }
   });

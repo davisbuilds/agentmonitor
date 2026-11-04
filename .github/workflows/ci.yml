@@ -90,8 +90,12 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Install Playwright chromium
-        run: pnpm exec playwright install --with-deps chromium
+      - name: Install browser OS dependencies
+        run: pnpm exec playwright install-deps chromium
+      - name: Install pinned patched Chrome for Testing
+        run: bash scripts/install-browser-ci.sh
+      - name: Test browser version guard
+        run: pnpm test:browser-runtime
 
       # Chromium only in the PR gate; the full browser matrix stays local.
       - name: Run Playwright tests
