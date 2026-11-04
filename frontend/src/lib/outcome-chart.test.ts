@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AnalyticsOutcomes, OutcomeCoverage, OutcomeWeek } from './api/client';
 import { OTHER_COLOR, SERIES_COLORS } from './components/usage/model-colors';
-import { coverageNotes, landedShare, OUTCOME_ORDER, OUTCOME_STYLE, spendSegments, weekSeries } from './outcome-chart';
+import { coverageNotes, landedShare, OUTCOME_ORDER, OUTCOME_STYLE, outcomeParts, spendSegments, weekSeries } from './outcome-chart';
 
 const coverage: OutcomeCoverage = {
   observable_share: 0.965,
@@ -45,6 +45,15 @@ describe('where the spend went', () => {
     const colors = OUTCOME_ORDER.map(outcome => OUTCOME_STYLE[outcome].color);
     expect(new Set(colors).size).toBe(colors.length);
     for (const color of colors) expect([...SERIES_COLORS, OTHER_COLOR]).toContain(color);
+  });
+
+  it('keeps merged pull requests\' figures when the range itself has no spend', () => {
+    // A pull request merged in the range costs the work before it, up to a month
+    // earlier, so it has figures even when none of that spend falls in the range.
+    const earlier = { ...outcomes([]), merged_prs: { prs: 2, median_usd: 3, p25_usd: 2, p75_usd: 4, p90_usd: 5, all_in_usd: null } };
+    expect(outcomeParts(earlier)).toEqual({ spend: false, merged: true });
+    expect(outcomeParts(outcomes([{ outcome: 'nothing_after', usd: 1, share: 1 }]))).toEqual({ spend: true, merged: false });
+    expect(outcomeParts(null)).toEqual({ spend: false, merged: false });
   });
 
   it('counts merged pull requests, pushes and other landings as landed', () => {

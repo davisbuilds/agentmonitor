@@ -299,3 +299,26 @@ test('Git shows where the spend went, and what that rests on', async ({ page }) 
     getDb().prepare('DELETE FROM events WHERE id = ?').run(id);
   }
 });
+
+test('Git keeps merged pull requests\' figures when their spend came before the range', async ({ page }) => {
+  // Two pull requests merged in the range, costed from work in the month before
+  // it, so the range itself holds no spend.
+  const week = { week: '2026-11-02', prs: 2, median_usd: 3, p25_usd: 2, p75_usd: 4, p90_usd: 5, median_tokens: 30_000, usd_per_mtok: 100 };
+  await page.route('**/api/v2/analytics/outcomes*', route => route.fulfill({ json: {
+    total_usd: 0,
+    spend: [],
+    merged_prs: { prs: 2, median_usd: 3, p25_usd: 2, p75_usd: 4, p90_usd: 5, all_in_usd: 0 },
+    weeks: [week],
+    sizes: [{ bucket: '<200', prs: 2, median_usd: 3 }],
+    unknown_size: 0,
+    projects: [{ project: 'alpha', prs: 2, median_usd: 3, pooled_usd: 3 }],
+    coverage: { observable_share: null, lookups: true, github_merged: 2, github_linked: 2, truncated_commit_lists: 0, membership: { github: 2, local: 0, none: 0 } },
+  } }));
+  await page.goto(`${baseUrl}/app/#analytics?view=git`);
+  const section = page.getByRole('region', { name: 'Cost per Outcome' });
+  await expect(section.getByRole('group', { name: 'Cost per outcome headlines' })).toContainText('median per merged pull request');
+  await expect(section.getByTestId('outcome-no-spend')).toBeVisible();
+  await expect(section.getByTestId('outcome-segment')).toHaveCount(0);
+  await expect(section.getByRole('list', { name: 'Median cost by pull request size' })).toBeVisible();
+  await expect(section.getByText('all spend over')).toHaveCount(0);
+});

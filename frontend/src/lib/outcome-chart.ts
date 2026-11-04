@@ -47,6 +47,15 @@ export function spendSegments(data: AnalyticsOutcomes | null): SpendSegment[] {
   });
 }
 
+/**
+ * Which parts of the section have anything to show. A pull request merged in the
+ * range costs the work before it, up to a month earlier, so its figures can
+ * stand when none of that spend falls inside the range.
+ */
+export function outcomeParts(data: AnalyticsOutcomes | null): { spend: boolean; merged: boolean } {
+  return { spend: !!data && data.total_usd > 0, merged: (data?.merged_prs.prs ?? 0) > 0 };
+}
+
 /** The share of the range's spend that preceded work landing on main; null without spend. */
 export function landedShare(data: AnalyticsOutcomes | null): number | null {
   if (!data || data.total_usd <= 0) return null;

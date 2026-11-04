@@ -2,12 +2,13 @@
   import { Bar, InfoTip } from '../ui';
   import { analytics } from '../../stores/analytics.svelte';
   import { formatCost, formatNumber } from '../../format';
-  import { coverageNotes, landedShare, OUTCOME_STYLE, spendSegments, weekSeries } from '../../outcome-chart';
+  import { coverageNotes, landedShare, OUTCOME_STYLE, outcomeParts, spendSegments, weekSeries } from '../../outcome-chart';
   import OutcomeTrend from './OutcomeTrend.svelte';
 
   const PROJECT_ROWS = 8;
 
   const data = $derived(analytics.outcomes);
+  const parts = $derived(outcomeParts(data));
   const segments = $derived(spendSegments(data));
   const landed = $derived(landedShare(data));
   const notes = $derived(coverageNotes(data?.coverage ?? null));
@@ -38,20 +39,22 @@
     <div class="py-12 text-center text-meta text-text-muted">Loading cost per outcome…</div>
   {:else if analytics.errors.outcomes}
     <div class="py-12 text-center text-meta text-danger">{analytics.errors.outcomes}</div>
-  {:else if !data || data.total_usd <= 0}
+  {:else if !data || (!parts.spend && !parts.merged)}
     <div class="py-12 text-center text-meta text-text-muted">No spend in the selected range.</div>
   {:else}
     <div class="mb-4 flex flex-wrap items-baseline gap-x-8 gap-y-2 text-meta text-text-muted" role="group" aria-label="Cost per outcome headlines">
-      {#if merged && merged.prs > 0}
+      {#if merged && parts.merged}
         <span>
           <span class="tabular font-mono text-h2 text-text">{formatCost(merged.median_usd)}</span>
           median per merged pull request
           <span class="tabular font-mono">({formatCost(merged.p25_usd)}–{formatCost(merged.p75_usd)})</span>
         </span>
-        <span>
-          <span class="tabular font-mono text-h2 text-text">{formatCost(merged.all_in_usd)}</span>
-          all spend over {formatNumber(merged.prs)} merged
-        </span>
+        {#if parts.spend}
+          <span>
+            <span class="tabular font-mono text-h2 text-text">{formatCost(merged.all_in_usd)}</span>
+            all spend over {formatNumber(merged.prs)} merged
+          </span>
+        {/if}
       {:else}
         <span>No pull request merged in the selected range.</span>
       {/if}
@@ -63,29 +66,33 @@
       {/if}
     </div>
 
-    <h4 class="mb-2 text-meta text-text-muted">Where the spend went</h4>
-    <div class="flex h-7 w-full gap-[2px] overflow-hidden rounded-sm" role="img"
-      aria-label={segments.filter(s => s.share > 0).map(s => `${s.label} ${percent(s.share)}`).join(', ')}>
-      {#each segments.filter(s => s.share > 0) as segment (segment.outcome)}
-        <div class="flex min-w-[2px] items-center justify-center overflow-hidden text-meta text-text"
-          style={`width:${segment.share * 100}%;background:${segment.color}`}
-          title={`${segment.label}: ${formatCost(segment.usd)} (${percent(segment.share)})`}
-          data-testid="outcome-segment">
-          {#if segment.labelled}<span class="tabular truncate px-1 font-mono">{percent(segment.share)}</span>{/if}
-        </div>
-      {/each}
-    </div>
-    <ul class="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-meta text-text-muted sm:grid-cols-2 xl:grid-cols-3" aria-label="Where the spend went">
-      {#each segments as segment (segment.outcome)}
-        <li class="flex items-center justify-between gap-3">
-          <span class="flex items-center gap-1.5">
-            <span class="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={`background:${segment.color}`} aria-hidden="true"></span>
-            {segment.label}
-          </span>
-          <span class="tabular font-mono text-text">{formatCost(segment.usd)} <span class="text-text-muted">{percent(segment.share)}</span></span>
-        </li>
-      {/each}
-    </ul>
+    {#if !parts.spend}
+      <p class="text-meta text-text-muted" data-testid="outcome-no-spend">No spend in the selected range. The figures below count the work before each merge, up to a month earlier.</p>
+    {:else}
+      <h4 class="mb-2 text-meta text-text-muted">Where the spend went</h4>
+      <div class="flex h-7 w-full gap-[2px] overflow-hidden rounded-sm" role="img"
+        aria-label={segments.filter(s => s.share > 0).map(s => `${s.label} ${percent(s.share)}`).join(', ')}>
+        {#each segments.filter(s => s.share > 0) as segment (segment.outcome)}
+          <div class="flex min-w-[2px] items-center justify-center overflow-hidden text-meta text-text"
+            style={`width:${segment.share * 100}%;background:${segment.color}`}
+            title={`${segment.label}: ${formatCost(segment.usd)} (${percent(segment.share)})`}
+            data-testid="outcome-segment">
+            {#if segment.labelled}<span class="tabular truncate px-1 font-mono">{percent(segment.share)}</span>{/if}
+          </div>
+        {/each}
+      </div>
+      <ul class="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 text-meta text-text-muted sm:grid-cols-2 xl:grid-cols-3" aria-label="Where the spend went">
+        {#each segments as segment (segment.outcome)}
+          <li class="flex items-center justify-between gap-3">
+            <span class="flex items-center gap-1.5">
+              <span class="h-2.5 w-2.5 shrink-0 rounded-[2px]" style={`background:${segment.color}`} aria-hidden="true"></span>
+              {segment.label}
+            </span>
+            <span class="tabular font-mono text-text">{formatCost(segment.usd)} <span class="text-text-muted">{percent(segment.share)}</span></span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
 
     {#if weeks.length > 0}
       <h4 class="mb-2 mt-6 text-meta text-text-muted">By week of merge</h4>
@@ -123,7 +130,7 @@
       </details>
     {/if}
 
-    {#if merged && merged.prs > 0}
+    {#if parts.merged}
       <div class="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
         <div>
           <div class="mb-2 flex items-center gap-1.5">
