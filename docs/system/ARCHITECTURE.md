@@ -92,7 +92,7 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   and for each the signed-in user merged in the last year, is cached in
   `github_pull_requests` (state, times, size, author kind), with its commits in
   `github_pull_request_commits`; `github_pull_request_search` records which
-  months of merges were read. These are asked read-only through `gh` only with
+  months of merges were read, per GitHub login. These are asked read-only through `gh` only with
   `AGENTMONITOR_GITHUB_LOOKUPS=1`, the only git activity that leaves the
   machine, naming only repositories, numbers and merge dates. Without it, a
   local merge commit gives its pull request's commits (`source = 'local'`),

@@ -285,6 +285,27 @@ export interface AuthoredPullRequestReport {
   unanswered: number;
 }
 
+/** The login `gh` is signed in as, lowercased; null when GitHub did not answer. */
+export type ViewerLookup = () => Promise<string | null>;
+
+/** The signed-in login from a `viewer` response; null when it holds none. */
+export function parseViewerResponse(body: string): string | null {
+  try {
+    const login = (JSON.parse(body) as { data?: { viewer?: { login?: unknown } | null } | null }).data?.viewer?.login;
+    return typeof login === 'string' && login !== '' ? login.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+const ghViewer: ViewerLookup = async () => {
+  try {
+    return parseViewerResponse((await run('gh', ['api', 'graphql', '-f', 'query=query { viewer { login } }'], { timeout: GH_TIMEOUT_MS })).stdout);
+  } catch {
+    return null;
+  }
+};
+
 /** Results GitHub's search returns at most for one query; a window holding more is split. */
 const SEARCH_RESULT_CAP = 1000;
 
@@ -402,29 +423,38 @@ async function readWindow(
  * measured against all of it. Reads month by month. The current month, which
  * still gains merges, is read again after PULL_REQUEST_RECHECK_MS; an ended
  * month once more on the first pass SEARCH_SETTLE_MS after its end, then never.
- * A month counts as read only when every page of it answered.
+ * A month counts as read only when every page of it answered, and for the
+ * login gh is signed in as.
  */
 export async function syncAuthoredPullRequests(
   db: Database,
-  options: { search?: PullRequestSearch; now?: Date; cap?: number } = {},
+  options: { search?: PullRequestSearch; viewer?: ViewerLookup; now?: Date; cap?: number } = {},
 ): Promise<AuthoredPullRequestReport> {
   const now = options.now ?? new Date();
   const search = options.search ?? ghPullRequestSearch;
   const cap = options.cap ?? SEARCH_RESULT_CAP;
   const report: AuthoredPullRequestReport = { windows: 0, pull_requests: 0, unanswered: 0 };
-  const read = db.prepare('SELECT synced_at FROM github_pull_request_search WHERE window_start = ?');
+  const start = new Date(now.getTime() - SESSION_HISTORY_MS);
+  const thisMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const firstMonth = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1);
+  // The search reads `author:@me`, so what was read is kept per login: another
+  // account signed in to gh reads its own year. Without one, nothing is read.
+  const login = await (options.viewer ?? ghViewer)();
+  if (login === null) {
+    const months = (now.getUTCFullYear() - start.getUTCFullYear()) * 12 + now.getUTCMonth() - start.getUTCMonth() + 1;
+    return { ...report, unanswered: months };
+  }
+  const read = db.prepare('SELECT synced_at FROM github_pull_request_search WHERE login = ? AND window_start = ?');
   const markRead = db.prepare(`
-    INSERT INTO github_pull_request_search (window_start, window_end, result_count, synced_at) VALUES (?, ?, ?, ?)
-    ON CONFLICT(window_start) DO UPDATE SET window_end = excluded.window_end, result_count = excluded.result_count, synced_at = excluded.synced_at
+    INSERT INTO github_pull_request_search (login, window_start, window_end, result_count, synced_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(login, window_start) DO UPDATE SET window_end = excluded.window_end, result_count = excluded.result_count, synced_at = excluded.synced_at
   `);
   const record = recorder(db);
 
-  const start = new Date(now.getTime() - SESSION_HISTORY_MS);
-  const thisMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
-  for (let month = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1); month <= thisMonth;) {
+  for (let month = firstMonth; month <= thisMonth;) {
     const next = Date.UTC(new Date(month).getUTCFullYear(), new Date(month).getUTCMonth() + 1, 1);
     const window = { from: day(month), to: day(next - DAY_MS) };
-    const previous = read.get(window.from) as { synced_at: string } | undefined;
+    const previous = read.get(login, window.from) as { synced_at: string } | undefined;
     const settled = previous !== undefined && Date.parse(previous.synced_at) >= next + SEARCH_SETTLE_MS;
     month = next;
     if (previous && (settled || now.getTime() - Date.parse(previous.synced_at) < PULL_REQUEST_RECHECK_MS)) continue;
@@ -434,7 +464,7 @@ export async function syncAuthoredPullRequests(
       for (const pull of result.pulls) {
         record(pull, { state: 'MERGED', merged_at: pull.merged_at, created_at: pull.created_at, details: pull }, now);
       }
-      if (result.complete) markRead.run(window.from, window.to, result.total, now.toISOString());
+      if (result.complete) markRead.run(login, window.from, window.to, result.total, now.toISOString());
     })();
     report.pull_requests += new Set(result.pulls.map(pullRequestKey)).size;
     if (result.complete) report.windows += 1;

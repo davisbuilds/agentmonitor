@@ -47,7 +47,7 @@ test('v29 adds pull request size, membership and commit landing to a v28 store, 
     assert.ok(columns('github_pull_requests').has(column), column);
   }
   assert.deepEqual([...columns('github_pull_request_commits')].sort(), ['number', 'repo', 'sha', 'source']);
-  assert.ok(columns('github_pull_request_search').has('window_start'));
+  assert.deepEqual([...columns('github_pull_request_search')].sort(), ['login', 'result_count', 'synced_at', 'window_end', 'window_start']);
 
   assert.deepEqual(db.prepare('SELECT subject, landing FROM git_commits').get(), { subject: 'feat: kept', landing: null });
   assert.deepEqual(db.prepare('SELECT state, additions FROM github_pull_requests').get(), { state: 'MERGED', additions: null });

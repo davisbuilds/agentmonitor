@@ -277,13 +277,16 @@ function initSchemaLocked(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_github_pull_request_commits_sha ON github_pull_request_commits(sha);
 
-    -- Windows of merge dates whose pull requests by the signed-in user were
-    -- read from GitHub's search, and how many the search said it held.
+    -- Windows of merge dates whose pull requests by a GitHub login (the one
+    -- signed in to gh, lowercased) were read from GitHub's search, and how
+    -- many the search said it held.
     CREATE TABLE IF NOT EXISTS github_pull_request_search (
-      window_start TEXT PRIMARY KEY,
+      login TEXT NOT NULL,
+      window_start TEXT NOT NULL,
       window_end TEXT NOT NULL,
       result_count INTEGER NOT NULL,
-      synced_at TEXT NOT NULL
+      synced_at TEXT NOT NULL,
+      PRIMARY KEY (login, window_start)
     );
 
     -- Claude Code's own running cost for each session, from its statusline

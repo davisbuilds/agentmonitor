@@ -10,13 +10,16 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-github-gate-'));
 after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
-// A `gh` that records each call and answers any search with nothing.
+// A `gh` that records each call, signed in as someone, and answers any search with nothing.
 const bin = path.join(tempDir, 'bin');
 const calls = path.join(tempDir, 'gh-calls');
 fs.mkdirSync(bin);
 fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh
 echo "$1 $2" >> "${calls}"
-echo '{"data":{"search":{"issueCount":0,"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}'
+case "$*" in
+  *"viewer { login }"*) echo '{"data":{"viewer":{"login":"someone"}}}' ;;
+  *) echo '{"data":{"search":{"issueCount":0,"pageInfo":{"hasNextPage":false,"endCursor":null},"nodes":[]}}}' ;;
+esac
 `, { mode: 0o755 });
 
 function syncGit(lookups: '0' | '1'): { status: number | null; stdout: string; stderr: string } {

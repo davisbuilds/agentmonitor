@@ -15,6 +15,7 @@ const {
   lookupQuery,
   parseLookupResponse,
   parseSearchResponse,
+  parseViewerResponse,
   PULL_REQUEST_RECHECK_MS,
   pullRequestKey,
   searchQuery,
@@ -126,6 +127,8 @@ test('a pull request GitHub did not answer keeps what was known, and is asked ab
   await syncPullRequestStates(db, keys, { lookup: async keysAsked => { asked += keysAsked.length; return new Map(); }, now: new Date(later.getTime() + 1) });
   assert.equal(asked, 1);
 });
+
+const me = async () => 'me';
 
 const members = (repo: string, number: number) => (db.prepare(
   'SELECT sha, source FROM github_pull_request_commits WHERE repo = ? AND number = ? ORDER BY sha',
@@ -252,7 +255,7 @@ test('merged pull requests are read window by window: a full window splits, page
     return { total: inWindow.length, pulls: inWindow.slice(offset, offset + 1), next: offset + 1 < inWindow.length ? String(offset + 1) : null, complete: true };
   };
   const now = new Date('2026-11-15T00:00:00Z');
-  const report = await syncAuthoredPullRequests(db, { search, now, cap: 3 });
+  const report = await syncAuthoredPullRequests(db, { search, viewer: me, now, cap: 3 });
 
   assert.ok(asked.includes('2026-03-01..2026-03-31'), 'March is asked whole first');
   assert.ok(asked.includes('2026-03-01..2026-03-16') && asked.includes('2026-03-17..2026-03-31'), 'and, holding more than the cap, in halves');
@@ -272,23 +275,23 @@ test('merged pull requests are read window by window: a full window splits, page
   asked.length = 0;
   failJuneSecondPage = false;
   partialPages = false;
-  await syncAuthoredPullRequests(db, { search, now: new Date(now.getTime() + 10 * 60_000), cap: 3 });
+  await syncAuthoredPullRequests(db, { search, viewer: me, now: new Date(now.getTime() + 10 * 60_000), cap: 3 });
   assert.deepEqual(asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i), ['2026-06-01..2026-06-30', '2026-07-01..2026-07-31', '2026-08-01..2026-08-31'],
     'a read window is not asked again, and recent months wait for the recheck interval');
   assert.ok(db.prepare("SELECT 1 FROM github_pull_requests WHERE repo = 'owner/delta' AND number = 6").get());
 
   const windowsAsked = () => asked.map(a => a.split(' ')[0]).filter((a, i, all) => all.indexOf(a) === i);
   asked.length = 0;
-  await syncAuthoredPullRequests(db, { search, now: new Date(now.getTime() + PULL_REQUEST_RECHECK_MS + 60_000), cap: 3 });
+  await syncAuthoredPullRequests(db, { search, viewer: me, now: new Date(now.getTime() + PULL_REQUEST_RECHECK_MS + 60_000), cap: 3 });
   assert.deepEqual(windowsAsked(), ['2026-11-01..2026-11-30'],
     'the month still gaining merges is read again after the interval; October, read after it ended, is settled');
 
   asked.length = 0;
-  await syncAuthoredPullRequests(db, { search, now: new Date('2026-12-02T12:00:00Z'), cap: 3 });
+  await syncAuthoredPullRequests(db, { search, viewer: me, now: new Date('2026-12-02T12:00:00Z'), cap: 3 });
   assert.deepEqual(windowsAsked(), ['2026-11-01..2026-11-30', '2026-12-01..2026-12-31'],
     'a month last read before it ended is read once more, a day after');
   asked.length = 0;
-  await syncAuthoredPullRequests(db, { search, now: new Date('2026-12-02T14:00:00Z'), cap: 3 });
+  await syncAuthoredPullRequests(db, { search, viewer: me, now: new Date('2026-12-02T14:00:00Z'), cap: 3 });
   assert.deepEqual(windowsAsked(), ['2026-12-01..2026-12-31'], 'and then never again');
 });
 
@@ -304,9 +307,38 @@ test('a window that returns fewer pull requests than the search counts stays unr
     const inWindow = window.from <= '2027-12-09' && window.to >= '2027-12-09' ? held : [];
     return { total: inWindow.length, pulls: [...inWindow.slice(0, 3), ...inWindow.slice(2, 3)], next: null, complete: true };
   };
-  const report = await syncAuthoredPullRequests(db, { search, now: new Date('2028-01-15T00:00:00Z'), cap: 3 });
+  const report = await syncAuthoredPullRequests(db, { search, viewer: me, now: new Date('2028-01-15T00:00:00Z'), cap: 3 });
   assert.deepEqual([report.pull_requests, report.unanswered], [3, 1], 'four results, three of them distinct');
   assert.equal((db.prepare("SELECT COUNT(*) AS n FROM github_pull_requests WHERE repo = 'owner/zeta'").get() as { n: number }).n, 3);
   assert.equal(db.prepare("SELECT 1 FROM github_pull_request_search WHERE window_start = '2027-12-01'").get(), undefined, 'December is short of its count');
   assert.ok(db.prepare("SELECT 1 FROM github_pull_request_search WHERE window_start = '2027-11-01'").get(), 'while a month that returned its count is read');
+});
+
+test('months read are read for the login signed in, so another account reads its own year', async () => {
+  const asked: string[] = [];
+  const search: PullRequestSearch = async window => {
+    asked.push(window.from);
+    return { total: 0, pulls: [], next: null, complete: true };
+  };
+  const now = new Date('2029-06-15T00:00:00Z');
+  await syncAuthoredPullRequests(db, { search, viewer: me, now });
+  assert.equal(asked.length, 13, 'a year of months, read as me');
+
+  asked.length = 0;
+  const switched = await syncAuthoredPullRequests(db, { search, viewer: async () => 'other', now: new Date(now.getTime() + 2 * PULL_REQUEST_RECHECK_MS) });
+  assert.equal(asked.length, 13, 'another login reads every month again');
+  assert.equal(switched.windows, 13);
+
+  asked.length = 0;
+  await syncAuthoredPullRequests(db, { search, viewer: me, now: new Date(now.getTime() + 2 * PULL_REQUEST_RECHECK_MS) });
+  assert.deepEqual(asked, ['2029-06-01'], 'and me, back, only the month still gaining merges');
+
+  asked.length = 0;
+  const unknown = await syncAuthoredPullRequests(db, { search, viewer: async () => null, now: new Date(now.getTime() + 4 * PULL_REQUEST_RECHECK_MS) });
+  assert.deepEqual(asked, [], 'without a login, nothing is searched');
+  assert.deepEqual(unknown, { windows: 0, pull_requests: 0, unanswered: 13 }, 'and the pass says GitHub did not answer for the year');
+
+  assert.equal(parseViewerResponse(JSON.stringify({ data: { viewer: { login: 'SomeOne' } } })), 'someone');
+  assert.equal(parseViewerResponse(JSON.stringify({ errors: [{ type: 'UNAUTHORIZED' }] })), null);
+  assert.equal(parseViewerResponse('gh: not logged in'), null);
 });
