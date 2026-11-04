@@ -540,6 +540,37 @@ the build.
   SIGTERM (and what it is doing, e.g. `sample` on macOS), before raising the
   wait.
 
+### Cost per outcome
+
+Shipped 2026-11 (plan `docs/plans/2026-11-03-cost-per-outcome-plan.md`). The
+bar is "landed on main"; these were left out by decision.
+
+#### Whether merged work stayed merged
+- **What**: a merged pull request counts as an outcome even if it was
+  reverted or rewritten soon after.
+- **Why or evidence**: "landed" was chosen as the bar (2026-11-03); revert
+  and follow-up detection was deferred as a second step.
+- **Revisit when**: the trend is used to judge a change in how agents work,
+  and a reverted pull request would distort it. A first check: count reverts
+  (`Revert "…"` subjects, or a later commit undoing most of a PR's lines)
+  among merged pull requests in a range.
+
+#### Claude vs Codex cost per outcome
+- **What**: the agent filter narrows the section to one agent, but no view
+  compares the two side by side.
+- **Why or evidence**: deferred by the maintainer (2026-11-03). Codex's share
+  of merged pull requests rose from 0.17 to 0.42 over June to October, so a
+  comparison needs the mix and size controlled, not raw medians.
+- **Revisit when**: choosing which agent to give a kind of work.
+
+#### Quota as the unit
+- **What**: cost per outcome is in API-rate dollars, not in the plan quota
+  the work used.
+- **Why or evidence**: dollars were chosen (2026-11-03) because quota history
+  was too short to allocate.
+- **Revisit when**: `provider_quota_samples` holds a few months, and a plan's
+  limits, rather than API rates, are what bounds the work.
+
 ### Frontend testing
 
 #### Cover component behavior (mount + reactivity)

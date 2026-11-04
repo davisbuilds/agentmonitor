@@ -266,6 +266,31 @@ counted as anyone's work. A repository renamed after its pull requests were
 opened is asked about under the name the link used, which GitHub follows to the
 renamed repository unless another repository has since taken that name.
 
+Cost per outcome, in the Git sub-view, infers what the spend produced, with
+landing on a main branch as the bar. Each minute of spend goes to the next
+milestone of the session it belongs to (a subagent's goes to the session that
+started it): a commit the session proved, counted as its pull request's when
+one lists it, or a pull request it opened. An amended commit is placed when the
+session amended it. A milestone landed through a merged pull request, by a push
+to a main branch, or another way, or not at all. Spend with no milestone after
+it is "nothing after it": work no commit followed, such as questions or reviews,
+not waste. Spend in a session with no tool calls stored, or with no transcript,
+cannot be followed. A pull request merged in the range costs the spend allocated
+to it, from up to 30 days before the range; the range's own dollars are
+Usage's. The section shows the median and all-in cost per merged pull request,
+a weekly trend with tokens per pull request and dollars per million tokens
+beside it (quantity apart from price), cost by size and by project, and what
+the figures rest on. A project's typical cost is pulled toward the overall
+figure, further the fewer pull requests it has, since cost varies far more
+between pull requests than between projects. Coverage says how much spend could
+be followed and, with GitHub lookups on and no project or agent filter, how many
+of the pull requests the signed-in user merged on GitHub the spend reached.
+With lookups off, a pull request's commits come from local merge commits only,
+so a squash-merged branch's commits read as not landed. Splitting the same work
+into more, smaller pull requests cannot be told apart from doing it for less:
+size accounts for lines changed, not scope. Landing reflects each repository's
+last fetch.
+
 External profile authorities may attach bounded, immutable expected-realization
 evidence to a compatible session. The session view then compares desired context
 with observed consultation and instruction evidence without rewriting history.

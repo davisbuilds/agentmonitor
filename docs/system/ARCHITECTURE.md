@@ -97,7 +97,8 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   machine, naming only repositories, numbers and merge dates. Without it, a
   local merge commit gives its pull request's commits (`source = 'local'`),
   which GitHub's list replaces when one arrives. Attributing a commit to the
-  session that made it happens at read time.
+  session that made it, and allocating spend to what it produced (cost per
+  outcome), happen at read time; neither is stored.
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots, with a sampled quota history (`provider_quota_samples`): a row per
   changed reading at most every five minutes, each held until `observed_until`,

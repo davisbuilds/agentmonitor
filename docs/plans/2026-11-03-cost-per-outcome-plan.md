@@ -3,7 +3,7 @@ date: 2026-11-03
 author: Claude (Opus 5.5)
 topic: cost-per-outcome
 stage: plan
-status: in-progress
+status: complete
 source: conversation
 risk_profile: routine
 readiness: ready
@@ -456,6 +456,12 @@ Task 4
 - Each check above passes.
 - A class missing from one range doesn't repaint the others (tested).
 - The section renders a clear empty state when no PR merged in range.
+
+**Result (2026-11-04, PR 3)**
+
+- Done as planned. The section sits below Commits and Latest Pull Requests. The weekly median and its middle half, tokens per PR, and dollars per million tokens are three small charts, each on its own axis, with a weekly table beside them.
+- The bar's six classes use five series of the shared validated palette, plus Other for spend that can't be followed. `tests/series-palette.test.ts` already checks every pair of those on the dark surface.
+- Screenshots at 1440 and 390 px against a store snapshot: no overflow, no console errors.
 
 ### Task 6: Docs
 
