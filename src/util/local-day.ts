@@ -63,7 +63,7 @@ function isBareDay(value: string): boolean {
 }
 
 /** Parse a stored timestamp. Zone-less values are UTC. */
-function parseStoredTimestamp(value: string): Date | null {
+export function parseStoredTimestamp(value: string): Date | null {
   const normalized = ZONELESS_PATTERN.test(value) ? `${value.replace(' ', 'T')}Z` : value;
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;

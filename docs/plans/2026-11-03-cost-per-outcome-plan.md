@@ -395,6 +395,13 @@ Tasks 2 and 3
 - Each of these mutations turns a test red: keying by browser row, skipping the parent rollup, splitting cost per session, unpooled projects, origin-only landing.
 - On a store snapshot, a 30-day read takes ≤1 s warm and reproduces the exploration's class shares within rounding (recorded in the PR, as ratios).
 
+**Result (2026-11-04, PR 2)**
+
+- Done as planned, with two refinements found while testing:
+  - Whether a commit's pull request merged comes from GitHub's word or a local merge. A session's own opening of a pull request is judged by git activity's rule, which knows when GitHub's answer is about another pull request that reused the name. GitHub's commit list belongs to the pull request GitHub answered about.
+  - A pull request merged in the range costs what was allocated to it from up to 30 days before the range, so the range's own dollars (which match Usage's) and the PRs' costs are read separately.
+- Snapshot: class shares within a point of the exploration, monthly medians within 2%, a 30-day read about 0.5 s warm.
+
 ### Task 5: The Cost per outcome section
 
 **Objective**

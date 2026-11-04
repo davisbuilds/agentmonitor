@@ -54,6 +54,7 @@ import {
   getAnalyticsFrictionResponse,
   getAnalyticsGitActivityResponse,
   getAnalyticsChangeMarkersResponse,
+  getAnalyticsOutcomesResponse,
   getAnalyticsHourOfWeekResponse,
   getAnalyticsProjectsResponse,
   getAnalyticsSkillHealthResponse,
@@ -931,6 +932,16 @@ v2Router.get('/analytics/change-markers', (req: Request, res: Response) => {
   } catch (err) {
     console.error('[v2/analytics/change-markers] Error:', err);
     res.status(500).json({ error: 'Failed to get change markers' });
+  }
+});
+
+v2Router.get('/analytics/outcomes', (req: Request, res: Response) => {
+  try {
+    const params = readAnalyticsParams(req);
+    res.json(getAnalyticsOutcomesResponse(params));
+  } catch (err) {
+    console.error('[v2/analytics/outcomes] Error:', err);
+    res.status(500).json({ error: 'Failed to get cost per outcome' });
   }
 });
 
