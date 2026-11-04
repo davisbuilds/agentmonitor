@@ -6,6 +6,7 @@ import {
   fetchAnalyticsFriction,
   fetchAnalyticsChangeMarkers,
   fetchAnalyticsGitActivity,
+  fetchAnalyticsOutcomes,
   fetchAnalyticsActivity,
   fetchAnalyticsProjects,
   fetchAnalyticsTools,
@@ -21,6 +22,7 @@ import {
   type AnalyticsFriction,
   type AnalyticsChangeMarkers,
   type AnalyticsGitActivity,
+  type AnalyticsOutcomes,
   type AnalyticsCoverage,
   type ActivityDataPoint,
   type ProjectBreakdown,
@@ -46,6 +48,7 @@ type PanelKey =
   | 'friction'
   | 'markers'
   | 'git'
+  | 'outcomes'
   | 'activity'
   | 'projects'
   | 'tools'
@@ -71,6 +74,7 @@ class AnalyticsStore {
     friction: 0,
     markers: 0,
     git: 0,
+    outcomes: 0,
     activity: 0,
     projects: 0,
     tools: 0,
@@ -102,6 +106,7 @@ class AnalyticsStore {
   /** The query `changeMarkers` answers. */
   private changeMarkersSlice: string | null = null;
   gitActivity = $state<AnalyticsGitActivity | null>(null);
+  outcomes = $state<AnalyticsOutcomes | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
   toolUsage = $state<ToolUsageStat[]>([]);
@@ -119,6 +124,7 @@ class AnalyticsStore {
     friction: null,
     markers: null,
     git: null,
+    outcomes: null,
     activity: null,
     projects: null,
     tools: null,
@@ -137,6 +143,7 @@ class AnalyticsStore {
     friction: false,
     markers: false,
     git: false,
+    outcomes: false,
     activity: false,
     projects: false,
     tools: false,
@@ -155,6 +162,7 @@ class AnalyticsStore {
     friction: null,
     markers: null,
     git: null,
+    outcomes: null,
     activity: null,
     projects: null,
     tools: null,
@@ -197,7 +205,7 @@ class AnalyticsStore {
   async initializeGit(): Promise<void> {
     this.bindFilterSubscription('git');
     await analyticsFilters.initialize();
-    await this.fetchGitActivity();
+    await this.fetchGitView();
   }
 
   async initializeSkills(): Promise<void> {
@@ -212,7 +220,7 @@ class AnalyticsStore {
     this.subscriptionMode = mode;
     this.unsubscribe = analyticsFilters.subscribe(() => {
       if (mode === 'overview') void this.fetchAll();
-      else if (mode === 'git') void this.fetchGitActivity();
+      else if (mode === 'git') void this.fetchGitView();
       else void this.fetchSkillsView();
     });
   }
@@ -323,6 +331,30 @@ class AnalyticsStore {
     } finally {
       if (version === this.versions.friction) {
         this.loading.friction = false;
+      }
+    }
+  }
+
+  /** Everything the Git sub-view shows: commits and pull requests, and what the spend produced. */
+  async fetchGitView(): Promise<void> {
+    await Promise.all([this.fetchGitActivity(), this.fetchOutcomes()]);
+  }
+
+  async fetchOutcomes(): Promise<void> {
+    const version = ++this.versions.outcomes;
+    this.loading.outcomes = true;
+    this.errors.outcomes = null;
+    try {
+      const result = await fetchAnalyticsOutcomes(this.queryParams);
+      if (version !== this.versions.outcomes) return;
+      this.outcomes = result;
+    } catch (err) {
+      if (version !== this.versions.outcomes) return;
+      console.error('Failed to load cost per outcome:', err);
+      this.errors.outcomes = 'Failed to load cost per outcome.';
+    } finally {
+      if (version === this.versions.outcomes) {
+        this.loading.outcomes = false;
       }
     }
   }

@@ -61,7 +61,7 @@
     else if (f.view === 'usage') void usage.fetchAll();
     else if (f.view === 'skills') void analytics.fetchSkillsView();
     else if (f.view === 'quality') void traceQuality.load();
-    else if (f.view === 'git') void analytics.fetchGitActivity();
+    else if (f.view === 'git') void analytics.fetchGitView();
     else void insights.load();
   }
 
