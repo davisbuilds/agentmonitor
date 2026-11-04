@@ -279,3 +279,23 @@ test('the shared project filter scopes the skill volume chart on Skills', async 
   await expect.poll(() => skillRequests.some(url => url.searchParams.get('project') === 'alpha')).toBe(true);
   await expect(page).toHaveURL(/view=skills/);
 });
+
+test('Git shows where the spend went, and what that rests on', async ({ page }) => {
+  // Spend in the seeded session, which has no tool calls stored, so none of it can be followed.
+  const usage = getDb().prepare(`INSERT INTO events (session_id, agent_type, event_type, model, project, tokens_in, cost_usd, client_timestamp, source)
+    VALUES ('e2e-analytics-views-session', 'claude_code', 'llm_response', 'claude-opus-5-5', 'alpha', 1000, 1.5, ?, 'import')`);
+  const id = usage.run(new Date().toISOString()).lastInsertRowid;
+  try {
+    await page.goto(`${baseUrl}/app/#analytics?view=git`);
+    const section = page.getByRole('region', { name: 'Cost per Outcome' });
+    await expect(section).toBeVisible();
+    await expect(section.getByText('No pull request merged in the selected range.')).toBeVisible();
+    await expect(section.getByTestId('outcome-segment')).toHaveCount(1);
+    await expect(section.getByRole('list', { name: 'Where the spend went' }).getByRole('listitem')).toHaveCount(6);
+    const coverage = section.getByTestId('outcome-coverage');
+    await expect(coverage).toContainText('0% of the spend could be followed');
+    await expect(coverage).toContainText('GitHub lookups are off');
+  } finally {
+    getDb().prepare('DELETE FROM events WHERE id = ?').run(id);
+  }
+});

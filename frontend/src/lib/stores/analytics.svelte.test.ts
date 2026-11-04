@@ -73,6 +73,23 @@ describe('Skills requests', () => {
   });
 });
 
+describe('Git requests', () => {
+  it('loads cost per outcome beside git activity, and refetches both with the new shared filter', async () => {
+    await analytics.initializeGit();
+    expect(paths()).toEqual(expect.arrayContaining(['/api/v2/analytics/git-activity', '/api/v2/analytics/outcomes']));
+    expect(paths()).not.toContain('/api/v2/analytics/summary');
+    requested.length = 0;
+
+    analyticsFilters.setProject('alpha');
+    await vi.waitFor(() => {
+      expect(paths()).toEqual(expect.arrayContaining(['/api/v2/analytics/git-activity', '/api/v2/analytics/outcomes']));
+    });
+    for (const url of requested) {
+      expect(url.searchParams.get('project')).toBe('alpha');
+    }
+  });
+});
+
 describe('the shared agent filter', () => {
   it("holds Claude under the option list's spelling when a drill-down passes the event spelling", () => {
     // Usage's By Agent rows name Claude `claude_code`; the filter options say `claude`.

@@ -442,6 +442,51 @@ export interface InstructionsChangeMarker {
 
 export type ChangeMarker = ModelChangeMarker | InstructionsChangeMarker;
 
+/** Where a minute of spend went, in the order every view lists them (the server's OUTCOME_CLASSES). */
+export type OutcomeClass = 'merged_pr' | 'direct' | 'other_landed' | 'not_landed' | 'nothing_after' | 'unobservable';
+export type SizeBucket = '<200' | '200-499' | '500-999' | '1000+';
+
+export interface OutcomeSpend {
+  outcome: OutcomeClass;
+  usd: number;
+  share: number;
+}
+
+export interface OutcomeCostStats {
+  prs: number;
+  median_usd: number | null;
+  p25_usd: number | null;
+  p75_usd: number | null;
+  p90_usd: number | null;
+}
+
+export interface OutcomeWeek extends OutcomeCostStats {
+  /** Monday of the week, local time. */
+  week: string;
+  median_tokens: number | null;
+  usd_per_mtok: number | null;
+}
+
+export interface OutcomeCoverage {
+  observable_share: number | null;
+  lookups: boolean;
+  github_merged: number | null;
+  github_linked: number | null;
+  truncated_commit_lists: number;
+  membership: { github: number; local: number; none: number };
+}
+
+export interface AnalyticsOutcomes {
+  total_usd: number;
+  spend: OutcomeSpend[];
+  merged_prs: OutcomeCostStats & { all_in_usd: number | null };
+  weeks: OutcomeWeek[];
+  sizes: Array<{ bucket: SizeBucket; prs: number; median_usd: number | null }>;
+  unknown_size: number;
+  projects: Array<{ project: string; prs: number; median_usd: number; pooled_usd: number }>;
+  coverage: OutcomeCoverage;
+}
+
 export interface AnalyticsChangeMarkers {
   markers: ChangeMarker[];
 }
@@ -1208,6 +1253,11 @@ export async function fetchAnalyticsGitActivity(params: Record<string, string | 
 export async function fetchSessionGitActivity(sessionId: string): Promise<SessionGitActivity> {
   const res = await fetch(`/api/v2/sessions/${sessionId}/git`);
   return checkedJson(res, 'fetchSessionGitActivity');
+}
+
+export async function fetchAnalyticsOutcomes(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsOutcomes> {
+  const res = await fetch(`/api/v2/analytics/outcomes${qs(params)}`);
+  return checkedJson(res, 'fetchAnalyticsOutcomes');
 }
 
 export async function fetchAnalyticsChangeMarkers(params: Record<string, string | number | undefined> = {}): Promise<AnalyticsChangeMarkers> {

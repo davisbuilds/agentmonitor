@@ -4,13 +4,14 @@
   import GitCommits from './GitCommits.svelte';
   import GitBreakdown from './GitBreakdown.svelte';
   import GitPullRequests from './GitPullRequests.svelte';
+  import GitOutcomes from './GitOutcomes.svelte';
 
   const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
   onMount(() => {
     void analytics.initializeGit();
     const timer = window.setInterval(() => {
-      void analytics.fetchGitActivity();
+      void analytics.fetchGitView();
     }, REFRESH_INTERVAL_MS);
 
     return () => {
@@ -27,5 +28,6 @@
       <div class="xl:col-span-7"><GitBreakdown /></div>
       <div class="xl:col-span-5"><GitPullRequests /></div>
     </div>
+    <GitOutcomes />
   </div>
 </main>
