@@ -188,3 +188,36 @@ test('the agent and project filters narrow spend and pull requests together', ()
   assert.deepEqual(betaOnly.projects.map(row => row.project), ['beta']);
   assert.equal(betaOnly.merged_prs.prs, 1);
 });
+
+test("a Codex subagent naming its parent by native id reaches the parent's milestones, though only the rollout row is stored", () => {
+  const parentId = '01990000-0000-7000-8000-00000000d00d';
+  const parentRollout = `rollout-2026-05-20T10-00-00-${parentId}`;
+  const child = '01990000-0000-7000-8000-0000000d00c1';
+  session.run(parentRollout, 'codex', 'codex-jsonl', alpha, at(20, 10), at(20, 12), null, null);
+  session.run(child, 'codex', 'codex-import', alpha, at(20, 10, 30), at(20, 11, 30), parentId, 'subagent');
+  spend(child, 'codex', 'alpha', 3, at(20, 11));
+  const when = at(20, 11, 10);
+  const messageId = Number(message.run(parentRollout, ordinal++, when).lastInsertRowid);
+  call.run(messageId, parentRollout, 'exec_command', 'call_d00d', JSON.stringify({ cmd: 'git commit -F msg.txt' }));
+  result.run(parentRollout, 'call_d00d:result', JSON.stringify({ output: '[main dddd000001] chore: by the parent' }));
+  commitRow.run(alpha, 'dddd0000010000', at(20, 11, 10, 20), at(20, 11, 10, 20), 'chore: by the parent', 'direct');
+
+  const outcomes = queries.getAnalyticsOutcomes({ date_from: '2026-05-20', date_to: '2026-05-20' });
+  assert.deepEqual(spendOf(outcomes), { direct: 3 });
+});
+
+test('an amended commit is a milestone when the session amended it, found by its committer date', () => {
+  session.run('c7', 'claude', 'claude-jsonl', alpha, at(21, 8), at(21, 10), null, null);
+  spend('c7', 'claude_code', 'alpha', 1, at(21, 9));
+  const when = at(21, 9, 10);
+  const messageId = Number(message.run('c7', ordinal++, when).lastInsertRowid);
+  call.run(messageId, 'c7', 'Bash', 'toolu_amend', JSON.stringify({ command: 'git commit --amend -m "feat: amended"' }));
+  // Git keeps the author date, here from long before the range.
+  commitRow.run(alpha, 'aaaa000008', '2026-03-01T08:00:30.000Z', at(21, 9, 10, 30), 'feat: amended', 'merged');
+  pr.run('owner/alpha', 8, at(21, 12), at(21, 9, 11), checked, 10, 0, 1, 0, checked);
+  member.run('owner/alpha', 8, 'aaaa000008', 'github');
+
+  const outcomes = queries.getAnalyticsOutcomes({ date_from: '2026-05-21', date_to: '2026-05-21' });
+  assert.deepEqual(spendOf(outcomes), { merged_pr: 1 });
+  assert.equal(outcomes.merged_prs.median_usd, 1);
+});

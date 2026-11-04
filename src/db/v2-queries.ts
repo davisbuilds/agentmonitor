@@ -3449,7 +3449,10 @@ function outcomeSessions(): { keyOf: Map<string, string>; rootOf: (key: string) 
   const known = new Set(keyOf.values());
   const parentOf = new Map<string, string>();
   for (const row of rows) {
-    const parent = row.parent_session_id ? keyOf.get(row.parent_session_id) : undefined;
+    // A Codex child names its parent by native id, which is the parent's key
+    // even when only its rollout row is stored.
+    const named = row.parent_session_id;
+    const parent = named ? keyOf.get(named) ?? (known.has(named.toLowerCase()) ? named.toLowerCase() : undefined) : undefined;
     if (parent && parent !== row.session_key) parentOf.set(row.session_key, parent);
   }
   const roots = new Map<string, string>();
@@ -3559,8 +3562,14 @@ export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOut
 
   const reachFrom = Math.max(0, (fromMs ?? 0) - OUTCOME_REACH_MS);
   const reachTo = toMs + OUTCOME_REACH_MS;
-  const rows = commitRows(reachFrom, reachTo);
-  const calls = gitToolCalls(...commitCallSpan(rows, reachFrom, reachTo));
+  // An amend keeps its author date, so commits made in the reach are found by
+  // either date. Calls are read for the reach alone: one authored long before
+  // it is proved by the call near its committer date, and widening the span to
+  // every such author date would read years of calls.
+  const rows = commitRows(reachFrom, reachTo, true);
+  const calls = gitToolCalls(reachFrom - COMMIT_CALL_WINDOW_MS, reachTo + COMMIT_CALL_WINDOW_MS);
+  const commitCallsOf = new Map<string, number[]>();
+  for (const call of calls.commits) commitCallsOf.set(call.session_id, [...(commitCallsOf.get(call.session_id) ?? []), call.at]);
   const opened = openedPullRequests(calls.pullRequests);
   // A commit GitHub lists in a pull request is in the one GitHub answered
   // about, so GitHub's word (or a local merge) says whether it merged; a
@@ -3583,11 +3592,15 @@ export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOut
     const root = key === undefined ? null : sessions.rootOf(key);
     if (root === null) return;
     const pull = pullOf(commit.sha);
-    const landing = rows[index].landing;
+    const { landing, committed_at } = rows[index];
+    // The commit is placed when its session made it: by its committer date
+    // when that session committed then (an amend), else by its author date.
+    const committed = Date.parse(committed_at);
+    const amended = (commitCallsOf.get(commit.attribution.session_id) ?? []).some(at => Math.abs(at - committed) <= COMMIT_CALL_WINDOW_MS);
     const outcome: MilestoneOutcome = pull !== null && isMerged(pull) ? 'merged_pr'
       : landing === 'direct' && pull === null ? 'direct'
         : landing !== null ? 'other_landed' : 'not_landed';
-    milestones.push({ root, at: Date.parse(commit.authored_at), outcome, pull, project: commit.project });
+    milestones.push({ root, at: amended ? committed : Date.parse(commit.authored_at), outcome, pull, project: commit.project });
   });
   for (const pull of opened) {
     if (params.project && pull.project !== params.project) continue;
