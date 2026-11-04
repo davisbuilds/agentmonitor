@@ -359,8 +359,9 @@ const DAY_MS = 86_400_000;
 
 /**
  * Every pull request a window holds, splitting it while it holds more than the
- * cap. `complete` is false when a page went unanswered or answered in part;
- * what was read is kept.
+ * cap. `complete` is false when a page went unanswered or answered in part,
+ * or the pages held fewer pull requests than the search counted; what was
+ * read is kept.
  */
 async function readWindow(
   search: PullRequestSearch, window: { from: string; to: string }, cap: number,
@@ -389,7 +390,9 @@ async function readWindow(
     complete &&= page.complete;
     next = page.next;
   }
-  return { total: first.total, pulls, complete };
+  // Fewer than the search counts (a day over the cap, or results it skipped) is not whole.
+  const read = new Set(pulls.map(pullRequestKey)).size;
+  return { total: first.total, pulls, complete: complete && read >= first.total };
 }
 
 /**
@@ -433,7 +436,7 @@ export async function syncAuthoredPullRequests(
       }
       if (result.complete) markRead.run(window.from, window.to, result.total, now.toISOString());
     })();
-    report.pull_requests += result.pulls.length;
+    report.pull_requests += new Set(result.pulls.map(pullRequestKey)).size;
     if (result.complete) report.windows += 1;
     else report.unanswered += 1;
   }

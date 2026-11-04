@@ -291,3 +291,22 @@ test('merged pull requests are read window by window: a full window splits, page
   await syncAuthoredPullRequests(db, { search, now: new Date('2026-12-02T14:00:00Z'), cap: 3 });
   assert.deepEqual(windowsAsked(), ['2026-12-01..2026-12-31'], 'and then never again');
 });
+
+test('a window that returns fewer pull requests than the search counts stays unread, keeping what it returned', async () => {
+  const pull = (number: number): AuthoredPullRequest => ({
+    repo: 'owner/zeta', number, created_at: '2027-12-09T10:00:00Z', merged_at: '2027-12-09T10:00:00Z',
+    additions: 1, deletions: 0, changed_files: 1, commit_count: 1, author_is_bot: false, commits: [`z-${number}`],
+  });
+  // One day holds more than the cap, so splitting cannot help; the search stops
+  // at the cap, and repeats a result (as paging does when merges land meanwhile).
+  const held = [1, 2, 3, 4].map(pull);
+  const search: PullRequestSearch = async window => {
+    const inWindow = window.from <= '2027-12-09' && window.to >= '2027-12-09' ? held : [];
+    return { total: inWindow.length, pulls: [...inWindow.slice(0, 3), ...inWindow.slice(2, 3)], next: null, complete: true };
+  };
+  const report = await syncAuthoredPullRequests(db, { search, now: new Date('2028-01-15T00:00:00Z'), cap: 3 });
+  assert.deepEqual([report.pull_requests, report.unanswered], [3, 1], 'four results, three of them distinct');
+  assert.equal((db.prepare("SELECT COUNT(*) AS n FROM github_pull_requests WHERE repo = 'owner/zeta'").get() as { n: number }).n, 3);
+  assert.equal(db.prepare("SELECT 1 FROM github_pull_request_search WHERE window_start = '2027-12-01'").get(), undefined, 'December is short of its count');
+  assert.ok(db.prepare("SELECT 1 FROM github_pull_request_search WHERE window_start = '2027-11-01'").get(), 'while a month that returned its count is read');
+});
