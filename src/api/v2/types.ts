@@ -1,5 +1,6 @@
 import type { ProjectionCapabilities } from '../../live/projector.js';
 import type { MonitorAgentUsage } from '../../db/queries.js';
+import type { OutcomeClass, SizeBucket } from '../../analytics/outcomes.js';
 import type {
   TraceQualityFindingKind,
   TraceQualityFindingSeverity,
@@ -403,6 +404,75 @@ export type ChangeMarker = ModelChangeMarker | InstructionsChangeMarker;
 
 export interface AnalyticsChangeMarkers {
   markers: ChangeMarker[];
+}
+
+/** One class of where the range's spend went. */
+export interface OutcomeSpend {
+  outcome: OutcomeClass;
+  usd: number;
+  /** Of the range's dollars. */
+  share: number;
+}
+
+/** Cost per pull request merged in a span, from the spend allocated to it. */
+export interface OutcomeCostStats {
+  prs: number;
+  median_usd: number | null;
+  p25_usd: number | null;
+  p75_usd: number | null;
+  p90_usd: number | null;
+}
+
+/** Pull requests merged in one week (starting Monday, local time), by what they cost. */
+export interface OutcomeWeek extends OutcomeCostStats {
+  week: string;
+  /** All four token kinds, per pull request. */
+  median_tokens: number | null;
+  /** The week's allocated dollars per million tokens: price, apart from quantity. */
+  usd_per_mtok: number | null;
+}
+
+export interface OutcomeSize {
+  bucket: SizeBucket;
+  prs: number;
+  median_usd: number | null;
+}
+
+export interface OutcomeProject {
+  project: string;
+  prs: number;
+  median_usd: number;
+  /** Pooled toward the overall figure as far as the project's few PRs warrant. */
+  pooled_usd: number;
+}
+
+export interface OutcomeCoverage {
+  /** Share of the range's dollars in sessions whose tool calls are stored. */
+  observable_share: number | null;
+  /** Whether GitHub lookups are on, which the next two need. */
+  lookups: boolean;
+  /** Pull requests GitHub says merged in the range, bots' left out; null with lookups off or a project or agent filter. */
+  github_merged: number | null;
+  /** Of those, how many any of the range's spend reached. */
+  github_linked: number | null;
+  /** Merged pull requests here whose commit list GitHub cut short. */
+  truncated_commit_lists: number;
+  /** Where the merged pull requests' commit lists came from. */
+  membership: { github: number; local: number; none: number };
+}
+
+export interface AnalyticsOutcomes {
+  /** The range's dollars, as Usage counts them. */
+  total_usd: number;
+  spend: OutcomeSpend[];
+  /** Pull requests merged in the range, and their spend over all of it divided by them. */
+  merged_prs: OutcomeCostStats & { all_in_usd: number | null };
+  weeks: OutcomeWeek[];
+  sizes: OutcomeSize[];
+  /** Merged pull requests whose size GitHub has not given. */
+  unknown_size: number;
+  projects: OutcomeProject[];
+  coverage: OutcomeCoverage;
 }
 
 export interface ProjectBreakdown {

@@ -94,6 +94,7 @@ test('v2 router returns scoped 500 errors when the backing database is unavailab
     ['/api/v2/analytics/friction', 'Failed to get session friction'],
     ['/api/v2/analytics/git-activity', 'Failed to get git activity'],
     ['/api/v2/analytics/change-markers', 'Failed to get change markers'],
+    ['/api/v2/analytics/outcomes', 'Failed to get cost per outcome'],
     ['/api/v2/analytics/agents', 'Failed to get agent analytics'],
     ['/api/v2/usage/summary', 'Failed to get usage summary'],
     ['/api/v2/usage/daily', 'Failed to get daily usage'],

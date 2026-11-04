@@ -60,6 +60,9 @@ import type {
   GitPullRequest,
   SessionGitActivity,
   AnalyticsChangeMarkers,
+  AnalyticsOutcomes,
+  OutcomeCostStats,
+  OutcomeWeek,
   ChangeMarker,
   FrictionSession,
   FrictionSignal,
@@ -135,8 +138,20 @@ import {
   localDayOf,
   localDayStart,
   localWeekdayHour,
+  parseStoredTimestamp,
   reportingTimeZone,
 } from '../util/local-day.js';
+import {
+  allocate,
+  OUTCOME_CLASSES,
+  poolProjects,
+  quantile,
+  SIZE_BUCKETS,
+  sizeBucket,
+  type Milestone,
+  type MilestoneOutcome,
+  type OutcomeClass,
+} from '../analytics/outcomes.js';
 
 function mapBrowsingSessionRow(row: BrowsingSessionDbRow): BrowsingSessionRow {
   return {
@@ -3183,6 +3198,8 @@ interface CommitRow {
   authored_at: string;
   committed_at: string;
   co_authors_json: string;
+  /** Whether it reached a main branch: on one's first-parent line, or merged into it. */
+  landing: 'direct' | 'merged' | null;
 }
 
 /**
@@ -3192,7 +3209,7 @@ interface CommitRow {
  */
 function commitRows(fromMs: number, toMs: number, orCommitted = false): CommitRow[] {
   return getDb().prepare(`
-    SELECT repo_root, sha, subject, authored_at, committed_at, co_authors_json FROM git_commits
+    SELECT repo_root, sha, subject, authored_at, committed_at, co_authors_json, landing FROM git_commits
     WHERE is_merge = 0 AND ((authored_at >= @from AND authored_at < @to)${orCommitted ? ' OR (committed_at >= @from AND committed_at < @to)' : ''})
     ORDER BY authored_at, sha
   `).all({ from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() }) as CommitRow[];
@@ -3241,19 +3258,22 @@ function attributedCommits(commits: CommitRow[], calls: GitToolCall[]): Attribut
 }
 
 /**
- * Pull requests merged by `owner/name#number`, from merge commits in local
- * repositories with a GitHub remote, which show a merge only once it was
- * pulled. GitHub's own word is read beside it (openedPullRequests).
+ * Pull requests merged, by `owner/name#number`, with when: from merge commits
+ * in local repositories with a GitHub remote, which show a merge only once it
+ * was pulled. GitHub's own word is read beside it (openedPullRequests).
  */
-function locallyMergedPullRequests(): Set<string> {
-  const merged = new Set<string>();
+function locallyMergedPullRequests(): Map<string, string> {
+  const merged = new Map<string, string>();
   const rows = getDb().prepare(`
-    SELECT r.github_repo, c.subject, c.is_merge FROM git_commits c JOIN git_repos r ON r.root = c.repo_root
+    SELECT r.github_repo, c.subject, c.is_merge, c.committed_at FROM git_commits c JOIN git_repos r ON r.root = c.repo_root
     WHERE r.github_repo IS NOT NULL AND (c.is_merge = 1 OR c.subject LIKE '%(#%)')
-  `).all() as Array<{ github_repo: string; subject: string | null; is_merge: number }>;
+  `).all() as Array<{ github_repo: string; subject: string | null; is_merge: number; committed_at: string }>;
   for (const row of rows) {
     const number = mergedPullRequestNumber(row.subject ?? '', row.is_merge === 1);
-    if (number !== null) merged.add(`${row.github_repo}#${number}`);
+    if (number === null) continue;
+    const key = `${row.github_repo}#${number}`;
+    const earlier = merged.get(key);
+    if (earlier === undefined || Date.parse(row.committed_at) < Date.parse(earlier)) merged.set(key, row.committed_at);
   }
   return merged;
 }
@@ -3407,6 +3427,286 @@ export function getSessionGitActivity(sessionId: string): SessionGitActivity {
   const pullRequests = openedPullRequests(calls.pullRequests.filter(call => call.session_id === sessionId))
     .map(pr => ({ url: pr.url, repo: pr.repo, number: pr.number, opened_at: pr.opened_at, merged: pr.merged }));
   return { commits, pull_requests: pullRequests };
+}
+
+/** How far past the range a minute's milestone is looked for, and how far before it a merged PR's work. */
+const OUTCOME_REACH_MS = 30 * 86_400_000;
+const MINUTE_MS = 60_000;
+
+/**
+ * Each browser row's session key, each key's root (delegated work rolls up,
+ * through parent_session_id, to the session that started it; a key with no
+ * browser row has none), and whether a root's sessions have any tool calls
+ * stored, without which none of its milestones could be seen.
+ */
+function outcomeSessions(): { keyOf: Map<string, string>; rootOf: (key: string) => string | null; observable: (root: string) => boolean } {
+  const rows = getDb().prepare(`
+    SELECT b.id, lower(${browserSessionKey('b')}) AS session_key, b.parent_session_id,
+      EXISTS (SELECT 1 FROM tool_calls t WHERE t.session_id = b.id) AS tools
+    FROM browsing_sessions b
+  `).all() as Array<{ id: string; session_key: string; parent_session_id: string | null; tools: number }>;
+  const keyOf = new Map(rows.map(row => [row.id, row.session_key]));
+  const known = new Set(keyOf.values());
+  const parentOf = new Map<string, string>();
+  for (const row of rows) {
+    const parent = row.parent_session_id ? keyOf.get(row.parent_session_id) : undefined;
+    if (parent && parent !== row.session_key) parentOf.set(row.session_key, parent);
+  }
+  const roots = new Map<string, string>();
+  const rootOf = (key: string): string | null => {
+    if (!known.has(key)) return null;
+    let root = roots.get(key);
+    if (root === undefined) {
+      root = key;
+      const seen = new Set([key]);
+      for (let parent = parentOf.get(root); parent !== undefined && !seen.has(parent); parent = parentOf.get(root)) {
+        seen.add(parent);
+        root = parent;
+      }
+      roots.set(key, root);
+    }
+    return root;
+  };
+  const observableRoots = new Set(rows.filter(row => row.tools).map(row => rootOf(row.session_key)));
+  return { keyOf, rootOf, observable: root => observableRoots.has(root) };
+}
+
+/** The Monday (local time) of the week an instant falls in. */
+function localWeekOf(iso: string): string | null {
+  const day = localDayOf(iso);
+  if (!day) return null;
+  const date = new Date(`${day}T00:00:00Z`);
+  date.setUTCDate(date.getUTCDate() - (date.getUTCDay() + 6) % 7);
+  return date.toISOString().slice(0, 10);
+}
+
+function outcomeCostStats(costs: number[]): OutcomeCostStats {
+  const sorted = [...costs].sort((a, b) => a - b);
+  const at = (q: number) => (sorted.length > 0 ? roundCost(quantile(sorted, q)) : null);
+  return { prs: sorted.length, median_usd: at(0.5), p25_usd: at(0.25), p75_usd: at(0.75), p90_usd: at(0.9) };
+}
+
+/**
+ * What the range's spend produced, with "landed on main" as the bar.
+ * Each minute of spend goes to its root session's next milestone (see
+ * allocate): a credited commit, which counts as its pull request's when one
+ * lists it (a merged one first), or a pull request the session opened. A
+ * milestone landed through a merged pull request, by a direct push to a
+ * main, or another way (on a main, in a pull request not known merged), or
+ * not at all. Milestones are read up to OUTCOME_REACH_MS past the range, and a
+ * pull request merged in the range costs what was allocated to it, from as far
+ * back. The agent and project filters narrow spend and milestones together.
+ */
+export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOutcomes {
+  const parsedFrom = params.date_from ? Date.parse(dateParamLowerBound(params.date_from)) : Number.NaN;
+  const fromMs = Number.isNaN(parsedFrom) ? null : parsedFrom;
+  const toMs = params.date_to ? Date.parse(dateParamUpperExclusive(params.date_to)) : Date.now() + COMMIT_CALL_WINDOW_MS;
+  const wantAgent = params.agent ? browserAgentName(params.agent) : null;
+  const sessions = outcomeSessions();
+  const db = getDb();
+
+  // The range's spend exactly as Usage reads it, and the stretch before it,
+  // read up to the same bound, for pull requests merged in the range.
+  const ranged = getUsageRows(params);
+  const before = params.date_from && fromMs !== null
+    ? getUsageRows({ ...params, date_from: new Date(fromMs - OUTCOME_REACH_MS).toISOString() },
+      [`datetime(${usageTimestampExpr('e')}) < datetime(?)`], [dateParamLowerBound(params.date_from)])
+    : [];
+  interface Spent { root: string | null; at: number; observable: boolean; usd: number; tokens: number; ranged: boolean }
+  const minutes = new Map<string, Spent>();
+  let undatedUsd = 0;
+  for (const [rows, inRange] of [[ranged, true], [before, false]] as const) {
+    for (const row of rows) {
+      const instant = row.timestamp ? parseStoredTimestamp(row.timestamp) : null;
+      if (!instant) {
+        if (inRange) undatedUsd += row.cost_usd;
+        continue;
+      }
+      const root = sessions.rootOf(row.session_id.toLowerCase());
+      const at = Math.floor(instant.getTime() / MINUTE_MS) * MINUTE_MS;
+      const id = `${root ?? ''}\0${at}\0${inRange}`;
+      let minute = minutes.get(id);
+      if (!minute) {
+        minute = { root, at, observable: root !== null && sessions.observable(root), usd: 0, tokens: 0, ranged: inRange };
+        minutes.set(id, minute);
+      }
+      minute.usd += row.cost_usd;
+      minute.tokens += row.tokens_in + row.tokens_out + row.cache_read_tokens + row.cache_write_tokens;
+    }
+  }
+
+  // Pull requests: GitHub's word, the commits each lists, and local merges.
+  const github = new Map((db.prepare(`
+    SELECT p.repo, p.number, p.state, p.merged_at, p.additions, p.deletions, p.commit_count, p.author_is_bot,
+      (SELECT COUNT(*) FROM github_pull_request_commits c WHERE c.repo = p.repo AND c.number = p.number AND c.source = 'github') AS listed
+    FROM github_pull_requests p
+  `).all() as Array<{
+    repo: string; number: number; state: string | null; merged_at: string | null; additions: number | null; deletions: number | null;
+    commit_count: number | null; author_is_bot: number | null; listed: number;
+  }>).map(row => [`${row.repo}#${row.number}`, row]));
+  const listedIn = new Map<string, Array<{ pull: string; number: number }>>();
+  const sources = new Map<string, Set<string>>();
+  for (const row of db.prepare('SELECT repo, number, sha, source FROM github_pull_request_commits').all() as Array<{ repo: string; number: number; sha: string; source: string }>) {
+    const pull = `${row.repo}#${row.number}`;
+    const pulls = listedIn.get(row.sha) ?? [];
+    pulls.push({ pull, number: row.number });
+    listedIn.set(row.sha, pulls);
+    const kinds = sources.get(pull) ?? new Set<string>();
+    kinds.add(row.source);
+    sources.set(pull, kinds);
+  }
+  const mergedLocally = locallyMergedPullRequests();
+
+  const reachFrom = Math.max(0, (fromMs ?? 0) - OUTCOME_REACH_MS);
+  const reachTo = toMs + OUTCOME_REACH_MS;
+  const rows = commitRows(reachFrom, reachTo);
+  const calls = gitToolCalls(...commitCallSpan(rows, reachFrom, reachTo));
+  const opened = openedPullRequests(calls.pullRequests);
+  // A commit GitHub lists in a pull request is in the one GitHub answered
+  // about, so GitHub's word (or a local merge) says whether it merged; a
+  // session's opening of it is judged by git activity's rule instead, which
+  // knows when that answer is about another that took the name.
+  const isMerged = (pull: string) => mergedLocally.has(pull) || github.get(pull)?.state === 'MERGED';
+  const mergedAt = (pull: string) => github.get(pull)?.merged_at ?? mergedLocally.get(pull) ?? null;
+  const pullOf = (sha: string): string | null => {
+    const pulls = [...(listedIn.get(sha) ?? [])].sort((a, b) => Number(isMerged(b.pull)) - Number(isMerged(a.pull)) || a.number - b.number);
+    return pulls[0]?.pull ?? null;
+  };
+
+  interface Reached extends Milestone { pull: string | null; project: string }
+  const milestones: Reached[] = [];
+  attributedCommits(rows, calls.commits).forEach((commit, index) => {
+    if (commit.attribution.kind !== 'session') return;
+    if (params.project && commit.project !== params.project) return;
+    if (wantAgent && commit.attribution.agent !== wantAgent) return;
+    const key = sessions.keyOf.get(commit.attribution.session_id);
+    const root = key === undefined ? null : sessions.rootOf(key);
+    if (root === null) return;
+    const pull = pullOf(commit.sha);
+    const landing = rows[index].landing;
+    const outcome: MilestoneOutcome = pull !== null && isMerged(pull) ? 'merged_pr'
+      : landing === 'direct' && pull === null ? 'direct'
+        : landing !== null ? 'other_landed' : 'not_landed';
+    milestones.push({ root, at: Date.parse(commit.authored_at), outcome, pull, project: commit.project });
+  });
+  for (const pull of opened) {
+    if (params.project && pull.project !== params.project) continue;
+    if (wantAgent && pull.agent !== wantAgent) continue;
+    const key = sessions.keyOf.get(pull.session_id);
+    const root = key === undefined ? null : sessions.rootOf(key);
+    if (root === null) continue;
+    milestones.push({
+      root, at: Date.parse(pull.opened_at), outcome: pull.merged ? 'merged_pr' : 'not_landed',
+      pull: `${pull.repo}#${pull.number}`, project: pull.project ?? pull.repo,
+    });
+  }
+
+  const spent = [...minutes.values()];
+  const allocated = allocate(spent, milestones);
+  const byClass = new Map<OutcomeClass, number>(OUTCOME_CLASSES.map(outcome => [outcome, 0]));
+  byClass.set('unobservable', undatedUsd);
+  const toPull = new Map<string, { usd: number; tokens: number; projects: Map<string, number> }>();
+  spent.forEach((minute, index) => {
+    const { outcome, milestone } = allocated[index];
+    if (minute.ranged) byClass.set(outcome, (byClass.get(outcome) ?? 0) + minute.usd);
+    if (outcome !== 'merged_pr' || !milestone?.pull) return;
+    let cost = toPull.get(milestone.pull);
+    if (!cost) toPull.set(milestone.pull, cost = { usd: 0, tokens: 0, projects: new Map() });
+    cost.usd += minute.usd;
+    cost.tokens += minute.tokens;
+    cost.projects.set(milestone.project, (cost.projects.get(milestone.project) ?? 0) + minute.usd);
+  });
+
+  const within = (iso: string | null) => {
+    const instant = iso ? parseStoredTimestamp(iso)?.getTime() : undefined;
+    return instant !== undefined && (fromMs === null || instant >= fromMs) && instant < toMs;
+  };
+  // Pull requests merged in the range, each with the project most of its cost was spent in.
+  const merged = [...toPull].filter(([pull]) => within(mergedAt(pull))).map(([pull, cost]) => ({
+    pull,
+    usd: cost.usd,
+    tokens: cost.tokens,
+    week: localWeekOf(mergedAt(pull) as string),
+    project: [...cost.projects].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0],
+  }));
+  const mergedSet = new Set(merged.map(row => row.pull));
+
+  const totalUsd = ranged.reduce((sum, row) => sum + row.cost_usd, 0);
+  const weeks: OutcomeWeek[] = [];
+  const mergedWeeks = merged.map(row => row.week).filter((week): week is string => week !== null).sort();
+  const firstWeek = fromMs !== null ? localWeekOf(new Date(fromMs).toISOString()) : mergedWeeks[0];
+  const lastWeek = params.date_to ? localWeekOf(new Date(toMs - 1).toISOString()) : mergedWeeks[mergedWeeks.length - 1];
+  if (firstWeek && lastWeek) {
+    for (let week = firstWeek; week <= lastWeek;) {
+      const prs = merged.filter(row => row.week === week);
+      const usd = prs.reduce((sum, row) => sum + row.usd, 0);
+      const tokens = prs.reduce((sum, row) => sum + row.tokens, 0);
+      const sortedTokens = prs.map(row => row.tokens).sort((a, b) => a - b);
+      weeks.push({
+        week,
+        ...outcomeCostStats(prs.map(row => row.usd)),
+        median_tokens: sortedTokens.length > 0 ? Math.round(quantile(sortedTokens, 0.5)) : null,
+        usd_per_mtok: tokens > 0 ? roundCost((usd / tokens) * 1_000_000) : null,
+      });
+      const next = new Date(`${week}T00:00:00Z`);
+      next.setUTCDate(next.getUTCDate() + 7);
+      week = next.toISOString().slice(0, 10);
+    }
+  }
+
+  const sized = merged.map(row => {
+    const known = github.get(row.pull);
+    return { usd: row.usd, lines: known?.additions != null ? known.additions + (known.deletions ?? 0) : null };
+  });
+  const byProject = new Map<string, number[]>();
+  for (const row of merged) {
+    if (row.usd <= 0) continue;
+    byProject.set(row.project, [...(byProject.get(row.project) ?? []), row.usd]);
+  }
+
+  const lookups = config.git.githubLookups;
+  const countable = lookups && !params.project && !params.agent;
+  const githubMerged = countable
+    ? [...github].filter(([, row]) => row.state === 'MERGED' && row.author_is_bot !== 1 && within(row.merged_at)).map(([pull]) => pull)
+    : null;
+  const membership = { github: 0, local: 0, none: 0 };
+  for (const pull of mergedSet) {
+    const kinds = sources.get(pull);
+    if (kinds?.has('github')) membership.github += 1;
+    else if (kinds?.has('local')) membership.local += 1;
+    else membership.none += 1;
+  }
+  const unobservable = byClass.get('unobservable') ?? 0;
+
+  return {
+    total_usd: roundCost(totalUsd),
+    spend: OUTCOME_CLASSES.map(outcome => {
+      const usd = byClass.get(outcome) ?? 0;
+      return { outcome, usd: roundCost(usd), share: totalUsd > 0 ? usd / totalUsd : 0 };
+    }),
+    merged_prs: { ...outcomeCostStats(merged.map(row => row.usd)), all_in_usd: merged.length > 0 ? roundCost(totalUsd / merged.length) : null },
+    weeks,
+    sizes: SIZE_BUCKETS.map(bucket => {
+      const costs = sized.filter(row => row.lines !== null && sizeBucket(row.lines) === bucket).map(row => row.usd);
+      const stats = outcomeCostStats(costs);
+      return { bucket, prs: stats.prs, median_usd: stats.median_usd };
+    }),
+    unknown_size: sized.filter(row => row.lines === null).length,
+    projects: poolProjects([...byProject].map(([project, costs]) => ({ project, costs })))
+      .map(row => ({ ...row, median_usd: roundCost(row.median_usd), pooled_usd: roundCost(row.pooled_usd) }))
+      .sort((a, b) => b.prs - a.prs || a.project.localeCompare(b.project)),
+    coverage: {
+      observable_share: totalUsd > 0 ? (totalUsd - unobservable) / totalUsd : null,
+      lookups,
+      github_merged: githubMerged ? githubMerged.length : null,
+      github_linked: githubMerged ? githubMerged.filter(pull => mergedSet.has(pull)).length : null,
+      truncated_commit_lists: [...mergedSet].filter(pull => {
+        const known = github.get(pull);
+        return known?.commit_count != null && known.commit_count > known.listed;
+      }).length,
+      membership,
+    },
+  };
 }
 
 /**
@@ -4228,8 +4528,8 @@ function usageRowsToSummaryValues(rows: UsageRow[]): {
 }
 
 /** The usage-bearing rows every Usage rollup is computed from. */
-/** `extraConditions` narrow the rows further, over alias `e`. */
-export function usageRowsStatement(params: UsageParams = {}, extraConditions: string[] = []): { sql: string; values: unknown[] } {
+/** `extraConditions` narrow the rows further, over alias `e`, binding `extraValues` in order. */
+export function usageRowsStatement(params: UsageParams = {}, extraConditions: string[] = [], extraValues: unknown[] = []): { sql: string; values: unknown[] } {
   const filter = buildUsageFilterState(params, 'e', { windowLeads: true });
   const usageWhere = [
     ...filter.conditions,
@@ -4256,16 +4556,16 @@ export function usageRowsStatement(params: UsageParams = {}, extraConditions: st
     WHERE ${usageWhere}
     ORDER BY ${timestampExpr} ASC, e.id ASC
   `;
-  return { sql, values: filter.values };
+  return { sql, values: [...filter.values, ...extraValues] };
 }
 
 /**
  * Usage-bearing rows for the filter; pass them to several rollups to scan once.
  * Model, provider and tier filters apply here, after the read; `extraConditions`
- * narrow the read itself.
+ * (binding `extraValues`) narrow the read itself.
  */
-export function getUsageRows(params: UsageParams = {}, extraConditions: string[] = []): UsageRow[] {
-  const statement = usageRowsStatement(params, extraConditions);
+export function getUsageRows(params: UsageParams = {}, extraConditions: string[] = [], extraValues: unknown[] = []): UsageRow[] {
+  const statement = usageRowsStatement(params, extraConditions, extraValues);
   const rows = getDb().prepare(statement.sql).all(...statement.values) as UsageDbRow[];
 
   const selected: UsageRow[] = [];
