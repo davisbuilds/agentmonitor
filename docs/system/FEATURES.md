@@ -408,8 +408,10 @@ enter activity or usage totals.
   selected top-session titles and opening prompts. It does not carry
   full transcripts.
 - With `AGENTMONITOR_GITHUB_LOOKUPS=1`, git activity asks GitHub, through `gh`,
-  for the state of pull requests sessions opened, naming only repositories and
-  numbers. It is off by default.
+  for the state of pull requests sessions opened, and searches the pull
+  requests the signed-in user merged in the last year for their size and
+  commits, naming only repositories, numbers and merge dates. It is off by
+  default.
 - Session sync copies transcript text, tool calls, and usage from local history
   files into the local database for search and analysis; it never modifies those
   files. `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` skips matching paths.

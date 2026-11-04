@@ -182,7 +182,7 @@ instead. Common controls include:
 | Discovery and sync | `AGENTMONITOR_PROJECTS_DIR`, `AGENTMONITOR_CLAUDE_DIR`, `AGENTMONITOR_AUTO_IMPORT_MINUTES`, `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` |
 | Live fidelity/privacy | `AGENTMONITOR_ENABLE_LIVE_TAB`, `AGENTMONITOR_CODEX_LIVE_MODE`, `AGENTMONITOR_CODEX_CONTEXT_WINDOW`, `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `AGENTMONITOR_LIVE_CAPTURE_REASONING`, `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`, `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` |
 | Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
-| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default off; `1` asks GitHub, through `gh`, whether sessions' pull requests merged) |
+| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default off; `1` asks GitHub, through `gh`, whether sessions' pull requests merged, and for the size and commits of the pull requests you merged) |
 | Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
 | Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
 | Reporting zone | `AGENTMONITOR_TIMEZONE` |
@@ -267,11 +267,21 @@ session started in a directory that is not a repository, such as `~/Dev`,
 covers the repositories directly inside it (not hidden ones, not deeper). A
 repository's first read reaches back to the day before its first session, at
 most a year; later reads reread from 14 days before the previous read, so
-downtime leaves no gap, and drop commits git no longer lists. With
+downtime leaves no gap, and drop commits git no longer lists. Each pass also
+records whether each commit has reached a main branch (any remote's default),
+from the remote-tracking branches as the last `git fetch` left them: the pass
+never fetches. With
 `AGENTMONITOR_GITHUB_LOOKUPS=1`, each pass then asks GitHub, read-only through
-`gh` and as its signed-in user, about the pull requests sessions opened in the
-last year: one GraphQL request per 50, never
-again for one already merged, and at most hourly for the rest. Local git alone
+`gh` and as its signed-in user, for the pull requests that user merged in the
+last year, a month at a time with their size and commits (the current month
+again at most hourly, an ended one once more a day after it ends, then never),
+and about the pull requests sessions opened
+in the last year: one GraphQL request per 50, never
+again for one already merged, and at most hourly for the rest. A month or a
+merged pull request GitHub answered only in part (an error beside the data,
+or a month returning fewer pull requests than the search counts) is asked
+about again on the next pass. Months read are kept per login, so signing `gh`
+in as another account reads that account's year. Local git alone
 shows a merge only once its commit is pulled. Without `gh`, or signed out, the
 pass logs that GitHub did not answer, and merged counts fall back to local
 merge commits, as they are with lookups off. The login service keeps the

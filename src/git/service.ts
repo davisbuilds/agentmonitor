@@ -1,7 +1,7 @@
 import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
 import { syncGitActivity } from './activity.js';
-import { syncSessionPullRequests } from './github.js';
+import { syncAuthoredPullRequests, syncSessionPullRequests } from './github.js';
 
 /** The first pass waits for startup's own transcript sync, which fills the session directories it reads. */
 const FIRST_PASS_DELAY_MS = 30_000;
@@ -14,8 +14,12 @@ function refreshGitActivity(): Promise<void> {
   if (inFlight) return inFlight;
   inFlight = syncGitActivity(getDb())
     .then(async report => {
-      if (report.errors > 0) console.error(`[git] ${report.errors} of ${report.repos} repositories could not be read`);
+      if (report.errors > 0) console.error(`[git] ${report.errors} of ${report.repos} repositories could not be read in full`);
       if (!config.git.githubLookups) return;
+      // The user's merged pull requests first: those it records with their
+      // details, the session lookup then has no need to ask about.
+      const authored = await syncAuthoredPullRequests(getDb());
+      if (authored.unanswered > 0) console.error(`[git] GitHub's search did not answer for ${authored.unanswered} month(s) of merged pull requests`);
       const pulls = await syncSessionPullRequests(getDb());
       if (pulls.unanswered > 0) console.error(`[git] GitHub did not answer for ${pulls.unanswered} of ${pulls.checked} pull requests`);
     })

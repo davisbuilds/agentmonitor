@@ -265,6 +265,30 @@ function initSchemaLocked(db: Database): void {
       PRIMARY KEY (repo, number)
     );
 
+    -- The commits a pull request carried: from GitHub when lookups are on,
+    -- else from a local merge commit's second parent, which a squash merge
+    -- leaves none of. GitHub's list replaces a local one.
+    CREATE TABLE IF NOT EXISTS github_pull_request_commits (
+      repo TEXT NOT NULL,
+      number INTEGER NOT NULL,
+      sha TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('github', 'local')),
+      PRIMARY KEY (repo, number, sha)
+    );
+    CREATE INDEX IF NOT EXISTS idx_github_pull_request_commits_sha ON github_pull_request_commits(sha);
+
+    -- Windows of merge dates whose pull requests by a GitHub login (the one
+    -- signed in to gh, lowercased) were read from GitHub's search, and how
+    -- many the search said it held.
+    CREATE TABLE IF NOT EXISTS github_pull_request_search (
+      login TEXT NOT NULL,
+      window_start TEXT NOT NULL,
+      window_end TEXT NOT NULL,
+      result_count INTEGER NOT NULL,
+      synced_at TEXT NOT NULL,
+      PRIMARY KEY (login, window_start)
+    );
+
     -- Claude Code's own running cost for each session, from its statusline
     -- payload. It is counted in memory once per API response, independently of
     -- the transcripts imports read, so it checks imported cost.
@@ -806,6 +830,20 @@ function initSchemaLocked(db: Database): void {
   if (!gitRepoColumns.has('github_repo')) {
     db.exec('ALTER TABLE git_repos ADD COLUMN github_repo TEXT');
   }
+  const gitCommitColumns = new Set((db.prepare('PRAGMA table_info(git_commits)').all() as Array<{ name: string }>).map(col => col.name));
+  // Whether a commit reached a main branch (any remote's default): `direct` on
+  // its first-parent line, a push; `merged` reachable another way; NULL not yet.
+  if (!gitCommitColumns.has('landing')) {
+    db.exec("ALTER TABLE git_commits ADD COLUMN landing TEXT CHECK (landing IN ('direct', 'merged'))");
+  }
+  // A pull request's size and author, read with its commits; details_at is when.
+  const pullRequestColumns = new Set((db.prepare('PRAGMA table_info(github_pull_requests)').all() as Array<{ name: string }>).map(col => col.name));
+  for (const [column, type] of [
+    ['additions', 'INTEGER'], ['deletions', 'INTEGER'], ['changed_files', 'INTEGER'],
+    ['commit_count', 'INTEGER'], ['author_is_bot', 'INTEGER'], ['details_at', 'TEXT'],
+  ] as const) {
+    if (!pullRequestColumns.has(column)) db.exec(`ALTER TABLE github_pull_requests ADD COLUMN ${column} ${type}`);
+  }
 
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_parent ON browsing_sessions(parent_session_id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_bs_last_item_at ON browsing_sessions(last_item_at DESC)');
@@ -1196,7 +1234,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 28;
+const DATA_SCHEMA_VERSION = 29;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1260,8 +1298,10 @@ export function runDataMigrations(db: Database): void {
     // v25 introduces no data correction: it adds provider_quota_samples, which
     // read commands only install when the version advances. v26 likewise only
     // adds browsing_sessions.cwd; a forced session sync fills it for stored rows.
-    // v27 likewise only adds git_repos and git_commits, and v28 git_repos.github_repo
-    // and github_pull_requests.
+    // v27 likewise only adds git_repos and git_commits, v28 git_repos.github_repo
+    // and github_pull_requests, and v29 commit landing, pull request
+    // size and author, github_pull_request_commits and github_pull_request_search;
+    // the next git pass fills them.
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

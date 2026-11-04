@@ -528,6 +528,18 @@ the build.
   console. The read shape (name×attrs → occurrences/last-seen) is already there;
   this is a frontend consumer. Noted 2026-09-04.
 
+#### `serve launches the runtime through Portless` flakes on shutdown under load
+- **What**: `tests/cli-runtime.test.ts` sends the Portless-backed `serve` child
+  SIGTERM and waits 5 s; in a full `pnpm test`, the child sometimes has not
+  exited by then and the test fails on `exitCode` null.
+- **Why or evidence**: 1 of 4 full local runs on 2026-11-03, on a branch that
+  changed only GitHub sync code; it passed alone and on the other runs.
+  Whether shutdown is slow under load or something holds the process open is
+  **hypothesis, unmeasured**.
+- **Next**: on the next failure, record how long the child takes to exit after
+  SIGTERM (and what it is doing, e.g. `sample` on macOS), before raising the
+  wait.
+
 ### Frontend testing
 
 #### Cover component behavior (mount + reactivity)

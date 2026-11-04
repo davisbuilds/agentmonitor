@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import type { Database } from 'better-sqlite3';
-import { githubRepoOfRemote } from './attribution.js';
+import { githubRepoOfRemote, mergedPullRequestNumber } from './attribution.js';
 
 const run = promisify(execFile);
 
@@ -14,6 +14,9 @@ export interface GitSyncReport {
   scanned: number;
   commits_seen: number;
   commits_removed: number;
+  /** Merged pull requests whose commits were found from their local merge commit. */
+  pull_requests_linked: number;
+  /** Repositories that could not be read, or whose commits' landing could not be checked. */
   errors: number;
 }
 
@@ -108,6 +111,86 @@ async function originGithubRepo(root: string): Promise<string | null> {
   }
 }
 
+/** A main branch work can land on, and the GitHub repository its remote names. */
+interface MainBranch {
+  ref: string;
+  githubRepo: string | null;
+}
+
+/**
+ * Each remote's main: the branch its HEAD names, else its main or master; a
+ * repository with no remote branches lands on its own main or master. Every
+ * remote counts, since a fork's work lands on its own remote, not on `origin`
+ * when that is upstream. Ordered most upstream first (`upstream`, then
+ * `origin`, then the rest), which decides whose pull request a merge on
+ * several of them was.
+ */
+async function mainBranches(root: string): Promise<MainBranch[]> {
+  const listed = (await git(root, ['for-each-ref', '--format=%(refname)%00%(symref)', 'refs/remotes', 'refs/heads/main', 'refs/heads/master']))
+    .split('\n').filter(Boolean).map(line => line.split('\0'));
+  const refs = new Set(listed.map(([ref]) => ref));
+  const rank = (remote: string) => (remote === 'upstream' ? 0 : remote === 'origin' ? 1 : 2);
+  const remotes = (await git(root, ['remote'])).split('\n').map(name => name.trim()).filter(Boolean)
+    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+  const mains: MainBranch[] = [];
+  for (const remote of remotes) {
+    const head = listed.find(([ref]) => ref === `refs/remotes/${remote}/HEAD`)?.[1];
+    const ref = head && refs.has(head) ? head : ['main', 'master'].map(name => `refs/remotes/${remote}/${name}`).find(name => refs.has(name));
+    if (!ref) continue;
+    const url = await git(root, ['remote', 'get-url', remote]).catch(() => '');
+    mains.push({ ref, githubRepo: githubRepoOfRemote(url) });
+  }
+  if (mains.length === 0) {
+    const local = ['refs/heads/main', 'refs/heads/master'].find(name => refs.has(name));
+    if (local) mains.push({ ref: local, githubRepo: null });
+  }
+  return mains;
+}
+
+const lines = (output: string) => output.split('\n').map(line => line.trim()).filter(Boolean);
+
+/**
+ * Record whether each commit not known to have landed has: `direct` on a
+ * main's first-parent line (pushed, or a merge made there), `merged` reachable
+ * from one another way. A commit already landed keeps its answer unless it is
+ * in the reread window, where history may have been rewritten. Then give each
+ * merged pull request without known commits the commits its merge brought in.
+ * Returns how many pull requests gained commits.
+ */
+async function recordLanding(db: Database, root: string, since: Date, originRepo: string | null): Promise<number> {
+  const mains = await mainBranches(root);
+  if (mains.length === 0) return 0;
+  const firstParent = await Promise.all(mains.map(async main => new Set(lines(await git(root, ['rev-list', '--first-parent', main.ref])))));
+  const reachable = new Set<string>();
+  for (const main of mains) for (const sha of lines(await git(root, ['rev-list', main.ref]))) reachable.add(sha);
+
+  const merges = db.prepare('SELECT sha, subject FROM git_commits WHERE repo_root = ? AND is_merge = 1')
+    .all(root) as Array<{ sha: string; subject: string | null }>;
+  const hasCommits = db.prepare('SELECT 1 FROM github_pull_request_commits WHERE repo = ? AND number = ? LIMIT 1');
+  const brought = new Map<string, { repo: string; number: number; shas: string[] }>();
+  for (const merge of merges) {
+    const number = mergedPullRequestNumber(merge.subject ?? '', true);
+    if (number === null) continue;
+    const repo = mains.find((_, index) => firstParent[index].has(merge.sha))?.githubRepo ?? originRepo;
+    if (!repo || brought.has(`${repo}#${number}`) || hasCommits.get(repo, number)) continue;
+    const shas = lines(await git(root, ['rev-list', `${merge.sha}^1..${merge.sha}^2`]).catch(() => ''));
+    if (shas.length > 0) brought.set(`${repo}#${number}`, { repo, number, shas });
+  }
+
+  const candidates = db.prepare('SELECT sha FROM git_commits WHERE repo_root = ? AND (landing IS NULL OR committed_at >= ?)')
+    .all(root, since.toISOString()) as Array<{ sha: string }>;
+  const setLanding = db.prepare('UPDATE git_commits SET landing = ? WHERE repo_root = ? AND sha = ?');
+  const addCommit = db.prepare("INSERT OR IGNORE INTO github_pull_request_commits (repo, number, sha, source) VALUES (?, ?, ?, 'local')");
+  db.transaction(() => {
+    for (const { sha } of candidates) {
+      const landing = firstParent.some(line => line.has(sha)) ? 'direct' : reachable.has(sha) ? 'merged' : null;
+      setLanding.run(landing, root, sha);
+    }
+    for (const pull of brought.values()) for (const sha of pull.shas) addCommit.run(pull.repo, pull.number, sha);
+  })();
+  return brought.size;
+}
+
 async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
   // --since stops walking at the first commit older than the cutoff, so a
   // backdated commit would hide the recent ones behind it, and the pass would
@@ -155,7 +238,7 @@ async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
  */
 export async function syncGitActivity(db: Database, options: GitSyncOptions = {}): Promise<GitSyncReport> {
   const now = options.now ?? new Date();
-  const report: GitSyncReport = { repos: 0, scanned: 0, commits_seen: 0, commits_removed: 0, errors: 0 };
+  const report: GitSyncReport = { repos: 0, scanned: 0, commits_seen: 0, commits_removed: 0, pull_requests_linked: 0, errors: 0 };
 
   const firstSessionByRoot = new Map<string, number>();
   const directories = db.prepare(`
@@ -243,6 +326,12 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
     })();
     report.scanned += 1;
     report.commits_seen += commits.length;
+    try {
+      report.pull_requests_linked += await recordLanding(db, root, since, githubRepo);
+    } catch {
+      // The commits are stored; landing is asked again on the next pass.
+      report.errors += 1;
+    }
   }
   return report;
 }
