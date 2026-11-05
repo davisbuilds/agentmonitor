@@ -72,21 +72,6 @@ so later readers know what still needs checking.
   source adapter; prefer nested transcripts over duplicate audit records. Do
   not claim full desktop coverage from local coding samples alone.
 
-### Claude Desktop interactive sessions classified as headless
-
-- **What**: distinguish human-driven Desktop Code sessions from headless SDK
-  invocations in the shared invocation-mode classifier and stored projections.
-- **Why or evidence**: a controlled Desktop 4.23118.0 / Claude Code 2.1.317
-  session on 2026-11-05 wrote `entrypoint: "claude-desktop"` and
-  `promptSource: "sdk"`. `claudeInvocationMode` treats any SDK prompt as
-  headless, even with that explicit desktop entrypoint. Both event import and
-  browser parsing consume this classifier (`src/util/invocation-mode.ts`).
-- **Next**: give explicit desktop origin appropriate precedence, test the
-  observed field combination while preserving actual headless behavior, and
-  reconcile already-stored mode values through both ingestion paths. Verify
-  the rendered mode and avoid inferring that every desktop-scheduled run was
-  human-driven solely from its SDK transport.
-
 ### Consistent session identity and parent/child coverage across read surfaces
 
 - **What**: Sessions lists and child lookups reconcile known Codex rollout/UUID
