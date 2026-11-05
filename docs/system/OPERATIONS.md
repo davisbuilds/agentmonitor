@@ -1124,8 +1124,9 @@ modifies a local `dist` file and restores it; run it serially without concurrent
 builds or other verification against that checkout. Its probe tests run against
 fixture databases from the disposable host, never the installed one. The normal
 tests do not require Chromium or a built app; they cover the probes' read-only
-opener and target guards. CI runs it last in the `E2E (Playwright)` job; locally,
-run it in a worktree, never the checkout the login service loads.
+opener and target guards. CI runs it in its own `Verification scenarios` job,
+which the `E2E (Playwright)` check requires; locally, run it in a worktree, never
+the checkout the login service loads.
 
 The pre-push checks are:
 
@@ -1152,9 +1153,10 @@ pnpm frontend:test
 ```
 
 Main branch protection currently requires `Lint, Build, Test` and
-`E2E (Playwright)`. `Lint, Build, Test` runs no checks itself: it passes only
-when the parallel `Lint and build` job and both `Node tests` shards did, so a new job
-that should gate merges belongs in its `needs`. The CI workflow also runs a
+`E2E (Playwright)`. Neither runs checks itself. `Lint, Build, Test` passes
+only when the parallel `Lint and build` job and both `Node tests` shards did;
+`E2E (Playwright)` only when the `Playwright` and `Verification scenarios` jobs
+did. A new job that should gate merges belongs in one of their `needs`. The CI workflow also runs a
 Gitleaks job. Current workflow
 definitions and live branch protection are authoritative; see
 [GIT_HISTORY_POLICY.md](../project/GIT_HISTORY_POLICY.md) for the verification
