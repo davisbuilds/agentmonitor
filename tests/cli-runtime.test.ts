@@ -40,14 +40,24 @@ function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): CliRun {
   };
 }
 
+// A port for `serve` to bind later. It comes from below the ephemeral ranges
+// (Linux 32768+, macOS 49152+) because other test files run at the same time
+// and their servers listen on port 0: an ephemeral port freed here could be
+// handed to one of them before `serve` binds it. One such server accepts
+// requests and never answers, which left a health check waiting five minutes.
 async function allocatePort(): Promise<number> {
-  const server = net.createServer();
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (!address || typeof address === 'string') throw new Error('Failed to allocate test port');
-  const port = address.port;
-  await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
-  return port;
+  for (let attempt = 0; attempt < 50; attempt++) {
+    const port = 20_000 + Math.floor(Math.random() * 12_000);
+    const server = net.createServer();
+    const free = await new Promise<boolean>((resolve) => {
+      server.once('error', () => resolve(false));
+      server.listen(port, '127.0.0.1', () => resolve(true));
+    });
+    if (!free) continue;
+    await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+    return port;
+  }
+  throw new Error('Failed to allocate a test port below the ephemeral range');
 }
 
 async function waitForHealth(baseUrl: string, child: ChildProcessWithoutNullStreams): Promise<void> {
@@ -59,7 +69,8 @@ async function waitForHealth(baseUrl: string, child: ChildProcessWithoutNullStre
       throw new Error(`serve exited early with ${child.exitCode}`);
     }
     try {
-      const res = await fetch(`${baseUrl}/api/health`);
+      // Bounded, so a listener that never answers fails within the deadline.
+      const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(1_000) });
       if (res.ok) return;
     } catch (error) {
       lastError = error;
