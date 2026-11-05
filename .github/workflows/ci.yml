@@ -141,8 +141,9 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Install browser OS dependencies
-        run: pnpm exec playwright install-deps chromium
+      # No `playwright install-deps`: the hosted image already has every
+      # library Chrome needs, and the step only added fonts, at 12s to 8 min
+      # of apt mirror time. A missing library fails Chrome's launch loudly.
       - name: Install pinned patched Chrome for Testing
         run: bash scripts/install-browser-ci.sh
       - name: Test browser version guard
