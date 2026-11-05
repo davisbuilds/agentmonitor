@@ -58,10 +58,16 @@ jobs:
       - name: Build
         run: pnpm build
 
+  # The node suite is CPU-bound, so it is split by file across two runners;
+  # each uses all four of its vCPUs (Node's default leaves one idle).
   node-tests:
-    name: Node tests
+    name: Node tests (${{ matrix.shard }}/2)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
 
     steps:
       - name: Check out repository
@@ -90,6 +96,9 @@ jobs:
 
       - name: Test
         run: pnpm test
+        env:
+          AGENTMONITOR_TEST_SHARD: ${{ matrix.shard }}/2
+          AGENTMONITOR_TEST_CONCURRENCY: "4"
 
   # Required check: branch protection and scripts/github/protect-main.sh name
   # it. It fails unless both jobs passed, including when one was cancelled.
@@ -101,6 +110,7 @@ jobs:
     timeout-minutes: 2
 
     steps:
+      # A matrix job's result is success only when every shard succeeded.
       - name: Require lint and the node tests
         env:
           LINT_RESULT: ${{ needs.lint.result }}

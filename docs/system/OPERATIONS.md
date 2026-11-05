@@ -1139,6 +1139,10 @@ pnpm test
 gives it a private temp directory and fails the run, naming each entry, when a
 test leaves anything under `os.tmpdir()`. The directory is removed either way.
 The tsx and Node compile caches are linked to the shared ones and are not counted.
+CI splits the suite by file across two jobs with `AGENTMONITOR_TEST_SHARD=1/2`
+and `2/2` (Node's `--test-shard`) and sets `AGENTMONITOR_TEST_CONCURRENCY=4`
+for its four-vCPU runners; the script rejects malformed values and does not
+pass either variable on to the tests. Locally, leave both unset.
 
 If frontend TypeScript or Svelte changes, also run:
 
@@ -1149,7 +1153,7 @@ pnpm frontend:test
 
 Main branch protection currently requires `Lint, Build, Test` and
 `E2E (Playwright)`. `Lint, Build, Test` runs no checks itself: it passes only
-when the parallel `Lint and build` and `Node tests` jobs both did, so a new job
+when the parallel `Lint and build` job and both `Node tests` shards did, so a new job
 that should gate merges belongs in its `needs`. The CI workflow also runs a
 Gitleaks job. Current workflow
 definitions and live branch protection are authoritative; see
