@@ -15,8 +15,10 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: Lint, Build, Test
+  # Lint and the node tests run side by side. `checks` is the required
+  # `Lint, Build, Test` check and passes only when both did.
+  lint:
+    name: Lint and build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -56,8 +58,57 @@ jobs:
       - name: Build
         run: pnpm build
 
+  node-tests:
+    name: Node tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.28.6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: "24.22.1"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The CLI and service tests run the compiled `dist/`.
+      - name: Build
+        run: pnpm build
+
       - name: Test
         run: pnpm test
+
+  # Required check: branch protection and scripts/github/protect-main.sh name
+  # it. It fails unless both jobs passed, including when one was cancelled.
+  checks:
+    name: Lint, Build, Test
+    if: ${{ always() }}
+    needs: [lint, node-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+
+    steps:
+      - name: Require lint and the node tests
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TESTS_RESULT: ${{ needs.node-tests.result }}
+        run: |
+          echo "lint=$LINT_RESULT node-tests=$TESTS_RESULT"
+          test "$LINT_RESULT" = success
+          test "$TESTS_RESULT" = success
 
   e2e:
     name: E2E (Playwright)

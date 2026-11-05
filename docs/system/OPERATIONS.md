@@ -1148,7 +1148,10 @@ pnpm frontend:test
 ```
 
 Main branch protection currently requires `Lint, Build, Test` and
-`E2E (Playwright)`. The CI workflow also runs a Gitleaks job. Current workflow
+`E2E (Playwright)`. `Lint, Build, Test` runs no checks itself: it passes only
+when the parallel `Lint and build` and `Node tests` jobs both did, so a new job
+that should gate merges belongs in its `needs`. The CI workflow also runs a
+Gitleaks job. Current workflow
 definitions and live branch protection are authoritative; see
 [GIT_HISTORY_POLICY.md](../project/GIT_HISTORY_POLICY.md) for the verification
 commands.
