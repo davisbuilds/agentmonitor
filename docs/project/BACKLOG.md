@@ -53,21 +53,39 @@ so later readers know what still needs checking.
   rollouts, including compressed files. Installed Claude Desktop 1.32885.1's
   transcript resolver accepts both per-session app-data `.claude/projects`
   roots and the global Claude projects root for Code. Only the latter is
-  discovered today; no identifiable local Code sample was available to prove
-  its current write path and ingestion end to end. A separate desktop
+  discovered today. A controlled local Code session later on 2026-11-05
+  (Desktop 4.23118.0, Claude Code 2.1.317) wrote to the global projects root
+  and appeared automatically in v2 session/message/activity reads. Imported
+  input/output/cache usage matched its transcript, and hook lifecycle events
+  arrived. It made no tool calls; live SSE delivery was not observed. A separate desktop
   session-list registry is not itself a separate transcript store; see the
   [desktop reference](https://code.claude.com/docs/en/desktop#coming-from-the-cli).
   Legacy local Cowork transcripts and audit JSONLs under the desktop app's
   `local-agent-mode-sessions` directory fall outside the current Claude
   `<claudeDir>/projects` discovery root. Cloud and remote execution must be
   evaluated separately from the desktop interface used to start them.
-- **Next**: capture a controlled local Claude Code Desktop session and verify
-  transcript discovery, messages, tools, usage and live activity through the
-  consumer APIs. Record app/harness versions and effective roots; add
-  descriptor-aware discovery with session-ID deduplication if needed. If
+- **Next**: extend the local Desktop check with a tool call and observe live
+  SSE delivery. Record app/harness versions and effective roots; add
+  descriptor-aware discovery with session-ID deduplication only when a selected
+  execution mode writes outside the configured root. If
   Cowork is selected, inspect current cloud/export support and design an explicit
   source adapter; prefer nested transcripts over duplicate audit records. Do
   not claim full desktop coverage from local coding samples alone.
+
+### Claude Desktop interactive sessions classified as headless
+
+- **What**: distinguish human-driven Desktop Code sessions from headless SDK
+  invocations in the shared invocation-mode classifier and stored projections.
+- **Why or evidence**: a controlled Desktop 4.23118.0 / Claude Code 2.1.317
+  session on 2026-11-05 wrote `entrypoint: "claude-desktop"` and
+  `promptSource: "sdk"`. `claudeInvocationMode` treats any SDK prompt as
+  headless, even with that explicit desktop entrypoint. Both event import and
+  browser parsing consume this classifier (`src/util/invocation-mode.ts`).
+- **Next**: give explicit desktop origin appropriate precedence, test the
+  observed field combination while preserving actual headless behavior, and
+  reconcile already-stored mode values through both ingestion paths. Verify
+  the rendered mode and avoid inferring that every desktop-scheduled run was
+  human-driven solely from its SDK transport.
 
 ### Consistent session identity and parent/child coverage across read surfaces
 
