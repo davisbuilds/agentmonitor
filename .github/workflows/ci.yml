@@ -15,8 +15,10 @@ permissions:
   contents: read
 
 jobs:
-  checks:
-    name: Lint, Build, Test
+  # Lint and the node tests run side by side. `checks` is the required
+  # `Lint, Build, Test` check and passes only when both did.
+  lint:
+    name: Lint and build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -56,11 +58,72 @@ jobs:
       - name: Build
         run: pnpm build
 
+  # The node suite is CPU-bound, so it is split by file across two runners;
+  # each uses all four of its vCPUs (Node's default leaves one idle).
+  node-tests:
+    name: Node tests (${{ matrix.shard }}/2)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.28.6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: "24.22.1"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The CLI and service tests run the compiled `dist/`.
+      - name: Build
+        run: pnpm build
+
       - name: Test
         run: pnpm test
+        env:
+          AGENTMONITOR_TEST_SHARD: ${{ matrix.shard }}/2
+          AGENTMONITOR_TEST_CONCURRENCY: "4"
 
-  e2e:
-    name: E2E (Playwright)
+  # Required check: branch protection and scripts/github/protect-main.sh name
+  # it. It fails unless both jobs passed, including when one was cancelled.
+  checks:
+    name: Lint, Build, Test
+    if: ${{ always() }}
+    needs: [lint, node-tests]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+
+    steps:
+      # A matrix job's result is success only when every shard succeeded.
+      - name: Require lint and the node tests
+        env:
+          LINT_RESULT: ${{ needs.lint.result }}
+          TESTS_RESULT: ${{ needs.node-tests.result }}
+        run: |
+          echo "lint=$LINT_RESULT node-tests=$TESTS_RESULT"
+          test "$LINT_RESULT" = success
+          test "$TESTS_RESULT" = success
+
+  # The Playwright suite and the verification scenarios run side by side.
+  # `e2e` is the required `E2E (Playwright)` check and passes only when both did.
+  playwright:
+    name: Playwright
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -90,8 +153,9 @@ jobs:
       - name: Build
         run: pnpm build
 
-      - name: Install browser OS dependencies
-        run: pnpm exec playwright install-deps chromium
+      # No `playwright install-deps`: the hosted image already has every
+      # library Chrome needs, and the step only added fonts, at 12s to 8 min
+      # of apt mirror time. A missing library fails Chrome's launch loudly.
       - name: Install pinned patched Chrome for Testing
         run: bash scripts/install-browser-ci.sh
       - name: Test browser version guard
@@ -104,11 +168,6 @@ jobs:
       - name: Verify built skill context runtime
         run: pnpm verify:skill-context-built
 
-      # Drives the compiled server through to the browser. It edits a dist file
-      # and restores it, so it runs after every other step that reads dist.
-      - name: Run verification scenarios
-        run: pnpm test:verify
-
       - name: Upload Playwright report
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -116,6 +175,68 @@ jobs:
           name: playwright-report
           path: playwright-report/
           retention-days: 7
+
+  verify:
+    name: Verification scenarios
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: 11.28.6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
+        with:
+          node-version: "24.22.1"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # The scenarios drive the compiled server, so they need the build.
+      - name: Build
+        run: pnpm build
+
+      # No `playwright install-deps`: the hosted image already has every
+      # library Chrome needs, and the step only added fonts, at 12s to 8 min
+      # of apt mirror time. A missing library fails Chrome's launch loudly.
+      - name: Install pinned patched Chrome for Testing
+        run: bash scripts/install-browser-ci.sh
+      - name: Test browser version guard
+        run: pnpm test:browser-runtime
+
+      # Drives the compiled server through to the browser. It edits a dist file
+      # and restores it, so nothing else in this job reads dist.
+      - name: Run verification scenarios
+        run: pnpm test:verify
+
+  # Required check: branch protection and scripts/github/protect-main.sh name
+  # it. It fails unless both jobs passed, including when one was cancelled.
+  e2e:
+    name: E2E (Playwright)
+    if: ${{ always() }}
+    needs: [playwright, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+
+    steps:
+      - name: Require Playwright and the verification scenarios
+        env:
+          PLAYWRIGHT_RESULT: ${{ needs.playwright.result }}
+          VERIFY_RESULT: ${{ needs.verify.result }}
+        run: |
+          echo "playwright=$PLAYWRIGHT_RESULT verify=$VERIFY_RESULT"
+          test "$PLAYWRIGHT_RESULT" = success
+          test "$VERIFY_RESULT" = success
 
   gitleaks:
     name: Gitleaks (secret scan)
