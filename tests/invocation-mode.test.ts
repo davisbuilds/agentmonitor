@@ -15,6 +15,11 @@ describe('claudeInvocationMode', () => {
     assert.equal(claudeInvocationMode('cli', 'typed'), 'interactive');
   });
 
+  test('Desktop SDK transport retains its interactive entrypoint', () => {
+    assert.equal(claudeInvocationMode('claude-desktop', 'sdk'), 'interactive');
+    assert.equal(claudeInvocationMode('claude-desktop', undefined), 'interactive');
+  });
+
   test('unknown entrypoint yields no signal', () => {
     assert.equal(claudeInvocationMode('vscode', undefined), undefined);
     assert.equal(claudeInvocationMode(undefined, undefined), undefined);

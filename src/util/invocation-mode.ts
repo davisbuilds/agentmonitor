@@ -10,10 +10,13 @@ export type InvocationMode = 'interactive' | 'headless';
 // Claude Code writes `entrypoint` on every transcript line and `promptSource` on
 // user turns. Headless `claude -p` runs report `entrypoint: "sdk-cli"` with
 // `promptSource: "sdk"`; interactive TUI runs report `entrypoint: "cli"`.
+// Desktop also uses SDK transport, so its explicit entrypoint takes precedence.
+// Mode describes the launch surface; subagent/internal lineage is independent.
 export function claudeInvocationMode(
   entrypoint: string | undefined,
   promptSource: string | undefined,
 ): InvocationMode | undefined {
+  if (entrypoint === 'claude-desktop') return 'interactive';
   if (entrypoint === 'sdk-cli' || promptSource === 'sdk') return 'headless';
   if (entrypoint === 'cli') return 'interactive';
   return undefined;

@@ -294,6 +294,15 @@ scoped imports intentionally do not update whole-file skip state. Benchmark impo
 creates segregated `source='benchmark'` rows; it does not fabricate transcripts for
 ephemeral benchmark runs.
 
+After upgrading the Claude Desktop invocation-mode correction, existing Desktop
+sessions may retain `headless` until their transcript is parsed again. To repair
+stored Monitor mode from available transcripts, run
+`amon import --source claude-code --force`. Duplicate events are preserved and
+the session mode is patched independently; a forced Claude session sync also
+patches it for existing Monitor sessions. Neither path can infer a corrected
+mode when the source transcript is gone. Delegated/internal lineage is unchanged.
+
+
 Benchmark delivery is explicit; the session watcher does not watch OpenBench
 result directories. After a scored campaign finishes, verify its sealed run with
 OpenBench on the execution host, transfer the unchanged results JSONL privately

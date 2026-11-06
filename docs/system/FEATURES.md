@@ -162,6 +162,13 @@ product never substitutes a misleading `0%` for missing evidence.
   a new conversation. Browser coverage and event-derived usage-session coverage
   are different populations; totals should not be compared as equivalent.
 
+Invocation mode describes the launch surface, independently of session lineage.
+Claude Desktop Code is interactive even though it sends prompts through SDK
+transport; `claude -p` and `codex exec` are headless. Subagents may retain an
+interactive originator from their harness. Their `subagent` relationship, rather
+than invocation mode, identifies delegated work; internal jobs are tracked
+separately as well. Mode does not establish direct human participation in a turn.
+
 ## Analytics And Skill Evidence
 
 Analytics Overview opens on five headlines, each against the equal-length
