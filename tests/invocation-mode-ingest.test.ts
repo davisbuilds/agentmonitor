@@ -119,9 +119,9 @@ describe('invocation mode surfaces on monitor sessions', () => {
 });
 
 describe('mode backfills on re-import even when all events are duplicates', () => {
-  test('forced re-import restores mode for a session imported before mode existed', () => {
+  test('forced re-import repairs Desktop mode even when all events already exist', () => {
     // A claude projects tree the importer can discover.
-    const claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cc-dir-'));
+    const claudeDir = path.join(tempDir, 'claude-reimport');
     const projDir = path.join(claudeDir, 'projects', 'proj');
     fs.mkdirSync(projDir, { recursive: true });
     const sid = 'cc-backfill';
@@ -130,7 +130,7 @@ describe('mode backfills on re-import even when all events are duplicates', () =
       JSON.stringify({
         type: 'assistant',
         sessionId: sid,
-        entrypoint: 'sdk-cli',
+        entrypoint: 'claude-desktop',
         promptSource: 'sdk',
         cwd: '/tmp/proj',
         timestamp: '2026-07-07T10:00:00Z',
@@ -139,17 +139,17 @@ describe('mode backfills on re-import even when all events are duplicates', () =
     );
 
     runImport({ source: 'claude-code', claudeDir, force: true });
-    assert.equal(modeFor(sid), 'headless');
+    assert.equal(modeFor(sid), 'interactive');
 
-    // Simulate the pre-change state: events already imported, but the session's
-    // mode was never persisted. A forced re-import re-parses and hits the
+    // Simulate the old Desktop classification: events already imported, but
+    // the SDK transport was incorrectly classified as headless. A forced re-import re-parses and hits the
     // duplicate-event_id early return, so only the decoupled backfill can fix it.
-    getDb().prepare("UPDATE sessions SET metadata = '{}' WHERE id = ?").run(sid);
-    assert.equal(modeFor(sid), null);
+    getDb().prepare("UPDATE sessions SET metadata = '{\"mode\":\"headless\"}' WHERE id = ?").run(sid);
+    assert.equal(modeFor(sid), 'headless');
 
     const result = runImport({ source: 'claude-code', claudeDir, force: true });
     assert.equal(result.totalEventsImported, 0, 'all events are duplicates on re-import');
-    assert.equal(modeFor(sid), 'headless');
+    assert.equal(modeFor(sid), 'interactive');
 
     fs.rmSync(claudeDir, { recursive: true, force: true });
   });

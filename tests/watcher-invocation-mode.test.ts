@@ -84,6 +84,23 @@ describe('watcher stamps invocation mode onto the live Monitor session', () => {
     assert.equal(modeOf(id), 'interactive');
   });
 
+  test('forced Desktop sync repairs an existing headless mode', () => {
+    const id = 'w-cc-desktop';
+    seedSessionRow(id, 'claude_code');
+    const file = write(claudeDir, `${id}.jsonl`, [
+      { type: 'user', sessionId: id, entrypoint: 'claude-desktop', promptSource: 'sdk', cwd: '/tmp/proj',
+        message: { role: 'user', content: [{ type: 'text', text: 'go' }] }, timestamp: '2026-07-07T10:00:00Z' },
+      { type: 'assistant', sessionId: id, entrypoint: 'claude-desktop', cwd: '/tmp/proj',
+        message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] }, timestamp: '2026-07-07T10:00:01Z' },
+    ]);
+    syncSessionFileDetailed(getDb(), file);
+    assert.equal(modeOf(id), 'interactive');
+    getDb().prepare("UPDATE sessions SET metadata = json_set(metadata, '$.mode', 'headless') WHERE id = ?").run(id);
+    assert.equal(syncSessionFileDetailed(getDb(), file).result, 'skipped');
+    assert.equal(syncSessionFileDetailed(getDb(), file, { force: true }).result, 'parsed');
+    assert.equal(modeOf(id), 'interactive');
+  });
+
   test('headless Codex session (originator codex_exec) is marked on sync', () => {
     // Monitor rows are keyed by the session UUID; the rollout filename carries it.
     const uuid = '019c26c7-9c64-7b01-b7bb-695ce94c3237';

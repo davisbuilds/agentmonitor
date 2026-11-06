@@ -29,6 +29,49 @@ so later readers know what still needs checking.
 
 ## Open
 
+### Codex archived rollout discovery
+
+- **What**: Include archived rollouts in historical import and session-browser
+  recovery. Both `discoverCodexLogs` and `discoverCodexSessionFiles`, plus the
+  live watcher, currently scope discovery to `$CODEX_HOME/sessions`.
+- **Why or evidence**: source inspection on 2026-11-05 confirmed that
+  `$CODEX_HOME/archived_sessions` is omitted. OpenAI's
+  [desktop troubleshooting reference](https://learn.chatgpt.com/docs/reference/troubleshooting#feedback-and-logs)
+  documents both roots. Sessions archived before their first ingestion, or
+  before rebuilding a lost projection, can therefore be missed. This is a
+  discovery gap, not evidence that previously ingested sessions are deleted.
+- **Next**: cover both roots in event import, browser sync and verification
+  discovery; test archive-before-first-import, moves between roots, compressed
+  rollouts, exclusions and duplicate identity. Preserve existing session links.
+
+### Desktop source coverage validation
+
+- **What**: Establish repeatable coverage checks for local desktop coding
+  sessions, and decide whether Claude Cowork/chat is in scope as another source.
+- **Why or evidence**: investigation on 2026-11-05 verified message readback
+  through the running v2 API for existing explicitly desktop-originated Codex
+  rollouts, including compressed files. Installed Claude Desktop 1.32885.1's
+  transcript resolver accepts both per-session app-data `.claude/projects`
+  roots and the global Claude projects root for Code. Only the latter is
+  discovered today. A controlled local Code session later on 2026-11-05
+  (Desktop 4.23118.0, Claude Code 2.1.317) wrote to the global projects root
+  and appeared automatically in v2 session/message/activity reads. Imported
+  input/output/cache usage matched its transcript, and hook lifecycle events
+  arrived. It made no tool calls; live SSE delivery was not observed. A separate desktop
+  session-list registry is not itself a separate transcript store; see the
+  [desktop reference](https://code.claude.com/docs/en/desktop#coming-from-the-cli).
+  Legacy local Cowork transcripts and audit JSONLs under the desktop app's
+  `local-agent-mode-sessions` directory fall outside the current Claude
+  `<claudeDir>/projects` discovery root. Cloud and remote execution must be
+  evaluated separately from the desktop interface used to start them.
+- **Next**: extend the local Desktop check with a tool call and observe live
+  SSE delivery. Record app/harness versions and effective roots; add
+  descriptor-aware discovery with session-ID deduplication only when a selected
+  execution mode writes outside the configured root. If
+  Cowork is selected, inspect current cloud/export support and design an explicit
+  source adapter; prefer nested transcripts over duplicate audit records. Do
+  not claim full desktop coverage from local coding samples alone.
+
 ### Consistent session identity and parent/child coverage across read surfaces
 
 - **What**: Sessions lists and child lookups reconcile known Codex rollout/UUID

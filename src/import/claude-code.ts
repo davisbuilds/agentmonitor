@@ -48,8 +48,8 @@ interface ClaudeCodeLogLine {
   error?: string | { message?: string };
   cwd?: string;
   gitBranch?: string;
-  entrypoint?: string;    // 'cli' (interactive) | 'sdk-cli' (headless -p)
-  promptSource?: string;  // 'typed'/'queued'/... (interactive) | 'sdk' (headless)
+  entrypoint?: string;    // 'cli'/'claude-desktop' (interactive) | 'sdk-cli' (headless -p)
+  promptSource?: string;  // SDK transport alone does not distinguish Desktop from headless runs
   // tool_result fields
   is_error?: boolean;
   status?: string;
