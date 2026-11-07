@@ -187,3 +187,47 @@ export function repairProjectNames(db: Database, options: ProjectRepairOptions):
     renames: [...renameCounts.values()].sort((a, b) => b.sessions - a.sessions || (a.to ?? '').localeCompare(b.to ?? '')),
   };
 }
+
+/**
+ * Rename stored project names by an explicit list, for sessions whose
+ * transcripts are gone, so `repairProjectNames` has nothing to re-derive them
+ * from. A null target clears the name, as for scratch work.
+ */
+export function renameStoredProjects(
+  db: Database,
+  options: { names: Array<[from: string, to: string | null]>; apply: boolean },
+): ProjectRepairReport {
+  const rows = { events: 0, sessions: 0, browsing_sessions: 0 };
+  const renames: ProjectRepairReport['renames'] = [];
+  const changed = new Set<string>();
+
+  const sessionIds = db.prepare(`SELECT session_id AS id FROM events WHERE project = ?
+    UNION SELECT id FROM sessions WHERE project = ?
+    UNION SELECT id FROM browsing_sessions WHERE project = ?`);
+  const renameEvents = db.prepare('UPDATE events SET project = ? WHERE project = ?');
+  const renameSessions = db.prepare('UPDATE sessions SET project = ? WHERE project = ?');
+  const renameBrowser = db.prepare('UPDATE browsing_sessions SET project = ? WHERE project = ?');
+  const hasSummary = db.prepare('SELECT 1 FROM session_trace_summary WHERE session_id = ?');
+
+  try {
+    db.transaction(() => {
+      for (const [from, to] of options.names) {
+        const ids = (sessionIds.all(from, from, from) as Array<{ id: string }>).map(row => row.id);
+        if (ids.length === 0) continue;
+        rows.events += renameEvents.run(to, from).changes;
+        rows.sessions += renameSessions.run(to, from).changes;
+        rows.browsing_sessions += renameBrowser.run(to, from).changes;
+        for (const id of ids) {
+          changed.add(id);
+          if (hasSummary.get(id)) maintainSessionTraceSummary(id);
+        }
+        renames.push({ from, to, sessions: ids.length });
+      }
+      if (!options.apply) throw DRY_RUN_ROLLBACK;
+    })();
+  } catch (err) {
+    if (err !== DRY_RUN_ROLLBACK) throw err;
+  }
+
+  return { apply: options.apply, transcripts_scanned: 0, sessions_changed: changed.size, rows, renames };
+}

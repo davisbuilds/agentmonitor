@@ -134,6 +134,30 @@ test('sessions show returns exit 4 for missing sessions', async () => {
   assert.match(result.stderr, /Session not found/);
 });
 
+test('sessions repair-projects --names previews a listed rename without writing', async () => {
+  const names = path.join(tempDir, 'names.json');
+  fs.writeFileSync(names, JSON.stringify({ agentmonitor: 'agentmonitor-renamed', 'never-stored': null }));
+  const result = await runCli(['sessions', 'repair-projects', '--names', names, '--json']);
+
+  assert.equal(result.exitCode, 0, result.stderr);
+  const report = JSON.parse(result.stdout) as { apply: boolean; rows: Record<string, number>; renames: unknown[] };
+  assert.equal(report.apply, false);
+  assert.deepEqual(report.rows, { events: 1, sessions: 0, browsing_sessions: 1 });
+  assert.deepEqual(report.renames, [{ from: 'agentmonitor', to: 'agentmonitor-renamed', sessions: 1 }]);
+  const listed = await runCli(['sessions', 'list', '--json']);
+  assert.match(listed.stdout, /"project": ?"agentmonitor"/);
+});
+
+test('sessions repair-projects --names rejects a list it cannot read as names', async () => {
+  for (const [file, body] of [['not-json.json', '{'], ['number.json', '{"tmp": 3}'], ['empty.json', '{"tmp": " "}'], ['array.json', '["tmp"]'], ['same.json', '{"tmp": "tmp"}']]) {
+    const names = path.join(tempDir, file);
+    fs.writeFileSync(names, body);
+    const result = await runCli(['sessions', 'repair-projects', '--names', names]);
+    assert.equal(result.exitCode, 2, `${file}: ${result.stderr}`);
+    assert.match(result.stderr, /--names/);
+  }
+});
+
 test('usage summary emits cost totals as JSON', async () => {
   const result = await runCli(['usage', 'summary', '--json']);
 

@@ -808,8 +808,20 @@ amon sessions repair-projects --apply
 ```
 
 Take a validated backup first, and restart the server afterwards so the
-Monitor's cached totals pick up the names. Sessions whose transcript is gone keep
-their names. Re-running finds nothing further to rename.
+Monitor's cached totals pick up the names. Re-running finds nothing further to
+rename.
+
+Sessions whose transcript is gone keep their names, since nothing is left to
+re-derive them from. To rename or clear those by hand, pass `--names` a JSON
+object from each stored name to its new name, or to `null` for no project. It
+matches whole names only, changes events, Monitor sessions, browser rows and
+trace summaries alike, reads no transcripts, and previews until `--apply`:
+
+```sh
+echo '{"feed-code-coverage-backfill-feed-2026-05-05": "feed", "tmp": null}' > names.json
+amon sessions repair-projects --names names.json --json   # preview, no writes
+amon sessions repair-projects --names names.json --apply
+```
 
 ### Pricing a newly released model
 

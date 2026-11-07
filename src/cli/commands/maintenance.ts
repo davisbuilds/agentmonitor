@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { parseDateOption, parseOptionSet, rejectExtraPositionals } from '../args.js';
@@ -102,6 +103,29 @@ function backfillStaleSessionTitles(db: Database.Database): { updated: number; f
 
   txn();
   return { updated, fallbackOnly };
+}
+
+/**
+ * A `--names` file: a JSON object from each stored project name to its new
+ * name, or to null to clear it. It is the only evidence for sessions whose
+ * transcripts are gone, so anything else is refused rather than guessed at.
+ */
+function readProjectNames(file: string): Array<[string, string | null]> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch (err) {
+    throw invalidUsage(`Cannot read --names ${file}: ${(err as Error).message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw invalidUsage(`--names ${file} must be a JSON object from stored name to new name or null`);
+  }
+  return Object.entries(parsed).map(([from, to]) => {
+    if (!from.trim() || from === to || (to !== null && (typeof to !== 'string' || !to.trim()))) {
+      throw invalidUsage(`--names ${file}: ${JSON.stringify(from)} must map to another non-empty name or null`);
+    }
+    return [from, to];
+  });
 }
 
 export function registerMaintenanceCommands(): void {
@@ -556,27 +580,37 @@ export function registerMaintenanceCommands(): void {
     summary: 'Rename stored projects to their repository, re-derived from each session transcript',
     // Reports by default: this rewrites stored history, so writing is opt-in
     // through --apply rather than opt-out through --dry-run.
-    usage: 'sessions repair-projects [--apply] [--claude-dir <path>] [--codex-dir <path>]',
+    usage: 'sessions repair-projects [--apply] [--claude-dir <path>] [--codex-dir <path>] [--names <file>]',
     examples: [
       'sessions repair-projects --json',
       'sessions repair-projects --apply',
+      'sessions repair-projects --names names.json --json',
     ],
     async handler(ctx, args) {
-      const parsed = parseOptionSet(args, new Set(['--claude-dir', '--codex-dir']), new Set(['--apply']));
+      const parsed = parseOptionSet(args, new Set(['--claude-dir', '--codex-dir', '--names']), new Set(['--apply']));
       rejectExtraPositionals(parsed.positionals, 'amon sessions repair-projects [--apply]');
+      const namesPath = parsed.values.get('--names');
+      // Read before opening the database, so a bad list touches nothing.
+      if (namesPath !== undefined && (parsed.values.has('--claude-dir') || parsed.values.has('--codex-dir'))) {
+        throw invalidUsage('--names renames by its list and reads no transcripts; drop --claude-dir and --codex-dir');
+      }
+      const names = namesPath === undefined ? null : readProjectNames(namesPath);
       const { createConfig } = await import('../../config.js');
       const runtimeConfig = createConfig();
       const { initSchema } = await import('../../db/schema.js');
       const { closeDb, getDb } = await import('../../db/connection.js');
-      const { repairProjectNames } = await import('../../import/project-repair.js');
+      const { renameStoredProjects, repairProjectNames } = await import('../../import/project-repair.js');
       initSchema();
       try {
-        const report = repairProjectNames(getDb(), {
-          claudeDir: parsed.values.get('--claude-dir') ?? runtimeConfig.claudeDir,
-          codexDir: parsed.values.get('--codex-dir'),
-          apply: parsed.flags.has('--apply'),
-          excludePatterns: runtimeConfig.sync.excludePatterns,
-        });
+        const apply = parsed.flags.has('--apply');
+        const report = names
+          ? renameStoredProjects(getDb(), { names, apply })
+          : repairProjectNames(getDb(), {
+            claudeDir: parsed.values.get('--claude-dir') ?? runtimeConfig.claudeDir,
+            codexDir: parsed.values.get('--codex-dir'),
+            apply,
+            excludePatterns: runtimeConfig.sync.excludePatterns,
+          });
         printSummary(ctx, report.apply ? 'Project name repair' : 'Project name repair preview', report);
         // The running server caches Monitor totals in its own process.
         if (report.apply && report.sessions_changed > 0) {
