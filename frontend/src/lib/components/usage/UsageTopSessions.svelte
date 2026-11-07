@@ -39,8 +39,8 @@
       <div class="space-y-2">
       {#each usage.topSessions as row}
         <div class="rounded-lg border border-line bg-surface-2 px-3 py-3">
-          <div class="flex flex-wrap items-start justify-between gap-3">
-            <div class="min-w-0">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0 flex-1">
               <div class="truncate text-body font-medium text-text" title={row.id}>{sessionTitle(row)}</div>
               <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-meta text-text-faint">
                 <span>{row.project ?? 'No project'}</span>
@@ -51,7 +51,7 @@
                 <span class="tabular font-mono" title={usageTokenSplit(row)}>{formatNumber(usageTokenTotal(row))} all tokens</span>
               </div>
             </div>
-            <div class="text-right">
+            <div class="shrink-0 text-right">
               <div class="tabular font-mono text-body text-text">{formatCost(row.cost_usd)}</div>
               <div class="mt-1 tabular font-mono text-meta text-text-faint">
                 {row.last_activity_at ? row.last_activity_at.slice(0, 10) : 'No timestamp'}

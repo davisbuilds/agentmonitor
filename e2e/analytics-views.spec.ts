@@ -247,6 +247,29 @@ test('Overview leaves top sessions to Usage and skill panels to Skills', async (
   expect((await download).suggestedFilename()).toMatch(/^agentmonitor-skills-.*\.csv$/);
 });
 
+test('Top Sessions keeps the cost beside the session, however long its details run', async ({ page }) => {
+  // A long project name stretches the details line past the card's width.
+  const usage = getDb().prepare(`INSERT INTO events (session_id, agent_type, event_type, model, project, tokens_in, cost_usd, client_timestamp, source)
+    VALUES ('e2e-analytics-views-session', 'claude_code', 'llm_response', 'claude-opus-5-5', 'a-project-whose-name-runs-on-and-on', 1000, 1.5, ?, 'import')`);
+  const id = usage.run(new Date().toISOString()).lastInsertRowid;
+  try {
+    for (const width of [1440, 390]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.goto(`${baseUrl}/app/#analytics?view=usage`);
+      const panel = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Top Sessions' }) });
+      const card = panel.locator('div.rounded-lg').first();
+      const cost = panel.getByText('$1.50', { exact: true });
+      await expect(cost).toBeVisible();
+      const [cardBox, costBox] = [await card.boundingBox(), await cost.boundingBox()];
+      // On the card's first line, at its right edge, rather than wrapped below the details.
+      expect(costBox!.y - cardBox!.y, `cost at ${width}px`).toBeLessThan(24);
+      expect(cardBox!.x + cardBox!.width - (costBox!.x + costBox!.width), `cost at ${width}px`).toBeLessThan(24);
+    }
+  } finally {
+    getDb().prepare('DELETE FROM events WHERE id = ?').run(id);
+  }
+});
+
 test('Overview opens on the headline row, with Velocity folded into it', async ({ page }) => {
   await page.goto(`${baseUrl}/app/#analytics`);
   const headlines = page.getByRole('region', { name: 'Overview headlines' });
