@@ -120,12 +120,20 @@ function readProjectNames(file: string): Array<[string, string | null]> {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw invalidUsage(`--names ${file} must be a JSON object from stored name to new name or null`);
   }
-  return Object.entries(parsed).map(([from, to]) => {
+  const names = Object.entries(parsed).map(([from, to]): [string, string | null] => {
     if (!from.trim() || from === to || (to !== null && (typeof to !== 'string' || !to.trim()))) {
       throw invalidUsage(`--names ${file}: ${JSON.stringify(from)} must map to another non-empty name or null`);
     }
     return [from, to];
   });
+  // Names are renamed one after another, so a target that is also a source
+  // would be renamed again and the order of keys would decide the result.
+  const sources = new Set(names.map(([from]) => from));
+  const chained = names.find(([, to]) => to !== null && sources.has(to));
+  if (chained) {
+    throw invalidUsage(`--names ${file}: ${JSON.stringify(chained[1])} is both a new name and a stored name to rename; split the list into separate runs`);
+  }
+  return names;
 }
 
 export function registerMaintenanceCommands(): void {

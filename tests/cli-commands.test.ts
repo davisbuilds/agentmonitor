@@ -149,7 +149,9 @@ test('sessions repair-projects --names previews a listed rename without writing'
 });
 
 test('sessions repair-projects --names rejects a list it cannot read as names', async () => {
-  for (const [file, body] of [['not-json.json', '{'], ['number.json', '{"tmp": 3}'], ['empty.json', '{"tmp": " "}'], ['array.json', '["tmp"]'], ['same.json', '{"tmp": "tmp"}']]) {
+  for (const [file, body] of [['not-json.json', '{'], ['number.json', '{"tmp": 3}'], ['empty.json', '{"tmp": " "}'], ['array.json', '["tmp"]'], ['same.json', '{"tmp": "tmp"}'],
+    // A target that is also a source would be renamed again, so the order of keys would decide.
+    ['chain.json', '{"old": "new", "new": null}'], ['swap.json', '{"a": "b", "b": "a"}']]) {
     const names = path.join(tempDir, file);
     fs.writeFileSync(names, body);
     const result = await runCli(['sessions', 'repair-projects', '--names', names]);

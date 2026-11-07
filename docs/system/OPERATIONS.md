@@ -815,7 +815,9 @@ Sessions whose transcript is gone keep their names, since nothing is left to
 re-derive them from. To rename or clear those by hand, pass `--names` a JSON
 object from each stored name to its new name, or to `null` for no project. It
 matches whole names only, changes events, Monitor sessions, browser rows and
-trace summaries alike, reads no transcripts, and previews until `--apply`:
+trace summaries alike, reads no transcripts, and previews until `--apply`. A
+new name may not also be a stored name in the same list (a chain or a swap);
+run those as separate lists:
 
 ```sh
 echo '{"feed-code-coverage-backfill-feed-2026-05-05": "feed", "tmp": null}' > names.json
