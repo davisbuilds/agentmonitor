@@ -38,6 +38,10 @@ interface TranscriptProjects {
 }
 
 const DRY_RUN_ROLLBACK = Symbol('dry-run rollback');
+// Both repairs take the write lock as they begin (`.immediate()`). They read
+// before they write, and a deferred transaction that has read cannot wait for
+// the running server's write: SQLite fails it as locked at once, busy timeout
+// or not. Taken up front, the lock waits like any other writer.
 const CWD_FIELD = /"cwd"\s*:\s*("(?:[^"\\]|\\.)*")/g;
 const SESSION_ID_FIELD = /"sessionId"\s*:\s*"([^"\\]+)"/g;
 
@@ -174,7 +178,7 @@ export function repairProjectNames(db: Database, options: ProjectRepairOptions):
         }
       }
       if (!options.apply) throw DRY_RUN_ROLLBACK;
-    })();
+    }).immediate();
   } catch (err) {
     if (err !== DRY_RUN_ROLLBACK) throw err;
   }
@@ -224,7 +228,7 @@ export function renameStoredProjects(
         renames.push({ from, to, sessions: ids.length });
       }
       if (!options.apply) throw DRY_RUN_ROLLBACK;
-    })();
+    }).immediate();
   } catch (err) {
     if (err !== DRY_RUN_ROLLBACK) throw err;
   }

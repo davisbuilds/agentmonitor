@@ -583,6 +583,25 @@ the build.
   SIGTERM (and what it is doing, e.g. `sample` on macOS), before raising the
   wait.
 
+#### CLI repairs that read before they write can fail as locked beside the server
+- **What**: a deferred transaction that has read cannot wait for another
+  writer: SQLite fails its first write as "database is locked" at once,
+  regardless of the 30 s busy timeout. Commands run while the server writes hit
+  this. `amon sessions repair-projects` was fixed (2026-11-07, `.immediate()`,
+  `tests/project-repair-lock.test.ts`). These still read first in a deferred
+  transaction: `costs recalc`'s preview (`src/pricing/recalc.ts`), the Claude
+  usage repair (`src/import/claude-usage-repair.ts`, the attribution pass),
+  `reconcileCodexSession` (`src/import/codex-reconcile.ts`), and
+  `backfillStaleSessionTitles` (`src/cli/commands/maintenance.ts`).
+- **Why or evidence**: on the live store, 2 of 5 timed `repair-projects`
+  previews failed in 0.6 s with the server running; a standalone probe (read,
+  then write while another process holds the write lock) fails in 0 ms
+  deferred and succeeds after the other commit with `.immediate()`. The four
+  sites above were read, not run, for this pattern.
+- **Next**: give each the same `.immediate()` and the same child-writer test;
+  for the reconcile, check first whether the server's own import calls it,
+  where the lock holder is usually itself.
+
 ### Cost per outcome
 
 Shipped 2026-11 (#253, #255 and the Git view's section). The bar is "landed
