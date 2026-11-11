@@ -121,3 +121,10 @@ test('an event a real hook spooled while the server was down is stored by the ne
   assert.ok(row.event_id && row.client_timestamp);
   assert.deepEqual(fs.readdirSync(spool), []);
 });
+
+test('a hook with no date command still spools a file the drain reads', () => {
+  // send_event.sh names the file `0-<id>.json` when it cannot tell the time.
+  spooled('0-hook-123-45678.json', event('no-clock', '2026-11-11T05:30:00Z'));
+  assert.deepEqual(drainHookSpool(spool), { ingested: 1, duplicates: 0, rejected: 0, errors: 0 });
+  assert.deepEqual(fs.readdirSync(spool), []);
+});

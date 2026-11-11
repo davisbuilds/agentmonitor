@@ -29,8 +29,8 @@ export interface HookSpoolDrain {
   errors: number;
 }
 
-/** `<unix seconds>-<event id>.json`, which the hooks write by renaming a dot-prefixed temporary file. */
-const SPOOL_FILE = /^\d{9,13}-[A-Za-z0-9._-]{1,128}\.json$/;
+/** `<unix seconds>-<event id>.json` (seconds `0` when the hook could not tell the time), which the hooks write by renaming a dot-prefixed temporary file. */
+const SPOOL_FILE = /^\d{1,13}-[A-Za-z0-9._-]{1,128}\.json$/;
 /** Hooks stop spooling at this many files; a drain reads no more than this. */
 const HOOK_SPOOL_MAX_FILES = 10_000;
 const DRAIN_INTERVAL_MS = 60_000;
