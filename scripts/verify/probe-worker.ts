@@ -337,6 +337,10 @@ function coverageSummary(routes: string[], failed: Record<string, number>, state
 }
 
 
+// A write with RETURNING hands back rows, so better-sqlite3 marks it a reader,
+// but replaying it on the read-only copy fails: it is not a read to time.
+const WRITE_STATEMENT = /^\s*(?:INSERT|UPDATE|DELETE|REPLACE)\b/i;
+
 /**
  * Drive the compiled app's read routes against the snapshot and record each
  * distinct read statement (SQL and parameters) that `include` accepts. `setup`
@@ -361,7 +365,7 @@ async function recordRouteStatements(
       for (const method of ['all', 'get', 'iterate']) {
         const original = proto[method];
         proto[method] = function (this: Database.Statement, ...args: unknown[]) {
-          if (recording && this.reader && include(this.source)) {
+          if (recording && this.reader && !WRITE_STATEMENT.test(this.source) && include(this.source)) {
             const key = `${this.source}\u0000${JSON.stringify(args)}`;
             if (!recorded.has(key)) recorded.set(key, { sql: this.source, params: args, route });
           }
