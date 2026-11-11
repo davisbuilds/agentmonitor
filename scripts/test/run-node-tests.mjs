@@ -43,7 +43,12 @@ for (const cache of TOOL_CACHES) {
 const child = spawn(process.execPath, ['--import', 'tsx', '--test', ...testFlags, ...process.argv.slice(2)], {
   stdio: 'inherit',
   // No test asks GitHub anything: a server a test starts keeps its git pass offline.
-  env: { ...testEnv, TMPDIR: privateTmp, TMP: privateTmp, TEMP: privateTmp, AGENTMONITOR_GITHUB_LOOKUPS: '0' },
+  // A hook run against a dead URL spools its event: keep it out of the real
+  // spool, which a running server would drain into the real database.
+  env: {
+    ...testEnv, TMPDIR: privateTmp, TMP: privateTmp, TEMP: privateTmp, AGENTMONITOR_GITHUB_LOOKUPS: '0',
+    AGENTMONITOR_HOOK_SPOOL_DIR: path.join(privateTmp, 'hook-spool'),
+  },
 });
 
 const forward = signal => child.kill(signal);

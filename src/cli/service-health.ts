@@ -7,7 +7,7 @@ export interface ServiceHealth {
   detail: string;
 }
 
-export const SERVICE_HEALTH_TIMEOUT_MS = 3_000;
+const SERVICE_HEALTH_TIMEOUT_MS = 3_000;
 
 /**
  * Ask a running server whether it answers. launchd reports a process that is

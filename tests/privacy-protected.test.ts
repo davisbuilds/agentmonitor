@@ -18,7 +18,7 @@ test('the folders macOS guards with a privacy prompt, and only those', () => {
     '/Users/someone/Dev/agentmonitor',
     '/Users/someone/DocumentsArchive/x',
     '/Users/someone/Library/Application Support/x',
-    '/Users/other/Documents/x',
+    '/Users/example/Documents/x',
     '/tmp/scratch',
   ]) assert.equal(isPrivacyProtectedPath(open, home), false, open);
 });

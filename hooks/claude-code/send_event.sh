@@ -88,13 +88,60 @@ json_escape() {
   fi
 }
 
-# POST an event payload to AgentMonitor. Fire-and-forget (backgrounded).
+# Where an event goes when the server cannot take it; the server drains it.
+# Keep the default in step with hookSpoolDir in src/config.ts.
+AGENTMONITOR_HOOK_SPOOL_DIR="${AGENTMONITOR_HOOK_SPOOL_DIR:-$HOME/.local/state/agentmonitor/hook-spool}"
+HOOK_SPOOL_MAX_FILES=10000
+
+# A fresh id per event, so a spooled event the server also received is stored
+# once, while two loads of the same file stay two events. Hooks must work with
+# a bare PATH, so each tool has a fallback that bash provides itself.
+new_event_id() {
+  local id=""
+  command -v uuidgen >/dev/null 2>&1 && id="$(uuidgen 2>/dev/null)"
+  [ -n "$id" ] || id="hook-$$-$RANDOM$RANDOM$RANDOM$RANDOM"
+  printf '%s' "$id"
+}
+
+# Unix seconds, or 0 when date is unavailable (the spool still orders by name).
+now_seconds() {
+  local seconds=""
+  command -v date >/dev/null 2>&1 && seconds="$(date +%s 2>/dev/null)"
+  printf '%s' "${seconds:-0}"
+}
+
+# Write one event into the spool: a single line, private to the user, published
+# by renaming its temporary file so the server never reads half of it.
+spool_event() {
+  local payload="$1" id="$2" dir="$AGENTMONITOR_HOOK_SPOOL_DIR"
+  umask 077
+  mkdir -p "$dir" 2>/dev/null || return 0
+  # Bounded: a server that never returns must not fill the disk.
+  local spooled
+  shopt -s nullglob
+  spooled=("$dir"/*.json)
+  [ "${#spooled[@]}" -lt "$HOOK_SPOOL_MAX_FILES" ] || return 0
+  local tmp="$dir/.$id.tmp"
+  if ! { printf '%s\n' "${payload//$'\n'/ }" >"$tmp" && mv "$tmp" "$dir/$(now_seconds)-$id.json"; } 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+  fi
+}
+
+# POST an event payload to AgentMonitor. Fire-and-forget (backgrounded). Each
+# event carries its own id and time; when the server cannot be reached in time,
+# it is spooled for the server to store later rather than lost.
 send_event() {
-  local payload="$1"
-  curl -s -X POST "${AGENTMONITOR_URL}/api/events" \
-    -H "Content-Type: application/json" \
-    -d "$payload" \
-    --connect-timeout 2 \
-    --max-time 5 \
-    >/dev/null 2>&1 &
+  local id stamp="" payload
+  id="$(new_event_id)"
+  command -v date >/dev/null 2>&1 && stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+  # The payload is a JSON object: put the id (and time, when known) first inside it.
+  payload="{\"event_id\":\"$id\",${stamp:+\"client_timestamp\":\"$stamp\",}${1#*\{}"
+  (
+    curl -s -o /dev/null -X POST "${AGENTMONITOR_URL}/api/events" \
+      -H "Content-Type: application/json" \
+      -d "$payload" \
+      --connect-timeout 2 \
+      --max-time 5 \
+      || spool_event "$payload" "$id"
+  ) >/dev/null 2>&1 &
 }

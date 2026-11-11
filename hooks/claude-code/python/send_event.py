@@ -10,6 +10,8 @@ import json
 import os
 import subprocess
 import sys
+import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 AGENTMONITOR_URL = os.environ.get("AGENTMONITOR_URL", "http://127.0.0.1:3141")
@@ -57,37 +59,69 @@ def get_project() -> str:
     return Path(cwd).name if cwd else ""
 
 
+# Where an event goes when the server cannot take it; the server drains it.
+# Keep the default in step with hookSpoolDir in src/config.ts.
+AGENTMONITOR_HOOK_SPOOL_DIR = os.environ.get(
+    "AGENTMONITOR_HOOK_SPOOL_DIR",
+    os.path.join(os.path.expanduser("~"), ".local", "state", "agentmonitor", "hook-spool"),
+)
+
 # The POST runs in a detached child so the hook can exit at once, the way the
 # shell hooks background curl. A thread cannot do this: the interpreter kills
 # daemon threads on exit, so it had to wait (up to 2s) for a slow server.
+# When the server cannot be reached in time, the child spools the event for
+# the server to store later: one line, private to the user, published by
+# renaming its temporary file so the server never reads half of it.
 _POST_CHILD = """
-import sys, urllib.request
+import os, sys, time, urllib.request
+url, spool, event_id = sys.argv[1], sys.argv[2], sys.argv[3]
+body = sys.stdin.buffer.read()
 try:
     urllib.request.urlopen(urllib.request.Request(
-        sys.argv[1], data=sys.stdin.buffer.read(),
-        headers={"Content-Type": "application/json"}, method="POST",
+        url, data=body, headers={"Content-Type": "application/json"}, method="POST",
     ), timeout=5)
+except urllib.error.HTTPError:
+    pass  # the server answered: nothing to retry
 except Exception:
-    pass
+    try:
+        os.umask(0o077)
+        os.makedirs(spool, exist_ok=True)
+        if sum(1 for name in os.listdir(spool) if name.endswith(".json")) < 10000:
+            tmp = os.path.join(spool, "." + event_id + ".tmp")
+            with open(tmp, "wb") as handle:
+                handle.write(body.replace(b"\\n", b" ") + b"\\n")
+            os.rename(tmp, os.path.join(spool, "%d-%s.json" % (int(time.time()), event_id)))
+    except Exception:
+        pass
 """
 
 
 def send_event(payload: dict) -> None:
-    """POST an event payload to AgentMonitor. Fire-and-forget (detached child)."""
+    """POST an event payload to AgentMonitor. Fire-and-forget (detached child).
+
+    Each event carries its own id and time, so one spooled while the server was
+    unreachable is stored at the time it happened, and stored once.
+    """
     try:
+        event_id = str(uuid.uuid4())
+        stamped = {
+            "event_id": event_id,
+            "client_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
+            **payload,
+        }
         detach = (
             {"creationflags": subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP}
             if sys.platform == "win32"
             else {"start_new_session": True}
         )
         child = subprocess.Popen(
-            [sys.executable, "-c", _POST_CHILD, f"{AGENTMONITOR_URL}/api/events"],
+            [sys.executable, "-c", _POST_CHILD, f"{AGENTMONITOR_URL}/api/events", AGENTMONITOR_HOOK_SPOOL_DIR, event_id],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             **detach,
         )
-        child.stdin.write(json.dumps(payload).encode("utf-8"))
+        child.stdin.write(json.dumps(stamped).encode("utf-8"))
         child.stdin.close()
     except Exception:
         pass  # fire-and-forget

@@ -5,6 +5,7 @@ import { closeDb, getDb } from './db/connection.js';
 import { initSchema } from './db/schema.js';
 import { getStatsForBroadcast, updateIdleSessions } from './db/queries.js';
 import { SERVICE_WATCHDOG, startEventLoopWatchdog } from './event-loop-watchdog.js';
+import { startHookSpoolDrain, stopHookSpoolDrain } from './import/hook-spool.js';
 import { runningAsLaunchdService } from './util/service-context.js';
 import {
   startSessionSweepBroadcast,
@@ -82,6 +83,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       };
 
       stopWatchdog?.();
+      stopHookSpoolDrain();
       if (sessionChecker) clearInterval(sessionChecker);
       stopSessionSweepBroadcast();
       if (autoImportTimer) clearInterval(autoImportTimer);
@@ -153,6 +155,9 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
     console.log(`Dashboard: ${publicUrl ? `${publicUrl}/app/` : `http://localhost:${config.port}/app/`}`);
 
     startStatsBroadcast();
+    // Before the watcher's scans, which hold the event loop: what hooks spooled
+    // while the server was down is stored first.
+    startHookSpoolDrain();
     if (!options.noWatch) startWatcher();
     startProviderQuotaPolling();
     startGitActivityPolling();

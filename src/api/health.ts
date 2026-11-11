@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { broadcaster } from '../sse/emitter.js';
 import { serverBuildStatus } from '../build-fingerprint.js';
 import { getRecentUnpricedModels } from '../db/v2-queries.js';
+import { hookSpoolStatus } from '../import/hook-spool.js';
 
 export const healthRouter = Router();
 
@@ -26,5 +27,6 @@ healthRouter.get('/', (_req: Request, res: Response) => {
     sse_clients: broadcaster.clientCount,
     build: serverBuildStatus(),
     pricing: { unpriced_models: getRecentUnpricedModels() },
+    hook_spool: hookSpoolStatus(),
   });
 });

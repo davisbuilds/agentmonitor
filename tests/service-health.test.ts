@@ -48,7 +48,7 @@ test('service status says a live process that does not serve is not responding, 
   const { formatServiceStatus } = await import('../src/cli/commands/service.js');
   const status = {
     label: 'dev.agentmonitor.serve', loaded: true, state: 'running', pid: 19816, last_exit_code: '(never exited)',
-    plist_path: '/Users/x/Library/LaunchAgents/dev.agentmonitor.serve.plist', installed: true,
+    plist_path: '/Users/example/Library/LaunchAgents/dev.agentmonitor.serve.plist', installed: true,
     program_arguments: ['node', '/x/dist/cli.js', 'serve'], entry_exists: true, address: { host: '127.0.0.1', port: 3141 },
   };
   const hung = formatServiceStatus(status, { responding: false, detail: 'did not answer /api/health within 3s' });

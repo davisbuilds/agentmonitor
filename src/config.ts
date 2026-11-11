@@ -250,6 +250,11 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     autoImportIntervalMinutes: parseEnvInt(env.AGENTMONITOR_AUTO_IMPORT_MINUTES, 10, 0),
     projectsDir: resolveProjectsDir(env, cwd),
     claudeDir: resolveClaudeDir(env, cwd),
+    // Where hooks write the events they could not deliver; the server drains it.
+    // The hooks default to the same path (hooks/claude-code/send_event.sh).
+    hookSpoolDir: env.AGENTMONITOR_HOOK_SPOOL_DIR
+      ? path.resolve(cwd, expandTilde(env.AGENTMONITOR_HOOK_SPOOL_DIR))
+      : path.join(os.homedir(), '.local', 'state', 'agentmonitor', 'hook-spool'),
     executionSpoolDir: env.AGENTMONITOR_EXECUTIONS_DIR
       ? path.resolve(cwd, expandTilde(env.AGENTMONITOR_EXECUTIONS_DIR)) : undefined,
     quotas: parseQuotaConfig(env),
