@@ -250,7 +250,25 @@ function parseRecords(entry: CodexRolloutEntry, bytes: Buffer, inherited: boolea
       let value: unknown;
       try { value = JSON.parse(raw); } catch { throw invalid('malformed or incomplete source record'); }
       if (!object(value)) throw invalid('source record must be an object');
-      if (records.length && value.type === 'session_meta') throw invalid('duplicate session metadata');
+      if (records.length && value.type === 'session_meta') {
+        // Resume can persist another metadata envelope in the same physical file.
+        // Keep that record and its ordinal, but never let it change this file's
+        // authoritative owner or replace the inherited physical bookmark.
+        const repeated = entryFromBytes(entry.filePath, Buffer.from(raw), entry);
+        if (repeated.sessionId !== entry.sessionId) {
+          if (!isCopiedParentMetadata(entry, repeated.sessionId, value.ordinal)) throw invalid('conflicting session metadata owner');
+          // A copied parent header describes its own history, not the child's
+          // physical lineage. Keep it as context without following its bookmark.
+        } else {
+          const initialBase = entry.historyBase;
+          const repeatedBase = repeated.historyBase;
+          if (initialBase?.thread_id !== repeatedBase?.thread_id
+            || initialBase?.end_ordinal_exclusive !== repeatedBase?.end_ordinal_exclusive
+            || initialBase?.end_byte_offset !== repeatedBase?.end_byte_offset) {
+            throw invalid('conflicting session metadata history_base');
+          }
+        }
+      }
       records.push({ value, raw, filePath: entry.filePath, rolloutId: entry.rolloutId, sessionId: entry.sessionId,
         inherited, startByteOffset: start, endByteOffset: end });
     }
@@ -258,6 +276,17 @@ function parseRecords(entry: CodexRolloutEntry, bytes: Buffer, inherited: boolea
   }
   if (!records.length || records[0].value.type !== 'session_meta') throw invalid('missing source metadata');
   return records;
+}
+
+/** Only explicit native inherited-prefix evidence permits a foreign metadata owner. */
+function isCopiedParentMetadata(entry: CodexRolloutEntry, owner: string, ordinal: unknown): boolean {
+  const boundary = entry.meta.subagent_history_start_ordinal;
+  if (!integer(boundary) || !integer(ordinal) || ordinal >= boundary) return false;
+  const source = entry.meta.source;
+  const subagent = object(source) ? source.subagent : undefined;
+  if (!object(subagent) && typeof subagent !== 'string') return false;
+  const spawn = object(subagent) && object(subagent.thread_spawn) ? subagent.thread_spawn : undefined;
+  return entry.meta.parent_thread_id === owner || entry.meta.forked_from_id === owner || spawn?.parent_thread_id === owner;
 }
 
 function validateOrdinals(entry: CodexRolloutEntry, records: CodexHistoryRecord[], cutoff?: CodexHistoryPosition): void {

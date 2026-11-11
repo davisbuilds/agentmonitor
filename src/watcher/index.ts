@@ -379,7 +379,14 @@ export function syncCodexSessionFileDetailed(
         : undefined);
     const active = entry ? currentCodexRollout(entry, inventory) : undefined;
     if (active) filePath = active.filePath;
-    const paginated = active && (inventory.bySessionId.get(active.sessionId) ?? []).some(candidate => candidate.historyBase || ['paginated', 'full'].includes(String(candidate.meta['history_mode'])));
+    const members = active ? inventory.bySessionId.get(active.sessionId) ?? [active] : [];
+    const nativeMembers = members.filter(candidate => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(candidate.rolloutId));
+    // A history-mode label alone does not make a complete root depend on other
+    // files. Keep its immutable compressed-file shortcut until actual lineage
+    // evidence requires resolving ancestors or retaining a stable root identity.
+    const paginated = active && (members.some(candidate => candidate.historyBase || candidate.historyError)
+      || nativeMembers.length > 1
+      || (nativeMembers.includes(active) && active.rolloutId !== active.sessionId));
     // Resolve completely before any projection is replaced. A missing base must
     // preserve the last complete browser history rather than store a plausible tail.
     const history = paginated ? resolveCodexRolloutHistory(filePath, { inventory }) : undefined;

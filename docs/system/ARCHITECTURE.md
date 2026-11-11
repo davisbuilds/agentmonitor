@@ -189,7 +189,9 @@ despite the field's name. Its decoded-byte offset and exclusive ordinal select
 an exact ancestor prefix. The shared history resolver validates ownership,
 complete-record boundaries and ordinals, rejects cycles and ambiguous or missing
 sources, and bounds depth and decoded bytes. Compressed files use decoded bytes
-for the same bookmarks.
+for the same bookmarks. Repeated metadata envelopes remain context: the first
+header owns the physical file, and a copied parent's header is accepted only
+inside an explicitly marked subagent prefix that names that parent.
 
 The native session owns its `import-cdx-` ledger across all discoverable physical
 members. Each member reads its bounded ancestors to initialize counters, request

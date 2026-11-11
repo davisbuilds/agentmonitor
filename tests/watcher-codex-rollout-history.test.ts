@@ -161,3 +161,38 @@ test('an invalid active creation timestamp preserves the previous complete proje
   assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), f.root, { force: true }).result, 'error');
   assert.deepEqual(f.contents(), before);
 });
+
+test('an unchanged compressed root with paginated mode skips without decoding its immutable bytes', () => {
+  const f = fixture();
+  const compressed = f.root + '.zst';
+  fs.writeFileSync(compressed, zstdCompressSync(fs.readFileSync(f.root)));
+  fs.unlinkSync(f.root);
+  assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), compressed).result, 'parsed');
+  assert.deepEqual(f.contents(), ['original request', 'discarded old tail']);
+  assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), compressed).result, 'skipped');
+  // Positive control above proves this file produces a complete projection.
+  // Once parsed, its unchanged mtime should suffice even if reads now fail.
+  fs.chmodSync(compressed, 0o000);
+  try {
+    assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), compressed).result, 'skipped');
+    assert.deepEqual(f.contents(), ['original request', 'discarded old tail']);
+  } finally {
+    fs.chmodSync(compressed, 0o644);
+  }
+});
+
+test('a replacement rollout with full history and no base retains the original browser identity', () => {
+  const f = fixture();
+  assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), f.root).result, 'parsed');
+  const leaf = f.writeLeaf();
+  const records = fs.readFileSync(leaf, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  records[0].payload.history_mode = 'full';
+  delete records[0].payload.history_base;
+  fs.writeFileSync(leaf, records.map(record => JSON.stringify(record)).join('\n') + '\n');
+  const replacement = watcher.syncCodexSessionFileDetailed(connection.getDb(), f.root, { force: true });
+  assert.equal(replacement.session_id, f.browserId);
+  assert.equal(replacement.result, 'parsed');
+  assert.deepEqual(f.contents(), ['continued request']);
+  assert.deepEqual(connection.getDb().prepare('SELECT id, file_path FROM browsing_sessions WHERE id = ?').get(f.browserId),
+    { id: f.browserId, file_path: leaf });
+});
