@@ -22,6 +22,7 @@
   import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { hasSessionCapability, sessionSourceLabel } from '../../session-capabilities';
   import { pins } from '../../stores/pins.svelte';
+  import { latestRequest } from '../../stores/latest-request';
   import ActivityMinimap from './ActivityMinimap.svelte';
   import MessageBlock from './MessageBlock.svelte';
   import { Badge, Button, EmptyState, Select } from '../ui';
@@ -155,11 +156,19 @@
     scheduleActiveBucketSync();
   }
 
+  // The loaded messages are one contiguous window. A jump replaces it, so it
+  // supersedes pages still loading at its edges, and a page lands only on the
+  // edge it was fetched for: otherwise it would splice the old window's
+  // neighbour onto the new one.
+  const windowRequests = latestRequest();
+
   async function loadWindowAroundOrdinal(targetOrdinal: number): Promise<boolean> {
+    const isCurrent = windowRequests.begin();
     const res = await fetchMessages(sessionId, {
       around_ordinal: targetOrdinal,
       limit: PAGE_SIZE,
     });
+    if (!isCurrent()) return false;
     messages = res.data;
     totalMessages = res.total;
     await tick();
@@ -305,12 +314,16 @@
   async function loadMore(): Promise<boolean> {
     if (loadingMore || !hasNextMessages) return false;
     loadingMore = true;
+    const isCurrent = windowRequests.join();
     try {
-      const nextOffset = (messages[messages.length - 1]?.ordinal ?? -1) + 1;
+      const edge = messages[messages.length - 1]?.ordinal ?? -1;
+      const nextOffset = edge + 1;
       const res = await fetchMessages(sessionId, {
         offset: nextOffset,
         limit: PAGE_SIZE,
       });
+      // Append only to the window this page continues.
+      if (!isCurrent() || (messages[messages.length - 1]?.ordinal ?? -1) !== edge) return false;
       messages = [...messages, ...res.data];
       totalMessages = res.total;
       await tick();
@@ -331,11 +344,14 @@
     const limit = startOrdinal - offset;
     const previousScrollHeight = transcriptEl?.scrollHeight ?? 0;
     loadingPrevious = true;
+    const isCurrent = windowRequests.join();
     try {
       const res = await fetchMessages(sessionId, {
         offset,
         limit,
       });
+      // Prepend only to the window this page continues.
+      if (!isCurrent() || (messages[0]?.ordinal ?? 0) !== startOrdinal) return false;
       messages = [...res.data, ...messages];
       totalMessages = res.total;
       await tick();
