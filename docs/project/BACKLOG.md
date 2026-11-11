@@ -138,15 +138,14 @@ so later readers know what still needs checking.
   schema change), read them in `frictionSignals`, and re-sync stored rollouts
   with `amon sync sessions --source codex --force`.
 
-### Codex activity on the Mac mini is not recorded
+### Mini and MacBook activity live in separate stores
 
-- **What**: the mini's Codex exports OTEL to its own `127.0.0.1:3141`, where no
-  amon runs, and its rollouts never reach the MacBook's store.
-- **Why or evidence**: on 2026-10-29 the mini's recent rollouts had no rows in
-  the MacBook store, and its own amon database was last written months earlier.
-- **Next**: choose between running amon on the mini (a separate store),
-  forwarding its OTEL to the MacBook (ingestion is loopback-only today), or a
-  periodic rollout import.
+- **What**: since 2026-11-11 the mini runs its own amon login service, so its
+  hooks, Codex OTEL and transcripts are recorded, in a store of its own. Neither
+  dashboard shows the other host's sessions.
+- **Revisit when**: a cross-host view is wanted. Options then: forward the
+  mini's OTEL and hooks to the MacBook (ingestion is loopback-only today), or a
+  periodic export from one store into the other.
 
 ### Quota burn rate
 
@@ -699,13 +698,27 @@ tracing on 2026-11-11; each was traced but not reproduced unless it says so.
 #### Server state assembled from independent flags
 - **What**: `src/build-fingerprint.ts` reports `{tracked, stale, started,
   current}`, which can express impossible pairs. A build in progress reads the
-  same as a finished one. `amon service status` (`src/cli/launchd.ts`) combines
-  `installed`, `loaded`, the launchd state and the PID without asking the
-  runtime lock. A crash loop caused by another owner therefore shows only as
-  an exit code, and an unreadable plist reads as installed.
+  same as a finished one. `amon service status` now asks `/api/health` (since
+  2026-11-11), but still combines `installed`, `loaded`, the launchd state and
+  the PID without asking the runtime lock. A crash loop caused by another owner
+  therefore shows only as an exit code, and an unreadable plist reads as
+  installed.
 - **Next**: when either surface changes, return one named state (with the
   detail alongside), so `--json` consumers branch on it rather than on flag
   combinations.
+
+#### Synchronous reads of session paths in the ingest path (hypothesis)
+- **What**: `projectNameFromCwd` (`src/util/project-identity.ts`) stats and
+  reads git files under a session's working directory synchronously, on every
+  hook event and import. Under the launchd service, a directory macOS guards
+  with a privacy prompt could block it as `opendir` blocked the git poller on
+  2026-11-11.
+- **Why or evidence**: not observed. The mini's service imported transcripts
+  whose working directories sit in `~/Documents` and kept answering, which
+  suggests `stat` does not wait on the prompt; `opendir` did. The watchdog now
+  restarts a server stuck that way.
+- **Next**: if a `[watchdog]` restart appears in the service log, take a stack
+  sample before it fires (`sample <pid> 2`) and check whether it is here.
 
 #### Frontend: remaining stale-slice and shared-flag sites
 - **What**:

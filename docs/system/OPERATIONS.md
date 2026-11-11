@@ -74,6 +74,18 @@ until `amon service restart` or the next login. Restarting a stopped service
 refuses while another server owns its database. Output goes to
 `~/Library/Logs/agentmonitor/serve.log`, which nothing rotates.
 
+`amon service status` asks the server's `/api/health` as well as launchd: a
+loaded server that does not answer within 3s reads `not responding` (`--json`:
+`responding: false`, with `health_detail`). Under the service, a watchdog thread
+ends a server whose event loop has not run for 5 minutes while it used under 1s
+of CPU, which is a wait in a blocking call rather than work, and launchd starts
+it again; the log says `[watchdog]`. A long import keeps the CPU busy and is left
+to finish. The service also leaves unread the session directories macOS guards
+with a privacy prompt (Desktop, Documents, Downloads, Movies, Music, Pictures,
+iCloud Drive, CloudStorage, `/Volumes`) when it reads git activity: no one can
+answer the prompt for a launchd job, and the read would wait for it. Sessions
+run there have no commit attribution under the service.
+
 launchd starts the server without the shell's environment. The install records
 `PATH` (the Codex quota reader runs `codex app-server`), `CODEX_HOME`, and the
 `AGENTMONITOR_*` settings in effect when it runs, and lists them. The service
@@ -182,6 +194,7 @@ instead. Common controls include:
 | Discovery and sync | `AGENTMONITOR_PROJECTS_DIR`, `AGENTMONITOR_CLAUDE_DIR`, `AGENTMONITOR_AUTO_IMPORT_MINUTES`, `AGENTMONITOR_SYNC_EXCLUDE_PATTERNS` |
 | Live fidelity/privacy | `AGENTMONITOR_ENABLE_LIVE_TAB`, `AGENTMONITOR_CODEX_LIVE_MODE`, `AGENTMONITOR_CODEX_CONTEXT_WINDOW`, `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `AGENTMONITOR_LIVE_CAPTURE_REASONING`, `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`, `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` |
 | Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
+| Hook spool | `AGENTMONITOR_HOOK_SPOOL_DIR` (default `~/.local/state/agentmonitor/hook-spool`; set it for the hooks and the server alike) |
 | Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default off; `1` asks GitHub, through `gh`, whether sessions' pull requests merged, and for the size and commits of the pull requests you merged) |
 | Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
 | Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
