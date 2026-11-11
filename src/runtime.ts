@@ -4,7 +4,12 @@ import { config } from './config.js';
 import { closeDb, getDb } from './db/connection.js';
 import { initSchema } from './db/schema.js';
 import { getStatsForBroadcast, updateIdleSessions } from './db/queries.js';
-import { startStatsBroadcast, stopStatsBroadcast } from './api/stream.js';
+import {
+  startSessionSweepBroadcast,
+  startStatsBroadcast,
+  stopSessionSweepBroadcast,
+  stopStatsBroadcast,
+} from './api/stream.js';
 import { liveBroadcaster } from './api/v2/live-stream.js';
 import { broadcaster } from './sse/emitter.js';
 import { createApp } from './app.js';
@@ -72,6 +77,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       };
 
       if (sessionChecker) clearInterval(sessionChecker);
+      stopSessionSweepBroadcast();
       if (autoImportTimer) clearInterval(autoImportTimer);
       if (autoImportDelay) clearTimeout(autoImportDelay);
 
@@ -145,11 +151,9 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
     startProviderQuotaPolling();
     startGitActivityPolling();
 
+    startSessionSweepBroadcast();
     sessionChecker = setInterval(() => {
-      const idled = updateIdleSessions(config.sessionTimeoutMinutes);
-      if (idled > 0 && broadcaster.clientCount > 0) {
-        broadcaster.broadcast('session_update', { type: 'idle_check', idled });
-      }
+      updateIdleSessions(config.sessionTimeoutMinutes);
     }, 60_000);
 
     if (!options.noImport && config.autoImportIntervalMinutes > 0) {

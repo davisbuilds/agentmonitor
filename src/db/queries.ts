@@ -11,6 +11,7 @@ import type {
   EventSource,
   NormalizedIngestEvent,
 } from '../contracts/event-contract.js';
+import type { MonitorSessionTransition } from '../contracts/session-lifecycle.js';
 import {
   excludeBenchmarkUsageCondition,
   excludeOverlappingOtelUsageCondition,
@@ -289,27 +290,68 @@ export function getSessionWithEvents(sessionId: string, eventLimit: number = 10)
   return { session, events };
 }
 
-export function updateIdleSessions(timeoutMinutes: number): number {
+export interface SessionSweep {
+  idled: number;
+  ended: number;
+  /** Each session the sweep moved, with the status it was left in. */
+  transitions: MonitorSessionTransition[];
+}
+
+type SessionSweepListener = (sweep: SessionSweep) => void;
+const sessionSweepListeners = new Set<SessionSweepListener>();
+
+/**
+ * Hear every sweep that moved a session, whichever caller ran it: reads run the
+ * sweep too, so the periodic check alone would miss their transitions.
+ */
+export function onSessionSweep(listener: SessionSweepListener): () => void {
+  sessionSweepListeners.add(listener);
+  return () => { sessionSweepListeners.delete(listener); };
+}
+
+export function updateIdleSessions(timeoutMinutes: number): SessionSweep {
   const db = getDb();
-  // Mark active sessions as idle after timeout
-  const idled = db.prepare(`
-    UPDATE sessions SET status = 'idle'
-    WHERE status = 'active'
-    AND last_event_at < datetime('now', ? || ' minutes')
-  `).run(`-${timeoutMinutes}`);
+  const sweep = db.transaction((): SessionSweep => {
+    // Mark active sessions as idle after timeout
+    const idled = db.prepare(`
+      UPDATE sessions SET status = 'idle'
+      WHERE status = 'active'
+      AND last_event_at < datetime('now', ? || ' minutes')
+      RETURNING id
+    `).all(`-${timeoutMinutes}`) as Array<{ id: string }>;
 
-  // Auto-end idle sessions that remain inactive for an additional timeout window.
-  const ended = db.prepare(`
-    UPDATE sessions SET status = 'ended', ended_at = datetime('now')
-    WHERE status = 'idle'
-    AND last_event_at < datetime('now', ? || ' minutes')
-  `).run(`-${timeoutMinutes * 2}`);
+    // Auto-end idle sessions that remain inactive for an additional timeout
+    // window. A session quiet for that long moves through both steps at once.
+    const ended = db.prepare(`
+      UPDATE sessions SET status = 'ended', ended_at = datetime('now')
+      WHERE status = 'idle'
+      AND last_event_at < datetime('now', ? || ' minutes')
+      RETURNING id
+    `).all(`-${timeoutMinutes * 2}`) as Array<{ id: string }>;
 
-  if (idled.changes > 0 || ended.changes > 0) {
+    const endedIds = new Set(ended.map(row => row.id));
+    return {
+      idled: idled.length,
+      ended: ended.length,
+      transitions: [
+        ...idled.filter(row => !endedIds.has(row.id)).map(row => ({ session_id: row.id, status: 'idle' as const })),
+        ...ended.map(row => ({ session_id: row.id, status: 'ended' as const })),
+      ],
+    };
+  })();
+
+  if (sweep.transitions.length > 0) {
     markStatsDirty(); // session status counts changed
+    for (const listener of sessionSweepListeners) {
+      try {
+        listener(sweep);
+      } catch (err) {
+        console.error('Session sweep listener failed:', err);
+      }
+    }
   }
 
-  return idled.changes;
+  return sweep;
 }
 
 function idleSession(sessionId: string): void {

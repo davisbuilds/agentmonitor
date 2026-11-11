@@ -412,6 +412,16 @@ it inserted, rewrote, and removed because their Codex rollout no longer produces
 them. The app's Monitor store treats it as a refresh signal, not as a delta to
 apply.
 
+The server owns the Monitor's session lifecycle (`sessions.status`: `active`,
+`idle`, `ended`; vocabulary in `src/contracts/session-lifecycle.ts`). The idle
+sweep runs every minute and before Monitor reads, and every sweep that moves a
+session sends `{ type: 'idle_check', idled, ended, transitions, timeout_minutes }`,
+where each transition names a session and the status it was left in. The
+Monitor applies those statuses and drops ended sessions, as its reload would.
+A sweep run by a separate `amon` process is not broadcast, so on each
+`idle_check` the Monitor also idles any active card quiet past
+`timeout_minutes`; a session that process ended stays listed until a reload.
+
 ## Source Layout
 
 ```text

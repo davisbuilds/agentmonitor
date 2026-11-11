@@ -175,15 +175,42 @@ let reconnectSignal = $state(0);
 export function getReconnectSignal(): number { return reconnectSignal; }
 export function signalReconnect(): void { reconnectSignal++; }
 
+/** The statuses an `idle_check` says the server's sweep left sessions in. */
+function sweptStatuses(update: Record<string, unknown>): Map<string, 'idle' | 'ended'> | null {
+  if (!Array.isArray(update.transitions)) return null;
+  const statuses = new Map<string, 'idle' | 'ended'>();
+  for (const entry of update.transitions as unknown[]) {
+    if (!entry || typeof entry !== 'object') continue;
+    const { session_id, status } = entry as Record<string, unknown>;
+    if (typeof session_id === 'string' && (status === 'idle' || status === 'ended')) statuses.set(session_id, status);
+  }
+  return statuses;
+}
+
+/** Whether an active card has been quiet past the session timeout. */
+function quietPast(session: Session, timeoutMinutes: number): boolean {
+  return Date.now() - parseTimestamp(session.last_event_at).getTime() > timeoutMinutes * 60_000;
+}
+
 export function handleSessionUpdate(update: Record<string, unknown>): void {
+  const swept = update.type === 'idle_check' ? sweptStatuses(update) : null;
   if (update.type === 'idle_check') {
-    sessions = sessions.map(s => {
-      if (s.status === 'active') {
-        const idle = Date.now() - parseTimestamp(s.last_event_at).getTime() > 5 * 60_000;
+    // An older server sends neither its transitions nor its timeout.
+    const timeoutMinutes = typeof update.timeout_minutes === 'number' && update.timeout_minutes > 0
+      ? update.timeout_minutes
+      : 5;
+    // The server owns the session lifecycle: apply what its sweep did. An
+    // ended session leaves the list, as on reload (Monitor lists sessions not
+    // ended). A card the sweep did not list may have been moved by a sweep in
+    // another process (an `amon` command), which is not broadcast, so an
+    // active one quiet past the timeout still reads as idle.
+    sessions = sessions
+      .filter(s => swept?.get(s.id) !== 'ended')
+      .map(s => {
+        if (s.status !== 'active') return s;
+        const idle = swept?.get(s.id) === 'idle' || quietPast(s, timeoutMinutes);
         return idle ? { ...s, status: 'idle' } : s;
-      }
-      return s;
-    });
+      });
   } else if (update.type === 'auto_import' || update.type === 'resync') {
     autoImportSignal++;
   } else if (update.type === 'session_parsed' && typeof update.session_id === 'string') {
