@@ -2,6 +2,8 @@ import path from 'node:path';
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { stripInlineImages } from '../util/inline-images.js';
+import { sqlStringList } from '../util/sql-literals.js';
+import { EVENT_STATUSES } from '../contracts/event-contract.js';
 import { config } from '../config.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from '../live/normalize.js';
 import { CODEX_AUTO_REVIEW_MODEL, isCodexAppJobPrompt } from '../parser/session-title.js';
@@ -12,9 +14,6 @@ import {
   TRACE_QUALITY_EXPORT_STATUSES,
 } from '../trace-quality/constants.js';
 
-function sqlStringList(values: readonly string[]): string {
-  return values.map(value => `'${value.replaceAll("'", "''")}'`).join(', ');
-}
 
 /**
  * Rebuild `trace_quality_export_state` without its legacy foreign keys to the
@@ -125,7 +124,7 @@ function initSchemaLocked(db: Database): void {
       agent_type TEXT NOT NULL,
       event_type TEXT NOT NULL,
       tool_name TEXT,
-      status TEXT NOT NULL DEFAULT 'success' CHECK (status IN ('success', 'error', 'timeout')),
+      status TEXT NOT NULL DEFAULT 'success' CHECK (status IN (${sqlStringList(EVENT_STATUSES)})),
       tokens_in INTEGER DEFAULT 0,
       tokens_out INTEGER DEFAULT 0,
       branch TEXT,
@@ -501,7 +500,7 @@ function initSchemaLocked(db: Database): void {
         agent_type TEXT NOT NULL,
         event_type TEXT NOT NULL,
         tool_name TEXT,
-        status TEXT NOT NULL DEFAULT 'success' CHECK (status IN ('success', 'error', 'timeout')),
+        status TEXT NOT NULL DEFAULT 'success' CHECK (status IN (${sqlStringList(EVENT_STATUSES)})),
         tokens_in INTEGER DEFAULT 0,
         tokens_out INTEGER DEFAULT 0,
         branch TEXT,

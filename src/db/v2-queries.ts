@@ -98,6 +98,8 @@ import type {
 } from '../api/v2/types.js';
 import { inferProjectionCapabilities } from '../live/projector.js';
 import { effectiveLiveStatus, effectiveLiveStatusSql } from '../live/live-status.js';
+import { RECENT_LIVE_STATUSES } from '../contracts/session-lifecycle.js';
+import { sqlStringList } from '../util/sql-literals.js';
 import { normalizeModelId, pricingRegistry, UNPRICEABLE_MODELS } from '../pricing/index.js';
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
@@ -699,7 +701,7 @@ export function listLiveSessions(params: LiveSessionsListParams = {}): LiveSessi
     values.push(params.fidelity);
   }
   if (params.active_only) {
-    conditions.push(`COALESCE(${effectiveLiveStatusSql()}, '') IN ('live', 'active')`);
+    conditions.push(`COALESCE(${effectiveLiveStatusSql()}, '') IN (${sqlStringList(RECENT_LIVE_STATUSES)})`);
   }
 
   const filterWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
