@@ -29,8 +29,13 @@ export interface HookSpoolDrain {
   errors: number;
 }
 
-/** `<unix seconds>-<event id>.json` (seconds `0` when the hook could not tell the time), which the hooks write by renaming a dot-prefixed temporary file. */
-const SPOOL_FILE = /^\d{1,13}-[A-Za-z0-9._-]{1,128}\.json$/;
+/**
+ * `<order>-<event id>.json`, which the hooks write by renaming a dot-prefixed
+ * temporary file. The order is the hook's clock when the event happened, in
+ * microseconds since the epoch where it can tell (`0` where it cannot), so
+ * events of the same second replay in the order they happened.
+ */
+const SPOOL_FILE = /^\d{1,20}-[A-Za-z0-9._-]{1,128}\.json$/;
 /** Hooks stop spooling at this many files; a drain reads no more than this. */
 const HOOK_SPOOL_MAX_FILES = 10_000;
 const DRAIN_INTERVAL_MS = 60_000;
@@ -79,8 +84,9 @@ export function drainHookSpool(directory: string): HookSpoolDrain {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') drain.errors += 1;
     return drain;
   }
-  // Seconds first, so the oldest events are stored first.
-  names.sort((a, b) => Number(a.split('-')[0]) - Number(b.split('-')[0]) || a.localeCompare(b));
+  // Oldest first. BigInt: a microsecond key outgrows exact Number comparison.
+  const order = (name: string) => BigInt(name.slice(0, name.indexOf('-')));
+  names.sort((a, b) => (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : a.localeCompare(b)));
 
   for (const name of names.slice(0, HOOK_SPOOL_MAX_FILES)) {
     const file = path.join(directory, name);
@@ -102,7 +108,7 @@ export function drainHookSpool(directory: string): HookSpoolDrain {
         drain.rejected += 1;
         continue;
       }
-      const stored = insertEvent(parsed.event);
+      const stored = insertEvent(parsed.event, { replayed: true });
       if (stored) {
         drain.ingested += 1;
         safelyMaintainTraceSummaryForEvent(stored.id, 'hook spool drain');

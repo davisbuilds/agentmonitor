@@ -885,7 +885,8 @@ describe('A hook that cannot reach the server spools its event', () => {
       assert.equal(run().exitCode, 0);
       await waitFor(() => spooledFiles().length === 1);
       const [name] = spooledFiles();
-      assert.match(name!, /^\d{9,13}-[A-Za-z0-9._-]+\.json$/);
+      // Microseconds since the epoch: finer than the second, so a burst keeps its order.
+      assert.match(name!, /^\d{16,20}-[A-Za-z0-9._-]+\.json$/);
       assert.equal(statSync(HOOK_SPOOL_DIR).mode & 0o777, 0o700);
       assert.equal(statSync(path.join(HOOK_SPOOL_DIR, name!)).mode & 0o777, 0o600);
 

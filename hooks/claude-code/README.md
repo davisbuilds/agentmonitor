@@ -103,8 +103,11 @@ reloads.
 
 Delivery is asynchronous. An event the server cannot take in time (it is down,
 restarting, or frozen) is spooled rather than dropped: one private file per
-event, at most 10,000, drained oldest first. The event id makes a spooled event
-the server also received count once. An HTTP error answer is not spooled, and
+event, at most 10,000, drained in the order the events happened (a microsecond
+key the hook takes when the event occurs). The event id makes a spooled event
+the server also received count once. A replayed event records its own time and
+moves its session's status only if nothing newer reached the session first, so
+a late Stop cannot idle a session that has worked since. An HTTP error answer is not spooled, and
 a hook without `mkdir`/`mv` on its PATH sends but cannot spool. Codex's OTEL
 exporter belongs to Codex, so its events are not spooled. `GET /api/health`
 reports `hook_spool`: files waiting and what drains stored.

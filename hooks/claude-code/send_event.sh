@@ -110,10 +110,23 @@ now_seconds() {
   printf '%s' "${seconds:-0}"
 }
 
+# The event's order key: microseconds since the epoch, taken when the event
+# happens, so events of the same second replay in the order they happened.
+event_order() {
+  if [ -n "${EPOCHREALTIME:-}" ]; then
+    printf '%s' "${EPOCHREALTIME//[.,]/}"
+    return
+  fi
+  local us=""
+  command -v perl >/dev/null 2>&1 && us="$(perl -MTime::HiRes=time -e 'printf "%d", time() * 1e6' 2>/dev/null)"
+  [ -n "$us" ] || us="$(now_seconds)000000"
+  printf '%s' "$us"
+}
+
 # Write one event into the spool: a single line, private to the user, published
 # by renaming its temporary file so the server never reads half of it.
 spool_event() {
-  local payload="$1" id="$2" dir="$AGENTMONITOR_HOOK_SPOOL_DIR"
+  local payload="$1" id="$2" order="$3" dir="$AGENTMONITOR_HOOK_SPOOL_DIR"
   umask 077
   mkdir -p "$dir" 2>/dev/null || return 0
   # Bounded: a server that never returns must not fill the disk.
@@ -122,7 +135,7 @@ spool_event() {
   spooled=("$dir"/*.json)
   [ "${#spooled[@]}" -lt "$HOOK_SPOOL_MAX_FILES" ] || return 0
   local tmp="$dir/.$id.tmp"
-  if ! { printf '%s\n' "${payload//$'\n'/ }" >"$tmp" && mv "$tmp" "$dir/$(now_seconds)-$id.json"; } 2>/dev/null; then
+  if ! { printf '%s\n' "${payload//$'\n'/ }" >"$tmp" && mv "$tmp" "$dir/$order-$id.json"; } 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
   fi
 }
@@ -131,7 +144,8 @@ spool_event() {
 # event carries its own id and time; when the server cannot be reached in time,
 # it is spooled for the server to store later rather than lost.
 send_event() {
-  local id stamp="" payload
+  local id stamp="" payload order
+  order="$(event_order)"
   id="$(new_event_id)"
   command -v date >/dev/null 2>&1 && stamp="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
   # The payload is a JSON object: put the id (and time, when known) first inside it.
@@ -142,6 +156,6 @@ send_event() {
       -d "$payload" \
       --connect-timeout 2 \
       --max-time 5 \
-      || spool_event "$payload" "$id"
+      || spool_event "$payload" "$id" "$order"
   ) >/dev/null 2>&1 &
 }

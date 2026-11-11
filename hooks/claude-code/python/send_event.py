@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,8 +74,8 @@ AGENTMONITOR_HOOK_SPOOL_DIR = os.environ.get(
 # the server to store later: one line, private to the user, published by
 # renaming its temporary file so the server never reads half of it.
 _POST_CHILD = """
-import os, sys, time, urllib.request
-url, spool, event_id = sys.argv[1], sys.argv[2], sys.argv[3]
+import os, sys, urllib.request
+url, spool, event_id, order = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 body = sys.stdin.buffer.read()
 try:
     urllib.request.urlopen(urllib.request.Request(
@@ -90,7 +91,7 @@ except Exception:
             tmp = os.path.join(spool, "." + event_id + ".tmp")
             with open(tmp, "wb") as handle:
                 handle.write(body.replace(b"\\n", b" ") + b"\\n")
-            os.rename(tmp, os.path.join(spool, "%d-%s.json" % (int(time.time()), event_id)))
+            os.rename(tmp, os.path.join(spool, "%s-%s.json" % (order, event_id)))
     except Exception:
         pass
 """
@@ -104,6 +105,8 @@ def send_event(payload: dict) -> None:
     """
     try:
         event_id = str(uuid.uuid4())
+        # Microseconds when the event happened: the spool replays in this order.
+        order = str(time.time_ns() // 1000)
         stamped = {
             "event_id": event_id,
             "client_timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z",
@@ -115,7 +118,7 @@ def send_event(payload: dict) -> None:
             else {"start_new_session": True}
         )
         child = subprocess.Popen(
-            [sys.executable, "-c", _POST_CHILD, f"{AGENTMONITOR_URL}/api/events", AGENTMONITOR_HOOK_SPOOL_DIR, event_id],
+            [sys.executable, "-c", _POST_CHILD, f"{AGENTMONITOR_URL}/api/events", AGENTMONITOR_HOOK_SPOOL_DIR, event_id, order],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
