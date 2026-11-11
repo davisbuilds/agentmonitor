@@ -7,7 +7,7 @@ import { resolveDbPath } from '../db-path.js';
 import { readRuntimeOwner } from '../runtime-ownership.js';
 import { CliError, notFound, unavailable } from './errors.js';
 
-export const SERVICE_LABEL = 'dev.agentmonitor.serve';
+import { SERVICE_LABEL } from '../util/service-context.js';
 
 export interface CommandResult {
   status: number | null;

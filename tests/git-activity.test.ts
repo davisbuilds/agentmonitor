@@ -298,3 +298,24 @@ test('each commit records whether it reached any remote\'s main, and a merge rec
   assert.equal(landing()[wip], null);
   assert.deepEqual(members('example/landing', 6), [`${listedOnGithub.slice(0, 7)} github`], "GitHub's list is never added to");
 });
+
+test('under the service, a session directory macOS guards with a privacy prompt is not read', async () => {
+  // A stand-in home: its Documents folder is what macOS would guard.
+  const home = path.join(tempDir, 'home');
+  const guarded = path.join(home, 'Documents', 'guarded');
+  fs.mkdirSync(guarded, { recursive: true });
+  git(guarded, ['init', '-q', '-b', 'main']);
+  commit(guarded, 'g.ts', 'feat: in a guarded folder', '2026-05-02T10:00:00Z');
+  db.prepare("INSERT INTO browsing_sessions (id, agent, cwd, started_at, message_count, user_message_count) VALUES ('s-guarded', 'claude', ?, '2026-05-02T09:00:00Z', 1, 1)")
+    .run(guarded);
+  const readGuarded = () => (db.prepare('SELECT COUNT(*) AS n FROM git_repos WHERE root = ?').get(guarded) as { n: number }).n;
+
+  const asService = await syncGitActivity(db, { now: new Date('2026-05-10T00:00:00Z'), skipPrivacyProtected: true, home });
+  assert.equal(readGuarded(), 0, 'not even asked about');
+  assert.equal(asService.skipped_directories, 1);
+
+  // A process someone can answer the prompt for reads it as usual.
+  const asked = await syncGitActivity(db, { now: new Date('2026-05-10T00:00:00Z'), home });
+  assert.equal(readGuarded(), 1);
+  assert.equal(asked.skipped_directories, 0);
+});
