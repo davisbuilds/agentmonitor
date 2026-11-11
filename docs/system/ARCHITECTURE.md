@@ -182,15 +182,33 @@ reads it. Antigravity always hashes, since its WAL sidecar can change alone. Ben
 events use `source='benchmark'` and remain excluded from normal activity and usage
 aggregates unless a benchmark-aware read explicitly includes them.
 
-A Codex rollout owns its session's `import-cdx-` rows. Their ids are positions
-in the rollout, and Codex can rewrite a rollout. So a changed file is not
-insert-only: the session's import rows are reconciled to the parse in one
-transaction, together with its summary projection, trace summary, invocation
-mode and import hash. Rows from other producers for the same session are never
-touched. A date-scoped import only appends, and so does a rollout with a line
-that does not parse (for example one read mid-write), because a missing line
-would make the rows after it look stale. A session projected as a full
-transcript is left alone.
+Codex's native thread identity (`session_meta.payload.id`) can span several
+physical rollout files after pagination or revert. The physical rollout UUID
+comes from the filename; a `history_base.thread_id` names that physical UUID,
+despite the field's name. Its decoded-byte offset and exclusive ordinal select
+an exact ancestor prefix. The shared history resolver validates ownership,
+complete-record boundaries and ordinals, rejects cycles and ambiguous or missing
+sources, and bounds depth and decoded bytes. Compressed files use decoded bytes
+for the same bookmarks.
+
+The native session owns its `import-cdx-` ledger across all discoverable physical
+members. Each member reads its bounded ancestors to initialize counters, request
+totals and model context, then emits only its own usage. Positional continuation
+ids include the physical rollout identity; native request ids retain their
+`response_id`. The ledger preserves requests actually billed in an old rollout's
+suffix even when a revert excludes them from the current conversation. An opening
+counter that repeats the ancestor total bills nothing anew.
+
+A changed family is reconciled once, independently of file discovery order.
+Its import rows, summary projection, trace summary, invocation mode and every
+owned member's import hash commit in one transaction from the same source reads.
+Rows from other producers for the same session are never touched. A date-scoped
+import only appends. An ordinary rollout with an unparseable line also takes the
+append-only path, because a missing line would make later rows look stale.
+Paginated history requires complete source records: malformed records or invalid
+or missing references fail before any ledger replacement or successful hash
+commit; the last complete stored history remains.
+A session projected as a full transcript is left alone.
 
 A `thread_spawn` subagent rollout can open with a copy of its parent's history,
 re-stamped at spawn time. The subagent's own activity starts at its first
@@ -209,9 +227,11 @@ unresolved subagents keep their whole rollout.
 
 Codex 0.154+ writes a `token_usage_record` per API request, with the
 request's usage and the thread's running total. When a rollout's own records
-start at the thread's first request (the first one's usage is the whole
-thread so far), the import bills one row per record, as the Claude import bills
-one row per assistant message:
+cover its usage from the resolved ancestor baseline (zero for an original
+rollout), the import bills one row per record, as the Claude import bills one row
+per assistant message. A continuation's first request can therefore be billed
+before its next cumulative counter arrives:
+
 - each row is keyed by the request's `response_id`;
 - it is priced with its own turn's model, one request at a time;
 - its `_usage_source` is `compaction` when a `compacted` line names it by
@@ -220,7 +240,9 @@ one row per assistant message:
 Counter lines then bill nothing but keep their place in the event index, so
 file-change ids do not move. This covers the requests the cumulative
 `token_count` leaves out (compactions, and requests of turns later aborted), so
-the rows add up to Codex's own thread total.
+the rows add up to Codex's own total for that physical member's span. Across a
+reverted family, the ledger is checked against the sum of those spans, which can
+exceed the current leaf's conversation total.
 
 A rollout without records, or whose records start mid-thread (a session begun
 before 0.154), bills from the cumulative counter instead. So does one whose
@@ -280,6 +302,14 @@ leaves no checkpoint while a later line could still change what it produced:
 before `session_meta`, before a subagent's own first turn, or after a catalog
 recorded a model or window that only a later line would give.
 
+For paginated Codex history, the watcher selects the newest unreferenced leaf by
+its creation timestamp, resolves its bounded ancestors, and writes the current
+conversation under the original root rollout's browser identity. Syncing an old
+physical file still selects that current leaf; it cannot restore a reverted
+conversation tail. Missing or invalid dependencies preserve the previous browser
+projection and report an error. This conversation projection intentionally differs
+from the usage ledger, which keeps the costs of discarded requests.
+
 Codex browser history has two existing identities: JSONL rollout basenames and
 native UUIDs from import/OTEL and API/hook-generated `codex-summary` rows.
 Session-list reads reconcile recognized aliases
@@ -291,7 +321,10 @@ counts from the same reconciled rows (`listed_sessions`), so its session and
 message totals count such a session once, and the warehouse export publishes
 one trace summary per session (the UUID one when both exist). Other reads
 retain their own projection/usage semantics; this is not a storage migration or
-a universal identity reconciliation across Live and Search.
+a universal identity reconciliation across Live and Search. New continuation
+writes use the root browser identity, but preexisting continuation aliases remain
+stored: deleting or merging them requires a migration that preserves pins and
+detail links.
 The selected representative's fields and dates are the ones listed. Summary-only
 sessions stay listed unless a caller passes `exclude_empty=true`. Unknown ID formats
 and integrations are left as they are rather than guessed into an alias. List totals

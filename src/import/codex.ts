@@ -130,6 +130,8 @@ export function parseCodexFile(
      * counter rows are stored, which cannot delete the rows a switch replaces.
      */
     usageInstrument?: 'counter';
+    /** Resolved ancestor lines initialize accounting but belong to other physical rollouts. */
+    history?: { ownFromLine: number; rolloutId: string };
   },
 ): NormalizedIngestEvent[] {
   const events: NormalizedIngestEvent[] = [];
@@ -146,12 +148,15 @@ export function parseCodexFile(
     }
   });
   if (options?.diagnostics) options.diagnostics.malformedLines = parsedLines.filter(line => line === null).length;
+  if (!options?.history && parsedLines.some(line => line?.type === 'session_meta' && line.payload.history_base != null)) {
+    throw new Error('Invalid Codex rollout history: paginated usage requires resolved ancestor accounting');
+  }
   // In a subagent that opens with a copy of its parent's history, lines before
   // the boundary are the parent's: they advance the counters and the event
   // index (so the child's own event ids stay what they always were) but emit
   // nothing.
   const boundary = findSubagentBoundary(parsedLines);
-  const ownFrom = boundary.kind === 'resolved' ? boundary.line : 0;
+  const ownFrom = Math.max(boundary.kind === 'resolved' ? boundary.line : 0, options?.history?.ownFromLine ?? 0);
   let inheritedCountersSkipped = 0;
   // A cumulative counter that drops has restarted: what it bills after the drop
   // is new usage, so the rollout's final counter understates the session.
@@ -209,6 +214,7 @@ export function parseCodexFile(
   const ownRecords = new Map<string, CodexUsageRecord>();
   let lastRecord: CodexUsageRecord | undefined;
   let unreadable = false;
+  let inheritedThread: CodexUsage3 = { input: 0, cached: 0, output: 0 };
   // Counter growth in the thread's own span, from the counter at the boundary.
   let lastCounter = { input: 0, output: 0 };
   const counterGrowth = { input: 0, output: 0 };
@@ -227,7 +233,11 @@ export function parseCodexFile(
       }
       lastCounter = current;
     }
-    if (lineIndex < ownFrom) continue;
+    if (lineIndex < ownFrom) {
+      const record = line.type === 'token_usage_record' ? asUsageRecord(line) : null;
+      if (record && record.thread_id === sessionId) inheritedThread = record.thread;
+      continue;
+    }
     if (line.type === 'compacted' && typeof line.payload.compaction_response_id === 'string') {
       namedCompactions.add(line.payload.compaction_response_id);
     }
@@ -238,10 +248,11 @@ export function parseCodexFile(
     lastRecord = record;
   }
   const firstRecord = ownRecords.values().next().value;
-  if (firstRecord && lastRecord && !unreadable && sameUsage(firstRecord.usage, firstRecord.thread)) {
+  if (firstRecord && lastRecord && !unreadable && sameUsage(firstRecord.usage, subtractUsage(firstRecord.thread, inheritedThread))) {
     const sum = [...ownRecords.values()].reduce((total, record) => addUsage(total, record.usage), { input: 0, cached: 0, output: 0 });
-    const covered = counterGrowth.input <= lastRecord.thread.input && counterGrowth.output <= lastRecord.thread.output;
-    if (sameUsage(sum, lastRecord.thread) && covered) instrument = 'request';
+    const ownTotal = subtractUsage(lastRecord.thread, inheritedThread);
+    const covered = counterGrowth.input <= ownTotal.input && counterGrowth.output <= ownTotal.output;
+    if (sameUsage(sum, ownTotal) && covered) instrument = 'request';
   }
 
   // Fall back to filename for session ID
@@ -253,6 +264,9 @@ export function parseCodexFile(
   }
 
   const project = projectNameFromCwd(cwd) ?? undefined;
+  // Reverts keep the native session id while starting a distinct rollout. Its
+  // positional ids must not replace requests already billed in the old file.
+  const positionalId = options?.history ? `${sessionId}:rollout:${options.history.rolloutId}` : sessionId;
 
   // Apply date filter on session start time
   if (sessionTimestamp && options?.from) {
@@ -365,6 +379,7 @@ export function parseCodexFile(
           originator,
           cwd,
           _model_source: firstTurnModel ? 'turn_context' : currentModelSource,
+          ...(options?.history ? { _rollout_id: options.history.rolloutId } : {}),
           ...(boundary.kind === 'none' ? {} : { _subagent_boundary: boundary.kind }),
         },
         source: 'import',
@@ -382,10 +397,10 @@ export function parseCodexFile(
     }
 
     if (line.type === 'token_usage_record') {
-      const record = !inherited ? asUsageRecord(line) : null;
+      const record = asUsageRecord(line);
       if (!record || record.thread_id !== sessionId) continue;
       threadTotal = record.thread;
-      if (instrument === 'request' && !billedResponses.has(record.response_id)) {
+      if (!inherited && instrument === 'request' && !billedResponses.has(record.response_id)) {
         billedResponses.add(record.response_id);
         pushRequest(
           { ...record, model: currentModel, model_source: currentModelSource },
@@ -417,11 +432,11 @@ export function parseCodexFile(
 
       const reset = totalIn < prevTokensIn || totalOut < prevTokensOut;
       if (reset) counterResets++;
-      if (!inherited) {
+      {
         const gap = threadTotal ? subtractUsage(threadTotal, { input: totalIn, cached: totalCacheRead, output: totalOut }) : undefined;
         // After a reset the gap grows by more than any held compaction, so
         // the exact-growth check fails closed on its own.
-        settleCompactions(gap);
+        if (!inherited) settleCompactions(gap);
         counterGap = gap;
       }
 
@@ -451,7 +466,7 @@ export function parseCodexFile(
 
       const eventId = crypto
         .createHash('sha256')
-        .update(`codex:${sessionId}:token:${eventIndex}`)
+        .update(`codex:${positionalId}:token:${eventIndex}`)
         .digest('hex')
         .slice(0, 32);
 
@@ -520,7 +535,7 @@ export function parseCodexFile(
         } else if (patchMeta) {
           const eventId = crypto
             .createHash('sha256')
-            .update(`codex:${sessionId}:patch:${eventIndex}`)
+            .update(`codex:${positionalId}:patch:${eventIndex}`)
             .digest('hex')
             .slice(0, 32);
 
@@ -599,7 +614,11 @@ export function parseCodexFile(
 
   // Invocation mode is a session-level constant derived from originator; stamp it
   // on every event so the session upsert persists it regardless of insert order.
-  return mode ? events.map((e) => ({ ...e, mode })) : events;
+  return mode || options?.history ? events.map(event => ({
+    ...event,
+    ...(mode ? { mode } : {}),
+    ...(options?.history ? { metadata: { ...event.metadata as Record<string, unknown>, _rollout_id: options.history.rolloutId } } : {}),
+  })) : events;
 }
 
 // ─── File hash for import state tracking ────────────────────────────────

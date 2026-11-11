@@ -20,6 +20,7 @@ import { COMPRESSED_ROLLOUT_SUFFIX, readTranscriptFile, transcriptBaseName } fro
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { setSessionMode } from '../db/queries.js';
 import { reparseRequested } from '../db/reparse-marker.js';
+import { createCodexRolloutInventory, resolveCodexRolloutHistory, type CodexRolloutInventory, type CodexRolloutEntry } from '../util/codex-rollout-history.js';
 
 // --- File hashing ---
 
@@ -146,6 +147,8 @@ export type SyncResult = 'parsed' | 'skipped' | 'error';
 interface SyncOptions {
   force?: boolean;
   excludePatterns?: string[];
+  /** Reuse one stat-cached header inventory during a Codex sweep. */
+  codexInventory?: CodexRolloutInventory;
 }
 
 export interface SyncSessionOutcome {
@@ -331,6 +334,35 @@ export function discoverCodexSessionFiles(codexHome?: string, options: SyncOptio
   return discoverCodexRolloutFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
 }
 
+/** Single-file live notifications still need the current leaf, including notifications
+ * for an ancestor after a new segment was created. Header reads are stat-cached by
+ * the shared inventory; a sweep supplies one inventory for all of its files. */
+function codexInventoryForFile(filePath: string, options: SyncOptions): CodexRolloutInventory {
+  if (options.codexInventory) return options.codexInventory;
+  let root = path.dirname(filePath);
+  for (let directory = root; path.dirname(directory) !== directory; directory = path.dirname(directory)) {
+    if (path.basename(directory) === 'sessions') { root = directory; break; }
+  }
+  return createCodexRolloutInventory(discoverCodexRolloutFilesRecursive(root, { excludePatterns: options.excludePatterns }));
+}
+
+function currentCodexRollout(entry: CodexRolloutEntry, inventory: CodexRolloutInventory): CodexRolloutEntry {
+  const siblings = inventory.bySessionId.get(entry.sessionId) ?? [entry];
+  // Ordinary rollouts keep their historical file identity. Pagination is the
+  // evidence that several physical files now represent the same browser history.
+  if (!siblings.some(candidate => candidate.historyBase || ['paginated', 'full'].includes(String(candidate.meta['history_mode'])))) return entry;
+  const ancestors = new Set(siblings.flatMap(candidate => candidate.historyBase ? [candidate.historyBase.thread_id] : []));
+  const leaves = siblings.filter(candidate => !ancestors.has(candidate.rolloutId));
+  if (!leaves.length) throw new Error('Codex rollout history has no active leaf');
+  const timestamps = new Map(leaves.map(candidate => {
+    const timestamp = Date.parse(candidate.timestamp ?? '');
+    if (!Number.isFinite(timestamp)) throw new Error('Codex rollout history has an invalid active creation timestamp');
+    return [candidate.filePath, timestamp];
+  }));
+  return leaves.sort((a, b) => timestamps.get(b.filePath)! - timestamps.get(a.filePath)!
+    || b.rolloutId.localeCompare(a.rolloutId) || a.filePath.localeCompare(b.filePath))[0];
+}
+
 export function syncCodexSessionFileDetailed(
   db: Database.Database,
   filePath: string,
@@ -339,11 +371,23 @@ export function syncCodexSessionFileDetailed(
   let fileHash = 'error';
   let fileMtime = '';
   try {
+    filePath = path.resolve(filePath);
+    const inventory = codexInventoryForFile(filePath, options);
+    const entry = inventory.entries.find(candidate => candidate.filePath === filePath)
+      ?? (filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)
+        ? inventory.entries.find(candidate => candidate.filePath === filePath.slice(0, -4))
+        : undefined);
+    const active = entry ? currentCodexRollout(entry, inventory) : undefined;
+    if (active) filePath = active.filePath;
+    const paginated = active && (inventory.bySessionId.get(active.sessionId) ?? []).some(candidate => candidate.historyBase || ['paginated', 'full'].includes(String(candidate.meta['history_mode'])));
+    // Resolve completely before any projection is replaced. A missing base must
+    // preserve the last complete browser history rather than store a plausible tail.
+    const history = paginated ? resolveCodexRolloutHistory(filePath, { inventory }) : undefined;
     const stat = fs.statSync(filePath);
     // Codex never writes to a rollout it compressed, so one parsed at this
     // mtime is current without decompressing it again, which every resync
     // would otherwise do for all of compressed history.
-    if (!options.force && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)) {
+    if (!options.force && !paginated && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)) {
       const seen = getWatchedFileState(db, filePath);
       if (seen && seen.status !== 'error' && !reparseRequested(seen) && seen.file_mtime === stat.mtime.toISOString()) {
         return { result: 'skipped' };
@@ -351,8 +395,9 @@ export function syncCodexSessionFileDetailed(
     }
     // One read serves the change check, the checkpoint check and the parse. A
     // compressed rollout reads as its lines, under the same session id.
-    const bytes = readTranscriptFile(filePath);
-    const sessionId = transcriptBaseName(filePath);
+    const bytes = history?.bytes ?? readTranscriptFile(filePath);
+    const original = active && inventory.byRolloutId.get(active.sessionId)?.find(candidate => candidate.sessionId === active.sessionId);
+    const sessionId = transcriptBaseName(history ? original?.filePath ?? history.segments.find(segment => segment.sessionId === history.sessionId)?.filePath ?? filePath : filePath);
     const read = options.force
       ? { fileHash: hashBytes(bytes), checkpoint: undefined }
       : readCheckpoint<CodexParseState>(db, filePath, sessionId, bytes);
@@ -386,6 +431,13 @@ export function syncCodexSessionFileDetailed(
     safelyMaintainTraceSummaryForSession(sessionId, 'codex session sync');
 
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
+    if (history && active) {
+      for (const sibling of inventory.bySessionId.get(active.sessionId) ?? []) {
+        if (sibling.filePath === filePath) continue;
+        checkpoints.delete(sibling.filePath);
+        upsertWatchedFile(db, sibling.filePath, fileHash, new Date(sibling.mtimeMs).toISOString(), 'skipped');
+      }
+    }
     settleCheckpoint(filePath, bytes, fileHash, chunk);
 
     return { result: 'parsed', live, session_id: sessionId, parse: appendFrom === undefined ? 'full' : 'resumed' };
@@ -407,10 +459,25 @@ export function syncCodexSessionFile(db: Database.Database, filePath: string, op
 
 export function syncAllCodexFiles(db: Database.Database, codexHome?: string, options: SyncOptions = {}): SyncStats {
   const files = discoverCodexSessionFiles(codexHome, options);
+  const codexInventory = createCodexRolloutInventory(files);
+  const entriesByPath = new Map(codexInventory.entries.map(entry => [entry.filePath, entry]));
+  const syncedLeaves = new Set<string>();
   const stats: SyncStats = { parsed: 0, skipped: 0, errors: 0, total: files.length };
 
   for (const filePath of files) {
-    const result = syncCodexSessionFileDetailed(db, filePath, options).result;
+    const entry = entriesByPath.get(path.resolve(filePath));
+    let target = filePath;
+    try {
+      if (entry) target = currentCodexRollout(entry, codexInventory).filePath;
+    } catch {
+      // Let the detailed sync record the error, using the same failure path as
+      // single-file notifications.
+    }
+    // Each page points to the same active history: resolve/decompress it once,
+    // rather than once for every ancestor in a periodic sweep.
+    if (syncedLeaves.has(target)) { stats.skipped++; continue; }
+    syncedLeaves.add(target);
+    const result = syncCodexSessionFileDetailed(db, filePath, { ...options, codexInventory }).result;
     stats[result === 'parsed' ? 'parsed' : result === 'skipped' ? 'skipped' : 'errors']++;
   }
 
