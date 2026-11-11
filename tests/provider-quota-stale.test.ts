@@ -21,7 +21,10 @@ after(() => {
 });
 
 beforeEach(() => {
-  getDb().exec('DELETE FROM provider_quotas');
+  const db = getDb();
+  // The delete below is table-wide: confirm it runs against this test's file.
+  assert.equal(fs.realpathSync(db.name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
+  db.exec('DELETE FROM provider_quotas');
 });
 
 const at = (minute: number) => new Date(Date.UTC(2026, 10, 11, 10, minute)).toISOString();
