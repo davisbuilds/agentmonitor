@@ -10,6 +10,7 @@ import { isCounterUsageRow, isRequestUsageRow, reconcileCodexImport, type CodexR
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
+import { reparseRequested } from '../db/reparse-marker.js';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -113,7 +114,7 @@ function isUnchangedOnDisk(filePath: string, stamp: DiskStamp, options: ImportOp
   if (options.force) return false;
   const state = getImportState(filePath);
   return state !== undefined
-    && state.file_hash !== ''
+    && !reparseRequested(state)
     && state.file_mtime === stamp.mtime
     && state.file_size === stamp.size;
 }

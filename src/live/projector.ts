@@ -1,5 +1,7 @@
 import type Database from 'better-sqlite3';
+import { OPEN_LIVE_STATUSES } from '../contracts/session-lifecycle.js';
 import { stripInlineImages } from '../util/inline-images.js';
+import { sqlStringList } from '../util/sql-literals.js';
 import type { CanonicalLiveItem } from './normalize.js';
 
 export type ProjectionFidelity = 'summary' | 'full';
@@ -271,7 +273,7 @@ export function upsertProjectedSessionIncrement(
       started_at = COALESCE(browsing_sessions.started_at, excluded.started_at),
       ended_at = CASE
         WHEN excluded.ended_at IS NOT NULL THEN excluded.ended_at
-        WHEN ${clearEndedAtOnActive ? "excluded.live_status IN ('live', 'active', 'available')" : '0'} THEN NULL
+        WHEN ${clearEndedAtOnActive ? `excluded.live_status IN (${sqlStringList(OPEN_LIVE_STATUSES)})` : '0'} THEN NULL
         ELSE browsing_sessions.ended_at
       END,
       message_count = browsing_sessions.message_count + excluded.message_count,

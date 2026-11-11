@@ -5,6 +5,8 @@ import { extractCanonicalCodexSessionId } from './invocation-detection.js';
 import { selectSkillInvocationOccurrences, type SkillInvocationOccurrence } from './invocation-ledger.js';
 import { dateParamLowerBound, dateParamUpperExclusive } from '../util/local-day.js';
 import { effectiveLiveStatusSql } from '../live/live-status.js';
+import { OPEN_LIVE_STATUSES } from '../contracts/session-lifecycle.js';
+import { sqlStringList } from '../util/sql-literals.js';
 import { browserAgentName } from '../util/agent-identity.js';
 
 interface SessionRow {
@@ -211,7 +213,7 @@ function selectScopedSessions(
   if (from) {
     intervalClauses.push(`
       datetime(CASE
-        WHEN ${effectiveLiveStatusSql('', asOf)} IN ('live', 'active', 'available') THEN ?
+        WHEN ${effectiveLiveStatusSql('', asOf)} IN (${sqlStringList(OPEN_LIVE_STATUSES)}) THEN ?
         ELSE COALESCE(ended_at, last_item_at, ?)
       END) >= datetime(?)
     `);

@@ -24,6 +24,7 @@
   import { fetchStats, fetchEvents, fetchMonitorSessions, fetchFilterOptions, fetchUsageSummary, statsParams } from '../../api/client';
   import { monitorCostWindowParams } from '../../monitor-analytics';
   import { getMonitorSessionId } from '../../stores/router.svelte';
+  import { latestRequest } from '../../stores/latest-request';
   import { FilterBar, Select } from '../ui';
   import { agentName } from '../../format';
 
@@ -61,7 +62,12 @@
     }
   }
 
+  // A filter change, reconnect or auto-import can each start a reload; only the
+  // newest one's snapshot is written, so an older filter's data never lands
+  // under the current one.
+  const reloads = latestRequest();
   async function reload(filters: Record<string, string> = {}) {
+    const isCurrent = reloads.begin();
     const sessionsParams: Record<string, string> = { limit: '0', exclude_status: 'ended' };
     if (filters.agent_type) sessionsParams.agent_type = filters.agent_type;
 
@@ -71,12 +77,14 @@
         fetchEvents(filters),
         fetchMonitorSessions(sessionsParams),
       ]);
+      if (!isCurrent()) return;
       setStats(statsData);
       setQuotaMonitor(statsData.quota_monitor || statsData.usage_monitor || []);
       setEvents(eventsData.events || []);
       setSessions(sessionsData.sessions || []);
       void refreshOccupancy();
     } catch (err) {
+      if (!isCurrent()) return;
       console.error('Failed to load monitor data:', err);
     }
 

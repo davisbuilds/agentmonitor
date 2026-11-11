@@ -32,6 +32,7 @@ See root `AGENTS.md` for project overview, API contract (V2 endpoints this app c
 - `src/lib/components/benchmarks/`: Benchmarks tab (segregated bake-off comparison). `BenchmarksPage.svelte` renders the studies list → study detail (arm ladder with verdict Badges + auto-generated honesty panel). Selected study rides `#benchmarks?study=<study_id>`; data via `stores/benchmarks.svelte.ts` off `GET /api/v2/benchmarks[/:studyId]`. Study detail also renders `BenchmarkFrontier.svelte` — a cost×score Pareto scatter on the shared `ui/chart/` primitives (`scales.ts`, `layout.ts`, `PlotFrame.svelte`) with pure geometry in `frontier-geometry.ts`; markers click-drill to the matching ladder row.
 - `src/lib/api/client.ts`: typed API client for v1 and v2 endpoints.
 - `src/lib/stores/`: Svelte 5 reactive state (runes).
+  Async loads that a newer one can supersede (a filter change, another item opened, a jump) guard their writes with `latestRequest()` (`stores/latest-request.ts`): `begin()` supersedes, `join()` runs beside the current request (a page appended to it), `invalidate()` clears. Check the returned `isCurrent()` after every `await`, before writing data, errors or loading flags.
 
 ## API Consumption
 

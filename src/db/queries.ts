@@ -11,6 +11,7 @@ import type {
   EventSource,
   NormalizedIngestEvent,
 } from '../contracts/event-contract.js';
+import type { MonitorSessionTransition } from '../contracts/session-lifecycle.js';
 import {
   excludeBenchmarkUsageCondition,
   excludeOverlappingOtelUsageCondition,
@@ -289,27 +290,68 @@ export function getSessionWithEvents(sessionId: string, eventLimit: number = 10)
   return { session, events };
 }
 
-export function updateIdleSessions(timeoutMinutes: number): number {
+export interface SessionSweep {
+  idled: number;
+  ended: number;
+  /** Each session the sweep moved, with the status it was left in. */
+  transitions: MonitorSessionTransition[];
+}
+
+type SessionSweepListener = (sweep: SessionSweep) => void;
+const sessionSweepListeners = new Set<SessionSweepListener>();
+
+/**
+ * Hear every sweep that moved a session, whichever caller ran it: reads run the
+ * sweep too, so the periodic check alone would miss their transitions.
+ */
+export function onSessionSweep(listener: SessionSweepListener): () => void {
+  sessionSweepListeners.add(listener);
+  return () => { sessionSweepListeners.delete(listener); };
+}
+
+export function updateIdleSessions(timeoutMinutes: number): SessionSweep {
   const db = getDb();
-  // Mark active sessions as idle after timeout
-  const idled = db.prepare(`
-    UPDATE sessions SET status = 'idle'
-    WHERE status = 'active'
-    AND last_event_at < datetime('now', ? || ' minutes')
-  `).run(`-${timeoutMinutes}`);
+  const sweep = db.transaction((): SessionSweep => {
+    // Mark active sessions as idle after timeout
+    const idled = db.prepare(`
+      UPDATE sessions SET status = 'idle'
+      WHERE status = 'active'
+      AND last_event_at < datetime('now', ? || ' minutes')
+      RETURNING id
+    `).all(`-${timeoutMinutes}`) as Array<{ id: string }>;
 
-  // Auto-end idle sessions that remain inactive for an additional timeout window.
-  const ended = db.prepare(`
-    UPDATE sessions SET status = 'ended', ended_at = datetime('now')
-    WHERE status = 'idle'
-    AND last_event_at < datetime('now', ? || ' minutes')
-  `).run(`-${timeoutMinutes * 2}`);
+    // Auto-end idle sessions that remain inactive for an additional timeout
+    // window. A session quiet for that long moves through both steps at once.
+    const ended = db.prepare(`
+      UPDATE sessions SET status = 'ended', ended_at = datetime('now')
+      WHERE status = 'idle'
+      AND last_event_at < datetime('now', ? || ' minutes')
+      RETURNING id
+    `).all(`-${timeoutMinutes * 2}`) as Array<{ id: string }>;
 
-  if (idled.changes > 0 || ended.changes > 0) {
+    const endedIds = new Set(ended.map(row => row.id));
+    return {
+      idled: idled.length,
+      ended: ended.length,
+      transitions: [
+        ...idled.filter(row => !endedIds.has(row.id)).map(row => ({ session_id: row.id, status: 'idle' as const })),
+        ...ended.map(row => ({ session_id: row.id, status: 'ended' as const })),
+      ],
+    };
+  })();
+
+  if (sweep.transitions.length > 0) {
     markStatsDirty(); // session status counts changed
+    for (const listener of sessionSweepListeners) {
+      try {
+        listener(sweep);
+      } catch (err) {
+        console.error('Session sweep listener failed:', err);
+      }
+    }
   }
 
-  return idled.changes;
+  return sweep;
 }
 
 function idleSession(sessionId: string): void {
@@ -1170,6 +1212,13 @@ export interface ProviderQuotaSnapshot {
   primary: ProviderQuotaWindow | null;
   secondary: ProviderQuotaWindow | null;
   credits: ProviderQuotaCredits | null;
+  /**
+   * The windows are the last good reading, kept through a failed refresh
+   * (`status: 'error'`): show them as stale, from `windows_observed_at`.
+   */
+  stale: boolean;
+  /** When the windows were read; null without windows. */
+  windows_observed_at: string | null;
 }
 
 interface ProviderQuotaWindowInput {
@@ -1199,7 +1248,7 @@ export interface ProviderQuotaSnapshotInput {
   raw_payload?: unknown;
 }
 
-const PROVIDER_DEFAULTS: Record<ProviderName, Pick<ProviderQuotaSnapshot, 'agent_type' | 'status' | 'source' | 'updated_at' | 'account_label' | 'plan_type' | 'limit_id' | 'limit_name' | 'error_message' | 'primary' | 'secondary' | 'credits'>> = {
+const PROVIDER_DEFAULTS: Record<ProviderName, Omit<ProviderQuotaSnapshot, 'provider'>> = {
   claude: {
     agent_type: 'claude_code',
     status: 'unavailable',
@@ -1213,6 +1262,8 @@ const PROVIDER_DEFAULTS: Record<ProviderName, Pick<ProviderQuotaSnapshot, 'agent
     primary: null,
     secondary: null,
     credits: null,
+    stale: false,
+    windows_observed_at: null,
   },
   codex: {
     agent_type: 'codex',
@@ -1227,6 +1278,8 @@ const PROVIDER_DEFAULTS: Record<ProviderName, Pick<ProviderQuotaSnapshot, 'agent
     primary: null,
     secondary: null,
     credits: null,
+    stale: false,
+    windows_observed_at: null,
   },
 };
 
@@ -1270,8 +1323,30 @@ function normalizeQuotaTimestamp(value: string | null | undefined): string {
   return new Date().toISOString();
 }
 
+interface StoredQuotaReading {
+  account_label: string | null;
+  plan_type: string | null;
+  limit_id: string | null;
+  limit_name: string | null;
+  primary_used_percent: number | null;
+  primary_window_minutes: number | null;
+  primary_resets_at: string | null;
+  secondary_used_percent: number | null;
+  secondary_window_minutes: number | null;
+  secondary_resets_at: string | null;
+  credits_has_credits: number | null;
+  credits_unlimited: number | null;
+  credits_balance: string | null;
+  raw_payload: string | null;
+  windows_observed_at: string | null;
+}
+
 export function upsertProviderQuotaSnapshot(input: ProviderQuotaSnapshotInput): void {
   const db = getDb();
+  db.transaction(() => writeProviderQuotaSnapshot(db, input))();
+}
+
+function writeProviderQuotaSnapshot(db: Database.Database, input: ProviderQuotaSnapshotInput): void {
   const defaults = PROVIDER_DEFAULTS[input.provider];
   const primary = normalizeQuotaWindow(input.primary);
   const secondary = normalizeQuotaWindow(input.secondary);
@@ -1282,15 +1357,31 @@ export function upsertProviderQuotaSnapshot(input: ProviderQuotaSnapshotInput): 
         balance: input.credits.balance ?? null,
       }
     : null;
+  const status = input.status ?? (primary || secondary ? 'available' : defaults.status);
+  const updatedAt = normalizeQuotaTimestamp(input.updated_at);
+
+  // A failed refresh says nothing about the quota itself, so it keeps the last
+  // good reading (read back as stale) rather than clearing it.
+  const lastGood = status === 'error' && !primary && !secondary
+    ? db.prepare(`
+        SELECT account_label, plan_type, limit_id, limit_name, primary_used_percent,
+          primary_window_minutes, primary_resets_at, secondary_used_percent,
+          secondary_window_minutes, secondary_resets_at, credits_has_credits,
+          credits_unlimited, credits_balance, raw_payload, windows_observed_at
+        FROM provider_quotas
+        WHERE provider = ? AND (primary_used_percent IS NOT NULL OR secondary_used_percent IS NOT NULL)
+      `).get(input.provider) as StoredQuotaReading | undefined
+    : undefined;
 
   db.prepare(`
     INSERT INTO provider_quotas (
       provider, agent_type, status, source, updated_at, account_label, plan_type,
       limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
       primary_resets_at, secondary_used_percent, secondary_window_minutes,
-      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance, raw_payload
+      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance, raw_payload,
+      windows_observed_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(provider) DO UPDATE SET
       agent_type = excluded.agent_type,
       status = excluded.status,
@@ -1310,33 +1401,51 @@ export function upsertProviderQuotaSnapshot(input: ProviderQuotaSnapshotInput): 
       credits_has_credits = excluded.credits_has_credits,
       credits_unlimited = excluded.credits_unlimited,
       credits_balance = excluded.credits_balance,
-      raw_payload = excluded.raw_payload
+      raw_payload = excluded.raw_payload,
+      windows_observed_at = excluded.windows_observed_at
   `).run(
     input.provider,
     input.agent_type ?? defaults.agent_type,
-    input.status ?? (primary || secondary ? 'available' : defaults.status),
+    status,
     input.source ?? defaults.source,
-    normalizeQuotaTimestamp(input.updated_at),
-    input.account_label ?? defaults.account_label,
-    input.plan_type ?? defaults.plan_type,
-    input.limit_id ?? defaults.limit_id,
-    input.limit_name ?? defaults.limit_name,
+    updatedAt,
+    input.account_label ?? lastGood?.account_label ?? defaults.account_label,
+    input.plan_type ?? lastGood?.plan_type ?? defaults.plan_type,
+    input.limit_id ?? lastGood?.limit_id ?? defaults.limit_id,
+    input.limit_name ?? lastGood?.limit_name ?? defaults.limit_name,
     input.error_message ?? defaults.error_message,
-    primary?.used_percent ?? null,
-    primary?.window_minutes ?? null,
-    primary?.resets_at ?? null,
-    secondary?.used_percent ?? null,
-    secondary?.window_minutes ?? null,
-    secondary?.resets_at ?? null,
-    credits ? (credits.has_credits ? 1 : 0) : null,
-    credits ? (credits.unlimited ? 1 : 0) : null,
-    credits?.balance ?? null,
-    input.raw_payload == null ? null : JSON.stringify(input.raw_payload),
+    ...(lastGood
+      ? [
+          lastGood.primary_used_percent,
+          lastGood.primary_window_minutes,
+          lastGood.primary_resets_at,
+          lastGood.secondary_used_percent,
+          lastGood.secondary_window_minutes,
+          lastGood.secondary_resets_at,
+          lastGood.credits_has_credits,
+          lastGood.credits_unlimited,
+          lastGood.credits_balance,
+          lastGood.raw_payload,
+          lastGood.windows_observed_at,
+        ]
+      : [
+          primary?.used_percent ?? null,
+          primary?.window_minutes ?? null,
+          primary?.resets_at ?? null,
+          secondary?.used_percent ?? null,
+          secondary?.window_minutes ?? null,
+          secondary?.resets_at ?? null,
+          credits ? (credits.has_credits ? 1 : 0) : null,
+          credits ? (credits.unlimited ? 1 : 0) : null,
+          credits?.balance ?? null,
+          input.raw_payload == null ? null : JSON.stringify(input.raw_payload),
+          primary || secondary ? updatedAt : null,
+        ]),
   );
 
-  if ((input.status ?? 'available') === 'available' && (primary || secondary)) {
-    recordProviderQuotaSample(input.provider, normalizeQuotaTimestamp(input.updated_at),
-      input.plan_type ?? defaults.plan_type, primary, secondary);
+
+  if (status === 'available' && (primary || secondary)) {
+    recordProviderQuotaSample(input.provider, updatedAt, input.plan_type ?? defaults.plan_type, primary, secondary);
   }
 }
 
@@ -1405,7 +1514,8 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
       provider, agent_type, status, source, updated_at, account_label, plan_type,
       limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
       primary_resets_at, secondary_used_percent, secondary_window_minutes,
-      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance
+      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance,
+      windows_observed_at
     FROM provider_quotas
   `).all() as Array<{
     provider: ProviderName;
@@ -1427,6 +1537,7 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
     credits_has_credits: number | null;
     credits_unlimited: number | null;
     credits_balance: string | null;
+    windows_observed_at: string | null;
   }>;
 
   const byProvider = new Map(rows.map((row) => [row.provider, row]));
@@ -1437,6 +1548,17 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
       return { provider, ...PROVIDER_DEFAULTS[provider] };
     }
 
+    const primary = normalizeQuotaWindow({
+      used_percent: row.primary_used_percent,
+      resets_at: row.primary_resets_at,
+      window_minutes: row.primary_window_minutes,
+    });
+    const secondary = normalizeQuotaWindow({
+      used_percent: row.secondary_used_percent,
+      resets_at: row.secondary_resets_at,
+      window_minutes: row.secondary_window_minutes,
+    });
+    const hasWindows = primary !== null || secondary !== null;
     return {
       provider,
       agent_type: row.agent_type,
@@ -1448,16 +1570,8 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
       limit_id: row.limit_id,
       limit_name: row.limit_name,
       error_message: row.error_message,
-      primary: normalizeQuotaWindow({
-        used_percent: row.primary_used_percent,
-        resets_at: row.primary_resets_at,
-        window_minutes: row.primary_window_minutes,
-      }),
-      secondary: normalizeQuotaWindow({
-        used_percent: row.secondary_used_percent,
-        resets_at: row.secondary_resets_at,
-        window_minutes: row.secondary_window_minutes,
-      }),
+      primary,
+      secondary,
       credits: row.credits_has_credits == null && row.credits_unlimited == null && row.credits_balance == null
         ? null
         : {
@@ -1465,6 +1579,8 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
             unlimited: Boolean(row.credits_unlimited),
             balance: row.credits_balance,
           },
+      stale: row.status === 'error' && hasWindows,
+      windows_observed_at: hasWindows ? row.windows_observed_at : null,
     };
   });
 }

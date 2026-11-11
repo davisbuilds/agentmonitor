@@ -9,6 +9,7 @@ import {
   type LiveSettings,
   type LiveTurn,
 } from '../api/client';
+import { latestRequest } from './latest-request';
 
 // The live stream of the one session Monitor is following (an agent card's
 // drill-in). There is no session list here: Monitor's agent cards are the list.
@@ -44,6 +45,9 @@ let settings = $state<LiveSettings>({
 });
 
 let selectedRequestToken = 0;
+// Item loads for the followed session: see loadSelectedItems.
+const itemRequests = latestRequest();
+let itemLoadsInFlight = 0;
 let turnsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let metaRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let itemsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -106,8 +110,12 @@ function keepSelectionInView(): void {
  * arrived after the newest item held, a page at a time until caught up.
  */
 async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | 'newer'): Promise<void> {
-  const token = selectedRequestToken;
-  const current = () => token === selectedRequestToken && selectedSessionId === sessionId;
+  // A tail load reopens the stream, so it supersedes every item load in
+  // flight; earlier pages and catch-ups add to what it loaded.
+  const isCurrent = mode === 'tail' ? itemRequests.begin() : itemRequests.join();
+  if (mode === 'tail') itemLoadsInFlight = 0;
+  const current = () => isCurrent() && selectedSessionId === sessionId;
+  itemLoadsInFlight += 1;
   itemsLoading = true;
   itemsError = null;
   try {
@@ -153,10 +161,15 @@ async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | '
     }
     keepSelectionInView();
   } catch (err) {
+    if (!current()) return;
     console.error('Failed to load live items:', err);
     itemsError = 'Failed to load live items.';
   } finally {
-    if (token === selectedRequestToken) itemsLoading = false;
+    // Loading lasts until the current tail and every page beside it settle.
+    if (isCurrent()) {
+      itemLoadsInFlight -= 1;
+      itemsLoading = itemLoadsInFlight > 0;
+    }
   }
 }
 
@@ -176,6 +189,8 @@ export async function followLiveSession(sessionId: string): Promise<void> {
   sessionMissing = false;
   sessionLoadFailed = false;
   selectedRequestToken += 1;
+  itemRequests.invalidate();
+  itemLoadsInFlight = 0;
   selectedItemId = null;
   itemsBeforeCursor = undefined;
   itemsTotal = 0;
@@ -194,6 +209,8 @@ export async function followLiveSession(sessionId: string): Promise<void> {
 export function stopFollowingLiveSession(): void {
   clearRefreshTimers();
   selectedRequestToken += 1;
+  itemRequests.invalidate();
+  itemLoadsInFlight = 0;
   selectedSessionId = null;
   selectedSession = null;
   sessionMissing = false;

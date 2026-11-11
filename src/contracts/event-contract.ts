@@ -16,7 +16,7 @@ const EVENT_TYPES = [
   'instruction_load',
 ] as const;
 
-const EVENT_STATUSES = [
+export const EVENT_STATUSES = [
   'success',
   'error',
   'timeout',

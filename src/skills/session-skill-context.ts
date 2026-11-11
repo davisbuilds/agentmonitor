@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { isOpenLiveStatus } from '../contracts/session-lifecycle.js';
 import type {
   SessionExpectedRealizationState,
   SessionSkillContext,
@@ -36,7 +37,6 @@ const MAX_CATALOG_ENTRIES = 16_384;
 const MAX_INSTRUCTION_EVENTS = 4_096;
 const CATALOG_MEASUREMENT_METHOD = 'retained_catalog_block_utf8_bytes/v1';
 const LEGACY_CATALOG_MEASUREMENT_METHOD = 'skill_catalog_presentation/v1';
-const ACTIVE_SESSION_STATUSES = new Set(['live', 'active', 'available']);
 
 interface StoredCapabilities {
   orderedConsultations?: { observable?: boolean; reason?: string };
@@ -635,8 +635,7 @@ export function getSessionSkillContext(
     harness: session.agent,
     startedAt: session.started_at,
     endedAt: session.ended_at,
-    active: session.live_status !== null
-      && ACTIVE_SESSION_STATUSES.has(session.live_status),
+    active: isOpenLiveStatus(session.live_status),
     consultationClassification: classification.observable
       ? { observable: true }
       : {

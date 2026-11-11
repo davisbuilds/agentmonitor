@@ -6,6 +6,10 @@
 // stored live or active status from the session's last activity; an explicit
 // end, or any other stored status, is read as stored.
 
+import { RECENT_LIVE_STATUSES } from '../contracts/session-lifecycle.js';
+import { sqlStringList } from '../util/sql-literals.js';
+
+const RECENT_LIVE_STATUS_SET = new Set<string>(RECENT_LIVE_STATUSES);
 const LIVE_WINDOW_MS = 5 * 60_000;
 const ACTIVE_WINDOW_MS = 15 * 60_000;
 
@@ -39,7 +43,7 @@ export function effectiveLiveStatus(
   lastActivityAt: string | null,
   now: number = Date.now(),
 ): string | null {
-  if (stored !== 'live' && stored !== 'active') return stored;
+  if (!RECENT_LIVE_STATUS_SET.has(stored ?? '')) return stored;
   if (!lastActivityAt || Number.isNaN(activityTimeMs(lastActivityAt))) return stored;
   return liveStatusFromActivity(lastActivityAt, now);
 }
@@ -58,7 +62,7 @@ export function effectiveLiveStatusSql(alias = '', nowIso?: string): string {
   const now = nowIso === undefined ? "'now'" : `'${nowIso}'`;
   // Whole milliseconds, so the boundaries agree with the TypeScript reading.
   const idleMs = `CAST(round((julianday(${now}) - julianday(${activity})) * 86400000.0) AS INTEGER)`;
-  return `(CASE WHEN ${stored} IN ('live', 'active') AND ${activity} GLOB '${ACTIVITY_TIME_GLOB}'
+  return `(CASE WHEN ${stored} IN (${sqlStringList(RECENT_LIVE_STATUSES)}) AND ${activity} GLOB '${ACTIVITY_TIME_GLOB}'
       AND julianday(${activity}) IS NOT NULL THEN
       CASE WHEN ${idleMs} <= ${LIVE_WINDOW_MS} THEN 'live'
         WHEN ${idleMs} <= ${ACTIVE_WINDOW_MS} THEN 'active'

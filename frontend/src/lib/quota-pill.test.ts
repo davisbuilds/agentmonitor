@@ -60,3 +60,17 @@ describe('quota pill', () => {
     expect(quotaPillLabel([])).toBe('Provider quota');
   });
 });
+
+describe('a stale quota reading', () => {
+  it('keeps the last good windows of a failed refresh, marked stale', () => {
+    const entries = quotaPillEntries([
+      row('codex', { status: 'error', stale: true, primary: win(40), windows_observed_at: '2026-11-11T10:00:00Z' }),
+    ]);
+    expect(entries.map(e => [e.label, e.remainingPercent, e.stale])).toEqual([['Codex', 60, true]]);
+    expect(quotaPillLabel(entries)).toBe('Quota left: Codex 60% (stale)');
+  });
+
+  it('marks a fresh reading as not stale', () => {
+    expect(quotaPillEntries([row('claude', { primary: win(25) })])[0].stale).toBe(false);
+  });
+});

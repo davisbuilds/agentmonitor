@@ -8,6 +8,7 @@ import {
   type TraceQualityReadCoverage,
 } from '../api/client';
 import { analyticsFilters } from './analytics-filters.svelte';
+import { latestRequest } from './latest-request';
 
 /** Flatten an observation tree depth-first to locate a node by id. */
 function findNode(
@@ -24,7 +25,7 @@ function findNode(
 
 class TraceQualityStore {
   private listVersion = 0;
-  private detailVersion = 0;
+  private readonly detailRequests = latestRequest();
   private unsubscribe: (() => void) | null = null;
 
   get from(): string { return analyticsFilters.from; }
@@ -140,6 +141,9 @@ class TraceQualityStore {
   }
 
   private clearDetail(): void {
+    // A detail still loading belongs to the selection being cleared.
+    this.detailRequests.invalidate();
+    this.detailLoading = false;
     this.detail = null;
     this.tree = [];
     this.selectedObservationId = null;
@@ -147,7 +151,7 @@ class TraceQualityStore {
   }
 
   async loadDetail(traceId: string): Promise<void> {
-    const version = ++this.detailVersion;
+    const isCurrent = this.detailRequests.begin();
     this.detailLoading = true;
     this.detailError = null;
     this.selectedObservationId = null;
@@ -156,17 +160,17 @@ class TraceQualityStore {
         fetchTraceQualityTrace(traceId),
         fetchTraceQualityObservations(traceId),
       ]);
-      if (version !== this.detailVersion) return;
+      if (!isCurrent()) return;
       this.detail = trace.trace;
       this.tree = observations.tree;
     } catch (err) {
-      if (version !== this.detailVersion) return;
+      if (!isCurrent()) return;
       console.error('Failed to load trace detail:', err);
       this.detailError = 'Failed to load trace detail.';
       this.detail = null;
       this.tree = [];
     } finally {
-      if (version === this.detailVersion) this.detailLoading = false;
+      if (isCurrent()) this.detailLoading = false;
     }
   }
 

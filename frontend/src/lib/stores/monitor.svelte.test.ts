@@ -116,7 +116,47 @@ describe('incrementEvent — optimistic stats totals', () => {
 });
 
 describe('handleSessionUpdate — idle_check', () => {
-  it('flips active sessions past the 5-minute threshold to idle and leaves fresh ones active', () => {
+  it('applies the statuses the server swept to, whatever its timeout, and drops ended cards', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-11T01:00:00Z'));
+    store.setSessions([
+      // 3m quiet: active by a 5-minute clock, but the server (timeout 2m) idled it.
+      session('quiet', { last_event_at: '2026-09-11T00:57:00Z' }),
+      session('gone', { status: 'idle', last_event_at: '2026-09-11T00:50:00Z' }),
+      // 10m quiet, yet the server did not move it (timeout 15m): it stays active.
+      session('slow', { last_event_at: '2026-09-11T00:50:00Z' }),
+    ]);
+    store.handleSessionUpdate({
+      type: 'idle_check',
+      idled: 1,
+      ended: 1,
+      timeout_minutes: 15,
+      transitions: [
+        { session_id: 'quiet', status: 'idle' },
+        { session_id: 'gone', status: 'ended' },
+      ],
+    });
+    // The Monitor lists only sessions that have not ended, as its reload does.
+    const byId = Object.fromEntries(store.getSessions().map((s) => [s.id, s.status]));
+    expect(byId).toEqual({ quiet: 'idle', slow: 'active' });
+    vi.useRealTimers();
+  });
+
+  it("idles an unlisted active card past the server's timeout (another process swept it)", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-11T01:00:00Z'));
+    store.setSessions([
+      // An `amon` command swept this one in its own process: no transition for it.
+      session('cli-swept', { last_event_at: '2026-09-11T00:50:00Z' }), // 10m quiet
+      session('recent', { last_event_at: '2026-09-11T00:53:00Z' }),    // 7m quiet
+    ]);
+    store.handleSessionUpdate({ type: 'idle_check', idled: 0, ended: 0, transitions: [], timeout_minutes: 8 });
+    const byId = Object.fromEntries(store.getSessions().map((s) => [s.id, s.status]));
+    expect(byId).toEqual({ 'cli-swept': 'idle', recent: 'active' });
+    vi.useRealTimers();
+  });
+
+  it('falls back to its own clock when the server sends no transitions (an older server)', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-11T01:00:00Z'));
     store.setSessions([

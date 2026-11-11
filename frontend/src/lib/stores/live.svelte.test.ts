@@ -187,3 +187,42 @@ describe('following one session in Monitor', () => {
     expect(fetchLiveItems).not.toHaveBeenCalled();
   });
 });
+
+describe('item requests that land out of order', () => {
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    let reject!: (reason: unknown) => void;
+    const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  }
+
+  it('a kind filter changed twice shows the items for the last filter, whichever lands last', async () => {
+    await store.followLiveSession('s1');
+    const first = deferred<{ data: LiveItem[]; total: number }>();
+    const second = deferred<{ data: LiveItem[]; total: number }>();
+    fetchLiveItems.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+
+    store.toggleLiveItemKind('tool_call');
+    store.toggleLiveItemKind('message');
+    second.resolve({ data: [{ id: 20 } as LiveItem], total: 1 });
+    await vi.runAllTimersAsync();
+    first.resolve({ data: [{ id: 10 } as LiveItem], total: 1 });
+    await vi.runAllTimersAsync();
+
+    expect(store.getSelectedLiveKinds()).toEqual(['tool_call', 'message']);
+    expect(store.getLiveItems().map(item => item.id)).toEqual([20]);
+    expect(store.getLiveItemsLoading()).toBe(false);
+  });
+
+  it("a failed request for a session the user left does not show its error on the next one", async () => {
+    const stale = deferred<{ data: LiveItem[]; total: number }>();
+    fetchLiveItems.mockReturnValueOnce(stale.promise);
+    const following = store.followLiveSession('a');
+    await store.followLiveSession('b');
+    stale.reject(new TypeError('Failed to fetch'));
+    await following;
+
+    expect(store.getSelectedLiveSessionId()).toBe('b');
+    expect(store.getLiveItemsError()).toBeNull();
+  });
+});

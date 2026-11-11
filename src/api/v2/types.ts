@@ -570,6 +570,10 @@ export interface MonitorQuotaSnapshot {
   primary: MonitorQuotaWindow | null;
   secondary: MonitorQuotaWindow | null;
   credits: MonitorQuotaCredits | null;
+  /** The windows are the last good reading, kept through a failed refresh. */
+  stale: boolean;
+  /** When the windows were read; null without windows. */
+  windows_observed_at: string | null;
 }
 
 export interface MonitorStats {

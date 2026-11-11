@@ -3,7 +3,7 @@
   import type { QuotaMonitorData, QuotaMonitorWindow } from '../../api/client';
   import { parseTimestamp, timeAgo } from '../../format';
   import { Popover, Bar } from '../ui';
-  import { quotaPillEntries, quotaPillLabel, quotaProviderLabel as providerLabel, quotaWindows as windows } from '../../quota-pill';
+  import { quotaPillEntries, quotaPillLabel, quotaProviderLabel as providerLabel, quotaShowsWindows, quotaWindows as windows } from '../../quota-pill';
 
   const rows = $derived(getQuotaMonitor());
   const entries = $derived(quotaPillEntries(rows));
@@ -49,10 +49,11 @@
         {#if entries.length > 0}
           <!-- Each provider's name and what is left of its most-used window. -->
           {#each entries as entry (entry.provider)}
-            <span class="flex items-center gap-1.5">
-              <span class="h-1.5 w-1.5 rounded-full {toneDot[entry.tone]}"></span>
+            <!-- A stale entry is the last good reading: a neutral dot and muted figure. -->
+            <span class="flex items-center gap-1.5" title={entry.stale ? 'Last good reading; the latest refresh failed' : undefined}>
+              <span class="h-1.5 w-1.5 rounded-full {entry.stale ? 'bg-line-strong' : toneDot[entry.tone]}"></span>
               <span>{entry.label}</span>
-              <span class="tabular font-mono text-text">{entry.remainingPercent}%</span>
+              <span class="tabular font-mono {entry.stale ? 'text-text-muted' : 'text-text'}">{entry.remainingPercent}%</span>
             </span>
           {/each}
           <span class="text-text-faint">left</span>
@@ -76,9 +77,14 @@
             {/if}
           </div>
 
-          {#if row.status === 'available' && windows(row).length > 0}
+          {#if quotaShowsWindows(row)}
+            {#if row.stale}
+              <p class="text-meta text-warn">
+                Stale{#if row.windows_observed_at}: read {timeAgo(row.windows_observed_at)}{/if}{#if row.error_message}. Refresh failed: {row.error_message}{/if}
+              </p>
+            {/if}
             {#each windows(row) as window, index (index)}
-              <div class="flex items-center gap-2.5 text-meta">
+              <div class="flex items-center gap-2.5 text-meta {row.stale ? 'opacity-60' : ''}">
                 <span class="w-6 shrink-0 text-text-faint">{windowLabel(window)}</span>
                 <Bar value={window.used_percent} tone="auto" class="flex-1" />
                 <span class="tabular w-16 shrink-0 text-right font-mono text-text-muted">{Math.round(window.remaining_percent)}% left</span>
@@ -90,7 +96,7 @@
           {/if}
 
           {#if row.updated_at}
-            <p class="text-meta text-text-faint">updated {timeAgo(row.updated_at)}</p>
+            <p class="text-meta text-text-faint">{row.stale ? 'last tried' : 'updated'} {timeAgo(row.updated_at)}</p>
           {/if}
         </div>
       {/each}

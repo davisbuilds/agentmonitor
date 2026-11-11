@@ -39,7 +39,9 @@ Monitor provides current sessions as agent cards, recent events, aggregate stats
 provider-native quota snapshots, and context-window occupancy. It consumes the v2
 Monitor reads and the shared SSE stream. A card folds repeated recent events into
 one row with a count. The header's quota pill names each provider and shows what
-is left of its most-used window.
+is left of its most-used window. When a refresh fails, it keeps the last good
+reading, shown as stale (muted, with when it was read and why the refresh
+failed), rather than dropping the provider.
 
 Model IDs read one way everywhere: as the vendor names the model, without a
 routing prefix, a long-context suffix, a Bedrock wrapper, or a release date

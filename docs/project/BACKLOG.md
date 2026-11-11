@@ -633,6 +633,99 @@ on main"; these were left out by decision.
 - **Revisit when**: `provider_quota_samples` holds a few months, and a plan's
   limits, rather than API rates, are what bounds the work.
 
+### Implicit state machines (audit 2026-11-11)
+
+An audit for lifecycle state encoded as loose strings, nullable column
+combinations or independent flags. Fixed in the same change: the Monitor
+session sweep (now broadcast with its transitions), the named live-status sets,
+the compressed-rollout reparse marker, and the request races in the live
+stream, Monitor reload, Quality detail and session viewer
+(`frontend/src/lib/stores/latest-request.ts`). What remains, from source
+tracing on 2026-11-11; each was traced but not reproduced unless it says so.
+
+#### Provider quota status is an open string
+- **What**: `POST /api/provider-quotas/:provider` stores any `status` string,
+  and readers cast it to `'available' | 'unavailable' | 'error'`. An
+  `available` snapshot from a statusline that stopped posting never turns
+  stale; only `updated_at` gives its age. A failed refresh now keeps the last
+  good windows marked stale (2026-11-11). `error_message` also carries Codex's
+  `rateLimitReachedType` on available rows, which the pill never shows.
+- **Next**: validate `status` against a constant vocabulary on the POST route,
+  and decide whether an old `available` reading should also read as stale.
+
+#### Runtime lock: stale-lock removal can race (hypothesis, unmeasured)
+- **What**: in `src/runtime-ownership.ts`, a contender that read a stale lock
+  unlinks it without re-checking the token. A second contender may have
+  replaced it in the meantime. A reused PID after a reboot also reads as alive,
+  since `startedAt` is never compared with the process start.
+- **Next**: re-read and compare the token before unlinking. Extend
+  `tests/runtime-ownership.test.ts` to race contenders against a pre-seeded
+  stale lock.
+
+#### A merged pull request can be recorded as nonexistent (hypothesis)
+- **What**: `src/git/github.ts` re-queries a `MERGED` row whose `details_at`
+  is null. A `null` answer (repo transferred, access lost) upserts
+  `state = NULL`, undoing a final state that outcome attribution reads.
+- **Next**: keep `MERGED`/`CLOSED` when a later lookup finds nothing, with a
+  test beside the partial-to-full case in `tests/github-pull-requests.test.ts`.
+
+#### Live item and turn statuses mix vocabularies
+- **What**: `session_items.status` and `session_turns.status` hold event
+  statuses, `completed`, raw vendor statuses and event types
+  (`src/live/codex-adapter.ts`). The tool-outcome tallies in
+  `src/db/v2-queries.ts` count only `status IN ('success', 'error')`. That
+  leaves `timeout` results out of both the numerator and the denominator; it
+  is not clear whether that is intended.
+- **Next**: list the stored values per producer with a read-only probe before
+  choosing a normalized vocabulary.
+
+#### Watcher error rows retry silently
+- **What**: a `watched_files` row with `status = 'error'` is retried on every
+  resync with no attempt count. Its failure appears only on stderr, so no CLI,
+  API or `--json` surface shows a file that keeps failing. The reparse request
+  is still the empty-hash marker (`src/db/reparse-marker.ts`), not a status.
+- **Next**: surface error rows through `amon` and a verify probe; add an
+  attempt count if they turn out to recur.
+
+#### Monitor status is swept on read
+- **What**: `sessions.status` advances when the sweep runs, and Monitor reads
+  run it too. A sweep run by a separate `amon` process is not broadcast. An
+  open Monitor still idles those cards by the server's timeout on its next
+  `idle_check`, but a session that process ended stays listed until a reload.
+- **Revisit when**: agents poll `amon monitor` often enough for this to be
+  noticed. At that point, derive the status at read time as live status does,
+  rather than storing it.
+
+#### Server state assembled from independent flags
+- **What**: `src/build-fingerprint.ts` reports `{tracked, stale, started,
+  current}`, which can express impossible pairs. A build in progress reads the
+  same as a finished one. `amon service status` (`src/cli/launchd.ts`) combines
+  `installed`, `loaded`, the launchd state and the PID without asking the
+  runtime lock. A crash loop caused by another owner therefore shows only as
+  an exit code, and an unreadable plist reads as installed.
+- **Next**: when either surface changes, return one named state (with the
+  detail alongside), so `--json` consumers branch on it rather than on flag
+  combinations.
+
+#### Frontend: remaining stale-slice and shared-flag sites
+- **What**:
+  - **Sessions list:** shows the old filter's rows next to a load error, and its
+    Retry reloads from the first page.
+  - **Analytics and Usage CSV exports:** write the previous slice's figures
+    under the current filter header while a fetch is in flight or after one
+    fails.
+  - **Insights:** one `error` field is shared by load, generate and delete.
+  - **SSE connection state:** `sse.ts` and `live-sse.ts` duplicate the
+    connection state and the backoff.
+  - **Smaller races:** collapsing a subagent row while it loads re-expands it,
+    and `pins.loadAll` and `refreshOccupancy` have no guard.
+  - **Hand-rolled counters:** the stores with their own latest-request counter
+    (analytics, usage, insights, search, benchmarks, session list) are correct
+    today.
+- **Next**: tag each slice's data with the query that produced it, as
+  `analytics.changeMarkersSlice` does. Move a store's counter to
+  `latestRequest()` when the store is next changed for another reason.
+
 ### Frontend testing
 
 #### Cover component behavior (mount + reactivity)

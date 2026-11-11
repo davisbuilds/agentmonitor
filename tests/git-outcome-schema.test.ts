@@ -53,5 +53,5 @@ test('v29 adds pull request size, membership and commit landing to a v28 store, 
   assert.deepEqual(db.prepare('SELECT state, additions FROM github_pull_requests').get(), { state: 'MERGED', additions: null });
   assert.throws(() => db.prepare("UPDATE git_commits SET landing = 'elsewhere'").run(), /CHECK/);
   assert.throws(() => db.prepare("INSERT INTO github_pull_request_commits VALUES ('owner/repo', 7, 'abc', 'guess')").run(), /CHECK/);
-  assert.equal(db.pragma('user_version', { simple: true }), 29);
+  assert.equal(db.pragma('user_version', { simple: true }), 30);
 });

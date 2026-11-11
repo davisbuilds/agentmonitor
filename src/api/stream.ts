@@ -1,6 +1,6 @@
 import { Router, type Request, type Response } from 'express';
 import { broadcaster } from '../sse/emitter.js';
-import { getStatsForBroadcast, getProviderQuotas } from '../db/queries.js';
+import { getStatsForBroadcast, getProviderQuotas, onSessionSweep } from '../db/queries.js';
 import { config } from '../config.js';
 import { serverBuildStatus } from '../build-fingerprint.js';
 import { getRecentUnpricedModels } from '../db/v2-queries.js';
@@ -45,6 +45,34 @@ export function stopStatsBroadcast(): void {
     clearInterval(statsInterval);
     statsInterval = null;
   }
+}
+
+let stopSweepListener: (() => void) | null = null;
+
+/**
+ * Send each session-sweep result as a `session_update` of type `idle_check`.
+ * Reads run the sweep too, so this listens to the sweep itself: whichever
+ * caller in this process moved a session, the Monitor hears the status it now
+ * has. A sweep in another process (an `amon` command) is not heard; the
+ * timeout rides along so the Monitor can still idle what that sweep moved.
+ */
+export function startSessionSweepBroadcast(): void {
+  if (stopSweepListener) return;
+  stopSweepListener = onSessionSweep((sweep) => {
+    if (broadcaster.clientCount === 0) return;
+    broadcaster.broadcast('session_update', {
+      type: 'idle_check',
+      idled: sweep.idled,
+      ended: sweep.ended,
+      transitions: sweep.transitions,
+      timeout_minutes: config.sessionTimeoutMinutes,
+    });
+  });
+}
+
+export function stopSessionSweepBroadcast(): void {
+  stopSweepListener?.();
+  stopSweepListener = null;
 }
 
 // GET /api/stream - SSE endpoint

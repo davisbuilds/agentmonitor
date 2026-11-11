@@ -67,6 +67,10 @@ export interface QuotaMonitorData {
   primary: QuotaMonitorWindow | null;
   secondary: QuotaMonitorWindow | null;
   credits: QuotaMonitorCredits | null;
+  /** The windows are the last good reading, kept through a failed refresh. Absent from older servers. */
+  stale?: boolean;
+  /** When the windows were read. */
+  windows_observed_at?: string | null;
 }
 
 export interface AgentEvent {

@@ -2,6 +2,9 @@ import path from 'node:path';
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { stripInlineImages } from '../util/inline-images.js';
+import { sqlStringList } from '../util/sql-literals.js';
+import { REPARSE_REQUESTED_HASH } from './reparse-marker.js';
+import { EVENT_STATUSES } from '../contracts/event-contract.js';
 import { config } from '../config.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from '../live/normalize.js';
 import { CODEX_AUTO_REVIEW_MODEL, isCodexAppJobPrompt } from '../parser/session-title.js';
@@ -12,9 +15,6 @@ import {
   TRACE_QUALITY_EXPORT_STATUSES,
 } from '../trace-quality/constants.js';
 
-function sqlStringList(values: readonly string[]): string {
-  return values.map(value => `'${value.replaceAll("'", "''")}'`).join(', ');
-}
 
 /**
  * Rebuild `trace_quality_export_state` without its legacy foreign keys to the
@@ -125,7 +125,7 @@ function initSchemaLocked(db: Database): void {
       agent_type TEXT NOT NULL,
       event_type TEXT NOT NULL,
       tool_name TEXT,
-      status TEXT NOT NULL DEFAULT 'success' CHECK (status IN ('success', 'error', 'timeout')),
+      status TEXT NOT NULL DEFAULT 'success' CHECK (status IN (${sqlStringList(EVENT_STATUSES)})),
       tokens_in INTEGER DEFAULT 0,
       tokens_out INTEGER DEFAULT 0,
       branch TEXT,
@@ -196,7 +196,8 @@ function initSchemaLocked(db: Database): void {
       credits_has_credits INTEGER,
       credits_unlimited INTEGER,
       credits_balance TEXT,
-      raw_payload TEXT
+      raw_payload TEXT,
+      windows_observed_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
@@ -416,7 +417,8 @@ function initSchemaLocked(db: Database): void {
         credits_has_credits INTEGER,
         credits_unlimited INTEGER,
         credits_balance TEXT,
-        raw_payload TEXT
+        raw_payload TEXT,
+        windows_observed_at TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
@@ -476,6 +478,11 @@ function initSchemaLocked(db: Database): void {
     if (!providerQuotaColumns.has('raw_payload')) {
       db.exec('ALTER TABLE provider_quotas ADD COLUMN raw_payload TEXT');
     }
+    // When the stored windows were read: a failed refresh keeps the last good
+    // windows, marked stale, rather than clearing them.
+    if (!providerQuotaColumns.has('windows_observed_at')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN windows_observed_at TEXT');
+    }
   }
 
   db.exec('UPDATE events SET payload_truncated = 0 WHERE payload_truncated IS NULL');
@@ -501,7 +508,7 @@ function initSchemaLocked(db: Database): void {
         agent_type TEXT NOT NULL,
         event_type TEXT NOT NULL,
         tool_name TEXT,
-        status TEXT NOT NULL DEFAULT 'success' CHECK (status IN ('success', 'error', 'timeout')),
+        status TEXT NOT NULL DEFAULT 'success' CHECK (status IN (${sqlStringList(EVENT_STATUSES)})),
         tokens_in INTEGER DEFAULT 0,
         tokens_out INTEGER DEFAULT 0,
         branch TEXT,
@@ -1234,7 +1241,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 29;
+const DATA_SCHEMA_VERSION = 30;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1248,6 +1255,23 @@ export function ensureSchemaForRead(): void {
   const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
   if (current >= DATA_SCHEMA_VERSION) return;
   initSchema();
+}
+
+/**
+ * v30 — provider_quotas.windows_observed_at says when the stored windows were
+ * read, so a failed refresh can keep them as stale. A row holding windows was
+ * last written by a good read, so its update time is when they were read.
+ */
+function dateStoredQuotaWindows(db: Database): void {
+  const columns = new Set((db.prepare('PRAGMA table_info(provider_quotas)').all() as Array<{ name: string }>)
+    .map(col => col.name));
+  if (!columns.has('windows_observed_at')) return;
+  db.prepare(`
+    UPDATE provider_quotas
+    SET windows_observed_at = updated_at
+    WHERE windows_observed_at IS NULL
+      AND (primary_used_percent IS NOT NULL OR secondary_used_percent IS NOT NULL)
+  `).run();
 }
 
 /**
@@ -1302,6 +1326,7 @@ export function runDataMigrations(db: Database): void {
     // and github_pull_requests, and v29 commit landing, pull request
     // size and author, github_pull_request_commits and github_pull_request_search;
     // the next git pass fills them.
+    if (current < 30) dateStoredQuotaWindows(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();
@@ -1448,7 +1473,7 @@ function refreshSessionTitles(db: Database): void {
   const hasWatchedFiles = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'watched_files'").get();
   const flagged = hasWatchedFiles ? db.prepare(`
     UPDATE watched_files
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE file_path IN (
       SELECT file_path FROM browsing_sessions
       WHERE agent IN ('claude', 'codex') AND file_path IS NOT NULL
@@ -1703,7 +1728,7 @@ function deleteLegacyBenchmarkRows(db: Database): void {
 function invalidateSessionFilesForSkillContext(db: Database): void {
   const result = db.prepare(`
     UPDATE watched_files
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE file_path IN (
       SELECT file_path
       FROM browsing_sessions
@@ -1727,7 +1752,7 @@ function invalidateSessionFilesForSkillContext(db: Database): void {
 function invalidateCodexImportsForModelAttribution(db: Database): void {
   const result = db.prepare(`
     UPDATE import_state
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE source = 'codex'
   `).run();
 
@@ -1751,7 +1776,7 @@ function invalidateCodexImportsForModelAttribution(db: Database): void {
 function backfillOccupancyOnUpgrade(db: Database): void {
   const result = db.prepare(`
     UPDATE watched_files
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE file_path IN (
       SELECT file_path FROM browsing_sessions
       WHERE agent IN ('claude', 'codex')

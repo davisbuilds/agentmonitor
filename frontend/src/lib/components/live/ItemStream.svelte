@@ -207,13 +207,17 @@
   <div class="space-y-0.5 px-2 py-2 [overflow-anchor:none] xl:flex-1 xl:overflow-y-auto" bind:this={scroller} onscroll={handleScroll} data-testid="live-stream-scroller">
     {#if loading && items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">Loading live items…</div>
-    {:else if error}
+    {:else if error && items.length === 0}
       <div class="py-12 text-center text-meta text-danger">{error}</div>
     {:else if !session}
       <div class="py-12 text-center text-meta text-text-muted">Loading session…</div>
     {:else if items.length === 0}
       <div class="py-12 text-center text-meta text-text-muted">No live items for this session yet.</div>
     {:else}
+      {#if error}
+        <!-- A failed page or catch-up keeps the rows already loaded in view. -->
+        <div class="px-3 py-1 text-meta text-danger" role="status">{error}</div>
+      {/if}
       {#each rows as row (row.item.id)}
         {@const failed = rowFailed(row)}
         {@const durationMs = rowDurationMs(row)}
