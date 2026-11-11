@@ -4,6 +4,8 @@ import { config } from './config.js';
 import { closeDb, getDb } from './db/connection.js';
 import { initSchema } from './db/schema.js';
 import { getStatsForBroadcast, updateIdleSessions } from './db/queries.js';
+import { SERVICE_WATCHDOG, startEventLoopWatchdog } from './event-loop-watchdog.js';
+import { runningAsLaunchdService } from './util/service-context.js';
 import {
   startSessionSweepBroadcast,
   startStatsBroadcast,
@@ -38,6 +40,9 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
   // publish it in the lock so one-shot commands can tell they differ.
   const build = startServerBuildWatch();
   const ownership = acquireRuntimeOwnership(config.dbPath, { build });
+  // launchd restarts the service when it exits, not when it freezes: under it,
+  // a server stuck waiting in a blocking call ends itself so launchd restarts it.
+  const stopWatchdog = runningAsLaunchdService() ? startEventLoopWatchdog(SERVICE_WATCHDOG) : undefined;
   let server: Server | undefined;
   let sessionChecker: ReturnType<typeof setInterval> | undefined;
   let autoImportTimer: ReturnType<typeof setInterval> | undefined;
@@ -76,6 +81,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
         }
       };
 
+      stopWatchdog?.();
       if (sessionChecker) clearInterval(sessionChecker);
       stopSessionSweepBroadcast();
       if (autoImportTimer) clearInterval(autoImportTimer);

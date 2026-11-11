@@ -376,6 +376,17 @@ export interface ServiceStatus {
   program_arguments: string[] | null;
   /** False when the recorded CLI is gone, e.g. the checkout moved. */
   entry_exists: boolean | null;
+  /** Where the agent's server listens: its recorded AGENTMONITOR_HOST/PORT, else the defaults. */
+  address: { host: string; port: number } | null;
+}
+
+function installedAddress(plist: InstalledPlist): { host: string; port: number } {
+  const environment = (plist.EnvironmentVariables ?? {}) as Record<string, unknown>;
+  const host = typeof environment.AGENTMONITOR_HOST === 'string' && environment.AGENTMONITOR_HOST.trim()
+    ? environment.AGENTMONITOR_HOST.trim()
+    : '127.0.0.1';
+  const port = Number(environment.AGENTMONITOR_PORT);
+  return { host, port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : 3141 };
 }
 
 export function serviceStatus(host: LaunchdHost): ServiceStatus {
@@ -395,5 +406,6 @@ export function serviceStatus(host: LaunchdHost): ServiceStatus {
     last_exit_code: state.lastExitCode,
     program_arguments: programArguments,
     entry_exists: entry ? fs.existsSync(entry) : null,
+    address: plist ? installedAddress(plist) : null,
   };
 }

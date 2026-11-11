@@ -9,8 +9,10 @@ import {
   serviceStatus,
   stopService,
   uninstallService,
+  type ServiceStatus,
 } from '../launchd.js';
 import { writeHuman, writeJson, writeStdout } from '../output.js';
+import { probeServiceHealth, type ServiceHealth } from '../service-health.js';
 
 const GROUP = 'Runtime Commands';
 
@@ -87,26 +89,18 @@ export function registerServiceCommands(): void {
     summary: 'Show whether the login service is installed and running',
     usage: 'service status [--json]',
     examples: ['service status', 'service status --json'],
-    handler(ctx, args) {
+    async handler(ctx, args) {
       rejectExtraPositionals(args, 'amon service status');
       const status = serviceStatus(currentLaunchdHost());
+      // launchd knows the process is alive, not that it serves: ask it.
+      const health = status.loaded && status.pid !== null && status.address
+        ? await probeServiceHealth(status.address.host, status.address.port)
+        : null;
       if (ctx.global.json) {
-        writeJson(ctx, status);
+        writeJson(ctx, { ...status, responding: health?.responding ?? null, health_detail: health?.detail ?? null });
         return;
       }
-      if (!status.installed && !status.loaded) {
-        writeStdout(ctx, 'The AgentMonitor service is not installed.');
-        return;
-      }
-      writeStdout(ctx, [
-        `Service: ${status.label} (${status.loaded ? status.state ?? 'loaded' : 'stopped'})`,
-        `PID: ${status.pid ?? '-'}`,
-        `Last exit: ${status.last_exit_code ?? '-'}`,
-        `Plist: ${status.plist_path}${status.installed ? '' : ' (missing)'}`,
-        ...(status.program_arguments ? [`Runs: ${status.program_arguments.join(' ')}`] : []),
-        ...(status.installed && !status.loaded ? ['Start it with `amon service restart`.'] : []),
-        ...(status.entry_exists === false ? ['Warning: the recorded CLI no longer exists; rerun `amon service install`.'] : []),
-      ].join('\n'));
+      writeStdout(ctx, formatServiceStatus(status, health));
     },
   });
 
@@ -122,4 +116,21 @@ export function registerServiceCommands(): void {
       writeHuman(ctx, removed ? 'Removed the AgentMonitor service.' : 'The AgentMonitor service was not installed.');
     },
   });
+}
+
+/** The human reading of `amon service status`. */
+export function formatServiceStatus(status: ServiceStatus, health: ServiceHealth | null): string {
+  if (!status.installed && !status.loaded) return 'The AgentMonitor service is not installed.';
+  const hung = health !== null && !health.responding;
+  return [
+    `Service: ${status.label} (${!status.loaded ? 'stopped' : hung ? 'not responding' : status.state ?? 'loaded'})`,
+    `PID: ${status.pid ?? '-'}`,
+    ...(health ? [`Responding: ${health.responding ? 'yes' : 'no'}, ${health.detail}`] : []),
+    `Last exit: ${status.last_exit_code ?? '-'}`,
+    `Plist: ${status.plist_path}${status.installed ? '' : ' (missing)'}`,
+    ...(status.program_arguments ? [`Runs: ${status.program_arguments.join(' ')}`] : []),
+    ...(status.installed && !status.loaded ? ['Start it with `amon service restart`.'] : []),
+    ...(hung ? ['The process is alive but does not serve. Restart it with `amon service restart`; its log is ~/Library/Logs/agentmonitor/serve.log.'] : []),
+    ...(status.entry_exists === false ? ['Warning: the recorded CLI no longer exists; rerun `amon service install`.'] : []),
+  ].join('\n');
 }
