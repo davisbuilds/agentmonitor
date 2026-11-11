@@ -26,7 +26,7 @@ test('a loop stuck waiting, using no CPU, is killed so launchd restarts it', asy
   // while it waits on a privacy prompt.
   const result = await runBlocked('Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000)');
   assert.equal(result.signal, 'SIGKILL');
-  assert.match(result.stderr, /\[watchdog\] the event loop has not run for \d+s while using \d+ms of CPU/);
+  assert.match(result.stderr, /\[watchdog\] the event loop has not run for \d+s and used \d+ms of CPU in the last \d+s/);
 });
 
 test('a loop busy with work is left to finish', async () => {
@@ -34,4 +34,10 @@ test('a loop busy with work is left to finish', async () => {
   assert.equal(result.signal, null);
   assert.equal(result.code, 0);
   assert.doesNotMatch(result.stderr, /watchdog/);
+});
+
+test('work done before a hang does not exempt it: CPU counts over the recent window only', async () => {
+  // Useful work (well past the CPU allowance), then a wait that never ends.
+  const result = await runBlocked('const end = Date.now() + 500; while (Date.now() < end) {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000)');
+  assert.equal(result.signal, 'SIGKILL');
 });

@@ -4,7 +4,8 @@ export interface EventLoopWatchdogOptions {
   /** How long the event loop may go without a turn before it counts as stalled. */
   stallMs: number;
   /**
-   * The most CPU the process may use while stalled and still count as hung.
+   * The most CPU the process may use in the last `stallMs` and still count as
+   * hung.
    * Work that blocks the loop (a long synchronous import) burns CPU and is left
    * alone; a loop waiting in a blocking call (a privacy prompt no one answers, a
    * stuck file read) uses next to none.
@@ -26,20 +27,25 @@ const { workerData } = require('node:worker_threads');
 const { beat, stallMs, maxCpuMs, checkMs } = workerData;
 const lastBeat = new Float64Array(beat);
 let seenBeat = lastBeat[0];
-let cpuAtBeat = process.cpuUsage();
+// Process CPU sampled every check. The first kept sample is the newest one at
+// least stallMs old, so the CPU spent across the last stallMs is measurable:
+// work done before a hang must not exempt the hang that follows it.
+const samples = [];
 setInterval(() => {
+  const now = Date.now();
+  const usage = process.cpuUsage();
+  samples.push({ at: now, cpu: usage.user + usage.system });
+  while (samples.length > 1 && samples[1].at <= now - stallMs) samples.shift();
   if (lastBeat[0] !== seenBeat) {
     seenBeat = lastBeat[0];
-    cpuAtBeat = process.cpuUsage();
     return;
   }
-  const stalledMs = Date.now() - seenBeat;
-  if (stalledMs < stallMs) return;
-  const used = process.cpuUsage(cpuAtBeat);
-  const cpuMs = (used.user + used.system) / 1000;
+  const stalledMs = now - seenBeat;
+  if (stalledMs < stallMs || now - samples[0].at < stallMs) return;
+  const cpuMs = (samples[samples.length - 1].cpu - samples[0].cpu) / 1000;
   if (cpuMs > maxCpuMs) return;
-  fs.writeSync(2, '[watchdog] the event loop has not run for ' + Math.round(stalledMs / 1000) + 's while using '
-    + Math.round(cpuMs) + 'ms of CPU: it is waiting in a blocking call, not working. Exiting so the service restarts.\\n');
+  fs.writeSync(2, '[watchdog] the event loop has not run for ' + Math.round(stalledMs / 1000) + 's and used '
+    + Math.round(cpuMs) + 'ms of CPU in the last ' + Math.round(stallMs / 1000) + 's: it is waiting in a blocking call, not working. Exiting so the service restarts.\\n');
   process.kill(process.pid, 'SIGKILL');
 }, checkMs);
 `;
