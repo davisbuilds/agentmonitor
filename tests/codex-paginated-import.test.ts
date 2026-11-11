@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach } from 'node:test';
+import { zstdCompressSync } from 'node:zlib';
 
 // The importer, repair, and usage reader all use a real, isolated store.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-codex-pages-'));
@@ -368,3 +369,47 @@ test('forced date-scoped reruns retain each physical member\'s stored usage inst
     assert.equal(summary.total_usage_events, 2);
   }
 });
+
+
+for (const compressed of [false, true]) {
+  test(`a complete subagent imports its own usage when copied parent metadata has a history bookmark (${compressed ? 'compressed' : 'plain'})`, () => {
+    const parent = '01000000-0000-7000-8000-000000000099';
+    const file = path.join(codexDir, 'sessions', `rollout-2026-11-11T10-00-00-${SESSION}.jsonl${compressed ? '.zst' : ''}`);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const ownTurn = { ...turn(4, TODAY), payload: { model: MODEL, turn_id: SESSION } };
+    const inheritedTurn = { ...turn(2, OLD_DAY), payload: { model: MODEL, turn_id: parent } };
+    const lines = [
+      meta(0, TODAY, {
+        source: { subagent: { thread_spawn: { parent_thread_id: parent, depth: 1 } } },
+        subagent_history_start_ordinal: 4,
+      }),
+      { ordinal: 1, type: 'session_meta', timestamp: `${OLD_DAY}T10:00:00Z`, payload: {
+        id: parent, history_mode: 'paginated',
+        // This bookmark is the copied parent's context, not a missing dependency
+        // of the complete child rollout. No matching source file is needed.
+        history_base: { thread_id: '01000000-0000-7000-8000-000000000098', end_ordinal_exclusive: 5, end_byte_offset: 100 },
+      } },
+      inheritedTurn, counter(3, OLD_DAY, 1, 100, 0, 0),
+      ownTurn, counter(5, TODAY, 2, 130, 0, 0),
+    ];
+    const bytes = Buffer.from(jsonl(lines));
+    fs.writeFileSync(file, compressed ? zstdCompressSync(bytes) : bytes);
+    if (compressed) {
+      const repaired = repairCodexImportUsage(getDb(), { codexDir, apply: true });
+      assert.deepEqual(repaired.sessions_failed, [], 'repair must ignore the copied parent bookmark');
+      assert.equal(repaired.sessions_changed, 1);
+    }
+    const imported = importAll();
+    assert.deepEqual(imported.files.flatMap(result => result.error ? [result.error] : []), [],
+      'only the authoritative child header can declare an unresolved history dependency');
+    assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, 30);
+    assert.equal(getUsageSummary({ agent: 'codex', date_from: OLD_DAY, date_to: OLD_DAY }).total_input_tokens, 0);
+    const before = allRows();
+    const preview = repairCodexImportUsage(getDb(), { codexDir, apply: false });
+    assert.deepEqual(preview.sessions_failed, []);
+    assert.equal(preview.sessions_changed, 0);
+    assert.deepEqual(allRows(), before);
+    importAll(true);
+    assert.deepEqual(allRows(), before);
+  });
+}

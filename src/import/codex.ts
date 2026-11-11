@@ -148,7 +148,10 @@ export function parseCodexFile(
     }
   });
   if (options?.diagnostics) options.diagnostics.malformedLines = parsedLines.filter(line => line === null).length;
-  if (!options?.history && parsedLines.some(line => line?.type === 'session_meta' && line.payload.history_base != null)) {
+  // Copied parent envelopes are context, not dependencies of this physical
+  // file. Ownership and the unresolved bookmark come from the first header.
+  const authoritativeHeader = parsedLines.find(line => line?.type === 'session_meta');
+  if (!options?.history && authoritativeHeader?.payload?.history_base != null) {
     throw new Error('Invalid Codex rollout history: paginated usage requires resolved ancestor accounting');
   }
   // In a subagent that opens with a copy of its parent's history, lines before
