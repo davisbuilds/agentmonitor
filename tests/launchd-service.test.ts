@@ -13,11 +13,11 @@ import {
   serviceStatus,
   stopService,
   uninstallService,
-  SERVICE_LABEL,
   type CommandResult,
   type LaunchdHost,
 } from '../src/cli/launchd.js';
 import { CliError } from '../src/cli/errors.js';
+import { SERVICE_LABEL } from '../src/util/service-context.js';
 import { acquireRuntimeOwnership } from '../src/runtime-ownership.js';
 
 const onMac = process.platform === 'darwin';

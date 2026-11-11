@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { execSync, execFileSync, spawn } from 'node:child_process';
 import {
   existsSync,
+  readdirSync,
+  statSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
@@ -13,11 +15,17 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import test, { describe } from 'node:test';
+import test, { after, describe } from 'node:test';
 import { normalizeIngestEvent } from '../src/contracts/event-contract.js';
 
 const HOOKS_DIR = path.resolve(import.meta.dirname, '..', 'hooks', 'claude-code');
 const PYTHON_DIR = path.join(HOOKS_DIR, 'python');
+
+// Hooks run here against a dead URL spool what they could not send: into this
+// file's own spool, never the real one a running server would drain.
+const HOOK_SPOOL_DIR = path.join(mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-hook-spool-')), 'spool');
+process.env.AGENTMONITOR_HOOK_SPOOL_DIR = HOOK_SPOOL_DIR;
+after(() => rmSync(path.dirname(HOOK_SPOOL_DIR), { recursive: true, force: true }));
 
 // Set a bogus URL so curl/urllib don't actually connect
 const ENV = {
@@ -538,7 +546,11 @@ describe('Instruction-load telemetry hooks', () => {
       'session_start',
       'compact',
     ]);
-    assert.equal(payloads.every(payload => payload.event_id === undefined), true);
+    // Each load is its own observation: a fresh id per hook run, never one
+    // derived from the file, so a repeated load is not dropped as a duplicate.
+    const ids = payloads.map(payload => payload.event_id);
+    assert.equal(ids.every(id => typeof id === 'string' && id.length > 0), true);
+    assert.equal(new Set(ids).size, ids.length);
     assert.equal(JSON.stringify(payloads).includes('must never be emitted'), false);
   });
 
@@ -857,4 +869,48 @@ describe('Hook safety heuristics', () => {
       assert.deepEqual(warned, [...SENSITIVE_PATHS].sort());
     });
   }
+});
+
+describe('A hook that cannot reach the server spools its event', () => {
+  const spooledFiles = () => (existsSync(HOOK_SPOOL_DIR) ? readdirSync(HOOK_SPOOL_DIR).filter(name => name.endsWith('.json')) : []);
+  const clearSpool = () => rmSync(HOOK_SPOOL_DIR, { recursive: true, force: true });
+
+  for (const [label, run] of [
+    ['shell', () => runShellHook('post_tool_use.sh', makePostToolUseInput('Bash', { command: 'ls -la' }))],
+    ['Python', () => runPythonHook('post_tool_use.py', makePostToolUseInput('Bash', { command: 'ls -la' }))],
+  ] as const) {
+    test(`${label}: the event is written, privately, as one valid event with its own id and time`, async () => {
+      clearSpool();
+      // ENV's URL is a port nothing listens on.
+      assert.equal(run().exitCode, 0);
+      await waitFor(() => spooledFiles().length === 1);
+      const [name] = spooledFiles();
+      // Microseconds since the epoch: finer than the second, so a burst keeps its order.
+      assert.match(name!, /^\d{16,20}-[A-Za-z0-9._-]+\.json$/);
+      assert.equal(statSync(HOOK_SPOOL_DIR).mode & 0o777, 0o700);
+      assert.equal(statSync(path.join(HOOK_SPOOL_DIR, name!)).mode & 0o777, 0o600);
+
+      const body = readFileSync(path.join(HOOK_SPOOL_DIR, name!), 'utf8');
+      assert.equal(body.trimEnd().includes('\n'), false, 'one line');
+      const event = JSON.parse(body) as Record<string, unknown>;
+      assert.equal(name!.endsWith(`-${String(event.event_id)}.json`), true, 'named after its event');
+      assert.match(String(event.client_timestamp), /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/);
+      assert.equal(event.tool_name, 'Bash');
+      assert.equal(normalizeIngestEvent(event).ok, true, 'the server will accept it');
+      clearSpool();
+    });
+  }
+
+  test('a delivered event carries its id and time, and nothing is spooled', async () => {
+    clearSpool();
+    const [payload] = await captureHookPayloads([{
+      executable: 'bash',
+      args: [path.join(HOOKS_DIR, 'post_tool_use.sh')],
+      stdin: makePostToolUseInput('Read', { file_path: '/tmp/x' }),
+    }]);
+    assert.equal(typeof payload?.event_id, 'string');
+    assert.equal(typeof payload?.client_timestamp, 'string');
+    await new Promise(resolve => setTimeout(resolve, 300));
+    assert.deepEqual(spooledFiles(), []);
+  });
 });

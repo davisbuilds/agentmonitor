@@ -354,6 +354,41 @@ export function updateIdleSessions(timeoutMinutes: number): SessionSweep {
   return sweep;
 }
 
+/**
+ * The session upsert for an event delivered late: its time, not now, is the
+ * activity it records, and it makes the session active only if nothing newer
+ * has reached it. The periodic sweep then settles an old session's status.
+ */
+function upsertReplayedSession(
+  id: string,
+  agentId: string,
+  agentType: string,
+  occurredAt: string,
+  project?: string,
+  branch?: string,
+  mode?: 'interactive' | 'headless',
+): void {
+  getDb().prepare(`
+    INSERT INTO sessions (id, agent_id, agent_type, project, branch, started_at, last_event_at, metadata)
+    VALUES (
+      @id, @agentId, @agentType, @project, @branch, datetime(@at), datetime(@at),
+      CASE WHEN @mode IS NOT NULL THEN json_object('mode', @mode) ELSE '{}' END
+    )
+    ON CONFLICT(id) DO UPDATE SET
+      status = CASE WHEN datetime(@at) >= sessions.last_event_at THEN 'active' ELSE sessions.status END,
+      ended_at = CASE WHEN datetime(@at) >= sessions.last_event_at THEN NULL ELSE sessions.ended_at END,
+      last_event_at = MAX(sessions.last_event_at, datetime(@at)),
+      started_at = MIN(sessions.started_at, datetime(@at)),
+      project = COALESCE(sessions.project, excluded.project),
+      branch = COALESCE(sessions.branch, excluded.branch),
+      metadata = CASE
+        WHEN @mode IS NOT NULL
+          THEN json_set(COALESCE(NULLIF(sessions.metadata, ''), '{}'), '$.mode', @mode)
+        ELSE sessions.metadata
+      END
+  `).run({ id, agentId, agentType, at: occurredAt, project: project || null, branch: branch || null, mode: mode ?? null });
+}
+
 function idleSession(sessionId: string): void {
   const db = getDb();
   db.prepare(`
@@ -635,6 +670,13 @@ export function insertEvent(event: {
    * write lock is held.
    */
   gitBranch?: string | null;
+  /**
+   * The event is delivered late (a hook spooled it while the server was away),
+   * at `client_timestamp`. It moves its session's lifecycle only when it is at
+   * least as new as the session's last activity: an old Stop must not idle a
+   * session that has worked since, nor an old tool call wake one that stopped.
+   */
+  replayed?: boolean;
 } = {}): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
@@ -694,10 +736,19 @@ export function insertEvent(event: {
   // leave a committed session with no event, inflating session counts for
   // good. Nested inside a caller's transaction this becomes a savepoint.
   // A duplicate found inside it throws so the upserts roll back with it.
+  const occurredAt = options.replayed && event.client_timestamp ? event.client_timestamp : null;
   const insert = db.transaction((): EventRow => {
     const agentId = `${event.agent_type}-default`;
     upsertAgent(agentId, event.agent_type);
-    upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch, event.mode);
+    // A replayed event leads the session only if nothing newer reached it first.
+    const leads = occurredAt === null || (db.prepare(`
+      SELECT 1 FROM sessions WHERE id = ? AND last_event_at > datetime(?)
+    `).get(event.session_id, occurredAt) === undefined);
+    if (occurredAt === null) {
+      upsertSession(event.session_id, agentId, event.agent_type, event.project, event.branch, event.mode);
+    } else {
+      upsertReplayedSession(event.session_id, agentId, event.agent_type, occurredAt, event.project, event.branch, event.mode);
+    }
 
     if (gitBranch) {
       db.prepare(`
@@ -754,7 +805,7 @@ export function insertEvent(event: {
     // Handle session lifecycle for successful inserts only.
     // Recent import session_end events are often synthetic snapshots, so they
     // should not force a live session to ended.
-    if (event.event_type === 'session_end' && (event.source !== 'import' || isHistoricalImport)) {
+    if (event.event_type === 'session_end' && leads && (event.source !== 'import' || isHistoricalImport)) {
       // Claude Code sessions go to 'idle' first so they linger on the dashboard
       // for one timeout cycle before the periodic cleanup marks them 'ended'.
       if (event.agent_type === 'claude_code') {

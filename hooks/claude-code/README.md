@@ -85,7 +85,11 @@ The installer preserves your existing `statusLine.command` by saving it to `~/.c
 Claude Code fires hook
   -> pipes JSON to stdin (event-specific fields plus session_id and cwd)
   -> hook script reads stdin, maps fields to AgentMonitor contract
-  -> curl POST to localhost:3141/api/events (fire-and-forget)
+  -> curl POST to localhost:3141/api/events (fire-and-forget), with a fresh
+     event_id and the event's own client_timestamp
+  -> if the server cannot be reached in time: the event is written to the spool
+     (~/.local/state/agentmonitor/hook-spool, or AGENTMONITOR_HOOK_SPOOL_DIR)
+     and the server stores it on its next drain (at startup, then every minute)
   -> event appears in dashboard via SSE
 ```
 
@@ -97,7 +101,18 @@ metadata only: `file_path`, `memory_type`, `load_reason`, and optional `globs`,
 contents. Each received load is retained separately, including `compact`
 reloads.
 
-Asynchronous delivery is best-effort. The installer marks SessionStart events
+Delivery is asynchronous. An event the server cannot take in time (it is down,
+restarting, or frozen) is spooled rather than dropped: one private file per
+event, at most 10,000, drained in the order the events happened (a microsecond
+key the hook takes when the event occurs). The event id makes a spooled event
+the server also received count once. A replayed event records its own time and
+moves its session's status only if nothing newer reached the session first, so
+a late Stop cannot idle a session that has worked since. An HTTP error answer is not spooled, and
+a hook without `mkdir`/`mv` on its PATH sends but cannot spool. Codex's OTEL
+exporter belongs to Codex, so its events are not spooled. `GET /api/health`
+reports `hook_spool`: files waiting and what drains stored.
+
+The installer marks SessionStart events
 as instruction-load instrumented, but a marked session with no received load
 events remains unobservable; it is not evidence that no instruction files
 loaded.

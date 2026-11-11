@@ -170,11 +170,13 @@ describe('handleSessionUpdate — idle_check', () => {
     vi.useRealTimers();
   });
 
-  it('bumps the auto-import signal on auto_import and resync', () => {
+  it('bumps the auto-import signal when stored events change underneath: an import, a resync, a hook spool drain', () => {
     expect(store.getAutoImportSignal()).toBe(0);
+    store.handleSessionUpdate({ type: 'hook_spool', ingested: 3 });
+    expect(store.getAutoImportSignal()).toBe(1);
     store.handleSessionUpdate({ type: 'auto_import' });
     store.handleSessionUpdate({ type: 'resync' });
-    expect(store.getAutoImportSignal()).toBe(2);
+    expect(store.getAutoImportSignal()).toBe(3);
   });
 });
 

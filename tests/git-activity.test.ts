@@ -298,3 +298,52 @@ test('each commit records whether it reached any remote\'s main, and a merge rec
   assert.equal(landing()[wip], null);
   assert.deepEqual(members('example/landing', 6), [`${listedOnGithub.slice(0, 7)} github`], "GitHub's list is never added to");
 });
+
+test('under the service, a session directory macOS guards with a privacy prompt is not read', async () => {
+  // A stand-in home: its Documents folder is what macOS would guard.
+  const home = path.join(tempDir, 'home');
+  const guarded = path.join(home, 'Documents', 'guarded');
+  fs.mkdirSync(guarded, { recursive: true });
+  git(guarded, ['init', '-q', '-b', 'main']);
+  commit(guarded, 'g.ts', 'feat: in a guarded folder', '2026-05-02T10:00:00Z');
+  db.prepare("INSERT INTO browsing_sessions (id, agent, cwd, started_at, message_count, user_message_count) VALUES ('s-guarded', 'claude', ?, '2026-05-02T09:00:00Z', 1, 1)")
+    .run(guarded);
+  const readGuarded = () => (db.prepare('SELECT COUNT(*) AS n FROM git_repos WHERE root = ?').get(guarded) as { n: number }).n;
+
+  const asService = await syncGitActivity(db, { now: new Date('2026-05-10T00:00:00Z'), skipPrivacyProtected: true, home });
+  assert.equal(readGuarded(), 0, 'not even asked about');
+  assert.equal(asService.skipped_directories, 1);
+
+  // A process someone can answer the prompt for reads it as usual.
+  const asked = await syncGitActivity(db, { now: new Date('2026-05-10T00:00:00Z'), home });
+  assert.equal(readGuarded(), 1);
+  assert.equal(asked.skipped_directories, 0);
+});
+
+test('a directory whose read hangs is asked about once, not on every pass', async () => {
+  // A folder of projects whose one child cannot be read: its .git check never
+  // returns, as on a stalled mount. Each hung read holds a thread for good.
+  const container = path.join(tempDir, 'hanging-container');
+  const hanging = path.join(container, 'stalled');
+  fs.mkdirSync(hanging, { recursive: true });
+  db.prepare("INSERT INTO browsing_sessions (id, agent, cwd, started_at, message_count, user_message_count) VALUES ('s-hang', 'claude', ?, '2026-06-02T09:00:00Z', 1, 1)")
+    .run(container);
+  let hungReads = 0;
+  const reader = {
+    access: (target: string) => {
+      if (target === path.join(hanging, '.git')) {
+        hungReads += 1;
+        return new Promise<void>(() => {});
+      }
+      return fs.promises.access(target);
+    },
+    readdir: (directory: string) => fs.promises.readdir(directory, { withFileTypes: true }),
+    timeoutMs: 50,
+  };
+
+  const first = await syncGitActivity(db, { now: new Date('2026-06-10T00:00:00Z'), reader });
+  const second = await syncGitActivity(db, { now: new Date('2026-06-10T00:10:00Z'), reader });
+  assert.equal(hungReads, 1);
+  assert.equal(first.skipped_directories, 1);
+  assert.equal(second.errors, 0);
+});

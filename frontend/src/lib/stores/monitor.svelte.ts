@@ -211,7 +211,7 @@ export function handleSessionUpdate(update: Record<string, unknown>): void {
         const idle = swept?.get(s.id) === 'idle' || quietPast(s, timeoutMinutes);
         return idle ? { ...s, status: 'idle' } : s;
       });
-  } else if (update.type === 'auto_import' || update.type === 'resync') {
+  } else if (update.type === 'auto_import' || update.type === 'resync' || update.type === 'hook_spool') {
     autoImportSignal++;
   } else if (update.type === 'session_parsed' && typeof update.session_id === 'string') {
     // The watcher just parsed this session's file, which may have stamped

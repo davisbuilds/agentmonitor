@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { getDb } from '../db/connection.js';
+import { runningAsLaunchdService } from '../util/service-context.js';
 import { syncGitActivity } from './activity.js';
 import { syncAuthoredPullRequests, syncSessionPullRequests } from './github.js';
 
@@ -9,11 +10,17 @@ const FIRST_PASS_DELAY_MS = 30_000;
 let firstPass: ReturnType<typeof setTimeout> | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let inFlight: Promise<void> | null = null;
+let lastSkipped = 0;
 
 function refreshGitActivity(): Promise<void> {
   if (inFlight) return inFlight;
-  inFlight = syncGitActivity(getDb())
+  inFlight = syncGitActivity(getDb(), { skipPrivacyProtected: runningAsLaunchdService() })
     .then(async report => {
+      // Said once per change: under the service the same folders are left each pass.
+      if (report.skipped_directories !== lastSkipped && report.skipped_directories > 0) {
+        console.error(`[git] left ${report.skipped_directories} session director${report.skipped_directories === 1 ? 'y' : 'ies'} unread: privacy-protected under the login service, or too slow to read`);
+      }
+      lastSkipped = report.skipped_directories;
       if (report.errors > 0) console.error(`[git] ${report.errors} of ${report.repos} repositories could not be read in full`);
       if (!config.git.githubLookups) return;
       // The user's merged pull requests first: those it records with their

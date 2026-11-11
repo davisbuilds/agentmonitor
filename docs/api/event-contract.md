@@ -77,8 +77,10 @@ Both are persisted on events so ingestion latency and client-vs-server ordering 
 - `event_id` is optional.
 - If provided, it is unique.
 - Duplicate `event_id` records are acknowledged and skipped (idempotent ingest).
-- Claude `InstructionsLoaded` hooks intentionally omit `event_id`, so repeated
-  loads of the same file remain separate observations.
+- Claude hooks send a fresh random `event_id` per event, so a spooled event the
+  server also received is stored once. It is never derived from the event's
+  content: two `InstructionsLoaded` loads of the same file get different ids and
+  remain separate observations.
 
 ## Payload Truncation
 
