@@ -1,5 +1,5 @@
-// CVE-2026-76024 is fixed in Chrome 156.0.8078.79. Playwright 1.64.1's
-// bundled Chromium is older; never silently fall back to that executable.
+// Check the actual browser against the CVE-2026-76024 floor before pages open.
+// Explicitly provisioned upstream Chromium follows the same guard as Chrome.
 const minimumVersion = [156, 0, 8078, 79];
 function assertPatchedVersion(version) {
   if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) {
