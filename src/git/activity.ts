@@ -34,6 +34,15 @@ export interface GitSyncOptions {
   skipPrivacyProtected?: boolean;
   /** The home directory those protected folders sit in; the user's own by default. */
   home?: string;
+  /** How directories are read; the filesystem, abandoned after 10s, by default. Tests stand in a hanging one. */
+  reader?: DirectoryReader;
+}
+
+/** The two directory reads a pass makes, and how long each may take before it is abandoned. */
+export interface DirectoryReader {
+  access(target: string): Promise<void>;
+  readdir(directory: string): Promise<fs.Dirent[]>;
+  timeoutMs: number;
 }
 
 const DAY_MS = 86_400_000;
@@ -73,27 +82,39 @@ interface CommitRecord {
 const FS_TIMEOUT_MS = 10_000;
 const unreachableDirectories = new Set<string>();
 
+const FILESYSTEM: DirectoryReader = {
+  access: target => fs.promises.access(target),
+  readdir: directory => fs.promises.readdir(directory, { withFileTypes: true }),
+  timeoutMs: FS_TIMEOUT_MS,
+};
+
+/** A read that did not finish in time, named by the directory to stop asking about. */
 class DirectoryTimeout extends Error {
-  constructor(readonly directory: string) {
-    super(`reading ${directory} did not finish within ${FS_TIMEOUT_MS}ms`);
+  constructor(readonly directory: string, timeoutMs: number) {
+    super(`reading ${directory} did not finish within ${timeoutMs}ms`);
   }
 }
 
-function within<T>(directory: string, operation: Promise<T>): Promise<T> {
+function within<T>(directory: string, timeoutMs: number, operation: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new DirectoryTimeout(directory)), FS_TIMEOUT_MS);
+    timer = setTimeout(() => reject(new DirectoryTimeout(directory, timeoutMs)), timeoutMs);
     timer.unref();
   });
   return Promise.race([operation, timeout]).finally(() => clearTimeout(timer));
 }
 
-async function exists(target: string): Promise<boolean> {
-  return within(target, fs.promises.access(target).then(() => true, () => false));
+/**
+ * Whether `target` exists. A timeout is charged to `directory`, the directory
+ * whose contents were being read, which is what the skip list is checked with.
+ */
+async function exists(reader: DirectoryReader, target: string, directory: string): Promise<boolean> {
+  return within(directory, reader.timeoutMs, reader.access(target).then(() => true, () => false));
 }
 
-/** Which directories a pass may read. */
+/** Which directories a pass may read, and how. */
 interface DirectoryPolicy {
+  reader: DirectoryReader;
   skipped(directory: string): boolean;
 }
 
@@ -108,8 +129,8 @@ async function git(cwd: string, args: string[]): Promise<string> {
  * an agent may run `git init` in a directory, inside another repository or
  * not, and the answer changes.
  */
-async function repositoryRoot(cwd: string): Promise<string | null> {
-  if (!(await exists(cwd))) return null;
+async function repositoryRoot(cwd: string, reader: DirectoryReader = FILESYSTEM): Promise<string | null> {
+  if (!(await exists(reader, cwd, cwd))) return null;
   try {
     const common = (await git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim();
     return path.basename(common) === '.git' ? path.dirname(common) : common;
@@ -128,7 +149,7 @@ async function repositoryRoot(cwd: string): Promise<string | null> {
 async function repositoriesInside(dir: string, policy: DirectoryPolicy): Promise<string[]> {
   let entries: fs.Dirent[];
   try {
-    entries = await within(dir, fs.promises.readdir(dir, { withFileTypes: true }));
+    entries = await within(dir, policy.reader.timeoutMs, policy.reader.readdir(dir));
   } catch (error) {
     if (error instanceof DirectoryTimeout) throw error;
     return [];
@@ -141,8 +162,8 @@ async function repositoriesInside(dir: string, policy: DirectoryPolicy): Promise
     if (policy.skipped(child)) continue;
     // Only a directory with its own .git is a repository's top; this spares a
     // git process for every plain folder.
-    if (!(await exists(path.join(child, '.git')))) continue;
-    const root = await repositoryRoot(child);
+    if (!(await exists(policy.reader, path.join(child, '.git'), child))) continue;
+    const root = await repositoryRoot(child, policy.reader);
     if (root) roots.add(root);
   }
   return [...roots];
@@ -292,6 +313,7 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
   `).all() as Array<{ cwd: string; first_started: string | null }>;
   const home = options.home ?? os.homedir();
   const policy: DirectoryPolicy = {
+    reader: options.reader ?? FILESYSTEM,
     skipped: directory => unreachableDirectories.has(directory)
       || (options.skipPrivacyProtected === true && isPrivacyProtectedPath(directory, home)),
   };
@@ -302,7 +324,7 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
     }
     let roots: string[];
     try {
-      const root = await repositoryRoot(row.cwd);
+      const root = await repositoryRoot(row.cwd, policy.reader);
       roots = root ? [root] : await repositoriesInside(row.cwd, policy);
     } catch (error) {
       if (!(error instanceof DirectoryTimeout)) throw error;

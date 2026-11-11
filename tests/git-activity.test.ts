@@ -319,3 +319,31 @@ test('under the service, a session directory macOS guards with a privacy prompt 
   assert.equal(readGuarded(), 1);
   assert.equal(asked.skipped_directories, 0);
 });
+
+test('a directory whose read hangs is asked about once, not on every pass', async () => {
+  // A folder of projects whose one child cannot be read: its .git check never
+  // returns, as on a stalled mount. Each hung read holds a thread for good.
+  const container = path.join(tempDir, 'hanging-container');
+  const hanging = path.join(container, 'stalled');
+  fs.mkdirSync(hanging, { recursive: true });
+  db.prepare("INSERT INTO browsing_sessions (id, agent, cwd, started_at, message_count, user_message_count) VALUES ('s-hang', 'claude', ?, '2026-06-02T09:00:00Z', 1, 1)")
+    .run(container);
+  let hungReads = 0;
+  const reader = {
+    access: (target: string) => {
+      if (target === path.join(hanging, '.git')) {
+        hungReads += 1;
+        return new Promise<void>(() => {});
+      }
+      return fs.promises.access(target);
+    },
+    readdir: (directory: string) => fs.promises.readdir(directory, { withFileTypes: true }),
+    timeoutMs: 50,
+  };
+
+  const first = await syncGitActivity(db, { now: new Date('2026-06-10T00:00:00Z'), reader });
+  const second = await syncGitActivity(db, { now: new Date('2026-06-10T00:10:00Z'), reader });
+  assert.equal(hungReads, 1);
+  assert.equal(first.skipped_directories, 1);
+  assert.equal(second.errors, 0);
+});
