@@ -196,7 +196,8 @@ function initSchemaLocked(db: Database): void {
       credits_has_credits INTEGER,
       credits_unlimited INTEGER,
       credits_balance TEXT,
-      raw_payload TEXT
+      raw_payload TEXT,
+      windows_observed_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
@@ -416,7 +417,8 @@ function initSchemaLocked(db: Database): void {
         credits_has_credits INTEGER,
         credits_unlimited INTEGER,
         credits_balance TEXT,
-        raw_payload TEXT
+        raw_payload TEXT,
+        windows_observed_at TEXT
       );
 
       CREATE INDEX IF NOT EXISTS idx_provider_quotas_updated_at ON provider_quotas(updated_at DESC);
@@ -475,6 +477,11 @@ function initSchemaLocked(db: Database): void {
     }
     if (!providerQuotaColumns.has('raw_payload')) {
       db.exec('ALTER TABLE provider_quotas ADD COLUMN raw_payload TEXT');
+    }
+    // When the stored windows were read: a failed refresh keeps the last good
+    // windows, marked stale, rather than clearing them.
+    if (!providerQuotaColumns.has('windows_observed_at')) {
+      db.exec('ALTER TABLE provider_quotas ADD COLUMN windows_observed_at TEXT');
     }
   }
 
@@ -1234,7 +1241,7 @@ function ensureMessageSearchIndex(db: Database): void {
 
 // Schema-version counter for one-shot data corrections (distinct from the
 // column-presence guards above, which handle additive DDL idempotently).
-const DATA_SCHEMA_VERSION = 29;
+const DATA_SCHEMA_VERSION = 30;
 
 /**
  * Prepare a database for a read-only CLI command without replaying the full
@@ -1248,6 +1255,23 @@ export function ensureSchemaForRead(): void {
   const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
   if (current >= DATA_SCHEMA_VERSION) return;
   initSchema();
+}
+
+/**
+ * v30 — provider_quotas.windows_observed_at says when the stored windows were
+ * read, so a failed refresh can keep them as stale. A row holding windows was
+ * last written by a good read, so its update time is when they were read.
+ */
+function dateStoredQuotaWindows(db: Database): void {
+  const columns = new Set((db.prepare('PRAGMA table_info(provider_quotas)').all() as Array<{ name: string }>)
+    .map(col => col.name));
+  if (!columns.has('windows_observed_at')) return;
+  db.prepare(`
+    UPDATE provider_quotas
+    SET windows_observed_at = updated_at
+    WHERE windows_observed_at IS NULL
+      AND (primary_used_percent IS NOT NULL OR secondary_used_percent IS NOT NULL)
+  `).run();
 }
 
 /**
@@ -1302,6 +1326,7 @@ export function runDataMigrations(db: Database): void {
     // and github_pull_requests, and v29 commit landing, pull request
     // size and author, github_pull_request_commits and github_pull_request_search;
     // the next git pass fills them.
+    if (current < 30) dateStoredQuotaWindows(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
   run.immediate();

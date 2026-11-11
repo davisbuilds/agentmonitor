@@ -102,7 +102,9 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
 - **Operational state:** content-free OTEL metrics and provider-native quota
   snapshots, with a sampled quota history (`provider_quota_samples`): a row per
   changed reading at most every five minutes, each held until `observed_until`,
-  so an idle stretch reads as flat. Operational metrics never enter usage or
+  so an idle stretch reads as flat. A failed refresh stores its error but keeps
+  the last good windows with their read time (`windows_observed_at`), and reads
+  report them as `stale`. Operational metrics never enter usage or
   event-count aggregates.
   Each OTLP point carries the same retry key as usage points, so an exporter
   resend is stored once.

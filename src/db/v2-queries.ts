@@ -104,7 +104,7 @@ import { normalizeModelId, pricingRegistry, UNPRICEABLE_MODELS } from '../pricin
 import { activityEventInstant, observedInstant } from './activity-evidence.js';
 import { computeOccupancy } from '../pricing/context-windows.js';
 import { classifyModelForUsage, type ModelClassification } from '../pricing/model-classification.js';
-import { getStatsForBroadcast, monitorUsageSql, sumMonitorUsage, updateIdleSessions } from './queries.js';
+import { getProviderQuotas, getStatsForBroadcast, monitorUsageSql, sumMonitorUsage, updateIdleSessions } from './queries.js';
 import {
   excludeBenchmarkUsageCondition,
   excludeOverlappingOtelUsageCondition,
@@ -1854,118 +1854,10 @@ export function listMonitorEvents(params: MonitorEventsParams = {}): { events: M
   return { events, total };
 }
 
-const MONITOR_QUOTA_DEFAULTS: Record<'claude' | 'codex', Omit<MonitorQuotaSnapshot, 'provider'>> = {
-  claude: {
-    agent_type: 'claude_code',
-    status: 'unavailable',
-    source: null,
-    updated_at: null,
-    account_label: null,
-    plan_type: null,
-    limit_id: null,
-    limit_name: null,
-    error_message: null,
-    primary: null,
-    secondary: null,
-    credits: null,
-  },
-  codex: {
-    agent_type: 'codex',
-    status: 'unavailable',
-    source: null,
-    updated_at: null,
-    account_label: null,
-    plan_type: null,
-    limit_id: null,
-    limit_name: null,
-    error_message: null,
-    primary: null,
-    secondary: null,
-    credits: null,
-  },
-};
-
-function monitorQuotaWindow(row: {
-  used_percent: number | null;
-  resets_at: string | null;
-  window_minutes: number | null;
-}): MonitorQuotaSnapshot['primary'] {
-  if (row.used_percent == null || !Number.isFinite(row.used_percent)) return null;
-  const usedPercent = Math.max(0, Math.min(row.used_percent, 100));
-  return {
-    used_percent: usedPercent,
-    remaining_percent: Math.max(0, Math.min(100 - usedPercent, 100)),
-    resets_at: row.resets_at,
-    window_minutes: row.window_minutes,
-  };
-}
-
+// The Monitor's quota snapshots are the provider-quota read: one mapper, so the
+// two never disagree about a snapshot's fields.
 function listMonitorProviderQuotas(): MonitorQuotaSnapshot[] {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT
-      provider, agent_type, status, source, updated_at, account_label, plan_type,
-      limit_id, limit_name, error_message, primary_used_percent, primary_window_minutes,
-      primary_resets_at, secondary_used_percent, secondary_window_minutes,
-      secondary_resets_at, credits_has_credits, credits_unlimited, credits_balance
-    FROM provider_quotas
-  `).all() as Array<{
-    provider: 'claude' | 'codex';
-    agent_type: 'claude_code' | 'codex';
-    status: MonitorQuotaSnapshot['status'];
-    source: string | null;
-    updated_at: string | null;
-    account_label: string | null;
-    plan_type: string | null;
-    limit_id: string | null;
-    limit_name: string | null;
-    error_message: string | null;
-    primary_used_percent: number | null;
-    primary_window_minutes: number | null;
-    primary_resets_at: string | null;
-    secondary_used_percent: number | null;
-    secondary_window_minutes: number | null;
-    secondary_resets_at: string | null;
-    credits_has_credits: number | null;
-    credits_unlimited: number | null;
-    credits_balance: string | null;
-  }>;
-
-  const byProvider = new Map(rows.map(row => [row.provider, row]));
-  return (['claude', 'codex'] as const).map((provider) => {
-    const row = byProvider.get(provider);
-    if (!row) return { provider, ...MONITOR_QUOTA_DEFAULTS[provider] };
-
-    return {
-      provider,
-      agent_type: row.agent_type,
-      status: row.status,
-      source: row.source,
-      updated_at: row.updated_at,
-      account_label: row.account_label,
-      plan_type: row.plan_type,
-      limit_id: row.limit_id,
-      limit_name: row.limit_name,
-      error_message: row.error_message,
-      primary: monitorQuotaWindow({
-        used_percent: row.primary_used_percent,
-        resets_at: row.primary_resets_at,
-        window_minutes: row.primary_window_minutes,
-      }),
-      secondary: monitorQuotaWindow({
-        used_percent: row.secondary_used_percent,
-        resets_at: row.secondary_resets_at,
-        window_minutes: row.secondary_window_minutes,
-      }),
-      credits: row.credits_has_credits == null && row.credits_unlimited == null && row.credits_balance == null
-        ? null
-        : {
-            has_credits: Boolean(row.credits_has_credits),
-            unlimited: Boolean(row.credits_unlimited),
-            balance: row.credits_balance,
-          },
-    };
-  });
+  return getProviderQuotas();
 }
 
 export type MonitorStatsStatementName =

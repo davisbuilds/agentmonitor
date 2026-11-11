@@ -643,18 +643,15 @@ stream, Monitor reload, Quality detail and session viewer
 (`frontend/src/lib/stores/latest-request.ts`). What remains, from source
 tracing on 2026-11-11; each was traced but not reproduced unless it says so.
 
-#### Provider quota errors overwrite the last good windows
-- **What**: `upsertProviderQuota` (`src/db/queries.ts`) rewrites every column,
-  so a transient Codex `app-server` timeout stores `status: 'error'` with null
-  windows. The QuotaPill then shows nothing until the next success, and has no
-  "stale" state for an old `available` snapshot. `error_message` also carries
-  `rateLimitReachedType` on available rows, which the pill reads only for
-  errors. `POST /api/provider-quotas/:provider` stores any `status` string.
-- **Why or evidence**: traced, not observed. `quota-pill.test.ts` builds an
-  error row with windows, a state the backend cannot produce.
-- **Next**: decide what a failed refresh should show: the last good windows
-  marked stale, or nothing. Then give the status a constant vocabulary with
-  validation on the POST route.
+#### Provider quota status is an open string
+- **What**: `POST /api/provider-quotas/:provider` stores any `status` string,
+  and readers cast it to `'available' | 'unavailable' | 'error'`. An
+  `available` snapshot from a statusline that stopped posting never turns
+  stale; only `updated_at` gives its age. A failed refresh now keeps the last
+  good windows marked stale (2026-11-11). `error_message` also carries Codex's
+  `rateLimitReachedType` on available rows, which the pill never shows.
+- **Next**: validate `status` against a constant vocabulary on the POST route,
+  and decide whether an old `available` reading should also read as stale.
 
 #### Runtime lock: stale-lock removal can race (hypothesis, unmeasured)
 - **What**: in `src/runtime-ownership.ts`, a contender that read a stale lock
