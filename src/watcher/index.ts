@@ -19,6 +19,7 @@ import { discoverCodexRolloutFilesRecursive, discoverJsonlFilesRecursive } from 
 import { COMPRESSED_ROLLOUT_SUFFIX, readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { setSessionMode } from '../db/queries.js';
+import { reparseRequested } from '../db/reparse-marker.js';
 
 // --- File hashing ---
 
@@ -344,7 +345,9 @@ export function syncCodexSessionFileDetailed(
     // would otherwise do for all of compressed history.
     if (!options.force && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)) {
       const seen = getWatchedFileState(db, filePath);
-      if (seen && seen.status !== 'error' && seen.file_mtime === stat.mtime.toISOString()) return { result: 'skipped' };
+      if (seen && seen.status !== 'error' && !reparseRequested(seen) && seen.file_mtime === stat.mtime.toISOString()) {
+        return { result: 'skipped' };
+      }
     }
     // One read serves the change check, the checkpoint check and the parse. A
     // compressed rollout reads as its lines, under the same session id.

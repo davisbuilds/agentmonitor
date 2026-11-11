@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
 import { stripInlineImages } from '../util/inline-images.js';
 import { sqlStringList } from '../util/sql-literals.js';
+import { REPARSE_REQUESTED_HASH } from './reparse-marker.js';
 import { EVENT_STATUSES } from '../contracts/event-contract.js';
 import { config } from '../config.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from '../live/normalize.js';
@@ -1447,7 +1448,7 @@ function refreshSessionTitles(db: Database): void {
   const hasWatchedFiles = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'watched_files'").get();
   const flagged = hasWatchedFiles ? db.prepare(`
     UPDATE watched_files
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE file_path IN (
       SELECT file_path FROM browsing_sessions
       WHERE agent IN ('claude', 'codex') AND file_path IS NOT NULL
@@ -1702,7 +1703,7 @@ function deleteLegacyBenchmarkRows(db: Database): void {
 function invalidateSessionFilesForSkillContext(db: Database): void {
   const result = db.prepare(`
     UPDATE watched_files
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE file_path IN (
       SELECT file_path
       FROM browsing_sessions
@@ -1726,7 +1727,7 @@ function invalidateSessionFilesForSkillContext(db: Database): void {
 function invalidateCodexImportsForModelAttribution(db: Database): void {
   const result = db.prepare(`
     UPDATE import_state
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE source = 'codex'
   `).run();
 
@@ -1750,7 +1751,7 @@ function invalidateCodexImportsForModelAttribution(db: Database): void {
 function backfillOccupancyOnUpgrade(db: Database): void {
   const result = db.prepare(`
     UPDATE watched_files
-    SET file_hash = ''
+    SET file_hash = '${REPARSE_REQUESTED_HASH}'
     WHERE file_path IN (
       SELECT file_path FROM browsing_sessions
       WHERE agent IN ('claude', 'codex')

@@ -90,3 +90,17 @@ test('a rollout amon first sees compressed is read whole', () => {
     fs.chmodSync(file, 0o644);
   }
 });
+
+test('a compressed rollout a migration flagged for reparse is reparsed, though its mtime is unchanged', () => {
+  const id = '019f0000-0000-7000-8000-000000000003';
+  const otherId = `rollout-2026-07-12T12-00-00-${id}`;
+  const file = path.join(sessionsDir, `${otherId}.jsonl.zst`);
+  fs.writeFileSync(file, zstdCompressSync(Buffer.from(lines.replaceAll(SESSION, id))));
+  assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'parsed');
+  assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped');
+
+  // What the schema migrations write to ask the next startup sync to reparse.
+  db().prepare("UPDATE watched_files SET file_hash = '' WHERE file_path = ?").run(file);
+  assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'parsed');
+  assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped', 'a reparse clears the flag');
+});
