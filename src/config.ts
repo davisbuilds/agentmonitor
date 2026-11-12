@@ -243,7 +243,6 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     dbPath: resolveDbPath(env),
     maxPayloadKB: parseEnvInt(env.AGENTMONITOR_MAX_PAYLOAD_KB, 10, 0),
     sessionTimeoutMinutes: parseEnvInt(env.AGENTMONITOR_SESSION_TIMEOUT, 5, 1),
-    maxFeed: parseEnvInt(env.AGENTMONITOR_MAX_FEED, 200, 1),
     statsIntervalMs: parseEnvInt(env.AGENTMONITOR_STATS_INTERVAL, 5000, 250),
     maxSseClients: parseEnvInt(env.AGENTMONITOR_MAX_SSE_CLIENTS, 50, 1),
     sseHeartbeatMs: parseEnvInt(env.AGENTMONITOR_SSE_HEARTBEAT_MS, 30000, 1000),
