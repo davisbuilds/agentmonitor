@@ -413,3 +413,254 @@ for (const compressed of [false, true]) {
     assert.deepEqual(allRows(), before);
   });
 }
+
+for (const replacementFirst of [false, true]) {
+  test(`a full-history replacement bills only new counter growth with ${replacementFirst ? 'replacement' : 'original'} discovered first`, () => {
+    const files = fixture(replacementFirst);
+    const original = [turn(1, OLD_DAY), counter(2, OLD_DAY, 1, 100, 0, 0)];
+    fs.writeFileSync(files.root, jsonl([meta(0, OLD_DAY, { history_mode: 'full' }), ...original]));
+    fs.writeFileSync(files.page, jsonl([
+      meta(0, TODAY, { history_mode: 'full' }), ...original,
+      turn(3, TODAY), counter(4, TODAY, 2, 120, 0, 0),
+    ]));
+    assert.equal(discoverCodexLogs(codexDir)[0], replacementFirst ? files.page : files.root);
+    importAll();
+    assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, 120,
+      'the copied original counter is context, not another physical request');
+    assert.deepEqual(usageRows().map(row => row.tokens_in), [100, 20]);
+    assert.equal(getUsageSummary({ date_from: OLD_DAY, date_to: OLD_DAY }).total_input_tokens, 100);
+    assert.equal(getUsageSummary({ date_from: TODAY, date_to: TODAY }).total_input_tokens, 20);
+    const before = allRows();
+    for (const force of [false, true, true]) {
+      const result = importAll(force);
+      assert.equal(result.totalEventsImported + result.totalEventsRefreshed + result.totalEventsRemoved, 0);
+      assert.deepEqual(allRows(), before);
+    }
+    const repaired = repairCodexImportUsage(getDb(), { codexDir, apply: true });
+    assert.deepEqual(repaired.sessions_failed, []);
+    assert.equal(repaired.rows_inserted + repaired.rows_updated + repaired.rows_deleted, 0);
+    assert.deepEqual(allRows(), before);
+  });
+}
+
+test('repeated full-history replacements retain billed reverted suffixes without billing any copied prefix twice', () => {
+  const files = fixture(true);
+  const originalPrefix = [turn(1, OLD_DAY), counter(2, OLD_DAY, 1, 100, 0, 0)];
+  fs.writeFileSync(files.root, jsonl([
+    meta(0, OLD_DAY, { history_mode: 'full' }), ...originalPrefix,
+    turn(3, SUFFIX_DAY), counter(4, SUFFIX_DAY, 1, 130, 0, 0),
+  ]));
+  const firstReplacement = [...originalPrefix, turn(3, TODAY), counter(4, TODAY, 2, 120, 0, 0)];
+  fs.writeFileSync(files.page, jsonl([meta(0, TODAY, { history_mode: 'full' }), ...firstReplacement]));
+  const next = path.join(path.dirname(files.page), 'rollout-2026-11-11T11-00-00-01a20000-0000-7000-8000-000000000003.jsonl');
+  const laterMeta = { ...meta(0, TODAY, { history_mode: 'full' }), timestamp: `${TODAY}T11:00:00Z` };
+  fs.writeFileSync(next, jsonl([
+    laterMeta, ...firstReplacement,
+    { ...turn(5, TODAY), timestamp: `${TODAY}T11:00:01Z` },
+    { ...counter(6, TODAY, 2, 150, 0, 0), timestamp: `${TODAY}T11:02:00Z` },
+  ]));
+  importAll();
+  const summary = getUsageSummary({ agent: 'codex' });
+  assert.equal(summary.total_input_tokens, 180, 'the ledger includes the reverted original suffix once and each replacement delta once');
+  assert.deepEqual(usageRows().map(row => row.tokens_in), [100, 30, 20, 30]);
+  assert.equal(getUsageSummary({ date_from: OLD_DAY, date_to: SUFFIX_DAY }).total_input_tokens, 130);
+  assert.equal(getUsageSummary({ date_from: TODAY, date_to: TODAY }).total_input_tokens, 50);
+
+  insertEvent({
+    event_id: 'import-cdx-legacy-full-copy-carry', session_id: SESSION,
+    agent_type: 'codex', event_type: 'llm_response', status: 'success', source: 'import',
+    model: MODEL, tokens_in: 100, tokens_out: 0, cost_usd: 0.0002,
+    cost_source: 'estimated', client_timestamp: `${TODAY}T10:01:00Z`, metadata: {},
+  });
+  const repair = repairCodexImportUsage(getDb(), { codexDir, apply: true });
+  assert.deepEqual(repair.sessions_failed, []);
+  assert.deepEqual(repair.counter_mismatches, [], 'native span totals exclude exact full-history copies and retain billed reverted suffixes');
+  assert.deepEqual(repair.history_totals_unverified, []);
+  assert.equal(repair.history_sessions_checked, 1);
+  assert.equal(repair.rows_deleted, 1);
+  assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, 180);
+  const before = allRows();
+  importAll(true);
+  assert.deepEqual(allRows(), before);
+  const again = repairCodexImportUsage(getDb(), { codexDir, apply: true });
+  assert.equal(again.rows_inserted + again.rows_updated + again.rows_deleted, 0);
+  assert.deepEqual(allRows(), before);
+});
+
+test('a full-copy replacement preserves counter-to-request billing and scoped rerun idempotence', () => {
+  const files = fixture();
+  const request = (ordinal: number, day: string, responseId: string, input: number, total: number): Line => ({
+    ordinal, type: 'token_usage_record', timestamp: `${day}T10:01:00Z`,
+    payload: {
+      response_id: responseId, thread_id: SESSION,
+      usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0 },
+      thread_token_usage: { input_tokens: total, cached_input_tokens: 0, output_tokens: 0 },
+    },
+  });
+  const copied = [
+    turn(1, OLD_DAY), request(2, OLD_DAY, 'synthetic-full-original-incomplete', 60, 100),
+    counter(3, OLD_DAY, 2, 100, 0, 0),
+  ];
+  fs.writeFileSync(files.root, jsonl([meta(0, OLD_DAY, { history_mode: 'full' }), ...copied]));
+  fs.writeFileSync(files.page, jsonl([
+    meta(0, TODAY, { history_mode: 'full' }), ...copied,
+    turn(4, TODAY), request(5, TODAY, 'synthetic-full-own-complete', 20, 120),
+    counter(6, TODAY, 2, 120, 0, 0),
+  ]));
+  importAll();
+  assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, 120,
+    'the original counter and the new native request each bill once');
+  assert.deepEqual(usageRows().map(row => row.tokens_in), [100, 20]);
+  const instruments = getDb().prepare(`
+    SELECT json_extract(metadata, '$._usage_source') AS usage_source
+    FROM events WHERE session_id = ? AND event_type = 'llm_response' ORDER BY client_timestamp
+  `).all(SESSION);
+  assert.deepEqual(instruments, [{ usage_source: null }, { usage_source: 'request' }]);
+  const before = allRows();
+  for (let repeat = 0; repeat < 2; repeat++) {
+    const scoped = runImport({ source: 'codex', codexDir, force: true, from: new Date('2026-01-01T00:00:00Z') });
+    assert.equal(scoped.totalEventsImported, 0);
+    assert.deepEqual(allRows(), before);
+  }
+});
+
+test('copied full-history native request records retain response-id deduplication', () => {
+  const files = fixture(true);
+  const request = (ordinal: number, day: string, responseId: string, input: number, total: number): Line => ({
+    ordinal, type: 'token_usage_record', timestamp: `${day}T10:01:00Z`,
+    payload: {
+      response_id: responseId, thread_id: SESSION,
+      usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0 },
+      thread_token_usage: { input_tokens: total, cached_input_tokens: 0, output_tokens: 0 },
+    },
+  });
+  const copied = [
+    turn(1, OLD_DAY), request(2, OLD_DAY, 'synthetic-full-complete-original', 100, 100),
+    counter(3, OLD_DAY, 2, 100, 0, 0),
+  ];
+  fs.writeFileSync(files.root, jsonl([meta(0, OLD_DAY, { history_mode: 'full' }), ...copied]));
+  fs.writeFileSync(files.page, jsonl([
+    meta(0, TODAY, { history_mode: 'full' }), ...copied,
+    turn(4, TODAY), request(5, TODAY, 'synthetic-full-complete-own', 20, 120),
+    counter(6, TODAY, 2, 120, 0, 0),
+  ]));
+  importAll();
+  assert.deepEqual(usageRows().map(row => row.tokens_in), [100, 20]);
+  assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, 120);
+  const before = allRows();
+  importAll(true);
+  assert.deepEqual(allRows(), before);
+});
+
+test('a prior lineage cache version cannot keep duplicated usage behind unchanged source stats', () => {
+  fixture();
+  importAll();
+  assertUsage();
+  insertEvent({
+    event_id: 'import-cdx-stale-lineage-version-carry', session_id: SESSION,
+    agent_type: 'codex', event_type: 'llm_response', status: 'success', source: 'import',
+    model: MODEL, tokens_in: 100, tokens_out: 0, cost_usd: 0.0002,
+    cost_source: 'estimated', client_timestamp: `${TODAY}T10:01:00Z`, metadata: {},
+  });
+  const oldState = getDb().prepare('SELECT file_path, file_hash FROM import_state WHERE source = ?').all('codex') as Array<{ file_path: string; file_hash: string }>;
+  assert.equal(oldState.length, 2, 'the complete family has cached file stats and dependency hashes');
+  const downgrade = getDb().prepare('UPDATE import_state SET file_hash = ? WHERE file_path = ?');
+  for (const state of oldState) {
+    assert.match(state.file_hash, /^lineage-v\d+:/);
+    downgrade.run(state.file_hash.replace(/^lineage-v\d+:/, 'lineage-v1:'), state.file_path);
+  }
+  assert.equal(usageRows().length, 4, 'positive control: old cached projection contains an extra billed row');
+  const refreshed = importAll();
+  assertUsage();
+  assert.equal(refreshed.totalEventsRemoved, 1, 'ordinary import reconciles prior-version hashes despite identical file stamps');
+  const state = getDb().prepare('SELECT file_hash FROM import_state WHERE source = ?').all('codex') as Array<{ file_hash: string }>;
+  assert.ok(state.every(row => row.file_hash.startsWith('lineage-v2:')));
+  const before = allRows();
+  importAll();
+  assert.deepEqual(allRows(), before);
+});
+
+test('a wholly copied replacement ending with repeated metadata contributes no new usage', () => {
+  const files = fixture();
+  const copied = [turn(1, OLD_DAY), counter(2, OLD_DAY, 1, 100, 0, 0)];
+  fs.writeFileSync(files.root, jsonl([meta(0, OLD_DAY, { history_mode: 'full' }), ...copied]));
+  fs.writeFileSync(files.page, jsonl([
+    meta(0, TODAY, { history_mode: 'full' }), ...copied,
+    meta(3, TODAY, { history_mode: 'full' }),
+  ]));
+  const imported = importAll();
+  assert.deepEqual(imported.files.flatMap(file => file.error ? [file.error] : []), [],
+    'an entirely inherited body is a valid completed copy, including its trailing metadata');
+  assert.deepEqual(usageRows().map(row => row.tokens_in), [100]);
+  assert.equal(getUsageSummary({ date_from: TODAY, date_to: TODAY }).total_usage_events, 0);
+  const before = allRows();
+  importAll(true);
+  assert.deepEqual(allRows(), before);
+  const repair = repairCodexImportUsage(getDb(), { codexDir, apply: true });
+  assert.deepEqual(repair.sessions_failed, []);
+  assert.equal(repair.rows_inserted + repair.rows_updated + repair.rows_deleted, 0);
+});
+
+test('full-copy matching ignores key order and top-level ordinal but retains nested values and timestamps', () => {
+  function reverseKeys(value: unknown): unknown {
+    if (Array.isArray(value)) return value.map(reverseKeys);
+    if (value === null || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.entries(value).reverse().map(([key, child]) => [key, reverseKeys(child)]));
+  }
+  for (const difference of ['equivalent', 'nested-value', 'timestamp'] as const) {
+    reset();
+    const files = fixture();
+    const originalCounter = {
+      ordinal: 2, type: 'event_msg', timestamp: `${OLD_DAY}T10:01:00Z`,
+      payload: { type: 'token_count', info: {
+        model_context_window: 10_000,
+        total_token_usage: { input_tokens: 100, cached_input_tokens: 0, output_tokens: 0 },
+      } },
+    };
+    const copiedCounter = structuredClone(originalCounter);
+    copiedCounter.ordinal = 72;
+    if (difference === 'nested-value') copiedCounter.payload.info.model_context_window = 20_000;
+    if (difference === 'timestamp') copiedCounter.timestamp = `${OLD_DAY}T10:01:01Z`;
+    fs.writeFileSync(files.root, jsonl([
+      meta(0, OLD_DAY, { history_mode: 'full' }), turn(1, OLD_DAY), originalCounter,
+    ]));
+    fs.writeFileSync(files.page, jsonl([
+      meta(0, TODAY, { history_mode: 'full' }),
+      reverseKeys({ ...turn(1, OLD_DAY), ordinal: 71 }) as Line,
+      reverseKeys(copiedCounter) as Line,
+      turn(73, TODAY), counter(74, TODAY, 2, 120, 0, 0),
+    ]));
+    importAll();
+    const copiedExactly = difference === 'equivalent';
+    assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, copiedExactly ? 120 : 220,
+      `${difference}: only the top-level ordinal and serialization key order may differ in a proven copy`);
+    assert.equal(usageRows().length, copiedExactly ? 2 : 3);
+  }
+});
+
+test('same-time replacement peers cannot suppress each other\'s otherwise identical new requests', () => {
+  const files = fixture(true);
+  const secondId = '01a20000-0000-7000-8000-000000000003';
+  const second = path.join(path.dirname(files.page), `rollout-2026-11-11T10-00-00-${secondId}.jsonl`);
+  const copied = [turn(1, OLD_DAY), counter(2, OLD_DAY, 1, 100, 0, 0)];
+  const sharedOwn = [turn(3, TODAY), counter(4, TODAY, 2, 120, 0, 0)];
+  fs.writeFileSync(files.root, jsonl([meta(0, OLD_DAY, { history_mode: 'full' }), ...copied]));
+  fs.writeFileSync(files.page, jsonl([meta(0, TODAY, { history_mode: 'full' }), ...copied, ...sharedOwn]));
+  fs.writeFileSync(second, jsonl([
+    meta(0, TODAY, { history_mode: 'full' }), ...copied, ...sharedOwn,
+    counter(5, TODAY, 3, 130, 0, 0),
+  ]));
+  importAll();
+  assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, 150,
+    'equal creation times do not prove either peer inherited the other\'s new counter');
+  const own = getDb().prepare(`
+    SELECT json_extract(metadata, '$._rollout_id') AS rollout_id, SUM(tokens_in) AS tokens
+    FROM events WHERE session_id = ? AND event_type = 'llm_response'
+      AND json_extract(metadata, '$._rollout_id') IS NOT NULL
+    GROUP BY rollout_id ORDER BY rollout_id
+  `).all(SESSION);
+  assert.deepEqual(own, [{ rollout_id: PAGE, tokens: 20 }, { rollout_id: secondId, tokens: 30 }]);
+  const before = allRows();
+  importAll(true);
+  assert.deepEqual(allRows(), before);
+});

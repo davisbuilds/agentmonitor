@@ -200,6 +200,10 @@ ids include the physical rollout identity; native request ids retain their
 `response_id`. The ledger preserves requests actually billed in an old rollout's
 suffix even when a revert excludes them from the current conversation. An opening
 counter that repeats the ancestor total bills nothing anew.
+For a full replacement without a bookmark, an exact copied record prefix from
+an older same-thread rollout also initializes accounting without being billed
+again. This compatibility check preserves timestamps and nested record values;
+equal cumulative totals alone do not establish copied history.
 
 A changed family is reconciled once, independently of file discovery order.
 Its import rows, summary projection, trace summary, invocation mode and every

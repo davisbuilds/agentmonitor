@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import { discoverCodexRolloutFilesRecursive } from '../util/file-discovery.js';
 import { readTranscriptFile } from '../util/transcript-file.js';
 import { codexRolloutDependencyStamp, createCodexRolloutInventory, resolveCodexRolloutHistory, type CodexRolloutInventory } from '../util/codex-rollout-history.js';
@@ -59,6 +60,36 @@ export function parseCodexSessionRollouts(
   // Resolve every member before reconciliation; a missing base preserves the store.
   const ordered = [...members].sort((a, b) => Number(!!a.historyBase) - Number(!!b.historyBase) || a.filePath.localeCompare(b.filePath));
   const histories = ordered.map(member => resolveCodexRolloutHistory(member.filePath, { inventory, readFile }));
+  // A full replacement can materialize its old prefix instead of pointing to
+  // it. Only an exact chronological prefix proves shared history; equal totals
+  // alone cannot distinguish a copy from another billable request.
+  const comparable = histories.map(history => history.records.flatMap((record, index) => {
+    if (record.value.type === 'session_meta') return [];
+    const { ordinal: _ordinal, ...value } = record.value;
+    return [{ index, value }];
+  }));
+  for (const [index, member] of ordered.entries()) {
+    if (member.historyBase || member.rolloutId === member.sessionId) continue;
+    const created = Date.parse(member.timestamp ?? '');
+    let copied = 0;
+    for (const [candidateIndex, candidate] of ordered.entries()) {
+      if (candidateIndex === index) continue;
+      const candidateCreated = Date.parse(candidate.timestamp ?? '');
+      const older = candidate.rolloutId === member.sessionId
+        || (Number.isFinite(created) && Number.isFinite(candidateCreated) && candidateCreated < created);
+      if (!older) continue;
+      let common = 0;
+      while (common < comparable[index].length && common < comparable[candidateIndex].length
+        && isDeepStrictEqual(comparable[index][common].value, comparable[candidateIndex][common].value)) common++;
+      copied = Math.max(copied, common);
+    }
+    if (copied === 0) continue;
+    const history = histories[index];
+    history.ownFromLine = copied === comparable[index].length
+      ? history.records.length : comparable[index][copied - 1].index + 1;
+    history.records = history.records.map((record, recordIndex) => recordIndex > 0 && recordIndex < history.ownFromLine
+      ? { ...record, inherited: true } : record);
+  }
   const merged = new Map<string, ParsedImportEvent>();
   const ends: ParsedImportEvent[] = [];
   let malformedLines = 0;

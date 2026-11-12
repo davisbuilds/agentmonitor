@@ -14,6 +14,8 @@ import { reparseRequested } from '../db/reparse-marker.js';
 import { codexRolloutDependencyStamp, createCodexRolloutInventory, type CodexRolloutInventory } from '../util/codex-rollout-history.js';
 import { parseCodexSessionRollouts } from './codex-session.js';
 
+const CODEX_LINEAGE_VERSION = 'lineage-v2:';
+
 // ─── Types ──────────────────────────────────────────────────────────────
 
 export type ImportSource = 'claude-code' | 'codex' | 'antigravity' | 'all';
@@ -243,6 +245,7 @@ function processCodexFile(filePath: string, options: ImportOptions, inventory?: 
   if (paginated) {
     const stamp = codexRolloutDependencyStamp(members, inventory!);
     if (members.every(member => isUnchangedOnDisk(member.filePath, diskStamp(member.filePath), options)
+      && getImportState(member.filePath)?.file_hash.startsWith(CODEX_LINEAGE_VERSION)
       && getImportState(member.filePath)?.file_hash.endsWith(`:${stamp}`))) return unchangedResult(filePath, 'codex');
   } else if (isUnchangedOnDisk(filePath, diskStamp(filePath), options)) return unchangedResult(filePath, 'codex');
   const read = readCodexRollout(filePath);
@@ -379,7 +382,7 @@ export function reconcileCodexRollout(
       for (const [file, snapshot] of parsed.reads) {
         // Ancestors from a different native session supply context, not ownership.
         if (!parsed.ownedFiles.has(file)) continue;
-        setImportState(file, parsed.paginated ? `lineage-v1:${snapshot.hash}:${parsed.dependencyStamp}` : snapshot.hash, snapshot.size, snapshot.mtime, 'codex', committed.inserted);
+        setImportState(file, parsed.paginated ? `${CODEX_LINEAGE_VERSION}${snapshot.hash}:${parsed.dependencyStamp}` : snapshot.hash, snapshot.size, snapshot.mtime, 'codex', committed.inserted);
       }
     },
   });
