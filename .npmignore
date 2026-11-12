@@ -20,7 +20,6 @@ yarn-error.log*
 
 __pycache__/
 *.pyc
-rust-backend/target/
 
 .DS_Store
 .idea/
