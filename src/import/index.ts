@@ -273,13 +273,13 @@ function processCodexFile(filePath: string, options: ImportOptions, inventory?: 
       result.skippedDuplicate = counts.unchanged;
       return result;
     }
-    return appendCodexEvents(filePath, events, read, options, result);
+    return appendCodexEvents(filePath, events, read, options, result, inventory);
   }
 
   const { events } = parseCodexSessionRollouts(filePath, { ...options, inventory, read });
   result.eventsFound = events.length;
   // A partial family must not record an individual file as the complete session.
-  return appendCodexEvents(filePath, events, read, paginated ? { ...options, from: options.from ?? new Date(0) } : options, result);
+  return appendCodexEvents(filePath, events, read, paginated ? { ...options, from: options.from ?? new Date(0) } : options, result, inventory);
 }
 
 /** The insert-only path, for partial parses and sessions a rollout cannot own. */
@@ -289,6 +289,7 @@ function appendCodexEvents(
   read: CodexRolloutRead,
   options: ImportOptions,
   result: ImportFileResult,
+  inventory: CodexRolloutInventory | undefined,
 ): ImportFileResult {
   // Inserting cannot delete the rows a change of instrument would replace, so
   // neither instrument may land beside the other's rows; a full reconcile (or
@@ -309,7 +310,7 @@ function appendCodexEvents(
     const requests = new Set(stored.filter(isRequestUsageRow).map(rollout));
     const keepCounters = new Set(events.filter(event => (event.metadata as Record<string, unknown> | undefined)?._usage_source === 'request' && counters.has(rollout(event))).map(rollout));
     if (keepCounters.size > 0) {
-      const fallback = parseCodexSessionRollouts(filePath, { ...options, read, usageInstrument: 'counter' }).events;
+      const fallback = parseCodexSessionRollouts(filePath, { ...options, inventory, read, usageInstrument: 'counter' }).events;
       events = [...events.filter(event => !keepCounters.has(rollout(event))), ...fallback.filter(event => keepCounters.has(rollout(event)))];
     }
     events = events.filter(event => !isCounterUsageRow({ event_type: event.event_type, metadata: JSON.stringify(event.metadata ?? {}) }) || !requests.has(rollout(event)));
@@ -320,6 +321,7 @@ function appendCodexEvents(
       from: options.from,
       to: options.to,
       codexDir: options.codexDir,
+      inventory,
       read,
       usageInstrument: 'counter',
     }).events;

@@ -664,3 +664,70 @@ test('same-time replacement peers cannot suppress each other\'s otherwise identi
   importAll(true);
   assert.deepEqual(allRows(), before);
 });
+
+for (const family of [false, true]) {
+  for (const excludedKind of ['valid-replacement', 'unresolved-history'] as const) {
+    test(`${family ? 'per-span family' : 'single-rollout'} counter fallback retains the filtered inventory with an excluded ${excludedKind}`, () => {
+      const files = fixture();
+      const original = [meta(0, OLD_DAY), turn(1, OLD_DAY), counter(2, OLD_DAY, 1, 100, 0, 0)];
+      fs.writeFileSync(files.root, jsonl(original));
+      if (family) {
+        fs.writeFileSync(files.page, jsonl([
+          meta(3, TODAY, { history_base: {
+            thread_id: SESSION, end_byte_offset: Buffer.byteLength(jsonl(original)), end_ordinal_exclusive: 3,
+          } }),
+          turn(4, TODAY), counter(5, TODAY, 2, 120, 0, 0),
+        ]));
+      } else fs.rmSync(files.page);
+      importAll();
+      assert.deepEqual(usageRows().map(row => row.tokens_in), family ? [100, 20] : [100],
+        'positive control: the stored spans use cumulative counters before native records arrive');
+      const before = allRows();
+      const request = (ordinal: number, day: string, responseId: string, input: number, total: number): Line => ({
+        ordinal, type: 'token_usage_record', timestamp: `${day}T10:01:00Z`,
+        payload: {
+          response_id: responseId, thread_id: SESSION,
+          usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0 },
+          thread_token_usage: { input_tokens: total, cached_input_tokens: 0, output_tokens: 0 },
+        },
+      });
+      const rewritten = [
+        meta(0, OLD_DAY), turn(1, OLD_DAY), request(2, OLD_DAY, 'synthetic-filtered-root-request', 100, 100),
+        counter(3, OLD_DAY, 1, 100, 0, 0),
+      ];
+      fs.writeFileSync(files.root, jsonl(rewritten));
+      if (family) {
+        fs.writeFileSync(files.page, jsonl([
+          meta(4, TODAY, { history_base: {
+            thread_id: SESSION, end_byte_offset: Buffer.byteLength(jsonl(rewritten)), end_ordinal_exclusive: 4,
+          } }),
+          turn(5, TODAY), request(6, TODAY, 'synthetic-filtered-page-request', 20, 120),
+          counter(7, TODAY, 2, 120, 0, 0),
+        ]));
+      }
+      const excluded = path.join(codexDir, 'sessions', 'excluded', 'rollout-2026-11-11T11-00-00-01a20000-0000-7000-8000-000000000003.jsonl');
+      fs.mkdirSync(path.dirname(excluded), { recursive: true });
+      fs.writeFileSync(excluded, jsonl(excludedKind === 'valid-replacement' ? [
+        { ...meta(0, TODAY, { history_mode: 'full' }), timestamp: `${TODAY}T11:00:00Z` },
+        ...rewritten.slice(1), turn(4, TODAY), counter(5, TODAY, 5, 180, 0, 0),
+      ] : [
+        meta(4, TODAY, { history_base: {
+          thread_id: '01a20000-0000-7000-8000-000000000099', end_byte_offset: 100, end_ordinal_exclusive: 4,
+        } }),
+        counter(5, TODAY, 5, 180, 0, 0),
+      ]));
+      const excludePatterns = ['excluded'];
+      assert.ok(discoverCodexLogs(codexDir).includes(excluded), 'positive control: the excluded sibling is discoverable without the filter');
+      assert.ok(!discoverCodexLogs(codexDir, { excludePatterns }).includes(excluded));
+      for (let repeat = 0; repeat < 2; repeat++) {
+        const result = runImport({ source: 'codex', codexDir, excludePatterns, force: true, from: new Date('2026-01-01T00:00:00Z') });
+        assert.deepEqual(result.files.flatMap(file => file.error ? [file.error] : []), [],
+          'counter fallback must not resolve an excluded sibling or its missing history');
+        assert.equal(getUsageSummary({ agent: 'codex' }).total_input_tokens, family ? 120 : 100,
+          'counter fallback must not import excluded sibling usage');
+        assert.equal(result.totalEventsImported, 0);
+        assert.deepEqual(allRows(), before, 'the insert-only fallback retains the stored instrument and rows');
+      }
+    });
+  }
+}
