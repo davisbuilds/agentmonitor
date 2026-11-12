@@ -5,12 +5,16 @@ import { getDb } from '../db/connection.js';
 import { eventIdExists, insertEvent, listImportedCodexRows, refreshImportedUsage, setSessionMode } from '../db/queries.js';
 import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile } from './claude-code.js';
 import type { ParsedImportEvent } from './claude-code.js';
-import { discoverCodexLogs, parseCodexFile, hashContent as hashCodexContent } from './codex.js';
+import { discoverCodexLogs, hashContent as hashCodexContent } from './codex.js';
 import { isCounterUsageRow, isRequestUsageRow, reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
 import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { reparseRequested } from '../db/reparse-marker.js';
+import { codexRolloutDependencyStamp, createCodexRolloutInventory, type CodexRolloutInventory } from '../util/codex-rollout-history.js';
+import { parseCodexSessionRollouts } from './codex-session.js';
+
+const CODEX_LINEAGE_VERSION = 'lineage-v2:';
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
@@ -38,6 +42,8 @@ export interface ImportFileResult {
   eventsRemoved: number;
   skippedDuplicate: number;
   skippedUnchanged: boolean;
+  /** An incomplete history was left untouched; other independent sessions can still import. */
+  error?: string;
 }
 
 export interface ImportResult {
@@ -232,10 +238,18 @@ function processFile(
  * rewrite re-keys them. The file is read once and the recorded hash is of those
  * exact bytes, so content that changes mid-run is seen as changed next time.
  */
-function processCodexFile(filePath: string, options: ImportOptions): ImportFileResult {
-  if (isUnchangedOnDisk(filePath, diskStamp(filePath), options)) return unchangedResult(filePath, 'codex');
+function processCodexFile(filePath: string, options: ImportOptions, inventory?: CodexRolloutInventory): ImportFileResult {
+  const entry = inventory?.entries.find(entry => entry.filePath === filePath);
+  const members = entry ? inventory?.bySessionId.get(entry.sessionId) ?? [entry] : [];
+  const paginated = members.length > 1 || !!entry?.historyBase || (entry !== undefined && entry.rolloutId !== entry.sessionId);
+  if (paginated) {
+    const stamp = codexRolloutDependencyStamp(members, inventory!);
+    if (members.every(member => isUnchangedOnDisk(member.filePath, diskStamp(member.filePath), options)
+      && getImportState(member.filePath)?.file_hash.startsWith(CODEX_LINEAGE_VERSION)
+      && getImportState(member.filePath)?.file_hash.endsWith(`:${stamp}`))) return unchangedResult(filePath, 'codex');
+  } else if (isUnchangedOnDisk(filePath, diskStamp(filePath), options)) return unchangedResult(filePath, 'codex');
   const read = readCodexRollout(filePath);
-  if (isUnchanged(filePath, read.hash, read, options)) return unchangedResult(filePath, 'codex');
+  if (!paginated && isUnchanged(filePath, read.hash, read, options)) return unchangedResult(filePath, 'codex');
   const result: ImportFileResult = {
     path: filePath,
     source: 'codex',
@@ -250,7 +264,7 @@ function processCodexFile(filePath: string, options: ImportOptions): ImportFileR
   // A date-scoped parse is partial, so it can add rows but never prove one stale.
   const isDateScoped = options.from !== undefined || options.to !== undefined;
   if (!options.dryRun && !isDateScoped) {
-    const { events, counts } = reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir }, read);
+    const { events, counts } = reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir, inventory }, read);
     result.eventsFound = events.length;
     if (counts.reconciled) {
       result.eventsImported = counts.inserted;
@@ -259,17 +273,13 @@ function processCodexFile(filePath: string, options: ImportOptions): ImportFileR
       result.skippedDuplicate = counts.unchanged;
       return result;
     }
-    return appendCodexEvents(filePath, events, read, options, result);
+    return appendCodexEvents(filePath, events, read, options, result, inventory);
   }
 
-  const events = parseCodexFile(filePath, {
-    from: options.from,
-    to: options.to,
-    codexDir: options.codexDir,
-    content: read.bytes.toString('utf-8'),
-  });
+  const { events } = parseCodexSessionRollouts(filePath, { ...options, inventory, read });
   result.eventsFound = events.length;
-  return appendCodexEvents(filePath, events, read, options, result);
+  // A partial family must not record an individual file as the complete session.
+  return appendCodexEvents(filePath, events, read, paginated ? { ...options, from: options.from ?? new Date(0) } : options, result, inventory);
 }
 
 /** The insert-only path, for partial parses and sessions a rollout cannot own. */
@@ -279,6 +289,7 @@ function appendCodexEvents(
   read: CodexRolloutRead,
   options: ImportOptions,
   result: ImportFileResult,
+  inventory: CodexRolloutInventory | undefined,
 ): ImportFileResult {
   // Inserting cannot delete the rows a change of instrument would replace, so
   // neither instrument may land beside the other's rows; a full reconcile (or
@@ -286,15 +297,34 @@ function appendCodexEvents(
   const end = events.find(event => event.event_type === 'session_end');
   const instrument = (end?.metadata as Record<string, unknown> | undefined)?._usage_instrument;
   const stored = end ? listImportedCodexRows(end.session_id) : [];
-  if (instrument === 'request' && stored.some(isCounterUsageRow)) {
+  const history = (end?.metadata as Record<string, unknown> | undefined)?._rollout_history === true;
+  if (history) {
+    // A family can legitimately use counters in an old file and native request
+    // records in a newer one. Insert-only imports must keep each physical span
+    // on its stored instrument, rather than switching the whole session.
+    const rollout = (event: { session_id?: string; metadata?: unknown }): string => {
+      const metadata = typeof event.metadata === 'string' ? JSON.parse(event.metadata) as Record<string, unknown> : event.metadata as Record<string, unknown> | undefined;
+      return typeof metadata?._rollout_id === 'string' ? metadata._rollout_id : event.session_id ?? end!.session_id;
+    };
+    const counters = new Set(stored.filter(isCounterUsageRow).map(rollout));
+    const requests = new Set(stored.filter(isRequestUsageRow).map(rollout));
+    const keepCounters = new Set(events.filter(event => (event.metadata as Record<string, unknown> | undefined)?._usage_source === 'request' && counters.has(rollout(event))).map(rollout));
+    if (keepCounters.size > 0) {
+      const fallback = parseCodexSessionRollouts(filePath, { ...options, inventory, read, usageInstrument: 'counter' }).events;
+      events = [...events.filter(event => !keepCounters.has(rollout(event))), ...fallback.filter(event => keepCounters.has(rollout(event)))];
+    }
+    events = events.filter(event => !isCounterUsageRow({ event_type: event.event_type, metadata: JSON.stringify(event.metadata ?? {}) }) || !requests.has(rollout(event)));
+    result.eventsFound = events.length;
+  } else if (instrument === 'request' && stored.some(isCounterUsageRow)) {
     // Stored from the counter: stay on it.
-    events = parseCodexFile(filePath, {
+    events = parseCodexSessionRollouts(filePath, {
       from: options.from,
       to: options.to,
       codexDir: options.codexDir,
-      content: read.bytes.toString('utf-8'),
+      inventory,
+      read,
       usageInstrument: 'counter',
-    });
+    }).events;
     result.eventsFound = events.length;
   } else if (instrument === 'counter' && stored.some(isRequestUsageRow)) {
     // Stored per request, but this parse fell back to the counter (a record
@@ -332,15 +362,16 @@ export function readCodexRollout(filePath: string): CodexRolloutRead {
  */
 export function reconcileCodexRollout(
   filePath: string,
-  options: { apply: boolean; codexDir?: string },
+  options: { apply: boolean; codexDir?: string; inventory?: CodexRolloutInventory },
   read: CodexRolloutRead = readCodexRollout(filePath),
 ): { events: ParsedImportEvent[]; counts: CodexReconcileCounts } {
-  const diagnostics = { malformedLines: 0 };
-  const events = parseCodexFile(filePath, { codexDir: options.codexDir, content: read.bytes.toString('utf-8'), diagnostics });
+  filePath = path.resolve(filePath);
+  const parsed = parseCodexSessionRollouts(filePath, { ...options, read });
+  const { events } = parsed;
   // A line that does not parse, such as one read mid-write, would make every
   // row after it look stale. Such a parse cannot prove any row stale, so it
   // takes the insert-only path.
-  if (diagnostics.malformedLines > 0) {
+  if (parsed.malformedLines > 0) {
     const sessionId = events.find(event => event.event_type === 'session_start')?.session_id ?? null;
     return { events, counts: { reconciled: false, session_id: sessionId, inserted: 0, updated: 0, deleted: 0, unchanged: 0 } };
   }
@@ -350,7 +381,11 @@ export function reconcileCodexRollout(
     apply: options.apply,
     onCommit: committed => {
       applySessionModes(events);
-      setImportState(filePath, read.hash, read.size, read.mtime, 'codex', committed.inserted);
+      for (const [file, snapshot] of parsed.reads) {
+        // Ancestors from a different native session supply context, not ownership.
+        if (!parsed.ownedFiles.has(file)) continue;
+        setImportState(file, parsed.paginated ? `${CODEX_LINEAGE_VERSION}${snapshot.hash}:${parsed.dependencyStamp}` : snapshot.hash, snapshot.size, snapshot.mtime, 'codex', committed.inserted);
+      }
     },
   });
   return { events, counts };
@@ -413,7 +448,7 @@ export function runImport(options: ImportOptions): ImportResult {
     ? discoverClaudeCodeLogs(options.claudeDir ?? runtimeConfig.claudeDir, { excludePatterns })
     : [];
   const codexFiles = (options.source === 'codex' || options.source === 'all')
-    ? discoverCodexLogs(options.codexDir, { excludePatterns })
+    ? discoverCodexLogs(options.codexDir, { excludePatterns }).map(file => path.resolve(file))
     : [];
   const antigravityFiles = (options.source === 'antigravity' || options.source === 'all')
     ? discoverAntigravityLogs(options.antigravityDir, { excludePatterns })
@@ -425,8 +460,23 @@ export function runImport(options: ImportOptions): ImportResult {
   }
 
   // Process Codex files
+  const inventory = createCodexRolloutInventory(codexFiles);
+  const handled = new Set<string>();
   for (const filePath of codexFiles) {
-    files.push(processFile(filePath, 'codex', options));
+    if (filePath.endsWith('.jsonl.zst') && fs.existsSync(filePath.slice(0, -4))) {
+      files.push(unchangedResult(filePath, 'codex')); continue;
+    }
+    const entry = inventory.entries.find(entry => entry.filePath === filePath);
+    if (entry && handled.has(entry.sessionId)) { files.push(unchangedResult(filePath, 'codex')); continue; }
+    if (entry) handled.add(entry.sessionId);
+    try {
+      files.push(processCodexFile(filePath, options, inventory));
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (!detail.startsWith('Invalid Codex rollout history:')) throw error;
+      console.warn(`[import] Codex history left unchanged: ${detail}`);
+      files.push({ ...unchangedResult(filePath, 'codex'), skippedUnchanged: false, error: detail });
+    }
   }
 
   // Process Antigravity files

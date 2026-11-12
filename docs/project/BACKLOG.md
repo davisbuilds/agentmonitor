@@ -96,8 +96,15 @@ so later readers know what still needs checking.
   basename. Keying those rows by `session_meta.id` when writing would retire
   most of them, but it is an identity migration of stored rows, links and
   summaries in its own right.
+- **Continuation writes (2026-11-11)**: paginated and reverted Codex files now
+  resolve the selected leaf's bounded history and write the browser projection
+  under the original root rollout identity. Synthetic import and watcher
+  regressions validate stable root writes, complete-history recovery and retained
+  billed costs for discarded requests. Preexisting continuation aliases remain
+  stored; this change does not migrate their pins, links, messages or summaries.
 - **Next**: define persisted provider-native identity plus child-agent identity
-  and coverage provenance; preserve existing links and pins during any migration.
+  and coverage provenance; migrate existing aliases only with an explicit mapping
+  that preserves links and pins.
   Expose usage-only versus browsable coverage explicitly without fabricating
   transcripts, and audit each aggregate before calling its count conversations.
 

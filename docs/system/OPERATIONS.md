@@ -145,6 +145,8 @@ preserve a closed database backup and rehearse
 `amon sync sessions --source codex --force` on a separate database path before
 reparsing the live projection. Unchanged files otherwise keep their old
 projection; deploying the binary alone cannot reclassify or trim that history.
+For paginated history, copy the complete physical rollout family and its referenced
+prefixes into the scratch source tree. A leaf file alone cannot prove its history.
 Unknown source shapes remain unclassified. Reparse reads native files but never
 modifies them. [Daily activity](../api/activity-contract.md#daily-conversation-activity)
 is an aggregate read; inspect its response separately from the older
@@ -669,9 +671,7 @@ because event history outlives the transcripts it came from.
 
 ### Imported Codex usage repair
 
-Until 2026-09-24 the Codex importer had two defects that inflated stored usage.
-Stored rows keep both, because import skips an unchanged file, and before this
-fix it only inserted ids it had not seen.
+The Codex usage repair covers stored rows from earlier importer defects:
 
 - **Copied subagent history.** A `thread_spawn` subagent's rollout can open with
   a copy of its parent's history, with the parent's cumulative token counters
@@ -681,11 +681,17 @@ fix it only inserted ids it had not seen.
   rewrites a rollout, the ids move. Insert-only import left the old rows
   alongside the new ones, and a model refresh wrote the file's cost onto stale
   tokens.
+- **Paginated or reverted history.** A continuation can retain the native thread
+  id while referencing a bounded prefix of another physical rollout. Parsing its
+  counters from zero billed historical usage again; reconciling each physical
+  file separately could also replace another member's requests. A revert removes
+  conversation history, but does not undo the bill for the discarded requests.
 
-New imports are correct. A changed rollout's import rows are now reconciled to
-its parse: updated in place, deleted when the parse no longer produces them, or
-inserted. A subagent is billed from its first own turn (see ARCHITECTURE). An
-unchanged file is still skipped, so rows already stored need the repair:
+Import now reconciles a native session's complete discoverable rollout family in
+one transaction. Ancestors initialize each member's accounting; only its own
+requests are emitted, including genuinely billed old suffixes outside the current
+conversation. A subagent is billed from its first own turn (see ARCHITECTURE).
+Rows already stored can be reconciled with the same path through the repair:
 
 ```sh
 amon costs repair-codex-usage --json            # preview, no writes
@@ -709,16 +715,21 @@ preview shows the switch apart from real orphans. The session's token total is
 unchanged, apart from requests the counter had left out. A compaction already
 stored keeps its row, because both paths key it by `response_id`.
 
-It reconciles every discoverable rollout through the importer's own path, so a
-repaired session is exactly what a fresh import would store. The preview runs
-the same work and rolls it back.
+It reconciles each discoverable native session once through the importer's own
+family path, so a repaired session is what a fresh complete import would store.
+The preview runs the same work and rolls it back. A forced parse of an isolated
+raw leaf is not a repair: it cannot establish inherited accounting or complete
+ownership. Use this command for event usage and `amon sync sessions --source
+codex --force` for the separate browser projection, with complete source families
+available to both.
 
 **Procedure:**
 
 1. Take a validated backup (see above).
-2. Rehearse on a copy. Also copy `~/.codex/sessions` and `config.toml` to a
-   scratch Codex directory, so the preview and the apply read identical bytes.
-   Then run:
+2. Rehearse on a copy. Also copy the source `sessions` tree and `config.toml` to
+   a scratch Codex directory, keeping all physical members and referenced
+   prefixes, including compressed files. Preview and apply must read identical
+   bytes. Then run:
 
    ```sh
    amon database backup --output <private-dir>/rehearsal.db
@@ -729,13 +740,18 @@ the same work and rolls it back.
    Record `/api/v2/monitor/stats` overall and with `?agent=codex` after this
    first startup, which prices any missing costs on the copy. Stop the server.
    Then run the preview and the apply with `--codex-dir <scratch>`, restart the
-   server, and read the same endpoints again.
+   server, and read the same endpoints again. Require no failed sessions,
+   unclassified rows, counter mismatches or unverified history totals before
+   proceeding; inspect the other exceptions below separately.
 3. Stop the live server and verify its port is free. A rollout that grows
    during the apply is reconciled again by the next import, but the Monitor's
    stats cache only resets on restart.
 4. Back up the live database again, then preview it and compare the preview
    with the rehearsal. Then run `--apply`, restart the server, and check that a
-   second preview reports no changes.
+   second preview reports no changes, no failed sessions, no unclassified rows,
+   no counter mismatches and no unverified history totals. Check both current
+   and historical usage windows: inherited cost must not move to the continuation
+   date, and reverted requests must retain their original costs and timestamps.
 
 **Reading the report.** Each changed row is classified by the evidence it
 carries:
@@ -750,14 +766,23 @@ carries:
 | `annotated` | only non-usage fields differ |
 | `compaction` | a compaction request Codex recorded but left out of its counter |
 | `instrument_switch` | a counter row replaced, or a request row added, as a session moves to per-request billing |
+| `rollout_history` | a stored row updated or removed when the native session's physical rollout family is reconciled |
 | `appended` | new usage since the last import |
 | `unclassified` | none of the above |
 
-**Do not apply while `unclassified` is above 0.** Also check the two outside
-instruments in the report:
+**Do not apply with failed sessions, unclassified rows, counter mismatches or
+unverified history totals.** Check these report fields and outside instruments:
 
+- `sessions_failed` must be empty. Missing, ambiguous or invalid history sources
+  fail closed for their native session; its existing rows stay stored.
+- `history_sessions_checked` counts changed paginated sessions with a native
+  total available for each physical member's own span. The check sums those
+  spans, preserving billed reverted suffixes rather than comparing the whole
+  ledger with only the current conversation's final counter.
+- `history_totals_unverified` must be empty. It names changed sessions whose
+  available source totals cannot establish that physical-span conservation.
 - `counter_mismatches` must be empty. Each changed session's repaired usage is
-  compared with Codex's own total for it:
+  compared with Codex's own total for it. For a single ordinary rollout:
   - the thread total on its last `token_usage_record`, for any session whose
     rollout has one (Codex 0.154+, counted in `thread_sessions_checked`). This
     includes subagents, because the total counts only the thread's own
@@ -792,10 +817,20 @@ today's config says nothing about an older session.
   timestamps.
 
 A session whose rollout is gone is counted in `sessions_without_rollout` and
-left as stored. A rollout that cannot prove which session it owns, or that has
-a line that does not parse, is counted in `sessions_unreconciled` and gets
-insert-only import as before. A failed session rolls back on its own. It is listed in
-`sessions_failed` and the CLI exits with partial success. Rerunning finishes it.
+left as stored. An ordinary rollout that cannot prove which session it owns, or
+that has a line that does not parse, is counted in `sessions_unreconciled` and
+gets insert-only import as before. A paginated family's missing or invalid
+referenced prefix, including malformed source records, instead fails without
+replacing any stored rows; normal import reports the error too. A failed session
+rolls back on its own. It is listed in
+`sessions_failed` and the CLI exits with partial success. Restore or resolve the
+source problem before rerunning.
+
+Synthetic regression coverage validated on 2026-11-11 exercises bounded prefixes,
+both discovery orders, forced and unchanged reruns, appends, native request records
+before the next counter, missing-prefix preservation, and repair idempotence.
+These checks validate the supported source contract; they do not migrate existing
+browser aliases or replace the rehearsal on the target database.
 
 **Measured shape.** This was rehearsed on 2026-09-24 against a copy of a local
 store and a snapshot of its rollouts:

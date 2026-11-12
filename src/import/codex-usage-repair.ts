@@ -11,6 +11,7 @@ import { discoverCodexLogs, parseCodexFile } from './codex.js';
 import { importedRowMatches, isCounterUsageRow, reconciledEvent, sameCost } from './codex-reconcile.js';
 import { readCodexRollout, reconcileCodexRollout, type CodexRolloutRead } from './index.js';
 import { acquireRuntimeOwnership } from '../runtime-ownership.js';
+import { createCodexRolloutInventory } from '../util/codex-rollout-history.js';
 
 export interface CodexUsageRepairOptions {
   /** Root of the Codex installation holding `sessions/`. Defaults to `~/.codex`. */
@@ -34,7 +35,7 @@ export interface CodexSubagentOtelCheck {
   otel_gap_hours: number;
 }
 
-type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'compaction' | 'instrument_switch' | 'appended' | 'unclassified';
+type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'compaction' | 'instrument_switch' | 'appended' | 'rollout_history' | 'unclassified';
 
 // A type alias, not an interface: `printSummary` takes `Record<string, unknown>`.
 export type CodexUsageRepairReport = {
@@ -72,6 +73,8 @@ export type CodexUsageRepairReport = {
   subagent_otel: CodexSubagentOtelCheck[];
   /** Sessions that had import usage and have none after the repair, so their OTEL rows count again. */
   sessions_left_without_usage: string[];
+  history_sessions_checked: number;
+  history_totals_unverified: string[];
 };
 
 type Usage = { tokens: number; cost: number };
@@ -161,7 +164,7 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     rows_inserted: 0,
     rows_updated: 0,
     rows_deleted: 0,
-    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, subagent_model: 0, annotated: 0, compaction: 0, instrument_switch: 0, appended: 0, unclassified: 0 },
+    rows_by_class: { copied_history: 0, orphaned: 0, refresh_drift: 0, repriced: 0, subagent_model: 0, annotated: 0, compaction: 0, instrument_switch: 0, appended: 0, rollout_history: 0, unclassified: 0 },
     tokens_before: 0,
     tokens_after: 0,
     cost_before_usd: 0,
@@ -175,11 +178,17 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     otel_ratios_moved_away: 0,
     subagent_otel: [],
     sessions_left_without_usage: [],
+    history_sessions_checked: 0,
+    history_totals_unverified: [],
   };
 
   const seenSessions = new Set<string>();
-  for (const filePath of discoverCodexLogs(options.codexDir, { excludePatterns: options.excludePatterns })) {
+  const files = discoverCodexLogs(options.codexDir, { excludePatterns: options.excludePatterns }).map(file => path.resolve(file));
+  const inventory = createCodexRolloutInventory(files);
+  for (const filePath of files) {
     report.files_scanned++;
+    const entry = inventory.entries.find(entry => entry.filePath === filePath);
+    if (entry && seenSessions.has(entry.sessionId)) continue;
     let read: CodexRolloutRead;
     try {
       read = readCodexRollout(filePath);
@@ -194,13 +203,13 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     let stored: ImportedCodexRow[] = [];
     try {
       // What is stored now, read before the reconcile changes it.
-      const peek = reconcileCodexRollout(filePath, { apply: false, codexDir: options.codexDir }, read);
+      const peek = reconcileCodexRollout(filePath, { apply: false, codexDir: options.codexDir, inventory }, read);
       if (peek.counts.session_id) stored = listImportedCodexRows(peek.counts.session_id);
-      result = apply ? reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir }, read) : peek;
+      result = apply ? reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir, inventory }, read) : peek;
     } catch (err) {
       report.sessions_failed.push({ rollout: path.basename(filePath), error: err instanceof Error ? err.message : String(err) });
       // Its rollout exists, so the session must not also read as missing one.
-      const failedSession = sessionIdOf(filePath, read, options.codexDir);
+      const failedSession = entry?.sessionId ?? sessionIdOf(filePath, read, options.codexDir);
       if (failedSession) seenSessions.add(failedSession);
       continue;
     }
@@ -213,6 +222,7 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
 
     const start = metadataOf(events.find(e => e.event_type === 'session_start'));
     const end = metadataOf(events.find(e => e.event_type === 'session_end'));
+    const history = end._rollout_history === true;
     const skipped = typeof end._inherited_counters_skipped === 'number' ? end._inherited_counters_skipped : 0;
     if (start._subagent_boundary === 'unresolved') report.subagent_boundaries_unresolved++;
     report.inherited_counters_skipped += skipped;
@@ -235,8 +245,8 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     const switching = end._usage_instrument === 'request' && stored.some(isCounterUsageRow);
     for (const row of stored) {
       const event = parsed.get(row.event_id);
-      if (!event) report.rows_by_class[switching && isCounterUsageRow(row) ? 'instrument_switch' : skipped > 0 ? 'copied_history' : 'orphaned']++;
-      else if (!importedRowMatches(row, event)) report.rows_by_class[classifyUpdate(row, event)]++;
+      if (!event) report.rows_by_class[history ? 'rollout_history' : switching && isCounterUsageRow(row) ? 'instrument_switch' : skipped > 0 ? 'copied_history' : 'orphaned']++;
+      else if (!importedRowMatches(row, event)) report.rows_by_class[history ? 'rollout_history' : classifyUpdate(row, event)]++;
     }
     for (const [id, event] of parsed) {
       if (storedById.has(id)) continue;
@@ -252,6 +262,8 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     report.cost_after_usd += after.cost;
 
     if (before.tokens > 0 && after.tokens === 0) report.sessions_left_without_usage.push(counts.session_id!);
+    if (end._history_total_unknown) { report.history_totals_unverified.push(counts.session_id!); continue; }
+    if (history) report.history_sessions_checked++;
 
     // Codex's thread total counts only this thread's own requests, so it checks
     // a subagent as well as a plain session; OTEL can miss a request Codex
