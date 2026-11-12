@@ -100,6 +100,14 @@ jobs:
           AGENTMONITOR_TEST_SHARD: ${{ matrix.shard }}/2
           AGENTMONITOR_TEST_CONCURRENCY: "4"
 
+      # These start a real server on a temp database and exercise the HTTP API
+      # end to end. `pnpm test` does not include them; one shard is enough.
+      - name: HTTP contract suites
+        if: ${{ matrix.shard == 1 }}
+        run: |
+          pnpm test:parity:ts
+          pnpm test:v2:contract:ts
+
   # Required check: branch protection and scripts/github/protect-main.sh name
   # it. It fails unless both jobs passed, including when one was cancelled.
   checks:
