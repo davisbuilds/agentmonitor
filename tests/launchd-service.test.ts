@@ -310,6 +310,13 @@ describe('amon service (launchd)', () => {
     }
   });
 
+  test('with no database configured, the spec names the default under the install it will run, not under the running CLI', () => {
+    const { host, entryScript, env, root, install } = fixture();
+    const { AGENTMONITOR_DB_PATH: _recorded, ...withoutDb } = env;
+    const built = buildServiceSpec({ host, nodePath: 'node', entryScript, cwd: root, env: withoutDb });
+    assert.equal(built.dbPath, path.join(fs.realpathSync(install), 'data', 'agentmonitor.db'));
+  });
+
   // Reads the plist with plutil, which only macOS has.
   test('restart of a stopped service checks the default database under the install when none is recorded', { skip: !onMac }, async () => {
     const { host, entryScript, env, root, install, calls } = fixture();

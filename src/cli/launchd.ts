@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { resolveDbPath } from '../db-path.js';
+import { defaultDbPath, resolveDbPath } from '../db-path.js';
 import { readRuntimeOwner } from '../runtime-ownership.js';
 import { CliError, notFound, unavailable } from './errors.js';
 
@@ -135,15 +135,18 @@ export function buildServiceSpec(input: {
     }
   }
 
+  // The agent runs the build `entry` belongs to, so its default database is
+  // under that install, whichever CLI computes this spec.
+  const workingDirectory = path.dirname(path.dirname(entry));
   return {
     label: SERVICE_LABEL,
     plistPath: plistPath(input.host),
     logPath: path.join(input.host.home, 'Library', 'Logs', 'agentmonitor', 'serve.log'),
     programArguments: [input.nodePath, entry, 'serve', '--no-portless'],
-    workingDirectory: path.dirname(path.dirname(entry)),
+    workingDirectory,
     environment,
     skippedSecrets,
-    dbPath: path.resolve(input.cwd, resolveDbPath(input.env)),
+    dbPath: path.resolve(input.cwd, resolveDbPath(input.env, workingDirectory)),
   };
 }
 
@@ -361,9 +364,7 @@ function installedDbPath(plist: InstalledPlist): string | null {
   const environment = plist.EnvironmentVariables as Record<string, unknown> | undefined;
   const configured = environment?.AGENTMONITOR_DB_PATH;
   if (typeof configured === 'string' && configured.trim()) return configured.trim();
-  return typeof plist.WorkingDirectory === 'string'
-    ? path.join(plist.WorkingDirectory, 'data', 'agentmonitor.db')
-    : null;
+  return typeof plist.WorkingDirectory === 'string' ? defaultDbPath(plist.WorkingDirectory) : null;
 }
 
 export interface ServiceStatus {
