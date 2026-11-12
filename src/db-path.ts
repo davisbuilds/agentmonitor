@@ -24,8 +24,13 @@ const packageRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..'
  * dashboard that looked plausible and was simply about someone else's data.
  * An explicit AGENTMONITOR_DB_PATH is still honored as given.
  */
-export function resolveDbPath(env: NodeJS.ProcessEnv = process.env): string {
+export function resolveDbPath(env: NodeJS.ProcessEnv = process.env, installRoot: string = packageRoot): string {
   const configured = env.AGENTMONITOR_DB_PATH?.trim();
   if (configured) return configured;
-  return path.join(packageRoot, 'data', 'agentmonitor.db');
+  return defaultDbPath(installRoot);
+}
+
+/** The database an install opens when none is configured. */
+export function defaultDbPath(installRoot: string): string {
+  return path.join(installRoot, 'data', 'agentmonitor.db');
 }
