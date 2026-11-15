@@ -9,7 +9,10 @@ const watchdog = path.resolve('src/event-loop-watchdog.ts');
 function runBlocked(block: string): Promise<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }> {
   const script = `
     import { startEventLoopWatchdog } from ${JSON.stringify(watchdog)};
-    startEventLoopWatchdog({ stallMs: 600, maxCpuMs: 200, checkMs: 100 });
+    // The CPU allowance is far below one core's worth of the stall window: on a
+    // loaded machine the busy child may get only a small share of a core, and it
+    // must still count as working. A waiting child uses almost none.
+    startEventLoopWatchdog({ stallMs: 600, maxCpuMs: 20, checkMs: 100 });
     setTimeout(() => { ${block}; process.exit(0); }, 200);
   `;
   return new Promise((resolve, reject) => {
