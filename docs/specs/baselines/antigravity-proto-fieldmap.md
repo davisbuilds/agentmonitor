@@ -2,7 +2,7 @@
 date: 2026-07-01
 topic: antigravity-cli-import
 stage: baseline
-status: complete
+status: reference
 source: binary-extraction
 ---
 
