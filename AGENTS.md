@@ -95,18 +95,11 @@ Full command catalog (build, test, parity, import, reparse, seed, bench) is in `
 - **Push back before building.** If a request is incoherent or self-contradictory, or a spec/plan is vague or skips key decisions, stop and interview me — ask clarifying questions and confirm intent before writing code or changing files. Don't guess at scope or comply silently. (Clear, well-scoped requests don't need this.)
 - **Log durable follow-ups in `BACKLOG.md`.** Fix simple issues inline. For durable work, record What, Why or evidence, and a Next action or Revisit trigger; date volatile claims or mark them as hypotheses. Agents may execute entries directly. Use issues when discussion or coordination helps, keep one detailed owner, and reconcile affected entries as work lands.
 - **Keep docs current.** Update the owning reference when a change alters its stated behavior, procedure, contract, or direction. Reconcile an affected Backlog entry as work lands; update Roadmap when selected direction changes.
-- **Planning and continuity.** Use the accepted conversation, ticket, or
-  existing contract when it defines the work. Save a design, spec, or plan when
-  it carries decisions, acceptance criteria, coordination, or execution
-  sequencing that someone will need. If unfinished work transfers between
-  agents, sessions, or devices, leave a brief handoff when the existing context
-  is insufficient. Include the goal, decisions, progress, remaining work,
-  verification limits, and links to the owning references. Commit shared
-  execution documents, keep their status current, and use the authorized push or
-  sync workflow to share them. Before archiving a completed artifact, move
-  lasting decisions and open work to maintained references and repair incoming
-  links. Archive under `docs/archive/` and use Git history to recover committed
-  originals. Keep tracked documents suitable for public readers and keep private
-  evidence local.
+- **Planning and continuity.** Reuse clear task context. Save planning docs when
+  decisions, acceptance, or coordination need persistence. Leave a brief handoff
+  only when needed to resume unfinished work. Commit shared docs and keep status
+  current. Before archiving, preserve lasting decisions and open work in
+  maintained docs and repair links. Keep tracked docs suitable for public
+  readers and private evidence local.
 - **Commit logically.** Commit completed work in coherent chunks as you proceed. Push only when explicitly asked.
 - **Re-ground after compaction.** A compaction summary loses precise paths, context, and verification state — before continuing, re-read this project's `AGENTS.md`, its reference docs, and recent commits.
