@@ -6,21 +6,6 @@ export default tseslint.config(
   ...tseslint.configs.recommended,
   {
     files: ['src/**/*.ts', 'tests/**/*.ts', 'scripts/**/*.ts'],
-    languageOptions: {
-      parserOptions: {
-        projectService: {
-          allowDefaultProject: [
-            'tests/*.ts',
-            'tests/*/*.ts',
-            'tests/*/*/*.ts',
-            'scripts/*.ts',
-            'scripts/*/*.ts',
-          ],
-          maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 300,
-        },
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
     rules: {
       // Allow unused vars prefixed with underscore
       '@typescript-eslint/no-unused-vars': ['error', {

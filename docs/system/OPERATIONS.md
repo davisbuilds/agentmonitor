@@ -49,7 +49,7 @@ and `amon health`) wait until all three finish. Each scan logs its own summary:
 event import of the same sources follows 5 seconds after the scans and repeats every
 `AGENTMONITOR_AUTO_IMPORT_MINUTES` (default 10; `0` disables it). It also runs
 synchronously, so a large first import pauses requests again.
-Provider quota polling always starts. For Codex it runs `codex app-server` from
+On startup, `amon serve` starts provider quota polling. For Codex it runs `codex app-server` from
 `PATH`, and records an error snapshot when the Codex CLI is absent.
 
 ### Login Service (macOS)
@@ -1210,6 +1210,9 @@ pnpm test
 pnpm test:parity:ts
 pnpm test:v2:contract:ts
 ```
+
+The two HTTP suites start a disposable server with background provider quota
+polling disabled. The quota parity case posts its own snapshots.
 
 `pnpm test` runs the suite through `scripts/test/run-node-tests.mjs`, which
 gives it a private temp directory and fails the run, naming each entry, when a
