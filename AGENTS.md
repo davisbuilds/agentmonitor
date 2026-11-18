@@ -82,6 +82,9 @@ remote settings. These references hold intent, boundaries, and procedures:
   maintainer's decision; don't open a branch or PR just for a backlog entry.
 - **Keep docs current** when a change makes a documented contract, boundary,
   procedure, or direction stale.
+- **TDD:** red/green for features, major refactors and large changes; the red
+  test must fail on the behavior, not on a missing symbol. For smaller edits, run
+  the relevant existing checks.
 - **Commit and push.** Commit coherent chunks, staging by explicit path. Push
   your task branch and open a PR once the work is complete and the local gate
   passes; don't push directly to `main`.
