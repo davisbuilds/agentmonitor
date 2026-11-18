@@ -87,9 +87,10 @@ remote settings. These references hold intent, boundaries, and procedures:
   passes; don't push directly to `main`.
 - **Merge** only under the standing merge authority in the maintainer's workspace
   instructions, or when the maintainer asks. Without those instructions in
-  context, leave the PR for the maintainer. Merge commit by default, rebase only
-  when the branch's commits are already clean; squash is disabled. Branch
-  protection requires every review thread resolved. A merge deploys and publishes
-  nothing: installs run from a local checkout's `dist/`.
+  context, leave the PR for the maintainer.
+- **History and deploys.** Squash is disabled: merge commit by default, rebase
+  only when the branch's commits are already clean. Branch protection requires
+  every review thread resolved. A merge deploys and publishes nothing: installs
+  run from a local checkout's `dist/`.
 - **Re-ground after compaction** in source, this file, the owning docs, and
   recent commits. A summary and your own earlier proposals are not user approval.
