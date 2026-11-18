@@ -1,45 +1,42 @@
 # Svelte 5 Frontend
 
-Vite SPA served at `/app/` with Monitor, Analytics, Sessions, and Benchmarks tabs. An agent card on Monitor opens that session's live stream (`components/monitor/MonitorStream.svelte`).
-This is the canonical product surface for AgentMonitor.
-
-See root `AGENTS.md` for project overview, API contract (V2 endpoints this app consumes), and shared conventions.
+Vite SPA served at `/app/` with Monitor, Analytics, Sessions, and Benchmarks tabs;
+the canonical product surface for AgentMonitor. The root `AGENTS.md` holds the
+project rules, gate, and Working Agreement; the tab-by-tab code map lives in
+`docs/system/ARCHITECTURE.md` → Frontend (`/app/`).
 
 **Design system:** follow `docs/system/DESIGN.md` ("Instrument Console"). Tokens live in
 `src/app.css` `@theme`; use `text-text`/`text-text-muted`, `bg-surface`, `border-line`, the
 `text-h1..text-meta` scale, two radii (`rounded-sm`/`rounded-lg`), `font-sans` (Mona Sans, UI) and
 `font-mono` (Geist Mono, numerals/code).
 
-## Working Commands
+## Commands and tests
 
-- Build: `pnpm frontend:build` (output at `frontend/dist/`, served at `/app/`)
-- Dev: `pnpm frontend:dev` (Vite dev server at `:5173` with API proxy to `:3141`)
-- Unit test: `pnpm frontend:test` (Vitest, run from root) — covers the stores
-  and some pure `lib/*.ts` logic. Most pure-helper tests are still root
-  `node:test` files under `tests/`, run by `pnpm test` (see the BACKLOG entry
-  on the split). Vitest runs through the Svelte plugin so `.svelte.ts` `$state`
-  compiles as it does in the build. Test files are `src/**/*.test.ts`; module
-  singletons are reset per test with `vi.resetModules()`. Component-mount +
-  `$derived`/`$effect` reactivity coverage is deferred (would add
-  `@testing-library/svelte` + `flushSync`).
+Run from the repo root: `pnpm frontend:dev` (Vite at `:5173`, API proxy to
+`:3141`), `pnpm frontend:build` (to `frontend/dist/`, served at `/app/`),
+`pnpm frontend:check` (svelte-check; type-checks only, never runs rune code), and
+`pnpm frontend:test` (Vitest over `src/**/*.test.ts`).
 
-## Code Map
+- Vitest covers the stores and some pure `lib/*.ts` logic. Most pure-helper tests
+  are still root `node:test` files under `tests/`, run by `pnpm test` (see the
+  BACKLOG entry on the split).
+- Vitest runs through the Svelte plugin so `.svelte.ts` `$state` compiles as it
+  does in the build. Reset module singletons per test with `vi.resetModules()`.
+- Component-mount and `$derived`/`$effect` reactivity coverage is deferred (it
+  would add `@testing-library/svelte` + `flushSync`).
 
-- `src/lib/components/monitor/`: Monitor tab (real-time dashboard). An agent card opens `MonitorStream` at `#monitor?session=…`: `SessionSummary` (the card's figures, from the Monitor store's row merged with the session's own `GET /api/v2/monitor/sessions/:id` read via `followedSessionSummary`), then the live stream (`components/live/ItemStream` + `InspectorPanel`, `stores/live.svelte.ts`). The Inspector's Events view and the no-live-record / live-view-off fallback both render `SessionEvents` (`sessionRecentEvents` in `lib/monitor-session-view.ts` merges that read with live SSE events). Legacy `#live` redirects to Monitor. `MonitorPage` renders its own `ui/FilterBar` (the Agent select, the only Monitor filter, beside `StatsBar`); `monitor.svelte.ts` applies the agent filter to live SSE events too (`applyLiveEvent`). The live stream opens at its newest page (`tail`), loads earlier pages as you reach the bottom (`before`), and reads new items after the newest one held (`cursor`); `ItemStream` renders newest first and, while you are scrolled down, pins the first visible row by its layout offset (not total height: a result folds into its call's row, which may sit above or below you), so the rows you are reading stay put (browser scroll anchoring is off on its scroller). `MonitorStream` holds the followed session's live events itself, since the Monitor's global feed keeps only its newest 200.
-- `src/lib/components/sessions/`: Sessions tab. `SessionsPage` owns the `#sessions?…` hash (`q`, `sort`, `project`, `agent`, `pinned`, `session`, `message`) and shows the `SessionViewer`, or one of three list bodies picked by `sessionsListMode` (`lib/sessions-browse.ts`): the session list, a `ui/DataTable` laid out like the Benchmarks studies table (a row opens its session; the title stays a button, and a parent's subagents open in the table's `detail` row); `SearchResults` (FTS5 message search via a page-local `createSearchStore`) while a query is entered; `PinnedMessages` while the Pinned filter is on (pins filtered client-side by `filterPinnedMessages`). The Search tab and the Pinned sub-view folded in here: legacy `#search?…`, `#pinned` and `#sessions?view=pinned` links redirect via `canonicalizeLegacy*Hash` in `route-state.ts`.
-- `src/lib/components/analytics/`: Analytics tab. `AnalyticsShell.svelte` hosts the tab's `ui/FilterBar` (SubTabs, date range with quick ranges, Project, Agent, and Usage's facets behind `MoreFilters`) and renders five sub-views — Overview, Usage (`components/usage/`), Skills (the filterable consultation evidence ledger), Insights (`components/insights/`), and Quality (`components/trace-quality/`). Overview holds activity panels only: top sessions live in Usage (by cost), and every skill panel (daily invocation volume + the consultation explorer) lives in Skills. Insights is listed once a provider key is configured or any insight is saved (`analytics-views.ts`, fed by `insights.availability`; an empty filtered slice does not hide it); an Insights deep link with neither renders Overview, and generating stays disabled without a key. Shared filter state + the `#analytics?view=…` hash live in `stores/analytics-filters.svelte.ts`, which the shell seeds from the URL (`attachHash`) before its first render so a sub-view deep link mounts only that view; the `analytics`/`usage`/`insights`/`trace-quality` data stores read filters from it and subscribe for refetch.
-- `src/lib/components/trace-quality/`: lean Quality sub-view (one trace per session, summary-backed list + on-demand detail). `TraceQualityPage` (list + inspector), `TraceTree` (recursive observation tree, read straight from the loaded detail), `TraceCoverageBadge`, `TraceDrillInLink` (session drill-in from Usage's top sessions, the live stream's inspector, and Sessions: viewer and search results). Backed by `stores/trace-quality.svelte.ts`; `?session=`/`?trace=` ride the analytics hash. The persisted eval/dashboard depth (scores, findings, prompt rollups, score trends) was removed in the trace-quality reframe. Current local projection and deferred export boundaries live in `docs/system/trace-quality.md`; broader direction lives in `docs/project/VISION.md`.
-- `src/lib/components/benchmarks/`: Benchmarks tab (segregated bake-off comparison). `BenchmarksPage.svelte` renders the studies list → study detail (arm ladder with verdict Badges + auto-generated honesty panel). Selected study rides `#benchmarks?study=<study_id>`; data via `stores/benchmarks.svelte.ts` off `GET /api/v2/benchmarks[/:studyId]`. Study detail also renders `BenchmarkFrontier.svelte` — a cost×score Pareto scatter on the shared `ui/chart/` primitives (`scales.ts`, `layout.ts`, `PlotFrame.svelte`) with pure geometry in `frontier-geometry.ts`; markers click-drill to the matching ladder row.
-- `src/lib/api/client.ts`: typed API client for v1 and v2 endpoints.
-- `src/lib/stores/`: Svelte 5 reactive state (runes).
-  Async loads that a newer one can supersede (a filter change, another item opened, a jump) guard their writes with `latestRequest()` (`stores/latest-request.ts`): `begin()` supersedes, `join()` runs beside the current request (a page appended to it), `invalidate()` clears. Check the returned `isCurrent()` after every `await`, before writing data, errors or loading flags.
+## Store invariant
 
-## API Consumption
+Async loads that a newer one can supersede (a filter change, another item opened,
+a jump) guard their writes with `latestRequest()` (`src/lib/stores/latest-request.ts`):
+`begin()` supersedes, `join()` runs beside the current request (a page appended
+to it), `invalidate()` clears. Check the returned `isCurrent()` after every
+`await`, before writing data, errors or loading flags.
 
-This app consumes the canonical V2 REST API defined in the root `AGENTS.md` API Contract Notes section. Some `Monitor` behaviors still depend on v1 endpoints today, but new product-contract work should prefer v2. Key endpoints:
+## API consumption
 
-- `GET /api/v2/sessions` — session list with cursor pagination
-- `GET /api/v2/sessions/:id/messages` — message viewer data
-- `GET /api/v2/search?q=` — FTS5 search with snippet highlighting
-- `GET /api/v2/analytics/*` — summary, activity, projects, tools
-- `GET /api/stream` — SSE for live updates (event names: `event`, `stats`, `session_update`)
+The app consumes the canonical v2 API, owned by `docs/api/` (exact routes are
+source-owned: `src/lib/api/client.ts` here, `src/api/v2/router.ts` on the
+server). Its one v1 dependency is the shared SSE stream `GET /api/stream`
+(message types `event`, `stats`, `session_update`; no replay after a reconnect).
+New product-contract work goes to v2.
