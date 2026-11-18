@@ -82,6 +82,12 @@ remote settings. These references hold intent, boundaries, and procedures:
   maintainer's decision; don't open a branch or PR just for a backlog entry.
 - **Keep docs current** when a change makes a documented contract, boundary,
   procedure, or direction stale.
+- **Planning and continuity.** Reuse clear task context. Save planning docs when
+  decisions, acceptance, or coordination need persistence. Leave a brief handoff
+  only when needed to resume unfinished work. Commit shared docs and keep status
+  current. Before archiving, preserve lasting decisions and open work in
+  maintained docs and repair links. Keep tracked docs suitable for public
+  readers and private evidence local.
 - **TDD:** red/green for features, major refactors and large changes; the red
   test must fail on the behavior, not on a missing symbol. For smaller edits, run
   the relevant existing checks.
