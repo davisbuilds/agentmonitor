@@ -45,7 +45,7 @@ env \
   AGENTMONITOR_PORT="$PORT" \
   AGENTMONITOR_DB_PATH="$TMP_DIR/agentmonitor.db" \
   AGENTMONITOR_AUTO_IMPORT_MINUTES="0" \
-  node --import tsx src/server.ts >"$SERVER_LOG" 2>&1 &
+  node --import tsx scripts/test/parity-server.ts >"$SERVER_LOG" 2>&1 &
 SERVER_PID="$!"
 
 for _ in $(seq 1 30); do

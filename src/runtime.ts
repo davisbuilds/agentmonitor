@@ -29,6 +29,7 @@ import { startSearchIndexMaintenance, type SearchIndexMaintenance } from './db/s
 export interface RuntimeOptions {
   noWatch?: boolean;
   noImport?: boolean;
+  noQuotaPolling?: boolean;
 }
 
 export interface RuntimeHandle {
@@ -106,7 +107,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       liveBroadcaster.closeAllClients();
       server?.closeIdleConnections();
 
-      await attempt(stopProviderQuotaPolling);
+      if (!options.noQuotaPolling) await attempt(stopProviderQuotaPolling);
       await attempt(stopGitActivityPolling);
       await attempt(stopWatcher);
       await attempt(() => searchIndexMaintenance?.stop());
@@ -159,7 +160,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
     // while the server was down is stored first.
     startHookSpoolDrain();
     if (!options.noWatch) startWatcher();
-    startProviderQuotaPolling();
+    if (!options.noQuotaPolling) startProviderQuotaPolling();
     startGitActivityPolling();
 
     startSessionSweepBroadcast();

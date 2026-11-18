@@ -469,6 +469,8 @@ test('serve launches the runtime through Portless by default', async () => {
     AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
     AGENTMONITOR_PORTLESS_CLI: portlessCli,
     AGENTMONITOR_PORTLESS_MARKER: markerPath,
+    // Keep shutdown independent of the developer's installed quota provider.
+    PATH: '/usr/bin:/bin',
   };
   const child = spawn(process.execPath, cliInvocation([
     'serve',
