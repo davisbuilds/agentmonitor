@@ -1199,12 +1199,16 @@ opener and target guards. CI runs it in its own `Verification scenarios` job,
 which the `E2E (Playwright)` check requires; locally, run it in a worktree, never
 the checkout the login service loads.
 
-The pre-push checks are:
+The pre-push checks match the required `Lint, Build, Test` CI check:
 
 ```bash
 pnpm lint
+pnpm frontend:check
+pnpm frontend:test
 pnpm build
 pnpm test
+pnpm test:parity:ts
+pnpm test:v2:contract:ts
 ```
 
 `pnpm test` runs the suite through `scripts/test/run-node-tests.mjs`, which
