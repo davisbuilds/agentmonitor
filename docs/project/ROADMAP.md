@@ -8,29 +8,73 @@ possibilities.
 
 ## Context For Current Direction
 
-- Recent import repairs reconcile copied Codex subagent history and rewritten
-  rollouts, and distinguish producer-reported costs from estimates. Claude
-  transcript imports now use producer line identity with a legacy bridge so
-  child-agent usage can be captured without duplicating old rows. These
-  changes make provenance and coverage as important as headline totals.
+- From late October to mid-November most effort went to cost correctness and
+  the evidence behind it: Codex is billed one import row per request,
+  including compaction and work spread across rollout history, OTEL usage that
+  an import also covers counts once, and every source's imported totals can be
+  checked against its harness's own figures. Provenance and coverage matter as
+  much as headline totals.
+- Analytics grew past usage. Overview opens on headlines against the period
+  before, with session depth, delegated work, friction and change markers.
+  Quota readings are kept as a sampled history. A Git view credits commits and
+  pull requests to the sessions that made them, and cost per outcome allocates
+  spend along each session's timeline to what landed.
+- The login service was hardened for everyday use: a frozen server is reported
+  and restarted, undelivered hook events are spooled, and lifecycle state that
+  lived in loose strings and flag combinations was made explicit. The Mac mini
+  now runs its own service and store; a cross-host view is deferred.
+- The local gate now matches CI, and the HTTP contract suites run there.
 - User-facing days use one reporting zone, while the optional warehouse export
-  deliberately keeps UTC days until a consumer justifies a migration. A
-  content-free observed-session inventory reconciles event and browser evidence
-  without claiming that either has complete capture.
+  deliberately keeps UTC days until a consumer justifies a migration.
 
 ## Now
 
 - Establish an excellent monitoring, observability, and analytics baseline before
   taking on dispatch, automatic intervention, or broader platform consolidation.
-- Treat `/app/`, `/api/v2/*`, and the `amon` CLI as the product center.
+- Treat `/app/`, `/api/v2/*`, and the `amon` CLI as the product center, and keep
+  CLI access at parity with UI data so agents can retrieve the same evidence
+  without browser automation.
 - Preserve v1 where ingestion, provider quotas, shared SSE, or current tests still
-  depend on it; avoid adding new product reads there.
-- Improve Live fidelity and operator clarity, especially around summary-only data,
-  session noise, and provider capability differences.
-- Keep CLI access at parity with UI data so agents can retrieve and process the
-  same evidence without browser automation.
+  depend on it; add no new product reads there.
+- Close capture gaps in the sources already ingested before adding new ones:
+  Codex sessions archived before their first import, Codex interruptions, and
+  Codex app jobs told apart by their recorded `originator` rather than prompt
+  text (Backlog: Codex archived rollout discovery, Codex interruptions are not
+  recorded, Codex thread names and app-job detection).
+- Start the Claude vs Codex cost-per-outcome comparison with its first slice: a
+  read-only probe that controls for project and pull request size and reports
+  whether the two agents overlap enough to compare (Backlog: Claude vs Codex
+  cost per outcome).
+- Fix the small reliability defects the backlog records, mostly from the
+  2026-11-11 state-machine audit: CLI repairs that fail as locked beside the
+  server, the operational insert that fails a request after usage is stored,
+  silent watcher retries, and the unvalidated provider quota status. Confirm
+  the two recorded as hypotheses (stale-lock removal, merged pull requests
+  recorded as nonexistent) before fixing them.
 
 ## Focus Areas
+
+### Evidence Fidelity And Coverage
+
+- Use richer Codex-native sources when they can improve the current OTEL summary
+  without overstating transcript fidelity.
+- Make unavailable and capability-limited evidence obvious throughout Monitor and
+  its live stream.
+- Do not claim coverage for a source from samples of another execution mode.
+
+### Analytics That Support Decisions
+
+- Make comparisons interpretable: control for mix and size, state coverage, and
+  link a figure to the records behind it.
+- Grow cost per outcome and quota analysis from stored history rather than
+  estimates, and say when history is too short.
+
+### Dependable Operation
+
+- Keep the login service serving under load and through restarts, and keep its
+  failures visible in the CLI and the app.
+- Make lifecycle state explicit where it is still assembled from loose strings
+  or independent flags.
 
 ### Legacy Surface Reduction
 
@@ -38,19 +82,10 @@ possibilities.
 - Keep the existing shared SSE path while it provides value; revisit a v2-only
   stream when maintaining both broadcasters becomes a measured cost.
 
-### Live Fidelity And Operator Clarity
-
-- Use richer Codex-native sources when they can improve the current OTEL summary
-  without overstating transcript fidelity.
-- Make unavailable and capability-limited evidence obvious throughout Live and
-  Monitor.
-- Improve grouping, filtering, and lifecycle presentation when real sessions show
-  persistent noise.
-
 ### Product Polish And Release Confidence
 
-- Tighten Monitor, Live, Sessions, and Analytics around real monitoring and
-  review workflows.
+- Tighten Monitor, Sessions, Analytics and the Git view around real monitoring
+  and review workflows.
 - Preserve the Instrument Console design system and laptop-first layout while
   retaining usable narrow-width behavior.
 - Keep a manual built-product regression path for deep links, long transcripts,
@@ -65,15 +100,22 @@ possibilities.
 
 ## Next
 
-- Ground and rank the open items in [BACKLOG.md](BACKLOG.md), including the
-  cross-repository pattern hypotheses, before selecting implementation.
-- Tighten v2 contract and built-runtime coverage where real consumer failures expose
-  gaps.
-- Improve integration and capture/redaction explanations in the product and CLI.
+- Quota burn rate: project when each provider's windows run out at the current
+  pace, now that the sampled history covers two weekly resets.
+- Claude Cowork/chat as a source: finish the interactive Desktop check with a
+  tool call and live delivery, then design an explicit source adapter.
+- Session identity: define persisted provider-native and child-agent identity,
+  with a migration plan for stored aliases that preserves links and pins. The
+  migration itself needs the maintainer's approval.
+- Build the cost-per-outcome comparison's API and UI if the first slice shows
+  enough overlap to compare.
+- Show the operational metrics that `amon ops metrics` already reads in the app.
 
 ## Later
 
 - Support richer Codex live fidelity when a stable local or telemetry source exists.
+- Context occupancy trajectory, and skill-health refinements (version
+  attribution beyond the installed catalog, a validated misfire heuristic).
 - Revisit packaging after the canonical web/runtime contract is stable.
 - Add agent integrations when they map cleanly to the existing fidelity and data
   model.
