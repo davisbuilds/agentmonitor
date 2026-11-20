@@ -127,6 +127,99 @@ test('live items reads the newest page with --tail and pages back with --before'
   assert.notEqual(invalid.exitCode, 0);
 });
 
+test('monitor tools keeps elapsed intervals, source timers and power coverage separate', async t => {
+  for (const key of ['CODEX_HOME', 'CODEX_SQLITE_HOME']) {
+    const previous = process.env[key];
+    process.env[key] = codexHome;
+    t.after(() => {
+      if (previous === undefined) delete process.env[key];
+      else process.env[key] = previous;
+    });
+  }
+  const id = '11111111-1111-4111-8111-111111111111';
+  const basename = `rollout-2026-06-15T12-00-00-${id}`;
+  const file = path.join(codexHome, 'sessions', `${basename}.jsonl`);
+  const lines = [
+    ['00', 'session_meta', { id }],
+    ['01', 'response_item', { type: 'custom_tool_call', call_id: 'one', name: 'exec', input: 'private input' }],
+    ['02', 'response_item', { type: 'function_call', call_id: 'two', name: 'lookup', arguments: '{}' }],
+    ['04', 'response_item', { type: 'function_call_output', call_id: 'two', output: 'private result' }],
+    ['06', 'response_item', { type: 'custom_tool_call_output', call_id: 'one', output: [
+      { type: 'input_text', text: 'Script completed\nWall time 0.3 seconds\nOutput:' },
+      { type: 'input_text', text: 'private result' },
+    ] }],
+  ];
+  fs.writeFileSync(file, lines.map(([sec, type, payload]) =>
+    JSON.stringify({ timestamp: `2026-06-15T12:00:${sec}.000Z`, type, payload })).join('\n') + '\n');
+  const { getDb, closeDb } = await import('../src/db/connection.js');
+  getDb().prepare(`INSERT INTO browsing_sessions (id, agent, project, integration_mode, file_path)
+    VALUES (?, 'codex', 'example', 'codex-jsonl', ?)`).run(basename, file);
+  closeDb();
+
+  const args = ['monitor', 'tools', '--session-id', id];
+  const first = await runCli([...args, '--limit', '1', '--json']);
+  assert.equal(first.exitCode, 0, first.stderr);
+  const report = JSON.parse(first.stdout);
+  assert.equal(report.session_id, id);
+  assert.equal(report.coverage.status, 'available');
+  assert.equal(report.elapsed_union_ms, 5000);
+  assert.equal(report.reported_calls, 1);
+  assert.equal(report.total_calls, 2);
+  assert.equal(report.next_offset, 1);
+  assert.equal(report.calls[0].elapsed_ms, 5000);
+  assert.equal(report.calls[0].reported_ms, 300);
+  assert.equal(report.calls[0].reported_source, 'codex_code_mode_wall_time');
+  assert.equal(report.sleep.sleep_overlap_ms, null);
+  assert.doesNotMatch(first.stdout, /private input|private result/);
+
+  const second = await runCli(['monitor', 'tools', '--session-id', basename, '--offset', '1', '--json']);
+  assert.equal(second.exitCode, 0, second.stderr);
+  assert.equal(JSON.parse(second.stdout).calls[0].reported_ms, null);
+  assert.equal(JSON.parse(second.stdout).elapsed_union_ms, 5000);
+  const plain = await runCli(args);
+  assert.match(plain.stdout, /REPORTED/);
+  assert.match(plain.stdout, /unknown/i);
+
+  // A summary-only monitor session can still have a current native rollout.
+  // Its physical filename can change while the native session keeps its UUID.
+  const replacement = path.join(path.dirname(file), 'rollout-2026-06-16T12-00-00-22222222-2222-4222-8222-222222222222.jsonl');
+  fs.renameSync(file, replacement);
+  const { default: Database } = await import('better-sqlite3');
+  const state = new Database(path.join(codexHome, 'state_5.sqlite'));
+  try {
+    state.exec('CREATE TABLE threads (id TEXT PRIMARY KEY, rollout_path TEXT)');
+    state.prepare('INSERT INTO threads VALUES (?, ?)').run(id, replacement);
+  } finally { state.close(); }
+  const fromNative = await runCli([...args, '--json']);
+  assert.equal(fromNative.exitCode, 0, fromNative.stderr);
+  assert.equal(JSON.parse(fromNative.stdout).source_selection, 'native_index');
+  assert.equal(JSON.parse(fromNative.stdout).total_calls, 2);
+
+  fs.unlinkSync(path.join(codexHome, 'state_5.sqlite'));
+  const replacementName = `rollout-2026-06-16T12-00-00-${id}_22222222-2222-4222-8222-222222222222`;
+  getDb().prepare('UPDATE browsing_sessions SET id = ?, file_path = ? WHERE id = ?').run(replacementName, replacement, basename);
+  closeDb();
+  for (const alias of [id, replacementName]) {
+    const indexed = await runCli(['monitor', 'tools', '--session-id', alias, '--json']);
+    assert.equal(indexed.exitCode, 0, indexed.stderr);
+    assert.equal(JSON.parse(indexed.stdout).session_id, id);
+    assert.equal(JSON.parse(indexed.stdout).total_calls, 2);
+  }
+  fs.unlinkSync(replacement);
+  const missingSource = await runCli([...args, '--json']);
+  assert.equal(missingSource.exitCode, 0, missingSource.stderr);
+  assert.equal(JSON.parse(missingSource.stdout).coverage.status, 'unavailable');
+  assert.equal(JSON.parse(missingSource.stdout).elapsed_union_ms, null);
+  const missingSession = await runCli(['monitor', 'tools', '--session-id', 'never-indexed']);
+  assert.equal(missingSession.exitCode, 4);
+  for (const invalid of [[...args, '--agent', 'codex'], [...args, '--limit', '0'],
+    [...args, '--power-host', 'other-host.invalid'], ['monitor', 'tools', '--offset', '1']]) {
+    assert.equal((await runCli(invalid)).exitCode, 2);
+  }
+  getDb().prepare('DELETE FROM browsing_sessions WHERE id = ?').run(replacementName);
+  closeDb();
+});
+
 test('sessions show returns exit 4 for missing sessions', async () => {
   const result = await runCli(['sessions', 'show', 'missing-session']);
 

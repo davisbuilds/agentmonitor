@@ -20,7 +20,7 @@ import { COMPRESSED_ROLLOUT_SUFFIX, readTranscriptFile, transcriptBaseName } fro
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { setSessionMode } from '../db/queries.js';
 import { reparseRequested } from '../db/reparse-marker.js';
-import { createCodexRolloutInventory, resolveCodexRolloutHistory, type CodexRolloutInventory, type CodexRolloutEntry } from '../util/codex-rollout-history.js';
+import { createCodexRolloutInventory, currentCodexRollout, resolveCodexRolloutHistory, type CodexRolloutInventory } from '../util/codex-rollout-history.js';
 
 // --- File hashing ---
 
@@ -344,23 +344,6 @@ function codexInventoryForFile(filePath: string, options: SyncOptions): CodexRol
     if (path.basename(directory) === 'sessions') { root = directory; break; }
   }
   return createCodexRolloutInventory(discoverCodexRolloutFilesRecursive(root, { excludePatterns: options.excludePatterns }));
-}
-
-function currentCodexRollout(entry: CodexRolloutEntry, inventory: CodexRolloutInventory): CodexRolloutEntry {
-  const siblings = inventory.bySessionId.get(entry.sessionId) ?? [entry];
-  // Ordinary rollouts keep their historical file identity. Pagination is the
-  // evidence that several physical files now represent the same browser history.
-  if (!siblings.some(candidate => candidate.historyBase || ['paginated', 'full'].includes(String(candidate.meta['history_mode'])))) return entry;
-  const ancestors = new Set(siblings.flatMap(candidate => candidate.historyBase ? [candidate.historyBase.thread_id] : []));
-  const leaves = siblings.filter(candidate => !ancestors.has(candidate.rolloutId));
-  if (!leaves.length) throw new Error('Codex rollout history has no active leaf');
-  const timestamps = new Map(leaves.map(candidate => {
-    const timestamp = Date.parse(candidate.timestamp ?? '');
-    if (!Number.isFinite(timestamp)) throw new Error('Codex rollout history has an invalid active creation timestamp');
-    return [candidate.filePath, timestamp];
-  }));
-  return leaves.sort((a, b) => timestamps.get(b.filePath)! - timestamps.get(a.filePath)!
-    || b.rolloutId.localeCompare(a.rolloutId) || a.filePath.localeCompare(b.filePath))[0];
 }
 
 export function syncCodexSessionFileDetailed(

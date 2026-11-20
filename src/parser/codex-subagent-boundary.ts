@@ -22,11 +22,12 @@ export type SubagentBoundary =
  */
 export function findSubagentBoundary(
   lines: ReadonlyArray<{ type?: string; payload?: Record<string, unknown> } | null>,
+  knownSubagent = false,
 ): SubagentBoundary {
   const meta = lines.find(line => line?.type === 'session_meta')?.payload;
   const source = meta?.['source'] as Record<string, unknown> | undefined;
   const subagent = source && typeof source === 'object' ? source['subagent'] as Record<string, unknown> | undefined : undefined;
-  if (!subagent || typeof subagent !== 'object' || !('thread_spawn' in subagent)) return { kind: 'none' };
+  if (!knownSubagent && (!subagent || typeof subagent !== 'object' || !('thread_spawn' in subagent))) return { kind: 'none' };
   const spawnedAt = uuidV7Millis(meta?.['id']);
   if (spawnedAt === null) return { kind: 'unresolved' };
   const line = lines.findIndex(entry => {

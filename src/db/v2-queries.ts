@@ -633,6 +633,27 @@ export function getBrowsingSession(id: string): BrowsingSessionRow | undefined {
   return row ? mapBrowsingSessionRow(row) : undefined;
 }
 
+/** A monitor UUID and its browsable rollout alias address the same native transcript. */
+export function getToolTimingSession(id: string): { session_id: string; agent: string; file_path: string | null } | undefined {
+  const db = getDb();
+  const nativeId = codexSessionAliases(id).at(-1)!;
+  // With only a replacement rollout on disk the browser may use its full
+  // nativeUUID_physicalUUID basename. Its first UUID still owns the thread.
+  const timingKey = `CASE WHEN b.agent = 'codex' AND b.integration_mode = 'codex-jsonl'
+    AND b.id GLOB '${codexRolloutGlob}_${codexUuidGlob}' THEN lower(substr(b.id, -73, 36))
+    ELSE ${browserSessionKey('b')} END`;
+  const row = db.prepare(`
+    SELECT ${timingKey} AS session_id, agent, file_path FROM browsing_sessions b
+    WHERE b.id = ? OR (b.agent = 'codex' AND ${timingKey} = ?)
+    ORDER BY (b.file_path IS NOT NULL) DESC, (b.id = ?) DESC, b.id LIMIT 1
+  `).get(id, nativeId, id) as { session_id: string; agent: string; file_path: string | null } | undefined;
+  if (row) return row;
+  const live = db.prepare(`SELECT id, agent_type FROM sessions WHERE id = ? OR (agent_type = 'codex' AND id = ?)
+    ORDER BY (id = ?) DESC LIMIT 1`)
+    .get(id, nativeId, id) as { id: string; agent_type: string } | undefined;
+  return live && { session_id: live.id, agent: browserAgentName(live.agent_type), file_path: null };
+}
+
 export function listObservedExecutions(params: { limit?: number; offset?: number; agent?: string; date_from?: string; date_to?: string } = {}) {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 200, 1), 500);
