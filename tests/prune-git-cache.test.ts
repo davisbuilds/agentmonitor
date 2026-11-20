@@ -18,10 +18,11 @@ after(() => {
 });
 
 function cli(args: string[], exclusions: string) {
-  return spawnSync('/bin/sh', ['-c', 'exec "$@"', 'cli', process.execPath, '--import', 'tsx', 'src/cli.ts', ...args], {
+  return spawnSync(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
     encoding: 'utf8',
     cwd: path.resolve(import.meta.dirname, '..'),
     env: { ...process.env, AGENTMONITOR_DB_PATH: dbPath, AGENTMONITOR_GIT_EXCLUDE_DIRS: exclusions },
+    timeout: 10_000,
   });
 }
 
