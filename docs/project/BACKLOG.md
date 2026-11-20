@@ -47,7 +47,8 @@ so later readers know what still needs checking.
 ### Desktop source coverage validation
 
 - **What**: Establish repeatable coverage checks for local desktop coding
-  sessions, and decide whether Claude Cowork/chat is in scope as another source.
+  sessions, and add Claude Cowork/chat as another source. Cowork/chat is in
+  scope (decided by the maintainer, 2026-11-20).
 - **Why or evidence**: investigation on 2026-11-05 verified message readback
   through the running v2 API for existing explicitly desktop-originated Codex
   rollouts, including compressed files. Installed Claude Desktop 1.32885.1's
@@ -65,12 +66,13 @@ so later readers know what still needs checking.
   `<claudeDir>/projects` discovery root. Cloud and remote execution must be
   evaluated separately from the desktop interface used to start them.
 - **Next**: extend the local Desktop check with a tool call and observe live
-  SSE delivery. Record app/harness versions and effective roots; add
+  SSE delivery; this needs an interactive Desktop session, so it cannot run
+  unattended. Record app/harness versions and effective roots; add
   descriptor-aware discovery with session-ID deduplication only when a selected
-  execution mode writes outside the configured root. If
-  Cowork is selected, inspect current cloud/export support and design an explicit
-  source adapter; prefer nested transcripts over duplicate audit records. Do
-  not claim full desktop coverage from local coding samples alone.
+  execution mode writes outside the configured root. For Cowork, inspect
+  current cloud/export support and design an explicit source adapter; prefer
+  nested transcripts over duplicate audit records. Do not claim full desktop
+  coverage from local coding samples alone.
 
 ### Consistent session identity and parent/child coverage across read surfaces
 
@@ -150,9 +152,11 @@ so later readers know what still needs checking.
 - **What**: since 2026-11-11 the mini runs its own amon login service, so its
   hooks, Codex OTEL and transcripts are recorded, in a store of its own. Neither
   dashboard shows the other host's sessions.
-- **Revisit when**: a cross-host view is wanted. Options then: forward the
-  mini's OTEL and hooks to the MacBook (ingestion is loopback-only today), or a
-  periodic export from one store into the other.
+- **Revisit when**: deferred by the maintainer (2026-11-20): a cross-host view
+  is not wanted for now. Revisit when it is, or when a total or comparison
+  (Usage spend, cost per outcome) must cover work done on both hosts. Options
+  then: forward the mini's OTEL and hooks to the MacBook (ingestion is
+  loopback-only today), or a periodic export from one store into the other.
 
 ### Quota burn rate
 
@@ -236,20 +240,6 @@ so later readers know what still needs checking.
   the run's actual route (`:free` or paid) from the harness config, then add
   entries to `src/pricing/data/openrouter.json` from a fresh pull. Noted
   2026-09-02, rechecked 2026-10-09.
-
-#### Benchmark artifact export (P4)
-- **What**: P1 data/queries + P2 arm-ladder UI **shipped** 2026-09-03 (PR #106);
-  **P3** frontier chart + shared inline-SVG primitives (`ui/chart/scales.ts`,
-  `layout.ts`, `PlotFrame.svelte`, `BenchmarkFrontier.svelte`, CostDashboard
-  refactored onto `linearScale`) **shipped** 2026-09-04 (`527945b`, `739b177`). What
-  remains is **P4** (optional) — a self-contained "Publish study" artifact export
-  mirroring the claude.ai Pareto artifact, with the app as source of truth.
-- **Why it matters**: the ladder + honesty panel + frontier now deliver the full
-  in-app comparison; the export is only a shareable-snapshot convenience. Not
-  blocking — pure enhancement.
-- **Next / Revisit when**: build P4 if a shareable standalone study page is
-  wanted. Watch openbench #5 (per-attempt cost) — landing it would drop the
-  "cost is a floor" honesty caveat. Noted 2026-09-02, updated 2026-09-04.
 
 ### Skill trigger health (2026-07-09)
 
@@ -341,12 +331,6 @@ Follow-ups deferred from skill trigger health's first phase.
 - **Revisit when**: the Monitor page's request passes about 0.3 s at the median,
   or a consumer needs the full list often. Then keep the per-session aggregates
   on the `sessions` row as events are written, with a one-time backfill.
-
-#### Legacy v1 session-list N+1
-- **What**: the v1 `queries.ts` session list (retiring `/` dashboard) keeps the
-  per-session correlated-subquery N+1 that v2 `listMonitorSessions` shed.
-- **Why it matters**: left untouched to avoid investing in the deprecated surface.
-- **Next**: apply the same CTE rewrite if v1 is kept.
 
 ### Context occupancy
 
@@ -500,9 +484,14 @@ Follow-ups deferred from skill trigger health's first phase.
   OTEL exporter configured, so no spans arrive. Claude Code 2.1.300 added
   GenAI semantic-convention span attributes (`gen_ai.conversation.id`,
   `gen_ai.tool.name`, `error.type`), which makes enabling its traces tempting.
-- **Next**: before building ingestion, capture a sanitized Claude Code 2.1.301+
-  trace export and compare its spans with the events hooks, session files, and
-  OTEL logs already produce. Ingest only what spans add, and deduplicate against
+- **Revisit when**: deferred by the maintainer (2026-11-20) under the
+  DECISIONS.md record "Leave Claude Code OTEL export off" (2026-10-27): Claude
+  Code export stays off, so no spans arrive. Revisit on that record's triggers:
+  Claude runs where its transcripts do not reach this machine, or active-time
+  or edit-decision metrics are wanted.
+- **Next** (once revisited): capture a sanitized Claude Code 2.1.301+ trace
+  export and compare its spans with the events hooks, session files, and OTEL
+  logs already produce. Ingest only what spans add, and deduplicate against
   those sources.
 
 #### Operational metrics UI surface (follow-up to the shipped ingestion)
@@ -551,7 +540,8 @@ Follow-ups deferred from skill trigger health's first phase.
 ### Cost per outcome
 
 Cost per outcome counts a pull request once it lands on main; these
-refinements were left out by decision.
+refinements were left out by decision. The Claude vs Codex comparison has
+since been selected (2026-11-20).
 
 #### Whether merged work stayed merged
 - **What**: a merged pull request counts as an outcome even if it was
@@ -566,10 +556,20 @@ refinements were left out by decision.
 #### Claude vs Codex cost per outcome
 - **What**: the agent filter narrows the section to one agent, but no view
   compares the two side by side.
-- **Why or evidence**: deferred by the maintainer (2026-11-03). Codex's share
-  of merged pull requests rose from 0.17 to 0.42 over June to October, so a
-  comparison needs the mix and size controlled, not raw medians.
-- **Revisit when**: choosing which agent to give a kind of work.
+- **Decision**: wanted (maintainer, 2026-11-20; deferred on 2026-11-03), as a
+  controlled comparison rather than raw medians side by side.
+- **Why or evidence**: Codex's share of merged pull requests rose from 0.17 to
+  0.42 over June to October, so a comparison needs the mix and size
+  controlled, not raw medians.
+- **Next**: a first slice is a read-only `verify probe` on the installed store,
+  before any API or UI. For merged pull requests in a range, group by agent
+  within each (project, size bucket) cell, using the attribution and
+  `SIZE_BUCKETS` that `getAnalyticsOutcomes` already applies, and report per
+  cell each agent's count and median allocated cost, plus a mix-weighted
+  difference over only the cells both agents have. Report separately the pull
+  requests whose milestones came from both agents' sessions, and the cells too
+  small to compare. Its output says whether there is enough overlap for a
+  comparison to mean anything; decide the API and UI shape from it.
 
 #### Quota as the unit
 - **What**: cost per outcome is in API-rate dollars, not in the plan quota
