@@ -14,7 +14,10 @@ let lastSkipped = 0;
 
 function refreshGitActivity(): Promise<void> {
   if (inFlight) return inFlight;
-  inFlight = syncGitActivity(getDb(), { skipPrivacyProtected: runningAsLaunchdService() })
+  inFlight = syncGitActivity(getDb(), {
+    skipPrivacyProtected: runningAsLaunchdService(),
+    excludedDirs: config.git.excludedDirs,
+  })
     .then(async report => {
       // Said once per change: under the service the same folders are left each pass.
       if (report.skipped_directories !== lastSkipped && report.skipped_directories > 0) {

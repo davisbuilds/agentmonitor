@@ -325,7 +325,7 @@ export function registerMaintenanceCommands(): void {
       const { config } = await import('../../config.js');
       initSchema();
       try {
-        const report = await syncGitActivity(getDb());
+        const report = await syncGitActivity(getDb(), { excludedDirs: config.git.excludedDirs });
         const authored = config.git.githubLookups ? await syncAuthoredPullRequests(getDb()) : null;
         const pulls = config.git.githubLookups ? await syncSessionPullRequests(getDb()) : null;
         printSummary(ctx, 'Git activity sync results', {

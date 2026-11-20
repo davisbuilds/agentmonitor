@@ -197,7 +197,7 @@ instead. Common controls include:
 | Live fidelity/privacy | `AGENTMONITOR_ENABLE_LIVE_TAB`, `AGENTMONITOR_CODEX_LIVE_MODE`, `AGENTMONITOR_CODEX_CONTEXT_WINDOW`, `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `AGENTMONITOR_LIVE_CAPTURE_REASONING`, `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`, `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` |
 | Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
 | Hook spool | `AGENTMONITOR_HOOK_SPOOL_DIR` (default `~/.local/state/agentmonitor/hook-spool`; set it for the hooks and the server alike) |
-| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default off; `1` asks GitHub, through `gh`, whether sessions' pull requests merged, and for the size and commits of the pull requests you merged), `AGENTMONITOR_GIT_AUTHOR_EMAILS` (comma-separated author emails for My work) |
+| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default off; `1` asks GitHub, through `gh`, whether sessions' pull requests merged, and for the size and commits of the pull requests you merged), `AGENTMONITOR_GIT_AUTHOR_EMAILS` (comma-separated author emails for My work), `AGENTMONITOR_GIT_EXCLUDE_DIRS` (path list of local Git repository exclusions) |
 | Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
 | Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
 | Reporting zone | `AGENTMONITOR_TIMEZONE` |
@@ -286,6 +286,16 @@ downtime leaves no gap, and drop commits git no longer lists. Each pass also
 records whether each commit has reached a main branch (any remote's default),
 from the remote-tracking branches as the last `git fetch` left them: the pass
 never fetches.
+
+Set `AGENTMONITOR_GIT_EXCLUDE_DIRS` to skip local Git collection for one or more
+directory trees. Use physical directory paths separated by `:` on macOS and
+Linux or `;` on Windows. Both background polling and `amon sync git` check the
+session directory, each child repo discovered there, and each worktree's common
+repository. An exclusion matches a whole directory name and its descendants.
+Session import and GitHub lookups have their own settings. To persist exclusions
+for a login service, run `amon service install` with this setting and the other
+service settings in effect. To remove local Git history collected earlier, see
+[Excluded Git cache prune](#excluded-git-cache-prune).
 
 At startup, the server reads Git's effective `user.email` from
 `AGENTMONITOR_PROJECTS_DIR` for the **My work** view. Set
@@ -448,6 +458,30 @@ Verify integrity, compare all non-target columns with the backup, and check that
 changed values differ only by the UTC marker/ISO separator. A repeated preview
 must report zero eligible changes; `unresolvedFields` may remain nonzero. Restart
 the newly built runtime afterward so new fallbacks keep their timezone marker.
+
+### Excluded Git cache prune
+
+Preview which cached repository roots and commit rows match the configured
+Git exclusions:
+
+```bash
+export AGENTMONITOR_GIT_EXCLUDE_DIRS="$HOME/Dev/reference-clones"
+amon database prune-git-cache --json
+```
+
+Apply the preview to the same database after stopping the server:
+
+```bash
+amon database prune-git-cache --apply --expect-digest <digest-from-preview>
+```
+
+The command rechecks the preview's repository and commit identities in the
+delete transaction. If they changed, run a fresh preview. The prune removes
+the selected local commit history and its repository scan records. Cached pull
+request records and commit membership have their own lifecycle. A pruned repo
+can be scanned again if it is later admitted and a session still points to it.
+On restart or manual Git sync, use the same exclusions to keep the selected
+repos out of collection.
 
 ### Codex stream fragment prune
 

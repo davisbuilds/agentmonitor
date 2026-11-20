@@ -347,3 +347,41 @@ test('a directory whose read hangs is asked about once, not on every pass', asyn
   assert.equal(first.skipped_directories, 1);
   assert.equal(second.errors, 0);
 });
+
+test('exclusions cover direct sessions, repository discovery, and worktrees of excluded repos', async () => {
+  const container = path.join(tempDir, 'git-scope');
+  const excluded = path.join(container, 'reference');
+  const allowed = path.join(container, 'reference-project');
+  const linked = path.join(tempDir, 'linked-reference');
+  const at = '2026-07-01T10:00:00Z';
+  for (const dir of [excluded, allowed]) {
+    fs.mkdirSync(dir, { recursive: true });
+    git(dir, ['init', '-q', '-b', 'main']);
+    commit(dir, 'file.txt', 'git scope fixture', at);
+  }
+  git(excluded, ['worktree', 'add', '-q', '--detach', linked]);
+  const nested = path.join(excluded, 'nested');
+  fs.mkdirSync(nested);
+  session.run('s-scope-parent', container, at);
+  session.run('s-scope-nested', nested, at);
+  session.run('s-scope-linked', linked, at);
+
+  const accesses: string[] = [];
+  await syncGitActivity(db, {
+    now: new Date('2026-07-02T00:00:00Z'),
+    excludedDirs: [excluded],
+    reader: {
+      timeoutMs: 1_000,
+      access(target) {
+        accesses.push(target);
+        return fs.promises.access(target);
+      },
+      readdir: directory => fs.promises.readdir(directory, { withFileTypes: true }),
+    },
+  });
+
+  assert.deepEqual(db.prepare('SELECT root FROM git_repos WHERE root IN (?, ?)').all(excluded, allowed), [{ root: allowed }]);
+  assert.deepEqual(db.prepare('SELECT repo_root FROM git_commits WHERE repo_root IN (?, ?)').all(excluded, allowed), [{ repo_root: allowed }]);
+  assert.ok(accesses.includes(path.join(allowed, '.git')), 'discovery reached the allowed repository');
+  assert.ok(!accesses.includes(nested) && !accesses.includes(path.join(excluded, '.git')), 'excluded paths are skipped before directory reads');
+});

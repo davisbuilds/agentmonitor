@@ -80,7 +80,7 @@ export const PATH_SETTINGS = new Set([
   'AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH',
   'CODEX_HOME',
 ]);
-export const PATH_LIST_SETTINGS = new Set(['AGENTMONITOR_SKILL_CATALOG_DIRS']);
+export const PATH_LIST_SETTINGS = new Set(['AGENTMONITOR_SKILL_CATALOG_DIRS', 'AGENTMONITOR_GIT_EXCLUDE_DIRS']);
 
 function absolutePath(value: string, cwd: string, home: string): string {
   const expanded = value === '~' ? home : value.startsWith('~/') ? path.join(home, value.slice(2)) : value;
