@@ -316,21 +316,20 @@ describe('PricingRegistry', () => {
       assert.equal(classifyModel('gpt-5.6-luna').tier, 'luna');
     });
 
-    test('classifies gpt-6-astra as its own tier, not the generic standard rollup', () => {
-      const c = classifyModel('gpt-6-astra');
-      assert.equal(c.provider, 'openai');
-      assert.equal(c.tier, 'astra');
-      // Guard the regression Codex flagged: without the named case it would fall
-      // through `gpt-` → 'standard' and vanish from tier facets/filters.
-      assert.notEqual(c.tier, 'standard');
-    });
-
-    test('classifies GPT-6 Sol and Luna by tier, apart from their GPT-5.6 namesakes', () => {
-      for (const [model, tier] of [['gpt-6-sol', 'sol'], ['gpt-6.1-sol', 'sol'], ['gpt-6-luna', 'luna']] as const) {
+    test('classifies GPT-6 models by their named tiers', () => {
+      for (const [model, tier] of [
+        ['gpt-6-astra', 'astra'],
+        ['gpt-6.2-astra', 'astra'],
+        ['gpt-6-sol', 'sol'],
+        ['gpt-6.1-sol', 'sol'],
+        ['gpt-6.2-sol', 'sol'],
+        ['gpt-6-luna', 'luna'],
+      ] as const) {
         const c = classifyModel(model);
-        assert.equal(c.canonical_model, model, 'resolves to its own rate card, not a 5.6 alias');
-        assert.equal(c.tier, tier);
-        assert.equal(c.pricing_status, 'known');
+        assert.equal(c.canonical_model, model);
+        assert.equal(c.provider, 'openai', model);
+        assert.equal(c.tier, tier, model);
+        assert.equal(c.pricing_status, 'known', model);
       }
     });
 
@@ -753,6 +752,8 @@ describe('PricingRegistry', () => {
     // is catalog accuracy rather than a charge applied to live Codex data today.)
     test('GPT tiers bill cache writes at their documented rate and apply long-context rates above 272K', () => {
       const cases = [
+        { model: 'gpt-6.2-astra', base: [8, 40, 0.4, 10], long: [16, 60, 0.8, 20] },
+        { model: 'gpt-6.2-sol', base: [2, 10, 0.1, 2.5], long: [4, 15, 0.2, 5] },
         { model: 'gpt-6-astra', base: [10, 50, 1, 12.5], long: [20, 75, 2, 25] },
         { model: 'gpt-6-sol', base: [2, 10, 0.2, 2.5], long: [4, 15, 0.4, 5] },
         { model: 'gpt-6.1-sol', base: [2, 10, 0.1, 2.5], long: [4, 15, 0.2, 5] },

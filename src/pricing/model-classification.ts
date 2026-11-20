@@ -53,8 +53,8 @@ function inferTier(model: string, provider: string): string {
 
   if (provider === 'openai') {
     if (/^o\d/.test(model) || model.includes('reasoning')) return 'reasoning';
-    if (model === 'gpt-6-astra') return 'astra';
-    if (model === 'gpt-6-sol' || model === 'gpt-6.1-sol' || model === 'gpt-5.6-sol') return 'sol';
+    if (model === 'gpt-6-astra' || model === 'gpt-6.2-astra') return 'astra';
+    if (model === 'gpt-6-sol' || model === 'gpt-6.1-sol' || model === 'gpt-6.2-sol' || model === 'gpt-5.6-sol') return 'sol';
     if (model === 'gpt-5.6-terra') return 'terra';
     if (model === 'gpt-6-luna' || model === 'gpt-5.6-luna') return 'luna';
     if (model.includes('mini') || model.includes('nano')) return 'economy';
