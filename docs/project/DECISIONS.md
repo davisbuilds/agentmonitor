@@ -75,3 +75,38 @@ similar inflation is a hypothesis. The alternatives each had a cost:
 older transcripts turn up. Measure how often distinct turns share a usage tuple
 before any collapse; if a per-row warning is wanted instead, add the provenance
 marker.
+
+## Leave Claude Code OTEL export off (2026-10-27)
+
+**Decision:** amon ingests Claude Code's OTEL metrics correctly, but the
+installed Claude Code does not export them, and enabling export is not planned.
+The import already covers what the metrics would add.
+
+**Evidence:** measured on 2026-10-27 with Claude Code 2.1.311 against a scratch
+database:
+
+- Before the parser fix in the same PR, every metric row was stored under
+  session `unknown` and every log record was dropped. Claude Code puts
+  `session.id` on each point and record, not on the resource, so enabling
+  export would have double-counted Claude cost permanently.
+- With the fix, each session's metric cost equals its imported cost exactly,
+  and the import covers every metric row once the transcript lands.
+- Logs and metrics do not double-count: amon stores Claude's `api_request` log
+  with no tokens or cost, because Claude sends `cost_usd` and `input_tokens`
+  under plain names. A test pins "counted once" so a parser that learns those
+  names must deduplicate.
+- What enabling would add: a live lead of seconds over the file watcher, and
+  usage for sessions whose transcript never reaches this machine. Claude's own
+  cost is already checked through `cost-state` (`amon costs check-sessions`).
+  Active time, lines changed, commits and edit decisions are exported but not
+  stored.
+- Space: about five rows per session, model and active export interval, each
+  about 1 KB with indexes. At the measured activity that is roughly 7-15% more
+  events rows a day, well under 1% of the database a month. Logs add about as
+  many rows again with no usage in them. Prompts and responses arrive redacted
+  by default; every point carries account identifiers, which amon does not
+  store.
+
+**Revisit when:** Claude runs where its transcripts do not reach this machine,
+or active-time or edit-decision metrics are wanted (that also needs metric
+ingestion beyond tokens and cost). Enable metrics only.

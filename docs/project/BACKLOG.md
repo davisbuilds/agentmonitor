@@ -203,19 +203,6 @@ so later readers know what still needs checking.
   message kind) or lineage metadata. Then project them like other messages, and
   check how the subagent boundary treats them.
 
-#### Codex subagent boundary rests on the current rollout layout
-- **What**: the importer finds a `thread_spawn` subagent's own activity from
-  UUIDv7 `turn_id` times (see ARCHITECTURE). That relies on how Codex lays out
-  subagent rollouts and mints turn ids today.
-- **Why or evidence**: verified on 2026-09-24 for every `thread_spawn` rollout
-  from Codex 0.94.0 to 0.156.1. All of them had datable turns and a boundary.
-  A layout change would make the parse fall back to billing the whole rollout,
-  as before the fix.
-- **Revisit when**: `amon costs repair-codex-usage` reports
-  `subagent_boundaries_unresolved` above 0, or a new subagent's import/OTEL
-  ratio leaves 0.95–1.02. Re-measure on each Codex minor version that changes
-  subagent behaviour.
-
 #### Long-context tier is chosen per row, not per request
 - **What**: pricing picks the long-context tier from the size of one row's
   token change. A Codex import row that spans several requests can therefore
@@ -226,9 +213,10 @@ so later readers know what still needs checking.
 - **Next**: price a multi-request span with the tier of its largest request,
   once `last_token_usage` per request is read. Otherwise leave as is. Since
   2026-10-27 this applies only to the counter path: rollouts from before Codex
-  0.154, or whose records start mid-thread. A rollout recorded per request from
-  its first request is billed one request at a time. The counter path also
-  still leaves aborted-turn requests unbilled.
+  0.154, whose records start mid-thread, or whose records look incomplete (see
+  ARCHITECTURE, Historical Sources). A rollout recorded per request from its
+  first request is billed one request at a time. The counter path also still
+  leaves aborted-turn requests unbilled.
 
 #### Some openbench comparator models are unpriced (`laguna-s-2.1`, `nemotron-3-ultra`)
 - **What**: `import benchmark` prices the paid bake-off targets (glm-5.3-flash,
@@ -263,40 +251,9 @@ so later readers know what still needs checking.
   wanted. Watch openbench #5 (per-attempt cost) — landing it would drop the
   "cost is a floor" honesty caveat. Noted 2026-09-02, updated 2026-09-04.
 
-#### Claude Code OTEL stays off: it adds little the import lacks (2026-10-27)
-- **What**: amon ingests Claude Code's OTEL metrics correctly, but the installed
-  Claude Code does not export them, and enabling it is not planned.
-- **Why or evidence**: measured on 2026-10-27 with Claude Code 2.1.311 against a
-  scratch database:
-  - Before the parser fix in the same PR, every metric row was stored under
-    session `unknown` and every log record was dropped. Claude Code puts
-    `session.id` on each point and record, not on the resource, so enabling
-    export would have double-counted Claude cost permanently.
-  - With the fix, each session's metric cost equals its imported cost exactly,
-    and the import covers every metric row once the transcript lands.
-  - Logs and metrics do not double-count: amon stores Claude's `api_request`
-    log with no tokens or cost, because Claude sends `cost_usd` and
-    `input_tokens` under plain names. A test pins "counted once" so a parser
-    that learns those names must deduplicate.
-  - What enabling would add: a live lead of seconds over the file watcher, and
-    usage for sessions whose transcript never reaches this machine. Claude's
-    own cost is already checked through `cost-state` (`amon costs
-    check-sessions`). Active time, lines changed, commits and edit decisions
-    are exported but not stored.
-  - Space: about five rows per session, model and active export interval, each
-    about 1 KB with indexes. At the measured activity that is roughly 7-15% more
-    events rows a day, well under 1% of the database a month. Logs add about
-    as many rows again with no usage in them. Prompts and responses arrive
-    redacted by default; every point carries account identifiers, which amon
-    does not store.
-- **Revisit when**: Claude runs where its transcripts do not reach this machine,
-  or active-time or edit-decision metrics are wanted (that also needs metric
-  ingestion beyond tokens and cost). Enable metrics only.
-
 ### Skill trigger health (2026-07-09)
 
-Phase 1 shipped. These are the deferred follow-ups surfaced during and after
-the build.
+Follow-ups deferred from skill trigger health's first phase.
 
 #### Version attribution only reaches skills in the installed catalog
 - **What**: version resolution matched ~1/3 of invoked skills on the live DB (23
@@ -417,9 +374,10 @@ the build.
     the input rate (commit `84db40b`'s reading). `gpt-5.6-cyber` uses the page's
     $15.625, so the GPT-5.6 rows now disagree among themselves. No effect today,
     since Codex emits no cache-write tokens.
-  - **GPT-5.6 Sol promo**: the OpenAI page shows $4/$20 ("through 2026-11-21")
-    while aggregators list $5/$30. We kept list ($5/$30); a `schedule` entry
-    could encode the promo.
+  - **GPT-5.6 Sol promo**: the OpenAI page (checked 2026-11-20) lists $4/$20
+    and says Sol's "promotional pricing is available until November 30, 2026",
+    later than the 2026-11-21 it showed before; aggregators list $5/$30. We
+    kept list ($5/$30); a `schedule` entry could encode the promo period.
 - **Why it matters**: a wrong rate is as silent as a missing one: the dashboard
   stays plausible.
 - **Next**: reconcile the GPT-5.6 cache-write column before Codex starts
@@ -432,33 +390,15 @@ the build.
 - **What**: cost estimation uses standard synchronous API rates. Event rows do not
   record OpenAI Standard, Priority, Batch, or other processing-service tiers, so
   the registry cannot select service-tier-specific pricing.
-- **Why it matters**: GPT-5.6 Priority prices differ from standard rates. Standard
+- **Why it matters**: GPT-5.6 Priority prices differ from standard rates
+  (OpenAI renamed Priority processing Fast mode on 2026-07-30). Standard
   pricing remains the honest default until ingestion exposes the billed service
   tier; do not infer it from the model ID.
-
-#### Codex event ids are positional, and a change to the emitted set re-keys history
-- **What**: `src/import/codex.ts` derives ids from a counter over *emitted*
-  events. Changing which events are emitted re-keys every stored row, so the
-  next import stops matching them and duplicates the history. Unlike the Claude
-  importer there is no legacy-id bridge to absorb such a change.
-- **Why or evidence**: measured 2026-09-22 while evaluating a switch to the
-  producer's `ordinal`, which was **rejected** — the counter advances only on
-  emitted events, so noise lines do not shift ids (verified byte-identical
-  against a noisy fixture), the producer ordinal and computed index agree across
-  120 real rollouts, and no rollout shares a `session_meta` id, so Codex has no
-  collision to fix. Switching would have re-keyed every stored Codex import row
-  for no measured gain. Two mutation-tested guards now make an accidental change loud:
-  `skipped, malformed and zero-delta lines do not shift later event ids` and
-  `pins the Codex event-id derivation against accidental re-keying`.
-- **Compaction rows (2026-10-26)** are keyed by the request's `response_id`,
-  not the positional index, and advance no counter. Adding them re-keyed no
-  stored row; the test `counter rows keep the ids they had before compactions
-  were billed` pins that.
-- **Revisit when**: a change to the set or order of emitted events makes a
-  derivation change necessary. Rewritten rollout content is already reconciled
-  under the current ids; a derivation change needs a legacy-id bridge first,
-  mirroring `src/import/index.ts`'s ownership rule. Do not simply update the
-  pinned expectation.
+- **Evidence (2026-11-20)**: Codex 0.163 rollouts record the thread's requested
+  tier as `thread_settings.service_tier` in `event_msg/thread_settings_applied`
+  (all 24 November rollouts on one host, every value `default`). The parser
+  lists that record as known-unused (`src/parser/record-types.ts`). Whether the
+  requested setting is the billed tier is unverified.
 
 #### Imported Claude cost runs below Claude Code's own running cost, inside the main models
 - **What**: imported Claude cost reads a few percent below Claude Code's own
@@ -610,8 +550,8 @@ the build.
 
 ### Cost per outcome
 
-Shipped 2026-11 (#253, #255 and the Git view's section). The bar is "landed
-on main"; these were left out by decision.
+Cost per outcome counts a pull request once it lands on main; these
+refinements were left out by decision.
 
 #### Whether merged work stayed merged
 - **What**: a merged pull request counts as an outcome even if it was
