@@ -1,3 +1,4 @@
+import { hostname } from 'node:os';
 import { parseDateOption, parseIntegerOption, parseOptionSet, requireOne } from '../args.js';
 import { registerCommand } from '../commands.js';
 import { initReadDb } from '../db.js';
@@ -9,6 +10,7 @@ import {
   formatMonitorSessions,
   formatMonitorStats,
   formatMonitorTools,
+  formatSessionToolTiming,
   formatMonitorTranscript,
 } from '../formatters/monitor.js';
 import { effectiveBaseUrl } from '../http.js';
@@ -75,8 +77,7 @@ function parseMonitorSessions(args: string[]): MonitorSessionsParams {
   };
 }
 
-function parseMonitorTools(args: string[]): UsageParams {
-  const values = parseValues(args, MONITOR_TOOL_FLAGS);
+function parseMonitorTools(values: Map<string, string>): UsageParams {
   return {
     project: values.get('--project'),
     agent: values.get('--agent'),
@@ -169,10 +170,36 @@ export function registerMonitorCommands(): void {
   registerCommand({
     name: 'monitor tools',
     group: 'Monitor Commands',
-    summary: 'Show Monitor tool aggregates',
-    usage: 'monitor tools [--project <name>] [--agent <type>] [--date-from <date>] [--date-to <date>] [--json]',
+    summary: 'Show tool aggregates or inspect timing for one session (longest calls first)',
+    usage: 'monitor tools [--project <name>] [--agent <type>] [--date-from <date>] [--date-to <date>] [--json]\n  amon monitor tools --session-id <id> [--limit <1-500>] [--offset <n>] [--power-host <local-hostname>] [--json]',
     async handler(ctx, args) {
-      const params = parseMonitorTools(args);
+      const detailFlags = ['--limit', '--offset', '--power-host'];
+      const values = parseValues(args, new Set([...MONITOR_TOOL_FLAGS, '--session-id', ...detailFlags]));
+      const id = values.get('--session-id');
+      if (id) {
+        if ([...MONITOR_TOOL_FLAGS].some(flag => values.has(flag))) {
+          throw invalidUsage('Use aggregate filters separately from --session-id');
+        }
+        const limit = parseIntegerOption(values.get('--limit'), '--limit') ?? 25;
+        const offset = parseIntegerOption(values.get('--offset'), '--offset') ?? 0;
+        if (limit < 1 || limit > 500 || offset < 0) throw invalidUsage('Use --limit 1–500 and a nonnegative --offset');
+        const powerHost = values.get('--power-host');
+        if (powerHost && powerHost !== hostname().split('.')[0]) {
+          throw invalidUsage('--power-host must name this machine by its short hostname');
+        }
+        const { closeDb } = await initReadDb();
+        try {
+          const { getSessionToolTiming } = await import('../../monitor/session-tool-timing.js');
+          const result = await getSessionToolTiming(id, { limit, offset, powerHost });
+          if (!result) throw notFound(`Session not found: ${id}`);
+          writeMonitor(ctx, result, formatSessionToolTiming(result));
+        } finally {
+          closeDb();
+        }
+        return;
+      }
+      if (detailFlags.some(flag => values.has(flag))) throw invalidUsage('Session timing options require --session-id');
+      const params = parseMonitorTools(values);
       const { closeDb } = await initReadDb();
       try {
         const { getMonitorToolStats } = await import('../../db/v2-queries.js');

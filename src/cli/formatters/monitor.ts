@@ -1,3 +1,4 @@
+import type { SessionToolTiming } from '../../monitor/session-tool-timing.js';
 import type {
   MonitorEventRow,
   MonitorFilterOptions,
@@ -92,6 +93,25 @@ export function formatMonitorTools(tools: MonitorToolStat[]): string {
       tool.avg_duration_ms == null ? '-' : `${tool.avg_duration_ms.toFixed(1)}ms`,
     ]),
   ]);
+}
+
+export function formatSessionToolTiming(report: SessionToolTiming): string {
+  const ms = (value: number | null) => {
+    if (value === null) return 'unknown';
+    return value < 1_000 ? `${Number(value.toFixed(3))}ms` : `${Number((value / 1000).toFixed(3))}s`;
+  };
+  const sleep = (value: SessionToolTiming['sleep']) =>
+    value.coverage === 'partial' ? `${ms(value.sleep_overlap_ms)} (partial)` : ms(value.sleep_overlap_ms);
+  return [
+    `Session ${sanitizeTerminal(report.session_id)} (${short(report.agent)})`,
+    `Transcript coverage: ${report.coverage.status}. ${report.total_calls} paired calls, ${report.reported_calls} with reported runtime.`,
+    `Elapsed across paired calls: ${ms(report.elapsed_union_ms)}. Recorded sleep overlap: ${sleep(report.sleep)}.`,
+    formatTable([
+      ['CALL', 'TOOL', 'ELAPSED', 'REPORTED', 'SLEEP OVERLAP'],
+      ...report.calls.map(call => [short(call.call_id, 100), short(call.tool), ms(call.elapsed_ms), ms(call.reported_ms), sleep(call.sleep)]),
+    ]),
+    ...(report.next_offset === null ? [] : [`Continue with --offset ${report.next_offset}`]),
+  ].join('\n');
 }
 
 export function formatMonitorDetail(session: MonitorSessionRow, events: MonitorEventRow[]): string {

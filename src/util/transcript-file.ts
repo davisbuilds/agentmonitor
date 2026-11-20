@@ -6,9 +6,16 @@ import { zstdDecompressSync } from 'zlib';
 export const COMPRESSED_ROLLOUT_SUFFIX = '.jsonl.zst';
 
 /** A transcript's bytes, decompressed when the file is a compressed rollout. */
-export function readTranscriptFile(filePath: string): Buffer {
+export function readTranscriptFile(filePath: string, maxBytes?: number): Buffer {
+  if (maxBytes !== undefined) {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size > maxBytes) throw new Error('Transcript exceeds read budget or is not a regular file');
+  }
   const bytes = fs.readFileSync(filePath);
-  return filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX) ? zstdDecompressSync(bytes) : bytes;
+  if (maxBytes !== undefined && bytes.length > maxBytes) throw new Error('Transcript exceeds read budget');
+  return filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)
+    ? zstdDecompressSync(bytes, { maxOutputLength: maxBytes })
+    : bytes;
 }
 
 /** A transcript's name without its extension, which is its session id, compressed or not. */

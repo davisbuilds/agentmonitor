@@ -60,6 +60,29 @@ where the source reports a duration. A session with no live record, and every
 session when the live view is turned off (`AGENTMONITOR_ENABLE_LIVE_TAB=false`, a
 name kept for compatibility), shows those events in place of the stream.
 
+Use `amon monitor tools --session-id <id>` to inspect the local native transcript for
+one Claude Code or Codex session. The report orders paired calls by elapsed time.
+Elapsed time runs from the call record to its result record. A separate reported
+duration identifies its source in JSON. Recognized timers include Codex Code Mode
+and shell wrapper wall time and Claude Code's tool-specific WebFetch duration.
+Other tool calls can have elapsed time and an unknown reported duration. The session total
+counts overlapping elapsed intervals once. A background call ends at its handoff.
+A delayed result, a human prompt, and an explicit timer can all occupy an interval.
+
+The report shows source coverage and the number of calls with timers. It reads
+the currently retained history. Missing or rewritten records limit historical
+comparisons. A Codex session can be addressed by its native ID or browser alias.
+A filename-only lookup has partial coverage because it can miss a replacement
+rollout. Use `--limit` and `--offset` to page the calls. Totals cover all pairs.
+
+When you know the recording machine, add `--power-host <short-hostname>` on that
+Mac to annotate overlaps with recorded system sleep. This explicitly identifies
+the transcript's source host. Copied transcripts can have the same paths on two
+machines. Missing history yields unknown coverage, and partial history reports
+only the observed portion. Remote work can continue during system sleep. These
+measurements describe time in tool calls. Estimating recoverable delay also
+requires knowing when the last prerequisite for the next action finished.
+
 Monitor filters by agent only, the one filter every Monitor read honors: the stats,
 the cards, their recent events, live updates, and the cost windows. Project and the
 event-level filters live in Sessions and Analytics, whose reads support them.

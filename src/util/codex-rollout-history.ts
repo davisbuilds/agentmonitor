@@ -86,14 +86,14 @@ function invalid(detail: string): Error {
 }
 
 /** Header-only for plain files; unchanged headers are cached by nanosecond stat identity. */
-export function createCodexRolloutInventory(filePaths: readonly string[]): CodexRolloutInventory {
+export function createCodexRolloutInventory(filePaths: readonly string[], readFile = readTranscriptFile): CodexRolloutInventory {
   const inventory: CodexRolloutInventory = { entries: [], byRolloutId: new Map(), bySessionId: new Map(), errors: new Map() };
   const unique = new Set(filePaths.map(file => path.resolve(file)));
   for (const filePath of unique) {
     // Codex briefly retains both formats during compression. The live plain path wins.
     if (filePath.endsWith('.jsonl.zst') && unique.has(filePath.slice(0, -4))) continue;
     try {
-      const entry = readEntry(filePath);
+      const entry = readEntry(filePath, readFile);
       inventory.entries.push(entry);
       if (entry.historyError) inventory.errors.set(filePath, entry.historyError);
       inventory.byRolloutId.set(entry.rolloutId, [...(inventory.byRolloutId.get(entry.rolloutId) ?? []), entry]);
@@ -103,6 +103,24 @@ export function createCodexRolloutInventory(filePaths: readonly string[]): Codex
     }
   }
   return inventory;
+}
+
+/** Select the active browser history among known physical members of a native thread. */
+export function currentCodexRollout(entry: CodexRolloutEntry, inventory: CodexRolloutInventory): CodexRolloutEntry {
+  const siblings = inventory.bySessionId.get(entry.sessionId) ?? [entry];
+  // Ordinary rollouts keep their historical file identity. Pagination is the
+  // evidence that several physical files now represent the same browser history.
+  if (!siblings.some(candidate => candidate.historyBase || ['paginated', 'full'].includes(String(candidate.meta['history_mode'])))) return entry;
+  const ancestors = new Set(siblings.flatMap(candidate => candidate.historyBase ? [candidate.historyBase.thread_id] : []));
+  const leaves = siblings.filter(candidate => !ancestors.has(candidate.rolloutId));
+  if (!leaves.length) throw invalid('no active leaf');
+  const timestamps = new Map(leaves.map(candidate => {
+    const timestamp = Date.parse(candidate.timestamp ?? '');
+    if (!Number.isFinite(timestamp)) throw invalid('invalid active creation timestamp');
+    return [candidate.filePath, timestamp];
+  }));
+  return leaves.sort((a, b) => timestamps.get(b.filePath)! - timestamps.get(a.filePath)!
+    || b.rolloutId.localeCompare(a.rolloutId) || a.filePath.localeCompare(b.filePath))[0];
 }
 
 /**
@@ -117,7 +135,7 @@ export function resolveCodexRolloutHistory(filePath: string, options: CodexHisto
   const maxBytes = options.maxBytes ?? 256 * 1024 * 1024;
   if (!integer(maxDepth) || maxDepth < 1 || !integer(maxBytes) || maxBytes < 1) throw invalid('invalid depth or byte budget');
   const readFile = options.readFile ?? readTranscriptFile;
-  const inventory = options.inventory ?? createCodexRolloutInventory(options.filePaths ?? defaultFiles(filePath));
+  const inventory = options.inventory ?? createCodexRolloutInventory(options.filePaths ?? discoverCodexRolloutSiblings(filePath));
   const seen = new Set<string>();
   const segments: CodexHistorySegment[] = [];
   let nextPath = filePath;
@@ -164,7 +182,7 @@ export function resolveCodexRolloutHistory(filePath: string, options: CodexHisto
     ownContent, lines, records, segments, prefixLineCount: inherited.length, ownFromLine: inherited.length + 1 };
 }
 
-function defaultFiles(filePath: string): string[] {
+export function discoverCodexRolloutSiblings(filePath: string): string[] {
   let dir = path.dirname(filePath);
   while (path.dirname(dir) !== dir) {
     if (['sessions', 'archived_sessions'].includes(path.basename(dir))) {
@@ -177,14 +195,15 @@ function defaultFiles(filePath: string): string[] {
   return discoverCodexRolloutFilesRecursive(path.dirname(filePath));
 }
 
-function readEntry(filePath: string): CodexRolloutEntry {
+function readEntry(filePath: string, readFile: (filePath: string) => Buffer): CodexRolloutEntry {
   const stats = fs.statSync(filePath, { bigint: true });
+  if (!stats.isFile()) throw invalid('expected a regular rollout file');
   const key = `${stats.dev}:${stats.ino}:${stats.size}:${stats.mtimeNs}`;
   const cached = headerCache.get(filePath);
   if (cached?.key === key) return cached.entry;
   let bytes: Buffer;
   if (filePath.endsWith('.jsonl.zst')) {
-    bytes = readTranscriptFile(filePath);
+    bytes = readFile(filePath);
   } else {
     const fd = fs.openSync(filePath, 'r');
     try {
@@ -207,6 +226,11 @@ function readEntry(filePath: string): CodexRolloutEntry {
   if (headerCache.size >= 100_000) headerCache.clear();
   headerCache.set(filePath, { key, entry });
   return entry;
+}
+
+export function codexPhysicalRolloutId(filePath: string): string {
+  const name = transcriptBaseName(filePath);
+  return name.match(/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i)?.[0] ?? name;
 }
 
 function entryFromBytes(filePath: string, bytes: Buffer, stats: { size: number; mtimeMs: number; ctimeMs: number }, allowInvalidHistoryBase = false): CodexRolloutEntry {
@@ -233,8 +257,7 @@ function entryFromBytes(filePath: string, bytes: Buffer, stats: { size: number; 
     if (!allowInvalidHistoryBase) throw error;
     historyError = error instanceof Error ? error : invalid(String(error));
   }
-  const name = transcriptBaseName(filePath);
-  return { filePath, rolloutId: name.match(/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i)?.[0] ?? name,
+  return { filePath, rolloutId: codexPhysicalRolloutId(filePath),
     sessionId: meta.id as string, meta, historyBase, historyError, timestamp: typeof header.timestamp === 'string' ? header.timestamp : undefined,
     size: stats.size, mtimeMs: stats.mtimeMs, ctimeMs: stats.ctimeMs };
 }
