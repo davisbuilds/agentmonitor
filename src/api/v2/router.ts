@@ -945,10 +945,17 @@ v2Router.get('/analytics/outcomes', (req: Request, res: Response) => {
   }
 });
 
-v2Router.get('/analytics/git-activity', (req: Request, res: Response) => {
+v2Router.get('/analytics/git-activity', async (req: Request, res: Response) => {
+  const scope = req.query.commit_scope;
+  if (scope !== undefined && scope !== 'mine' && scope !== 'all') {
+    res.status(400).json({ error: 'commit_scope must be mine or all', code: 'invalid_query' });
+    return;
+  }
   try {
     const params = readAnalyticsParams(req);
-    res.json(getAnalyticsGitActivityResponse(params));
+    const commitAuthorEmails: Promise<ReadonlySet<string>> = req.app.locals.commitAuthorEmails;
+    const authors = scope === 'mine' ? await commitAuthorEmails : undefined;
+    res.json(getAnalyticsGitActivityResponse(params, authors));
   } catch (err) {
     console.error('[v2/analytics/git-activity] Error:', err);
     res.status(500).json({ error: 'Failed to get git activity' });

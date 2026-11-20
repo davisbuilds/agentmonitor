@@ -414,12 +414,15 @@ export interface GitActivityCoverage {
   trailer_without_session: number;
 }
 
+export type GitCommitScope = 'mine' | 'all';
+
 export interface AnalyticsGitActivity {
   days: GitActivityDay[];
   agents: GitActivityAgent[];
   projects: GitActivityProject[];
   pull_requests: GitPullRequest[];
   coverage: GitActivityCoverage;
+  author_identity_configured?: boolean;
 }
 
 export interface SessionGitActivity {

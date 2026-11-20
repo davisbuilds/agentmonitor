@@ -10,6 +10,10 @@
   const opened = $derived((data?.agents ?? []).reduce((sum, row) => sum + row.prs_opened, 0));
   const merged = $derived((data?.agents ?? []).reduce((sum, row) => sum + row.prs_merged, 0));
   const coverage = $derived(data?.coverage ?? null);
+  const scopes = [
+    { id: 'mine', label: 'My work' },
+    { id: 'all', label: 'All contributors' },
+  ] as const;
 
   function label(day: DailyBar): string {
     const split = chart.byDate.get(day.date);
@@ -20,12 +24,29 @@
 </script>
 
 <section class="rounded-lg border border-line bg-surface p-4" aria-labelledby="git-commits-heading">
-  <div class="mb-3 flex items-center gap-1.5">
-    <h3 id="git-commits-heading" class="text-h3">Commits</h3>
-    <InfoTip label="Commits">
-      <p>Commits in the repositories your sessions worked in, read from local git, each credited to an agent only when a session proves it made it: the commit's hash in the session's output, or its message in the session's commands. A session committing nearby proves nothing, so every other commit counts as made outside a session, including those from another machine, from you, or from sessions no longer on disk. Merge commits are left out. Click a day to narrow the page to it.</p>
-    </InfoTip>
+  <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-1.5">
+      <h3 id="git-commits-heading" class="text-h3">Commits</h3>
+      <InfoTip label="Commits">
+        <p>My work includes commits authored with your Git email and commits a monitored session proved it created. All contributors includes every author in the tracked repositories. The chart excludes merge commits. Click a day to narrow the page to it.</p>
+      </InfoTip>
+    </div>
+    <div class="flex shrink-0 rounded-sm border border-line" role="group" aria-label="Commit scope">
+      {#each scopes as scope (scope.id)}
+        <button
+          type="button"
+          class="px-2 py-1 text-meta transition-colors first:rounded-l-sm last:rounded-r-sm
+            {analytics.gitCommitScope === scope.id ? 'bg-surface-2 text-text' : 'text-text-muted hover:text-text'}"
+          aria-pressed={analytics.gitCommitScope === scope.id}
+          onclick={() => analytics.setGitCommitScope(scope.id)}
+        >{scope.label}</button>
+      {/each}
+    </div>
   </div>
+
+  {#if data?.author_identity_configured === false}
+    <p class="mb-3 text-meta text-text-muted">My work shows proven session commits. Set a Git author email to include your other commits.</p>
+  {/if}
 
   {#if analytics.loading.git && !data}
     <div class="py-12 text-center text-meta text-text-muted">Loading commits…</div>

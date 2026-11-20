@@ -4,11 +4,14 @@ import { fileURLToPath } from 'url';
 import { apiRouter } from './api/router.js';
 import { apiErrorHandler, localOriginGuard } from './api/local-origin.js';
 import { config } from './config.js';
+import { gitAuthorEmails } from './git/author-identity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export function createApp({ bindHost = config.host }: { bindHost?: string } = {}): Express {
   const app = express();
+  // Resolve once per app so HTTP requests never launch Git processes.
+  app.locals.commitAuthorEmails = gitAuthorEmails();
   app.use('/api', localOriginGuard({ bindHost }));
   const jsonLikeContentTypes = ['application/json', 'application/*+json', 'text/plain'];
 

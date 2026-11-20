@@ -22,6 +22,7 @@ import {
   type AnalyticsFriction,
   type AnalyticsChangeMarkers,
   type AnalyticsGitActivity,
+  type GitCommitScope,
   type AnalyticsOutcomes,
   type AnalyticsCoverage,
   type ActivityDataPoint,
@@ -35,6 +36,7 @@ import {
 } from '../api/client';
 import { navigateToSession, navigateToSessionMessage } from './router.svelte';
 import { analyticsFilters } from './analytics-filters.svelte';
+import { latestRequest } from './latest-request';
 import {
   buildAnalyticsCsv,
   downloadAnalyticsCsv,
@@ -66,14 +68,13 @@ type FiltersSnapshot = {
 };
 
 class AnalyticsStore {
-  private readonly versions: Record<PanelKey, number> = {
+  private readonly versions: Record<Exclude<PanelKey, 'git'>, number> = {
     summary: 0,
     headlines: 0,
     depth: 0,
     delegation: 0,
     friction: 0,
     markers: 0,
-    git: 0,
     outcomes: 0,
     activity: 0,
     projects: 0,
@@ -84,6 +85,7 @@ class AnalyticsStore {
     velocity: 0,
     agents: 0,
   };
+  private readonly gitRequests = latestRequest();
   private unsubscribe: (() => void) | null = null;
   private subscriptionMode: 'overview' | 'skills' | 'git' | null = null;
 
@@ -106,6 +108,7 @@ class AnalyticsStore {
   /** The query `changeMarkers` answers. */
   private changeMarkersSlice: string | null = null;
   gitActivity = $state<AnalyticsGitActivity | null>(null);
+  gitCommitScope = $state<GitCommitScope>('mine');
   outcomes = $state<AnalyticsOutcomes | null>(null);
   activity = $state<ActivityDataPoint[]>([]);
   projectBreakdowns = $state<ProjectBreakdown[]>([]);
@@ -360,22 +363,29 @@ class AnalyticsStore {
   }
 
   async fetchGitActivity(): Promise<void> {
-    const version = ++this.versions.git;
+    const isCurrent = this.gitRequests.begin();
     this.loading.git = true;
     this.errors.git = null;
     try {
-      const result = await fetchAnalyticsGitActivity(this.queryParams);
-      if (version !== this.versions.git) return;
+      const result = await fetchAnalyticsGitActivity({ ...this.queryParams, commit_scope: this.gitCommitScope });
+      if (!isCurrent()) return;
       this.gitActivity = result;
     } catch (err) {
-      if (version !== this.versions.git) return;
+      if (!isCurrent()) return;
       console.error('Failed to load git activity:', err);
       this.errors.git = 'Failed to load git activity.';
     } finally {
-      if (version === this.versions.git) {
+      if (isCurrent()) {
         this.loading.git = false;
       }
     }
+  }
+
+  async setGitCommitScope(scope: GitCommitScope): Promise<void> {
+    if (this.gitCommitScope === scope) return;
+    this.gitCommitScope = scope;
+    this.gitActivity = null;
+    await this.fetchGitActivity();
   }
 
   async fetchChangeMarkers(): Promise<void> {

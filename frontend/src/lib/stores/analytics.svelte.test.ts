@@ -88,6 +88,17 @@ describe('Git requests', () => {
       expect(url.searchParams.get('project')).toBe('alpha');
     }
   });
+
+  it('defaults to My work and refreshes only Git activity when switching commit scope', async () => {
+    await analytics.initializeGit();
+    const activityPath = '/api/v2/analytics/git-activity';
+    expect(requested.find(url => url.pathname === activityPath)?.searchParams.get('commit_scope')).toBe('mine');
+    requested.length = 0;
+
+    await analytics.setGitCommitScope('all');
+    expect(paths()).toEqual([activityPath]);
+    expect(requested[0].searchParams.get('commit_scope')).toBe('all');
+  });
 });
 
 describe('the shared agent filter', () => {

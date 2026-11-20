@@ -11,7 +11,7 @@
   <div class="mb-3 flex items-center gap-1.5">
     <h3 id="git-breakdown-heading" class="text-h3">By Agent and Project</h3>
     <InfoTip label="By Agent and Project">
-      <p>Each agent's proven commits, the sessions they came from, and the pull requests its sessions opened. A pull request is merged when GitHub says so, or when local git has its merge commit. Projects list every commit in their repository, split by who made it. Select a project to narrow the page to it.</p>
+      <p>Each agent's proven commits, the sessions they came from, and the pull requests its sessions opened. A pull request is merged when GitHub says so, or when local git has its merge commit. Project commit totals follow the commit scope above. Select a project to narrow the page to it.</p>
     </InfoTip>
   </div>
 
