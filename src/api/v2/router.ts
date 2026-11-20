@@ -82,7 +82,6 @@ import {
 } from '../../skills/expected-realizations.js';
 import { getSessionSkillContext } from '../../skills/session-skill-context.js';
 import { getLiveSettingsResponse } from '../../live/responses.js';
-import { gitAuthorEmails } from '../../git/author-identity.js';
 
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
@@ -954,7 +953,8 @@ v2Router.get('/analytics/git-activity', async (req: Request, res: Response) => {
   }
   try {
     const params = readAnalyticsParams(req);
-    const authors = scope === 'mine' ? await gitAuthorEmails() : undefined;
+    const commitAuthorEmails: Promise<ReadonlySet<string>> = req.app.locals.commitAuthorEmails;
+    const authors = scope === 'mine' ? await commitAuthorEmails : undefined;
     res.json(getAnalyticsGitActivityResponse(params, authors));
   } catch (err) {
     console.error('[v2/analytics/git-activity] Error:', err);

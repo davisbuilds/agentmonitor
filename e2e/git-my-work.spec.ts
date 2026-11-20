@@ -34,15 +34,18 @@ test('Git defaults to personal commits and can show all contributors', async ({ 
     insert.run(repo, '1111111', 'ME@example.com');
     insert.run(path.join(tempDir, 'reference-clone'), '2222222', 'contributor@example.com');
 
-    const server = createApp().listen(0, '127.0.0.1');
-    stack.defer(async () => {
-      await page.close();
-      await new Promise<void>(resolve => server.close(() => resolve()));
-    });
-    await once(server, 'listening');
-    const address = server.address();
-    if (!address || typeof address === 'string') throw new Error('Failed to resolve test server address');
-    const baseUrl = `http://127.0.0.1:${address.port}`;
+    const startApp = async () => {
+      const server = createApp().listen(0, '127.0.0.1');
+      stack.defer(() => new Promise<void>(resolve => {
+        server.close(() => resolve());
+        server.closeAllConnections();
+      }));
+      await once(server, 'listening');
+      const address = server.address();
+      if (!address || typeof address === 'string') throw new Error('Failed to resolve test server address');
+      return `http://127.0.0.1:${address.port}`;
+    };
+    const baseUrl = await startApp();
 
     await page.goto(`${baseUrl}/app/#analytics?view=git&from=2026-09-10&to=2026-09-10`);
     const chart = page.getByRole('region', { name: 'Commits', exact: true });
@@ -61,16 +64,20 @@ test('Git defaults to personal commits and can show all contributors', async ({ 
     await expect(day).toHaveAccessibleName('2026-09-10: 1 outside a session');
     await expect(projects.getByRole('button', { name: 'reference-clone' })).toHaveCount(0);
 
-    const api = `${baseUrl}/api/v2/analytics/git-activity?date_from=2026-09-10&date_to=2026-09-10`;
+    const api = '/api/v2/analytics/git-activity?date_from=2026-09-10&date_to=2026-09-10';
     config.git.authorEmails = ['CONTRIBUTOR@example.com'];
-    const override = await page.request.get(`${api}&commit_scope=mine`);
+    const overrideUrl = await startApp();
+    const override = await page.request.get(`${overrideUrl}${api}&commit_scope=mine`);
     expect(override.ok()).toBe(true);
     expect(await override.json()).toMatchObject({
       author_identity_configured: true,
       projects: [{ project: 'reference-clone', commits: 1 }],
     });
+    const original = await page.request.get(`${baseUrl}${api}&commit_scope=mine`);
+    expect(original.ok()).toBe(true);
+    expect(await original.json()).toMatchObject({ projects: [{ project: 'my-repo', commits: 1 }] });
 
-    const invalid = await page.request.get(`${api}&commit_scope=other`);
+    const invalid = await page.request.get(`${baseUrl}${api}&commit_scope=other`);
     expect(invalid.status()).toBe(400);
     expect((await invalid.json()).code).toBe('invalid_query');
   } finally {

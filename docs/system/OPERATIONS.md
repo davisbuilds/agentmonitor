@@ -287,12 +287,13 @@ records whether each commit has reached a main branch (any remote's default),
 from the remote-tracking branches as the last `git fetch` left them: the pass
 never fetches.
 
-The **My work** commit view reads Git's effective `user.email` from
-`AGENTMONITOR_PROJECTS_DIR`. Set `AGENTMONITOR_GIT_AUTHOR_EMAILS` to the full list
-of your author emails when you use aliases, including work or GitHub noreply
-addresses. Matching ignores case and surrounding whitespace. When no author
-email can be resolved, My work shows proven session commits. For a login service,
-rerun `amon service install` with the setting to record it in launchd.
+At startup, the server reads Git's effective `user.email` from
+`AGENTMONITOR_PROJECTS_DIR` for the **My work** view. Set
+`AGENTMONITOR_GIT_AUTHOR_EMAILS` to the full list of your author emails when you
+use aliases, including work or GitHub noreply addresses. Matching ignores case
+and surrounding whitespace. When no author email can be resolved, My work shows
+proven session commits. For a login service, rerun `amon service install` with
+the setting to record it in launchd.
 
 With
 `AGENTMONITOR_GITHUB_LOOKUPS=1`, each pass then asks GitHub, read-only through
