@@ -48,6 +48,8 @@ interface GitConfig {
   pollIntervalMs: number;
   /** Whether each pass also asks GitHub, through `gh`, whether sessions' pull requests merged. */
   githubLookups: boolean;
+  /** Author emails for the personal commits view. Undefined uses Git's effective user.email. */
+  authorEmails?: string[];
 }
 
 interface LiveConfig {
@@ -132,10 +134,12 @@ function parseQuotaConfig(env: EnvMap): QuotaConfig {
 }
 
 function parseGitConfig(env: EnvMap): GitConfig {
+  const authorEmails = parseEnvList(env.AGENTMONITOR_GIT_AUTHOR_EMAILS);
   return {
     pollIntervalMs: parseEnvInt(env.AGENTMONITOR_GIT_POLL_INTERVAL_MS, 600_000, 0),
     // Off unless asked for: it is the only git activity that leaves the machine.
     githubLookups: parseEnvBool(env.AGENTMONITOR_GITHUB_LOOKUPS, false),
+    ...(authorEmails.length > 0 ? { authorEmails } : {}),
   };
 }
 

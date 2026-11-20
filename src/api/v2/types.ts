@@ -370,6 +370,8 @@ export interface AnalyticsGitActivity {
   /** The latest pull requests sessions opened in the range. */
   pull_requests: GitPullRequest[];
   coverage: GitActivityCoverage;
+  /** Present on the personal commit view. An empty identity only shows proven session commits. */
+  author_identity_configured?: boolean;
 }
 
 /** One session's commits and pull requests, for its viewer. */

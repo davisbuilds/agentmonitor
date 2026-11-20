@@ -130,6 +130,7 @@ import {
   type CommitAttribution,
   type CommitCall,
 } from '../git/attribution.js';
+import { normalizeAuthorEmail } from '../git/author-identity.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 import { CODEX_AUTO_REVIEW_MODEL } from '../parser/session-title.js';
 import { browserAgentName, eventAgentType } from '../util/agent-identity.js';
@@ -3100,6 +3101,7 @@ interface AttributedCommit {
   sha: string;
   subject: string;
   authored_at: string;
+  author_email: string | null;
   project: string;
   co_authors: string[];
   attribution: CommitAttribution;
@@ -3111,6 +3113,7 @@ interface CommitRow {
   sha: string;
   subject: string | null;
   authored_at: string;
+  author_email: string | null;
   committed_at: string;
   co_authors_json: string;
   /** Whether it reached a main branch: on one's first-parent line, or merged into it. */
@@ -3124,7 +3127,7 @@ interface CommitRow {
  */
 function commitRows(fromMs: number, toMs: number, orCommitted = false): CommitRow[] {
   return getDb().prepare(`
-    SELECT repo_root, sha, subject, authored_at, committed_at, co_authors_json, landing FROM git_commits
+    SELECT repo_root, sha, subject, authored_at, author_email, committed_at, co_authors_json, landing FROM git_commits
     WHERE is_merge = 0 AND ((authored_at >= @from AND authored_at < @to)${orCommitted ? ' OR (committed_at >= @from AND committed_at < @to)' : ''})
     ORDER BY authored_at, sha
   `).all({ from: new Date(fromMs).toISOString(), to: new Date(toMs).toISOString() }) as CommitRow[];
@@ -3165,6 +3168,7 @@ function attributedCommits(commits: CommitRow[], calls: GitToolCall[]): Attribut
       sha: row.sha,
       subject: row.subject ?? '',
       authored_at: row.authored_at,
+      author_email: row.author_email,
       project,
       co_authors: parseJsonString(row.co_authors_json) as string[] ?? [],
       attribution: attributeCommit(fact, calls, sessionInputsBetween),
@@ -3251,7 +3255,7 @@ const GIT_RECENT_PULL_REQUESTS = 10;
  * no session left. A pull request is merged when GitHub says so or a merge
  * commit for it is in local git.
  */
-export function getAnalyticsGitActivity(params: AnalyticsParams = {}): AnalyticsGitActivity {
+export function getAnalyticsGitActivity(params: AnalyticsParams = {}, authorEmails?: ReadonlySet<string>): AnalyticsGitActivity {
   const fromDay = rangeDay(params.date_from, 'from');
   const toDay = rangeDay(params.date_to, 'to');
   const fromMs = params.date_from ? Date.parse(dateParamLowerBound(params.date_from)) : 0;
@@ -3262,6 +3266,8 @@ export function getAnalyticsGitActivity(params: AnalyticsParams = {}): Analytics
   const calls = gitToolCalls(...commitCallSpan(rows, fromMs, toMs));
   const commits = attributedCommits(rows, calls.commits)
     .filter(commit => !params.project || commit.project === params.project)
+    .filter(commit => !authorEmails || commit.attribution.kind === 'session'
+      || (commit.author_email !== null && authorEmails.has(normalizeAuthorEmail(commit.author_email))))
     .filter(commit => !wantAgent || (commit.attribution.kind === 'session' && commit.attribution.agent === wantAgent));
   const pullRequests = openedPullRequests(calls.pullRequests.filter(call => call.at >= fromMs && call.at < toMs))
     .filter(pr => !params.project || pr.project === params.project)
@@ -3322,6 +3328,7 @@ export function getAnalyticsGitActivity(params: AnalyticsParams = {}): Analytics
       .slice(0, GIT_RECENT_PULL_REQUESTS)
       .map(({ project: _project, ...pr }) => pr),
     coverage,
+    ...(authorEmails && { author_identity_configured: authorEmails.size > 0 }),
   };
 }
 

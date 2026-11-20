@@ -197,7 +197,7 @@ instead. Common controls include:
 | Live fidelity/privacy | `AGENTMONITOR_ENABLE_LIVE_TAB`, `AGENTMONITOR_CODEX_LIVE_MODE`, `AGENTMONITOR_CODEX_CONTEXT_WINDOW`, `AGENTMONITOR_LIVE_CAPTURE_PROMPTS`, `AGENTMONITOR_LIVE_CAPTURE_REASONING`, `AGENTMONITOR_LIVE_CAPTURE_TOOL_ARGUMENTS`, `AGENTMONITOR_LIVE_DIFF_PAYLOAD_MAX_BYTES` |
 | Codex quotas | `AGENTMONITOR_CODEX_QUOTA_POLL_INTERVAL_MS` |
 | Hook spool | `AGENTMONITOR_HOOK_SPOOL_DIR` (default `~/.local/state/agentmonitor/hook-spool`; set it for the hooks and the server alike) |
-| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default off; `1` asks GitHub, through `gh`, whether sessions' pull requests merged, and for the size and commits of the pull requests you merged) |
+| Git activity | `AGENTMONITOR_GIT_POLL_INTERVAL_MS` (default 10 minutes; `0` turns it off), `AGENTMONITOR_GITHUB_LOOKUPS` (default off; `1` asks GitHub, through `gh`, whether sessions' pull requests merged, and for the size and commits of the pull requests you merged), `AGENTMONITOR_GIT_AUTHOR_EMAILS` (comma-separated author emails for My work) |
 | Skill catalogs | `AGENTMONITOR_SKILL_CATALOG_DIRS` |
 | Usage budgets | `AGENTMONITOR_USAGE_BUDGETS_PATH` |
 | Reporting zone | `AGENTMONITOR_TIMEZONE` |
@@ -285,7 +285,16 @@ most a year; later reads reread from 14 days before the previous read, so
 downtime leaves no gap, and drop commits git no longer lists. Each pass also
 records whether each commit has reached a main branch (any remote's default),
 from the remote-tracking branches as the last `git fetch` left them: the pass
-never fetches. With
+never fetches.
+
+The **My work** commit view reads Git's effective `user.email` from
+`AGENTMONITOR_PROJECTS_DIR`. Set `AGENTMONITOR_GIT_AUTHOR_EMAILS` to the full list
+of your author emails when you use aliases, including work or GitHub noreply
+addresses. Matching ignores case and surrounding whitespace. When no author
+email can be resolved, My work shows proven session commits. For a login service,
+rerun `amon service install` with the setting to record it in launchd.
+
+With
 `AGENTMONITOR_GITHUB_LOOKUPS=1`, each pass then asks GitHub, read-only through
 `gh` and as its signed-in user, for the pull requests that user merged in the
 last year, a month at a time with their size and commits (the current month

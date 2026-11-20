@@ -27,6 +27,14 @@ Response-shape compatibility is enforced by the API and CLI test suites. Add
 durable semantics here or in a focused contract document when an external client
 needs more than the TypeScript route and query definitions.
 
+`GET /api/v2/analytics/git-activity` accepts `commit_scope=mine` for commits
+matching the server's Git author emails or proved by a monitored session.
+The scope applies to commit counts and their coverage. With `mine`,
+`author_identity_configured` tells the client whether author-email matching
+was available. The endpoint returns all contributors when `commit_scope=all`
+or the parameter is omitted. See [Git activity setup](../system/OPERATIONS.md)
+for author aliases.
+
 ## Related Docs
 
 - Product surface and feature notes: [../system/FEATURES.md](../system/FEATURES.md)

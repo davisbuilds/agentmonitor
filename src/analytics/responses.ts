@@ -152,8 +152,8 @@ export function getAnalyticsOutcomesResponse(params: AnalyticsParams = {}): Anal
   return getDb().transaction(() => getAnalyticsOutcomes(params))();
 }
 
-export function getAnalyticsGitActivityResponse(params: AnalyticsParams = {}): AnalyticsGitActivity {
-  return getDb().transaction(() => getAnalyticsGitActivity(params))();
+export function getAnalyticsGitActivityResponse(params: AnalyticsParams = {}, authorEmails?: ReadonlySet<string>): AnalyticsGitActivity {
+  return getDb().transaction(() => getAnalyticsGitActivity(params, authorEmails))();
 }
 
 export function getAnalyticsHeadlinesResponse(params: AnalyticsParams = {}): AnalyticsHeadlines {

@@ -24,9 +24,9 @@ const root = path.join(tempDir, 'alpha');
 const at = (hour: number, minute = 0, second = 0) => new Date(Date.UTC(2026, 2, 2, hour, minute, second)).toISOString();
 db.prepare("INSERT INTO git_repos (root, last_scanned_at, github_repo) VALUES (?, ?, 'owner/alpha')").run(root, at(23));
 const commitRow = db.prepare(`INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, author_name, author_email, subject, co_authors_json, is_merge)
-  VALUES (?, ?, ?, ?, 'Dev', 'dev@example.com', ?, ?, ?)`);
-const addCommit = (sha: string, when: string, subject: string, coAuthors: string[] = [], isMerge = 0) =>
-  commitRow.run(root, sha, when, when, subject, JSON.stringify(coAuthors), isMerge);
+  VALUES (?, ?, ?, ?, 'Dev', ?, ?, ?, ?)`);
+const addCommit = (sha: string, when: string, subject: string, coAuthors: string[] = [], isMerge = 0, email = 'dev@example.com') =>
+  commitRow.run(root, sha, when, when, email, subject, JSON.stringify(coAuthors), isMerge);
 
 const session = db.prepare(`INSERT INTO browsing_sessions (id, agent, integration_mode, cwd, title, started_at, ended_at, message_count, user_message_count)
   VALUES (?, ?, ?, ?, ?, ?, ?, 10, 1)`);
@@ -53,16 +53,16 @@ const uuid = '01990000-0000-7000-8000-000000000001';
 const rollout = `rollout-2026-03-02T11-00-00-${uuid}`;
 session.run(rollout, 'codex', 'codex-jsonl', root, 'Ship two', at(11), at(11, 30));
 runs(rollout, at(11), 'git commit -F msg.txt', 'call_commit', { row: uuid, id: 'call_commit:result' });
-addCommit('bbb2222bbbb', at(11, 0, 10), 'fix: two');
+addCommit('bbb2222bbbb', at(11, 0, 10), 'fix: two', [], 0, 'agent@example.com');
 runs(rollout, at(11, 5), 'gh pr create --fill', 'call_pr8', { row: uuid, id: 'call_pr8:result' });
 
 // Only near a commit: a Claude session committed something else a minute later.
 session.run('c2', 'claude', 'claude-jsonl', root, null, at(11, 50), at(12, 30));
-addCommit('ccc3333cccc', at(12), 'chore: three', ['Claude Opus 5.5 <noreply@anthropic.com>']);
+addCommit('ccc3333cccc', at(12), 'chore: three', ['Claude Opus 5.5 <noreply@anthropic.com>'], 0, 'upstream@example.com');
 runs('c2', at(12, 1), 'git commit -F other.txt', 'toolu_c2');
 
 // No session anywhere near.
-addCommit('ddd4444dddd', at(15), 'docs: four');
+addCommit('ddd4444dddd', at(15), 'docs: four', [], 0, 'DEV+OTHER@EXAMPLE.COM');
 
 const range = { date_from: '2026-03-02', date_to: '2026-03-02' };
 
@@ -85,6 +85,19 @@ test('the agent filter keeps that agent\'s proven commits and pull requests', ()
   const activity = queries.getAnalyticsGitActivity({ ...range, agent: 'codex' });
   assert.deepEqual(activity.days[0], { date: '2026-03-02', by_agent: { codex: 1 }, outside: 0 });
   assert.deepEqual(activity.agents.map(row => row.agent), ['codex']);
+});
+
+test('My work counts author aliases and proven session commits in the chart and project totals', () => {
+  const myWork = queries.getAnalyticsGitActivity(range, new Set(['dev@example.com', 'dev+other@example.com']));
+  assert.deepEqual(myWork.days, [{ date: '2026-03-02', by_agent: { claude: 1, codex: 1 }, outside: 1 }]);
+  assert.deepEqual(myWork.projects, [{ project: 'alpha', commits: 3, by_agent: { claude: 1, codex: 1 }, outside: 1 }]);
+  assert.deepEqual(myWork.coverage, { commits: 3, proven: 2, time_only: 0, trailer_without_session: 0 });
+  assert.deepEqual(myWork.pull_requests, queries.getAnalyticsGitActivity(range).pull_requests);
+  assert.equal(myWork.author_identity_configured, true);
+
+  const noIdentity = queries.getAnalyticsGitActivity(range, new Set());
+  assert.equal(noIdentity.author_identity_configured, false);
+  assert.deepEqual(noIdentity.days, [{ date: '2026-03-02', by_agent: { claude: 1, codex: 1 }, outside: 0 }]);
 });
 
 test('a session shows the commits it proved and the pull requests it opened', () => {

@@ -281,15 +281,19 @@ reason to remove a skill. Missing denominators remain unavailable with a reason
 rather than becoming zero. A skill's current files on disk are not treated as
 evidence of what a past session loaded.
 
-Git activity counts what agents committed and opened in the repositories
-sessions worked in, from local git (see OPERATIONS for which repositories and
-how far back). A commit is an agent's only when one of its sessions proves it:
+Git activity starts with **My work**, which counts commits authored with your
+configured Git emails and commits a monitored session proved it created.
+**All contributors** includes every author in the tracked repositories. The
+scope applies to the commit chart and project totals. See OPERATIONS for Git
+identities, repository discovery, and coverage. A commit is an agent's only
+when one of its sessions proves it:
 the commit's hash in a commit call's output, or its subject in that call or in
 a call the session made in the 15 minutes before. Timing alone proves nothing,
 and evidence pointing at two sessions proves neither, so every other commit
-counts as made outside a session: by hand, on another machine, or by a session
-no longer on disk. The Git sub-view charts each day's commits by agent with the
-outside ones on top, says how many outside commits were only close in time to a
+counts as made outside a session. This includes work done by hand, on another
+machine, or through a session no longer on disk. The Git sub-view charts each
+day's commits by agent with the outside ones on top, says how many outside
+commits were only close in time to a
 session's commit or carry a Claude co-author trailer with no session here, and
 lists commits and pull requests by agent and project. Pull requests are the
 links `gh pr create` printed, including those a Codex call printed after it
