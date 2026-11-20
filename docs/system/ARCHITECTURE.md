@@ -231,6 +231,14 @@ copied turns. Only inherited turns or requests mark a copy, so a child's own
 compaction before its first surviving turn stays. Plain forks (`forked_from_id` without `thread_spawn`) and
 unresolved subagents keep their whole rollout.
 
+The boundary rests on how Codex lays out subagent rollouts and mints turn ids
+today. On 2026-09-24 every `thread_spawn` rollout from Codex 0.94.0 to 0.156.1
+had a datable turn and a boundary. A layout change would make the parse fall
+back to billing the whole rollout. Re-measure when `amon costs
+repair-codex-usage` reports `subagent_boundaries_unresolved` above 0, when a
+new subagent's import/OTEL ratio leaves 0.95-1.02, or on a Codex minor version
+that changes subagent behaviour.
+
 Codex 0.154+ writes a `token_usage_record` per API request, with the
 request's usage and the thread's running total. When a rollout's own records
 cover its usage from the resolved ancestor baseline (zero for an original
@@ -267,6 +275,24 @@ window. The miss is counted on `session_end` as `_compactions_unbilled`.
 `session_end` names the instrument used in `_usage_instrument` (`request` or
 `counter`), and carries Codex's `total_thread_tokens`, which the repair checks
 against.
+
+Codex import event ids are positional: `src/import/codex.ts` derives them from a
+counter over *emitted* events, so skipped, malformed and zero-delta lines do not
+shift them, and rewritten rollout content is reconciled under the same ids.
+Changing which events are emitted, or their order, re-keys every stored row; the
+next import would stop matching them and duplicate the history. Unlike the
+Claude importer, Codex import has no legacy-id bridge to absorb such a change.
+Compaction rows are keyed by the request's `response_id` and advance no counter.
+A switch to the producer's `ordinal` was evaluated and rejected on 2026-09-22:
+the counter and the ordinal agreed across 120 real rollouts, and no rollout
+shared a `session_meta` id, so it would have re-keyed every stored row for no
+measured gain. Tests in `tests/import.test.ts` (`pins the Codex event-id
+derivation against accidental re-keying`, `skipped, malformed and zero-delta
+lines do not shift later event ids`) and `tests/codex-import-usage.test.ts`
+(`counter rows keep the ids they had before compactions were billed`) pin this.
+A derivation change needs a legacy-id bridge first, mirroring
+`src/import/index.ts`'s ownership rule; do not simply update the pinned
+expectation.
 
 ### Session Browser And Live
 

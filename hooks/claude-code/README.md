@@ -269,8 +269,8 @@ Claude Code can also export OpenTelemetry. AgentMonitor already bills every
 Claude request from the session transcript, so OTEL usage the import covers is
 counted once, and OTEL mostly adds a live lead of seconds and usage for
 sessions whose transcript never reaches this machine. AgentMonitor stores only
-the token and cost metrics; see the Backlog entry "Claude Code OTEL stays off"
-for the measured trade-off.
+the token and cost metrics; see "Leave Claude Code OTEL export off" in
+[DECISIONS.md](../../docs/project/DECISIONS.md) for the measured trade-off.
 
 To enable it, export metrics only:
 
