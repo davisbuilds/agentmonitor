@@ -21,6 +21,16 @@ test('a compressed rollout reads as its decompressed lines and keeps its session
   assert.equal(transcriptBaseName(path.join(tempDir, `${rollout('2')}.jsonl`)), rollout('2'));
 });
 
+test('the optional read budget bounds the decoded bytes of a compressed transcript', () => {
+  const original = Buffer.from('a'.repeat(4096));
+  const file = path.join(tempDir, 'budget.jsonl.zst');
+  const compressed = zstdCompressSync(original);
+  fs.writeFileSync(file, compressed);
+  assert.ok(compressed.length < 100);
+  assert.throws(() => readTranscriptFile(file, 100), /[bB]uffer|[bB]udget/);
+  assert.deepEqual(readTranscriptFile(file, original.length), original);
+});
+
 test('discovery finds compressed rollouts, and one rollout once when both forms exist', () => {
   const dir = path.join(tempDir, 'sessions', '2026', '03');
   fs.mkdirSync(dir, { recursive: true });

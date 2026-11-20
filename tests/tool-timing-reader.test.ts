@@ -131,9 +131,9 @@ test('excludes the parent copy in child files and reports unresolved legacy boun
   const write = createFiles();
   const source = { subagent: { thread_spawn: { parent_thread_id: rootId } } };
   const copy = [turn(rootId), call(100, 'call_parent'), output(500, 'call_parent', wrapped)];
-  for (const explicit of [true, false]) {
+  for (const extra of [{ source, subagent_history_start_ordinal: 4 }, { source }, { thread_source: 'subagent' }]) {
     const { filePath } = write(rollout(childId), withOrdinals([
-      meta(childId, { source, ...(explicit ? { subagent_history_start_ordinal: 4 } : {}) }),
+      meta(childId, extra),
       ...copy, turn(turnId), call(600, 'call_child'), output(700, 'call_child', 'own'),
     ]));
     const result = readToolTiming({ source: 'codex', sessionId: childId, filePaths: [filePath] });
@@ -146,6 +146,26 @@ test('excludes the parent copy in child files and reports unresolved legacy boun
   assert.deepEqual(unresolved.intervals, []);
   assert.equal(unresolved.coverage.status, 'unavailable');
   assert.equal(unresolved.coverage.unresolvedFiles, 1);
+});
+
+test('resolves a child bookmark without attributing the parent calls in its ancestry', () => {
+  const write = createFiles();
+  const parent = write(rollout(rootId), withOrdinals([
+    meta(rootId, { history_mode: 'paginated' }), call(100, 'call_parent'),
+    output(200, 'call_parent', wrapped), call(250, 'call_parent_pending'),
+  ]));
+  const child = write(rollout(childId, '01'), withOrdinals([
+    meta(childId, { history_mode: 'paginated', parent_thread_id: rootId, subagent_history_start_ordinal: 5,
+      history_base: { thread_id: rootId, end_byte_offset: parent.bytes.length, end_ordinal_exclusive: 4 } }),
+    output(300, 'call_parent_pending', wrapped),
+    call(400, 'call_child'), output(500, 'call_child', wrapped),
+  ], 4));
+  const result = readToolTiming({ source: 'codex', sessionId: childId, filePaths: [child.filePath] });
+  assert.deepEqual(result.intervals.map(({ callId }) => callId), ['call_child']);
+  assert.equal(result.coverage.copiedRecords, 3);
+  assert.equal(result.coverage.unmatchedReturns, 1);
+  assert.equal(result.coverage.filesRead, 2);
+  assert.equal(result.coverage.status, 'partial');
 });
 
 test('pairs Claude split blocks after resuming and keeps child calls outside parent coverage', () => {

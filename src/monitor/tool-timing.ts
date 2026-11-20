@@ -265,7 +265,7 @@ function ownCodexRecords(
   const boundary = findSubagentBoundary(records.map(row => ({
     type: typeof row.type === 'string' ? row.type : undefined,
     payload: asRecord(row.payload),
-  })));
+  })), meta.thread_source === 'subagent');
   if (boundary.kind !== 'resolved') throw new Error('Unresolved Codex subagent boundary');
   coverage.copiedRecords += boundary.line - 1;
   return records.slice(boundary.line);
@@ -288,16 +288,15 @@ function* readCodexEvents(
   try {
     const active = currentCodexRollout(first, inventory);
     if (active.historyError) throw active.historyError;
-    const filesRead = new Set<string>();
+    let filesRead = 1;
     let records: Iterable<NativeRecord>;
     if (active.historyBase) {
       inventory = completeCodexInventory(active, inventory, readFile);
       const history = resolveCodexRolloutHistory(active.filePath, { inventory, readFile, maxBytes: MAX_DECODED_BYTES });
-      filesRead.add(active.filePath);
+      filesRead = history.segments.length;
       records = (function* () {
         for (const record of history.records) {
           if (record.sessionId === input.sessionId) {
-            filesRead.add(record.filePath);
             yield record.value;
           } else {
             coverage.copiedRecords++;
@@ -306,10 +305,9 @@ function* readCodexEvents(
       })();
     } else {
       records = readJsonl(readFile(active.filePath), coverage);
-      filesRead.add(active.filePath);
     }
     yield* codexToolEvents(ownCodexRecords(records, input.sessionId, coverage), coverage);
-    coverage.filesRead = filesRead.size;
+    coverage.filesRead = filesRead;
   } catch {
     coverage.unresolvedFiles++;
   }
