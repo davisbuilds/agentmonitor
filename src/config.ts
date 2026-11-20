@@ -50,6 +50,8 @@ interface GitConfig {
   githubLookups: boolean;
   /** Author emails for the personal commits view. Undefined uses Git's effective user.email. */
   authorEmails?: string[];
+  /** Absolute directory prefixes skipped during local Git collection. */
+  excludedDirs: string[];
 }
 
 interface LiveConfig {
@@ -133,13 +135,16 @@ function parseQuotaConfig(env: EnvMap): QuotaConfig {
   };
 }
 
-function parseGitConfig(env: EnvMap): GitConfig {
+function parseGitConfig(env: EnvMap, cwd: string): GitConfig {
   const authorEmails = parseEnvList(env.AGENTMONITOR_GIT_AUTHOR_EMAILS);
+  const excludedDirs = (env.AGENTMONITOR_GIT_EXCLUDE_DIRS ?? '').split(path.delimiter)
+    .map(item => item.trim()).filter(Boolean).map(item => path.resolve(cwd, expandTilde(item)));
   return {
     pollIntervalMs: parseEnvInt(env.AGENTMONITOR_GIT_POLL_INTERVAL_MS, 600_000, 0),
     // Off unless asked for: it is the only git activity that leaves the machine.
     githubLookups: parseEnvBool(env.AGENTMONITOR_GITHUB_LOOKUPS, false),
     ...(authorEmails.length > 0 ? { authorEmails } : {}),
+    excludedDirs: [...new Set(excludedDirs)],
   };
 }
 
@@ -261,7 +266,7 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     executionSpoolDir: env.AGENTMONITOR_EXECUTIONS_DIR
       ? path.resolve(cwd, expandTilde(env.AGENTMONITOR_EXECUTIONS_DIR)) : undefined,
     quotas: parseQuotaConfig(env),
-    git: parseGitConfig(env),
+    git: parseGitConfig(env, cwd),
     contextWindow: {
       codexDefault: parseEnvInt(env.AGENTMONITOR_CODEX_CONTEXT_WINDOW, 256_000, 1),
     },

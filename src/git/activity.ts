@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import type { Database } from 'better-sqlite3';
 import { isPrivacyProtectedPath } from '../util/privacy-protected.js';
 import { githubRepoOfRemote, mergedPullRequestNumber } from './attribution.js';
+import { isExcludedGitDirectory } from './exclusions.js';
 
 const run = promisify(execFile);
 
@@ -26,6 +27,7 @@ export interface GitSyncReport {
 
 export interface GitSyncOptions {
   now?: Date;
+  excludedDirs?: readonly string[];
   /**
    * Leave unread the session directories macOS guards with a privacy prompt
    * (`isPrivacyProtectedPath`). The launchd service sets this: no one can answer
@@ -116,6 +118,7 @@ async function exists(reader: DirectoryReader, target: string, directory: string
 interface DirectoryPolicy {
   reader: DirectoryReader;
   skipped(directory: string): boolean;
+  excluded(directory: string): boolean;
 }
 
 async function git(cwd: string, args: string[]): Promise<string> {
@@ -159,7 +162,7 @@ async function repositoriesInside(dir: string, policy: DirectoryPolicy): Promise
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
     const child = path.join(dir, entry.name);
     // A folder of projects can be the home directory, whose Documents is guarded.
-    if (policy.skipped(child)) continue;
+    if (policy.excluded(child) || policy.skipped(child)) continue;
     // Only a directory with its own .git is a repository's top; this spares a
     // git process for every plain folder.
     if (!(await exists(policy.reader, path.join(child, '.git'), child))) continue;
@@ -312,12 +315,15 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
     SELECT cwd, MIN(started_at) AS first_started FROM browsing_sessions WHERE cwd IS NOT NULL GROUP BY cwd
   `).all() as Array<{ cwd: string; first_started: string | null }>;
   const home = options.home ?? os.homedir();
+  const excludedDirs = options.excludedDirs ?? [];
   const policy: DirectoryPolicy = {
     reader: options.reader ?? FILESYSTEM,
     skipped: directory => unreachableDirectories.has(directory)
       || (options.skipPrivacyProtected === true && isPrivacyProtectedPath(directory, home)),
+    excluded: directory => isExcludedGitDirectory(directory, excludedDirs),
   };
   for (const row of directories) {
+    if (policy.excluded(row.cwd)) continue;
     if (policy.skipped(row.cwd)) {
       report.skipped_directories += 1;
       continue;
@@ -335,6 +341,8 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
     }
     const first = row.first_started ? Date.parse(row.first_started) : Number.NaN;
     for (const each of roots) {
+      // A worktree can sit outside the exclusion while its common repo is inside.
+      if (policy.excluded(each)) continue;
       const known = firstSessionByRoot.get(each);
       firstSessionByRoot.set(each, Number.isNaN(first) ? known ?? Number.NaN : Math.min(known ?? first, first));
     }

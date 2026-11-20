@@ -85,8 +85,11 @@ SQLite runs in WAL mode. The schema and compatible migrations live in
   is not one, the repositories directly inside it (`git_commits`, with
   `git_repos` recording each one's last read), read from local git by a
   background child process: hashes, times, authors, subjects, co-author
-  trailers and changed paths, never contents. Merge commits are kept, flagged
-  `is_merge`: they record merged pull requests. Each commit's `landing` says
+  trailers and changed paths, never contents. Configured Git directory
+  exclusions filter local collection before the log is read, including linked
+  worktrees resolved to an excluded common repository. Existing local cache
+  rows can be pruned separately using the same exclusions. Merge commits are
+  kept with `is_merge` to record merged pull requests. Each commit's `landing` says
   whether it reached a main branch: any remote's default, since a fork's
   `origin` is upstream. GitHub's answer for each pull request sessions opened,
   and for each the signed-in user merged in the last year, is cached in

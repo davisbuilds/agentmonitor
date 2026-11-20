@@ -132,6 +132,7 @@ describe('amon service (launchd)', () => {
         AGENTMONITOR_EXECUTIONS_DIR: '/abs/executions',
         AGENTMONITOR_USAGE_BUDGETS_PATH: './config/budgets.json',
         AGENTMONITOR_SKILL_CATALOG_DIRS: ['skills', '~/more-skills', '/abs/skills'].join(path.delimiter),
+        AGENTMONITOR_GIT_EXCLUDE_DIRS: ['reference', '~/mirrors'].join(path.delimiter),
         CODEX_HOME: 'codex-home',
       },
     });
@@ -144,6 +145,7 @@ describe('amon service (launchd)', () => {
       [path.join(root, 'skills'), path.join(home, 'more-skills'), '/abs/skills'].join(path.delimiter),
     );
     assert.equal(built.environment.CODEX_HOME, path.join(root, 'codex-home'));
+    assert.equal(built.environment.AGENTMONITOR_GIT_EXCLUDE_DIRS, [path.join(root, 'reference'), path.join(home, 'mirrors')].join(path.delimiter));
   });
 
   test('knows every path setting the server reads', () => {

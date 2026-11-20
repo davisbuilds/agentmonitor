@@ -93,16 +93,7 @@ export function registerDatabaseCommands(): void {
       'database prune-codex-fragments --apply --expect-digest <sha256-from-preview>',
     ],
     async handler(ctx, args) {
-      const parsed = parseOptionSet(args, new Set(['--expect-digest']), new Set(['--apply']));
-      rejectExtraPositionals(parsed.positionals, 'amon database prune-codex-fragments [--apply --expect-digest <sha256>]');
-      const apply = parsed.flags.has('--apply');
-      const expectDigest = parsed.values.get('--expect-digest');
-      if (apply !== (expectDigest !== undefined)) {
-        throw invalidUsage('--apply and --expect-digest go together: preview first, then apply with its digest.');
-      }
-      if (expectDigest !== undefined && !/^[a-f0-9]{64}$/.test(expectDigest)) {
-        throw invalidUsage('--expect-digest must be the 64-character sha256 a preview printed.');
-      }
+      const expectDigest = parsePruneArgs(args, 'prune-codex-fragments');
       const { config } = await import('../../config.js');
       const { closeDb } = await import('../../db/connection.js');
       const { pruneCodexStreamFragments } = await import('../../db/prune-codex-fragments.js');
@@ -131,6 +122,45 @@ export function registerDatabaseCommands(): void {
         throw new CliError(`Codex fragment prune failed: ${messageForError(error)}`);
       } finally {
         closeDb();
+      }
+    },
+  });
+
+  registerCommand({
+    name: 'database prune-git-cache',
+    group: 'Data Commands',
+    summary: 'Preview or remove cached local Git history for excluded repositories',
+    usage: 'database prune-git-cache [--apply --expect-digest <sha256>] [--json]',
+    examples: [
+      'database prune-git-cache --json',
+      'database prune-git-cache --apply --expect-digest <sha256-from-preview>',
+    ],
+    async handler(ctx, args) {
+      const expectDigest = parsePruneArgs(args, 'prune-git-cache');
+      const { config } = await import('../../config.js');
+      if (config.git.excludedDirs.length === 0) {
+        throw invalidUsage('Set AGENTMONITOR_GIT_EXCLUDE_DIRS to the directories whose Git cache you want to prune.');
+      }
+      const { pruneGitCache } = await import('../../db/prune-git-cache.js');
+      const { RuntimeOwnershipError } = await import('../../runtime-ownership.js');
+      try {
+        const result = pruneGitCache({ dbPath: config.dbPath, excludedDirs: config.git.excludedDirs, expectDigest });
+        if (ctx.global.json) {
+          writeJson(ctx, result);
+          return;
+        }
+        writeHuman(ctx, [
+          result.applied ? 'Excluded Git cache pruned' : 'Git cache prune preview',
+          `  commits: ${result.commits}`,
+          `  repositories: ${result.repositories.length}`,
+          ...result.repositories.map(repo => `    ${JSON.stringify(repo.root)} (${repo.commits} commits)`),
+          `  digest: ${result.digest}`,
+        ].join('\n') + '\n');
+      } catch (error) {
+        if (error instanceof RuntimeOwnershipError) {
+          throw new CliError(`${error.message}\nStop the server before pruning its Git cache.`);
+        }
+        throw new CliError(`Git cache prune failed: ${messageForError(error)}`);
       }
     },
   });
@@ -180,6 +210,19 @@ export function registerDatabaseCommands(): void {
       }
     },
   });
+}
+
+function parsePruneArgs(args: string[], command: string): string | undefined {
+  const parsed = parseOptionSet(args, new Set(['--expect-digest']), new Set(['--apply']));
+  rejectExtraPositionals(parsed.positionals, `amon database ${command} [--apply --expect-digest <sha256>]`);
+  const expectDigest = parsed.values.get('--expect-digest');
+  if (parsed.flags.has('--apply') !== (expectDigest !== undefined)) {
+    throw invalidUsage('--apply and --expect-digest go together: preview first, then apply with its digest.');
+  }
+  if (expectDigest !== undefined && !/^[a-f0-9]{64}$/.test(expectDigest)) {
+    throw invalidUsage('--expect-digest must be the 64-character sha256 a preview printed.');
+  }
+  return expectDigest;
 }
 
 // Decimal units, as Finder and `ls -h` report file sizes on macOS.
