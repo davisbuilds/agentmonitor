@@ -1246,6 +1246,7 @@ the checkout the login service loads.
 The pre-push checks match the required `Lint, Build, Test` CI check:
 
 ```bash
+python3 scripts/check_comments.py
 pnpm lint
 pnpm frontend:check
 pnpm frontend:test

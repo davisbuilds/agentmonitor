@@ -46,6 +46,9 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      - name: Comment ratchet
+        run: python3 scripts/check_comments.py
+
       # eslint/tsc don't see inside .svelte components; svelte-check does.
       - name: Svelte check
         run: pnpm frontend:check

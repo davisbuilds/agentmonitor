@@ -47,7 +47,7 @@ remote settings. These references hold intent, boundaries, and procedures:
 ## Testing
 
 - **Local gate** (the required `Lint, Build, Test` check):
-  `pnpm lint && pnpm frontend:check && pnpm frontend:test && pnpm build && pnpm test && pnpm test:parity:ts && pnpm test:v2:contract:ts`.
+  `python3 scripts/check_comments.py && pnpm lint && pnpm frontend:check && pnpm frontend:test && pnpm build && pnpm test && pnpm test:parity:ts && pnpm test:v2:contract:ts`.
 - The required `E2E (Playwright)` check also runs, after `pnpm build`:
   `pnpm test:browser-runtime`, `pnpm exec playwright test --project=chromium`,
   `pnpm verify:skill-context-built`, and `pnpm test:verify`. Run them locally when a
@@ -76,6 +76,12 @@ remote settings. These references hold intent, boundaries, and procedures:
 
 - **Clarify before building** when a request is vague, contradictory, or skips a
   key decision; clear, well-scoped requests need no interview.
+- **Comments.** Don't add code comments. The one exception is a decision record:
+  start it with `WHY:` and state a non-obvious reason the code can't express.
+  Never justify a shortcut in a comment; fix it or record it in
+  `docs/project/BACKLOG.md`. `python3 scripts/check_comments.py` enforces a
+  ratchet: after deleting comments run it with `--update`, and never raise a
+  count in `.comment-baseline.json`.
 - **Fix small issues now; backlog the rest.** Fix simple, quick, or blocking
   issues in this repo as part of the current change and call them out. Record in
   `docs/project/BACKLOG.md` only what can't be finished now or needs the
