@@ -1276,8 +1276,6 @@ describe('Pricing auto-calculation on ingest', () => {
   });
 });
 
-// ─── Lint test ──────────────────────────────────────────────────────────
-
 describe('Code quality', () => {
   test('ESLint passes on all source files', () => {
     try {

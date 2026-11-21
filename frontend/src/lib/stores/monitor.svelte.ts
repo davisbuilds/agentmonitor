@@ -3,7 +3,6 @@ import { parseTimestamp } from '../format';
 import { mergeSessionAggregates } from '../monitor-session-merge';
 import { addEventUsage } from '../monitor-token-totals';
 
-// --- Stats ---
 let stats = $state<Stats>({
   total_events: 0,
   active_sessions: 0,
@@ -84,7 +83,6 @@ export function incrementEvent(event: AgentEvent): void {
   stats = { ...addEventUsage(stats, event), total_events: stats.total_events + 1 };
 }
 
-// --- Events ---
 let events = $state<AgentEvent[]>([]);
 export function getEvents(): AgentEvent[] { return events; }
 export function setEvents(e: AgentEvent[]): void {
@@ -108,7 +106,6 @@ export function addEvent(event: AgentEvent): void {
   events = [event, ...events].slice(0, 200);
 }
 
-// --- Sessions ---
 let sessions = $state<Session[]>([]);
 const sessionBackfillInFlight = new Set<string>();
 const sessionBackfillRequestedAgain = new Set<string>();
@@ -345,7 +342,6 @@ export function applyLiveEvent(event: AgentEvent): void {
   incrementEvent(event);
 }
 
-// --- Filters ---
 let filters = $state<Record<string, string>>({});
 export function getFilters(): Record<string, string> { return filters; }
 export function setFilters(f: Record<string, string>): void { filters = f; }
@@ -367,12 +363,10 @@ let costWindows = $state<MonitorCostWindowTotals>({ today: null, last30Days: nul
 export function getCostWindows(): MonitorCostWindowTotals { return costWindows; }
 export function setCostWindows(next: MonitorCostWindowTotals): void { costWindows = next; }
 
-// --- Usage Monitor ---
 let quotaMonitor = $state<QuotaMonitorData[]>([]);
 export function getQuotaMonitor(): QuotaMonitorData[] { return quotaMonitor; }
 export function setQuotaMonitor(u: QuotaMonitorData[]): void { quotaMonitor = u; }
 
-// --- Connection ---
 let connectionStatus = $state<'connected' | 'connecting' | 'disconnected'>('connecting');
 export function getConnectionStatus() { return connectionStatus; }
 export function setConnectionStatus(s: 'connected' | 'connecting' | 'disconnected'): void { connectionStatus = s; }

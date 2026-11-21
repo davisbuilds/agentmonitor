@@ -29,8 +29,6 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// --- browsing_sessions table ---
-
 test('browsing_sessions table exists with correct columns', () => {
   const db = getDb();
   const columns = db.prepare("PRAGMA table_info(browsing_sessions)").all() as Array<{ name: string; type: string }>;
@@ -76,8 +74,6 @@ test('browsing_sessions indexes exist', () => {
   assert.ok(indexNames.some(n => n.includes('started_at')), 'should have started_at index');
 });
 
-// --- messages table ---
-
 test('messages table exists with correct columns', () => {
   const db = getDb();
   const columns = db.prepare("PRAGMA table_info(messages)").all() as Array<{ name: string }>;
@@ -118,8 +114,6 @@ test('messages indexes exist', () => {
   assert.ok(indexNames.some(n => n.includes('session_role')), 'should have session_id+role compound index');
 });
 
-// --- pinned_messages table ---
-
 test('pinned_messages table exists with correct columns', () => {
   const db = getDb();
   const columns = db.prepare("PRAGMA table_info(pinned_messages)").all() as Array<{ name: string }>;
@@ -155,8 +149,6 @@ test('pinned_messages indexes exist', () => {
   assert.ok(indexNames.some(n => n.includes('session_ordinal')), 'should have session/ordinal index');
   assert.ok(indexNames.some(n => n.includes('created_at')), 'should have created_at index');
 });
-
-// --- insights table ---
 
 test('insights table exists with correct columns', () => {
   const db = getDb();
@@ -222,8 +214,6 @@ test('insights indexes exist', () => {
   assert.ok(indexNames.some(n => n.includes('scope')), 'should have scope index');
 });
 
-// --- tool_calls table ---
-
 test('tool_calls table exists with correct columns', () => {
   const db = getDb();
   const columns = db.prepare("PRAGMA table_info(tool_calls)").all() as Array<{ name: string }>;
@@ -268,8 +258,6 @@ test('tool_calls indexes exist', () => {
   assert.ok(indexNames.some(n => n.includes('category')), 'should have category index');
   assert.ok(indexNames.some(n => n.includes('tool_name')), 'should have tool_name index');
 });
-
-// --- FTS5 ---
 
 test('messages_fts virtual table exists', () => {
   const db = getDb();
@@ -351,8 +339,6 @@ test('FTS5 stays in sync on UPDATE', () => {
   assert.ok(ftsResults.length > 0, 'new content should be searchable');
 });
 
-// --- watched_files table ---
-
 test('watched_files table exists with correct columns', () => {
   const db = getDb();
   const columns = db.prepare("PRAGMA table_info(watched_files)").all() as Array<{ name: string }>;
@@ -385,8 +371,6 @@ test('watched_files dedup: skip unchanged hash', () => {
   const shouldSkip = existing.file_hash === 'hash_aaa';
   assert.ok(shouldSkip, 'same hash should skip');
 });
-
-// --- Backward compatibility ---
 
 test('existing tables are unmodified', () => {
   const db = getDb();

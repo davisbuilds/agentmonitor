@@ -59,8 +59,6 @@ test('formatOpsMetrics reports an empty result rather than a bare header', () =>
   assert.equal(formatOpsMetrics([]), '(no rows)');
 });
 
-// --- End-to-end command wiring --------------------------------------------
-
 class CaptureStream extends Writable {
   output = '';
   override _write(chunk: Buffer | string, _encoding: BufferEncoding, callback: (error?: Error | null) => void): void {

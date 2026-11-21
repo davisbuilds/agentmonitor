@@ -1031,8 +1031,6 @@ export interface TraceQualityObservationTreeNode extends TraceQualityObservation
   children: TraceQualityObservationTreeNode[];
 }
 
-// --- API client ---
-
 type Filters = Record<string, string>;
 
 function qs(params: Record<string, string | number | boolean | undefined>): string {

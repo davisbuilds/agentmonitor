@@ -26,8 +26,6 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// --- Sample JSONL content ---
-
 function sampleJsonl(lines: object[]): string {
   return lines.map(l => JSON.stringify(l)).join('\n') + '\n';
 }
@@ -218,8 +216,6 @@ const SESSION_WITH_PROGRESS = sampleJsonl([
     subtype: 'stop_hook_summary',
   },
 ]);
-
-// --- Parser tests ---
 
 describe('parseSessionMessages', () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -433,8 +429,6 @@ describe('parseSessionMessages', () => {
   });
 });
 
-// --- Category normalization tests ---
-
 describe('categorizeToolName', () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let categorizeToolName: typeof import('../src/parser/claude-code.js').categorizeToolName;
@@ -478,8 +472,6 @@ describe('categorizeToolName', () => {
     assert.equal(categorizeToolName('SomethingNew'), 'Other');
   });
 });
-
-// --- DB insertion integration tests ---
 
 describe('insertParsedSession', () => {
   /* eslint-disable @typescript-eslint/consistent-type-imports */

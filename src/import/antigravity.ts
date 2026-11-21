@@ -42,8 +42,6 @@ export function hashFile(filePath: string): string {
   return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
 }
 
-// --- step kind → event taxonomy ---------------------------------------------
-
 const USER_PROMPT_KINDS = new Set(['user_input', 'plan_input', 'ask_question']);
 const RESPONSE_KINDS = new Set([
   'planner_response', 'suggested_responses', 'notify_user', 'ephemeral_message',
@@ -84,8 +82,6 @@ export function stepKindToEvent(kind: string | undefined): { type: EventType; to
   }
   return { type: 'response' }; // typed generic; kind preserved in metadata, never dropped
 }
-
-// --- parse ------------------------------------------------------------------
 
 interface StepRow { idx: number; step_type: number; status: number; step_payload: Buffer; metadata: Buffer | null }
 interface GenRow { idx: number; data: Buffer }

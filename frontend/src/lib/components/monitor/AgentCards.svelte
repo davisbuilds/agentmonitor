@@ -66,7 +66,6 @@
         class="w-full cursor-pointer rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-line-strong"
         onclick={() => openSession(session.id)}
       >
-        <!-- Header -->
         <div class="mb-2 flex items-start justify-between gap-3">
           <div class="flex min-w-0 items-start gap-2">
             <StatusDot status={session.status} class="mt-1.5" />
@@ -87,7 +86,6 @@
           </div>
         </div>
 
-        <!-- Project/Branch -->
         {#if session.project || session.branch}
           <div class="mb-2 truncate text-meta text-text-muted">
             {#if session.project}<span class="text-text">{session.project}</span>{/if}
@@ -95,7 +93,6 @@
           </div>
         {/if}
 
-        <!-- Metrics -->
         <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-text-muted">
           <span><span class="tabular font-mono text-text">{session.event_count || 0}</span> events</span>
           <span><span class="tabular font-mono text-text">{formatNumber(session.tokens_in || 0)}</span> in</span>
@@ -114,7 +111,6 @@
           {/if}
         </div>
 
-        <!-- Mini event feed -->
         {#if recentEvents.length > 0}
           <div class="max-h-48 space-y-1 overflow-hidden">
             {#each collapseEventRuns(recentEvents.slice(0, 8), eventLabel, (e) => `${eventLabel(e)}|${eventStatusDot(e)}`) as run}

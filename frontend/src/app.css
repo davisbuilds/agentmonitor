@@ -65,7 +65,6 @@
   /* ---- Elevation: borders carry structure; shadow only for floating layers ---- */
   --shadow-overlay: 0 12px 32px -8px oklch(0 0 0 / 0.55), 0 4px 12px -4px oklch(0 0 0 / 0.4);
 
-  /* ---- Motion ---- */
   --default-transition-duration: 140ms;
   --default-transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out */
 }

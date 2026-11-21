@@ -369,8 +369,6 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// --- Sessions endpoints ---
-
 describe('GET /api/v2/sessions', () => {
   test('returns paginated session list', async () => {
     const res = await fetch(`${baseUrl}/api/v2/sessions`);
@@ -760,8 +758,6 @@ describe('GET /api/v2/sessions/:id/children', () => {
   });
 });
 
-// --- Live endpoints ---
-
 describe('GET /api/v2/live/settings', () => {
   test('returns live settings and capture metadata', async () => {
     const res = await fetch(`${baseUrl}/api/v2/live/settings`);
@@ -954,8 +950,6 @@ describe('GET /api/v2/live/sessions/:id/items', () => {
   });
 });
 
-// --- Search endpoint ---
-
 describe('GET /api/v2/search', () => {
   test('returns matching results for FTS query', async () => {
     const res = await fetch(`${baseUrl}/api/v2/search?q=alpha`);
@@ -1038,8 +1032,6 @@ describe('GET /api/v2/search', () => {
     assert.ok(body.cursor, 'relevance search should return a cursor when the page is full');
   });
 });
-
-// --- Analytics endpoints ---
 
 describe('GET /api/v2/analytics/summary', () => {
   test('returns correct totals', async () => {
@@ -1899,8 +1891,6 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
     }
   });
 });
-
-// --- Metadata endpoints ---
 
 describe('GET /api/v2/projects', () => {
   test('returns distinct project names', async () => {

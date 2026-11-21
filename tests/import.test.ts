@@ -10,8 +10,6 @@ import type { AddressInfo } from 'node:net';
 import { parseClaudeCodeFile, discoverClaudeCodeLogs } from '../src/import/claude-code.js';
 import { parseCodexFile, discoverCodexLogs } from '../src/import/codex.js';
 
-// ─── Claude Code parser unit tests ──────────────────────────────────────
-
 describe('Claude Code log parser', () => {
   let tmpDir: string;
 
@@ -354,8 +352,6 @@ describe('Claude Code log parser', () => {
   });
 });
 
-// ─── Claude Code discovery ──────────────────────────────────────────────
-
 describe('Claude Code log discovery', () => {
   let tmpDir: string;
 
@@ -405,8 +401,6 @@ describe('Claude Code log discovery', () => {
     assert.deepEqual(files, []);
   });
 });
-
-// ─── Codex parser unit tests ────────────────────────────────────────────
 
 describe('Codex log parser', () => {
   let tmpDir: string;
@@ -802,8 +796,6 @@ describe('Codex log parser', () => {
     assert.equal(events[0].project, 'my-project');
   });
 });
-
-// ─── Codex discovery ────────────────────────────────────────────────────
 
 describe('Codex log discovery', () => {
   let tmpDir: string;

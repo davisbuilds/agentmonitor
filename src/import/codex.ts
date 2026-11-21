@@ -11,8 +11,6 @@ import { readTranscriptFile, transcriptBaseName } from '../util/transcript-file.
 import { codexInvocationMode } from '../util/invocation-mode.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 
-// ─── Codex JSONL line types ─────────────────────────────────────────────
-
 interface CodexTokenUsage {
   input_tokens?: number;
   cached_input_tokens?: number;
@@ -86,8 +84,6 @@ const addUsage = (a: CodexUsage3, b: CodexUsage3): CodexUsage3 => ({ input: a.in
 const subtractUsage = (a: CodexUsage3, b: CodexUsage3): CodexUsage3 => ({ input: a.input - b.input, cached: a.cached - b.cached, output: a.output - b.output });
 const sameUsage = (a: CodexUsage3, b: CodexUsage3): boolean => a.input === b.input && a.cached === b.cached && a.output === b.output;
 
-// ─── Discover JSONL files ──────────────────────────────────────────────
-
 export function discoverCodexLogs(
   baseDir?: string,
   options: { excludePatterns?: string[] } = {},
@@ -111,8 +107,6 @@ function readCodexModel(codexHome?: string): string | undefined {
     return undefined;
   }
 }
-
-// ─── Parse a single JSONL file ──────────────────────────────────────────
 
 export function parseCodexFile(
   filePath: string,

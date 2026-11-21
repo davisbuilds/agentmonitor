@@ -16,8 +16,6 @@ import {
   uniqueSession,
 } from './helpers/runtime.js';
 
-// ==================== SSE endpoint ====================
-
 test('GET /api/stream returns text/event-stream content type', async () => {
   const controller = new AbortController();
   try {

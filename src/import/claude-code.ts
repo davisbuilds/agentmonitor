@@ -7,8 +7,6 @@ import { discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { claudeInvocationMode } from '../util/invocation-mode.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 
-// ─── Claude Code JSONL line types ──────────────────────────────────────
-
 interface ClaudeCodeUsage {
   input_tokens?: number;
   output_tokens?: number;
@@ -59,8 +57,6 @@ interface ClaudeCodeLogLine {
   output?: unknown;
 }
 
-// ─── Event type mapping ─────────────────────────────────────────────────
-
 const TYPE_MAP: Record<string, EventType> = {
   tool_use: 'tool_use',
   tool_result: 'tool_use',
@@ -70,8 +66,6 @@ const TYPE_MAP: Record<string, EventType> = {
   session_end: 'session_end',
 };
 
-// ─── Discover JSONL files ──────────────────────────────────────────────
-
 export function discoverClaudeCodeLogs(
   baseDir?: string,
   options: { excludePatterns?: string[] } = {},
@@ -80,8 +74,6 @@ export function discoverClaudeCodeLogs(
   const projectsDir = path.join(claudeDir, 'projects');
   return discoverJsonlFilesRecursive(projectsDir, { excludePatterns: options.excludePatterns });
 }
-
-// ─── Parse a single JSONL file ──────────────────────────────────────────
 
 /**
  * An event plus the id the positional scheme would have given it. The importer

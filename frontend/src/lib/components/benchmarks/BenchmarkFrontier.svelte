@@ -78,7 +78,6 @@
       />
     {/each}
 
-    <!-- Pareto frontier polyline -->
     {#if geometry.frontier.length > 1}
       <polyline
         points={frontierPath}
@@ -118,7 +117,6 @@
       />
     {/each}
 
-    <!-- hover tooltip -->
     {#if hovered}
       {@const p = hovered}
       <g pointer-events="none">
@@ -142,7 +140,6 @@
     {/if}
   </PlotFrame>
 
-  <!-- legend + unpriced note -->
   <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-text-faint">
     <span class="inline-flex items-center gap-1">
       <svg width="16" height="6" aria-hidden="true"

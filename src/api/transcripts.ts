@@ -3,8 +3,6 @@ import { getSessionTranscript, type TranscriptEvent } from '../db/queries.js';
 
 export const transcriptsRouter = Router();
 
-// --- Transcript entry types ---
-
 interface TranscriptEntry {
   role: 'system' | 'user' | 'assistant' | 'tool';
   type: string;

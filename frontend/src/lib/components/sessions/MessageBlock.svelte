@@ -68,7 +68,6 @@
   }`}
   data-message-ordinal={message.ordinal}
 >
-  <!-- Role header -->
   <div class="mb-1 flex items-center gap-2">
     <span class="text-meta font-medium {roleColor}">{roleLabel}</span>
     {#if message.timestamp}
@@ -102,7 +101,6 @@
     {/if}
   </div>
 
-  <!-- Content blocks -->
   {#each blocks as block, i}
     {#if block.type === 'text' && block.text}
       {@const parsedText = parseSessionText(block.text)}

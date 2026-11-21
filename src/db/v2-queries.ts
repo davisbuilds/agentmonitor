@@ -226,8 +226,6 @@ export function lookupSessionTitles(ids: readonly string[]): Map<string, Session
   return titles;
 }
 
-// --- Sessions ---
-
 interface SessionsResult {
   data: BrowsingSessionRow[];
   total: number;
@@ -692,8 +690,6 @@ export function getSessionChildren(parentId: string): BrowsingSessionRow[] {
   `).all(parent.agent, parent.session_key) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 }
 
-// --- Live sessions ---
-
 interface LiveSessionsResult {
   data: LiveSessionRow[];
   total: number;
@@ -864,8 +860,6 @@ export function getTraceQualitySessionSourceRows(sessionId: string): TraceQualit
     toolCalls,
   };
 }
-
-// --- Messages ---
 
 interface MessagesResult {
   data: MessageRow[];
@@ -1116,8 +1110,6 @@ export function unpinMessage(sessionId: string, messageId: number): { removed: b
   return { removed: result.changes > 0, message_ordinal: storedPin?.message_ordinal ?? null };
 }
 
-// --- Search ---
-
 interface FtsSearchResult {
   data: SearchResultRow[];
   total: number;
@@ -1279,7 +1271,6 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   return { data, total, cursor };
 }
 
-// --- Analytics ---
 type AnalyticsCoverageScope = AnalyticsCoverage['metric_scope'];
 
 interface AnalyticsFilterState {
@@ -3977,8 +3968,6 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
   `).all(...filter.values) as AgentComparisonRow[];
 }
 
-// --- Expected skill realizations ---
-
 export interface SessionSkillContextSessionRow {
   id: string;
   agent: string;
@@ -4189,8 +4178,6 @@ export function selectSessionExpectedRealizationPersistenceRow(
     WHERE association.session_id = ?
   `).get(sessionId) as ExpectedRealizationPersistenceRow | undefined;
 }
-
-// --- Usage ---
 
 interface UsageFilterState {
   conditions: string[];
@@ -5495,8 +5482,6 @@ function getUsagePriorCosts(params: UsageParams = {}): UsagePriorCosts {
   };
 }
 
-// --- Insights ---
-
 function parseInsightRow(row: InsightDbRow): InsightRow {
   return {
     id: row.id,
@@ -5642,8 +5627,6 @@ export function deleteInsight(id: number): boolean {
   const result = db.prepare('DELETE FROM insights WHERE id = ?').run(id);
   return result.changes > 0;
 }
-
-// --- Metadata ---
 
 export function getDistinctProjects(): string[] {
   const db = getDb();
@@ -5975,8 +5958,6 @@ export function getOperationalMetricSummary(query: OperationalMetricQuery = {}):
     last_seen: row.last_seen,
   }));
 }
-
-// --- Unpriced model usage ---
 
 /** A model whose recent usage carries no cost because no rate card matches it. */
 export interface UnpricedModelUsage {

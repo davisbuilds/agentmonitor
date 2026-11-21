@@ -108,7 +108,6 @@
 
 <main class="flex-1 overflow-hidden flex flex-col p-4 sm:p-6">
   {#if store.selectedStudyId}
-    <!-- Study detail -->
     <div class="mb-3">
       <Button variant="ghost" onclick={() => void store.select(null)}>← Studies</Button>
     </div>
@@ -185,7 +184,6 @@
       </div>
     {/if}
   {:else}
-    <!-- Studies list -->
     <SectionHeader title="Benchmarks" count={store.studies.length ? `${store.studies.length} studies` : undefined} />
     {#if store.loading}
       <p class="text-meta text-text-muted">Loading studies…</p>
