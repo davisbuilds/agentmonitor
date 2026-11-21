@@ -16,8 +16,6 @@ import { parseCodexSessionRollouts } from './codex-session.js';
 
 const CODEX_LINEAGE_VERSION = 'lineage-v2:';
 
-// ─── Types ──────────────────────────────────────────────────────────────
-
 export type ImportSource = 'claude-code' | 'codex' | 'antigravity' | 'all';
 
 export interface ImportOptions {
@@ -56,8 +54,6 @@ export interface ImportResult {
   totalDuplicates: number;
   skippedFiles: number;
 }
-
-// ─── Import state DB helpers ────────────────────────────────────────────
 
 interface ImportStateRow {
   file_path: string;
@@ -124,8 +120,6 @@ function isUnchangedOnDisk(filePath: string, stamp: DiskStamp, options: ImportOp
     && state.file_mtime === stamp.mtime
     && state.file_size === stamp.size;
 }
-
-// ─── Core import logic ──────────────────────────────────────────────────
 
 function importEvents(
   events: ParsedImportEvent[],
@@ -435,8 +429,6 @@ function recordImportState(
   const isDateScoped = options.from !== undefined || options.to !== undefined;
   if (!options.dryRun && !isDateScoped) setImportState(filePath, hash, size, mtime, source, imported);
 }
-
-// ─── Public API ─────────────────────────────────────────────────────────
 
 export function runImport(options: ImportOptions): ImportResult {
   const files: ImportFileResult[] = [];

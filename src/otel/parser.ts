@@ -22,8 +22,6 @@ interface OtelResource {
   attributes?: OtelKeyValue[];
 }
 
-// ─── Logs ───────────────────────────────────────────────────────────────
-
 interface OtelLogRecord {
   timeUnixNano?: string;
   observedTimeUnixNano?: string;
@@ -52,8 +50,6 @@ interface OtelResourceLogs {
 export interface OtelLogsPayload {
   resourceLogs?: OtelResourceLogs[];
 }
-
-// ─── Metrics ────────────────────────────────────────────────────────────
 
 interface OtelNumberDataPoint {
   asInt?: string | number;
@@ -97,8 +93,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
 }
-
-// ─── Attribute helpers ──────────────────────────────────────────────────
 
 function getAttr(attrs: OtelKeyValue[] | undefined, key: string): string | undefined {
   if (!attrs) return undefined;
@@ -309,8 +303,6 @@ function splitCommaSeparatedList(value: string | undefined): string[] | undefine
   return items.length > 0 ? items : undefined;
 }
 
-// ─── Patch parsing helper ────────────────────────────────────────────────
-
 export interface PatchMeta {
   file_path: string;
   lines_added: number;
@@ -334,8 +326,6 @@ export function parsePatchMeta(input: string): PatchMeta | null {
 
   return { file_path: filePath, lines_added: added, lines_removed: removed };
 }
-
-// ─── Event name → event_type mapping ────────────────────────────────────
 
 const CLAUDE_EVENT_MAP: Record<string, EventType> = {
   'claude_code.tool_result': 'tool_use',
@@ -488,8 +478,6 @@ function hasCodexTransportFailure(
     || Boolean(getCodexErrorMessage(logRecord, bodyJson))
   );
 }
-
-// ─── Log parser ─────────────────────────────────────────────────────────
 
 function resolveServiceName(resourceAttrs: OtelKeyValue[] | undefined): string {
   const svc = getAttr(resourceAttrs, 'service.name') ?? '';
@@ -966,8 +954,6 @@ export function parseOtelLogs(payload: OtelLogsPayload): NormalizedIngestEvent[]
 
   return events;
 }
-
-// ─── Metric parser with cumulative-to-delta ─────────────────────────────
 
 // In-memory store for cumulative-to-delta conversion.
 // Keyed by `service|metricName|model|type` → last seen value.

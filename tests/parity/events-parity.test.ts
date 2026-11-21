@@ -16,8 +16,6 @@ import {
   uniqueEventId,
 } from './helpers/runtime.js';
 
-// ==================== Health ====================
-
 test('GET /api/health returns 200 with expected shape', async () => {
   const res = await getJson('/api/health');
   assert.equal(res.status, 200);
@@ -26,8 +24,6 @@ test('GET /api/health returns 200 with expected shape', async () => {
   assert.equal(typeof body.uptime, 'number');
   assert.equal(typeof body.sse_clients, 'number');
 });
-
-// ==================== Single event ingest ====================
 
 test('POST /api/events with valid payload returns 201', async () => {
   const res = await postJson('/api/events', {
@@ -175,8 +171,6 @@ test('POST /api/events with null event_id does not dedup', async () => {
   assert.equal(second.status, 201);
 });
 
-// ==================== Batch ingest ====================
-
 test('POST /api/events/batch with valid events returns 201', async () => {
   const res = await postJson('/api/events/batch', {
     events: [
@@ -265,8 +259,6 @@ test('POST /api/events/batch dedup counted separately', async () => {
   assert.equal(body.received, 1);
   assert.equal(body.duplicates, 1);
 });
-
-// ==================== Stats ====================
 
 test('GET /api/stats returns expected shape', async () => {
   const res = await getJson('/api/stats');

@@ -192,8 +192,6 @@ function buildMetricsPayload(opts: {
   };
 }
 
-// ─── Logs endpoint tests ────────────────────────────────────────────────
-
 describe('POST /api/otel/v1/logs', () => {
   test('returns 415 for protobuf content-type', async () => {
     const res = await postProtobuf(`${baseUrl}/api/otel/v1/logs`);
@@ -515,8 +513,6 @@ describe('POST /api/otel/v1/logs', () => {
     assert.equal(meta.prompt, undefined);
   });
 });
-
-// ─── Metrics endpoint tests ────────────────────────────────────────────
 
 describe('OTLP events meet the ingest contract', () => {
   test('a record with negative usage is rejected, and the rest of the batch still lands', async () => {
@@ -1220,8 +1216,6 @@ describe('POST /api/otel/v1/metrics', () => {
   });
 });
 
-// ─── Traces endpoint tests ─────────────────────────────────────────────
-
 describe('a metric usage row is dated at the start of the interval it covers', () => {
   // The OTEL-vs-import rule compares this date with the session's imported
   // usage, so a point exported after a transcript's last request still counts
@@ -1308,8 +1302,6 @@ describe('POST /api/otel/v1/traces', () => {
     assert.match(body.partialSuccess?.errorMessage ?? '', /not implemented/);
   });
 });
-
-// ─── Codex-specific tests ──────────────────────────────────────────────
 
 describe('Codex OTLP integration', () => {
   test('recognizes codex_cli_rs service name as codex agent type', async () => {

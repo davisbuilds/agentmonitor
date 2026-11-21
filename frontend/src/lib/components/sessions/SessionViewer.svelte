@@ -381,7 +381,6 @@
 </script>
 
 <main class="flex-1 min-h-0 overflow-hidden flex flex-col">
-  <!-- Header -->
   <div class="border-b border-line px-4 sm:px-6 py-3 flex items-center gap-3 shrink-0">
     <Button variant="ghost" size="sm" onclick={onclose}>← Back</Button>
 
@@ -466,7 +465,6 @@
     </div>
   {/if}
 
-  <!-- Children -->
   {#if children.length > 0}
     <div class="border-b border-line px-4 sm:px-6 py-2 flex flex-wrap items-center gap-1.5 text-meta text-text-faint">
       <span class="mr-1">Subagents:</span>
@@ -485,7 +483,6 @@
     </div>
   {/if}
 
-  <!-- Messages -->
   <div class="min-h-0 flex-1 overflow-hidden px-4 sm:px-6 py-4">
     <div class="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
       <div

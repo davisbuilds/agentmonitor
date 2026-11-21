@@ -22,7 +22,6 @@ const codexSessions = path.join(codexDir, 'sessions', '2026', '10', '27');
 type Line = Record<string, unknown>;
 const jsonl = (lines: Line[]) => lines.map(line => JSON.stringify(line)).join('\n');
 
-// ─── Codex fixtures ─────────────────────────────────────────────────────
 const PER_REQUEST = '019f2222-0000-7000-8000-000000000001';
 const LEGACY = '019f2222-0000-7000-8000-000000000002';
 const UNIMPORTED = '019f2222-0000-7000-8000-000000000003';
@@ -45,7 +44,6 @@ const perRequestRollout = (id: string): Line[] => [
 const writeRollout = (id: string, lines: Line[]) =>
   fs.writeFileSync(path.join(codexSessions, `rollout-2026-10-27T10-00-00-${id}.jsonl`), jsonl(lines));
 
-// ─── Claude fixtures ────────────────────────────────────────────────────
 const CLAUDE = '11111111-2222-4333-8444-777777777777';
 const assistant = (timestamp: string): Line => ({ type: 'assistant', timestamp, sessionId: CLAUDE, message: { id: `msg-${timestamp}` } });
 const costState: Line = {

@@ -69,8 +69,6 @@ async function seedTestData() {
   assert.ok(res.status >= 200 && res.status < 300, `batch ingest failed: ${res.status}`);
 }
 
-// ─── Stats API ──────────────────────────────────────────────────────────
-
 describe('GET /api/stats', () => {
   test('includes provider quota snapshots on initial load', async () => {
     await seedTestData();
@@ -186,8 +184,6 @@ describe('GET /api/stats', () => {
   });
 });
 
-// ─── Tool Analytics API ─────────────────────────────────────────────────
-
 describe('GET /api/stats/tools', () => {
   test('returns tool analytics with frequency, error rate, avg duration', async () => {
     await seedTestData();
@@ -247,8 +243,6 @@ describe('GET /api/stats/tools', () => {
     assert.ok(body.tools.some(t => t.tool_name === 'Bash'));
   });
 });
-
-// ─── Cost API ───────────────────────────────────────────────────────────
 
 describe('GET /api/stats/cost', () => {
   test('returns cost breakdowns by model, session, and timeline', async () => {
@@ -431,8 +425,6 @@ describe('GET /api/filter-options', () => {
     assert.ok(body.models.includes('o3'));
   });
 });
-
-// ─── Transcript API ─────────────────────────────────────────────────────
 
 describe('GET /api/sessions/:id/transcript', () => {
   test('returns ordered transcript entries from session events', async () => {

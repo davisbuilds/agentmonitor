@@ -16,8 +16,6 @@ import {
 } from '../skills/invocation-detection.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 
-// --- Codex JSONL line types ---
-
 interface CodexTokenUsage {
   input_tokens?: number;
   cached_input_tokens?: number;

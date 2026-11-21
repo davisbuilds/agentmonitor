@@ -295,8 +295,6 @@ class AnalyticsFiltersStore {
     this.notify();
   }
 
-  // --- Usage specialized filters ---
-
   setModel(model: string): void {
     this.model = model;
     this.syncHash();
@@ -344,8 +342,6 @@ class AnalyticsFiltersStore {
     this.skillSort = 'volume';
     this.syncHash();
   }
-
-  // --- Insights specialized filters ---
 
   setKind(kind: InsightKind): void {
     this.kind = kind;

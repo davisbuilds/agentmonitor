@@ -42,7 +42,6 @@
   {/if}
 
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-12">
-    <!-- Trace list -->
     <section class="rounded-lg border border-line bg-surface xl:col-span-4">
       <div class="border-b border-line px-4 py-3">
         <div class="flex items-center gap-1.5">
@@ -87,7 +86,6 @@
       </div>
     </section>
 
-    <!-- Trace inspector -->
     <section class="rounded-lg border border-line bg-surface xl:col-span-8">
       {#if tq.detailLoading}
         <div class="px-4 py-16 text-center text-meta text-text-muted">Loading trace…</div>
@@ -118,7 +116,6 @@
           <div class="bg-surface px-4 py-3"><Stat label="Cost" value={formatCost(d.aggregate.total_cost_usd)} /></div>
         </div>
 
-        <!-- Observation tree -->
         <div class="border-b border-line">
           <div class="px-4 py-2 text-meta font-medium text-text">Observations</div>
           {#if tq.tree.length === 0}

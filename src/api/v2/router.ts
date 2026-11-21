@@ -187,8 +187,6 @@ function readTraceQualityParams(req: Request): {
   };
 }
 
-// --- Sessions ---
-
 v2Router.get('/activity/daily', (req: Request, res: Response) => {
   const { since, until } = req.query;
   const validDate = (value: unknown): value is string => typeof value === 'string'
@@ -535,8 +533,6 @@ v2Router.get('/sessions/:id/children', (req: Request, res: Response) => {
   }
 });
 
-// --- Search ---
-
 v2Router.get('/pins', (req: Request, res: Response) => {
   try {
     res.json({ data: listPinnedMessages({ project: req.query.project as string | undefined }) });
@@ -545,8 +541,6 @@ v2Router.get('/pins', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to list pins' });
   }
 });
-
-// --- Live ---
 
 function splitKinds(value: string | undefined): string[] | undefined {
   if (!value) return undefined;
@@ -664,8 +658,6 @@ v2Router.get('/search', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Search failed' });
   }
 });
-
-// --- Analytics ---
 
 function readAnalyticsParams(req: Request): {
   project?: string;
@@ -982,8 +974,6 @@ v2Router.get('/analytics/agents', (req: Request, res: Response) => {
   }
 });
 
-// --- Usage ---
-
 v2Router.get('/usage/overview', (req: Request, res: Response) => {
   try {
     res.json(getUsageOverview(readAnalyticsParams(req)));
@@ -1160,8 +1150,6 @@ v2Router.get('/usage/tier-feedback', (req: Request, res: Response) => {
   }
 });
 
-// --- Trace quality ---
-
 // Lean view (reframe Phase 2): the trace list comes from session_trace_summary
 // and per-session detail is projected on-demand — one trace per session.
 v2Router.get('/trace-quality/traces', (req: Request, res: Response) => {
@@ -1207,8 +1195,6 @@ v2Router.get('/trace-quality/traces/:id', (req: Request, res: Response) => {
 // Scores / findings / prompts / per-observation detail were removed in the
 // trace-quality reframe (Phase 3): that eval depth is deferred to the export
 // (Langfuse/medallion), see docs/project/POSITIONING.md.
-
-// --- Insights ---
 
 v2Router.get('/insights', (req: Request, res: Response) => {
   try {
@@ -1336,8 +1322,6 @@ v2Router.delete('/insights/:id', (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to delete insight' });
   }
 });
-
-// --- Metadata ---
 
 v2Router.get('/projects', (_req: Request, res: Response) => {
   try {

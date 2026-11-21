@@ -2,8 +2,6 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
-// ─── Types ──────────────────────────────────────────────────────────────
-
 interface PricingDataRates {
   inputCostPerMTok: number;
   outputCostPerMTok: number;
@@ -94,8 +92,6 @@ export interface ResolvedModelPricing {
   canonicalModel: string;
   pricing: ModelPricing;
 }
-
-// ─── PricingRegistry ────────────────────────────────────────────────────
 
 const M_TOK = 1_000_000;
 

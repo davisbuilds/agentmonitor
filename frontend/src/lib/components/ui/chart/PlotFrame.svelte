@@ -139,6 +139,5 @@
     >{yTitle}</text>
   {/if}
 
-  <!-- consumer marks -->
   {@render children?.()}
 </svg>

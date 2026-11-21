@@ -12,8 +12,6 @@ import { extractExplicitSkillName } from '../skills/invocation-detection.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 import { promptTitleFromTexts } from './session-title.js';
 
-// --- Tool category normalization ---
-
 const CATEGORY_MAP: Record<string, string> = {
   Read: 'Read',
   NotebookRead: 'Read',
@@ -35,8 +33,6 @@ const CATEGORY_MAP: Record<string, string> = {
 export function categorizeToolName(toolName: string): string {
   return CATEGORY_MAP[toolName] ?? 'Other';
 }
-
-// --- JSONL line types ---
 
 export interface ContentBlock {
   type: string;
@@ -94,8 +90,6 @@ interface ClaudeCodeLine {
   entrypoint?: string;
   promptSource?: string;
 }
-
-// --- Parsed output types ---
 
 export interface ParsedMessage {
   session_id: string;
@@ -661,8 +655,6 @@ export function parseSessionChunk(
     resumable: true,
   };
 }
-
-// --- Insert parsed session into database ---
 
 interface StoredMessageRow {
   id: number;

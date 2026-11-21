@@ -22,13 +22,9 @@ import { setSessionMode } from '../db/queries.js';
 import { reparseRequested } from '../db/reparse-marker.js';
 import { createCodexRolloutInventory, currentCodexRollout, resolveCodexRolloutHistory, type CodexRolloutInventory } from '../util/codex-rollout-history.js';
 
-// --- File hashing ---
-
 function hashBytes(bytes: Buffer): string {
   return crypto.createHash('sha256').update(bytes).digest('hex');
 }
-
-// --- Resuming a parse ---
 
 /**
  * Where the last parse of a transcript stopped. Transcripts grow by appending,
@@ -133,14 +129,10 @@ function settleCheckpoint<State>(filePath: string, bytes: Buffer, fileHash: stri
   }
 }
 
-// --- Discover session files ---
-
 export function discoverSessionFiles(claudeDir: string, options: SyncOptions = {}): string[] {
   const projectsDir = path.join(claudeDir, 'projects');
   return discoverJsonlFilesRecursive(projectsDir, { excludePatterns: options.excludePatterns });
 }
-
-// --- Sync a single session file ---
 
 export type SyncResult = 'parsed' | 'skipped' | 'error';
 
@@ -305,8 +297,6 @@ export function syncSessionFile(db: Database.Database, filePath: string, options
   return syncSessionFileDetailed(db, filePath, options).result;
 }
 
-// --- Sync all discovered files ---
-
 export interface SyncStats {
   parsed: number;
   skipped: number;
@@ -325,8 +315,6 @@ export function syncAllFiles(db: Database.Database, claudeDir: string, options: 
 
   return stats;
 }
-
-// --- Codex session file support ---
 
 export function discoverCodexSessionFiles(codexHome?: string, options: SyncOptions = {}): string[] {
   const base = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
@@ -473,8 +461,6 @@ export function syncAllCodexFiles(db: Database.Database, codexHome?: string, opt
 
   return stats;
 }
-
-// --- Antigravity conversation DB support ---
 
 /**
  * Change token for an Antigravity conversation DB. Folds the SQLite sidecars

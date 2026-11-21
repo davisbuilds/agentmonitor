@@ -159,13 +159,9 @@ export interface PinnedMessageRow {
   session_title: string | null;
 }
 
-// --- Aggregate query result ---
-
 export interface CountResult {
   c: number;
 }
-
-// --- Analytics response types ---
 
 export interface AnalyticsSummary {
   total_sessions: number;
@@ -1608,8 +1604,6 @@ export interface SearchResultRow {
   session_title: string | null;
 }
 
-// --- Trace quality response types ---
-
 export interface TraceQualityAggregateMetrics {
   observation_count: number;
   error_count: number;
@@ -1791,8 +1785,6 @@ export interface TraceQualityFinding {
   evidence: TraceQualityFindingEvidence;
   created_at: string | null;
 }
-
-// --- API request params ---
 
 export interface SessionsListParams {
   limit?: number;

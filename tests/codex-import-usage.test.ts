@@ -708,8 +708,6 @@ describe('on the counter path, a compaction request is billed once', () => {
   });
 });
 
-// ─── Per-request usage ──────────────────────────────────────────────────
-
 const requestId = compactionId;
 const turnAbortedAt = (minute: number): Line => ({
   type: 'event_msg', timestamp: `2026-07-12T10:${String(minute).padStart(2, '0')}:40Z`, payload: { type: 'turn_aborted', reason: 'interrupted' },

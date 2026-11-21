@@ -18,8 +18,6 @@ import {
   usageMetricPresenceCondition,
 } from './usage-reconciliation.js';
 
-// --- Agents ---
-
 function upsertAgent(id: string, agentType: string, name?: string): void {
   const db = getDb();
   db.prepare(`
@@ -28,8 +26,6 @@ function upsertAgent(id: string, agentType: string, name?: string): void {
     ON CONFLICT(id) DO UPDATE SET last_seen_at = datetime('now')
   `).run(id, agentType, name || null);
 }
-
-// --- Sessions ---
 
 function upsertSession(
   id: string,
@@ -404,8 +400,6 @@ function endSession(sessionId: string): void {
     WHERE id = ?
   `).run(sessionId);
 }
-
-// --- Events ---
 
 export interface EventRow {
   id: number;
@@ -1007,8 +1001,6 @@ export function listTraceQualityEventSourcesForSession(sessionId: string): Event
   `).all(sessionId) as EventRow[];
 }
 
-// --- Stats ---
-
 /** One agent's usage in a Monitor total. `tokens_in` is uncached input only. */
 export interface MonitorAgentUsage {
   tokens_in: number;
@@ -1231,8 +1223,6 @@ export function getStatsForBroadcast(): Stats {
   }
   return cachedBroadcastStats;
 }
-
-// --- Provider Quotas ---
 
 export type ProviderName = 'claude' | 'codex';
 
@@ -1636,8 +1626,6 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
   });
 }
 
-// --- Filter Options ---
-
 export interface FilterOptions {
   agent_types: string[];
   event_types: string[];
@@ -1689,8 +1677,6 @@ export function getFilterOptions(): FilterOptions {
 
   return { agent_types: agentTypes, event_types: eventTypes, tool_names: toolNames, models, projects, branches, sources };
 }
-
-// --- Tool Analytics ---
 
 export interface ToolAnalyticsRow {
   tool_name: string;
@@ -1839,8 +1825,6 @@ export function getCostByProject(limit: number = 10, filters?: { agentType?: str
   `).all(...params, limit) as ProjectCostRow[];
 }
 
-// --- Cost by model ---
-
 export interface ModelCostRow {
   model: string;
   cost_usd: number;
@@ -1879,8 +1863,6 @@ export function getCostByModel(filters?: { agentType?: string; since?: string })
   `).all(...params) as ModelCostRow[];
 }
 
-// --- Session Transcript ---
-
 export interface TranscriptEvent {
   id: number;
   event_type: string;
@@ -1906,8 +1888,6 @@ export function getSessionTranscript(sessionId: string): TranscriptEvent[] {
     ORDER BY created_at ASC, id ASC
   `).all(sessionId) as TranscriptEvent[];
 }
-
-// ─── Claude session accounting ─────────────────────────────────────────
 
 /** Claude Code's running totals for one session, as its statusline reports them. */
 export interface ClaudeSessionAccounting {
