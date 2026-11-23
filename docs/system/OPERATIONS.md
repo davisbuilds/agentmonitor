@@ -1239,7 +1239,14 @@ out of public issues and commits.
 
 `pnpm test:verify` type-checks the driver and exercises lifecycle isolation,
 interruption, real browser workflows, missing prerequisites, explicit timing
-failure, and a wrong-but-plausible compiled aggregation mutation. It temporarily
+failure, and a wrong-but-plausible compiled aggregation mutation. It also replays
+the same four synthetic Codex requests as a single rollout and as a resumed session
+with reverted work and a copied prefix. The compiled importer runs against a fresh
+fixture database for each layout. The usage API must report the native totals and
+the correct billing day on initial import, repeat import, and forced replay. Run
+just that check after building with
+`node --import tsx --test scripts/verify/codex-accounting.integration.test.ts`.
+The full verification suite temporarily
 modifies a local `dist` file and restores it; run it serially without concurrent
 builds or other verification against that checkout. Its probe tests run against
 fixture databases from the disposable host, never the installed one. The normal
