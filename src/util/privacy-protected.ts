@@ -1,10 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 
-// Folders macOS guards with a privacy (TCC) prompt, or serves from iCloud or
-// another file provider. A process with no one to answer the prompt, such as
-// the launchd service, waits in open() for as long as the prompt stands, and a
-// synchronous read there freezes the whole server.
+// WHY: A service cannot answer macOS privacy prompts or reliably traverse an unavailable file
+// provider.
 const PROTECTED_IN_HOME = [
   'Desktop',
   'Documents',
@@ -20,7 +18,6 @@ const PROTECTED_IN_HOME = [
 export function isPrivacyProtectedPath(target: string, home: string = os.homedir()): boolean {
   const resolved = path.resolve(target);
   const within = (root: string) => resolved === root || resolved.startsWith(`${root}${path.sep}`);
-  // Removable and network volumes have prompts of their own.
   if (within('/Volumes')) return true;
   return PROTECTED_IN_HOME.some(folder => within(path.join(home, folder)));
 }

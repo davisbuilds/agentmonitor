@@ -1,7 +1,6 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 
-// Hooks, OTLP exporters, and the CLI send no Origin; only browsers do. So the
-// question for any Origin-bearing write is whether the page is the app itself.
+// WHY: Native hooks and OTLP clients do not send an Origin header; browsers do.
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
 /**
@@ -26,7 +25,7 @@ function isLocalHostname(hostname: string): boolean {
     || name.endsWith('.localhost')
     || /^127(\.\d{1,3}){3}$/.test(name)
     || name === '[::1]'
-    // IPv4-mapped 127.0.0.0/8, which the parser writes in hex (::ffff:7f00:1).
+    // WHY: URL canonicalization renders IPv4-mapped loopback addresses in hexadecimal.
     || /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/.test(name);
 }
 
@@ -70,11 +69,9 @@ export function localOriginGuard({ bindHost }: { bindHost: string }): RequestHan
     try {
       originUrl = new URL(origin);
     } catch {
-      refuse(res, 'origin'); // includes the opaque "null" origin
+      refuse(res, 'origin');
       return;
     }
-    // The app's own page, whether served directly, through Portless, or by the
-    // Vite dev server, has a local origin; beyond loopback it matches the Host.
     if (isLocalHostname(originUrl.hostname) || originUrl.host === host) {
       next();
       return;
@@ -104,7 +101,7 @@ export function apiErrorHandler(err: unknown, req: Request, res: Response, next:
     res.status(status).json({ error: 'Internal server error' });
     return;
   }
-  // Client errors from body-parser and friends mark safe messages `expose`.
+  // WHY: body-parser sets expose only on messages that are safe to return to clients.
   const expose = (err as { expose?: unknown }).expose === true && err instanceof Error;
   res.status(status).json({ error: expose ? (err as Error).message : 'Request failed' });
 }

@@ -1,5 +1,3 @@
-// Which session made a commit, decided from evidence a session leaves, never
-// from timing alone. Pure, so each rule is testable without a store.
 
 /** A `git commit` a session ran, timed by the message that ran it. */
 export interface CommitCall {
@@ -43,10 +41,7 @@ const MESSAGE_LEAD_MS = 15 * 60_000;
 export const PROCESS_POLL_WINDOW_MS = 30 * 60_000;
 
 
-// An option git takes before its command: `-C <path>` or `-c <key>=<value>`
-// (a path possibly quoted, and escaped once more in stored JSON), or a flag.
 const GIT_GLOBAL_OPTION = String.raw`(?:-[Cc]\s+(?:\\?"[^"\\]*\\?"|'[^']*'|\S+)|--[\w-]+(?:=\S+)?|-[a-zA-Z])`;
-// `git` starts a word, or a line of a script stored as JSON (`\ngit`).
 const GIT_COMMIT = new RegExp(String.raw`(?:(?<![\w-])|(?<=\\[nt]))git(?:\s+${GIT_GLOBAL_OPTION})*\s+commit(?![\w-])`);
 
 /** Whether a command runs `git commit`, global options (`-C <path>`, `-c <key>=<value>`, `--no-pager`) included. */
@@ -62,8 +57,6 @@ export function createdCommit(result: string, sha: string): boolean {
   return false;
 }
 
-// Quotes and escapes, which shells and stored JSON (once or twice) spell
-// differently around the same text, collapse to one marker on both sides.
 const QUOTING = /[\\"'`]+/g;
 const MARK = '\0';
 
@@ -118,8 +111,7 @@ export function attributeCommit(
   calls: CommitCall[],
   earlierInputs: (sessionId: string, from: number, to: number) => string[],
 ): CommitAttribution {
-  // The call that made a commit ran by its committer date, which an amend
-  // moves; a rebase moves it too, leaving the original call by its author date.
+  // WHY: Rebase changes committer dates; attribution may need the original author date.
   const times = [...new Set([commit.at, commit.committed_at])];
   const candidates = calls.filter(call => times.some(time => Math.abs(call.at - time) <= COMMIT_CALL_WINDOW_MS));
   if (candidates.length === 0) return { kind: 'outside' };
@@ -136,10 +128,6 @@ export function attributeCommit(
   const byHash = verdict(sessionsOf(candidates.filter(call => createdCommit(call.result, commit.sha))), 'hash');
   if (byHash) return byHash;
 
-  // A session works in the commit's repository when it started there (or in
-  // one of its worktrees), or when a call of its names the repository: the
-  // commit call, or any call before it, since the shell keeps the directory an
-  // earlier `cd` moved it to.
   const end = Math.max(...times) + COMMIT_CALL_WINDOW_MS;
   const reached = new Map<string, boolean>();
   const reaches = (sessionId: string): boolean => {
@@ -180,8 +168,6 @@ export function runningProcessIds(result: string): string[] {
 /** Whether a call polls one of a session's processes: `write_stdin`, called as a tool or from a script. */
 export function pollsProcess(toolName: string, input: string, id: string): boolean {
   if (toolName !== 'write_stdin' && !input.includes('write_stdin')) return false;
-  // `session_id: N`, its key quoted or not and escaped as stored, or a loop
-  // over a list of ids passing a variable (`for (const id of [N, M])`).
   const argument = new RegExp(String.raw`session_id\\*"?\s*:\s*${id}(?!\d)`);
   const loop = new RegExp(String.raw`session_id\\*"?\s*:\s*[A-Za-z_]`).test(input)
     && new RegExp(String.raw`\[[\d,\s]*(?<!\d)${id}(?!\d)[\d,\s]*\]`).test(input);
@@ -213,9 +199,7 @@ export interface PullRequestRef {
   url: string;
 }
 
-// A link with a fragment (`#issuecomment-…`, `#discussion_r…`) points into a
-// pull request that already exists, as a `gh pr comment` in the same script
-// prints; it opened nothing.
+// WHY: A link to a comment identifies an existing pull request and cannot establish who opened it.
 const PULL_REQUEST_URL = /https:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?![\d#])/g;
 
 /** Whether a tool creates a pull request itself: a GitHub app's or MCP server's `create_pull_request`. */
@@ -239,7 +223,6 @@ function topLevelStrings(text: string): Map<string, string> {
   for (let index = start; index < text.length; index += 1) {
     const char = text[index];
     if (char === '"') {
-      // A whole string: the JSON escapes in it end at its closing quote.
       let end = index + 1;
       while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
       if (end >= text.length) break;
@@ -268,12 +251,12 @@ function cutStringValues(json: string, key: string): string[] {
     const start = (match.index ?? 0) + match[0].length;
     let end = start;
     while (end < json.length && json[end] !== '"') end += json[end] === '\\' ? 2 : 1;
-    // Drop an escape the cut split, then close the string to decode it.
     const body = json.slice(start, Math.min(end, json.length)).replace(/\\(u[0-9a-fA-F]{0,3})?$/, '');
     try {
       values.push(JSON.parse(`"${body}"`) as string);
     } catch {
-      // An escape cut mid-way that the trim missed: nothing to read.
+      // WHY: A truncated escape cannot identify a pull request reliably; later fields may still be
+      // readable.
     }
   }
   return values;
@@ -292,14 +275,11 @@ export function createdPullRequestUrls(result: string): PullRequestRef[] {
     if (depth > 4) return;
     if (typeof value === 'string') {
       texts.push(value);
-      // A wrapper serialized into a string (an MCP result in a receipt's content).
       const trimmed = value.trim();
       if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
         try {
           collect(JSON.parse(trimmed), depth + 1);
         } catch {
-          // Cut off: a wrapper's text blocks still start whole, so read each
-          // one as far as it goes.
           for (const text of cutStringValues(trimmed, 'text')) collect(text, depth + 1);
         }
       }

@@ -108,7 +108,6 @@ const contents = sampleJsonl([
   },
 ]);
 
-// Write a config.toml so the importer can resolve the model
 const configPath = path.join(codexHome, 'config.toml');
 if (!fs.existsSync(configPath)) {
   fs.writeFileSync(configPath, 'model = "o3-mini"\n', 'utf8');

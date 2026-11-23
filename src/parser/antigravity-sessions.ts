@@ -1,12 +1,3 @@
-// Session-browser projection for Antigravity CLI conversation databases.
-//
-// Parallel to src/parser/codex-sessions.ts: turns one conversation `.db` into a
-// ParsedSession (browsing_sessions + messages + tool_calls). The step payload
-// internals (transcript text, tool args/outputs) live in private CortexStep*
-// messages that are not yet descriptor-pinned, so messages carry the decoded
-// step *kind* as a summary label — hence this projects at `summary` fidelity
-// (see the live adapter). When payload internals are decoded, the labels
-// upgrade to real content without changing this seam.
 
 import path from 'node:path';
 import Database from 'better-sqlite3';

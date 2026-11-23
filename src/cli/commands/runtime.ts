@@ -10,8 +10,8 @@ import { writeHuman, writeJson, writeStdout } from '../output.js';
 import { runPortlessServe } from '../portless.js';
 import type { CliContext } from '../output.js';
 
-// Deliberately the same resolver the server uses: a local copy of the default
-// would let `amon status` report on a different database than `amon serve` opens.
+// WHY: A separate path default could make status inspect a different database from the running
+// service.
 function effectiveDbPath(): string {
   return resolveDbPath();
 }
@@ -43,7 +43,6 @@ function setServeEnv(ctx: CliContext, args: string[]): {
     const rawEnvPort = process.env.AGENTMONITOR_PORT;
     const envPort = Number.parseInt(rawEnvPort ?? '', 10);
     if (Number.isFinite(envPort)) {
-      // Fail here rather than as a raw ERR_SOCKET_BAD_PORT from listen().
       if (envPort < 1 || envPort > 65535) throw invalidUsage(`Invalid AGENTMONITOR_PORT: ${rawEnvPort}`);
       effectivePort = envPort;
     }
@@ -122,8 +121,6 @@ export function registerRuntimeCommands(): void {
     async handler(ctx, args) {
       rejectExtraPositionals(args, 'amon status [--url <url>]');
       const baseUrl = effectiveBaseUrl(ctx.global.url);
-      // --db-path is already exported into the env by the dispatcher, so the
-      // resolver sees it; a relative one stays cwd-relative, the default is absolute.
       const dbPath = path.resolve(effectiveDbPath());
       let server: unknown = null;
       let serverReachable: boolean;

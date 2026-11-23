@@ -1,10 +1,3 @@
-// A session's live status says how recently it was active: live within five
-// minutes, active within fifteen, ended after that. Writers store the status
-// they derive at write time, but a row that stops receiving writes keeps it, so
-// a session whose producer simply goes quiet (most often one known only from
-// telemetry) would read as live indefinitely. Readers therefore re-derive a
-// stored live or active status from the session's last activity; an explicit
-// end, or any other stored status, is read as stored.
 
 import { RECENT_LIVE_STATUSES } from '../contracts/session-lifecycle.js';
 import { sqlStringList } from '../util/sql-literals.js';
@@ -13,10 +6,6 @@ const RECENT_LIVE_STATUS_SET = new Set<string>(RECENT_LIVE_STATUSES);
 const LIVE_WINDOW_MS = 5 * 60_000;
 const ACTIVE_WINDOW_MS = 15 * 60_000;
 
-// An activity time in the forms SQLite's date functions read: a date, then
-// optionally a time, then optionally an offset. SQLite reads a time without an
-// offset as UTC, where `new Date` reads it as local time, and offset-free times
-// are still stored, so the TypeScript reading takes SQLite's.
 const ACTIVITY_TIME = /^(\d{4}-\d{2}-\d{2})(?:[T ](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?))?(Z|[+-]\d{2}:\d{2})?$/;
 const ACTIVITY_TIME_GLOB = '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*';
 
@@ -60,7 +49,6 @@ export function effectiveLiveStatusSql(alias = '', nowIso?: string): string {
   const stored = column('live_status');
   const activity = `COALESCE(${column('last_item_at')}, ${column('ended_at')})`;
   const now = nowIso === undefined ? "'now'" : `'${nowIso}'`;
-  // Whole milliseconds, so the boundaries agree with the TypeScript reading.
   const idleMs = `CAST(round((julianday(${now}) - julianday(${activity})) * 86400000.0) AS INTEGER)`;
   return `(CASE WHEN ${stored} IN (${sqlStringList(RECENT_LIVE_STATUSES)}) AND ${activity} GLOB '${ACTIVITY_TIME_GLOB}'
       AND julianday(${activity}) IS NOT NULL THEN
@@ -69,4 +57,3 @@ export function effectiveLiveStatusSql(alias = '', nowIso?: string): string {
         ELSE 'ended' END
     ELSE ${stored} END)`;
 }
-

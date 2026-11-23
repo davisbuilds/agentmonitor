@@ -39,7 +39,7 @@ function deviceOf(directory: string): number | undefined {
   try {
     return fs.statSync(directory).dev;
   } catch {
-    return undefined; // the backup's own checks report a missing directory
+    return undefined;
   }
 }
 
@@ -82,11 +82,10 @@ export async function compactDatabase(options: DatabaseCompactOptions): Promise<
 
       const backup = await createValidatedDatabaseBackup({ source, output: options.backup, replace: false });
 
-      // The server is stopped, so a blocking optimize is fine, and unlike the
-      // server's capped stepwise merge it always finishes.
+      // WHY: Compaction runs with the server stopped, so it can finish a blocking optimize in one
+      // pass.
       db.exec("INSERT INTO messages_fts(messages_fts) VALUES('optimize')");
       db.exec('VACUUM');
-      // Fold the rewrite back into the main file and drop the WAL it filled.
       db.pragma('wal_checkpoint(TRUNCATE)');
       const quickCheck = db.pragma('quick_check', { simple: true });
       if (quickCheck !== 'ok') throw new Error(`quick_check after VACUUM reported: ${String(quickCheck)}`);

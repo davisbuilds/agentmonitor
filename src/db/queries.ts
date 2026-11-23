@@ -36,9 +36,6 @@ function upsertSession(
   mode?: 'interactive' | 'headless'
 ): void {
   const db = getDb();
-  // `mode` (invocation mode) is a session-level constant persisted in metadata.
-  // When present it is merged into metadata on both insert and conflict so it
-  // survives across the many event upserts a session accumulates.
   db.prepare(`
     INSERT INTO sessions (id, agent_id, agent_type, project, branch, metadata)
     VALUES (
@@ -66,13 +63,7 @@ function upsertSession(
   });
 }
 
-// Backfill/patch a session's invocation mode independent of event insertion.
-// `insertEvent` sets mode via upsertSession, but it returns early for duplicate
-// event_ids (and unchanged files are skipped entirely by import_state), so
-// sessions imported before mode existed are never updated through that path.
-// The import pipeline calls this once per session per file so a re-import
-// (including `--force`) backfills mode even when every event is a duplicate.
-// Guarded so it is a no-op UPDATE when the mode is already correct.
+// WHY: Invocation mode can arrive after the session's first event.
 export function setSessionMode(sessionId: string, mode: 'interactive' | 'headless'): void {
   const db = getDb();
   db.prepare(`
@@ -308,7 +299,6 @@ export function onSessionSweep(listener: SessionSweepListener): () => void {
 export function updateIdleSessions(timeoutMinutes: number): SessionSweep {
   const db = getDb();
   const sweep = db.transaction((): SessionSweep => {
-    // Mark active sessions as idle after timeout
     const idled = db.prepare(`
       UPDATE sessions SET status = 'idle'
       WHERE status = 'active'
@@ -316,8 +306,6 @@ export function updateIdleSessions(timeoutMinutes: number): SessionSweep {
       RETURNING id
     `).all(`-${timeoutMinutes}`) as Array<{ id: string }>;
 
-    // Auto-end idle sessions that remain inactive for an additional timeout
-    // window. A session quiet for that long moves through both steps at once.
     const ended = db.prepare(`
       UPDATE sessions SET status = 'ended', ended_at = datetime('now')
       WHERE status = 'idle'
@@ -337,7 +325,7 @@ export function updateIdleSessions(timeoutMinutes: number): SessionSweep {
   })();
 
   if (sweep.transitions.length > 0) {
-    markStatsDirty(); // session status counts changed
+    markStatsDirty();
     for (const listener of sessionSweepListeners) {
       try {
         listener(sweep);
@@ -674,21 +662,17 @@ export function insertEvent(event: {
 } = {}): EventRow | null {
   const db = getDb();
   const isHistoricalImport = isHistoricalImportedEvent(event);
-  // Benchmark cells are batch-imported historical runs, never live activity, so
-  // they must not drive live-session lifecycle: no git-branch resolution against
-  // the task name, and the session is marked ended immediately so it stays out of
-  // the Monitor's live lists and active/live/agent counts.
+  // WHY: A batch-imported benchmark owns historical cells and cannot establish current session
+  // liveness.
   const isBenchmark = event.source === 'benchmark';
   if (event.event_id) {
     const existing = db.prepare('SELECT id FROM events WHERE event_id = ?').get(event.event_id) as { id: number } | undefined;
     if (existing) return null;
   }
 
-  // Everything that reads outside the database happens before the write
-  // transaction: resolving a branch may run `git`, and a subprocess must never
-  // hold SQLite's write lock.
+  // WHY: Git resolution and filesystem reads can block; doing them under the write transaction would
+  // stall other writers.
 
-  // Backfill project/branch from the session if missing on this event.
   if (!event.project || !event.branch) {
     const session = db.prepare('SELECT project, branch FROM sessions WHERE id = ?').get(event.session_id) as { project: string | null; branch: string | null } | undefined;
     if (session) {
@@ -697,19 +681,12 @@ export function insertEvent(event: {
     }
   }
 
-  // Resolve git branch from project directory and keep session branch fresh.
-  // Recent live imports can carry stale branch metadata from session start, so
-  // refresh the session-level branch from current repo HEAD when possible.
   const gitBranch = options.gitBranch !== undefined ? options.gitBranch : resolveEventGitBranch(event);
   if (gitBranch && !event.branch) event.branch = gitBranch;
 
-  // A supplied cost is the producer's own figure unless the caller priced it
-  // from our tables; one we calculate here is an estimate.
   let costSource: CostSource | null = event.cost_usd === undefined || event.cost_usd === null
     ? null
     : event.cost_source ?? 'reported';
-  // Auto-calculate cost if model + usage present but cost not provided. Usage
-  // includes cache tokens, as in the startup backfill (src/pricing/recalc.ts).
   const hasUsage = event.tokens_in > 0 || event.tokens_out > 0
     || (event.cache_read_tokens ?? 0) > 0 || (event.cache_write_tokens ?? 0) > 0;
   if (event.model && hasUsage && costSource === null) {
@@ -725,16 +702,12 @@ export function insertEvent(event: {
 
   const metadata = truncateMetadata(event.metadata);
 
-  // One transaction from the session upsert to the event row: a failure in
-  // between (a constraint, or SQLITE_BUSY under concurrent writers) used to
-  // leave a committed session with no event, inflating session counts for
-  // good. Nested inside a caller's transaction this becomes a savepoint.
-  // A duplicate found inside it throws so the upserts roll back with it.
+  // WHY: A partial event insert must not leave session totals or lifecycle ahead of the committed
+  // event.
   const occurredAt = options.replayed && event.client_timestamp ? event.client_timestamp : null;
   const insert = db.transaction((): EventRow => {
     const agentId = `${event.agent_type}-default`;
     upsertAgent(agentId, event.agent_type);
-    // A replayed event leads the session only if nothing newer reached it first.
     const leads = occurredAt === null || (db.prepare(`
       SELECT 1 FROM sessions WHERE id = ? AND last_event_at > datetime(?)
     `).get(event.session_id, occurredAt) === undefined);
@@ -786,8 +759,7 @@ export function insertEvent(event: {
         costSource
       );
     } catch (err: unknown) {
-      // UNIQUE constraint violation = duplicate event_id (a concurrent writer
-      // won the race past the pre-check): skip it, undoing the session upsert
+      // WHY: Only a duplicate event ID proves a concurrent writer already ingested the event.
       if (err instanceof Error && err.message.includes('UNIQUE constraint failed: events.event_id')) {
         throw DUPLICATE_EVENT_ID;
       }
@@ -796,12 +768,9 @@ export function insertEvent(event: {
 
     if (result.changes === 0) throw DUPLICATE_EVENT_ID;
 
-    // Handle session lifecycle for successful inserts only.
-    // Recent import session_end events are often synthetic snapshots, so they
-    // should not force a live session to ended.
+    // WHY: Imported session-end markers may describe a snapshot rather than the end of a live
+    // process.
     if (event.event_type === 'session_end' && leads && (event.source !== 'import' || isHistoricalImport)) {
-      // Claude Code sessions go to 'idle' first so they linger on the dashboard
-      // for one timeout cycle before the periodic cleanup marks them 'ended'.
       if (event.agent_type === 'claude_code') {
         idleSession(event.session_id);
       } else {
@@ -809,7 +778,6 @@ export function insertEvent(event: {
       }
     }
 
-    // Keep clearly historical imports and benchmark cells out of active lists.
     if (isHistoricalImport || isBenchmark) {
       db.prepare(`
         UPDATE sessions SET status = 'ended', ended_at = COALESCE(ended_at, datetime('now'))
@@ -827,16 +795,12 @@ export function insertEvent(event: {
     if (err === DUPLICATE_EVENT_ID) return null;
     throw err;
   }
-  markStatsDirty(); // event (and its session-status side effects) changed totals
+  markStatsDirty();
 
-  // Benchmark cells carry harness='codex' but are batch-imported historical
-  // runs, not live activity. Projecting them writes browsing_sessions/turns/
-  // items that the Analytics and /api/v2/live surfaces read, so skip the live
-  // projection entirely — segregation must cover this path too, not just the
-  // Monitor's `sessions` aggregates.
+  // WHY: A historical benchmark can carry a real harness name; that alone cannot make it a live
+  // session.
   if (row.agent_type === 'codex' && !isBenchmark) {
-    // The event is committed; a projection failure is logged, never reported
-    // to the client as a failed write.
+    // WHY: Returning a write error after commit would tell the caller to retry a row already stored.
     try {
       syncCodexSummaryLiveEvent(db, row);
     } catch (err) {
@@ -1105,10 +1069,7 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  // Count every matching event, including an overlapping OTEL usage row, but
-  // exclude that row from token/cost totals. Keeping reconciliation in WHERE
-  // evaluates its timestamp lookup once per event instead of repeating the
-  // same correlated EXISTS independently for all three SUM expressions.
+  // WHY: Overlapping OTEL and import records are two events but only one billable usage observation.
   const hasFilters = Boolean(filters?.agentType || filters?.since);
   const totalEvents = hasFilters
     ? (db.prepare(`SELECT COUNT(*) as count FROM events e ${where}`).get(...params) as { count: number }).count
@@ -1123,12 +1084,8 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
     `SELECT COUNT(*) as count FROM sessions WHERE status = 'active'`
   ).get() as { count: number }).count;
 
-  // Exclude benchmark sessions from the lifetime tally. `sessions` has no source
-  // column, and benchmark cells own their session_id namespace, so a session with
-  // any benchmark event is entirely a bake-off cell — filter via a correlated
-  // NOT EXISTS (events.session_id is indexed). Cost/token/event totals and the
-  // active/live/agent counts are already benchmark-clean elsewhere; this was the
-  // one residual leak. See docs/project/ROADMAP.md.
+  // WHY: Benchmark-only sessions would otherwise inflate the lifetime count even with benchmark
+  // events excluded.
   const totalSessions = (db.prepare(
     `SELECT COUNT(*) as count FROM sessions s
      WHERE NOT EXISTS (
@@ -1194,19 +1151,10 @@ export function getStats(filters?: { agentType?: string; since?: string }): Stat
   };
 }
 
-// Cached unfiltered stats for the periodic SSE broadcast.
-//
-// getStats() runs several full-table events aggregates (including the correlated
-// Codex usage-reconciliation sum). The stats broadcaster fires every
-// statsIntervalMs (default 5s) for as long as a dashboard tab is open, but the
-// underlying totals only change when events are ingested or session status
-// shifts. Recomputing the whole snapshot on every tick is pure waste, so we
-// memoize the unfiltered result and recompute lazily only after a write marks it
-// dirty (see markStatsDirty). The filtered getStats() path (HTTP /api/stats) is
-// on-demand and stays uncached.
+// WHY: The SSE broadcaster polls even on an idle dashboard. Repeating the full-table aggregates then
+// would waste work.
 let cachedBroadcastStats: Stats | null = null;
-// The connection the snapshot was read from. A reopened connection may see
-// writes this process never marked dirty, so its snapshot starts over.
+// WHY: Reopening the connection can expose writes that never marked this process's cache dirty.
 let cachedBroadcastStatsDb: Database.Database | null = null;
 let broadcastStatsDirty = true;
 
@@ -1401,8 +1349,8 @@ function writeProviderQuotaSnapshot(db: Database.Database, input: ProviderQuotaS
   const status = input.status ?? (primary || secondary ? 'available' : defaults.status);
   const updatedAt = normalizeQuotaTimestamp(input.updated_at);
 
-  // A failed refresh says nothing about the quota itself, so it keeps the last
-  // good reading (read back as stale) rather than clearing it.
+  // WHY: A failed refresh gives no new quota evidence; keep the last known reading available as
+  // stale.
   const lastGood = status === 'error' && !primary && !secondary
     ? db.prepare(`
         SELECT account_label, plan_type, limit_id, limit_name, primary_used_percent,
@@ -1526,7 +1474,6 @@ function recordProviderQuotaSample(
 
   const now = Date.parse(observedAt);
   if (latest) {
-    // A reading older than one already kept adds nothing.
     if (now <= Date.parse(latest.observed_until)) return;
     const held = (Object.keys(reading) as Array<keyof typeof reading>).every(key => latest[key] === reading[key]);
     if (held) {
@@ -1721,7 +1668,6 @@ export function getToolAnalytics(filters?: { agentType?: string; since?: string 
     avg_duration_ms: number | null;
   }>;
 
-  // Get per-agent breakdown for each tool
   const agentRows = db.prepare(`
     SELECT tool_name, agent_type, COUNT(*) as count
     FROM events ${where}
@@ -1745,7 +1691,6 @@ export function getToolAnalytics(filters?: { agentType?: string; since?: string 
   }));
 }
 
-// --- Cost over time (hourly buckets) ---
 
 export interface CostBucket {
   bucket: string;
@@ -1785,7 +1730,6 @@ export function getCostOverTime(filters?: { since?: string; agentType?: string }
   `).all(...params) as CostBucket[];
 }
 
-// --- Cost by session (top sessions) ---
 
 export interface ProjectCostRow {
   project: string;
@@ -1990,8 +1934,7 @@ export function checkClaudeSessionCosts(limit = 20): ClaudeSessionCostCheck[] {
     ORDER BY a.observed_at DESC
     LIMIT ?
   `).all(limit) as Array<Omit<ClaudeSessionCostCheck, 'ratio'>>;
-  // An unpriced row bills as NULL and the sum skips it, so the imported cost
-  // would read low; no ratio is better than a falsely reassuring one.
+  // WHY: SQL SUM skips unpriced rows, which would understate the total and distort the ratio.
   return rows.map(row => ({
     ...row,
     ratio: row.cost_usd > 0 && row.unpriced_rows === 0 ? row.amon_cost_usd / row.cost_usd : null,

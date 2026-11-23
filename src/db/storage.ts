@@ -1,8 +1,6 @@
 import fs from 'node:fs';
 import type Database from 'better-sqlite3';
 
-// The search index's shadow tables. messages_fts_data holds the index
-// segments, which is where deleted rows leave their dead entries behind.
 const SEARCH_INDEX_TABLES = ['messages_fts_data', 'messages_fts_idx', 'messages_fts_docsize', 'messages_fts_config'];
 
 export interface StorageReport {
@@ -25,8 +23,7 @@ function fileBytes(file: string): number {
 }
 
 export function searchIndexBytes(db: Database.Database): number {
-  // Per-name lookups: dbstat seeks one b-tree per `name =` constraint but
-  // walks every table in the file for anything looser.
+  // WHY: dbstat can seek by exact object name; looser predicates require walking unrelated objects.
   const stat = db.prepare('SELECT COALESCE(SUM(pgsize), 0) AS bytes FROM dbstat WHERE name = ?');
   return SEARCH_INDEX_TABLES.reduce((sum, name) => sum + (stat.get(name) as { bytes: number }).bytes, 0);
 }
@@ -51,16 +48,13 @@ export function readStorageReport(db: Database.Database): StorageReport {
  * of a rebuilt index; 500-page steps took up to 0.9 s each.
  */
 const SEARCH_MERGE_STEP_PAGES = 100;
-// That cleanup took 226 steps; this bound only stops a loop that never ends.
 const SEARCH_MERGE_MAX_STEPS = 10_000;
 
 /** Run one bounded merge of the search index. Returns whether it found work. */
 function mergeSearchIndexStep(db: Database.Database, pages = SEARCH_MERGE_STEP_PAGES): boolean {
   if (!Number.isSafeInteger(pages) || pages < 1) throw new RangeError(`merge step pages must be a positive integer: ${pages}`);
-  // A negative page count merges even when no level has `automerge` segments
-  // waiting, which is what carries dead entries down into the oldest segment.
-  // FTS5 reports no result; it changes fewer than two rows once nothing is left
-  // to merge. The value is inlined because FTS5 rejects a bound one.
+  // WHY: A negative merge count compacts segments even when no level has enough segments to trigger
+  // automerge.
   const before = db.prepare('SELECT total_changes() AS n').get() as { n: number };
   db.exec(`INSERT INTO messages_fts(messages_fts, rank) VALUES('merge', -${pages})`);
   const after = db.prepare('SELECT total_changes() AS n').get() as { n: number };

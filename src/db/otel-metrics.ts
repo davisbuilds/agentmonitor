@@ -1,8 +1,7 @@
 import { getDb } from './connection.js';
 
-// Storage + read layer for operational OTEL metrics (Bucket A). Kept out of the
-// `events` table on purpose: these rows carry no tokens/cost and must never be
-// visible to usage/cost or the COUNT(*)/event_type aggregates over `events`.
+// WHY: Operational counters carry no usage and would inflate event aggregates if stored alongside
+// normal events.
 
 export type MetricTemporality = 'delta' | 'cumulative' | 'gauge';
 
@@ -35,8 +34,7 @@ export interface OperationalMetricRow extends OperationalMetricRecord {
 export function insertOperationalMetrics(records: OperationalMetricRecord[]): number {
   if (records.length === 0) return 0;
   const db = getDb();
-  // The conflict target names only the retry key, so any other constraint
-  // failure still throws instead of being swallowed as a duplicate.
+  // WHY: Target only the retry key so an unrelated constraint violation still surfaces.
   const stmt = db.prepare(`
     INSERT INTO otel_metrics (point_id, session_id, agent_type, metric_name, attrs, value, temporality, client_timestamp)
     VALUES (@point_id, @session_id, @agent_type, @metric_name, @attrs, @value, @temporality, @client_timestamp)
@@ -60,7 +58,3 @@ export function insertOperationalMetrics(records: OperationalMetricRecord[]): nu
   });
   return insertAll(records);
 }
-
-// The operational-metric READ query lives in src/db/v2-queries.ts
-// (getOperationalMetricSummary) — v2 SQL ownership stays centralized there.
-// This module owns ingestion (insert) only.

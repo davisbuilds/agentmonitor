@@ -28,7 +28,6 @@ function isWatchedTranscript(filePath: string, codexSessionsDir: string): boolea
 let watcher: FSWatcher | undefined;
 let resyncTimer: ReturnType<typeof setInterval> | undefined;
 
-// Debounce map: file path → timeout handle
 const debounceMap = new Map<string, ReturnType<typeof setTimeout>>();
 const DEBOUNCE_MS = 500;
 type WatchedSource = 'claude' | 'codex';
@@ -61,7 +60,6 @@ function handleFileChange(
     return;
   }
 
-  // Debounce: wait 500ms after last change before processing
   const debounceKey = `${source}:${filePath}`;
   const existing = debounceMap.get(debounceKey);
   if (existing) clearTimeout(existing);
@@ -140,7 +138,6 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
     ...discoverCodexSessionFiles(codexHome, { excludePatterns: config.sync.excludePatterns }),
   ];
 
-  // Initial sync on startup
   const db = getDb();
   const syncExecutions = () => {
     const result = syncExecutionReceipts(db, config.executionSpoolDir);
@@ -153,7 +150,6 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   const stats = syncAllFiles(db, claudeDir, { excludePatterns: config.sync.excludePatterns });
   console.log(`[watcher] Initial sync complete: ${stats.parsed} parsed, ${stats.skipped} skipped, ${stats.errors} errors (${stats.total} total files)`);
 
-  // Sync Codex session files
   const codexStats = syncAllCodexFiles(db, codexHome, { excludePatterns: config.sync.excludePatterns });
   if (codexStats.total > 0) {
     console.log(`[watcher] Codex sync: ${codexStats.parsed} parsed, ${codexStats.skipped} skipped, ${codexStats.errors} errors (${codexStats.total} total files)`);
@@ -168,23 +164,19 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
     );
   }
 
-  // Sync Antigravity conversation DBs (historical + periodic resync; live-tailing deferred)
   const antigravityStats = syncAllAntigravityFiles(db, overrides?.antigravityDir, { excludePatterns: config.sync.excludePatterns });
   if (antigravityStats.total > 0) {
     console.log(`[watcher] Antigravity sync: ${antigravityStats.parsed} parsed, ${antigravityStats.skipped} skipped, ${antigravityStats.errors} errors (${antigravityStats.total} total files)`);
   }
 
-  // Watch the session directories directly and filter to `.jsonl` in the
-  // handler. chokidar dropped glob support in v4, so the previous
-  // `projectsDir/**/*.jsonl` patterns silently matched nothing and no live
-  // file events ever fired (live tailing relied entirely on the periodic
-  // resync below). Directory watching is recursive by default.
+  // WHY: Chokidar removed glob support in v4, so watching glob expressions can silently miss every
+  // event.
   watcher = watch([projectsDir, codexSessionsDir], {
     persistent: true,
-    ignoreInitial: true, // We already did initial sync
+    ignoreInitial: true,
     ignored: (filePath, stats) => (
-      // Only exclude *files* by pattern/extension; directories must pass so
-      // chokidar keeps traversing into them.
+      // WHY: Rejecting directories by file extension would prevent chokidar from reaching their
+      // descendants.
       !!stats?.isFile()
       && (
         !isWatchedTranscript(filePath, codexSessionsDir)
@@ -212,7 +204,6 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
 
   console.log(`[watcher] Watching ${projectsDir} and ${codexSessionsDir} for changes`);
 
-  // Periodic re-sync every 15 minutes to catch anything missed
   const RESYNC_INTERVAL_MS = 15 * 60_000;
   resyncTimer = setInterval(() => {
     syncExecutions();
@@ -243,7 +234,6 @@ export async function stopWatcher(): Promise<void> {
     clearInterval(resyncTimer);
     resyncTimer = undefined;
   }
-  // Clear any pending debounce timers
   for (const timeout of debounceMap.values()) {
     clearTimeout(timeout);
   }

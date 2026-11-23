@@ -18,7 +18,7 @@ export function findPackageRoot(startUrl: string = import.meta.url): string {
         const parsed = JSON.parse(fs.readFileSync(packageJson, 'utf-8')) as PackageJson;
         if (parsed.name === 'agentmonitor') return current;
       } catch {
-        // Keep walking; malformed package metadata is handled by callers.
+        // WHY: An unreadable manifest in a nested directory must not hide the enclosing package.
       }
     }
     const parent = path.dirname(current);

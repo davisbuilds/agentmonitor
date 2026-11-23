@@ -133,9 +133,6 @@ function runUpsertSql(schema: string): string {
     `ON CONFLICT (account, session_id) DO UPDATE SET ${updates}`;
 }
 
-// Rows already published under a session id that another summary of the same
-// session now supersedes (a Codex rollout alias of a UUID-keyed session). The
-// upsert cannot remove them, so publishing deletes them for this account.
 function retractSql(schema: string): string {
   return `DELETE FROM ${schema}.runs WHERE account = $1 AND session_id = ANY($2::text[])`;
 }

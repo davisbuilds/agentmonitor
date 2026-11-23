@@ -1,5 +1,5 @@
-// Keep normalized timestamp expressions identical in query predicates and
-// expression indexes. Unproven timezone evidence is indexed as NULL.
+// WHY: SQLite uses expression indexes only when the query expression matches the stored index
+// expression.
 export function observedInstant(column: string): string {
   return `CASE WHEN ${column} GLOB '*Z'
     OR (${column} GLOB '*[+-][0-9][0-9]:[0-9][0-9]' AND ${column} NOT GLOB '*-00:00')

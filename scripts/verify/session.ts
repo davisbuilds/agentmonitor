@@ -114,8 +114,7 @@ export async function startSession(signal?: AbortSignal): Promise<Session> {
   writeJson(path.join(directory, 'startup.json'), { id: randomUUID(), provenance: identity });
   fs.writeFileSync(path.join(directory, 'control-token'), randomUUID(), { mode: 0o600 });
   const log = fs.openSync(path.join(directory, 'host.log'), 'a', 0o600);
-  // Only the environment needed to launch Node is inherited; provider credentials,
-  // runtime database overrides, and ambient application configuration stay outside.
+  // WHY: A disposable server must not inherit credentials or paths to the live database.
   const env: NodeJS.ProcessEnv = {};
   for (const name of ['PATH', 'TMPDIR', 'SystemRoot']) if (process.env[name]) env[name] = process.env[name];
   const child = spawn(process.execPath, ['--import', 'tsx', path.join(repoRoot, 'scripts/verify/host.ts'), directory], {

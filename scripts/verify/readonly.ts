@@ -8,7 +8,7 @@ import Database from 'better-sqlite3';
 export function openReadOnly(file: string): Database.Database {
   const db = new Database(file, { readonly: true, fileMustExist: true });
   db.pragma('query_only = ON');
-  // Match the server connection's page cache so timings are comparable.
+  // WHY: Use the server's page-cache size to make the timings comparable.
   db.pragma('cache_size = -64000');
   return db;
 }

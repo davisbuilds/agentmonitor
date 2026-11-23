@@ -8,8 +8,6 @@ import type {
   TraceQualityTraceRow,
 } from './types.js';
 
-// Stamped into projected trace metadata. Internal-only since the reframe (the
-// projection is no longer persisted, so nothing outside this module needs it).
 const TRACE_QUALITY_PROJECTION_VERSION = 'trace-quality:v1';
 
 export interface EventProjectionSource {
@@ -534,7 +532,6 @@ function eventOutputSummary(event: EventProjectionSource, metadata: Record<strin
 
 function itemInputSummary(item: SessionItemProjectionSource, payload: Record<string, unknown> | undefined): string | null {
   if (!payload) return null;
-  // Injected instructions are model input, as the person's prompts are.
   if (item.kind === 'user_message' || item.kind === 'instructions') return summarizeRecord(payload);
   if (item.kind === 'tool_call' || item.kind === 'command_execution') {
     const input = asRecord(payload.input);

@@ -103,8 +103,8 @@ export async function dispatchCommand(ctx: CliContext, args: string[]): Promise<
   const found = findCommand(args);
   if (!found) throw unknownCommand(ctx.commandName, args);
   applyGlobalEnv(ctx.global);
-  // A one-shot command next to a server on another build is how old code kept
-  // writing rows after a fix shipped. `serve` is that server, so it is exempt.
+  // WHY: A one-shot command running an older build could write stale rows alongside the patched
+  // server.
   if (found.command.name !== 'serve') warnIfServerBuildDiffers(ctx);
   await found.command.handler(ctx, found.rest);
 }

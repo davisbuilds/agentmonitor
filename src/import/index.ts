@@ -137,8 +137,6 @@ function importEvents(
   }
 
   for (const event of events) {
-    // This file owns the identity the positional scheme gave its events, so a
-    // row already stored under that id is this same event under the old scheme.
     if (bridgeLegacyIds && event.legacy_event_id && eventIdExists(event.legacy_event_id)) {
       duplicates++;
       continue;
@@ -149,7 +147,6 @@ function importEvents(
       safelyMaintainTraceSummaryForEvent(row.id, 'historical import');
       continue;
     }
-    // A turn stored while it was still being written gains its final usage.
     const refreshedId = refreshUsage && event.event_id ? refreshImportedUsage({ ...event, event_id: event.event_id }) : null;
     if (refreshedId !== null) {
       refreshed++;
@@ -159,17 +156,14 @@ function importEvents(
     }
   }
 
-  // The summary already counts a refreshed row, so adding it again would
-  // double it; re-derive the session instead.
+  // WHY: The summary already includes the earlier row, so adding its final usage would count the
+  // turn twice.
   for (const sessionId of refreshedSessions) safelyMaintainTraceSummaryForSession(sessionId, 'import refresh');
 
   applySessionModes(events);
   return { imported, duplicates, refreshed };
 }
 
-// Invocation mode is a session-level constant carried on events. Apply it once
-// per session so it backfills even when every event is a duplicate
-// (upsertSession inside insertEvent is skipped on the duplicate path).
 function applySessionModes(events: ParsedImportEvent[]): void {
   const sessionModes = new Map<string, 'interactive' | 'headless'>();
   for (const event of events) {
@@ -187,8 +181,8 @@ function processFile(
 ): ImportFileResult {
   if (source === 'codex') return processCodexFile(filePath, options);
 
-  // An Antigravity conversation can change in its WAL sidecar alone, so only
-  // its hash can tell; it never takes the stat shortcut.
+  // WHY: Antigravity can write changes only to the WAL sidecar, leaving the main database's size and
+  // mtime unchanged.
   const stamp = source === 'claude-code' ? diskStamp(filePath) : null;
   if (stamp && isUnchangedOnDisk(filePath, stamp, options)) return unchangedResult(filePath, source);
   const stat = fs.statSync(filePath);
@@ -196,17 +190,10 @@ function processFile(
   const currentHash = hashFn(filePath);
   if (isUnchanged(filePath, currentHash, stamp, options)) return unchangedResult(filePath, source);
 
-  // Parse the file (each source has its own option needs)
   const events = source === 'claude-code'
     ? parseClaudeCodeFile(filePath, { from: options.from, to: options.to })
     : parseAntigravityFile(filePath, { from: options.from, to: options.to });
 
-  // Import events. A transcript is named after its session, so it owns the ids
-  // the positional scheme minted for its lines and can recognize its own rows
-  // from before the id change. A child-agent transcript reports its parent's
-  // session under a different filename, so those ids are not its to claim —
-  // without this distinction its events collide with the parent's and are
-  // dropped, which is what kept child-agent usage out of the store.
   const ownsLegacyIdentity = source === 'claude-code'
     && events.length > 0
     && path.basename(filePath, '.jsonl') === events[0].session_id;
@@ -255,7 +242,8 @@ function processCodexFile(filePath: string, options: ImportOptions, inventory?: 
     skippedUnchanged: false,
   };
 
-  // A date-scoped parse is partial, so it can add rows but never prove one stale.
+  // WHY: A date-scoped import can add evidence but cannot prove that any row outside its window is
+  // stale.
   const isDateScoped = options.from !== undefined || options.to !== undefined;
   if (!options.dryRun && !isDateScoped) {
     const { events, counts } = reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir, inventory }, read);
@@ -272,7 +260,7 @@ function processCodexFile(filePath: string, options: ImportOptions, inventory?: 
 
   const { events } = parseCodexSessionRollouts(filePath, { ...options, inventory, read });
   result.eventsFound = events.length;
-  // A partial family must not record an individual file as the complete session.
+  // WHY: One physical file cannot certify completeness for a family with missing segments.
   return appendCodexEvents(filePath, events, read, paginated ? { ...options, from: options.from ?? new Date(0) } : options, result, inventory);
 }
 
@@ -285,17 +273,12 @@ function appendCodexEvents(
   result: ImportFileResult,
   inventory: CodexRolloutInventory | undefined,
 ): ImportFileResult {
-  // Inserting cannot delete the rows a change of instrument would replace, so
-  // neither instrument may land beside the other's rows; a full reconcile (or
-  // the usage repair) makes the switch.
+  // WHY: An insert-only import cannot remove the old instrument's rows and would bill both.
   const end = events.find(event => event.event_type === 'session_end');
   const instrument = (end?.metadata as Record<string, unknown> | undefined)?._usage_instrument;
   const stored = end ? listImportedCodexRows(end.session_id) : [];
   const history = (end?.metadata as Record<string, unknown> | undefined)?._rollout_history === true;
   if (history) {
-    // A family can legitimately use counters in an old file and native request
-    // records in a newer one. Insert-only imports must keep each physical span
-    // on its stored instrument, rather than switching the whole session.
     const rollout = (event: { session_id?: string; metadata?: unknown }): string => {
       const metadata = typeof event.metadata === 'string' ? JSON.parse(event.metadata) as Record<string, unknown> : event.metadata as Record<string, unknown> | undefined;
       return typeof metadata?._rollout_id === 'string' ? metadata._rollout_id : event.session_id ?? end!.session_id;
@@ -310,7 +293,6 @@ function appendCodexEvents(
     events = events.filter(event => !isCounterUsageRow({ event_type: event.event_type, metadata: JSON.stringify(event.metadata ?? {}) }) || !requests.has(rollout(event)));
     result.eventsFound = events.length;
   } else if (instrument === 'request' && stored.some(isCounterUsageRow)) {
-    // Stored from the counter: stay on it.
     events = parseCodexSessionRollouts(filePath, {
       from: options.from,
       to: options.to,
@@ -321,8 +303,7 @@ function appendCodexEvents(
     }).events;
     result.eventsFound = events.length;
   } else if (instrument === 'counter' && stored.some(isRequestUsageRow)) {
-    // Stored per request, but this parse fell back to the counter (a record
-    // it could not read): its counter rows would repeat those requests.
+    // WHY: A partial fallback to the counter could duplicate previously stored native requests.
     events = events.filter(event => !isCounterUsageRow({ event_type: event.event_type, metadata: JSON.stringify(event.metadata ?? {}) }));
     result.eventsFound = events.length;
   }
@@ -362,21 +343,18 @@ export function reconcileCodexRollout(
   filePath = path.resolve(filePath);
   const parsed = parseCodexSessionRollouts(filePath, { ...options, read });
   const { events } = parsed;
-  // A line that does not parse, such as one read mid-write, would make every
-  // row after it look stale. Such a parse cannot prove any row stale, so it
-  // takes the insert-only path.
+  // WHY: A partially written line makes the remainder of the file unreliable as evidence for
+  // deletion.
   if (parsed.malformedLines > 0) {
     const sessionId = events.find(event => event.event_type === 'session_start')?.session_id ?? null;
     return { events, counts: { reconciled: false, session_id: sessionId, inserted: 0, updated: 0, deleted: 0, unchanged: 0 } };
   }
-  // The mode backfill and the hash commit with the rows: a hash recorded ahead
-  // of a failed backfill would make every later import skip the file.
+  // WHY: Recording the hash before a failed backfill would make later runs skip that repair.
   const counts = reconcileCodexImport(events, {
     apply: options.apply,
     onCommit: committed => {
       applySessionModes(events);
       for (const [file, snapshot] of parsed.reads) {
-        // Ancestors from a different native session supply context, not ownership.
         if (!parsed.ownedFiles.has(file)) continue;
         setImportState(file, parsed.paginated ? `${CODEX_LINEAGE_VERSION}${snapshot.hash}:${parsed.dependencyStamp}` : snapshot.hash, snapshot.size, snapshot.mtime, 'codex', committed.inserted);
       }
@@ -394,7 +372,6 @@ function isUnchanged(
   if (options.force) return false;
   const state = getImportState(filePath);
   const unchanged = state !== undefined && state.file_hash === currentHash;
-  // A touched but unchanged file would otherwise be read on every run.
   if (unchanged && stamp && state.file_mtime !== stamp.mtime && !options.dryRun) {
     getDb().prepare('UPDATE import_state SET file_mtime = ? WHERE file_path = ?').run(stamp.mtime, filePath);
   }
@@ -414,9 +391,8 @@ function unchangedResult(filePath: string, source: string): ImportFileResult {
   };
 }
 
-// Record import state (unless dry run or date-scoped import). Date-scoped
-// imports are partial — caching the hash would cause a later full import to
-// skip the file, permanently losing the excluded events.
+// WHY: Caching the hash of a date-limited import would suppress a later complete import of the same
+// file.
 function recordImportState(
   filePath: string,
   hash: string,
@@ -435,7 +411,6 @@ export function runImport(options: ImportOptions): ImportResult {
   const runtimeConfig = createConfig();
   const excludePatterns = options.excludePatterns ?? runtimeConfig.sync.excludePatterns;
 
-  // Discover files
   const claudeFiles = (options.source === 'claude-code' || options.source === 'all')
     ? discoverClaudeCodeLogs(options.claudeDir ?? runtimeConfig.claudeDir, { excludePatterns })
     : [];
@@ -446,12 +421,10 @@ export function runImport(options: ImportOptions): ImportResult {
     ? discoverAntigravityLogs(options.antigravityDir, { excludePatterns })
     : [];
 
-  // Process Claude Code files
   for (const filePath of claudeFiles) {
     files.push(processFile(filePath, 'claude-code', options));
   }
 
-  // Process Codex files
   const inventory = createCodexRolloutInventory(codexFiles);
   const handled = new Set<string>();
   for (const filePath of codexFiles) {
@@ -471,12 +444,10 @@ export function runImport(options: ImportOptions): ImportResult {
     }
   }
 
-  // Process Antigravity files
   for (const filePath of antigravityFiles) {
     files.push(processFile(filePath, 'antigravity', options));
   }
 
-  // Aggregate results
   let totalEventsFound = 0;
   let totalEventsImported = 0;
   let totalEventsRefreshed = 0;

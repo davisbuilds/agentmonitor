@@ -46,7 +46,7 @@ if (dir) {
             try {
               const json = serializeParams(args);
               if (json.length <= MAX_PARAMS_JSON) params = json;
-            } catch { /* unserializable parameters: record the statement alone */ }
+            } catch { /* WHY: Parameters can be unserializable even when the statement is useful on its own. */ }
             seen.set(this.source, params);
           }
           return original.apply(this, args);

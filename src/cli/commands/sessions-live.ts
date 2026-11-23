@@ -370,7 +370,6 @@ export function registerSessionLiveCommands(): void {
         const result = getSessionItems(id, {
           limit: parseIntegerOption(parsed.values.get('--limit'), '--limit'),
           cursor: parsed.values.get('--cursor'),
-          // An item id, like --cursor; anything else would read as the end of the list.
           before: parsed.values.has('--before')
             ? String(parseIntegerOption(parsed.values.get('--before'), '--before'))
             : undefined,

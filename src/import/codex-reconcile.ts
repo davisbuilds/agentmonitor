@@ -70,8 +70,7 @@ export function isCounterUsageRow(row: Pick<ImportedCodexRow, 'event_type' | 'me
   }
 }
 const OWN_ID_PREFIX = 'import-cdx-';
-// Browser rows the Codex summary projection owns. A full transcript projection
-// under the same id must not be rewritten into a summary.
+// WHY: Full transcript projections can share the summary ID and must survive a summary-only repair.
 const SUMMARY_MODES = new Set(['codex-import', 'codex-otel', 'codex-summary']);
 
 /**
@@ -137,8 +136,7 @@ export function reconcileCodexImport(
   events: NormalizedIngestEvent[],
   options: CodexReconcileOptions,
 ): CodexReconcileCounts {
-  // First occurrence wins, which is what insertion keeps: newer rollouts
-  // repeat `session_meta`, and with it the session_start id.
+  // WHY: Newer rollouts repeat session metadata; use the occurrence that insertion actually kept.
   const parsed = new Map<string, NormalizedIngestEvent>();
   for (const event of events) {
     if (event.event_id?.startsWith(OWN_ID_PREFIX) && !parsed.has(event.event_id)) parsed.set(event.event_id, event);
@@ -155,7 +153,6 @@ export function reconcileCodexImport(
   if (browsingMode !== null && !SUMMARY_MODES.has(browsingMode)) return counts;
   counts.reconciled = true;
 
-  // `git` must never run while this transaction holds the write lock.
   const stored = new Map(listImportedCodexRows(sessionId).map(row => [row.event_id, row]));
   const additions = [...parsed.values()].filter(event => !stored.has(event.event_id!));
   const newest = additions.at(-1);

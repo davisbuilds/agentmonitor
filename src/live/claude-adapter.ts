@@ -55,7 +55,6 @@ export function syncClaudeLiveSession(
   let reset = false;
   let startOrdinal = existingTurnCount;
 
-  // A continued parse holds only its new messages; the count covers them all.
   if (parsed.metadata.message_count < existingTurnCount
     || (options.keptMessages !== undefined && options.keptMessages < existingTurnCount)) {
     resetLiveSession(db, sessionId);

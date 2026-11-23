@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 
-// Only the operation prefix is recognized here. SQLite parses the complete SQL;
-// prepare() rejects multiple statements before run() can have any side effects.
+// WHY: SQLite prepare() rejects multiple statements before execution, so this prefix check can
+// delegate full parsing.
 const gap = String.raw`(?:\s|--[^\r\n]*(?:\r?\n|$)|/\*[\s\S]*?\*/)`;
 const createIndex = new RegExp(`^${gap}*CREATE${gap}+(?:UNIQUE${gap}+)?INDEX${gap}+`, 'i');
 

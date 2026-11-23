@@ -1,4 +1,3 @@
-// Seed script - generate realistic multi-agent events for development/demo
 const BASE_URL = process.env.AGENTMONITOR_URL || 'http://127.0.0.1:3141';
 
 interface EventPayload {
@@ -32,7 +31,6 @@ const CODEX_MODELS = [
   'codex-mini-latest',
 ];
 
-// Simplified pricing (per million tokens) for seed cost estimation
 const SEED_PRICING: Record<string, { input: number; output: number }> = {
   'claude-sonnet-4-5-20250929': { input: 3, output: 15 },
   'claude-haiku-4-5-20251001': { input: 1, output: 5 },
@@ -73,7 +71,6 @@ function randomInt(min: number, max: number): number {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Simulated agent sessions
 const sessions = [
   {
     id: 'claude-session-001',
@@ -127,7 +124,6 @@ const sessions = [
 ];
 
 async function seedSession(session: typeof sessions[0], delayBetweenEvents: number) {
-  // Session start
   await postEvent({
     session_id: session.id,
     agent_type: session.agent_type,
@@ -138,7 +134,6 @@ async function seedSession(session: typeof sessions[0], delayBetweenEvents: numb
   });
   console.log(`  Started ${session.agent_type} session: ${session.project}/${session.branch}`);
 
-  // Tool events
   for (const tool of session.tools) {
     await sleep(delayBetweenEvents + randomInt(0, 500));
 
@@ -165,7 +160,6 @@ async function seedSession(session: typeof sessions[0], delayBetweenEvents: numb
     });
     console.log(`  [${session.project}] ${tool.name}: ${JSON.stringify(tool.meta).slice(0, 60)}`);
 
-    // Occasional response event for Codex
     if (session.agent_type === 'codex' && Math.random() < 0.5) {
       await sleep(delayBetweenEvents);
       const respModel = randomChoice(session.models);
@@ -190,7 +184,6 @@ async function seedSession(session: typeof sessions[0], delayBetweenEvents: numb
 async function main() {
   console.log(`Seeding AgentMonitor at ${BASE_URL}...\n`);
 
-  // Check server health
   try {
     const health = await fetch(`${BASE_URL}/api/health`);
     if (!health.ok) throw new Error(`Health check failed: ${health.status}`);
@@ -200,10 +193,8 @@ async function main() {
     process.exit(1);
   }
 
-  // Run sessions with staggered starts
   const delayBetweenEvents = 300;
 
-  // Start all sessions concurrently with slight offsets
   await Promise.all(
     sessions.map((session, i) =>
       sleep(i * 800).then(() => seedSession(session, delayBetweenEvents))

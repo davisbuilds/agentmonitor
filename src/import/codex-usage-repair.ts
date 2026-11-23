@@ -37,7 +37,6 @@ export interface CodexSubagentOtelCheck {
 
 type RowClass = 'copied_history' | 'orphaned' | 'refresh_drift' | 'repriced' | 'subagent_model' | 'annotated' | 'compaction' | 'instrument_switch' | 'appended' | 'rollout_history' | 'unclassified';
 
-// A type alias, not an interface: `printSummary` takes `Record<string, unknown>`.
 export type CodexUsageRepairReport = {
   apply: boolean;
   files_scanned: number;
@@ -99,10 +98,9 @@ function classifyUpdate(row: ImportedCodexRow, event: NormalizedIngestEvent): Ro
   const cost = sameCost(row.cost_usd, event.cost_usd);
   const model = row.model === (event.model ?? null);
   if (tokens && model && !cost) return 'repriced';
-  // The retired model refresh wrote the rollout's cost onto the old tokens.
+  // WHY: Older model refreshes could write a cost derived from the rollout beside the previous token
+  // counts.
   if (!tokens && cost) return 'refresh_drift';
-  // A subagent's session model now comes from its own first turn, not its
-  // parent's. Only session_start carries the boundary.
   if (tokens && cost && !model && metadataOf(event)._subagent_boundary === 'resolved') return 'subagent_model';
   if (tokens && cost && model) return 'annotated';
   return 'unclassified';
@@ -141,7 +139,6 @@ export function repairCodexImportUsage(
   options: CodexUsageRepairOptions = {},
 ): CodexUsageRepairReport {
   const apply = options.apply === true;
-  // Applying rewrites stored history: no server may write or cache meanwhile.
   const ownership = apply ? acquireRuntimeOwnership(options.dbPath ?? _db.name) : null;
   try {
     return repairWithin(apply, options);
@@ -196,19 +193,16 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
       report.files_unreadable++;
       continue;
     }
-    // A failure past this point is not bad input: it is a repair that did not
-    // happen. The session rolled back on its own, so the run continues, and
-    // the failure is reported rather than counted as unreadable.
+    // WHY: A failed transaction rolls back that session. Counting it as bad input would conceal an
+    // unapplied repair.
     let result: ReturnType<typeof reconcileCodexRollout>;
     let stored: ImportedCodexRow[] = [];
     try {
-      // What is stored now, read before the reconcile changes it.
       const peek = reconcileCodexRollout(filePath, { apply: false, codexDir: options.codexDir, inventory }, read);
       if (peek.counts.session_id) stored = listImportedCodexRows(peek.counts.session_id);
       result = apply ? reconcileCodexRollout(filePath, { apply: true, codexDir: options.codexDir, inventory }, read) : peek;
     } catch (err) {
       report.sessions_failed.push({ rollout: path.basename(filePath), error: err instanceof Error ? err.message : String(err) });
-      // Its rollout exists, so the session must not also read as missing one.
       const failedSession = entry?.sessionId ?? sessionIdOf(filePath, read, options.codexDir);
       if (failedSession) seenSessions.add(failedSession);
       continue;
@@ -238,10 +232,7 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
       if (event.event_id?.startsWith('import-cdx-') && !parsed.has(event.event_id)) parsed.set(event.event_id, event);
     }
     const storedById = new Map(stored.map(row => [row.event_id, row]));
-    // What the reconcile wrote: a model known only from config keeps its stored value.
     for (const [id, event] of parsed) parsed.set(id, reconciledEvent(storedById.get(id), event));
-    // A session that now bills per request but still holds counter rows is
-    // switching instrument: its counter rows give way to one row per request.
     const switching = end._usage_instrument === 'request' && stored.some(isCounterUsageRow);
     for (const row of stored) {
       const event = parsed.get(row.event_id);
@@ -265,21 +256,15 @@ function repairWithin(apply: boolean, options: CodexUsageRepairOptions): CodexUs
     if (end._history_total_unknown) { report.history_totals_unverified.push(counts.session_id!); continue; }
     if (history) report.history_sessions_checked++;
 
-    // Codex's thread total counts only this thread's own requests, so it checks
-    // a subagent as well as a plain session; OTEL can miss a request Codex
-    // recorded. Without one, a subagent's counter includes its parent's, and
-    // the subagent falls back to the OTEL check below.
+    // WHY: A thread's total is independent of parent billing, so it can also verify usage for
+    // subagents.
     const thread = end.total_thread_tokens as { input_tokens?: number; output_tokens?: number } | undefined;
-    // Reported whichever instrument checks the session.
     const unbilled = typeof end._compactions_unbilled === 'number' && end._compactions_unbilled > 0;
     if (unbilled) report.compaction_sessions_unbilled.push(counts.session_id!);
     if (start._subagent_boundary === undefined || thread) {
-      // Without a reset, the rows telescope to the counter Codex itself kept,
-      // plus the compactions it leaves out: together, Codex's thread total.
       const expected = thread
         ? Number(thread.input_tokens ?? 0) + Number(thread.output_tokens ?? 0)
         : Number(end.total_tokens_in ?? 0) + Number(end.total_tokens_out ?? 0);
-      // An unbilled compaction is already named, and its total is not expected to match.
       if (unbilled) continue;
       if (typeof end._counter_resets === 'number' && end._counter_resets > 0) report.counter_sessions_reset++;
       else {

@@ -208,7 +208,6 @@ export async function readLocalPowerHistory(ranges: readonly TimeRange[]): Promi
       .map(entry => ({ name: entry.name, date: entry.name.slice(0, -4) }))
       .filter(({ date }) => {
         const day = archiveDay(date);
-        // Allow for local day boundaries and neighboring transition evidence.
         return merged.some(({ startMs, endMs }) => startMs < day + 3 * DAY_MS && endMs > day - 2 * DAY_MS);
       })
       .sort((a, b) => a.date.localeCompare(b.date))
@@ -222,7 +221,7 @@ export async function readLocalPowerHistory(ranges: readonly TimeRange[]): Promi
         ], { timeout: 1_000, maxBuffer: 2 * 1024 * 1024, signal });
         archives.push({ date, text: stdout });
       } catch {
-        // An unreadable archive leaves a gap between any neighboring files.
+        // WHY: An unreadable archive cannot establish continuity between adjacent power records.
       }
     }
     return parsePowerArchives(archives, hostname());

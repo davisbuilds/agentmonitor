@@ -530,10 +530,8 @@ try {
         true,
         'refusing to remove a non-temp verification directory',
       );
-      // The server's Codex quota poller runs codex with CODEX_HOME in here,
-      // and codex can still be cloning plugins into codex/.tmp while the
-      // directory is removed, failing the delete with ENOTEMPTY after every
-      // check has passed. rmSync retries that case.
+      // WHY: Codex can still be cloning plugins at teardown, making an otherwise successful cleanup
+      // fail with ENOTEMPTY.
       fs.rmSync(resolvedTempDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
     }
   }

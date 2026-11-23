@@ -17,9 +17,8 @@ import path from 'node:path';
  * has no project; anything else keeps its own name.
  */
 
-// Resolution reads the filesystem, and an import resolves the same directories
-// many times over. Entries expire so a long-running server notices a worktree
-// path removed and recreated, or repointed to another repository.
+// WHY: Expiring the cache lets a running server observe filesystem changes without resolving every
+// path on every import.
 const CACHE_TTL_MS = 30_000;
 const resolved = new Map<string, { name: string | null; at: number }>();
 const reposByParent = new Map<string, { repos: string[]; at: number }>();
@@ -60,7 +59,7 @@ function worktreeMainRoot(gitfile: string): string | null {
   try {
     commondir = path.resolve(gitdir, fs.readFileSync(path.join(gitdir, 'commondir'), 'utf8').trim());
   } catch {
-    return null; // a submodule: no commondir
+    return null; // WHY: Submodules can omit commondir.
   }
   return path.basename(commondir) === '.git' ? path.dirname(commondir) : null;
 }

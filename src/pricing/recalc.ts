@@ -66,8 +66,8 @@ export function recalculateEventCosts(db: Database, options: CostRecalcOptions):
 function recalculate(db: Database, options: CostRecalcOptions): CostRecalcReport {
   const missingOnly = options.missingOnly ?? false;
   const costsAttributed = attributeCostSources(db);
-  // The missing-only WHERE must match idx_events_cost_pending (src/db/schema.ts)
-  // so the startup backfill finds its handful of rows without a table scan.
+  // WHY: This predicate matches the partial index so startup can find missing prices without
+  // scanning all events.
   const events = db.prepare(`
     SELECT id, session_id, source, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
            cache_write_1h_tokens, cost_usd, created_at, client_timestamp
@@ -110,16 +110,12 @@ function recalculate(db: Database, options: CostRecalcOptions): CostRecalcReport
       }
       if (options.apply) {
         update.run(rounded, event.id);
-        // Benchmark sessions never get a trace summary; the benchmarks API is
-        // the only surface that includes them.
         if (event.source !== 'benchmark') touchedSessions.add(event.session_id);
       }
       updated++;
     }
 
-    // session_trace_summary caches each session's cost, so re-derive it for
-    // every session whose events changed. Inside the transaction: if a summary
-    // fails, the costs roll back too, and a retry still finds the rows to redo.
+    // WHY: Cached per-session totals must change in the same transaction as their event costs.
     for (const sessionId of touchedSessions) maintainSessionTraceSummary(sessionId);
   })();
 

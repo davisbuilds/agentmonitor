@@ -90,7 +90,6 @@ export function createCodexRolloutInventory(filePaths: readonly string[], readFi
   const inventory: CodexRolloutInventory = { entries: [], byRolloutId: new Map(), bySessionId: new Map(), errors: new Map() };
   const unique = new Set(filePaths.map(file => path.resolve(file)));
   for (const filePath of unique) {
-    // Codex briefly retains both formats during compression. The live plain path wins.
     if (filePath.endsWith('.jsonl.zst') && unique.has(filePath.slice(0, -4))) continue;
     try {
       const entry = readEntry(filePath, readFile);
@@ -108,8 +107,6 @@ export function createCodexRolloutInventory(filePaths: readonly string[], readFi
 /** Select the active browser history among known physical members of a native thread. */
 export function currentCodexRollout(entry: CodexRolloutEntry, inventory: CodexRolloutInventory): CodexRolloutEntry {
   const siblings = inventory.bySessionId.get(entry.sessionId) ?? [entry];
-  // Ordinary rollouts keep their historical file identity. Pagination is the
-  // evidence that several physical files now represent the same browser history.
   if (!siblings.some(candidate => candidate.historyBase || ['paginated', 'full'].includes(String(candidate.meta['history_mode'])))) return entry;
   const ancestors = new Set(siblings.flatMap(candidate => candidate.historyBase ? [candidate.historyBase.thread_id] : []));
   const leaves = siblings.filter(candidate => !ancestors.has(candidate.rolloutId));
@@ -148,7 +145,6 @@ export function resolveCodexRolloutHistory(filePath: string, options: CodexHisto
     const fullBytes = readFile(nextPath);
     totalBytes += fullBytes.length;
     if (totalBytes > maxBytes) throw invalid('decoded byte budget exceeded');
-    // Re-read metadata from the exact bytes being projected, even if the inventory is older.
     const entry = entryFromBytes(nextPath, fullBytes, fs.statSync(nextPath));
     if ((inventory.byRolloutId.get(entry.rolloutId)?.length ?? 0) > 1) throw invalid(`ambiguous source rollout ${entry.rolloutId}`);
     if (seen.has(entry.rolloutId)) throw invalid('cycle detected');
@@ -191,7 +187,6 @@ export function discoverCodexRolloutSiblings(filePath: string): string[] {
     }
     dir = path.dirname(dir);
   }
-  // Standalone callers need only their own directory, never a scan of the filesystem root.
   return discoverCodexRolloutFilesRecursive(path.dirname(filePath));
 }
 
@@ -222,7 +217,6 @@ function readEntry(filePath: string, readFile: (filePath: string) => Buffer): Co
     } finally { fs.closeSync(fd); }
   }
   const entry = entryFromBytes(filePath, bytes, { size: Number(stats.size), mtimeMs: Number(stats.mtimeNs) / 1e6, ctimeMs: Number(stats.ctimeNs) / 1e6 }, true);
-  // Bound the process cache; a full clear only costs another bounded header read.
   if (headerCache.size >= 100_000) headerCache.clear();
   headerCache.set(filePath, { key, entry });
   return entry;
@@ -274,14 +268,12 @@ function parseRecords(entry: CodexRolloutEntry, bytes: Buffer, inherited: boolea
       try { value = JSON.parse(raw); } catch { throw invalid('malformed or incomplete source record'); }
       if (!object(value)) throw invalid('source record must be an object');
       if (records.length && value.type === 'session_meta') {
-        // Resume can persist another metadata envelope in the same physical file.
-        // Keep that record and its ordinal, but never let it change this file's
-        // authoritative owner or replace the inherited physical bookmark.
+        // WHY: A resumed file can repeat session metadata without changing its physical lineage.
         const repeated = entryFromBytes(entry.filePath, Buffer.from(raw), entry);
         if (repeated.sessionId !== entry.sessionId) {
           if (!isCopiedParentMetadata(entry, repeated.sessionId, value.ordinal)) throw invalid('conflicting session metadata owner');
-          // A copied parent header describes its own history, not the child's
-          // physical lineage. Keep it as context without following its bookmark.
+          // WHY: A copied parent header does not establish a bookmark dependency for the child's own
+          // file.
         } else {
           const initialBase = entry.historyBase;
           const repeatedBase = repeated.historyBase;
@@ -324,8 +316,8 @@ function validateOrdinals(entry: CodexRolloutEntry, records: CodexHistoryRecord[
     if (!integer(ordinal) || ordinal <= previous || (index === 0 && ordinal !== startOrdinal)) throw invalid('invalid source record ordinal');
     previous = ordinal;
   }
-  // Ordinal gaps can survive writer recovery; the exact record at the byte boundary
-  // must still end immediately before the bookmark's exclusive ordinal.
+  // WHY: Ordinals can have gaps after writer recovery, so adjacency has to agree with the stored
+  // byte boundary.
   if (cutoff && (records[records.length - 1].endByteOffset !== cutoff.end_byte_offset
     || previous + 1 !== cutoff.end_ordinal_exclusive)) throw invalid('byte boundary and exclusive ordinal disagree');
 }

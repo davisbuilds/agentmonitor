@@ -4,7 +4,6 @@ export const scenarios = [
   {
     id: 'live-session',
     description: 'Synthetic transcript → compiled watcher/projection → API → live browser update without reload',
-    // The live stream is Monitor's drill-in; run.ts appends the session id.
     route: '/app/#monitor?session=',
     fixture: 'claude-live-v1',
     checks: ['initial-api', 'initial-browser', 'updated-api', 'updated-browser'],

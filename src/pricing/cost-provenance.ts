@@ -9,7 +9,7 @@ import { pricingRegistry } from './index.js';
  */
 export type CostSource = 'reported' | 'estimated';
 
-// Must match idx_events_cost_unattributed's WHERE clause (src/db/schema.ts).
+// WHY: SQLite's partial-index predicate must match for the pending-cost lookup to use the index.
 const UNATTRIBUTED = 'cost_usd IS NOT NULL AND cost_source IS NULL';
 
 interface UnattributedRow {

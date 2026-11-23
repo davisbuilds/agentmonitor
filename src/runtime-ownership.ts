@@ -96,16 +96,14 @@ function createOwnership(lockPath: string, record: OwnershipRecord): void {
       flag: 'wx',
       mode: 0o600,
     });
-    // The fully-written temp inode becomes the ownership path in one atomic
-    // create-if-absent operation. A contender can therefore never mistake the
-    // brief empty/partial-write window of an `open("wx")` lock for stale state.
+    // WHY: A lock contender can mistake a partially written ownership file for a stale one.
     fs.linkSync(tempPath, lockPath);
   } finally {
     try {
       fs.unlinkSync(tempPath);
     } catch {
-      // The uniquely-named temp link is non-authoritative. Never mask the
-      // ownership result if best-effort cleanup cannot remove it.
+      // WHY: A stale temporary link has no ownership authority and must not mask the result of the
+      // claim.
     }
   }
 }
@@ -157,13 +155,13 @@ export function readRuntimeOwner(dbPath: string): RuntimeOwner | null {
   try {
     dir = fs.realpathSync.native(path.dirname(absolute));
   } catch {
-    return null; // the directory does not exist, so nothing owns it
+    return null;
   }
   let canonicalPath = path.join(dir, path.basename(absolute));
   try {
     canonicalPath = fs.realpathSync.native(canonicalPath);
   } catch {
-    // The database file need not exist yet; ownership is keyed the same way.
+    // WHY: A new database needs the same ownership key before its file exists.
   }
   const record = readOwnership(`${canonicalPath}.runtime.lock`);
   if (!record || record.dbPath !== canonicalPath || !processIsAlive(record.pid)) return null;

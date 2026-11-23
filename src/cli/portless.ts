@@ -6,8 +6,6 @@ const PORTLESS_APP_NAME = 'agentmonitor';
 const FORWARDED_SIGNALS: NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
 
 function resolvePortlessCli(): string {
-  // The override is an integration-test seam; normal runs always resolve the
-  // pinned package dependency next to AgentMonitor.
   const override = process.env.AGENTMONITOR_PORTLESS_CLI?.trim();
   if (override) return override;
 
@@ -60,9 +58,7 @@ export async function runPortlessServe(port: number, serveArgs: string[]): Promi
     });
 
     if (forwardedSignal) {
-      // The direct runtime treats a handled Ctrl-C/SIGTERM as a clean shutdown.
-      // Match that contract after Portless has removed the route and its child
-      // has exited, rather than re-raising the signal in this wrapper process.
+      // WHY: A handled termination is a clean shutdown for both direct and Portless launches.
       return;
     }
     if (result.signal) {

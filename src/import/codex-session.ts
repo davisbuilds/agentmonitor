@@ -56,13 +56,11 @@ export function parseCodexSessionRollouts(
     const events = parseCodexFile(filePath, { ...options, content: readFile(filePath).toString('utf8'), diagnostics });
     return { events, reads, malformedLines: diagnostics.malformedLines, paginated: false, ownedFiles };
   }
-  // Native session identity alone does not prove every segment is readable.
-  // Resolve every member before reconciliation; a missing base preserves the store.
+  // WHY: An unreadable segment cannot prove that a stored native-session row is stale.
   const ordered = [...members].sort((a, b) => Number(!!a.historyBase) - Number(!!b.historyBase) || a.filePath.localeCompare(b.filePath));
   const histories = ordered.map(member => resolveCodexRolloutHistory(member.filePath, { inventory, readFile }));
-  // A full replacement can materialize its old prefix instead of pointing to
-  // it. Only an exact chronological prefix proves shared history; equal totals
-  // alone cannot distinguish a copy from another billable request.
+  // WHY: A replacement may materialize its history. Only an exact prefix proves that two segments
+  // share that history.
   const comparable = histories.map(history => history.records.flatMap((record, index) => {
     if (record.value.type === 'session_meta') return [];
     const { ordinal: _ordinal, ...value } = record.value;
@@ -114,8 +112,6 @@ export function parseCodexSessionRollouts(
     const end = events.find(event => event.event_type === 'session_end')?.metadata as Record<string, unknown> | undefined;
     resets += Number(end?._counter_resets ?? 0);
     unbilled += Number(end?._compactions_unbilled ?? 0);
-    // Independent native counter evidence for each file's own billed span.
-    // Prefer thread totals (which include compactions) when both boundaries have them.
     const total = (inherited: boolean, useThread: boolean): { input: number; output: number } | undefined => {
       let last: { input: number; output: number } | undefined;
       for (const record of history.records) {

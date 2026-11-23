@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
-# Isolated upstream Playwright Chromium for the disposable hosted Linux runner.
 [[ "$(uname -s)" == Linux && "$(uname -m)" == x86_64 ]] || { echo 'Expected Linux x64 hosted runner' >&2; exit 1; }
 : "${RUNNER_TEMP:?RUNNER_TEMP is required}"
 : "${GITHUB_ENV:?GITHUB_ENV is required}"

@@ -1,18 +1,9 @@
-// Session titles: which user text names a session.
-//
-// Harnesses put machine-written context in user-role messages ahead of the
-// user's own prompt: Codex sends AGENTS.md and an <environment_context> block,
-// Claude Code sends local-command wrappers and task notifications. A title
-// taken from the first user message names the injected context instead.
 
 const TITLE_MAX_CHARS = 200;
-// Elements Codex and Claude Code write into user messages on their own. A user's
-// prompt can be markup too (`<task>…</task>`), so only these tags mark context.
+// WHY: User text may contain markup too, so skip only tags known to come from the harness.
 const HARNESS_TAGS = new Set([
-  // Codex
   'environment_context', 'recommended_plugins', 'user_action', 'turn_aborted', 'skill',
   'subagent_notification', 'codex_internal_context', 'external_codex_apps_open_page',
-  // Claude Code
   'system-reminder', 'task-notification', 'local-command-caveat', 'local-command-stdout',
   'local-command-stderr', 'command-name', 'command-message', 'command-args',
   'bash-input', 'bash-stdout', 'bash-stderr',
@@ -61,9 +52,6 @@ export function promptTitleFromTexts(texts: readonly string[]): string | null {
   return null;
 }
 
-// Prompts the Codex app sends on its own: naming a thread, summarizing it for a
-// returning user, and consolidating memories. They run as threads of their own
-// and leave no rollout file, so their prompt is the only thing that marks them.
 const CODEX_APP_JOB_PREFIXES = [
   'Generate a concise, single-line task title',
   'You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title',

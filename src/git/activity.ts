@@ -77,10 +77,7 @@ interface CommitRecord {
   is_merge: boolean;
 }
 
-// Directory reads here run on the server, so none may block it: each is
-// asynchronous and abandoned after FS_TIMEOUT_MS. A read that hangs (a privacy
-// prompt no one answers, a stalled network volume) still holds a libuv thread,
-// so its directory is remembered and not asked about again in this process.
+// WHY: A server-side directory read can block forever on an unavailable file provider.
 const FS_TIMEOUT_MS = 10_000;
 const unreachableDirectories = new Set<string>();
 
@@ -161,10 +158,7 @@ async function repositoriesInside(dir: string, policy: DirectoryPolicy): Promise
   for (const entry of entries) {
     if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
     const child = path.join(dir, entry.name);
-    // A folder of projects can be the home directory, whose Documents is guarded.
     if (policy.excluded(child) || policy.skipped(child)) continue;
-    // Only a directory with its own .git is a repository's top; this spares a
-    // git process for every plain folder.
     if (!(await exists(policy.reader, path.join(child, '.git'), child))) continue;
     const root = await repositoryRoot(child, policy.reader);
     if (root) roots.add(root);
@@ -262,16 +256,8 @@ async function recordLanding(db: Database, root: string, since: Date, originRepo
 }
 
 async function readCommits(root: string, since: Date): Promise<CommitRecord[]> {
-  // --since stops walking at the first commit older than the cutoff, so a
-  // backdated commit would hide the recent ones behind it, and the pass would
-  // then remove them as rewritten. --since-as-filter (git 2.38) visits them all.
-  // Merges are kept, flagged: a merged pull request leaves one. The output is
-  // parsed, so no user config may add to it: log.showSignature would print
-  // verification text between commits, and color would add escapes.
-  // --all, which alone examines every worktree's HEAD, detached ones included,
-  // without the refs that are not anyone's work: a stash's synthetic commits
-  // (two parents, so they would read as merges), notes, filter-branch backups
-  // and replacements. Each --exclude applies to the --all after it.
+  // WHY: Git's --since stops at the first older commit, which can hide newer commits behind a
+  // backdated one.
   const output = await git(root, ['log',
     '--exclude=refs/stash', '--exclude=refs/notes/*', '--exclude=refs/original/*', '--exclude=refs/replace/*', '--all',
     '-z', '--no-show-signature', '--no-color', `--since-as-filter=${since.toISOString()}`, `--format=${LOG_FORMAT}`, '--name-only']);
@@ -341,7 +327,7 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
     }
     const first = row.first_started ? Date.parse(row.first_started) : Number.NaN;
     for (const each of roots) {
-      // A worktree can sit outside the exclusion while its common repo is inside.
+      // WHY: A linked worktree can sit outside the exclusion while its common repository is inside.
       if (policy.excluded(each)) continue;
       const known = firstSessionByRoot.get(each);
       firstSessionByRoot.set(each, Number.isNaN(first) ? known ?? Number.NaN : Math.min(known ?? first, first));
@@ -375,10 +361,6 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
   for (const [root, firstSession] of firstSessionByRoot) {
     const floor = now.getTime() - MAX_HISTORY_DAYS * DAY_MS;
     const state = lastScan.get(root) as { last_scanned_at: string | null; covered_from: string | null } | undefined;
-    // History to cover reaches the day before the repository's first session.
-    // A reread overlaps the last read by RESCAN_DAYS, however long ago it was,
-    // so downtime never leaves a gap, and reaches further back when a session
-    // older than anything read so far has turned up (a forced session sync).
     const wanted = Math.max(floor, Number.isNaN(firstSession) ? floor : firstSession - DAY_MS);
     const covered = state?.covered_from ? Date.parse(state.covered_from) : Number.NaN;
     const reread = state?.last_scanned_at
@@ -423,7 +405,6 @@ export async function syncGitActivity(db: Database, options: GitSyncOptions = {}
     try {
       report.pull_requests_linked += await recordLanding(db, root, since, githubRepo);
     } catch {
-      // The commits are stored; landing is asked again on the next pass.
       report.errors += 1;
     }
   }

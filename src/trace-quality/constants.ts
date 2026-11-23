@@ -56,7 +56,7 @@ export const TRACE_QUALITY_PROMPT_REF_SOURCES = [
   'task_template',
   'system_prompt',
   'manual',
-  // Legacy values kept readable for existing local databases and seeded rows.
+  // WHY: Existing databases and seed rows still contain the older spellings.
   'file',
   'inline',
   'skill',
@@ -102,9 +102,6 @@ export const TRACE_QUALITY_COVERAGE_KEYS = [
   'projection_confidence',
 ] as const;
 
-// Local, read-only quality/alert findings (spec Task 7). 13 aggregate/anomaly kinds plus the
-// retained per-observation `observation_error` drill-down. `low_score`/`low_coverage` were renamed
-// to `low_quality_score`/`low_trace_coverage`.
 export const TRACE_QUALITY_FINDING_KINDS = [
   'high_error_rate',
   'tool_failure_rate',
@@ -122,7 +119,6 @@ export const TRACE_QUALITY_FINDING_KINDS = [
   'observation_error',
 ] as const;
 
-// Ordered ascending by severity rank; index doubles as the rank (info=0 … critical=3).
 export const TRACE_QUALITY_FINDING_SEVERITIES = [
   'info',
   'warning',
@@ -130,10 +126,6 @@ export const TRACE_QUALITY_FINDING_SEVERITIES = [
   'critical',
 ] as const;
 
-// Default thresholds/windows for finding computation. Overridable via a local JSON file
-// (AGENTMONITOR_TRACE_QUALITY_FINDINGS_PATH). `rate` values are fractions in [0,1]; `*_ms` are
-// milliseconds; `*_usd` are dollars. `daily_budget_risk` delegates to the usage-budgets module and
-// `observation_error` is unconditional, so neither carries thresholds here.
 export interface TraceQualityFindingThresholds {
   high_error_rate: { warning: number; high: number; critical: number; min_observations: number };
   tool_failure_rate: { warning: number; high: number; critical: number; min_calls: number };

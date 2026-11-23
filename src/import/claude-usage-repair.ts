@@ -13,8 +13,6 @@ export interface ClaudeUsageRepairOptions {
   excludePatterns?: string[];
 }
 
-// A type alias, not an interface: `printSummary` takes `Record<string, unknown>`,
-// which an interface is not assignable to.
 export type ClaudeUsageRepairReport = {
   apply: boolean;
   files_scanned: number;
@@ -47,7 +45,6 @@ interface StoredRow {
   client_timestamp: string | null;
 }
 
-// input, output, cache read, cache write, and the 1-hour part of the cache write.
 type Buckets = [number, number, number, number, number];
 
 /**
@@ -98,13 +95,10 @@ export function repairClaudeImportUsage(
     cost_reclaimed_usd: 0,
   };
 
-  // Pass 1: every transcript line's claim on each id it can be stored under.
-  // Claims are collected before any is resolved, so a collision cannot depend
-  // on which file happened to be visited first.
+  // WHY: Collect all candidate IDs first so record order cannot decide which transcript owns an
+  // event.
   const claims = new Map<string, Claim[]>();
-  // Every copy of a producer line (keyed by its uuid id), for billing it once.
   const copiesByLine = new Map<string, LineCopy[]>();
-  // The producer lines each transcript holds, to tell which copied which.
   const transcriptLines = new Map<string, Set<string>>();
   for (const filePath of discoverClaudeCodeLogs(options.claudeDir, {
     excludePatterns: options.excludePatterns,
@@ -114,7 +108,7 @@ export function repairClaudeImportUsage(
     try {
       parsed = parseClaudeCodeFile(filePath);
     } catch {
-      continue; // an unreadable transcript leaves its rows unrepairable, not wrong
+      continue; // WHY: An unreadable transcript cannot establish that its stored rows are wrong.
     }
     const lines = new Set<string>();
     transcriptLines.set(filePath, lines);
@@ -127,19 +121,13 @@ export function repairClaudeImportUsage(
         event.cache_write_tokens ?? 0,
         event.cache_write_1h_tokens ?? 0,
       ];
-      // Index under both ids a line can be stored as: the current one, and the
-      // positional id every row imported before the uuid change still carries.
-      // Legacy ids are the ones that collide between a transcript and its
-      // child-agent file, so the ambiguity rule does its work here.
-      // A line without a uuid derives both ids identically; indexing it twice
-      // would mark it as claimed by two files and refuse to repair it.
+      // WHY: Rows written before UUID-based identity still use positional keys.
       for (const id of new Set([event.event_id, event.legacy_event_id])) {
         if (!id) continue;
         const list = claims.get(id) ?? [];
         list.push({
           buckets,
-          // A transcript is named after its session and owns the positional ids
-          // minted for it; a child agent's file reports its parent's session.
+          // WHY: Child transcripts report the parent's session ID but own their own positional rows.
           ownsId: transcriptName === event.session_id,
           ownId: id === event.event_id ? undefined : event.event_id,
           timestamp: event.client_timestamp ?? null,
@@ -156,7 +144,6 @@ export function repairClaudeImportUsage(
     }
   }
 
-  // Pass 2: compare every stored import row against what its transcript says.
   const rows = readStoredRows(db, apply);
   const storedRows = new Map(rows.map(row => [row.event_id, row]));
   const corrections = new Map<string, Buckets | null>();
@@ -189,16 +176,13 @@ export function repairClaudeImportUsage(
     ];
     if (corrected.every((value, index) => value === stored[index])) continue;
 
-    // A line that contributes no tokens also contributes no cost. A row that
-    // now bills different tokens keeps a captured cost, but an estimate follows
-    // the tokens it was estimated from.
     const zeroed = corrected.every(value => value === 0);
     const cost = zeroed ? 0 : correctedCost(row, corrected);
 
     report.rows_corrected++;
     if (duplicate) report.rows_deduplicated++;
     if (corrected[4] !== stored[4]) report.rows_split_1h++;
-    // The 1-hour part is already counted in the cache-write total.
+    // WHY: The hour-long writes are already part of the total cache-write bucket.
     report.tokens_reclaimed += stored.slice(0, 4).reduce((sum, value, index) => sum + (value - corrected[index]), 0);
     report.cost_reclaimed_usd += (row.cost_usd ?? 0) - (cost ?? 0);
     pending.push({ row, corrected, cost });
@@ -221,10 +205,7 @@ export function repairClaudeImportUsage(
     });
     run();
 
-    // session_trace_summary keeps its own token/cost rollup, which the
-    // trace-quality API and warehouse export read directly. Startup backfill
-    // skips rows already at the current projection version, so a repaired
-    // session would otherwise keep serving the inflated numbers indefinitely.
+    // WHY: Trace summaries cache token and cost totals and must reflect the same repair.
     for (const sessionId of touchedSessions) {
       maintainSessionTraceSummary(sessionId);
       report.sessions_resummarized++;
@@ -367,7 +348,6 @@ function duplicateLineRows(
 ): { duplicates: Set<string>; unresolved: Set<string> } {
   const duplicates = new Set<string>();
   const unresolved = new Set<string>();
-  // A resumed transcript shares many lines with its source; compare each pair once.
   const lineage = new Map<string, boolean>();
   const isResumedFrom = (resumed: string, source: string): boolean => {
     const key = `${resumed}\0${source}`;
@@ -386,9 +366,7 @@ function duplicateLineRows(
   for (const [uuidId, copies] of copiesByLine) {
     const contribution = corrections.get(uuidId);
     if (contribution === null) {
-      // The copies disagree on what the line contributes (a copy that starts
-      // partway through a turn), so correcting each on its own could bill the
-      // response twice. Leave every stored copy as it is.
+      // WHY: Copies starting mid-turn can disagree on what the same line contributes.
       for (const copy of copies) {
         if (copy.legacyId !== undefined && stored.has(copy.legacyId)) unresolved.add(copy.legacyId);
       }
@@ -409,8 +387,8 @@ function duplicateLineRows(
       for (const id of candidates) unresolved.add(id);
       continue;
     }
-    // Every other copy is zeroed, including copies an earlier run already
-    // zeroed; otherwise the ordinary correction would re-bill them.
+    // WHY: A resumed transcript can retain previously zeroed copies; rebilling them would undo an
+    // earlier repair.
     for (const id of candidates) if (id !== kept) duplicates.add(id);
   }
   return { duplicates, unresolved };

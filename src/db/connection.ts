@@ -37,19 +37,15 @@ export function getDb({ fileMustExist = false } = {}): Database.Database {
     }
 
     db = new Database(config.dbPath, { timeout: SQLITE_BUSY_TIMEOUT_MS, fileMustExist });
-    // Configure contention handling before any pragma that may need a lock.
-    // Re-applying journal_mode=WAL from every short-lived CLI process can queue
-    // behind the running server's writer even when the database is already WAL.
+    // WHY: A short-lived CLI can encounter an existing writer even while setting pragmas; install
+    // the busy handler first.
     db.pragma(`busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS}`);
     const journalMode = db.pragma('journal_mode', { simple: true });
     if (journalMode !== 'wal') db.pragma('journal_mode = WAL');
     db.pragma('synchronous = NORMAL');
     db.pragma('foreign_keys = ON');
-    db.pragma('cache_size = -64000'); // 64MB
-    // Truncate the WAL back to this size when a checkpoint resets it. SQLite
-    // otherwise keeps the file at its high-water mark: a burst of writes (an
-    // import, a re-sync) once left a WAL about 8% of the database's size
-    // behind indefinitely.
+    db.pragma('cache_size = -64000');
+    // WHY: SQLite retains a reset WAL at its high-water mark unless a size limit is set.
     db.pragma(`journal_size_limit = ${WAL_SIZE_LIMIT_BYTES}`);
   }
   return db;

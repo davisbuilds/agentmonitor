@@ -86,7 +86,6 @@ export function registerDatabaseCommands(): void {
     name: 'database prune-codex-fragments',
     group: 'Data Commands',
     summary: 'Remove stored Codex OTEL stream fragments and their projected turns',
-    // Reports by default; the apply needs the preview's digest and the server stopped.
     usage: 'database prune-codex-fragments [--apply --expect-digest <sha256>] [--json]',
     examples: [
       'database prune-codex-fragments --json',
@@ -225,7 +224,6 @@ function parsePruneArgs(args: string[], command: string): string | undefined {
   return expectDigest;
 }
 
-// Decimal units, as Finder and `ls -h` report file sizes on macOS.
 function formatBytes(bytes: number): string {
   if (bytes < 1e6) return `${(bytes / 1e3).toFixed(1)} kB`;
   if (bytes < 1e9) return `${(bytes / 1e6).toFixed(1)} MB`;

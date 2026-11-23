@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url';
  * resolver without either inheriting the other's import timing.
  */
 
-// src/db-path.ts and dist/db-path.js both sit one level under the package root.
 const packageRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
