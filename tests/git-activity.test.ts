@@ -7,7 +7,8 @@ import test, { after } from 'node:test';
 
 const tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-git-activity-')));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
-// The fixture repos and the reads under test see no user or system git config.
+// WHY: Exclude ambient Git configuration so fixture behavior does not depend on user or system
+// settings.
 process.env.GIT_CONFIG_GLOBAL = '/dev/null';
 process.env.GIT_CONFIG_NOSYSTEM = '1';
 
@@ -45,7 +46,6 @@ const commit = (cwd: string, file: string, message: string, at: string) => {
 fs.mkdirSync(repo);
 git(repo, ['init', '-q', '-b', 'main']);
 git(repo, ['remote', 'add', 'origin', 'git@github.com:Example/alpha.git']);
-// Within the history cap but before any session here: the first scan does not reach it.
 commit(repo, 'old.txt', 'chore: before the sessions', '2026-01-15T00:00:00Z');
 const first = commit(repo, 'a.ts', 'feat: add a', '2026-03-02T10:00:00Z');
 const second = commit(repo, 'AGENTS.md', 'docs: agent rules\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>', '2026-03-03T10:00:00-05:00');
@@ -121,7 +121,6 @@ test('a backdated commit does not hide a recent one behind it from the reread', 
   const dir = freshRepository('epsilon', '2026-04-01T09:00:00Z');
   const recent = commit(dir, 'a.txt', 'feat: recent', '2026-04-01T10:00:00Z');
   await syncGitActivity(db, { now: new Date('2026-04-02T00:00:00Z') });
-  // A child whose committer date is older than the reread window.
   commit(dir, 'b.txt', 'chore: backdated', '2026-01-01T10:00:00Z');
   await syncGitActivity(db, { now: new Date('2026-04-03T00:00:00Z') });
   assert.ok(shasIn(dir).includes(recent), 'the recent commit is still reachable, so it stays');
@@ -189,7 +188,6 @@ test('a session found later, older than any read so far, extends the next read b
   const recent = commit(dir, 'b.txt', 'feat: recent', '2026-04-01T10:00:00Z');
   await syncGitActivity(db, { now: new Date('2026-04-02T00:00:00Z') });
   assert.deepEqual(shasIn(dir), [recent], 'the first read reaches back only to the day before its first session');
-  // A forced session sync restores a March session in the same repository.
   session.run('s-kappa-march', dir, '2026-03-01T09:00:00Z');
   await syncGitActivity(db, { now: new Date('2026-04-03T00:00:00Z') });
   assert.deepEqual(shasIn(dir), [older, recent]);
@@ -257,7 +255,6 @@ test('each commit records whether it reached any remote\'s main, and a merge rec
   const late = commit(dir, 'd.txt', 'feat: merged weeks later', '2026-03-01T14:00:00Z');
   git(dir, ['checkout', '-q', '-b', 'wip', 'main']);
   const wip = commit(dir, 'e.txt', 'wip: never merged', '2026-03-01T15:00:00Z');
-  // The fork's own main: work there, and a pull request merged on the fork.
   git(dir, ['checkout', '-q', '-b', 'forkmain', 'main']);
   const forked = commit(dir, 'f.txt', 'feat: on the fork only', '2026-03-01T16:00:00Z');
   git(dir, ['checkout', '-q', '-b', 'forkfeature']);
@@ -287,8 +284,6 @@ test('each commit records whether it reached any remote\'s main, and a merge rec
   assert.deepEqual(members('me/landing', 3), [`${forkBranch.slice(0, 7)} local`], "a fork's merge is the fork's pull request");
   assert.deepEqual(members('example/landing', 3), []);
 
-  // Merged three weeks on, past the reread window. GitHub has already listed
-  // its commits, as they were before a rebase there, so they differ from git's.
   git(dir, ['merge', '-q', '--no-ff', '-m', 'Merge pull request #6 from example/late', 'late'], '2026-04-05T12:00:00Z');
   remoteMain('origin', git(dir, ['rev-parse', 'HEAD']));
   const listedOnGithub = 'f'.repeat(40);
@@ -300,7 +295,6 @@ test('each commit records whether it reached any remote\'s main, and a merge rec
 });
 
 test('under the service, a session directory macOS guards with a privacy prompt is not read', async () => {
-  // A stand-in home: its Documents folder is what macOS would guard.
   const home = path.join(tempDir, 'home');
   const guarded = path.join(home, 'Documents', 'guarded');
   fs.mkdirSync(guarded, { recursive: true });
@@ -314,15 +308,14 @@ test('under the service, a session directory macOS guards with a privacy prompt 
   assert.equal(readGuarded(), 0, 'not even asked about');
   assert.equal(asService.skipped_directories, 1);
 
-  // A process someone can answer the prompt for reads it as usual.
   const asked = await syncGitActivity(db, { now: new Date('2026-05-10T00:00:00Z'), home });
   assert.equal(readGuarded(), 1);
   assert.equal(asked.skipped_directories, 0);
 });
 
 test('a directory whose read hangs is asked about once, not on every pass', async () => {
-  // A folder of projects whose one child cannot be read: its .git check never
-  // returns, as on a stalled mount. Each hung read holds a thread for good.
+  // WHY: Simulate stalled mount metadata so the test covers a read that never completes, not a fast
+  // error.
   const container = path.join(tempDir, 'hanging-container');
   const hanging = path.join(container, 'stalled');
   fs.mkdirSync(hanging, { recursive: true });

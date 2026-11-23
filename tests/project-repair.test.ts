@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-project-repair-')));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -13,12 +12,10 @@ const { closeDb, getDb } = await import('../src/db/connection.js');
 const { repairProjectNames } = await import('../src/import/project-repair.js');
 const { maintainSessionTraceSummary } = await import('../src/trace-quality/summary.js');
 const { setScratchRootsForTests } = await import('../src/util/project-identity.js');
-// The fixtures live in a temp directory, which is scratch space; name none, so
-// the plain folder below keeps its name (tests/project-repair-scratch.test.ts
-// covers scratch work).
+// WHY: The normal temp-root policy would classify the plain-folder fixture as scratch rather than
+// testing repair.
 setScratchRootsForTests([]);
 
-// A repo with a worktree that has since been removed, as transcripts outlive them.
 const dev = path.join(tempDir, 'Dev');
 const repo = path.join(dev, 'app');
 fs.mkdirSync(path.join(repo, '.git'), { recursive: true });
@@ -36,7 +33,6 @@ before(() => {
   initSchema();
   assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
 
-  // Claude transcript: the encoded folder name is the one the old decoder misread.
   const claudeFile = path.join(claudeDir, 'projects', '-Users-test-user-Dev', `${CLAUDE_ID}.jsonl`);
   fs.mkdirSync(path.dirname(claudeFile), { recursive: true });
   fs.writeFileSync(claudeFile, [
@@ -89,10 +85,8 @@ test('applying renames every table to the canonical project, once', () => {
   const report = repairProjectNames(getDb(), { claudeDir, codexDir, apply: true });
   assert.equal(report.sessions_changed, 2);
   assert.deepEqual(report.rows, { events: 3, sessions: 2, browsing_sessions: 3 });
-  // Hook and import rows follow their cwd; another session and an OTEL row without one stay.
   assert.deepEqual(projects('events'), ['app', 'app', 'notes', 'app', null, 'app-task']);
   assert.deepEqual(projects('sessions'), ['app', 'app']);
-  // The Claude browser row takes the transcript's first cwd.
   assert.deepEqual(projects('browsing_sessions'), ['app', 'app', 'app']);
   assert.deepEqual(projects('session_trace_summary', `session_id IN ('${CLAUDE_ID}', '${ROLLOUT}', '${CODEX_ID}')`), ['app', 'app', 'app']);
   assert.ok(report.renames.some(rename => rename.from === 'user-Dev' && rename.to === 'app'));

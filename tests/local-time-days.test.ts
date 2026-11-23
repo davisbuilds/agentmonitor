@@ -4,10 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
 
-// Isolate the DB and pin the reporting zone before importing anything that
-// reads config. Tokyo is deliberately neither UTC (the old reading) nor the
-// America/New_York that daily activity used to hardcode, so every surface has
-// to honor the configured zone to pass.
+// WHY: Use Tokyo to distinguish the configured zone from both UTC and the old hardcoded reporting
+// zone.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-local-days-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
 process.env.AGENTMONITOR_TIMEZONE = 'Asia/Tokyo';
@@ -19,15 +17,12 @@ const q = await import('../src/db/v2-queries.js');
 const { listSessionTraces } = await import('../src/trace-quality/on-demand.js');
 const { maintainSessionTraceSummary } = await import('../src/trace-quality/summary.js');
 
-// The local day under test is Thursday 2026-09-10 in Tokyo (UTC+9).
-const EARLY = '2026-09-09T16:00:00.000Z'; // 01:00 JST Sep 10 — still Sep 9 in UTC
-const LATE = '2026-09-10T14:30:00.000Z'; //  23:30 JST Sep 10
-const NEXT = '2026-09-10T16:30:00.000Z'; //  01:30 JST Sep 11 — still Sep 10 in UTC
+const EARLY = '2026-09-09T16:00:00.000Z';
+const LATE = '2026-09-10T14:30:00.000Z';
+const NEXT = '2026-09-10T16:30:00.000Z';
 const DAY = { date_from: '2026-09-10', date_to: '2026-09-10' };
 const TWO_DAYS = { date_from: '2026-09-10', date_to: '2026-09-11' };
 
-// Weights make each row identifiable in any sum: the right Sep 10 answer is 11,
-// the old UTC reading gives 110.
 const ROWS = [
   { id: 'early', at: EARLY, weight: 1 },
   { id: 'late', at: LATE, weight: 10 },
@@ -47,14 +42,12 @@ before(() => {
       INSERT INTO browsing_sessions (id, project, agent, started_at, ended_at, message_count, user_message_count)
       VALUES (?, 'local-days', 'claude', ?, ?, ?, 0)
     `).run(`bs-${row.id}`, row.at, row.at, row.weight);
-    // A Codex read of a skill file is one skill invocation.
     insertEvent({
       session_id: `skill-${row.id}`, agent_type: 'codex', event_type: 'tool_use', tool_name: 'exec_command',
       status: 'success', client_timestamp: row.at, source: 'hook',
       metadata: { arguments: { cmd: 'cat /home/example/.codex/skills/test-strategy/SKILL.md' } },
     });
     maintainSessionTraceSummary(`evt-${row.id}`);
-    // sessions.last_event_at is SQLite's zone-less UTC format.
     getDb().prepare('UPDATE sessions SET last_event_at = ? WHERE id = ?')
       .run(row.at.replace('T', ' ').slice(0, 19), `evt-${row.id}`);
     getDb().prepare(`
@@ -80,8 +73,6 @@ describe('usage selects and buckets local days', () => {
   });
 
   test('a timestamp date_from starts the daily axis on its local day', () => {
-    // The Monitor sends instants. EARLY is Sep 9 in UTC but Sep 10 in Tokyo, so
-    // reading its UTC date would open the axis on an empty Sep 9.
     assert.deepEqual(q.getUsageDaily({ date_from: EARLY }).map(p => p.date), ['2026-09-10', '2026-09-11']);
   });
 
@@ -108,7 +99,6 @@ describe('analytics selects and buckets local days', () => {
     const plotted = q.getAnalyticsHourOfWeek({ ...DAY, project: 'local-days' })
       .filter(p => p.message_count > 0)
       .map(p => [p.day_of_week, p.hour_of_day, p.message_count]);
-    // Thursday is 3 (Monday = 0).
     assert.deepEqual(plotted, [[3, 1, 1], [3, 23, 10]]);
   });
 });
@@ -170,7 +160,6 @@ describe('trace quality selects local days', () => {
 });
 
 describe('local-day filters stay indexable', () => {
-  // The exact predicate buildAnalyticsFilterState and listBrowsingSessions emit.
   for (const column of ['started_at', 'bs.started_at']) {
     test(`datetime(${column}) ranges search an index rather than scan`, () => {
       const plan = getDb().prepare(`

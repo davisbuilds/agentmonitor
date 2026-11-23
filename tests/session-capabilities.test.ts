@@ -58,7 +58,7 @@ test('hasSessionCapability is false without a contract and thresholds at the min
   assert.equal(hasSessionCapability(null, 'history'), false);
   assert.equal(hasSessionCapability(null, 'history', 'none'), false);
   const summaryHistory = caps('summary', 'full', 'none', 'none');
-  assert.equal(hasSessionCapability(summaryHistory, 'history'), true); // summary meets the default minimum
+  assert.equal(hasSessionCapability(summaryHistory, 'history'), true);
   assert.equal(hasSessionCapability(summaryHistory, 'history', 'full'), false);
   assert.equal(hasSessionCapability(summaryHistory, 'search', 'full'), true);
   assert.equal(hasSessionCapability(summaryHistory, 'tool_analytics'), false);

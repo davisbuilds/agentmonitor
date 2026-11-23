@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-project-repair-lock-')));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -15,8 +14,6 @@ const { renameStoredProjects, repairProjectNames } = await import('../src/import
 const { setScratchRootsForTests } = await import('../src/util/project-identity.js');
 setScratchRootsForTests([]);
 
-// A Claude transcript whose cwd basename is already its project, so the repair's
-// first statement reads the browser row before it writes.
 const CLAUDE_ID = 'c0ffee00-0000-4000-8000-0000000000aa';
 const repo = path.join(tempDir, 'Dev', 'app');
 fs.mkdirSync(path.join(repo, '.git'), { recursive: true });

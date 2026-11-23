@@ -21,13 +21,12 @@ import { normalizeIngestEvent } from '../src/contracts/event-contract.js';
 const HOOKS_DIR = path.resolve(import.meta.dirname, '..', 'hooks', 'claude-code');
 const PYTHON_DIR = path.join(HOOKS_DIR, 'python');
 
-// Hooks run here against a dead URL spool what they could not send: into this
-// file's own spool, never the real one a running server would drain.
+// WHY: Use an isolated spool because unreachable delivery writes to disk and a running service could
+// drain the real one.
 const HOOK_SPOOL_DIR = path.join(mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-hook-spool-')), 'spool');
 process.env.AGENTMONITOR_HOOK_SPOOL_DIR = HOOK_SPOOL_DIR;
 after(() => rmSync(path.dirname(HOOK_SPOOL_DIR), { recursive: true, force: true }));
 
-// Set a bogus URL so curl/urllib don't actually connect
 const ENV = {
   ...process.env,
   AGENTMONITOR_URL: 'http://127.0.0.1:0',
@@ -224,7 +223,6 @@ function runStatuslineInstaller(args: string[], envOverrides: Record<string, str
   });
 }
 
-// Validate that the payload a hook would send matches our contract
 function validatePayloadShape(eventType: string, fields: Record<string, unknown>) {
   const result = normalizeIngestEvent({
     session_id: 'test-session-001',
@@ -238,8 +236,6 @@ function validatePayloadShape(eventType: string, fields: Record<string, unknown>
 
 describe('Shell hook scripts', () => {
   test('hooks report events from a repository with no commits yet', async () => {
-    // An unborn HEAD makes `git rev-parse --abbrev-ref HEAD` exit 128, which
-    // under `set -e` used to kill the hook before it sent anything.
     const repo = mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-unborn-'));
     try {
       execFileSync('git', ['init', '-q', '-b', 'trunk', repo]);
@@ -326,7 +322,6 @@ describe('Shell hook scripts', () => {
         timeout: 10000,
         encoding: 'utf-8',
       });
-      // If we get here, exit code was 0
     } catch (err: unknown) {
       const e = err as { status: number };
       assert.fail(`Expected exit 0 with safety disabled, got ${e.status}`);
@@ -335,13 +330,13 @@ describe('Shell hook scripts', () => {
 });
 
 describe('Python hook scripts', () => {
-  // Check if python3 is available
   let hasPython = false;
   try {
     execSync('python3 --version', { encoding: 'utf-8', timeout: 5000 });
     hasPython = true;
   } catch {
-    // python3 not available
+    // WHY: These tests run real Python subprocesses, so the suite skips when the interpreter is
+    // unavailable.
   }
 
   if (!hasPython) {
@@ -407,7 +402,7 @@ describe('Claude statusline bridge installer', () => {
     execSync('jq --version', { encoding: 'utf-8', timeout: 5000 });
     hasJq = true;
   } catch {
-    // jq not available
+    // WHY: The statusline installer uses real jq, so the suite skips when it cannot run locally.
   }
 
   if (!hasJq) {
@@ -495,11 +490,10 @@ describe('Hook payload contract validation', () => {
 });
 
 describe('Hook working directory', () => {
-  // The server derives the canonical project from the cwd; a hook that only
-  // sent its folder name would name a worktree after itself.
+  // WHY: A worktree’s folder is not its project identity, so the server needs the working directory
+  // to resolve the canonical project.
   test('every hook payload carries the session cwd', async () => {
     const prompt = JSON.stringify({ session_id: 'test-session-001', cwd: '/home/user/my-project', prompt: 'hello' });
-    // The sensitive-file warning is the pre-tool event that exits 0.
     const warned = makePreToolUseInput('Read', { file_path: '/home/user/my-project/.env' });
     const runs = [
       ...['session_start.sh', 'session_end.sh', 'post_tool_use.sh', 'instructions_loaded.sh', 'user_prompt_submit.sh', 'pre_tool_use.sh']
@@ -546,8 +540,8 @@ describe('Instruction-load telemetry hooks', () => {
       'session_start',
       'compact',
     ]);
-    // Each load is its own observation: a fresh id per hook run, never one
-    // derived from the file, so a repeated load is not dropped as a duplicate.
+    // WHY: Separate loads of the same file are distinct observations. Deriving an ID from the
+    // filename would deduplicate them.
     const ids = payloads.map(payload => payload.event_id);
     assert.equal(ids.every(id => typeof id === 'string' && id.length > 0), true);
     assert.equal(new Set(ids).size, ids.length);
@@ -632,9 +626,8 @@ describe('Instruction-load telemetry hooks', () => {
   });
 });
 
-// A server that accepts a request, reads its body, and never answers: the case
-// where a slow-but-reachable AgentMonitor used to stall the agent. A refused
-// connection is fast either way, so it proves nothing here.
+// WHY: A refused connection returns quickly. A peer that accepts and stays silent exercises the
+// actual request deadline.
 async function withStalledServer<T>(fn: (url: string, bodies: string[]) => Promise<T>): Promise<T> {
   const bodies: string[] = [];
   const held: Array<{ destroy: () => void }> = [];
@@ -682,8 +675,6 @@ async function waitFor(condition: () => boolean, timeoutMs = 3_000): Promise<voi
   }
 }
 
-// Well under the old stalls (1s statusline timeout, 2s Python join) and well
-// over a normal process start.
 const HOT_PATH_BUDGET_MS = 600;
 
 describe('Hooks never make the agent wait on a slow server', () => {
@@ -724,9 +715,6 @@ describe('Hooks never make the agent wait on a slow server', () => {
   });
 });
 
-// The checks are best-effort telemetry (see hooks/claude-code/README.md), but
-// the shell and Python hooks must agree, and each case here is a form that an
-// earlier, literal-token version either missed or blocked by mistake.
 const DESTRUCTIVE_COMMANDS = [
   'rm -rf /',
   'rm -rf ~',
@@ -759,7 +747,6 @@ const DESTRUCTIVE_COMMANDS = [
   'echo "x $(rm -rf /) y"',
   'echo "`rm -rf ~`"',
   'echo "$(cd /tmp; rm -rf ~)"',
-  // A long payload after the match must not end the check early.
   `rm -rf / && echo ${'x'.repeat(100_000)}`,
 ];
 
@@ -827,8 +814,6 @@ async function warnedPaths(executable: string, script: string, filePaths: string
     for (const filePath of filePaths) {
       await runHookProcess(executable, [script], makePreToolUseInput('Read', { file_path: filePath }), url);
     }
-    // Wait for the expected warnings, then a little longer for unexpected ones:
-    // the hooks post in the background after they exit.
     await waitFor(() => warned.length >= expected).catch(() => undefined);
     await new Promise(resolve => setTimeout(resolve, 300));
     return warned.sort();
@@ -881,11 +866,9 @@ describe('A hook that cannot reach the server spools its event', () => {
   ] as const) {
     test(`${label}: the event is written, privately, as one valid event with its own id and time`, async () => {
       clearSpool();
-      // ENV's URL is a port nothing listens on.
       assert.equal(run().exitCode, 0);
       await waitFor(() => spooledFiles().length === 1);
       const [name] = spooledFiles();
-      // Microseconds since the epoch: finer than the second, so a burst keeps its order.
       assert.match(name!, /^\d{16,20}-[A-Za-z0-9._-]+\.json$/);
       assert.equal(statSync(HOOK_SPOOL_DIR).mode & 0o777, 0o700);
       assert.equal(statSync(path.join(HOOK_SPOOL_DIR, name!)).mode & 0o777, 0o600);

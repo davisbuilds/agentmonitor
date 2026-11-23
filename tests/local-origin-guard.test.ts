@@ -7,7 +7,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
 
-// Isolate the DB before importing anything that reads config.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-origin-guard-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -74,8 +73,7 @@ after(async () => {
 
 describe('a web page cannot write to the local server', () => {
   test('a cross-origin text/plain POST is refused and writes nothing', async () => {
-    // text/plain is CORS-safelisted, so the browser sends this without a
-    // preflight; the page never needs to read the response for the write to land.
+    // WHY: Exercise the origin policy on writes that do not depend on a preflight.
     const reply = await send(loopbackPort, 'POST', '/api/events', {
       'Content-Type': 'text/plain',
       Origin: 'https://evil.example.com',
@@ -85,7 +83,6 @@ describe('a web page cannot write to the local server', () => {
   });
 
   test('an opaque "null" origin is refused', async () => {
-    // Sandboxed iframes and file:// pages send Origin: null.
     const reply = await send(loopbackPort, 'POST', '/api/otel/v1/logs', {
       'Content-Type': 'text/plain',
       Origin: 'null',
@@ -119,8 +116,6 @@ describe('a web page cannot write to the local server', () => {
 
 describe('a loopback-bound server answers only loopback host names', () => {
   test('a rebound foreign Host is refused', async () => {
-    // DNS rebinding points evil.example.com at 127.0.0.1: the page is then
-    // same-origin with the server and could read it, but the Host header gives it away.
     const reply = await send(loopbackPort, 'GET', '/api/health', { Host: 'evil.example.com:3141' });
     assert.equal(reply.status, 403);
   });
@@ -134,8 +129,8 @@ describe('a loopback-bound server answers only loopback host names', () => {
 });
 
 describe('loopback is recognized however it is spelled', () => {
-  // Node binds `--host 0:0:0:0:0:0:0:1` to ::1; reading it as an external
-  // bind would silently drop the rebinding check.
+  // WHY: Node normalizes the fully expanded loopback address when binding. Treating it as an external
+  // listener would bypass the loopback policy.
   for (const bindHost of ['0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '127.1', 'LOCALHOST']) {
     test(`a server bound to ${bindHost} still refuses a rebound Host`, async () => {
       const { server, port } = await listen(createApp({ bindHost }));
@@ -178,8 +173,6 @@ describe('a server bound beyond loopback', () => {
 });
 
 describe('errors do not leak server internals', () => {
-  // Beyond the obvious garbage: a numeral too large for any Date, as a string
-  // and as a JSON number, must not throw a RangeError either.
   for (const timeUnixNano of ['not-a-number', '9'.repeat(30), 1e30]) {
     test(`a malformed OTLP timestamp ${JSON.stringify(timeUnixNano).slice(0, 16)} is ingested without one, not a 500`, async () => {
       const sessionId = `bad-ts-${String(timeUnixNano).slice(0, 8)}`;

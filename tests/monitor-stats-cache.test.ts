@@ -28,8 +28,8 @@ test('Monitor session expiry invalidates the shared stats snapshot', async () =>
     assert.equal(primed.active_sessions, 1);
     assert.equal(primed.live_sessions, 1);
 
-    // Simulate time passing without another event write. The v2 session read is
-    // the first code path to observe and persist the expired status.
+    // WHY: Time can expire live status without an event write, so the next reader must notice
+    // independently.
     getDb().prepare(`
       UPDATE sessions
       SET last_event_at = '2000-01-01 00:00:00', status = 'active', ended_at = NULL
@@ -58,14 +58,12 @@ test('the shared stats snapshot does not outlive the connection it was read from
   try {
     closeDb();
     initSchema();
-    // `config` snapshots the path on first import, so this file's earlier test
-    // chose it; getDb() has already refused the install database.
     const dbPath = getDb().name;
     assert.match(dbPath, /agentmonitor-monitor-stats-cache/);
     assert.equal(getStatsForBroadcast().total_events, 0);
 
-    // Another writer changes the file while the connection is closed; nothing in
-    // this process marks the snapshot dirty.
+    // WHY: An external writer can invalidate the snapshot without any event or dirty marker in this
+    // process.
     closeDb();
     const other = new Database(dbPath);
     other.prepare(`

@@ -57,7 +57,6 @@ function seed(): Record<string, number> {
   add('withText', 1, 'reasoning', { text: '' });
   add('empty', 2, 'reasoning', { text: '' });
   add('redacted', 3, 'reasoning', { redacted: true, reason: 'reasoning_capture_disabled' });
-  // One item for two thinking blocks: which text it held is unknown.
   add('ambiguous', 4, 'reasoning', { text: '' });
   return ids;
 }
@@ -65,7 +64,6 @@ function seed(): Record<string, number> {
 test('v18 restores live reasoning text from the transcript and removes empty reasoning', () => {
   const db = getDb();
   const ids = seed();
-  // The summary as the previous release derived it, counting every stored item.
   maintainSessionTraceSummary(SESSION);
   db.prepare("UPDATE session_trace_summary SET projection_version = 'sts:v3'").run();
 

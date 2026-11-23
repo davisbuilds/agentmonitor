@@ -52,9 +52,8 @@ const pr = db.prepare(`INSERT INTO github_pull_requests (repo, number, state, me
   VALUES (?, ?, 'MERGED', ?, ?, ?, ?, ?, 1, ?, ?, ?)`);
 const member = db.prepare('INSERT INTO github_pull_request_commits (repo, number, sha, source) VALUES (?, ?, ?, ?)');
 
-// A Claude session in alpha: two pull requests, a push, a branch never merged, then talk.
 session.run('c1', 'claude', 'claude-jsonl', alpha, at(11, 22), at(13, 23), null, null);
-spend('c1', 'claude_code', 'alpha', 5, at(11, 23)); // the day before the range, toward #1
+spend('c1', 'claude_code', 'alpha', 5, at(11, 23));
 spend('c1', 'claude_code', 'alpha', 1, at(12, 9));
 spend('c1', 'claude_code', 'alpha', 2, at(12, 9, 10));
 commits('c1', alpha, 'aaaa000001', at(12, 9, 15), 'feat: one', 'merged');
@@ -66,12 +65,10 @@ spend('c1', 'claude_code', 'alpha', 2, at(12, 9, 40));
 commits('c1', alpha, 'aaaa000004', at(12, 9, 45), 'wip: never merged', null);
 spend('c1', 'claude_code', 'alpha', 0.5, at(12, 9, 50));
 
-// Another session's last minute in the range, toward a push the day after it.
 session.run('c4', 'claude', 'claude-jsonl', alpha, at(13, 23), at(14, 1), null, null);
 spend('c4', 'claude_code', 'alpha', 1, at(13, 23, 50));
 commits('c4', alpha, 'aaaa000005', at(14, 0, 10), 'chore: next day', 'direct');
 
-// A Codex session (rollout row and import row under one key) whose subagent did the work for #3.
 const codexId = '01990000-0000-7000-8000-00000000c0de';
 const rollout = `rollout-2026-05-12T10-00-00-${codexId}`;
 const childId = '01990000-0000-7000-8000-0000000c41d0';
@@ -96,32 +93,30 @@ function opens(sessionId: string, when: string, url: string) {
   result.run(sessionId, `toolu_open_${ordinal}`, JSON.stringify({ content: url }));
 }
 
-// A Claude session in beta: a commit, then the pull request it opened, merged as #4 with a list from a local merge.
 session.run('c3', 'claude', 'claude-jsonl', beta, at(12, 14), at(12, 15), null, null);
 spend('c3', 'claude_code', 'beta', 2, at(12, 14));
 commits('c3', beta, 'bbbb000001', at(12, 14, 5), 'feat: four', 'merged');
 spend('c3', 'claude_code', 'beta', 0.5, at(12, 14, 6));
 opens('c3', at(12, 14, 7), 'https://github.com/owner/beta/pull/4');
 
-// A session that opened #7, which GitHub says merged, but as a pull request
-// created after the call: the name was reused, so this one did not land.
+// WHY: A later pull request cannot supply the outcome of an earlier call referring to the same
+// display name.
 session.run('c6', 'claude', 'claude-jsonl', alpha, at(12, 18), at(12, 19), null, null);
 spend('c6', 'claude_code', 'alpha', 1, at(12, 18));
 opens('c6', at(12, 18, 5), 'https://github.com/owner/alpha/pull/7');
 
-// Spend no milestone could be seen for: no transcript, and a session with no tool calls.
 spend('ghost', 'claude_code', 'alpha', 2, at(12, 12));
 session.run('quiet', 'claude', 'claude-jsonl', alpha, at(12, 16), at(12, 17), null, null);
 spend('quiet', 'claude_code', 'alpha', 1, at(12, 16, 30));
 
 const checked = at(20, 0);
 pr.run('owner/alpha', 1, at(12, 13), at(12, 9, 16), checked, 100, 50, 1, 0, checked);
-pr.run('owner/alpha', 2, at(13, 10), at(12, 9, 26), checked, 400, 200, 2, 0, checked); // two commits, one listed
+pr.run('owner/alpha', 2, at(13, 10), at(12, 9, 26), checked, 400, 200, 2, 0, checked);
 pr.run('owner/alpha', 3, at(12, 15), at(12, 11, 11), checked, 1000, 200, 1, 0, checked);
 pr.run('owner/beta', 4, at(12, 16), at(12, 14, 6), checked, null, null, null, null, null);
-pr.run('owner/alpha', 5, at(13, 12), at(13, 11), checked, 10, 0, 1, 0, checked); // from another machine
-pr.run('owner/alpha', 6, at(13, 12), at(13, 11), checked, 10, 0, 1, 1, checked); // a bot's
-pr.run('owner/alpha', 7, at(12, 20), at(13, 9), checked, 10, 0, 1, 0, checked); // the reused name
+pr.run('owner/alpha', 5, at(13, 12), at(13, 11), checked, 10, 0, 1, 0, checked);
+pr.run('owner/alpha', 6, at(13, 12), at(13, 11), checked, 10, 0, 1, 1, checked);
+pr.run('owner/alpha', 7, at(12, 20), at(13, 9), checked, 10, 0, 1, 0, checked);
 member.run('owner/alpha', 1, 'aaaa000001', 'github');
 member.run('owner/alpha', 2, 'aaaa000002', 'github');
 member.run('owner/alpha', 3, 'cccc0000030000', 'github');
@@ -135,9 +130,9 @@ test("the range's spend goes to what each session's timeline led to, counting ea
   const outcomes = queries.getAnalyticsOutcomes(range);
   assert.equal(outcomes.total_usd, 22);
   assert.deepEqual(spendOf(outcomes), {
-    merged_pr: 13.5, // #1 3, #2 4, #3 4 (the subagent's 3 with its parent), #4 2.5 (its commit, then opening it)
-    direct: 2, // the push, and the range's last minute toward the next day's
-    not_landed: 3, // the branch never merged, and #7
+    merged_pr: 13.5,
+    direct: 2,
+    not_landed: 3,
     nothing_after: 0.5,
     unobservable: 3,
   });
@@ -150,7 +145,6 @@ test("the range's spend goes to what each session's timeline led to, counting ea
 
 test('a merged pull request costs the spend allocated to it, work before the range included', () => {
   const outcomes = queries.getAnalyticsOutcomes(range);
-  // #1 8 (5 the day before), #2 4, #3 4, #4 2.5.
   assert.deepEqual(outcomes.merged_prs, { prs: 4, median_usd: 4, p25_usd: 3.625, p75_usd: 5, p90_usd: 6.8, all_in_usd: 5.5 });
   assert.deepEqual(outcomes.weeks, [{ week: '2026-05-11', prs: 4, median_usd: 4, p25_usd: 3.625, p75_usd: 5, p90_usd: 6.8, median_tokens: 4000, usd_per_mtok: 1000 }]);
   assert.deepEqual(outcomes.sizes, [
@@ -169,7 +163,7 @@ test('coverage says how much spend could be followed and how many of GitHub\'s m
   assert.deepEqual({ ...coverage, observable_share: null }, {
     observable_share: null,
     lookups: true,
-    github_merged: 6, // #1-#5 and #7; the bot's left out
+    github_merged: 6,
     github_linked: 4,
     truncated_commit_lists: 1,
     membership: { github: 3, local: 1, none: 0 },
@@ -212,7 +206,6 @@ test('an amended commit is a milestone when the session amended it, found by its
   const when = at(21, 9, 10);
   const messageId = Number(message.run('c7', ordinal++, when).lastInsertRowid);
   call.run(messageId, 'c7', 'Bash', 'toolu_amend', JSON.stringify({ command: 'git commit --amend -m "feat: amended"' }));
-  // Git keeps the author date, here from long before the range.
   commitRow.run(alpha, 'aaaa000008', '2026-03-01T08:00:30.000Z', at(21, 9, 10, 30), 'feat: amended', 'merged');
   pr.run('owner/alpha', 8, at(21, 12), at(21, 9, 11), checked, 10, 0, 1, 0, checked);
   member.run('owner/alpha', 8, 'aaaa000008', 'github');

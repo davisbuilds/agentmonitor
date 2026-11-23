@@ -7,10 +7,8 @@ import test, { after, before } from 'node:test';
 import type { closeDb as closeDbType, getDb as getDbType } from '../src/db/connection.js';
 import type * as V2Queries from '../src/db/v2-queries.js';
 
-// With an agent filter, the Usage overview's rows and cost total sought an
-// agent-led index and looked up every row of that agent's whole history to
-// apply the date window: up to 3.5 s each for Codex on a real store. The
-// window-led covering usage index answers both inside the index.
+// WHY: An agent-led seek can visit the agent’s full history to apply a narrow window. The covering
+// window index avoids those lookups.
 
 let tempDir = '';
 let closeDb: typeof closeDbType;
@@ -80,9 +78,8 @@ test('the window-led plan returns the same usage as the agent-led one', () => {
 });
 
 test('the top sessions\' event count seeks each session\'s window inside one index', () => {
-  // It counts every event of the costliest sessions in the window; through the
-  // session_id index alone that meant a row lookup per event (3.7 s for ten
-  // large sessions on a real store, against 18 ms inside a covering index).
+  // WHY: Counting many events for the top sessions needs a covering index to avoid a lookup for every
+  // event.
   for (const params of [window, { ...window, include_benchmark: true }]) {
     const detail = plan(queries.usageSessionEventCountStatement(['s-0', 's-1'], params));
     assert.match(detail, /SEARCH e USING COVERING INDEX idx_events_session_window \(session_id=\? AND <expr>>\? AND <expr><\?\)/, `${JSON.stringify(params)}: ${detail}`);

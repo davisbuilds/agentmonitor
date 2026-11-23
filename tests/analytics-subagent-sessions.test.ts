@@ -23,7 +23,6 @@ const session = db.prepare(`INSERT INTO browsing_sessions
   (id, agent, project, started_at, message_count, user_message_count, parent_session_id, relationship_type)
   VALUES (?, ?, 'demo', '2026-03-02T10:00:00Z', ?, ?, ?, ?)`);
 session.run('parent', 'claude', 10, 2, null, null);
-// Work the parent delegated, and a Codex app job no one started by hand.
 session.run('agent-child', 'claude', 6, 1, 'parent', 'subagent');
 session.run('codex-job', 'codex', 2, 1, null, 'internal');
 

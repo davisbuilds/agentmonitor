@@ -3,9 +3,8 @@ import assert from 'node:assert/strict';
 import { classifyModel } from '../src/pricing/model-classification.js';
 import { pricingRegistry } from '../src/pricing/index.js';
 
-// Antigravity stores an internal model id (gen_metadata field 19), e.g.
-// "gemini-pro-default", with a human display (field 21) like "Gemini 3.1 Pro (High)".
-// We store + price the field-19 id.
+// WHY: The provider stores both an internal model identity and a friendly name. Include both so
+// charging the display name instead cannot pass unnoticed.
 
 test("'gemini-pro-default' resolves to the priced Gemini 3.1 Pro", () => {
   const c = classifyModel('gemini-pro-default');
@@ -27,9 +26,6 @@ test('cost is computed for gemini-pro-default (non-zero, not null)', () => {
 });
 
 test('display-string fallback "Gemini 3.1 Pro (High)" is priced (decoder may use field 21 when field 19 is absent)', () => {
-  // When the internal id (gen_metadata field 19) is missing, the decoder falls
-  // back to the field-21 display string, which is what reaches pricing. Each
-  // reasoning-tier variant of the priced Pro model must still resolve to a cost.
   for (const display of ['Gemini 3.1 Pro (High)', 'Gemini 3.1 Pro (Medium)', 'Gemini 3.1 Pro (Low)']) {
     const cost = pricingRegistry.calculate(display, { input: 20000, output: 3000, cacheRead: 8000, cacheWrite: 0 });
     assert.ok(cost !== null && cost > 0, `expected positive cost for "${display}", got ${cost}`);

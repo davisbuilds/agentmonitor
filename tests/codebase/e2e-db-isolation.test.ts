@@ -8,7 +8,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const E2E_ROOT = path.join(ROOT, 'e2e');
 const SRC_ROOT = path.join(ROOT, 'src');
 const ISOLATED_DB = path.join(E2E_ROOT, 'isolated-db.ts');
-// Static `from '...'`, side-effect `import '...'` and dynamic `import('...')`.
 const RELATIVE_IMPORT = /(?:from\s+|import\s*\(?\s*)['"](\.{1,2}\/[^'"]+)['"]/g;
 
 /** Resolve a relative specifier the way the TypeScript sources write it (`.js` for `.ts`). */
@@ -37,17 +36,13 @@ function reachesSource(spec: string): boolean {
   return false;
 }
 
-// Playwright runs several spec files in one worker, and `config` snapshots the
-// database path on first import. A spec that boots the app in-process without
-// useIsolatedDb() reads the previous file's database: in CI, with one worker,
-// such specs failed their first attempt and passed on a retry in a fresh worker.
-// The call must be in the spec itself: a shared module runs once per worker.
+// WHY: The config snapshots the database at import, so each spec sharing a Playwright worker needs
+// its own isolation call.
 test('every e2e spec that boots the app in-process opens its own database', () => {
-  // Playwright discovers specs in subdirectories too.
   const specs = (fs.readdirSync(E2E_ROOT, { recursive: true }) as string[])
     .filter(name => name.endsWith('.spec.ts'));
   const inProcess = specs.filter(name => reachesSource(path.join(E2E_ROOT, name)));
-  // A floor, so a renamed directory or import style cannot pass with nothing checked.
+  // WHY: The discovery check could pass vacuously if a directory or import convention changed.
   assert.ok(inProcess.length >= 8, `expected at least 8 in-process specs, found ${inProcess.length}`);
 
   const offenders = inProcess.filter(name => {

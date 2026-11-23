@@ -97,7 +97,6 @@ before(async () => {
   makeCatalogSkill(catalogRoot, 'diagnose', '1.0.0');
   makeCatalogSkill(catalogRoot, 'first-principles', '1.0.0');
   makeCatalogSkill(catalogRoot, '_review', '1.0.0');
-  // Installed at 2.0.0, but the only invocation is attributed to 1.0.0 (below).
   makeCatalogSkill(catalogRoot, 'bumped', '2.0.0');
   process.env.AGENTMONITOR_SKILL_CATALOG_DIRS = catalogRoot;
 
@@ -113,24 +112,18 @@ before(async () => {
     getAnalyticsSkillHealthParts,
   } = await import('../src/db/v2-queries.js'));
 
-  // Version snapshot covering the invocation window.
   insertSnapshot('write-spec', '1.0.0', '2026-06-01T00:00:00Z', '2026-07-31T00:00:00Z');
-  // `bumped`: 1.0.0 covered the invocation; 2.0.0 is the now-installed version.
   insertSnapshot('bumped', '1.0.0', '2026-06-01T00:00:00Z', '2026-06-30T00:00:00Z');
   insertSnapshot('bumped', '2.0.0', '2026-07-01T00:00:00Z', '2026-07-31T00:00:00Z');
   seedInvocation('s-bumped', 'bumped', userText('ok'), '2026-06-15T10:00:00Z');
 
-  // (i) interrupted turn -> misfire.
   seedInvocation('s-misfire', 'write-spec', userText('[Request interrupted by user]'));
-  // (ii) clean turn -> not a misfire.
   seedInvocation('s-clean', 'test-strategy', userText('thanks, do the next thing'));
   db.prepare(
     `UPDATE browsing_sessions SET project = 'claude-only' WHERE id = 's-clean'`,
   ).run();
-  // (v) invocation of a skill absent from the catalog and snapshots -> null version, retained.
   seedInvocation('s-ghost', 'ghost-skill', userText('ok continue'));
 
-  // (iii) Codex SKILL.md read -> counted, misfire null.
   insertSession('s-codex', 'codex', 'codex-jsonl');
   const codexMsg = insertMessage('s-codex', 0, 'assistant', '[]', '2026-07-02T10:00:00Z');
   insertToolCall(
@@ -140,8 +133,8 @@ before(async () => {
     JSON.stringify({ cmd: 'cat ~/.codex/skills/deep-research/SKILL.md' }),
   );
 
-  // Newer Codex captures use `exec` rather than `exec_command`. Both the JSONL
-  // and event-backed analytics paths must recognize it.
+  // WHY: Codex changed the captured tool name. Both transcript and event views need the new spelling
+  // to see the same invocation.
   insertSession('s-codex-exec', 'codex', 'codex-jsonl');
   const codexExecMsg = insertMessage('s-codex-exec', 0, 'assistant', '[]', '2026-07-03T10:00:00Z');
   insertToolCall(
@@ -224,9 +217,8 @@ before(async () => {
     JSON.stringify({ cmd: 'cat ~/.agents/skills/_review/SKILL.md' }),
   );
 
-  // Regression: daily used to mark a canonical session OTEL-backed before
-  // applying the date filter, suppressing this in-window JSONL fallback because
-  // of the later out-of-window OTEL row. Health already filters first.
+  // WHY: A later OTEL row outside the requested window cannot suppress the in-window transcript
+  // fallback.
   const dateFallbackUuid = '019d0000-0000-0000-0000-000000000003';
   const dateFallbackSessionId = `rollout-2026-07-08T10-00-00-${dateFallbackUuid}`;
   insertSession(dateFallbackSessionId, 'codex', 'codex-jsonl');
@@ -357,7 +349,6 @@ test('an out-of-window OTEL skill read does not suppress an in-window JSONL fall
 
 test('exposes misfireEligible as the denominator behind misfireRate', () => {
   const byName = rowsByName();
-  // Explicit Claude invocation -> eligible denominator of 1.
   assert.equal(byName.get('write-spec')?.misfireEligible, 1);
   assert.equal(byName.get('test-strategy')?.misfireEligible, 1);
 });
@@ -382,7 +373,6 @@ test('emits never-fired rows for installed catalog skills with no invocations', 
 test('surfaces a freshly-installed version as never-fired even when an older version has invocations', () => {
   const rows = getAnalyticsSkillsHealth().filter(r => r.name === 'bumped');
   const byVersion = new Map(rows.map(r => [r.version, r]));
-  // 1.0.0 was invoked; 2.0.0 is installed but never fired — both rows present.
   assert.equal(byVersion.get('1.0.0')?.neverFired, false);
   assert.equal(byVersion.get('1.0.0')?.invocations, 1);
   assert.equal(byVersion.get('2.0.0')?.neverFired, true);
@@ -393,7 +383,6 @@ test('excludes out-of-range invocations but still lists never-fired catalog skil
   const rows = new Map(
     getAnalyticsSkillsHealth({ date_from: '2026-08-01' }).map(r => [r.name, r]),
   );
-  // All seeded invocations predate the range.
   assert.equal(rows.get('write-spec')?.neverFired, true);
   assert.equal(rows.has('ghost-skill'), false);
   assert.equal(rows.get('never-used')?.neverFired, true);
@@ -534,7 +523,6 @@ test('GET /api/v2/analytics/skills/health honors the date range for backfill que
 
   const body = await res.json() as { data: SkillHealthRow[] };
   const byName = new Map(body.data.map(r => [r.name, r]));
-  // Claude invocations dated 2026-07-01 are present; the codex read (07-02) is not.
   assert.equal(byName.get('write-spec')?.invocations, 1);
   assert.equal(byName.get('deep-research'), undefined);
 });

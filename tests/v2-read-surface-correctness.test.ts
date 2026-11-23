@@ -6,7 +6,6 @@ import test, { after, before, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-read-surface-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
 
@@ -43,7 +42,6 @@ before(async () => {
     session_id: 'bench-session', agent_type: 'claude_code', event_type: 'llm_response',
     status: 'success', tokens_in: 10, tokens_out: 5, source: 'benchmark',
   });
-  // More sessions than the list ceiling, so an unbounded read is observable.
   for (let i = 0; i < 505; i++) {
     insertEvent({
       session_id: `bulk-session-${i}`, agent_type: 'codex', event_type: 'tool_use',
@@ -93,8 +91,8 @@ describe('benchmark rows stay out of the Monitor feed and session list', () => {
 
 describe('monitor session list limit', () => {
   test('limit=0 and negative limits are capped at the ceiling, not unbounded or clamped to one', async () => {
-    // The Monitor page asks for limit=0 to mean "every live session", so a
-    // clamp to 1 would silently truncate it; the fix is a ceiling.
+    // WHY: The Monitor uses zero to request every live session. Treating it as a minimum of one would
+    // truncate the page.
     for (const limit of ['0', '-1', '100000']) {
       const { body } = await getJson<{ sessions: unknown[] }>(`/api/v2/monitor/sessions?limit=${limit}`);
       assert.equal(body.sessions.length, 500, `limit=${limit}`);
@@ -144,11 +142,9 @@ describe('Hour-of-Week buckets by local time, matching its label', () => {
   test('a UTC early-morning session lands on the previous local evening', async () => {
     setReportingTimeZoneForTests('America/New_York');
     try {
-      // 2026-09-11 02:00Z is Friday 02:00 UTC but Thursday 22:00 EDT.
       seedBrowsingSession('how-session', '2026-09-11T02:00:00Z', 7);
       const { getAnalyticsHourOfWeek } = await import('../src/db/v2-queries.js');
       const grid = getAnalyticsHourOfWeek({ project: 'read-surface' });
-      // day_of_week is Monday=0, so Thursday is 3 and Friday is 4.
       const thursday22 = grid.find(p => p.day_of_week === 3 && p.hour_of_day === 22);
       const friday02 = grid.find(p => p.day_of_week === 4 && p.hour_of_day === 2);
       assert.equal(thursday22?.message_count, 7);
@@ -161,9 +157,7 @@ describe('Hour-of-Week buckets by local time, matching its label', () => {
   test('its date window selects local calendar days, matching the buckets', async () => {
     setReportingTimeZoneForTests('America/Los_Angeles');
     try {
-      // Wednesday 2026-09-09 20:00 PDT: inside the UTC day 2026-09-10, outside the local one.
       seedBrowsingSession('how-prev-evening', '2026-09-10T03:00:00Z', 3, 'heatmap-window');
-      // Thursday 2026-09-10 23:00 PDT: outside the UTC day, inside the local one.
       seedBrowsingSession('how-late-local', '2026-09-11T06:00:00Z', 5, 'heatmap-window');
       const { getAnalyticsHourOfWeek } = await import('../src/db/v2-queries.js');
       const grid = getAnalyticsHourOfWeek({ project: 'heatmap-window', date_from: '2026-09-10', date_to: '2026-09-10' });

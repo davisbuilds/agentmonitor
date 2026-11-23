@@ -3,18 +3,14 @@ import test, { describe } from 'node:test';
 
 import { OTHER_COLOR, SERIES_COLORS } from '../frontend/src/lib/components/usage/model-colors.js';
 
-// The categorical checks of the dataviz palette validator, on ALL pairs. A
-// stacked daily chart omits a series on days it has no volume, so any two
-// series can end up touching; a palette validated on adjacent pairs only
-// guarantees nothing there. Thresholds and the Machado-Oliveira-Fernandes
-// (2009, severity 1.0) simulation follow the validator, whose calibration
-// depends on that model.
-const SURFACE = '#101419'; // the dark chart surface (--color-surface)
-const BAND: [number, number] = [0.48, 0.67]; // OKLCH L, dark mode
+// WHY: Missing series on individual days let any two colors touch in a stack, so validating adjacent
+// palette positions alone cannot protect it.
+const SURFACE = '#101419';
+const BAND: [number, number] = [0.48, 0.67];
 const CHROMA_FLOOR = 0.10;
-const CVD_TARGET = 8; // OKLab ΔE ×100, min(protan, deutan)
-const NORMAL_FLOOR = 15; // OKLab ΔE ×100, unsimulated
-const CONTRAST_MIN = 3; // WCAG, against the surface
+const CVD_TARGET = 8;
+const NORMAL_FLOOR = 15;
+const CONTRAST_MIN = 3;
 
 type Rgb = [number, number, number];
 const MACHADO: Record<'protan' | 'deutan', Rgb[]> = {
@@ -75,8 +71,6 @@ describe('the shared chart series palette', () => {
     }
   });
 
-  // Other is a neutral that recedes toward the surface, so it sits below the
-  // band; the legend and tooltip name it. It must still never pass for a series.
   test('Other never reads as one of the series', () => {
     for (const color of SERIES_COLORS) {
       assert.ok(cvdDelta(color, OTHER_COLOR) >= CVD_TARGET, `Other is ΔE ${cvdDelta(color, OTHER_COLOR).toFixed(1)} from ${color} under CVD`);

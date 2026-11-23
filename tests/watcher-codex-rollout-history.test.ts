@@ -170,8 +170,6 @@ test('an unchanged compressed root with paginated mode skips without decoding it
   assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), compressed).result, 'parsed');
   assert.deepEqual(f.contents(), ['original request', 'discarded old tail']);
   assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), compressed).result, 'skipped');
-  // Positive control above proves this file produces a complete projection.
-  // Once parsed, its unchanged mtime should suffice even if reads now fail.
   fs.chmodSync(compressed, 0o000);
   try {
     assert.equal(watcher.syncCodexSessionFileDetailed(connection.getDb(), compressed).result, 'skipped');

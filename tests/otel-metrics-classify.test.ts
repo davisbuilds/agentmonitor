@@ -3,14 +3,6 @@ import test, { describe, beforeEach } from 'node:test';
 
 import { parseOtelMetrics, resetCumulativeState } from '../src/otel/parser.ts';
 
-// parseOtelMetrics classifies each metric datapoint into one of:
-//   usage       — Claude Code token/cost (→ synthetic llm_response, unchanged)
-//   operational — Bucket A outcome/state counters (→ otel_metrics table)
-//   (skipped)   — Codex token/cost metrics: recognized, deliberately NOT stored
-//                 (logs are authoritative; storing would double-count)
-//   dropped     — timings/sizes/unrecognized: tallied by name for intake visibility
-//
-// Fixture names are taken verbatim from the Codex 0.153.2 binary's metric registry.
 
 type Point = { value: number; attributes?: Array<{ key: string; value: { stringValue?: string; intValue?: number } }> };
 
@@ -52,10 +44,7 @@ beforeEach(() => resetCumulativeState());
 
 describe('parseOtelMetrics classification', () => {
   test('an allowlisted Codex counter is captured, with attrs projected to outcomes only', () => {
-    // Live Codex emits codex.memory.startup with a pile of descriptive labels
-    // (app.version/auth_mode/model/originator/session_source) that fragment the
-    // series. Only the outcome attribute is kept, so the metric collapses to the
-    // one series that answers "did startup skip, and why".
+    // WHY: Unneeded descriptive labels fragment the same operational outcome into separate series.
     const result = parseOtelMetrics(metricsPayload('codex', 'sess-op', [
       { name: 'codex.memory.startup', points: [{ value: 1, attributes: [
         attr('state', 'skipped_rate_limit'),
@@ -70,7 +59,7 @@ describe('parseOtelMetrics classification', () => {
     const m = result.operational[0];
     assert.equal(m.metric_name, 'codex.memory.startup');
     assert.equal(m.session_id, 'sess-op');
-    assert.deepEqual(m.attrs, { state: 'skipped_rate_limit' }); // descriptive labels stripped
+    assert.deepEqual(m.attrs, { state: 'skipped_rate_limit' });
     assert.equal(m.value, 1);
     assert.equal(result.usage.length, 0);
   });
@@ -84,9 +73,6 @@ describe('parseOtelMetrics classification', () => {
   });
 
   test('high-cardinality internal counters are dropped, not stored', () => {
-    // shadow_selection (internal skill-routing A/B eval) and sqlite plumbing both
-    // carry a `status`/`outcome` attr but are not operator-actionable — the exact
-    // noise that would bloat the store. Not in the allowlist → dropped (tallied).
     const result = parseOtelMetrics(metricsPayload('codex', 'sess-n', [
       { name: 'codex.skills.shadow_selection', points: [{ value: 1, attributes: [attr('method', 'bm25_v1'), attr('status', 'selected')] }] },
       { name: 'codex.sqlite.init.count', points: [{ value: 1, attributes: [attr('status', 'success')] }] },
@@ -115,8 +101,8 @@ describe('parseOtelMetrics classification', () => {
   });
 
   test('Codex token/cost metrics are recognized and skipped — not operational, not dropped', () => {
-    // Logs own Codex token/cost; storing these would double-count. They must NOT
-    // pollute the dropped/intake-visibility tally either (they are handled, not unknown).
+    // WHY: Codex logs already account for this usage. Adding the metrics would double-count and
+    // labeling them unknown would misstate intake.
     const result = parseOtelMetrics(metricsPayload('codex', 'sess-tok', [
       { name: 'codex.turn.token_usage.input_tokens', points: [{ value: 5000 }] },
       { name: 'codex.turn.cost_microusd', points: [{ value: 1200 }] },
@@ -144,36 +130,32 @@ describe('parseOtelMetrics classification', () => {
     const first = parseOtelMetrics(metricsPayload('codex', 'sess-c', [
       { name: 'codex.memory.phase1', cumulative: true, points: [{ value: 1, attributes: [attr('state', 'succeeded')] }] },
     ]));
-    assert.equal(first.operational[0].value, 1); // first sighting = current value
+    assert.equal(first.operational[0].value, 1);
     const second = parseOtelMetrics(metricsPayload('codex', 'sess-c', [
       { name: 'codex.memory.phase1', cumulative: true, points: [{ value: 3, attributes: [attr('state', 'succeeded')] }] },
     ]));
-    assert.equal(second.operational[0].value, 2); // 3 - 1
+    assert.equal(second.operational[0].value, 2);
     assert.equal(second.operational[0].temporality, 'delta');
   });
 
   test('a cumulative producer restart (new startTimeUnixNano) re-emits the current value', () => {
-    // Sessionless/process-level Codex counters reuse their derived key across
-    // process restarts. Without folding in startTimeUnixNano, a repeated
-    // cumulative `=1` after restart diffs against the previous process's stored 1
-    // → delta 0 → silently swallowed, hiding every later startup outcome.
+    // WHY: Process-level keys can repeat after restart. Include the process start so its first
+    // cumulative point is not treated as an old repeat.
     const opts = { name: 'codex.memory.startup', cumulative: true, points: [{ value: 1, attributes: [attr('state', 'skipped_rate_limit')] }] };
     const p1 = parseOtelMetrics(metricsPayload('codex', 'unknown', [{ ...opts, startNano: '100' }]));
-    assert.equal(p1.operational[0].value, 1); // process 1, first sighting
+    assert.equal(p1.operational[0].value, 1);
 
     const p1again = parseOtelMetrics(metricsPayload('codex', 'unknown', [{ ...opts, startNano: '100' }]));
-    assert.equal(p1again.operational.length, 0); // same series, unchanged cumulative → no delta
+    assert.equal(p1again.operational.length, 0);
 
     const p2 = parseOtelMetrics(metricsPayload('codex', 'unknown', [{ ...opts, startNano: '200' }]));
-    assert.equal(p2.operational.length, 1); // restart → fresh series
-    assert.equal(p2.operational[0].value, 1); // the new process's startup is recorded, not swallowed
+    assert.equal(p2.operational.length, 1);
+    assert.equal(p2.operational[0].value, 1);
   });
 
   test('cumulative series that differ only in a projected-away label track independently', () => {
-    // Two real OTLP series share the stored outcome {state:ok} but differ in a
-    // label we project away (model). Their cumulative values must be diffed
-    // against their OWN series, not against each other — else the second is
-    // reported as (7-5)=2 instead of its true first-seen 7.
+    // WHY: Two raw series can share projected labels. Keep separate cumulative baselines so their
+    // deltas are measured independently.
     const mk = (model: string, value: number) => ({
       name: 'codex.memory.startup', cumulative: true, startNano: '500',
       points: [{ value, attributes: [attr('state', 'ok'), attr('model', model)] }],
@@ -181,13 +163,11 @@ describe('parseOtelMetrics classification', () => {
     const first = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('luna', 5)]));
     const second = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('terra', 7)]));
     assert.equal(first.operational[0].value, 5);
-    assert.equal(second.operational[0].value, 7); // its own series' first sighting, not 7-5
-    // Both stored under the projected {state:ok}, model dropped.
+    assert.equal(second.operational[0].value, 7);
     assert.deepEqual(first.operational[0].attrs, { state: 'ok' });
     assert.deepEqual(second.operational[0].attrs, { state: 'ok' });
-    // A later export of the luna series diffs against luna's 5, not terra's 7.
     const third = parseOtelMetrics(metricsPayload('codex', 'sess-proj', [mk('luna', 8)]));
-    assert.equal(third.operational[0].value, 3); // 8 - 5
+    assert.equal(third.operational[0].value, 3);
   });
 
   test('distinct outcome states are tracked as separate cumulative series', () => {
@@ -199,14 +179,13 @@ describe('parseOtelMetrics classification', () => {
     ]));
     const next = parseOtelMetrics(metricsPayload('codex', 'sess-d', [
       { name: 'codex.memory.startup', cumulative: true, points: [
-        { value: 4, attributes: [attr('state', 'skipped_rate_limit')] }, // +2
-        { value: 5, attributes: [attr('state', 'succeeded')] },          // +0 → dropped (no change)
+        { value: 4, attributes: [attr('state', 'skipped_rate_limit')] },
+        { value: 5, attributes: [attr('state', 'succeeded')] },
       ] },
     ]));
     const skips = next.operational.filter(m => (m.attrs as { state: string }).state === 'skipped_rate_limit');
     assert.equal(skips.length, 1);
     assert.equal(skips[0].value, 2);
-    // The unchanged 'succeeded' series produced no positive delta → not emitted.
     assert.equal(next.operational.some(m => (m.attrs as { state: string }).state === 'succeeded'), false);
   });
 });

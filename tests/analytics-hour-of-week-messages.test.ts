@@ -6,7 +6,6 @@ import test, { after } from 'node:test';
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-hour-of-week-messages-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
-// Kathmandu is UTC+5:45: a cell boundary there falls inside a UTC hour.
 process.env.AGENTMONITOR_TIMEZONE = 'Asia/Kathmandu';
 const { getDb, closeDb } = await import('../src/db/connection.js');
 const { initSchema } = await import('../src/db/schema.js');
@@ -29,14 +28,12 @@ const prompt = JSON.stringify([{ type: 'text', text: 'go on' }]);
 const toolResult = JSON.stringify([{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }]);
 const reply = JSON.stringify([{ type: 'text', text: 'done' }]);
 
-// Started Monday 2026-03-02 at 10:20 local (04:35Z), resumed at 20:00 local (14:15Z).
 session.run('resumed', 'claude', 'claude-jsonl', '2026-03-02T04:35:00Z', 4, 2);
-message.run('resumed', 0, 'user', prompt, '2026-03-02T04:35:00Z'); //    10:20 local
-message.run('resumed', 1, 'assistant', reply, '2026-03-02T04:40:00Z'); // 10:25
-message.run('resumed', 2, 'user', toolResult, '2026-03-02T05:14:00Z'); // 10:59
-message.run('resumed', 3, 'user', prompt, '2026-03-02T14:15:00Z'); //    20:00
-// A session with no stored messages (summary-only) stays at its start hour.
-session.run('summary', 'codex', 'codex-otel', '2026-03-03T03:30:00Z', 5, 1); // Tue 09:15
+message.run('resumed', 0, 'user', prompt, '2026-03-02T04:35:00Z');
+message.run('resumed', 1, 'assistant', reply, '2026-03-02T04:40:00Z');
+message.run('resumed', 2, 'user', toolResult, '2026-03-02T05:14:00Z');
+message.run('resumed', 3, 'user', prompt, '2026-03-02T14:15:00Z');
+session.run('summary', 'codex', 'codex-otel', '2026-03-03T03:30:00Z', 5, 1);
 
 test('the heatmap places each message at its own local hour', () => {
   const cells = queries.getAnalyticsHourOfWeek({ date_from: '2026-03-01', date_to: '2026-03-31' })
@@ -50,8 +47,7 @@ test('the heatmap places each message at its own local hour', () => {
 });
 
 test('a session whose messages all fall outside the window adds nothing at its start hour', () => {
-  // Started Monday evening, every message sent two days later.
-  session.run('carried', 'claude', 'claude-jsonl', '2026-03-02T15:00:00Z', 2, 1); // Mon 20:45
+  session.run('carried', 'claude', 'claude-jsonl', '2026-03-02T15:00:00Z', 2, 1);
   message.run('carried', 0, 'user', prompt, '2026-03-04T06:00:00Z');
   message.run('carried', 1, 'assistant', reply, '2026-03-04T06:01:00Z');
   const cells = queries.getAnalyticsHourOfWeek({ date_from: '2026-03-02', date_to: '2026-03-02' })

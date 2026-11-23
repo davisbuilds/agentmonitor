@@ -32,11 +32,8 @@ before(async () => {
       (id, project, agent, first_message, started_at, message_count, user_message_count, integration_mode, fidelity, capabilities_json)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  // Full transcript with real conversation — keep.
   insert.run('full-1', 'p', 'claude', 'Hello there', '2026-03-06T12:00:00Z', 40, 20, 'claude-jsonl', 'full', FULL_CAPS);
-  // Full transcript that opened with a local command (no preview) but has user turns — keep.
   insert.run('full-noprev', 'p', 'claude', '<command-name>/compact</command-name><command-message>x</command-message><command-args></command-args>', '2026-03-06T11:00:00Z', 5, 5, 'claude-jsonl', 'full', FULL_CAPS);
-  // Telemetry-only live-summary session: no browsable history — strip.
   insert.run('summary-1', 'p', 'codex', null, '2026-03-06T10:00:00Z', 422, 0, 'otel', 'summary', SUMMARY_LIVE_CAPS);
 });
 

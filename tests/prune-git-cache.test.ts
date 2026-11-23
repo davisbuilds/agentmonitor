@@ -35,7 +35,6 @@ test('Git cache prune previews exact roots and guards an atomic, scoped apply', 
   const trackerOnly = path.join(container, 'tracker');
   const commitsOnly = path.join(container, 'commits');
   const allowed = path.join(directory, 'references-active', 'repo');
-  // These are historical Git roots. Cleanup also works after the directories move away.
   const now = '2026-01-01T00:00:00Z';
   const tracker = db.prepare("INSERT INTO git_repos (root, github_repo) VALUES (?, 'owner/repo')");
   for (const root of [excluded, trackerOnly, allowed]) tracker.run(root);

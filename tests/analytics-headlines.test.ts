@@ -20,8 +20,6 @@ initSchema();
 const db = getDb();
 assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
 
-// One Codex session, two rows: the rollout transcript the session list shows,
-// and the OTEL row its usage and tool outcomes arrived on.
 const codexId = '01990000-0000-7000-8000-000000000001';
 const rolloutId = `rollout-2026-03-04T09-00-00-${codexId}`;
 const session = db.prepare(`INSERT INTO browsing_sessions
@@ -35,7 +33,7 @@ session.run('p', 'claude', 'claude-jsonl', '2026-02-28T10:00:00Z', 2, 3, null, n
 
 const message = db.prepare(`INSERT INTO messages (session_id, ordinal, role, content, timestamp) VALUES (?, ?, 'assistant', '[]', ?)`);
 const messages: Array<[string, string[]]> = [
-  // The subagent runs inside its parent's time, so it adds no active time.
+  // WHY: A child running inside the parent’s interval does not add wall time.
   ['a', ['2026-03-02T10:00:00Z', '2026-03-02T10:10:00Z', '2026-03-02T10:40:00Z']],
   ['a-sub', ['2026-03-02T10:05:00Z', '2026-03-02T10:06:00Z']],
   [rolloutId, ['2026-03-04T09:00:00Z', '2026-03-04T09:20:00Z']],
@@ -45,7 +43,6 @@ for (const [id, times] of messages) times.forEach((time, ordinal) => message.run
 
 const item = db.prepare(`INSERT INTO session_items (session_id, kind, status) VALUES (?, 'tool_result', ?)`);
 for (const status of ['success', 'success', 'success', 'error']) item.run('a', status);
-// The rollout records no outcome ('completed'); it counts neither way.
 for (const status of ['success', 'error']) item.run(codexId, status);
 item.run(rolloutId, 'completed');
 for (const status of ['success', 'error']) item.run('p', status);
@@ -54,7 +51,6 @@ const usage = db.prepare(`INSERT INTO events (session_id, agent_type, event_type
   VALUES (?, ?, 'llm_response', 'claude-opus-5-5', 10, ?, ?, 'import')`);
 usage.run('a', 'claude_code', 1.0, '2026-03-02T10:01:00Z');
 usage.run(codexId, 'codex', 0.5, '2026-03-04T09:01:00Z');
-// Usage from a session whose transcript is gone counts in cost, not in cost per session.
 usage.run('ghost', 'claude_code', 2.0, '2026-03-03T12:00:00Z');
 usage.run('p', 'claude_code', 1.0, '2026-02-28T10:01:00Z');
 
@@ -74,8 +70,6 @@ test('the overview compares each headline with the period before, day by day', (
   assert.equal(overview.sessions.delegated_share, 0.33);
   assert.deepEqual(overview.sessions.daily_delegated_share, [0.5, null, 0]);
 
-  // Each gap counts up to 15 minutes, the return after a break too: 03/02 is
-  // 5 + 1 + 4 + 15 minutes, 03/04 is 15 (two days idle) + 15 (a 20-minute gap).
   assert.deepEqual(overview.active_hours, { value: 0.92, prior: 0.2, daily: [0.42, 0, 0.5] });
 });
 

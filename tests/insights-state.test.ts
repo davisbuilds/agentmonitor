@@ -179,12 +179,12 @@ test('sameInsightListFilters compares every slice field', () => {
 test('insightMatchesListFilters treats the date window as inclusive overlap', () => {
   const window = { ...baseFilters, from: '2026-03-10', to: '2026-03-20' };
   const span = (date_from: string, date_to: string) => insightMatchesListFilters({ ...baseInsight, date_from, date_to }, window);
-  assert.equal(span('2026-03-01', '2026-03-10'), true); // ends on the window's first day
-  assert.equal(span('2026-03-20', '2026-03-31'), true); // starts on the window's last day
-  assert.equal(span('2026-03-12', '2026-03-14'), true); // inside
-  assert.equal(span('2026-03-01', '2026-03-31'), true); // covers it
-  assert.equal(span('2026-03-01', '2026-03-09'), false); // ends the day before
-  assert.equal(span('2026-03-21', '2026-03-31'), false); // starts the day after
+  assert.equal(span('2026-03-01', '2026-03-10'), true);
+  assert.equal(span('2026-03-20', '2026-03-31'), true);
+  assert.equal(span('2026-03-12', '2026-03-14'), true);
+  assert.equal(span('2026-03-01', '2026-03-31'), true);
+  assert.equal(span('2026-03-01', '2026-03-09'), false);
+  assert.equal(span('2026-03-21', '2026-03-31'), false);
 });
 
 test('insightMatchesListFilters: an empty project/agent filter matches anything, a set one needs an exact match', () => {

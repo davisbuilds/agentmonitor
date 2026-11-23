@@ -36,7 +36,6 @@ test('discovery finds compressed rollouts, and one rollout once when both forms 
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `${rollout('3')}.jsonl.zst`), zstdCompressSync(Buffer.from(line)));
   fs.writeFileSync(path.join(dir, `${rollout('4')}.jsonl`), line);
-  // Mid-compression both exist; the plain file is the one a live session appends to.
   fs.writeFileSync(path.join(dir, `${rollout('5')}.jsonl`), line);
   fs.writeFileSync(path.join(dir, `${rollout('5')}.jsonl.zst`), zstdCompressSync(Buffer.from(line)));
   fs.writeFileSync(path.join(dir, 'notes.txt'), 'not a rollout');

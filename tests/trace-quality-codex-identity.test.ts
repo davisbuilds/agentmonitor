@@ -35,23 +35,15 @@ assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
 const insert = db.prepare(`INSERT INTO session_trace_summary
   (session_id, trace_id, agent_type, started_at, observation_count, cost_usd, coverage_json, projection_version)
   VALUES (?, ?, ?, ?, ?, ?, ?, 'test')`);
-// One Codex session as the watcher (rollout basename, transcript only) and the
-// importer/OTEL (native UUID, events with usage) each summarize it.
 insert.run(rollout, 'sts:rollout', 'codex', '2026-02-04T03:34:26Z', 322, 0, '{"has_token_usage":false}');
 insert.run(uuid, 'sts:uuid', 'codex', '2026-02-04T03:34:26Z', 52, 0.89, '{"has_token_usage":true}');
-// A rollout whose UUID has no summary yet (a live session before its events).
 insert.run(loneRollout, 'sts:lone', 'codex', '2026-02-04T08:00:00Z', 10, 0, '{}');
-// Not Codex: the same id grammar is no evidence of an alias.
 insert.run(claudeRolloutShaped, 'sts:claude-a', 'claude', '2026-02-04T01:00:00Z', 5, 0.1, '{}');
 insert.run(claudeUuid, 'sts:claude-b', 'claude', '2026-02-04T02:00:00Z', 7, 0.2, '{}');
-// Only a Codex row is shadowed, even when a Codex summary holds its UUID.
 insert.run(claudeBesideCodex, 'sts:claude-c', 'claude', '2026-02-04T05:00:00Z', 3, 0.05, '{}');
 insert.run(mixedUuid, 'sts:codex-mixed', 'codex', '2026-02-04T05:00:00Z', 4, 0.07, '{}');
-// ...and only by a Codex summary: another agent's row under that UUID is not its twin.
 insert.run(codexBesideClaude, 'sts:codex-foreign', 'codex', '2026-02-04T06:00:00Z', 6, 0, '{}');
 insert.run(foreignUuid, 'sts:claude-foreign', 'claude', '2026-02-04T06:00:00Z', 2, 0.01, '{}');
-// A resumed session the watcher stored as two rollout files, with no UUID
-// summary yet: one session, listed as the rollout with more observations.
 insert.run(resumedFirst, 'sts:resumed-1', 'codex', '2026-02-05T09:00:00Z', 12, 0, '{}');
 insert.run(resumedSecond, 'sts:resumed-2', 'codex', '2026-02-06T09:00:00Z', 30, 0, '{}');
 

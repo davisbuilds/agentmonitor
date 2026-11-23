@@ -96,7 +96,6 @@ describe('Claude Code log parser', () => {
 
     const events = parseClaudeCodeFile(filePath);
     assert.equal(events.length, 3);
-    // Deltas: 0.05, 0.07, 0.08
     assert.ok(Math.abs((events[0].cost_usd as number) - 0.05) < 0.001);
     assert.ok(Math.abs((events[1].cost_usd as number) - 0.07) < 0.001);
     assert.ok(Math.abs((events[2].cost_usd as number) - 0.08) < 0.001);
@@ -124,11 +123,8 @@ describe('Claude Code log parser', () => {
   });
 
   test('bills one assistant turn once when it spans several content blocks', () => {
-    // Claude Code writes one assistant line per content block (thinking,
-    // tool_use, text). Every line of a turn repeats the same `message.id` and
-    // the same cumulative `usage`, so counting each line bills the turn twice
-    // or more. Across 40 local transcripts, all 8,874 multi-line message IDs
-    // carried byte-identical usage, so the turn's real cost is one line's.
+    // WHY: The producer repeats cumulative usage across content blocks. Billing each block would
+    // count one turn more than once.
     const usage = {
       input_tokens: 2,
       output_tokens: 254,
@@ -149,7 +145,6 @@ describe('Claude Code log parser', () => {
 
     const events = parseClaudeCodeFile(filePath);
 
-    // Every line stays an event: the transcript and event history are unchanged.
     assert.equal(events.length, 3);
 
     const sum = (field: 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens') =>
@@ -159,7 +154,6 @@ describe('Claude Code log parser', () => {
     assert.equal(sum('cache_read_tokens'), usage.cache_read_input_tokens);
     assert.equal(sum('cache_write_tokens'), usage.cache_creation_input_tokens);
 
-    // A distinct turn bills separately even with identical usage.
     const second = writeJsonl('sess-blocks-2.jsonl', [
       line([{ type: 'text', text: 'first' }]),
       { ...line([{ type: 'text', text: 'second' }]), message: { id: 'msg_02Second', usage } },
@@ -172,10 +166,8 @@ describe('Claude Code log parser', () => {
   });
 
   test('bills a turn with the usage its last line records', () => {
-    // Each line of a turn records usage as of that content block: input and
-    // cache counts are the same on every line, but output keeps growing, so
-    // only the last line has the turn's final output. The turn is billed once,
-    // on its first line, with that final usage.
+    // WHY: Output grows across blocks of one turn, so its final sample carries usage earlier samples
+    // cannot represent.
     const line = (output: number, content: unknown) => ({
       type: 'assistant',
       sessionId: 'sess-growing',
@@ -200,8 +192,8 @@ describe('Claude Code log parser', () => {
   });
 
   test('a date-scoped parse that starts mid-turn does not bill the turn\'s later lines', () => {
-    // Billing position comes from the whole transcript: a turn whose first line
-    // falls before \`from\` was billed there, so its later lines stay at zero.
+    // WHY: Starting a visible slice later does not change where a cumulative turn was originally
+    // billed.
     const line = (timestamp: string, content: unknown) => ({
       type: 'assistant',
       sessionId: 'sess-scoped',
@@ -219,9 +211,8 @@ describe('Claude Code log parser', () => {
   });
 
   test('does not collide with a child-agent transcript at the same line index', () => {
-    // A child-agent transcript embeds its PARENT's sessionId, and legacy ids were
-    // derived from (sessionId, line index) — so line N of each file minted the
-    // same id and whichever imported second was dropped by dedup.
+    // WHY: Legacy keys used the reported session and line index. Children that report their parent’s
+    // session collide on that scheme.
     const sessionId = 'parent-session-uuid';
     const parent = writeJsonl(`${sessionId}.jsonl`, [
       { type: 'assistant', sessionId, uuid: 'uuid-parent-0', timestamp: '2026-02-01T10:00:00Z', message: { id: 'msg_p', usage: { input_tokens: 5, output_tokens: 7 } } },
@@ -235,16 +226,12 @@ describe('Claude Code log parser', () => {
     const childIds = parseClaudeCodeFile(child).map(e => e.event_id);
 
     assert.equal(childIds.filter(id => parentIds.has(id)).length, 0);
-    // The id follows the line's own uuid, so it survives reordering and appends.
     assert.deepEqual(parseClaudeCodeFile(child).map(e => e.event_id), childIds);
   });
 
   test('keeps uuid-less child-agent lines distinct from the parent', () => {
-    // The positional fallback still applies to lines without a uuid. Deriving it
-    // from the reported sessionId would recreate the original collision for those
-    // lines, since a child-agent transcript reports its parent's session. No
-    // child-agent line lacks a uuid in current local data (0 of 3,590 measured
-    // 2026-09-22), so this guards a latent case rather than an observed one.
+    // WHY: Lines without UUIDs still need a fallback that distinguishes child files reporting the
+    // parent’s ID.
     const sessionId = 'fallback-session-uuid';
     const parent = writeJsonl(`${sessionId}.jsonl`, [
       { type: 'assistant', sessionId, timestamp: '2026-02-01T10:00:00Z', message: { id: 'mp', usage: { input_tokens: 1, output_tokens: 2 } } },
@@ -257,8 +244,8 @@ describe('Claude Code log parser', () => {
     const [childEvent] = parseClaudeCodeFile(child);
 
     assert.notEqual(childEvent.event_id, parentEvent.event_id);
-    // The parent's fallback must stay byte-identical to the legacy scheme, or the
-    // bridge that recognizes its already-imported rows stops matching.
+    // WHY: Keep the parent fallback identical so old imported keys still participate in
+    // reconciliation.
     assert.equal(parentEvent.event_id, parentEvent.legacy_event_id);
   });
 
@@ -269,9 +256,7 @@ describe('Claude Code log parser', () => {
     ]);
 
     const [event] = parseClaudeCodeFile(child);
-    // Cost accrues against the conversation that spawned the work...
     assert.equal(event.session_id, sessionId);
-    // ...but the work stays attributable to its own agent transcript.
     const metadata = event.metadata as Record<string, unknown>;
     assert.equal(metadata.agent_id, 'attr456');
     assert.equal(metadata.agent_transcript, 'agent-attr456');
@@ -357,7 +342,6 @@ describe('Claude Code log discovery', () => {
 
   before(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-disc-test-'));
-    // Create mock directory structure
     fs.mkdirSync(path.join(tmpDir, 'projects', 'project-a'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'projects', 'project-b'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'projects', 'project-b', 'nested', 'deeper'), { recursive: true });
@@ -434,7 +418,6 @@ describe('Codex log parser', () => {
     ]);
 
     const events = parseCodexFile(filePath);
-    // session_meta → session_start + session_end
     assert.ok(events.length >= 1);
     assert.equal(events[0].event_type, 'session_start');
     assert.equal(events[0].session_id, 'cdx-1');
@@ -487,10 +470,9 @@ describe('Codex log parser', () => {
     const events = parseCodexFile(filePath);
     const tokenEvent = events.find(e => e.event_type === 'llm_response');
     assert.ok(tokenEvent);
-    // OpenAI/Codex report input_tokens as cache-inclusive (cached is a subset).
-    // tokens_in is normalized to the uncached portion so it is never billed at
-    // the full input rate alongside the cheap cache-read rate.
-    assert.equal(tokenEvent.tokens_in, 2400); // 2500 total - 100 cached
+    // WHY: The provider’s input count includes cached tokens, so cache reads need to be subtracted
+    // before full-rate pricing.
+    assert.equal(tokenEvent.tokens_in, 2400);
     assert.equal(tokenEvent.tokens_out, 600);
     assert.equal(tokenEvent.cache_read_tokens, 100);
   });
@@ -517,10 +499,8 @@ describe('Codex log parser', () => {
     const events = parseCodexFile(filePath);
     const tokenEvents = events.filter(e => e.event_type === 'llm_response');
     assert.equal(tokenEvents.length, 2);
-    // First delta: 1000, 200
     assert.equal(tokenEvents[0].tokens_in, 1000);
     assert.equal(tokenEvents[0].tokens_out, 200);
-    // Second delta: 2000, 500
     assert.equal(tokenEvents[1].tokens_in, 2000);
     assert.equal(tokenEvents[1].tokens_out, 500);
   });
@@ -554,11 +534,8 @@ describe('Codex log parser', () => {
     const tokenEvent = events.find(e => e.event_type === 'llm_response');
     assert.ok(tokenEvent);
     assert.equal(tokenEvent.model, 'gpt-5.4');
-    // Uncached input is billed at the full rate; the 40k cached tokens move to
-    // the cache-read rate instead of being double-charged at the input rate.
-    assert.equal(tokenEvent.tokens_in, 60_000); // 100k total - 40k cached
+    assert.equal(tokenEvent.tokens_in, 60_000);
     assert.ok(tokenEvent.cost_usd !== undefined);
-    // 60k*$2.5 + 50k*$15 + 40k*$0.25 per MTok = 0.15 + 0.75 + 0.01 = 0.91
     assert.ok(Math.abs((tokenEvent.cost_usd as number) - 0.91) < 0.0001);
   });
 
@@ -591,17 +568,14 @@ describe('Codex log parser', () => {
     const tokenEvent = events.find(e => e.event_type === 'llm_response');
     assert.ok(tokenEvent);
     assert.equal(tokenEvent.model, 'gpt-5.3-codex');
-    assert.equal(tokenEvent.tokens_in, 60_000); // 100k total - 40k cached
+    assert.equal(tokenEvent.tokens_in, 60_000);
     assert.ok(tokenEvent.cost_usd !== undefined);
-    // 60k*$1.75 + 50k*$14 + 40k*$0.175 per MTok = 0.105 + 0.7 + 0.007 = 0.812
     assert.ok(Math.abs((tokenEvent.cost_usd as number) - 0.812) < 0.0001);
   });
 
   test('skipped, malformed and zero-delta lines do not shift later event ids', () => {
-    // Codex ids are positional, but the counter advances only when an event is
-    // actually emitted, so anything the importer passes over leaves later ids
-    // untouched. That is what makes the positional scheme safe to keep here,
-    // unlike Claude's, where a child transcript reused the parent's session.
+    // WHY: The positional counter advances only for emitted events, so ignored records must not move
+    // later keys.
     const meta = {
       type: 'session_meta',
       timestamp: '2026-02-01T11:00:00Z',
@@ -622,7 +596,7 @@ describe('Codex log parser', () => {
       '{ this is not json',
       '',
       JSON.stringify({ type: 'some_future_record', payload: { x: 1 } }),
-      JSON.stringify(tokenCount(2, 100, 10)), // zero delta: emitted nothing
+      JSON.stringify(tokenCount(2, 100, 10)),
       JSON.stringify(tokenCount(3, 200, 20)),
     ].join('\n'));
 
@@ -634,12 +608,8 @@ describe('Codex log parser', () => {
   });
 
   test('pins the Codex event-id derivation against accidental re-keying', () => {
-    // These literals are deliberate. Codex event ids are derived from a counter
-    // over emitted events, so changing WHICH events are emitted silently re-keys
-    // every stored row: on the next import the old rows no longer match and the
-    // whole history duplicates. 73,963 import-cdx- rows carry these ids today.
-    // If this test fails, the derivation changed — that needs a legacy-id bridge
-    // like the Claude importer's, not a new expected value here.
+    // WHY: These literal IDs detect changes that would re-key existing imports and require a legacy
+    // migration.
     const filePath = writeJsonl('cdx-id-pin.jsonl', [
       {
         type: 'session_meta',
@@ -698,9 +668,7 @@ describe('Codex log parser', () => {
       'turn_context',
       'turn_context',
     ]);
-    // Terra: 60K uncached * $2 + 40K cached * $0.20 + 20K output * $12 = $0.368.
     assert.ok(Math.abs((responses[0].cost_usd as number) - 0.368) < 0.0001);
-    // Luna delta: 30K uncached * $0.20 + 20K cached * $0.02 + 10K output * $1.20 = $0.0184.
     assert.ok(Math.abs((responses[1].cost_usd as number) - 0.0184) < 0.0001);
   });
 
@@ -754,7 +722,6 @@ describe('Codex log parser', () => {
     ]);
 
     const events = parseCodexFile(filePath);
-    // Should use filename since there's no session_meta
     const tokenEvent = events.find(e => e.event_type === 'llm_response');
     assert.ok(tokenEvent);
     assert.equal(tokenEvent.session_id, 'codex-session-xyz');
@@ -802,7 +769,6 @@ describe('Codex log discovery', () => {
 
   before(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cdx-disc-'));
-    // Create mock ~/.codex/sessions/YYYY/MM/DD/ structure
     fs.mkdirSync(path.join(tmpDir, 'sessions', '2026', '01', '15'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, 'sessions', '2026', '02', '01'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'sessions', '2026', '01', '15', 'sess-a.jsonl'), '');
@@ -826,7 +792,6 @@ describe('Codex log discovery', () => {
   });
 });
 
-// ─── Integration: import orchestrator with DB ───────────────────────────
 
 let server: Server;
 let baseUrl = '';
@@ -891,11 +856,10 @@ describe('Import orchestrator integration', () => {
   before(() => {
     claudeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-claude-'));
     codexDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-codex-'));
-    // Empty (no conversations/*.db) so `source: 'all'` stays isolated from the
-    // developer's real ~/.gemini/antigravity-cli during tests.
+    // WHY: Use a separate empty discovery root so importing all providers cannot open a developer’s
+    // real conversation store.
     antigravityDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-orch-agr-'));
 
-    // Mock Claude Code logs
     fs.mkdirSync(path.join(claudeDir, 'projects', 'my-project'), { recursive: true });
     fs.writeFileSync(
       path.join(claudeDir, 'projects', 'my-project', 'session-abc.jsonl'),
@@ -905,7 +869,6 @@ describe('Import orchestrator integration', () => {
       ].join('\n'),
     );
 
-    // Mock Codex logs (new format: session_meta + event_msg token_count)
     fs.mkdirSync(path.join(codexDir, 'sessions', '2026', '02', '01'), { recursive: true });
     fs.writeFileSync(
       path.join(codexDir, 'sessions', '2026', '02', '01', 'session-xyz.jsonl'),
@@ -935,7 +898,6 @@ describe('Import orchestrator integration', () => {
     assert.equal(result.totalDuplicates, 0);
     assert.equal(result.skippedFiles, 0);
 
-    // Verify events in DB via API
     const eventsRes = await fetch(`${baseUrl}/api/events?limit=10&source=import`);
     const body = await eventsRes.json() as { events: Array<Record<string, unknown>>; total: number };
     assert.equal(body.total, 2);
@@ -952,9 +914,8 @@ describe('Import orchestrator integration', () => {
     });
 
     assert.equal(result.totalFiles, 1);
-    assert.equal(result.totalEventsImported, 3); // session_start + llm_response + session_end
+    assert.equal(result.totalEventsImported, 3);
 
-    // Verify events in DB
     const eventsRes = await fetch(`${baseUrl}/api/events?limit=10&source=import`);
     const body = await eventsRes.json() as { events: Array<Record<string, unknown>>; total: number };
     assert.equal(body.total, 3);
@@ -973,17 +934,15 @@ describe('Import orchestrator integration', () => {
     });
 
     assert.equal(result.totalFiles, 2);
-    assert.equal(result.totalEventsImported, 5); // 2 claude + 3 codex
+    assert.equal(result.totalEventsImported, 5);
   });
 
   test('skips unchanged files on re-import', async () => {
     const { runImport } = await import('../src/import/index.js');
 
-    // First import
     const result1 = runImport({ source: 'claude-code', claudeDir });
     assert.equal(result1.totalEventsImported, 2);
 
-    // Second import — should skip since file hash matches
     const result2 = runImport({ source: 'claude-code', claudeDir });
     assert.equal(result2.skippedFiles, 1);
     assert.equal(result2.totalEventsImported, 0);
@@ -992,23 +951,18 @@ describe('Import orchestrator integration', () => {
   test('--force re-imports even if file unchanged', async () => {
     const { runImport } = await import('../src/import/index.js');
 
-    // First import
     runImport({ source: 'claude-code', claudeDir });
 
-    // Force re-import — events deduplicated by event_id but file isn't skipped
     const result2 = runImport({ source: 'claude-code', claudeDir, force: true });
     assert.equal(result2.skippedFiles, 0);
     assert.equal(result2.totalFiles, 1);
-    // All events are duplicates since event_ids match
     assert.equal(result2.totalDuplicates, 2);
     assert.equal(result2.totalEventsImported, 0);
   });
 
   test('does not re-insert events already stored under the legacy id scheme', async () => {
-    // Production rows were written with ids derived from (sessionId, line index).
-    // Changing the derivation must not make those events look new: auto-import
-    // re-parses any changed file every few minutes, so a missed bridge would
-    // duplicate a live session's whole history, not just forced re-imports.
+    // WHY: Automatic re-import rereads changed live transcripts. Losing historical identity would
+    // duplicate their events.
     const { runImport } = await import('../src/import/index.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-legacy-id-'));
     const sessionId = 'legacy-session-uuid';
@@ -1035,10 +989,8 @@ describe('Import orchestrator integration', () => {
   });
 
   test('refreshes a turn imported before its last line was written', async () => {
-    // Auto-import reads live transcripts, so it can store a turn while Claude
-    // Code is still writing it. That row has output only as of the first
-    // blocks; the next import must bring it up to the turn's final usage
-    // instead of skipping it as a duplicate.
+    // WHY: Auto-import can observe a turn before it is finished. The next read must catch its final
+    // usage.
     const { runImport } = await import('../src/import/index.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-refresh-'));
     const sessionId = 'refresh-session-uuid';
@@ -1067,8 +1019,8 @@ describe('Import orchestrator integration', () => {
       'the estimate follows the refreshed tokens');
     const total = getDb().prepare('SELECT SUM(tokens_out) AS out FROM events WHERE session_id = ?').get(sessionId) as { out: number };
     assert.equal(total.out, 254, 'the turn is still billed once');
-    // The session summary keeps its own rollup; the refreshed row must replace
-    // its old contribution rather than be counted a second time.
+    // WHY: The summary has its own rollup. Replace the previous contribution so refreshing a row
+    // cannot count it twice.
     const summary = getDb().prepare('SELECT tokens_out, observation_count FROM session_trace_summary WHERE session_id = ?')
       .get(sessionId) as { tokens_out: number; observation_count: number };
     const events = getDb().prepare('SELECT COUNT(*) AS c FROM events WHERE session_id = ?').get(sessionId) as { c: number };
@@ -1101,9 +1053,8 @@ describe('Import orchestrator integration', () => {
   });
 
   test('does not refresh a row another transcript stored for the same line', async () => {
-    // A resumed session repeats its predecessor's lines under the same uuids.
-    // The row belongs to whichever transcript stored it; a copy that reads the
-    // line differently must not rewrite it on every import.
+    // WHY: A resumed transcript can repeat a UUID from its predecessor. The copy must not overwrite
+    // the owning transcript’s usage.
     const { runImport } = await import('../src/import/index.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-refresh-copy-'));
     const original = 'refresh-original-uuid';
@@ -1130,11 +1081,8 @@ describe('Import orchestrator integration', () => {
   });
 
   test('recovers child-agent events whose parent rows are stored under legacy ids', async () => {
-    // The production shape: the parent was imported before the id change, so its
-    // rows carry legacy ids, and the child's legacy ids are byte-identical to
-    // them. The child must not claim that identity, or its events are suppressed
-    // as duplicates — which is how child-agent usage went missing in the first
-    // place, and what a forced re-import is meant to recover.
+    // WHY: A child can share legacy IDs with its parent. Treating those parent rows as child
+    // duplicates would suppress real child usage.
     const { runImport } = await import('../src/import/index.js');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-child-recovery-'));
     const sessionId = 'recovery-parent-uuid';
@@ -1188,9 +1136,8 @@ describe('Import orchestrator integration', () => {
     const first = runImport({ source: 'claude-code', claudeDir: dir });
     assert.equal(first.totalEventsImported, 4, 'both transcripts contribute their own events');
 
-    // The parent must still deduplicate with its child present: an ownership rule
-    // keyed on "is this sessionId claimed twice" would strip the parent's bridge
-    // and re-insert its whole history.
+    // WHY: A child sharing the reported session ID must not take away the parent’s legacy bridge or
+    // the next import would duplicate its history.
     const second = runImport({ source: 'claude-code', claudeDir: dir, force: true });
     assert.equal(second.totalEventsImported, 0);
     assert.equal(second.totalDuplicates, 4);
@@ -1229,7 +1176,6 @@ describe('Import orchestrator integration', () => {
         WHERE session_id = 'session-model-refresh' AND event_type = 'llm_response'
       `).get() as { model: string; cost_usd: number };
       assert.equal(before.model, 'gpt-5.6-sol');
-      // Sol: 60K*$5 + 40K*$0.50 + 20K*$30 = $0.92.
       assert.ok(Math.abs(before.cost_usd - 0.92) < 0.0001);
       const statsBefore = getStatsForBroadcast();
       assert.ok(Math.abs(statsBefore.total_cost_usd - 0.92) < 0.0001);
@@ -1246,7 +1192,6 @@ describe('Import orchestrator integration', () => {
         WHERE session_id = 'session-model-refresh' AND event_type = 'llm_response'
       `).get() as { model: string; cost_usd: number };
       assert.equal(after.model, 'gpt-5.6-terra');
-      // Terra: 60K*$2 + 40K*$0.20 + 20K*$12 = $0.368.
       assert.ok(Math.abs(after.cost_usd - 0.368) < 0.0001);
 
       const summary = getDb().prepare(`
@@ -1312,9 +1257,8 @@ describe('Import orchestrator integration', () => {
     });
 
     assert.equal(result.totalEventsFound, 2);
-    assert.equal(result.totalEventsImported, 2); // reported as "would import"
+    assert.equal(result.totalEventsImported, 2);
 
-    // Verify nothing written to DB
     const eventsRes = await fetch(`${baseUrl}/api/events?limit=10`);
     const body = await eventsRes.json() as { total: number };
     assert.equal(body.total, 0);
@@ -1325,15 +1269,11 @@ describe('Import orchestrator integration', () => {
 
     runImport({ source: 'claude-code', claudeDir, force: true });
 
-    // The tool_use event has model + tokens but no cost
-    // insertEvent should auto-calculate
     const eventsRes = await fetch(`${baseUrl}/api/events?limit=10&source=import`);
     const body = await eventsRes.json() as { events: Array<Record<string, unknown>> };
 
     const toolEvent = body.events.find(e => e.event_type === 'tool_use');
     assert.ok(toolEvent);
-    // model: claude-sonnet-4-5-20250929, tokens_in: 1000, tokens_out: 200
-    // Cost should be auto-calculated
     assert.ok(toolEvent.cost_usd !== null, 'Expected auto-calculated cost_usd');
   });
 
@@ -1427,7 +1367,7 @@ describe('Import orchestrator integration', () => {
 });
 
 describe('Import skips files unchanged on disk', () => {
-  // A file the importer cannot open proves it was skipped without a read.
+  // WHY: Use an unreadable file to show that the importer skipped it without opening it.
   function claudeFixture(prefix: string): { dir: string; file: string } {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
     const file = path.join(dir, 'projects', 'proj', 'stat-gate-session.jsonl');
@@ -1497,7 +1437,6 @@ describe('Import skips files unchanged on disk', () => {
   test('an append that keeps the mtime is read again by its size', async () => {
     const { runImport } = await import('../src/import/index.js');
     const { dir, file } = claudeFixture('agentmonitor-stat-gate-size-');
-    // A whole-second mtime can be restored exactly after the append.
     const pinned = new Date('2026-02-01T12:00:00Z');
     fs.utimesSync(file, pinned, pinned);
     runImport({ source: 'claude-code', claudeDir: dir });

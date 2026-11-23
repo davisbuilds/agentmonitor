@@ -41,7 +41,6 @@ test('one query asks for every pull request, and an answer keeps what GitHub cou
   assert.match(query, /repository\(owner: "owner", name: "gone"\)/);
   assert.equal(aliases.size, 3);
 
-  // As `gh api graphql` prints it, exiting 1, for a missing pull request and a missing repository.
   const [seven, missing, gone] = [...aliases.entries()].map(([alias, key]) => ({ alias, key }));
   const [repoAlias, prAlias] = seven.alias.split('.');
   const goneRepo = gone.alias.split('.')[0];
@@ -229,7 +228,6 @@ test('merged pull requests are read window by window: a full window splits, page
     repo: 'owner/delta', number, created_at: mergedAt, merged_at: mergedAt,
     additions: number, deletions: 0, changed_files: 1, commit_count: 1, author_is_bot: false, commits: [`sha-${number}`],
   });
-  // What GitHub holds, by merge day.
   const held = [pull(1, '2026-03-02T10:00:00Z'), pull(2, '2026-03-10T10:00:00Z'), pull(3, '2026-03-20T10:00:00Z'), pull(4, '2026-03-28T10:00:00Z'),
     pull(5, '2026-06-05T10:00:00Z'), pull(6, '2026-06-06T10:00:00Z'), pull(8, '2026-07-07T10:00:00Z'), pull(9, '2026-08-08T10:00:00Z'), pull(7, '2026-10-20T10:00:00Z')];
   db.prepare("INSERT INTO github_pull_request_commits (repo, number, sha, source) VALUES ('owner/delta', 7, 'from-a-merge', 'local')").run();
@@ -241,17 +239,13 @@ test('merged pull requests are read window by window: a full window splits, page
     const inWindow = held.filter(p => p.merged_at.slice(0, 10) >= window.from && p.merged_at.slice(0, 10) <= window.to);
     const offset = after ? Number(after) : 0;
     if (window.from.startsWith('2026-06') && offset > 0 && failJuneSecondPage) return null;
-    // As GitHub does, a search returns no result past the cap.
     if (offset >= 3) return { total: inWindow.length, pulls: [], next: null, complete: true };
-    // On the first pass July's second page answers only in part: its one result does not.
     if (window.from.startsWith('2026-07') && partialPages) {
       return offset === 0
         ? { total: inWindow.length + 1, pulls: inWindow, next: '1', complete: true }
         : { total: inWindow.length + 1, pulls: [], next: null, complete: false };
     }
-    // And August's only page.
     if (window.from.startsWith('2026-08') && partialPages) return { total: inWindow.length + 1, pulls: inWindow, next: null, complete: false };
-    // One per page, to exercise paging.
     return { total: inWindow.length, pulls: inWindow.slice(offset, offset + 1), next: offset + 1 < inWindow.length ? String(offset + 1) : null, complete: true };
   };
   const now = new Date('2026-11-15T00:00:00Z');
@@ -300,8 +294,8 @@ test('a window that returns fewer pull requests than the search counts stays unr
     repo: 'owner/zeta', number, created_at: '2027-12-09T10:00:00Z', merged_at: '2027-12-09T10:00:00Z',
     additions: 1, deletions: 0, changed_files: 1, commit_count: 1, author_is_bot: false, commits: [`z-${number}`],
   });
-  // One day holds more than the cap, so splitting cannot help; the search stops
-  // at the cap, and repeats a result (as paging does when merges land meanwhile).
+  // WHY: A single day can hit the search cap, where subdividing the date window cannot recover
+  // additional results.
   const held = [1, 2, 3, 4].map(pull);
   const search: PullRequestSearch = async window => {
     const inWindow = window.from <= '2027-12-09' && window.to >= '2027-12-09' ? held : [];

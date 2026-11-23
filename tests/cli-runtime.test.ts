@@ -40,11 +40,8 @@ function runCli(args: string[], env: NodeJS.ProcessEnv = process.env): CliRun {
   };
 }
 
-// A port for `serve` to bind later. It comes from below the ephemeral ranges
-// (Linux 32768+, macOS 49152+) because other test files run at the same time
-// and their servers listen on port 0: an ephemeral port freed here could be
-// handed to one of them before `serve` binds it. One such server accepts
-// requests and never answers, which left a health check waiting five minutes.
+// WHY: Other test files reserve ephemeral ports. Choose outside that range so they cannot claim this
+// port between allocation and server startup.
 async function allocatePort(): Promise<number> {
   for (let attempt = 0; attempt < 50; attempt++) {
     const port = 20_000 + Math.floor(Math.random() * 12_000);
@@ -69,7 +66,6 @@ async function waitForHealth(baseUrl: string, child: ChildProcessWithoutNullStre
       throw new Error(`serve exited early with ${child.exitCode}`);
     }
     try {
-      // Bounded, so a listener that never answers fails within the deadline.
       const res = await fetch(`${baseUrl}/api/health`, { signal: AbortSignal.timeout(1_000) });
       if (res.ok) return;
     } catch (error) {
@@ -198,7 +194,7 @@ async function waitForResponseEnd(response: Response): Promise<void> {
   assert.ok(response.body);
   const reader = response.body.getReader();
   while (!(await reader.read()).done) {
-    // Drain until runtime shutdown ends the SSE response.
+    // WHY: Observe an actual shutdown closing the stream, regardless of which messages it sends.
   }
 }
 
@@ -280,7 +276,6 @@ test('serve prices usage rows that have no cost yet and labels older costs befor
   const dbPath = path.join(tempDir, 'runtime.db');
   const env = { ...process.env, AGENTMONITOR_DB_PATH: dbPath, AGENTMONITOR_AUTO_IMPORT_MINUTES: '0' };
   try {
-    // First start creates the schema.
     const port = await allocatePort();
     const first = spawnDirectServe(env, port);
     try {
@@ -289,7 +284,6 @@ test('serve prices usage rows that have no cost yet and labels older costs befor
       await stopChild(first);
     }
 
-    // A model priced after its usage landed, and a cost from before provenance.
     const seed = new Database(dbPath);
     const insert = seed.prepare(`
       INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out,
@@ -469,7 +463,8 @@ test('serve launches the runtime through Portless by default', async () => {
     AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
     AGENTMONITOR_PORTLESS_CLI: portlessCli,
     AGENTMONITOR_PORTLESS_MARKER: markerPath,
-    // Keep shutdown independent of the developer's installed quota provider.
+    // WHY: Installed quota providers can start background RPCs that change shutdown behavior on the
+    // developer’s host.
     PATH: '/usr/bin:/bin',
   };
   const child = spawn(process.execPath, cliInvocation([

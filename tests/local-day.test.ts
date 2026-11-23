@@ -31,8 +31,6 @@ describe('localDayOf', () => {
   });
 
   test('splits at local midnight in a quarter-hour-offset zone, cached or not', () => {
-    // Kathmandu is UTC+05:45, so its midnight is 18:15Z. Ask twice so the
-    // second answer comes from the quarter-hour memo.
     for (let pass = 0; pass < 2; pass++) {
       assert.equal(localDayOf('2026-09-10T18:14:59.999Z', 'Asia/Kathmandu'), '2026-09-10');
       assert.equal(localDayOf('2026-09-10T18:15:00.000Z', 'Asia/Kathmandu'), '2026-09-11');
@@ -40,7 +38,6 @@ describe('localDayOf', () => {
   });
 
   test('returns a bare day unchanged rather than reading it as UTC midnight', () => {
-    // new Date('2026-09-10') is UTC midnight, which is Sep 9 west of UTC.
     assert.equal(localDayOf('2026-09-10', NY), '2026-09-10');
   });
 
@@ -62,8 +59,8 @@ describe('local day bounds', () => {
   });
 
   test('a day whose midnight is skipped starts at its first real instant', () => {
-    // Havana springs forward at 00:00 on 2026-03-08: 23:59 CST on Mar 7 is
-    // followed by 01:00 CDT on Mar 8, so Mar 8 begins at 05:00Z and Mar 7 ends there.
+    // WHY: A daylight-saving transition can skip local midnight. The start of the day is the first
+    // valid instant, even when its clock shows 01:00.
     assert.equal(localDayStart('2026-03-08', 'America/Havana'), '2026-03-08T05:00:00.000Z');
     assert.equal(localDayEndExclusive('2026-03-07', 'America/Havana'), '2026-03-08T05:00:00.000Z');
     assert.equal(localDayStart('2026-03-07', 'America/Havana'), '2026-03-07T05:00:00.000Z');
@@ -89,7 +86,6 @@ describe('date params', () => {
 
 describe('localWeekdayHour', () => {
   test('buckets by local weekday (Monday = 0) and hour', () => {
-    // Friday 02:00 UTC is Thursday 22:00 EDT.
     assert.deepEqual(localWeekdayHour('2026-09-11T02:00:00Z', NY), { weekday: 3, hour: 22 });
     assert.deepEqual(localWeekdayHour('2026-09-11T02:00:00Z', TOKYO), { weekday: 4, hour: 11 });
   });

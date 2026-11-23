@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-project-rename-')));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -13,7 +12,6 @@ const { closeDb, getDb } = await import('../src/db/connection.js');
 const { renameStoredProjects } = await import('../src/import/project-repair.js');
 const { maintainSessionTraceSummary } = await import('../src/trace-quality/summary.js');
 
-// No transcript backs any of these sessions: the list is the only evidence.
 const JOB = 'job-session';
 const SCRATCH = 'scratch-session';
 const BROWSER_ONLY = 'browser-only-session';
@@ -29,7 +27,6 @@ before(() => {
   event.run(JOB, 'feed-code-coverage-backfill-feed-2026-05-05');
   event.run(SCRATCH, 'tmp');
   event.run(KEPT, 'feed');
-  // A name that only contains a listed one is not that name.
   event.run(KEPT, 'tmp-notes');
   const session = db.prepare(`INSERT INTO sessions (id, agent_id, agent_type, project, status, last_event_at) VALUES (?, 'a', 'claude_code', ?, 'ended', '2026-05-18 10:00:00')`);
   session.run(JOB, 'feed-code-coverage-backfill-feed-2026-05-05');
@@ -80,11 +77,9 @@ test('applying renames or clears exactly the listed names in every table, once',
   assert.deepEqual(projects('sessions', 'id', SCRATCH), [null]);
   assert.deepEqual(projects('browsing_sessions', 'id', SCRATCH), [null]);
   assert.deepEqual(projects('browsing_sessions', 'id', BROWSER_ONLY), ['site.net']);
-  // Trace summaries follow their sessions.
   assert.deepEqual(projects('session_trace_summary', 'session_id', JOB), ['feed']);
   assert.deepEqual(projects('session_trace_summary', 'session_id', SCRATCH), [null]);
   assert.deepEqual(projects('session_trace_summary', 'session_id', BROWSER_ONLY), ['site.net']);
-  // Unlisted names stay, including one that only contains a listed name.
   assert.deepEqual(projects('events', 'session_id', KEPT), ['feed', 'tmp-notes']);
 
   const again = renameStoredProjects(getDb(), { names: NAMES, apply: true });

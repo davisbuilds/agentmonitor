@@ -126,7 +126,6 @@ describe('syncSessionFile', () => {
     const result = syncSessionFile(db, filePath);
     assert.equal(result, 'parsed');
 
-    // Verify data in DB
     const session = db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(sessionId) as Record<string, unknown>;
     assert.ok(session, 'session should exist');
     assert.equal(session.message_count, 2);
@@ -134,7 +133,6 @@ describe('syncSessionFile', () => {
     const messages = db.prepare('SELECT * FROM messages WHERE session_id = ?').all(sessionId);
     assert.equal(messages.length, 2);
 
-    // Verify watched_files record
     const watched = db.prepare('SELECT * FROM watched_files WHERE file_path = ?').get(filePath) as Record<string, unknown>;
     assert.ok(watched, 'watched_files record should exist');
     assert.equal(watched.status, 'parsed');
@@ -163,11 +161,9 @@ describe('syncSessionFile', () => {
     const sessionId = 'skip-sess-001';
     const filePath = writeSessionFile(sessionId, makeSession(sessionId));
 
-    // First parse
     const result1 = syncSessionFile(db, filePath);
     assert.equal(result1, 'parsed');
 
-    // Second parse — same content, should skip
     const result2 = syncSessionFile(db, filePath);
     assert.equal(result2, 'skipped');
   });
@@ -180,7 +176,6 @@ describe('syncSessionFile', () => {
 
     syncSessionFile(db, filePath);
 
-    // Modify file — add another message
     const content2 = content1 + JSON.stringify({
       type: 'user',
       parentUuid: 'u2',
@@ -194,7 +189,6 @@ describe('syncSessionFile', () => {
     const result = syncSessionFile(db, filePath);
     assert.equal(result, 'parsed');
 
-    // Should now have 3 messages
     const count = (db.prepare('SELECT COUNT(*) as c FROM messages WHERE session_id = ?').get(sessionId) as { c: number }).c;
     assert.equal(count, 3);
   });
@@ -203,7 +197,6 @@ describe('syncSessionFile', () => {
     const db = getDb();
     const filePath = writeSessionFile('empty-sess', '');
     const result = syncSessionFile(db, filePath);
-    // Should mark as skipped (no messages to parse)
     assert.ok(result === 'skipped' || result === 'parsed');
   });
 
@@ -213,7 +206,6 @@ describe('syncSessionFile', () => {
     const result = syncSessionFile(db, fakePath);
     assert.equal(result, 'error');
 
-    // Should record error in watched_files
     const watched = db.prepare('SELECT status FROM watched_files WHERE file_path = ?').get(fakePath) as { status: string } | undefined;
     assert.ok(watched, 'should record error in watched_files');
     assert.equal(watched!.status, 'error');
@@ -221,7 +213,6 @@ describe('syncSessionFile', () => {
 
   test('empty-messages file is recorded as skipped in watched_files', () => {
     const db = getDb();
-    // File with only non-message lines
     const content = JSON.stringify({ type: 'progress', sessionId: 'skip-only', data: {} }) + '\n';
     const filePath = writeSessionFile('skip-only-sess', content);
     const result = syncSessionFile(db, filePath);
@@ -355,7 +346,6 @@ describe('discoverSessionFiles', () => {
   });
 
   test('discovers JSONL files in projects directory', () => {
-    // Write some session files
     writeSessionFile('discover-001', makeSession('discover-001'));
     writeSessionFile('discover-002', makeSession('discover-002'));
     const nestedDir = path.join(watchDir, 'nested', 'branch');
@@ -371,7 +361,6 @@ describe('discoverSessionFiles', () => {
   });
 
   test('ignores non-JSONL files', () => {
-    // Write a non-JSONL file
     fs.writeFileSync(path.join(watchDir, 'readme.txt'), 'not a session');
 
     const parentDir = path.join(tempDir, 'watch');
@@ -403,7 +392,6 @@ describe('syncAllFiles', () => {
     const db = getDb();
     const parentDir = path.join(tempDir, 'watch');
 
-    // Write fresh session files
     const syncDir = path.join(tempDir, 'watch', 'projects', '-Users-dev-Dev-syncproject');
     fs.mkdirSync(syncDir, { recursive: true });
     fs.writeFileSync(

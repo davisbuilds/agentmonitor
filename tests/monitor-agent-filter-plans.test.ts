@@ -8,9 +8,8 @@ import type { closeDb as closeDbType, getDb as getDbType } from '../src/db/conne
 import type * as V2Queries from '../src/db/v2-queries.js';
 import type * as Ledger from '../src/skills/invocation-ledger.js';
 
-// An agent filter let SQLite seek the low-cardinality agent_type index and look
-// up every matching row: on a real store the Codex-filtered Monitor stats took
-// 16 s and its event page about 6 s. These pin the plans that avoid it.
+// WHY: A low-cardinality agent seek can still look up every matching event. Pin the relevant covering
+// plans to catch that regression.
 
 let tempDir = '';
 let closeDb: typeof closeDbType;
@@ -87,8 +86,6 @@ test('the agent filter still selects only that agent', () => {
 });
 
 test('the windowed Codex skill-event read seeks exec tool calls, not every Codex event', () => {
-  // The same agent_type-only seek made skill health and daily read all Codex
-  // events (about 3 s on a real store) to find a few SKILL.md commands.
   const statement = ledger.codexSkillEventStatement({ date_from: '2026-09-01', date_to: '2026-09-30' });
   const detail = plan(statement.sql, statement.values);
   assert.doesNotMatch(detail, /idx_events_agent_type\b/, detail);
@@ -96,12 +93,8 @@ test('the windowed Codex skill-event read seeks exec tool calls, not every Codex
 });
 
 test('an agent with an event type or tool reads that pair newest-first', () => {
-  // Walking all of an agent's events finds a rare or absent value only after
-  // visiting every row (about 2 s for Codex on a real store), while sorting
-  // every match of a common value takes as long. Seeking the pair in time
-  // order serves both. The page's total count must also stay inside the index:
-  // a count that looks up each row to apply the benchmark exclusion took about
-  // 3 s for Codex tool_use events on a real store.
+  // WHY: A rare filter can still require a full scan and a common one a full sort. An ordered
+  // composite keeps both cases bounded.
   for (const [filter, index] of [
     [{ event_type: 'tool_use' }, 'idx_events_agent_event_covering'],
     [{ tool_name: 'exec_command' }, 'idx_events_agent_tool_order'],
@@ -116,7 +109,6 @@ test('an agent with an event type or tool reads that pair newest-first', () => {
 });
 
 test('a combined model or session filter leads instead of the agent index', () => {
-  // These have selective indexes of their own and no agent-ordered composite.
   for (const [filter, index] of [
     [{ model: 'gpt-5.5' }, 'idx_events_model'],
     [{ session_id: 's-1' }, 'session'],
@@ -131,7 +123,6 @@ test('a combined model or session filter leads instead of the agent index', () =
 });
 
 test('the unfiltered feed reads newest-first from the normalized order index', () => {
-  // The Monitor's default request. Without the index each page sorts every event.
   const { page } = queries.monitorEventsStatements({});
   const detail = plan(page.sql, page.values);
   assert.match(detail, /idx_events_created_at_order/, detail);
@@ -139,7 +130,6 @@ test('the unfiltered feed reads newest-first from the normalized order index', (
 });
 
 test('a feed filter without its own index keeps the ordered agent index', () => {
-  // branch and source have no index; there the agent index is the narrow one.
   for (const filter of [{ branch: 'main' }, { source: 'hook' }]) {
     const { page } = queries.monitorEventsStatements({ agent: 'codex', ...filter });
     assert.match(plan(page.sql, page.values), /idx_events_agent_created_order/, JSON.stringify(filter));

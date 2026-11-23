@@ -102,7 +102,6 @@ function usage(model: string, pricing_status: 'known' | 'deprecated' | 'unknown'
 }
 
 test('a $0 row with no tokens is not incomplete cost usage', () => {
-  // Nothing was consumed, so a zero cost is correct, not missing.
   assert.equal(summarizeIncompleteCostUsage([usage('idle', 'known', 0, 0)]), null);
 });
 
@@ -113,6 +112,5 @@ test('a $0 deprecated-priced row counts as unrecalculated, not unknown pricing',
   ]);
   assert.equal(summary?.unknown_pricing_model_count, 1);
   assert.equal(summary?.unrecalculated_model_count, 1);
-  // Equal token volume: ordered by name so the list is stable.
   assert.deepEqual(summary?.models, ['mystery', 'old-model']);
 });

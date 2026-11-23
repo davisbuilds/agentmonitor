@@ -41,7 +41,6 @@ function fixture(options: { platform?: NodeJS.Platform; servicePid?: number } = 
   fs.mkdirSync(path.dirname(dbPath));
 
   const calls: string[][] = [];
-  // A booted-out server keeps running for stopDelayMs, as a graceful shutdown does.
   const service = {
     loaded: false, alive: false, pid: options.servicePid ?? 4242, stopDelayMs: 0,
     onStopped: () => {}, aliveAtBootstrap: [] as boolean[],
@@ -208,7 +207,6 @@ describe('amon service (launchd)', () => {
     const { host, spec, dbPath, calls, service } = fixture({ servicePid: process.pid });
     const built = spec();
     await installService(host, built);
-    // The running service is this process, holding the database.
     const owner = acquireRuntimeOwnership(dbPath);
     service.stopDelayMs = 200;
     service.onStopped = () => owner.release();
@@ -297,7 +295,6 @@ describe('amon service (launchd)', () => {
     assert.equal(serviceStatus(host).loaded, true);
   });
 
-  // Reads the plist with plutil, which only macOS has.
   test('restart of a stopped service refuses while another server owns its database', { skip: !onMac }, async () => {
     const { host, spec, dbPath, calls } = fixture();
     await installService(host, spec());
@@ -319,7 +316,6 @@ describe('amon service (launchd)', () => {
     assert.equal(built.dbPath, path.join(fs.realpathSync(install), 'data', 'agentmonitor.db'));
   });
 
-  // Reads the plist with plutil, which only macOS has.
   test('restart of a stopped service checks the default database under the install when none is recorded', { skip: !onMac }, async () => {
     const { host, entryScript, env, root, install, calls } = fixture();
     const { AGENTMONITOR_DB_PATH: _recorded, ...withoutDb } = env;

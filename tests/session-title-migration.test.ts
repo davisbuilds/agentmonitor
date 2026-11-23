@@ -39,7 +39,6 @@ function seed(): void {
   session.run('ag-1', 'antigravity', 'user input', antigravityFile, null, null, null);
   session.run('codex-job', 'codex', 'Generate a concise, single-line task title of at most 36 characters', null, null, null, 'codex-otel');
   session.run('codex-user', 'codex', 'Generate a title for the blog post', null, null, null, 'codex-otel');
-  // An older layout kept subagent transcripts beside their parent's, not inside it.
   session.run('agent-old', 'claude', 'Legacy helper', '/Users/example/.claude/projects/-Users-example-app/agent-old.jsonl', null, 'subagent', 'claude-jsonl');
   session.run('codex-job-file', 'codex', 'Write a brief catch-up for a user returning to this task.', codexFile.replace('0000', '1111'), null, null, 'codex-jsonl');
   session.run('codex-sub', 'codex', 'Write a brief catch-up for a user returning to this task.', null, 'p', 'subagent', 'codex-otel');

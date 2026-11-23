@@ -70,7 +70,8 @@ test('summary projections mark database fallback time as UTC without guessing cl
       id: 900 + index, session_id: `timestamp-control-${index}`, event_type: 'user_prompt',
       created_at: '2026-03-24 12:00:00', metadata: JSON.stringify({ message: 'fixture' }),
     });
-    // The existing fixture builder defaults null via ??; set it explicitly.
+    // WHY: The fixture builder replaces null with its default, so assign null after construction to
+    // exercise it.
     row.client_timestamp = clientTimestamp;
     const result = syncCodexSummaryLiveEvent(db, row);
     assert.equal(result.last_item_at, expected);
@@ -374,8 +375,6 @@ test('OTEL prompts title the session with the first prompt that is not injected 
 });
 
 test('an auto-review approval thread is internal from its first event', () => {
-  // Codex reviews approvals on threads of their own: no prompt, no rollout,
-  // only the reviewer model marks them.
   const db = getDb();
   syncCodexSummaryLiveEvent(db, makeEventRow({
     id: 9301, session_id: 'codex-auto-review-thread', event_type: 'session_start', model: 'codex-auto-review',

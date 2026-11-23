@@ -10,7 +10,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-github-gate-'));
 after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
 
-// A `gh` that records each call, signed in as someone, and answers any search with nothing.
 const bin = path.join(tempDir, 'bin');
 const calls = path.join(tempDir, 'gh-calls');
 fs.mkdirSync(bin);
@@ -23,7 +22,6 @@ esac
 `, { mode: 0o755 });
 
 function syncGit(lookups: '0' | '1'): { status: number | null; stdout: string; stderr: string } {
-  // tsx run from a tsx child fails silently unless started through a shell.
   const result = spawnSync('/bin/sh', ['-c', 'exec node --import tsx src/cli.ts sync git --json'], {
     cwd: ROOT,
     encoding: 'utf8',
@@ -46,7 +44,6 @@ test('amon sync git asks GitHub nothing with lookups off, and searches merged pu
 
   const on = syncGit('1');
   assert.equal(on.status, 0, on.stderr);
-  // Control: the same command does reach gh once allowed, a search per month of the last year.
   assert.ok(ghCalls().length >= 12, `gh was called ${ghCalls().length} times`);
   assert.ok(ghCalls().every(call => call === 'api graphql'));
   assert.ok(JSON.parse(on.stdout).merged_months_read >= 12);

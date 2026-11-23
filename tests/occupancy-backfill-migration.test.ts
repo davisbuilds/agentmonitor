@@ -47,39 +47,30 @@ function hashOf(sessionId: string): string | undefined {
 }
 
 test('occupancy and skill-context migrations invalidate their eligible watched files', () => {
-  // initSchema already ran migrations to the current version; rewind so our
-  // seeded rows are present when the occupancy migration (v2) runs.
   getDb().pragma('user_version = 1');
 
   seedSession('claude-null', 'claude', null, 'h-claude-null');
   seedSession('claude-occ', 'claude', 250_000, 'h-claude-occ');
   seedSession('codex-null', 'codex', null, 'h-codex-null');
   seedSession('anti-null', 'antigravity', null, 'h-anti-null');
-  // A watched file with no browsing_sessions row must be left alone.
   getDb().prepare('INSERT INTO watched_files (file_path, file_hash, status) VALUES (?, ?, ?)')
     .run('/fake/orphan.jsonl', 'h-orphan', 'parsed');
 
   runDataMigrations(getDb());
 
-  // Null-occupancy Claude/Codex files are invalidated by v2.
   assert.equal(hashOf('claude-null'), '', 'claude null-occupancy invalidated');
   assert.equal(hashOf('codex-null'), '', 'codex null-occupancy invalidated');
-  // v4 additionally invalidates every file-backed Claude/Codex session for the
-  // ordered skill-context projection, including populated occupancy sessions.
   assert.equal(hashOf('claude-occ'), '', 'populated Claude session invalidated for skill context');
-  // Non-live agents remain untouched.
   assert.equal(hashOf('anti-null'), 'h-anti-null', 'antigravity (always-null) untouched');
   assert.equal(
     (getDb().prepare('SELECT file_hash FROM watched_files WHERE file_path = ?').get('/fake/orphan.jsonl') as { file_hash: string }).file_hash,
     'h-orphan',
     'orphan watched file untouched',
   );
-  // The version counter advanced so it will not run again.
   assert.ok((getDb().pragma('user_version', { simple: true }) as number) >= 2);
 });
 
 test('the migration is a no-op once the version counter has advanced', () => {
-  // Re-invalidate a hash by hand; a second run must not touch it (guarded).
   getDb().prepare('UPDATE watched_files SET file_hash = ? WHERE file_path = ?')
     .run('restored', '/fake/claude-null.jsonl');
   runDataMigrations(getDb());

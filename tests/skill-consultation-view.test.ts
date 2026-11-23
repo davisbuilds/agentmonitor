@@ -172,6 +172,5 @@ test('engagement-rate sort keeps every null rate last regardless of input positi
       skill('full', 'codex', { eligible: 1, firstReads: 1 }),
     ]),
   ], { ...ALL_FILTERS, sort: 'first_read_rate' });
-  // A 0% rate is a real measurement and ranks above "no eligible sessions".
   assert.deepEqual(filtered[0]?.skills.map(row => row.name), ['full', 'half', 'zero', 'null-busy', 'null-quiet']);
 });

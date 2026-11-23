@@ -5,7 +5,6 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import Database from 'better-sqlite3';
 
-// A host west of UTC, where `new Date` and SQLite read an offset-free time apart.
 process.env.TZ = 'America/Los_Angeles';
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-live-status-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');

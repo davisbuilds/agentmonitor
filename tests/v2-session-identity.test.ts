@@ -36,7 +36,6 @@ before(async () => {
   insert.run(rollout, 'codex', 'codex-jsonl', 'transcript-project', '2026-03-01T09:00:00Z', 20, '/synthetic/first.jsonl');
   insert.run(secondRollout, 'codex', 'codex-jsonl', 'transcript-project', '2026-03-02T09:00:00Z', 10, '/synthetic/second.jsonl');
   insert.run(solo, 'codex', 'codex-otel', 'solo-project', '2026-03-01T09:00:00Z', 3, null);
-  // Neither other providers nor arbitrary IDs are evidence of a Codex alias.
   insert.run(`other-${uuid}`, 'claude', 'claude-jsonl', 'controls', '2026-03-01T09:00:00Z', 2, null);
   insert.run(`custom-${uuid}`, 'codex', 'codex-jsonl', 'controls', '2026-03-01T09:00:00Z', 2, null);
   insert.run(`rollout-2026-03-01T09-00-00-${solo}`, 'codex', 'future-mode', 'controls', '2026-03-01T09:00:00Z', 2, null);
