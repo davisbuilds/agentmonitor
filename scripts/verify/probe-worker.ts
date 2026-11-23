@@ -58,7 +58,7 @@ async function health(options: ProbeOptions) {
         args: execFileSync('ps', ['-o', 'args=', '-p', pid], { encoding: 'utf8' }).trim(),
       };
     }
-  } catch { /* lsof finds nothing, or is unavailable */ }
+  } catch { /* WHY: The process-list tool can be unavailable even when the database can be inspected. */ }
   const dbBytes = request.target ? fs.statSync(request.target.path).size : null;
   const reported = typeof server?.db_size_bytes === 'number' ? server.db_size_bytes : null;
   return {
@@ -69,7 +69,7 @@ async function health(options: ProbeOptions) {
       server_error: error,
       listener,
       build: server?.build ?? null,
-      // Equal sizes are not database identity evidence.
+      // WHY: Unrelated database files can have equal sizes.
       database_size_matches: reported === null || dbBytes === null ? 'unknown' : reported === dbBytes,
       target_matches_running_server: 'unknown',
     },
@@ -103,10 +103,9 @@ async function ingestion(probeOptions: ProbeOptions) {
   }>).map(row => [row.file_path, row]));
   const summary: Record<string, unknown> = {};
   for (const [source, list] of Object.entries(files)) {
-    // Mirrors the auto-import skip and the watcher's change check without reading files.
     const imports: Record<string, number> = { unchanged: 0, changed_since_import: 0, unstamped: 0, invalidated: 0, never_imported: 0 };
-    // The watcher keeps no mtime for files it skipped by hash, so only its
-    // recorded status is reported here, not whether a file changed since.
+    // WHY: The watcher retains no mtime for a file skipped by hash, so later modification cannot be
+    // inferred.
     const watcher: Record<string, number> = { parsed: 0, skipped: 0, error: 0, unwatched: 0 };
     for (const file of list) {
       const stat = fs.statSync(file, { bigint: true });
@@ -120,11 +119,10 @@ async function ingestion(probeOptions: ProbeOptions) {
       if (!seen) watcher.unwatched++;
       else watcher[seen.status] = (watcher[seen.status] ?? 0) + 1;
     }
-    // Record types the parsers do not know, so a harness format change is
-    // visible instead of silently skipped. Counts only; no content leaves here.
+    // WHY: An unknown record type can indicate upstream format drift. Counts expose it without
+    // recording content.
     const { catalog, kindOf } = catalogs[source as keyof typeof catalogs];
     const record_types = recordTypes.emptyRecordTypeTally();
-    // A compressed Codex rollout counts by its records, read as discovery found it.
     for (const file of list) recordTypes.tallyRecordTypes(readTranscriptFile(file).toString('utf8'), kindOf, catalog, record_types);
     summary[source] = {
       discovered: list.length,
@@ -219,7 +217,6 @@ async function resync(options: ProbeOptions) {
   const sync = isCodex ? watcher.syncCodexSessionFileDetailed : watcher.syncSessionFileDetailed;
   const countMessages = (sessionId: string) => (db.prepare('SELECT COUNT(*) AS n FROM messages WHERE session_id = ?').get(sessionId) as { n: number }).n;
 
-  // End to end: the real watcher entry point on a copy that grows by an append.
   const copy = path.join(dir, `${base}.jsonl`);
   fs.writeFileSync(copy, prefix);
   let start = performance.now();
@@ -230,7 +227,6 @@ async function resync(options: ProbeOptions) {
   const second = sync(db, copy);
   const appendMs = elapsed(start);
 
-  // Phases, in the watcher's order, on a second copy with its own session id.
   const phaseId = `${base}-phases`;
   const phaseFile = path.join(dir, `${phaseId}.jsonl`);
   const phases = (text: string) => {
@@ -260,7 +256,6 @@ async function resync(options: ProbeOptions) {
   };
   const prefixPhases = phases(prefix);
   const appendPhases = phases(prefix + rest);
-  // What the watcher parses on an append once it holds a checkpoint: only the new lines.
   const parseChunk = (isCodex ? codex.parseCodexSessionChunk : claude.parseSessionChunk) as (
     content: string, sessionId: string, filePath: string, state?: unknown) => { state: unknown };
   const head = parseChunk(prefix, phaseId, phaseFile);
@@ -337,8 +332,7 @@ function coverageSummary(routes: string[], failed: Record<string, number>, state
 }
 
 
-// A write with RETURNING hands back rows, so better-sqlite3 marks it a reader,
-// but replaying it on the read-only copy fails: it is not a read to time.
+// WHY: A write with RETURNING is reported as a reader, but cannot be timed on the read-only copy.
 const WRITE_STATEMENT = /^\s*(?:INSERT|UPDATE|DELETE|REPLACE)\b/i;
 
 /**
@@ -351,7 +345,6 @@ async function recordRouteStatements(
   include: (sql: string) => boolean,
   setup?: (db: Database.Database) => void,
 ): Promise<{ recorded: RecordedStatement[]; routes: string[]; failed: Record<string, number> }> {
-  // Record reads by wrapping the shared Statement prototype before the app loads.
   const recorded = new Map<string, RecordedStatement>();
   let route = 'startup';
   let recording = false;
@@ -407,7 +400,6 @@ async function recordRouteStatements(
   recording = false;
   await new Promise<void>(resolve => server.close(() => resolve()));
   closeDb();
-  // Saved in the recorder's format, so index-audit --corpus can include these reads.
   const corpus = path.join(request.evidence, 'sql-corpus');
   fs.mkdirSync(corpus, { recursive: true });
   fs.writeFileSync(path.join(corpus, 'routes.jsonl'), [...recorded.values()]
@@ -570,8 +562,7 @@ async function reclaim() {
     const optimizeMs = elapsed(start);
     start = performance.now();
     db.exec('VACUUM');
-    // As compact does: in WAL mode the rewrite lands in the WAL, and the main
-    // file only shrinks once a checkpoint folds it back.
+    // WHY: VACUUM in WAL mode can leave the compacted pages in the WAL until a checkpoint.
     db.pragma('wal_checkpoint(TRUNCATE)');
     const vacuumMs = elapsed(start);
     const projected = readStorageReport(db);
@@ -600,7 +591,7 @@ async function reclaim() {
 /** Run the unit test suite with the SQL recorder; its statements are the corpus. */
 function recordCorpus(directory: string) {
   const start = performance.now();
-  // Its own temp dir, which the parent removes even if the deadline kills the suite.
+  // WHY: A deadline can kill the suite before it removes its scratch directory.
   const tmp = path.join(request.evidence, SUITE_TMP);
   fs.mkdirSync(tmp, { recursive: true });
   const run = spawnSync(process.execPath, [
@@ -666,7 +657,7 @@ async function indexAudit(options: ProbeOptions) {
     if (!live.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(table)) throw new Error(`No table ${table} in the database`);
     replicateSchema(live, copy);
 
-    // Control: the schema copy must plan each statement exactly as the real database does.
+    // WHY: A schema-only copy is useful for comparison only if it reproduces the real query plans.
     const compared: AuditStatement[] = [];
     const mismatches: Array<{ sql: string; live: string[]; copy: string[] }> = [];
     const unpreparable: Array<{ sql: string; error: string }> = [];

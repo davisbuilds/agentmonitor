@@ -47,7 +47,6 @@ const checkpoints = new Map<string, ParseCheckpoint<unknown>>();
 function rememberCheckpoint(filePath: string, checkpoint: ParseCheckpoint<unknown>): void {
   checkpoints.delete(filePath);
   checkpoints.set(filePath, checkpoint);
-  // Map order is insertion order, so the first key is the least recently synced.
   if (checkpoints.size > MAX_CHECKPOINTS) checkpoints.delete(checkpoints.keys().next().value!);
 }
 
@@ -237,7 +236,6 @@ export function syncSessionFileDetailed(
   let fileMtime = '';
   try {
     const stat = fs.statSync(filePath);
-    // One read serves the change check, the checkpoint check and the parse.
     const bytes = fs.readFileSync(filePath);
     const sessionId = path.basename(filePath, '.jsonl');
     const read = options.force
@@ -246,7 +244,6 @@ export function syncSessionFileDetailed(
     fileHash = read.fileHash;
     fileMtime = stat.mtime.toISOString();
 
-    // Check watched_files for existing record
     const existing = getWatchedFileState(db, filePath);
     if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
       return { result: 'skipped' };
@@ -259,24 +256,17 @@ export function syncSessionFileDetailed(
       parsed.metadata.title = readSubagentDescription(filePath);
     }
 
-    // Skip files with no messages (non-interactive sessions)
     if (parsed.metadata.message_count === 0) {
       checkpoints.delete(filePath);
       upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
       return { result: 'skipped', session_id: sessionId };
     }
 
-    // Insert parsed data
     const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash, { appendFrom });
     const live = syncClaudeLiveSession(db, parsed, { keptMessages: messagesKept });
-    // Stamp the Monitor session's invocation mode from the JSONL the watcher
-    // already parsed, so a live session gets its headless/interactive pill
-    // without waiting for the next auto-import tick. No-op if the Monitor
-    // session row does not exist yet (created by hooks/import, not the watcher).
     if (parsed.metadata.mode) setSessionMode(parsed.metadata.session_id, parsed.metadata.mode);
     safelyMaintainTraceSummaryForSession(sessionId, 'claude session sync');
 
-    // Update watched_files
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
     settleCheckpoint(filePath, bytes, fileHash, chunk);
 
@@ -352,27 +342,23 @@ export function syncCodexSessionFileDetailed(
     if (active) filePath = active.filePath;
     const members = active ? inventory.bySessionId.get(active.sessionId) ?? [active] : [];
     const nativeMembers = members.filter(candidate => /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(candidate.rolloutId));
-    // A history-mode label alone does not make a complete root depend on other
-    // files. Keep its immutable compressed-file shortcut until actual lineage
-    // evidence requires resolving ancestors or retaining a stable root identity.
+    // WHY: Complete compressed roots have immutable bytes; a history-mode label alone does not imply
+    // external dependencies.
     const paginated = active && (members.some(candidate => candidate.historyBase || candidate.historyError)
       || nativeMembers.length > 1
       || (nativeMembers.includes(active) && active.rolloutId !== active.sessionId));
-    // Resolve completely before any projection is replaced. A missing base must
-    // preserve the last complete browser history rather than store a plausible tail.
+    // WHY: Missing ancestry cannot justify replacing a complete stored transcript with a partial
+    // parse.
     const history = paginated ? resolveCodexRolloutHistory(filePath, { inventory }) : undefined;
     const stat = fs.statSync(filePath);
-    // Codex never writes to a rollout it compressed, so one parsed at this
-    // mtime is current without decompressing it again, which every resync
-    // would otherwise do for all of compressed history.
+    // WHY: Codex does not append to a compressed rollout, so a matching mtime can avoid needless
+    // decompression.
     if (!options.force && !paginated && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)) {
       const seen = getWatchedFileState(db, filePath);
       if (seen && seen.status !== 'error' && !reparseRequested(seen) && seen.file_mtime === stat.mtime.toISOString()) {
         return { result: 'skipped' };
       }
     }
-    // One read serves the change check, the checkpoint check and the parse. A
-    // compressed rollout reads as its lines, under the same session id.
     const bytes = history?.bytes ?? readTranscriptFile(filePath);
     const original = active && inventory.byRolloutId.get(active.sessionId)?.find(candidate => candidate.sessionId === active.sessionId);
     const sessionId = transcriptBaseName(history ? original?.filePath ?? history.segments.find(segment => segment.sessionId === history.sessionId)?.filePath ?? filePath : filePath);
@@ -399,9 +385,7 @@ export function syncCodexSessionFileDetailed(
 
     const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash, { appendFrom });
     const live = syncCodexLiveSession(db, parsed, { keptMessages: messagesKept });
-    // The Monitor session row is keyed by the Codex session UUID (session_meta.id),
-    // not the rollout filename the watcher uses for browsing_sessions — match the
-    // import's id resolution so mode lands on the right row. No-op if absent.
+    // WHY: Monitor uses native session UUIDs while the watcher indexes physical filenames.
     if (parsed.metadata.mode) {
       const uuid = sessionId.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
       setSessionMode(uuid?.[1] ?? sessionId, parsed.metadata.mode);
@@ -448,11 +432,9 @@ export function syncAllCodexFiles(db: Database.Database, codexHome?: string, opt
     try {
       if (entry) target = currentCodexRollout(entry, codexInventory).filePath;
     } catch {
-      // Let the detailed sync record the error, using the same failure path as
-      // single-file notifications.
+      // WHY: Detailed sync records this lookup failure for both batch scans and single-file
+      // notifications.
     }
-    // Each page points to the same active history: resolve/decompress it once,
-    // rather than once for every ancestor in a periodic sweep.
     if (syncedLeaves.has(target)) { stats.skipped++; continue; }
     syncedLeaves.add(target);
     const result = syncCodexSessionFileDetailed(db, filePath, { ...options, codexInventory }).result;
@@ -480,7 +462,7 @@ export function hashAntigravityDb(filePath: string): string {
       h.update(suffix);
       h.update(fs.readFileSync(filePath + suffix));
     } catch {
-      // sidecar absent (checkpointed / not in WAL mode) — nothing to fold in
+      // WHY: A checkpointed database can have no WAL sidecar.
     }
   }
   return h.digest('hex');

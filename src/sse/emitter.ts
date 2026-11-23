@@ -50,7 +50,7 @@ class SSEBroadcaster {
 
     this.safeWrite(client, `data: ${JSON.stringify({ type: 'connected', timestamp: new Date().toISOString() })}\n\n`);
 
-    // Heartbeat to keep intermediaries from silently timing out the connection.
+    // WHY: Idle intermediaries can drop a healthy SSE stream unless the connection exchanges bytes.
     client.heartbeat = setInterval(() => {
       if (!this.safeWrite(client, ': heartbeat\n\n')) {
         this.removeClient(client);
@@ -115,7 +115,7 @@ class SSEBroadcaster {
       try {
         client.res.end();
       } catch {
-        // Ignore errors while tearing down stale sockets.
+        // WHY: A lost client must not prevent the server from removing the remaining stale sockets.
       }
     }
   }

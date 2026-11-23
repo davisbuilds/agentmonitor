@@ -97,7 +97,7 @@ export function registerWarehouseCommands(): void {
           assertContentFree(row);
         }
         const batch = applyMinBatch(rows, options.minBatch);
-        // Aliases published before the export kept one summary per session.
+        // WHY: Older exports used one summary per session, before aliases were published separately.
         const retractSessionIds = listWarehouseSupersededSessionIds(batch.published.map(row => row.session_id));
         const lineage = buildLineage({
           runId,

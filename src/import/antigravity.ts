@@ -1,10 +1,3 @@
-// Historical importer for Antigravity CLI conversation databases.
-//
-// Each `~/.gemini/antigravity-cli/conversations/<uuid>.db` is a SQLite file whose
-// `steps`/`gen_metadata` blobs are plaintext protobuf (see
-// docs/specs/baselines/antigravity-proto-fieldmap.md). This projects one session
-// per DB into normalized events: session_start, per-step activity, and one
-// llm_response per generation carrying usage + cost.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,9 +25,6 @@ export function discoverAntigravityLogs(
   options?: { excludePatterns?: string[] },
 ): string[] {
   const root = path.join(antigravityHome(dir), 'conversations');
-  // Recurse: conversation DBs may be nested under project/date subdirectories,
-  // matching the spec's `conversations/**/*.db` scope (mirrors the Claude/Codex
-  // JSONL importers). A flat readdir would silently drop nested sessions.
   return discoverDbFilesRecursive(root, { excludePatterns: options?.excludePatterns });
 }
 
@@ -80,7 +70,7 @@ export function stepKindToEvent(kind: string | undefined): { type: EventType; to
   if (TOOL_KINDS.has(kind) || TOOL_KIND_PREFIXES.some((p) => kind.startsWith(p))) {
     return { type: 'tool_use', toolName: kind };
   }
-  return { type: 'response' }; // typed generic; kind preserved in metadata, never dropped
+  return { type: 'response' };
 }
 
 interface StepRow { idx: number; step_type: number; status: number; step_payload: Buffer; metadata: Buffer | null }
@@ -123,11 +113,9 @@ export function parseAntigravityFile(
     const stepTs = steps.map((s) => (s.metadata ? decodeStepTimestampMs(s.metadata) : undefined));
     const firstTs = stepTs.find((t) => t !== undefined);
 
-    // Model + usage come from the generation records.
     const generations = genRows.map((g) => decodeGeneratorMetadata(g.data));
     const sessionModel = generations.find((g) => g.model)?.model;
 
-    // Date-scope on the session's first activity.
     if (firstTs !== undefined) {
       if (options?.from && firstTs < options.from.getTime()) return events;
       if (options?.to && firstTs > options.to.getTime()) return events;
@@ -170,8 +158,7 @@ export function parseAntigravityFile(
       if (!gm.usage) return;
       const b = deriveBillingTokens(gm.usage);
       const model = gm.model ?? sessionModel;
-      // Stamp and price each generation at its own time, so spend lands when
-      // it happened and a rate change mid-session picks the right period.
+      // WHY: Each generation can cross a pricing boundary even within one session.
       const at = iso(gm.timestampMs ?? firstTs);
       const cost = model
         ? pricingRegistry.calculate(model, { input: b.tokensIn, output: b.tokensOut, cacheRead: b.cacheReadTokens }, at)

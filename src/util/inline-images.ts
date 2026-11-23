@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto';
 
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
-// An image data URI, media type parameters (`;charset=utf-8`) included.
 const DATA_URI = /(data:image\/[a-z0-9.+-]+(?:;[a-z0-9.+-]+=[^;,"'\s\\]*)*;)base64,([A-Za-z0-9+/]+={0,2})/gi;
 
 function describe(base64: string): string {
@@ -9,9 +8,6 @@ function describe(base64: string): string {
   return `omitted-image;sha256=${createHash('sha256').update(bytes).digest('hex')};bytes=${bytes.length}`;
 }
 
-// Fallback for serialized JSON that no longer parses (truncated, or embedded in
-// prose): an image source written `type`, `media_type: image/*`, `data`, at any
-// escaping depth (group 2 holds the backslashes before each quote).
 const SERIALIZED_IMAGE_SOURCE = new RegExp(
   String.raw`((\\*)"type\2":\s*\2"base64\2",\s*\2"media_type\2":\s*\2"image/[^"\\]*\2",\s*\2"data\2":\s*\2")`
   + String.raw`([A-Za-z0-9+/]+={0,2})`,
@@ -43,14 +39,14 @@ const UNCHANGED = Symbol('unchanged');
 function strip(value: unknown, parentType: unknown): unknown {
   if (typeof value === 'string') {
     if (!value.includes('base64')) return UNCHANGED;
-    // A tool result can carry its content blocks as serialized JSON.
     let nested: unknown = UNCHANGED;
     const trimmed = value.trimStart();
     if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
       try {
         nested = JSON.parse(value);
       } catch {
-        // Not JSON after all: handled textually below.
+        // WHY: Truncated or embedded JSON can still contain an image payload that requires textual
+        // handling.
       }
     }
     let text: string;

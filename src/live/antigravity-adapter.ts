@@ -1,10 +1,3 @@
-// Antigravity conversation `.db` → v2 live projection.
-//
-// Parallel to syncCodexLiveSession (src/live/codex-adapter.ts): projects a
-// ParsedSession into session_turns/session_items and stamps
-// browsing_sessions.integration_mode/fidelity via the projector. Runs at
-// `summary` fidelity because step payload internals are not yet decoded (see
-// src/parser/antigravity-sessions.ts).
 
 import type Database from 'better-sqlite3';
 import { config } from '../config.js';
@@ -47,9 +40,8 @@ export function syncAntigravityLiveSession(
   let reset = false;
   let startOrdinal = existingTurnCount;
 
-  // A shorter step list than we already projected, or a changed earlier step,
-  // means the DB was rewritten; clear and reproject to stay consistent (mirrors
-  // the Codex adapter).
+  // WHY: A rewritten earlier step invalidates an appended projection even when some final steps
+  // still match.
   if (parsed.messages.length < existingTurnCount
     || (options.keptMessages !== undefined && options.keptMessages < existingTurnCount)) {
     clearProjectedSessionStream(db, sessionId);

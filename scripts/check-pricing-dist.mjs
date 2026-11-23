@@ -26,7 +26,6 @@ const problems = [];
 if (!existsSync(DIST)) {
   problems.push(`${DIST} does not exist — the build did not copy the pricing tables.`);
 } else {
-  // The signature of the cp -r bug: the tables nested one level deeper.
   if (existsSync(join(DIST, 'data'))) {
     problems.push(`${DIST}/data/ exists — the pricing tables were copied into the directory instead of over it, so the runtime is reading a stale copy.`);
   }

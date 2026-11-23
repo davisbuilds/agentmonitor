@@ -1,13 +1,3 @@
-// Dependency-light protobuf wire reader for Antigravity conversation blobs.
-//
-// Scope: decode the descriptor-pinned surfaces only — the gemini_coder.Step
-// envelope and the Google UsageMetadata schema (see fieldmap.ts + the baseline
-// doc). Private exa.cortex_pb payload internals are navigated generically (by
-// presence), not interpreted here.
-//
-// The reader never throws on malformed input: a truncated/garbage tail stops
-// parsing and returns what was read so far (real conversation DBs can hold
-// partially-written rows for a live session).
 
 import {
   STEP_FIELDS,
@@ -37,7 +27,7 @@ function readVarint(buf: Buffer, pos: number): [number, number] {
   for (;;) {
     if (p >= buf.length) throw new RangeError('varint truncated');
     const byte = buf[p++];
-    // multiply instead of shift so bits above 31 don't overflow int32
+    // WHY: JavaScript shifts truncate to 32 bits; multibyte varints can exceed that width.
     result += (byte & 0x7f) * 2 ** shift;
     if ((byte & 0x80) === 0) break;
     shift += 7;
@@ -85,7 +75,7 @@ export function decodeMessage(buf: Buffer): Map<number, ProtoField[]> {
       pos += 8;
       entry = { wire };
     } else {
-      break; // groups (3/4) unsupported / reserved wire types → stop
+      break;
     }
     const list = fields.get(field);
     if (list) list.push(entry);
@@ -246,7 +236,7 @@ function decodeGenerationTimestampMs(gm: Map<number, ProtoField[]>): number | un
   if (!stamp) return undefined;
   const fields = decodeMessage(stamp);
   const secs = getVarint(fields, 1);
-  // Same plausibility window as step timestamps: a misread field is not a time.
+  // WHY: A plausible integer from an unknown field need not be a timestamp.
   if (secs === undefined || secs < 1_000_000_000 || secs > 4_000_000_000) return undefined;
   const nanos = getVarint(fields, 2) ?? 0;
   return secs * 1000 + Math.floor(nanos / 1_000_000);

@@ -10,7 +10,6 @@ SESSION_ID="$(extract_field session_id)"
 PROJECT="$(get_project)"
 PROMPT="$(extract_field prompt)"
 
-# Skip empty prompts
 [ -z "$PROMPT" ] && exit 0
 
 send_event "$(cat <<EOF

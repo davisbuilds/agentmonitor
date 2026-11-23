@@ -1,8 +1,6 @@
 export type LiveItemKind =
   | 'user_message'
   | 'assistant_message'
-  // Instructions a harness injects for the model, such as Codex's
-  // developer-role messages: input, but not the person's prompt.
   | 'instructions'
   | 'reasoning'
   | 'tool_call'
@@ -77,8 +75,8 @@ export function applyLivePrivacyPolicy(
   item: CanonicalLiveItem,
   policy: LivePrivacyPolicy,
 ): CanonicalLiveItem {
-  // Injected instructions are model input too (memory files, skill lists), so
-  // prompt capture governs them as it does the person's prompts.
+  // WHY: Injected instructions can contain private memory, so they obey the same capture policy as
+  // user prompts.
   if ((item.kind === 'user_message' || item.kind === 'instructions') && !policy.capturePrompts) {
     return {
       ...item,
@@ -142,9 +140,6 @@ export function normalizeClaudeBlock(
         payload: { text: block.text ?? '' },
       };
     case 'thinking': {
-      // The parsers store thinking under `text`; `thinking` is the raw
-      // transcript field. Claude Code often records a thinking block with its
-      // text left out, and such a block carries nothing to show.
       const text = block.text ?? block.thinking ?? '';
       if (!text.trim()) return null;
       return {
@@ -164,8 +159,8 @@ export function normalizeClaudeBlock(
         },
       };
     case 'tool_result':
-      // A result whose producer records no outcome completed, but neither
-      // succeeded nor failed as far as anyone knows.
+      // WHY: A result without an outcome records completion but supplies no evidence of success or
+      // failure.
       if (block.outcome === 'unrecorded') {
         return {
           kind: 'tool_result',

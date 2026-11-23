@@ -39,14 +39,11 @@ export function ensureTraceQualityExportStateFkFree(db: Database): void {
   db.pragma('foreign_keys = OFF');
   try {
     db.exec('BEGIN IMMEDIATE');
-    // Another process may have repaired the table while this connection waited
-    // for the write slot. Recheck under the lock before rebuilding it.
+    // WHY: Another connection may have repaired the table while this one waited for its write lock.
     if (!hasLegacyForeignKeys(readTableSql())) {
       db.exec('COMMIT');
       return;
     }
-    // Build the FK-free replacement under a temp name (so the old indexes keep
-    // their names until the original is dropped), copy rows, swap, re-index.
     db.exec(`
       CREATE TABLE trace_quality_export_state_rebuilt (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,12 +148,7 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_tool_name ON events(tool_name);
     CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status);
   `);
-  // NOTE: the bare session_id index and model coverage are handled in the
-  // index-hygiene block after the column-presence migrations below, because the
-  // covering composites reference cost_usd (added by an ALTER guard). The
-  // agent_type/event_type indexes above are intentionally kept — see that block.
 
-  // Import state tracking - avoids re-importing unchanged files
   db.exec(`
     CREATE TABLE IF NOT EXISTS import_state (
       file_path TEXT PRIMARY KEY,
@@ -303,12 +295,6 @@ function initSchemaLocked(db: Database): void {
     );
   `);
 
-  // Operational OTEL metrics (Bucket A: outcome/state-tagged counters like
-  // codex.memory.startup{state=...}, retries, fallbacks). Deliberately a
-  // separate table, not events: it carries no tokens/cost and must never reach
-  // the ~50 COUNT(*)/event_type aggregates over `events`. Token/cost metrics do
-  // NOT land here — Claude Code usage stays a synthetic llm_response, Codex
-  // token/cost is logs-authoritative. See docs/system/ARCHITECTURE.md.
   db.exec(`
     CREATE TABLE IF NOT EXISTS otel_metrics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -328,12 +314,6 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_otel_metrics_created ON otel_metrics(created_at DESC);
   `);
 
-  // Exporter-retry key (v17), mirroring events.event_id: the parser derives it
-  // per OTLP data point, and a resend with a stored key is not inserted again.
-  // Rows from before it keep a NULL key. They are not collapsed: the stored row
-  // keeps only the projected attributes, so an old duplicate cannot be told
-  // apart from two genuine points of different series. UNIQUE allows any
-  // number of NULLs, so the index creates over them.
   const otelMetricColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(otel_metrics)`).all() as Array<{ name: string }>).map(col => col.name)
   );
@@ -342,7 +322,6 @@ function initSchemaLocked(db: Database): void {
   }
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_otel_metrics_point_id ON otel_metrics(point_id)');
 
-  // Backward-compatible schema updates for existing local databases.
   const eventColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(events)`).all() as Array<{ name: string }>).map(col => col.name)
   );
@@ -368,23 +347,16 @@ function initSchemaLocked(db: Database): void {
   if (!eventColumns.has('source')) {
     db.exec("ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'api'");
   }
-  // Of cache_write_tokens, the tokens written to Anthropic's 1-hour cache, which
-  // bill at their own rate. Claude transcripts record the split per request.
+  // WHY: One-hour cache writes have a different price from the provider's other cache writes.
   if (!eventColumns.has('cache_write_1h_tokens')) {
     db.exec('ALTER TABLE events ADD COLUMN cache_write_1h_tokens INTEGER NOT NULL DEFAULT 0');
   }
-  // Benchmark study grouping (source='benchmark' rows only; null elsewhere).
-  // study_id = openbench study_sha256 (exact per-run key, the grouping key);
-  // study = the human slug label.
   if (!eventColumns.has('study_id')) {
     db.exec('ALTER TABLE events ADD COLUMN study_id TEXT');
   }
   if (!eventColumns.has('study')) {
     db.exec('ALTER TABLE events ADD COLUMN study TEXT');
   }
-  // Where a stored cost came from: 'reported' by its producer (never rewritten
-  // by recalc) or 'estimated' from the pricing tables (re-derivable). NULL while
-  // the row has no cost.
   if (!eventColumns.has('cost_source')) {
     db.exec("ALTER TABLE events ADD COLUMN cost_source TEXT CHECK (cost_source IN ('reported', 'estimated'))");
   }
@@ -478,8 +450,6 @@ function initSchemaLocked(db: Database): void {
     if (!providerQuotaColumns.has('raw_payload')) {
       db.exec('ALTER TABLE provider_quotas ADD COLUMN raw_payload TEXT');
     }
-    // When the stored windows were read: a failed refresh keeps the last good
-    // windows, marked stale, rather than clearing them.
     if (!providerQuotaColumns.has('windows_observed_at')) {
       db.exec('ALTER TABLE provider_quotas ADD COLUMN windows_observed_at TEXT');
     }
@@ -492,8 +462,7 @@ function initSchemaLocked(db: Database): void {
     WHERE metadata IS NOT NULL AND json_valid(metadata) = 0
   `);
 
-  // Remove restrictive CHECK constraint on event_type if present on existing databases.
-  // SQLite does not support ALTER CONSTRAINT, so we recreate the table.
+  // WHY: SQLite cannot alter a CHECK constraint in place, so older event tables need a rebuild.
   const tableSql = (db.prepare(
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='events'"
   ).get() as { sql: string } | undefined)?.sql ?? '';
@@ -557,11 +526,6 @@ function initSchemaLocked(db: Database): void {
     `);
   }
 
-  // Cost bookkeeping that runs on every startup (src/pricing/cost-provenance.ts)
-  // looks only at usage rows still missing a cost and cost rows still missing a
-  // provenance label. Both sets are tiny in steady state; these partial indexes
-  // keep finding them from scanning the whole table. Each WHERE clause must stay
-  // identical to its query's, or SQLite will not use the index.
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_events_cost_pending ON events(id)
       WHERE cost_usd IS NULL AND model IS NOT NULL
@@ -570,99 +534,8 @@ function initSchemaLocked(db: Database): void {
       WHERE cost_usd IS NOT NULL AND cost_source IS NULL;
   `);
 
-  // Event index hygiene (schema-storage-rebalance Phase 1).
-  // - Replace the bare session_id index with a covering composite so the monitor
-  //   session-list SUM(tokens_in/out, cost_usd) subqueries resolve index-only.
-  //   The composite's leftmost column is session_id, so plain session_id
-  //   equality lookups (and DISTINCT session_id) still use it.
-  // Created here (not with the base table) because the covering columns include
-  // cost_usd, which is added by an ALTER guard above on legacy databases.
-  //
-  // v14 drops two indexes no statement needed any more, measured with
-  // `pnpm verify probe index-audit` over every statement the test suite runs
-  // and the route reads recorded on a snapshot: idx_events_agent_type (the
-  // agent-ordered composites cover its DISTINCT agent_type enumeration with no
-  // sort) and idx_events_created_model (its time-windowed aggregate was
-  // rewritten onto the normalized usage timestamp). idx_events_study_id stays:
-  // without it a per-study read seeks the benchmark index on source alone and
-  // visits every benchmark row. Re-run the probe before adding or dropping an
-  // events index; it reports what each index's absence would cost.
-  //
-  // NOTE: idx_events_event_type is deliberately kept. It is too low-cardinality
-  // to help row *filtering*, but it covers the filter-option `SELECT DISTINCT
-  // event_type ... ORDER BY` enumeration; without it that read sorts.
-  //
-  // - idx_events_session_reconcile seeds the correlated OTEL/import
-  //   usage-reconciliation subquery (src/db/usage-reconciliation.ts). That
-  //   subquery correlates on session_id (highly selective) then filters the
-  //   OTEL row's agent_type AND source='import'. Without this index the planner
-  //   falls back to seeking an agent_type index (agent_type=?), matching every
-  //   Codex row, turning the full-history stats aggregate into an O(n^2) scan
-  //   (measured ~95s per run on ~440k events; ~0.2s with this index).
-  // - idx_events_import_usage_session_ts narrows that same reconciliation
-  //   lookup to metric-bearing imported rows of the OTEL row's session and
-  //   agent, at or after the OTEL event. It replaced a Codex-only partial index
-  //   when the rule came to cover every source (2026-10-27): correlated on the
-  //   OTEL row's agent, the old index's agent predicate could not be proven, and
-  //   the Codex Monitor sum fell back to a broader session index at about twice
-  //   the time.
-  //   Long sessions now contain tens of thousands of imported events, so the
-  //   older session/agent/source index still left SQLite scanning and parsing
-  //   every imported timestamp for each candidate OTEL row. The partial
-  //   expression index turns it into a session+timestamp range seek while
-  //   indexing only the rows the reconciliation predicate can match.
-  // - idx_events_created_at_order matches listMonitorEvents' normalized sort.
-  //   created_at contains both SQLite and ISO timestamp forms, so the ORDER BY
-  //   must retain datetime() normalization; indexing that exact expression
-  //   avoids sorting the complete event table to return the newest page.
-  // - idx_events_usage_covering covers the metric-bearing, non-benchmark rows
-  //   needed by both lifetime Monitor sums and the canonical Usage row selector.
-  //   Its normalized timestamp prefix supports window range seeks; the remaining
-  //   columns keep those reads off the metadata-heavy events table. v23 added
-  //   cache_write_1h_tokens for the cache-savings estimate; an index built
-  //   without it is dropped and rebuilt below, since IF NOT EXISTS keeps it.
-  // - idx_events_usage_matching_covering serves Usage coverage's broader
-  //   denominator, which includes events without token/cost metrics. Project and
-  //   agent stay in the index so filtered coverage does not fall back to the
-  //   metadata-heavy events table.
-  // - idx_events_benchmark_monitor makes the default lifetime counts and
-  //   dimension breakdowns cheap to compute as all rows minus the small,
-  //   segregated benchmark slice. Its session_id prefix after source also
-  //   accelerates the benchmark-session exclusion in total_sessions.
-  // - idx_events_agent_created_order is idx_events_created_at_order per agent,
-  //   so an agent-filtered event page reads the newest rows in order instead of
-  //   sorting all of that agent's rows (about 6 s for Codex on a real store).
-  // - idx_events_agent_event_covering and idx_events_agent_tool_order do the
-  //   same for an agent combined with an event type or a tool. Walking the agent
-  //   index for a rare or absent value visits every row of the agent, and
-  //   sorting every match of a common value takes as long (seconds either way);
-  //   seeking the pair in time order serves both. Both carry source so the
-  //   page's total count applies the benchmark exclusion inside the index (v11
-  //   shipped the event index without it, and the count looked up every match:
-  //   about 3 s for Codex tool_use events). idx_events_agent_tool_order
-  //   also carries model and source, so it covers the agent-filtered Monitor
-  //   counts and tool/model breakdowns (an agent_type-only index covers
-  //   nothing else, and those reads looked up every row of the agent), and its
-  //   (agent_type, tool_name) prefix gives the windowed Codex skill-event read
-  //   a seek to exec tool calls.
-  //
-  // - idx_events_session_window counts a session's events inside a usage date
-  //   window (the Usage top sessions' event counts) as a range seek. Through
-  //   the session_id index alone, ten large sessions took 3.7 s of row lookups;
-  //   18 ms with this index. Its expression must match usageTimestampExpr().
-  //
-  // - idx_events_usage_ts is an EXPRESSION index, and the expression must stay
-  //   character-identical to usageTimestampExpr()/the date predicate in
-  //   v2-queries.ts or SQLite silently ignores it and reverts to a full scan.
-  //   Every usage read filters on datetime(COALESCE(client_timestamp,
-  //   created_at)); wrapping the column in datetime() is not sloppiness but
-  //   load-bearing normalization, because the two columns store different
-  //   formats (client_timestamp '2026-02-19T02:07:56.664Z' vs created_at
-  //   '2026-02-20 04:21:39'). That means the predicate cannot be made sargable
-  //   by comparing raw strings — 'T' (0x54) and ' ' (0x20) sort differently, so
-  //   a string compare would silently mis-bucket same-day rows. Indexing the
-  //   normalized expression keeps the semantics and gets the seek:
-  //   SCAN (497k rows) -> SEARCH USING INDEX.
+  // WHY: The covering index serves session totals. Its leading session_id also serves existing
+  // equality lookups.
   const usageCovering = db.prepare(`SELECT sql FROM sqlite_master WHERE name = 'idx_events_usage_covering'`)
     .get() as { sql: string } | undefined;
   if (usageCovering && !usageCovering.sql.includes('cache_write_1h_tokens')) {
@@ -756,7 +629,6 @@ function initSchemaLocked(db: Database): void {
       ON events(datetime(COALESCE(client_timestamp, created_at)));
   `);
 
-  // --- V2 tables: session browser, messages, tool calls, FTS ---
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS browsing_sessions (
@@ -833,17 +705,13 @@ function initSchemaLocked(db: Database): void {
     db.exec('ALTER TABLE browsing_sessions ADD COLUMN cwd TEXT');
   }
   const gitRepoColumns = new Set((db.prepare('PRAGMA table_info(git_repos)').all() as Array<{ name: string }>).map(col => col.name));
-  // The GitHub repository a local one pushes to (`owner/name`), which names its pull requests.
   if (!gitRepoColumns.has('github_repo')) {
     db.exec('ALTER TABLE git_repos ADD COLUMN github_repo TEXT');
   }
   const gitCommitColumns = new Set((db.prepare('PRAGMA table_info(git_commits)').all() as Array<{ name: string }>).map(col => col.name));
-  // Whether a commit reached a main branch (any remote's default): `direct` on
-  // its first-parent line, a push; `merged` reachable another way; NULL not yet.
   if (!gitCommitColumns.has('landing')) {
     db.exec("ALTER TABLE git_commits ADD COLUMN landing TEXT CHECK (landing IN ('direct', 'merged'))");
   }
-  // A pull request's size and author, read with its commits; details_at is when.
   const pullRequestColumns = new Set((db.prepare('PRAGMA table_info(github_pull_requests)').all() as Array<{ name: string }>).map(col => col.name));
   for (const [column, type] of [
     ['additions', 'INTEGER'], ['deletions', 'INTEGER'], ['changed_files', 'INTEGER'],
@@ -973,10 +841,8 @@ function initSchemaLocked(db: Database): void {
       ON session_catalog_observation_entries(skill_name);
   `);
 
-  // Immutable desired-state evidence is stored separately from parser-owned
-  // session projections. The session association intentionally has no foreign
-  // key to browsing_sessions: transcript reparse deletes and recreates that row
-  // inside one transaction, while the explicit realization binding must survive.
+  // WHY: Transcript reparsing recreates browsing session rows. A foreign key here would couple
+  // durable evidence to that lifecycle.
   db.exec(`
     CREATE TABLE IF NOT EXISTS skill_expected_realizations (
       id TEXT PRIMARY KEY,
@@ -1040,10 +906,6 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_si_source_item_id ON session_items(source_item_id);
   `);
 
-  // Trace-quality reframe (Phase 3): the persisted trace/observation/score/prompt
-  // warehouse is gone — detail is projected on-demand and only the lean
-  // session_trace_summary is stored. The dormant export seam is kept (no FK to
-  // the dropped tables); existing DBs are reclaimed by scripts/reclaim-trace-quality.ts.
   db.exec(`
     CREATE TABLE IF NOT EXISTS trace_quality_export_state (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1066,10 +928,6 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_tq_export_external_trace ON trace_quality_export_state(provider, external_trace_id);
   `);
 
-  // Lean, content-free, export-shaped per-session trace summary (trace-quality
-  // reframe). One row per session; the full observation tree is projected
-  // on-demand rather than persisted. Columns map to medallion's
-  // `silver.agent_runs` so the deferred export is near-free. No message text.
   db.exec(`
     CREATE TABLE IF NOT EXISTS session_trace_summary (
       session_id         TEXT PRIMARY KEY,
@@ -1098,18 +956,12 @@ function initSchemaLocked(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_sts_quality ON session_trace_summary(quality_score);
   `);
 
-  // Backward-compatible add of the stable per-session trace id (reframe Phase 2):
-  // the on-demand read layer emits it as each row's id and reverses it to a
-  // session for detail. Populated by the summary maintainers; the version bump
-  // (sts:v3) re-backfills existing rows so the column fills in on upgrade.
   const sessionTraceSummaryColumns = new Set<string>(
     (db.prepare(`PRAGMA table_info(session_trace_summary)`).all() as Array<{ name: string }>).map(col => col.name)
   );
   if (!sessionTraceSummaryColumns.has('trace_id')) {
     db.exec('ALTER TABLE session_trace_summary ADD COLUMN trace_id TEXT');
   }
-  // project: carried on the summary so the lean list honors the project filter
-  // without re-projecting (filter parity with the old persisted trace list).
   if (!sessionTraceSummaryColumns.has('project')) {
     db.exec('ALTER TABLE session_trace_summary ADD COLUMN project TEXT');
   }
@@ -1118,7 +970,6 @@ function initSchemaLocked(db: Database): void {
 
   ensureMessageSearchIndex(db);
 
-  // File-watcher state tracking
   db.exec(`
     CREATE TABLE IF NOT EXISTS watched_files (
       file_path TEXT PRIMARY KEY,
@@ -1129,12 +980,6 @@ function initSchemaLocked(db: Database): void {
     );
   `);
 
-  // Point-in-time record of which skill versions were installed when. A refresh
-  // stamps each observed (name, version) pair; the [first_seen_at, last_seen_at]
-  // window lets a past skill invocation be attributed to the version installed
-  // at that time. Uniqueness for version-less rows is enforced in application
-  // code (see refreshCatalogSnapshots), since a nullable version can't
-  // participate in a NULL-distinct primary key.
   db.exec(`
     CREATE TABLE IF NOT EXISTS skill_catalog_snapshots (
       name TEXT NOT NULL,
@@ -1157,19 +1002,14 @@ function initSchemaLocked(db: Database): void {
  */
 export function initSchema(): void {
   const db = getDb();
-  // This repair must toggle foreign_keys outside a transaction. It acquires and
-  // rechecks under its own immediate transaction when a legacy table exists.
+  // WHY: SQLite requires foreign_keys to change outside a transaction; recheck the table once the
+  // write lock is held.
   ensureTraceQualityExportStateFkFree(db);
   const initialize = db.transaction(() => initSchemaLocked(db));
   initialize.immediate();
 }
 
-// Search indexes what a message says. Messages store JSON content blocks, and
-// indexing them raw made the block keys ("type", "text") match nearly every
-// message and put JSON syntax in snippets. The index reads every string value
-// in the blocks except these bookkeeping keys, so text, thinking, tool names,
-// tool inputs and tool results stay searchable. A tool's input is the tool's
-// own data, so a field there named "type" or "id" is kept.
+// WHY: Indexing raw JSON made formatting keys such as type and text match every message.
 const SEARCH_SKIPPED_KEYS = ['type', 'id', 'tool_use_id', 'media_type'];
 
 /** SQL for the searchable text of a stored `messages.content` value. */
@@ -1211,8 +1051,6 @@ export function rebuildMessageSearchIndex(db: Database): void {
 function ensureMessageSearchIndex(db: Database): void {
   const stored = (name: string) => (db.prepare('SELECT sql FROM sqlite_master WHERE name = ?')
     .get(name) as { sql: string } | undefined)?.sql;
-  // Rebuild when the index reads anything but the view, or the view extracts
-  // text by a rule other than the current one.
   const current = stored('messages_fts')?.includes("content='messages_search'") === true
     && stored('messages_search') === MESSAGE_SEARCH_VIEW;
   if (current) return;
@@ -1239,8 +1077,6 @@ function ensureMessageSearchIndex(db: Database): void {
   rebuildMessageSearchIndex(db);
 }
 
-// Schema-version counter for one-shot data corrections (distinct from the
-// column-presence guards above, which handle additive DDL idempotently).
 const DATA_SCHEMA_VERSION = 30;
 
 /**
@@ -1282,9 +1118,8 @@ export function runDataMigrations(db: Database): void {
   const observedVersion = (db.pragma('user_version', { simple: true }) as number) ?? 0;
   if (observedVersion >= DATA_SCHEMA_VERSION) return;
 
-  // Re-read the version after acquiring the write transaction. Another process
-  // may have completed the migration while this connection was waiting, and v1
-  // is deliberately non-idempotent.
+  // WHY: Another connection may advance the version while this one waits, and the first correction
+  // is non-idempotent.
   const run = db.transaction(() => {
     const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
     if (current >= DATA_SCHEMA_VERSION) return;
@@ -1294,37 +1129,13 @@ export function runDataMigrations(db: Database): void {
     if (current < 4) invalidateSessionFilesForSkillContext(db);
     if (current < 5) deleteLegacyBenchmarkRows(db);
     if (current < 6) deleteOrphanedSessions(db);
-    // v7/v8/v9 introduce no data correction. v8 adds the receipt ledger and
-    // observed-identity index; v9 adds content-free daily activity indexes.
     if (current < 10) clearMetricTokenRowEstimates(db);
-    // v11 introduces no data correction: it adds the agent-ordered event
-    // indexes, which read commands only install when the version advances.
-    // v12 likewise only replaces the agent+event-type index with one that
-    // covers the benchmark exclusion, v13 only adds the session-window index,
-    // and v14 only drops two events indexes no statement needs. v15 only adds
-    // events.cache_write_1h_tokens; `amon costs repair-claude-usage` fills it
-    // from the transcripts that record the split.
     if (current < 16) stripStoredInlineImages(db);
-    // v17 introduces no data correction: it adds otel_metrics.point_id and its
-    // unique index. Rows stored before it keep a NULL key and are not collapsed.
     if (current < 18) repairStoredLiveReasoning(db);
     if (current < 19) refreshSessionTitles(db);
     if (current < 20) relabelCodexInstructionItems(db);
-    // v21 introduces no data correction: the schema guard replaces a search
-    // index built over the raw JSON with one over the message text, which read
-    // commands only install when the version advances.
     if (current < 22) recountClaudeUserMessages(db);
-    // v23 introduces no data correction: the schema guard rebuilds the usage
-    // covering index with cache_write_1h_tokens, which read commands only
-    // install when the version advances.
     if (current < 24) classifyCodexInternalThreads(db);
-    // v25 introduces no data correction: it adds provider_quota_samples, which
-    // read commands only install when the version advances. v26 likewise only
-    // adds browsing_sessions.cwd; a forced session sync fills it for stored rows.
-    // v27 likewise only adds git_repos and git_commits, v28 git_repos.github_repo
-    // and github_pull_requests, and v29 commit landing, pull request
-    // size and author, github_pull_request_commits and github_pull_request_search;
-    // the next git pass fills them.
     if (current < 30) dateStoredQuotaWindows(db);
     db.pragma(`user_version = ${DATA_SCHEMA_VERSION}`);
   });
@@ -1479,7 +1290,6 @@ function refreshSessionTitles(db: Database): void {
     )
   `).run().changes : 0;
 
-  // <project>/<parent session>/subagents/agent-<id>.jsonl
   const setParent = db.prepare('UPDATE browsing_sessions SET parent_session_id = ? WHERE id = ?');
   let linked = 0;
   for (const row of db.prepare(`
@@ -1553,8 +1363,8 @@ function repairStoredLiveReasoning(db: Database): void {
     diffPayloadMaxBytes: config.live.diffPayloadMaxBytes,
   };
 
-  // The adapter wrote one reasoning item per thinking block, in block order, so
-  // a turn's items pair with its message's thinking blocks when the counts agree.
+  // WHY: The adapter emitted reasoning items in block order, allowing them to be paired with the
+  // original thinking blocks.
   const thinkingTexts = (sessionId: string, sourceTurnId: string | null): string[] | null => {
     const match = /^claude-message:(\d+)$/.exec(sourceTurnId ?? '');
     if (!match) return null;
@@ -1816,15 +1626,16 @@ function backfillCacheInclusiveInputTokens(db: Database): void {
   const update = db.prepare('UPDATE events SET tokens_in = ?, cost_usd = ? WHERE id = ?');
   let corrected = 0;
 
-  // Runs inside the runDataMigrations transaction; the version-counter guard is
-  // what makes this apply exactly once (the correction is not self-idempotent).
+  // WHY: This correction changes existing values and is safe only behind the transaction's one-time
+  // version guard.
   for (const row of rows) {
     const provider = pricingRegistry.resolve(row.model)?.pricing.provider;
-    // Only OpenAI/Google report cache-inclusive input; Anthropic is already net.
+    // WHY: OpenAI and Google usage reports include cache reads in input totals, while Anthropic
+    // already reports net input.
     if (provider !== 'openai' && provider !== 'google') continue;
 
     const netIn = Math.max(0, row.tokens_in - row.cache_read_tokens);
-    if (netIn === row.tokens_in) continue; // nothing to subtract
+    if (netIn === row.tokens_in) continue;
 
     const cost = pricingRegistry.calculate(row.model, {
       input: netIn,

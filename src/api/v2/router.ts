@@ -87,20 +87,18 @@ import { getLiveSettingsResponse } from '../../live/responses.js';
 export const v2Router = Router();
 v2Router.use('/live/stream', liveStreamRouter);
 
-// A bare date, or the full ISO timestamp the Monitor sends for its cost window.
 const DATE_PARAM = /^(\d{4}-\d{2}-\d{2})(T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})?)?$/;
 
 function isValidDateParam(value: unknown): boolean {
   if (typeof value !== 'string') return false;
   const match = DATE_PARAM.exec(value);
   if (!match || !Number.isFinite(Date.parse(value))) return false;
-  // Date.parse rolls impossible days over (2026-02-30 → March 2), so require the
-  // calendar date to survive a round trip.
+  // WHY: Date.parse rolls impossible dates into the following month, so check the round trip.
   return new Date(`${match[1]}T00:00:00Z`).toISOString().slice(0, 10) === match[1];
 }
 
-// SQLite reads an unparseable date as NULL, which filters out every row, so a
-// typo would render as "no usage" rather than an error. Refuse it instead.
+// WHY: SQLite treats malformed dates as NULL, which would make a bad request look like a valid empty
+// window.
 v2Router.use(['/usage', '/analytics'], (req: Request, res: Response, next) => {
   for (const key of ['date_from', 'date_to'] as const) {
     if (req.query[key] !== undefined && !isValidDateParam(req.query[key])) {
@@ -257,9 +255,6 @@ v2Router.get('/sessions', (req: Request, res: Response) => {
   }
 });
 
-// Operational OTEL metrics (Bucket A): outcome/state-tagged counters like
-// codex.memory.startup{state=...}. Grouped by name×attrs so a caller can answer
-// "is Codex memory consolidation running, and what states is it hitting?".
 v2Router.get('/metrics', (req: Request, res: Response) => {
   try {
     const summary = getOperationalMetricSummary({
@@ -610,8 +605,7 @@ v2Router.get('/live/sessions/:id/items', (req: Request, res: Response) => {
     }
     const cursor = req.query.cursor as string | undefined;
     const before = req.query.before as string | undefined;
-    // Both cursors are item ids; anything else would match no rows and read as
-    // the end of the list.
+    // WHY: A malformed cursor would otherwise look like the end of the list.
     if ((cursor !== undefined && !/^\d+$/.test(cursor)) || (before !== undefined && !/^\d+$/.test(before))) {
       res.status(400).json({ error: 'Invalid cursor' });
       return;
@@ -997,7 +991,6 @@ v2Router.get('/usage/facets', (req: Request, res: Response) => {
   }
 });
 
-// Benchmarks — the one benchmark-inclusive surface (segregated bake-off view).
 v2Router.get('/benchmarks', (_req: Request, res: Response) => {
   try {
     res.json({ data: getBenchmarkStudies() });
@@ -1034,7 +1027,6 @@ v2Router.get('/usage/summary', (req: Request, res: Response) => {
 v2Router.get('/usage/daily', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    // One scan feeds both, and coverage from rows stays index-only.
     const usageRows = getUsageRows(params);
     res.json({
       data: getUsageDaily(params, usageRows),
@@ -1049,7 +1041,6 @@ v2Router.get('/usage/daily', (req: Request, res: Response) => {
 v2Router.get('/usage/projects', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    // One scan feeds both, and coverage from rows stays index-only.
     const usageRows = getUsageRows(params);
     res.json({
       data: getUsageProjects(params, usageRows),
@@ -1064,7 +1055,6 @@ v2Router.get('/usage/projects', (req: Request, res: Response) => {
 v2Router.get('/usage/models', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    // One scan feeds both, and coverage from rows stays index-only.
     const usageRows = getUsageRows(params);
     res.json({
       data: getUsageModels(params, usageRows),
@@ -1079,7 +1069,6 @@ v2Router.get('/usage/models', (req: Request, res: Response) => {
 v2Router.get('/usage/models/daily', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    // One scan feeds both, and coverage from rows stays index-only.
     const usageRows = getUsageRows(params);
     res.json({
       data: getUsageModelsDaily(params, usageRows),
@@ -1094,7 +1083,6 @@ v2Router.get('/usage/models/daily', (req: Request, res: Response) => {
 v2Router.get('/usage/tiers', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    // One scan feeds both, and coverage from rows stays index-only.
     const usageRows = getUsageRows(params);
     res.json({
       data: getUsageTiers(params, usageRows),
@@ -1109,7 +1097,6 @@ v2Router.get('/usage/tiers', (req: Request, res: Response) => {
 v2Router.get('/usage/agents', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    // One scan feeds both, and coverage from rows stays index-only.
     const usageRows = getUsageRows(params);
     res.json({
       data: getUsageAgents(params, usageRows),
@@ -1124,7 +1111,6 @@ v2Router.get('/usage/agents', (req: Request, res: Response) => {
 v2Router.get('/usage/top-sessions', (req: Request, res: Response) => {
   try {
     const params = readAnalyticsParams(req);
-    // One scan feeds both, and coverage from rows stays index-only.
     const usageRows = getUsageRows(params);
     res.json({
       data: getUsageTopSessions(params, usageRows),
@@ -1155,8 +1141,6 @@ v2Router.get('/usage/tier-feedback', (req: Request, res: Response) => {
   }
 });
 
-// Lean view (reframe Phase 2): the trace list comes from session_trace_summary
-// and per-session detail is projected on-demand — one trace per session.
 v2Router.get('/trace-quality/traces', (req: Request, res: Response) => {
   try {
     res.json(listSessionTraces(readTraceQualityParams(req)));
@@ -1197,9 +1181,6 @@ v2Router.get('/trace-quality/traces/:id', (req: Request, res: Response) => {
   }
 });
 
-// Scores / findings / prompts / per-observation detail were removed in the
-// trace-quality reframe (Phase 3): that eval depth is deferred to the export
-// (Langfuse/medallion), see docs/project/POSITIONING.md.
 
 v2Router.get('/insights', (req: Request, res: Response) => {
   try {

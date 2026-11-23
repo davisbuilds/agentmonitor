@@ -16,7 +16,6 @@ function short(value: unknown, max = 36): string {
 
 type TokenBuckets = { in: number; out: number; read: number; write: number };
 
-// Every bucket, cache included, as the UI and the harnesses count tokens.
 const tokenTotal = (b: TokenBuckets) => b.in + b.out + b.read + b.write;
 function tokenLine(b: TokenBuckets): string {
   return `${tokenTotal(b)} (in ${b.in} / out ${b.out} / cache read ${b.read} / cache write ${b.write})`;

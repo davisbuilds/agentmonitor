@@ -261,7 +261,6 @@ export function selectSkillInvocationOccurrences(
   db: Database.Database,
   params: AnalyticsParams = {},
 ): SkillInvocationOccurrence[] {
-  // Rows below carry the session browser's agent spelling.
   if (params.agent) params = { ...params, agent: browserAgentName(params.agent) };
   const occurrences: Omit<
     SkillInvocationOccurrence,
@@ -344,9 +343,8 @@ export function selectSkillInvocationOccurrences(
       metadata: string | null;
     }>;
 
-    // OTEL is authoritative per (session, skill): JSONL contributes only the
-    // reads OTEL did not report. Suppressing by session alone dropped every
-    // JSONL-only skill in a session with any OTEL skill read.
+    // WHY: One session can use skills missing from its OTEL stream; reconcile by skill instead of
+    // suppressing all JSONL evidence.
     const otelReadsBySkill = new Map<string, number>();
     const otelReadsByCommand = new Map<string, number>();
     for (const row of eventRows) {
@@ -444,9 +442,7 @@ export function selectSkillInvocationOccurrences(
       }
     }
 
-    // Pair exact command matches first, then spend any remaining OTEL reads of
-    // the same skill on the rest. The command text alone is not identity: newer
-    // rollouts record `exec` as JS wrapping the command OTEL reports bare.
+    // WHY: Older and newer rollouts can spell the same execution command differently.
     for (const read of jsonlReads) {
       const skillKey = `${read.canonicalSessionId}|${read.skillName}`;
       if (take(otelReadsByCommand, `${skillKey}|${read.commandFingerprint}`)) {

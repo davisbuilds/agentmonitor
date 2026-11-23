@@ -157,7 +157,8 @@ export function installedDatabase(): DatabaseTarget {
   } catch {
     throw new Error('No installed amon on PATH; pass --db <path> to name a database');
   }
-  // npm links a symlink to dist/cli.js; pnpm writes a shell shim that execs it.
+  // WHY: npm installs a symlink while pnpm installs a shell shim; both can identify the same built
+  // CLI.
   let cli = fs.realpathSync(binary);
   if (!cli.endsWith(`${path.sep}dist${path.sep}cli.js`)) {
     const target = fs.readFileSync(cli, 'utf8').match(/"\$basedir\/([^"]+\/dist\/cli\.js)"/)?.[1];
@@ -179,7 +180,6 @@ function isSnapshot(file: string): boolean {
 export function resolveTarget(probe: ReturnType<typeof probeById>, options: ProbeOptions, evidence: string): DatabaseTarget | null {
   if (probe.id === 'resync' || drivesApp(probe.id)) {
     if (!options.db && probe.id === 'resync') return { kind: 'scratch', path: path.join(evidence, 'scratch.db'), resolved_by: 'fresh scratch database' };
-    // A probe that writes may only touch a copy this CLI made.
     if (!options.db || !fs.existsSync(options.db) || !isSnapshot(options.db)) {
       throw new Error(`${probe.id} writes; --db must be a snapshot created by \`verify probe snapshot\``);
     }
@@ -190,7 +190,6 @@ export function resolveTarget(probe: ReturnType<typeof probeById>, options: Prob
     return { kind: isSnapshot(options.db) ? 'snapshot' : 'explicit', path: fs.realpathSync(options.db), resolved_by: '--db' };
   }
   if (probe.id === 'health') {
-    // Health is useful without a database: it still reports the server.
     try { return installedDatabase(); } catch { return null; }
   }
   return installedDatabase();
@@ -213,7 +212,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-evidence-'));
   fs.chmodSync(directory, 0o700);
   const deadline = options.timeoutMs ?? probe.deadline_ms;
-  // Resolve caller-relative roots before crossing into the worker's repo cwd.
+  // WHY: Worker processes start in the repo; relative input paths belong to the caller.
   const absolute = (value: string) => path.resolve(value === '~' ? os.homedir()
     : value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : value);
   if (probe.id === 'index-audit' && options.corpus) options = { ...options, corpus: options.corpus.map(absolute) };
@@ -242,8 +241,8 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
   };
   const persist = () => writeJson(path.join(directory, 'result.json'), result);
   persist();
-  // The parent creates the snapshot directory so it can remove a partial copy
-  // when the worker fails or is killed mid-backup.
+  // WHY: The worker can die mid-backup. The parent needs the directory name to remove the partial
+  // copy.
   let snapshotDir: string | null = null;
   try {
     options.signal?.throwIfAborted();
@@ -257,8 +256,6 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     }
     const request = path.join(directory, 'request.json');
     writeJson(request, { probe: probe.id, target, options: result.request, evidence: directory, snapshot_dir: snapshotDir });
-    // Only what the worker needs: discovery reads HOME, and resync points the
-    // compiled app at its scratch database before any module reads config.
     const env: NodeJS.ProcessEnv = {};
     for (const name of ['PATH', 'TMPDIR', 'HOME', 'CODEX_HOME']) if (process.env[name]) env[name] = process.env[name];
     if (probe.id === 'ingestion' && process.env.AGENTMONITOR_SYNC_EXCLUDE_PATTERNS !== undefined) {
@@ -266,14 +263,14 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     }
     if ((probe.id === 'resync' || drivesApp(probe.id)) && target) env.AGENTMONITOR_DB_PATH = target.path;
     if (drivesApp(probe.id)) {
-      // The app reads these at startup; keep it off real catalogs and auto-import.
+      // WHY: The compiled app reads these paths at startup; the probe must not open live catalogs.
       const empty = path.join(directory, 'empty');
       fs.mkdirSync(empty);
       Object.assign(env, { AGENTMONITOR_AUTO_IMPORT_MINUTES: '0', AGENTMONITOR_SKILL_CATALOG_DIRS: empty });
     }
     const log = fs.openSync(path.join(directory, 'worker.log'), 'a', 0o600);
-    // Its own process group, so the deadline also kills anything the worker
-    // started, such as the test suite index-audit records.
+    // WHY: The worker can start another test suite, so a deadline must cover its entire process
+    // group.
     const child = spawn(process.execPath, ['--import', 'tsx', path.join(repoRoot, 'scripts/verify/probe-worker.ts'), request], {
       cwd: repoRoot, env, stdio: ['ignore', log, log], detached: true,
     });
@@ -301,8 +298,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
     result.errors.push(String(error));
   } finally {
     if (probe.id === 'resync') {
-      // The parent owns cleanup: the worker may have failed or been SIGKILLed.
-      // Only remove paths created inside this run's fresh evidence directory.
+      // WHY: A killed worker cannot clean up the scratch files it created.
       try {
         const transcripts = path.join(directory, 'transcripts');
         if (options.retainTranscripts) {
@@ -330,8 +326,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
       }
     } else if (probe.id === 'snapshot') result.cleanup = 'complete';
     if (probe.id === 'reclaim') {
-      // The copy holds the whole database; the parent removes it because the
-      // worker may have failed or been killed before it could.
+      // WHY: A killed worker can leave a full copy of the database behind.
       try {
         for (const suffix of ['', '-wal', '-shm', '-journal']) fs.rmSync(path.join(directory, `${RECLAIM_COPY}${suffix}`), { force: true });
         result.cleanup = 'complete';
@@ -342,7 +337,7 @@ export async function runProbe(id: string, options: ProbeOptions = {}) {
       }
     }
     if (probe.id === 'index-audit') {
-      // A suite killed at the deadline never runs its own cleanup.
+      // WHY: A timed-out suite cannot remove its own files.
       try {
         fs.rmSync(path.join(directory, SUITE_TMP), { recursive: true, force: true });
         result.cleanup = 'complete';

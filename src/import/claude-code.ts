@@ -12,7 +12,6 @@ interface ClaudeCodeUsage {
   output_tokens?: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
-  // The same cache writes by cache lifetime; recorded since mid-2026.
   cache_creation?: {
     ephemeral_5m_input_tokens?: number;
     ephemeral_1h_input_tokens?: number;
@@ -20,7 +19,7 @@ interface ClaudeCodeUsage {
 }
 
 interface ClaudeCodeMessage {
-  id?: string;            // stable per assistant turn; repeats across its content blocks
+  id?: string;
   model?: string;
   usage?: ClaudeCodeUsage;
   content?: unknown;
@@ -30,30 +29,27 @@ interface ClaudeCodeMessage {
 interface ClaudeCodeLogLine {
   type?: string;
   sessionId?: string;
-  uuid?: string;          // producer-supplied, unique per line; present on every billable line
-  agentId?: string;       // child-agent transcripts only
+  uuid?: string;
+  agentId?: string;
   isSidechain?: boolean;
   model?: string;
   costUSD?: number;
   usage?: ClaudeCodeUsage;
-  message?: ClaudeCodeMessage;  // assistant lines nest model/usage here
+  message?: ClaudeCodeMessage;
   timestamp?: string;
-  name?: string;          // tool name for tool_use lines
-  tool_name?: string;     // alternate field
+  name?: string;
+  tool_name?: string;
   content?: unknown;
   duration_ms?: number;
   durationMs?: number;
   error?: string | { message?: string };
   cwd?: string;
   gitBranch?: string;
-  entrypoint?: string;    // 'cli'/'claude-desktop' (interactive) | 'sdk-cli' (headless -p)
-  promptSource?: string;  // SDK transport alone does not distinguish Desktop from headless runs
-  // tool_result fields
+  entrypoint?: string;
+  promptSource?: string; // WHY: Desktop and headless clients can both use the SDK transport.
   is_error?: boolean;
   status?: string;
-  // tool_use input
   input?: unknown;
-  // tool_result output
   output?: unknown;
 }
 
@@ -90,33 +86,21 @@ export function parseClaudeCodeFile(
   const content = fs.readFileSync(filePath, 'utf-8');
   const lines = content.split('\n').filter(l => l.trim());
 
-  // Extract session ID from filename (session UUID) or from first line
   const fileBasename = path.basename(filePath, '.jsonl');
 
-  // A transcript is named after its session; a child-agent transcript is named
-  // `agent-<id>.jsonl` and reports its PARENT's sessionId. Its work is billed to
-  // the parent conversation, but stays attributable to its own agent.
+  // WHY: Child-agent files report their parent's session ID; the filename identifies the physical
+  // child.
   const childAgentTranscript = fileBasename.startsWith('agent-');
 
-  // Track cumulative cost for delta calculation
   let prevCostUSD = 0;
 
-  // Assistant turns are written one line per content block (thinking, tool_use,
-  // text), every line repeating the same `message.id` and the turn's input and
-  // cache counts. A main transcript repeats the final output count too, but a
-  // child agent's transcript records output as of each block, so only its last
-  // line holds the final count. The turn is billed once, on its first line,
-  // with the last line's usage; the rest would re-bill tokens the turn already
-  // spent.
-  //
-  // This is usage per API response, which is what Anthropic bills and what
-  // Claude Code's live counters (statusline, `/cost`) add up. Claude Code's
-  // `/stats` instead sums every line, so it reads about twice as high.
+  // WHY: Each content-block line repeats the whole turn's usage, so billing every line would
+  // multiply the cost.
   const parsed = lines.map(text => {
     try {
       return JSON.parse(text) as ClaudeCodeLogLine;
     } catch {
-      return undefined; // Skip malformed lines
+      return undefined;
     }
   });
   const finalUsage = new Map<string, NonNullable<ClaudeCodeLogLine['usage']>>();
@@ -135,24 +119,19 @@ export function parseClaudeCodeFile(
 
     const eventType = TYPE_MAP[line.type] ?? 'response';
 
-    // Extract tool name
     const toolName = line.name ?? line.tool_name;
 
-    // Resolve model and usage — check top-level first, then nested message object
     const msg = line.message;
     const model = line.model ?? msg?.model;
     const usage = line.usage ?? msg?.usage;
 
-    // Compute delta cost from cumulative costUSD
     let costDelta: number | undefined;
     if (typeof line.costUSD === 'number' && line.costUSD > 0) {
       costDelta = line.costUSD - prevCostUSD;
-      if (costDelta < 0) costDelta = 0; // Safety: shouldn't happen
+      if (costDelta < 0) costDelta = 0;
       prevCostUSD = line.costUSD;
     }
 
-    // Extract token counts, once per assistant turn (see billedMessageIds).
-    // Lines without a message id keep per-line accounting.
     const messageId = msg?.id;
     const alreadyBilled = messageId !== undefined && billedMessageIds.has(messageId);
     if (messageId !== undefined && usage) billedMessageIds.add(messageId);
@@ -164,8 +143,8 @@ export function parseClaudeCodeFile(
     const cacheWrite = alreadyBilled ? 0 : turnUsage?.cache_creation_input_tokens ?? 0;
     const cacheWrite1h = Math.min(cacheWrite, alreadyBilled ? 0 : turnUsage?.cache_creation?.ephemeral_1h_input_tokens ?? 0);
 
-    // Apply the date filter only now: a turn whose first line falls outside
-    // the range was billed there, and its later lines must stay at zero.
+    // WHY: Applying the date filter before turn deduplication could bill the same turn again in a
+    // later window.
     if (line.timestamp && options?.from) {
       const ts = new Date(line.timestamp);
       if (ts < options.from) continue;
@@ -178,26 +157,18 @@ export function parseClaudeCodeFile(
     const project = projectNameFromCwd(line.cwd) ?? undefined;
     const branch = line.gitBranch;
 
-    // Determine status
     let status: 'success' | 'error' | 'timeout' = 'success';
     if (line.type === 'error' || line.is_error || line.status === 'error') {
       status = 'error';
     }
 
-    // Deterministic event_id for dedup on re-import. The producer's own per-line
-    // `uuid` is unique across every transcript, including child-agent files that
-    // repeat the parent's sessionId, so prefer it. Lines without one (summaries
-    // and other non-billable types) keep the positional derivation.
     const legacyEventId = `import-cc-${crypto
       .createHash('sha256')
       .update(`claude-code:${sessionId}:${i}`)
       .digest('hex')
       .slice(0, 32)}`;
-    // The positional fallback keys on the transcript rather than the reported
-    // session: a child-agent file reports its parent's session, so deriving from
-    // that would recreate the collision for lines without a uuid. A transcript is
-    // named after its session, so its own fallback stays byte-identical to the
-    // legacy id — which the importer's bridge depends on to recognize its rows.
+    // WHY: A child file reports its parent session, so positional fallback IDs must include the
+    // physical transcript identity.
     const positionalEventId = childAgentTranscript
       ? `import-cca-${crypto
           .createHash('sha256')
@@ -213,7 +184,6 @@ export function parseClaudeCodeFile(
           .slice(0, 32)}`
       : positionalEventId;
 
-    // Build metadata with content for transcript enrichment
     const metadataObj: Record<string, unknown> = {};
     if (childAgentTranscript) {
       metadataObj.agent_id = line.agentId ?? fileBasename.slice('agent-'.length);
@@ -222,12 +192,10 @@ export function parseClaudeCodeFile(
     if (typeof line.error === 'string') metadataObj.error = line.error;
     else if (line.error?.message) metadataObj.error = line.error.message;
 
-    // Extract content preview from various formats
     if (line.content !== undefined) {
       if (typeof line.content === 'string') {
         metadataObj.content_preview = line.content.slice(0, 500);
       } else if (Array.isArray(line.content)) {
-        // Claude Code uses content blocks: [{type: "text", text: "..."}]
         const textParts: string[] = [];
         for (const block of line.content) {
           if (block && typeof block === 'object' && 'text' in block && typeof block.text === 'string') {
@@ -240,7 +208,6 @@ export function parseClaudeCodeFile(
       }
     }
 
-    // Capture tool input/output for transcript enrichment
     if (line.type === 'tool_use' && line.input) {
       if (typeof line.input === 'object' && line.input !== null) {
         const inp = line.input as Record<string, unknown>;
@@ -249,7 +216,6 @@ export function parseClaudeCodeFile(
         if (inp.pattern) metadataObj.pattern = String(inp.pattern);
         if (inp.query) metadataObj.query = String(inp.query);
 
-        // Compute lines added/removed for edit tools
         const tn = toolName ?? '';
         if (tn === 'Edit' || tn === 'MultiEdit') {
           if (typeof inp.old_string === 'string' && inp.old_string) {
@@ -300,7 +266,6 @@ export function parseClaudeCodeFile(
   return events;
 }
 
-// ─── File hash for import state tracking ────────────────────────────────
 
 export function hashFile(filePath: string): string {
   const content = fs.readFileSync(filePath);

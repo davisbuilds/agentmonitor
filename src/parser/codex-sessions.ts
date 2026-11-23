@@ -37,7 +37,6 @@ interface CodexLine {
     input?: string;
     arguments?: string;
     type?: string;
-    // event_msg / token_count telemetry
     info?: {
       last_token_usage?: CodexTokenUsage;
       total_token_usage?: CodexTokenUsage;
@@ -123,7 +122,6 @@ function toolOutputText(output: unknown): string {
     .join('');
 }
 
-// --- Parse Codex JSONL content into ParsedSession ---
 
 /** What a Codex parse carries forward; see ClaudeParseState. */
 export interface CodexParseState {
@@ -184,8 +182,7 @@ export function parseCodexSessionChunk(
   const toolCalls: ParsedToolCall[] = [];
   const receipts: ParsedToolReceipt[] = [];
   const captureToolOutput = options?.captureToolOutput ?? config.live.capture.toolArguments;
-  // A call waits here for its output: by message index when its message is in
-  // this parse, by stored ordinal when an earlier parse stored it.
+  // WHY: Continuation output can belong to a call stored by an earlier parse.
   const openCalls = new Map<string, number>(Object.entries(state?.openCalls ?? {}));
   const chunkCalls = new Map<string, number>();
   const ordinalBase = state?.messageCount ?? 0;
@@ -202,8 +199,6 @@ export function parseCodexSessionChunk(
   let initialModel: string | null = state?.initialModel ?? null;
   let initialContextWindowReported: number | undefined = state?.initialContextWindowReported;
   let latestModel: string | null = state?.latestModel ?? null;
-  // Latest context-window occupancy from token_count telemetry (in file order).
-  // Numerator is last_token_usage.input_tokens, which is cache-inclusive.
   let contextUsedTokens: number | undefined = state?.contextUsedTokens;
   let contextWindowReported: number | undefined = state?.contextWindowReported;
   let malformedRecords = state?.malformedRecords ?? 0;
@@ -224,13 +219,8 @@ export function parseCodexSessionChunk(
     sourceOrdinal++;
   }
 
-  // A spawned subagent's rollout can open with a copy of the parent's turns,
-  // which the parent session already shows. Browse the child from its own first
-  // turn, keeping only the instruction preamble written before the copy. Only
-  // inherited activity (a turn or a request) proves a copy: a compaction with
-  // neither after it, before the child's first surviving turn, is the child's
-  // own earlier work.
-  // A continued parse starts after both, so neither is looked for again.
+  // WHY: A spawned subagent may begin with its parent's history, which is already visible in the
+  // parent transcript.
   if (!state) {
     const boundary = findSubagentBoundary(lines.map(entry => entry.line));
     if (boundary.kind === 'unresolved') resumable = false;
@@ -246,7 +236,6 @@ export function parseCodexSessionChunk(
     if (!lines.some(({ line }) => line.type === 'session_meta' && line.payload)) resumable = false;
   }
 
-  // Extract session metadata
   for (const { line } of state ? [] : lines) {
     if (line.type === 'session_meta' && line.payload) {
       cwd = (line.payload.cwd as string) ?? null;
@@ -265,7 +254,6 @@ export function parseCodexSessionChunk(
         && ['compact', 'memory_consolidation', 'memory_extraction'].includes(subagent)) {
         relationshipType = 'internal';
       } else if (asRecord(subagent)?.['other'] === 'guardian' || line.payload['thread_source'] === 'guardian_review') {
-        // An approval review: Codex's own thread, though it names the thread it reviews as parent.
         relationshipType = 'internal';
       } else if (typeof source === 'string' && ['cli', 'vscode', 'exec'].includes(source)) {
         relationshipType = 'conversation';
@@ -331,8 +319,6 @@ export function parseCodexSessionChunk(
 
     const text = responseItemText(payload);
     for (const presentation of parseCodexCatalogPresentations(text)) {
-      // Falling back to an initial value no line has given yet: a later line
-      // that gives one would change this observation.
       if ((latestModel ?? initialModel) === null
         || (contextWindowReported ?? initialContextWindowReported) === undefined) {
         resumable = false;
@@ -362,19 +348,15 @@ export function parseCodexSessionChunk(
     }
   };
 
-  // Process response_item lines as messages
   for (const { line, ordinal } of lines) {
     const timestamp = line.timestamp ?? null;
     if (timestamp) {
-      // Forks may retain older messages. The native creation timestamp wins;
-      // inherited context is still browsable but must not backdate the thread.
+      // WHY: A fork's inherited messages can predate its own creation; they cannot establish the
+      // child's start time.
       if (!startedAt) startedAt = timestamp;
       if (!endedAt || timestamp > endedAt) endedAt = timestamp;
     }
 
-    // Context-window occupancy: track the latest token_count telemetry. The
-    // last request's input_tokens (cache-inclusive) is how full the window is;
-    // total_token_usage is cumulative billing and must NOT be used here.
     if (line.type === 'event_msg' && line.payload?.type === 'token_count') {
       const info = line.payload.info;
       const lastUsage = info?.last_token_usage;
@@ -460,8 +442,6 @@ export function parseCodexSessionChunk(
     const toolInput = parseToolInput(line.payload);
     const callId = typeof line.payload['call_id'] === 'string' && line.payload['call_id'] ? line.payload['call_id'] : undefined;
 
-    // A tool output: a receipt on its call's message, so no ordinal moves. An
-    // output whose call this session never stored has nothing to attach to.
     if ((line.payload.type === 'function_call_output' || line.payload.type === 'custom_tool_call_output') && callId) {
       const text = toolOutputText(line.payload['output']);
       const receipt: ContentBlock = {
@@ -470,7 +450,7 @@ export function parseCodexSessionChunk(
         content: captureToolOutput ? text.slice(0, TOOL_OUTPUT_PREVIEW_CHARS) : '',
         ...(timestamp ? { timestamp } : {}),
         output_bytes: Buffer.byteLength(text, 'utf8'),
-        // Codex links no exit code or success flag to a call.
+        // WHY: Codex does not attach a trustworthy exit code to every tool result.
         outcome: 'unrecorded',
       };
       const index = chunkCalls.get(callId);
@@ -487,7 +467,6 @@ export function parseCodexSessionChunk(
       continue;
     }
 
-    // Tool call response_item (no role, has name + input)
     if (toolName && !role) {
       const blocks: ContentBlock[] = [{
         type: 'tool_use',
@@ -524,7 +503,6 @@ export function parseCodexSessionChunk(
       continue;
     }
 
-    // Regular message with role + content
     if (!role || !Array.isArray(contentBlocks)) continue;
 
     const blocks: ContentBlock[] = [];
@@ -556,7 +534,6 @@ export function parseCodexSessionChunk(
     });
   }
 
-  // A recorded cwd decides, even when it names no project (scratch work).
   const project = cwd ? projectNameFromCwd(cwd) : (filePath ? projectFromCodexPath(filePath) : null);
   const sawCatalogPresentation = (state?.sawCatalogPresentation ?? false)
     || contextObservations.some(observation => observation.kind === 'catalog_presentation');

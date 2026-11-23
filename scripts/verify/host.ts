@@ -78,7 +78,6 @@ function closeApplication() {
       }
     } catch (error) {
       if (session) writeJson(path.join(directory, 'session.json'), { ...session, status: 'failed', error: String(error) });
-      // Do not leave a partially closed detached host alive after an error.
       console.error(error);
       process.exit(1);
     } finally { clearTimeout(watchdog); }
@@ -100,8 +99,7 @@ try {
   initSchema();
   const db = getDb();
   assert.equal(fs.realpathSync(db.name), fs.realpathSync(dbPath), 'Fixture must never use the install DB');
-  // Synthetic usage events intentionally bypass ingestion: this scenario checks
-  // aggregation and rendering. Its expected values live in contracts.ts.
+  // WHY: Synthetic rows isolate the aggregation and rendering behavior from the ingestion path.
   const insert = db.prepare(`INSERT INTO events
     (session_id, agent_type, event_type, status, tokens_in, tokens_out, cost_usd, project, model, created_at, source)
     VALUES (?, 'codex', 'llm_response', 'success', 100, 20, 0.01, ?, 'gpt-5.5', '2026-07-10T12:00:00Z', 'otel')`);

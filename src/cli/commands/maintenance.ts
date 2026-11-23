@@ -126,8 +126,7 @@ function readProjectNames(file: string): Array<[string, string | null]> {
     }
     return [from, to];
   });
-  // Names are renamed one after another, so a target that is also a source
-  // would be renamed again and the order of keys would decide the result.
+  // WHY: Sequential remaps would rename a destination twice when it is also a source.
   const sources = new Set(names.map(([from]) => from));
   const chained = names.find(([, to]) => to !== null && sources.has(to));
   if (chained) {
@@ -346,8 +345,6 @@ export function registerMaintenanceCommands(): void {
     name: 'costs repair-claude-usage',
     group: 'Data Commands',
     summary: 'Correct imported Claude events from their transcripts (per-turn usage, 1-hour cache writes)',
-    // Reports by default: this rewrites stored history, so writing is opt-in
-    // through --apply rather than opt-out through --dry-run.
     usage: 'costs repair-claude-usage [--apply] [--claude-dir <path>]',
     examples: [
       'costs repair-claude-usage --json',
@@ -467,8 +464,6 @@ export function registerMaintenanceCommands(): void {
       initSchema();
       try {
         if (parsed.flags.has('--transcripts')) {
-          // Claude Code's own per-model totals, from the `cost-state` line it
-          // writes into each transcript when a process exits or resumes.
           const { config } = await import('../../config.js');
           const { checkClaudeTranscriptCosts } = await import('../../import/claude-cost-state.js');
           const checks = checkClaudeTranscriptCosts({ claudeDir: config.claudeDir, limit });
@@ -534,8 +529,6 @@ export function registerMaintenanceCommands(): void {
     name: 'costs repair-codex-usage',
     group: 'Data Commands',
     summary: 'Rebuild imported Codex usage from rollouts, dropping copied subagent history and stale rows',
-    // Reports by default: this rewrites stored history, so writing is opt-in
-    // through --apply rather than opt-out through --dry-run.
     usage: 'costs repair-codex-usage [--apply] [--codex-dir <path>]',
     examples: [
       'costs repair-codex-usage --json',
@@ -562,7 +555,8 @@ export function registerMaintenanceCommands(): void {
           report.apply ? 'Codex import usage repair' : 'Codex import usage repair preview',
           report,
         );
-        // The running server caches Monitor totals in its own process.
+        // WHY: The running server's in-process Monitor cache cannot observe writes from this
+        // separate CLI.
         if (report.apply && report.sessions_changed > 0) {
           console.error('Restart the AgentMonitor server so the Monitor shows the repaired totals.');
         }
@@ -586,8 +580,6 @@ export function registerMaintenanceCommands(): void {
     name: 'sessions repair-projects',
     group: 'Data Commands',
     summary: 'Rename stored projects to their repository, re-derived from each session transcript',
-    // Reports by default: this rewrites stored history, so writing is opt-in
-    // through --apply rather than opt-out through --dry-run.
     usage: 'sessions repair-projects [--apply] [--claude-dir <path>] [--codex-dir <path>] [--names <file>]',
     examples: [
       'sessions repair-projects --json',
@@ -598,7 +590,6 @@ export function registerMaintenanceCommands(): void {
       const parsed = parseOptionSet(args, new Set(['--claude-dir', '--codex-dir', '--names']), new Set(['--apply']));
       rejectExtraPositionals(parsed.positionals, 'amon sessions repair-projects [--apply]');
       const namesPath = parsed.values.get('--names');
-      // Read before opening the database, so a bad list touches nothing.
       if (namesPath !== undefined && (parsed.values.has('--claude-dir') || parsed.values.has('--codex-dir'))) {
         throw invalidUsage('--names renames by its list and reads no transcripts; drop --claude-dir and --codex-dir');
       }
@@ -620,7 +611,8 @@ export function registerMaintenanceCommands(): void {
             excludePatterns: runtimeConfig.sync.excludePatterns,
           });
         printSummary(ctx, report.apply ? 'Project name repair' : 'Project name repair preview', report);
-        // The running server caches Monitor totals in its own process.
+        // WHY: The running server's cached totals need invalidating after this process rewrites
+        // history.
         if (report.apply && report.sessions_changed > 0) {
           console.error('Restart the AgentMonitor server so the Monitor shows the repaired names.');
         }

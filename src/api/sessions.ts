@@ -3,7 +3,6 @@ import { getSessions, getSessionWithEvents } from '../db/queries.js';
 
 export const sessionsRouter = Router();
 
-// GET /api/sessions - List sessions
 sessionsRouter.get('/', (req: Request, res: Response) => {
   const sessions = getSessions({
     status: req.query.status as string | undefined,
@@ -16,7 +15,6 @@ sessionsRouter.get('/', (req: Request, res: Response) => {
   res.json({ sessions, total: sessions.length });
 });
 
-// GET /api/sessions/:id - Session detail with events
 sessionsRouter.get('/:id', (req: Request, res: Response) => {
   const limit = req.query.event_limit
     ? parseInt(req.query.event_limit as string, 10)

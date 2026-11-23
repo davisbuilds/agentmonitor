@@ -141,7 +141,7 @@ function parseGitConfig(env: EnvMap, cwd: string): GitConfig {
     .map(item => item.trim()).filter(Boolean).map(item => path.resolve(cwd, expandTilde(item)));
   return {
     pollIntervalMs: parseEnvInt(env.AGENTMONITOR_GIT_POLL_INTERVAL_MS, 600_000, 0),
-    // Off unless asked for: it is the only git activity that leaves the machine.
+    // WHY: Polling the remote is the only Git activity here that leaves the machine.
     githubLookups: parseEnvBool(env.AGENTMONITOR_GITHUB_LOOKUPS, false),
     ...(authorEmails.length > 0 ? { authorEmails } : {}),
     excludedDirs: [...new Set(excludedDirs)],
@@ -258,8 +258,6 @@ export function createConfig(env: EnvMap = process.env, cwd: string = process.cw
     autoImportIntervalMinutes: parseEnvInt(env.AGENTMONITOR_AUTO_IMPORT_MINUTES, 10, 0),
     projectsDir: resolveProjectsDir(env, cwd),
     claudeDir: resolveClaudeDir(env, cwd),
-    // Where hooks write the events they could not deliver; the server drains it.
-    // The hooks default to the same path (hooks/claude-code/send_event.sh).
     hookSpoolDir: env.AGENTMONITOR_HOOK_SPOOL_DIR
       ? path.resolve(cwd, expandTilde(env.AGENTMONITOR_HOOK_SPOOL_DIR))
       : path.join(os.homedir(), '.local', 'state', 'agentmonitor', 'hook-spool'),

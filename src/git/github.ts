@@ -75,7 +75,7 @@ function detailsOf(node: DetailNode): PullRequestDetails | undefined {
     deletions: node.deletions ?? 0,
     changed_files: node.changedFiles ?? 0,
     commit_count: node.commits.totalCount,
-    // A deleted account reads as null, not as a bot.
+    // WHY: GitHub returns null for a deleted account; that supplies no evidence of a bot.
     author_is_bot: node.author?.__typename === 'Bot',
     commits: (node.commits.nodes ?? []).map(entry => entry!.commit!.oid!),
   };
@@ -90,8 +90,6 @@ export const pullRequestKey = (key: PullRequestKey) => `${key.repo}#${key.number
 export function lookupQuery(keys: PullRequestKey[]): { query: string; aliases: Map<string, string> } {
   const byRepo = new Map<string, Set<number>>();
   for (const key of keys) {
-    // Names come from URLs that admit only these characters; anything else is
-    // never written into the query.
     if (!/^[\w.-]+\/[\w.-]+$/.test(key.repo) || !Number.isSafeInteger(key.number)) continue;
     const numbers = byRepo.get(key.repo) ?? new Set();
     byRepo.set(key.repo, numbers.add(key.number));
@@ -120,8 +118,8 @@ export function parseLookupResponse(body: string, aliases: Map<string, string>):
   } catch {
     return answers;
   }
-  // Null is an answer only where GitHub said it found nothing; a null left by
-  // any other error (permissions, limits) is no answer.
+  // WHY: A missing node proves absence only if GitHub said it was missing. Permission or rate-limit
+  // errors supply no answer.
   const notFound = new Set((parsed.errors ?? []).filter(error => error.type === 'NOT_FOUND').map(error => (error.path ?? []).join('.')));
   for (const [alias, key] of aliases) {
     const [repoAlias, pullAlias] = alias.split('.');
@@ -156,8 +154,8 @@ const ghPullRequestLookup: PullRequestLookup = async keys => {
     try {
       body = (await run('gh', ['api', 'graphql', '-f', `query=${query}`], { timeout: GH_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 })).stdout;
     } catch (err) {
-      // `gh` exits 1 when any part of the query found nothing, still printing
-      // the data it resolved; without that output the batch went unanswered.
+      // WHY: gh can exit nonzero after a partially successful GraphQL batch while still returning
+      // usable data.
       body = (err as { stdout?: string }).stdout ?? '';
     }
     for (const [key, state] of parseLookupResponse(body, aliases)) answers.set(key, state);
@@ -182,7 +180,6 @@ export async function syncPullRequestStates(
   const due = new Map<string, PullRequestKey>();
   for (const key of keys) {
     const row = known.get(key.repo, key.number) as { state: string | null; checked_at: string; details_at: string | null } | undefined;
-    // Merged is final once its details are read; one stored before they were is asked once more.
     if (row?.state === 'MERGED' && row.details_at !== null) continue;
     if (row?.state === 'MERGED' && row.details_at === null) {
       due.set(pullRequestKey(key), key);
@@ -321,7 +318,6 @@ const SEARCH_SETTLE_MS = 86_400_000;
 
 /** The query for one page of a window's merged pull requests by the signed-in user. */
 export function searchQuery(window: { from: string; to: string }, after: string | null): string {
-  // Days are written into the search string, so only a day may be.
   if (!DAY_PATTERN.test(window.from) || !DAY_PATTERN.test(window.to)) throw new Error(`Not a search window: ${JSON.stringify(window)}`);
   const search = `is:pr is:merged author:@me merged:${window.from}..${window.to}`;
   const page = after === null ? '' : `after: ${JSON.stringify(after)}, `;
@@ -350,7 +346,6 @@ export function parseSearchResponse(body: string): PullRequestSearchPage | null 
   const search = parsed.data?.search;
   if (!search || typeof search.issueCount !== 'number') return null;
   const pulls: AuthoredPullRequest[] = [];
-  // GitHub answers what it can beside its errors; a page with any is kept but not whole.
   let complete = !parsed.errors?.length;
   for (const node of search.nodes ?? []) {
     const repo = node?.repository?.nameWithOwner?.toLowerCase();
@@ -401,7 +396,7 @@ async function readWindow(
       complete: halves[0].complete && halves[1].complete,
     };
   }
-  // A single day over the cap is read as far as the search will go.
+  // WHY: A day over GitHub's result cap cannot be split any further by date.
   const pulls = [...first.pulls];
   let complete = first.complete;
   for (let next = first.next; next !== null;) {
@@ -411,7 +406,6 @@ async function readWindow(
     complete &&= page.complete;
     next = page.next;
   }
-  // Fewer than the search counts (a day over the cap, or results it skipped) is not whole.
   const read = new Set(pulls.map(pullRequestKey)).size;
   return { total: first.total, pulls, complete: complete && read >= first.total };
 }
@@ -437,8 +431,7 @@ export async function syncAuthoredPullRequests(
   const start = new Date(now.getTime() - SESSION_HISTORY_MS);
   const thisMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const firstMonth = Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1);
-  // The search reads `author:@me`, so what was read is kept per login: another
-  // account signed in to gh reads its own year. Without one, nothing is read.
+  // WHY: The search uses author:@me, so cached coverage belongs to the current GitHub login.
   const login = await (options.viewer ?? ghViewer)();
   if (login === null) {
     const months = (now.getUTCFullYear() - start.getUTCFullYear()) * 12 + now.getUTCMonth() - start.getUTCMonth() + 1;

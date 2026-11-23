@@ -1,16 +1,5 @@
-// Antigravity CLI protobuf field map — descriptor-pinned.
-//
-// Source of truth: FileDescriptorProtos extracted from the Antigravity
-// `language_server` binary via `protodump` (see
-// docs/specs/baselines/antigravity-proto-fieldmap.md for provenance + regen).
-// The Step envelope + step-kind taxonomy come from
-// third_party/gemini_coder/proto/trajectory.proto; token fields from
-// google/cloud/aiplatform/master/usage_metadata.proto (Google's stable public schema).
-//
-// NOT pinned here (private exa.cortex_pb payload internals — cortex.proto is
-// present in the binary but not recoverable by protodump's scanner): the
-// per-kind payload message fields and CortexStepMetadata's model/usage nesting.
-// Those are fixture-verified in the decoder (Task 2), not guessed.
+// WHY: The public descriptors define the envelope; private nested Cortex fields need fixture
+// evidence. Provenance is recorded in docs/specs/baselines/antigravity-proto-fieldmap.md.
 
 /** google.cloud.aiplatform.master.UsageMetadata — token counts (all int32). */
 export const USAGE_METADATA_FIELDS = {
@@ -22,29 +11,20 @@ export const USAGE_METADATA_FIELDS = {
   thoughtsTokenCount: 14,
 } as const;
 
-// Cache-inclusive invariant: Google's promptTokenCount INCLUDES cached tokens,
-// so the store must subtract them (mirrors the Codex/OpenAI handling):
-//   tokens_in    = promptTokenCount - cachedContentTokenCount
-//   cache_read   = cachedContentTokenCount
-//   tokens_out   = candidatesTokenCount (thoughtsTokenCount tracked separately)
+// WHY: Google's prompt token count already includes its cached subset.
 
-// --- Real token accounting: CortexGeneratorMetadata (private exa/jetski proto,
-// not descriptor-recoverable). Field numbers below are EMPIRICALLY PINNED against
-// all 21 local conversation usage records (2026-07-01), not guessed:
-//   - field 1 is constant per model (1016 gemini-pro-default / 1020 flash) => system prompt
-//   - field 3 == field 9 + field 10 in every record => output = thinking + answer
-//   - field 2 shrinks as field 5 grows across a session => 2 is non-cached input, 5 is cache
-// See docs/specs/baselines/antigravity-proto-fieldmap.md "Real token accounting".
+// WHY: The private descriptor is unavailable. These field numbers were checked against 21 usage
+// records; field 3 equaled fields 9 and 10 combined in every one.
 
 /** gen_metadata blob wrapper → CortexGeneratorMetadata at field 1. */
 export const GEN_METADATA_WRAPPER_FIELD = 1;
 
 /** CortexGeneratorMetadata (the per-generation record). */
 export const GENERATOR_METADATA_FIELDS = {
-  usage: 4, // the CortexUsage sub-message
-  model: 19, // string, e.g. "gemini-pro-default"
-  modelDisplay: 21, // string, e.g. "Gemini 3.1 Pro (High)"
-  timing: 9, // sub-message holding the generation's own Timestamp (below)
+  usage: 4,
+  model: 19,
+  modelDisplay: 21,
+  timing: 9,
 } as const;
 
 /**
@@ -57,22 +37,22 @@ export const GENERATOR_TIMING_TIMESTAMP_FIELD = 4;
 
 /** CortexUsage sub-message (empirically pinned). All int varints. */
 export const CORTEX_USAGE_FIELDS = {
-  systemPromptTokens: 1, // constant per model
-  inputTokens: 2, // non-cached prompt
-  outputTokens: 3, // total output (= thinking + answer)
-  cachedTokens: 5, // cached prompt prefix (intermittent)
-  thinkingTokens: 9, // reasoning tokens
-  answerTokens: 10, // outputTokens - thinkingTokens
+  systemPromptTokens: 1,
+  inputTokens: 2,
+  outputTokens: 3,
+  cachedTokens: 5,
+  thinkingTokens: 9,
+  answerTokens: 10,
 } as const;
 
 /** gemini_coder.Step envelope (trajectory.proto). */
 export const STEP_FIELDS = {
-  type: 1,          // exa.cortex_pb.CortexStepType (enum; its own numbering, NOT the oneof field #)
-  status: 4,        // exa.cortex_pb.CortexStepStatus
-  metadata: 5,      // exa.cortex_pb.CortexStepMetadata (holds model + usage; internals fixture-verified)
-  error: 31,        // exa.cortex_pb.CortexErrorDetails
-  subtrajectory: 6, // gemini_coder.Trajectory
-  taskDetails: 148, // gemini_coder.TaskDetails
+  type: 1, // WHY: The step enum and the protobuf oneof use independent numbering.
+  status: 4,
+  metadata: 5,
+  error: 31,
+  subtrajectory: 6,
+  taskDetails: 148,
 } as const;
 
 /**
@@ -205,4 +185,3 @@ export const STEP_PAYLOAD_KINDS: Record<number, string> = {
   153: 'cloudsql_execute_sql',
   154: 'ask_question',
 };
-

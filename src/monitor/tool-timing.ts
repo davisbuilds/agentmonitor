@@ -79,7 +79,7 @@ function* readJsonl(bytes: Buffer, coverage: ToolTimingCoverage): Generator<Nati
     start = end + 1;
     if (!line) continue;
     let record: NativeRecord | undefined;
-    try { record = asRecord(JSON.parse(line)); } catch { /* counted below */ }
+    try { record = asRecord(JSON.parse(line)); } catch { /* WHY: Malformed records count toward coverage below even when JSON parsing fails. */ }
     if (record) yield record;
     else coverage.malformedRecords++;
   }
@@ -106,8 +106,6 @@ function codexReportedTimer(output: unknown): ReportedTimer | null {
     const duration = milliseconds(shellCommand);
     return duration === null ? null : { source: 'codex_shell_wall_time', shell: 'shell_command', milliseconds: duration };
   }
-  // Older unified exec frames include a single shell-quoted command line.
-  // A multiline or incomplete echo cannot identify where the timing starts.
   const direct = header.replace(/^Command: [\w./-]+ -[a-z]+ (?:'[^'\r\n]*'|"(?:[^"\\\r\n]|\\[^\r\n])*")\r?\n(?=Chunk ID: )/, '');
   const unified = /^(?:Chunk ID: [a-f0-9]+\r?\n)?Wall time: (\d+(?:\.\d+)?) seconds\r?\n(?:Process exited with code -?\d+\r?\n|Process running with session ID \d+\r?\n)(?:Original token count: \d+\r?\n)?(?:Output:|Final output:)(?:\r?\n|$)/.exec(direct);
   if (!unified) return null;
@@ -175,8 +173,8 @@ function* claudeToolEvents(records: Iterable<NativeRecord>, isSubagent: boolean,
       } else if (record.type === 'user' && block?.type === 'tool_result') {
         const id = token(block.tool_use_id);
         if (!id) { coverage.invalidIntervals++; continue; }
-        // WebFetch records its own elapsed timer on the host's one-result
-        // envelope. Only that single result can be bound to the assistant UUID.
+        // WHY: WebFetch reports elapsed time for the host result envelope and cannot time multiple
+        // calls independently.
         const owner = token(record.sourceToolAssistantUUID);
         const duration = asRecord(record.toolUseResult)?.durationMs;
         const timer = message.content.length === 1 && owner && typeof duration === 'number' && Number.isSafeInteger(duration) && duration >= 0
@@ -227,8 +225,6 @@ function completeCodexInventory(
   while (id && !seen.has(id) && seen.size < 128) {
     seen.add(id);
     if (!inventory.byRolloutId.has(id)) {
-      // The parent may be archived or compressed since the session was indexed.
-      // Read only headers whose physical filename matches a required bookmark.
       siblings ??= discoverCodexRolloutSiblings(active.filePath);
       const matching = siblings.filter(file => codexPhysicalRolloutId(file) === id);
       matching.forEach(file => files.add(file));
@@ -275,8 +271,7 @@ function* readCodexEvents(
   input: ToolTimingInput, paths: string[], readFile: (filePath: string) => Buffer, coverage: ToolTimingCoverage,
 ): Generator<TimingEvent> {
   let inventory = input.codexInventory ?? createCodexRolloutInventory(paths, readFile);
-  // An indexed compressed copy can disappear after the plain file is selected
-  // by inventory deduplication. Its surviving counterpart covers it.
+  // WHY: A compressed copy can vanish during a concurrent materialization.
   coverage.unresolvedFiles += paths.filter(file => inventory.errors.has(file)
     && !inventory.entries.some(entry => entry.filePath === file)).length;
   const sameSession = inventory.bySessionId.get(input.sessionId) ?? [];

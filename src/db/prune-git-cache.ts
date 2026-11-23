@@ -18,7 +18,8 @@ export interface GitCachePruneResult {
 }
 
 function gitCacheInventory(db: Database.Database, dbPath: string, excludedDirs: readonly string[]) {
-  // Include roots that have only a tracker or only commits in an older store.
+  // WHY: Older stores may have a tracker without cached commits, or cached commits without a
+  // tracker.
   const roots = db.prepare(`
     SELECT root, MAX(tracked) AS tracked FROM (
       SELECT root, 1 AS tracked FROM git_repos

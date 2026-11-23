@@ -3,7 +3,6 @@ import { getStats, getToolAnalytics, getCostOverTime, getCostByProject, getCostB
 
 export const statsRouter = Router();
 
-// GET /api/stats - Aggregated statistics
 statsRouter.get('/', (req: Request, res: Response) => {
   const stats = getStats({
     agentType: req.query.agent_type as string | undefined,
@@ -11,11 +10,10 @@ statsRouter.get('/', (req: Request, res: Response) => {
   });
   const quota_monitor = getProviderQuotas();
 
-  // Keep usage_monitor as a compatibility alias while the Monitor surface migrates.
+  // WHY: Older Monitor clients still read usage_monitor from this response.
   res.json({ ...stats, quota_monitor, usage_monitor: quota_monitor });
 });
 
-// GET /api/stats/tools - Tool analytics
 statsRouter.get('/tools', (req: Request, res: Response) => {
   const tools = getToolAnalytics({
     agentType: req.query.agent_type as string | undefined,
@@ -24,7 +22,6 @@ statsRouter.get('/tools', (req: Request, res: Response) => {
   res.json({ tools });
 });
 
-// GET /api/stats/cost - Cost breakdowns
 statsRouter.get('/cost', (req: Request, res: Response) => {
   const costFilters = {
     agentType: req.query.agent_type as string | undefined,
@@ -38,7 +35,6 @@ statsRouter.get('/cost', (req: Request, res: Response) => {
   res.json({ timeline, by_project: byProject, by_model: byModel });
 });
 
-// GET /api/stats/usage-monitor - Compatibility alias for provider quota snapshots
 statsRouter.get('/usage-monitor', (_req: Request, res: Response) => {
   res.json(getProviderQuotas());
 });

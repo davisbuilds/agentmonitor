@@ -343,6 +343,12 @@ Follow-ups deferred from skill trigger health's first phase.
 
 ### Pricing
 
+#### Surface a skipped provider price table
+
+`PricingRegistry.load` catches missing and malformed provider files so the
+remaining providers can still be priced. Surface which provider failed to load
+without logging table contents, and verify that the other providers still load.
+
 #### Some stored rates disagree with the vendors' live pricing pages
 - **What**: no model with recent usage is unpriced. Claude Haiku 5.5
   (prompt-length tiered at 100K) and `gpt-5.6-cyber` were priced 2026-10-09 from

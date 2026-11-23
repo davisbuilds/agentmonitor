@@ -7,11 +7,9 @@ import { spawnSync } from 'node:child_process';
 import { startSession, stopSession, control, readSession, repoRoot } from './session.js';
 import { runScenario } from './run.js';
 
-// Explicit opt-in: these checks require the compiled app and patched Chrome.
-// Run serially; the mutation test temporarily changes one local dist file.
+// WHY: This suite mutates a compiled file to check staleness, so it must run serially.
 
-// Evidence and session directories outlive a run by design; the tests remove
-// exactly the ones their runs report, never a prefix sweep of the temp dir.
+// WHY: Evidence is kept after a normal run. Delete only directories returned to this test.
 const created = new Set<string>();
 function keep<T extends { directory?: string; session?: string | null }>(result: T): T {
   for (const dir of [result.directory, result.session]) if (dir) created.add(dir);
@@ -153,7 +151,7 @@ test('verification pilot lifecycle, real workflows, and negative controls', { ti
     } finally { fs.writeFileSync(file, builtApp); }
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'verification-browser-'));
     try {
-      // Separate process: browser selection is captured at module import.
+      // WHY: Browser selection is captured when the module is imported.
       const result = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/verify/cli.ts', 'run', 'usage', '--json'], {
         cwd: repoRoot, encoding: 'utf8', timeout: 30_000,
         env: { ...process.env, PLAYWRIGHT_CHROME_EXECUTABLE_PATH: path.join(empty, 'missing-chrome') },

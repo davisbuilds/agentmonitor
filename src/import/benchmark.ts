@@ -62,8 +62,8 @@ interface BenchmarkRow {
   tokens_reasoning?: unknown;
   token_basis?: unknown;
   usage_evidence_grade?: unknown;
-  // Ranking eligibility computed upstream by openbench (obench/usage_evidence.py).
-  // amon consumes these verbatim — it does not re-derive the policy.
+  // WHY: Ranking eligibility is an upstream decision and cannot be inferred from locally visible
+  // scores.
   usage_ranking_eligible?: unknown;
   usage_ranking_exclusion_reason?: unknown;
   cost_usd?: unknown;
@@ -71,8 +71,6 @@ interface BenchmarkRow {
   harness_version?: unknown;
   score?: unknown;
   workspace_changed?: unknown;
-  // Identity fields emitted by openbench (feat/results-row-study-identity).
-  // Preferred over amon's legacy derivations when present.
   canonical_model?: unknown;
   reasoning_effort?: unknown;
   is_open_model?: unknown;
@@ -97,10 +95,8 @@ function splitEffort(model: string): { canonical: string; effort: string | undef
   return { canonical: model, effort: undefined };
 }
 
-// Reasoning-effort suffixes openbench appends to a codex model string
-// (`gpt-5.6-terra-xhigh` ran `-m gpt-5.6-terra -c model_reasoning_effort=xhigh`).
-// They are settings, not price tiers, so strip them for pricing lookup only —
-// the event keeps the faithful bench string.
+// WHY: OpenBench appends reasoning effort to some model names, but billing uses the underlying
+// model.
 const EFFORT_SUFFIXES = ['xhigh', 'high', 'medium', 'low', 'minimal', 'max'];
 
 function num(value: unknown): number {
@@ -116,9 +112,8 @@ function record(value: unknown): Record<string, unknown> | undefined {
     ? value as Record<string, unknown> : undefined;
 }
 
-// Canonical Harbor rows leave the legacy top-level study fields null. Their
-// identity lives in the embedded suite manifest. This reads identity only;
-// OpenBench must verify the sealed run before delivery to this importer.
+// WHY: Canonical Harbor rows store identity in suite provenance while legacy top-level fields remain
+// null.
 function harborStudy(row: BenchmarkRow): { id: string; study: string } | undefined {
   const provenance = record(row.candidate_provenance);
   if (provenance?.kind !== 'harbor_job') return undefined;
@@ -141,22 +136,19 @@ function resolveBenchmarkCost(row: BenchmarkRow): { cost: number; source: CostSo
   }
   const model = str(row.model);
   if (!model) return null;
-  // reasoning is billed at the output rate (vendor convention); the vendor split
-  // already folds reasoning into tokens_output, so do not add it again.
+  // WHY: The vendor's output bucket already includes reasoning tokens; adding them separately would
+  // double-charge.
   const tokens = {
     input: num(row.tokens_input_uncached),
     output: num(row.tokens_output),
     cacheRead: num(row.tokens_cache_read),
     cacheWrite: num(row.tokens_cache_write),
   };
-  // Price the fallback estimate at the cell's own run time, so importing a
-  // pre-revert benchmark after a scheduled rate change still derives the
-  // promo-era cost the experiment actually incurred.
+  // WHY: Pricing at import time would reprice old runs after a schedule change.
   const at = str(row.ts_iso);
   const direct = pricingRegistry.calculate(model, tokens, at);
   if (direct !== null) return { cost: direct, source: 'estimated' };
 
-  // Retry against the base model with an effort suffix stripped.
   const lastDash = model.lastIndexOf('-');
   if (lastDash > 0 && EFFORT_SUFFIXES.includes(model.slice(lastDash + 1))) {
     const base = pricingRegistry.calculate(model.slice(0, lastDash), tokens, at);
@@ -181,12 +173,6 @@ export function importBenchmarkResults(
   };
   const unpriced = new Set<string>();
 
-  // Legacy study fallback for pre-field rows: the results.jsonl's parent dir name
-  // (e.g. `am-consistency-pareto-2026-08-29`), else the file's own basename.
-  // Resolve first so relative inputs derive their *real* containing directory —
-  // a bare `results.jsonl` or a parent-relative `../results.jsonl` would otherwise
-  // yield the literal `.`/`..` segment and merge unrelated runs under one key. The
-  // basename fallback only trips at the filesystem root, where there is no parent.
   const resolved = path.resolve(filePath);
   const parentDir = path.basename(path.dirname(resolved));
   const legacyStudy = parentDir || path.basename(resolved).replace(/\.[^.]*$/, '');
@@ -200,9 +186,6 @@ export function importBenchmarkResults(
     let row: BenchmarkRow;
     try {
       const parsed: unknown = JSON.parse(trimmed);
-      // Valid JSON that is not a plain object (`null`, an array, a bare scalar)
-      // would throw on the first property access and abort the whole file after
-      // earlier rows have committed. Reject it as a skip instead.
       if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
         result.skipped += 1;
         continue;
@@ -224,8 +207,7 @@ export function importBenchmarkResults(
     const harbor = harborStudy(row);
     if (record(row.candidate_provenance)?.kind === 'harbor_job' && !harbor
       && options.study === undefined && !str(row.study_sha256)) {
-      // All canonical files share a suite-runs directory. Falling back to that
-      // name would collapse unrelated suites and silently discard their cells.
+      // WHY: The shared suite-runs directory name cannot distinguish unrelated canonical suites.
       result.skipped += 1;
       continue;
     }
@@ -233,33 +215,20 @@ export function importBenchmarkResults(
     const priced = resolveBenchmarkCost(row);
     if (priced === null) unpriced.add(model);
 
-    // Study identity: prefer the manual override, then openbench's own fields,
-    // then Harbor suite provenance, then the legacy parent-dir fallback.
-    // study_id (= study_sha256 or suite_manifest_sha256) is the exact
-    // per-run grouping key; study is the human slug label.
     const studyId = options.study ?? str(row.study_sha256) ?? harbor?.id ?? legacyStudy;
     const study = options.study ?? str(row.study) ?? harbor?.study ?? legacyStudy;
 
-    // Namespace the persisted event/session key by study. `run_id` is only unique
-    // *within* one bake-off (harness:task:model:trial), so two studies rerunning
-    // the same cell share a run_id; keying events on run_id alone would drop the
-    // second study's cells as duplicates. Prefixing with study_id keeps
-    // idempotence within a study while separating reruns. The faithful run_id is
-    // preserved in metadata.
+    // WHY: A run ID is unique within a study, so using it alone would collide across bake-offs.
     const eventId = `${studyId}::${runId}`;
 
-    // Model identity: prefer openbench's split, else strip the effort suffix.
     const split = splitEffort(model);
     const canonicalModel = str(row.canonical_model) ?? split.canonical;
     const reasoningEffort = str(row.reasoning_effort) ?? split.effort ?? null;
     const isOpenModel = typeof row.is_open_model === 'boolean' ? row.is_open_model : null;
-    // openbench's ranking-eligibility verdict (mirrored, not re-derived).
     const rankingEligible = typeof row.usage_ranking_eligible === 'boolean' ? row.usage_ranking_eligible : null;
     const rankingExclusionReason = str(row.usage_ranking_exclusion_reason) ?? null;
 
     if (options.dryRun) {
-      // Count would-be inserts without touching the DB. Duplicate detection is
-      // not available in dry-run; report everything as importable.
       result.eventsImported += 1;
       continue;
     }
@@ -267,9 +236,7 @@ export function importBenchmarkResults(
     const durationMs = Math.round(num(row.wall_time_s || row.t_agent_s) * 1000) || undefined;
     const isError = row.success === false || (typeof row.error === 'string' && row.error.length > 0);
 
-    // A file imported before Harbor identity was read stored this cell under the
-    // shared directory key. Replace that row atomically with the corrected one;
-    // a manual --study or explicit row identity names its own key instead.
+    // WHY: Older imports placed this same cell under the shared directory name.
     const legacyEventId = `${legacyStudy}::${runId}`;
     const replacesLegacy = harbor !== undefined && studyId === harbor.id && studyId !== legacyStudy;
 
@@ -311,13 +278,10 @@ export function importBenchmarkResults(
           tokens_reasoning: num(row.tokens_reasoning),
           token_basis: str(row.token_basis),
           usage_evidence_grade: str(row.usage_evidence_grade),
-          // Upstream ranking-eligibility verdict (mirrored, not re-derived).
           usage_ranking_eligible: rankingEligible,
           usage_ranking_exclusion_reason: rankingExclusionReason,
           cost_source: str(row.cost_source),
-          // success with no workspace change = a no-op trial (honesty flag).
           workspace_changed: typeof row.workspace_changed === 'boolean' ? row.workspace_changed : null,
-          // Arm/model identity (study_id/study live in their own columns).
           canonical_model: canonicalModel,
           reasoning_effort: reasoningEffort,
           is_open_model: isOpenModel,
@@ -330,13 +294,8 @@ export function importBenchmarkResults(
       result.eventsImported += 1;
     } else {
       result.duplicates += 1;
-      // A duplicate is a re-import of the *same* study+cell (identical namespaced
-      // event_id). Two things can still change on the stored row: (1) a cost that
-      // was null when the model was unpriced — backfill once rates are added so
-      // usage stops summing it as $0; (2) ranking-eligibility metadata absent on a
-      // cell imported before those fields existed — backfill it (only when the row
-      // predates the field), so upgrading + re-importing surfaces the verdict
-      // without deleting rows.
+      // WHY: A re-import can supply a price or eligibility data missing from an older row. Preserve
+      // the original event identity when filling those gaps.
       if (priced !== null && backfillBenchmarkCost(eventId, priced.cost, priced.source)) {
         result.costsBackfilled += 1;
       }

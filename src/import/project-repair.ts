@@ -38,10 +38,8 @@ interface TranscriptProjects {
 }
 
 const DRY_RUN_ROLLBACK = Symbol('dry-run rollback');
-// Both repairs take the write lock as they begin (`.immediate()`). They read
-// before they write, and a deferred transaction that has read cannot wait for
-// the running server's write: SQLite fails it as locked at once, busy timeout
-// or not. Taken up front, the lock waits like any other writer.
+// WHY: A deferred SQLite transaction that read before its lock upgrade can fail under a concurrent
+// writer.
 const CWD_FIELD = /"cwd"\s*:\s*("(?:[^"\\]|\\.)*")/g;
 const SESSION_ID_FIELD = /"sessionId"\s*:\s*"([^"\\]+)"/g;
 

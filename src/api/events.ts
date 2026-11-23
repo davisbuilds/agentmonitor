@@ -7,7 +7,6 @@ import { safelyMaintainTraceSummaryForEvent } from '../trace-quality/service.js'
 
 export const eventsRouter = Router();
 
-// POST /api/events - Ingest single event
 eventsRouter.post('/', (req: Request, res: Response) => {
   const parsed = normalizeIngestEvent(coerceJsonLikeBody(req.body));
   if (!parsed.ok) {
@@ -30,7 +29,6 @@ eventsRouter.post('/', (req: Request, res: Response) => {
   res.status(201).json({ received: 1, ids: [event.id], duplicates: 0 });
 });
 
-// POST /api/events/batch - Ingest multiple events
 eventsRouter.post('/batch', (req: Request, res: Response) => {
   const body = coerceJsonLikeBody(req.body);
   const { events } = (body && typeof body === 'object') ? body as { events?: unknown } : {};
@@ -72,7 +70,6 @@ eventsRouter.post('/batch', (req: Request, res: Response) => {
   });
 });
 
-// GET /api/events - Query events
 eventsRouter.get('/', (req: Request, res: Response) => {
   const result = getEvents({
     limit: req.query.limit ? parseInt(req.query.limit as string, 10) : undefined,

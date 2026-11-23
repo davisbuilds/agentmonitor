@@ -26,19 +26,12 @@ FILE_PATH = extract_nested("tool_input.file_path")
 
 SAFETY_ENABLED = os.environ.get("AGENTMONITOR_SAFETY", "1") == "1"
 
-# These patterns match pre_tool_use.sh; tests/hooks.test.ts holds both to one
-# table of cases.
-# An rm with the root or home directory, or everything in it, among its
-# arguments. It may follow variable assignments and wrappers such as sudo, with
-# their options. Matched per simple command (see simple_commands), after
-# ${HOME} is spelled $HOME.
+# WHY: The two hook implementations share a policy; tests/hooks.test.ts exercises the same cases against both.
 DESTRUCTIVE_RM = re.compile(
     r'^[ \t]*(\{[ \t]*)?(([A-Za-z_][A-Za-z0-9_]*=[^ \t]*'
     r'|(sudo|command|exec|nice|nohup|time|doas|env)([ \t]+-[^ \t]+([ \t]+[^- \t][^ \t]*)?)*)[ \t]+)*'
     r'([^ \t]*/)?rm([ \t]+[^ \t]+)*[ \t]+(/|/\*|~|~/|~/\*|\$HOME|\$HOME/|\$HOME/\*)([ \t]|$)'
 )
-# A file name that usually holds secrets, matched on the basename, ignoring case;
-# example and template copies are not.
 SENSITIVE_NAME = re.compile(
     r'^(\.env(\..+)?|.+\.(env|pem|key|p12|pfx|secret|credentials)'
     r'|\.?(credentials|secrets?)(\.(json|ya?ml|toml|ini|txt|env|xml|cfg|conf))?'
@@ -124,7 +117,6 @@ def is_sensitive(file_path):
     return bool(SENSITIVE_NAME.search(name)) and not TEMPLATE_NAME.search(name)
 
 
-# --- Safety checks (only for Bash commands) ---
 if SAFETY_ENABLED and TOOL_NAME == "Bash" and COMMAND:
     if is_destructive(COMMAND):
         send_event({
@@ -145,7 +137,6 @@ if SAFETY_ENABLED and TOOL_NAME == "Bash" and COMMAND:
         print(f"AgentMonitor: Blocked destructive command: {COMMAND}", file=sys.stderr)
         sys.exit(2)
 
-# --- Security warnings (log but don't block) ---
 if SAFETY_ENABLED and FILE_PATH:
     if is_sensitive(FILE_PATH):
         send_event({

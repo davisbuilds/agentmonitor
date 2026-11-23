@@ -64,7 +64,6 @@ function inventory() {
   const hash = createHash('sha256');
   for (const row of fragments) {
     hash.update(`${row.id}\n`);
-    // The summary projection keys an event's turn by its event id (see syncCodexSummaryLiveEvent).
     for (const turn of turnsFor.all(row.session_id, row.event_id ?? `codex-event:${row.id}`) as Array<{ id: number }>) {
       turns++;
       items += (itemCount.get(turn.id) as { c: number }).c;

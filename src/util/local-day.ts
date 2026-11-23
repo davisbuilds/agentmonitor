@@ -7,11 +7,9 @@
 import { config } from '../config.js';
 
 const DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-// A stored timestamp with a time but no zone: SQLite's `YYYY-MM-DD HH:MM:SS`,
-// or ISO without a suffix. Both are UTC by this app's storage convention.
+// WHY: SQLite's zone-less timestamps are UTC under this store's contract.
 const ZONELESS_PATTERN = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
 
-// Every zone offset in use is a whole number of quarter-hours.
 const QUARTER_HOUR_MS = 15 * 60 * 1000;
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
@@ -69,16 +67,14 @@ export function parseStoredTimestamp(value: string): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-// Every zone offset in use is a whole multiple of 15 minutes, so all instants
-// in one UTC quarter-hour share a local day. Memoizing on that block turns a
-// per-row Intl call (about 2µs) into a map lookup for the bulk bucketing that
-// usage reads do over every row.
+// WHY: All supported zone offsets align to 15 minutes, so caching in UTC quarter-hours cannot cross
+// a local date boundary.
 const DAY_CACHE_LIMIT = 50_000;
 const dayCaches = new Map<string, Map<number, string>>();
 
 /** The local calendar day (`YYYY-MM-DD`) a timestamp falls on. */
 export function localDayOf(timestamp: string, zone = reportingTimeZone()): string | null {
-  // A bare day already is a calendar day; parsing it would read UTC midnight.
+  // WHY: Parsing a bare calendar day as UTC midnight can move it to the prior local date.
   if (isBareDay(timestamp)) return timestamp;
   const parsed = parseStoredTimestamp(timestamp);
   if (!parsed) return null;

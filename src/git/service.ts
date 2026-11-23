@@ -19,15 +19,12 @@ function refreshGitActivity(): Promise<void> {
     excludedDirs: config.git.excludedDirs,
   })
     .then(async report => {
-      // Said once per change: under the service the same folders are left each pass.
       if (report.skipped_directories !== lastSkipped && report.skipped_directories > 0) {
         console.error(`[git] left ${report.skipped_directories} session director${report.skipped_directories === 1 ? 'y' : 'ies'} unread: privacy-protected under the login service, or too slow to read`);
       }
       lastSkipped = report.skipped_directories;
       if (report.errors > 0) console.error(`[git] ${report.errors} of ${report.repos} repositories could not be read in full`);
       if (!config.git.githubLookups) return;
-      // The user's merged pull requests first: those it records with their
-      // details, the session lookup then has no need to ask about.
       const authored = await syncAuthoredPullRequests(getDb());
       if (authored.unanswered > 0) console.error(`[git] GitHub's search did not answer for ${authored.unanswered} month(s) of merged pull requests`);
       const pulls = await syncSessionPullRequests(getDb());

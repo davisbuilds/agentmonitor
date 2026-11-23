@@ -29,15 +29,6 @@ import type { TraceQualityCoverage } from './types.js';
  * changes; the startup guard re-backfills every row whose stored version
  * differs, so derivation changes propagate without a manual reset.
  */
-// v2: usage is rolled up from events (authoritative) even when detail structure
-// comes from live session_items, fixing zeroed Codex usage (PR #37 review).
-// v3: add the stable per-session `trace_id` (reframe Phase 2 on-demand read
-// layer); the bump re-backfills existing rows so the column populates on upgrade.
-// v4: empty reasoning items are no longer projected and the stored ones were
-// restored or removed (data migration v18), so observation counts and the
-// has_reasoning flag are re-derived.
-// v5: Codex developer-role items are `instructions`, not assistant messages
-// (data migration v20), so generation counts and raw-output coverage change.
 const SESSION_TRACE_SUMMARY_VERSION = 'sts:v5';
 
 /**
@@ -398,8 +389,6 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
     projection_version: SESSION_TRACE_SUMMARY_VERSION,
   });
 
-  // OR-accumulate the coverage flags and recompute the quality scalar from the
-  // running totals (all O(1) against the single summary row).
   const row = db.prepare(`
     SELECT observation_count, error_count, coverage_json FROM session_trace_summary WHERE session_id = ?
   `).get(event.session_id) as { observation_count: number; error_count: number; coverage_json: string };
@@ -485,17 +474,12 @@ export function maintainSessionTraceSummary(sessionId: string): void {
  */
 export function ensureSessionTraceSummaryBackfill(): number {
   const db = getDb();
-  // Re-backfill when the table is empty (but sessions exist) OR when any row is
-  // incompletely migrated: a stale projection_version, or a NULL trace_id that a
-  // partial/interrupted backfill could have left behind. Checking a single row's
-  // version is not enough — one up-to-date row would mask stale/NULL siblings,
-  // leaving the table permanently un-openable (NULL trace_id ⇒ no detail).
   const total = (db.prepare('SELECT COUNT(*) AS c FROM session_trace_summary').get() as { c: number }).c;
   const incomplete = (db.prepare(
     `SELECT COUNT(*) AS c FROM session_trace_summary
      WHERE projection_version IS NOT ? OR trace_id IS NULL`,
   ).get(SESSION_TRACE_SUMMARY_VERSION) as { c: number }).c;
-  if (total > 0 && incomplete === 0) return 0; // fully migrated
+  if (total > 0 && incomplete === 0) return 0;
 
   const hasSessions =
     db.prepare('SELECT 1 FROM browsing_sessions LIMIT 1').get() ?? db.prepare('SELECT 1 FROM events LIMIT 1').get();

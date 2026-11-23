@@ -1,10 +1,4 @@
-// The transcript record types amon knows, per source. A harness that starts
-// writing a new type is otherwise silent: every parser skips what it does not
-// recognize. `amon`'s ingestion probe tallies the types it finds against these
-// lists, so a new one shows up as `unknown` instead of being lost.
-//
-// `read` maps each type to what consumes it; `knownUnused` to why it is
-// skipped. A type belongs in exactly one of them.
+// WHY: Unknown record types otherwise disappear silently when a producer changes its format.
 
 export interface RecordTypeCatalog {
   read: Readonly<Record<string, string>>;

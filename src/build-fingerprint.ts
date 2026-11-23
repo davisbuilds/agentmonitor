@@ -52,7 +52,7 @@ export function createBuildWatch(root: string | null): BuildWatch {
     started,
     status() {
       if (!root || !started) return { tracked: false, stale: false, started: null, current: null };
-      // A build in progress can remove files; that is a changed build too.
+      // WHY: A missing file during a concurrent rebuild is evidence that the running build changed.
       const current = fingerprintOrNull(root);
       return { tracked: true, stale: current !== started, started, current };
     },
