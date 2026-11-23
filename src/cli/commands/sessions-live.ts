@@ -132,7 +132,7 @@ export function registerSessionLiveCommands(): void {
     async handler(ctx, args) {
       const { parsed, params } = parseListFilters(args);
       if (parsed.positionals.length > 0) throw invalidUsage('Usage: amon sessions list [options]');
-      const { closeDb } = await initReadDb();
+      const { closeDb } = await initReadDb({ requireConfiguredStore: true });
       try {
         const { listBrowsingSessions } = await import('../../db/v2-queries.js');
         const result = listBrowsingSessions(params);
@@ -151,7 +151,7 @@ export function registerSessionLiveCommands(): void {
     examples: ['sessions show abc123 --json'],
     async handler(ctx, args) {
       const id = requireOne(args, 'amon sessions show <id>');
-      const { closeDb } = await initReadDb();
+      const { closeDb } = await initReadDb({ requireConfiguredStore: true });
       try {
         const { getBrowsingSession } = await import('../../db/v2-queries.js');
         const session = getBrowsingSession(id);
@@ -181,7 +181,7 @@ export function registerSessionLiveCommands(): void {
         limit: parseIntegerOption(parsed.values.get('--limit'), '--limit'),
         around_ordinal: parseIntegerOption(parsed.values.get('--around-ordinal'), '--around-ordinal'),
       };
-      const { closeDb } = await initReadDb();
+      const { closeDb } = await initReadDb({ requireConfiguredStore: true });
       try {
         const { getBrowsingSession, getSessionMessages } = await import('../../db/v2-queries.js');
         if (!getBrowsingSession(id)) throw notFound(`Session not found: ${id}`);
@@ -201,7 +201,7 @@ export function registerSessionLiveCommands(): void {
     examples: ['sessions search "rate limit" --sort relevance --json'],
     async handler(ctx, args) {
       const params = parseSearchFilters(args);
-      const { closeDb } = await initReadDb();
+      const { closeDb } = await initReadDb({ requireConfiguredStore: true });
       try {
         const { searchMessages } = await import('../../db/v2-queries.js');
         const result = searchMessages(params);
@@ -244,7 +244,7 @@ export function registerSessionLiveCommands(): void {
     async handler(ctx, args) {
       const parsed = parseOptionSet(args, new Set(), new Set());
       const id = requireOne(parsed.positionals, 'amon sessions activity <id>');
-      const { closeDb } = await initReadDb();
+      const { closeDb } = await initReadDb({ requireConfiguredStore: true });
       try {
         const { getBrowsingSession, getSessionActivity } = await import('../../db/v2-queries.js');
         if (!getBrowsingSession(id)) throw notFound(`Session not found: ${id}`);
@@ -264,7 +264,7 @@ export function registerSessionLiveCommands(): void {
     async handler(ctx, args) {
       const parsed = parseOptionSet(args, new Set(), new Set());
       const id = requireOne(parsed.positionals, 'amon sessions children <id>');
-      const { closeDb } = await initReadDb();
+      const { closeDb } = await initReadDb({ requireConfiguredStore: true });
       try {
         const { getSessionChildren } = await import('../../db/v2-queries.js');
         const data = getSessionChildren(id);
@@ -283,7 +283,7 @@ export function registerSessionLiveCommands(): void {
     async handler(ctx, args) {
       const parsed = parseOptionSet(args, new Set(), new Set());
       const id = requireOne(parsed.positionals, 'amon sessions pins <id>');
-      const { closeDb } = await initReadDb();
+      const { closeDb } = await initReadDb({ requireConfiguredStore: true });
       try {
         const { getBrowsingSession, listPinnedMessages } = await import('../../db/v2-queries.js');
         if (!getBrowsingSession(id)) throw notFound(`Session not found: ${id}`);
