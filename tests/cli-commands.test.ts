@@ -52,8 +52,8 @@ before(async () => {
     'Investigate CLI behavior',
     '2026-06-15T10:00:00.000Z',
     null,
-    2,
-    1,
+    7,
+    7,
     '/tmp/session.jsonl',
     100,
     'hash',
@@ -62,6 +62,20 @@ before(async () => {
     INSERT INTO messages (session_id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run('cli-session-001', 0, 'user', 'Investigate CLI behavior', '2026-06-15T10:00:00.000Z', 0, 0, 24);
+  const insertSearchMessage = db.prepare(`
+    INSERT INTO messages (session_id, ordinal, role, content, timestamp, content_length)
+    VALUES ('cli-session-001', ?, 'user', ?, '2026-06-15T10:00:00.000Z', ?)
+  `);
+  for (const [index, content] of [
+    'cursorprobe cursorprobe cursorprobe cursorprobe',
+    'cursorprobe cursorprobe cursorprobe cursorprobe',
+    'cursorprobe cursorprobe cursorprobe cursorprobe',
+    'cursorprobe cursorprobe sizing test',
+    'cursorprobe sparse transcript match',
+    'cursorprobe sparse transcript match',
+  ].entries()) {
+    insertSearchMessage.run(index + 1, content, content.length);
+  }
   db.prepare(`
     INSERT INTO events (
       session_id, agent_type, event_type, status, tokens_in, tokens_out, project,
@@ -96,6 +110,56 @@ test('sessions list emits JSON from the configured database', async () => {
   assert.equal(result.exitCode, 0);
   const parsed = JSON.parse(result.stdout) as { data: Array<{ id: string }> };
   assert.equal(parsed.data[0]?.id, 'cli-session-001');
+});
+
+type SearchPage = { data: Array<{ message_ordinal: number }>; total: number; cursor?: string };
+
+for (const [sort, expectedPages] of [
+  ['recent', [[6, 5], [4, 3], [2, 1], []]],
+  ['relevance', [[3, 2], [1, 4], [6, 5], []]],
+] as const) {
+  test(`sessions search walks ${sort} pages in order until the cursor is exhausted`, async () => {
+    const args = ['sessions', 'search', 'cursorprobe', '--sort', sort, '--limit', '2', '--json'];
+    let cursor: string | undefined;
+    for (const [index, expectedOrdinals] of expectedPages.entries()) {
+      const result = await runCli(cursor ? [...args, '--cursor', cursor] : args);
+      assert.equal(result.exitCode, 0, result.stderr);
+      const page = JSON.parse(result.stdout) as SearchPage;
+      assert.deepEqual(page.data.map(row => row.message_ordinal), expectedOrdinals);
+      assert.equal(page.total, 6);
+      cursor = page.cursor;
+      if (index < expectedPages.length - 1) assert.ok(cursor);
+    }
+    assert.equal(cursor, undefined);
+  });
+}
+
+for (const [sort, otherSort, malformed] of [
+  ['recent', 'relevance', '1junk'],
+  ['relevance', 'recent', '???'],
+] as const) {
+  test(`sessions search rejects malformed or wrong-sort cursors for ${sort}`, async () => {
+    const args = ['sessions', 'search', 'cursorprobe', '--limit', '2', '--json'];
+    const first = await runCli([...args, '--sort', otherSort]);
+    assert.equal(first.exitCode, 0, first.stderr);
+    const { cursor } = JSON.parse(first.stdout) as SearchPage;
+    assert.ok(cursor);
+
+    for (const invalidCursor of [malformed, cursor]) {
+      const result = await runCli([...args, '--sort', sort, '--cursor', invalidCursor]);
+      assert.equal(result.exitCode, 2, result.stderr || result.stdout);
+      assert.equal(result.stdout, '');
+      assert.match(result.stderr, /cursor/i);
+    }
+  });
+}
+
+test('paginated session commands document --cursor in help', async () => {
+  for (const command of [['sessions', 'search'], ['sessions', 'list'], ['live', 'sessions']]) {
+    const result = await runCli([...command, '--help']);
+    assert.equal(result.exitCode, 0, result.stderr);
+    assert.match(result.stdout, /--cursor\b/, command.join(' '));
+  }
 });
 
 test('live items reads the newest page with --tail and pages back with --before', async () => {

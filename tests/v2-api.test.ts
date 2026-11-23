@@ -1031,6 +1031,25 @@ describe('GET /api/v2/search', () => {
     assert.equal(body.data[0]?.session_id, 'api-search-rank-001');
     assert.ok(body.cursor, 'relevance search should return a cursor when the page is full');
   });
+
+  test('returns 400 for malformed or wrong-sort cursors', async () => {
+    const search = `${baseUrl}/api/v2/search?q=rankmagic&limit=1`;
+    const first = await fetch(`${search}&sort=relevance`);
+    assert.equal(first.status, 200);
+    const { cursor } = await first.json() as { cursor?: string };
+    assert.ok(cursor);
+
+    for (const params of [
+      'cursor=1junk',
+      `sort=recent&cursor=${encodeURIComponent(cursor)}`,
+      'sort=relevance&cursor=1',
+    ]) {
+      const res = await fetch(`${search}&${params}`);
+      assert.equal(res.status, 400, params);
+      const body = await res.json() as { error: string };
+      assert.match(body.error, /cursor/i, params);
+    }
+  });
 });
 
 describe('GET /api/v2/analytics/summary', () => {
