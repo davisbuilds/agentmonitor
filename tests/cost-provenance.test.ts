@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cost-provenance-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -15,7 +14,6 @@ const { normalizeIngestEvent } = await import('../src/contracts/event-contract.j
 const { recalculateEventCosts } = await import('../src/pricing/recalc.js');
 const { attributeCostSources } = await import('../src/pricing/cost-provenance.js');
 
-// claude-sonnet-5 is $2/MTok input, so one million input tokens is exactly $2.
 const MODEL = 'claude-sonnet-5';
 const TABLE_COST = 2;
 const AT = '2026-09-20T10:00:00Z';
@@ -132,7 +130,6 @@ describe('cost provenance', () => {
     });
 
     test('a Codex OTEL cost may be the producer\'s own, so it takes the table comparison', () => {
-      // The OTLP parser reads gen_ai.usage.cost for any service.
       legacy('codex-otel-sent', 0.5, { source: 'otel', agent: 'codex' });
       legacy('codex-otel-priced', TABLE_COST, { source: 'otel', agent: 'codex' });
       attributeCostSources(getDb());

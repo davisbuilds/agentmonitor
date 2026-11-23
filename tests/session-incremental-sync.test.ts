@@ -143,7 +143,7 @@ describe('insertParsedSession re-sync', () => {
     store(parse('rewrite', [...BASE, userLine('foxtrot tail', 3)]));
     const before = messageRows('rewrite');
 
-    // Same length as "ls bravo", so a length-only comparison would miss it.
+    // WHY: Use a replacement of equal length so a size-only change detector cannot pass.
     const rewritten = [BASE[0], toolLine('t1', 'ls hotel', 1), BASE[2], userLine('foxtrot tail', 3)];
     store(parse('rewrite', rewritten));
     const after = messageRows('rewrite');
@@ -156,7 +156,6 @@ describe('insertParsedSession re-sync', () => {
     assert.equal(searchHits('rewrite', 'hotel'), 1);
     assertSearchIndexMatchesMessages(getDb());
 
-    // The stored rows are what a full rewrite of the new parse would store.
     const expected = parse('rewrite-fresh', rewritten);
     store(expected);
     assert.deepEqual(

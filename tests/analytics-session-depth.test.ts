@@ -30,7 +30,6 @@ const compact = (id: string, times: number) => { for (let i = 0; i < times; i++)
 session.run('c1', 'claude', 'claude-jsonl', 'Backlog sweep', '2026-03-02T10:00:00Z', 100, null, null, observable);
 session.run('c2', 'claude', 'claude-jsonl', 'Quick fix', '2026-03-02T12:00:00Z', 10, null, null, observable);
 session.run('c3', 'claude', 'claude-jsonl', 'Investigation', '2026-03-03T10:00:00Z', 40, null, null, observable);
-// Delegated work compacts on its own clock; depth reads the sessions someone started.
 session.run('c-sub', 'claude', 'claude-jsonl', null, '2026-03-02T10:05:00Z', 30, 'c1', 'subagent', observable);
 compact('c1', 3);
 compact('c3', 1);
@@ -39,7 +38,6 @@ compact('c-sub', 2);
 const codexId = '01990000-0000-7000-8000-000000000001';
 session.run(`rollout-2026-03-03T09-00-00-${codexId}`, 'codex', 'codex-jsonl', 'Cross-repo work', '2026-03-03T09:00:00Z', 200, null, null, observable);
 compact(`rollout-2026-03-03T09-00-00-${codexId}`, 5);
-// Telemetry only: no transcript, so no way to see its compactions.
 session.run('01990000-0000-7000-8000-000000000002', 'codex', 'codex-otel', null, '2026-03-03T11:00:00Z', 0, null, null, null);
 
 const range = { date_from: '2026-03-01', date_to: '2026-03-31' };

@@ -4,7 +4,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fetchCodexQuotaSnapshot } from '../src/provider-quotas/codex.js';
 
-// Mirror just enough of ChildProcess to satisfy fetchCodexQuotaSnapshot's spawner seam.
 function makeFakeChild(opts: {
   onStdin?: (chunk: string) => void;
   emitStdout?: (write: (line: string) => void) => void;
@@ -25,12 +24,11 @@ function makeFakeChild(opts: {
   stdin.on('data', (chunk: Buffer) => opts.onStdin?.(chunk.toString('utf8')));
   stdin.on('end', () => {
     stdinClosed = true;
-    // Mimic Codex CLI v0.133.0: if stdin closes before responses are written,
-    // the server exits silently with no output.
     setImmediate(() => emitter.emit('exit', 0, null));
   });
 
-  // Defer writes so the function has time to wire up its 'data' listener.
+  // WHY: Write after the consumer has installed its data listener so the fixture exercises the
+  // response path.
   setImmediate(() => {
     if (stdinClosed) return;
     opts.emitStdout?.((line) => stdout.write(line + '\n'));
@@ -69,15 +67,13 @@ test('fetchCodexQuotaSnapshot parses rate limits from the JSON-RPC peer', async 
   assert.equal(snapshot.primary?.window_minutes, 300);
   assert.equal(snapshot.secondary?.used_percent, 57);
   assert.equal(snapshot.credits?.balance, '825.62');
-  // All 4 JSON-RPC frames were sent to the peer.
   assert.match(stdinBuffer, /"method":"initialize"/);
   assert.match(stdinBuffer, /"method":"account\/rateLimits\/read"/);
 });
 
 test('fetchCodexQuotaSnapshot does not close stdin before responses arrive', async () => {
-  // Regression: Codex CLI v0.133.0 emits no responses when stdin EOFs before
-  // the peer has written the rateLimits frame. The function must keep stdin
-  // open and rely on child.kill() for cleanup.
+  // WHY: This Codex CLI stopped writing when stdin ended before its response. Keep that pipe open
+  // until the peer has answered.
   let stdinEndedBeforeResponse = false;
   let respondedAt: number | null = null;
   let endedAt: number | null = null;
@@ -92,7 +88,6 @@ test('fetchCodexQuotaSnapshot does not close stdin before responses arrive', asy
         endedAt = Date.now();
         if (respondedAt == null) stdinEndedBeforeResponse = true;
       });
-      // Emit responses 50ms after the function spawns the child.
       setTimeout(() => {
         respondedAt = Date.now();
         stdout.write('{"id":1,"result":{}}\n');
@@ -112,7 +107,6 @@ test('fetchCodexQuotaSnapshot does not close stdin before responses arrive', asy
 
   assert.equal(snapshot.status, 'available', 'snapshot should succeed when the peer eventually responds');
   assert.equal(stdinEndedBeforeResponse, false, 'stdin must not close before responses arrive');
-  // Sanity: if stdin was closed at all, it happened after the response.
   if (endedAt != null && respondedAt != null) {
     assert.ok(endedAt >= respondedAt, 'stdin close, if any, follows the response');
   }
@@ -125,7 +119,6 @@ test('fetchCodexQuotaSnapshot surfaces a diagnostic message when the peer exits 
       const stdout = new PassThrough();
       const stderr = new PassThrough();
       const emitter = new EventEmitter();
-      // Peer exits immediately with no stdout/stderr — the v0.133.0 regression shape.
       setImmediate(() => emitter.emit('exit', 0, null));
       return Object.assign(emitter, {
         stdin,

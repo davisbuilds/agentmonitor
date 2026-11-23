@@ -46,18 +46,14 @@ function claudeResults(sessionId: string, outcomes: Array<[number, 'success' | '
   });
 }
 
-// Claude, alpha: three failures in a row from message 5, and one interruption.
 session.run('c1', 'claude', 'claude-jsonl', 'alpha', 'Refactor', '2026-03-02T10:00:00Z', null, null);
 messages('c1', 12, { 10: ['user', text('[Request interrupted by user]')] });
 claudeResults('c1', [[3, 'success'], [4, 'error'], [4, 'success'], [5, 'error'], [6, 'error'], [7, 'error'], [9, 'success']]);
 
-// Claude, alpha: as many failures, never three in a row, so nothing to flag.
 session.run('c2', 'claude', 'claude-jsonl', 'alpha', 'Long sweep', '2026-03-02T12:00:00Z', null, null);
 messages('c2', 10);
 claudeResults('c2', [[1, 'error'], [2, 'error'], [3, 'success'], [4, 'error'], [5, 'error'], [6, 'success'], [7, 'error']]);
 
-// Codex, beta: the rollout row lists the session; OTEL records outcomes on the
-// native UUID row by call id, and the rollout's own results record none.
 const uuid = '01990000-0000-7000-8000-000000000001';
 const rollout = `rollout-2026-03-03T09-00-00-${uuid}`;
 session.run(rollout, 'codex', 'codex-jsonl', 'beta', 'Port the parser', '2026-03-03T09:00:00Z', null, null);
@@ -68,8 +64,8 @@ const cx = messages(rollout, 8);
   item.run(uuid, null, `call_${'SABCD'[index]}:result`, status, at(index)));
 item.run(rollout, null, 'call_A:rollout', 'completed', at(1));
 
-// Codex, beta: failures inside a code-mode exec carry call ids no stored tool
-// call has, so the streak opens at the last message before its first failure.
+// WHY: Code-mode failures may lack a stored tool call, so the preceding message anchors the streak
+// without inventing a call.
 const uuid2 = '01990000-0000-7000-8000-000000000002';
 const rollout2 = `rollout-2026-03-04T09-00-00-${uuid2}`;
 session.run(rollout2, 'codex', 'codex-jsonl', 'beta', 'Nested calls', '2026-03-04T09:00:00Z', null, null);
@@ -78,8 +74,8 @@ const timed = db.prepare('INSERT INTO messages (session_id, ordinal, role, conte
 for (const ordinal of [0, 1, 2, 3]) timed.run(rollout2, ordinal, 'assistant', text(`step ${ordinal}`), at(ordinal * 10));
 ['inner_1', 'inner_2', 'inner_3'].forEach((call, index) => item.run(uuid2, null, `${call}:result`, 'error', at(15 + index)));
 
-// Codex, beta: a fast code-mode call. The fallback must keep fractions of a
-// second, or a message just after the failure reads as before it.
+// WHY: A fractional-second fallback prevents a message immediately after a failure from being ordered
+// before it.
 const uuid3 = '01990000-0000-7000-8000-000000000003';
 const rollout3 = `rollout-2026-03-05T09-00-00-${uuid3}`;
 session.run(rollout3, 'codex', 'codex-jsonl', 'beta', 'Fast calls', '2026-03-05T09:00:00Z', null, null);
@@ -88,7 +84,6 @@ timed.run(rollout3, 0, 'assistant', text('before'), '2026-03-05T09:00:15.100Z');
 timed.run(rollout3, 1, 'assistant', text('after'), '2026-03-05T09:00:15.900Z');
 ['fast_1', 'fast_2', 'fast_3'].forEach((call, index) => item.run(uuid3, null, `${call}:result`, 'error', `2026-03-05T09:00:15.${200 + index * 100}Z`));
 
-// Delegated work meets friction on its own clock and is left out.
 session.run('c-sub', 'claude', 'claude-jsonl', 'alpha', null, '2026-03-02T10:30:00Z', 'c1', 'subagent');
 claudeResults('c-sub', [[1, 'error'], [2, 'error'], [3, 'error']]);
 

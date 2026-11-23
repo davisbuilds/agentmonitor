@@ -20,10 +20,9 @@ const ALLOWED_HOME_SEGMENTS = new Set([
   'runner', 'home', 'ci', 'agent', 'dev', 'alice', 'bob',
 ]);
 
-// Addresses that are intentionally published: package authorship and commit trailers.
 const ALLOWED_EMAILS = new Set([
   'noreply@anthropic.com',
-  'git@github.com', // the SSH remote form, not an address
+  'git@github.com',
 ]);
 
 function trackedFiles(): string[] {
@@ -50,7 +49,6 @@ function readTracked(): Array<{ file: string; content: string }> {
     });
 }
 
-// Any `-Users-` not glued to an identifier: after a quote, `/`, `=`, space, or line start.
 function encodedHomePaths(content: string): string[] {
   const found: string[] = [];
   for (const match of content.matchAll(/(?<![A-Za-z0-9_])-(?:Users|home)-([A-Za-z0-9._]+)/g)) {
@@ -67,10 +65,7 @@ describe('publication hygiene (public repository)', () => {
       for (const match of content.matchAll(/\/(?:Users|home)\/([A-Za-z0-9._-]+)/g)) {
         const segment = match[1].toLowerCase();
         if (ALLOWED_HOME_SEGMENTS.has(segment)) continue;
-        // A path built from an env var or variable is fine; only literals leak.
         if (segment.startsWith('$') || segment.startsWith('{')) continue;
-        // `/home/.claude` and friends are synthetic HOMEs assembled in fixtures,
-        // not a real account name.
         if (segment.startsWith('.')) continue;
         offenders.push(`${file}: ${match[0]}`);
       }
@@ -83,10 +78,8 @@ describe('publication hygiene (public repository)', () => {
   });
 
   test('no tracked file hardcodes a real home directory in encoded form', () => {
-    // Claude names project folders after the path with `/` turned into `-`, so
-    // `/Users/<name>/Dev` becomes `-Users-<name>-Dev` and slips past the check
-    // above. Usernames can contain `-`, so only the first segment is knowable;
-    // fixtures must start the account part with a placeholder.
+    // WHY: Claude encodes paths into folder names. Direct home-path detection alone misses an encoded
+    // account identity.
     const offenders = readTracked().flatMap(({ file, content }) =>
       encodedHomePaths(content).map(found => `${file}: ${found}`));
     assert.deepEqual(
@@ -97,7 +90,6 @@ describe('publication hygiene (public repository)', () => {
   });
 
   test('the encoded-path detector sees every delimiter and ignores placeholders', () => {
-    // A detector that misses a form reports the same clean result as a clean tree.
     const positives = [
       "path.join(dir, 'projects', '-Users-realname-Dev')",
       'CLAUDE_PROJECT=-Users-realname-Dev',

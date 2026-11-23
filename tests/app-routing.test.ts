@@ -51,8 +51,6 @@ test('the Portless root redirects to the canonical Svelte app', async () => {
 });
 
 test('the direct loopback root also redirects to the canonical Svelte app', async () => {
-  // The legacy static `/` dashboard was removed 2026-09-10; the root is now a
-  // pure redirect to /app/ regardless of host.
   const response = await requestRoot();
 
   assert.equal(response.status, 302);

@@ -3,8 +3,6 @@ import test from 'node:test';
 import { normalizeModelId } from '../src/pricing/index.ts';
 import { formatModelName } from '../frontend/src/lib/format.ts';
 
-// The app shows a model the way pricing spells it, minus a release date stamp.
-// The two live in separate bundles, so this keeps their rules from drifting.
 test('the displayed model name follows the server\'s model ID normalization', () => {
   const ids = [
     'claude-opus-4-8',

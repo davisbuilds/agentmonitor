@@ -50,9 +50,9 @@ function statusOf(id: string): string {
 
 test('the sweep reports each session it moved and the status it left it in', () => {
   seed('fresh', 'active', 1);
-  seed('quiet', 'active', 7);      // past one timeout: idle
-  seed('gone', 'idle', 12);        // past two timeouts: ended
-  seed('long-gone', 'active', 30); // both steps in one sweep: ended
+  seed('quiet', 'active', 7);
+  seed('gone', 'idle', 12);
+  seed('long-gone', 'active', 30);
   seed('done', 'ended', 60);
 
   const sweep = queries.updateIdleSessions(5);
@@ -76,12 +76,10 @@ test('a sweep that only ends sessions still reaches listeners, whichever caller 
   const heard: SessionSweep[] = [];
   const stop = queries.onSessionSweep(sweep => heard.push(sweep));
   try {
-    // A read runs the sweep before the periodic check does.
     queries.getSessions({ excludeStatus: 'ended', limit: 10 });
     assert.equal(heard.length, 1);
     assert.deepEqual(heard[0].transitions, [{ session_id: 'gone', status: 'ended' }]);
 
-    // Nothing left to move: listeners stay quiet.
     queries.updateIdleSessions(5);
     assert.equal(heard.length, 1);
   } finally {

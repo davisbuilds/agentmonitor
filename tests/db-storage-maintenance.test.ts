@@ -20,12 +20,8 @@ function messageContent(i: number): string {
   return Array.from({ length: 40 }, (_, j) => `${WORDS[(i + j) % WORDS.length]}${(i * 7 + j) % 97}`).join(' ');
 }
 
-// The pre-incremental re-sync deleted a session's messages and inserted them
-// again on every append. Each pass leaves the old postings in the index as
-// dead entries that only a merge into the older segments removes. On a real
-// store those sit in large old segments FTS5's incremental merges never reach;
-// a small fixture reproduces that by turning automerge off and letting
-// segments pile up before a crisis merge.
+// WHY: Disable automerge so the small fixture reproduces old postings that would survive ordinary
+// incremental merges.
 function rewriteSession(times: number): void {
   db.exec("INSERT INTO messages_fts(messages_fts, rank) VALUES('automerge', 0)");
   db.exec("INSERT INTO messages_fts(messages_fts, rank) VALUES('crisismerge', 64)");
@@ -68,8 +64,6 @@ test('a stepwise merge reclaims dead search-index entries without changing resul
   const merged = storage.searchIndexBytes(db);
   schema.rebuildMessageSearchIndex(db);
   const rebuilt = storage.searchIndexBytes(db);
-  // The merge reaches the size of an index built from scratch, and the fixture
-  // was bloated enough for that to mean something.
   assert.ok(merged <= rebuilt * 1.25, `merged ${merged} bytes, rebuilt ${rebuilt}`);
   assert.ok(bloated >= merged * 3, `bloated ${bloated} bytes, merged ${merged}`);
   assert.equal(result.completed, true);
@@ -78,7 +72,6 @@ test('a stepwise merge reclaims dead search-index entries without changing resul
   assert.deepEqual({ alpha: matches('alpha3'), golf: matches('golf50'), absent: matches('zulu') }, expected);
   assert.ok(expected.alpha > 0 && expected.golf > 0);
 
-  // Once clean, a run finds nothing to do.
   assert.deepEqual(await storage.mergeSearchIndex(db), { steps: 1, completed: true });
 });
 
@@ -123,12 +116,11 @@ test('stopping the maintenance ends a run in progress and cancels later ones', a
   const maintenance = storage.startSearchIndexMaintenance({
     db: () => { runs++; return db; }, initialDelayMs: 1, intervalMs: 20, pauseMs: 200, pages: 1, log: message => logs.push(message),
   });
-  // The fixture's merge takes three working steps; stop between the second
-  // (about 200 ms in) and the third (about 400 ms).
+  // WHY: Interrupt between working steps so the fixture exercises a partial merge instead of an
+  // untouched or finished one.
   await until(() => runs > 0);
   await new Promise(resolve => setTimeout(resolve, 250));
   await maintenance.stop();
-  // stop() waits for the run to wind down, so its report precedes shutdown.
   assert.equal(logs.length, 1);
   assert.match(logs[0], /merged the search index in \d+ steps/);
   const left = await storage.mergeSearchIndex(db, { pages: 1 });

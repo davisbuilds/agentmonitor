@@ -244,8 +244,6 @@ test('monitor tools keeps elapsed intervals, source timers and power coverage se
   assert.match(plain.stdout, /REPORTED/);
   assert.match(plain.stdout, /unknown/i);
 
-  // A summary-only monitor session can still have a current native rollout.
-  // Its physical filename can change while the native session keeps its UUID.
   const replacement = path.join(path.dirname(file), 'rollout-2026-06-16T12-00-00-22222222-2222-4222-8222-222222222222.jsonl');
   fs.renameSync(file, replacement);
   const { default: Database } = await import('better-sqlite3');
@@ -307,7 +305,8 @@ test('sessions repair-projects --names previews a listed rename without writing'
 
 test('sessions repair-projects --names rejects a list it cannot read as names', async () => {
   for (const [file, body] of [['not-json.json', '{'], ['number.json', '{"tmp": 3}'], ['empty.json', '{"tmp": " "}'], ['array.json', '["tmp"]'], ['same.json', '{"tmp": "tmp"}'],
-    // A target that is also a source would be renamed again, so the order of keys would decide.
+    // WHY: When a target is also a source, a sequential rename would make the result depend on key
+    // order.
     ['chain.json', '{"old": "new", "new": null}'], ['swap.json', '{"a": "b", "b": "a"}']]) {
     const names = path.join(tempDir, file);
     fs.writeFileSync(names, body);

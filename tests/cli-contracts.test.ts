@@ -961,8 +961,6 @@ test('invalid date reporting filters exit with invalid usage', async () => {
 });
 
 test('serve rejects the removed --no-browser flag instead of silently accepting it', async () => {
-  // serve never opened a browser, so --no-browser was a no-op that misrepresented
-  // the contract. It is now unknown and must fail loudly rather than lie.
   const result = await runCli(['serve', '--no-browser', '--no-portless']);
 
   assert.equal(result.exitCode, 2);
@@ -1050,7 +1048,6 @@ test('warehouse publish dry-run plans retracting a Codex rollout alias its UUID 
   assert.equal(parsed.rows_retracted, 1);
   assert.ok(parsed.statements.some(statement => statement.startsWith('DELETE FROM agentmonitor.runs')));
 
-  // A publish that leaves the UUID summary out retracts nothing it replaces.
   for (const args of [['--min-batch', '99'], ['--date-from', '2026-04-01']]) {
     const narrow = await runCli(['warehouse', 'publish', '--dry-run', '--json', ...args]);
     assert.equal(narrow.exitCode, 0, narrow.stderr);

@@ -89,7 +89,6 @@ test('the index follows edits and deletes, and passes its integrity check', () =
 });
 
 test('a database indexed the old way is reindexed on upgrade', () => {
-  // The schema as it was at data version 20: the index read the raw JSON.
   const db = getDb();
   db.exec(`
     DROP TRIGGER messages_fts_insert; DROP TRIGGER messages_fts_delete; DROP TRIGGER messages_fts_update;
@@ -121,7 +120,6 @@ test('a database indexed the old way is reindexed on upgrade', () => {
 
 test('an index whose view extracts text by an earlier rule is rebuilt', () => {
   const db = getDb();
-  // The first v21 rule skipped bookkeeping keys at any depth, tool inputs included.
   db.exec(`DROP VIEW messages_search;
     CREATE VIEW messages_search AS SELECT id, content AS content FROM messages`);
   initSchema();

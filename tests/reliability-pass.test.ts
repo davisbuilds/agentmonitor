@@ -8,7 +8,6 @@ import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import Database from 'better-sqlite3';
 
-// Isolate the DB before importing anything that reads config.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-reliability-pass-'));
 const dbPath = path.join(tempDir, 'agentmonitor.db');
 process.env.AGENTMONITOR_DB_PATH = dbPath;
@@ -21,8 +20,8 @@ const { createApp } = await import('../src/app.js');
 
 let server: Server | undefined;
 let baseUrl = '';
-// A second connection to the same file: the other process (`amon import`
-// beside the server's auto-import) in a cross-process race.
+// WHY: Use another connection to model import running alongside the server rather than a second call
+// within the same transaction.
 let rival: Database.Database | undefined;
 
 function count(sql: string, ...params: unknown[]): number {
@@ -139,8 +138,6 @@ describe('a duplicate event_id is acknowledged and skipped without side effects'
   });
 
   test('a duplicate that loses the race to another writer leaves its ended session as it was', () => {
-    // Two importers read the same historical transcript; the other commits the
-    // row between this one's pre-check and its insert.
     const sessionId = 'rp-race-same';
     assert.ok(insertEvent(historicalImport(sessionId, 'rp-race-same-1')));
     const stored = sessionState(sessionId);
@@ -157,8 +154,6 @@ describe('a duplicate event_id is acknowledged and skipped without side effects'
   });
 
   test('a duplicate that loses the race leaves no session without events', () => {
-    // The id is already the rival's, under another session; the loser's own
-    // session must not survive as an empty shell.
     let result: unknown;
     const interleaved = withRivalCommitAfterPrecheck('rp-race-shared', rivalStores('rp-race-shared', 'rp-race-owner'), () => {
       result = insertEvent({ ...historicalImport('rp-race-loser', 'rp-race-shared'), source: 'api', client_timestamp: undefined });
@@ -179,7 +174,6 @@ describe('HTTP ingestion reads back once through the dashboard APIs', () => {
     const base = { session_id: sessionId, agent_type: 'claude_code' };
     const events = [
       { ...base, event_id: 'rp-batch-1', event_type: 'tool_use', tool_name: 'Bash', tokens_in: 10, tokens_out: 5 },
-      // Same id, different payload: the first delivery wins.
       { ...base, event_id: 'rp-batch-1', event_type: 'tool_use', tool_name: 'Bash', tokens_in: 999, tokens_out: 999 },
       { ...base, event_id: 'rp-batch-2', event_type: 'tool_use', tokens_in: -1 },
       { ...base, event_id: 'rp-batch-3', event_type: 'llm_response', tokens_in: 20, tokens_out: 7 },
@@ -293,8 +287,6 @@ describe('restart', () => {
     assert.equal(getDb().pragma('integrity_check', { simple: true }), 'ok');
     assert.equal((getDb().pragma('foreign_key_check') as unknown[]).length, 0);
 
-    // The same server keeps serving on the reopened handle, and an id stored
-    // before the restart is still a duplicate after it.
     const resend = await postJson(`${baseUrl}/api/events`, {
       event_id: 'rp-batch-1', session_id: 'rp-batch', agent_type: 'claude_code', event_type: 'tool_use',
     });

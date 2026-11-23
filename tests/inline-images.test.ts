@@ -39,8 +39,6 @@ test('an image source is found whatever its property order', () => {
 });
 
 test('an image in serialized JSON that no longer parses is still stripped', () => {
-  // A truncated or prose-embedded serialization: the structure is gone, the
-  // escaped image source is not.
   const block = JSON.stringify({ type: 'image', source: { type: 'base64', media_type: 'image/png', data } });
   const pdfBlock = JSON.stringify({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } });
   const out = stripInlineImages(JSON.stringify({ text: `see [${block}, ${pdfBlock}` }));

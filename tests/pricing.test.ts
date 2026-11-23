@@ -10,7 +10,6 @@ import type { AddressInfo } from 'node:net';
 import { PricingRegistry } from '../src/pricing/index.js';
 import { classifyModel } from '../src/pricing/model-classification.js';
 
-// ─── Unit tests: PricingRegistry ────────────────────────────────────────
 
 describe('PricingRegistry', () => {
   const registry = new PricingRegistry();
@@ -72,12 +71,12 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.inputCostPerToken, 10 / 1_000_000);
       assert.equal(pricing.outputCostPerToken, 50 / 1_000_000);
       assert.equal(pricing.cacheReadCostPerToken, 1 / 1_000_000);
-      assert.equal(pricing.cacheWriteCostPerToken, 12.5 / 1_000_000); // 5-minute cache write
+      assert.equal(pricing.cacheWriteCostPerToken, 12.5 / 1_000_000);
       assert.equal(pricing.deprecated, false);
     });
 
-    // Both break the 0.1x cache-read convention the older entries follow, so a
-    // rate derived from input price would over-bill every cache hit.
+    // WHY: These rates break the older cache-read ratio, so deriving them from input pricing would
+    // overcharge cache hits.
     test('finds Claude Opus 5.5 with its 0.05x cache-read rate', () => {
       const pricing = registry.lookup('claude-opus-5-5');
       assert.ok(pricing);
@@ -85,7 +84,7 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.inputCostPerToken, 4 / 1_000_000);
       assert.equal(pricing.outputCostPerToken, 20 / 1_000_000);
       assert.equal(pricing.cacheReadCostPerToken, 0.2 / 1_000_000);
-      assert.equal(pricing.cacheWriteCostPerToken, 5 / 1_000_000); // 5-minute cache write
+      assert.equal(pricing.cacheWriteCostPerToken, 5 / 1_000_000);
       assert.equal(pricing.deprecated, false);
     });
 
@@ -96,7 +95,7 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.inputCostPerToken, 10 / 1_000_000);
       assert.equal(pricing.outputCostPerToken, 50 / 1_000_000);
       assert.equal(pricing.cacheReadCostPerToken, 0.25 / 1_000_000);
-      assert.equal(pricing.cacheWriteCostPerToken, 12.5 / 1_000_000); // 5-minute cache write
+      assert.equal(pricing.cacheWriteCostPerToken, 12.5 / 1_000_000);
       assert.equal(pricing.deprecated, false);
     });
 
@@ -159,11 +158,6 @@ describe('PricingRegistry', () => {
       assert.equal(registry.resolve('gpt-5.6')?.canonicalModel, 'gpt-5.6-sol');
     });
 
-    // 2026-10-09 live pricing page (developers.openai.com/api/docs/pricing,
-    // "Cyber models"): $12.50 input, $1.25 cached input, $15.625 cache writes,
-    // $75 output. The pricing table lists no long-context rates; the model page
-    // (developers.openai.com/api/docs/models/gpt-5.6-cyber) does, and names
-    // gpt-daybreak-red-latest as a deprecated alias.
     test('prices gpt-5.6-cyber at its published rates and long-context tier', () => {
       const pricing = registry.lookup('gpt-5.6-cyber');
       assert.ok(pricing, 'gpt-5.6-cyber must be priced, not billed as $0');
@@ -173,8 +167,6 @@ describe('PricingRegistry', () => {
       assert.equal(pricing.outputCostPerToken, 75 / 1_000_000);
       assert.equal(pricing.cacheReadCostPerToken, 1.25 / 1_000_000);
       assert.equal(pricing.cacheWriteCostPerToken, 15.625 / 1_000_000);
-      // Model page (2026-10-09): prompts over 272K input tokens pay 2x input
-      // and 1.5x output for the full request.
       assert.equal(pricing.tiers?.length, 1);
       const [tier] = pricing.tiers ?? [];
       assert.equal(tier.abovePromptTokens, 272_000);
@@ -256,8 +248,6 @@ describe('PricingRegistry', () => {
       assert.equal(registry.resolve('not-a-real-model'), null);
     });
 
-    // Claude Code against Bedrock reports the Bedrock model ID, and its
-    // long-context variant carries a `[1m]` suffix. Unresolved, both bill $0.
     test('resolves Bedrock model IDs and the [1m] long-context suffix', () => {
       for (const [raw, canonical] of [
         ['anthropic.claude-sonnet-4-5-20250929-v1:0', 'claude-sonnet-4-5-20250929'],
@@ -386,7 +376,6 @@ describe('PricingRegistry', () => {
         cacheWrite: 10_000,
       });
       assert.ok(cost !== null);
-      // 100K*$10 + 50K*$50 + 200K*$1 + 10K*$12.50 (per MTok)
       const expected = 1.0 + 2.5 + 0.2 + 0.125;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
     });
@@ -403,18 +392,15 @@ describe('PricingRegistry', () => {
     });
 
     test('calculates cost for Claude Sonnet 4.5', () => {
-      // Sonnet 4.5: $3/MTok input, $15/MTok output
       const cost = registry.calculate('claude-sonnet-4-5-20250929', {
         input: 1_000_000,
         output: 1_000_000,
       });
       assert.ok(cost !== null);
-      // $3 input + $15 output = $18
       assert.equal(cost, 18);
     });
 
     test('calculates cost with cache tokens', () => {
-      // Sonnet 4.5: $0.3/MTok cacheRead, $3.75/MTok cacheWrite
       const cost = registry.calculate('claude-sonnet-4-5-20250929', {
         input: 100_000,
         output: 50_000,
@@ -422,8 +408,6 @@ describe('PricingRegistry', () => {
         cacheWrite: 10_000,
       });
       assert.ok(cost !== null);
-      // 100K * $3/MTok + 50K * $15/MTok + 500K * $0.3/MTok + 10K * $3.75/MTok
-      // = $0.30 + $0.75 + $0.15 + $0.0375
       const expected = 0.3 + 0.75 + 0.15 + 0.0375;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -435,19 +419,16 @@ describe('PricingRegistry', () => {
         cacheRead: 40_000,
       });
       assert.ok(cost !== null);
-      // 100K * $2/MTok + 50K * $8/MTok + 40K * $0.50/MTok
       const expected = 0.2 + 0.4 + 0.02;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
 
     test('calculates cost for OpenAI o3', () => {
-      // o3: $2/MTok input, $8/MTok output
       const cost = registry.calculate('o3', {
         input: 500_000,
         output: 200_000,
       });
       assert.ok(cost !== null);
-      // 500K * $2/MTok + 200K * $8/MTok = $1.00 + $1.60 = $2.60
       const expected = 1.0 + 1.6;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -460,7 +441,6 @@ describe('PricingRegistry', () => {
         cacheWrite: 999_999,
       });
       assert.ok(cost !== null);
-      // 100K * $1.75/MTok + 50K * $14/MTok + 400K * $0.175/MTok + cache_write ignored ($0)
       const expected = 0.175 + 0.7 + 0.07;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -472,7 +452,6 @@ describe('PricingRegistry', () => {
         cacheRead: 40_000,
       });
       assert.ok(cost !== null);
-      // 100K * $2.50/MTok + 50K * $15/MTok + 40K * $0.25/MTok
       const expected = 0.25 + 0.75 + 0.01;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -484,7 +463,6 @@ describe('PricingRegistry', () => {
         cacheRead: 40_000,
       });
       assert.ok(cost !== null);
-      // 100K * $5/MTok + 50K * $30/MTok + 40K * $0.50/MTok
       const expected = 0.5 + 1.5 + 0.02;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -496,7 +474,6 @@ describe('PricingRegistry', () => {
         cacheRead: 40_000,
       });
       assert.ok(cost !== null);
-      // Pro has no cached-input discount in the pasted short-context table.
       const expected = 3 + 9;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -508,7 +485,6 @@ describe('PricingRegistry', () => {
         cacheRead: 40_000,
       });
       assert.ok(cost !== null);
-      // 100K * $0.30/MTok + 50K * $2.50/MTok + 40K * $0.03/MTok
       const expected = 0.03 + 0.125 + 0.0012;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -531,15 +507,12 @@ describe('PricingRegistry', () => {
     });
 
     test('handles typical Claude Code session token counts', () => {
-      // Typical session: 15K input, 3K output, 10K cache read
       const cost = registry.calculate('claude-sonnet-4-5-20250929', {
         input: 15_000,
         output: 3_000,
         cacheRead: 10_000,
       });
       assert.ok(cost !== null);
-      // 15K * $3/MTok + 3K * $15/MTok + 10K * $0.3/MTok
-      // = $0.045 + $0.045 + $0.003 = $0.093
       const expected = 0.045 + 0.045 + 0.003;
       assert.ok(Math.abs(cost - expected) < 0.0001);
     });
@@ -597,8 +570,6 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Sonnet 5 ($2/$10 — the launch "introductory" rate was made permanent;
-  //     the scheduled 2026-09-01 rise to $3/$15 was cancelled by Anthropic) ──
   describe('Claude Sonnet 5', () => {
     test('resolves with the permanent per-MTok rates ($2/$10, cacheRead $0.20, 5m write $2.50)', () => {
       const pricing = registry.lookup('claude-sonnet-5');
@@ -627,15 +598,11 @@ describe('PricingRegistry', () => {
         cacheWrite: 10_000,
       });
       assert.ok(cost !== null);
-      // 100K*$2 + 50K*$10 + 500K*$0.20 + 10K*$2.50 (per MTok)
       const expected = 0.2 + 0.5 + 0.1 + 0.025;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
     });
   });
 
-  // ─── Sonnet 5.5 (live pricing page: $2/$10, 5m write $2.50; cache read
-  //     $0.10, "0.05x the base input price", per the page on 2026-10-09).
-  //     Full 1M context at standard rates, so no tiers. ──
   describe('Claude Sonnet 5.5', () => {
     test('resolves with its published per-MTok rates and classifies as sonnet', () => {
       const pricing = registry.lookup('claude-sonnet-5-5');
@@ -652,11 +619,6 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Haiku 5.5 (2026-10-09 live pricing page, platform.claude.com/docs/en/
-  //     about-claude/pricing): priced by prompt length. Up to 100K prompt tokens
-  //     $0.10 input / $0.125 5m write / $0.20 1h write / $0.01 cache read /
-  //     $0.50 output; over 100K, $0.50 / $0.625 / $1 / $0.05 / $2.50. The prompt
-  //     counts cache reads and writes too. ──
   describe('Claude Haiku 5.5', () => {
     test('resolves with its published base rates, a 100K prompt tier, and classifies as haiku', () => {
       const pricing = registry.lookup('claude-haiku-5-5');
@@ -682,7 +644,6 @@ describe('PricingRegistry', () => {
     });
 
     test('bills a prompt of exactly 100K at base rates and one over it at the higher rates', () => {
-      // Prompt = input + cache reads + cache writes; the 1h part is a share of the writes.
       const tokens = { input: 40_000, output: 10_000, cacheRead: 50_000, cacheWrite: 10_000, cacheWrite1h: 4_000 };
       const at = registry.calculate('claude-haiku-5-5', tokens);
       const over = registry.calculate('claude-haiku-5-5', { ...tokens, input: 40_001 });
@@ -694,9 +655,6 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Claude 1-hour cache writes (2x input, vs 1.25x for 5-minute writes) ──
-  // Rates from the live pricing page's "1h cache writes" column (2026-10-04;
-  // Haiku 5.5 2026-10-09, its up-to-100K-prompt rate).
   describe('Claude 1-hour cache writes', () => {
     const ONE_HOUR_RATES: Record<string, number> = {
       'claude-fable-5-1': 20, 'claude-fable-5': 20, 'claude-opus-5-5': 8, 'claude-opus-5': 10,
@@ -715,7 +673,6 @@ describe('PricingRegistry', () => {
     });
 
     test('bills the 1-hour part of the cache writes at the 1-hour rate and the rest at the 5-minute rate', () => {
-      // Opus 5: 5m write $6.25, 1h write $10 per MTok.
       const cost = registry.calculate('claude-opus-5', { input: 0, output: 0, cacheWrite: 1_000_000, cacheWrite1h: 600_000 });
       assert.ok(cost !== null);
       assert.ok(Math.abs(cost - (0.4 * 6.25 + 0.6 * 10)) < 1e-9, `got ${cost}`);
@@ -741,15 +698,9 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // ─── Prompt-size tiers: Google doubles rates above 200K prompt tokens ────
   describe('tiered prompt-size pricing', () => {
-    // The parser subtracts cache-write tokens from tokens_in, so the cache-write
-    // rate reflects what OpenAI charges for those tokens. Through gpt-5.6 that
-    // equaled the input rate (no surcharge). gpt-6-astra is the first OpenAI
-    // model with a genuine 1.25x cache-write surcharge ($12.50 vs $10 input),
-    // like Anthropic's structure — so cache-write must NOT be forced to the input
-    // rate here. (Codex does not currently emit cache-write tokens, so this rate
-    // is catalog accuracy rather than a charge applied to live Codex data today.)
+    // WHY: Use the explicit cache-write rate because it can differ from the base input price even
+    // after the parser separates those tokens.
     test('GPT tiers bill cache writes at their documented rate and apply long-context rates above 272K', () => {
       const cases = [
         { model: 'gpt-6.2-astra', base: [8, 40, 0.4, 10], long: [16, 60, 0.8, 20] },
@@ -761,8 +712,6 @@ describe('PricingRegistry', () => {
         { model: 'gpt-5.6-sol', base: [5, 30, 0.5, 5], long: [10, 45, 1, 10] },
         { model: 'gpt-5.6-terra', base: [2, 12, 0.2, 2], long: [4, 18, 0.4, 4] },
         { model: 'gpt-5.6-luna', base: [0.2, 1.2, 0.02, 0.2], long: [0.4, 1.8, 0.04, 0.4] },
-        // Pricing page (2026-10-27): GPT-6.1 Terra, and the 272K tier of GPT-5.5
-        // and GPT-5.4, which have no cache-write price.
         { model: 'gpt-6.1-terra', base: [1, 5, 0.05, 1.25], long: [2, 7.5, 0.1, 2.5] },
         { model: 'gpt-5.5', base: [5, 30, 0.5, 0], long: [10, 45, 1, 0] },
         { model: 'gpt-5.5-pro', base: [30, 180, 0, 0], long: [60, 270, 0, 0] },
@@ -792,7 +741,6 @@ describe('PricingRegistry', () => {
     });
 
     test('GPT-5.4 mini and nano bill at one rate with no long-context tier', () => {
-      // Pricing page (2026-10-27). Codex used GPT-5.4 mini, which billed $0 unpriced.
       for (const { model, rates } of [
         { model: 'gpt-5.4-mini', rates: [0.75, 4.5, 0.075] },
         { model: 'gpt-5.4-nano', rates: [0.2, 1.25, 0.02] },
@@ -806,27 +754,23 @@ describe('PricingRegistry', () => {
     });
 
     test('Gemini 3.1 Pro uses base rates at/under the 200K prompt threshold', () => {
-      // 150K input + 40K cacheRead = 190K prompt → base tier
       const cost = registry.calculate('gemini-3.1-pro-preview', {
         input: 150_000,
         output: 50_000,
         cacheRead: 40_000,
       });
       assert.ok(cost !== null);
-      // base: input $2, output $12, cacheRead $0.20
       const expected = 0.3 + 0.6 + 0.008;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
     });
 
     test('Gemini 3.1 Pro doubles all rates when the prompt exceeds 200K (cacheRead counts toward the threshold)', () => {
-      // 150K input + 100K cacheRead = 250K prompt → >200K tier
       const cost = registry.calculate('gemini-3.1-pro-preview', {
         input: 150_000,
         output: 50_000,
         cacheRead: 100_000,
       });
       assert.ok(cost !== null);
-      // >200K: input $4, output $18, cacheRead $0.40
       const expected = 0.6 + 0.9 + 0.04;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
     });
@@ -837,7 +781,6 @@ describe('PricingRegistry', () => {
         output: 0,
       });
       assert.ok(cost !== null);
-      // exactly 200K → base $2 input
       assert.ok(Math.abs(cost - 0.4) < 0.0001, `got ${cost}`);
     });
 
@@ -845,29 +788,23 @@ describe('PricingRegistry', () => {
       const base = registry.calculate('gemini-2.5-pro', { input: 100_000, output: 100_000 });
       const over = registry.calculate('gemini-2.5-pro', { input: 300_000, output: 100_000 });
       assert.ok(base !== null && over !== null);
-      // base: 100K*$1.25 + 100K*$10
       assert.ok(Math.abs(base - (0.125 + 1.0)) < 0.0001, `base got ${base}`);
-      // over: 300K*$2.50 + 100K*$15
       assert.ok(Math.abs(over - (0.75 + 1.5)) < 0.0001, `over got ${over}`);
     });
 
     test('a flat model (no tiers) is unaffected by a large prompt', () => {
-      // gemini-3.5-flash is flat; 2M prompt must still use the single rate
       const cost = registry.calculate('gemini-3.5-flash', {
         input: 1_000_000,
         output: 0,
         cacheRead: 1_000_000,
       });
       assert.ok(cost !== null);
-      // 1M*$1.50 + 1M*$0.15, no doubling
       assert.ok(Math.abs(cost - (1.5 + 0.15)) < 0.0001, `got ${cost}`);
     });
 
-    // Newer Gemini Flash models must be priced, not silently billed as $0.
     test('newer Gemini Flash / Flash-Lite models resolve to real rates', () => {
       const flashPromo = registry.lookup('gemini-3.8-flash');
       assert.ok(flashPromo, 'gemini-3.8-flash missing from registry');
-      // Promotional rate through 2026-12-31 (reverts to $1.50 in — no date-awareness yet).
       assert.equal(flashPromo.inputCostPerToken, 0.75 / 1_000_000);
       assert.equal(flashPromo.outputCostPerToken, 3.75 / 1_000_000);
       for (const m of ['gemini-3.7-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-flash-lite']) {
@@ -877,8 +814,8 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // effectiveRates exposes the same tier selection to non-calculate() consumers
-  // (e.g. usage-summary cache-savings), so their figures agree with billing.
+  // WHY: Cache-savings reads use the rate helper separately from billing. Both must select the same
+  // tier.
   describe('effectiveRates', () => {
     test('returns base rates for a small prompt and tier rates once it exceeds 200K', () => {
       const base = registry.effectiveRates('gemini-3.1-pro-preview', { input: 100_000, output: 0, cacheRead: 50_000 });
@@ -895,11 +832,8 @@ describe('PricingRegistry', () => {
     });
   });
 
-  // OpenRouter-routed benchmark models (openbench bake-off). Rates are the
-  // OpenRouter 2026-08-27 snapshot embedded in
-  // _forks/openbench/experiments/analyze_cost.py; reasoning tokens are billed at
-  // the output rate, the vendor convention, so callers fold reasoning into
-  // `output` before calling calculate().
+  // WHY: Provider billing folds reasoning into output for these models, so the fixture keeps both on
+  // the same pricing basis.
   describe('OpenRouter benchmark models', () => {
     test('prices glm-5.3-flash across all four token classes', () => {
       const cost = registry.calculate('glm-5.3-flash', {
@@ -909,7 +843,6 @@ describe('PricingRegistry', () => {
         cacheWrite: 1_000_000,
       });
       assert.ok(cost !== null);
-      // 0.075 in + 0.25 out + 0.015 cacheRead + 0.075 cacheWrite
       assert.ok(Math.abs(cost - (0.075 + 0.25 + 0.015 + 0.075)) < 1e-9, `got ${cost}`);
     });
 
@@ -937,7 +870,6 @@ describe('PricingRegistry', () => {
   });
 });
 
-// ─── Integration tests: pricing in ingestion pipeline ────────────────────
 
 let server: Server;
 let baseUrl = '';
@@ -1024,7 +956,6 @@ describe('Pricing auto-calculation on ingest', () => {
 
     const event = events.events[0];
     assert.ok(event.cost_usd !== null && event.cost_usd !== undefined);
-    // 1M * $3/MTok + 100K * $15/MTok = $3.00 + $1.50 = $4.50
     const cost = event.cost_usd as number;
     assert.ok(Math.abs(cost - 4.5) < 0.0001, `Expected ~$4.50, got $${cost}`);
   });
@@ -1062,7 +993,6 @@ describe('Pricing auto-calculation on ingest', () => {
 
     const events = await getEvents();
     const cost = events.events[0].cost_usd as number;
-    // 100K * $3/MTok + 50K * $15/MTok + 500K * $0.3/MTok + 10K * $3.75/MTok
     const expected = 0.3 + 0.75 + 0.15 + 0.0375;
     assert.ok(Math.abs(cost - expected) < 0.0001, `Expected ~$${expected}, got $${cost}`);
   });
@@ -1108,7 +1038,6 @@ describe('Pricing auto-calculation on ingest', () => {
     assert.equal(res.status, 201);
 
     const events = await getEvents();
-    // tokens_in and tokens_out both default to 0, so no calculation
     assert.equal(events.events[0].cost_usd, null);
   });
 
@@ -1125,7 +1054,6 @@ describe('Pricing auto-calculation on ingest', () => {
 
     const events = await getEvents();
     const cost = events.events[0].cost_usd as number;
-    // 500K * $2/MTok + 200K * $8/MTok = $1.00 + $1.60 = $2.60
     assert.ok(Math.abs(cost - 2.6) < 0.0001, `Expected ~$2.60, got $${cost}`);
   });
 
@@ -1148,7 +1076,6 @@ describe('Pricing auto-calculation on ingest', () => {
   });
 
   test('stats endpoint includes total_cost_usd from auto-calculated costs', async () => {
-    // Ingest two events with known costs
     await postJson(`${baseUrl}/api/events`, {
       session_id: 'sess-stats-cost',
       agent_type: 'claude_code',
@@ -1169,7 +1096,6 @@ describe('Pricing auto-calculation on ingest', () => {
     const statsRes = await fetch(`${baseUrl}/api/stats`);
     assert.equal(statsRes.status, 200);
     const stats = await statsRes.json() as { total_cost_usd: number };
-    // $3.00 + $15.00 = $18.00
     assert.ok(Math.abs(stats.total_cost_usd - 18.0) < 0.0001, `Expected ~$18.00, got $${stats.total_cost_usd}`);
   });
 
@@ -1199,7 +1125,6 @@ describe('Pricing auto-calculation on ingest', () => {
     const events = await getEvents();
     assert.equal(events.total, 2);
 
-    // Both should have cost_usd populated
     for (const event of events.events) {
       assert.ok(event.cost_usd !== null, `Event with model ${event.model} should have cost_usd`);
       assert.ok((event.cost_usd as number) > 0);
@@ -1236,13 +1161,11 @@ describe('Pricing auto-calculation on ingest', () => {
     const events = await getEvents();
     assert.equal(events.total, 1);
     const cost = events.events[0].cost_usd as number;
-    // 100K * $3/MTok + 20K * $15/MTok = $0.30 + $0.30 = $0.60
     assert.ok(cost !== null);
     assert.ok(Math.abs(cost - 0.6) < 0.0001, `Expected ~$0.60, got $${cost}`);
   });
 
   test('OTEL cost metric takes precedence over auto-calculation', async () => {
-    // When OTEL provides cost_usd via log attributes, it should be preserved
     const payload = {
       resourceLogs: [{
         resource: {
@@ -1271,7 +1194,6 @@ describe('Pricing auto-calculation on ingest', () => {
 
     const events = await getEvents();
     assert.equal(events.total, 1);
-    // The OTel parser extracts cost_usd from body, so insertEvent should preserve it
     assert.equal(events.events[0].cost_usd, 42.0);
   });
 });

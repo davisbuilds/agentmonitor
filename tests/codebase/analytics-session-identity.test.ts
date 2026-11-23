@@ -4,9 +4,8 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
-// Analytics counts sessions. Reading browsing_sessions directly counts a Codex
-// session stored under both its rollout basename and its native UUID twice, and
-// its messages with it, so every Analytics read takes `listed_sessions`.
+// WHY: One Codex session can have rollout and native aliases. Direct reads from the browsing
+// projection count both.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const source = fs.readFileSync(path.join(ROOT, 'src/db/v2-queries.ts'), 'utf8');
 

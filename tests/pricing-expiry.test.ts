@@ -26,9 +26,8 @@ describe('pricing: Claude Sonnet 5 permanent rate', () => {
     const pricing = pricingRegistry.lookup('claude-sonnet-5');
     assert.ok(pricing, 'claude-sonnet-5 is missing from the pricing registry');
 
-    // Read back through the registry, not the JSON: this is the path that prices
-    // an event, and it stores per-token rates. Rounding absorbs the per-MTok
-    // round-trip float noise.
+    // WHY: Read through the registry that prices live events so a correct JSON file cannot hide a
+    // stale runtime copy.
     const perMTok = (perToken: number) => Math.round(perToken * 1e6 * 1000) / 1000;
     assert.deepEqual(
       {

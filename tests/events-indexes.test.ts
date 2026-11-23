@@ -24,7 +24,6 @@ before(async () => {
 
   initSchema();
 
-  // Seed a few events so query plans have something to resolve against.
   const db = getDb();
   const insert = db.prepare(
     `INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, created_at, model, tokens_in, tokens_out, cost_usd)
@@ -60,14 +59,11 @@ test('the redundant bare session_id index is dropped (superseded by composite)',
 });
 
 test('filter-option enumeration keeps the event-type index', () => {
-  // Low-cardinality, so useless for row filtering, but it covers the
-  // `SELECT DISTINCT event_type ... ORDER BY` filter-option read.
+  // WHY: The low-cardinality index still matters because it covers the distinct-value filter query.
   assert.ok(indexNames().has('idx_events_event_type'), 'idx_events_event_type should be retained for DISTINCT enumeration');
 });
 
 test('filter-option DISTINCT enumeration uses a covering index (no temp b-tree)', () => {
-  // An agent-ordered composite leads with agent_type, so no agent_type-only
-  // index is needed for this read (v14 dropped it).
   for (const column of ['agent_type', 'event_type']) {
     const plan = queryPlan(`SELECT DISTINCT ${column} FROM events WHERE ${column} IS NOT NULL ORDER BY ${column}`);
     assert.match(plan, /COVERING INDEX/, `${column}: expected covering index, got: ${plan}`);
@@ -83,7 +79,6 @@ test('v14 retires the events indexes no statement needs', () => {
 });
 
 test('a per-study benchmark read seeks the study index', () => {
-  // The benchmark index would seek source alone and visit every benchmark row.
   const plan = queryPlan(`SELECT * FROM events WHERE source = 'benchmark' AND study_id = ?`, 'study-1');
   assert.match(plan, /idx_events_study_id \(study_id=\?\)/, plan);
 });
@@ -124,9 +119,7 @@ test('event-session reconciliation uses the dedicated composite index', () => {
 });
 
 test('OTEL usage reconciliation seeks imported rows by session, agent and normalized timestamp', async () => {
-  // The rule's own SQL, correlated on the OTEL row's agent: a partial index
-  // restricted to one agent cannot serve it, and the lookup falls back to a
-  // broader session index that scans every imported row of the session.
+  // WHY: The correlation spans multiple agents. A partial agent index cannot support that lookup.
   const { overlappingOtelUsageCondition } = await import('../src/db/usage-reconciliation.js');
   const plan = queryPlan(`SELECT e.id FROM events e WHERE e.session_id = ? AND ${overlappingOtelUsageCondition('e')}`, 'session-1');
   assert.match(

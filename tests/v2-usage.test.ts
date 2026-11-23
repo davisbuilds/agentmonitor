@@ -37,8 +37,7 @@ function makeSession(sessionId: string, project: string, startDate: string): str
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-usage-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
-  // Fixtures are authored as UTC instants; report their days in UTC so this
-  // suite reads the same on any host. Local-day behavior has its own suite.
+  // WHY: Pin UTC for these fixtures so their dates are independent of the host.
   process.env.AGENTMONITOR_TIMEZONE = 'UTC';
 
   const { initSchema } = await import('../src/db/schema.js');
@@ -219,7 +218,6 @@ describe('GET /api/v2/usage/summary', () => {
     assert.equal(body.total_usage_events, 5);
     assert.equal(body.total_sessions, 4);
     assert.equal(body.active_days, 3);
-    // Cache reads over every prompt token: uncached input, cache reads and writes.
     assert.equal(body.cache_hit_rate, 0.078727);
     assert.equal(body.estimated_cache_savings_usd, 0.001005);
     assert.equal(body.pricing_known_events, 4);
@@ -341,9 +339,6 @@ describe('GET /api/v2/usage/daily', () => {
     assert.equal(res.status, 200);
 
     const body = await res.json() as { data: Array<{ date: string }> };
-    // Regression: ISO bounds used to produce an Invalid Date inside
-    // enumerateDateRange, collapsing the series to [] and hiding the
-    // monitor "Spend Over Time" chart whenever a cost window was active.
     assert.deepEqual(body.data.map(row => row.date), ['2026-04-01', '2026-04-02', '2026-04-03']);
   });
 });
@@ -422,7 +417,6 @@ describe('GET /api/v2/usage/models/daily', () => {
       [
         [['claude-sonnet-4-5-20250929', 0.02, 2]],
         [['gpt-5.4', 0.03, 1]],
-        // Highest-cost model first within the day.
         [['gpt-5.4', 0.02, 1], ['unknown-expensive-model', 0.015, 1]],
         [['claude-3-opus-20240229', 0.005, 1]],
       ],
@@ -752,10 +746,8 @@ describe('Codex usage source reconciliation', () => {
 });
 
 describe('GET /api/v2/usage/overview', () => {
-  // The overview exists to collapse the Usage page's 8 requests (and its 8
-  // redundant coverage computations) into one scan. It is only safe to swap the
-  // page onto it if it is indistinguishable from the endpoints it replaces, so
-  // assert equivalence against each of them rather than re-asserting values.
+  // WHY: The aggregated overview replaces separately consumed endpoints, so test its outputs against
+  // those actual reads before treating it as equivalent.
   const query = 'date_from=2026-04-01&date_to=2026-04-04';
 
   test('matches every per-panel endpoint it replaces', async () => {
@@ -787,7 +779,6 @@ describe('GET /api/v2/usage/overview', () => {
     assert.deepEqual(overview.agents, agents.data);
     assert.deepEqual(overview.top_sessions, topSessions.data);
 
-    // Coverage is identical on every panel today; the overview carries it once.
     assert.deepEqual(overview.coverage, daily.coverage);
   });
 
@@ -883,9 +874,8 @@ describe('GET /api/v2/usage/overview', () => {
         client_timestamp: '2026-06-01T10:00:00Z',
         source: 'otel',
       });
-      // The later authoritative import makes the OTEL event overlap, but sits
-      // outside the requested day. The optimized denominator must therefore
-      // remove the session itself, not only subtract one event.
+      // WHY: The authoritative import changes session coverage even outside the requested window, so
+      // subtracting an overlapping event alone is insufficient.
       insertEvent({
         event_id: eventIds[1],
         session_id: 'usage-vanishing-session',
@@ -950,17 +940,14 @@ describe('GET /api/v2/usage/facets', () => {
 
     const body = await res.json() as { models: string[]; projects: string[] };
 
-    // The model dropdown must still offer every model, or you could never switch away.
     assert.equal(body.models.length, 4);
-    // Other facets narrow to what the selected model actually ran on.
     assert.deepEqual(body.projects, ['alpha', 'beta']);
   });
 });
 
 describe('usage coverage from shared rows', () => {
-  // Panels compute coverage from the usage rows they already selected. That
-  // path counts the matching population index-only and subtracts the Codex
-  // OTEL overlap separately; it must equal the per-group computation.
+  // WHY: The index-only panel denominator and per-group computation must describe the same
+  // population.
   test('equals coverage computed on its own, across filters', async () => {
     const { getUsageCoverage, getUsageRows } = await import('../src/db/v2-queries.js');
     const window = { date_from: '2026-04-01', date_to: '2026-04-04' };

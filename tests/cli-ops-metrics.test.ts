@@ -9,7 +9,6 @@ import { formatAttrs, formatOpsMetrics } from '../src/cli/formatters/ops.js';
 import { resolveSince } from '../src/cli/commands/ops.js';
 import type { OperationalMetricSummaryRow } from '../src/db/v2-queries.js';
 
-// --- Relative --since resolution (pure) -----------------------------------
 
 test('resolveSince converts a relative shorthand to now - duration', () => {
   const now = Date.parse('2026-09-11T12:00:00.000Z');
@@ -27,17 +26,14 @@ test('resolveSince passes through an absolute ISO value and undefined', () => {
 });
 
 test('resolveSince rejects a malformed --since instead of silently matching nothing', () => {
-  // A typo'd absolute value would make SQLite datetime() return NULL, yielding
-  // an empty result that falsely implies no events occurred.
+  // WHY: SQLite can turn an invalid date into NULL and silently report no activity.
   assert.throws(() => resolveSince('notadate'), /--since/);
   assert.throws(() => resolveSince('2026-13-40'), /--since/);
 });
 
-// --- Pure formatter behavior (the TDD unit) -------------------------------
 
 test('formatAttrs renders sorted k=v and a dash for no attrs', () => {
   assert.equal(formatAttrs({ state: 'succeeded' }), 'state=succeeded');
-  // Keys are sorted so the same bag always renders identically.
   assert.equal(formatAttrs({ state: 'skipped', reason: 'rate_limit' }), 'reason=rate_limit state=skipped');
   assert.equal(formatAttrs(null), '-');
   assert.equal(formatAttrs({}), '-');
@@ -107,7 +103,6 @@ test('ops metrics --json emits the grouped summary rows', async () => {
   const payload = JSON.parse(stdout) as { metrics: OperationalMetricSummaryRow[] };
   assert.ok(Array.isArray(payload.metrics));
   const startup = payload.metrics.filter(m => m.metric_name === 'codex.memory.startup');
-  // Two distinct attrs bags → two grouped rows; the succeeded bag has 2 occurrences.
   assert.equal(startup.length, 2);
   assert.equal(startup.find(m => (m.attrs as { state?: string })?.state === 'succeeded')?.occurrences, 2);
 });
@@ -139,8 +134,8 @@ test('ops metrics --since applies a relative window end-to-end', async () => {
     INSERT INTO otel_metrics (session_id, agent_type, metric_name, attrs, value, temporality, created_at, client_timestamp)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  insert.run('s3', 'codex', 'ops.window.probe', JSON.stringify({ age: 'recent' }), 1, 'delta', iso(60_000), null); // 1m ago
-  insert.run('s3', 'codex', 'ops.window.probe', JSON.stringify({ age: 'stale' }), 1, 'delta', iso(2 * 86_400_000), null); // 2d ago
+  insert.run('s3', 'codex', 'ops.window.probe', JSON.stringify({ age: 'recent' }), 1, 'delta', iso(60_000), null);
+  insert.run('s3', 'codex', 'ops.window.probe', JSON.stringify({ age: 'stale' }), 1, 'delta', iso(2 * 86_400_000), null);
 
   const recent = await runCli(['ops', 'metrics', '--name-prefix', 'ops.window.probe', '--since', '1h', '--json']);
   const recentMetrics = (JSON.parse(recent.stdout) as { metrics: OperationalMetricSummaryRow[] }).metrics;

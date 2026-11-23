@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-claude-cost-state-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -72,7 +71,7 @@ describe('checkClaudeTranscriptCosts', () => {
   });
   beforeEach(() => {
     const db = getDb();
-    // Fail closed before the table-wide deletes if the handle is not the fixture's.
+    // WHY: Check the disposable handle before any table-wide delete.
     assert.equal(fs.realpathSync(db.name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
     db.exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM agents;');
     for (const entry of fs.readdirSync(projectDir)) fs.rmSync(path.join(projectDir, entry), { recursive: true, force: true });
@@ -103,8 +102,6 @@ describe('checkClaudeTranscriptCosts', () => {
   });
 
   test('a checkpoint counts from its own process start: usage before a counter reset is not compared', () => {
-    // A process that did not restore the session's cost state starts its
-    // totals at zero, and its checkpoint carries that process's start.
     fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
       assistant('2026-10-21T10:00:00.000Z'), costState(90, 0),
       assistant('2026-10-23T10:00:00.000Z'), costState(4, 0, Date.parse('2026-10-23T09:00:00.000Z')),
@@ -119,7 +116,6 @@ describe('checkClaudeTranscriptCosts', () => {
 
   test('a model the transcripts record but amon never imported is a coverage gap, not unrecorded usage', () => {
     fs.mkdirSync(path.join(projectDir, SESSION, 'subagents'), { recursive: true });
-    // The Haiku request is in the session's own transcript; a subagent's model is in its own file.
     fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
       assistant('2026-10-21T09:00:00.000Z', 'claude-haiku-4-5-20251001'), assistant('2026-10-21T10:00:00.000Z'),
       { ...costState(4, 0.5), modelUsage: { ...(costState(4, 0.5).modelUsage as object), 'claude-sonnet-5': modelUsage(2) } },
@@ -164,8 +160,6 @@ describe('checkClaudeTranscriptCosts', () => {
     assert.equal(check.ratio, null);
   });
 
-  // The harness's own tokens priced at amon's rates separate usage amon does not
-  // hold (coverage) from a disagreement about what a token costs (rate_ratio).
   const usageLine = (model: string, u: { cr: number; cw: number; cost: number }): Line => ({
     type: 'cost-state', sessionId: SESSION, totalCostUSD: u.cost, startTime: Date.parse('2026-10-20T00:00:00.000Z'),
     modelUsage: { [model]: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: u.cr, cacheCreationInputTokens: u.cw, costUSD: u.cost } },
@@ -178,7 +172,6 @@ describe('checkClaudeTranscriptCosts', () => {
   const close = (a: number | null, b: number) => a !== null && Math.abs(a - b) < 1e-9;
 
   test('a harness that bills more per token reads as a rate disagreement, not missing usage', () => {
-    // Sonnet 5.5 cache reads: the pricing page's $0.10/MTok, which Claude Code bills at $0.20.
     fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
       assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-sonnet-5-5', { cr: 1_000_000, cw: 0, cost: 0.2 }),
     ]));
@@ -194,8 +187,6 @@ describe('checkClaudeTranscriptCosts', () => {
   });
 
   test('usage amon does not hold reads as coverage below 1, cache writes at the rate amon stored them', () => {
-    // Opus 5.5: cache read $0.20, 1-hour cache write $8 per MTok. amon holds
-    // half the reads; its cache writes are all 1-hour, so the harness's are priced so.
     fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
       assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-opus-5-5', { cr: 2_000_000, cw: 100_000, cost: 1.2 }),
     ]));
@@ -207,8 +198,8 @@ describe('checkClaudeTranscriptCosts', () => {
     assert.ok(close(opus.rate_ratio, 1), `rate ${opus.rate_ratio}`);
   });
 
-  // Haiku 5.5 bills a request whose prompt passes 100K at 5x. A checkpoint holds
-  // only the session's totals, so they cannot say which tier each request paid.
+  // WHY: Session totals cannot recover which individual prompts crossed the provider’s pricing
+  // threshold.
   test('a tiered model whose checkpoint total passes its threshold is not repriced as one request', () => {
     fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([
       assistant('2026-10-21T10:00:00.000Z'), usageLine('claude-haiku-5-5', { cr: 120_000, cw: 0, cost: 0.0012 }),
@@ -251,7 +242,6 @@ describe('checkClaudeTranscriptCosts', () => {
   test('subagent transcripts are not sessions of their own', () => {
     fs.mkdirSync(path.join(projectDir, SESSION, 'subagents'), { recursive: true });
     fs.writeFileSync(path.join(projectDir, SESSION, 'subagents', 'agent-a1.jsonl'), text([assistant('2026-10-21T10:00:00.000Z')]));
-    // Older Claude Code versions kept subagent transcripts beside the session.
     fs.writeFileSync(path.join(projectDir, 'agent-a2.jsonl'), text([assistant('2026-10-21T10:00:00.000Z')]));
     fs.writeFileSync(path.join(projectDir, `${SESSION}.jsonl`), text([assistant('2026-10-21T10:00:00.000Z'), costState(4, 0)]));
     assert.deepEqual(checkClaudeTranscriptCosts({ claudeDir }).map(check => check.session_id), [SESSION]);

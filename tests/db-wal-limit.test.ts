@@ -14,9 +14,7 @@ after(() => {
 });
 
 test('connections cap the WAL file a checkpoint leaves behind', async () => {
-  // Without a limit SQLite keeps the WAL at its largest size forever: a store
-  // held a WAL about 8% of its database's size long after the write burst
-  // that grew it.
+  // WHY: SQLite can retain the WAL’s high-water size after the burst that grew it.
   const connection = await import('../src/db/connection.js');
   closeDb = connection.closeDb;
   const db = connection.getDb();

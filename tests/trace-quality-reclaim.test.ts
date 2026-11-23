@@ -58,7 +58,6 @@ test('export seam survives dropping its former parents after the FK-free migrati
   const db = getDb();
   seedLegacyExportState();
 
-  // Sanity: the legacy table really does carry the FK.
   const before = (db.prepare("SELECT sql FROM sqlite_master WHERE name='trace_quality_export_state'").get() as { sql: string }).sql;
   assert.match(before, /REFERENCES\s+trace_quality_traces/i);
 
@@ -67,12 +66,9 @@ test('export seam survives dropping its former parents after the FK-free migrati
   const after = (db.prepare("SELECT sql FROM sqlite_master WHERE name='trace_quality_export_state'").get() as { sql: string }).sql;
   assert.doesNotMatch(after, /REFERENCES\s+trace_quality_/i, 'FKs to the warehouse tables are gone');
 
-  // The pre-existing row is preserved through the rebuild.
   assert.equal((db.prepare('SELECT COUNT(*) AS c FROM trace_quality_export_state').get() as { c: number }).c, 1);
-  // Indexes were recreated.
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type='index' AND name='idx_tq_export_local_trace'").get());
 
-  // The whole point: dropping the former parents no longer breaks inserts.
   db.pragma('foreign_keys = OFF');
   db.exec('DROP TABLE trace_quality_traces; DROP TABLE trace_quality_observations;');
   db.pragma('foreign_keys = ON');
@@ -84,12 +80,11 @@ test('export seam survives dropping its former parents after the FK-free migrati
 
 test('the migration is a no-op when export_state is already FK-free or absent', () => {
   const db = getDb();
-  // Already FK-free now (previous test rebuilt it); re-running must not change it.
   const sqlBefore = (db.prepare("SELECT sql FROM sqlite_master WHERE name='trace_quality_export_state'").get() as { sql: string }).sql;
   ensureTraceQualityExportStateFkFree(db);
   const sqlAfter = (db.prepare("SELECT sql FROM sqlite_master WHERE name='trace_quality_export_state'").get() as { sql: string }).sql;
   assert.equal(sqlAfter, sqlBefore);
 
   db.exec('DROP TABLE trace_quality_export_state');
-  assert.doesNotThrow(() => ensureTraceQualityExportStateFkFree(db)); // absent → no-op
+  assert.doesNotThrow(() => ensureTraceQualityExportStateFkFree(db));
 });

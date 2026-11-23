@@ -41,9 +41,6 @@ function at(second: number): string {
   return `2026-07-01T00:00:${String(second).padStart(2, '0')}.000Z`;
 }
 
-// Every kind of line the Claude parser carries state across: a meta prompt
-// that is not the first message, usage and model, a malformed record, a skill
-// consultation, a compaction, a subagent spawn, a sidechain turn and a new cwd.
 const CLAUDE_LINES = [
   JSON.stringify({ type: 'user', isMeta: true, cwd: '/work/alpha', entrypoint: 'cli', timestamp: at(0), message: { role: 'user', content: '<local-command-caveat>ignore</local-command-caveat>' } }),
   JSON.stringify({ type: 'user', cwd: '/work/alpha', timestamp: at(1), message: { role: 'user', content: [{ type: 'text', text: 'please inspect the repo' }] } }),
@@ -58,8 +55,8 @@ const CLAUDE_LINES = [
   JSON.stringify({ type: 'assistant', cwd: '/work/beta', timestamp: at(10), message: { role: 'assistant', model: 'claude-opus-5-5', usage: { input_tokens: 12, cache_read_input_tokens: 4000 }, content: [{ type: 'thinking', thinking: 'hmm' }, { type: 'text', text: 'done' }] } }),
 ];
 
-// A catalog presented before the first turn_context and token count, so its
-// recorded model and window come from later lines until both have appeared.
+// WHY: The catalog can precede model and window reporting, so later lines must fill in that earlier
+// observation.
 const CODEX_LINES = [
   JSON.stringify({ type: 'session_meta', timestamp: at(0), payload: { id: 'c0dex000-0000-4000-8000-000000000000', cwd: '/work/alpha', originator: 'codex_cli_rs', cli_version: '0.150.0', source: 'cli' } }),
   JSON.stringify({ type: 'response_item', timestamp: at(1), payload: { role: 'developer', content: [{ type: 'input_text', text: catalog }] } }),
@@ -68,7 +65,6 @@ const CODEX_LINES = [
   JSON.stringify({ type: 'response_item', timestamp: at(4), payload: { role: 'user', content: [{ type: 'input_text', text: 'run the tests' }] } }),
   JSON.stringify({ type: 'response_item', timestamp: at(5), payload: { type: 'function_call', name: 'exec_command', call_id: 'call-1', arguments: JSON.stringify({ cmd: 'cat /skills/test-strategy/SKILL.md' }) } }),
   JSON.stringify({ type: 'world_state', timestamp: at(6), payload: { state: { agents_md: { directory: '/work/alpha', text: 'instructions' } } } }),
-  // The call's output lands a line later, so a split between them attaches it to a stored message.
   JSON.stringify({ type: 'response_item', timestamp: at(6), payload: { type: 'function_call_output', call_id: 'call-1', output: 'skill text' } }),
   JSON.stringify({ type: 'compacted', timestamp: at(7), payload: { replacement_history: [{ type: 'response_item', payload: { role: 'developer', content: [{ type: 'input_text', text: catalog.replace('Test behavior.', 'Test carefully.') }] } }] } }),
   JSON.stringify({ type: 'response_item', timestamp: at(8), payload: { role: 'assistant', content: [{ type: 'output_text', text: 'tests pass' }] } }),
@@ -77,8 +73,7 @@ const CODEX_LINES = [
   JSON.stringify({ type: 'response_item', timestamp: at(11), payload: { role: 'user', content: [{ type: 'input_text', text: 'thanks' }] } }),
 ];
 
-// A spawned subagent whose rollout opens with a copy of its parent's turn. The
-// copy is dropped only once the child's own first turn has been written.
+// WHY: The copied prefix can be recognized only after the child writes work of its own.
 const SUBAGENT_LINES = [
   JSON.stringify({ type: 'session_meta', timestamp: at(0), payload: { id: '01a0a82a-8672-7012-bbc6-467629b03bbe', cwd: '/work/alpha', source: { subagent: { thread_spawn: { parent_thread_id: 'parent-1' } } } } }),
   JSON.stringify({ type: 'turn_context', timestamp: at(0), payload: { turn_id: '01a0a000-0000-7000-8000-000000000000', model: 'gpt-5.6-terra' } }),
@@ -145,9 +140,8 @@ function snapshot(file: string): unknown {
       SELECT agent_type, source_turn_id, status, title, started_at, ended_at
       FROM session_turns WHERE session_id = ? ORDER BY id
     `),
-    // Items in their turn's order. Row order follows arrival: a Codex tool
-    // result whose call an earlier sync stored joins that call's turn later,
-    // as the live stream shows it.
+    // WHY: A tool result may arrive after the sync that recorded its call. Join it into the existing
+    // turn without changing event arrival order.
     items: all(`
       SELECT t.source_turn_id, i.ordinal, i.source_item_id, i.kind, i.status, i.payload_json, i.created_at
       FROM session_items i JOIN session_turns t ON t.id = i.turn_id
@@ -174,13 +168,8 @@ function splitSync(agent: Agent, name: string, lines: string[], split: number): 
 }
 
 const FIXTURES: Array<{ agent: Agent; name: string; lines: string[]; parses: string[] }> = [
-  // Split 1 holds only a meta prompt, which is a message, so it is resumable.
   { agent: 'claude', name: 'claude', lines: CLAUDE_LINES, parses: Array(CLAUDE_LINES.length - 1).fill('resumed') },
-  // Split 1 has no message to store. Splits 2 and 3 recorded the catalog before
-  // the model and the window had appeared.
   { agent: 'codex', name: 'codex', lines: CODEX_LINES, parses: ['full', 'full', 'full', ...Array(CODEX_LINES.length - 4).fill('resumed')] },
-  // Splits 1 to 4 end before the child's own first turn; split 5 ends at it, so
-  // the copy is dropped and no message is left to store.
   { agent: 'codex', name: 'subagent', lines: SUBAGENT_LINES, parses: ['full', 'full', 'full', 'full', 'full', 'resumed'] },
 ];
 
@@ -271,7 +260,6 @@ describe('watcher parse falls back to the whole file', () => {
   });
 
   test('while a Codex rollout has not yet written its session_meta line', () => {
-    // The session line names the start time and project, whatever its position.
     const lines = [CODEX_LINES[4], CODEX_LINES[0], CODEX_LINES[11]];
     const file = transcript('fallback-no-meta', lines.slice(0, 1));
     sync('codex', file);

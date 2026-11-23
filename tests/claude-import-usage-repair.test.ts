@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-usage-repair-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -149,7 +148,7 @@ describe('Claude import usage repair', () => {
   test('reports rows whose transcript is gone as unrepairable instead of touching them', () => {
     const sessionId = 'sess-orphan';
     const claudeDir = claudeDirFor(sessionId);
-    seedInflatedRows(sessionId, 3); // no transcript written for this session
+    seedInflatedRows(sessionId, 3);
     const before = totals(sessionId);
 
     const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
@@ -160,10 +159,7 @@ describe('Claude import usage repair', () => {
   });
 
   test('still matches rows stored under the legacy positional id', () => {
-    // Ids moved onto the producer's uuid, but every row imported before that
-    // change is keyed by the positional scheme. Indexing corrections only by the
-    // new id would silently reclassify all of that repairable history as
-    // "no surviving transcript" and leave its inflated usage in place.
+    // WHY: Rows stored before UUID-based IDs still need repair through the positional lookup.
     const sessionId = 'sess-legacy-keyed';
     const claudeDir = claudeDirFor(sessionId);
     const dir = path.join(claudeDir, 'projects', '-Users-someone-project');
@@ -180,11 +176,10 @@ describe('Claude import usage repair', () => {
       line([{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }], 'uuid-lk-1'),
       line([{ type: 'text', text: 'done' }], 'uuid-lk-2'),
     ].join('\n'));
-    // The orphan count is global to the database, and earlier tests leave rows
-    // behind, so compare against a baseline rather than expecting zero.
+    // WHY: The count is database-wide, so compare against a baseline that includes earlier tests.
     const baselineOrphans = repairClaudeImportUsage(getDb(), { claudeDir, apply: false })
       .rows_without_transcript;
-    seedInflatedRows(sessionId, 3); // stored under legacy ids, as production is
+    seedInflatedRows(sessionId, 3);
 
     const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
 
@@ -200,10 +195,8 @@ describe('Claude import usage repair', () => {
   });
 
   test('refuses rows whose event id is claimed by more than one transcript', () => {
-    // A Claude child-agent transcript embeds its PARENT's sessionId, and event
-    // ids are derived from (sessionId, line index) — so a subagent file and its
-    // parent mint identical ids for the same line number. Correcting such a row
-    // from whichever file sorts later would write another transcript's tokens.
+    // WHY: Parent and child files can share a reported session ID and positional key. File ordering
+    // cannot establish ownership.
     const sessionId = 'sess-ambiguous';
     const claudeDir = claudeDirFor(sessionId);
     writeTranscript(claudeDir, sessionId);
@@ -212,14 +205,13 @@ describe('Claude import usage repair', () => {
     fs.writeFileSync(path.join(subagentDir, 'agent-child.jsonl'), [
       JSON.stringify({
         type: 'assistant',
-        sessionId, // the parent's id, as real child-agent transcripts carry
+        sessionId,
         isSidechain: true,
         timestamp: '2026-02-01T10:05:00Z',
         message: { id: 'msg_02Child', model: MODEL, usage: { input_tokens: 7, output_tokens: 9 }, content: [{ type: 'text', text: 'child' }] },
       }),
     ].join('\n'));
     seedInflatedRows(sessionId, 3);
-    // Line 0 is the colliding one: both transcripts mint this id.
     const collidingId = `import-cc-${crypto.createHash('sha256')
       .update(`claude-code:${sessionId}:0`).digest('hex').slice(0, 32)}`;
     const before = getDb()
@@ -234,14 +226,12 @@ describe('Claude import usage repair', () => {
       before,
       'the contested row keeps its own values rather than the child transcript\'s',
     );
-    // Lines 1 and 2 are claimed by one transcript only, so they are still repaired.
     assert.equal(report.rows_corrected, 2);
   });
 
   test('re-derives the persisted trace summary for repaired sessions', () => {
-    // session_trace_summary stores its own token/cost rollup, and both the
-    // trace-quality API and warehouse export read it directly. Leaving it stale
-    // would keep serving the inflated numbers after the events were fixed.
+    // WHY: Trace-quality and warehouse consumers read the materialized rollup directly, so repairing
+    // only events would leave stale totals.
     const sessionId = 'sess-summary';
     const claudeDir = claudeDirFor(sessionId);
     writeTranscript(claudeDir, sessionId);
@@ -295,8 +285,6 @@ describe('Claude import usage repair', () => {
     }
 
     test('a line stored under both its uuid id and its legacy id keeps the uuid row', () => {
-      // An importer that predates uuid ids stored the line positionally; a later
-      // one stored it again under its uuid, before the legacy bridge existed.
       const sessionId = 'sess-dual-id';
       const claudeDir = claudeDirFor(sessionId);
       writeTurns(claudeDir, sessionId, [['uuid-dual-0', 'msg_dual', '2026-02-01T10:00:00Z']]);
@@ -317,8 +305,6 @@ describe('Claude import usage repair', () => {
     });
 
     test('a repeat line stored under both ids is corrected, not counted as a duplicate', () => {
-      // The turn's second line contributes nothing, so neither of its rows bills
-      // a line another row bills; both are ordinary repeat-line corrections.
       const sessionId = 'sess-dual-id-repeat';
       const claudeDir = claudeDirFor(sessionId);
       writeTurns(claudeDir, sessionId, [
@@ -336,9 +322,8 @@ describe('Claude import usage repair', () => {
     });
 
     test('copies that disagree on what a line contributes are refused as ambiguous', () => {
-      // The copy starts partway through a turn: the copied line is a repeat in the
-      // original but the turn's first line in the copy. Neither reading is safe
-      // to pick by file order.
+      // WHY: The same line can be the first observation in one copy and a repeat in the other.
+      // Sorting files does not resolve that ambiguity.
       const original = 'sess-disagree-a-original';
       const resumed = 'sess-disagree-b-continued';
       const claudeDir = claudeDirFor(original);
@@ -358,10 +343,8 @@ describe('Claude import usage repair', () => {
       assert.equal(row(uuidId('uuid-disagree-1')).tokens_out, USAGE.output_tokens, 'the contested row keeps its values');
     });
 
-    // Under the positional scheme a child agent's line collided with its parent's
-    // line of the same number, and whichever was imported first kept the id.
-    // The child's line was later stored again under its own uuid, so the child
-    // is billed elsewhere; what the positional row may hold depends on whose it is.
+    // WHY: A later UUID import already bills the child. The earlier positional collision could belong
+    // to either transcript.
     function writeCollision(parent: string, parentLine: Record<string, unknown>) {
       const claudeDir = claudeDirFor(parent);
       const dir = path.join(claudeDir, 'projects', '-Users-someone-project');
@@ -386,7 +369,6 @@ describe('Claude import usage repair', () => {
     test('a collision row that is the parent\'s own is corrected to the parent line', () => {
       const parent = 'sess-collision-parent-row';
       const claudeDir = writeCollision(parent, billingParent);
-      // The parent's row (its timestamp and model), holding tokens it should not.
       getDb().prepare("UPDATE events SET cost_source = 'estimated' WHERE event_id = ?").run(legacyId(parent, 0));
 
       const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });
@@ -406,8 +388,6 @@ describe('Claude import usage repair', () => {
     });
 
     test('a collision row the child wrote is zeroed when the parent line bills nothing', () => {
-      // The child's usage is billed by its own row, and the parent line has none
-      // to restore, so whoever wrote the row it should hold nothing.
       const parent = 'sess-collision-child-row-quiet-parent';
       const claudeDir = writeCollision(parent, { type: 'user', message: { role: 'user', content: 'go' } });
       getDb().prepare("UPDATE events SET client_timestamp = '2026-02-01T10:05:00Z', cost_source = 'reported' WHERE event_id = ?")
@@ -421,9 +401,8 @@ describe('Claude import usage repair', () => {
     });
 
     test('a collision row the child wrote stays ambiguous when the parent line bills something', () => {
-      // Writing the parent's tokens into the child's row would bill them under the
-      // child's timestamp and model; the row's own provenance says it is not the
-      // parent's to correct.
+      // WHY: Use the stored row’s provenance because changing its usage can otherwise charge the
+      // wrong timestamp and model.
       const parent = 'sess-collision-child-row';
       const claudeDir = writeCollision(parent, billingParent);
       getDb().prepare("UPDATE events SET client_timestamp = '2026-02-01T10:05:00Z' WHERE event_id = ?").run(legacyId(parent, 0));
@@ -466,7 +445,6 @@ describe('Claude import usage repair', () => {
     });
 
     test('a positional id two transcripts both own stays ambiguous', () => {
-      // The same session's transcript under two project directories, diverged.
       const sessionId = 'sess-two-owners';
       const claudeDir = claudeDirFor(sessionId);
       writeTurns(claudeDir, sessionId, [['uuid-two-owners-a', 'msg_two_owners_a', '2026-02-01T10:00:00Z']]);
@@ -487,9 +465,8 @@ describe('Claude import usage repair', () => {
     });
 
     test('disagreeing copies stored only under positional ids are refused, not billed twice', () => {
-      // As above, but both copies were stored positionally. Correcting each
-      // from its own transcript would zero the original's repeat and keep the
-      // copy's first line, billing a response the original already bills.
+      // WHY: Position-specific repair alone would keep a resumed response that the original had
+      // already billed.
       const original = 'sess-disagree-legacy-a-original';
       const resumed = 'sess-disagree-legacy-b-continued';
       const claudeDir = claudeDirFor(original);
@@ -512,9 +489,8 @@ describe('Claude import usage repair', () => {
     });
 
     test('a copy whose positional id a child-agent transcript also mints is left alone', () => {
-      // The resumed session's child agent reports the resumed session id, so its
-      // first line mints the same positional id as the copied line. That row may
-      // hold the child's usage, not the copy's, so it is not the copy's to zero.
+      // WHY: The positional row can belong to a child that reused the resumed session ID, so a copied
+      // line cannot zero it blindly.
       const original = 'sess-contested-original';
       const resumed = 'sess-contested-continued';
       const claudeDir = claudeDirFor(original);
@@ -543,9 +519,8 @@ describe('Claude import usage repair', () => {
     });
 
     test('history a resumed session copied from its predecessor is billed by the original', () => {
-      // Resuming writes a new transcript that repeats the earlier conversation
-      // line for line, under the new session id but the same uuids. Positional
-      // ids differ per file, so both copies were stored and billed.
+      // WHY: A resume can retain UUIDs while changing positional identities, which is how both copies
+      // were billed before UUID indexing.
       const original = 'sess-resume-original';
       const resumed = 'sess-resume-continued';
       const claudeDir = claudeDirFor(original);
@@ -569,9 +544,8 @@ describe('Claude import usage repair', () => {
     });
 
     test('copies whose lineage the transcripts cannot establish are refused as ambiguous', () => {
-      // The original conversation was used again after the resume, so each
-      // transcript holds lines the other lacks, and end times prove nothing
-      // about which copied which. Billing either would guess the session.
+      // WHY: Each file grew after resume, so neither end time identifies the original owner of their
+      // common prefix.
       const original = 'sess-lineage-original';
       const resumed = 'sess-lineage-continued';
       const claudeDir = claudeDirFor(original);
@@ -595,9 +569,8 @@ describe('Claude import usage repair', () => {
     });
 
     test('a uuid row the resumed copy stored does not displace the original\'s row', () => {
-      // The original was imported positionally before the id change; the first
-      // uuid-keyed import of the line came from the resumed transcript, so the
-      // uuid row carries the resumed session. The line is the original's.
+      // WHY: The UUID row can belong to the resume if the original was imported under positional IDs
+      // first.
       const original = 'sess-mixed-original';
       const resumed = 'sess-mixed-continued';
       const claudeDir = claudeDirFor(original);
@@ -617,8 +590,7 @@ describe('Claude import usage repair', () => {
     });
 
     test('a copied line with only one stored row keeps it', () => {
-      // The original transcript's rows are missing, so the copy is the only
-      // record of that turn and must not be zeroed.
+      // WHY: The resumed copy may be the only surviving stored observation of a turn.
       const original = 'sess-copy-only-original';
       const resumed = 'sess-copy-only-continued';
       const claudeDir = claudeDirFor(original);
@@ -636,8 +608,6 @@ describe('Claude import usage repair', () => {
     });
 
     test('a uuid row claimed by the original and its copy is repairable, not ambiguous', () => {
-      // Both transcripts mint the same uuid id for the same producer line, so
-      // they agree on what it should contribute.
       const original = 'sess-uuid-shared-original';
       const resumed = 'sess-uuid-shared-continued';
       const claudeDir = claudeDirFor(original);
@@ -656,9 +626,8 @@ describe('Claude import usage repair', () => {
     });
   });
 
-  // Transcripts since mid-2026 split each turn's cache writes by cache lifetime.
-  // Rows imported before the split was read carry none, so they bill 1-hour writes
-  // at the 5-minute rate. The repair fills the split in from the transcript.
+  // WHY: Older rows lack the cache-lifetime split and would price longer writes at the shorter rate
+  // without transcript evidence.
   describe('the 1-hour cache-write split', () => {
     const SPLIT_MODEL = 'claude-opus-5';
     const usage = (split: boolean) => ({
@@ -730,10 +699,8 @@ describe('Claude import usage repair', () => {
       assert.equal(row().cost_usd, 1.23);
     });
 
-    // A store older than cost provenance holds costs with no cost_source until
-    // startup or a recalc labels them, by comparing each cost with the tables.
-    // Keeping the flat-rate cost beside the recorded split would make that
-    // comparison fail and pin the stale estimate as reported.
+    // WHY: Keeping the pre-split cost would cause later provenance repair to misclassify an old
+    // estimate as provider-reported.
     test('labels a legacy estimate before applying the split, so it is re-estimated rather than pinned', () => {
       const { claudeDir, row, costSourceOf } = scenario('legacy', { split: true, costSource: null });
       const report = repairClaudeImportUsage(getDb(), { claudeDir, apply: true });

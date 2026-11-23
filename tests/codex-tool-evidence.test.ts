@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-codex-tool-evidence-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -116,7 +115,6 @@ describe('a receipt for a call stored by an earlier sync', () => {
       { ordinal: 0, kind: 'tool_call', source_item_id: 'call-1', created_at: at(2) },
       { ordinal: 1, kind: 'tool_result', source_item_id: 'call-1', created_at: at(7) },
     ]);
-    // Codex records no outcome for a call: the result says only that it completed.
     const result = getDb().prepare(`
       SELECT i.status, i.payload_json FROM session_items i JOIN session_turns t ON t.id = i.turn_id
       WHERE t.session_id = ? AND i.kind = 'tool_result'

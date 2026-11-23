@@ -22,8 +22,7 @@ function writeResults(rows: object[]): string {
   return file;
 }
 
-// Write results.jsonl into a named study directory, so the legacy parent-dir
-// derivation has a deterministic name to fall back to.
+// WHY: Use a named directory so the legacy study fallback resolves deterministically.
 function writeResultsInDir(dirName: string, rows: object[]): string {
   const dir = path.join(tempDir, dirName);
   fs.mkdirSync(dir, { recursive: true });
@@ -32,8 +31,6 @@ function writeResultsInDir(dirName: string, rows: object[]): string {
   return file;
 }
 
-// Persisted event_id is namespaced `${study_id}::${run_id}`, so resolve the row
-// by the run_id suffix (unique within these single-study fixtures).
 function benchRow(runId: string): { event_id: string; study_id: string | null; study: string | null; metadata: string } {
   const rows = getDb()
     .prepare("SELECT event_id, study_id, study, metadata FROM events WHERE source = 'benchmark'")
@@ -72,7 +69,6 @@ const minimaxRow = {
   cost_usd: null,
 };
 
-// codex daily-driver comparator with a reasoning-effort suffix on the model.
 const codexRow = {
   run_id: 'codex:task-a:gpt-5.6-terra-xhigh:trial1',
   harness: 'codex',
@@ -122,16 +118,11 @@ describe('importBenchmarkResults', () => {
     const minimax = events.find(e => e.model === 'minimax-m3');
     assert.ok(minimax);
     assert.equal(minimax.source, 'benchmark');
-    // event/session id is namespaced `${study_id}::${run_id}`; the faithful run_id
-    // is preserved in metadata.
     assert.ok(minimax.session_id.endsWith('::codex:task-a:minimax-m3:trial1'));
     assert.equal(JSON.parse(minimax.metadata as string).run_id, 'codex:task-a:minimax-m3:trial1');
-    // 1M input * 0.30/MTok + 1M output * 1.20/MTok
     assert.ok(Math.abs((minimax.cost_usd ?? 0) - 1.5) < 1e-9, `got ${minimax.cost_usd}`);
-    // No captured cost on the row, so the table price is an estimate.
     assert.equal((minimax as { cost_source?: string }).cost_source, 'estimated');
 
-    // Effort-suffix stripped so the codex base model resolves to a real price.
     const codex = events.find(e => e.model === 'gpt-5.6-terra-xhigh');
     assert.ok(codex);
     assert.ok((codex.cost_usd ?? 0) > 0, 'effort-suffixed codex model should be priced');
@@ -148,7 +139,7 @@ describe('importBenchmarkResults', () => {
   test('reports unpriced models loudly and skips malformed rows', () => {
     const file = writeResults([
       { run_id: 'codex:task-b:mystery-model:trial1', harness: 'codex', model: 'mystery-model', tokens_input_uncached: 500, tokens_output: 100 },
-      { run_id: 'no-model', harness: 'codex' }, // missing model -> skipped
+      { run_id: 'no-model', harness: 'codex' },
     ]);
     const result = importBenchmarkResults(file);
     assert.equal(result.skipped, 1);
@@ -176,7 +167,6 @@ describe('importBenchmarkResults', () => {
 
   test('re-import backfills a benchmark cost that was null at first import', () => {
     const runId = 'codex:task-backfill:mystery-model:trial1';
-    // First import: model unpriced and the row carries no cost -> stored as null.
     const first = writeResults([
       { run_id: runId, harness: 'codex', model: 'mystery-model', tokens_input_uncached: 500, tokens_output: 100, cost_usd: null },
     ]);
@@ -185,7 +175,6 @@ describe('importBenchmarkResults', () => {
     assert.ok(stored);
     assert.equal(stored.cost_usd, null, 'cost is null while the model is unpriced');
 
-    // Re-run once a cost resolves (rates added / row now carries cost_usd).
     const second = writeResults([
       { run_id: runId, harness: 'codex', model: 'mystery-model', tokens_input_uncached: 500, tokens_output: 100, cost_usd: 0.42 },
     ]);
@@ -271,7 +260,6 @@ describe('importBenchmarkResults', () => {
     const bare = (id: string) => ({
       ...codexRow, run_id: id, model: 'gpt-6-sol-high', study: null, study_sha256: null, suite: null,
     });
-    // Before Harbor identity was read, these rows were keyed by the shared directory.
     writeResultsInDir('suite-runs', [bare(runId), bare(otherRunId)]);
     importBenchmarkResults(path.join(tempDir, 'suite-runs', 'results.jsonl'));
     const legacyId = `suite-runs::${runId}`;
@@ -285,7 +273,6 @@ describe('importBenchmarkResults', () => {
       },
     };
     const file = writeResultsInDir('suite-runs', [harborRow]);
-    // A manual study override names its own key, so it must not retire anything.
     importBenchmarkResults(file, { study: 'manual-legacy' });
     assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId));
 
@@ -295,7 +282,6 @@ describe('importBenchmarkResults', () => {
     assert.equal(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(legacyId), undefined);
     assert.equal(getDb().prepare('SELECT 1 FROM sessions WHERE id = ?').get(legacyId), undefined);
     assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`${hash}::${runId}`));
-    // Another cell from the same directory is not this row's legacy copy.
     assert.ok(getDb().prepare('SELECT 1 FROM events WHERE event_id = ?').get(`suite-runs::${otherRunId}`));
 
     const again = importBenchmarkResults(file);
@@ -343,12 +329,9 @@ describe('importBenchmarkResults', () => {
   test('re-import backfills ranking-eligibility onto a cell imported before the fields existed', () => {
     const runId = 'codex:task-bf:minimax-m3:trial1';
     const base = { run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'task-bf', trial: 1, tokens_input_uncached: 10, tokens_output: 5, study: 'bf-suite', study_sha256: 'sha-bf' };
-    // First import predates the ranking fields → stored null.
     importBenchmarkResults(writeResults([base]));
     assert.equal(meta(runId).usage_ranking_eligible, null);
 
-    // Re-import the same cell, now carrying openbench's verdict. It is a duplicate
-    // (same study+run), so the value must arrive via the backfill path.
     const second = importBenchmarkResults(writeResults([{ ...base, usage_ranking_eligible: false, usage_ranking_exclusion_reason: 'usage_unavailable' }]));
     assert.equal(second.duplicates, 1, 'same study+run → duplicate');
 
@@ -373,7 +356,6 @@ describe('importBenchmarkResults', () => {
 
   test('legacy fallback: no openbench identity fields → derive from parent dir + strip suffix', () => {
     const runId = 'codex:legacy:minimax-m3:trial1';
-    // A pre-field row: no study/study_sha256/canonical_model/reasoning_effort.
     const file = writeResultsInDir('legacy-study-2026-09-03', [{
       run_id: runId, harness: 'codex', model: 'gpt-5.6-terra-xhigh',
       task: 'legacy', trial: 1, tokens_input_uncached: 1000, tokens_output: 100,
@@ -395,9 +377,8 @@ describe('importBenchmarkResults', () => {
     try {
       process.chdir(tempDir);
       fs.writeFileSync('bare.jsonl', JSON.stringify({ run_id: runId, harness: 'codex', model: 'minimax-m3', task: 'bare', trial: 1, tokens_input_uncached: 10, tokens_output: 5 }) + '\n');
-      // A bare or parent-relative path must resolve to the real directory the
-      // file lives in — never the literal '.' or '..' segment, which would merge
-      // unrelated runs under one meaningless study key.
+      // WHY: A relative filename with no named parent must use the resolved directory so independent
+      // files do not share a study key.
       importBenchmarkResults('bare.jsonl');
     } finally {
       process.chdir(prevCwd);
@@ -407,9 +388,8 @@ describe('importBenchmarkResults', () => {
 
   test('data migration deletes pre-namespacing benchmark rows (study_id NULL) so re-import cannot double-count', () => {
     const db = getDb();
-    // A legacy benchmark row: keyed on the bare run_id, no study_id column set.
-    // Re-importing its file now inserts a fresh `${study_id}::${run_id}` row, so
-    // the orphan must be removed or include_benchmark usage double-counts it.
+    // WHY: Legacy events used bare run IDs. Leaving them beside namespaced replacements would
+    // double-count usage.
     insertEvent({
       event_id: 'legacy:run:1', session_id: 'legacy:run:1', agent_type: 'codex',
       event_type: 'llm_response', status: 'success', model: 'minimax-m3',
@@ -428,13 +408,12 @@ describe('importBenchmarkResults', () => {
     assert.equal(nullRows(), 1, 'legacy NULL-study benchmark row present before migration');
     assert.equal(sessionRows('legacy:run:1'), 1, 'legacy benchmark session present before migration');
 
-    // Re-run the versioned data migration from before the v5/v6 cleanup.
     db.pragma('user_version = 4');
     runDataMigrations(db);
 
     assert.equal(nullRows(), 0, 'legacy NULL-study benchmark row deleted');
-    // Deleting the events orphans their session rows; those must be swept too or
-    // they keep inflating total_sessions (nothing left to correlate against).
+    // WHY: Deleting events can leave their session summaries behind, which would still inflate the
+    // session tally.
     assert.equal(sessionRows('legacy:run:1'), 0, 'orphaned legacy benchmark session deleted');
     const kept = (db.prepare("SELECT COUNT(*) AS n FROM events WHERE event_id = 'sha-keep::run:1'").get() as { n: number }).n;
     assert.equal(kept, 1, 'namespaced row preserved');
@@ -442,8 +421,8 @@ describe('importBenchmarkResults', () => {
   });
 
   test('two runs of one suite with the same run_id are two studies (event_id namespaced)', () => {
-    // openbench reruns produce the SAME run_id (harness:task:model:trial); only
-    // study_sha256 differs. Keying events on run_id alone would drop run B.
+    // WHY: OpenBench reruns reuse run IDs. Use the study identity too so separate studies retain
+    // their own events.
     const runId = 'codex:t:glm-5.3-flash:trial1';
     const base = { run_id: runId, harness: 'codex', model: 'glm-5.3-flash', task: 't', trial: 1, tokens_input_uncached: 10, tokens_output: 5, study: 'dup-suite-2026-09-03', suite: 'dup-suite' };
     const a = importBenchmarkResults(writeResults([{ ...base, study_sha256: 'sha-runA' }]));
@@ -473,7 +452,6 @@ describe('importBenchmarkResults', () => {
   test('skips non-object JSON rows instead of aborting the whole import', () => {
     const goodRow = { ...minimaxRow, run_id: 'codex:task-good:minimax-m3:trial1' };
     const file = path.join(tempDir, 'nonobject.jsonl');
-    // `null`, an array, and a bare number are all valid JSON but not benchmark rows.
     fs.writeFileSync(file, ['null', '[1,2,3]', '42', JSON.stringify(goodRow)].join('\n') + '\n');
     const result = importBenchmarkResults(file);
     assert.equal(result.rowsRead, 4);

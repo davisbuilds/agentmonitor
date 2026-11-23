@@ -22,7 +22,6 @@ const claudeDir = path.join(tempDir, 'claude', 'projects', 'proj');
 const codexDir = path.join(tempDir, 'codex', 'sessions');
 
 function seedSessionRow(id: string, agentType: string): void {
-  // Simulate the hook/OTEL-created Monitor session row the watcher patches.
   getDb().prepare(`
     INSERT INTO sessions (id, agent_id, agent_type, project, branch, status, started_at, last_event_at, metadata)
     VALUES (?, ?, ?, ?, ?, 'active', datetime('now'), datetime('now'), '{}')
@@ -102,7 +101,6 @@ describe('watcher stamps invocation mode onto the live Monitor session', () => {
   });
 
   test('headless Codex session (originator codex_exec) is marked on sync', () => {
-    // Monitor rows are keyed by the session UUID; the rollout filename carries it.
     const uuid = '019c26c7-9c64-7b01-b7bb-695ce94c3237';
     seedSessionRow(uuid, 'codex');
     const file = write(codexDir, `rollout-2026-07-07T10-00-00-${uuid}.jsonl`, [

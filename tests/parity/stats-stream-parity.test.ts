@@ -41,7 +41,6 @@ test('GET /api/stream sends connected message as first event', async () => {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
 
-    // Read first chunk(s) until we have a complete SSE message
     let buffer = '';
     const deadline = Date.now() + 3000;
     while (Date.now() < deadline) {
@@ -71,7 +70,6 @@ test('SSE broadcasts ingested events to connected clients', async () => {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
 
-    // Consume connected message
     let buffer = '';
     const connectDeadline = Date.now() + 3000;
     while (Date.now() < connectDeadline) {
@@ -82,7 +80,6 @@ test('SSE broadcasts ingested events to connected clients', async () => {
     }
     assert.ok(buffer.includes('connected'), 'should receive connected message');
 
-    // Now ingest an event
     const session = uniqueSession();
     await postJson('/api/events', {
       session_id: session,
@@ -90,7 +87,6 @@ test('SSE broadcasts ingested events to connected clients', async () => {
       event_type: 'tool_use',
     });
 
-    // Read until we get the event broadcast
     let eventBuffer = '';
     const eventDeadline = Date.now() + 3000;
     while (Date.now() < eventDeadline) {
@@ -110,27 +106,23 @@ test('SSE broadcasts ingested events to connected clients', async () => {
 });
 
 test('GET /api/health reflects SSE client count', async () => {
-  // Wait for previous test SSE connections to fully close
   await new Promise(resolve => setTimeout(resolve, 200));
 
-  // Check baseline — other clients may already be connected
   const before = await getJson('/api/health');
   const healthBefore = await before.json();
   const baselineClients: number = healthBefore.sse_clients;
 
-  // Connect an SSE client
   const controller = new AbortController();
   try {
     const res = await fetch(`${BASE_URL}/api/stream`, {
       signal: controller.signal,
     });
-    // If we get 503 (max clients reached), skip this test gracefully
     if (res.status === 503) {
       return;
     }
     assert.equal(res.status, 200);
 
-    // Read connected message to ensure client is fully registered
+    // WHY: Wait for the registration acknowledgement so the stream cannot miss the seeded event.
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
@@ -143,10 +135,8 @@ test('GET /api/health reflects SSE client count', async () => {
     }
     assert.ok(buffer.includes('connected'), 'should receive connected message');
 
-    // Settle time for the server to update its counter
     await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Health should show incremented client count
     const during = await getJson('/api/health');
     const healthDuring = await during.json();
     assert.ok(

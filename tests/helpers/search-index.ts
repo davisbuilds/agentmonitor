@@ -1,7 +1,5 @@
-// Check the message search index against what it should hold. FTS5's rank-1
-// 'integrity-check' does this for an external-content table, but it cannot scan
-// the view the index reads (see rebuildMessageSearchIndex), so this builds a
-// second index from that view and compares the two term by term.
+// WHY: FTS5 cannot compare this index directly against its source view. Build a comparison index from
+// the view.
 import assert from 'node:assert/strict';
 import type { Database } from 'better-sqlite3';
 

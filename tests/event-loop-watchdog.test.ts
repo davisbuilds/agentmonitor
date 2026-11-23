@@ -25,8 +25,7 @@ function runBlocked(block: string): Promise<{ code: number | null; signal: NodeJ
 }
 
 test('a loop stuck waiting, using no CPU, is killed so launchd restarts it', async () => {
-  // Atomics.wait blocks the main thread without spending CPU, as open() does
-  // while it waits on a privacy prompt.
+  // WHY: Use a blocking wait to model a prompt that stalls the event loop without consuming CPU.
   const result = await runBlocked('Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000)');
   assert.equal(result.signal, 'SIGKILL');
   assert.match(result.stderr, /\[watchdog\] the event loop has not run for \d+s and used \d+ms of CPU in the last \d+s/);
@@ -40,7 +39,6 @@ test('a loop busy with work is left to finish', async () => {
 });
 
 test('work done before a hang does not exempt it: CPU counts over the recent window only', async () => {
-  // Useful work (well past the CPU allowance), then a wait that never ends.
   const result = await runBlocked('const end = Date.now() + 500; while (Date.now() < end) {} Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 8000)');
   assert.equal(result.signal, 'SIGKILL');
 });

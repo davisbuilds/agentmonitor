@@ -24,14 +24,11 @@ test('matchingQuickRange names the quick range a date range covers exactly', () 
   assert.equal(matchingQuickRange('2026-10-09', '2026-10-15', ranges, now), 7);
   assert.equal(matchingQuickRange('2026-09-16', '2026-10-15', ranges, now), 30);
   assert.equal(matchingQuickRange('2026-07-18', '2026-10-15', ranges, now), 90);
-  // The default range is the 30D one.
   const defaults = createDefaultAnalyticsFilters(now);
   assert.equal(matchingQuickRange(defaults.from, defaults.to, ranges, now), 30);
-  // One day off at either end, or a range that does not end today, is custom.
   assert.equal(matchingQuickRange('2026-10-08', '2026-10-15', ranges, now), null);
   assert.equal(matchingQuickRange('2026-10-09', '2026-10-14', ranges, now), null);
   assert.equal(matchingQuickRange('2026-09-01', '2026-09-30', ranges, now), null);
-  // Across a month end (2026 is not a leap year).
   assert.equal(matchingQuickRange('2026-02-23', '2026-03-01', ranges, new Date(2026, 2, 1, 23, 0)), 7);
 });
 
@@ -125,7 +122,6 @@ test('buildAnalyticsCsv emits summary and table sections for export', () => {
   assert.match(csv, /Summary,Total Sessions,12/);
   assert.match(csv, /Velocity,Messages Per Active Day,18/);
   assert.match(csv, /Activity By Day/);
-  // Top sessions belong to the Usage export (highest cost), not this one.
   assert.doesNotMatch(csv, /Top Sessions/);
   assert.match(csv, /Agent Comparison/);
 });
@@ -316,7 +312,6 @@ test('buildAnalyticsCsv puts every value under its own header (no swapped column
     { Project: 'proj', Sessions: '9', Messages: '110', 'User Messages': '31' },
   ]);
   assert.deepEqual(csvSection(csv, 'Tools'), [{ Tool: 'Bash', Category: 'Execute', Count: '18' }]);
-  // One row per (day, skill), not per day.
   assert.deepEqual(csvSection(csv, 'Skills By Day'), [
     { Date: '2026-04-11', Skill: 'a', Count: '1' },
     { Date: '2026-04-11', Skill: 'b', Count: '2' },
@@ -325,7 +320,6 @@ test('buildAnalyticsCsv puts every value under its own header (no swapped column
     Agent: 'codex', Sessions: '10', Messages: '130', 'User Messages': '39', 'Average Messages': '13',
     'Full Fidelity': '6', 'Summary Fidelity': '4', 'Tool Analytics Capable': '7',
   }]);
-  // Unset filters export as "All"; absent summary/velocity emit no rows.
   assert.deepEqual(parseCsv(csv).find(r => r[0] === 'Filters' && r[1] === 'Agent'), ['Filters', 'Agent', 'All']);
   assert.doesNotMatch(csv, /^(Summary|Velocity),/m);
 });

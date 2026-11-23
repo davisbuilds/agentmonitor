@@ -7,7 +7,6 @@ import test, { after, before, beforeEach, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-session-accounting-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 process.env.AGENTMONITOR_MAX_SSE_CLIENTS = '0';
@@ -89,8 +88,7 @@ describe('Claude session accounting', () => {
   });
 
   test('a sample arriving late does not replace a newer one from the same process', async () => {
-    // The bridge posts in the background, so samples can arrive out of order:
-    // here a sample read half a second earlier lands after the newer one.
+    // WHY: Background bridge sends can arrive out of observation order.
     await statusline({ session_id: 'sess-late', cost: { total_cost_usd: 2, total_duration_ms: 2_000_000 } });
     await statusline({ session_id: 'sess-late', cost: { total_cost_usd: 1, total_duration_ms: 1_999_500 } });
 
@@ -99,7 +97,6 @@ describe('Claude session accounting', () => {
   });
 
   test('a new process for the same session replaces the old totals', async () => {
-    // A restarted or resumed session starts its counters again from zero.
     await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 50, total_duration_ms: 3_600_000 } });
     await statusline({ session_id: 'sess-restart', cost: { total_cost_usd: 0.5, total_duration_ms: 1000 } });
 
@@ -108,8 +105,7 @@ describe('Claude session accounting', () => {
   });
 
   test('a late sample from the process before a restart is dropped', async () => {
-    // The old process's last sample can still be in flight when the new one
-    // reports. Its longer duration must not win: it belongs to an older process.
+    // WHY: A stale sample can arrive after a restart with a longer duration than the current process.
     await statusline({ session_id: 'sess-late-old', cost: { total_cost_usd: 0.5, total_duration_ms: 1000 } });
     await statusline({ session_id: 'sess-late-old', cost: { total_cost_usd: 50, total_duration_ms: 3_600_000 } });
     assert.equal(checkClaudeSessionCosts()[0].cost_usd, 0.5);
@@ -131,10 +127,10 @@ describe('Claude session accounting', () => {
     const shift = (iso: string, ms: number) => new Date(Date.parse(iso) + ms).toISOString();
     seedEvent('sess-e', shift(start, 60_000), 4);
     seedEvent('sess-e', shift(observed, -60_000), 5);
-    seedEvent('sess-e', shift(start, -60_000), 100); // an earlier process of the same session
-    seedEvent('sess-e', shift(observed, 60_000), 100); // after the totals were read
+    seedEvent('sess-e', shift(start, -60_000), 100);
+    seedEvent('sess-e', shift(observed, 60_000), 100);
     seedEvent('sess-other', shift(start, 60_000), 100);
-    seedEvent('sess-e', shift(start, 60_000), 100, 'otel'); // not an import; the check tests imports
+    seedEvent('sess-e', shift(start, 60_000), 100, 'otel');
 
     const [check] = checkClaudeSessionCosts();
 
@@ -144,8 +140,8 @@ describe('Claude session accounting', () => {
   });
 
   test('gives no ratio while any imported usage in the window is unpriced', async () => {
-    // An unpriced model bills as NULL, which a sum silently skips, so the
-    // imported cost would read low and the ratio falsely reassuring.
+    // WHY: An aggregate SQL sum omits NULL, making an unpriced model appear to improve
+    // reconciliation.
     await statusline({ session_id: 'sess-f', cost: { total_cost_usd: 10, total_duration_ms: 3_600_000 } });
     const [{ process_started_at: start }] = checkClaudeSessionCosts();
     const at = new Date(Date.parse(start) + 60_000).toISOString();
@@ -157,7 +153,7 @@ describe('Claude session accounting', () => {
     getDb().prepare(`
       INSERT INTO events (session_id, agent_type, event_type, status, tokens_in, tokens_out, cost_usd, source, client_timestamp)
       VALUES ('sess-f', 'claude_code', 'user', 'success', 0, 0, NULL, 'import', ?)
-    `).run(at); // no usage, so nothing to price
+    `).run(at);
 
     const [check] = checkClaudeSessionCosts();
 

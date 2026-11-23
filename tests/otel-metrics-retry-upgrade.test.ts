@@ -4,11 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
-// An existing database gets the operational-metric retry key on upgrade. Rows
-// stored before it carry no key, and the stored row keeps only the projected
-// attributes, so an old duplicate cannot be told apart from two genuine points
-// of different series: those rows are kept as they are, and the unique index
-// must still create over them.
+// WHY: Historical rows lack a retry key, so matching projected attributes cannot tell a duplicate
+// from two real source series.
 
 let dir = '';
 let closeDb: (() => void) | undefined;
@@ -26,7 +23,6 @@ test('upgrading a database with duplicate operational rows keeps them and dedups
   const db = connection.getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
 
-  // The otel_metrics shape before the retry key, holding a retried point twice.
   db.exec(`
     CREATE TABLE otel_metrics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,8 +63,6 @@ test('a read-only command adds the retry key to a v16 database', async () => {
   const schema = await import('../src/db/schema.js');
   const db = connection.getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
-  // Read commands skip DDL once user_version is current, so the key only
-  // arrives on them if the version moves past the schema without it.
   db.exec('DROP INDEX idx_otel_metrics_point_id; ALTER TABLE otel_metrics DROP COLUMN point_id; PRAGMA user_version = 16');
 
   schema.ensureSchemaForRead();

@@ -233,7 +233,6 @@ test('tool_calls table exists with correct columns', () => {
 
 test('tool_calls insert and query', () => {
   const db = getDb();
-  // First insert a message to get a valid message_id
   const msgResult = db.prepare(`
     INSERT INTO messages (session_id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -267,14 +266,12 @@ test('messages_fts virtual table exists', () => {
 
 test('FTS5 search returns matching results on insert', () => {
   const db = getDb();
-  // Insert a message with searchable content
   const content = JSON.stringify([{ type: 'text', text: 'Implementing a recursive fibonacci function in TypeScript' }]);
   db.prepare(`
     INSERT INTO messages (session_id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run('sess-002', 1, 'user', content, '2026-03-06T12:00:00Z', 0, 0, content.length);
 
-  // FTS5 search should find it
   const results = db.prepare(`
     SELECT messages.id, messages.session_id, messages.content
     FROM messages_fts
@@ -300,21 +297,17 @@ test('FTS5 snippet extraction works', () => {
 
 test('FTS5 stays in sync on DELETE', () => {
   const db = getDb();
-  // Insert then delete a message
   const content = JSON.stringify([{ type: 'text', text: 'unique_deleteme_term_xyz' }]);
   const result = db.prepare(`
     INSERT INTO messages (session_id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run('sess-003', 1, 'user', content, '2026-03-06T13:00:00Z', 0, 0, content.length);
 
-  // Verify it's searchable
   let ftsResults = db.prepare("SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?").all('unique_deleteme_term_xyz');
   assert.ok(ftsResults.length > 0, 'should be searchable before delete');
 
-  // Delete the message
   db.prepare('DELETE FROM messages WHERE id = ?').run(result.lastInsertRowid);
 
-  // Should no longer be in FTS
   ftsResults = db.prepare("SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?").all('unique_deleteme_term_xyz');
   assert.equal(ftsResults.length, 0, 'should not be searchable after delete');
 });
@@ -330,11 +323,9 @@ test('FTS5 stays in sync on UPDATE', () => {
   const content2 = JSON.stringify([{ type: 'text', text: 'replaced_unique_updatetest_content' }]);
   db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(content2, result.lastInsertRowid);
 
-  // Old content should not be found
   let ftsResults = db.prepare("SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?").all('original_unique_updatetest_content');
   assert.equal(ftsResults.length, 0, 'old content should not be searchable');
 
-  // New content should be found
   ftsResults = db.prepare("SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?").all('replaced_unique_updatetest_content');
   assert.ok(ftsResults.length > 0, 'new content should be searchable');
 });
@@ -358,16 +349,13 @@ test('watched_files dedup: skip unchanged hash', () => {
     VALUES (?, ?, ?, ?, datetime('now'))
   `).run('/path/to/session.jsonl', 'hash_aaa', '2026-03-06T10:00:00Z', 'parsed');
 
-  // Same hash should indicate no re-parse needed
   const existing = db.prepare('SELECT file_hash FROM watched_files WHERE file_path = ?').get('/path/to/session.jsonl') as { file_hash: string } | undefined;
   assert.ok(existing, 'should find existing record');
   assert.equal(existing.file_hash, 'hash_aaa');
 
-  // Simulate changed file: different hash means re-parse needed
   const needsReparse = existing.file_hash !== 'hash_bbb';
   assert.ok(needsReparse, 'different hash should trigger re-parse');
 
-  // Same hash means skip
   const shouldSkip = existing.file_hash === 'hash_aaa';
   assert.ok(shouldSkip, 'same hash should skip');
 });
@@ -375,13 +363,11 @@ test('watched_files dedup: skip unchanged hash', () => {
 test('existing tables are unmodified', () => {
   const db = getDb();
 
-  // Verify existing tables still exist
   for (const tableName of ['agents', 'sessions', 'events', 'import_state']) {
     const table = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tableName) as { name: string } | undefined;
     assert.ok(table, `${tableName} table should still exist`);
   }
 
-  // Verify existing events columns are intact
   const eventColumns = db.prepare("PRAGMA table_info(events)").all() as Array<{ name: string }>;
   const eventColNames = eventColumns.map(c => c.name);
   for (const col of ['id', 'session_id', 'agent_type', 'event_type', 'tokens_in', 'tokens_out', 'cost_usd', 'model']) {

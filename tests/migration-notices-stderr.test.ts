@@ -4,10 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-// Migration notices are diagnostics; they must go to stderr, never stdout.
-// A CLI read command runs initSchema() before printing, so a `[migration]`
-// line on stdout would corrupt `--json` output for agents on first run after
-// an upgrade. This asserts the notices land on stderr.
+// WHY: A first read after upgrade can run migrations before emitting JSON. Diagnostics cannot share
+// the result stream.
 
 let tempDir = '';
 /* eslint-disable @typescript-eslint/consistent-type-imports */
@@ -33,7 +31,7 @@ after(() => {
 });
 
 test('migration notices are written to stderr, not stdout', () => {
-  // Rewind so the occupancy backfill (v2) re-runs against a seeded row and emits.
+  // WHY: Rewind the schema so the notice-producing migration runs after its fixture exists.
   getDb().pragma('user_version = 1');
   getDb()
     .prepare('INSERT INTO browsing_sessions (id, agent, file_path, context_used_tokens) VALUES (?, ?, ?, ?)')

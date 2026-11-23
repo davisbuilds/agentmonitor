@@ -24,7 +24,6 @@ function line(role: 'user' | 'assistant', content: unknown, second: number): str
   });
 }
 
-// Claude Code returns each tool result to the model as a user-role line.
 const transcript = [
   line('user', 'Fix the build', 0),
   line('assistant', [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'pnpm lint' } }], 1),
@@ -57,7 +56,6 @@ test('the data migration recounts stored Claude sessions the same way', () => {
     { type: 'tool_result', tool_use_id: 't1', content: 'ok' },
     { type: 'text', text: 'and the tests' },
   ]));
-  // Codex counts prompts already; its rows are left alone.
   message.run('codex-s', 0, 'user', JSON.stringify([{ type: 'text', text: 'hi' }]));
 
   runDataMigrations(db);

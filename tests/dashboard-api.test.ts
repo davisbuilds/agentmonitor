@@ -54,7 +54,6 @@ after(async () => {
   if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// Seed some test events for analytics queries
 async function seedTestData() {
   const events = [
     { session_id: 's1', agent_type: 'claude_code', event_type: 'tool_use', tool_name: 'Bash', status: 'success', tokens_in: 1000, tokens_out: 200, model: 'claude-sonnet-4-5-20250929', cost_usd: 0.01, duration_ms: 150 },
@@ -193,17 +192,15 @@ describe('GET /api/stats/tools', () => {
 
     const body = await res.json() as { tools: Array<Record<string, unknown>> };
     assert.ok(Array.isArray(body.tools));
-    assert.ok(body.tools.length >= 3); // Bash, Read, Edit
+    assert.ok(body.tools.length >= 3);
 
-    // Find Bash - should have highest call count
     const bash = body.tools.find(t => t.tool_name === 'Bash');
     assert.ok(bash);
-    assert.equal(bash.total_calls, 3); // 2 claude + 1 codex
+    assert.equal(bash.total_calls, 3);
     assert.equal(bash.error_count, 1);
     assert.ok((bash.error_rate as number) > 0);
     assert.ok(bash.avg_duration_ms != null);
 
-    // Verify by_agent breakdown
     const byAgent = bash.by_agent as Record<string, number>;
     assert.equal(byAgent.claude_code, 2);
     assert.equal(byAgent.codex, 1);
@@ -215,7 +212,6 @@ describe('GET /api/stats/tools', () => {
     const res = await fetch(`${baseUrl}/api/stats/tools?agent_type=codex`);
     const body = await res.json() as { tools: Array<Record<string, unknown>> };
 
-    // Only codex tools
     assert.ok(body.tools.every(t => {
       const byAgent = t.by_agent as Record<string, number>;
       return byAgent.codex !== undefined;
@@ -257,17 +253,14 @@ describe('GET /api/stats/cost', () => {
       timeline: Array<Record<string, unknown>>;
     };
 
-    // by_model
     assert.ok(Array.isArray(body.by_model));
-    assert.ok(body.by_model.length >= 2); // claude-sonnet and o3
+    assert.ok(body.by_model.length >= 2);
     const sonnet = body.by_model.find(m => m.model === 'claude-sonnet-4-5-20250929');
     assert.ok(sonnet);
     assert.ok((sonnet.cost_usd as number) > 0);
 
-    // by_project
     assert.ok(Array.isArray(body.by_project));
 
-    // timeline
     assert.ok(Array.isArray(body.timeline));
     assert.ok(body.timeline.length >= 1);
     assert.ok(body.timeline[0].bucket);
@@ -292,11 +285,9 @@ describe('GET /api/stats/cost', () => {
     const res = await fetch(`${baseUrl}/api/stats/cost?agent_type=codex`);
     const body = await res.json() as { timeline: Array<Record<string, unknown>> };
 
-    // Timeline should only have codex events
     const totalCost = body.timeline.reduce((sum, b) => sum + (b.cost_usd as number), 0);
-    // Codex events total: 0.015 + 0.01 = 0.025
     assert.ok(totalCost > 0);
-    assert.ok(totalCost < 0.03); // Should not include claude events
+    assert.ok(totalCost < 0.03);
   });
 
   test('excludes overlapping Codex OTEL usage from cost breakdowns', async () => {
@@ -407,7 +398,6 @@ describe('GET /api/stats/cost', () => {
   });
 });
 
-// ─── Filter Options (existing, verify still works) ──────────────────────
 
 describe('GET /api/filter-options', () => {
   test('returns distinct filter values from events', async () => {
@@ -428,7 +418,6 @@ describe('GET /api/filter-options', () => {
 
 describe('GET /api/sessions/:id/transcript', () => {
   test('returns ordered transcript entries from session events', async () => {
-    // Seed events with different types
     const events = [
       { event_id: 'tx-1', session_id: 'tx-sess', agent_type: 'claude_code', event_type: 'session_start', status: 'success', tokens_in: 0, tokens_out: 0 },
       { event_id: 'tx-2', session_id: 'tx-sess', agent_type: 'claude_code', event_type: 'tool_use', tool_name: 'Read', status: 'success', tokens_in: 500, tokens_out: 100, model: 'claude-sonnet-4-5-20250929', metadata: { file_path: 'src/main.ts' } },
@@ -448,7 +437,6 @@ describe('GET /api/sessions/:id/transcript', () => {
     assert.equal(body.session_id, 'tx-sess');
     assert.equal(body.entries.length, 6);
 
-    // Entries should be in chronological order (ASC)
     assert.equal(body.entries[0].type, 'session_start');
     assert.equal(body.entries[0].role, 'system');
 
@@ -492,7 +480,6 @@ describe('GET /api/sessions/:id/transcript', () => {
 
     assert.equal(body.entries.length, 1);
     assert.equal(body.entries[0].role, 'assistant');
-    // Optional fields should not be present when empty
     assert.equal(body.entries[0].tool_name, undefined);
     assert.equal(body.entries[0].model, undefined);
     assert.equal(body.entries[0].cost_usd, undefined);

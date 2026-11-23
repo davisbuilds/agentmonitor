@@ -7,8 +7,8 @@ import test, { after, before, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-// An unpriced model bills as $0, not as an error, so a new model's usage piles up
-// at $0 until someone notices. These pin the signal that names such models.
+// WHY: An unpriced model can accumulate usage at zero cost without raising, so it needs an explicit
+// signal.
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-unpriced-models-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
@@ -38,21 +38,19 @@ before(async () => {
   const row = (model: string, fields: { type?: string; tin?: number; tout?: number; read?: number; cost?: number | null; source?: string; at?: string; happened?: string } = {}) =>
     insert.run(`e-${id++}`, fields.type ?? 'llm_response', model, fields.tin ?? 10, fields.tout ?? 5, fields.read ?? 0,
       fields.cost === undefined ? null : fields.cost, fields.source ?? 'otel', fields.at ?? daysAgo(1), fields.happened ?? null);
-  // An import stamps created_at with the import time and keeps the event's own
-  // time in client_timestamp (ISO with zone).
   const isoDaysAgo = (days: number) => new Date(now - days * 86_400_000).toISOString();
 
   row('gpt-new', { at: daysAgo(2) });
   row('gpt-new', { at: daysAgo(1) });
-  row('gpt-new', { type: 'session_start', tin: 0, tout: 0 });   // carries no usage
-  row('claude-new', { tin: 0, tout: 0, read: 500, at: daysAgo(0), happened: isoDaysAgo(3) }); // cache reads alone are usage
-  row('gpt-reimported', { source: 'import', at: daysAgo(0), happened: isoDaysAgo(30) }); // old usage, imported today
-  row('gpt-old', { at: daysAgo(10) });                           // outside the window
-  row('gpt-6-sol', { cost: 0.01 });                              // priced
-  row('claude-harness', { cost: 0.5 });                          // unknown here, but its producer reported a cost
-  row('claude-sonnet-5');                                        // has a rate card; startup fills it
-  row('codex-auto-review');                                      // no public rate exists
-  row('bench-model', { source: 'benchmark' });                   // benchmark import reports its own
+  row('gpt-new', { type: 'session_start', tin: 0, tout: 0 });
+  row('claude-new', { tin: 0, tout: 0, read: 500, at: daysAgo(0), happened: isoDaysAgo(3) });
+  row('gpt-reimported', { source: 'import', at: daysAgo(0), happened: isoDaysAgo(30) });
+  row('gpt-old', { at: daysAgo(10) });
+  row('gpt-6-sol', { cost: 0.01 });
+  row('claude-harness', { cost: 0.5 });
+  row('claude-sonnet-5');
+  row('codex-auto-review');
+  row('bench-model', { source: 'benchmark' });
 
   server = createApp().listen(0, '127.0.0.1');
   await once(server, 'listening');

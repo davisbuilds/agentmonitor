@@ -48,6 +48,5 @@ test('initSchema adds file_mtime to an import_state table that predates it, keep
 
   const row = db.prepare('SELECT file_hash, file_size, file_mtime FROM import_state WHERE file_path = ?')
     .get('/logs/a.jsonl');
-  // No stamp yet, so the next import reads the file once and records one.
   assert.deepEqual({ ...(row as object) }, { file_hash: 'abc', file_size: 10, file_mtime: null });
 });

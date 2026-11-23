@@ -12,8 +12,6 @@ const { closeDb, getDb } = await import('../src/db/connection.js');
 const { repairProjectNames } = await import('../src/import/project-repair.js');
 const { setScratchRootsForTests } = await import('../src/util/project-identity.js');
 
-// A session run in a scratch directory since removed, stored under its
-// folder's name by the import, the hooks, and the session browser.
 const scratch = path.join(tempDir, 'scratch');
 const run = path.join(scratch, 'tm-terra.g35Rbg');
 const claudeDir = path.join(tempDir, 'claude');

@@ -29,9 +29,8 @@ async function runCli(args: string[]) {
 
 const WORDS = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
 
-// A store with both kinds of reclaimable space: free pages from dropped data,
-// and dead search-index entries from repeated delete-and-reinsert re-syncs
-// (automerge off reproduces the large old segments FTS5 never merges on its own).
+// WHY: Turn off FTS automerge to reproduce old segments that accumulated dead postings outside normal
+// incremental maintenance.
 async function buildFixture(): Promise<void> {
   for (const suffix of ['', '-wal', '-shm', '.runtime.lock']) fs.rmSync(`${dbPath}${suffix}`, { force: true });
   const connection = await import('../src/db/connection.js');
@@ -97,7 +96,6 @@ test('compact backs up the store, then reclaims free pages and dead index entrie
   assert.equal(payload.after.database_bytes, fs.statSync(dbPath).size);
   assert.equal(payload.after.wal_bytes, 0);
   assert.deepEqual(counts(dbPath), expected);
-  // Fully merged, not just smaller: another merge step finds nothing to do.
   const compacted = new Database(dbPath);
   try {
     const before = (compacted.prepare('SELECT total_changes() AS n').get() as { n: number }).n;
@@ -106,7 +104,6 @@ test('compact backs up the store, then reclaims free pages and dead index entrie
   } finally {
     compacted.close();
   }
-  // The backup is the store as it was, validated and closed.
   assert.equal(payload.backup, path.join(fs.realpathSync(backupDir), 'before-compact.db'));
   assert.deepEqual(counts(backup), expected);
   assert.equal(fs.statSync(backup).size, payload.before.database_bytes);
@@ -149,7 +146,6 @@ test('compact refuses when the volume lacks room for the backup and the rewrite'
 test('compact refuses when the backup volume lacks room for the backup', async () => {
   const { compactDatabase, DatabaseCompactPolicyError } = await import('../src/db/compact.js');
   const size = fs.statSync(dbPath).size;
-  // The store's volume has room; only the backup's directory is short.
   const available = (directory: string) => (fs.realpathSync(directory) === fs.realpathSync(backupDir) ? size / 2 : size * 10);
   await assert.rejects(
     compactDatabase({ source: dbPath, backup: path.join(backupDir, 'short.db'), availableBytes: available }),

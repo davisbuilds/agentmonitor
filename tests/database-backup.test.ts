@@ -168,8 +168,6 @@ test('database backup refuses an existing export unless replacement is explicit 
     assert.equal(replaced.exitCode, 0, replaced.stderr);
     assert.equal((JSON.parse(replaced.stdout) as { replaced: boolean }).replaced, true);
 
-    // An open reader retains the old inode while a new reader sees the complete
-    // replacement, proving the command did not rewrite the published file in place.
     assert.equal(
       (previous.prepare('SELECT value FROM previous_export').get() as { value: string }).value,
       'keep-until-replaced',

@@ -13,7 +13,6 @@ test('Codex native source evidence distinguishes conversations, delegation and i
   assert.equal(child.parent_session_id, 'parent');
   assert.equal(parse({ source: { subagent: 'compact' } }).relationship_type, 'internal');
   assert.equal(parse({ source: { subagent: 'memory_consolidation' } }).relationship_type, 'internal');
-  // An approval review, as Codex Desktop writes it: no prompt of anyone's, so not delegated work either.
   assert.equal(parse({
     source: { subagent: { other: 'guardian' } }, thread_source: 'guardian_review', parent_thread_id: 'parent',
   }).relationship_type, 'internal');
@@ -42,7 +41,6 @@ test('native creation time is not moved backwards by inherited child history', (
   assert.equal(parsed.messages.length, 1, 'history stays browsable, but is not new work');
 });
 
-// UUIDv7 whose embedded time is `ms`, as Codex mints session and turn ids.
 function uuidV7(ms: number, tail = '000000000000'): string {
   const hex = ms.toString(16).padStart(12, '0');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7000-8000-${tail}`;
@@ -109,8 +107,6 @@ test('a preamble ahead of a copied span stays with the child', () => {
 });
 
 test('a child\'s own compaction before its first surviving turn is kept', () => {
-  // Without inherited turns there is no copy: a compacted record here is the
-  // child's own earlier work, not the parent's.
   const parsed = rollout([
     spawnMeta,
     { type: 'compacted', payload: { message: 'child summary' } },

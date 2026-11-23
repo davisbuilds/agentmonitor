@@ -11,7 +11,7 @@ import type { parseClaudeCodeFile as parseClaudeCodeFileType } from '../src/impo
 import type { parseCodexFile as parseCodexFileType } from '../src/import/codex.js';
 import type { runImport as runImportType } from '../src/import/index.js';
 
-// Env must be set before any module that snapshots config is imported.
+// WHY: Configure the disposable database before importing modules that snapshot its path.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-invocation-mode-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
 process.env.AGENTMONITOR_SESSION_TIMEOUT = '1000000';
@@ -120,7 +120,6 @@ describe('invocation mode surfaces on monitor sessions', () => {
 
 describe('mode backfills on re-import even when all events are duplicates', () => {
   test('forced re-import repairs Desktop mode even when all events already exist', () => {
-    // A claude projects tree the importer can discover.
     const claudeDir = path.join(tempDir, 'claude-reimport');
     const projDir = path.join(claudeDir, 'projects', 'proj');
     fs.mkdirSync(projDir, { recursive: true });
@@ -141,9 +140,8 @@ describe('mode backfills on re-import even when all events are duplicates', () =
     runImport({ source: 'claude-code', claudeDir, force: true });
     assert.equal(modeFor(sid), 'interactive');
 
-    // Simulate the old Desktop classification: events already imported, but
-    // the SDK transport was incorrectly classified as headless. A forced re-import re-parses and hits the
-    // duplicate-event_id early return, so only the decoupled backfill can fix it.
+    // WHY: Deduplication returns before rewriting existing events, so a re-import needs the separate
+    // mode backfill to repair their classification.
     getDb().prepare("UPDATE sessions SET metadata = '{\"mode\":\"headless\"}' WHERE id = ?").run(sid);
     assert.equal(modeFor(sid), 'headless');
 

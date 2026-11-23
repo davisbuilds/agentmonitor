@@ -12,8 +12,8 @@ let getDb: typeof getDbType;
 let closeDb: typeof closeDbType;
 let initSchema: typeof initSchemaType;
 
-// The original per-session correlated-subquery query (pre-rewrite). Kept here as
-// the parity oracle: the production CTE query must return byte-identical rows.
+// WHY: Use the original query as the parity oracle so the replacement preserves its result rather
+// than just matching a new fixture.
 const OLD_SQL = `
   SELECT s.*,
     COALESCE((SELECT COUNT(*) FROM events e WHERE e.session_id = s.id), 0) as event_count,
@@ -31,9 +31,6 @@ const OLD_SQL = `
   __LIMIT__
 `;
 
-// The new grouped-aggregate query the production code adopts. Pages sessions
-// first, then computes all seven aggregates in a single grouped pass restricted
-// to the paged sessions, instead of 7 correlated subqueries per row.
 const NEW_SQL = `
   WITH page AS (
     SELECT s.*
@@ -109,7 +106,6 @@ function seed(): void {
   const session = db.prepare(
     `INSERT INTO sessions (id, agent_id, agent_type, project, status, last_event_at) VALUES (?, ?, ?, ?, ?, ?)`,
   );
-  // Tied last_event_at on A/B to exercise the id-DESC tiebreak; C has zero events.
   session.run('sess-a', 'agent-1', 'claude', 'proj-x', 'active', '2026-05-01T10:00:00Z');
   session.run('sess-b', 'agent-1', 'claude', 'proj-x', 'idle', '2026-05-01T10:00:00Z');
   session.run('sess-c', 'agent-2', 'codex', 'proj-y', 'ended', '2026-04-20T08:00:00Z');
@@ -119,20 +115,16 @@ function seed(): void {
     `INSERT INTO events (event_id, session_id, agent_type, event_type, tool_name, created_at, tokens_in, tokens_out, cost_usd, metadata)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  // sess-a: two edits on the SAME file (distinct files = 1), one tool with no metadata, one NULL-cost row.
   event.run('a1', 'sess-a', 'claude', 'tool_use', 'Edit', '2026-05-01T09:00:00Z', 100, 50, 0.01,
     JSON.stringify({ file_path: '/repo/foo.ts', lines_added: 10, lines_removed: 2 }));
   event.run('a2', 'sess-a', 'claude', 'tool_use', 'Write', '2026-05-01T09:05:00Z', 200, 80, 0.02,
     JSON.stringify({ file_path: '/repo/foo.ts', lines_added: 5, lines_removed: 0 }));
   event.run('a3', 'sess-a', 'claude', 'tool_use', 'Bash', '2026-05-01T09:10:00Z', 10, null, null, '{}');
-  // sess-b: single event, all token columns NULL, non-JSON metadata (json_valid guard must skip it).
   event.run('b1', 'sess-b', 'claude', 'response', null, '2026-05-01T09:30:00Z', null, null, null, 'not json');
-  // sess-d: two edits on DIFFERENT files (distinct files = 2).
   event.run('d1', 'sess-d', 'codex', 'tool_use', 'apply_patch', '2026-05-02T08:00:00Z', 300, 120, 0.05,
     JSON.stringify({ file_path: '/repo/a.py', lines_added: 30, lines_removed: 4 }));
   event.run('d2', 'sess-d', 'codex', 'tool_use', 'apply_patch', '2026-05-02T08:30:00Z', 150, 60, 0.03,
     JSON.stringify({ file_path: '/repo/b.py', lines_added: 7, lines_removed: 1 }));
-  // sess-c intentionally has no events.
 }
 
 function run(sql: string, limit: number | null): unknown[] {
@@ -145,7 +137,6 @@ test('grouped-aggregate session list matches the correlated-subquery oracle (no 
 });
 
 test('grouped-aggregate session list matches the oracle under a small page limit', () => {
-  // Exercises the paged-aggregate restriction (WHERE session_id IN page).
   assert.deepEqual(run(NEW_SQL, 2), run(OLD_SQL, 2));
 });
 

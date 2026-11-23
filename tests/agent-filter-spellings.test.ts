@@ -34,7 +34,6 @@ db.prepare(`INSERT INTO tool_calls (message_id, session_id, tool_name, category,
 const summary = db.prepare(`INSERT INTO session_trace_summary
   (session_id, trace_id, agent_type, started_at, observation_count, projection_version)
   VALUES (?, ?, ?, '2026-03-04T14:00:00Z', 1, 'test')`);
-// Trace summaries carry whichever spelling their source projected.
 summary.run('claude-1', 'sts:claude-1', 'claude');
 summary.run('claude-2', 'sts:claude-2', 'claude_code');
 

@@ -4,9 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 
-// Claude transcripts split each request's cache writes into a 5-minute and a
-// 1-hour part, and the 1-hour part bills at 2x input rather than 1.25x. These
-// follow that split from the transcript through every path that prices a row.
+// WHY: The provider prices the two cache lifetimes differently. The fixture carries the split from
+// source through each pricing path.
 
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-claude-1h-cache-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
@@ -19,11 +18,10 @@ const { parseClaudeCodeFile } = await import('../src/import/claude-code.js');
 const { recalculateEventCosts } = await import('../src/pricing/recalc.js');
 const { attributeCostSources } = await import('../src/pricing/cost-provenance.js');
 
-// claude-opus-5: input $5, 5-minute write $6.25, 1-hour write $10 per MTok.
 const MODEL = 'claude-opus-5';
 const AT = '2026-09-20T10:00:00Z';
-const SPLIT_COST = 0.4 * 6.25 + 0.6 * 10;   // 1M cache writes, 600K of them 1-hour
-const FLAT_COST = 6.25;                       // the same writes, all at the 5-minute rate
+const SPLIT_COST = 0.4 * 6.25 + 0.6 * 10;
+const FLAT_COST = 6.25;
 
 type Row = { cache_write_tokens: number; cache_write_1h_tokens: number; cost_usd: number | null; cost_source: string | null };
 const rowOf = (eventId: string) => getDb().prepare(

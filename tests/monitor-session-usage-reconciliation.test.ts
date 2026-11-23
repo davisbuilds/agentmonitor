@@ -11,10 +11,8 @@ import type {
   listMonitorSessions as listMonitorSessionsType,
 } from '../src/db/v2-queries.js';
 
-// Codex and Claude report each response's usage twice: live over OTEL, then
-// again when the transcript is imported. The Monitor's session totals (the Active Agents
-// cards and the session detail) must reconcile that overlap the way Usage does,
-// or a card shows roughly twice the cost the header's "Cost today" counts.
+// WHY: Import and live telemetry can represent the same response. Session totals must reconcile that
+// overlap to agree with Usage.
 
 let tempDir = '';
 let closeDb: typeof closeDbType;
@@ -59,17 +57,13 @@ before(async () => {
       tokens_in, tokens_out, cost_usd, metadata
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '{}')
   `);
-  // Two responses, each seen by OTEL and then by the import.
   event.run('otel-1', 'codex-live', 'codex', 'llm_response', 'otel', `${day} 12:01:00`, 'gpt-5.5', 1000, 100, 1.0);
   event.run('import-1', 'codex-live', 'codex', 'llm_response', 'import', `${day} 12:01:00`, 'gpt-5.5', 900, 90, 0.9);
   event.run('otel-2', 'codex-live', 'codex', 'llm_response', 'otel', `${day} 12:10:00`, 'gpt-5.5', 2000, 200, 2.0);
   event.run('import-2', 'codex-live', 'codex', 'llm_response', 'import', `${day} 12:10:00`, 'gpt-5.5', 1800, 180, 1.8);
-  // A response the import has not reached yet: OTEL is the only record, so it counts.
   event.run('otel-3', 'codex-live', 'codex', 'llm_response', 'otel', `${day} 12:20:00`, 'gpt-5.5', 500, 50, 0.5);
-  // A usage-free event still counts as an event.
   event.run('tool-1', 'codex-live', 'codex', 'tool_use', 'otel', `${day} 12:05:00`, null, null, null, null);
 
-  // Claude Code OTEL and import rows are not the Codex overlap and both stay.
   event.run('claude-otel', 'claude-live', 'claude_code', 'llm_response', 'otel', `${day} 12:01:00`, 'claude-sonnet-4-5', 100, 10, 0.1);
   event.run('claude-import', 'claude-live', 'claude_code', 'llm_response', 'import', `${day} 12:02:00`, 'claude-sonnet-4-5', 200, 20, 0.2);
 });

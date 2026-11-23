@@ -9,7 +9,6 @@ import {
   deriveBillingTokens,
 } from '../src/import/antigravity/proto.js';
 
-// --- minimal protobuf encoder, for building deterministic fixtures ---
 function varint(n: number): number[] {
   const out: number[] = [];
   let big = n;
@@ -49,13 +48,11 @@ test('decodeMessage: tolerates trailing garbage without throwing', () => {
 });
 
 test('decodeStepEnvelope: extracts type, status, kind from the oneof, metadata presence', () => {
-  // gemini_coder.Step: type=1 -> 28 (run_command), status=4 -> 3,
-  // metadata=5 present, oneof payload field 28 (run_command) present.
   const stepPayload = buf([
     ...vField(1, 28),
     ...vField(4, 3),
-    ...lField(5, [...vField(1, 1)]), // CortexStepMetadata (opaque here)
-    ...lField(28, [...vField(1, 1)]), // run_command payload (opaque)
+    ...lField(5, [...vField(1, 1)]),
+    ...lField(28, [...vField(1, 1)]),
   ]);
   const step = decodeStepEnvelope(stepPayload);
   assert.equal(step.type, 28);
@@ -65,30 +62,28 @@ test('decodeStepEnvelope: extracts type, status, kind from the oneof, metadata p
 });
 
 test('decodeStepEnvelope: kind comes from the present oneof field, not the type enum', () => {
-  // Real row shape (verified against DBs): step_payload is the FULL Step. Here
-  // type(1)=14 but the present oneof is field 19 (user_input) — they differ, and
-  // kind must follow the oneof, not the type number (14 would wrongly map to view_file).
+  // WHY: Dispatch on the protobuf oneof because a real step can carry a type enum that disagrees with
+  // its payload.
   const stepPayload = buf([
-    ...vField(1, 14), // Step.type = CortexStepType enum 14
-    ...vField(4, 3), // status
-    ...lField(5, [...vField(1, 1)]), // metadata
-    ...lField(19, [...vField(1, 1)]), // oneof: user_input payload
+    ...vField(1, 14),
+    ...vField(4, 3),
+    ...lField(5, [...vField(1, 1)]),
+    ...lField(19, [...vField(1, 1)]),
   ]);
   const step = decodeStepEnvelope(stepPayload);
   assert.equal(step.type, 14);
-  assert.equal(step.kind, 'user_input'); // NOT 'view_file'
+  assert.equal(step.kind, 'user_input');
   assert.equal(step.hasMetadata, true);
 });
 
 test('decodeStepEnvelope: unknown kind falls back to generic marker, never throws', () => {
   const stepPayload = buf([...vField(1, 9999), ...lField(9999, [0x01])]);
   const step = decodeStepEnvelope(stepPayload);
-  assert.equal(step.kind, undefined); // no known oneof field set
+  assert.equal(step.kind, undefined);
   assert.equal(step.type, 9999);
 });
 
 test('decodeGoogleUsage: maps pinned UsageMetadata field numbers', () => {
-  // prompt=1000, candidates=200, total=1500, cached=800, thoughts=300
   const usage = buf([
     ...vField(1, 1000),
     ...vField(2, 200),
@@ -105,8 +100,6 @@ test('decodeGoogleUsage: maps pinned UsageMetadata field numbers', () => {
 });
 
 test('decodeGeneratorMetadata: extracts model + CortexUsage from the real gen_metadata shape', () => {
-  // wrapper.1 -> CortexGeneratorMetadata { 19: model, 4: CortexUsage }
-  // CortexUsage: 1=system, 2=input(non-cached), 3=output(=thinking+answer), 5=cached, 9=thinking, 10=answer
   const usage = [
     ...vField(1, 1016),
     ...vField(2, 20000),
@@ -124,7 +117,6 @@ test('decodeGeneratorMetadata: extracts model + CortexUsage from the real gen_me
   assert.equal(decoded.usage!.inputTokens, 20000);
   assert.equal(decoded.usage!.cachedTokens, 8000);
   assert.equal(decoded.usage!.thinkingTokens, 2500);
-  // invariant proven across all 21 real records: output == thinking + answer
   assert.equal(
     decoded.usage!.outputTokens,
     decoded.usage!.thinkingTokens + decoded.usage!.answerTokens,
@@ -140,9 +132,9 @@ test('deriveBillingTokens: honors the cache-inclusive invariant (in + cache addi
     thinkingTokens: 2500,
     answerTokens: 500,
   });
-  assert.equal(billing.tokensIn, 21016); // system + non-cached input
-  assert.equal(billing.cacheReadTokens, 8000); // cached bulk NOT folded into tokensIn
-  assert.equal(billing.tokensOut, 3000); // includes reasoning
+  assert.equal(billing.tokensIn, 21016);
+  assert.equal(billing.cacheReadTokens, 8000);
+  assert.equal(billing.tokensOut, 3000);
   assert.equal(billing.thoughtsTokens, 2500);
 });
 

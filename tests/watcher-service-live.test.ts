@@ -60,7 +60,6 @@ describe('watcher picks up live file changes (chokidar directory watch, not glob
     seedRow(id);
 
     startWatcher({ claudeDir, codexHome, antigravityDir });
-    // Give chokidar a moment to establish its watchers before writing.
     await delay(600);
 
     fs.writeFileSync(
@@ -73,7 +72,6 @@ describe('watcher picks up live file changes (chokidar directory watch, not glob
       ].join('\n') + '\n',
     );
 
-    // Poll up to ~5s: chokidar stabilityThreshold (300ms) + debounce (500ms) + parse.
     let mode: string | null = null;
     for (let i = 0; i < 50; i++) {
       mode = modeOf(id);

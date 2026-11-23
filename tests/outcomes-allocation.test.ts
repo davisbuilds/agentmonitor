@@ -6,7 +6,6 @@ const minute = (n: number) => Date.UTC(2026, 2, 2, 10, n);
 
 test("each minute goes to the same root's first milestone at or after it, and minutes after the last to nothing", () => {
   type Named = Milestone & { name: string };
-  // Out of order on purpose.
   const milestones: Named[] = [
     { root: 'a', at: minute(30), outcome: 'direct', name: 'push' },
     { root: 'a', at: minute(10) + 20_000, outcome: 'merged_pr', name: 'pr' },
@@ -24,11 +23,11 @@ test("each minute goes to the same root's first milestone at or after it, and mi
   ];
   assert.deepEqual(allocate(minutes, milestones).map(row => [row.outcome, row.milestone?.name ?? null]), [
     ['merged_pr', 'pr'],
-    ['merged_pr', 'pr'], // a milestone later in the same minute
+    ['merged_pr', 'pr'],
     ['direct', 'push'],
-    ['direct', 'push'], // at the minute's start
+    ['direct', 'push'],
     ['nothing_after', null],
-    ['nothing_after', null], // another root's milestones are not this root's
+    ['nothing_after', null],
     ['unobservable', null],
     ['unobservable', null],
   ]);
@@ -47,7 +46,6 @@ test('quantiles interpolate between ranks', () => {
 });
 
 test("a project's few PRs move toward the overall figure further than a well-measured project's", () => {
-  // Deterministic spread around each project's level.
   const around = (level: number, n: number) => Array.from({ length: n }, (_, i) => level * Math.exp(((i % 5) - 2) * 0.4));
   const pooled = poolProjects([
     { project: 'big', costs: around(20, 40) },

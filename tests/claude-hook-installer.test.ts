@@ -66,7 +66,8 @@ try {
   execSync('jq --version', { encoding: 'utf8', timeout: 5_000 });
   hasJq = true;
 } catch {
-  // The installer itself requires jq.
+  // WHY: The installer requires a real jq executable. Leave the dependency probe false so the
+  // test can skip on hosts without it.
 }
 
 test('installer registers both instruction-load modes and preserves unrelated settings', {
@@ -149,7 +150,6 @@ test('back-to-back installs keep the original settings in their own backup', {
   writeFileSync(path.join(configDir, 'settings.json'), original);
 
   try {
-    // Both runs land within one second, which shared a backup name before.
     runInstaller([], configDir);
     runInstaller([], configDir);
 

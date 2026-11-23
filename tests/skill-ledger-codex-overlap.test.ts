@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 
-// Isolate the DB before importing anything that reads config.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-skill-overlap-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -12,8 +11,8 @@ const { initSchema } = await import('../src/db/schema.js');
 const { closeDb, getDb } = await import('../src/db/connection.js');
 const { selectSkillInvocationOccurrences } = await import('../src/skills/invocation-ledger.js');
 
-// Codex writes the same run twice: OTEL carries the bare command, and the
-// JSONL rollout (newer `exec`) wraps it in JS, so the strings differ.
+// WHY: One command can be recorded as bare OTEL text and as a wrapped transcript tool call, so string
+// equality does not establish uniqueness.
 const SESSION = '019a0000-0000-7000-8000-000000000001';
 const JSONL_SESSION = `rollout-2026-07-01T09-00-00-${SESSION}`;
 const read = (skill: string) => `cat ~/.agents/skills/${skill}/SKILL.md`;
@@ -76,7 +75,6 @@ describe('Codex OTEL and JSONL skill reads are reconciled per skill', () => {
   });
 
   test('JSONL fills in reads OTEL missed for a skill it did see', () => {
-    // OTEL export dropped out after the first read.
     otelRead('skill-alpha', '2026-07-01T10:00:00Z');
     jsonlRead(read('skill-alpha'), '2026-07-01T10:00:00Z');
     jsonlRead(read('skill-alpha'), '2026-07-01T11:00:00Z');

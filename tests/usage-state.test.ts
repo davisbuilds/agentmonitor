@@ -221,7 +221,6 @@ test('buildUsageCsv puts every value under its own header (no swapped columns)',
     'Input Tokens': '2002', 'Output Tokens': '303', 'Usage Events': '6', 'All Events': '9',
     'Started At': '2026-04-10T10:00:00Z', 'Last Activity': '2026-04-10T11:00:00Z', 'Has Browsing Session': 'false',
   }]);
-  // Empty filters are labelled, and a null summary emits no summary rows.
   assert.match(csv, /^Filters,Provider,All$/m);
   assert.doesNotMatch(csv, /^Summary,/m);
 });
@@ -242,8 +241,6 @@ test('buildUsageCsv quotes values containing commas, quotes, or newlines', () =>
   assert.ok(csv.includes('"acme, ""inc""\nlab"'));
   assert.equal(csvSection(csv, 'Projects')[0].Project, awkward);
   assert.deepEqual(parseCsv(csv).find(r => r[0] === 'Filters' && r[1] === 'Project'), ['Filters', 'Project', awkward]);
-  // A newline alone also forces quoting, or the row splits in two.
   assert.deepEqual(parseCsv(csv).find(r => r[0] === 'Filters' && r[1] === 'Agent'), ['Filters', 'Agent', 'two\nlines']);
-  // Empty tables are omitted entirely rather than emitted as bare headers.
   assert.doesNotMatch(csv, /Daily Usage|Top Sessions/);
 });

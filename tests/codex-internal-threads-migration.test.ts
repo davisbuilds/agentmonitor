@@ -30,31 +30,24 @@ test('v24 marks the Codex threads no one started as internal, and leaves real se
   const event = db.prepare(`INSERT INTO events (session_id, agent_type, event_type, model, metadata, source)
     VALUES (?, 'codex', ?, ?, ?, 'otel')`);
 
-  // An approval review: only its model marks it.
   session.run(id(1), 'codex-otel', null);
   event.run(id(1), 'session_start', 'codex-auto-review', '{}');
-  // An app job whose prompt the size cap dropped, with no rollout anywhere.
   session.run(id(2), 'codex-otel', null);
   event.run(id(2), 'user_prompt', 'gpt-5.6-terra', truncated);
-  // A long first prompt in a real session: it saved a rollout, so it stays.
   session.run(id(3), 'codex-otel', null);
   event.run(id(3), 'user_prompt', 'gpt-6-astra', truncated);
   session.run(`rollout-2026-10-20T10-00-00-${id(3)}`, 'codex-jsonl', null);
-  // A session whose prompt survived and names no app job.
   session.run(id(4), 'codex-otel', null);
   event.run(id(4), 'user_prompt', 'gpt-6-astra', JSON.stringify({ message: 'Fix the flaky test' }));
-  // A review that also saved a rollout: the list shows the rollout row, so it is marked too.
   session.run(id(6), 'codex-otel', null);
   event.run(id(6), 'session_start', 'codex-auto-review', '{}');
   session.run(`rollout-2026-10-20T10-05-00-${id(6)}`, 'codex-jsonl', null);
-  // A reviewer already classified another way keeps its classification.
   session.run(id(5), 'codex-otel', 'subagent');
   event.run(id(5), 'session_start', 'codex-auto-review', '{}');
 
   db.pragma('user_version = 23');
   runDataMigrations(db);
 
-  // A negative number names that thread's rollout row.
   const relationship = (n: number) => (db.prepare(
     "SELECT relationship_type FROM browsing_sessions WHERE id = ? OR (? AND id GLOB 'rollout-*' AND substr(id, -36) = ?)",
   ).get(n > 0 ? id(n) : '', n < 0 ? 1 : 0, id(Math.abs(n))) as { relationship_type: string | null }).relationship_type;
