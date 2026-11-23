@@ -28,11 +28,9 @@
   import { FilterBar, Select } from '../ui';
   import { agentName } from '../../format';
 
-  // A card's drill-in (`#monitor?session=…`): its live stream, or its events when it has none.
   const followedSessionId = $derived(getMonitorSessionId());
 
-  // Monitor filters by agent alone: it is the one filter every read here
-  // honors (the stats, the cards, their recent events and the cost windows).
+  // WHY: Expose only the agent filter because it is the sole filter every Monitor read honors.
   const agentFilter = $derived(getFilters().agent_type ?? '');
   const agentOptions = $derived(getFilterOptions().agent_types.map(agent => ({ value: agent, label: agentName(agent) })));
   function setAgentFilter(agent: string): void {
@@ -41,10 +39,8 @@
     void reload(next);
   }
 
-  // Today's and the last 30 days' cost come from the Usage API, with the window
-  // Usage's 30D range uses, so the Monitor and Usage show the same figures.
-  // Each read is synchronous SQLite work on the server, so they run in turn,
-  // and only the latest request's figures are kept.
+  // WHY: Use the same date windows as Usage so both views agree. Serialize the reads because they do
+  // synchronous SQLite work.
   let costWindowsRequest = 0;
   let lastCostWindowsAt = 0;
   async function loadCostWindows(filters: Record<string, string> = {}) {
@@ -62,9 +58,8 @@
     }
   }
 
-  // A filter change, reconnect or auto-import can each start a reload; only the
-  // newest one's snapshot is written, so an older filter's data never lands
-  // under the current one.
+  // WHY: Filter changes, reconnects, or imports can overlap. Only the latest reload may write the
+  // visible snapshot.
   const reloads = latestRequest();
   async function reload(filters: Record<string, string> = {}) {
     const isCurrent = reloads.begin();
@@ -108,7 +103,7 @@
     try {
       setFilterOptions(await fetchFilterOptions());
     } catch {
-      // Monitor data still renders without dropdown metadata.
+      // WHY: Keep Monitor usable when its optional filter metadata request fails.
     }
   }
 
@@ -117,10 +112,8 @@
     reload(getFilters());
   });
 
-  // Refetch when the server reports an auto-import (new events landed). This is
-  // how importer-derived fields like session invocation `mode` reach an already
-  // open Monitor — the live SSE stream (hooks/OTEL) does not carry them. Guarded
-  // against the effect's initial run so mount doesn't double-load.
+  // WHY: Reload imported session metadata because live hook and OTEL events omit it. Skip the initial
+  // effect run to avoid a duplicate mounted load.
   let lastAutoImportSignal = getAutoImportSignal();
   $effect(() => {
     const signal = getAutoImportSignal();
@@ -130,11 +123,8 @@
     }
   });
 
-  // Under an agent or start-time filter the store drops the unfiltered SSE
-  // stats snapshot and asks for this instead. A filtered read is synchronous
-  // SQLite work that can take seconds on a large store, so never overlap one
-  // and take at most one per interval; live events keep the bar current in
-  // between. A response for a filter that has since changed is discarded.
+  // WHY: Serialize and throttle filtered statistics because synchronous SQLite reads can block a large
+  // store. The stream keeps recent events current between reads.
   const FILTERED_STATS_REFRESH_MS = 30_000;
   let lastStatsRefreshSignal = getStatsRefreshSignal();
   let filteredStatsInFlight = false;
@@ -160,8 +150,8 @@
       .finally(() => { filteredStatsInFlight = false; });
   });
 
-  // Live events move the all-time cost in the stats snapshot as they land; take
-  // that as the cue to re-read the windowed figures, at most once per interval.
+  // WHY: Use a changing live total to refresh the cost windows, with a rate cap on the synchronous
+  // reads.
   const COST_WINDOWS_REFRESH_MS = 30_000;
   let lastCostSeen: number | null = null;
   $effect(() => {
@@ -176,9 +166,8 @@
     void loadCostWindows(getFilters());
   });
 
-  // Refetch after an SSE reconnect: the v1 stream has no replay, so events that
-  // landed while the connection was dropped (e.g. laptop sleep) never reached the
-  // incremental store. Guarded against the initial run so mount doesn't double-load.
+  // WHY: Reconnects leave a gap because the SSE endpoint has no replay. Reload the snapshot once after
+  // reconnect.
   let lastReconnectSignal = getReconnectSignal();
   $effect(() => {
     const signal = getReconnectSignal();

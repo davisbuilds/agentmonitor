@@ -32,8 +32,7 @@ export function sessionRecentEvents(
   for (const event of [...fetched, ...live]) {
     if (event.session_id === sessionId) byId.set(event.id, event);
   }
-  // Time first, as the server orders them: an imported event can carry a
-  // higher id than a live one that happened after it.
+  // WHY: Sort by event time because the importer may allocate a newer ID to an older event.
   return [...byId.values()]
     .sort((a, b) => eventTime(b) - eventTime(a) || b.id - a.id)
     .slice(0, limit);

@@ -1,5 +1,3 @@
-// Shared UI primitives for the Instrument Console design system.
-// See docs/system/DESIGN.md.
 export { default as Panel } from './Panel.svelte';
 export { default as SectionHeader } from './SectionHeader.svelte';
 export { default as Button } from './Button.svelte';

@@ -10,7 +10,7 @@
     antigravity: 'var(--color-antigravity)',
   };
 
-  // Compaction count is ordered, so one hue steps light to dark; each segment is also labeled.
+  // WHY: Order the compaction bins by lightness so they read as an ordinal scale alongside the labels.
   const bucketSteps: Array<{ key: keyof SessionDepthAgent['buckets']; label: string; mix: number }> = [
     { key: 'none', label: 'none', mix: 22 },
     { key: 'one', label: 'once', mix: 48 },
@@ -53,7 +53,6 @@
             </span>
           </div>
 
-          <!-- With no session that can show compactions there is nothing to read; the header already says so. -->
           {#if row.sessions > 0}
             <div class="mt-2 flex items-baseline gap-2">
               <span class="tabular font-mono text-h3 text-text">{percent(row.compacted_sessions, row.sessions)}</span>

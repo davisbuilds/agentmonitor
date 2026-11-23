@@ -25,13 +25,8 @@ export interface ModelDailyPointLike {
 
 export const TOP_N = 5;
 
-// Validated on ALL pairs against the dark chart surface (#101419): lightness
-// band, chroma floor, CVD separation (worst ΔE 8.0, deutan), the normal-vision
-// floor (worst ΔE 15.4) and 3:1 contrast. All pairs, not adjacent ones: a
-// stacked day omits the series it lacks, so any two can end up touching. Any
-// subset of the set passes too, so the order only picks which colors a short
-// chart opens with. tests/series-palette.test.ts reruns every check. Green and
-// red are omitted deliberately: they read as the ok/danger status tokens.
+// WHY: Validate all palette pairs since a stack omits absent series and any two hues may touch. Reserve
+// green and red for status signals.
 export const SERIES_COLORS = [
   '#3c8ac7', '#e46212', '#3aac83', '#f030c3', '#9e71fd',
   '#8d5d1b', '#4b47ee', '#b05f8f', '#03785d', '#a318be',
@@ -45,9 +40,7 @@ export const SERIES_COLORS = [
 export const OTHER_COLOR = '#3d424a';
 export const OTHER_LABEL = 'Other';
 
-// A set needs at most TOP_N distinct hues, so this headroom is what lets
-// assignModelColors() always find a free color. Guard the invariant here rather
-// than discovering it as a gray series in the chart.
+// WHY: Ensure enough hues for a complete stack so a model cannot silently fall back to gray.
 if (TOP_N > SERIES_COLORS.length) {
   throw new Error(`Daily Usage by Model needs at least ${TOP_N} series colors, got ${SERIES_COLORS.length}`);
 }
@@ -102,8 +95,7 @@ export function rankModels(points: readonly ModelDailyPointLike[], metric: Usage
 export function assignModelColors(points: readonly ModelDailyPointLike[]): Map<string, string> {
   const rankedByMetric = METRICS.map(metric => rankModels(points, metric));
 
-  // Deterministic and metric-independent: the union, ordered by the first metric that
-  // ranks each model. Iterating the selection instead would reintroduce the repaint.
+  // WHY: Assign from a stable cross-metric universe so toggling the metric cannot repaint a model.
   const universe = [...new Set(rankedByMetric.flat())];
 
   const assigned = new Map<string, string>();

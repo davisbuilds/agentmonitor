@@ -89,8 +89,6 @@ class AnalyticsStore {
   private unsubscribe: (() => void) | null = null;
   private subscriptionMode: 'overview' | 'skills' | 'git' | null = null;
 
-  // Shared filters live in the consolidated analytics filter store; the Overview
-  // sub-view reads from it and refetches when it changes.
   get from(): string { return analyticsFilters.from; }
   get to(): string { return analyticsFilters.to; }
   get project(): string { return analyticsFilters.project; }
@@ -394,8 +392,8 @@ class AnalyticsStore {
     const slice = JSON.stringify(params);
     this.loading.markers = true;
     this.errors.markers = null;
-    // The charts draw markers without an error notice, so another slice's
-    // markers are dropped rather than drawn on this slice's charts.
+    // WHY: Drop markers from the previous slice so an unsuccessful fetch cannot leave unrelated
+    // annotations on the current chart.
     if (slice !== this.changeMarkersSlice) this.changeMarkers = null;
     try {
       const result = await fetchAnalyticsChangeMarkers(params);
@@ -404,7 +402,6 @@ class AnalyticsStore {
       this.changeMarkersSlice = slice;
     } catch (err) {
       if (version !== this.versions.markers) return;
-      // Markers annotate the charts; without them the charts still stand.
       console.error('Failed to load change markers:', err);
       this.errors.markers = 'Failed to load change markers.';
     } finally {
@@ -517,8 +514,8 @@ class AnalyticsStore {
     const version = ++this.versions.skillConsultations;
     this.loading.skillConsultations = true;
     this.errors.skillConsultations = null;
-    // Consultation rows carry their own filter denominator. Never retain them
-    // across a new slice when the replacement request may fail.
+    // WHY: Consultation rows include their filter denominator. Clear them when a new slice starts so a
+    // failed replacement cannot misattribute the old rows.
     this.skillConsultations = null;
     this.coverage.skillConsultations = null;
     try {
@@ -597,8 +594,8 @@ class AnalyticsStore {
     }
   }
 
-  // Filter mutations delegate to the shared store, which syncs the hash and
-  // notifies subscribers (this store's fetchAll) — no direct fetch here.
+  // WHY: Delegate to the shared filters to synchronize the link and avoid a second fetch alongside the
+  // subscriber.
   async setDateRange(from: string, to: string): Promise<void> {
     analyticsFilters.setDateRange(from, to);
   }

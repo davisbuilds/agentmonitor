@@ -14,8 +14,8 @@ function isToolResult(node: TraceQualityObservationTreeNode): boolean {
   return node.name.startsWith('Tool result');
 }
 
-// Claude calls and results share the tool_use id; Codex ids them
-// `<call_id>:decision` and `<call_id>:result`.
+// WHY: Claude pairs items by tool_use ID. Normalize the Codex decision and result suffixes before
+// matching.
 function callKey(node: TraceQualityObservationTreeNode): string | null {
   if (!node.source_item_id) return null;
   return node.source_item_id.replace(/:(decision|result)$/, '');

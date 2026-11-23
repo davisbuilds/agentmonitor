@@ -19,8 +19,8 @@ import {
 
 describe('parseTimestamp — timezone normalization', () => {
   it('treats a space-separated SQLite timestamp as UTC', () => {
-    // "YYYY-MM-DD HH:MM:SS" (no T, no zone) is a SQLite datetime; it must be
-    // read as UTC, not local, or every card time shifts by the offset.
+    // WHY: SQLite timestamps without offsets represent UTC. Interpreting them as local shifts card
+    // times by the timezone offset.
     expect(parseTimestamp('2026-09-11 12:00:00').toISOString()).toBe('2026-09-11T12:00:00.000Z');
   });
 
@@ -103,7 +103,7 @@ describe('formatDateRange — cost window labels', () => {
   });
 
   it('reads the dates as calendar days in any time zone', () => {
-    // West of UTC, a UTC midnight shown in local time is the day before.
+    // WHY: Test west of UTC so a local parse of UTC midnight would visibly land on the preceding day.
     vi.stubEnv('TZ', 'America/Los_Angeles');
     try {
       expect(formatDateRange('2026-09-01', '2026-09-01', now)).toBe('Sep 1');
@@ -136,7 +136,6 @@ describe('formatModelName — one spelling for every model', () => {
     expect(formatModelName('claude-haiku-4-5-20251001')).toBe('claude-haiku-4-5');
     expect(formatModelName('claude-sonnet-4-20250514')).toBe('claude-sonnet-4');
     expect(formatModelName('openai/gpt-5.4-2026-03-05')).toBe('gpt-5.4');
-    // Version numbers are not dates.
     expect(formatModelName('gpt-5.6-terra')).toBe('gpt-5.6-terra');
     expect(formatModelName('gemini-3.1-pro-preview')).toBe('gemini-3.1-pro-preview');
   });
@@ -159,7 +158,6 @@ describe('modelSelectOptions — a filter option per raw ID', () => {
   });
 });
 
-// Moved from the root node:test suite, which duplicated this one.
 describe('formatDateOnly', () => {
   it('keeps a UTC calendar date in a negative local offset', () => {
     vi.stubEnv('TZ', 'America/Chicago');

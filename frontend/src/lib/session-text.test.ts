@@ -88,7 +88,8 @@ describe('getMessagePreviewText — stored message content', () => {
   it('previews the first text block of a block array, skipping non-text blocks', () => {
     const content = JSON.stringify([
       { type: 'tool_use', name: 'Read' },
-      // A non-text block that happens to carry a `text` field is still not the answer.
+      // WHY: Give a non-answer block text so the test proves selection depends on block type as well as
+      // the text field.
       { type: 'tool_result', text: 'file contents' },
       { type: 'text', text: 'first  answer' },
       { type: 'text', text: 'second' },

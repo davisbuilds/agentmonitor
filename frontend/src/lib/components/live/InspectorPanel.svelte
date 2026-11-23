@@ -27,8 +27,8 @@
   const itemDurationMs = $derived(item ? rowDurationMs({ item, result }) : null);
   const itemTurnDurationMs = $derived(item?.turn_id != null ? turnDurationMs(turns.find(turn => turn.id === item.turn_id)) : null);
 
-  // Every message is a turn, so the full list repeats the stream; only turns
-  // that are still running or went wrong are worth listing here.
+  // WHY: Listing every turn repeats the stream, so the inspector reserves its attention list for
+  // unfinished or failed turns.
   const attentionTurns = $derived(turns.filter(turn => isNotableStatus(turn.status)));
 
   const parsedPayload = $derived.by(() => {

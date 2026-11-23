@@ -1,5 +1,3 @@
-// Geometry for DailyBarChart: one bar per day, stacked by segment, on a
-// round-tick y axis. Pure, so the arithmetic is testable without a DOM.
 import { niceLinearTicks } from './scales';
 
 export interface BarSegment {
@@ -49,7 +47,6 @@ export function dailyBarLayout(
   });
   const max = Math.max(0, ...columns.map(column => column.total));
   let ticks = max > 0 ? niceLinearTicks(0, max, tickCount) : [0];
-  // A count has no half sessions; keep whole ticks (0 and the top always are).
   if (integer) ticks = ticks.filter(Number.isInteger);
   const top = ticks[ticks.length - 1];
   for (const column of columns) column.heightPct = top > 0 ? (column.total / top) * 100 : 0;
@@ -65,8 +62,8 @@ function dateTickIndexes(count: number, max: number): Set<number> {
   let last = 0;
   for (let i = 0; i < count; i += step) last = i;
   for (let i = 0; i <= last; i += step) ticks.add(i);
-  // The last label is right-aligned under its column; drop a label that would
-  // sit closer to it than one step, or the two collide on a narrow plot.
+  // WHY: Omit a near-final tick so its text cannot overlap the right-aligned last label on narrow
+  // plots.
   if (last > 0 && count - 1 - last < step) ticks.delete(last);
   ticks.add(count - 1);
   return ticks;

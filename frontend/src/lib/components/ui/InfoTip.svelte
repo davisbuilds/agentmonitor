@@ -2,8 +2,6 @@
   import type { Snippet } from 'svelte';
   import Popover from './Popover.svelte';
 
-  // The single ⓘ a heading carries in place of a subtitle or banner
-  // (DESIGN.md: collapse heading + subtitle + banner into one affordance).
   interface Props {
     /** What the note explains; the button's accessible name is "About <label>". */
     label: string;

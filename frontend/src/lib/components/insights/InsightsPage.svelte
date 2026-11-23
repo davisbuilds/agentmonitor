@@ -58,7 +58,6 @@
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
   <div class="rounded-lg border border-line bg-surface px-4 py-3">
     <div class="flex flex-col gap-3">
-      <!-- Insight kind + authoring LLM; shared date/project/agent live in the Analytics bar. -->
       <div class="flex flex-wrap items-center gap-2">
         <select
           class="rounded-sm border border-line bg-surface px-2 py-1 text-meta text-text-muted transition-colors hover:border-line-strong focus:border-accent focus:outline-none"

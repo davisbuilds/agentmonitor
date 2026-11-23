@@ -1,8 +1,4 @@
 <script lang="ts">
-  // Thin, tokenized chart frame: gridlines, tick labels, and axis titles for a
-  // plot rect, given ready-made scales + tick values. No marks and no data
-  // opinions — the consumer renders its own <circle>/<polyline> marks into the
-  // `children` snippet using the same scales. See docs/system/DESIGN.md.
   import type { Snippet } from 'svelte';
   import type { Scale } from './scales';
   import { chartLayout, type ChartMargins } from './layout';
@@ -56,7 +52,6 @@
   {role}
   aria-label={ariaLabel}
 >
-  <!-- horizontal gridlines + y tick labels -->
   {#each yTicks as t}
     {@const y = yScale(t)}
     <line
@@ -78,7 +73,6 @@
     >{formatY(t)}</text>
   {/each}
 
-  <!-- x tick marks + labels -->
   {#each xTicks as t}
     {@const x = xScale(t)}
     <line
@@ -99,7 +93,6 @@
     >{formatX(t)}</text>
   {/each}
 
-  <!-- axis frame (left + bottom) -->
   <line
     x1={plot.left}
     x2={plot.left}

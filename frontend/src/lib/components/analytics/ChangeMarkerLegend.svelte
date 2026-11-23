@@ -1,6 +1,6 @@
 <script lang="ts">
-  // The key to the change markers on the Overview timelines, and the reason
-  // instruction changes are missing until a project is selected.
+  // WHY: Project-specific instruction changes need a selected project before the timeline can show
+  // them.
   import { analytics } from '../../stores/analytics.svelte';
   import { formatNumber } from '../../format';
 

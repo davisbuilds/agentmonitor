@@ -45,7 +45,7 @@
         <span class="tabular font-mono text-h2 text-text">{formatCost(headlines.cost.value)}</span>
         {@render change(percentChange(headlines.cost.value, headlines.cost.prior, 'up-is-bad'))}
       </div>
-      <!-- Name the window, so this figure can't be read against Monitor's. -->
+      <!-- WHY: Label the measured window so readers do not interpret Analytics using the Monitor range. -->
       <div class="text-meta text-text-faint">
         {formatDateRange(analytics.from, analytics.to)}{#if headlines.cost.prior !== null} · vs {formatCost(headlines.cost.prior)} before{/if}
       </div>
@@ -82,7 +82,6 @@
         {@render change(percentChange(headlines.sessions.value, headlines.sessions.prior))}
       </div>
       <Sparkline class="mt-auto h-7 pt-2" values={headlines.sessions.daily} />
-      <!-- The delegated share gets its own labeled line, so the two trends never read as one. -->
       <div class="flex items-center gap-2 text-meta text-text-faint">
         <span class="shrink-0">{Math.round(headlines.sessions.delegated_share * 100)}% delegated</span>
         <Sparkline class="h-4 min-w-0 flex-1" color="var(--color-text-faint)" values={headlines.sessions.daily_delegated_share} />
@@ -97,8 +96,7 @@
       {#if headlines.tool_errors.length === 0}
         <div class="text-meta text-text-faint">No tool outcomes recorded.</div>
       {:else}
-        <!-- No daily line: on most days a rate rests on a handful of calls, so its
-             shape would be noise. The counts say how much each rate rests on. -->
+        <!-- WHY: Show denominators because most days have too few tool calls for a meaningful daily error-rate trend. -->
         {#each headlines.tool_errors as row}
           <div>
             <div class="flex items-baseline gap-2">

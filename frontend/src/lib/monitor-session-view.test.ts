@@ -51,7 +51,8 @@ describe('followedSessionSummary', () => {
   });
 
   it('takes the larger figure from each row when both are known', () => {
-    // The card has counted live events since the read; the read has an import the card missed.
+    // WHY: Seed a live-only update and an import-only update so preferring one source wholesale would
+    // lose a fact.
     const card = session({ event_count: 12, tokens_in: 900, total_cost_usd: 1.5, last_event_at: '2026-10-26T10:05:00Z' });
     const detail = session({ event_count: 10, tokens_in: 1200, total_cost_usd: 1.2, mode: 'headless' });
     const merged = followedSessionSummary(card, detail);

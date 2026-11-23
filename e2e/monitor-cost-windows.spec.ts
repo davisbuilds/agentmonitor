@@ -41,7 +41,6 @@ test.beforeAll(async () => {
   initSchema();
   seedCost('e2e-cost-today', 1.25, new Date().toISOString());
   seedCost('e2e-cost-recent', 2, daysAgo(10));
-  // Outside both windows: only an all-time total would count it.
   seedCost('e2e-cost-old', 4, daysAgo(45));
 
   const app = createApp();
@@ -73,8 +72,6 @@ test('the Monitor names its cost windows, and its 30 days matches Usage', async 
   await expect(page.getByTestId('monitor-cost-today')).toHaveText('$1.25');
   await expect(page.getByTestId('monitor-cost-30d')).toHaveText('$3.25');
   await expect(page.getByText('$7.25')).toHaveCount(0);
-  // Read once on load: the first stats snapshot moving the cost from zero must
-  // not start a second pair of reads.
   await page.waitForTimeout(1_000);
   expect(summaryReads).toHaveLength(2);
 

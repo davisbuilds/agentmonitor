@@ -62,15 +62,14 @@
   ]);
   const captureAllOn = $derived(captureRows.every(row => row.on));
 
-  // Picking an item shows it in the Inspector, even from its Events view.
   let inspectorView = $state<'details' | 'events'>('details');
   function selectItem(id: number): void {
     setSelectedLiveItem(id);
     inspectorView = 'details';
   }
 
-  // The session's own Monitor read: its figures (for a session the cards do
-  // not list) and its recent events, which the live stream does not carry.
+  // WHY: Fetch Monitor details separately because the live stream does not carry the figures or recent
+  // events used by the cards.
   let detailSession = $state<Session | null>(null);
   let detailEvents = $state<AgentEvent[]>([]);
   let detailLoading = $state(false);
@@ -88,8 +87,7 @@
       detailError = null;
     } catch (err) {
       if (request !== detailRequest) return;
-      // A session the Monitor never recorded (a live stream with no events
-      // behind it) has no events to show; that is not a failure.
+      // WHY: A live-only session can have no Monitor record. Treat that absence as an empty event list.
       if (err instanceof ApiError && err.status === 404) {
         detailSession = null;
         detailEvents = [];
@@ -103,9 +101,8 @@
     }
   }
 
-  // Live events for this session, held here: the Monitor's global feed keeps
-  // only its newest 200, so other sessions' activity would evict them. Keyed
-  // by session id, so a new session drops the last one's events.
+  // WHY: Hold this session’s events separately so other sessions cannot evict them from the globally
+  // capped feed.
   let heldLiveEvents = $state<AgentEvent[]>([]);
   $effect(() => {
     const id = sessionId;
@@ -124,8 +121,8 @@
     untrack(() => void loadDetail(id));
   });
 
-  // Imported events reach no live broadcast; reread after an import or a
-  // reconnect, as the cards do.
+  // WHY: Import completion and reconnect need explicit reads because their events may never arrive
+  // through the live stream.
   let lastAutoImportSignal = getAutoImportSignal();
   let lastReconnectSignal = getReconnectSignal();
   $effect(() => {
@@ -142,11 +139,10 @@
   const summary = $derived(followedSessionSummary(cardRow, detailSession));
   const recentEvents = $derived(sessionRecentEvents(sessionId, detailEvents, heldLiveEvents));
   const agentLabel = $derived(summary ? buildActiveAgentLabel(summary.agent_type, recentEvents) : '');
-  // With no live stream to follow, the events are the view.
   const eventsOnly = $derived(!liveEnabled || missing);
 
-  // Follow on a new session or when the live view turns on; the store's own
-  // reads (such as the kind filter) must not re-run this.
+  // WHY: Keep the follow effect tied to the session and view mode so the store’s filter reads cannot
+  // start a duplicate follow.
   $effect(() => {
     const id = sessionId;
     const live = liveEnabled;
@@ -209,7 +205,6 @@
   </div>
 
   {#if summary}
-    <!-- The card's figures, kept live while you follow the session. -->
     <SessionSummary
       session={summary}
       label={agentLabel}

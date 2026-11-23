@@ -72,24 +72,19 @@ class AnalyticsFiltersStore {
   project = $state('');
   agent = $state('');
 
-  // Usage sub-view specialized filters.
   model = $state('');
   provider = $state('');
   tier = $state('');
 
-  // Skills sub-view specialized filters.
   skillHarness = $state('');
   skillQuery = $state('');
   skillSignal = $state<AnalyticsSkillSignal>('all');
   skillSort = $state<AnalyticsSkillSort>('volume');
 
-  // Insights sub-view specialized filters (provider/model = the LLM that authors
-  // the insight; distinct from Usage's billed provider/model).
   insightProvider = $state<InsightProvider>('openai');
   insightModel = $state('');
   kind = $state<InsightKind>('overview');
 
-  // Quality sub-view: optional session scope (drill-in) and the open trace.
   sessionId = $state<string | null>(null);
   traceId = $state<string | null>(null);
 
@@ -267,8 +262,6 @@ class AnalyticsFiltersStore {
     this.notify();
   }
 
-  // --- Shared filters (refetch the active sub-view) ---
-
   setDateRange(from: string, to: string): void {
     this.from = from;
     this.to = to < from ? from : to;
@@ -313,8 +306,6 @@ class AnalyticsFiltersStore {
     this.notify();
   }
 
-  // --- Skills specialized filters (client-side; hash-only, no refetch) ---
-
   setSkillHarness(harness: string): void {
     this.skillHarness = harness;
     this.syncHash();
@@ -349,8 +340,8 @@ class AnalyticsFiltersStore {
     this.notify();
   }
 
-  // Insight provider/model select the authoring LLM; they don't affect the list
-  // query, so they sync the hash but do not trigger a refetch.
+  // WHY: Authoring model selection is independent of the saved-insight list. Update the link without
+  // fetching it again.
   setInsightProvider(provider: InsightProvider): void {
     this.insightProvider = provider;
     this.syncHash();
@@ -387,11 +378,8 @@ class AnalyticsFiltersStore {
       || next.tier !== this.tier
       || next.kind !== this.kind
       || next.sessionId !== this.sessionId
-      // Trace selection rides the hash: an external nav (Back/Forward, edited
-      // URL, or deep-link anchor) that changes only `trace=` must still notify so
-      // the Quality explorer reloads the inspector for the new trace. In-app
-      // selection uses replaceState and does not fire hashchange, so this only
-      // costs a list reload on genuine navigation.
+      // WHY: A Back, Forward or edited hash can change only the trace. Notify on that change so the
+      // inspector reloads its selected trace.
       || next.traceId !== this.traceId
     );
     this.applyState(next);

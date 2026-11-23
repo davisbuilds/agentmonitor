@@ -12,8 +12,8 @@ export type MessageAuthor = 'you' | 'assistant' | 'tool' | 'instructions';
  * alongside a tool_result — counts as genuine human input.
  */
 export function classifyMessageAuthor(message: Pick<Message, 'role' | 'content'>): MessageAuthor {
-  // Codex injects harness instructions (permissions, skills, memory) as
-  // developer-role messages: input to the model, not its replies.
+  // WHY: Separate harness instructions from user input and assistant output because Codex records them
+  // as system or developer messages.
   if (message.role === 'developer' || message.role === 'system') return 'instructions';
   if (message.role !== 'user') return 'assistant';
   try {
@@ -22,7 +22,7 @@ export function classifyMessageAuthor(message: Pick<Message, 'role' | 'content'>
       return 'tool';
     }
   } catch {
-    // Non-JSON content is plain human text.
+    // WHY: Treat content that was never encoded as JSON as human text.
   }
   return 'you';
 }

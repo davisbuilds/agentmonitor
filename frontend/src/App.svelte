@@ -54,7 +54,6 @@
 </script>
 
 <div class="min-h-full h-screen flex flex-col bg-canvas text-text">
-  <!-- Command bar: wordmark · tabs · quota · search · connection -->
   <header class="flex h-14 shrink-0 items-center gap-4 border-b border-line px-4 sm:px-6">
     <div class="flex min-w-0 flex-1 items-center gap-5">
       <h1 class="shrink-0 text-h3 font-semibold tracking-tight">AgentMonitor</h1>
@@ -94,7 +93,6 @@
     </div>
   </header>
 
-  <!-- Tab Content: each tab renders its own FilterBar under the command bar. -->
   {#if tab === 'monitor'}
     <MonitorPage />
   {:else if tab === 'sessions'}

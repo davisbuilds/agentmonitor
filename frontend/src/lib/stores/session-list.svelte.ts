@@ -32,8 +32,8 @@ export class SessionList {
     this.loading = true;
     this.error = null;
     if (!append) {
-      // A new query starts a new pagination; a failed one must not leave the
-      // previous query's cursor behind for "Load more" to page from.
+      // WHY: Clear the cursor with a new query so an unsuccessful first page cannot leave Load more
+      // pointing at a prior result set.
       this.cursor = undefined;
       this.hasMore = false;
     }

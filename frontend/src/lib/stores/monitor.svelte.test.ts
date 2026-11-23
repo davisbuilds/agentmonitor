@@ -7,9 +7,7 @@ vi.mock('../api/client', async (importOriginal) => ({
   fetchSessionDetail: (...args: unknown[]) => fetchSessionDetail(...args),
 }));
 
-// The store is a module singleton built on `$state`. Reset the module registry
-// before each test so every case starts from fresh state rather than inheriting
-// the previous test's events/sessions/signals.
+// WHY: Reset the Svelte singleton so one test’s events, sessions or signals cannot reach the next.
 let store: typeof import('./monitor.svelte');
 beforeEach(async () => {
   vi.resetModules();
@@ -48,17 +46,15 @@ describe('setEvents — authoritative snapshot vs. in-flight live prepend', () =
   });
 
   it('preserves a live event newer than the snapshot high-water mark', () => {
-    // A live event (id 10) arrives via SSE while the REST reload is in flight.
+    // WHY: Deliver a newer live event before applying the older REST snapshot to expose a reload that
+    // replaces the whole feed.
     store.addEvent(ev(10));
-    // The reload returns an older snapshot that predates the live event.
     store.setEvents([ev(8), ev(7), ev(6)]);
-    // The naive `slice(200)` replace would drop id 10; the merge must keep it.
     expect(store.getEvents().map((e) => e.id)).toEqual([10, 8, 7, 6]);
   });
 
   it('dedups an id present in both the snapshot and the live prepend', () => {
     store.addEvent(ev(9));
-    // id 9 appears in the snapshot too (the importer persisted the live event).
     store.setEvents([ev(9), ev(8)]);
     expect(store.getEvents().map((e) => e.id)).toEqual([9, 8]);
   });
@@ -120,10 +116,10 @@ describe('handleSessionUpdate — idle_check', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-11T01:00:00Z'));
     store.setSessions([
-      // 3m quiet: active by a 5-minute clock, but the server (timeout 2m) idled it.
+      // WHY: Use server transitions that disagree with the default client clock to establish which
+      // timeout controls the card.
       session('quiet', { last_event_at: '2026-09-11T00:57:00Z' }),
       session('gone', { status: 'idle', last_event_at: '2026-09-11T00:50:00Z' }),
-      // 10m quiet, yet the server did not move it (timeout 15m): it stays active.
       session('slow', { last_event_at: '2026-09-11T00:50:00Z' }),
     ]);
     store.handleSessionUpdate({
@@ -136,7 +132,6 @@ describe('handleSessionUpdate — idle_check', () => {
         { session_id: 'gone', status: 'ended' },
       ],
     });
-    // The Monitor lists only sessions that have not ended, as its reload does.
     const byId = Object.fromEntries(store.getSessions().map((s) => [s.id, s.status]));
     expect(byId).toEqual({ quiet: 'idle', slow: 'active' });
     vi.useRealTimers();
@@ -146,9 +141,10 @@ describe('handleSessionUpdate — idle_check', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-11T01:00:00Z'));
     store.setSessions([
-      // An `amon` command swept this one in its own process: no transition for it.
-      session('cli-swept', { last_event_at: '2026-09-11T00:50:00Z' }), // 10m quiet
-      session('recent', { last_event_at: '2026-09-11T00:53:00Z' }),    // 7m quiet
+      // WHY: A sweep in another process can leave this card without a broadcast transition. Exercise
+      // the inferred-idle case.
+      session('cli-swept', { last_event_at: '2026-09-11T00:50:00Z' }),
+      session('recent', { last_event_at: '2026-09-11T00:53:00Z' }),
     ]);
     store.handleSessionUpdate({ type: 'idle_check', idled: 0, ended: 0, transitions: [], timeout_minutes: 8 });
     const byId = Object.fromEntries(store.getSessions().map((s) => [s.id, s.status]));
@@ -160,8 +156,8 @@ describe('handleSessionUpdate — idle_check', () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-09-11T01:00:00Z'));
     store.setSessions([
-      session('stale', { last_event_at: '2026-09-11T00:50:00Z' }), // 10m ago → idle
-      session('fresh', { last_event_at: '2026-09-11T00:58:00Z' }), // 2m ago → active
+      session('stale', { last_event_at: '2026-09-11T00:50:00Z' }),
+      session('fresh', { last_event_at: '2026-09-11T00:58:00Z' }),
       session('ended', { status: 'ended', last_event_at: '2026-09-11T00:00:00Z' }),
     ]);
     store.handleSessionUpdate({ type: 'idle_check' });
@@ -184,7 +180,7 @@ describe('stats under a Monitor filter', () => {
   const snapshot = (cost: number) => ({ ...store.getStats(), total_cost_usd: cost });
 
   it('takes the unfiltered SSE snapshot when no stats filter is set', () => {
-    store.setFilters({ event_type: 'tool_use' }); // narrows lists, not stats
+    store.setFilters({ event_type: 'tool_use' });
     store.applyBroadcastStats(snapshot(100));
     expect(store.getStats().total_cost_usd).toBe(100);
     expect(store.getStatsRefreshSignal()).toBe(0);
@@ -326,7 +322,6 @@ describe('edited-file tracking', () => {
     store.handleEventForSession(edit(2, 's1', '/other.ts'));
     await vi.waitFor(() => expect(store.getSessions()[0].files_edited).toBe(5));
 
-    // A path this tab already saw is already in the server's count.
     store.handleEventForSession(edit(3, 's1', '/other.ts'));
     expect(fetchSessionDetail).toHaveBeenCalledTimes(2);
     expect(store.getSessions()[0].files_edited).toBe(5);
@@ -376,7 +371,8 @@ describe('edited-file tracking', () => {
     const ids = Array.from({ length: cap + 1 }, (_, index) => `s${index}`);
     store.setSessions(ids.map(id => session(id)));
     ids.forEach((id, index) => {
-      // s0 edits again just before the last session, so s1 is the oldest.
+      // WHY: Refresh the oldest set before adding one at capacity so the test distinguishes recency
+      // eviction from insertion order.
       if (index === cap) store.handleEventForSession(edit(index * 2 + 1, 's0', '/again.ts'));
       store.handleEventForSession(edit(index * 2, id, '/a.ts'));
     });

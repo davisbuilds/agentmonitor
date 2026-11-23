@@ -102,8 +102,8 @@
     const controls = dialogRef.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)');
     const first = controls[0];
     const last = controls[controls.length - 1];
-    // Native modality makes the page inert; wrap the edges instead of tabbing
-    // into browser chrome. Query current controls as search results change.
+    // WHY: Native modal behavior leaves background controls inert, so wrap the current controls before
+    // keyboard focus can leave the dialog for browser chrome.
     if (event.shiftKey && document.activeElement === first) {
       event.preventDefault();
       last?.focus();
@@ -122,8 +122,8 @@
 
     return () => {
       dialog?.close();
-      // Svelte removes this conditional dialog on dismissal. Restore after that
-      // update, including shortcut/backdrop paths that bypass native close.
+      // WHY: Wait for Svelte to unmount the dialog before restoring focus, including dismissal paths
+      // that bypass the native close event.
       void tick().then(() => {
         if (invoker instanceof HTMLElement && invoker.isConnected) invoker.focus();
       });

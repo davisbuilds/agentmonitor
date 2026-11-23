@@ -27,8 +27,7 @@
   import { Select, EmptyState, Button, InfoTip, FilterBar, Panel, DataTable } from '../ui';
 
   const list = new SessionList();
-  // Full-text results for the query box. The page owns the URL, so the store
-  // only searches; with no query the session list shows instead.
+  // WHY: The page owns navigation history, so the search store must not change the URL independently.
   const search = createSearchStore({ recentLimit: 0 });
 
   const sortOptions = [
@@ -36,7 +35,6 @@
     { value: 'relevance', label: 'Best Match' },
   ];
 
-  // Filters
   let projects = $state<string[]>([]);
   let agents = $state<string[]>([]);
   let filterProject = $state('');
@@ -71,7 +69,6 @@
     { key: 'started_at', label: 'Started', align: 'right' as const, width: '7rem' },
   ];
 
-  // Subagents shown under their parent row, by parent id.
   let expandedChildren = $state<Record<string, BrowsingSession[] | 'loading' | 'error'>>({});
 
   async function toggleChildren(parentId: string) {
@@ -90,7 +87,6 @@
     }
   }
 
-  // Selected session
   let selectedSessionId = $state<string | null>(null);
   let selectedMessageOrdinal = $state<number | null>(null);
   let previousSelections = $state<Array<{ sessionId: string; messageOrdinal: number | null }>>([]);
@@ -220,8 +216,7 @@
   }
 
   function handleQueryInput(next: string) {
-    // Starting a search adds a history entry so Back returns to the list;
-    // later keystrokes replace it.
+    // WHY: Give the start of a search a Back target without adding a history entry for every keystroke.
     const push = startsSearch(query, next);
     query = next;
     syncHash(!push);

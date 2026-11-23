@@ -11,11 +11,7 @@ import {
 } from '../api/client';
 import { latestRequest } from './latest-request';
 
-// The live stream of the one session Monitor is following (an agent card's
-// drill-in). There is no session list here: Monitor's agent cards are the list.
-
 const LIVE_ITEMS_PAGE_SIZE = 100;
-// Pages read per catch-up after new items arrive, before yielding to the next one.
 const CATCH_UP_PAGES = 20;
 
 let selectedSessionId = $state<string | null>(null);
@@ -25,7 +21,6 @@ let sessionLoadFailed = $state(false);
 let turns = $state<LiveTurn[]>([]);
 let items = $state<LiveItem[]>([]);
 let itemsTotal = $state(0);
-// The stream opens at its newest page; this is where the next older page starts.
 let itemsBeforeCursor = $state<string | undefined>();
 let itemsLoading = $state(false);
 let itemsError = $state<string | null>(null);
@@ -45,7 +40,6 @@ let settings = $state<LiveSettings>({
 });
 
 let selectedRequestToken = 0;
-// Item loads for the followed session: see loadSelectedItems.
 const itemRequests = latestRequest();
 let itemLoadsInFlight = 0;
 let turnsRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -82,7 +76,8 @@ async function loadSelectedSessionMeta(sessionId: string): Promise<void> {
       return;
     }
     console.error('Failed to load live session:', err);
-    // Keep a record that loaded earlier; only a session never loaded is failed.
+    // WHY: Preserve a successful prior read so a refresh failure cannot turn an already visible session
+    // into a failed selection.
     if (!selectedSession) sessionLoadFailed = true;
   }
 }
@@ -110,8 +105,8 @@ function keepSelectionInView(): void {
  * arrived after the newest item held, a page at a time until caught up.
  */
 async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | 'newer'): Promise<void> {
-  // A tail load reopens the stream, so it supersedes every item load in
-  // flight; earlier pages and catch-ups add to what it loaded.
+  // WHY: Starting a new tail supersedes pending item loads. More pages of the same view can share that
+  // request.
   const isCurrent = mode === 'tail' ? itemRequests.begin() : itemRequests.join();
   if (mode === 'tail') itemLoadsInFlight = 0;
   const current = () => isCurrent() && selectedSessionId === sessionId;
@@ -120,9 +115,8 @@ async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | '
   itemsError = null;
   try {
     if (mode === 'newer' && items.length > 0) {
-      // A burst can exceed a page; follow the cursor until a page comes back
-      // short. Past a bounded run of pages, hand the rest to another scheduled
-      // catch-up rather than stop: no further item_delta may come for it.
+      // WHY: Bound each catch-up but schedule the next chunk because a burst may fill several pages
+      // without another item_delta.
       let more = false;
       for (let page = 0; page < CATCH_UP_PAGES; page += 1) {
         const res = await fetchLiveItems(sessionId, {
@@ -165,7 +159,7 @@ async function loadSelectedItems(sessionId: string, mode: 'tail' | 'earlier' | '
     console.error('Failed to load live items:', err);
     itemsError = 'Failed to load live items.';
   } finally {
-    // Loading lasts until the current tail and every page beside it settle.
+    // WHY: Keep the loading indicator active until all pages sharing the current tail have settled.
     if (isCurrent()) {
       itemLoadsInFlight -= 1;
       itemsLoading = itemLoadsInFlight > 0;
