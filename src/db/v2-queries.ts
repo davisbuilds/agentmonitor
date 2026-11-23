@@ -1,5 +1,6 @@
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
+import { decodeSearchCursor } from './search-cursor.js';
 import { config } from '../config.js';
 import {
   scanSkillCatalogs,
@@ -1127,24 +1128,6 @@ interface RelevanceCursor {
   message_id: number;
 }
 
-function decodeRelevanceCursor(cursor: string | undefined): RelevanceCursor | null {
-  if (!cursor) return null;
-
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf-8')) as Partial<RelevanceCursor>;
-    if (typeof parsed.rank === 'number' && typeof parsed.message_id === 'number') {
-      return {
-        rank: parsed.rank,
-        message_id: parsed.message_id,
-      };
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
 function encodeRelevanceCursor(cursor: RelevanceCursor): string {
   return Buffer.from(JSON.stringify(cursor), 'utf-8').toString('base64url');
 }
@@ -1153,6 +1136,7 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
   const sort = params.sort === 'relevance' ? 'relevance' : 'recent';
+  const cursorState = decodeSearchCursor(params.cursor, sort);
 
   const conditions: string[] = [];
   const values: unknown[] = [];
@@ -1179,7 +1163,6 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   const total = (db.prepare(countSql).get(params.q, ...values) as CountResult).c;
 
   if (sort === 'relevance') {
-    const cursorState = decodeRelevanceCursor(params.cursor);
     const offsetCondition = cursorState
       ? `AND (
           bm25(messages_fts) > ?
@@ -1234,9 +1217,8 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
     };
   }
 
-  const recentCursor = params.cursor ? parseInt(params.cursor, 10) : null;
-  const offsetCondition = Number.isFinite(recentCursor) ? `AND m.id < ?` : '';
-  const offsetValues = Number.isFinite(recentCursor) ? [recentCursor] : [];
+  const offsetCondition = cursorState ? `AND m.id < ?` : '';
+  const offsetValues = cursorState ? [cursorState.message_id] : [];
 
   const searchSql = `
     SELECT
