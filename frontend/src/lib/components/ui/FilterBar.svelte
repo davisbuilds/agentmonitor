@@ -11,11 +11,7 @@
   let { children, end }: Props = $props();
 </script>
 
-<!--
-  The one filter row under the command bar, laid out the same on every tab:
-  scope first, then Project and Agent, then the page's own filters, with
-  less-used ones behind a MoreFilters button so the row never wraps on desktop.
--->
+<!-- WHY: Use one shared filter row and defer less-used controls so the header can remain a single line on desktop. -->
 <div
   data-testid="filter-bar"
   role="group"

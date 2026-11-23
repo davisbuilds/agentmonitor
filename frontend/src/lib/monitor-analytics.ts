@@ -55,10 +55,8 @@ function reasoningEffortFromEvent(event: ActiveAgentLabelEvent): string | null {
   return null;
 }
 
-// Claude Code writes "<synthetic>" as the model for locally-generated assistant
-// turns (rate-limit notices, API errors, login prompts) rather than real API
-// responses. It is not a model, so it must never surface in the agent label —
-// skip it and fall through to the last genuine model instead.
+// WHY: Filter Claude’s synthetic model sentinel so local notices cannot replace the last actual model
+// in the label.
 function isRealModel(model: string | undefined): model is string {
   const trimmed = model?.trim();
   return !!trimmed && trimmed !== '<synthetic>';

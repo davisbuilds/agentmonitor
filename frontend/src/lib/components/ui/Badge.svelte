@@ -12,7 +12,6 @@
 
   let { tone = 'neutral', title, class: klass = '', children }: Props = $props();
 
-  // Subtle tints — not loud, uppercase, full-saturation pills.
   const tones: Record<Tone, string> = {
     neutral: 'bg-surface-2 text-text-muted',
     accent: 'bg-accent/15 text-accent',

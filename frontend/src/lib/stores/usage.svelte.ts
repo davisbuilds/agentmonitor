@@ -65,8 +65,6 @@ class UsageStore {
   };
   private filterOptionsController: AbortController | null = null;
 
-  // Shared + Usage-specialized filters live in the consolidated analytics filter
-  // store; this store reads them and refetches when they change.
   get from(): string { return analyticsFilters.from; }
   get to(): string { return analyticsFilters.to; }
   get project(): string { return analyticsFilters.project; }
@@ -198,9 +196,8 @@ class UsageStore {
     const versions = new Map(keys.map(key => [key, ++this.versions[key]]));
     const stale = (): boolean => keys.some(key => versions.get(key) !== this.versions[key]);
 
-    // One request backs every panel, so the same controller is registered under
-    // each key: abortAll()/dispose() and any later per-panel nextSignal() all
-    // still cancel it.
+    // WHY: Register the batch controller under every panel so an individual refresh can supersede the
+    // bundled request.
     const controller = new AbortController();
     for (const key of keys) {
       this.controllers[key]?.abort();
@@ -242,8 +239,7 @@ class UsageStore {
 
 
 
-  // Filter mutations delegate to the shared store, which syncs the hash and
-  // notifies subscribers (this store's refreshUsage) — no direct fetch here.
+  // WHY: Let shared filter subscribers reload so these callers cannot start a duplicate request.
   async setDateRange(from: string, to: string): Promise<void> {
     analyticsFilters.setDateRange(from, to);
   }
@@ -314,10 +310,8 @@ class UsageStore {
     this.filterOptionsController = controller;
 
     try {
-      // One DISTINCT query server-side. This was five full rollup requests — each
-      // scanning and pricing-classifying every usage row — to read off five lists
-      // of distinct strings. The server applies the same self-excluding facet
-      // scoping these five calls used to encode in their query params.
+      // WHY: Read distinct facets in one request to avoid rescanning and classifying the same usage
+      // rows once per facet.
       const facets = await fetchUsageFacets(this.queryParams, { signal: controller.signal });
 
       if (version !== this.filterOptionsVersion) return;
@@ -329,7 +323,6 @@ class UsageStore {
       this.tierOptions = withSelectedOption(facets.tiers, this.tier);
     } catch (err) {
       if (isAbortError(err)) return;
-      // Usage can still load without refreshed filter options.
     } finally {
       if (this.filterOptionsController === controller) {
         this.filterOptionsController = null;

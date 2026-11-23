@@ -27,8 +27,6 @@ class InsightsStore {
   /** Whether any insight is saved at all, whatever the current filters select. */
   private hasSavedInsights = false;
 
-  // Shared filters (date/project/agent) and the insight-specialized filters
-  // (kind + authoring provider/model) live in the consolidated filter store.
   get defaultFrom(): string { return analyticsFilters.defaultFrom; }
   get defaultTo(): string { return analyticsFilters.defaultTo; }
 
@@ -118,9 +116,8 @@ class InsightsStore {
       this.availability = insightsViewAvailable(result.generation, this.hasSavedInsights);
     } catch (err) {
       if (version !== this.availabilityVersion) return;
-      // Without the status Insights can't be offered honestly; fall back
-      // rather than leave a deep link waiting on it. A failed recheck is no
-      // evidence that nothing is saved, so a known answer stands.
+      // WHY: An unsuccessful status request cannot disprove a previously observed key or saved insight.
+      // Fall back only when there was no prior answer.
       console.error('Failed to load insight provider status:', err);
       if (this.availability === null) this.availability = false;
     }
@@ -152,13 +149,11 @@ class InsightsStore {
       if (version !== this.listVersion) return;
       this.items = result.data;
       this.generation = result.generation;
-      // An empty filtered slice says nothing about the other saved insights, so
-      // it must not hide the view on a keyless server; the unfiltered recheck
-      // below decides whether any remain.
+      // WHY: An empty filtered list cannot tell us whether other saved insights keep the view available
+      // without a key.
       if (result.data.length > 0) this.hasSavedInsights = true;
       recheck = this.needsAvailabilityCheck();
-      // Rows or a key in hand outrank an unfiltered read still in flight;
-      // otherwise the recheck below supersedes it.
+      // WHY: Prefer a known key or saved row to an older availability response still in flight.
       if (!recheck) this.availabilityVersion++;
       this.availability = insightsViewAvailable(result.generation, this.hasSavedInsights);
       if (!analyticsFilters.insightModel) {
@@ -185,8 +180,6 @@ class InsightsStore {
     if (recheck) await this.loadAvailability();
   }
 
-  // Shared/specialized filter mutations delegate to the shared store, which
-  // notifies subscribers (this store's load) — no direct load here.
   async setDateRange(from: string, to: string): Promise<void> {
     analyticsFilters.setDateRange(from, to);
   }
@@ -234,7 +227,8 @@ class InsightsStore {
   }
 
   async generate(): Promise<void> {
-    // Saved insights are readable without a key; generating one still needs it.
+    // WHY: Keep existing insights readable when a provider key is removed. Require the key only for
+    // generation.
     if (!this.selectedProviderConfigured) return;
     const requestFilters = this.listFilters;
     this.generating = true;
@@ -278,9 +272,8 @@ class InsightsStore {
       await deleteInsight(id);
       this.items = this.items.filter(item => item.id !== id);
       this.selectedId = this.items[0]?.id ?? null;
-      // A list read still in flight may have been answered before the delete
-      // and would restore the row; a fresh read for the current filters
-      // supersedes it and rechecks availability itself.
+      // WHY: Supersede a pending list read after delete so a response captured earlier cannot restore
+      // the deleted row.
       reload = this.loading;
       recheck = !reload && this.needsAvailabilityCheck();
     } catch (err) {

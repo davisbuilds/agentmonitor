@@ -26,8 +26,7 @@ export function setStats(s: Stats): void { stats = s; }
 
 let statsRefreshSignal = $state(0);
 export function getStatsRefreshSignal(): number { return statsRefreshSignal; }
-// Matching live events counted while a filtered stats read is in flight. The
-// read's snapshot may predate them, so they are re-applied on top of it.
+// WHY: Apply events seen while the filtered query is in flight because its snapshot may predate them.
 let eventsDuringFilteredRead: AgentEvent[] | null = null;
 export function beginFilteredStatsRead(): void { eventsDuringFilteredRead = []; }
 /** Apply a filtered read's snapshot, or abandon the read when `next` is null. */
@@ -55,23 +54,24 @@ export function applyBroadcastStats(s: Stats): void {
   stats = s;
 }
 
-// Whether the server runs an older build than the one on disk. It rides the
-// stats snapshot but is not a stat: it applies whatever the Monitor's filters.
+// WHY: Build freshness describes the server as a whole and should survive changes to the Monitor
+// filters.
 let serverBuildStale = $state(false);
 export function getServerBuildStale(): boolean { return serverBuildStale; }
 export function setServerBuild(build: Stats['server_build']): void {
   serverBuildStale = Boolean(build?.tracked && build.stale);
 }
 
-// Models whose recent usage bills as $0 because no rate card matches them. Also
-// server state riding the snapshot, so a Monitor filter does not hide it.
+// WHY: Unknown rates are server state carried by the snapshot. Do not hide that warning when Monitor
+// filters change.
 let unpricedModels = $state<NonNullable<Stats['unpriced_models']>>([]);
 export function getUnpricedModels(): NonNullable<Stats['unpriced_models']> { return unpricedModels; }
 export function setUnpricedModels(models: Stats['unpriced_models']): void {
   unpricedModels = models ?? [];
 }
 
-// A live event is new, so a start-time filter always admits it; an agent filter may not.
+// WHY: A start-time filter admits live events by definition. An agent filter can still exclude a
+// different agent.
 function matchesFilters(event: AgentEvent): boolean {
   const agent = statsParams(filters).agent;
   return !agent || event.agent_type === agent;
@@ -86,12 +86,8 @@ export function incrementEvent(event: AgentEvent): void {
 let events = $state<AgentEvent[]>([]);
 export function getEvents(): AgentEvent[] { return events; }
 export function setEvents(e: AgentEvent[]): void {
-  // A reload (mount / auto-import / reconnect) replaces the feed with an
-  // authoritative REST snapshot. But the resumed SSE handler can prepend a live
-  // event newer than the snapshot while the query is in flight; a blind replace
-  // would drop it. Preserve any current events newer than the snapshot's
-  // high-water mark, then dedup by id (an event may appear in both the snapshot
-  // and the live prepend) and keep the most-recent 200.
+  // WHY: A live event can arrive while REST loads. Keep arrivals newer than the snapshot, deduplicate
+  // by ID and cap the combined feed.
   const snapshotMaxId = e.reduce((max, ev) => Math.max(max, ev.id), 0);
   const newerLive = events.filter(ev => ev.id > snapshotMaxId);
   if (newerLive.length === 0) {
@@ -109,39 +105,30 @@ export function addEvent(event: AgentEvent): void {
 let sessions = $state<Session[]>([]);
 const sessionBackfillInFlight = new Set<string>();
 const sessionBackfillRequestedAgain = new Set<string>();
-// `complete` is false when the set began after the session already had edits
-// (counted by the server, or held in a set the cap evicted); the server then
-// owns the count, since this tab never saw those paths.
+// WHY: A local set started after a session had edits may omit earlier paths. Use the server total until
+// the local set can prove its count.
 const editedFilesBySession = new Map<string, { files: Set<string>; complete: boolean }>();
 export function getSessions(): Session[] { return sessions; }
 export function setSessions(s: Session[]): void { sessions = s; }
 /** Sessions whose edited-file set is held in memory; for tests. */
 export function trackedEditedFileSessionCount(): number { return editedFilesBySession.size; }
-// The SSE stream lives as long as the tab, so the file sets are capped, least
-// recently edited first. Pruning by the visible list instead would forget a
-// session an agent filter hides and later restores: its count could not grow
-// until a fresh set passed the old aggregate.
+// WHY: Keep recent edit sets bounded across the life of the tab without discarding sets just because
+// the current agent filter hides a session.
 export const EDITED_FILE_SESSION_CAP = 500;
 
-// --- Context-window occupancy (v2 live projection, joined to v1 cards by id) ---
-// Occupancy lives on the v2 browsing_sessions projection, not the v1 Session
-// aggregate. Rather than mutate Session objects the event stream constantly
-// rebuilds, we keep occupancy as a separate map keyed by session id and join it
-// at render. Refreshed on the same signals that drive the monitor (mount,
-// auto-import, session_parsed).
+// WHY: Occupancy is a v2 projection. Join it by ID at render so v1 stream updates cannot overwrite it.
 export interface SessionOccupancy { used: number | null; window: number | null; pct: number; }
 let occupancyBySession = $state<Record<string, SessionOccupancy>>({});
 export function getSessionOccupancy(id: string): SessionOccupancy | null {
   return occupancyBySession[id] ?? null;
 }
-// Codex browsing sessions are keyed by the rollout filename, but the v1 Monitor
-// card is keyed by the embedded session UUID; alias occupancy under both so the
-// card's id lookup resolves. Claude ids are already the UUID (self-alias, no-op).
+// WHY: Alias Codex occupancy by rollout and embedded UUID because browsing and Monitor use different
+// IDs for the same session.
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 export async function refreshOccupancy(): Promise<void> {
   try {
-    // `/api/v2/live/sessions` clamps limit into [1, 500]; request the ceiling so
-    // every displayed card gets its occupancy, not just the single newest row.
+    // WHY: Request the endpoint ceiling so a short default page cannot omit occupancy for a displayed
+    // card.
     const res = await fetchLiveSessions({ limit: 500 });
     const next: Record<string, SessionOccupancy> = {};
     for (const s of res.data) {
@@ -156,18 +143,11 @@ export async function refreshOccupancy(): Promise<void> {
     console.error('Failed to load session occupancy:', err);
   }
 }
-// Bumped when the server reports an auto-import brought in new events. The
-// Monitor subscribes and refetches so importer-derived fields (e.g. a session's
-// invocation `mode`, which the live hook/OTEL stream never carries) appear
-// without a manual page reload.
 let autoImportSignal = $state(0);
 export function getAutoImportSignal(): number { return autoImportSignal; }
 
-// Bumped when the SSE stream reconnects after a drop (e.g. laptop sleep). The v1
-// `/api/stream` has no replay, so events emitted during the gap are lost from the
-// incremental store; Monitor watches this signal and refetches authoritative
-// state from REST to close the gap. Not bumped on the initial connect (mount
-// already loads).
+// WHY: Signal only after reconnect, because the first mount loads its own snapshot and this SSE
+// endpoint cannot replay missed events.
 let reconnectSignal = $state(0);
 export function getReconnectSignal(): number { return reconnectSignal; }
 export function signalReconnect(): void { reconnectSignal++; }
@@ -192,15 +172,12 @@ function quietPast(session: Session, timeoutMinutes: number): boolean {
 export function handleSessionUpdate(update: Record<string, unknown>): void {
   const swept = update.type === 'idle_check' ? sweptStatuses(update) : null;
   if (update.type === 'idle_check') {
-    // An older server sends neither its transitions nor its timeout.
+    // WHY: Use the historical timeout for older server responses that lack the lifecycle metadata.
     const timeoutMinutes = typeof update.timeout_minutes === 'number' && update.timeout_minutes > 0
       ? update.timeout_minutes
       : 5;
-    // The server owns the session lifecycle: apply what its sweep did. An
-    // ended session leaves the list, as on reload (Monitor lists sessions not
-    // ended). A card the sweep did not list may have been moved by a sweep in
-    // another process (an `amon` command), which is not broadcast, so an
-    // active one quiet past the timeout still reads as idle.
+    // WHY: Honor server transitions and infer idle for quiet cards when a sweep in another process
+    // could not broadcast a transition.
     sessions = sessions
       .filter(s => swept?.get(s.id) !== 'ended')
       .map(s => {
@@ -211,13 +188,10 @@ export function handleSessionUpdate(update: Record<string, unknown>): void {
   } else if (update.type === 'auto_import' || update.type === 'resync' || update.type === 'hook_spool') {
     autoImportSignal++;
   } else if (update.type === 'session_parsed' && typeof update.session_id === 'string') {
-    // The watcher just parsed this session's file, which may have stamped
-    // importer-derived fields (e.g. invocation `mode`). Refetch just this
-    // session so the pill appears without reloading the whole dashboard.
+    // WHY: Refetch the parsed session alone because it may gain metadata without changes to any other
+    // card.
     if (sessions.some((s) => s.id === update.session_id)) {
       void backfillSession(update.session_id);
-      // The same parse updates the v2 occupancy projection; pull it so the
-      // context pill tracks the latest turn without a manual reload.
       void refreshOccupancy();
     }
   }
@@ -235,8 +209,8 @@ function parseEventMetadata(event: AgentEvent): Record<string, unknown> {
   return event.metadata;
 }
 
-// Set when an edit adds a new path to an incomplete set: the local set cannot
-// tell whether the path is already in the server's count, so ask the server.
+// WHY: Ask the server for the edit total if the local set may count a path that the server already
+// observed.
 let editCountNeedsRefetch = false;
 
 /**
@@ -271,7 +245,6 @@ function applyLiveEventAggregate(session: Session, event: AgentEvent, countKnown
     const sizeBefore = entry.files.size;
     entry.files.add(metadata.file_path);
     if (!entry.complete && entry.files.size > sizeBefore) editCountNeedsRefetch = true;
-    // Re-insert so Map order runs from least to most recently edited.
     editedFilesBySession.delete(session.id);
     editedFilesBySession.set(session.id, entry);
     if (editedFilesBySession.size > EDITED_FILE_SESSION_CAP) {
@@ -286,7 +259,7 @@ function applyLiveEventAggregate(session: Session, event: AgentEvent, countKnown
 
 async function backfillSession(sessionId: string): Promise<void> {
   if (sessionBackfillInFlight.has(sessionId)) {
-    // The running fetch may predate the edit that asked again; run once more.
+    // WHY: Queue one more read because the request in flight may have started before the latest edit.
     sessionBackfillRequestedAgain.add(sessionId);
     return;
   }
@@ -352,9 +325,7 @@ let filterOptions = $state<FilterOptions>({
 export function getFilterOptions(): FilterOptions { return filterOptions; }
 export function setFilterOptions(o: FilterOptions): void { filterOptions = o; }
 
-// --- Cost ---
-// Today's and the last 30 days' cost, read from the Usage API so they match the
-// Usage page. Null until the first read finishes.
+// WHY: Use the Usage API’s windows so both cost displays can be compared directly.
 export interface MonitorCostWindowTotals {
   today: number | null;
   last30Days: number | null;

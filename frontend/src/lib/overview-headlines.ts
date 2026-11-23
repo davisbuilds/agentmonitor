@@ -1,5 +1,3 @@
-// Labels for the Overview headline tiles: how each value moved against the
-// period before. Pure, so the arithmetic and wording are testable.
 
 export type ChangeTone = 'ok' | 'danger' | 'muted';
 

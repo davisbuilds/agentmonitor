@@ -125,7 +125,6 @@
           {/if}
         </div>
 
-        <!-- Selected observation summary (payload-policy-safe), read from the loaded tree -->
         {#if tq.selectedObservation}
           {@const o = tq.selectedObservation}
           <div class="px-4 py-3 space-y-2">

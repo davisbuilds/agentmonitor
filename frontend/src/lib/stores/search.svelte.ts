@@ -99,7 +99,6 @@ class SearchStore {
         limit: this.recentLimit,
         project: this.project || undefined,
         agent: this.agent || undefined,
-        // Like the Sessions list: a session with no transcript has nothing to open.
         exclude_empty: 'true',
       });
       if (version !== this.requestVersion) return;
@@ -130,7 +129,7 @@ class SearchStore {
 
     if (!this.hasQuery) {
       this.cancelPending();
-      // A search still in flight must not land on the cleared results.
+      // WHY: Invalidate pending searches so clearing results cannot be undone by a late response.
       this.requestVersion += 1;
       this.loading = false;
       this.results = [];

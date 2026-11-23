@@ -161,8 +161,7 @@ test('usage tab does not eagerly request v1 monitor filter options', async ({ pa
   await page.goto(`${baseUrl}/app/#usage`);
 
   await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
-  // The page loads through two v2 calls: rollups via /usage/overview, dropdowns via /usage/facets.
-  // Waiting on both keeps the /api/filter-options assertion below from passing vacuously.
+  // WHY: Observe both expected v2 responses before asserting the old endpoint was absent.
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/overview')).toBe(true);
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/facets')).toBe(true);
   expect(requestedPaths).not.toContain('/api/filter-options');
@@ -179,9 +178,8 @@ test('usage tab loads its rollups from /usage/overview, not per-panel endpoints'
   await expect(page.getByRole('button', { name: 'Export CSV' })).toBeVisible();
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/usage/overview')).toBe(true);
 
-  // /usage/overview reuses one scan of the events table for every rollup. The granular endpoints
-  // remain public reads, so a per-panel fetch could creep back in here and cost nothing but
-  // latency — this pins the Usage page to the batched call.
+  // WHY: Assert the batched usage endpoint because separate public endpoints would make a redundant
+  // full usage scan possible.
   for (const panel of ['summary', 'daily', 'projects', 'models', 'models/daily', 'tiers', 'agents', 'top-sessions', 'coverage']) {
     expect(requestedPaths).not.toContain(`/api/v2/usage/${panel}`);
   }
@@ -250,8 +248,6 @@ test('monitor event feed uses the v2 monitor endpoint instead of v1 events', asy
 
   await page.goto(`${baseUrl}/app/#monitor`);
 
-  // The standalone "All Events" panel is gone; the feed lives inside the
-  // agent cards now, so anchor on the monitor page itself being rendered.
   await expect(page.getByText('Active Agents')).toBeVisible();
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/events')).toBe(true);
   expect(requestedPaths).not.toContain('/api/events');
@@ -273,13 +269,11 @@ test('a monitor session with no live record reads its v2 detail and shows its ev
 
   await page.goto(`${baseUrl}/app/#monitor`);
 
-  // This session has no live record, so its card opens its recent events.
   const card = page.locator('button').filter({ hasText: 'agentmonitor' }).first();
   await expect(card).toBeVisible();
   await card.click();
 
   await expect(page.getByRole('heading', { name: 'Recent events' })).toBeVisible();
-  // The header keeps the card's model and reasoning-effort label.
   await expect(page.getByTestId('session-summary')).toContainText('Codex (gpt-5.5 high)');
   await expect.poll(() => requestedPaths.some(pathname => pathname === '/api/v2/monitor/sessions/e2e-monitor-model-session')).toBe(true);
   expect(requestedPaths.some(pathname => pathname.startsWith('/api/sessions/'))).toBe(false);

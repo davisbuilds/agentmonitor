@@ -9,8 +9,8 @@ import {
 class PinsStore {
   private sessionVersions: Record<string, number> = {};
 
-  // Every pin, unfiltered: the Sessions filters narrow them client-side
-  // (`filterPinnedMessages`), so a pin made under any filter lands here.
+  // WHY: Retain all pins in the store so a pin created under any filter remains available when the user
+  // changes the filter.
   pins = $state<PinnedMessage[]>([]);
   loading = $state(false);
   error = $state<string | null>(null);

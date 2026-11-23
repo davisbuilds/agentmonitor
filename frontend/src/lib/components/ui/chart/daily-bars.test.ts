@@ -36,7 +36,6 @@ describe('daily bar layout', () => {
     expect(ticks[0]).toBe(0);
     expect(ticks[ticks.length - 1]).toBe(29);
     expect(ticks.length).toBeLessThanOrEqual(7);
-    // The last label is right-aligned, so the one before it keeps a full step away.
     expect(ticks[ticks.length - 1] - ticks[ticks.length - 2]).toBeGreaterThanOrEqual(ticks[1] - ticks[0]);
     expect(shortDate('2026-03-02')).toBe('03/02');
   });

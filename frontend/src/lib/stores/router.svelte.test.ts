@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-// The router reads the hash once at import and then listens for hashchange, so
-// each case sets the starting URL and imports a fresh module.
+// WHY: Arrange the initial hash before importing the singleton so each test exercises a new navigation
+// state.
 let router: typeof import('./router.svelte');
 async function loadAt(hash: string) {
   window.history.replaceState(null, '', `/app/${hash}`);

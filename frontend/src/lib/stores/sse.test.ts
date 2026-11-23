@@ -1,12 +1,8 @@
 // @vitest-environment node
-// This suite injects its own EventSource stand-in and drives it synchronously,
-// so it needs no DOM. Running it under happy-dom left a pending async task that
-// surfaced as an AbortError during window teardown; the node env avoids that.
+// WHY: Drive EventSource synchronously under Node because happy-dom tears down an unrelated pending
+// task with AbortError.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// A controllable EventSource stand-in: connectSSE() constructs one per connect,
-// and the test drives its onopen/onerror to simulate the stream lifecycle
-// without any real network.
 class FakeEventSource {
   static instances: FakeEventSource[] = [];
   url: string;
@@ -34,8 +30,7 @@ beforeEach(async () => {
   FakeEventSource.instances = [];
   (globalThis as { EventSource: unknown }).EventSource = FakeEventSource;
   vi.useFakeTimers();
-  // Fresh module graph so sse.ts and the monitor store it imports share one
-  // instance, and reconnectSignal starts at 0.
+  // WHY: Import the listener and store after the same module reset so they share one signal instance.
   vi.resetModules();
   sse = await import('./sse');
   monitor = await import('./monitor.svelte');
@@ -57,16 +52,16 @@ describe('SSE reconnect signalling', () => {
 
   it('signals exactly one reconnect on the open that follows a drop', () => {
     sse.connectSSE();
-    FakeEventSource.latest.onopen?.(); // initial connect — no signal
+    FakeEventSource.latest.onopen?.();
     expect(monitor.getReconnectSignal()).toBe(0);
 
-    FakeEventSource.latest.onerror?.(); // stream drops
+    FakeEventSource.latest.onerror?.();
     expect(monitor.getConnectionStatus()).toBe('disconnected');
 
-    vi.advanceTimersByTime(1000); // backoff fires → reconnect attempt
+    vi.advanceTimersByTime(1000);
     expect(FakeEventSource.instances).toHaveLength(2);
 
-    FakeEventSource.latest.onopen?.(); // reconnect succeeds
+    FakeEventSource.latest.onopen?.();
     expect(monitor.getConnectionStatus()).toBe('connected');
     expect(monitor.getReconnectSignal()).toBe(1);
   });
@@ -75,10 +70,9 @@ describe('SSE reconnect signalling', () => {
     sse.connectSSE();
     FakeEventSource.latest.onerror?.();
     vi.advanceTimersByTime(1000);
-    FakeEventSource.latest.onopen?.(); // reconnect → signal 1
+    FakeEventSource.latest.onopen?.();
     expect(monitor.getReconnectSignal()).toBe(1);
 
-    // A spurious duplicate onopen without an intervening drop must not bump again.
     FakeEventSource.latest.onopen?.();
     expect(monitor.getReconnectSignal()).toBe(1);
   });

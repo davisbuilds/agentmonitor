@@ -1,7 +1,4 @@
 <script lang="ts">
-  // One weekly measure of cost per outcome on its own axis: a line through the
-  // weeks with merges (a week without any leaves a gap), and for the median its
-  // middle-half band. Hovering a week reads its value out above the plot.
   import { PlotFrame, chartLayout, linearScale, niceLinearTicks, plotXRange, plotYRange } from '../ui/chart';
   import { formatDateOnly } from '../../format';
   import type { WeekPoint } from '../../outcome-chart';
@@ -23,9 +20,9 @@
   const yTicks = $derived(niceLinearTicks(0, top || 1, 4));
   const yScale = $derived(linearScale([0, yTicks[yTicks.length - 1]], plotYRange(plot)));
   const xScale = $derived(linearScale([0, Math.max(weeks.length - 1, 1)], plotXRange(plot)));
-  // A few week labels: the ends and the middle.
   const xTicks = $derived([...new Set([0, Math.floor((weeks.length - 1) / 2), weeks.length - 1])].filter(i => i >= 0));
-  // Contiguous runs of weeks, so a gap is not bridged by the line.
+  // WHY: Break the line across weeks with no observations so the chart cannot imply an interpolated
+  // outcome cost.
   const runs = $derived.by(() => {
     const out: WeekPoint[][] = [];
     for (const point of points) {
@@ -55,7 +52,7 @@
 <figure class="min-w-0">
   <figcaption class="text-meta text-text-muted">
     <div>{title}</div>
-    <!-- A line of its own, held open, so hovering does not move the plot. -->
+    <!-- WHY: Reserve space for the hover readout so updating the value cannot move the plot. -->
     <div class="tabular min-h-[1.25rem] truncate font-mono text-text" aria-live="polite">
       {#if hovered}{weekLabel(hovered.week)}: {format(hovered.value)}{#if hovered.low !== null && hovered.high !== null} ({format(hovered.low)}–{format(hovered.high)}){/if}, {hovered.prs} PR{hovered.prs === 1 ? '' : 's'}{/if}
     </div>

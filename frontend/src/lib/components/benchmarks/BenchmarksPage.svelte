@@ -7,8 +7,7 @@
 
   const store = benchmarksStore;
 
-  // Clicking a frontier marker drills into the matching ladder row: highlight it
-  // and scroll it into view. Keyed by arm label (unique within a study).
+  // WHY: Use the arm label within a study to link each frontier marker to its ladder row.
   let focusedArm = $state<string | null>(null);
   function focusArm(arm: BenchmarkArm): void {
     focusedArm = arm.label;
@@ -51,8 +50,7 @@
   function score(v: number): string {
     return v.toFixed(3);
   }
-  // Two runs of one suite on the same day share a slug but not a study_id; show a
-  // date + short id line so reruns are distinguishable in the list.
+  // WHY: Show a short study ID because several reruns of one suite can share a date and slug.
   function shortId(id: string): string {
     return id.length > 10 ? `${id.slice(0, 8)}…` : id;
   }
@@ -98,7 +96,6 @@
     for (const a of d.arms.filter(a => a.ranking_eligible === false)) {
       out.push(`${a.label}: usage excluded from ranking${a.ranking_exclusion_reason ? ` — ${a.ranking_exclusion_reason}` : ''}.`);
     }
-    // Token usage not backed by the vendor's own numbers is a weaker basis.
     for (const a of d.arms.filter(a => a.usage_evidence_grade && a.usage_evidence_grade !== 'vendor_reported')) {
       out.push(`${a.label}: token usage graded "${a.usage_evidence_grade}", not vendor-reported.`);
     }

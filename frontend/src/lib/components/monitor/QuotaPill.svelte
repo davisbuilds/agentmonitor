@@ -47,9 +47,7 @@
         onclick={toggle}
       >
         {#if entries.length > 0}
-          <!-- Each provider's name and what is left of its most-used window. -->
           {#each entries as entry (entry.provider)}
-            <!-- A stale entry is the last good reading: a neutral dot and muted figure. -->
             <span class="flex items-center gap-1.5" title={entry.stale ? 'Last good reading; the latest refresh failed' : undefined}>
               <span class="h-1.5 w-1.5 rounded-full {entry.stale ? 'bg-line-strong' : toneDot[entry.tone]}"></span>
               <span>{entry.label}</span>

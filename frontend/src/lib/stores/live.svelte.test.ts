@@ -76,8 +76,8 @@ describe('following one session in Monitor', () => {
   });
 
   it('a session whose live record appears after the click stops reading as missing', async () => {
-    // A new session's card can come from its first hook event before the live
-    // projection has written the session.
+    // WHY: A new hook event can create the Monitor card before the live projection exists. A 404 then
+    // means there is no stream yet.
     fetchLiveSession.mockRejectedValueOnce(new ApiError('fetchLiveSession failed (404): ', 404));
     await store.followLiveSession('new');
     expect(store.getLiveSessionMissing()).toBe(true);
@@ -135,7 +135,6 @@ describe('following one session in Monitor', () => {
     expect(fetchLiveItems).toHaveBeenLastCalledWith('s1', expect.objectContaining({ before: '101' }));
     expect(store.getLiveItems().map(item => item.id)).toEqual(page(1, 300).map(item => item.id));
     expect(store.getLiveItemsHasEarlier()).toBe(false);
-    // Loading earlier items keeps the selection.
     expect(store.getSelectedLiveItemId()).toBe(300);
   });
 
@@ -144,7 +143,6 @@ describe('following one session in Monitor', () => {
     fetchLiveItems.mockReset().mockResolvedValueOnce({ data: page(201, 250), total: 250, before_cursor: '201' });
     await store.followLiveSession('s1');
 
-    // 150 new items: a full page with a cursor, then the rest.
     fetchLiveItems
       .mockResolvedValueOnce({ data: page(251, 350), total: 400, cursor: '350' })
       .mockResolvedValueOnce({ data: page(351, 400), total: 400 });
@@ -161,7 +159,8 @@ describe('following one session in Monitor', () => {
     fetchLiveItems.mockReset().mockResolvedValueOnce({ data: page(1, 100), total: 100 });
     await store.followLiveSession('s1');
 
-    // 2,550 new items: 25 full pages, then a short one.
+    // WHY: Seed enough full pages to exceed the per-catch-up cap so the test must observe the next
+    // scheduled batch.
     let next = 101;
     fetchLiveItems.mockImplementation(async () => {
       const from = next;

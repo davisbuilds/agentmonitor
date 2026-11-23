@@ -1,9 +1,4 @@
-// Shared viewBox + plot-rect geometry for inline-SVG charts drawn on PlotFrame.
-//
-// A real-aspect viewBox (not preserveAspectRatio="none") so circles stay round
-// and tick text stays legible. Consumers build their scales into the returned
-// plot rect and hand the same scales to PlotFrame, which draws the frame; the
-// marks stay per-view.
+// WHY: Keep a real-aspect viewBox so chart text stays legible and circular markers remain round.
 
 export interface PlotRect {
   /** left edge x (viewBox units). */

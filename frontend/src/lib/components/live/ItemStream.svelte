@@ -50,7 +50,6 @@
     onopenhistory,
   }: Props = $props();
 
-  // Each value is the stored item kinds it selects, comma-joined as the API takes them.
   const kindFilters: Array<{ value: string; label: string }> = [
     { value: 'user_message,assistant_message', label: 'Messages' },
     { value: 'reasoning', label: 'Thinking' },
@@ -60,16 +59,12 @@
     { value: 'plan_update', label: 'Plans' },
   ];
 
-  // The newest item is at the top. New ones appear there while you are at the
-  // top; scrolled further down, the rows you are reading stay put as they
-  // arrive above. Scrolling to the bottom loads the page before.
   let scroller = $state<HTMLDivElement>();
   let atTop = true;
   const NEAR_EDGE_PX = 48;
 
   async function loadEarlier(): Promise<void> {
     if (!hasEarlier || loading) return;
-    // Older items go below the rows shown, so nothing on screen moves.
     await onloadearlier();
   }
 
@@ -84,7 +79,6 @@
     if (scroller) scroller.scrollTop = 0;
   }
 
-  // A new session or kind filter reopens the stream at its newest item.
   const sessionId = $derived(session?.id ?? null);
   $effect(() => {
     void sessionId;
@@ -96,13 +90,8 @@
     ontogglekind(kind);
   }
 
-  // Scrolled down, pin the first row in view: note its layout offset before
-  // the items render, then scroll by however far it moved. Rows added above
-  // move it; a result folding into a call below does not, nor do older pages
-  // loading at the bottom. The move is read from layout offsets, which ignore
-  // the rows' enter animation that a measured box would include. Browser
-  // scroll anchoring is off on the scroller so the two never both apply;
-  // Safari has none.
+  // WHY: Use layout offsets to anchor the first visible row. They exclude enter-animation movement, and
+  // disabling native scroll anchoring prevents two competing adjustments.
   function firstVisibleRow(el: HTMLElement): HTMLElement | null {
     const top = el.getBoundingClientRect().top;
     for (const row of el.querySelectorAll<HTMLElement>('[data-row-id]')) {
@@ -122,8 +111,8 @@
     void tick().then(() => {
       const same = el.querySelector<HTMLElement>(`[data-row-id="${rowId}"]`);
       if (!same) return;
-      // Content added above moves the row by at least a line of text; a pixel
-      // is offset rounding of fractional layout, and chasing it nudges the rows.
+      // WHY: Ignore single-pixel differences caused by fractional layout rounding so repeated updates
+      // do not nudge the reading position.
       const moved = same.offsetTop - offsetBefore;
       if (Math.abs(moved) >= 2) el.scrollTop += moved;
     });
@@ -136,8 +125,6 @@
     return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
   }
 
-  // One dot per row in the design's signal tokens: you = accent, the assistant =
-  // ok, tools neutral, a plan = warn, and anything that failed = danger.
   function dotClass(row: LiveStreamRow): string {
     if (rowFailed(row)) return 'bg-danger';
     switch (row.item.kind) {
@@ -170,7 +157,6 @@
               fidelity={session.fidelity}
             />
             <span class="tabular font-mono">{turns.length} turn{turns.length === 1 ? '' : 's'}</span>
-            <!-- The stream holds the newest page or so; say how much of the session that is. -->
             <span class="tabular font-mono">
               {#if hasEarlier && selectedKinds.length === 0}
                 {formatNumber(items.length)} of {formatNumber(total)} items
@@ -215,7 +201,6 @@
       <div class="py-12 text-center text-meta text-text-muted">No live items for this session yet.</div>
     {:else}
       {#if error}
-        <!-- A failed page or catch-up keeps the rows already loaded in view. -->
         <div class="px-3 py-1 text-meta text-danger" role="status">{error}</div>
       {/if}
       {#each rows as row (row.item.id)}

@@ -29,8 +29,7 @@ const NUMBER_UNITS = [
 ];
 
 export function formatNumber(n: number): string {
-  // Round before settling on a unit: 999,950 rounds to 1000.0K, which must
-  // read as 1.0M.
+  // WHY: Carry rounding into the next unit so a display never reaches 1000K.
   for (let i = NUMBER_UNITS.length - 1; i >= 0; i--) {
     const unit = NUMBER_UNITS[i];
     if (n < unit.value) continue;
@@ -58,8 +57,8 @@ export function formatDateOnly(value: string, locales?: Intl.LocalesArgument): s
 export function formatDateRange(from: string, to: string, now = new Date()): string {
   const year = String(now.getFullYear());
   const withYear = !from.startsWith(year) || !to.startsWith(year);
-  // Read as UTC midnight and format in UTC, so the label shows the calendar
-  // day in every time zone.
+  // WHY: Parse and format calendar dates in UTC so their day label cannot shift with the browser
+  // timezone.
   const day = (value: string) => new Date(`${value}T00:00:00.000Z`).toLocaleDateString('en-US', {
     month: 'short',
     day: 'numeric',
@@ -82,7 +81,8 @@ export function formatModelName(model: string): string {
     .trim()
     .replace(/\[1m\]$/i, '')
     .replace(/^(?:anthropic|openai|google)\//, '');
-  // Anthropic stamps `-20251001`, OpenAI snapshots `-2026-03-05`.
+  // WHY: Normalize both compact and hyphenated vendor snapshot dates so display labels group the base
+  // model.
   return (BEDROCK_ANTHROPIC_ID.exec(id)?.[1] ?? id).replace(/-20\d{2}-?\d{2}-?\d{2}$/, '');
 }
 

@@ -4,8 +4,7 @@ import type { AgentEvent, Stats } from '../api/client';
 let source: EventSource | null = null;
 let reconnectDelay = 1000;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-// True once the stream has dropped, so the next `onopen` is a *re*connect (which
-// missed events during the gap) rather than the initial connect (mount loads).
+// WHY: Record a real disconnect so initial mount does not replay the reconnect reload.
 let droppedSinceOpen = false;
 
 export function connectSSE(): void {

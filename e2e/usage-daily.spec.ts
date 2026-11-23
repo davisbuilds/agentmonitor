@@ -32,7 +32,7 @@ test.beforeAll(async () => {
   insert.run('daily-a', 'claude_code', 'claude-haiku-4-5-20251001', 1000, 200, 3, '2026-09-10 12:00:00');
   insert.run('daily-b', 'codex', 'openai/gpt-6-astra', 500, 100, 1, '2026-09-10 13:00:00');
   insert.run('daily-a', 'claude_code', 'claude-haiku-4-5-20251001', 2000, 400, 5, '2026-09-11 12:00:00');
-  // An unpriced model: tokens but no cost.
+  // WHY: Use tokens at zero cost so the fixture can distinguish unpriced activity from no activity.
   insert.run('daily-c', 'codex', 'mystery-model-1', 1000, 200, 0, '2026-09-20 12:00:00');
 
   server = createApp().listen(0, '127.0.0.1');
@@ -54,7 +54,6 @@ test('Daily usage is one chart: each day says its totals and narrows the page wh
   await expect(page.getByRole('heading', { name: 'Daily Usage', exact: true })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Top Models' })).toHaveCount(0);
 
-  // The legend spells models the one way the app does.
   const chart = page.getByRole('region', { name: 'Daily Usage by Model' });
   await expect(chart.getByText('claude-haiku-4-5', { exact: true })).toBeVisible();
   await expect(chart.getByText('gpt-6-astra', { exact: true })).toBeVisible();
@@ -86,7 +85,6 @@ test('one breakdown table switches dimension, compares each row with the period 
   await expect(breakdown.getByText('claude-haiku-4-5', { exact: true })).toBeVisible();
 
   await breakdown.getByRole('button', { name: 'Agent', exact: true }).click();
-  // Nothing ran the two days before, so every row is new.
   await expect(breakdown.getByText('new')).toHaveCount(2);
   await breakdown.getByRole('button', { name: 'Claude Code' }).click();
   await expect(page).toHaveURL(/agent=claude(&|$)/);

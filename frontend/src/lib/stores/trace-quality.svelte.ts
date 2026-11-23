@@ -35,20 +35,18 @@ class TraceQualityStore {
   get projectOptions(): string[] { return analyticsFilters.projectOptions; }
   get agentOptions(): string[] { return analyticsFilters.agentOptions; }
 
-  // List
   traces = $state<TraceQualityTrace[]>([]);
   coverage = $state<TraceQualityReadCoverage | null>(null);
   loading = $state(false);
   error = $state<string | null>(null);
 
-  // Selected trace detail
   detail = $state<TraceQualityTraceDetail | null>(null);
   tree = $state<TraceQualityObservationTreeNode[]>([]);
   detailLoading = $state(false);
   detailError = $state<string | null>(null);
 
-  // Selected observation within the open trace (read from the loaded tree —
-  // the lean view has no per-observation detail endpoint to refetch).
+  // WHY: Resolve observations from the current trace because the lean API has no per-observation detail
+  // route.
   selectedObservationId = $state<string | null>(null);
 
   get selectedObservation(): TraceQualityObservationTreeNode | null {
@@ -70,8 +68,8 @@ class TraceQualityStore {
   }
 
   private get listParams(): Record<string, string> {
-    // A session scope (drill-in) targets one session's traces regardless of when they ran,
-    // so it overrides the shared date window. Otherwise filter by the date/project/agent bar.
+    // WHY: A session drill-in must find the session’s traces even if they fall outside the current
+    // page’s date window.
     if (this.sessionScope) {
       const scoped: Record<string, string> = { session_id: this.sessionScope };
       if (this.project) scoped.project = this.project;
@@ -109,12 +107,10 @@ class TraceQualityStore {
       if (version !== this.listVersion) return;
       this.traces = result.data;
       this.coverage = result.coverage;
-      // Reconcile the open trace against the new list / hash.
       const wanted = this.selectedTraceId;
       if (wanted && this.detail?.id !== wanted) {
         await this.loadDetail(wanted);
       } else if (!wanted && this.sessionScope && result.data.length === 1) {
-        // Drill-in to a session with a single trace opens it directly.
         await this.selectTrace(result.data[0]!.id);
       } else if (!wanted) {
         this.clearDetail();
@@ -141,7 +137,6 @@ class TraceQualityStore {
   }
 
   private clearDetail(): void {
-    // A detail still loading belongs to the selection being cleared.
     this.detailRequests.invalidate();
     this.detailLoading = false;
     this.detail = null;

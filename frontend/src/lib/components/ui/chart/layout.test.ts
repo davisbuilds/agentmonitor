@@ -10,7 +10,6 @@ describe('chartLayout — viewBox and plot rect', () => {
   });
 
   it('merges a partial margin override with the defaults', () => {
-    // Only `left` changes; the other three edges keep their defaults.
     const { plot } = chartLayout({ left: 20 });
     expect(plot.left).toBe(20);
     expect(plot.right).toBe(306);
@@ -24,7 +23,6 @@ describe('chartLayout — viewBox and plot rect', () => {
     const { width, height, plot } = chartLayout({ top: 5, right: 9, bottom: 41, left: 33 });
     expect(plot.right - plot.left).toBe(plot.width);
     expect(plot.bottom - plot.top).toBe(plot.height);
-    // The margins are exactly what is left around the plot rect.
     expect(plot.left).toBe(33);
     expect(width - plot.right).toBe(9);
     expect(plot.top).toBe(5);

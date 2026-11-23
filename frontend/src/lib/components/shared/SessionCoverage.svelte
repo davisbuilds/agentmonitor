@@ -9,9 +9,8 @@
   } from '../../session-capabilities';
   import { Popover } from '../ui';
 
-  // How much of a session amon can show, as a tinted dot and a label
-  // (DESIGN.md: status indicators are a dot + label, not a pill on every row).
-  // `row` says nothing for a fully captured session; `detail` opens the breakdown.
+  // WHY: Omit a row-level badge for full captures to reserve indicators for coverage gaps. The detail
+  // view can show the breakdown.
   interface Props {
     capabilities: SessionCapabilities | null;
     integrationMode?: string | null;

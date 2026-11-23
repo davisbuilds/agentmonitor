@@ -1,6 +1,6 @@
 <script lang="ts">
-  // A trend line under a headline number: shape only, no axes. The tile's text
-  // carries the values, so the line is hidden from assistive technology.
+  // WHY: Hide the decorative trend from assistive technology because the tile already exposes its
+  // values as text.
   import { SPARKLINE_HEIGHT, SPARKLINE_WIDTH, sparklineSegments } from './sparkline';
 
   interface Props {

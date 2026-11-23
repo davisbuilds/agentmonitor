@@ -17,8 +17,6 @@ let createApp: typeof import('../src/app.js').createApp;
 
 const now = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
-// Seed one active headless and one active interactive session so we can assert
-// the Monitor renders the "headless" pill on the former and not the latter.
 function seedSession(project: string, mode: 'headless' | 'interactive'): void {
   const db = getDb();
   const id = `e2e-mode-${mode}`;

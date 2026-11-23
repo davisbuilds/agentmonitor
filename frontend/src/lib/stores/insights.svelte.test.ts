@@ -22,13 +22,12 @@ function generation(configured: Partial<Record<'openai' | 'anthropic' | 'gemini'
   };
 }
 
-// Only the fields the store reads; the rest of the row is irrelevant here.
 const savedInsight = { id: 7, kind: 'overview', title: 'Saved under an earlier key' } as Insight;
 
-// The unfiltered availability read asks for one row; list loads send filters.
+// WHY: The one-row limit distinguishes the unfiltered availability probe from the filtered list mock.
 const isAvailabilityRead = (params: unknown) => (params as { limit?: number }).limit === 1;
 
-// Module singleton on `$state`: reset per test so availability starts unknown.
+// WHY: Reset the Svelte singleton so prior cases cannot seed a known availability value.
 let store: typeof import('./insights.svelte');
 beforeEach(async () => {
   vi.resetModules();
@@ -86,8 +85,8 @@ describe('insights saved while no provider key is configured', () => {
     fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
     await store.insights.loadAvailability();
 
-    // e.g. a kind or date range that matches nothing saved: an empty slice,
-    // not an empty table, so the view must not drop back to Overview.
+    // WHY: Give the list an empty slice and the unfiltered probe a row so the test distinguishes slice
+    // emptiness from global absence.
     fetchInsights.mockImplementation(async (params: unknown) => ({
       data: isAvailabilityRead(params) ? [savedInsight] : [],
       generation: generation({}),
@@ -167,7 +166,6 @@ describe('insights availability once saved insights are gone', () => {
     await store.insights.load();
     expect(store.insights.availability).toBe(true);
 
-    // Removed outside this page (another tab, the CLI); then Refresh.
     fetchInsights.mockResolvedValue({ data: [], generation: generation({}) });
     await store.insights.load();
     expect(store.insights.availability).toBe(false);
@@ -215,8 +213,6 @@ describe('insights availability once saved insights are gone', () => {
     fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
     await store.insights.loadAvailability();
 
-    // An empty filtered slice rechecks unfiltered; a transient failure there
-    // is no evidence that nothing is saved.
     fetchInsights.mockResolvedValueOnce({ data: [], generation: generation({}) });
     fetchInsights.mockRejectedValueOnce(new Error('boom'));
     await store.insights.load();
@@ -255,8 +251,8 @@ describe('insights availability once saved insights are gone', () => {
 });
 
 describe('insights list reads in flight during a delete', () => {
-  // Refresh (or the auto-refresh timer) starts a list read; the server may
-  // answer it from before the delete lands.
+  // WHY: Hold the list response across delete so the test can expose a late response restoring a
+  // deleted row.
   function pendingListRead() {
     let resolve!: (value: unknown) => void;
     let reject!: (err: unknown) => void;
@@ -340,7 +336,6 @@ describe('insights list reads in flight during a delete', () => {
     fetchInsights.mockResolvedValueOnce({ data: [savedInsight], generation: generation({}) });
     await store.insights.load();
 
-    // The kind changed while the old slice's row stays selected.
     const workflowInsight = { id: 11, kind: 'workflow', title: 'Workflow' } as Insight;
     await store.insights.setKind('workflow');
     const pending = pendingListRead();

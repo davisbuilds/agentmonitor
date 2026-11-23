@@ -27,7 +27,8 @@ function outcomes(spend: AnalyticsOutcomes['spend']): AnalyticsOutcomes {
 
 describe('where the spend went', () => {
   it('lists every class in fixed order with its own color, whichever classes a range has', () => {
-    // Out of order, with classes missing: the bar must not reorder or repaint.
+    // WHY: Use missing, out-of-order classes so the test can catch palette or ordering changes across
+    // subsets.
     const some = spendSegments(outcomes([
       { outcome: 'not_landed', usd: 1, share: 0.05 },
       { outcome: 'merged_pr', usd: 19, share: 0.95 },
@@ -48,8 +49,8 @@ describe('where the spend went', () => {
   });
 
   it('keeps merged pull requests\' figures when the range itself has no spend', () => {
-    // A pull request merged in the range costs the work before it, up to a month
-    // earlier, so it has figures even when none of that spend falls in the range.
+    // WHY: Outcomes in the window can link spend outside that window. Use this fixture to show those
+    // denominators differ.
     const earlier = { ...outcomes([]), merged_prs: { prs: 2, median_usd: 3, p25_usd: 2, p75_usd: 4, p90_usd: 5, all_in_usd: null } };
     expect(outcomeParts(earlier)).toEqual({ spend: false, merged: true });
     expect(outcomeParts(outcomes([{ outcome: 'nothing_after', usd: 1, share: 1 }]))).toEqual({ spend: true, merged: false });

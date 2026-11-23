@@ -17,9 +17,7 @@ let createApp: typeof import('../src/app.js').createApp;
 
 const sessionId = 'e2e-monitor-backfill-001';
 
-// Two days back (UTC date) so the seeded data always sits inside the cost
-// dashboard's default 30d window — absolute dates here rot as the calendar
-// moves and the panels silently fall back to "No data".
+// WHY: Date fixtures relative to the clock so the default date window cannot age them out of the chart.
 const seedDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
 const priorDay = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
 
@@ -76,8 +74,7 @@ test.beforeAll(async () => {
     'api',
   );
 
-  // A second, older session in a different project gives the cost timeline a
-  // second day — the Spend Over Time chart only renders with >1 timeline point.
+  // WHY: Seed two days because the spend timeline cannot render a single point.
   db.prepare(`
     INSERT INTO sessions (
       id, agent_id, agent_type, project, branch, status, started_at, ended_at, last_event_at, metadata

@@ -18,8 +18,8 @@
   import GitPage from '../git/GitPage.svelte';
 
   const f = analyticsFilters;
-  // Apply a deep link before the first render, so `#analytics?view=usage`
-  // mounts Usage straight away instead of mounting Overview and its reads first.
+  // WHY: Hydrate the selected view before first render so a deep link does not mount and read Overview
+  // first.
   f.attachHash();
 
   const viewLabels: Record<AnalyticsView, string> = {
@@ -31,29 +31,26 @@
     quality: 'Quality',
   };
 
-  // Insights is offered once a provider key or a saved insight is known to exist
-  // (saved ones stay readable after keys are removed) — not while that loads.
+  // WHY: Keep saved insights readable after provider keys are removed and defer deciding while
+  // availability loads.
   const views = $derived(
     visibleAnalyticsViews(insights.availability).map(id => ({ id, label: viewLabels[id] })),
   );
-  // The view actually rendered: an Insights deep link with neither a key nor a
-  // saved insight shows Overview, and shows nothing while that is unknown.
+  // WHY: Delay mounting a deep-linked view until availability is known so it does not start reads for
+  // the wrong panel.
   const shown = $derived(resolveAnalyticsView(f.view, insights.availability));
 
   onMount(() => {
     void insights.loadAvailability();
   });
 
-  // Point the hash (and the export/refresh actions) at the view really shown.
   $effect(() => {
     if (shown && shown !== f.view) f.setView(shown);
   });
 
-  // The range button names the window every figure below covers.
   const rangeLabel = $derived(formatDateRange(f.from, f.to));
   const usageFacetCount = $derived([usage.provider, usage.tier, usage.model].filter(Boolean).length);
 
-  // Export only exists for the data-backed sub-views; insights and quality have none.
   const canExport = $derived(f.view === 'overview' || f.view === 'usage' || f.view === 'skills');
 
   function refreshActive(): void {
@@ -73,7 +70,6 @@
 </script>
 
 <div class="flex min-h-0 flex-1 flex-col">
-  <!-- Date, project and agent apply across every sub-view; Usage adds its own facets. -->
   <FilterBar>
     <SubTabs tabs={views} active={f.view} onchange={(id) => f.setView(id as AnalyticsView)} />
 

@@ -76,15 +76,15 @@ function subTab(page: Page, name: string) {
   return page.getByRole('button', { name, exact: true });
 }
 
-// The server runs in this process, so the override (not the developer's
-// ambient API keys) decides whether a provider is configured.
+// WHY: Override the server process’s provider configuration so ambient operator credentials cannot
+// influence the fixture.
 test('Insights is hidden and its deep link falls back to Overview without an API key', async ({ page }) => {
   setInsightProviderConfigForTests(NO_KEYS);
 
   const status = page.waitForResponse(res => new URL(res.url()).pathname === '/api/v2/insights');
   await page.goto(`${baseUrl}/app/#analytics`);
-  // Control: the sub-view bar has rendered and the key status has answered,
-  // so a missing Insights tab is not just a page that hasn't finished loading.
+  // WHY: Wait for the status response and another rendered tab so the absence check cannot pass before
+  // the page loads.
   await expect(subTab(page, 'Quality')).toBeVisible();
   await status;
   await expect(subTab(page, 'Insights')).toHaveCount(0);
@@ -116,7 +116,6 @@ function daysAgo(days: number): string {
   return date.toISOString().slice(0, 10);
 }
 
-// Saved under a key that has since been removed; inside the default 30-day window.
 function saveInsight(title: string): number | bigint {
   return getDb().prepare(`
     INSERT INTO insights (
@@ -162,7 +161,6 @@ test('saved insights stay readable without an API key, with generation disabled'
     await expect(fresh.getByText(title).first()).toBeVisible();
     await expect(fresh.getByRole('button', { name: 'Generate Insight' })).toBeDisabled();
 
-    // A kind with nothing saved empties the slice; the view must stay put.
     const listLoaded = fresh.waitForResponse(res => {
       const url = new URL(res.url());
       return url.pathname === '/api/v2/insights' && url.searchParams.get('kind') === 'workflow';
@@ -207,7 +205,6 @@ test('a refresh after the final saved insight is removed elsewhere drops Insight
     await page.goto(`${baseUrl}/app/#analytics?view=insights`);
     await expect(page.getByText(title).first()).toBeVisible();
 
-    // Removed outside this page (another tab, the CLI).
     getDb().prepare('DELETE FROM insights WHERE id = ?').run(id);
     await page.getByRole('button', { name: 'Refresh', exact: true }).first().click();
     await expect(page).not.toHaveURL(/view=insights/);
@@ -225,7 +222,7 @@ test('Overview leaves top sessions to Usage and skill panels to Skills', async (
   });
 
   await page.goto(`${baseUrl}/app/#analytics`);
-  // Control: Overview rendered and fetched its own panels.
+  // WHY: Observe an Overview request before making assertions about the requests a view does not send.
   await expect(page.getByRole('heading', { name: 'Tool Usage' })).toBeVisible();
   await expect.poll(() => requestedPaths.includes('/api/v2/analytics/summary')).toBe(true);
   await expect(page.getByRole('heading', { name: 'Top Sessions' })).toHaveCount(0);
@@ -234,21 +231,19 @@ test('Overview leaves top sessions to Usage and skill panels to Skills', async (
   expect(requestedPaths).not.toContain('/api/v2/analytics/top-sessions');
   expect(requestedPaths).not.toContain('/api/v2/analytics/skills/daily');
 
-  // The one Top Sessions panel is Usage's, ranked by cost.
   await subTab(page, 'Usage').click();
   await expect(page.getByRole('heading', { name: 'Top Sessions' })).toHaveCount(1);
 
   await subTab(page, 'Skills').click();
   await expect(page.getByRole('heading', { name: 'Raw skill invocation volume' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Skill consultation explorer' })).toBeVisible();
-  // Skills keeps the skill sections the Overview export used to carry.
   const download = page.waitForEvent('download');
   await page.getByRole('button', { name: 'Export CSV' }).click();
   expect((await download).suggestedFilename()).toMatch(/^agentmonitor-skills-.*\.csv$/);
 });
 
 test('Top Sessions keeps the cost beside the session, however long its details run', async ({ page }) => {
-  // A long project name stretches the details line past the card's width.
+  // WHY: Use a long project name to exercise the card’s overflow protection.
   const usage = getDb().prepare(`INSERT INTO events (session_id, agent_type, event_type, model, project, tokens_in, cost_usd, client_timestamp, source)
     VALUES ('e2e-analytics-views-session', 'claude_code', 'llm_response', 'claude-opus-5-5', 'a-project-whose-name-runs-on-and-on', 1000, 1.5, ?, 'import')`);
   const id = usage.run(new Date().toISOString()).lastInsertRowid;
@@ -261,7 +256,6 @@ test('Top Sessions keeps the cost beside the session, however long its details r
       const cost = panel.getByText('$1.50', { exact: true });
       await expect(cost).toBeVisible();
       const [cardBox, costBox] = [await card.boundingBox(), await cost.boundingBox()];
-      // On the card's first line, at its right edge, rather than wrapped below the details.
       expect(costBox!.y - cardBox!.y, `cost at ${width}px`).toBeLessThan(24);
       expect(cardBox!.x + cardBox!.width - (costBox!.x + costBox!.width), `cost at ${width}px`).toBeLessThan(24);
     }
@@ -304,7 +298,7 @@ test('the shared project filter scopes the skill volume chart on Skills', async 
 });
 
 test('Git shows where the spend went, and what that rests on', async ({ page }) => {
-  // Spend in the seeded session, which has no tool calls stored, so none of it can be followed.
+  // WHY: Seed spending without stored calls so the chart exercises a meaningful unmatched total.
   const usage = getDb().prepare(`INSERT INTO events (session_id, agent_type, event_type, model, project, tokens_in, cost_usd, client_timestamp, source)
     VALUES ('e2e-analytics-views-session', 'claude_code', 'llm_response', 'claude-opus-5-5', 'alpha', 1000, 1.5, ?, 'import')`);
   const id = usage.run(new Date().toISOString()).lastInsertRowid;
@@ -324,8 +318,8 @@ test('Git shows where the spend went, and what that rests on', async ({ page }) 
 });
 
 test('Git keeps merged pull requests\' figures when their spend came before the range', async ({ page }) => {
-  // Two pull requests merged in the range, costed from work in the month before
-  // it, so the range itself holds no spend.
+  // WHY: Put outcomes inside the range but their linked spend outside it to distinguish outcome cost
+  // from interval spend.
   const week = { week: '2026-11-02', prs: 2, median_usd: 3, p25_usd: 2, p75_usd: 4, p90_usd: 5, median_tokens: 30_000, usd_per_mtok: 100 };
   await page.route('**/api/v2/analytics/outcomes*', route => route.fulfill({ json: {
     total_usd: 0,

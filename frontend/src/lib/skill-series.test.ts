@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { OTHER_COLOR, OTHER_LABEL, SERIES_COLORS } from './components/usage/model-colors';
 import { SKILL_TOP_N, skillSeries, stackDay } from './skill-series';
 
-// Twelve skills, ranked s01 (most invocations) to s12, so s11 and s12 fall
-// outside the named ten.
 const names = Array.from({ length: 12 }, (_, i) => `s${String(i + 1).padStart(2, '0')}`);
 const days = [
   { date: '2026-03-01', total: 78, skills: names.map((skill_name, i) => ({ skill_name, count: 12 - i })) },

@@ -29,7 +29,6 @@
 <main class="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
   <OverviewHeadlines />
 
-  <!-- Highest-volume sessions live in Usage (by cost); skill panels live in Skills. -->
   <div class="grid grid-cols-1 gap-4 xl:grid-cols-12">
     <div class="space-y-4 xl:col-span-7">
       <ActivityTimeline />

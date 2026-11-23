@@ -30,7 +30,6 @@ test.beforeAll(async () => {
   const { createApp } = await import('../src/app.js');
 
   initSchema();
-  // What the runtime starts beside its periodic sweep.
   stream.startSessionSweepBroadcast();
   server = createApp().listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -60,13 +59,12 @@ test('a session the sweep ends leaves Active Agents without a reload', async ({ 
   const cards = page.locator('button', { hasText: /sweep-(stays|ends)/ });
   await expect(cards).toHaveCount(2);
 
-  // Wait for the page's SSE stream before the sweep, which is broadcast once.
+  // WHY: Wait for the SSE client because the sweep broadcasts only once and cannot be replayed.
   await expect.poll(async () => {
     const health = await (await fetch(`${baseUrl}/api/health`)).json() as { sse_clients: number };
     return health.sse_clients;
   }).toBeGreaterThan(0);
 
-  // Quiet past two timeouts, then the periodic sweep runs.
   getDb().prepare("UPDATE sessions SET last_event_at = datetime('now', '-30 minutes') WHERE id = 'e2e-sweep-ends'").run();
   const sweep = updateIdleSessions(5);
   expect(sweep.transitions).toEqual([{ session_id: 'e2e-sweep-ends', status: 'ended' }]);

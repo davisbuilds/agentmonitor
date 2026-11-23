@@ -13,7 +13,6 @@
 
   let { nodes, selectedId, onselect }: Props = $props();
 
-  // Default expanded; track collapsed ids so deep trees can be folded.
   let collapsed = $state<Record<string, boolean>>({});
 
   function toggle(id: string): void {
@@ -32,8 +31,6 @@
     return 'neutral';
   }
 
-  // Success is the routine case; only a status or severity that says something
-  // gets a badge.
   function showsStatus(obs: TraceQualityObservationTreeNode): boolean {
     if (obs.status) return isNotableStatus(obs.status);
     return obs.severity === 'warning' || obs.severity === 'error' || obs.severity === 'critical';

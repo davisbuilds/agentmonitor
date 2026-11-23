@@ -14,7 +14,6 @@
 
   const summary = $derived(usage.summary);
 
-  // Total Cost + Cache Hit Rate are promoted; the rest form a compact strip.
   const promoted = $derived.by((): Card[] => {
     if (!summary) return [];
     return [
@@ -25,7 +24,6 @@
           value: `${summary.cost_delta_pct >= 0 ? '+' : ''}${summary.cost_delta_pct.toFixed(1)}%`,
           tone: summary.cost_delta_pct > 0 ? 'danger' : 'ok',
         },
-        // Name the window, so this figure can't be read against Monitor's.
         sub: `${formatDateRange(usage.from, usage.to)} · vs ${formatCost(summary.prior_total_cost_usd)} the period before`,
         testid: 'usage-total-cost',
       },

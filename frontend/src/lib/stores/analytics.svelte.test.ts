@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Every request is answered with an empty-but-valid body; the tests assert which
-// endpoints each Analytics sub-view asks for, not what it renders.
+// WHY: Return valid empty fixtures so the tests measure endpoint selection independently of panel
+// content.
 const requested: URL[] = [];
 
 function stubFetch(): void {
@@ -39,7 +39,7 @@ afterEach(() => {
 describe('Overview requests', () => {
   it('loads activity panels but not the skill or message-count top-session reads', async () => {
     await analytics.initialize();
-    // Control: Overview did fetch, so the absences below are not a silent no-op.
+    // WHY: Require actual Overview reads so the absence checks cannot pass when the view never loaded.
     expect(paths()).toContain('/api/v2/analytics/summary');
     expect(paths()).toContain('/api/v2/analytics/tools');
     expect(paths()).not.toContain('/api/v2/analytics/top-sessions');
@@ -103,15 +103,12 @@ describe('Git requests', () => {
 
 describe('the shared agent filter', () => {
   it("holds Claude under the option list's spelling when a drill-down passes the event spelling", () => {
-    // Usage's By Agent rows name Claude `claude_code`; the filter options say `claude`.
     analyticsFilters.setAgent('claude_code');
     expect(analyticsFilters.agent).toBe('claude');
   });
 });
 
 describe('change markers', () => {
-  // The timelines read markers without an error notice, so a slice's markers
-  // must never be drawn on another slice's charts.
   const markersFor = (project: string) => ({
     markers: [{ kind: 'instructions', date: '2026-03-03', at: '2026-03-03T10:00:00Z', project, files: ['AGENTS.md'], commits: [] }],
   });

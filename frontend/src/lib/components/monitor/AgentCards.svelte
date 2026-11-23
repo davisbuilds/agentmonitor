@@ -10,7 +10,6 @@
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
 
-  // Group recent events by session
   const eventsBySession = $derived.by(() => {
     const map = new Map<string, AgentEvent[]>();
     for (const e of events) {
@@ -21,7 +20,6 @@
     return map;
   });
 
-  // Sort: active first, then idle, then by last_event_at desc
   const sorted = $derived.by(() => {
     return [...sessions].sort((a, b) => {
       const statusOrder: Record<string, number> = { active: 0, idle: 1, ended: 2 };
@@ -32,8 +30,6 @@
     });
   });
 
-  // A card opens the session in place: its live stream, or its recent events
-  // when it has no live record or the live view is off.
   function openSession(id: string): void {
     openMonitorSession(id);
   }

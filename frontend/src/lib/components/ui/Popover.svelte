@@ -29,8 +29,8 @@
   let root = $state<HTMLDivElement>();
   let panel = $state<HTMLDivElement>();
 
-  // Keep the panel inside the viewport with a 16px gutter. A panel anchored to
-  // a trigger near the edge of a phone screen would otherwise overflow it.
+  // WHY: Clamp the panel to a viewport gutter so a trigger near the edge of a small screen cannot hide
+  // its options.
   const GUTTER = 16;
   $effect(() => {
     if (!open || !panel) return;

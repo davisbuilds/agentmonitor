@@ -65,7 +65,8 @@ test('an agent filter keeps its totals when the unfiltered stats broadcast arriv
   await expect(tokens).toHaveText('300');
   await expect(costToday).toHaveText('$3.00');
 
-  // The server's periodic snapshot is always unfiltered.
+  // WHY: Broadcast an unfiltered server snapshot to check that the filtered figures cannot be
+  // overwritten by it.
   for (let i = 0; i < 3; i++) {
     broadcaster.broadcast('stats', getStats() as unknown as Record<string, unknown>);
     await page.waitForTimeout(300);
@@ -73,7 +74,6 @@ test('an agent filter keeps its totals when the unfiltered stats broadcast arriv
   await expect(tokens).toHaveText('300');
   await expect(costToday).toHaveText('$3.00');
 
-  // Clearing the filter takes the unfiltered snapshot again.
   await page.getByRole('combobox').first().selectOption('');
   await expect(tokens).toHaveText('10.0K');
   await expect(costToday).toHaveText('$100.00');

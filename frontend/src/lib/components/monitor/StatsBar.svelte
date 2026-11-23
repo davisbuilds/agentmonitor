@@ -10,7 +10,8 @@
   const agentCount = $derived(Number.isFinite(stats.active_agents) ? stats.active_agents : Object.keys(stats.agent_breakdown || {}).length);
   const totalTokens = $derived(statsTotalTokens(stats));
   const agents = $derived(agentTokenRows(stats));
-  // Named the way Claude's /stats names them. Input is uncached: cached input is a cache read.
+  // WHY: The bucket labels follow provider convention. Count cached input as a cache read so it cannot
+  // be counted twice.
   const buckets = $derived([
     { label: 'Input', value: stats.total_tokens_in },
     { label: 'Output', value: stats.total_tokens_out },

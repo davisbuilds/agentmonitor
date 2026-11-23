@@ -1,5 +1,3 @@
-// Rows for Usage's one breakdown table: the selected dimension's rows with
-// their share of the range's cost and their change against the period before.
 import type {
   UsageAgentBreakdown,
   UsageModelBreakdown,
@@ -60,7 +58,8 @@ function identity(dimension: BreakdownDimension, row: AnyRow): Pick<BreakdownRow
   }
   if (dimension === 'project') {
     const { project } = row as UsageProjectBreakdown;
-    // Selecting the unattributed bucket clears the project filter, as before.
+    // WHY: A missing project label represents unattributed usage. Do not send that synthetic label as a
+    // real project filter.
     return { key: project, label: project === 'unknown' ? 'No project' : project, filter: { kind: 'project', value: project === 'unknown' ? '' : project } };
   }
   if (dimension === 'agent') {

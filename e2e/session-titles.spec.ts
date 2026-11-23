@@ -46,7 +46,6 @@ test.beforeAll(async () => {
     '2026-10-01T10:04:00.000Z', null, 'conversation', 'codex-jsonl', full);
   insert.run(CHILD_ROLLOUT, 'codex', null, 'emil pstack',
     '2026-10-01T10:05:00.000Z', PARENT_UUID, 'subagent', 'codex-jsonl', full);
-  // Known only from telemetry: no transcript, so nothing to open or search.
   insert.run('01a1360c-6cbf-7512-85ab-356409e02847', 'codex', null, null,
     '2026-10-01T10:07:00.000Z', null, null, 'codex-otel',
     JSON.stringify({ history: 'none', search: 'none', tool_analytics: 'none', live_items: 'summary' }));
@@ -71,7 +70,6 @@ test('the session list names sessions and nests subagents under their parent', a
   await expect(page.getByRole('button', { name: /Parser audit/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Review the open pull request/ })).toBeVisible();
   await expect(page.getByText('2 total')).toBeVisible();
-  // Fully captured sessions carry no coverage label in the list.
   await expect(page.getByText('Full detail')).toHaveCount(0);
   await expect(page.getByText('hunt the cache layer')).toHaveCount(0);
   await expect(page.getByText('Generate a concise')).toHaveCount(0);
