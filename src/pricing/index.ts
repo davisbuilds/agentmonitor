@@ -202,6 +202,7 @@ export class PricingRegistry {
         this.loadProvider(data);
       } catch {
         // WHY: A broken provider table must not prevent pricing from the other providers.
+        console.warn(`[pricing] Could not load all rates from ${file}`);
       }
     }
   }
