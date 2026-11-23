@@ -26,6 +26,11 @@ node dist/cli.js serve --no-portless   # http://127.0.0.1:3141/app/
 pnpm's global bin directory must be on `PATH` (`pnpm setup`). `amon <command>` and
 `node dist/cli.js <command>` are interchangeable from the checkout.
 
+Session reads such as `amon sessions list` and `amon sessions search` require an existing
+database file when you select one with `--db-path` or `AGENTMONITOR_DB_PATH`. A missing
+file produces exit code 4 and a diagnostic on stderr. An initialized empty store
+returns a successful, empty session list.
+
 `amon serve` runs Express on the fixed `127.0.0.1:3141` backend and normally uses
 the pinned package-local Portless CLI to expose
 `https://agentmonitor.localhost`. Portless is an AgentMonitor dependency, so no

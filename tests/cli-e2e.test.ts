@@ -127,6 +127,31 @@ test('built CLI runs when invoked through package bin symlinks', (t) => {
   }
 });
 
+test('built session reads distinguish a missing explicit store from an empty store', async (t) => {
+  if (!requireBuiltCli(t)) return;
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-missing-'));
+  t.after(() => fs.rmSync(tempDir, { recursive: true, force: true }));
+  const dbPath = path.join(tempDir, 'empty.db');
+  runBuiltCli(['--db-path', dbPath, 'analytics', 'summary', '--json']);
+  const empty = await runBuiltCliAsync(['--db-path', dbPath, 'sessions', 'list', '--json']);
+  assert.equal(empty.status, 0, empty.stderr);
+  assert.deepEqual(JSON.parse(empty.stdout), { data: [], total: 0 });
+
+  const before = fs.readdirSync(tempDir);
+  const missing = path.join(tempDir, 'missing.db');
+  const result = await runBuiltCliAsync(['--db-path', missing, 'sessions', 'list', '--json']);
+  assert.equal(result.status, 4, result.stdout || result.stderr);
+  assert.equal(result.stdout, '');
+  assert.ok(result.stderr.includes(missing), result.stderr);
+  const nested = path.join(tempDir, 'absent', 'store.db');
+  const search = await runBuiltCliAsync(['sessions', 'search', 'test', '--json'],
+    { ...process.env, AGENTMONITOR_DB_PATH: nested });
+  assert.equal(search.status, 4, search.stdout || search.stderr);
+  assert.ok(search.stderr.includes(nested), search.stderr);
+  assert.deepEqual(fs.readdirSync(tempDir), before);
+});
+
 test('built reporting CLI supports eight concurrent reads of one database', async (t) => {
   if (!requireBuiltCli(t)) return;
 

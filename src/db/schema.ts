@@ -1250,8 +1250,7 @@ const DATA_SCHEMA_VERSION = 30;
  * also the read fast-path boundary. A missing or older database still takes the
  * complete initialization path before any query runs.
  */
-export function ensureSchemaForRead(): void {
-  const db = getDb();
+export function ensureSchemaForRead(db = getDb()): void {
   const current = (db.pragma('user_version', { simple: true }) as number) ?? 0;
   if (current >= DATA_SCHEMA_VERSION) return;
   initSchema();

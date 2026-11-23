@@ -28,15 +28,15 @@ export function assertTestDbIsIsolated(dbPath: string, env: NodeJS.ProcessEnv = 
   );
 }
 
-export function getDb(): Database.Database {
+export function getDb({ fileMustExist = false } = {}): Database.Database {
   if (!db) {
     assertTestDbIsIsolated(config.dbPath);
     const dbDir = path.dirname(config.dbPath);
-    if (!fs.existsSync(dbDir)) {
+    if (!fileMustExist && !fs.existsSync(dbDir)) {
       fs.mkdirSync(dbDir, { recursive: true });
     }
 
-    db = new Database(config.dbPath, { timeout: SQLITE_BUSY_TIMEOUT_MS });
+    db = new Database(config.dbPath, { timeout: SQLITE_BUSY_TIMEOUT_MS, fileMustExist });
     // Configure contention handling before any pragma that may need a lock.
     // Re-applying journal_mode=WAL from every short-lived CLI process can queue
     // behind the running server's writer even when the database is already WAL.
