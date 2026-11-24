@@ -11,7 +11,7 @@
     ['codex', codex],
   ]);
 
-  let { agent, fallbackDot = false }: { agent: string; fallbackDot?: boolean } = $props();
+  let { agent, fallback }: { agent: string; fallback?: 'dot' | 'terminal' } = $props();
   const icon = $derived(icons.get(agent));
 </script>
 
@@ -19,7 +19,11 @@
   <span class="agent-icon inline-flex size-4 shrink-0 text-text" aria-hidden="true">
     {@html icon}
   </span>
-{:else if fallbackDot}
+{:else if fallback === 'terminal'}
+  <svg class="size-4 shrink-0 text-text-muted" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+    <path d="m4 7 5 5-5 5m8 0h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+  </svg>
+{:else if fallback === 'dot'}
   <span class="inline-block size-2 shrink-0 rounded-full" style:background-color={agentHexColor(agent)} aria-hidden="true"></span>
 {/if}
 

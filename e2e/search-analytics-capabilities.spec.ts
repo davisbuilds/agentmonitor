@@ -261,6 +261,19 @@ test('monitor active agent cards include model and reasoning effort when availab
   await expect(card).toContainText('Codex (gpt-5.5 high)');
 });
 
+test('monitor gives unfamiliar agents an icon and labels idle sessions', async ({ page }) => {
+  const now = new Date().toISOString();
+  getDb().prepare(`
+    INSERT INTO sessions (id, agent_id, agent_type, project, status, started_at, last_event_at)
+    VALUES ('e2e-idle-local-agent', 'local-agent', 'local-agent', 'fallback-project', 'idle', ?, ?)
+  `).run(now, now);
+
+  await page.goto(`${baseUrl}/app/#monitor`);
+  const card = page.getByRole('button', { name: /local-agent/ });
+  await expect(card.getByText('Idle', { exact: true })).toBeVisible();
+  await expect(card.locator('svg')).toBeVisible();
+});
+
 test('a monitor session with no live record reads its v2 detail and shows its events in place', async ({ page }) => {
   const requestedPaths: string[] = [];
   page.on('request', (request) => {
