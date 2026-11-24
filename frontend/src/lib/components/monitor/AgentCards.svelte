@@ -4,6 +4,7 @@
   import type { AgentEvent, Session } from '../../api/client';
   import { buildActiveAgentLabel, collapseEventRuns } from '../../monitor-analytics';
   import { SectionHeader, StatusDot, EmptyState, Badge } from '../ui';
+  import AgentIcon from '../shared/AgentIcon.svelte';
   import ContextPill from './ContextPill.svelte';
   import { openMonitorSession } from '../../stores/router.svelte';
 
@@ -65,7 +66,10 @@
         <div class="mb-2 flex items-start justify-between gap-3">
           <div class="flex min-w-0 items-start gap-2">
             <StatusDot status={session.status} class="mt-1.5" />
-            <span class="text-body font-medium leading-tight {agentColor(session.agent_type)}">{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
+            <span class="flex min-w-0 items-center gap-2 text-body font-medium leading-tight {agentColor(session.agent_type)}">
+              <AgentIcon agent={session.agent_type} />
+              <span>{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
+            </span>
             {#if session.mode === 'headless'}
               <Badge tone="neutral" class="mt-0.5" title="Headless run (claude -p / codex exec)">headless</Badge>
             {/if}

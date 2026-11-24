@@ -3,6 +3,7 @@
   import type { QuotaMonitorData, QuotaMonitorWindow } from '../../api/client';
   import { parseTimestamp, timeAgo } from '../../format';
   import { Popover, Bar } from '../ui';
+  import AgentIcon from '../shared/AgentIcon.svelte';
   import { quotaPillEntries, quotaPillLabel, quotaProviderLabel as providerLabel, quotaShowsWindows, quotaWindows as windows } from '../../quota-pill';
 
   const rows = $derived(getQuotaMonitor());
@@ -69,7 +70,10 @@
       {#each rows as row (row.provider)}
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
-            <span class="text-meta font-medium text-text">{providerLabel(row)}</span>
+            <h3 class="flex items-center" title={providerLabel(row)}>
+              <AgentIcon agent={row.provider} />
+              <span class="sr-only">{providerLabel(row)}</span>
+            </h3>
             {#if row.plan_type}
               <span class="text-meta uppercase tracking-wide text-text-faint">{row.plan_type}</span>
             {/if}
