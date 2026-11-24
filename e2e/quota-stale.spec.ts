@@ -26,6 +26,13 @@ test.beforeAll(async () => {
 
   const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
   upsertProviderQuotaSnapshot({
+    provider: 'claude',
+    status: 'available',
+    source: 'claude-statusline',
+    updated_at: minutesAgo(2),
+    primary: { used_percent: 20, resets_at: null, window_minutes: 300 },
+  });
+  upsertProviderQuotaSnapshot({
     provider: 'codex',
     status: 'available',
     source: 'codex-app-server',
@@ -57,11 +64,15 @@ test.afterAll(async () => {
 
 test('a failed quota refresh keeps the last good reading, marked stale', async ({ page }) => {
   await page.goto(`${baseUrl}/app/`);
-  const pill = page.getByRole('button', { name: 'Quota left: Codex 60% (stale)' });
+  const pill = page.getByRole('button', { name: 'Quota left: Claude 80%, Codex 60% (stale)' });
   await expect(pill).toBeVisible();
 
   await pill.click();
   const detail = page.getByRole('dialog', { name: 'Provider quota detail' });
+  for (const name of ['Claude', 'Codex']) {
+    const providerHeading = detail.getByRole('heading', { name, exact: true });
+    await expect(providerHeading.locator('svg')).toBeVisible();
+  }
   await expect(detail.getByText(/Stale: read 20 ?m(in)? ago/)).toBeVisible();
   await expect(detail.getByText('Refresh failed: Timed out waiting for Codex quota response after 5000ms', { exact: false })).toBeVisible();
   await expect(detail.getByText('60% left')).toBeVisible();

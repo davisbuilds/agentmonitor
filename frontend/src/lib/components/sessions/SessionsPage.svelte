@@ -8,7 +8,7 @@
     type PinnedMessage,
     type SearchResult,
   } from '../../api/client';
-  import { timeAgo, agentHexColor, agentDisplayName } from '../../format';
+  import { timeAgo, agentDisplayName } from '../../format';
   import { sessionTitle } from '../../session-text';
   import {
     consumePendingSessionNavigation,
@@ -23,6 +23,7 @@
   import SessionViewer from './SessionViewer.svelte';
   import SearchResults from './SearchResults.svelte';
   import PinnedMessages from './PinnedMessages.svelte';
+  import AgentIcon from '../shared/AgentIcon.svelte';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { Select, EmptyState, Button, InfoTip, FilterBar, Panel, DataTable } from '../ui';
 
@@ -395,10 +396,7 @@
                       onclick={(event) => { event.stopPropagation(); selectSession(session.id); }}
                     >{sessionTitle(session)}</button>
                     <span class="flex items-center gap-1.5 text-meta text-text-faint">
-                      <span
-                        class="inline-block h-2 w-2 shrink-0 rounded-full"
-                        style="background-color: {agentHexColor(session.agent)}"
-                      ></span>
+                      <AgentIcon agent={session.agent} fallbackDot />
                       <span>{agentDisplayName(session.agent)}</span>
                       {#if session.child_count}
                         <span aria-hidden="true">·</span>
