@@ -49,9 +49,9 @@
       >
         {#if entries.length > 0}
           {#each entries as entry (entry.provider)}
-            <span class="flex items-center gap-1.5" title={entry.stale ? 'Last good reading; the latest refresh failed' : undefined}>
+            <span class="flex items-center gap-1.5" title={entry.stale ? `${entry.label}. Last good reading (latest refresh failed)` : entry.label}>
               <span class="h-1.5 w-1.5 rounded-full {entry.stale ? 'bg-line-strong' : toneDot[entry.tone]}"></span>
-              <span>{entry.label}</span>
+              <AgentIcon agent={entry.provider} />
               <span class="tabular font-mono {entry.stale ? 'text-text-muted' : 'text-text'}">{entry.remainingPercent}%</span>
             </span>
           {/each}

@@ -66,6 +66,11 @@ test('a failed quota refresh keeps the last good reading, marked stale', async (
   await page.goto(`${baseUrl}/app/`);
   const pill = page.getByRole('button', { name: 'Quota left: Claude 80%, Codex 60% (stale)' });
   await expect(pill).toBeVisible();
+  await expect(pill.getByTitle('Claude', { exact: true }).locator('svg')).toBeVisible();
+  await expect(pill.getByTitle(/Codex.*Last good reading/).locator('svg')).toBeVisible();
+  for (const name of ['Claude', 'Codex']) {
+    await expect(pill.getByText(name, { exact: true })).toHaveCount(0);
+  }
 
   await pill.click();
   const detail = page.getByRole('dialog', { name: 'Provider quota detail' });

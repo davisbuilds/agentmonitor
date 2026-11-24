@@ -396,7 +396,7 @@
                       onclick={(event) => { event.stopPropagation(); selectSession(session.id); }}
                     >{sessionTitle(session)}</button>
                     <span class="flex items-center gap-1.5 text-meta text-text-faint">
-                      <AgentIcon agent={session.agent} fallbackDot />
+                      <AgentIcon agent={session.agent} fallback="dot" />
                       <span>{agentDisplayName(session.agent)}</span>
                       {#if session.child_count}
                         <span aria-hidden="true">·</span>
