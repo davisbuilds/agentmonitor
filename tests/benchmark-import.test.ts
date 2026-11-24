@@ -458,4 +458,52 @@ describe('importBenchmarkResults', () => {
     assert.equal(result.skipped, 3, 'the three non-object rows are skipped');
     assert.equal(result.eventsImported, 1, 'the valid row still imports');
   });
+
+  test('prices effort-suffixed Gemini 4 benchmark rows against the canonical rate card', () => {
+    const file = writeResults([
+      {
+        run_id: 'openbench:task-g4:gemini-4-neon-high:trial1',
+        harness: 'antigravity',
+        model: 'gemini-4-neon-high',
+        task: 'task-g4',
+        trial: 1,
+        ts_iso: '2026-11-24T12:00:00Z',
+        tokens_input_uncached: 1_000_000,
+        tokens_output: 100_000,
+        tokens_cache_read: 200_000,
+      },
+      {
+        run_id: 'openbench:task-g4:gemini-4-neon-xhigh:trial1',
+        harness: 'antigravity',
+        model: 'gemini-4-neon-xhigh',
+        task: 'task-g4',
+        trial: 1,
+        ts_iso: '2026-11-24T12:00:00Z',
+        tokens_input_uncached: 1_000_000,
+        tokens_output: 100_000,
+        tokens_cache_read: 200_000,
+      },
+      {
+        run_id: 'openbench:task-g4:gemini-4-hydrogen-tiered-xhigh:trial1',
+        harness: 'antigravity',
+        model: 'gemini-4-hydrogen-tiered-xhigh',
+        task: 'task-g4',
+        trial: 1,
+        ts_iso: '2026-11-24T12:00:00Z',
+        tokens_input_uncached: 1_000_000,
+        tokens_output: 100_000,
+        tokens_cache_read: 200_000,
+      },
+    ]);
+    const result = importBenchmarkResults(file);
+    assert.equal(result.eventsImported, 3);
+    assert.deepEqual(result.unpricedModels, []);
+
+    const byRun = (id: string) => getDb().prepare('SELECT cost_usd, cost_source FROM events WHERE event_id LIKE ?').get(`%::${id}`) as { cost_usd: number | null; cost_source: string | null };
+    const neonExpected = 3 + 1.5 + 0.03;
+    const hydrogenExpected = 1.5 + 0.75 + 0.015;
+    assert.ok(Math.abs((byRun('openbench:task-g4:gemini-4-neon-high:trial1').cost_usd ?? 0) - neonExpected) < 1e-9);
+    assert.ok(Math.abs((byRun('openbench:task-g4:gemini-4-neon-xhigh:trial1').cost_usd ?? 0) - neonExpected) < 1e-9);
+    assert.ok(Math.abs((byRun('openbench:task-g4:gemini-4-hydrogen-tiered-xhigh:trial1').cost_usd ?? 0) - hydrogenExpected) < 1e-9);
+  });
 });

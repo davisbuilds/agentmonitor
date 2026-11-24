@@ -110,6 +110,29 @@ describe('PricingRegistry', () => {
       assert.ok(registry.lookup('Gemini 3.5 Flash (Medium)'), 'display-string alias resolves');
     });
 
+    test('finds Gemini 4 models by canonical name, google/ prefix, and Antigravity aliases', () => {
+      for (const [model, rates] of [
+        ['gemini-4-carbon', [2, 10, 0.1]],
+        ['gemini-4-argon', [2, 10, 0.1]],
+        ['gemini-4-neon', [3, 15, 0.15]],
+        ['gemini-4-hydrogen', [1.5, 7.5, 0.075]],
+      ] as const) {
+        const pricing = registry.lookup(model);
+        assert.ok(pricing, `${model} missing`);
+        assert.equal(pricing.provider, 'google', model);
+        assert.equal(pricing.deprecated, false, model);
+        assert.equal(pricing.inputCostPerToken, rates[0] / 1_000_000, model);
+        assert.equal(pricing.outputCostPerToken, rates[1] / 1_000_000, model);
+        assert.equal(pricing.cacheReadCostPerToken, rates[2] / 1_000_000, model);
+        assert.equal(pricing.cacheWriteCostPerToken, 0, model);
+        assert.equal(registry.resolve(`google/${model}`)?.canonicalModel, model, `google/${model}`);
+      }
+
+      assert.equal(registry.resolve('Gemini 4 Neon (High)')?.canonicalModel, 'gemini-4-neon');
+      assert.equal(registry.resolve('gemini-4-hydrogen-tiered-xhigh')?.canonicalModel, 'gemini-4-hydrogen');
+      assert.equal(registry.resolve('Gemini 4 Hydrogen (XHigh)')?.canonicalModel, 'gemini-4-hydrogen');
+    });
+
     test('finds Claude Opus 4 by alias', () => {
       const pricing = registry.lookup('opus');
       assert.ok(pricing);
@@ -350,6 +373,27 @@ describe('PricingRegistry', () => {
       }
     });
 
+    test('classifies Gemini 4 models by their named tiers', () => {
+      for (const [id, canonical, tier] of [
+        ['gemini-4-carbon', 'gemini-4-carbon', 'carbon'],
+        ['gemini-4-argon', 'gemini-4-argon', 'argon'],
+        ['gemini-4-neon', 'gemini-4-neon', 'neon'],
+        ['Gemini 4 Neon (High)', 'gemini-4-neon', 'neon'],
+        ['google/gemini-4-neon', 'gemini-4-neon', 'neon'],
+        ['gemini-4-hydrogen', 'gemini-4-hydrogen', 'hydrogen'],
+        ['gemini-4-hydrogen-tiered-xhigh', 'gemini-4-hydrogen', 'hydrogen'],
+        ['Gemini 4 Hydrogen (XHigh)', 'gemini-4-hydrogen', 'hydrogen'],
+      ] as const) {
+        const c = classifyModel(id);
+        assert.equal(c.provider, 'google', id);
+        assert.equal(c.family, 'gemini', id);
+        assert.equal(c.canonical_model, canonical, id);
+        assert.equal(c.tier, tier, id);
+        assert.equal(c.known, true, id);
+        assert.equal(c.pricing_status, 'known', id);
+      }
+    });
+
     test('marks pruned legacy models as deprecated without pricing', () => {
       const classification = classifyModel('claude-3-opus-20240229');
       assert.equal(classification.canonical_model, 'claude-3-opus-20240229');
@@ -389,6 +433,21 @@ describe('PricingRegistry', () => {
       assert.ok(cost !== null);
       const expected = 1.5 + 9 + 0.15;
       assert.ok(Math.abs(cost - expected) < 0.0001, `got ${cost}`);
+    });
+
+    test('calculates cost for Gemini 4 Neon and Hydrogen including Antigravity aliases', () => {
+      const tokens = { input: 400_000, output: 100_000, cacheRead: 200_000, cacheWrite: 50_000 };
+      const neonExpected = 0.4 * 3 + 0.1 * 15 + 0.2 * 0.15;
+      for (const id of ['gemini-4-neon', 'google/gemini-4-neon', 'Gemini 4 Neon (High)']) {
+        const cost = registry.calculate(id, tokens);
+        assert.ok(cost !== null && Math.abs(cost - neonExpected) < 1e-9, `${id} got ${cost}`);
+      }
+
+      const hydrogenExpected = 0.4 * 1.5 + 0.1 * 7.5 + 0.2 * 0.075;
+      for (const id of ['gemini-4-hydrogen', 'gemini-4-hydrogen-tiered-xhigh', 'Gemini 4 Hydrogen (XHigh)']) {
+        const cost = registry.calculate(id, tokens);
+        assert.ok(cost !== null && Math.abs(cost - hydrogenExpected) < 1e-9, `${id} got ${cost}`);
+      }
     });
 
     test('calculates cost for Claude Sonnet 4.5', () => {

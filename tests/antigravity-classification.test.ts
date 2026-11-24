@@ -54,3 +54,27 @@ test('a genuinely-unknown model still resolves to null cost, not a silent zero (
   assert.equal(c.pricing_status, 'unknown');
   assert.equal(pricingRegistry.calculate('gemini-99-imaginary', { input: 100, output: 10, cacheRead: 0, cacheWrite: 0 }), null);
 });
+
+test('Antigravity Gemini 4 ids and display strings resolve and price', () => {
+  for (const id of ['gemini-4-neon', 'Gemini 4 Neon (High)']) {
+    const c = classifyModel(id);
+    assert.equal(c.provider, 'google', id);
+    assert.equal(c.family, 'gemini', id);
+    assert.equal(c.tier, 'neon', id);
+    assert.equal(c.canonical_model, 'gemini-4-neon', id);
+    assert.equal(c.pricing_status, 'known', id);
+    const cost = pricingRegistry.calculate(id, { input: 100_000, output: 10_000, cacheRead: 50_000, cacheWrite: 0 });
+    assert.ok(cost !== null && Math.abs(cost - (0.3 + 0.15 + 0.0075)) < 1e-9, `${id} got ${cost}`);
+  }
+
+  for (const id of ['gemini-4-hydrogen-tiered-xhigh', 'Gemini 4 Hydrogen (XHigh)']) {
+    const c = classifyModel(id);
+    assert.equal(c.provider, 'google', id);
+    assert.equal(c.family, 'gemini', id);
+    assert.equal(c.tier, 'hydrogen', id);
+    assert.equal(c.canonical_model, 'gemini-4-hydrogen', id);
+    assert.equal(c.pricing_status, 'known', id);
+    const cost = pricingRegistry.calculate(id, { input: 100_000, output: 10_000, cacheRead: 50_000, cacheWrite: 0 });
+    assert.ok(cost !== null && Math.abs(cost - (0.15 + 0.075 + 0.00375)) < 1e-9, `${id} got ${cost}`);
+  }
+});

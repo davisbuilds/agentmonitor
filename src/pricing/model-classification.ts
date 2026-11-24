@@ -45,9 +45,9 @@ function inferTier(model: string, provider: string): string {
   }
 
   if (provider === 'google') {
-    if (model.includes('flash')) return 'flash';
-    if (model.includes('pro')) return 'pro';
-    if (model.includes('ultra')) return 'ultra';
+    for (const tier of ['flash', 'pro', 'ultra', 'carbon', 'argon', 'neon', 'hydrogen']) {
+      if (model.includes(tier)) return tier;
+    }
     return 'unknown';
   }
 
