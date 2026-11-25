@@ -29,6 +29,30 @@ so later readers know what still needs checking.
 
 ## Open
 
+### Antigravity parity with Claude and Codex
+
+- **What**: Antigravity (the `agy` CLI and IDE, Gemini models) is in growing use.
+  Capture, display and usage tracking should reach the level Claude and Codex
+  have, and the gaps should be closed. Start with investigation and design, not
+  implementation.
+- **Why or evidence**: checked on the Mac mini on 2026-11-25 with `agy` 1.5.16.
+  The store holds no Antigravity sessions, turns or events (482 Claude and 1,620
+  Codex browser sessions). The importer defaults to `~/.gemini/antigravity-cli`,
+  the CLI conversation-database layout the
+  [proto field map](../specs/baselines/antigravity-proto-fieldmap.md) pins, and
+  that directory is empty there. Antigravity's current local data sits under
+  `~/.gemini/antigravity/` instead: `conversations/*.pb` (13 files, last written
+  in June), `brain/`, `annotations/` and other stores. Costs report
+  `no_instrument` for Antigravity since the 2026-10-27 usage standardization.
+  Most recent Antigravity use is likely on the MacBook, which was not checked.
+- **Next**: on both Macs, inventory where current CLI and IDE versions store
+  sessions, steps, tool calls, models, token usage, subagents and skills, and
+  whether the proto field map is still current. Compare each against what
+  AgentMonitor captures and shows for Claude and Codex: import and live capture,
+  the session list and detail, turns and items, tools, skills, usage and cost,
+  quota, parent/child links, Git view and Overview analytics. Write a gap matrix
+  and a design proposal with an ordered plan, then implement from it.
+
 ### Codex archived rollout discovery
 
 - **What**: Include archived rollouts in historical import and session-browser
