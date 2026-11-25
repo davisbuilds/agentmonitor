@@ -15,6 +15,7 @@ import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
 import { syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
 import { discoverAntigravityLogs } from '../import/antigravity.js';
+import { readAntigravityConversationSummary } from '../import/antigravity/summary.js';
 import { discoverCodexRolloutFilesRecursive, discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { COMPRESSED_ROLLOUT_SUFFIX, readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
@@ -465,10 +466,15 @@ export function hashAntigravityDb(filePath: string): string {
       // WHY: A checkpointed database can have no WAL sidecar.
     }
   }
+  const summary = readAntigravityConversationSummary(filePath, path.basename(filePath, '.db'));
+  if (summary) {
+    h.update('summary:');
+    h.update(summary.rawSignature);
+  }
   return h.digest('hex');
 }
 
-function syncAntigravitySessionFileDetailed(
+export function syncAntigravitySessionFileDetailed(
   db: Database.Database,
   filePath: string,
   options: SyncOptions = {},
