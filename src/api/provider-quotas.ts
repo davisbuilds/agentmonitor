@@ -1,4 +1,5 @@
 import { Router, type Request, type Response } from 'express';
+import { getDb } from '../db/connection.js';
 import {
   getProviderQuotas,
   recordClaudeSessionAccounting,
@@ -7,11 +8,170 @@ import {
   type ProviderName,
   type ProviderQuotaSnapshotInput,
 } from '../db/queries.js';
+import { upsertAntigravityStatuslineContext, type AntigravityStatuslineContextInput } from '../live/projector.js';
+import { resolveContextWindow } from '../pricing/context-windows.js';
+import { broadcaster } from '../sse/emitter.js';
+import { projectNameFromCwd } from '../util/project-identity.js';
+import { liveBroadcaster } from './v2/live-stream.js';
 
 export const providerQuotasRouter = Router();
 
 function isProviderName(value: string): value is ProviderName {
-  return value === 'claude' || value === 'codex';
+  return value === 'claude' || value === 'codex' || value === 'antigravity';
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function positiveFinite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function nonNegativeFinite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+interface AntigravityQuotaBucket {
+  remaining_fraction?: unknown;
+  reset_time?: unknown;
+  reset_in_seconds?: unknown;
+  disabled?: unknown;
+}
+
+function usableAntigravityBucket(value: unknown): AntigravityQuotaBucket | null {
+  const bucket = asRecord(value) as AntigravityQuotaBucket | null;
+  if (!bucket || bucket.disabled === true) return null;
+  if (typeof bucket.remaining_fraction !== 'number' || !Number.isFinite(bucket.remaining_fraction)) {
+    return null;
+  }
+  return bucket;
+}
+
+function parseAntigravityResetTime(bucket: AntigravityQuotaBucket): string | null {
+  if (typeof bucket.reset_in_seconds === 'number' && Number.isFinite(bucket.reset_in_seconds) && bucket.reset_in_seconds <= 0) {
+    return null;
+  }
+  if (typeof bucket.reset_time === 'string') {
+    const trimmed = bucket.reset_time.trim();
+    if (!trimmed) return null;
+    const parsed = Date.parse(trimmed);
+    if (!Number.isFinite(parsed) || parsed <= 0) return null;
+    return new Date(parsed).toISOString();
+  }
+  return null;
+}
+
+function buildAntigravityWindow(
+  bucket: AntigravityQuotaBucket | null,
+  windowMinutes: number,
+): ProviderQuotaSnapshotInput['primary'] {
+  if (!bucket) return null;
+  const remaining = bucket.remaining_fraction as number;
+  const usedPercent = Number(Math.max(0, Math.min(100, (1 - remaining) * 100)).toFixed(2));
+  return {
+    used_percent: usedPercent,
+    resets_at: parseAntigravityResetTime(bucket),
+    window_minutes: windowMinutes,
+  };
+}
+
+function sanitizeAntigravityRawPayload(data: Record<string, unknown>): Record<string, unknown> {
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (key === 'email' || key === 'subagents') continue;
+    sanitized[key] = value;
+  }
+  return sanitized;
+}
+
+function parseAntigravityStatuslinePayload(payload: unknown): ProviderQuotaSnapshotInput | null {
+  const data = asRecord(payload);
+  if (!data) return null;
+  const quota = asRecord(data.quota);
+  if (!quota) return null;
+
+  const gemini5h = usableAntigravityBucket(quota['gemini-5h']);
+  const geminiWeekly = usableAntigravityBucket(quota['gemini-weekly']);
+  const hasGemini = gemini5h !== null || geminiWeekly !== null;
+
+  const primaryBucket = hasGemini ? gemini5h : usableAntigravityBucket(quota['3p-5h']);
+  const secondaryBucket = hasGemini ? geminiWeekly : usableAntigravityBucket(quota['3p-weekly']);
+  if (!primaryBucket && !secondaryBucket) return null;
+
+  return {
+    provider: 'antigravity',
+    agent_type: 'antigravity',
+    status: 'available',
+    source: 'antigravity-statusline',
+    plan_type: nonEmptyString(data.plan_tier),
+    primary: buildAntigravityWindow(primaryBucket, 300),
+    secondary: buildAntigravityWindow(secondaryBucket, 10080),
+    raw_payload: sanitizeAntigravityRawPayload(data),
+  };
+}
+
+function parseAntigravityStatuslineContext(
+  payload: unknown,
+  now = Date.now(),
+): AntigravityStatuslineContextInput | null {
+  const data = asRecord(payload);
+  if (!data) return null;
+
+  const sessionId = nonEmptyString(data.conversation_id) ?? nonEmptyString(data.session_id);
+  const cw = asRecord(data.context_window);
+  if (!sessionId || !cw) return null;
+
+  let usedTokens = positiveFinite(cw.total_input_tokens);
+  if (usedTokens === null) {
+    const currentUsage = asRecord(cw.current_usage);
+    if (currentUsage) {
+      const inputTokens = nonNegativeFinite(currentUsage.input_tokens);
+      const cacheCreation = nonNegativeFinite(currentUsage.cache_creation_input_tokens);
+      const cacheRead = nonNegativeFinite(currentUsage.cache_read_input_tokens);
+      if (inputTokens !== null || cacheCreation !== null || cacheRead !== null) {
+        const sum = (inputTokens ?? 0) + (cacheCreation ?? 0) + (cacheRead ?? 0);
+        if (sum > 0) usedTokens = sum;
+      }
+    }
+  }
+  if (usedTokens === null) return null;
+
+  const modelObj = asRecord(data.model);
+  const model = nonEmptyString(data.model) ?? nonEmptyString(modelObj?.id) ?? nonEmptyString(modelObj?.display_name);
+  const reportedWindow = positiveFinite(cw.context_window_size);
+  const windowTokens = resolveContextWindow({
+    agent: 'antigravity',
+    model,
+    reportedWindow,
+    observedTokens: usedTokens,
+  });
+
+  const workspace = asRecord(data.workspace);
+  const workspaceDir = nonEmptyString(workspace?.project_dir)
+    ?? nonEmptyString(workspace?.current_dir)
+    ?? nonEmptyString(data.cwd);
+  const project = workspaceDir ? projectNameFromCwd(workspaceDir) : null;
+
+  const rawTitle = nonEmptyString(data.conversation_title);
+  const title = rawTitle ? rawTitle.replace(/\s+/g, ' ').trim().slice(0, 200) || null : null;
+
+  return {
+    sessionId,
+    project,
+    firstMessage: title,
+    title,
+    usedTokens: Math.round(usedTokens),
+    windowTokens,
+    observedAt: new Date(now).toISOString(),
+  };
 }
 
 function parseClaudeStatuslinePayload(payload: unknown): ProviderQuotaSnapshotInput | null {
@@ -90,6 +250,38 @@ providerQuotasRouter.post('/claude/statusline', (req: Request, res: Response) =>
   }
 
   upsertProviderQuotaSnapshot(snapshot);
+  res.status(202).json({ accepted: true });
+});
+
+providerQuotasRouter.post('/antigravity/statusline', (req: Request, res: Response) => {
+  const contextUpdate = parseAntigravityStatuslineContext(req.body);
+  if (contextUpdate) {
+    const rowState = upsertAntigravityStatuslineContext(getDb(), contextUpdate);
+    liveBroadcaster.broadcast('session_presence', {
+      session_id: contextUpdate.sessionId,
+      live_status: 'live',
+      integration_mode: rowState.integration_mode,
+      fidelity: rowState.fidelity,
+      last_item_at: rowState.last_item_at,
+    });
+    if (broadcaster.clientCount > 0) {
+      broadcaster.broadcast('session_update', {
+        type: 'session_parsed',
+        session_id: contextUpdate.sessionId,
+      });
+    }
+  }
+
+  const snapshot = parseAntigravityStatuslinePayload(req.body);
+  if (snapshot) {
+    upsertProviderQuotaSnapshot(snapshot);
+  }
+
+  if (!snapshot && !contextUpdate) {
+    res.status(202).json({ accepted: false, reason: 'missing quota or context_window payload' });
+    return;
+  }
+
   res.status(202).json({ accepted: true });
 });
 

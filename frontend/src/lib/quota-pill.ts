@@ -10,8 +10,14 @@ export interface QuotaPillEntry {
   stale: boolean;
 }
 
+const PROVIDER_LABELS: Record<QuotaMonitorData['provider'], string> = {
+  claude: 'Claude',
+  codex: 'Codex',
+  antigravity: 'Antigravity',
+};
+
 export function quotaProviderLabel(row: QuotaMonitorData): string {
-  return row.provider === 'claude' ? 'Claude' : 'Codex';
+  return PROVIDER_LABELS[row.provider];
 }
 
 export function quotaWindows(row: QuotaMonitorData): QuotaMonitorWindow[] {
