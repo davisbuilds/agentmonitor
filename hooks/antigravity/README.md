@@ -34,10 +34,25 @@ pnpm cli -- import --source antigravity --dry-run
 pnpm cli -- import --source antigravity --antigravity-dir /path/to/antigravity-cli
 ```
 
+## Live Watcher & Statusline Bridge
+
 The **session browser** rows (`browsing_sessions` / `messages` / `session_items`)
-are projected automatically by the running AgentMonitor watcher on startup and on
-each periodic resync — no separate command. New conversations appear on the next
-resync (live file-tailing is not implemented yet).
+are projected automatically by the running AgentMonitor watcher on startup, on
+real-time changes under `~/.gemini/antigravity-cli/conversations/` (`.db` and
+`.db-wal`), and on each 15-minute periodic resync. During sync, AgentMonitor
+also reads `gen_metadata` prompt token counts for context occupancy and reads
+`~/.gemini/antigravity-cli/conversation_summaries.db` (read-only, fail-open)
+for project identity, session titles, and parent/subagent lineage.
+
+For live Antigravity subscriber quota windows (`gemini-5h`, `gemini-weekly`, or
+`3p-*` fallback) and turn-level context-window updates, send `agy` statusline
+JSON payloads to:
+
+```text
+POST /api/provider-quotas/antigravity/statusline
+```
+
+`email` and `subagents` fields are stripped before persisting `raw_payload`.
 
 ## Fidelity
 
