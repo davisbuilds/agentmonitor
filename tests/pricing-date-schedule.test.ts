@@ -91,4 +91,39 @@ describe('pricing: date-aware rate schedules', () => {
     assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, '2027-01-01 00:00:00'), 1.5);
     assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, '2026-12-31 23:59:59'), 0.75);
   });
+
+  test('gemini-4-carbon and gemini-4-argon move from launch promo ($2/$10/$0.10) to list ($4/$20/$0.20) on 2026-12-01', () => {
+    const g4Boundary = '2026-12-01T00:00:00Z';
+    const g4Before = Date.parse(g4Boundary) - 1;
+    const g4After = '2026-12-15T00:00:00Z';
+    const tokens = { input: 500_000, output: 100_000, cacheRead: 200_000, cacheWrite: 50_000 };
+    const promoExpected = 0.5 * 2 + 0.1 * 10 + 0.2 * 0.1;
+    const listExpected = 0.5 * 4 + 0.1 * 20 + 0.2 * 0.2;
+
+    for (const model of ['gemini-4-carbon', 'gemini-4-carbon-high', 'gemini-4-argon', 'gemini-4-argon-medium']) {
+      const promoCost = pricingRegistry.calculate(model, tokens, '2026-11-24T00:00:00Z');
+      const justBeforeCost = pricingRegistry.calculate(model, tokens, g4Before);
+      const atBoundaryCost = pricingRegistry.calculate(model, tokens, g4Boundary);
+      const afterCost = pricingRegistry.calculate(model, tokens, g4After);
+      const sqliteBefore = pricingRegistry.calculate(model, tokens, '2026-11-30 23:59:59');
+      const sqliteAt = pricingRegistry.calculate(model, tokens, '2026-12-01 00:00:00');
+
+      assert.ok(promoCost !== null && Math.abs(promoCost - promoExpected) < 1e-9, `${model} promo`);
+      assert.ok(justBeforeCost !== null && Math.abs(justBeforeCost - promoExpected) < 1e-9, `${model} 1ms before`);
+      assert.ok(sqliteBefore !== null && Math.abs(sqliteBefore - promoExpected) < 1e-9, `${model} sqlite before`);
+      assert.ok(atBoundaryCost !== null && Math.abs(atBoundaryCost - listExpected) < 1e-9, `${model} boundary`);
+      assert.ok(afterCost !== null && Math.abs(afterCost - listExpected) < 1e-9, `${model} after`);
+      assert.ok(sqliteAt !== null && Math.abs(sqliteAt - listExpected) < 1e-9, `${model} sqlite at`);
+
+      const promoRates = pricingRegistry.effectiveRates(model, tokens, g4Before);
+      const listRates = pricingRegistry.effectiveRates(model, tokens, g4Boundary);
+      assert.ok(promoRates && listRates, `${model} effectiveRates`);
+      assert.equal(promoRates.inputCostPerToken, 2 / 1_000_000, `${model} promo input`);
+      assert.equal(promoRates.outputCostPerToken, 10 / 1_000_000, `${model} promo output`);
+      assert.equal(promoRates.cacheReadCostPerToken, 0.1 / 1_000_000, `${model} promo cacheRead`);
+      assert.equal(listRates.inputCostPerToken, 4 / 1_000_000, `${model} list input`);
+      assert.equal(listRates.outputCostPerToken, 20 / 1_000_000, `${model} list output`);
+      assert.equal(listRates.cacheReadCostPerToken, 0.2 / 1_000_000, `${model} list cacheRead`);
+    }
+  });
 });
