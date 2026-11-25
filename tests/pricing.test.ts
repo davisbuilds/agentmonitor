@@ -131,6 +131,34 @@ describe('PricingRegistry', () => {
       assert.equal(registry.resolve('Gemini 4 Neon (High)')?.canonicalModel, 'gemini-4-neon');
       assert.equal(registry.resolve('gemini-4-hydrogen-tiered-xhigh')?.canonicalModel, 'gemini-4-hydrogen');
       assert.equal(registry.resolve('Gemini 4 Hydrogen (XHigh)')?.canonicalModel, 'gemini-4-hydrogen');
+
+      for (const [alias, canonical] of [
+        ['gemini-4-neon-xhigh', 'gemini-4-neon'],
+        ['gemini-4-neon-high', 'gemini-4-neon'],
+        ['gemini-4-neon-medium', 'gemini-4-neon'],
+        ['gemini-4-neon-low', 'gemini-4-neon'],
+        ['Gemini 4 Neon (XHigh)', 'gemini-4-neon'],
+        ['Gemini 4 Neon (Medium)', 'gemini-4-neon'],
+        ['Gemini 4 Neon (Low)', 'gemini-4-neon'],
+        ['gemini-4-hydrogen-xhigh', 'gemini-4-hydrogen'],
+        ['gemini-4-hydrogen-high', 'gemini-4-hydrogen'],
+        ['gemini-4-hydrogen-medium', 'gemini-4-hydrogen'],
+        ['gemini-4-hydrogen-low', 'gemini-4-hydrogen'],
+        ['gemini-4-carbon-high', 'gemini-4-carbon'],
+        ['gemini-4-carbon-medium', 'gemini-4-carbon'],
+        ['gemini-4-carbon-low', 'gemini-4-carbon'],
+        ['Gemini 4 Carbon (High)', 'gemini-4-carbon'],
+        ['Gemini 4 Carbon (Medium)', 'gemini-4-carbon'],
+        ['Gemini 4 Carbon (Low)', 'gemini-4-carbon'],
+        ['gemini-4-argon-high', 'gemini-4-argon'],
+        ['gemini-4-argon-medium', 'gemini-4-argon'],
+        ['gemini-4-argon-low', 'gemini-4-argon'],
+        ['Gemini 4 Argon (High)', 'gemini-4-argon'],
+        ['Gemini 4 Argon (Medium)', 'gemini-4-argon'],
+        ['Gemini 4 Argon (Low)', 'gemini-4-argon'],
+      ] as const) {
+        assert.equal(registry.resolve(alias)?.canonicalModel, canonical, alias);
+      }
     });
 
     test('finds Claude Opus 4 by alias', () => {

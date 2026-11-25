@@ -1481,4 +1481,74 @@ describe('Import skips files unchanged on disk', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  test('imports an Antigravity SQLite conversation recording gemini-4-neon-xhigh with estimated cost', async (t) => {
+    const isolatedAgrDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-agr-g4-import-'));
+    t.after(() => fs.rmSync(isolatedAgrDir, { recursive: true, force: true }));
+    const conversationsDir = path.join(isolatedAgrDir, 'conversations');
+    fs.mkdirSync(conversationsDir, { recursive: true });
+    const sessionId = '66666666-0000-0000-0000-000000000000';
+    const dbPath = path.join(conversationsDir, `${sessionId}.db`);
+
+    const varint = (n: number): number[] => {
+      const out: number[] = [];
+      let big = n;
+      do {
+        let b = big & 0x7f;
+        big = Math.floor(big / 128);
+        if (big > 0) b |= 0x80;
+        out.push(b);
+      } while (big > 0);
+      return out;
+    };
+    const tag = (f: number, w: number) => varint((f << 3) | w);
+    const vField = (f: number, n: number) => [...tag(f, 0), ...varint(n)];
+    const lField = (f: number, b: number[]) => [...tag(f, 2), ...varint(b.length), ...b];
+    const sField = (f: number, s: string) => lField(f, [...Buffer.from(s, 'utf-8')]);
+
+    const { default: Database } = await import('better-sqlite3');
+    const agrDb = new Database(dbPath);
+    agrDb.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+    agrDb.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+    const tsSec = Date.UTC(2026, 10, 25, 12, 0) / 1000;
+    agrDb.prepare('INSERT INTO steps(idx,step_type,status,step_payload,metadata) VALUES (?,?,?,?,?)').run(
+      0,
+      14,
+      3,
+      Buffer.from([...vField(1, 14), ...vField(4, 3), ...lField(5, [...vField(1, 1)]), ...lField(19, [...vField(1, 1)])]),
+      Buffer.from(lField(1, [...vField(1, tsSec)])),
+    );
+    agrDb.prepare('INSERT INTO gen_metadata(idx,data) VALUES (?,?)').run(
+      0,
+      Buffer.from(lField(1, [
+        ...sField(19, 'gemini-4-neon-xhigh'),
+        ...lField(4, [...vField(1, 1000), ...vField(2, 19_000), ...vField(3, 10_000), ...vField(5, 40_000), ...vField(9, 2000), ...vField(10, 8000)]),
+        ...lField(9, [...lField(4, [...vField(1, tsSec), ...vField(2, 0)])]),
+      ])),
+    );
+    agrDb.close();
+
+    const { runImport } = await import('../src/import/index.js');
+    const result = runImport({ source: 'antigravity', antigravityDir: isolatedAgrDir });
+    assert.equal(result.totalFiles, 1);
+    assert.equal(result.totalEventsImported, 3);
+
+    if (!getDb) throw new Error('Database not initialized');
+    const row = getDb().prepare(
+      "SELECT model, tokens_in, tokens_out, cache_read_tokens, cost_usd, cost_source FROM events WHERE session_id = ? AND event_type = 'llm_response'",
+    ).get(sessionId) as {
+      model: string;
+      tokens_in: number;
+      tokens_out: number;
+      cache_read_tokens: number;
+      cost_usd: number | null;
+      cost_source: string | null;
+    };
+    assert.equal(row.model, 'gemini-4-neon-xhigh');
+    assert.equal(row.tokens_in, 20_000);
+    assert.equal(row.tokens_out, 10_000);
+    assert.equal(row.cache_read_tokens, 40_000);
+    assert.equal(row.cost_source, 'estimated');
+    assert.ok(row.cost_usd !== null && Math.abs(row.cost_usd - 0.216) < 1e-9, `got ${row.cost_usd}`);
+  });
 });

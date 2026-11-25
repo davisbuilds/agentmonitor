@@ -100,7 +100,7 @@ describe('pricing: date-aware rate schedules', () => {
     const promoExpected = 0.5 * 2 + 0.1 * 10 + 0.2 * 0.1;
     const listExpected = 0.5 * 4 + 0.1 * 20 + 0.2 * 0.2;
 
-    for (const model of ['gemini-4-carbon', 'gemini-4-argon']) {
+    for (const model of ['gemini-4-carbon', 'gemini-4-carbon-high', 'gemini-4-argon', 'gemini-4-argon-medium']) {
       const promoCost = pricingRegistry.calculate(model, tokens, '2026-11-24T00:00:00Z');
       const justBeforeCost = pricingRegistry.calculate(model, tokens, g4Before);
       const atBoundaryCost = pricingRegistry.calculate(model, tokens, g4Boundary);

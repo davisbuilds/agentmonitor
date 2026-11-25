@@ -158,3 +158,46 @@ test('stepKindToEvent: explicit and generic mappings', () => {
   assert.deepEqual(stepKindToEvent('finish'), { type: 'session_end' });
   assert.deepEqual(stepKindToEvent(undefined), { type: 'response' });
 });
+
+test('parseAntigravityFile: prices Gemini 4 effort-suffixed CLI IDs directly from gen_metadata', () => {
+  const preCutoverSec = Date.UTC(2026, 10, 25, 12, 0) / 1000;
+  const usage = { 1: 1000, 2: 19_000, 3: 10_000, 5: 40_000, 9: 2000, 10: 8000 };
+  const cases: Array<[string, number]> = [
+    ['gemini-4-neon-xhigh', 0.216],
+    ['gemini-4-neon-high', 0.216],
+    ['gemini-4-neon-medium', 0.216],
+    ['gemini-4-neon-low', 0.216],
+    ['gemini-4-hydrogen-xhigh', 0.108],
+    ['gemini-4-hydrogen-high', 0.108],
+    ['gemini-4-hydrogen-medium', 0.108],
+    ['gemini-4-hydrogen-low', 0.108],
+    ['gemini-4-carbon-high', 0.144],
+    ['gemini-4-carbon-medium', 0.144],
+    ['gemini-4-carbon-low', 0.144],
+    ['gemini-4-argon-high', 0.144],
+    ['gemini-4-argon-medium', 0.144],
+    ['gemini-4-argon-low', 0.144],
+  ];
+
+  const dir = tempDir('agr-g4-');
+  const dbPath = path.join(dir, '55555555-0000-0000-0000-000000000000.db');
+  const db = new Database(dbPath);
+  db.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+  db.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+  db.prepare('INSERT INTO steps(idx,step_type,status,step_payload,metadata) VALUES (?,?,?,?,?)')
+    .run(0, 14, 3, step(14, 19), meta(preCutoverSec));
+  const insGen = db.prepare('INSERT INTO gen_metadata(idx,data) VALUES (?,?)');
+  cases.forEach(([model], idx) => {
+    insGen.run(idx, timedGenmeta(model, usage, preCutoverSec + idx, 0));
+  });
+  db.close();
+
+  const llm = parseAntigravityFile(dbPath).filter((e) => e.event_type === 'llm_response');
+  assert.equal(llm.length, cases.length);
+  cases.forEach(([model, expectedCost], idx) => {
+    const ev = llm[idx];
+    assert.equal(ev.model, model);
+    assert.equal(ev.cost_source, 'estimated', `${model} cost_source`);
+    assert.ok(ev.cost_usd !== undefined && Math.abs(ev.cost_usd - expectedCost) < 1e-9, `${model} got ${ev.cost_usd}`);
+  });
+});
