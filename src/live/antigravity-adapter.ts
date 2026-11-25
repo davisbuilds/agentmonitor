@@ -2,6 +2,7 @@
 import type Database from 'better-sqlite3';
 import { config } from '../config.js';
 import type { ContentBlock, ParsedSession, ParsedMessage } from '../parser/claude-code.js';
+import { resolveContextWindow } from '../pricing/context-windows.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from './normalize.js';
 import {
   clearProjectedSessionStream,
@@ -98,17 +99,31 @@ export function syncAntigravityLiveSession(
   }
 
   const liveStatus = liveStatusFromActivity(parsed.metadata.ended_at);
+  const usedTokens = parsed.metadata.context_used_tokens ?? null;
+  const contextWindow = usedTokens != null
+    ? resolveContextWindow({
+        agent: 'antigravity',
+        model: parsed.metadata.model,
+        reportedWindow: parsed.metadata.context_window_reported,
+        observedTokens: usedTokens,
+      })
+    : null;
   upsertProjectedSessionSnapshot(db, {
     id: sessionId,
     agent: 'antigravity',
     project: parsed.metadata.project,
     first_message: parsed.metadata.first_message,
+    title: parsed.metadata.title ?? null,
     started_at: parsed.metadata.started_at,
     ended_at: parsed.metadata.ended_at,
     message_count: parsed.metadata.message_count,
     user_message_count: parsed.metadata.user_message_count,
+    parent_session_id: parsed.metadata.parent_session_id,
+    relationship_type: parsed.metadata.relationship_type,
     live_status: liveStatus,
     last_item_at: parsed.metadata.ended_at,
+    context_used_tokens: usedTokens,
+    context_window_tokens: contextWindow,
   }, {
     integration_mode: 'antigravity-sqlite',
     fidelity: 'summary',
