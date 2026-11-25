@@ -41,6 +41,10 @@ possibilities.
   Codex app jobs told apart by their recorded `originator` rather than prompt
   text (Backlog: Codex archived rollout discovery, Codex interruptions are not
   recorded, Codex thread names and app-job detection).
+- Investigate Antigravity parity with Claude and Codex, now that Antigravity is
+  in growing use: inventory its current local stores on both Macs, compare every
+  capture and display surface, and write a gap matrix and design before
+  implementing (Backlog: Antigravity parity with Claude and Codex).
 - Start the Claude vs Codex cost-per-outcome comparison with its first slice: a
   read-only probe that controls for project and pull request size and reports
   whether the two agents overlap enough to compare (Backlog: Claude vs Codex
