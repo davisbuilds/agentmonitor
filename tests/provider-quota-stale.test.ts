@@ -22,7 +22,6 @@ after(() => {
 
 beforeEach(() => {
   const db = getDb();
-  // The delete below is table-wide: confirm it runs against this test's file.
   assert.equal(fs.realpathSync(db.name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
   db.exec('DELETE FROM provider_quotas');
 });
@@ -70,12 +69,10 @@ test('a failed refresh keeps the last good windows, marked stale with when they 
   assert.equal(row.plan_type, 'pro');
   assert.deepEqual(row.credits, { has_credits: true, unlimited: false, balance: '5' });
 
-  // Failing again keeps the same reading and its age.
   failedRead(2);
   assert.equal(codex().windows_observed_at, at(0));
   assert.equal(codex().primary?.used_percent, 40);
 
-  // The Monitor's stats read the same snapshot.
   const monitorCodex = getMonitorStats().quota_monitor.find(row => row.provider === 'codex')!;
   assert.deepEqual(monitorCodex, codex());
 

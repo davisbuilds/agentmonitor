@@ -11,8 +11,6 @@ import { readTranscriptFile, transcriptBaseName } from '../util/transcript-file.
 import { codexInvocationMode } from '../util/invocation-mode.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 
-// ─── Codex JSONL line types ─────────────────────────────────────────────
-
 interface CodexTokenUsage {
   input_tokens?: number;
   cached_input_tokens?: number;
@@ -26,14 +24,12 @@ interface CodexLogLine {
   timestamp: string;
   type: string;
   payload: {
-    // session_meta
     id?: string;
     cwd?: string;
     originator?: string;
     timestamp?: string;
     model?: string;
 
-    // event_msg
     type?: string;
     info?: {
       total_token_usage?: CodexTokenUsage;
@@ -41,11 +37,9 @@ interface CodexLogLine {
       model_context_window?: number;
     };
 
-    // response_item
     role?: string;
     content?: Array<{ type: string; text?: string }>;
 
-    // generic fields from OTEL-style
     [key: string]: unknown;
   };
 }
@@ -86,8 +80,6 @@ const addUsage = (a: CodexUsage3, b: CodexUsage3): CodexUsage3 => ({ input: a.in
 const subtractUsage = (a: CodexUsage3, b: CodexUsage3): CodexUsage3 => ({ input: a.input - b.input, cached: a.cached - b.cached, output: a.output - b.output });
 const sameUsage = (a: CodexUsage3, b: CodexUsage3): boolean => a.input === b.input && a.cached === b.cached && a.output === b.output;
 
-// ─── Discover JSONL files ──────────────────────────────────────────────
-
 export function discoverCodexLogs(
   baseDir?: string,
   options: { excludePatterns?: string[] } = {},
@@ -97,22 +89,18 @@ export function discoverCodexLogs(
   return discoverCodexRolloutFilesRecursive(sessionsDir, { excludePatterns: options.excludePatterns });
 }
 
-// ─── Read model from config.toml ────────────────────────────────────────
 
 function readCodexModel(codexHome?: string): string | undefined {
   const base = codexHome ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
   const configPath = path.join(base, 'config.toml');
   try {
     const content = fs.readFileSync(configPath, 'utf-8');
-    // Simple parse for top-level model = "..."
     const match = content.match(/^model\s*=\s*"([^"]+)"/m);
     return match?.[1];
   } catch {
     return undefined;
   }
 }
-
-// ─── Parse a single JSONL file ──────────────────────────────────────────
 
 export function parseCodexFile(
   filePath: string,
@@ -148,24 +136,18 @@ export function parseCodexFile(
     }
   });
   if (options?.diagnostics) options.diagnostics.malformedLines = parsedLines.filter(line => line === null).length;
-  // Copied parent envelopes are context, not dependencies of this physical
-  // file. Ownership and the unresolved bookmark come from the first header.
+  // WHY: A copied parent record is context and does not establish ownership of its source file.
   const authoritativeHeader = parsedLines.find(line => line?.type === 'session_meta');
   if (!options?.history && authoritativeHeader?.payload?.history_base != null) {
     throw new Error('Invalid Codex rollout history: paginated usage requires resolved ancestor accounting');
   }
-  // In a subagent that opens with a copy of its parent's history, lines before
-  // the boundary are the parent's: they advance the counters and the event
-  // index (so the child's own event ids stay what they always were) but emit
-  // nothing.
+  // WHY: Before the fork boundary, copied lines advance the counter but still belong to the parent.
   const boundary = findSubagentBoundary(parsedLines);
   const ownFrom = Math.max(boundary.kind === 'resolved' ? boundary.line : 0, options?.history?.ownFromLine ?? 0);
   let inheritedCountersSkipped = 0;
-  // A cumulative counter that drops has restarted: what it bills after the drop
-  // is new usage, so the rollout's final counter understates the session.
+  // WHY: A falling cumulative counter marks a reset; later growth is new usage.
   let counterResets = 0;
 
-  // First pass: extract session metadata
   let sessionId: string | undefined;
   let cwd: string | undefined;
   let sessionTimestamp: string | undefined;
@@ -191,10 +173,7 @@ export function parseCodexFile(
 
   const mode = codexInvocationMode(originator);
 
-  // Codex writes one `token_usage_record` per API request (0.154+), including
-  // compaction requests its cumulative `token_count` leaves out. Index this
-  // thread's own records so a `compacted` line can bill the request it names;
-  // a copied prefix's `compacted` lines are skipped where they are read.
+  // WHY: Native per-request usage records include compactions that the cumulative counter can omit.
   const usageRecords = new Map<string, CodexUsageRecord>();
   for (const line of parsedLines) {
     if (!line || line.type !== 'token_usage_record') continue;
@@ -204,21 +183,12 @@ export function parseCodexFile(
     }
   }
 
-  // Records that start at the thread's first request (the first one's usage is
-  // the whole thread so far) cover every request, so they are billed one row
-  // each. Records that start mid-thread, as in a session begun before Codex
-  // wrote them, leave earlier requests to the cumulative counter. So do records
-  // with one missing: their usage must add up to the last one's thread total,
-  // no line with lines after it may be unreadable, since it could have been a
-  // record (a partial last line is a write still in progress), and the counter
-  // may not grow past that total, since it leaves requests out but adds none.
   let instrument: 'request' | 'counter' = 'counter';
   const namedCompactions = new Set<string>();
   const ownRecords = new Map<string, CodexUsageRecord>();
   let lastRecord: CodexUsageRecord | undefined;
   let unreadable = false;
   let inheritedThread: CodexUsage3 = { input: 0, cached: 0, output: 0 };
-  // Counter growth in the thread's own span, from the counter at the boundary.
   let lastCounter = { input: 0, output: 0 };
   const counterGrowth = { input: 0, output: 0 };
   for (const [lineIndex, line] of parsedLines.entries()) {
@@ -258,20 +228,17 @@ export function parseCodexFile(
     if (sameUsage(sum, ownTotal) && covered) instrument = 'request';
   }
 
-  // Fall back to filename for session ID
   if (!sessionId) {
     const basename = transcriptBaseName(filePath);
-    // Extract UUID from filename like "rollout-2026-02-18T20-10-57-019c7373-39f7..."
     const uuidMatch = basename.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
     sessionId = uuidMatch?.[1] ?? basename;
   }
 
   const project = projectNameFromCwd(cwd) ?? undefined;
-  // Reverts keep the native session id while starting a distinct rollout. Its
-  // positional ids must not replace requests already billed in the old file.
+  // WHY: Reverts retain the native session ID but start another physical rollout; positional IDs
+  // must not overwrite earlier requests.
   const positionalId = options?.history ? `${sessionId}:rollout:${options.history.rolloutId}` : sessionId;
 
-  // Apply date filter on session start time
   if (sessionTimestamp && options?.from) {
     const ts = new Date(sessionTimestamp);
     if (ts < options.from) return events;
@@ -281,14 +248,11 @@ export function parseCodexFile(
     if (ts > options.to) return events;
   }
 
-  // Second pass: extract events
   let prevTokensIn = 0;
   let prevTokensOut = 0;
   let prevCacheRead = 0;
   let eventIndex = 0;
-  // The thread total of the latest record, and its gap to the counter at the
-  // last token_count. A compaction is billed only when the gap grows by
-  // exactly its usage, so a counter that already includes it bills it once.
+  // WHY: Charge compaction only when its growth accounts for the gap in the thread counter.
   let threadTotal: CodexUsage3 | undefined;
   let counterGap: CodexUsage3 | undefined;
   let pendingCompactions: CodexUsageRecord[] = [];
@@ -329,7 +293,6 @@ export function parseCodexFile(
       .update(`codex:${sessionId}:response:${record.response_id}`)
       .digest('hex')
       .slice(0, 32);
-    // Keyed by the request, not the positional index, so counter rows keep their ids.
     events.push({
       event_id: `import-cdx-${eventId}`,
       session_id: sessionId!,
@@ -359,7 +322,6 @@ export function parseCodexFile(
     if (!line) continue;
     const inherited = lineIndex < ownFrom;
 
-    // Generate session_start from session_meta
     if (line.type === 'session_meta') {
       const eventId = crypto
         .createHash('sha256')
@@ -390,9 +352,8 @@ export function parseCodexFile(
       continue;
     }
 
-    // Codex records the model selected for each turn in the JSONL. This is the
-    // authoritative source for usage attribution; config.toml is only a legacy
-    // fallback for older logs that predate turn_context.
+    // WHY: The session log records the selected model per turn. The current config cannot establish
+    // which model ran an earlier request.
     if (line.type === 'turn_context' && typeof line.payload?.model === 'string') {
       currentModel = line.payload.model;
       currentModelSource = 'turn_context';
@@ -414,7 +375,7 @@ export function parseCodexFile(
     }
 
     if (line.type === 'compacted') {
-      // Per-request records already bill the compaction they name.
+      // WHY: A native per-request record already includes the compaction it identifies.
       if (inherited || instrument === 'request') continue;
       const responseId = typeof line.payload.compaction_response_id === 'string' ? line.payload.compaction_response_id : undefined;
       if (!responseId || billedResponses.has(responseId) || pendingCompactions.some(r => r.response_id === responseId)) continue;
@@ -424,7 +385,6 @@ export function parseCodexFile(
       continue;
     }
 
-    // Extract token deltas from token_count events
     if (line.type === 'event_msg' && line.payload?.type === 'token_count') {
       const usage = line.payload.info?.total_token_usage;
       if (!usage) continue;
@@ -437,13 +397,10 @@ export function parseCodexFile(
       if (reset) counterResets++;
       {
         const gap = threadTotal ? subtractUsage(threadTotal, { input: totalIn, cached: totalCacheRead, output: totalOut }) : undefined;
-        // After a reset the gap grows by more than any held compaction, so
-        // the exact-growth check fails closed on its own.
         if (!inherited) settleCompactions(gap);
         counterGap = gap;
       }
 
-      // Compute deltas
       const deltaIn = totalIn - prevTokensIn;
       const deltaOut = totalOut - prevTokensOut;
       const deltaCacheRead = totalCacheRead - prevCacheRead;
@@ -452,15 +409,13 @@ export function parseCodexFile(
       prevTokensOut = totalOut;
       prevCacheRead = totalCacheRead;
 
-      // OpenAI/Codex report input_tokens as cache-inclusive (cached_input_tokens
-      // is a subset of it). Bill only the uncached remainder at the full input
-      // rate; the cached portion is charged separately at the cache-read rate.
+      // WHY: Codex input totals include cached input. Charging the full total at the uncached rate
+      // would bill it twice.
       const deltaInputUncached = Math.max(0, deltaIn - deltaCacheRead);
 
-      // Only emit if there's a meaningful delta
       if (deltaIn <= 0 && deltaOut <= 0) continue;
-      // The requests are billed from their records; the counter still takes
-      // its place in the event index, so file changes keep their ids.
+      // WHY: Preserve the counter record's ordinal even when per-request records own billing, so
+      // unrelated event IDs stay stable.
       if (inherited || instrument === 'request') {
         if (inherited) inheritedCountersSkipped++;
         eventIndex++;
@@ -473,7 +428,6 @@ export function parseCodexFile(
         .digest('hex')
         .slice(0, 32);
 
-      // Calculate cost from deltas
       const costUsd = currentModel
         ? pricingRegistry.calculate(currentModel, {
             input: deltaInputUncached,
@@ -508,9 +462,6 @@ export function parseCodexFile(
       continue;
     }
 
-    // Extract file stats from apply_patch tool calls
-    // Format 1: custom_tool_call with name=apply_patch and input=<patch>
-    // Format 2: function_call with name=exec_command and arguments={"cmd":"apply_patch <<'PATCH'\n..."}
     if (line.type === 'response_item') {
       const payload = line.payload as Record<string, unknown>;
       let patchContent: string | undefined;
@@ -524,7 +475,7 @@ export function parseCodexFile(
             patchContent = args.cmd;
           }
         } catch {
-          // arguments might be a plain string containing apply_patch
+          // WHY: An older producer may store the shell-form patch directly in arguments.
           if (payload.arguments.startsWith('apply_patch') || payload.arguments.includes('*** Begin Patch')) {
             patchContent = payload.arguments;
           }
@@ -567,15 +518,12 @@ export function parseCodexFile(
       }
     }
 
-    // Skip other event types for now
   }
 
-  // A compaction after the last counter is checked against that counter.
   if (pendingCompactions.length > 0) {
     settleCompactions(threadTotal ? subtractUsage(threadTotal, { input: prevTokensIn, cached: prevCacheRead, output: prevTokensOut }) : undefined);
   }
 
-  // Add session_end event
   if (events.length > 0) {
     const lastTimestamp = lines.length > 0
       ? (() => { try { return (JSON.parse(lines[lines.length - 1]) as CodexLogLine).timestamp; } catch { return undefined; } })()
@@ -615,8 +563,6 @@ export function parseCodexFile(
     });
   }
 
-  // Invocation mode is a session-level constant derived from originator; stamp it
-  // on every event so the session upsert persists it regardless of insert order.
   return mode || options?.history ? events.map(event => ({
     ...event,
     ...(mode ? { mode } : {}),
@@ -624,7 +570,6 @@ export function parseCodexFile(
   })) : events;
 }
 
-// ─── File hash for import state tracking ────────────────────────────────
 
 export function hashFile(filePath: string): string {
   return hashContent(readTranscriptFile(filePath));

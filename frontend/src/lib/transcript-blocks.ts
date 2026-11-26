@@ -6,7 +6,6 @@ export function parseMessageBlocks(content: string): ContentBlock[] {
     const blocks = JSON.parse(content) as unknown;
     if (Array.isArray(blocks)) return blocks as ContentBlock[];
   } catch {
-    // Plain text content.
   }
   return [{ type: 'text', text: content }];
 }

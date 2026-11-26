@@ -44,10 +44,8 @@ function seedLeanSessions(): void {
       project, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
-  // s-lean-1 (project alpha): 2 observations, 1 error, 100/50 tokens, $0.25.
   event.run(501, 'le1', 's-lean-1', 'codex', 'llm_response', null, 'success', 'gpt-5', 'alpha', 100, 50, 10, 0, 0.25, 20000, '2026-06-07T10:00:10Z');
   event.run(502, 'le2', 's-lean-1', 'codex', 'tool_use', 'Read', 'error', 'gpt-5', 'alpha', 0, 0, 0, 0, 0, 4000, '2026-06-07T10:00:31Z');
-  // s-lean-2 (project beta): single observation.
   event.run(503, 'le3', 's-lean-2', 'claude', 'llm_response', null, 'success', 'claude-opus-4-8', 'beta', 10, 5, 0, 0, 0.01, 1000, '2026-06-07T09:00:00Z');
 }
 
@@ -104,7 +102,6 @@ test('lean trace list returns one row per session from the summary, keyed by a s
     };
   }>('/api/v2/trace-quality/traces');
 
-  // One row per event-bearing session (NOT one per event/observation).
   assert.equal(body.total, 2);
   assert.deepEqual(
     [...body.data].map(t => t.session_id).sort(),
@@ -117,7 +114,6 @@ test('lean trace list returns one row per session from the summary, keyed by a s
   assert.equal(leanOne?.aggregate.observation_count, 2);
   assert.equal(leanOne?.aggregate.total_tokens_in, 100);
   assert.equal(leanOne?.aggregate.total_cost_usd, 0.25);
-  // Lean view carries no scores.
   assert.equal(body.coverage.score_coverage.scored_traces, 0);
   assert.equal(body.coverage.score_coverage.total_scores, 0);
 });
@@ -178,11 +174,9 @@ test('lean trace observations are projected on-demand under one session trace', 
     total: number;
   }>(`/api/v2/trace-quality/traces/${traceId}/observations?limit=10`);
 
-  // Every event surfaces as an observation, all under the single session trace.
   assert.equal(body.total, 2);
   assert.ok(body.data.every(o => o.trace_id === traceId), 'all observations hang under the session trace');
   assert.equal(new Set(body.data.map(o => o.trace_id)).size, 1);
-  // Flat event observations are deterministically ordered (by start time) roots.
   assert.equal(body.tree.length, 2);
   assert.equal(body.data[0]?.started_at, '2026-06-07T10:00:10Z');
   assert.equal(body.data[1]?.started_at, '2026-06-07T10:00:31Z');

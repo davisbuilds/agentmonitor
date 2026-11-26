@@ -1,7 +1,4 @@
 <script lang="ts">
-  // Cost×score Pareto frontier scatter for one study. Inline SVG on the shared
-  // PlotFrame + scales; the geometry (points, polyline order, domination
-  // connectors) comes from the pure, unit-tested frontier-geometry module.
   import type { BenchmarkArm } from '../../api/client';
   import { PlotFrame } from '../ui/chart';
   import { log10Ticks, niceLinearTicks, formatUsd } from '../ui/chart/scales';
@@ -35,7 +32,6 @@
     return v < 1 ? `$${v.toFixed(3)}` : `$${v.toFixed(2)}`;
   }
 
-  // Keep the tooltip inside the viewBox rather than clipping past the edges.
   const TOOLTIP_W = 136;
   function tooltipX(p: FrontierArmPoint): number {
     return Math.min(p.x + 6, layout.width - TOOLTIP_W - 2);
@@ -63,7 +59,6 @@
     class="mx-auto max-w-[560px]"
     ariaLabel="Cost versus score frontier: {geometry.points.length} priced arms"
   >
-    <!-- domination connectors (dominated arm → its dominator) -->
     {#each geometry.connectors as c}
       <line
         x1={c.from.x}
@@ -78,7 +73,6 @@
       />
     {/each}
 
-    <!-- Pareto frontier polyline -->
     {#if geometry.frontier.length > 1}
       <polyline
         points={frontierPath}
@@ -90,7 +84,6 @@
       />
     {/if}
 
-    <!-- arm markers: hollow ◯ native, filled ● routed -->
     {#each geometry.points as p}
       <circle
         cx={p.x}
@@ -118,7 +111,6 @@
       />
     {/each}
 
-    <!-- hover tooltip -->
     {#if hovered}
       {@const p = hovered}
       <g pointer-events="none">
@@ -142,7 +134,6 @@
     {/if}
   </PlotFrame>
 
-  <!-- legend + unpriced note -->
   <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-text-faint">
     <span class="inline-flex items-center gap-1">
       <svg width="16" height="6" aria-hidden="true"

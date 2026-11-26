@@ -18,8 +18,8 @@ test('linearScale maps domain endpoints and midpoint into the range', () => {
 
 test('linearScale supports an inverted range (SVG y grows downward)', () => {
   const y = linearScale([0, 1], [100, 0]);
-  assert.equal(y(0), 100); // score 0 at the bottom
-  assert.equal(y(1), 0); // score 1 at the top
+  assert.equal(y(0), 100);
+  assert.equal(y(1), 0);
   assert.equal(y(0.25), 75);
 });
 
@@ -34,7 +34,7 @@ test('log10Scale places decade endpoints and the geometric midpoint', () => {
   const s = log10Scale([0.01, 1], [0, 100]);
   assert.equal(s(0.01), 0);
   assert.equal(s(1), 100);
-  assert.ok(Math.abs(s(0.1) - 50) < 1e-9); // geometric middle of two decades
+  assert.ok(Math.abs(s(0.1) - 50) < 1e-9);
 });
 
 test('log10Scale clamps non-positive values to the domain floor', () => {
@@ -44,10 +44,8 @@ test('log10Scale clamps non-positive values to the domain floor', () => {
 });
 
 test('niceLinearTicks produces round covering ticks without float drift', () => {
-  // 1-2-5 nice-numbering picks a 0.2 step for [0,1] (0.25 is not a nice step).
   const ticks = niceLinearTicks(0, 1, 5);
   assert.deepEqual(ticks, [0, 0.2, 0.4, 0.6, 0.8, 1]);
-  // No 0.30000000000000004-style drift.
   assert.ok(ticks.every((t) => t === Number(t.toFixed(2))));
 });
 
@@ -82,13 +80,9 @@ test('formatUsd renders compact axis labels', () => {
 });
 
 test('niceLinearTicks picks the 1-2-5 step for the range, not just any covering set', () => {
-  // [3, 17]: rough step 14/4 rounds to 5, so ticks start/end on multiples of 5.
   assert.deepEqual(niceLinearTicks(3, 17, 5), [0, 5, 10, 15, 20]);
-  // [0, 100] with 5 ticks: 25 is not nice, 20 is.
   assert.deepEqual(niceLinearTicks(0, 100, 5), [0, 20, 40, 60, 80, 100]);
-  // Fewer requested ticks widen the step.
   assert.deepEqual(niceLinearTicks(0, 100, 3), [0, 50, 100]);
-  // Two ticks means one interval: the whole range is a single step.
   assert.deepEqual(niceLinearTicks(0, 10, 2), [0, 10]);
 });
 
@@ -114,9 +108,9 @@ test('log10Ticks on exact decades does not add an extra decade', () => {
 });
 
 test('formatUsd switches precision at the $1 and $100 boundaries', () => {
-  assert.equal(formatUsd(0.123), '$0.12'); // two significant figures below $1
+  assert.equal(formatUsd(0.123), '$0.12');
   assert.equal(formatUsd(0.0042), '$0.0042');
   assert.equal(formatUsd(99.5), '$99.5');
   assert.equal(formatUsd(100), '$100');
-  assert.equal(formatUsd(1234.56), '$1235'); // whole dollars from $100 up
+  assert.equal(formatUsd(1234.56), '$1235');
 });

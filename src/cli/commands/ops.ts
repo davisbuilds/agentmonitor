@@ -27,9 +27,7 @@ export function resolveSince(value: string | undefined, now: number = Date.now()
     const amount = Number(match[1]);
     return new Date(now - amount * UNIT_MS[match[2]]).toISOString();
   }
-  // A non-relative value is an absolute timestamp. Reject anything unparsable:
-  // SQLite datetime() would evaluate it to NULL and return an empty result,
-  // falsely implying no operational events occurred.
+  // WHY: SQLite's NULL result for an invalid timestamp would silently suppress all matching rows.
   if (Number.isNaN(Date.parse(value))) {
     throw invalidUsage(`Invalid --since: ${value} (use an ISO timestamp or a relative window like 1h, 30m, 7d)`);
   }

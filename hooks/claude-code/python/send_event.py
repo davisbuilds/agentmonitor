@@ -60,19 +60,13 @@ def get_project() -> str:
     return Path(cwd).name if cwd else ""
 
 
-# Where an event goes when the server cannot take it; the server drains it.
-# Keep the default in step with hookSpoolDir in src/config.ts.
+# WHY: The server must look in the same directory when replaying events after an outage.
 AGENTMONITOR_HOOK_SPOOL_DIR = os.environ.get(
     "AGENTMONITOR_HOOK_SPOOL_DIR",
     os.path.join(os.path.expanduser("~"), ".local", "state", "agentmonitor", "hook-spool"),
 )
 
-# The POST runs in a detached child so the hook can exit at once, the way the
-# shell hooks background curl. A thread cannot do this: the interpreter kills
-# daemon threads on exit, so it had to wait (up to 2s) for a slow server.
-# When the server cannot be reached in time, the child spools the event for
-# the server to store later: one line, private to the user, published by
-# renaming its temporary file so the server never reads half of it.
+# WHY: The interpreter can terminate a daemon thread before it sends the event; a detached process survives the hook.
 _POST_CHILD = """
 import os, sys, urllib.request
 url, spool, event_id, order = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
@@ -105,7 +99,7 @@ def send_event(payload: dict) -> None:
     """
     try:
         event_id = str(uuid.uuid4())
-        # Microseconds when the event happened: the spool replays in this order.
+        # WHY: Spool replay sorts filenames by the original event time.
         order = str(time.time_ns() // 1000)
         stamped = {
             "event_id": event_id,
@@ -127,4 +121,4 @@ def send_event(payload: dict) -> None:
         child.stdin.write(json.dumps(stamped).encode("utf-8"))
         child.stdin.close()
     except Exception:
-        pass  # fire-and-forget
+        pass

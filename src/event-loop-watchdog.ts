@@ -17,10 +17,7 @@ export interface EventLoopWatchdogOptions {
 
 export const SERVICE_WATCHDOG: EventLoopWatchdogOptions = { stallMs: 5 * 60_000, maxCpuMs: 1_000, checkMs: 10_000 };
 
-// Runs on its own thread, so it still runs while the main thread is stuck. It
-// writes with fs.writeSync: process.stderr in a worker is relayed through the
-// main thread, which is the one not running. SIGKILL ends the process however
-// it is stuck, and launchd restarts a job that ends on a signal.
+// WHY: stderr writes from the blocked main event loop would never report that same stall.
 const WATCHDOG_SOURCE = `
 const fs = require('node:fs');
 const { workerData } = require('node:worker_threads');
@@ -61,8 +58,7 @@ export function startEventLoopWatchdog(options: EventLoopWatchdogOptions): () =>
   lastBeat[0] = Date.now();
   const heartbeat = setInterval(() => { lastBeat[0] = Date.now(); }, Math.min(1_000, options.checkMs));
   heartbeat.unref();
-  // No inherited flags: the source is CommonJS, which a parent's --input-type
-  // or loader would otherwise change.
+  // WHY: An inherited module loader could change how the CommonJS worker source is interpreted.
   const worker = new Worker(WATCHDOG_SOURCE, { eval: true, execArgv: [], workerData: { beat, ...options } });
   worker.unref();
   return () => {

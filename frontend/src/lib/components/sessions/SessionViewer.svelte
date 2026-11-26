@@ -59,8 +59,8 @@
   let highlightTimer: ReturnType<typeof setTimeout> | null = null;
   let scrollFrame: number | null = null;
 
-  // Author filter operates on the loaded window only — paging pulls more, which
-  // then re-filters. "all" shows everything.
+  // WHY: Apply the author filter only to messages already loaded. Paging extends the same window and
+  // then reapplies the filter.
   let authorFilter = $state<'all' | MessageAuthor>('all');
   const authorOptions = $derived([
     { value: 'all', label: 'All turns' },
@@ -69,8 +69,8 @@
     { value: 'tool', label: 'Tools' },
     { value: 'instructions', label: 'Instructions' },
   ]);
-  // A message with nothing to render (Claude Code often records a thinking block
-  // with its text left out) would show as an empty header, so it is left out.
+  // WHY: Some providers omit thinking text. Filter empty messages so the viewer cannot render a header
+  // with no content.
   const visibleMessages = $derived(messages.filter(hasVisibleContent));
   const filteredMessages = $derived(
     authorFilter === 'all'
@@ -156,10 +156,8 @@
     scheduleActiveBucketSync();
   }
 
-  // The loaded messages are one contiguous window. A jump replaces it, so it
-  // supersedes pages still loading at its edges, and a page lands only on the
-  // edge it was fetched for: otherwise it would splice the old window's
-  // neighbour onto the new one.
+  // WHY: A jump replaces the contiguous window. An outstanding page must still match its original edge
+  // before it can join that window.
   const windowRequests = latestRequest();
 
   async function loadWindowAroundOrdinal(targetOrdinal: number): Promise<boolean> {
@@ -185,10 +183,8 @@
     await loadWindowAroundOrdinal(targetOrdinal);
   }
 
-  // Resolve against the rendered (filtered) set so the result always has a DOM
-  // node. With an author filter active, a bucket jump lands on the nearest
-  // visible turn instead of silently no-opping on a hidden ordinal. The same
-  // holds for a message left out because it has nothing to render.
+  // WHY: Resolve jumps against visible ordinals so an author filter or omitted message cannot leave the
+  // scroll target without a DOM node.
   function findLoadedOrdinal(targetOrdinal: number): number | null {
     let fallback: number | null = null;
     for (const message of filteredMessages) {
@@ -271,12 +267,12 @@
           activityError = 'Failed to load activity map.';
           return null;
         }),
-        // Friction is an aside; the transcript loads without it.
+        // WHY: Friction and Git activity are supplementary. A failed auxiliary request should still
+        // leave the transcript usable.
         fetchSessionFriction(sessionId).catch((err) => {
           console.error('Failed to load session friction:', err);
           return { signals: [] };
         }),
-        // So is what it committed and opened.
         fetchSessionGitActivity(sessionId).catch((err): SessionGitActivity => {
           console.error('Failed to load session git activity:', err);
           return { commits: [], pull_requests: [] };
@@ -322,7 +318,6 @@
         offset: nextOffset,
         limit: PAGE_SIZE,
       });
-      // Append only to the window this page continues.
       if (!isCurrent() || (messages[messages.length - 1]?.ordinal ?? -1) !== edge) return false;
       messages = [...messages, ...res.data];
       totalMessages = res.total;
@@ -350,7 +345,6 @@
         offset,
         limit,
       });
-      // Prepend only to the window this page continues.
       if (!isCurrent() || (messages[0]?.ordinal ?? 0) !== startOrdinal) return false;
       messages = [...res.data, ...messages];
       totalMessages = res.total;
@@ -381,7 +375,6 @@
 </script>
 
 <main class="flex-1 min-h-0 overflow-hidden flex flex-col">
-  <!-- Header -->
   <div class="border-b border-line px-4 sm:px-6 py-3 flex items-center gap-3 shrink-0">
     <Button variant="ghost" size="sm" onclick={onclose}>← Back</Button>
 
@@ -466,7 +459,6 @@
     </div>
   {/if}
 
-  <!-- Children -->
   {#if children.length > 0}
     <div class="border-b border-line px-4 sm:px-6 py-2 flex flex-wrap items-center gap-1.5 text-meta text-text-faint">
       <span class="mr-1">Subagents:</span>
@@ -485,7 +477,6 @@
     </div>
   {/if}
 
-  <!-- Messages -->
   <div class="min-h-0 flex-1 overflow-hidden px-4 sm:px-6 py-4">
     <div class="flex h-full min-h-0 flex-col gap-4 lg:flex-row">
       <div

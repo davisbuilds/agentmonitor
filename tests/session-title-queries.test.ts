@@ -35,14 +35,11 @@ before(() => {
   insert.run('agent-c2', 'claude', 'You are hunter two', null, at(3), 2, 'c-parent', 'subagent', 'claude-jsonl');
   insert.run('agent-orphan', 'claude', 'Parent gone', null, at(4), 2, 'missing-parent', 'subagent', 'claude-jsonl');
   insert.run('c-plain', 'claude', 'Plain session', null, at(5), 2, null, null, 'claude-jsonl');
-  // A Codex session stored twice: its rollout transcript and its telemetry row.
   insert.run(PARENT_ROLLOUT, 'codex', 'Review the PR', null, at(6), 6, null, 'conversation', 'codex-jsonl');
   insert.run(PARENT_UUID, 'codex', null, null, at(6), 0, null, null, 'codex-import');
   insert.run(CHILD_ROLLOUT, 'codex', null, 'emil pstack', at(7), 3, PARENT_UUID.toUpperCase(), 'subagent', 'codex-jsonl');
-  // Its telemetry twin names the same parent; the session still counts once.
   insert.run(CHILD_UUID, 'codex', 'Telemetry prompt', null, at(7), 0, PARENT_UUID, 'subagent', 'codex-otel');
   insert.run('codex-job', 'codex', 'Generate a concise, single-line task title', null, at(8), 2, null, 'internal', 'codex-otel');
-  // A hidden internal parent must not hide its child too.
   insert.run('codex-job-child', 'codex', 'Helper of a job', null, at(9), 2, 'codex-job', 'subagent', 'codex-otel');
 });
 

@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-// Isolate the DB before importing anything that reads config. Children inherit it.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-reliability-recovery-'));
 const dbPath = path.join(tempDir, 'agentmonitor.db');
 process.env.AGENTMONITOR_DB_PATH = dbPath;
@@ -36,8 +35,6 @@ function hookEvent(eventId: string, sessionId: string, extra: { client_timestamp
   };
 }
 
-// Child preamble: open the temp database, refuse any other, and expose a way to
-// stop forever at the point the parent kills it.
 const CHILD_PRELUDE = String.raw`
   import fs from 'node:fs';
 
@@ -109,7 +106,6 @@ test('a writer killed inside its transaction leaves only what it committed, and 
     })();
   `);
 
-  // Restart: a fresh connection recovers the WAL the killed writer left behind.
   initSchema();
   assertOpenedTempDb();
   assert.equal(getDb().pragma('integrity_check', { simple: true }), 'ok');
@@ -117,8 +113,7 @@ test('a writer killed inside its transaction leaves only what it committed, and 
   assert.equal(count('SELECT COUNT(*) AS n FROM events WHERE event_id IN (?, ?)', 'rr-kill-pending', 'rr-kill-orphan'), 0);
   assert.equal(count('SELECT COUNT(*) AS n FROM sessions WHERE id = ?', 'rr-kill-orphan'), 0, 'no session without its event');
 
-  // The killed process held no lock that outlives it, and its uncommitted ids
-  // are not duplicates: the producer's retry is stored, once.
+  // WHY: A killed writer’s uncommitted IDs must remain available to the producer’s retry.
   assert.ok(insertEvent(hookEvent('rr-kill-pending', 'rr-kill')));
   assert.equal(insertEvent(hookEvent('rr-kill-pending', 'rr-kill')), null);
   assert.equal(count('SELECT COUNT(*) AS n FROM events WHERE session_id = ?', 'rr-kill'), 2);
@@ -128,8 +123,6 @@ test('a migration killed before it records its version rolls back, and the resta
   assertOpenedTempDb();
   const version = getDb().pragma('user_version', { simple: true }) as number;
   assert.ok(version > 0);
-  // The v1 correction is not self-idempotent: 100k cache-inclusive input with
-  // 40k cache reads becomes 60k once, and 20k if it ever ran twice.
   getDb().prepare(`
     INSERT INTO events (
       event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out,
@@ -140,8 +133,8 @@ test('a migration killed before it records its version rolls back, and the resta
   getDb().pragma('user_version = 0');
   closeDb();
 
-  // Every correction has run inside the startup transaction; stop at the
-  // version bump that would commit them.
+  // WHY: Interrupt at the version bump to test rollback after the repairs have run but before the
+  // transaction commits.
   await killWhenReady('migration', String.raw`
     const { initSchema } = await import('./src/db/schema.ts');
     const pragma = db.pragma.bind(db);
@@ -170,8 +163,8 @@ test('a migration killed before it records its version rolls back, and the resta
 });
 
 test('events delivered out of client order each keep their own time and read back the same way every time', () => {
-  // The contract persists both the client and the receive time; it does not
-  // promise an order by either, so this asserts membership and stability only.
+  // WHY: The receipt stores both clocks without promising an order by either. Assert stable
+  // membership independently.
   const sessionId = 'rr-order';
   const delivered = [
     { id: 'rr-order-3', at: '2026-10-19T12:00:03.000Z' },
@@ -181,7 +174,6 @@ test('events delivered out of client order each keep their own time and read bac
   for (const { id, at } of delivered) {
     assert.ok(insertEvent(hookEvent(id, sessionId, { client_timestamp: at, command: id })));
   }
-  // The earliest event, resent late, is still the one stored copy.
   assert.equal(insertEvent(hookEvent('rr-order-1', sessionId, {
     client_timestamp: '2026-10-19T12:00:09.000Z', command: 'rr-order-1-resent',
   })), null);

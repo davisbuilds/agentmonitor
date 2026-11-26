@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-session-total-check-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -22,7 +21,6 @@ const codexSessions = path.join(codexDir, 'sessions', '2026', '10', '27');
 type Line = Record<string, unknown>;
 const jsonl = (lines: Line[]) => lines.map(line => JSON.stringify(line)).join('\n');
 
-// ─── Codex fixtures ─────────────────────────────────────────────────────
 const PER_REQUEST = '019f2222-0000-7000-8000-000000000001';
 const LEGACY = '019f2222-0000-7000-8000-000000000002';
 const UNIMPORTED = '019f2222-0000-7000-8000-000000000003';
@@ -45,7 +43,6 @@ const perRequestRollout = (id: string): Line[] => [
 const writeRollout = (id: string, lines: Line[]) =>
   fs.writeFileSync(path.join(codexSessions, `rollout-2026-10-27T10-00-00-${id}.jsonl`), jsonl(lines));
 
-// ─── Claude fixtures ────────────────────────────────────────────────────
 const CLAUDE = '11111111-2222-4333-8444-777777777777';
 const assistant = (timestamp: string): Line => ({ type: 'assistant', timestamp, sessionId: CLAUDE, message: { id: `msg-${timestamp}` } });
 const costState: Line = {
@@ -58,7 +55,7 @@ before(() => {
   assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
 });
 beforeEach(() => {
-  // Fail closed before the table-wide deletes if the handle is not the fixture's.
+  // WHY: Check the temp handle before deleting all rows.
   assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
   getDb().exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM agents; DELETE FROM import_state;');
   fs.rmSync(claudeDir, { recursive: true, force: true });
@@ -97,8 +94,6 @@ test('stored Codex usage that falls short of the thread total reads below 1', ()
 });
 
 test('the check reads the thread total, not the cumulative counter', () => {
-  // A request the counter left out: the thread total holds it, so a session
-  // billed only to the counter would read below 1.
   writeRollout(PER_REQUEST, [...perRequestRollout(PER_REQUEST), record(3, PER_REQUEST, 'resp-3', [500, 0, 5], [3_500, 2_300, 125])]);
   runImport({ source: 'codex', codexDir });
   const row = codexRow(check('codex'), PER_REQUEST)!;
@@ -138,7 +133,6 @@ test('a Claude session is checked against its cost-state checkpoint, in dollars'
 });
 
 test('a Claude session reports its coverage apart from a disagreement in rates', () => {
-  // Every token imported, but the harness bills Sonnet 5.5 cache reads at twice amon's rate.
   const line: Line = {
     type: 'cost-state', sessionId: CLAUDE, totalCostUSD: 0.2, startTime: Date.parse('2026-10-27T00:00:00.000Z'),
     modelUsage: { 'claude-sonnet-5-5': { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 1_000_000, cacheCreationInputTokens: 0, costUSD: 0.2 } },
@@ -184,7 +178,6 @@ test('the summary spans the checked ratios, with the median of an even count hal
   writeRollout(PER_REQUEST, perRequestRollout(PER_REQUEST));
   writeRollout(UNIMPORTED, perRequestRollout(UNIMPORTED));
   runImport({ source: 'codex', codexDir });
-  // Half of one session's usage goes missing: 1050 of 3120 tokens.
   getDb().prepare(`DELETE FROM events WHERE session_id = ? AND event_type = 'llm_response' AND tokens_out = 70`).run(UNIMPORTED);
   const short = (1_000 + 50) / (3_000 + 120);
   assert.deepEqual(check('codex').sources.codex, {

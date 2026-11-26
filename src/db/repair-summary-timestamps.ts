@@ -43,7 +43,6 @@ function inventory(db: Database.Database) {
       && !events.some(e => (e.client_timestamp ?? e.created_at) === value && !fallback(e));
     for (const column of ['started_at', 'ended_at', 'last_item_at'] as const) {
       const value = session[column];
-      // The retained session start must additionally match the first source event.
       const firstMatches = column !== 'started_at'
         || (events.length > 0 && fallback(events[0]) && events[0].created_at === value);
       add('browsing_sessions', session.id, column, value, provenTime(value) && firstMatches);
@@ -71,7 +70,6 @@ export function repairSummaryTimestamps(db: Database.Database, expectedDigest?: 
     for (const change of plan.changes) {
       byTable[change.table] = (byTable[change.table] ?? 0) + 1;
       if (expectedDigest !== undefined) {
-        // Table/column names come only from the closed inventory above, never CLI input.
         const result = db.prepare(`UPDATE ${change.table} SET ${change.column}=? WHERE id=? AND ${change.column}=?`)
           .run(change.after, change.id, change.before);
         if (result.changes !== 1) throw new Error('Repair row changed; transaction rolled back');

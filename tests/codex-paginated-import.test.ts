@@ -5,7 +5,6 @@ import path from 'node:path';
 import test, { after, before, beforeEach } from 'node:test';
 import { zstdCompressSync } from 'node:zlib';
 
-// The importer, repair, and usage reader all use a real, isolated store.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-codex-pages-'));
 const dbPath = path.join(tempDir, 'agentmonitor.db');
 process.env.AGENTMONITOR_DB_PATH = dbPath;
@@ -49,8 +48,6 @@ const counter = (ordinal: number, day: string, minute: number, input: number, ca
 });
 const jsonl = (lines: Line[]): string => lines.map(line => JSON.stringify(line)).join('\n') + '\n';
 
-// The active page references the first request. The root's later request was
-// discarded from the conversation by a revert, but its bill remains real.
 const prefix = [meta(0, OLD_DAY), turn(1, OLD_DAY), counter(2, OLD_DAY, 1, 200_000, 100_000, 2_000)];
 const rootLines = [...prefix, turn(3, SUFFIX_DAY), counter(4, SUFFIX_DAY, 1, 205_000, 102_000, 2_050)];
 const pageLines = [
@@ -62,7 +59,7 @@ const pageLines = [
     },
   }),
   turn(4, TODAY),
-  counter(5, TODAY, 1, 200_000, 100_000, 2_000), // Repeated inherited total, no new request.
+  counter(5, TODAY, 1, 200_000, 100_000, 2_000),
   counter(6, TODAY, 2, 201_000, 100_400, 2_010),
 ];
 
@@ -94,8 +91,6 @@ function importAll(force = false) {
   return runImport({ source: 'codex', codexDir, force });
 }
 
-// Fixed oracle: this model charges $2/M uncached, $0.2/M cached, $12/M
-// output below its long-context threshold. Each physical request is below it.
 function assertUsage(appended = false): void {
   const today = getUsageSummary({ agent: 'codex', date_from: TODAY, date_to: TODAY });
   assert.equal(today.total_input_tokens, appended ? 1_800 : 600, 'today excludes the historical cumulative carry');
@@ -177,8 +172,6 @@ test('a newly discovered page and later append preserve the already imported roo
 
 test('usage repair reconciles the complete physical lineage once and removes a historical carry billed today', () => {
   fixture(true);
-  // Seed a genuine old store through runImport, then add the erroneous carry
-  // that the old page-local counter parser would have billed on the new date.
   importAll();
   insertEvent({
     event_id: 'import-cdx-legacy-paginated-carry', session_id: SESSION,
@@ -204,8 +197,8 @@ test('usage repair reconciles the complete physical lineage once and removes a h
 });
 
 test('a missing referenced prefix cannot replace previously complete billed history', () => {
-  // This ordering lets the old importer leave the root's historical rows in
-  // place, so the red assertion below reaches the missing-prefix mutation.
+  // WHY: Preserve the old store ordering so the negative control reaches the missing-prefix defect
+  // rather than failing in setup.
   const files = fixture(true);
   importAll();
   const before = allRows();
@@ -272,8 +265,8 @@ test('a continuation bills its native request record immediately before any new 
 test('public rollout reconcile finds an external leaf\'s neighboring history without codexDir', () => {
   const files = fixture(true);
   const previousHome = process.env.CODEX_HOME;
-  // A known-empty alternate home makes any accidental ambient lookup safe and
-  // proves the source of the resolved prefix is the external rollout tree.
+  // WHY: Use a known-empty home to prove the external rollout tree supplies the prefix instead of
+  // ambient state.
   process.env.CODEX_HOME = path.join(tempDir, 'unrelated-codex-home');
   try {
     const result = reconcileCodexRollout(files.page, { apply: true });
@@ -338,7 +331,6 @@ test('forced date-scoped reruns retain each physical member\'s stored usage inst
       thread_token_usage: { input_tokens: total, cached_input_tokens: 0, output_tokens: 0 },
     },
   });
-  // The root's records started mid-thread, so it must retain counter billing.
   const historical = [
     meta(0, OLD_DAY), turn(1, OLD_DAY), request(2, OLD_DAY, 'synthetic-mid-thread-request', 60, 100),
     counter(3, OLD_DAY, 2, 100, 0, 0),
@@ -385,8 +377,6 @@ for (const compressed of [false, true]) {
       }),
       { ordinal: 1, type: 'session_meta', timestamp: `${OLD_DAY}T10:00:00Z`, payload: {
         id: parent, history_mode: 'paginated',
-        // This bookmark is the copied parent's context, not a missing dependency
-        // of the complete child rollout. No matching source file is needed.
         history_base: { thread_id: '01000000-0000-7000-8000-000000000098', end_ordinal_exclusive: 5, end_byte_offset: 100 },
       } },
       inheritedTurn, counter(3, OLD_DAY, 1, 100, 0, 0),

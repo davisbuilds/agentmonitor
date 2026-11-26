@@ -94,7 +94,7 @@ test('live API exposes occupancy fields with derived context_pct', () => {
   assert.ok(row);
   assert.equal(row.context_used_tokens, 64_000);
   assert.equal(row.context_window_tokens, 256_000);
-  assert.equal(row.context_pct, 25); // round(64000/256000*100)
+  assert.equal(row.context_pct, 25);
 });
 
 test('live API reports null context_pct when occupancy is unavailable', () => {
@@ -105,8 +105,6 @@ test('live API reports null context_pct when occupancy is unavailable', () => {
   assert.equal(row.context_used_tokens, null);
 });
 
-// --- Initial-sync backfill: insertParsedSession must carry occupancy too, so
-// cards populate on server boot / import, not only after the next live turn.
 test('insertParsedSession backfills Claude occupancy with the 1M default window', () => {
   insertParsedSession(getDb(), baseParsed('claude-insert', 'claude', {
     context_used_tokens: 250_000,

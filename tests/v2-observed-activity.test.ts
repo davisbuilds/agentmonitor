@@ -109,7 +109,6 @@ test('Codex events stored under a rollout basename join that session, not a seco
   const insert = db.prepare(`INSERT INTO events (session_id, agent_type, event_type, source, tokens_in, client_timestamp)
     VALUES (?, 'codex', 'api_request', 'import', 7, '2026-03-05T09:00:00Z')`);
   try {
-    // An older import keyed some Codex events by the rollout file, in either case.
     insert.run(rollout);
     insert.run(`rollout-2026-03-01T09-00-00-${uuid.toUpperCase()}`);
     const result = await list('?agent=codex');

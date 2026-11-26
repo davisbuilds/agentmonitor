@@ -276,8 +276,6 @@ for (const declaration of ['parent_thread_id', 'forked_from_id', 'thread_spawn']
     const parentId = nativeId(131);
     const copied = { type: 'session_meta', ordinal: 1, payload: {
       id: parentId, history_mode: 'paginated', cwd: '/synthetic/parent',
-      // This is the parent's bookmark, retained as context without replacing
-      // the child's absent history_base or requiring that unrelated file.
       history_base: { thread_id: nativeId(999), end_ordinal_exclusive: 5, end_byte_offset: 100 },
     } };
     const childMeta = {

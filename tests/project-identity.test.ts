@@ -6,8 +6,7 @@ import test, { after, mock } from 'node:test';
 
 import { projectNameFromCwd, setScratchRootsForTests } from '../src/util/project-identity.js';
 
-// The suite runs in a temp directory, which is scratch space; name none, so the
-// fixture repositories and folders below resolve as they would anywhere else.
+// WHY: Clear the scratch-root override so temp fixtures can exercise normal project discovery.
 setScratchRootsForTests([]);
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-project-identity-')));
 after(() => {
@@ -19,8 +18,6 @@ function repo(dir: string): string {
   fs.mkdirSync(path.join(dir, '.git'), { recursive: true });
   return dir;
 }
-// A linked worktree: a gitfile pointing at <repo>/.git/worktrees/<name>, whose
-// commondir leads back to the repo's .git.
 function worktree(repoDir: string, dir: string, name = path.basename(dir)): string {
   const admin = path.join(repoDir, '.git', 'worktrees', name);
   fs.mkdirSync(admin, { recursive: true });
@@ -67,10 +64,8 @@ test('a directory outside any repo is named after itself', () => {
 
 test('removed worktrees still fold into their repo', () => {
   assert.equal(projectNameFromCwd(path.join(app, '.claude', 'worktrees', 'agent-gone')), 'app');
-  // Even with the repo gone, an agent worktree is named after the repo's folder.
   assert.equal(projectNameFromCwd(path.join(root, 'moved-repo', '.claude', 'worktrees', 'agent-9')), 'moved-repo');
   assert.equal(projectNameFromCwd(path.join(dev, '.worktrees', 'app-old-task')), 'app');
-  // The longest repo name the run directory starts with wins.
   assert.equal(projectNameFromCwd(path.join(dev, '.tool-worktrees', 'app-ios-code-coverage-app-ios-2026-05-13')), 'app-ios');
   assert.equal(projectNameFromCwd(path.join(dev, '.tool-worktrees', 'app-code-ci-app-2026-05-13', 'sub')), 'app');
 });
@@ -101,9 +96,6 @@ test('a long-running process sees a worktree repointed to another repo', () => {
   }
 });
 
-// Scratch work has no project: a temp directory, an app-support folder, or a
-// worktree container, when no repository holds it. This test names a scratch
-// root of its own.
 test('a scratch directory outside any repo has no project', () => {
   const scratch = path.join(root, 'scratch');
   const loose = path.join(scratch, 'tm-terra.g35Rbg');

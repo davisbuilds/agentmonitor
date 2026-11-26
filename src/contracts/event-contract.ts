@@ -27,9 +27,8 @@ const _EVENT_SOURCES = [
   'hook',
   'otel',
   'import',
-  // Batch-imported external benchmark runs (openbench results.jsonl). Segregated
-  // from the default cost/usage/analytics aggregates so a bake-off does not
-  // pollute real-activity numbers; opt in via UsageParams.include_benchmark.
+  // WHY: Batch-imported benchmark cells must not inflate the operator's own activity or usage
+  // totals.
   'benchmark',
 ] as const;
 
@@ -62,12 +61,8 @@ export interface NormalizedIngestEvent {
   /** Of cache_write_tokens, the tokens written to Anthropic's 1-hour cache. */
   cache_write_1h_tokens?: number;
   source?: EventSource;
-  // Invocation mode of the owning session (interactive vs headless). Session-level
-  // constant carried on events so the session upsert can persist it; see
-  // src/util/invocation-mode.ts.
   mode?: 'interactive' | 'headless';
-  // Internal: set by importers that priced the row from our tables. The public
-  // contract never reads it from input, so a client's own cost is 'reported'.
+  // WHY: Clients cannot claim that a supplied cost came from AgentMonitor's pricing tables.
   cost_source?: CostSource;
 }
 
@@ -236,9 +231,6 @@ export function normalizeIngestEvent(input: unknown): NormalizeEventResult {
   const eventId = getOptionalString(input, 'event_id', errors);
   const toolName = getOptionalString(input, 'tool_name', errors);
   const branch = getOptionalString(input, 'branch', errors);
-  // A client that sends its working directory gets the canonical project name
-  // for it, or none for scratch work, rather than the `project` it sent beside
-  // it (hooks send the cwd's basename); the directory itself is not stored.
   const cwd = getOptionalString(input, 'cwd', errors);
   const givenProject = getOptionalString(input, 'project', errors);
   const project = cwd?.trim() ? projectNameFromCwd(cwd) ?? undefined : givenProject;

@@ -10,14 +10,13 @@ export const healthRouter = Router();
 
 const startTime = Date.now();
 
-// GET /api/health - Server status
 healthRouter.get('/', (_req: Request, res: Response) => {
   let dbSizeBytes = 0;
   try {
     const stat = fs.statSync(config.dbPath);
     dbSizeBytes = stat.size;
   } catch {
-    // DB file may not exist yet
+    // WHY: A newly initialized server may not have a database file yet.
   }
 
   res.json({

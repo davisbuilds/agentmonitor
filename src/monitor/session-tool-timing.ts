@@ -37,7 +37,7 @@ function currentNativeRollout(codexHome: string, id: string): string | undefined
       if (real.startsWith(resolvedRoot + path.sep) && !shouldExcludePath(resolvedRoot, real, config.sync.excludePatterns)) return real;
     }
   } catch {
-    // Older or unavailable native indexes still permit a bounded filename lookup.
+    // WHY: A missing native index need not make an otherwise readable transcript unavailable.
   } finally {
     db?.close();
   }
@@ -46,7 +46,7 @@ function currentNativeRollout(codexHome: string, id: string): string | undefined
 function sessionFiles(session: NonNullable<ReturnType<typeof getToolTimingSession>>) {
   if (session.agent === 'codex') {
     const home = process.env.CODEX_HOME || path.join(os.homedir(), '.codex');
-    // A live thread can resume in a new rollout before the watcher catches up.
+    // WHY: A thread can resume in a new physical rollout before the watcher indexes it.
     const native = currentNativeRollout(home, session.session_id);
     if (native) return { selection: 'native_index' as const, files: [native] };
     const indexed = session.file_path && existingRollout(session.file_path);
@@ -60,10 +60,9 @@ function sessionFiles(session: NonNullable<ReturnType<typeof getToolTimingSessio
     }).filter(file => {
       const name = transcriptBaseName(file).toLowerCase();
       const id = session.session_id.toLowerCase();
-      // Replacements can carry the native UUID followed by the physical rollout UUID.
       return name.endsWith(`-${id}`) || name.includes(`-${id}_`);
     });
-    // A matching original filename alone cannot establish that a later leaf was retained.
+    // WHY: An original filename cannot establish that a later replacement was retained.
     return { selection: 'filename' as const, files };
   }
   if (session.agent === 'claude') {

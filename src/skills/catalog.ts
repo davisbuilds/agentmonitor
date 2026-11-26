@@ -40,7 +40,6 @@ function readSkill(catalogDir: string, entryName: string): CatalogSkill | null {
   const skillMdPath = path.join(catalogDir, entryName, 'SKILL.md');
   let content: string;
   try {
-    // readFileSync follows symlinks, so symlinked skill dirs resolve transparently.
     content = fs.readFileSync(skillMdPath, 'utf-8');
   } catch {
     return null;

@@ -27,6 +27,11 @@ Response-shape compatibility is enforced by the API and CLI test suites. Add
 durable semantics here or in a focused contract document when an external client
 needs more than the TypeScript route and query definitions.
 
+For `GET /api/v2/search` and `amon sessions search`, pass the response’s `cursor` to
+continue the same query and sort. Omit it to start over. A malformed cursor or one
+from the other sort produces HTTP 400 or CLI exit 2. A full page can return a cursor
+even when the following page is empty.
+
 `GET /api/v2/analytics/git-activity` accepts `commit_scope=mine` for commits
 matching the server's Git author emails or proved by a monitored session.
 The scope applies to commit counts and their coverage. With `mine`,

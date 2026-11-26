@@ -9,8 +9,6 @@ import type { getAnalyticsSkillConsultations as getAnalyticsSkillConsultationsTy
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amon-consultations-'));
 process.env['AGENTMONITOR_DB_PATH'] = path.join(tempDir, 'test.db');
 process.env['AGENTMONITOR_SKILL_DIRS'] = path.join(tempDir, 'skills');
-// Fixtures are authored as UTC instants; local-day windows are covered in
-// local-time-days.test.ts.
 process.env['AGENTMONITOR_TIMEZONE'] = 'UTC';
 
 let getDb: typeof getDbType;
@@ -111,16 +109,12 @@ before(async () => {
     10,
     'active-across-window',
   );
-  // Live at the response instant (2026-07-10T12:00Z): active two minutes
-  // before it, while the parsed transcript still ends the previous evening.
   getDb().prepare(`
     UPDATE browsing_sessions
     SET live_status = 'live', last_item_at = '2026-07-10T11:58:00Z'
     WHERE id = 'active-across-window'
   `).run();
 
-  // Stored as live, but quiet since the previous evening: its status was
-  // written then and never rewritten, so it is not active in the window.
   const staleLivePath = '/tmp/.claude/projects/-Users-test-Dev-stale-window/stale.jsonl';
   const staleLive = parseSessionMessages([
     JSON.stringify({

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "exclude": [],
+  "files": {
+    ".github/dependabot.yml": 3,
+    ".github/workflows/ci.yml": 31,
+    ".github/workflows/security.yml": 5,
+    ".github/workflows/zizmor.yml": 8
+  }
+}

@@ -26,8 +26,6 @@ after(() => {
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
 
-// --- Sample JSONL content ---
-
 function sampleJsonl(lines: object[]): string {
   return lines.map(l => JSON.stringify(l)).join('\n') + '\n';
 }
@@ -219,8 +217,6 @@ const SESSION_WITH_PROGRESS = sampleJsonl([
   },
 ]);
 
-// --- Parser tests ---
-
 describe('parseSessionMessages', () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
   let parseSessionMessages: typeof import('../src/parser/claude-code.js').parseSessionMessages;
@@ -234,15 +230,12 @@ describe('parseSessionMessages', () => {
     const result = parseSessionMessages(BASIC_SESSION_JSONL, 'sess-100');
     assert.ok(result.messages.length >= 3, `expected >=3 messages, got ${result.messages.length}`);
 
-    // First message should be user
     assert.equal(result.messages[0].role, 'user');
     assert.equal(result.messages[0].ordinal, 0);
 
-    // Second should be assistant
     assert.equal(result.messages[1].role, 'assistant');
     assert.equal(result.messages[1].ordinal, 1);
 
-    // Ordinals should be sequential
     for (let i = 0; i < result.messages.length; i++) {
       assert.equal(result.messages[i].ordinal, i, `ordinal mismatch at index ${i}`);
     }
@@ -257,12 +250,10 @@ describe('parseSessionMessages', () => {
   test('identifies content blocks correctly', () => {
     const result = parseSessionMessages(BASIC_SESSION_JSONL, 'sess-100');
 
-    // First user message: text only
     const userBlocks = JSON.parse(result.messages[0].content);
     assert.equal(userBlocks[0].type, 'text');
     assert.equal(userBlocks[0].text, 'Hello, help me fix a bug');
 
-    // First assistant message: text + tool_use
     const assistantBlocks = JSON.parse(result.messages[1].content);
     const blockTypes = assistantBlocks.map((b: { type: string }) => b.type);
     assert.ok(blockTypes.includes('text'), 'should have text block');
@@ -272,18 +263,14 @@ describe('parseSessionMessages', () => {
   test('detects thinking blocks', () => {
     const result = parseSessionMessages(BASIC_SESSION_JSONL, 'sess-100');
 
-    // Third message (index 2) has thinking
     assert.equal(result.messages[2].has_thinking, 1);
-    // First message has no thinking
     assert.equal(result.messages[0].has_thinking, 0);
   });
 
   test('detects tool_use blocks', () => {
     const result = parseSessionMessages(BASIC_SESSION_JSONL, 'sess-100');
 
-    // First assistant message has tool_use
     assert.equal(result.messages[1].has_tool_use, 1);
-    // First user message has no tool_use
     assert.equal(result.messages[0].has_tool_use, 0);
   });
 
@@ -297,7 +284,6 @@ describe('parseSessionMessages', () => {
     assert.ok(byName.has('Bash'), 'should have Bash call');
     assert.ok(byName.has('Glob'), 'should have Glob call');
 
-    // Check categories
     assert.equal(byName.get('Grep')!.category, 'Search');
     assert.equal(byName.get('Bash')!.category, 'Bash');
     assert.equal(byName.get('Glob')!.category, 'Search');
@@ -316,7 +302,7 @@ describe('parseSessionMessages', () => {
 
     assert.equal(result.metadata.session_id, 'sess-100');
     assert.equal(result.metadata.message_count, result.messages.length);
-    assert.equal(result.metadata.user_message_count, 2); // two user messages
+    assert.equal(result.metadata.user_message_count, 2);
     assert.ok(result.metadata.started_at, 'should have started_at');
     assert.ok(result.metadata.ended_at, 'should have ended_at');
     assert.ok(result.metadata.first_message, 'should have first_message');
@@ -371,7 +357,6 @@ describe('parseSessionMessages', () => {
   test('skips non-message lines (progress, system, file-history-snapshot)', () => {
     const result = parseSessionMessages(SESSION_WITH_PROGRESS, 'sess-300');
 
-    // Only the user message should be extracted
     assert.equal(result.messages.length, 1);
     assert.equal(result.messages[0].role, 'user');
   });
@@ -395,7 +380,6 @@ describe('parseSessionMessages', () => {
       { type: 'assistant', sessionId: 'sess-x', message: {} },
       { type: 'assistant', sessionId: 'sess-x', message: { role: 'assistant', content: null } },
     ]);
-    // Should not throw
     const result = parseSessionMessages(content, 'sess-x');
     assert.ok(result.messages.length >= 0);
   });
@@ -432,8 +416,6 @@ describe('parseSessionMessages', () => {
     assert.equal(result.metadata.relationship_type, 'subagent');
   });
 });
-
-// --- Category normalization tests ---
 
 describe('categorizeToolName', () => {
   // eslint-disable-next-line @typescript-eslint/consistent-type-imports
@@ -479,8 +461,6 @@ describe('categorizeToolName', () => {
   });
 });
 
-// --- DB insertion integration tests ---
-
 describe('insertParsedSession', () => {
   /* eslint-disable @typescript-eslint/consistent-type-imports */
   let parseSessionMessages: typeof import('../src/parser/claude-code.js').parseSessionMessages;
@@ -499,17 +479,14 @@ describe('insertParsedSession', () => {
 
     insertParsedSession(db, parsed, '/path/to/sess-db-001.jsonl', 1024, 'hash123');
 
-    // Check browsing_sessions
     const session = db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get('sess-db-001') as Record<string, unknown>;
     assert.ok(session, 'session should exist');
     assert.equal(session.file_hash, 'hash123');
     assert.equal(session.message_count, parsed.messages.length);
 
-    // Check messages
     const messages = db.prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY ordinal').all('sess-db-001') as Array<Record<string, unknown>>;
     assert.equal(messages.length, parsed.messages.length);
 
-    // Check tool_calls
     const toolCalls = db.prepare('SELECT * FROM tool_calls WHERE session_id = ?').all('sess-db-001') as Array<Record<string, unknown>>;
     assert.ok(toolCalls.length > 0, 'should have tool calls');
   });
@@ -533,7 +510,6 @@ describe('insertParsedSession', () => {
 
     const count1 = (db.prepare('SELECT COUNT(*) as c FROM messages WHERE session_id = ?').get('sess-db-002') as { c: number }).c;
 
-    // Re-insert with different hash (simulating file change)
     insertParsedSession(db, parsed, '/path/to/sess-db-002.jsonl', 600, 'hash_second');
 
     const count2 = (db.prepare('SELECT COUNT(*) as c FROM messages WHERE session_id = ?').get('sess-db-002') as { c: number }).c;
@@ -608,7 +584,6 @@ describe('Claude session titles and subagent parents', () => {
   });
 
   test("a user's rename is the title over Claude Code's ai-title, and the latest rename wins", () => {
-    // Claude Code rewrites the rename beside each new ai-title; agent-name mirrors one of them.
     const content = sampleJsonl([
       userLine('sess-rename', [{ type: 'text', text: 'Start the work' }]),
       { type: 'ai-title', aiTitle: 'Generated title', sessionId: 'sess-rename' },
@@ -650,7 +625,6 @@ describe('Claude session titles and subagent parents', () => {
     const first = parseSessionChunk(content, 'agent-a1');
     assert.equal(first.parsed.metadata.parent_session_id, 'parent-session-1');
     assert.equal(first.parsed.metadata.relationship_type, 'subagent');
-    // A continued parse can read only lines that name no session.
     const resumed = parseSessionChunk(sampleJsonl([
       { type: 'assistant', isSidechain: true,
         message: { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] } },

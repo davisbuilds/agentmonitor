@@ -1,5 +1,3 @@
-// Check the actual browser against the CVE-2026-76024 floor before pages open.
-// Explicitly provisioned upstream Chromium follows the same guard as Chrome.
 const minimumVersion = [156, 0, 8078, 79];
 function assertPatchedVersion(version) {
   if (!/^\d+\.\d+\.\d+\.\d+$/.test(version)) {

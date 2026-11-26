@@ -21,8 +21,8 @@ test('a read-only command installs the agent-filter indexes on a database from b
   schema.initSchema();
   const db = connection.getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
-  // The preceding schema: read commands skip DDL once user_version is current,
-  // so the indexes only arrive if the version moves past it.
+  // WHY: Older schema versions need the upgrade because reads skip DDL once they see the current
+  // version.
   db.exec('DROP INDEX idx_events_agent_tool_order; DROP INDEX idx_events_agent_event_covering; DROP INDEX idx_events_agent_created_order; PRAGMA user_version = 10');
 
   schema.ensureSchemaForRead();
@@ -40,8 +40,6 @@ test('a read-only command replaces the v11 agent+event-type index with the cover
   const schema = await import('../src/db/schema.js');
   const db = connection.getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
-  // v11 shipped this index without source, so the page's total count looked up
-  // every matching row to apply the benchmark exclusion.
   db.exec(`DROP INDEX idx_events_agent_event_covering;
     CREATE INDEX idx_events_agent_event_order ON events(agent_type, event_type, datetime(created_at) DESC, id DESC);
     PRAGMA user_version = 11`);
@@ -89,7 +87,6 @@ test('a read-only command adds the 1-hour cache-write column on a v14 database',
   const schema = await import('../src/db/schema.js');
   const db = connection.getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
-  // The usage covering index carries the column since v23; SQLite drops no indexed column.
   db.exec('DROP INDEX idx_events_usage_covering; ALTER TABLE events DROP COLUMN cache_write_1h_tokens; PRAGMA user_version = 14');
 
   schema.ensureSchemaForRead();
@@ -105,8 +102,6 @@ test('a read-only command rebuilds the v22 usage covering index with the 1-hour 
   const schema = await import('../src/db/schema.js');
   const db = connection.getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
-  // v22's index ended at cache_write_tokens, so Usage's savings read could not
-  // select the 1-hour split without leaving the index.
   db.exec(`DROP INDEX idx_events_usage_covering;
     CREATE INDEX idx_events_usage_covering ON events(datetime(COALESCE(client_timestamp, created_at)), agent_type, source,
       session_id, project, model, client_timestamp, created_at, cost_usd, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens)

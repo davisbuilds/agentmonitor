@@ -26,7 +26,7 @@ function parseJsonLines(buffer: string, onMessage: (message: JsonRpcResponse) =>
     try {
       onMessage(JSON.parse(line) as JsonRpcResponse);
     } catch {
-      // Ignore non-JSON log lines from the child process.
+      // WHY: The child may interleave plain diagnostic lines with protocol messages.
     }
   }
   return remainder;
@@ -155,9 +155,8 @@ export async function fetchCodexQuotaSnapshot(
 
     child.on('exit', () => {
       if (settled) return;
-      // `??` only catches null/undefined, not empty strings — and codex-cli ≥0.133.0
-      // exits silently (empty stderr) when stdin EOFs before responses are written.
-      // Fall through any empty fallbacks so the user gets an actionable message.
+      // WHY: Some Codex CLI versions exit with empty stderr on stdin EOF, so nullish fallback alone
+      // can hide the error.
       const rpcError = responses.get(3)?.error?.message?.trim();
       const stderr = stderrBuffer.trim();
       const errorMessage =
@@ -177,9 +176,6 @@ export async function fetchCodexQuotaSnapshot(
     child.stdin.write('{"method":"initialized"}\n');
     child.stdin.write('{"id":2,"method":"account/read","params":{}}\n');
     child.stdin.write('{"id":3,"method":"account/rateLimits/read","params":null}\n');
-    // NOTE: do not call `child.stdin.end()` here. codex-cli ≥0.133.0 detects the
-    // stdin EOF before flushing responses and exits silently with empty output,
-    // which made the Monitor card show "unavailable" with no diagnostic. Cleanup
-    // happens via the `child.kill()` call inside `finish()`.
+    // WHY: Codex CLI may exit before flushing its response when stdin closes.
   });
 }

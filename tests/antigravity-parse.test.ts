@@ -7,7 +7,6 @@ import Database from 'better-sqlite3';
 import { parseAntigravityFile, stepKindToEvent, discoverAntigravityLogs } from '../src/import/antigravity.js';
 import { pricingRegistry } from '../src/pricing/index.js';
 
-// --- minimal protobuf encoder (deterministic fixtures) ---
 function varint(n: number): number[] {
   const out: number[] = [];
   let big = n;
@@ -25,20 +24,15 @@ const lField = (f: number, b: number[]) => [...tag(f, 2), ...varint(b.length), .
 const sField = (f: number, s: string) => lField(f, [...Buffer.from(s, 'utf-8')]);
 const buf = (a: number[]) => Buffer.from(a);
 
-// Full gemini_coder.Step: type(1), status(4), metadata(5), <oneof>(payload)
 const step = (type: number, oneof: number) =>
   buf([...vField(1, type), ...vField(4, 3), ...lField(5, [...vField(1, 1)]), ...lField(oneof, [...vField(1, 1)])]);
-// CortexStepMetadata column: field1.field1 = unix seconds
 const meta = (secs: number) => buf(lField(1, [...vField(1, secs)]));
-// gen_metadata: wrapper(1) → CortexGeneratorMetadata { model(19), usage(4) }
 const genmeta = (model: string, u: Record<number, number>) =>
   buf(lField(1, [
     ...sField(19, model),
     ...lField(4, [...vField(1, u[1]), ...vField(2, u[2]), ...vField(3, u[3]), ...vField(5, u[5]), ...vField(9, u[9]), ...vField(10, u[10])]),
   ]));
 
-// A generation's own time: wrapper(1) → CortexGeneratorMetadata → field 9 →
-// field 4, a protobuf Timestamp { seconds(1), nanos(2) }.
 const timedGenmeta = (model: string, u: Record<number, number>, secs: number, nanos: number) =>
   buf(lField(1, [
     ...sField(19, model),
@@ -61,9 +55,9 @@ function buildFixture(uuid: string): string {
   db.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
   db.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
   const ins = db.prepare('INSERT INTO steps(idx,step_type,status,step_payload,metadata) VALUES (?,?,?,?,?)');
-  ins.run(0, 14, 3, step(14, 19), meta(1782000000)); // type 14, oneof 19 = user_input
-  ins.run(1, 28, 3, step(28, 28), meta(1782000005)); // run_command
-  ins.run(2, 999, 3, step(999, 9998), meta(1782000010)); // unknown oneof → generic
+  ins.run(0, 14, 3, step(14, 19), meta(1782000000));
+  ins.run(1, 28, 3, step(28, 28), meta(1782000005));
+  ins.run(2, 999, 3, step(999, 9998), meta(1782000010));
   db.prepare('INSERT INTO gen_metadata(idx,data) VALUES (?,?)').run(
     0,
     genmeta('gemini-pro-default', { 1: 1016, 2: 20000, 3: 3000, 5: 8000, 9: 2500, 10: 500 }),
@@ -88,7 +82,6 @@ test('parseAntigravityFile: steps map to the taxonomy (user_prompt, tool_use, ge
   const tool = events.find((e) => e.event_type === 'tool_use');
   assert.ok(tool, 'run_command → tool_use');
   assert.equal(tool!.tool_name, 'run_command');
-  // unknown oneof (kind undefined) becomes a generic `response`, not dropped
   const generic = events.find((e) => e.event_type === 'response' && (e.metadata as { kind: unknown }).kind === null);
   assert.ok(generic, 'unmapped step ingested as generic response');
 });
@@ -98,17 +91,17 @@ test('parseAntigravityFile: llm_response carries cache-net tokens + cost from Co
   const llm = events.find((e) => e.event_type === 'llm_response');
   assert.ok(llm, 'a generation produced an llm_response');
   assert.equal(llm!.model, 'gemini-pro-default');
-  assert.equal(llm!.tokens_in, 21016); // system(1016) + input(20000)
-  assert.equal(llm!.tokens_out, 3000); // total output (incl. reasoning)
-  assert.equal(llm!.cache_read_tokens, 8000); // cached, not folded into tokens_in
+  assert.equal(llm!.tokens_in, 21016);
+  assert.equal(llm!.tokens_out, 3000);
+  assert.equal(llm!.cache_read_tokens, 8000);
   assert.equal((llm!.metadata as { thoughts_tokens: number }).thoughts_tokens, 2500);
   assert.ok(llm!.cost_usd !== undefined && llm!.cost_usd > 0, 'priced (gemini-pro-default)');
   assert.equal(llm!.cost_source, 'estimated', 'priced from our tables, not reported by Antigravity');
 });
 
 test('parseAntigravityFile: each generation is stamped and priced at its own time', () => {
-  // The session opens on the last promo day; its second generation runs after
-  // the 2027-01-01 revert to list price, so it must price at the list rate.
+  // WHY: Pricing follows each generation’s timestamp. One session can straddle the end of a
+  // promotion.
   const opened = Date.UTC(2026, 11, 31, 23, 59) / 1000;
   const second = Date.UTC(2027, 0, 1, 0, 5) / 1000;
   const dir = tempDir('agr-');
@@ -122,7 +115,7 @@ test('parseAntigravityFile: each generation is stamped and priced at its own tim
   const insGen = db.prepare('INSERT INTO gen_metadata(idx,data) VALUES (?,?)');
   insGen.run(0, timedGenmeta('gemini-3.8-flash', usage, opened, 250_000_000));
   insGen.run(1, timedGenmeta('gemini-3.8-flash', usage, second, 500_000_000));
-  insGen.run(2, genmeta('gemini-3.8-flash', usage)); // no timestamp recorded
+  insGen.run(2, genmeta('gemini-3.8-flash', usage));
   db.close();
 
   const llm = parseAntigravityFile(dbPath).filter((e) => e.event_type === 'llm_response');
@@ -130,10 +123,10 @@ test('parseAntigravityFile: each generation is stamped and priced at its own tim
   assert.deepEqual(llm.map((e) => e.client_timestamp), [
     new Date(opened * 1000 + 250).toISOString(),
     new Date(second * 1000 + 500).toISOString(),
-    openedIso, // falls back to the session's first activity
+    openedIso,
   ]);
 
-  const tokens = { input: 1020 + 1_000_000, output: 0, cacheRead: 0 }; // system + input
+  const tokens = { input: 1020 + 1_000_000, output: 0, cacheRead: 0 };
   const promo = pricingRegistry.calculate('gemini-3.8-flash', tokens, openedIso);
   const list = pricingRegistry.calculate('gemini-3.8-flash', tokens, new Date(second * 1000).toISOString());
   assert.notEqual(promo, list, 'the fixture straddles a rate change');
@@ -164,4 +157,47 @@ test('stepKindToEvent: explicit and generic mappings', () => {
   assert.deepEqual(stepKindToEvent('browser_click_element'), { type: 'tool_use', toolName: 'browser_click_element' });
   assert.deepEqual(stepKindToEvent('finish'), { type: 'session_end' });
   assert.deepEqual(stepKindToEvent(undefined), { type: 'response' });
+});
+
+test('parseAntigravityFile: prices Gemini 4 effort-suffixed CLI IDs directly from gen_metadata', () => {
+  const preCutoverSec = Date.UTC(2026, 10, 25, 12, 0) / 1000;
+  const usage = { 1: 1000, 2: 19_000, 3: 10_000, 5: 40_000, 9: 2000, 10: 8000 };
+  const cases: Array<[string, number]> = [
+    ['gemini-4-neon-xhigh', 0.216],
+    ['gemini-4-neon-high', 0.216],
+    ['gemini-4-neon-medium', 0.216],
+    ['gemini-4-neon-low', 0.216],
+    ['gemini-4-hydrogen-xhigh', 0.108],
+    ['gemini-4-hydrogen-high', 0.108],
+    ['gemini-4-hydrogen-medium', 0.108],
+    ['gemini-4-hydrogen-low', 0.108],
+    ['gemini-4-carbon-high', 0.144],
+    ['gemini-4-carbon-medium', 0.144],
+    ['gemini-4-carbon-low', 0.144],
+    ['gemini-4-argon-high', 0.144],
+    ['gemini-4-argon-medium', 0.144],
+    ['gemini-4-argon-low', 0.144],
+  ];
+
+  const dir = tempDir('agr-g4-');
+  const dbPath = path.join(dir, '55555555-0000-0000-0000-000000000000.db');
+  const db = new Database(dbPath);
+  db.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+  db.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+  db.prepare('INSERT INTO steps(idx,step_type,status,step_payload,metadata) VALUES (?,?,?,?,?)')
+    .run(0, 14, 3, step(14, 19), meta(preCutoverSec));
+  const insGen = db.prepare('INSERT INTO gen_metadata(idx,data) VALUES (?,?)');
+  cases.forEach(([model], idx) => {
+    insGen.run(idx, timedGenmeta(model, usage, preCutoverSec + idx, 0));
+  });
+  db.close();
+
+  const llm = parseAntigravityFile(dbPath).filter((e) => e.event_type === 'llm_response');
+  assert.equal(llm.length, cases.length);
+  cases.forEach(([model, expectedCost], idx) => {
+    const ev = llm[idx];
+    assert.equal(ev.model, model);
+    assert.equal(ev.cost_source, 'estimated', `${model} cost_source`);
+    assert.ok(ev.cost_usd !== undefined && Math.abs(ev.cost_usd - expectedCost) < 1e-9, `${model} got ${ev.cost_usd}`);
+  });
 });

@@ -329,8 +329,6 @@ test('POST /api/events stores byte-capped metadata and payload_truncated marker'
 });
 
 test('a prompt over the cap keeps its opening words, so a Codex app job is still recognized', async () => {
-  // The Codex app embeds a whole thread in its title and catch-up prompts; past
-  // the cap, the prompt used to vanish with the prefix that marks the job.
   const prompt = `Generate a concise, single-line task title of at most 36 characters. ${'x'.repeat(4000)}`;
   const response = await postJson(`${baseUrl}/api/events`, {
     session_id: 'codex-app-job-big',
@@ -374,7 +372,6 @@ test('session_end transitions to idle, subsequent events reactivate', async () =
 
   const session = body.sessions.find(item => item.id === sessionId);
   assert.ok(session);
-  // session_end → idle, then tool_use reactivates to active
   assert.equal(session.status, 'active');
 });
 
@@ -610,7 +607,7 @@ test('SSE enforces max clients and cleans up disconnected clients', async () => 
   try {
     await first.body?.cancel();
   } catch {
-    // The aborted stream may already be closed.
+    // WHY: Aborting the request can close the stream before explicit cancellation reaches it.
   }
 
   let closed = false;

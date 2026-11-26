@@ -30,9 +30,8 @@
     return typeof option === 'string' ? { value: option, label: option } : option;
   }
 
-  // A native select is as wide as its longest option, so one long project or
-  // tool name used to stretch it across the bar. Capped, it truncates the
-  // shown value, and the tooltip carries the whole of it.
+  // WHY: Native select width follows its longest option. Cap it so one project name cannot stretch the
+  // filter row and expose the full label in a tooltip.
   const selectedLabel = $derived(
     options.map(normalize).find((option) => option.value === value)?.label ?? placeholder ?? '',
   );

@@ -210,7 +210,7 @@ test('a dead owner is not reported, and reading creates nothing', () => {
     pid: dead.pid, startedAt: new Date().toISOString(), token: 't', dbPath: fs.realpathSync(root) + '/dead.db', build: 'old',
   }));
   assert.equal(readRuntimeOwner(dbPath), null);
-  // A lock carried over from another database (copied with the file) is not this database's owner.
+  // WHY: A lock copied beside a different database does not establish ownership of that database.
   fs.writeFileSync(`${dbPath}.runtime.lock`, JSON.stringify({
     pid: process.pid, startedAt: new Date().toISOString(), token: 't', dbPath: '/elsewhere/other.db', build: 'old',
   }));

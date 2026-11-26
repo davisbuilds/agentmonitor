@@ -1,5 +1,6 @@
 import type { Database } from 'better-sqlite3';
 import { getDb } from './connection.js';
+import { decodeSearchCursor } from './search-cursor.js';
 import { config } from '../config.js';
 import {
   scanSkillCatalogs,
@@ -226,8 +227,6 @@ export function lookupSessionTitles(ids: readonly string[]): Map<string, Session
   return titles;
 }
 
-// --- Sessions ---
-
 interface SessionsResult {
   data: BrowsingSessionRow[];
   total: number;
@@ -252,17 +251,14 @@ function decodeTimeCursor(cursor: string | undefined): TimeCursor | null {
       return { sort_at: parsed.sort_at, id: parsed.id };
     }
   } catch {
-    // Fall back to legacy timestamp-only cursors below.
+    // WHY: Old clients send a timestamp directly; decoding that as a structured cursor can fail.
   }
 
   return { sort_at: cursor, id: '\uffff' };
 }
 
-// The JSONL watcher keys browser history by rollout basename, while import/OTEL
-// use the native UUID. Preserve both stored projections and their detail URLs,
-// but select one representative before any list filters or pagination. Only
-// recognized producer modes and the exact rollout/UUID grammar establish an
-// alias; arbitrary IDs and future integrations must remain separate.
+// WHY: The watcher and OTEL/import use different IDs for the same Codex session; deduplicate reads
+// without deleting either record.
 const codexUuidGlob = [8, 4, 4, 4, 12]
   .map(length => '[0-9a-fA-F]'.repeat(length)).join('-');
 const codexRolloutTimestampGlob = 'dddd-dd-ddTdd-dd-dd'.replaceAll('d', '[0-9]');
@@ -344,11 +340,6 @@ function parentSessionKey(alias: string): string {
     ELSE ${alias}.parent_session_id END`;
 }
 
-// What a session list shows: one row per session matching the filters, without
-// internal jobs, and with a subagent nested under its parent whenever the parent
-// is listed too. A subagent whose parent is not stored, or is filtered out, stays
-// listed on its own. The count covers every listed subagent of the parent, since
-// expanding it shows them all.
 const browsableSessionsCte = (filterWhere: string): string => `${sessionListCte},
 filtered_sessions AS (
   SELECT * FROM listed_sessions ${filterWhere}
@@ -373,8 +364,8 @@ browsable_sessions AS (
     ))
 )`;
 
-// Keys deliberately distinguish unrecognized browser projections from native
-// Codex UUIDs. An arbitrary producer mode is not evidence of an alias.
+// WHY: An arbitrary producer mode cannot establish that a browser projection belongs to a native
+// Codex session.
 function observedBrowserIdentity(): string {
   return `CASE
     WHEN agent = 'codex' AND integration_mode = 'codex-jsonl'
@@ -445,8 +436,8 @@ export function listObservedSessions(params: { limit?: number; offset?: number; 
   const conditions: string[] = [];
   const values: (string | number)[] = [];
   if (params.agent) { conditions.push('agent = ?'); values.push(params.agent); }
-  // Unresolved timestamps are reported independently of date filters, so a
-  // consumer can never mistake their exclusion for complete date coverage.
+  // WHY: Date filtering cannot assign unresolved timestamps to a window. Count them separately so
+  // coverage stays visible.
   if (params.date_from) { conditions.push('started_at >= ?'); values.push(dateParamLowerBound(params.date_from)); }
   if (params.date_to) {
     conditions.push('started_at < ?');
@@ -510,8 +501,6 @@ export function getDailyConversationActivity(since: string, until: string) {
     ${activityEventInstant('events')}
     FROM events INDEXED BY idx_events_daily_activity WHERE ${excludeBenchmarkUsageCondition('events')}
       AND (event_type IN ('user_prompt', 'tool_use') OR ${usageMetricPresenceCondition('events')})`;
-  // Read every recognized projection's dated evidence, but classify and count
-  // the canonical identity once. Avoid the inventory's all-history event rollup.
   const query = `${sessionListCte}, all_browser AS (
     SELECT *, ${observedBrowserIdentity()} AS session_id,
       ${observedInstant('started_at')} AS instant FROM ranked_sessions
@@ -581,7 +570,7 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     values.push(dateParamLowerBound(params.date_from));
   }
   if (params.date_to) {
-    // Through the end of the local day, however long DST makes it.
+    // WHY: Local days can span more or fewer than 24 hours at a DST transition.
     conditions.push('datetime(started_at) < datetime(?)');
     values.push(dateParamUpperExclusive(params.date_to));
   }
@@ -594,9 +583,7 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     values.push(params.max_messages);
   }
   if (params.exclude_empty) {
-    // Hide telemetry-only sessions that have no browsable transcript — opening
-    // them shows nothing. The effective history capability mirrors what the
-    // client computes via inferProjectionCapabilities; 'unknown' is kept.
+    // WHY: Opening a telemetry-only session would show an empty transcript.
     conditions.push(`${analyticsCapabilityExpr('history')} != 'none'`);
   }
   const filterWhere = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -616,7 +603,6 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
     `${cte} SELECT * FROM browsable_sessions ${cursorWhere} ORDER BY started_at DESC, id DESC LIMIT ?`
   ).all(...filterValues, ...cursorValues, limit) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 
-  // Build cursor from last item
   let nextCursor: string | undefined;
   if (data.length === limit && data.length > 0) {
     const last = data[data.length - 1];
@@ -638,8 +624,7 @@ export function getBrowsingSession(id: string): BrowsingSessionRow | undefined {
 export function getToolTimingSession(id: string): { session_id: string; agent: string; file_path: string | null } | undefined {
   const db = getDb();
   const nativeId = codexSessionAliases(id).at(-1)!;
-  // With only a replacement rollout on disk the browser may use its full
-  // nativeUUID_physicalUUID basename. Its first UUID still owns the thread.
+  // WHY: A replacement rollout can store both native and physical UUIDs in its basename.
   const timingKey = `CASE WHEN b.agent = 'codex' AND b.integration_mode = 'codex-jsonl'
     AND b.id GLOB '${codexRolloutGlob}_${codexUuidGlob}' THEN lower(substr(b.id, -73, 36))
     ELSE ${browserSessionKey('b')} END`;
@@ -691,8 +676,6 @@ export function getSessionChildren(parentId: string): BrowsingSessionRow[] {
     ORDER BY c.started_at, c.id
   `).all(parent.agent, parent.session_key) as BrowsingSessionDbRow[]).map(mapBrowsingSessionRow);
 }
-
-// --- Live sessions ---
 
 interface LiveSessionsResult {
   data: LiveSessionRow[];
@@ -813,8 +796,6 @@ export function getSessionItems(sessionId: string, params: LiveItemsListParams =
     `SELECT COUNT(*) as c FROM session_items WHERE session_id = ?`
   ).get(sessionId) as CountResult).c;
 
-  // Read one extra row to learn whether a further page exists in the reading
-  // direction, without a second query.
   values.push(limit + 1);
   const rows = db.prepare(
     `SELECT * FROM session_items ${where} ORDER BY id ${backward ? 'DESC' : 'ASC'} LIMIT ?`
@@ -826,7 +807,7 @@ export function getSessionItems(sessionId: string, params: LiveItemsListParams =
     const data = page.reverse();
     return { data, total, before_cursor: more && data.length > 0 ? String(data[0].id) : undefined };
   }
-  // Forward paging keeps its old contract: a cursor whenever the page was full.
+  // WHY: Existing clients expect a cursor on every full forward page.
   return { data: page, total, cursor: page.length === limit ? String(page[page.length - 1].id) : undefined };
 }
 
@@ -864,8 +845,6 @@ export function getTraceQualitySessionSourceRows(sessionId: string): TraceQualit
     toolCalls,
   };
 }
-
-// --- Messages ---
 
 interface MessagesResult {
   data: MessageRow[];
@@ -1116,8 +1095,6 @@ export function unpinMessage(sessionId: string, messageId: number): { removed: b
   return { removed: result.changes > 0, message_ordinal: storedPin?.message_ordinal ?? null };
 }
 
-// --- Search ---
-
 interface FtsSearchResult {
   data: SearchResultRow[];
   total: number;
@@ -1135,24 +1112,6 @@ interface RelevanceCursor {
   message_id: number;
 }
 
-function decodeRelevanceCursor(cursor: string | undefined): RelevanceCursor | null {
-  if (!cursor) return null;
-
-  try {
-    const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf-8')) as Partial<RelevanceCursor>;
-    if (typeof parsed.rank === 'number' && typeof parsed.message_id === 'number') {
-      return {
-        rank: parsed.rank,
-        message_id: parsed.message_id,
-      };
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
 function encodeRelevanceCursor(cursor: RelevanceCursor): string {
   return Buffer.from(JSON.stringify(cursor), 'utf-8').toString('base64url');
 }
@@ -1161,6 +1120,7 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   const db = getDb();
   const limit = Math.min(Math.max(params.limit ?? 20, 1), 100);
   const sort = params.sort === 'relevance' ? 'relevance' : 'recent';
+  const cursorState = decodeSearchCursor(params.cursor, sort);
 
   const conditions: string[] = [];
   const values: unknown[] = [];
@@ -1176,7 +1136,6 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
 
   const joinFilter = conditions.length > 0 ? `AND ${conditions.join(' AND ')}` : '';
 
-  // Count total matches
   const countSql = `
     SELECT COUNT(*) as c
     FROM messages_fts
@@ -1187,7 +1146,6 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   const total = (db.prepare(countSql).get(params.q, ...values) as CountResult).c;
 
   if (sort === 'relevance') {
-    const cursorState = decodeRelevanceCursor(params.cursor);
     const offsetCondition = cursorState
       ? `AND (
           bm25(messages_fts) > ?
@@ -1242,9 +1200,8 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
     };
   }
 
-  const recentCursor = params.cursor ? parseInt(params.cursor, 10) : null;
-  const offsetCondition = Number.isFinite(recentCursor) ? `AND m.id < ?` : '';
-  const offsetValues = Number.isFinite(recentCursor) ? [recentCursor] : [];
+  const offsetCondition = cursorState ? `AND m.id < ?` : '';
+  const offsetValues = cursorState ? [cursorState.message_id] : [];
 
   const searchSql = `
     SELECT
@@ -1279,7 +1236,6 @@ export function searchMessages(params: SearchParams): FtsSearchResult {
   return { data, total, cursor };
 }
 
-// --- Analytics ---
 type AnalyticsCoverageScope = AnalyticsCoverage['metric_scope'];
 
 interface AnalyticsFilterState {
@@ -1304,7 +1260,6 @@ function buildAnalyticsFilterState(params: AnalyticsParams = {}, alias?: string)
     conditions.push(`${qualifyColumn(alias, 'agent')} = ?`);
     values.push(browserAgentName(params.agent));
   }
-  // Bare dates are the operator's local days (see src/util/local-day.ts).
   const startedAt = qualifyColumn(alias, 'started_at');
   if (params.date_from) {
     conditions.push(`datetime(${startedAt}) >= datetime(?)`);
@@ -1494,10 +1449,7 @@ export function getAnalyticsCoverage(
   };
 }
 
-// Analytics counts sessions, so every read here takes the rows a session list
-// shows (`listed_sessions`): one per recognized Codex rollout/UUID pair, the
-// JSONL transcript row preferred, chosen before the filters. Counting
-// browsing_sessions directly counts such a session, and its messages, twice.
+// WHY: Analytics and the session list must count recognized aliases as the same session.
 export function getAnalyticsSummary(params: AnalyticsParams = {}): AnalyticsSummary {
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
@@ -1553,7 +1505,7 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
     started_at: string | null; message_count: number; user_message_count: number; relationship_type: string | null;
   }>;
 
-  // Bucket in JS: a local day cannot be expressed in SQLite for a configured zone.
+  // WHY: SQLite cannot bucket timestamps by the configured IANA time zone.
   const byDate = new Map<string, ActivityDataPoint>();
   for (const row of rows) {
     const date = row.started_at ? localDayOf(row.started_at) : null;
@@ -1564,8 +1516,7 @@ export function getAnalyticsActivity(params: AnalyticsParams = {}): ActivityData
     point.user_messages += row.user_message_count ?? 0;
     byDate.set(date, point);
   }
-  // List every day of the range, idle days as zero, so a chart's axis is time.
-  // Without a range, span the first to the last active day.
+  // WHY: Omitting idle days would compress the chart's time axis.
   const active = [...byDate.keys()].sort();
   const from = rangeDay(params.date_from, 'from') ?? active[0];
   const to = rangeDay(params.date_to, 'to') ?? active[active.length - 1];
@@ -1707,14 +1658,12 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
     conditions.push('datetime(s.last_event_at) < datetime(?)');
     values.push(dateParamUpperExclusive(params.date_to));
   }
-  // A session made only of benchmark rows is a batch import, not live activity.
   conditions.push(`(
     NOT EXISTS (SELECT 1 FROM events b WHERE b.session_id = s.id AND b.source = 'benchmark')
     OR EXISTS (SELECT 1 FROM events r WHERE r.session_id = s.id AND ${excludeBenchmarkUsageCondition('r')})
   )`);
 
-  // The Monitor page sends limit=0 to mean "every live session", so a
-  // non-positive limit takes the ceiling rather than being clamped to one.
+  // WHY: The Monitor sends zero when it requests every live session.
   const requestedLimit = Number.isFinite(params.limit) ? Math.trunc(params.limit as number) : 50;
   const limit = requestedLimit > 0
     ? Math.min(requestedLimit, MONITOR_SESSIONS_MAX_LIMIT)
@@ -1722,18 +1671,11 @@ export function listMonitorSessions(params: MonitorSessionsParams = {}): { sessi
   const where = `WHERE ${conditions.join(' AND ')}`;
   const queryValues = [...values, limit];
 
-  // Usage seen by both OTEL and the import counts once, as Usage counts it,
-  // so a card's cost agrees with the header's; the event count keeps both rows.
+  // WHY: Usage from both import and OTEL must appear once in cost totals even when both event rows
+  // remain visible.
   const countedUsage = excludeOverlappingOtelUsageCondition('e');
 
-  // Page the sessions first, then compute all seven event aggregates in a single
-  // grouped pass restricted to that page, instead of running seven correlated
-  // subqueries per returned row. tests/monitor-session-list.test.ts diffs that
-  // paging shape against the correlated form on seeded edge cases; its oracle
-  // sums every row, so the reconciled usage sums are covered by
-  // tests/monitor-session-usage-reconciliation.test.ts instead. The
-  // session_id IN page restriction keeps the pass index-backed rather than
-  // scanning all events.
+  // WHY: Grouping only the selected page avoids seven correlated aggregates per returned session.
   const sessions = db.prepare(`
     WITH page AS (
       SELECT s.*
@@ -1804,7 +1746,7 @@ export function monitorEventsStatements(params: MonitorEventsParams = {}): {
   const values: unknown[] = [];
 
   if (params.agent) {
-    // The agent filter reads an agent-ordered index newest-first, alone or with
+    // WHY: The agent filter reads an agent-ordered index newest-first, alone or with
     // an event type or tool (idx_events_agent_event_covering/_tool_order). A model
     // or session has no agent-ordered composite, and walking the agent index
     // for a rare or absent value visits every row of the agent (seconds), so the
@@ -1838,8 +1780,6 @@ export function monitorEventsStatements(params: MonitorEventsParams = {}): {
     conditions.push('source = ?');
     values.push(params.source);
   } else {
-    // An explicit source filter decides for itself; otherwise the Monitor feed
-    // is live activity and keeps batch-imported benchmark rows out.
     conditions.push(excludeBenchmarkUsageCondition('events'));
   }
   if (params.since) {
@@ -1876,8 +1816,6 @@ export function listMonitorEvents(params: MonitorEventsParams = {}): { events: M
   return { events, total };
 }
 
-// The Monitor's quota snapshots are the provider-quota read: one mapper, so the
-// two never disagree about a snapshot's fields.
 function listMonitorProviderQuotas(): MonitorQuotaSnapshot[] {
   return getProviderQuotas();
 }
@@ -1902,9 +1840,6 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
   usageWhere: string;
   values: unknown[];
 } {
-  // The Monitor is the live-activity view: batch-imported benchmark rows are
-  // always excluded from its aggregates (no opt-in), and benchmark sessions are
-  // marked ended at insert so they never reach the live session lists/counts.
   const conditions: string[] = [excludeBenchmarkUsageCondition('e')];
   const values: unknown[] = [];
 
@@ -1918,7 +1853,7 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  // Event count retains overlapping OTEL rows; usage totals reconcile them
+  // WHY: Event count retains overlapping OTEL rows; usage totals reconcile them
   // away. Put the reconciliation predicate in WHERE so SQLite performs its
   // session+timestamp lookup once per candidate row, not once per SUM column.
   // The unary `+` on the agent filter keeps SQLite from seeking an agent-led
@@ -1928,8 +1863,6 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
   const usageWhere = `WHERE ${usageConditions.join(' AND ')}
     AND ${usageMetricPresenceCondition('e')}
     AND ${excludeOverlappingOtelUsageCondition('e')}`;
-  // Breakdowns break count ties by name, so their order does not depend on
-  // which index the plan happens to read.
   const toolWhere = conditions.length > 0 ? `${where} AND tool_name IS NOT NULL` : 'WHERE tool_name IS NOT NULL';
   const modelWhere = conditions.length > 0 ? `${where} AND model IS NOT NULL` : 'WHERE model IS NOT NULL';
 
@@ -1963,9 +1896,7 @@ export function monitorStatsStatements(params: MonitorStatsParams = {}): {
 
 export function getMonitorStats(params: MonitorStatsParams = {}): MonitorStats {
   if (!params.agent && !params.since) {
-    // The default Monitor and the SSE broadcaster need the same all-time
-    // snapshot. Reuse the write-invalidated cache instead of running two copies
-    // of the full-history query on the synchronous SQLite connection.
+    // WHY: The Monitor and its SSE broadcaster must agree on the same all-time snapshot.
     const stats = getStatsForBroadcast();
     const quotaMonitor = listMonitorProviderQuotas();
     return {
@@ -2065,7 +1996,6 @@ export function getMonitorSessionWithEvents(sessionId: string, eventLimit = 10):
   const db = getDb();
   updateIdleSessions(config.sessionTimeoutMinutes);
   const limit = Math.min(Math.max(eventLimit, 0), 500);
-  // Reconciled like the session list's totals (see listMonitorSessions).
   const countedUsage = excludeOverlappingOtelUsageCondition('e');
 
   const session = db.prepare(`
@@ -2332,11 +2262,7 @@ interface HealthAccumulator {
 }
 
 function healthKey(name: string, version: string | null): string {
-  // NUL joins name+version into a collision-free composite Map key (no
-  // printable char can appear in either half to forge the boundary). Built
-  // via fromCharCode so no literal NUL sits in the source bytes: a literal
-  // one makes grep/rg treat this 3.5k-line file as binary and silently
-  // return nothing for every symbol below it.
+  // WHY: NUL cannot appear in either half of the name/version key.
   return `${name}${String.fromCharCode(0)}${version ?? ''}`;
 }
 
@@ -2349,9 +2275,7 @@ function recordHealthInvocation(
   timestamp: string,
   misfire: boolean | null,
 ): void {
-  // A null or approximate version means we couldn't pin this invocation to a
-  // specific installed version; record the name so never-fired detection won't
-  // claim the installed version was never invoked.
+  // WHY: An approximate version cannot establish which installed version handled the invocation.
   if (version === null || approximate) unpinnedNames.add(name);
   const key = healthKey(name, version);
   const entry = acc.get(key) ?? {
@@ -2430,11 +2354,7 @@ function buildAnalyticsSkillsHealth(
     misfireRate: entry.misfireEligible > 0 ? entry.misfires / entry.misfireEligible : null,
   }));
 
-  // Never-fired: installed catalog (name, version) pairs with no invocations in
-  // range. Keyed by version, not name, so a freshly-installed version surfaces as
-  // never-fired even while an older version of the same skill has invocations —
-  // but a name with any unpinned (null/approximate) invocation is skipped, since
-  // that invocation may in fact be the installed version we just can't attribute.
+  // WHY: Invoking an older version does not establish that its replacement was used.
   for (const skill of catalog) {
     if (acc.has(healthKey(skill.name, skill.version))) continue;
     if (unpinnedNames.has(skill.name)) continue;
@@ -2499,11 +2419,8 @@ export function getAnalyticsSkillHealthParts(
 export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeekDataPoint[] {
   const db = getDb();
   const filter = buildAnalyticsFilterState(params);
-  // Messages land at their own times (resumed sessions span days), so the window
-  // selects messages, not session starts. Group them on the UTC quarter-hour
-  // grid, which every zone's hours align to, so the rows stay few and local
-  // bucketing below stays exact. The daily-activity index covers the instant,
-  // session, and role, so the counts read no message content.
+  // WHY: Resumed sessions can span days, so filtering on session start would misplace later
+  // messages.
   const instant = observedInstant('m.timestamp');
   const slot = `substr(${instant}, 1, 14)
     || printf('%02d', (CAST(substr(${instant}, 15, 2) AS INTEGER) / 15) * 15) || ':00Z'`;
@@ -2524,9 +2441,6 @@ export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeek
     WHERE ${windowConditions.join(' AND ')}
     GROUP BY m.session_id, slot
   `).all(...windowValues) as Array<{ session_id: string; slot: string; message_count: number }>;
-  // A user message is a prompt, as the parsers count it: a line carrying more
-  // than tool results. Only user rows read content, and ungrouped, so SQLite
-  // does not copy every row's content into a sorter.
   const promptSlots = db.prepare(`
     SELECT m.session_id, ${slot} AS slot
     FROM messages m INDEXED BY idx_messages_daily_activity
@@ -2536,13 +2450,11 @@ export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeek
         WHERE COALESCE(json_extract(block.value, '$.type'), '') != 'tool_result'
       )
   `).all(...windowValues) as Array<{ session_id: string; slot: string }>;
-  // Joining listed_sessions into the read above defeats its index range; the
-  // session list is small, so keep its ids and drop other sessions' rows here.
+  // WHY: Joining listed_sessions into this query prevents the index range scan.
   const inScope = new Set((db.prepare(`${sessionListCte}
     SELECT id FROM listed_sessions ${scope.where}
   `).all(...scope.values) as Array<{ id: string }>).map(row => row.id));
-  // Sessions with no timestamped message at all (summary-only) keep their
-  // start hour. One whose messages all fall outside the window has none here.
+  // WHY: Summary-only sessions have no timestamped messages from which to derive their active hour.
   const untimed = db.prepare(`${sessionListCte}
     SELECT id, started_at, message_count, user_message_count
     FROM listed_sessions
@@ -2551,7 +2463,6 @@ export function getAnalyticsHourOfWeek(params: AnalyticsParams = {}): HourOfWeek
     )
   `).all(...filter.values) as Array<{ id: string; started_at: string | null; message_count: number; user_message_count: number }>;
 
-  // Bucket by the operator's local weekday and hour, the view's labeled axes.
   const buckets = new Map<string, HourOfWeekDataPoint>();
   const sessionsByBucket = new Map<string, Set<string>>();
   const add = (sessionId: string, timestamp: string, messages: number, userMessages: number): void => {
@@ -2628,10 +2539,6 @@ export function getAnalyticsTopSessions(params: AnalyticsParams = {}): TopSessio
   `).all(...filter.values, limit) as TopSessionStat[];
 }
 
-// Overview's headlines: each the range's value, the equal-length period just
-// before, and one value per day. Sessions, prompts and tool outcomes come from
-// the session list (by session start, as the rest of Overview counts); cost
-// from usage events, as Usage counts it; active time from message times.
 export function getAnalyticsHeadlines(params: AnalyticsParams = {}): AnalyticsHeadlines {
   const from = rangeDay(params.date_from, 'from');
   const to = rangeDay(params.date_to, 'to');
@@ -2642,7 +2549,6 @@ export function getAnalyticsHeadlines(params: AnalyticsParams = {}): AnalyticsHe
   const daily = (byDay: Map<string, number>, round: (value: number) => number = value => value) =>
     days.map(day => round(byDay.get(day) ?? 0));
 
-  // Cost, as Usage counts it; per session only over sessions with a transcript.
   const usageRows = getUsageRows(params);
   const costByDay = new Map(getUsageDaily(params, usageRows).map(point => [point.date, point.cost_usd]));
   const costBySession = new Map<string, number>();
@@ -2765,8 +2671,6 @@ function toolOutcomesByAgent(params: AnalyticsParams): Map<string, ToolOutcomeTa
     SELECT agent, ${browserSessionKey('listed_sessions')} AS session_key FROM listed_sessions ${filter.where}
   `).all(...filter.values) as Array<{ agent: string; session_key: string }>;
   const sessionByKey = new Map(listed.map(row => [`${row.agent}:${row.session_key.toLowerCase()}`, row]));
-  // Every row of each listed session, then only those rows' items: the
-  // session_id index seeks them, where a scan reads every item in the store.
   const sessionById = new Map<string, (typeof listed)[number]>();
   for (const row of db.prepare(`SELECT id, agent, ${browserSessionKey('b')} AS session_key FROM browsing_sessions b`)
     .all() as Array<{ id: string; agent: string; session_key: string }>) {
@@ -2881,7 +2785,6 @@ export function getAnalyticsDelegation(params: AnalyticsParams = {}): AnalyticsD
     day.messages[kind] += row.message_count ?? 0;
   }
 
-  // Usage keys a session by its native id; the listed row says who ran it.
   const delegated = new Map((db.prepare(`${sessionListCte}
     SELECT ${browserSessionKey('listed_sessions')} AS session_key, relationship_type FROM listed_sessions
     WHERE relationship_type IN ('subagent', 'internal')
@@ -2899,7 +2802,6 @@ export function getAnalyticsDelegation(params: AnalyticsParams = {}): AnalyticsD
     cost.subagent += row.cost_usd;
   }
 
-  // Every day of the range, idle days as zero; without one, the active span.
   const active = [...byDay.keys()].sort();
   const from = rangeDay(params.date_from, 'from') ?? active[0];
   const to = rangeDay(params.date_to, 'to') ?? active[active.length - 1];
@@ -3013,7 +2915,6 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
       AND m.timestamp IS NOT NULL AND julianday(m.timestamp) > julianday(?) AND julianday(m.timestamp) <= julianday(?)
     ORDER BY julianday(m.timestamp), tc.id
   `);
-  // Read once per session: most of a code-mode session's calls leave a process running.
   const pollsBySession = new Map<string, Array<{ tool_name: string; input: string; tool_use_id: string | null; at: number }>>();
   const pollsOf = (sessionId: string) => {
     let found = pollsBySession.get(sessionId);
@@ -3026,13 +2927,8 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
     }
     return found;
   };
-  // A Codex call that returned while its process ran (a push hook, a slow
-  // `gh`) printed the rest to the polls of that process, and a code-mode
-  // script that yielded printed it to the waits on its cell, so they are read
-  // as part of its result.
-  // A continuation can itself leave something running (a cell's wait returns
-  // a live process), so the polls are walked in order, following each id a
-  // matched one names.
+  // WHY: A Codex call can return while its process is still running; later poll output may contain
+  // the actual result.
   const withPolls = (sessionId: string, at: number, own: string): string => {
     const processes = new Set(runningProcessIds(own));
     const cells = new Set(yieldedCellIds(own));
@@ -3217,11 +3113,9 @@ function openedPullRequests(calls: GitToolCall[]): Array<GitPullRequest & { proj
       if (opened.has(key)) continue;
       const github = onGithub.get(key);
       const created = github?.created ?? null;
-      // Opened before the call: an existing pull request the call listed.
       if (created !== null && created < call.at - COMMIT_CALL_WINDOW_MS) continue;
-      // Opened after it: GitHub answered about another pull request that has
-      // since taken the name (a renamed repository's name reused), so its
-      // state says nothing about this one.
+      // WHY: A newly opened PR can reuse a name from an older repository and must not acquire the
+      // older attribution.
       const aboutThis = created === null || created <= call.at + PROCESS_POLL_WINDOW_MS;
       opened.set(key, {
         url: ref.url,
@@ -3340,7 +3234,8 @@ export function getSessionGitActivity(sessionId: string): SessionGitActivity {
   if (!session || Number.isNaN(start)) return { commits: [], pull_requests: [] };
   const endIso = session.ended_at ?? session.last_item_at;
   const end = endIso ? Date.parse(endIso) : Date.now();
-  // Other sessions' calls compete for the same commits, so read them all for the span.
+  // WHY: Multiple sessions can compete for one commit, so restricting the candidate calls to one
+  // session could misattribute it.
   const rows = commitRows(start - COMMIT_CALL_WINDOW_MS, end + COMMIT_CALL_WINDOW_MS, true);
   const calls = gitToolCalls(...commitCallSpan(rows, start - COMMIT_CALL_WINDOW_MS, end + COMMIT_CALL_WINDOW_MS));
   const commits = attributedCommits(rows, calls.commits)
@@ -3371,8 +3266,6 @@ function outcomeSessions(): { keyOf: Map<string, string>; rootOf: (key: string) 
   const known = new Set(keyOf.values());
   const parentOf = new Map<string, string>();
   for (const row of rows) {
-    // A Codex child names its parent by native id, which is the parent's key
-    // even when only its rollout row is stored.
     const named = row.parent_session_id;
     const parent = named ? keyOf.get(named) ?? (known.has(named.toLowerCase()) ? named.toLowerCase() : undefined) : undefined;
     if (parent && parent !== row.session_key) parentOf.set(row.session_key, parent);
@@ -3430,8 +3323,6 @@ export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOut
   const sessions = outcomeSessions();
   const db = getDb();
 
-  // The range's spend exactly as Usage reads it, and the stretch before it,
-  // read up to the same bound, for pull requests merged in the range.
   const ranged = getUsageRows(params);
   const before = params.date_from && fromMs !== null
     ? getUsageRows({ ...params, date_from: new Date(fromMs - OUTCOME_REACH_MS).toISOString() },
@@ -3460,7 +3351,6 @@ export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOut
     }
   }
 
-  // Pull requests: GitHub's word, the commits each lists, and local merges.
   const github = new Map((db.prepare(`
     SELECT p.repo, p.number, p.state, p.merged_at, p.additions, p.deletions, p.commit_count, p.author_is_bot,
       (SELECT COUNT(*) FROM github_pull_request_commits c WHERE c.repo = p.repo AND c.number = p.number AND c.source = 'github') AS listed
@@ -3484,19 +3374,12 @@ export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOut
 
   const reachFrom = Math.max(0, (fromMs ?? 0) - OUTCOME_REACH_MS);
   const reachTo = toMs + OUTCOME_REACH_MS;
-  // An amend keeps its author date, so commits made in the reach are found by
-  // either date. Calls are read for the reach alone: one authored long before
-  // it is proved by the call near its committer date, and widening the span to
-  // every such author date would read years of calls.
+  // WHY: Amend and rebase can move the committer date while preserving the original author date.
   const rows = commitRows(reachFrom, reachTo, true);
   const calls = gitToolCalls(reachFrom - COMMIT_CALL_WINDOW_MS, reachTo + COMMIT_CALL_WINDOW_MS);
   const commitCallsOf = new Map<string, number[]>();
   for (const call of calls.commits) commitCallsOf.set(call.session_id, [...(commitCallsOf.get(call.session_id) ?? []), call.at]);
   const opened = openedPullRequests(calls.pullRequests);
-  // A commit GitHub lists in a pull request is in the one GitHub answered
-  // about, so GitHub's word (or a local merge) says whether it merged; a
-  // session's opening of it is judged by git activity's rule instead, which
-  // knows when that answer is about another that took the name.
   const isMerged = (pull: string) => mergedLocally.has(pull) || github.get(pull)?.state === 'MERGED';
   const mergedAt = (pull: string) => github.get(pull)?.merged_at ?? mergedLocally.get(pull) ?? null;
   const pullOf = (sha: string): string | null => {
@@ -3515,8 +3398,6 @@ export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOut
     if (root === null) return;
     const pull = pullOf(commit.sha);
     const { landing, committed_at } = rows[index];
-    // The commit is placed when its session made it: by its committer date
-    // when that session committed then (an amend), else by its author date.
     const committed = Date.parse(committed_at);
     const amended = (commitCallsOf.get(commit.attribution.session_id) ?? []).some(at => Math.abs(at - committed) <= COMMIT_CALL_WINDOW_MS);
     const outcome: MilestoneOutcome = pull !== null && isMerged(pull) ? 'merged_pr'
@@ -3556,7 +3437,6 @@ export function getAnalyticsOutcomes(params: AnalyticsParams = {}): AnalyticsOut
     const instant = iso ? parseStoredTimestamp(iso)?.getTime() : undefined;
     return instant !== undefined && (fromMs === null || instant >= fromMs) && instant < toMs;
   };
-  // Pull requests merged in the range, each with the project most of its cost was spent in.
   const merged = [...toPull].filter(([pull]) => within(mergedAt(pull))).map(([pull, cost]) => ({
     pull,
     usd: cost.usd,
@@ -3663,11 +3543,8 @@ export function getAnalyticsChangeMarkers(params: AnalyticsParams = {}): Analyti
   const wantAgent = params.agent ? browserAgentName(params.agent) : null;
   const markers: ChangeMarker[] = [];
 
-  // Days are the reporting zone's, so uses are grouped by UTC quarter-hour, which
-  // every zone offset in use keeps within one local day. julianday reads both
-  // stored formats as UTC instants (their raw text does not sort as time), and
-  // the block is taken from whole milliseconds so float error can't move an
-  // instant on a boundary. It costs about half what strftime per row does.
+  // WHY: A UTC quarter hour stays within the same local reporting bucket for the supported time-zone
+  // offsets.
   const uses = db.prepare(`
     SELECT agent_type, model, strftime('%Y-%m-%dT%H:%M:%fZ', MIN(jd)) AS first_at
     FROM (
@@ -3766,7 +3643,6 @@ function frictionSignals(targets: Array<{ id: string; session_key: string }>): M
     const rowIds = [...new Set([...ids, ...byKey.keys()])];
     const marks = (values: unknown[]) => values.map(() => '?').join(', ');
 
-    // Where each tool call sits, to open a streak at its first failure.
     const callOrdinal = new Map((db.prepare(`
       SELECT tc.session_id, tc.tool_use_id, m.ordinal
       FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
@@ -3809,10 +3685,7 @@ function frictionSignals(targets: Array<{ id: string; session_key: string }>): M
       streaks.set(id, tally);
     }
 
-    // A failure inside a Codex code-mode exec, or from a rollout parsed before
-    // call ids were kept, matches no stored call: open at the last message
-    // before it instead. julianday keeps fractions of a second, which a fast
-    // call needs; datetime() drops them.
+    // WHY: Older rollouts and nested code-mode failures can lack a matching stored call.
     const messageBefore = db.prepare(`
       SELECT MAX(ordinal) AS ordinal FROM messages
       WHERE session_id = ? AND timestamp IS NOT NULL AND julianday(timestamp) <= julianday(?)
@@ -3926,9 +3799,6 @@ export function getAnalyticsVelocity(params: AnalyticsParams = {}): VelocityMetr
       .filter((day): day is string => day !== null),
   ).size;
 
-  // Delegated work (subagents, internal jobs) is activity without a started
-  // session: it fills days and messages, and only the per-session rates need
-  // a session to divide by.
   const hasActivity = row.matched_rows > 0;
   const hasSessions = row.total_sessions > 0;
   const spanDays = hasActivity ? rangeSpanDays(params, row.earliest, row.latest) : 0;
@@ -3976,8 +3846,6 @@ export function getAnalyticsAgents(params: AnalyticsParams = {}): AgentCompariso
     ORDER BY message_count DESC, session_count DESC, agent ASC
   `).all(...filter.values) as AgentComparisonRow[];
 }
-
-// --- Expected skill realizations ---
 
 export interface SessionSkillContextSessionRow {
   id: string;
@@ -4190,8 +4058,6 @@ export function selectSessionExpectedRealizationPersistenceRow(
   `).get(sessionId) as ExpectedRealizationPersistenceRow | undefined;
 }
 
-// --- Usage ---
-
 interface UsageFilterState {
   conditions: string[];
   values: unknown[];
@@ -4290,9 +4156,7 @@ function buildUsageFilterState(params: UsageParams = {}, alias = 'e', options: U
     conditions.push(`datetime(${timestampExpr}) < datetime(?)`);
     values.push(dateParamUpperExclusive(params.date_to));
   }
-  // Segregate batch-imported benchmark runs from real-activity aggregates unless
-  // the caller opts in. A NULL source predates the column default and is never a
-  // benchmark row, so keep it.
+  // WHY: Benchmark sessions arrive through batch import and do not represent operator activity.
   if (!params.include_benchmark) {
     conditions.push(`(${alias}.source IS NULL OR ${alias}.source != 'benchmark')`);
   }
@@ -4562,10 +4426,8 @@ function selectUsageCostTotal(params: UsageParams = {}): number {
 }
 
 function estimateCacheSavings(row: UsageRow): number {
-  // Use the same date- and tier-selected rates `calculate()` billed this event
-  // at, so a long-context Gemini request (prompt > 200K) reports savings against
-  // its doubled long-context input rate, and a scheduled promo/revert reports
-  // against the rate in force when the event happened — not today's table.
+  // WHY: A single flat price would disagree with the original bill for tiered or date-dependent
+  // rates.
   const rates = pricingRegistry.effectiveRates(row.model, {
     input: row.tokens_in,
     output: row.tokens_out,
@@ -4573,8 +4435,6 @@ function estimateCacheSavings(row: UsageRow): number {
     cacheWrite: row.cache_write_tokens,
   }, row.timestamp);
   if (!rates) return 0;
-  // A write costs more than the input it caches, by a larger premium for the
-  // 1-hour part, priced as `calculate()` bills it.
   const cacheWrite1h = Math.min(Math.max(row.cache_write_1h_tokens, 0), row.cache_write_tokens);
   return (
     row.cache_read_tokens * (rates.inputCostPerToken - rates.cacheReadCostPerToken)
@@ -4588,9 +4448,6 @@ function resolveUsageDateBounds(
   earliest: string | null,
   latest: string | null,
 ): { from: string | null; to: string | null } {
-  // The monitor UI sends full ISO timestamps (e.g. 2026-06-02T12:02:29.756Z);
-  // enumerateDateRange needs bare YYYY-MM-DD or it yields an Invalid Date and
-  // the whole daily series comes back empty.
   const dayOf = (value: string | null | undefined) => (value ? localDayOf(value) : null);
   const from = dayOf(params.date_from) ?? dayOf(earliest);
   const to = dayOf(params.date_to) ?? dayOf(latest);
@@ -4747,9 +4604,8 @@ function selectUsageMatchingAggregate(params: UsageParams = {}): UsageMatchingAg
   const survivorFilter = buildUsageFilterState(params, 'survivor');
   const excludedWhere = [
     ...excludedFilter.conditions,
-    // source='otel' makes this logically redundant when benchmark rows are
-    // included, but spelling the partial-index predicate lets SQLite prove that
-    // idx_events_usage_covering is a valid forced plan in both modes.
+    // WHY: SQLite needs the partial-index predicate in the query even when source=otel already
+    // implies it.
     `(e.source IS NULL OR e.source != 'benchmark')`,
     `e.source = 'otel'`,
     usageMetricsCondition('e'),
@@ -4941,9 +4797,6 @@ export function getUsageCoverage(params: UsageParams = {}, usageRows?: UsageRow[
   };
 }
 
-// The `usageRows` parameter lets getUsageOverview() feed every rollup from one
-// scan instead of each re-running an identical query. Callers that want a single
-// panel keep passing params alone and pay for their own scan, as before.
 export function getUsageSummary(
   params: UsageParams = {},
   usageRows: UsageRow[] = getUsageRows(params),
@@ -4953,8 +4806,6 @@ export function getUsageSummary(
   const spanDays = usageRows.length > 0 ? rangeSpanDays(params, row.earliest, row.latest) : 0;
   const safeActiveDays = Math.max(row.active_days, 1);
   const safeSessions = Math.max(row.total_sessions, 1);
-  // The share of prompt tokens served from cache: a prompt is its uncached
-  // input, cache reads and cache writes, as the providers count it.
   const cacheHitDenominator = row.total_input_tokens + row.total_cache_read_tokens + row.total_cache_write_tokens;
   let estimatedCacheSavingsUsd = 0;
   let pricingKnownEvents = 0;
@@ -5390,9 +5241,6 @@ export function getUsageTopSessions(
  */
 export function getUsageFacets(params: UsageParams = {}): UsageFacets {
   const db = getDb();
-  // Only dates constrain the SQL here; project/agent are applied per-facet in JS
-  // below, alongside the classification filters SQL cannot express. Carry the
-  // benchmark opt-in so facets stay consistent with the other usage panels.
   const filter = buildUsageFilterState(
     { date_from: params.date_from, date_to: params.date_to, include_benchmark: params.include_benchmark },
     'e',
@@ -5494,8 +5342,6 @@ function getUsagePriorCosts(params: UsageParams = {}): UsagePriorCosts {
     agents: costs(getUsageAgents(prior, rows), row => row.agent),
   };
 }
-
-// --- Insights ---
 
 function parseInsightRow(row: InsightDbRow): InsightRow {
   return {
@@ -5643,8 +5489,6 @@ export function deleteInsight(id: number): boolean {
   return result.changes > 0;
 }
 
-// --- Metadata ---
-
 export function getDistinctProjects(): string[] {
   const db = getDb();
   const rows = db.prepare(
@@ -5661,10 +5505,6 @@ export function getDistinctAgents(): string[] {
   return rows.map(r => r.agent);
 }
 
-// ── Benchmarks (segregated bake-off comparison) ──────────────────────────────
-// The ONE benchmark-inclusive surface: these read `source='benchmark'` in
-// explicitly and never route through `buildUsageFilterState`, which keeps every
-// other surface benchmark-excluding.
 
 /** Mean-score floor below which an arm is treated as not really engaging the task. */
 const BENCH_ENGAGE_FLOOR = 0.5;
@@ -5699,9 +5539,7 @@ function firstString(cells: BenchCell[], key: string): string | null {
   return (hit as string) ?? null;
 }
 
-// Usage-evidence grades from weakest to strongest. An arm spanning mixed grades
-// must report its *weakest* cell so the honesty panel never hides a soft basis
-// behind a stronger one. Unknown grade strings sort as moderately weak.
+// WHY: Averaging evidence grades would conceal the weakest cell used to compare an arm.
 const GRADE_WEAKNESS: Record<string, number> = {
   vendor_reported: 0,
   proxy_measured: 1,
@@ -5783,13 +5621,11 @@ function computeBenchmarkFrontier(arms: BenchmarkArm[]): void {
       && (b.mean_score > a.mean_score || b.cost_per_trial < a.cost_per_trial));
     a.pareto = dominators.length === 0;
     if (dominators.length > 0) {
-      // Connector points to the cheapest arm that beats it (tie: highest score).
       dominators.sort((x, y) => x.cost_per_trial - y.cost_per_trial || y.mean_score - x.mean_score);
       a.dominated_by = dominators[0].canonical_model;
     }
   }
 
-  // value-pick: the engaging arm with the best score-per-dollar.
   let vp: Priced | null = null;
   for (const a of priced) {
     if (a.mean_score <= BENCH_ENGAGE_FLOOR || a.cost_per_trial <= 0) continue;
@@ -5813,10 +5649,7 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
   `).all(studyId) as Array<{ study: string | null; cost_usd: number | null; cache_read_tokens: number | null; duration_ms: number | null; client_timestamp: string | null; project: string | null; metadata: string | null }>;
 
   const cells: BenchCell[] = rows.map(r => ({ study: r.study, cost_usd: r.cost_usd, cache_read_tokens: r.cache_read_tokens, duration_ms: r.duration_ms, client_timestamp: r.client_timestamp, project: r.project, m: parseBenchMeta(r.metadata) }));
-  // Expected cells per arm = the full task×trial grid, not the max trial index.
-  // A multi-task study runs every arm against every (task, trial) combination, so
-  // the max trial index alone under-counts and hides missing cells in the
-  // excluded-trials honesty flag below.
+  // WHY: The highest trial index omits the task dimension of a multi-task study.
   const distinctTasks = new Set(cells.map(c => c.project).filter((t): t is string => Boolean(t)));
   const distinctTrials = new Set(cells.map(c => Number(c.m.trial)).filter(t => Number.isFinite(t)));
   const expected_trials = Math.max(distinctTasks.size, 1) * distinctTrials.size;
@@ -5838,9 +5671,6 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
     const anyUnpriced = cs.some(c => c.cost_usd == null);
     const ineligibleCells = cs.filter(c => c.m.usage_ranking_eligible === false);
     const isOpen = typeof m0.is_open_model === 'boolean' ? m0.is_open_model : null;
-    // Prefer openbench's authoritative is_open_model; fall back to pricing-table
-    // provenance only when absent. An `unknown` provider (unpriced model) is
-    // treated as routed, NOT first-party — so hollow markers never over-claim.
     const native = isOpen === false ? true
       : isOpen === true ? false
       : ['openai', 'anthropic', 'google'].includes(classifyModelForUsage(canonical_model).provider);
@@ -5859,16 +5689,14 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
       pareto: false,
       dominated_by: null,
       verdict: 'on-frontier',
-      // Count *scored* cells: an unscored failure (rate-limited / errored) is
-      // effectively an excluded trial, and the mean already averages only scored
-      // cells — so subtract n, not the raw cell count, or the honesty flag hides it.
+      // WHY: An unscored failure provides no observation and must not dilute the mean as if it
+      // scored zero.
       excluded_trials: Math.max(0, expected_trials - scored.length),
       noop_trials: cs.filter(c => c.m.success === true && c.m.workspace_changed === false).length,
       token_basis: firstString(cs, 'token_basis'),
       usage_evidence_grade: weakestEvidenceGrade(cs),
-      // Ranking eligibility from openbench (mirrored, not re-derived): tri-state —
-      // false if any cell was excluded, true only if every cell is explicitly
-      // eligible, else null (unknown). Surface the first exclusion reason.
+      // WHY: Legacy benchmarks can omit ranking eligibility; absence is distinct from an explicit
+      // exclusion.
       ranking_eligible: aggregateRankingEligible(cs),
       ranking_exclusion_reason: firstString(ineligibleCells, 'usage_ranking_exclusion_reason'),
     });
@@ -5887,9 +5715,6 @@ export function getBenchmarkStudy(studyId: string): BenchmarkStudyDetail {
   };
 }
 
-// ─── Operational OTEL metrics (Bucket A) read surface ───────────────────────
-// Backs GET /api/v2/metrics. Ingestion (insert) lives in src/db/otel-metrics.ts;
-// v2 read SQL stays here per the v1/v2 query-ownership split.
 
 export interface OperationalMetricQuery {
   /** Prefix match on metric_name, e.g. "codex.memory." */
@@ -5920,10 +5745,8 @@ export function getOperationalMetricSummary(query: OperationalMetricQuery = {}):
   const conditions: string[] = [];
   const values: unknown[] = [];
 
-  // client_timestamp is ISO-with-zone ("...T..Z"); created_at is SQLite's
-  // space-formatted local-of-UTC. Normalize the coalesced time with datetime()
-  // everywhere it is compared/aggregated so `since` and last-seen ordering are
-  // real time comparisons, not lexicographic string compares across two formats.
+  // WHY: SQLite and client timestamps use different separators and timezone conventions, so lexical
+  // comparison alone is unsafe.
   const eventTime = "datetime(COALESCE(client_timestamp, created_at))";
 
   if (query.namePrefix) {
@@ -5976,8 +5799,6 @@ export function getOperationalMetricSummary(query: OperationalMetricQuery = {}):
   }));
 }
 
-// --- Unpriced model usage ---
-
 /** A model whose recent usage carries no cost because no rate card matches it. */
 export interface UnpricedModelUsage {
   model: string;
@@ -5985,12 +5806,7 @@ export interface UnpricedModelUsage {
   last_seen: string;
 }
 
-// The window is on event time (client_timestamp, else created_at), which
-// idx_events_usage_ts indexes: an import stamps created_at with the import time,
-// so old usage would otherwise read as last week's. Grouping by `+model` keeps
-// SQLite off the model index, which would read every row of every model across
-// all history (about 1 s cold on a real store). Benchmark imports report their
-// own unpriced models loudly.
+// WHY: A delayed import belongs to its event window rather than the day it reached the database.
 export function recentUnpricedUsageStatement(since: string): { sql: string; values: unknown[] } {
   const eventTime = 'datetime(COALESCE(client_timestamp, created_at))';
   return {

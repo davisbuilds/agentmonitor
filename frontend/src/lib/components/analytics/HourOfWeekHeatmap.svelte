@@ -55,7 +55,6 @@
           </div>
         </div>
       {/each}
-      <!-- The scale: an empty hour, then four steps up to the busiest hour. -->
       <div class="ml-12 flex items-center justify-end gap-1.5 pt-1 text-meta tabular font-mono text-text-faint">
         <span>0</span>
         {#each [0, 0.25, 0.5, 0.75, 1] as step}

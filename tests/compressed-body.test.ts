@@ -8,8 +8,8 @@ import test from 'node:test';
 test('compressed bodies with trailing bytes cannot terminate the application', () => {
   const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'amon-compressed-body-'));
   try {
-    // An uncaught decoder error must kill only this disposable process. Exercise
-    // createApp's JSON and both raw-text middleware paths, with no live database.
+    // WHY: Run the decoder in a disposable process so an uncaught error cannot kill the test runner
+    // or reach the installed database.
     const script = `
       import assert from 'node:assert/strict';
       import http from 'node:http';

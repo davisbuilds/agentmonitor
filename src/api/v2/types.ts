@@ -10,14 +10,13 @@ import type {
   TraceQualityTraceRow,
 } from '../../trace-quality/types.js';
 
-// --- Database row types (also used as API response shapes) ---
 
 export interface BrowsingSessionRow {
   id: string;
   project: string | null;
   agent: string;
   first_message: string | null;
-  // A name the harness or a parent gave the session; shown before first_message.
+  /** Optional name assigned by the harness or parent session. */
   title: string | null;
   started_at: string | null;
   ended_at: string | null;
@@ -33,16 +32,13 @@ export interface BrowsingSessionRow {
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;
-  // Context-window occupancy (live sessions). Raw columns from the projection;
-  // context_pct is derived at read time. All null when occupancy is unavailable.
+  /** Occupancy is unknown when the live session has supplied no context-window evidence. */
   context_used_tokens: number | null;
   context_window_tokens: number | null;
   context_pct: number | null;
-  // Session lists only: listed subagent sessions nested under this one.
   child_count?: number;
 }
 
-// context_pct is derived, not stored, so it is omitted from the raw DB row.
 export interface BrowsingSessionDbRow
   extends Omit<BrowsingSessionRow, 'capabilities' | 'context_pct' | 'child_count'> {
   child_count?: number;
@@ -102,10 +98,11 @@ export interface MessageRow {
   session_id: string;
   ordinal: number;
   role: string;
-  content: string; // JSON-serialized content blocks
+  /** JSON-encoded array of message content blocks. */
+  content: string;
   timestamp: string | null;
-  has_thinking: number; // 0 or 1
-  has_tool_use: number; // 0 or 1
+  has_thinking: number;
+  has_tool_use: number;
   content_length: number;
 }
 
@@ -159,13 +156,9 @@ export interface PinnedMessageRow {
   session_title: string | null;
 }
 
-// --- Aggregate query result ---
-
 export interface CountResult {
   c: number;
 }
-
-// --- Analytics response types ---
 
 export interface AnalyticsSummary {
   total_sessions: number;
@@ -559,8 +552,8 @@ export interface MonitorQuotaCredits {
 }
 
 export interface MonitorQuotaSnapshot {
-  provider: 'claude' | 'codex';
-  agent_type: 'claude_code' | 'codex';
+  provider: 'claude' | 'codex' | 'antigravity';
+  agent_type: 'claude_code' | 'codex' | 'antigravity';
   status: 'available' | 'unavailable' | 'error';
   source: string | null;
   updated_at: string | null;
@@ -1295,8 +1288,6 @@ export interface UsageModelDailyPoint {
   models: UsageModelBreakdown[];
 }
 
-// ── Benchmarks (segregated bake-off comparison; the one benchmark-inclusive
-// surface). ──
 
 export type BenchmarkCostBasis = 'captured' | 'derived' | 'unpriced';
 export type BenchmarkVerdict =
@@ -1304,15 +1295,17 @@ export type BenchmarkVerdict =
 
 /** One row in the Studies list — a single bake-off run. */
 export interface BenchmarkStudySummary {
-  study_id: string;              // exact per-run key (= openbench study_sha256)
-  study: string;                 // display slug
-  suite: string | null;          // config-level slug
+  /** Exact study-run identity supplied by OpenBench as study_sha256. */
+  study_id: string;
+  study: string;
+  suite: string | null;
   arm_count: number;
   cell_count: number;
   tasks: string[];
   date_from: string | null;
   date_to: string | null;
-  total_cost_usd: number | null; // null if any arm unpriced
+  /** Null when any arm lacks pricing. */
+  total_cost_usd: number | null;
   cost_basis: BenchmarkCostBasis;
 }
 
@@ -1323,23 +1316,20 @@ export interface BenchmarkArm {
   label: string;
   n: number;
   mean_score: number;
-  cost_per_trial: number | null; // null if any cell unpriced
+  /** Null when any cell lacks pricing. */
+  cost_per_trial: number | null;
   cost_basis: BenchmarkCostBasis;
   mean_t_agent_s: number;
   cache_reads: number;
   native: boolean;
-  // frontier geometry (computed):
   pareto: boolean;
   dominated_by: string | null;
   verdict: BenchmarkVerdict;
-  // honesty flags:
   excluded_trials: number;
   noop_trials: number;
   token_basis: string | null;
   usage_evidence_grade: string | null;
-  // Upstream ranking eligibility (openbench), tri-state: false = a cell was
-  // excluded from ranking (reason in ranking_exclusion_reason); true = every cell
-  // explicitly eligible; null = unknown (legacy rows / field omitted).
+  /** False if a cell was explicitly excluded, true if all cells were eligible, and null when upstream supplied no decision. */
   ranking_eligible: boolean | null;
   ranking_exclusion_reason: string | null;
 }
@@ -1608,8 +1598,6 @@ export interface SearchResultRow {
   session_title: string | null;
 }
 
-// --- Trace quality response types ---
-
 export interface TraceQualityAggregateMetrics {
   observation_count: number;
   error_count: number;
@@ -1792,8 +1780,6 @@ export interface TraceQualityFinding {
   created_at: string | null;
 }
 
-// --- API request params ---
-
 export interface SessionsListParams {
   limit?: number;
   cursor?: string;
@@ -1886,7 +1872,6 @@ export interface TraceQualityTraceListParams {
   min_score?: number;
   max_score?: number;
   exclude_low_coverage?: boolean;
-  // Findings-only: narrow derived findings by kind and/or severity.
   kind?: string;
   severity?: string;
   limit?: number;

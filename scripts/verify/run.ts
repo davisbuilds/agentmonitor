@@ -97,7 +97,6 @@ export async function runScenario(id: Scenario, options: RunOptions = {}) {
     page.on('console', message => browserLog.push({ type: message.type(), text: message.text() }));
     page.on('pageerror', error => browserLog.push({ type: 'pageerror', text: String(error) }));
     page.on('requestfailed', request => browserLog.push({ type: 'requestfailed', url: request.url(), error: request.failure() }));
-    // From this point an unmet product expectation is a failure, not a missing prerequisite.
     result.status = 'failed';
     if (id === 'live-session') {
       const state = await control(session, 'status');

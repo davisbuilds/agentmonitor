@@ -100,9 +100,8 @@ describe('usage top models: color assignment', () => {
     }
   });
 
-  // Color follows the entity, never its rank. A rank-keyed palette would give whichever
-  // model leads the current metric SERIES_COLORS[0], repainting survivors on every
-  // toggle — so the two metrics' leaders, being different models, must NOT share a hue.
+  // WHY: Metric toggles can change model ranks. Position-based colors would repaint models that
+  // remain visible.
   test('color follows the model, not its rank in the current metric', () => {
     const colors = assignModelColors(divergent);
     const costLeader = rankModels(divergent, 'cost')[0];
@@ -122,9 +121,7 @@ describe('usage top models: color assignment', () => {
     }
   });
 
-  // Worst case: the two metrics' top-N sets are entirely disjoint, so ten distinct
-  // models can appear. They are never shown together, so a six-color palette still
-  // suffices — but only because sets are colored independently.
+  // WHY: Disjoint top sets can reuse colors because the models do not appear together in either view.
   test('disjoint cost and token leaders still resolve within the palette', () => {
     const points = [day(
       ...Array.from({ length: TOP_N }, (_, i) => slice(`costly-${i}`, 100 - i, 1)),
@@ -142,10 +139,8 @@ describe('usage top models: color assignment', () => {
 });
 
 describe('usage top models: overlap and ties', () => {
-  // Overlapping top-N sets that together exceed the palette: the token view
-  // shares one model (A) with the cost view and adds four more. Nine models,
-  // six colors. Handing colors out by position in the union would wrap G back
-  // onto A's hue, and A and G are shown side by side under Tokens.
+  // WHY: A shared model keeps its color across views while the others still need distinct colors
+  // within their own view.
   test('overlapping top-N sets larger than the palette still never collide on screen', () => {
     const points = [day(
       slice('A', 100, 9_000),
@@ -169,7 +164,6 @@ describe('usage top models: overlap and ties', () => {
   });
 
   test('tied totals rank by model name so the top-N cut is deterministic', () => {
-    // Six models tie; exactly one must fall to Other, and it must always be the same one.
     const points = [day(...['f', 'b', 'e', 'a', 'd', 'c'].map(name => slice(name, 5, 5)))];
     assert.deepEqual(rankModels(points, 'cost'), ['a', 'b', 'c', 'd', 'e']);
     assert.deepEqual(rankModels(points, 'tokens'), ['a', 'b', 'c', 'd', 'e']);

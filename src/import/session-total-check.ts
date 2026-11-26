@@ -1,12 +1,3 @@
-// One check of amon's imported totals against what each harness recorded
-// itself, per recent session. Each source is checked against its own
-// instrument, in its own unit:
-//   - Claude: the `cost-state` checkpoint Claude Code writes into a transcript
-//     (dollars, per model);
-//   - Codex: the thread total on the rollout's last own `token_usage_record`
-//     (tokens);
-//   - Antigravity records no total of its own, and is reported as such.
-// Read-only.
 
 import fs from 'node:fs';
 import { listImportedCodexRows } from '../db/queries.js';
@@ -147,7 +138,6 @@ function readThreadTotal(content: string): { sessionId: string | null; total: nu
   let sessionId: string | null = null;
   let total: number | null = null;
   for (const raw of content.split('\n')) {
-    // Most lines are neither; skip them before parsing.
     const meta = sessionId === null && raw.includes('"session_meta"');
     if (!meta && !raw.includes('"token_usage_record"')) continue;
     let line: { type?: unknown; payload?: Record<string, unknown> };
@@ -198,7 +188,6 @@ function checkCodex(codexDir: string | undefined, limit: number, excludePatterns
       checks.push({ source: 'codex', session_id: sessionId, status: 'not_imported', ...empty, harness: total });
       continue;
     }
-    // Cache-inclusive input plus output, as Codex's thread total counts it.
     const amon = rows.reduce((sum, row) => sum + row.tokens_in + row.tokens_out + row.cache_read_tokens + row.cache_write_tokens, 0);
     checks.push({ source: 'codex', session_id: sessionId, status: 'checked', harness: total, amon, ratio: total > 0 ? amon / total : null });
   }

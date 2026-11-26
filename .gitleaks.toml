@@ -1,6 +1,4 @@
-# Gitleaks config — extends the default ruleset. Full history is scanned in
-# CI, so allowlists below cover verified non-secrets (including in deleted
-# files). Keep entries tight and give each a reason.
+# WHY: CI scans full history, including files that have since been deleted.
 
 [extend]
 useDefault = true

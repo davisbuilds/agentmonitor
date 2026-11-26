@@ -84,7 +84,7 @@ export function drainHookSpool(directory: string): HookSpoolDrain {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') drain.errors += 1;
     return drain;
   }
-  // Oldest first. BigInt: a microsecond key outgrows exact Number comparison.
+  // WHY: Microsecond spool identities can exceed JavaScript's exact integer range.
   const order = (name: string) => BigInt(name.slice(0, name.indexOf('-')));
   names.sort((a, b) => (order(a) < order(b) ? -1 : order(a) > order(b) ? 1 : a.localeCompare(b)));
 
@@ -162,7 +162,7 @@ export function hookSpoolStatus(): HookSpoolDrain & { directory: string; pending
   try {
     pending = fs.readdirSync(config.hookSpoolDir).filter(name => SPOOL_FILE.test(name)).length;
   } catch {
-    // No spool yet: nothing was ever spooled.
+    // WHY: No spool directory exists until the first failed delivery.
   }
   return { directory: config.hookSpoolDir, pending, ...totals };
 }

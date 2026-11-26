@@ -31,7 +31,6 @@ test('a Claude session keeps the directory it started in, across a continued par
   insertParsedSession(db, chunk.parsed, '/home/.claude/projects/-work-alpha/claude-1.jsonl', 1, 'h1');
   assert.equal(storedCwd('claude-1'), '/work/alpha');
 
-  // The session moved into a worktree later; it still started in alpha.
   const more = lines([
     { type: 'user', uuid: 'u2', cwd: '/work/.worktrees/alpha-fix', timestamp: '2026-03-02T10:05:00Z', message: { role: 'user', content: 'Now the tests' } },
   ]);

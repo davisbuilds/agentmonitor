@@ -60,16 +60,12 @@ export interface ServiceSpec {
   dbPath: string;
 }
 
-// The plist is a plain file under ~/Library, so nothing that names a credential
-// goes into it. AGENTMONITOR_WAREHOUSE_DSN can carry a password.
+// WHY: launchd stores this plist in plaintext. A warehouse DSN may contain a password.
 const SECRET_NAME = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|DSN/;
-// Seams for tests, never runtime configuration.
 const TEST_ONLY = new Set(['AGENTMONITOR_PORTLESS_CLI']);
 
-// Settings that name a path, which the server resolves against its working
-// directory. The service's is the install root, so the install pins each to
-// what it meant in the shell that ran it. Keep in step with src/config.ts;
-// tests/launchd-service.test.ts checks the *_DIR, *_DIRS and *_PATH names.
+// WHY: launchd starts in the install directory; relative paths from the invoking checkout would
+// resolve differently.
 export const PATH_SETTINGS = new Set([
   'AGENTMONITOR_DB_PATH',
   'AGENTMONITOR_PROJECTS_DIR',
@@ -135,8 +131,8 @@ export function buildServiceSpec(input: {
     }
   }
 
-  // The agent runs the build `entry` belongs to, so its default database is
-  // under that install, whichever CLI computes this spec.
+  // WHY: Service operations must use the database belonging to the installed build, even when
+  // invoked from another checkout.
   const workingDirectory = path.dirname(path.dirname(entry));
   return {
     label: SERVICE_LABEL,
@@ -167,9 +163,7 @@ function renderPlist(spec: ServiceSpec): string {
   const environment = Object.entries(spec.environment)
     .map(([name, value]) => `    <key>${xml(name)}</key>\n    <string>${xml(value)}</string>`)
     .join('\n');
-  // KeepAlive restarts a server that crashes, not one that was stopped: a
-  // handled SIGTERM exits 0. ThrottleInterval spaces retries while another
-  // runtime holds the database.
+  // WHY: launchd must restart a crashed server while leaving an intentional SIGTERM stopped.
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -213,8 +207,7 @@ interface ServiceState {
 
 function assertSupported(host: LaunchdHost): void {
   if (host.platform !== 'darwin') throw unavailable('`amon service` manages a macOS launchd agent; this is not macOS.');
-  // Like the install-database guard in src/db/connection.ts: a test that forgot
-  // to substitute the host would install a real login service.
+  // WHY: A test using the real host implementation could otherwise install a login service.
   if (process.env.NODE_TEST_CONTEXT && path.resolve(host.home) === path.resolve(os.homedir())) {
     throw new Error('Refusing to manage the real launchd agent from a test; pass a temporary home.');
   }
@@ -245,8 +238,7 @@ function launchctl(host: LaunchdHost, args: string[]): void {
   }
 }
 
-// bootout can return while the server is still shutting down. Its process,
-// not the new spec's database, is what holds the port and its own database.
+// WHY: bootout may return before the old process releases its port and database.
 async function waitForExit(host: LaunchdHost, pid: number): Promise<void> {
   const deadline = performance.now() + host.stopTimeoutMs;
   while (host.isAlive(pid)) {

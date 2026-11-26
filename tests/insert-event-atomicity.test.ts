@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
 
-// Isolate the DB before importing anything that reads config.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-insert-atomic-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -34,8 +33,6 @@ describe('insertEvent is all-or-nothing', () => {
   });
 
   test('a failed event insert leaves no orphan session behind', () => {
-    // Stand-in for any failure after the session upsert: a constraint, or
-    // SQLITE_BUSY from a concurrent writer.
     getDb().exec(`CREATE TRIGGER fail_boom BEFORE INSERT ON events WHEN NEW.session_id = 'boom'
       BEGIN SELECT RAISE(ABORT, 'forced insert failure'); END`);
     try {
@@ -63,8 +60,6 @@ describe('insertEvent is all-or-nothing', () => {
   });
 
   test('a live-projection failure does not fail a write that already committed', () => {
-    // The Codex live projection runs after the event commits. Its failure must
-    // not surface as an error to a client whose event was in fact stored.
     getDb().exec(`CREATE TRIGGER fail_projection BEFORE INSERT ON browsing_sessions
       BEGIN SELECT RAISE(ABORT, 'forced projection failure'); END`);
     const originalError = console.error;

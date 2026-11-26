@@ -12,8 +12,6 @@ import { extractExplicitSkillName } from '../skills/invocation-detection.js';
 import { projectNameFromCwd } from '../util/project-identity.js';
 import { promptTitleFromTexts } from './session-title.js';
 
-// --- Tool category normalization ---
-
 const CATEGORY_MAP: Record<string, string> = {
   Read: 'Read',
   NotebookRead: 'Read',
@@ -35,8 +33,6 @@ const CATEGORY_MAP: Record<string, string> = {
 export function categorizeToolName(toolName: string): string {
   return CATEGORY_MAP[toolName] ?? 'Other';
 }
-
-// --- JSONL line types ---
 
 export interface ContentBlock {
   type: string;
@@ -69,9 +65,7 @@ interface ClaudeCodeLine {
   type?: string;
   parentUuid?: string | null;
   sessionId?: string;
-  // Claude Code's own short title for the session (`type: 'ai-title'` lines).
   aiTitle?: string;
-  // The name a user gave the session with a rename (`type: 'custom-title'`).
   customTitle?: string;
   isSidechain?: boolean;
   isMeta?: boolean;
@@ -88,20 +82,18 @@ interface ClaudeCodeLine {
       output_tokens?: number;
     };
   };
-  // progress / system fields
   data?: Record<string, unknown>;
   subtype?: string;
   entrypoint?: string;
   promptSource?: string;
 }
 
-// --- Parsed output types ---
-
 export interface ParsedMessage {
   session_id: string;
   ordinal: number;
   role: string;
-  content: string; // JSON-serialized ContentBlock[]
+  /** JSON-encoded array of content blocks. */
+  content: string;
   timestamp: string | null;
   has_thinking: number;
   has_tool_use: number;
@@ -115,7 +107,7 @@ export interface ParsedToolCall {
   tool_use_id: string | null;
   input_json: string | null;
   subagent_session_id: string | null;
-  message_ordinal: number; // used to link to message after insert
+  message_ordinal: number;
 }
 
 export interface ParsedSessionMetadata {
@@ -123,11 +115,8 @@ export interface ParsedSessionMetadata {
   project: string | null;
   agent: string;
   first_message: string | null;
-  // The directory the session started in, which names its repository. Local
-  // only: never in an API response or an export.
+  /** Local-only starting directory used for project attribution. */
   cwd?: string | null;
-  // A name for the session the harness or its parent gave it, preferred over
-  // first_message for display. Undefined when the parser has none.
   title?: string | null;
   started_at: string | null;
   ended_at: string | null;
@@ -135,16 +124,12 @@ export interface ParsedSessionMetadata {
   user_message_count: number;
   parent_session_id: string | null;
   relationship_type: string | null;
-  // Invocation mode derived from the session log (see src/util/invocation-mode.ts).
-  // Undefined when the agent emits no signal (e.g. Antigravity).
+  /** Undefined when the producer emits no invocation-mode signal. */
   mode?: 'interactive' | 'headless';
-  // Context-window occupancy numerator: the most recent assistant turn's prompt
-  // size (input + cache_read + cache_creation). Undefined when no usage seen.
+  /** Latest prompt occupancy, including cache reads and cache creation. */
   context_used_tokens?: number;
-  // Model of the most recent assistant turn (for context-window resolution).
   model?: string;
-  // First-party context-window size when the source reports one (Codex
-  // model_context_window). Undefined for Claude (resolved by default instead).
+  /** Producer-reported context-window size when available. */
   context_window_reported?: number;
 }
 
@@ -169,38 +154,18 @@ function previewTextFromBlocks(blocks: ContentBlock[], isMeta: boolean): string 
   )));
 }
 
-// --- Extract project name from file path ---
 
 function projectFromPath(filePath: string): string | null {
-  // Path pattern: ~/.claude/projects/-Users-dev-my-project/session.jsonl
-  // The directory name encodes the full path with '-' as separator, prefixed with '-'.
-  // e.g. "-Users-example-Dev-agentmonitor" → project is "agentmonitor"
-  // e.g. "-Users-dev-my-project" → project is "my-project"
-  // Strategy: the encoded dir represents a filesystem path. The last path component
-  // (after the last known directory separator) is the project name. We use the cwd
-  // from the JSONL if available, but as fallback we decode the directory name.
   const parts = filePath.split('/');
   const projectsIdx = parts.indexOf('projects');
   if (projectsIdx >= 0 && projectsIdx + 1 < parts.length) {
     const encodedDir = parts[projectsIdx + 1];
-    // The encoded dir is a path like "-Users-dev-my-project".
-    // We need to find where the last path component starts.
-    // Claude Code encodes "/" as "-", so we need to figure out which "-" is a separator
-    // and which is part of the name. Use a heuristic: split by known path prefixes.
-    // Most reliable: look for common path patterns.
+    // WHY: A hyphen in a Claude project directory can represent a separator or a literal part of a
+    // name.
 
-    // Try matching known patterns: -Users-<user>-<...>-<project>
-    // or -home-<user>-<...>-<project>
     const match = encodedDir.match(/^-(?:Users|home)-[^-]+-(.+)$/);
     if (match) {
-      // The remainder after "-Users-<username>-" may contain multiple path segments.
-      // The last segment (after the last known directory separator '-' that maps to '/')
-      // is the project. But we don't know which '-' are separators vs part of names.
-      // Best approach: use the cwd from the JSONL data. As fallback, take everything
-      // after the last major directory marker.
       const remainder = match[1];
-      // Common pattern: Dev-projectname or Documents-projectname
-      // Just take everything after the last known single-component directory
       const knownDirs = ['Dev', 'Documents', 'Projects', 'repos', 'code', 'src', 'work', 'projects', 'workspace', 'git'];
       for (const dir of knownDirs) {
         const dirIdx = remainder.indexOf(dir + '-');
@@ -208,7 +173,6 @@ function projectFromPath(filePath: string): string | null {
           return remainder.slice(dirIdx + dir.length + 1);
         }
       }
-      // Fallback: just return the full remainder
       return remainder;
     }
   }
@@ -294,7 +258,6 @@ function linkParsedSessionRelationships(
   }
 }
 
-// --- Parse JSONL content into structured messages ---
 
 /**
  * Everything a parse carries from one line to the next, so a later parse can
@@ -304,7 +267,6 @@ export interface ClaudeParseState {
   messageCount: number;
   firstUserMessage: string | null;
   title: string | null;
-  // A user's rename, which outranks `title` (Claude Code's ai-title).
   customTitle?: string;
   parentSessionId: string | null;
   startedAt: string | null;
@@ -358,20 +320,18 @@ export function parseSessionChunk(
   let startedAt: string | null = state?.startedAt ?? null;
   let endedAt: string | null = state?.endedAt ?? null;
   let userMessageCount = state?.userMessageCount ?? 0;
-  // A subagent's own file (agent-*.jsonl) records its parent's session id on
-  // every line. A top-level file can name another session too (a resumed
-  // conversation), which is not a parent, so only subagent files read it.
+  // WHY: Subagent files report their parent's session ID; a different ID on one line is insufficient
+  // to identify a child.
   const isSubagentFile = sessionId.startsWith('agent-');
   let parentSessionId: string | null = state?.parentSessionId ?? null;
   let relationshipType: string | null = null;
   let sawSidechain = state?.sawSidechain ?? false;
   let entrypoint: string | undefined = state?.entrypoint;
   let promptSource: string | undefined = state?.promptSource;
-  // Latest assistant turn's context-window occupancy (in file order).
   let contextUsedTokens: number | undefined = state?.contextUsedTokens;
   let latestModel: string | undefined = state?.latestModel;
-  // Sidechain turns only speak for a file with no main thread: a subagent's own
-  // file marks every line as a sidechain, an older interleaved transcript does not.
+  // WHY: Child-agent transcripts can consist entirely of sidechain turns, while a mixed file also
+  // contains the main thread.
   let sidechainContextUsedTokens: number | undefined = state?.sidechainContextUsedTokens;
   let sidechainLatestModel: string | undefined = state?.sidechainLatestModel;
   let latestCwd: string | null = state?.latestCwd ?? null;
@@ -423,14 +383,13 @@ export function parseSessionChunk(
     }
 
     if (lineType === 'ai-title') {
-      // Claude Code rewrites its title as the session goes; the latest one wins.
       const aiTitle = typeof line.aiTitle === 'string' ? cleanPreviewText(line.aiTitle) : '';
       if (aiTitle) title = aiTitle.slice(0, 200);
       continue;
     }
 
     if (lineType === 'custom-title') {
-      // A rename is the user's choice, so it outranks ai-title; the latest one wins.
+      // WHY: A user's explicit rename takes precedence over an automatically generated title.
       const renamed = typeof line.customTitle === 'string' ? cleanPreviewText(line.customTitle) : '';
       if (renamed) customTitle = renamed.slice(0, 200);
       continue;
@@ -440,21 +399,17 @@ export function parseSessionChunk(
       sawSidechain = true;
     }
 
-    // Invocation-mode signal rides every line; capture the first seen.
     if (entrypoint === undefined && typeof line.entrypoint === 'string') entrypoint = line.entrypoint;
     if (promptSource === undefined && typeof line.promptSource === 'string') promptSource = line.promptSource;
 
-    // Only process user and assistant message lines
     if (lineType !== 'user' && lineType !== 'assistant') continue;
 
     const msg = line.message;
     if (!msg || !msg.role) continue;
 
-    // Extract content blocks
     const rawContent = msg.content;
     if (rawContent == null) continue;
 
-    // Normalize content to array of blocks
     let blocks: ContentBlock[];
     if (typeof rawContent === 'string') {
       blocks = [{ type: 'text', text: rawContent }];
@@ -464,7 +419,6 @@ export function parseSessionChunk(
       continue;
     }
 
-    // Filter to known block types and normalize
     const normalizedBlocks: ContentBlock[] = [];
     let hasThinking = false;
     let hasToolUse = false;
@@ -489,7 +443,6 @@ export function parseSessionChunk(
           });
           hasToolUse = true;
 
-          // Extract tool call record
           if (block.name) {
             if (block.name === 'Skill') {
               const skillName = extractExplicitSkillName(
@@ -514,7 +467,7 @@ export function parseSessionChunk(
               tool_use_id: block.id ?? null,
               input_json: block.input != null ? stripInlineImages(JSON.stringify(block.input)) : null,
               subagent_session_id: extractSubagentSessionId(block.input),
-              message_ordinal: ordinalBase + messages.length, // current message index
+              message_ordinal: ordinalBase + messages.length,
             });
           }
           break;
@@ -527,7 +480,8 @@ export function parseSessionChunk(
           });
           break;
         default:
-          // Keep unknown block types as-is for forward compatibility
+          // WHY: A newer producer can introduce a content-block type before the browser knows how to
+          // render it.
           normalizedBlocks.push(block);
           break;
       }
@@ -536,14 +490,13 @@ export function parseSessionChunk(
     const contentJson = stripInlineImages(JSON.stringify(normalizedBlocks));
     const timestamp = line.timestamp ?? null;
 
-    // Track timestamps for session metadata
     if (timestamp) {
       if (!startedAt || timestamp < startedAt) startedAt = timestamp;
       if (!endedAt || timestamp > endedAt) endedAt = timestamp;
     }
 
-    // Track first user message. Claude Code returns each tool result to the
-    // model as a user-role line; only a line carrying anything else is a prompt.
+    // WHY: Claude returns tool results in user-role messages; those must not become the user's first
+    // prompt.
     if (msg.role === 'user') {
       if (normalizedBlocks.some(block => block.type !== 'tool_result')) userMessageCount++;
       if (firstUserMessage === null) {
@@ -551,9 +504,6 @@ export function parseSessionChunk(
       }
     }
 
-    // Track the latest assistant turn's context-window occupancy. The prompt
-    // size (input + cache_read + cache_creation) of the most recent request is
-    // how full the window is right now; output_tokens is generation, not window.
     if (msg.role === 'assistant' && msg.usage) {
       const u = msg.usage;
       const used =
@@ -582,10 +532,8 @@ export function parseSessionChunk(
     });
   }
 
-  // The transcript's own cwd names the project; the encoded directory name is
-  // ambiguous (a dash may be a separator or part of a name), so it is only the
-  // fallback for transcripts that record no cwd.
-  // A recorded cwd decides, even when it names no project (scratch work).
+  // WHY: The recorded cwd distinguishes hyphens inside a directory name from path separators in its
+  // encoded name.
   const project = firstCwd ? projectNameFromCwd(firstCwd) : (filePath ? projectFromPath(filePath) : null);
   if (sessionId.startsWith('agent-')) {
     relationshipType = 'subagent';
@@ -662,8 +610,6 @@ export function parseSessionChunk(
   };
 }
 
-// --- Insert parsed session into database ---
-
 interface StoredMessageRow {
   id: number;
   ordinal: number;
@@ -719,7 +665,7 @@ function storedPrefixLength(
     SELECT id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length
     FROM messages WHERE session_id = ? ORDER BY ordinal, id
   `).all(sessionId) as StoredMessageRow[];
-  // Anything but one row per ordinal 0..n-1 cannot be trimmed by ordinal.
+  // WHY: Trimming by ordinal requires exactly one row per position and no gaps.
   if (stored.some((row, index) => row.ordinal !== index)) return { keep: 0, storedIds: [] };
 
   let keep = 0;
@@ -734,8 +680,6 @@ function storedPrefixLength(
     WHERE tc.session_id = ?
     ORDER BY tc.id
   `).all(sessionId) as StoredToolCallRow[];
-  // Both lists run in message order, so the kept tool calls are a prefix of each.
-  // A tool call whose message is gone is never kept; the delete clears it.
   const keptStored = storedTools.filter(row => row.ordinal !== null && row.ordinal < keep);
   const keptParsed = toolCalls.filter(tc => tc.message_ordinal < keep);
   const length = Math.max(keptStored.length, keptParsed.length);
@@ -784,9 +728,6 @@ export function insertParsedSession(
       ? { keep: options.appendFrom!, storedIds: [] }
       : storedPrefixLength(db, metadata.session_id, messages, toolCalls);
 
-    // Clear the rows this parse replaces. Messages and tool calls are trimmed
-    // from the first difference; the session row and observations are small and
-    // are rewritten whole, unless this parse only adds to them.
     if (!appending) {
       db.prepare(`
         DELETE FROM session_catalog_observation_entries
@@ -804,10 +745,6 @@ export function insertParsedSession(
     db.prepare('DELETE FROM messages WHERE session_id = ? AND ordinal >= ?').run(metadata.session_id, keep);
     db.prepare('DELETE FROM browsing_sessions WHERE id = ?').run(metadata.session_id);
 
-    // Backfill context-window occupancy so cards populate on import/boot, not
-    // only after the next live turn. Mirrors the live adapters' resolution: the
-    // resolver branches per agent (Claude 1M default, Codex reported-else-config
-    // default), and returns null when the agent/usage yields no window.
     const usedTokens = metadata.context_used_tokens ?? null;
     const contextWindow = usedTokens != null
       ? resolveContextWindow({
@@ -819,7 +756,6 @@ export function insertParsedSession(
         })
       : null;
 
-    // Insert browsing session
     db.prepare(`
       INSERT INTO browsing_sessions (
         id, project, agent, first_message, title, cwd, started_at, ended_at, message_count,
@@ -850,7 +786,6 @@ export function insertParsedSession(
       skillContext ? JSON.stringify(skillContext.capabilities) : null,
     );
 
-    // Insert messages and collect their IDs for tool call linking
     const insertMsg = db.prepare(`
       INSERT INTO messages (session_id, ordinal, role, content, timestamp, has_thinking, has_tool_use, content_length)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -872,8 +807,6 @@ export function insertParsedSession(
       messageIds.set(msg.ordinal, Number(result.lastInsertRowid));
     }
 
-    // A result for a call an earlier, continued parse stored goes onto that
-    // call's message in place, so no ordinal moves.
     const storedMessage = db.prepare('SELECT id, content FROM messages WHERE session_id = ? AND ordinal = ?');
     const updateContent = db.prepare('UPDATE messages SET content = ?, content_length = ? WHERE id = ?');
     for (const receipt of parsed.receipts ?? []) {
@@ -889,7 +822,6 @@ export function insertParsedSession(
       updateContent.run(content, content.length, row.id);
     }
 
-    // Insert tool calls linked to their messages
     const insertTc = db.prepare(`
       INSERT INTO tool_calls (message_id, session_id, tool_name, category, tool_use_id, input_json, subagent_session_id)
       VALUES (?, ?, ?, ?, ?, ?, ?)

@@ -9,7 +9,6 @@ from send_event import read_hook_input, extract, extract_nested, get_project, se
 
 read_hook_input()
 
-# Build metadata from tool_input fields
 meta = {"tool_use_id": extract("tool_use_id")}
 for key in ("command", "file_path", "pattern", "query", "url"):
     val = extract_nested(f"tool_input.{key}")

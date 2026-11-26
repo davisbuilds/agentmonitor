@@ -92,7 +92,6 @@
                 <span class="tabular font-mono text-text">{formatValue(row.value)}{percent(row.value)}</span>
               </div>
             {/each}
-            <!-- The delegated segment's two parts, under it. -->
             {#each [{ key: 'Subagents', value: split.subagent }, { key: 'Codex threads', value: split.internal }] as part (part.key)}
               <div class="flex items-center justify-between gap-3 pl-[18px] text-text-muted">
                 <span>{part.key}</span>

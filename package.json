@@ -39,7 +39,7 @@
     "test:parity:ts:live": "AGENTMONITOR_BASE_URL=http://127.0.0.1:3141 node --import tsx --test tests/parity/*.test.ts",
     "verify": "tsx scripts/verify/cli.ts",
     "verify:check": "tsc --noEmit -p tsconfig.verify.json",
-    "test:verify": "pnpm verify:check && node --import tsx --test --test-concurrency=1 scripts/verify/integration.test.ts scripts/verify/probe.integration.test.ts",
+    "test:verify": "pnpm verify:check && node --import tsx --test --test-concurrency=1 scripts/verify/integration.test.ts scripts/verify/probe.integration.test.ts scripts/verify/codex-accounting.integration.test.ts",
     "test:browser-runtime": "node --test scripts/browser-runtime.test.mjs && playwright test --config scripts/browser-smoke.config.ts"
   },
   "keywords": [
@@ -55,22 +55,22 @@
   },
   "packageManager": "pnpm@11.28.6",
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^13.2.0",
     "chokidar": "^6.0.0",
     "express": "^5.3.0",
     "pg": "^8.23.1",
-    "portless": "0.16.0"
+    "portless": "0.17.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@playwright/test": "1.65.0",
+    "@playwright/test": "1.65.1",
     "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.6",
     "@types/node": "^26.6.6",
     "@types/pg": "^8.23.1",
-    "eslint": "^10.14.0",
+    "eslint": "^10.15.0",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1"
+    "typescript-eslint": "^8.72.2"
   }
 }

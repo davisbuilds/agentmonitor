@@ -34,9 +34,7 @@ test('v10 clears the table estimate a Claude token metric row billed on top of t
   insert('metric-tokens', 1_000_000, 2, metric);
   insert('metric-cost', 0, 1.75, metric);
   insert('log-usage', 1_000_000, 2, '{}');
-  // Token-only exports: no cost metric arrived, so the estimate is the only cost.
   insert('tokens-only', 1_000_000, 2, metric, 's-tokens-only');
-  // A cost metric from another export interval does not cover this token row.
   insert('other-interval', 1_000_000, 2, metric, 's-metric', '2026-09-04 21:00:00');
 
   db.pragma('user_version = 9');

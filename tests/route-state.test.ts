@@ -118,9 +118,7 @@ test('an open search result keeps the search in the hash so closing the viewer r
 });
 
 test('sort only serializes while it orders full-text results', () => {
-  // No query: nothing is sorted by match, so the sort stays out of the link.
   assert.equal(buildSessionsHash({ ...sessionsFallback, sort: 'relevance' }), 'sessions');
-  // Pinned messages keep their own order, even with a query narrowing them.
   assert.equal(
     buildSessionsHash({ ...sessionsFallback, query: 'x', sort: 'relevance', pinned: true }),
     'sessions?q=x&pinned=1',
@@ -134,8 +132,8 @@ test('parseSessionsHash reads an omitted or unknown sort as recent, whatever the
 });
 
 test('sessions hashes round-trip reserved characters in the query', () => {
-  // The parser splits the hash on "?", so a literal "?" or "#" in a query must
-  // be encoded by the builder or the query is truncated.
+  // WHY: The fragment parser treats question marks as separators, so query punctuation needs encoding
+  // to survive a round trip.
   const state: SessionsRouteState = { ...sessionsFallback, query: 'why? a&b=c #1 100%', project: 'p q' };
   assert.deepEqual(parseSessionsHash(`#${buildSessionsHash(state)}`, sessionsFallback), state);
 });
@@ -150,12 +148,10 @@ test('Pinned is a filter on the sessions list, kept beside the other filters', (
 });
 
 test('legacy Pinned links redirect to the Pinned filter', () => {
-  // Neither a standalone tab nor a sub-view any more.
   assert.equal(parseAppHash('#pinned').tab, 'monitor');
   assert.equal(canonicalizeLegacyPinnedHash('#pinned'), 'sessions?pinned=1');
   assert.equal(canonicalizeLegacyPinnedHash('#sessions?view=pinned'), 'sessions?pinned=1');
   assert.equal(canonicalizeLegacyPinnedHash('sessions?view=pinned&project=am'), 'sessions?project=am&pinned=1');
-  // Canonical or unrelated hashes are left alone.
   assert.equal(canonicalizeLegacyPinnedHash('#sessions?pinned=1'), null);
   assert.equal(canonicalizeLegacyPinnedHash('#sessions?session=abc'), null);
   assert.equal(canonicalizeLegacyPinnedHash('#analytics?view=usage'), null);
@@ -169,16 +165,13 @@ test('legacy Search links redirect into the Sessions search', () => {
     canonicalizeLegacySearchHash('#search?q=quota%20reset&project=am&agent=codex&sort=relevance'),
     'sessions?q=quota+reset&project=am&agent=codex&sort=relevance',
   );
-  // A sort without a query has nothing to order.
   assert.equal(canonicalizeLegacySearchHash('search?project=am&sort=relevance'), 'sessions?project=am');
-  // Canonical or unrelated hashes are left alone.
   assert.equal(canonicalizeLegacySearchHash('#sessions?q=x'), null);
   assert.equal(canonicalizeLegacySearchHash('#searchx'), null);
   assert.equal(canonicalizeLegacySearchHash(''), null);
 });
 
 test('usage and insights are no longer standalone tabs', () => {
-  // Legacy top-level tabs collapse into the analytics tab via canonicalization.
   assert.equal(parseAppHash('#usage?from=2026-01-01').tab, 'monitor');
   assert.equal(parseAppHash('#insights').tab, 'monitor');
   assert.equal(parseAppHash('#analytics?view=usage').tab, 'analytics');
@@ -190,14 +183,12 @@ test('canonicalizeLegacyAnalyticsHash rewrites old usage/insights deep links', (
     'analytics?from=2026-01-01&to=2026-01-30&project=p&model=gpt-5&tier=standard&view=usage',
   );
   assert.equal(canonicalizeLegacyAnalyticsHash('#insights'), 'analytics?view=insights');
-  // Already-canonical or unrelated hashes are left alone.
   assert.equal(canonicalizeLegacyAnalyticsHash('#analytics?view=usage'), null);
   assert.equal(canonicalizeLegacyAnalyticsHash('#sessions?session=abc'), null);
   assert.equal(canonicalizeLegacyAnalyticsHash(''), null);
 });
 
 test('analytics route hashes round-trip view + shared filters', () => {
-  // Overview view omits the view param; shared filters serialize.
   assert.equal(
     buildAnalyticsRouteHash({ ...analyticsFallback, view: 'overview', from: '2026-02-01', to: '2026-02-28', project: 'am' }),
     'analytics?from=2026-02-01&to=2026-02-28&project=am',
@@ -209,7 +200,6 @@ test('analytics route hashes round-trip view + shared filters', () => {
 });
 
 test('analytics route hashes carry only the active view\'s specialized filters', () => {
-  // Usage view: model/provider/tier serialize; insights fields do not.
   const usageHash = buildAnalyticsRouteHash({
     ...analyticsFallback, view: 'usage', model: 'gpt-5', provider: 'openai', tier: 'standard', insightModel: 'ignored',
   });
@@ -219,7 +209,6 @@ test('analytics route hashes carry only the active view\'s specialized filters',
   assert.equal(usage.model, 'gpt-5');
   assert.equal(usage.tier, 'standard');
 
-  // Insights view: provider maps to insightProvider, model to insightModel, plus kind.
   const insightsHash = buildAnalyticsRouteHash({
     ...analyticsFallback, view: 'insights', insightProvider: 'anthropic', insightModel: 'claude', kind: 'weekly', model: 'ignored',
   });
@@ -229,9 +218,8 @@ test('analytics route hashes carry only the active view\'s specialized filters',
   assert.equal(insights.insightProvider, 'anthropic');
   assert.equal(insights.insightModel, 'claude');
   assert.equal(insights.kind, 'weekly');
-  assert.equal(insights.model, ''); // usage-model not set on insights view
+  assert.equal(insights.model, '');
 
-  // Skills view: shared filters survive, unrelated specialized state does not.
   const skillsHash = buildAnalyticsRouteHash({
     ...analyticsFallback,
     view: 'skills',
@@ -316,7 +304,7 @@ test('quality view carries session and trace; other views drop them', () => {
 test('insight provider and kind persist from the current state when another view is active', () => {
   const current = { ...analyticsFallback, insightProvider: 'anthropic', kind: 'weekly' };
   const usage = parseAnalyticsRouteHash('#analytics?view=usage&provider=openai', current);
-  assert.equal(usage.insightProvider, 'anthropic'); // usage's provider param is the billed provider
+  assert.equal(usage.insightProvider, 'anthropic');
   assert.equal(usage.provider, 'openai');
   assert.equal(usage.kind, 'weekly');
 });

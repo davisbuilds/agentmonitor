@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cost-recalc-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -13,7 +12,6 @@ const { closeDb, getDb } = await import('../src/db/connection.js');
 const { recalculateEventCosts } = await import('../src/pricing/recalc.js');
 const { maintainSessionTraceSummary } = await import('../src/trace-quality/summary.js');
 
-// claude-sonnet-5 is $2/MTok input, so one million input tokens is exactly $2.
 const MODEL = 'claude-sonnet-5';
 const TABLE_COST = 2;
 
@@ -78,15 +76,14 @@ describe('recalculateEventCosts', () => {
   });
 
   test('a full recalc keeps a benchmark row\'s captured provider cost', () => {
-    // A benchmark cost is the provider's own bill (promos, discounts, rounding);
-    // the local tables can only estimate it, and re-import is the only way back.
+    // WHY: Repricing benchmark rows would replace actual provider costs with estimates and require
+    // re-import to recover them.
     seed('s-bench', 'captured', 1.5, 'benchmark');
     seed('s-bench', 'uncosted', null, 'benchmark');
 
     const report = recalculateEventCosts(getDb(), { apply: true });
 
     assert.equal(costOf('captured'), 1.5);
-    // An uncosted benchmark row still takes the table estimate, as import does.
     assert.equal(costOf('uncosted'), TABLE_COST);
     assert.equal(report.updated, 1);
   });
@@ -103,8 +100,6 @@ describe('recalculateEventCosts', () => {
   });
 
   test('prices an uncosted benchmark row without giving its session a trace summary', () => {
-    // Benchmark import never maintains trace summaries: the benchmarks API is
-    // the only surface that includes them.
     seed('s-bench', 'bench-unpriced', null, 'benchmark');
 
     const report = recalculateEventCosts(getDb(), { apply: true, missingOnly: true });

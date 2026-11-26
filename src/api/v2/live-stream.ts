@@ -163,7 +163,7 @@ class LiveSSEBroadcaster {
       try {
         client.res.end();
       } catch {
-        // Ignore teardown errors.
+        // WHY: A disconnected client can fail end(); the remaining clients still need to close.
       }
     }
   }

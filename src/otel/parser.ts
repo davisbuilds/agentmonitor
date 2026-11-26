@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import type { NormalizedIngestEvent, EventType } from '../contracts/event-contract.js';
 import { sliceWithoutSplittingSurrogates } from '../util/text.js';
 
-// ─── OTLP JSON types (subset we care about) ────────────────────────────
 
 interface OtelKeyValue {
   key: string;
@@ -21,8 +20,6 @@ interface OtelAnyValue {
 interface OtelResource {
   attributes?: OtelKeyValue[];
 }
-
-// ─── Logs ───────────────────────────────────────────────────────────────
 
 interface OtelLogRecord {
   timeUnixNano?: string;
@@ -53,8 +50,6 @@ export interface OtelLogsPayload {
   resourceLogs?: OtelResourceLogs[];
 }
 
-// ─── Metrics ────────────────────────────────────────────────────────────
-
 interface OtelNumberDataPoint {
   asInt?: string | number;
   asDouble?: number;
@@ -66,7 +61,7 @@ interface OtelNumberDataPoint {
 interface OtelSum {
   dataPoints?: OtelNumberDataPoint[];
   isMonotonic?: boolean;
-  aggregationTemporality?: number; // 1=delta, 2=cumulative
+  aggregationTemporality?: number;
 }
 
 interface OtelGauge {
@@ -97,8 +92,6 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
   return value as Record<string, unknown>;
 }
-
-// ─── Attribute helpers ──────────────────────────────────────────────────
 
 function getAttr(attrs: OtelKeyValue[] | undefined, key: string): string | undefined {
   if (!attrs) return undefined;
@@ -168,7 +161,8 @@ function getBodyJson(body: OtelAnyValue | undefined): Record<string, unknown> | 
       const parsed = JSON.parse(body.stringValue);
       if (typeof parsed === 'object' && parsed !== null) return parsed as Record<string, unknown>;
     } catch {
-      // not JSON, ignore
+      // WHY: OTLP also accepts plain string bodies, so failed JSON parsing must preserve the
+      // original text.
     }
     return undefined;
   }
@@ -200,17 +194,8 @@ function extractAnyValue(v: OtelAnyValue): unknown {
   return undefined;
 }
 
-// ─── Retry identity ─────────────────────────────────────────────────────
-//
-// OTLP exporters resend a whole batch on timeout or connection reset, and every
-// resend used to insert fresh rows. A retry carries byte-for-byte the same
-// record, so a hash of the record (with its resource and instrumentation scope)
-// is a stable event_id that collapses retries through insertEvent's event_id
-// dedup. Operational metric points take the same key as `point_id`, which the
-// unique index on otel_metrics.point_id collapses the same way. Scope is part
-// of it because two scopes may emit identical records.
-// Only records that carry a time get one: without a time, a retry and a genuine repeat of the
-// same event are indistinguishable, and dropping real usage is the worse error.
+// WHY: Exporters replay whole batches after connection failures; retry identity must distinguish a
+// replay from new usage.
 
 /** JSON with object keys sorted, so a re-serialized retry hashes the same. */
 function canonicalJson(value: unknown): string {
@@ -244,14 +229,12 @@ function attrToIso(value: string | undefined): string | undefined {
 }
 
 function nanoToIso(nanos: string | number | undefined): string | undefined {
-  // OTLP JSON sends uint64 as a string, though some exporters send a number.
-  // Anything else means "no time", not a BigInt SyntaxError that fails the batch.
+  // WHY: OTLP encodes uint64 times as strings, although some exporters send numbers.
   let ms: number;
   if (typeof nanos === 'number') ms = Math.floor(nanos / 1_000_000);
   else if (typeof nanos === 'string' && /^\d+$/.test(nanos)) ms = Number(BigInt(nanos) / BigInt(1_000_000));
   else return undefined;
   const date = new Date(ms);
-  // Past the Date range (±8.64e15 ms), toISOString would throw a RangeError.
   if (ms <= 0 || Number.isNaN(date.getTime())) return undefined;
   return date.toISOString();
 }
@@ -309,8 +292,6 @@ function splitCommaSeparatedList(value: string | undefined): string[] | undefine
   return items.length > 0 ? items : undefined;
 }
 
-// ─── Patch parsing helper ────────────────────────────────────────────────
-
 export interface PatchMeta {
   file_path: string;
   lines_added: number;
@@ -319,7 +300,6 @@ export interface PatchMeta {
 
 /** Extract file path and line counts from a Codex apply_patch input string. */
 export function parsePatchMeta(input: string): PatchMeta | null {
-  // Match "*** (Update|Add|Delete) File: <path>"
   const fileMatch = input.match(/\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+)/);
   if (!fileMatch) return null;
 
@@ -334,8 +314,6 @@ export function parsePatchMeta(input: string): PatchMeta | null {
 
   return { file_path: filePath, lines_added: added, lines_removed: removed };
 }
-
-// ─── Event name → event_type mapping ────────────────────────────────────
 
 const CLAUDE_EVENT_MAP: Record<string, EventType> = {
   'claude_code.tool_result': 'tool_use',
@@ -368,7 +346,6 @@ const CODEX_EVENT_MAP: Record<string, EventType> = {
   'codex.user_message': 'user_prompt',
 };
 
-// High-frequency events to skip — these create noise without useful signal
 const SKIP_EVENTS = new Set([
   'claude_code.response',
 ]);
@@ -489,8 +466,6 @@ function hasCodexTransportFailure(
   );
 }
 
-// ─── Log parser ─────────────────────────────────────────────────────────
-
 function resolveServiceName(resourceAttrs: OtelKeyValue[] | undefined): string {
   const svc = getAttr(resourceAttrs, 'service.name') ?? '';
   const sdk = getAttr(resourceAttrs, 'telemetry.sdk.name') ?? '';
@@ -545,7 +520,6 @@ function resolveEventType(
       }
     }
 
-    // Try generic suffix matching (e.g. "tool_use" from "some_prefix.tool_use")
     const suffix = eventName.split('.').pop() ?? '';
     const EVENT_TYPE_SUFFIXES: Record<string, EventType> = {
       tool_result: 'tool_use',
@@ -575,10 +549,8 @@ function resolveEventType(
     }
   }
 
-  // Fallback: check severity
   if (logRecord.severityText === 'ERROR') return 'error';
 
-  // Unrecognized event — skip to avoid noise
   return null;
 }
 
@@ -590,29 +562,26 @@ function parseLogRecord(
   const bodyJson = getBodyJson(logRecord.body);
   const payload = getCodexPayload(bodyJson);
 
-  // Skip high-frequency noisy events
   const eventName = getAttr(logRecord.attributes, 'event.name');
   if (eventName && SKIP_EVENTS.has(eventName)) return null;
 
   const agentType = resolveServiceName(resourceAttrs);
 
-  // Session ID: prefer log attribute, then resource attribute, then body
   const sessionId =
     getAttr(logRecord.attributes, 'gen_ai.session.id')
     ?? getAttr(logRecord.attributes, 'conversation.id')
-    ?? getAttr(logRecord.attributes, 'session.id') // Claude Code
+    ?? getAttr(logRecord.attributes, 'session.id')
     ?? getAttr(resourceAttrs, 'session.id')
     ?? getAttr(resourceAttrs, 'gen_ai.session.id')
     ?? getAttr(resourceAttrs, 'conversation.id')
     ?? (bodyJson?.session_id as string | undefined);
 
-  if (!sessionId) return null; // Cannot process without session_id
+  if (!sessionId) return null;
 
   const resolvedEventName = eventName ?? getAttr(logRecord.attributes, 'name');
   const eventType = resolveEventType(logRecord, agentType, resolvedEventName, bodyJson);
-  if (!eventType) return null; // Skip unrecognized events
+  if (!eventType) return null;
 
-  // Extract fields from attributes + body
   const toolName =
     getAttr(logRecord.attributes, 'gen_ai.tool.name')
     ?? getAttr(logRecord.attributes, 'tool_name')
@@ -645,11 +614,8 @@ function parseLogRecord(
     ?? asNumber(payload?.output_token_count)
     ?? 0;
 
-  // Anthropic reports `input_tokens` already net of cache (cache_read is a
-  // separate, additive bucket). OpenAI/Codex report `input_token(s)` as
-  // cache-inclusive, with the cached count a subset of it. Distinguish by the
-  // field name that supplies the cache figure rather than by model, because
-  // Codex SSE records carry no model attribute.
+  // WHY: Anthropic input is already net of cache, while OpenAI includes cached tokens in its input
+  // count.
   const anthropicCacheRead =
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.cache_read_input_tokens')
     ?? asNumber(bodyJson?.cache_read_tokens)
@@ -670,9 +636,6 @@ function parseLogRecord(
     ?? asNumber(payload?.cache_write_tokens);
   const cacheWriteTokens = anthropicCacheWrite ?? normalizedCacheWrite ?? 0;
 
-  // `cache_write_tokens` is a normalized field used by more than one provider.
-  // It is part of inclusive input only when the record itself identifies an
-  // OpenAI/Codex source; for Claude/Anthropic it remains an additive bucket.
   const openaiCacheWrite = (
     agentType === 'codex'
     || agentType.toLowerCase().includes('openai')
@@ -681,9 +644,8 @@ function parseLogRecord(
     ? normalizedCacheWrite
     : undefined;
 
-  // Only subtract when the cache figures came from cache-inclusive OpenAI/Codex
-  // fields and no Anthropic-style net field was present. Both cached reads and
-  // GPT-5.6 cache writes are subsets of the reported total input tokens.
+  // WHY: An Anthropic-style cache field prevents safely treating the input as an OpenAI-inclusive
+  // total.
   const cacheInclusiveInput = anthropicCacheRead == null
     && anthropicCacheWrite == null
     && ((openaiCacheRead ?? 0) > 0 || (openaiCacheWrite ?? 0) > 0);
@@ -711,13 +673,12 @@ function parseLogRecord(
     ?? getAttr(resourceAttrs, 'branch')
     ?? (bodyJson?.branch as string | undefined);
 
-  // Codex leaves timeUnixNano unset and carries its time in event.timestamp;
-  // without it every Codex row fell back to server receive time.
+  // WHY: Codex can omit timeUnixNano but still supply event.timestamp. Import time would put old
+  // events in today's window.
   const clientTimestamp = nanoToIso(logRecord.timeUnixNano)
     ?? attrToIso(getAttr(logRecord.attributes, 'event.timestamp'))
     ?? nanoToIso(logRecord.observedTimeUnixNano);
 
-  // Build metadata from body JSON (minus fields we've already extracted)
   let metadata: unknown = {};
   if (bodyJson) {
     const extracted = new Set([
@@ -732,7 +693,6 @@ function parseLogRecord(
     }
     if (Object.keys(remaining).length > 0) metadata = remaining;
   } else if (logRecord.body?.stringValue) {
-    // Plain-string body (non-JSON) — store as message
     metadata = { message: logRecord.body.stringValue };
   }
 
@@ -764,8 +724,6 @@ function parseLogRecord(
       meta.response_item_type ??= codexPayloadType;
     }
 
-    // The client a thread came from (the CLI, the app, an ephemeral exec), on
-    // the events that open a thread; every other event would only repeat it.
     if (eventType === 'session_start' || eventType === 'user_prompt') {
       const clientAttr = (key: string) => getAttr(logRecord.attributes, key) ?? getAttr(resourceAttrs, key);
       meta.originator ??= clientAttr('originator');
@@ -866,7 +824,6 @@ function parseLogRecord(
     }
   }
 
-  // For user_prompt events, ensure we capture the prompt text from all possible sources
   if (eventType === 'user_prompt') {
     const meta = (typeof metadata === 'object' && metadata !== null) ? metadata as Record<string, unknown> : {};
     if (!meta.message) {
@@ -874,7 +831,6 @@ function parseLogRecord(
       const bodyPromptText =
         (typeof bodyJson?.message === 'string' ? bodyJson.message : undefined)
         ?? (typeof payload?.message === 'string' ? payload.message : undefined);
-      // Try attributes: gen_ai.prompt, message, prompt, codex.prompt
       const promptText =
         bodyPromptText
         ?? getAttr(logRecord.attributes, 'gen_ai.prompt')
@@ -885,13 +841,11 @@ function parseLogRecord(
       if (promptText) {
         metadata = { ...meta, message: promptText };
       } else if (logRecord.body?.stringValue && !bodyJson) {
-        // Non-JSON string body — already handled above, but guard for edge cases
         metadata = { ...meta, message: logRecord.body.stringValue };
       }
     }
   }
 
-  // For apply_patch tool events, extract file path and line counts from patch input
   if (toolName === 'apply_patch') {
     const meta = (typeof metadata === 'object' && metadata !== null) ? metadata as Record<string, unknown> : {};
     const patchInput = typeof meta.input === 'string'
@@ -967,13 +921,7 @@ export function parseOtelLogs(payload: OtelLogsPayload): NormalizedIngestEvent[]
   return events;
 }
 
-// ─── Metric parser with cumulative-to-delta ─────────────────────────────
-
-// In-memory store for cumulative-to-delta conversion.
-// Keyed by `service|metricName|model|type` → last seen value.
 const cumulativeState = new Map<string, number>();
-// The time of each cumulative usage series' latest point: where the next
-// point's delta begins.
 const cumulativeTimes = new Map<string, string | undefined>();
 
 export interface ParsedMetricDelta {
@@ -1045,12 +993,10 @@ function computeDelta(key: string, currentValue: number): number {
   cumulativeState.set(key, currentValue);
 
   if (lastValue === undefined) {
-    // First time seeing this metric — treat current value as the delta
     return currentValue;
   }
 
   const delta = currentValue - lastValue;
-  // Skip if delta <= 0 (counter reset or no change)
   return delta > 0 ? delta : 0;
 }
 
@@ -1066,30 +1012,18 @@ const COST_METRICS = new Set([
   'gen_ai.client.cost.usage',
 ]);
 
-// Token/cost metrics we RECOGNIZE but deliberately do not store: for Codex,
-// logs (codex.sse_event response.completed) are the authoritative token/cost
-// source, so ingesting these as billable would double-count. Skipped silently
-// (not tallied as "dropped/unknown"). Claude Code's `*.token.usage`/`*.cost.usage`
-// are handled by the usage sets above and are unaffected.
+// WHY: Codex usage already arrives through completion logs; storing its corresponding usage metrics
+// would double-count.
 function isRecognizedTokenCostMetric(name: string): boolean {
   return /token_usage|cost_microusd/.test(name)
     || /_tokens$/.test(name)
     || name.startsWith('codex.usage.');
 }
 
-// Noise for a local operations console: latency histograms and size gauges.
-// "How fast / how big", not "did it happen / why". Dropped (tallied), never stored.
 function isNoiseMetric(name: string): boolean {
   return /\.duration_ms$|_ms$|_bytes$|\.bytes$/.test(name);
 }
 
-// Operator-actionable metric families we store. A curated allowlist rather than
-// a broad "any outcome attribute" heuristic: live Codex tags `status`/`outcome`
-// on many internal counters (skill-routing A/B evals, sqlite plumbing) that are
-// pure bloat for a local console. Default-deny — unknown families are dropped
-// (and tallied for visibility) until deliberately added here.
-//   - prefixes: consolidation health (the motivating signal)
-//   - name signal: failure/degradation counters wherever they live in the tree
 const OPERATIONAL_PREFIXES = ['codex.memory.', 'codex.memories.'];
 const OPERATIONAL_NAME_SIGNAL = /retry|error|fallback/;
 
@@ -1098,10 +1032,8 @@ function isOperationalMetric(name: string): boolean {
     || OPERATIONAL_NAME_SIGNAL.test(name);
 }
 
-// Attributes worth storing: the outcome/state labels that give a counter meaning.
-// Everything else (app.version, model, originator, session_source, method, db
-// paths, …) is descriptive and only fragments the series, so it is projected
-// away — this is what keeps codex.memory.startup one clean {state} series.
+// WHY: Keeping high-cardinality labels such as model or host in every point would multiply
+// operational time series.
 const OUTCOME_ATTR_KEYS = new Set([
   'state', 'status', 'outcome', 'result', 'reason',
   'error.type', 'error_type', 'fallback_reason', 'failure_reason',
@@ -1133,8 +1065,6 @@ function attributesToObject(attrs: OtelKeyValue[] | undefined): Record<string, s
   return out;
 }
 
-// Stable signature over the outcome-bearing attributes, so each (name, attrs)
-// series converts cumulative→delta independently.
 function attrsSignature(attrs: Record<string, string | number | boolean>): string {
   return Object.keys(attrs).sort().map(k => `${k}=${attrs[k]}`).join('&');
 }
@@ -1170,23 +1100,15 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
         const isUsage = TOKEN_METRICS.has(metricName) || COST_METRICS.has(metricName);
 
         for (const dp of dataPoints) {
-          // Claude Code names the session on each point, not on the resource.
           const sessionId = getAttr(dp.attributes, 'session.id') ?? resourceSessionId;
           const rawValue = getDataPointValue(dp);
-          // Retry identity of this data point, shared by usage and operational
-          // points; absent without a time (see "Retry identity" above).
           const pointKey = () => hasNanos(dp.timeUnixNano)
             ? retryKey('metric', { resource: resourceAttrs ?? [], scope: sm.scope ?? {}, metric: metricName, point: dp })
             : undefined;
-          // startTimeUnixNano marks the start of a cumulative series; it changes
-          // when the producer restarts and its counter resets. Folding it into the
-          // series key means a restart begins a fresh series, so the first export
-          // after a restart is emitted as-is instead of being diffed against (and
-          // swallowed by) the previous process's stale value — the failure mode
-          // for sessionless/process-level Codex counters that reuse a key.
+          // WHY: A change in cumulative start time marks a producer restart even if the new total
+          // happens to exceed the old one.
           const seriesStart = dp.startTimeUnixNano ?? '';
 
-          // ── Claude Code token/cost usage → synthetic llm_response (unchanged) ──
           if (isUsage) {
             const model = getAttr(dp.attributes, 'model')
               ?? getAttr(dp.attributes, 'gen_ai.request.model')
@@ -1201,8 +1123,8 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
             const cacheKey = `${sessionId}|${agentType}|${metricName}|${model ?? ''}|${tokenType ?? ''}|${seriesStart}`;
             const delta = isCumulative ? computeDelta(cacheKey, rawValue) : rawValue;
             const pointTime = nanoToIso(dp.timeUnixNano);
-            // A cumulative series' first point seen may follow a long unseen
-            // stretch (amon restarted), so only a previous point dates it.
+            // WHY: The first point after a collector restart cannot establish when its unseen
+            // cumulative growth occurred.
             const intervalStart = isCumulative ? cumulativeTimes.get(cacheKey) : nanoToIso(dp.startTimeUnixNano);
             if (isCumulative) cumulativeTimes.set(cacheKey, pointTime);
             if (delta <= 0) continue;
@@ -1230,28 +1152,23 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
                 case 'cacheCreation':
                 case 'cache_creation':
                 case 'cache_write': entry.cache_write_delta = delta; break;
-                default: entry.tokens_in_delta = delta; // unknown token type → input
+                default: entry.tokens_in_delta = delta;
               }
             }
             usage.push(entry);
             continue;
           }
 
-          // ── Recognized token/cost metric we intentionally do not store ──
           if (isRecognizedTokenCostMetric(metricName)) continue;
 
-          // ── Noise: latency/size ──
           if (isNoiseMetric(metricName)) { drop(metricName); continue; }
 
-          // ── Bucket A operational: curated operator-actionable families only ──
           if (!isOperationalMetric(metricName)) { drop(metricName); continue; }
           const fullAttrs = attributesToObject(dp.attributes);
           const attrs = projectAttrs(fullAttrs);
 
-          // Key the cumulative→delta identity on the FULL attributes so two real
-          // OTLP series that share the projected outcome but differ in a
-          // projected-away label (model, method, …) diff against their own series,
-          // not each other. Storage still collapses to the projected attrs.
+          // WHY: Two upstream series can share the displayed outcome labels but have different
+          // counter histories.
           const opKey = `op|${sessionId}|${agentType}|${metricName}|${attrsSignature(fullAttrs)}|${seriesStart}`;
           const delta = isCumulative ? computeDelta(opKey, rawValue) : rawValue;
           if (delta <= 0) continue;
@@ -1274,7 +1191,6 @@ export function parseOtelMetrics(payload: OtelMetricsPayload): ParsedMetrics {
   return { usage, operational, dropped, refused };
 }
 
-// Exposed for testing — reset cumulative state
 export function resetCumulativeState(): void {
   cumulativeState.clear();
   cumulativeTimes.clear();

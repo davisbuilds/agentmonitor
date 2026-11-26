@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, describe } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-backfill-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -45,26 +44,22 @@ describe('cache-inclusive input backfill migration', () => {
   test('re-normalizes OpenAI rows to net input and leaves Anthropic untouched', () => {
     const db = getDb();
 
-    // Seed historical rows in the pre-fix (cache-inclusive) convention. gpt-5.4:
-    // 100k inclusive input, 40k cached → old buggy cost billed all 100k at input.
     insertEventRow({
       event_id: 'openai-old', agent_type: 'codex', model: 'gpt-5.4',
       tokens_in: 100_000, cache_read_tokens: 40_000, cost_usd: 1.01,
     });
-    // Anthropic input_tokens is already net; must not be altered.
     insertEventRow({
       event_id: 'anthropic-net', agent_type: 'claude_code', model: 'claude-opus-4-8',
       tokens_in: 1500, cache_read_tokens: 800, cost_usd: 0.0079,
     });
 
-    // The migration ran once during initSchema (empty table). Reset the guard so
-    // it re-runs over the seeded rows.
+    // WHY: Schema initialization already ran the repair on the empty store. Reset its guard to
+    // exercise historical rows added by the fixture.
     db.pragma('user_version = 0');
     runDataMigrations(db);
 
     const openai = getRow('openai-old');
-    assert.equal(openai.tokens_in, 60_000); // 100k - 40k cached
-    // 60k*$2.5 + 40k*$0.25 per MTok = 0.15 + 0.01 = 0.16
+    assert.equal(openai.tokens_in, 60_000);
     assert.ok(openai.cost_usd !== null && Math.abs(openai.cost_usd - 0.16) < 0.0001);
 
     const anthropic = getRow('anthropic-net');
@@ -75,12 +70,8 @@ describe('cache-inclusive input backfill migration', () => {
   test('version guard makes it run exactly once', () => {
     const db = getDb();
     const before = getRow('openai-old');
-    // runDataMigrations advances the counter to the current DATA_SCHEMA_VERSION
-    // (bumped to 4 when skill-context session backfill was added).
     assert.equal(db.pragma('user_version', { simple: true }), 30);
 
-    // Re-running without resetting the guard must short-circuit — no second
-    // subtraction of the already-netted cached tokens.
     runDataMigrations(db);
 
     const after = getRow('openai-old');

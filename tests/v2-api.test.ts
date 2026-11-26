@@ -18,7 +18,6 @@ let setInsightGeneratorForTests: typeof import('../src/insights/service.js').set
 let setInsightProviderConfigForTests: typeof import('../src/insights/service.js').setInsightProviderConfigForTests;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 
-// Sample session data to seed into the DB
 function sampleJsonl(lines: object[]): string {
   return lines.map(l => JSON.stringify(l)).join('\n') + '\n';
 }
@@ -72,8 +71,7 @@ function makeSession(sessionId: string, project: string, msgCount: number, start
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-v2-api-'));
   process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'test.db');
-  // Fixtures are authored as UTC instants; report their days in UTC so this
-  // suite reads the same on any host. Local-day behavior has its own suite.
+  // WHY: Pin the reporting zone for these instants so dates do not depend on the CI host.
   process.env.AGENTMONITOR_TIMEZONE = 'UTC';
   budgetsPath = path.join(tempDir, 'budgets.json');
   process.env.AGENTMONITOR_USAGE_BUDGETS_PATH = budgetsPath;
@@ -91,7 +89,6 @@ before(async () => {
     model: params.model ?? 'gpt-5-mini',
   }));
 
-  // Seed test data via parser
   const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
   const { parseCodexSessionMessages } = await import('../src/parser/codex-sessions.js');
   const { insertEvent } = await import('../src/db/queries.js');
@@ -103,7 +100,6 @@ before(async () => {
   } = await import('../src/live/projector.js');
   db = dbModule.getDb();
 
-  // Create 5 sessions across 3 projects with varying sizes
   const sessions = [
     { id: 'api-sess-001', project: 'alpha', msgs: 10, date: '2026-03-01T10:00:00Z' },
     { id: 'api-sess-002', project: 'alpha', msgs: 6, date: '2026-03-02T14:00:00Z' },
@@ -184,16 +180,13 @@ before(async () => {
   insertParsedSession(db, codexSkillParsed, codexSkillFilePath, 512, 'hash_api_skill_codex_001');
   syncCodexLiveSession(db, codexSkillParsed);
 
-  // Add a child session for relationship testing
   const childJsonl = makeSession('api-sess-006', 'alpha', 4, '2026-03-01T11:00:00Z');
   const childParsed = parseSessionMessages(childJsonl, 'api-sess-006');
-  // Manually set parent relationship
   childParsed.metadata.parent_session_id = 'api-sess-001';
   childParsed.metadata.relationship_type = 'subagent';
   insertParsedSession(db, childParsed, '/fake/api-sess-006.jsonl', 512, 'hash_006');
   syncClaudeLiveSession(db, childParsed);
 
-  // Seed one summary-only projected session to exercise capability-aware analytics coverage.
   upsertProjectedSessionSnapshot(db, {
     id: 'api-codex-summary-001',
     agent: 'codex',
@@ -352,7 +345,6 @@ before(async () => {
     insertEvent(event);
   }
 
-  // Start server
   const { createApp } = await import('../src/app.js');
   const app = createApp();
   server = app.listen(0);
@@ -368,8 +360,6 @@ after(() => {
   if (closeDb) closeDb();
   fs.rmSync(tempDir, { recursive: true, force: true });
 });
-
-// --- Sessions endpoints ---
 
 describe('GET /api/v2/sessions', () => {
   test('returns paginated session list', async () => {
@@ -394,7 +384,6 @@ describe('GET /api/v2/sessions', () => {
     const res2 = await fetch(`${baseUrl}/api/v2/sessions?limit=2&cursor=${body1.cursor}`);
     const body2 = await res2.json() as { data: Array<{ id: string }> };
 
-    // Pages should not overlap
     const ids1 = new Set(body1.data.map(s => s.id));
     for (const s of body2.data) {
       assert.ok(!ids1.has(s.id), `session ${s.id} should not appear in both pages`);
@@ -644,8 +633,8 @@ describe('GET/POST/DELETE /api/v2 pins', () => {
 
     const { parseSessionMessages, insertParsedSession } = await import('../src/parser/claude-code.js');
     const filePath = '/fake/projects/-Users-dev-Dev-alpha/api-sess-002.jsonl';
-    // A re-sync keeps rows that did not change, so shift the timestamps to
-    // force the pinned row itself to be replaced.
+    // WHY: A re-sync may keep existing rows by identity, so change the timestamp to reach replacement
+    // of the pinned message.
     const parsed = parseSessionMessages(
       makeSession('api-sess-002', 'alpha', 6, '2026-03-02T14:00:30Z'),
       'api-sess-002',
@@ -759,8 +748,6 @@ describe('GET /api/v2/sessions/:id/children', () => {
     assert.equal(body.data.length, 0);
   });
 });
-
-// --- Live endpoints ---
 
 describe('GET /api/v2/live/settings', () => {
   test('returns live settings and capture metadata', async () => {
@@ -928,7 +915,6 @@ describe('GET /api/v2/live/sessions/:id/items', () => {
     assert.deepEqual(tail.data.map(item => item.id), ids.slice(-2), 'the newest two, oldest first');
     assert.equal(tail.before_cursor, String(ids.at(-2)));
 
-    // Walk back to the start: contiguous pages, then no older cursor.
     const collected = [...tail.data.map(item => item.id)];
     let before = tail.before_cursor;
     while (before) {
@@ -953,8 +939,6 @@ describe('GET /api/v2/live/sessions/:id/items', () => {
     assert.equal(res.status, 404);
   });
 });
-
-// --- Search endpoint ---
 
 describe('GET /api/v2/search', () => {
   test('returns matching results for FTS query', async () => {
@@ -981,7 +965,6 @@ describe('GET /api/v2/search', () => {
   test('filters search by project', async () => {
     const res = await fetch(`${baseUrl}/api/v2/search?q=message&project=gamma`);
     const body = await res.json() as { data: Array<{ session_id: string }> };
-    // All results should be from gamma project sessions
     for (const r of body.data) {
       assert.equal(r.session_id, 'api-sess-004', 'should only return gamma sessions');
     }
@@ -1037,9 +1020,26 @@ describe('GET /api/v2/search', () => {
     assert.equal(body.data[0]?.session_id, 'api-search-rank-001');
     assert.ok(body.cursor, 'relevance search should return a cursor when the page is full');
   });
-});
 
-// --- Analytics endpoints ---
+  test('returns 400 for malformed or wrong-sort cursors', async () => {
+    const search = `${baseUrl}/api/v2/search?q=rankmagic&limit=1`;
+    const first = await fetch(`${search}&sort=relevance`);
+    assert.equal(first.status, 200);
+    const { cursor } = await first.json() as { cursor?: string };
+    assert.ok(cursor);
+
+    for (const params of [
+      'cursor=1junk',
+      `sort=recent&cursor=${encodeURIComponent(cursor)}`,
+      'sort=relevance&cursor=1',
+    ]) {
+      const res = await fetch(`${search}&${params}`);
+      assert.equal(res.status, 400, params);
+      const body = await res.json() as { error: string };
+      assert.match(body.error, /cursor/i, params);
+    }
+  });
+});
 
 describe('GET /api/v2/analytics/summary', () => {
   test('returns correct totals', async () => {
@@ -1073,7 +1073,6 @@ describe('GET /api/v2/analytics/summary', () => {
     const res = await fetch(`${baseUrl}/api/v2/analytics/summary?project=alpha`);
     assert.equal(res.status, 200);
     const body = await res.json() as { total_sessions: number };
-    // Alpha has 2 sessions + 1 child = 3
     assert.ok(body.total_sessions >= 2 && body.total_sessions <= 4, `expected 2-4 alpha sessions, got ${body.total_sessions}`);
   });
 
@@ -1144,7 +1143,6 @@ describe('GET /api/v2/analytics/tools', () => {
       };
     };
     assert.ok(body.data.length > 0, 'should have tool usage data');
-    // We know Read and Bash were inserted
     assert.ok(body.data.some(t => t.tool_name === 'Read'));
     assert.equal(body.coverage.metric_scope, 'tool_analytics_capable');
     assert.ok(body.coverage.excluded_sessions >= 1, 'expected summary-only sessions to be excluded from tool analytics');
@@ -1292,7 +1290,11 @@ describe('GET /api/v2/monitor/stats', () => {
     assert.equal(body.tool_breakdown.exec_command, 1);
     assert.ok(Array.isArray(body.branches));
     assert.ok(Array.isArray(body.quota_monitor));
-    assert.equal(body.quota_monitor.length, 2);
+    assert.equal(body.quota_monitor.length, 3);
+    assert.deepEqual(
+      body.quota_monitor.map((row) => row.provider),
+      ['claude', 'codex', 'antigravity'],
+    );
     assert.deepEqual(body.usage_monitor, body.quota_monitor);
   });
 });
@@ -1836,9 +1838,8 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
 
   test('returns generator config error when no API key is available and no test override is installed', async () => {
     setInsightGeneratorForTests(null);
-    // Force the no-key path regardless of the developer's ambient OPENAI_API_KEY.
-    // config.insights is a startup singleton, so this override — not env — is what
-    // makes the test hermetic across machines/CI.
+    // WHY: The provider config is a startup singleton, so only its test seam can reliably clear
+    // configured credentials after import.
     setInsightProviderConfigForTests({ openai: { apiKey: null } });
     try {
       const res = await fetch(`${baseUrl}/api/v2/insights/generate`, {
@@ -1866,9 +1867,8 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
   });
 
   test('list reports a provider as configured from the same key resolution generation uses', async () => {
-    // The app hides Insights until a provider is configured, so the list's
-    // `generation` status must agree with what generate would actually find —
-    // including the test override — not just the ambient environment.
+    // WHY: The product uses generation status to decide whether to show Insights, so both paths must
+    // resolve the same provider.
     async function configured(): Promise<Record<string, boolean>> {
       const res = await fetch(`${baseUrl}/api/v2/insights?limit=1`);
       assert.equal(res.status, 200);
@@ -1900,8 +1900,6 @@ describe('GET/POST/DELETE /api/v2/insights', () => {
   });
 });
 
-// --- Metadata endpoints ---
-
 describe('GET /api/v2/projects', () => {
   test('returns distinct project names', async () => {
     const res = await fetch(`${baseUrl}/api/v2/projects`);
@@ -1922,7 +1920,6 @@ describe('GET /api/v2/agents', () => {
   });
 });
 
-// --- Regression: existing API still works ---
 
 describe('existing API regression', () => {
   test('GET /api/health still works', async () => {
@@ -1930,7 +1927,6 @@ describe('existing API regression', () => {
     assert.equal(res.status, 200);
     const body = await res.json() as { status: string; build: { tracked: boolean; stale: boolean } };
     assert.equal(body.status, 'ok');
-    // Tests run from source, so there is no built bundle to watch.
     assert.deepEqual([body.build.tracked, body.build.stale], [false, false]);
   });
 

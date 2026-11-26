@@ -8,7 +8,7 @@
     type PinnedMessage,
     type SearchResult,
   } from '../../api/client';
-  import { timeAgo, agentHexColor, agentDisplayName } from '../../format';
+  import { timeAgo, agentDisplayName } from '../../format';
   import { sessionTitle } from '../../session-text';
   import {
     consumePendingSessionNavigation,
@@ -23,12 +23,12 @@
   import SessionViewer from './SessionViewer.svelte';
   import SearchResults from './SearchResults.svelte';
   import PinnedMessages from './PinnedMessages.svelte';
+  import AgentIcon from '../shared/AgentIcon.svelte';
   import SessionCoverage from '../shared/SessionCoverage.svelte';
   import { Select, EmptyState, Button, InfoTip, FilterBar, Panel, DataTable } from '../ui';
 
   const list = new SessionList();
-  // Full-text results for the query box. The page owns the URL, so the store
-  // only searches; with no query the session list shows instead.
+  // WHY: The page owns navigation history, so the search store must not change the URL independently.
   const search = createSearchStore({ recentLimit: 0 });
 
   const sortOptions = [
@@ -36,7 +36,6 @@
     { value: 'relevance', label: 'Best Match' },
   ];
 
-  // Filters
   let projects = $state<string[]>([]);
   let agents = $state<string[]>([]);
   let filterProject = $state('');
@@ -71,7 +70,6 @@
     { key: 'started_at', label: 'Started', align: 'right' as const, width: '7rem' },
   ];
 
-  // Subagents shown under their parent row, by parent id.
   let expandedChildren = $state<Record<string, BrowsingSession[] | 'loading' | 'error'>>({});
 
   async function toggleChildren(parentId: string) {
@@ -90,7 +88,6 @@
     }
   }
 
-  // Selected session
   let selectedSessionId = $state<string | null>(null);
   let selectedMessageOrdinal = $state<number | null>(null);
   let previousSelections = $state<Array<{ sessionId: string; messageOrdinal: number | null }>>([]);
@@ -220,8 +217,7 @@
   }
 
   function handleQueryInput(next: string) {
-    // Starting a search adds a history entry so Back returns to the list;
-    // later keystrokes replace it.
+    // WHY: Give the start of a search a Back target without adding a history entry for every keystroke.
     const push = startsSearch(query, next);
     query = next;
     syncHash(!push);
@@ -400,10 +396,7 @@
                       onclick={(event) => { event.stopPropagation(); selectSession(session.id); }}
                     >{sessionTitle(session)}</button>
                     <span class="flex items-center gap-1.5 text-meta text-text-faint">
-                      <span
-                        class="inline-block h-2 w-2 shrink-0 rounded-full"
-                        style="background-color: {agentHexColor(session.agent)}"
-                      ></span>
+                      <AgentIcon agent={session.agent} fallback="dot" />
                       <span>{agentDisplayName(session.agent)}</span>
                       {#if session.child_count}
                         <span aria-hidden="true">·</span>

@@ -14,11 +14,8 @@ import { normalizeIngestEvent, type NormalizedIngestEvent } from '../contracts/e
 
 export const otelRouter = Router();
 
-// Intake visibility for dropped metrics. The metrics endpoint used to silently
-// discard everything it did not recognize; that blindness hid the Codex
-// operational-counter gap for months ("an absence is a claim about the
-// instrument"). We now keep a throttled aggregate tally of what we drop — names
-// only, never datapoints — so the stream is observable without bloating anything.
+// WHY: Silent drops previously hid unsupported operational metrics. Count dropped names without
+// collecting their payloads.
 const droppedTally = new Map<string, number>();
 let lastDropFlush = 0;
 const DROP_FLUSH_INTERVAL_MS = 60_000;
@@ -75,7 +72,6 @@ class OtlpAdmission {
   }
 }
 
-// Content-Type guard: JSON only (415 for protobuf)
 function requireJson(req: Request, res: Response): boolean {
   const ct = req.headers['content-type'] ?? '';
   if (ct.includes('application/x-protobuf') || ct.includes('application/protobuf')) {
@@ -88,7 +84,6 @@ function requireJson(req: Request, res: Response): boolean {
   return true;
 }
 
-// POST /api/otel/v1/logs
 otelRouter.post('/v1/logs', (req: Request, res: Response) => {
   if (!requireJson(req, res)) return;
 
@@ -113,7 +108,6 @@ otelRouter.post('/v1/logs', (req: Request, res: Response) => {
   res.status(200).json(admission.response('rejectedLogRecords'));
 });
 
-// POST /api/otel/v1/metrics
 otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
   if (!requireJson(req, res)) return;
 
@@ -124,13 +118,6 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
   }
   const { usage, operational, dropped, refused } = parseOtelMetrics(payload as OtelMetricsPayload);
 
-  // Token/cost usage metrics (Claude Code OTEL) → synthetic llm_response, so the
-  // existing event pipeline aggregates tokens/cost per session. Codex token/cost
-  // metrics are deliberately not here — logs are authoritative (see parser).
-  // Claude reports cost on its own cost metric, exported in the same batch as
-  // the token metric. Where the batch carries that cost for a session and model,
-  // the token rows' cost is a reported zero, since an estimate would bill the
-  // usage twice. A token-only export has no reported cost, so it is estimated.
   const reportedCost = new Set(usage.filter(d => d.cost_usd_delta > 0).map(d => `${d.session_id}|${d.model ?? ''}`));
   const admission = new OtlpAdmission();
   admission.refuse(refused.count, `${refused.metrics.join(', ')} value must be a finite non-negative number`);
@@ -162,7 +149,6 @@ otelRouter.post('/v1/metrics', (req: Request, res: Response) => {
     }
   }
 
-  // Bucket A operational metrics → dedicated otel_metrics table (never events).
   if (operational.length > 0) insertOperationalMetrics(operational);
 
   recordDropped(dropped);
@@ -183,13 +169,10 @@ function countSpans(payload: object): number {
   return count;
 }
 
-// Spans are not ingested yet. The route says so in OTLP's partial-success
-// shape, so an exporter pointed here sees its spans refused rather than stored.
-// The warning is throttled: an exporter resends a batch every few seconds.
+// WHY: Exporters retry refused batches every few seconds, so throttle the warning.
 let discardedSpans = 0;
 let lastSpanWarn = 0;
 
-// POST /api/otel/v1/traces
 otelRouter.post('/v1/traces', (req: Request, res: Response) => {
   if (!requireJson(req, res)) return;
   const payload = coerceJsonLikeBody(req.body);

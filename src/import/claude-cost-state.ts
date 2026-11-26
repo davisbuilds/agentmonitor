@@ -187,19 +187,15 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
     const rows = importedClaudeCostByModel(sessionId, checkpoint.since, checkpoint.cut);
     const amon = new Map(rows.map(row => [row.model ?? '', row]));
     const unpricedRows = rows.reduce((sum, row) => sum + row.unpriced, 0);
-    // An unpriced row bills as NULL and the sum skips it, so the imported cost
-    // would read low; no ratio is better than a falsely reassuring one.
+    // WHY: Summing unpriced rows silently drops their costs and understates the imported total.
     const ratio = (amonCost: number, harnessCost: number, unpriced: number) =>
       (harnessCost > 0 && unpriced === 0 ? amonCost / harnessCost : null);
     const models = Object.entries(checkpoint.models).map(([model, usage]) => {
       const row = amon.get(model);
-      // The checkpoint does not split cache writes by TTL, so its writes take
-      // the 1-hour share amon stored for the model (none: the 5-minute rate).
+      // WHY: Claude's checkpoint does not expose cache-write TTL, so apportion it from the model's
+      // recorded mix.
       const share1h = row && row.cache_write > 0 ? row.cache_write_1h / row.cache_write : 0;
-      // A tier is chosen per request by its prompt size, and the checkpoint
-      // holds only the session's totals. Within the lowest threshold no request
-      // can have crossed it; past it, the totals cannot say which tier each paid.
-      // Every dated period's tiers, the base period's (the inline tiers) among them.
+      // WHY: The checkpoint contains session totals, while a pricing tier is chosen per request.
       const thresholds = (pricingRegistry.lookup(model)?.periods ?? [])
         .flatMap(period => period.tiers ?? []).map(tier => tier.abovePromptTokens);
       const prompt = usage.input_tokens + usage.cache_read_tokens + usage.cache_write_tokens;
@@ -220,13 +216,12 @@ export function checkClaudeTranscriptCosts(options: { claudeDir: string; limit?:
         rate_ratio: priced === null || usage.cost_usd <= 0 ? null : priced / usage.cost_usd,
       };
     });
-    // A session's coverage needs every billed model priced, as its ratio needs every row priced.
     const billed = models.filter(model => model.harness_cost_usd > 0);
     const allPriced = billed.every(model => model.harness_tokens_cost_usd !== null);
     const pricedHarness = billed.reduce((sum, model) => sum + (model.harness_tokens_cost_usd ?? 0), 0);
     const amonCost = rows.reduce((sum, row) => sum + row.cost, 0);
-    // A model amon holds no rows for is only unrecorded usage if the
-    // transcripts do not record it either; otherwise the import missed it.
+    // WHY: An absent import row can mean a missing import rather than usage the transcript never
+    // captured.
     const { since, cut } = checkpoint;
     const recorded = new Set([...sightings, ...subagentSightings(file)]
       .filter(sighting => sighting.timestamp >= since && sighting.timestamp <= cut)

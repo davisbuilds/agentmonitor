@@ -3,8 +3,6 @@ import { getSessionTranscript, type TranscriptEvent } from '../db/queries.js';
 
 export const transcriptsRouter = Router();
 
-// --- Transcript entry types ---
-
 interface TranscriptEntry {
   role: 'system' | 'user' | 'assistant' | 'tool';
   type: string;
@@ -30,7 +28,7 @@ function extractDetail(event: TranscriptEvent): string | undefined {
     if (meta.query) return meta.query;
     if (meta.error) return typeof meta.error === 'string' ? meta.error : meta.error?.message;
     if (meta.diff_preview) return meta.diff_preview;
-  } catch { /* ignore */ }
+  } catch { /* WHY: Malformed optional metadata must not hide the rest of the transcript entry. */ }
   return undefined;
 }
 
@@ -72,7 +70,6 @@ function toEntry(event: TranscriptEvent): TranscriptEntry {
   return entry;
 }
 
-// GET /api/sessions/:id/transcript
 transcriptsRouter.get('/:id/transcript', (req: Request, res: Response) => {
   const sessionId = req.params['id'] as string;
   const events = getSessionTranscript(sessionId);

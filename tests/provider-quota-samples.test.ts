@@ -42,7 +42,7 @@ function samples(provider = 'codex') {
 
 test('a reading that moves is sampled at most once per five minutes', () => {
   codex(0, 40);
-  codex(1, 41); // too soon after the last row
+  codex(1, 41);
   codex(3, 42);
   codex(5, 43);
   codex(7, 44);
@@ -55,10 +55,9 @@ test('a reading that moves is sampled at most once per five minutes', () => {
 test('a reading that holds extends the latest row instead of adding one', () => {
   codex(0, 40);
   for (let minute = 1; minute <= 30; minute++) codex(minute, 40);
-  codex(33, 40); // too soon to move observed_until again
+  codex(33, 40);
   codex(42, 46);
   assert.deepEqual(samples().map(row => [row.sampled_at, row.observed_until, row.used]), [
-    // observed_until moves at most once per interval, and the idle stretch stays flat.
     [at(0), at(30), 40],
     [at(42), at(42), 46],
   ]);
@@ -68,7 +67,6 @@ test('a window reset starts a row like any other change', () => {
   const next = '2026-11-11T15:00:00.000Z';
   codex(0, 97);
   codex(6, 0, next);
-  // An unused window rolling over moves no percentage, only its reset.
   codex(12, 0, '2026-11-18T15:00:00.000Z');
   assert.deepEqual(samples().map(row => [row.used, row.resets]), [[97, weekly], [0, next], [0, '2026-11-18T15:00:00.000Z']]);
 });
@@ -92,7 +90,6 @@ test('providers are sampled apart, and a reading with no usage is not sampled', 
 test('a read command on a store from before quota history still gets the table', async () => {
   const { ensureSchemaForRead } = await import('../src/db/schema.js');
   const db = getDb();
-  // Read commands skip DDL once user_version is current, so the table only arrives if the version moves past it.
   db.exec('DROP TABLE provider_quota_samples; PRAGMA user_version = 24');
   ensureSchemaForRead();
   assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'provider_quota_samples'").get());

@@ -18,7 +18,6 @@ USE_PYTHON=false
 AGENTMONITOR_URL="http://127.0.0.1:3141"
 UNINSTALL=false
 
-# Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --python)  USE_PYTHON=true; shift ;;
@@ -36,7 +35,6 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# Ensure jq is available
 if ! command -v jq &>/dev/null; then
   echo "Error: jq is required for install/uninstall. Install it with:"
   echo "  brew install jq      (macOS)"
@@ -45,16 +43,13 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
-# Ensure settings directory exists
 mkdir -p "$(dirname "$SETTINGS_FILE")"
 
-# Create settings file if it doesn't exist
 if [ ! -f "$SETTINGS_FILE" ]; then
   echo '{}' > "$SETTINGS_FILE"
 fi
 
-# Backup existing settings. Two runs in one second would share a timestamp,
-# and the second would overwrite the pre-install backup with modified settings.
+# WHY: Consecutive installations can share a timestamp and overwrite the original backup.
 BACKUP_BASE="${SETTINGS_FILE}.bak.$(date +%Y%m%d%H%M%S)"
 BACKUP="$BACKUP_BASE"
 BACKUP_N=1
@@ -66,8 +61,7 @@ cp "$SETTINGS_FILE" "$BACKUP"
 echo "Backed up settings to $BACKUP"
 
 if [ "$UNINSTALL" = true ]; then
-  # Remove only hooks owned by this installer. AGENTMONITOR_URL may also be
-  # used by unrelated commands, so the executable path is the ownership marker.
+  # WHY: Unrelated hooks can use AGENTMONITOR_URL; the executable path identifies this installer's entries.
   jq '
     def without_agentmonitor:
       map(
@@ -93,14 +87,13 @@ if [ "$UNINSTALL" = true ]; then
   exit 0
 fi
 
-# Determine script paths based on language choice
 if [ "$USE_PYTHON" = true ]; then
   SESSION_START="python3 $HOOKS_DIR/python/session_start.py"
   SESSION_END="python3 $HOOKS_DIR/python/session_end.py"
   POST_TOOL="python3 $HOOKS_DIR/python/post_tool_use.py"
   PRE_TOOL="python3 $HOOKS_DIR/python/pre_tool_use.py"
   INSTRUCTIONS_LOADED="python3 $HOOKS_DIR/python/instructions_loaded.py"
-  USER_PROMPT="$HOOKS_DIR/user_prompt_submit.sh"  # No Python variant yet
+  USER_PROMPT="$HOOKS_DIR/user_prompt_submit.sh"
   LANG_LABEL="Python"
 else
   SESSION_START="$HOOKS_DIR/session_start.sh"
@@ -112,7 +105,6 @@ else
   LANG_LABEL="Shell"
 fi
 
-# Build the hooks configuration and merge into settings
 jq --arg session_start "$SESSION_START" \
    --arg session_end "$SESSION_END" \
    --arg post_tool "$POST_TOOL" \

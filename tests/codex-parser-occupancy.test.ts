@@ -2,9 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseCodexSessionMessages } from '../src/parser/codex-sessions.js';
 
-// Two token_count events; occupancy must reflect the LAST last_token_usage
-// input (cache-inclusive) and reported model_context_window — never
-// total_token_usage (cumulative billing).
 const jsonl = [
   JSON.stringify({
     type: 'session_meta',
@@ -39,7 +36,7 @@ const jsonl = [
 
 test('parseCodexSessionMessages: reports last request occupancy + reported window', () => {
   const parsed = parseCodexSessionMessages(jsonl, 's1');
-  assert.equal(parsed.metadata.context_used_tokens, 64_000); // last input, not total
+  assert.equal(parsed.metadata.context_used_tokens, 64_000);
   assert.equal(parsed.metadata.context_window_reported, 258_400);
 });
 

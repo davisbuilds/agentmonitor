@@ -1,9 +1,6 @@
 <script lang="ts">
-  // One bar per day, stacked by segment (bottom first), on a round-tick y axis
-  // with faint gridlines. Each day is a button: its accessible name is `label`,
-  // hovering or focusing it shows the tooltip, and clicking it selects the day.
-  // HTML bars rather than SVG so the strip stretches to any width while its
-  // labels keep their size. See docs/system/DESIGN.md.
+  // WHY: Use HTML bars so the strip can stretch while native labels and focus controls retain their
+  // size.
   import type { Snippet } from 'svelte';
   import { dailyBarLayout, shortDate, type DailyBar, type DayMarkerGlyph } from './daily-bars';
 
@@ -49,8 +46,7 @@
   const tooltipId = `daily-bar-tip-${Math.random().toString(36).slice(2)}`;
   let active = $state<number | null>(null);
   const activeColumn = $derived(active === null ? null : layout.columns[active] ?? null);
-  // Open the tooltip from the plot's top edge beside the bar, away from the
-  // nearer side, so a long list stays inside the card rather than above it.
+  // WHY: Open the tooltip inward from the bar so long lists remain inside the card.
   const activeLeftPct = $derived(active === null || layout.columns.length === 0 ? 0 : ((active + 0.5) / layout.columns.length) * 100);
 </script>
 
@@ -60,7 +56,6 @@
 
 <div class="flex min-h-0 flex-col {klass}">
   {#if hasMarkers}
-    <!-- The marker row lines up with the bars below; hovering a mark opens its day. -->
     <div class="flex gap-2 pb-1" aria-hidden="true">
       <div class="{axisClass} shrink-0"></div>
       <div class="flex h-3 min-w-0 flex-1 gap-[2px]">
@@ -88,7 +83,7 @@
       {#each layout.ticks.slice(1) as tick}
         <div class="pointer-events-none absolute inset-x-0 border-t border-line/50" style={`bottom:${(tick / layout.top) * 100}%`} aria-hidden="true"></div>
       {/each}
-      <!-- A marked day's line runs through the plot, so before and after read at a glance. -->
+      <!-- WHY: Draw change markers through the plot so the corresponding before-and-after periods remain easy to compare. -->
       {#each layout.columns as column, index}
         {#if markersOf(column.date).length > 0}
           <div class="pointer-events-none absolute inset-y-0 border-l border-dashed border-line-strong"
@@ -109,7 +104,7 @@
             onclick={() => onSelect?.(column.date)}
           >
             {#if column.total > 0}
-              <!-- At least 2px, so a quiet day still reads as active; a 2px gap between segments. -->
+              <!-- WHY: Give a nonempty quiet day a two-pixel minimum so its activity cannot disappear. -->
               <span
                 class="flex w-full flex-col-reverse gap-[2px] overflow-hidden rounded-t-[4px]"
                 style={`height:max(${column.heightPct}%, 2px)`}
@@ -155,7 +150,6 @@
     <div class="{axisClass} shrink-0"></div>
     <div class="flex min-w-0 flex-1 gap-[2px]">
       {#each layout.columns as column, index}
-        <!-- The end labels align to the plot's edges, so neither overflows the card. -->
         <span class="min-w-0 flex-1 overflow-visible whitespace-nowrap text-meta tabular font-mono text-text-faint
           {index === 0 ? 'text-left' : index === layout.columns.length - 1 ? 'flex justify-end' : 'text-center'}">
           {layout.dateTicks.has(index) ? shortDate(column.date) : ''}

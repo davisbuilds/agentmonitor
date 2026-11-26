@@ -107,7 +107,6 @@ after(async () => {
   }
 });
 
-// ─── Helper: build OTLP log payload ────────────────────────────────────
 
 function buildLogPayload(opts: {
   serviceName?: string;
@@ -149,7 +148,6 @@ function buildLogPayload(opts: {
   };
 }
 
-// ─── Helper: build OTLP metrics payload ────────────────────────────────
 
 function buildMetricsPayload(opts: {
   serviceName?: string;
@@ -184,15 +182,13 @@ function buildMetricsPayload(opts: {
               timeUnixNano: '1700000000000000000',
             })),
             isMonotonic: true,
-            aggregationTemporality: m.aggregationTemporality ?? 1, // delta by default
+            aggregationTemporality: m.aggregationTemporality ?? 1,
           },
         })),
       }],
     }],
   };
 }
-
-// ─── Logs endpoint tests ────────────────────────────────────────────────
 
 describe('POST /api/otel/v1/logs', () => {
   test('returns 415 for protobuf content-type', async () => {
@@ -472,10 +468,8 @@ describe('POST /api/otel/v1/logs', () => {
     assert.equal(events.total, 1);
 
     const meta = JSON.parse(events.events[0].metadata as string) as Record<string, unknown>;
-    // session_id and tool_name should be excluded from metadata
     assert.equal(meta.session_id, undefined);
     assert.equal(meta.tool_name, undefined);
-    // Non-promoted fields should remain
     assert.equal(meta.command, 'ls -la');
     assert.equal(meta.exit_code, 0);
     assert.equal(meta.output, 'total 42');
@@ -516,8 +510,6 @@ describe('POST /api/otel/v1/logs', () => {
   });
 });
 
-// ─── Metrics endpoint tests ────────────────────────────────────────────
-
 describe('OTLP events meet the ingest contract', () => {
   test('a record with negative usage is rejected, and the rest of the batch still lands', async () => {
     const payload = buildLogPayload({
@@ -544,7 +536,6 @@ describe('OTLP events meet the ingest contract', () => {
 
     const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
     assert.equal(res.status, 200);
-    // OTLP's own partial-success shape, so the exporter can report the loss.
     const body = await res.json() as { partialSuccess?: { rejectedLogRecords?: number; errorMessage?: string } };
     assert.equal(body.partialSuccess?.rejectedLogRecords, 1);
     assert.match(body.partialSuccess?.errorMessage ?? '', /tokens_in/);
@@ -665,11 +656,9 @@ describe('OTLP exporter retries do not double-count', () => {
   });
 
   test('a resent log batch is stored once', async () => {
-    // Shaped like real Codex output: no timeUnixNano, time in event.timestamp.
     const payload = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
     for (let attempt = 0; attempt < 2; attempt++) {
       const res = await postJson(`${baseUrl}/api/otel/v1/logs`, payload);
-      // A duplicate is not a refusal: the retry still gets a clean success.
       assert.deepEqual(await res.json(), {});
     }
     const events = await getEvents();
@@ -678,7 +667,7 @@ describe('OTLP exporter retries do not double-count', () => {
   });
 
   test('a retry re-serialized with its keys reordered is still one delivery', async () => {
-    // A collector in the path may re-encode the batch; key order is not identity.
+    // WHY: Re-encoding can reorder attributes without changing the batch’s identity.
     const payload = codexLogs([{ ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' }]);
     const reversed = (value: unknown): unknown => {
       if (Array.isArray(value)) return value.map(reversed);
@@ -693,7 +682,6 @@ describe('OTLP exporter retries do not double-count', () => {
   });
 
   test('records that differ only in their event time are both stored', async () => {
-    // Codex never sets timeUnixNano; its time lives in event.timestamp.
     const payload = codexLogs([
       { ...usageRecord('2026-09-23T12:00:00.000Z'), timeUnixNano: '0' },
       { ...usageRecord('2026-09-23T12:00:00.001Z'), timeUnixNano: '0' },
@@ -722,8 +710,8 @@ describe('OTLP exporter retries do not double-count', () => {
   });
 
   test('a record with no time at all is never collapsed', async () => {
-    // Without any timestamp a retry and a genuine repeat look identical, so
-    // keep both rather than risk dropping real usage.
+    // WHY: Without a timestamp there is no reliable way to distinguish a retry from genuine repeated
+    // usage.
     const record = { ...usageRecord(''), timeUnixNano: '0' };
     record.attributes = record.attributes.filter(attr => attr.key !== 'event.timestamp');
     const payload = codexLogs([record]);
@@ -789,7 +777,6 @@ describe('OTLP exporter retries do not double-count', () => {
     assert.equal((await getEvents()).total, 2);
   });
 
-  // Operational points (otel_metrics) take the same per-point retry key.
   const operationalBatch = (opts: { session?: string; state?: string; value?: number; temporality?: number } = {}) => buildMetricsPayload({
     serviceName: 'codex',
     resourceAttrs: [{ key: 'gen_ai.session.id', value: { stringValue: opts.session ?? 'sess-op-retry' } }],
@@ -825,10 +812,10 @@ describe('OTLP exporter retries do not double-count', () => {
   test('distinct operational points are all kept', async () => {
     const points = [
       operationalBatch(),
-      atTime(operationalBatch(), '1700000060000000000'), // next interval
-      operationalBatch({ value: 2 }), // same time, different value
-      operationalBatch({ state: 'succeeded' }), // same time, different attrs
-      operationalBatch({ session: 'sess-op-retry-other' }), // same time, different session
+      atTime(operationalBatch(), '1700000060000000000'),
+      operationalBatch({ value: 2 }),
+      operationalBatch({ state: 'succeeded' }),
+      operationalBatch({ session: 'sess-op-retry-other' }),
     ];
     for (const payload of points) await postJson(`${baseUrl}/api/otel/v1/metrics`, payload);
     assert.equal(storedOperationalRows(), 5);
@@ -839,13 +826,12 @@ describe('OTLP exporter retries do not double-count', () => {
     resetCumulativeState();
     const first = operationalBatch({ value: 3, temporality: 2 });
     await postJson(`${baseUrl}/api/otel/v1/metrics`, first);
-    // A server restart clears the cumulative baseline, so a resend arriving
-    // afterwards converts to its full value again; only the retry key stops it.
+    // WHY: Restart clears the cumulative baseline. The persisted retry key must still suppress an
+    // already-accounted resend.
     resetCumulativeState();
     await postJson(`${baseUrl}/api/otel/v1/metrics`, first);
     assert.equal(storedOperationalRows(), 1);
 
-    // The next real export differs by timestamp (and value), so it is kept.
     await postJson(`${baseUrl}/api/otel/v1/metrics`, atTime(operationalBatch({ value: 5, temporality: 2 }), '1700000060000000000'));
     assert.equal(storedOperationalRows(), 2);
     const [row] = await operationalSummary();
@@ -896,7 +882,7 @@ describe('POST /api/otel/v1/metrics', () => {
             ],
           },
         ],
-        aggregationTemporality: 1, // delta
+        aggregationTemporality: 1,
       }],
     });
 
@@ -938,13 +924,11 @@ describe('POST /api/otel/v1/metrics', () => {
     assert.equal(row.attrs.state, 'skipped_rate_limit');
     assert.equal(row.occurrences, 1);
 
-    // It must NOT have become an event (no billable/count pollution).
     const events = await getEvents('agent_type=codex');
     assert.equal(events.events.some(e => e.session_id === 'sess-op-e2e'), false);
   });
 
   test('ingests cost delta metrics', async () => {
-    // Build with asDouble since cost is fractional
     const rawPayload = {
       resourceMetrics: [{
         resource: {
@@ -982,8 +966,8 @@ describe('POST /api/otel/v1/metrics', () => {
   });
 
   test('a token metric carries no cost of its own when Claude reports cost on its cost metric', async () => {
-    // Claude Code exports token counts and cost as separate metrics. Pricing
-    // the token rows from our tables as well billed the same usage twice.
+    // WHY: Claude sends cost separately from token metrics, so estimating cost again from the tokens
+    // double-bills the response.
     const model = { key: 'model', value: { stringValue: 'claude-sonnet-5' } };
     const payload = {
       resourceMetrics: [{
@@ -1041,7 +1025,6 @@ describe('POST /api/otel/v1/metrics', () => {
   });
 
   test('handles cumulative metrics with delta conversion', async () => {
-    // Reset the cumulative state between tests by importing the parser
     const { resetCumulativeState } = await import('../src/otel/parser.js');
     resetCumulativeState();
 
@@ -1066,27 +1049,23 @@ describe('POST /api/otel/v1/metrics', () => {
                 timeUnixNano: '1700000000000000000',
               }],
               isMonotonic: true,
-              aggregationTemporality: 2, // cumulative
+              aggregationTemporality: 2,
             },
           }],
         }],
       }],
     });
 
-    // First report: 1000 total (treated as delta = 1000)
     const res1 = await postJson(`${baseUrl}/api/otel/v1/metrics`, makePayload(1000));
     assert.equal(res1.status, 200);
 
-    // Second report: 1500 total (delta = 500)
     const res2 = await postJson(`${baseUrl}/api/otel/v1/metrics`, makePayload(1500));
     assert.equal(res2.status, 200);
 
-    // Third report: 1500 total (delta = 0, should be skipped)
     const res3 = await postJson(`${baseUrl}/api/otel/v1/metrics`, makePayload(1500));
     assert.equal(res3.status, 200);
 
     const events = await getEvents();
-    // Should have 2 events: first delta=1000, second delta=500, third skipped (delta=0)
     assert.equal(events.total, 2);
 
     const tokenValues = events.events.map(e => e.tokens_in as number).sort((a, b) => a - b);
@@ -1162,7 +1141,6 @@ describe('POST /api/otel/v1/metrics', () => {
     const { resetCumulativeState } = await import('../src/otel/parser.js');
     resetCumulativeState();
 
-    // Build cumulative metric payload for a specific session
     const makeCumulativePayload = (sessionId: string, value: number) => ({
       resourceMetrics: [{
         resource: {
@@ -1184,26 +1162,21 @@ describe('POST /api/otel/v1/metrics', () => {
                 timeUnixNano: '1700000000000000000',
               }],
               isMonotonic: true,
-              aggregationTemporality: 2, // cumulative
+              aggregationTemporality: 2,
             },
           }],
         }],
       }],
     });
 
-    // Session A: first report = 1000 (delta 1000)
     await postJson(`${baseUrl}/api/otel/v1/metrics`, makeCumulativePayload('sess-A', 1000));
-    // Session B: first report = 500 (delta 500, NOT 500-1000=-500)
     await postJson(`${baseUrl}/api/otel/v1/metrics`, makeCumulativePayload('sess-B', 500));
-    // Session A: second report = 1800 (delta 800, NOT 1800-500=1300)
     await postJson(`${baseUrl}/api/otel/v1/metrics`, makeCumulativePayload('sess-A', 1800));
-    // Session B: second report = 900 (delta 400, NOT 900-1800=-900)
     await postJson(`${baseUrl}/api/otel/v1/metrics`, makeCumulativePayload('sess-B', 900));
 
     const events = await getEvents();
     assert.equal(events.total, 4);
 
-    // Verify each session's deltas are correct
     const sessAEvents = events.events.filter(e => e.session_id === 'sess-A');
     const sessBEvents = events.events.filter(e => e.session_id === 'sess-B');
     assert.equal(sessAEvents.length, 2);
@@ -1211,21 +1184,16 @@ describe('POST /api/otel/v1/metrics', () => {
 
     const sessATokens = sessAEvents.map(e => e.tokens_in as number).sort((a, b) => a - b);
     const sessBTokens = sessBEvents.map(e => e.tokens_in as number).sort((a, b) => a - b);
-    // Session A: 1000, then 800
     assert.deepEqual(sessATokens, [800, 1000]);
-    // Session B: 500, then 400
     assert.deepEqual(sessBTokens, [400, 500]);
 
     resetCumulativeState();
   });
 });
 
-// ─── Traces endpoint tests ─────────────────────────────────────────────
-
 describe('a metric usage row is dated at the start of the interval it covers', () => {
-  // The OTEL-vs-import rule compares this date with the session's imported
-  // usage, so a point exported after a transcript's last request still counts
-  // as covered when its interval began before that request.
+  // WHY: A metric interval may start before the last transcript request even when the export arrives
+  // afterward.
   const costPayload = (sessionId: string, points: Array<{ value: number; start?: string; time?: string }>, temporality: 1 | 2) => ({
     resourceMetrics: [{
       resource: { attributes: [
@@ -1261,8 +1229,8 @@ describe('a metric usage row is dated at the start of the interval it covers', (
   });
 
   test('a cumulative point is dated at the previous point of its series, and the first one seen at its own time', async () => {
-    // The series may have started long before amon saw it (amon restarted), so
-    // its start says nothing about when the first delta's usage happened.
+    // WHY: A metric can outlive an AgentMonitor restart. Its original start does not identify when an
+    // unseen delta occurred.
     const start = nanos('2026-10-27T09:00:00Z');
     for (const [value, time] of [[0.4, '2026-10-27T10:01:00Z'], [0.9, '2026-10-27T10:02:00Z']] as const) {
       const res = await postJson(`${baseUrl}/api/otel/v1/metrics`, costPayload('sess-cumulative-start', [{ value, start, time: nanos(time) }], 2));
@@ -1308,8 +1276,6 @@ describe('POST /api/otel/v1/traces', () => {
     assert.match(body.partialSuccess?.errorMessage ?? '', /not implemented/);
   });
 });
-
-// ─── Codex-specific tests ──────────────────────────────────────────────
 
 describe('Codex OTLP integration', () => {
   test('recognizes codex_cli_rs service name as codex agent type', async () => {
@@ -1376,8 +1342,6 @@ describe('Codex OTLP integration', () => {
   });
 
   test('keeps the client a Codex thread came from on its start and prompt events', async () => {
-    // Which client ran a thread (the CLI, the app, an ephemeral exec) tells a
-    // session someone started from a job Codex ran on its own.
     const client = [
       { key: 'originator', value: { stringValue: 'codex_cli_rs' } },
       { key: 'terminal.type', value: { stringValue: 'ghostty' } },
@@ -1400,7 +1364,6 @@ describe('Codex OTLP integration', () => {
     for (const type of ['session_start', 'user_prompt']) {
       assert.deepEqual([meta(type).originator, meta(type).terminal_type, meta(type).app_version], ['codex_cli_rs', 'ghostty', '0.166.0'], type);
     }
-    // Every other event would only repeat it.
     assert.equal(meta('llm_request').originator, undefined);
   });
 
@@ -1590,8 +1553,6 @@ describe('Codex OTLP integration', () => {
     const events = await getEvents();
     assert.equal(events.total, 1);
     assert.equal(events.events[0].event_type, 'llm_response');
-    // Codex/OpenAI report input_token_count as cache-inclusive; tokens_in is
-    // normalized to the uncached portion (1200 total - 180 cached).
     assert.equal(events.events[0].tokens_in, 1020);
     assert.equal(events.events[0].tokens_out, 320);
     assert.equal(events.events[0].cache_read_tokens, 180);
@@ -1634,7 +1595,6 @@ describe('Codex OTLP integration', () => {
     assert.equal(events.events[0].tokens_in, 50_000);
     assert.equal(events.events[0].cache_read_tokens, 40_000);
     assert.equal(events.events[0].cache_write_tokens, 10_000);
-    // 50K*$2 + 40K*$0.20 + 10K*$2 (cache write bills at the input rate) + 20K*$12 = $0.368.
     assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.368) < 0.0001);
   });
 
@@ -1664,7 +1624,6 @@ describe('Codex OTLP integration', () => {
     assert.equal(events.total, 1);
     assert.equal(events.events[0].tokens_in, 100_000);
     assert.equal(events.events[0].cache_write_tokens, 10_000);
-    // 100K*$3 + 10K*$3.75 + 20K*$15 = $0.6375.
     assert.ok(Math.abs((events.events[0].cost_usd as number) - 0.6375) < 0.0001);
   });
 
@@ -1685,7 +1644,6 @@ describe('Codex OTLP integration', () => {
 
     const payload = buildLogPayload({
       serviceName: 'codex_cli_rs',
-      // The parser accepts the websocket transport under both spellings.
       logRecords: ['codex.websocket_event', 'codex.websocket.event'].flatMap(eventName => ignoredKinds.map((eventKind, index) => ({
         eventName,
         attributes: [
@@ -1711,8 +1669,6 @@ describe('Codex OTLP integration', () => {
   });
 
   test('drops codex.sse_event stream fragments but keeps completions, failures and other response kinds', async () => {
-    // Codex exports its streaming lifecycle as codex.sse_event since mid-2026;
-    // every kind below arrives with no content, usage or error.
     const fragmentKinds = [
       'response.custom_tool_call_input.delta',
       'response.custom_tool_call_input.done',
@@ -1901,11 +1857,9 @@ describe('Codex OTLP integration', () => {
   });
 });
 
-// ─── Claude Code's session id ──────────────────────────────────────────
 
-// Claude Code (2.1.311, observed 2026-10-27) puts `session.id` on each metric
-// data point and log record, never on the resource, and sends its log
-// attributes under plain names (`cost_usd`, `input_tokens`), as strings.
+// WHY: Claude supplies session IDs on points and records instead of resource metadata. The fixture
+// preserves that producer shape.
 describe('Claude Code OTEL is stored under the session it names', () => {
   const sessionAttr = (id: string) => ({ key: 'session.id', value: { stringValue: id } });
   const monitorStats = async () =>

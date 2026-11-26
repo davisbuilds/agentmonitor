@@ -76,13 +76,11 @@ function main(): void {
     return;
   }
 
-  // Repair the dormant export seam first: a pre-reframe DB has it FK-referencing
-  // trace_quality_traces/_observations, so dropping those parents would leave it
-  // un-insertable (`no such table`). This rebuilds it FK-free if needed.
+  // WHY: Older databases reference the tables about to be dropped; preserve the export seam for
+  // subsequent inserts.
   ensureTraceQualityExportStateFkFree(db);
 
-  // FK enforcement OFF so dropping a referenced parent doesn't trip cascade
-  // bookkeeping; the warehouse tables only reference each other now.
+  // WHY: Dropping a referenced parent can invoke cascade bookkeeping during reclamation.
   db.pragma('foreign_keys = OFF');
   const drop = db.transaction(() => {
     for (const name of present) db.exec(`DROP TABLE IF EXISTS ${name}`);

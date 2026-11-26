@@ -28,7 +28,6 @@ describe('pricing: date-aware rate schedules', () => {
   });
 
   test('a scheduled model is priced at the reverted rate after the revert date', () => {
-    // The whole point: after 2027-01-01 a Gemini Flash request bills at $1.50/MTok.
     assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, REVERT), 1.5);
   });
 
@@ -63,17 +62,14 @@ describe('pricing: date-aware rate schedules', () => {
   });
 
   test('a model with no schedule is unaffected by the `at` date', () => {
-    // Sonnet 5 has no schedule: $2/MTok input at every date, past or future.
     assert.equal(pricingRegistry.calculate('claude-sonnet-5', ONE_M_INPUT, PROMO), 2);
     assert.equal(pricingRegistry.calculate('claude-sonnet-5', ONE_M_INPUT, REVERT), 2);
-    assert.equal(pricingRegistry.calculate('claude-sonnet-5', ONE_M_INPUT), 2); // omitted date
+    assert.equal(pricingRegistry.calculate('claude-sonnet-5', ONE_M_INPUT), 2);
   });
 
   test('an omitted date prices at the current wall-clock period', () => {
-    // Guards the default path callers hit when no event timestamp is threaded.
-    // Asserted against "price at now" rather than a hard-coded rate so this test
-    // does not itself become a dated guard that flips on 2027-01-01 — the exact
-    // fragility this feature removes.
+    // WHY: A fixed expected rate for the implicit timestamp would break when the schedule crosses
+    // another date.
     const omitted = pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT);
     const explicitNow = pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, Date.now());
     assert.equal(omitted, explicitNow);
@@ -86,17 +82,48 @@ describe('pricing: date-aware rate schedules', () => {
   });
 
   test('a zone-less SQLite created_at is read as UTC, not host-local time', () => {
-    // SQLite CURRENT_TIMESTAMP writes `YYYY-MM-DD HH:MM:SS` with no zone but means
-    // UTC; Node would otherwise parse it in the host TZ and misassign events near
-    // a boundary. This is host-independent: the bare form must resolve to the same
-    // instant as its explicit-Z equivalent regardless of where CI runs.
+    // WHY: SQLite’s timezone-free timestamp denotes UTC, while Node can interpret its bare form in
+    // the host zone.
     assert.equal(normalizeSqliteTimestamp('2027-01-01 00:00:00'), '2027-01-01T00:00:00Z');
     assert.equal(normalizeSqliteTimestamp('2026-12-31 23:59:59.500'), '2026-12-31T23:59:59.500Z');
-    // Already-zoned ISO (client_timestamp) and non-datetime strings pass through.
     assert.equal(normalizeSqliteTimestamp('2026-10-01T00:00:00Z'), '2026-10-01T00:00:00Z');
     assert.equal(normalizeSqliteTimestamp('not-a-date'), 'not-a-date');
-    // The bare boundary time prices at the reverted rate — as UTC, not local.
     assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, '2027-01-01 00:00:00'), 1.5);
     assert.equal(pricingRegistry.calculate('gemini-3.8-flash', ONE_M_INPUT, '2026-12-31 23:59:59'), 0.75);
+  });
+
+  test('gemini-4-carbon and gemini-4-argon move from launch promo ($2/$10/$0.10) to list ($4/$20/$0.20) on 2026-12-01', () => {
+    const g4Boundary = '2026-12-01T00:00:00Z';
+    const g4Before = Date.parse(g4Boundary) - 1;
+    const g4After = '2026-12-15T00:00:00Z';
+    const tokens = { input: 500_000, output: 100_000, cacheRead: 200_000, cacheWrite: 50_000 };
+    const promoExpected = 0.5 * 2 + 0.1 * 10 + 0.2 * 0.1;
+    const listExpected = 0.5 * 4 + 0.1 * 20 + 0.2 * 0.2;
+
+    for (const model of ['gemini-4-carbon', 'gemini-4-carbon-high', 'gemini-4-argon', 'gemini-4-argon-medium']) {
+      const promoCost = pricingRegistry.calculate(model, tokens, '2026-11-24T00:00:00Z');
+      const justBeforeCost = pricingRegistry.calculate(model, tokens, g4Before);
+      const atBoundaryCost = pricingRegistry.calculate(model, tokens, g4Boundary);
+      const afterCost = pricingRegistry.calculate(model, tokens, g4After);
+      const sqliteBefore = pricingRegistry.calculate(model, tokens, '2026-11-30 23:59:59');
+      const sqliteAt = pricingRegistry.calculate(model, tokens, '2026-12-01 00:00:00');
+
+      assert.ok(promoCost !== null && Math.abs(promoCost - promoExpected) < 1e-9, `${model} promo`);
+      assert.ok(justBeforeCost !== null && Math.abs(justBeforeCost - promoExpected) < 1e-9, `${model} 1ms before`);
+      assert.ok(sqliteBefore !== null && Math.abs(sqliteBefore - promoExpected) < 1e-9, `${model} sqlite before`);
+      assert.ok(atBoundaryCost !== null && Math.abs(atBoundaryCost - listExpected) < 1e-9, `${model} boundary`);
+      assert.ok(afterCost !== null && Math.abs(afterCost - listExpected) < 1e-9, `${model} after`);
+      assert.ok(sqliteAt !== null && Math.abs(sqliteAt - listExpected) < 1e-9, `${model} sqlite at`);
+
+      const promoRates = pricingRegistry.effectiveRates(model, tokens, g4Before);
+      const listRates = pricingRegistry.effectiveRates(model, tokens, g4Boundary);
+      assert.ok(promoRates && listRates, `${model} effectiveRates`);
+      assert.equal(promoRates.inputCostPerToken, 2 / 1_000_000, `${model} promo input`);
+      assert.equal(promoRates.outputCostPerToken, 10 / 1_000_000, `${model} promo output`);
+      assert.equal(promoRates.cacheReadCostPerToken, 0.1 / 1_000_000, `${model} promo cacheRead`);
+      assert.equal(listRates.inputCostPerToken, 4 / 1_000_000, `${model} list input`);
+      assert.equal(listRates.outputCostPerToken, 20 / 1_000_000, `${model} list output`);
+      assert.equal(listRates.cacheReadCostPerToken, 0.2 / 1_000_000, `${model} list cacheRead`);
+    }
   });
 });

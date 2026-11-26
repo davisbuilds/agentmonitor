@@ -3,14 +3,14 @@
   import { formatCost, formatNumber, timeAgo, agentColor, parseTimestamp } from '../../format';
   import type { AgentEvent, Session } from '../../api/client';
   import { buildActiveAgentLabel, collapseEventRuns } from '../../monitor-analytics';
-  import { SectionHeader, StatusDot, EmptyState, Badge } from '../ui';
+  import { SectionHeader, EmptyState, Badge } from '../ui';
+  import AgentIcon from '../shared/AgentIcon.svelte';
   import ContextPill from './ContextPill.svelte';
   import { openMonitorSession } from '../../stores/router.svelte';
 
   const sessions = $derived(getSessions());
   const events = $derived(getEvents());
 
-  // Group recent events by session
   const eventsBySession = $derived.by(() => {
     const map = new Map<string, AgentEvent[]>();
     for (const e of events) {
@@ -21,7 +21,6 @@
     return map;
   });
 
-  // Sort: active first, then idle, then by last_event_at desc
   const sorted = $derived.by(() => {
     return [...sessions].sort((a, b) => {
       const statusOrder: Record<string, number> = { active: 0, idle: 1, ended: 2 };
@@ -32,8 +31,6 @@
     });
   });
 
-  // A card opens the session in place: its live stream, or its recent events
-  // when it has no live record or the live view is off.
   function openSession(id: string): void {
     openMonitorSession(id);
   }
@@ -66,11 +63,12 @@
         class="w-full cursor-pointer rounded-lg border border-line bg-surface p-4 text-left transition-colors hover:border-line-strong"
         onclick={() => openSession(session.id)}
       >
-        <!-- Header -->
         <div class="mb-2 flex items-start justify-between gap-3">
           <div class="flex min-w-0 items-start gap-2">
-            <StatusDot status={session.status} class="mt-1.5" />
-            <span class="text-body font-medium leading-tight {agentColor(session.agent_type)}">{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
+            <span class="flex min-w-0 items-center gap-2 text-body font-medium leading-tight {agentColor(session.agent_type)}">
+              <AgentIcon agent={session.agent_type} fallback="terminal" />
+              <span>{buildActiveAgentLabel(session.agent_type, recentEvents)}</span>
+            </span>
             {#if session.mode === 'headless'}
               <Badge tone="neutral" class="mt-0.5" title="Headless run (claude -p / codex exec)">headless</Badge>
             {/if}
@@ -83,11 +81,13 @@
                 windowTokens={occupancy.window}
               />
             {/if}
+            {#if session.status === 'idle' || session.status === 'ended'}
+              <span class="text-meta text-text-muted">{session.status === 'idle' ? 'Idle' : 'Ended'}</span>
+            {/if}
             <span class="text-meta text-text-faint">{timeAgo(session.last_event_at)}</span>
           </div>
         </div>
 
-        <!-- Project/Branch -->
         {#if session.project || session.branch}
           <div class="mb-2 truncate text-meta text-text-muted">
             {#if session.project}<span class="text-text">{session.project}</span>{/if}
@@ -95,7 +95,6 @@
           </div>
         {/if}
 
-        <!-- Metrics -->
         <div class="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-meta text-text-muted">
           <span><span class="tabular font-mono text-text">{session.event_count || 0}</span> events</span>
           <span><span class="tabular font-mono text-text">{formatNumber(session.tokens_in || 0)}</span> in</span>
@@ -114,7 +113,6 @@
           {/if}
         </div>
 
-        <!-- Mini event feed -->
         {#if recentEvents.length > 0}
           <div class="max-h-48 space-y-1 overflow-hidden">
             {#each collapseEventRuns(recentEvents.slice(0, 8), eventLabel, (e) => `${eventLabel(e)}|${eventStatusDot(e)}`) as run}

@@ -1,7 +1,95 @@
 {
   "provider": "google",
-  "lastUpdated": "2026-09-03T00:00:00Z",
+  "lastUpdated": "2026-11-25T00:00:00Z",
   "models": {
+    "gemini-4-carbon": {
+      "aliases": [
+        "gemini-4-carbon-high",
+        "gemini-4-carbon-medium",
+        "gemini-4-carbon-low",
+        "Gemini 4 Carbon (High)",
+        "Gemini 4 Carbon (Medium)",
+        "Gemini 4 Carbon (Low)"
+      ],
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.1,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false,
+      "schedule": [
+        {
+          "from": "2026-12-01",
+          "note": "Launch promo ($2/$10) reverts to list on 2026-12-01.",
+          "inputCostPerMTok": 4,
+          "outputCostPerMTok": 20,
+          "cacheReadCostPerMTok": 0.2,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
+    },
+    "gemini-4-argon": {
+      "aliases": [
+        "gemini-4-argon-high",
+        "gemini-4-argon-medium",
+        "gemini-4-argon-low",
+        "Gemini 4 Argon (High)",
+        "Gemini 4 Argon (Medium)",
+        "Gemini 4 Argon (Low)"
+      ],
+      "inputCostPerMTok": 2,
+      "outputCostPerMTok": 10,
+      "cacheReadCostPerMTok": 0.1,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false,
+      "schedule": [
+        {
+          "from": "2026-12-01",
+          "note": "Launch promo ($2/$10) reverts to list on 2026-12-01.",
+          "inputCostPerMTok": 4,
+          "outputCostPerMTok": 20,
+          "cacheReadCostPerMTok": 0.2,
+          "cacheWriteCostPerMTok": 0
+        }
+      ]
+    },
+    "gemini-4-neon": {
+      "aliases": [
+        "gemini-4-neon-xhigh",
+        "gemini-4-neon-high",
+        "gemini-4-neon-medium",
+        "gemini-4-neon-low",
+        "Gemini 4 Neon (XHigh)",
+        "Gemini 4 Neon (High)",
+        "Gemini 4 Neon (Medium)",
+        "Gemini 4 Neon (Low)"
+      ],
+      "inputCostPerMTok": 3,
+      "outputCostPerMTok": 15,
+      "cacheReadCostPerMTok": 0.15,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
+    "gemini-4-hydrogen": {
+      "aliases": [
+        "gemini-4-hydrogen-xhigh",
+        "gemini-4-hydrogen-high",
+        "gemini-4-hydrogen-medium",
+        "gemini-4-hydrogen-low",
+        "gemini-4-hydrogen-tiered-xhigh",
+        "gemini-4-hydrogen-tiered-high",
+        "gemini-4-hydrogen-tiered-medium",
+        "gemini-4-hydrogen-tiered-low",
+        "Gemini 4 Hydrogen (XHigh)",
+        "Gemini 4 Hydrogen (High)",
+        "Gemini 4 Hydrogen (Medium)",
+        "Gemini 4 Hydrogen (Low)"
+      ],
+      "inputCostPerMTok": 1.5,
+      "outputCostPerMTok": 7.5,
+      "cacheReadCostPerMTok": 0.075,
+      "cacheWriteCostPerMTok": 0,
+      "deprecated": false
+    },
     "gemini-3.8-flash": {
       "aliases": [],
       "inputCostPerMTok": 0.75,

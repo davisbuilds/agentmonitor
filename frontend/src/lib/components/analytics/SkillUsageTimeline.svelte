@@ -22,7 +22,6 @@
 
   const dayMap = $derived.by(() => new Map(analytics.skillUsageDaily.map((day) => [day.date, day])));
 
-  // The range's top skills keep one palette color each; the rest fold into Other.
   const series = $derived(skillSeries(analytics.skillUsageDaily));
   const hasOther = $derived(analytics.skillUsageDaily.some(day => day.skills.some(skill => !series.top.includes(skill.skill_name))));
 

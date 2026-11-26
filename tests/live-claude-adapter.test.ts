@@ -130,7 +130,6 @@ test('an empty thinking block projects no live item but keeps its turn', () => {
       timestamp: '2026-03-24T10:30:00.000Z',
     },
     {
-      // Claude Code often records a thinking block with its text left out.
       type: 'assistant',
       message: { role: 'assistant', content: [{ type: 'thinking', thinking: '', signature: 'sig' }] },
       timestamp: '2026-03-24T10:30:02.000Z',
@@ -152,8 +151,6 @@ test('an empty thinking block projects no live item but keeps its turn', () => {
     .map(item => item.kind);
   assert.deepEqual(kinds, ['user_message', 'assistant_message']);
 
-  // The turn count still matches the message count, so the next sync appends
-  // only the new message instead of rebuilding the session.
   const jsonl2 = makeSession('live-claude-empty-thinking', [
     ...lines,
     {
@@ -304,7 +301,6 @@ test('each live adapter projects again when an earlier message changed', async (
     };
 
     store(session(['alpha', 'bravo', 'charlie']));
-    // Same number of messages, so only the kept count reveals the change.
     const result = store(session(['alpha', 'bravo rewritten', 'charlie']));
 
     const titles = (db.prepare('SELECT title FROM session_turns WHERE session_id = ? ORDER BY id')

@@ -8,8 +8,6 @@ import { resolveDbPath } from '../src/db-path.js';
 
 describe('config: default database path', () => {
   test('does not depend on the working directory', () => {
-    // Launching from the wrong directory used to silently create a second,
-    // empty database there and auto-import into it.
     const fromRepo = createConfig({}, '/Users/dev/agentmonitor');
     const fromElsewhere = createConfig({}, '/Users/dev');
     const fromRoot = createConfig({}, '/');
@@ -30,9 +28,8 @@ describe('config: default database path', () => {
     assert.equal(dbPath, '/tmp/custom.db');
   });
 
-  // `amon status` reports on the DB it resolves itself. When it kept its own copy
-  // of the default, a server started from a non-repo cwd was healthy and reading
-  // the install DB while status pointed at a cwd-relative file that did not exist.
+  // WHY: A status command launched outside the repo must resolve the same database as the service or
+  // it can contradict a healthy server.
   test('the server and `amon status` resolve the same default', () => {
     assert.equal(resolveDbPath({}), createConfig({}, '/anywhere').dbPath);
   });
@@ -58,8 +55,6 @@ describe('db: tests cannot open the install database', () => {
     assert.doesNotThrow(() => assertTestDbIsIsolated('/tmp/scratch/agentmonitor.db', underTest));
   });
 
-  // The guard is a test-runner interlock, not a runtime restriction: the server's
-  // whole job is to open this file.
   test('the server may open the install database', () => {
     assert.doesNotThrow(() => assertTestDbIsIsolated(installDb, {}));
   });

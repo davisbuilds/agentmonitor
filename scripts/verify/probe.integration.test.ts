@@ -10,8 +10,6 @@ import { startSession, stopSession } from './session.js';
 import { zstdCompressSync } from 'node:zlib';
 import { runProbe, snapshotPrefix } from './probe.js';
 
-// Explicit opt-in: needs the compiled app (pnpm build). Fixture databases come
-// from the pilot's disposable host, never the installed database.
 const digest = (file: string) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 
 type StatementFailure = { route: string; sql: string; error: string };
@@ -42,8 +40,7 @@ function assertTimingName(measurements: unknown) {
   assert.equal('total_median_ms' in values, false);
 }
 
-// Evidence and session directories outlive a run by design; the tests remove
-// exactly the ones their runs report, never a prefix sweep of the temp dir.
+// WHY: Evidence outlives its creating process; a prefix sweep could delete another run's results.
 const created = new Set<string>();
 function keep<T extends { directory?: string; session?: string | null }>(result: T): T {
   for (const dir of [result.directory, result.session]) if (dir) created.add(dir);
@@ -88,7 +85,6 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       'total_events', 'usage', 'active_sessions', 'total_sessions', 'live_sessions',
       'active_agents', 'tool_breakdown', 'agent_breakdown', 'model_breakdown', 'branches',
     ]);
-    // The fixture's usage events are all Codex rows on one model.
     assert.equal(rows(all).model_breakdown, 1);
     assert.equal(rows(claude).model_breakdown, 0, 'the agent filter reaches the statements');
     assert.ok((all.measurements as Statements).statements.every(entry => entry.plan.length > 0));
@@ -105,7 +101,7 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
   });
 
   await t.test('the deadline also kills what the worker started', async () => {
-    // index-audit's worker runs the test suite; killing only the worker would orphan it.
+    // WHY: Killing only the worker would leave its child test suite running.
     const recorder = /^\S*node\s.*--import \.\/scripts\/verify\/record-sql\.ts/;
     const running = () => execFileSync('ps', ['-A', '-o', 'args='], { encoding: 'utf8' }).split('\n').filter(line => recorder.test(line.trim()));
     assert.deepEqual(running(), [], 'no recorder run before the test');
@@ -134,15 +130,12 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       const transcripts = ['stamped', 'unstamped', 'new', 'touched'].map(name => {
         const file = path.join(projects, `${name}.jsonl`);
         fs.writeFileSync(file, '{}\n');
-        // Discovery joins paths under HOME, so state is keyed the same way.
         return file;
       });
       const [stamped, unstamped, newTranscript, touched] = transcripts;
-      // A read type and one no parser knows: the unknown one must be reported.
       fs.writeFileSync(newTranscript, '{"type":"user"}\n{"type":"brand-new-record"}\n');
       fs.writeFileSync(path.join(home, '.codex', 'sessions', 'rollout-probe.jsonl'),
         '{"type":"session_meta","payload":{}}\n{"type":"event_msg","payload":{"type":"agent_reasoning_v2"}}\n');
-      // A rollout Codex compressed is read as its records, not as binary.
       fs.writeFileSync(path.join(home, '.codex', 'sessions', 'rollout-probe-old.jsonl.zst'),
         zstdCompressSync(Buffer.from('{"type":"session_meta","payload":{}}\n{"type":"event_msg","payload":{"type":"compressed_v3"}}\n')));
       const copy = path.join(home, 'probe.db');
@@ -176,7 +169,6 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
         claude_dir: path.join(home, '.claude'), codex_home: path.join(home, '.codex'),
         exclude_patterns: ['excluded'], matches_running_service: 'unknown',
       });
-      // Explicit scope wins over the caller's environment and can clear exclusions.
       const override = await probe('ingestion', {
         db: copy, claudeDir: path.join(home, '.claude'), codexHome: path.join(home, '.codex'), excludePatterns: [],
       });
@@ -234,7 +226,6 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.equal(fs.existsSync(retained.target!.path), false);
       fs.rmSync(copies, { recursive: true });
 
-      // A real SQLite error after transcript copies exist must also clean them.
       const backup = await probe('snapshot', { db: fixture });
       assert.equal(backup.status, 'observed', backup.errors.join(' '));
       const snapshot = String(backup.observations.snapshot);
@@ -250,7 +241,6 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
         assert.ok(fs.existsSync(snapshot));
       } finally { fs.rmSync(path.dirname(snapshot), { recursive: true }); }
 
-      // Wait for a real copy to exist, then interrupt the worker during parsing.
       fs.writeFileSync(transcript, lines.repeat(300));
       const before = new Set(fs.readdirSync(os.tmpdir()));
       const abort = new AbortController();
@@ -275,7 +265,6 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
         assert.equal(fs.existsSync(interrupted.target!.path), false);
       } finally { clearInterval(timer); }
 
-      // Too short to split into a prefix and an append: refused, not a timing of nothing.
       for (const short of ['', lines.split('\n')[0] + '\n']) {
         fs.writeFileSync(transcript, short);
         const refused = await probe('resync', { transcript });
@@ -339,20 +328,19 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.deepEqual([observations.index, observations.table], ['idx_events_agent_created_order', 'events']);
       assert.deepEqual(observations.compare_errors, []);
       assert.equal(measurements.unchanged + measurements.changed.length, measurements.statements);
-      // The agent-filtered feed page is the read this index exists for.
+      // WHY: This index exists for the agent-filtered feed.
       const page = measurements.changed.find(entry => entry.route === '/api/v2/monitor/events?agent=codex'
         && entry.plan_with.includes('idx_events_agent_created_order'));
       assert.ok(page, JSON.stringify(measurements.changed.map(entry => entry.route)));
       assert.match(page.plan_without, /TEMP B-TREE FOR ORDER BY/);
 
-      // SQLite parses a quoted name; DROP must quote it correctly on each comparison.
       const candidate = await probe('plans', { db: copy, indexSql: 'CREATE INDEX "idx_probe""candidate" ON events(branch, id)' });
       assert.equal(candidate.status, 'observed', candidate.errors.join(' '));
       assert.equal((candidate.observations as { index: string }).index, 'idx_probe"candidate');
       assert.deepEqual(candidate.observations.compare_errors, []);
 
-      // The product pins this index with INDEXED BY. Removing it cannot produce
-      // a plan: expose that missing comparison, rather than a clean no-change result.
+      // WHY: INDEXED BY makes a dropped index a planning error; treating that as an unchanged plan
+      // would hide missing evidence.
       const pinned = await probe('plans', { db: copy, index: 'idx_events_usage_covering' });
       assert.equal(pinned.status, 'observed', pinned.errors.join(' '));
       const partial = pinned.observations as RouteObservations & { compare_errors: StatementFailure[] };
@@ -399,15 +387,14 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
   await t.test('reclaim projects what compact would free, from a deleted copy', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-reclaim-test-'));
     try {
-      // A store with known free pages: data written, then dropped.
       const store = path.join(dir, 'agentmonitor.db');
       fs.copyFileSync(fixture, store);
       const writer = new Database(store);
       writer.exec(`CREATE TABLE filler (b BLOB);
         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000) INSERT INTO filler SELECT randomblob(2000) FROM n;
         DROP TABLE filler;`);
-      // And dead search-index entries, from messages rewritten the way the old
-      // re-sync did (automerge off keeps them in segments FTS5 never merges).
+      // WHY: Disable automerge so deleted search entries still occupy FTS segments when the probe
+      // runs.
       writer.exec("INSERT INTO messages_fts(messages_fts, rank) VALUES('automerge', 0)");
       writer.exec("INSERT INTO messages_fts(messages_fts, rank) VALUES('crisismerge', 64)");
       const insert = writer.prepare('INSERT INTO messages (session_id, ordinal, role, content) VALUES (?, ?, ?, ?)');
@@ -435,7 +422,6 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.deepEqual(result.content_artifacts, []);
       assert.equal(digest(store), before, 'reclaim reads the store and writes only its copy');
 
-      // Interrupted while the copy exists, the parent still deletes it.
       const grow = new Database(store);
       grow.exec(`CREATE TABLE ballast (b BLOB);
         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 20000) INSERT INTO ballast SELECT randomblob(4000) FROM n;`);
@@ -480,7 +466,6 @@ test('probes report observations a wrong answer would contradict', { timeout: 24
       assert.ok(measurements.statements > measurements.slowest.length, 'more statements than the listed slowest');
       assert.deepEqual(measurements.slowest.map(entry => entry.median_ms), [...measurements.slowest.map(entry => entry.median_ms)].sort((a, b) => b - a));
       assert.ok(measurements.slowest.every(entry => entry.plan.length > 0));
-      // Reads from more than one table are timed, not only events.
       const all = measurements.slowest.map(entry => entry.sql).join('\n');
       assert.match(all, /\bevents\b/);
       assert.match(all, /\b(messages|browsing_sessions|sessions)\b/);

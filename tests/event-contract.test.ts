@@ -224,7 +224,6 @@ test('normalizeIngestEvent rejects an unparseable client_timestamp and keeps oth
 
   assert.equal(result.ok, false);
   if (result.ok) return;
-  // Errors aggregate — the whole payload is validated, not just the first failure.
   assert.ok(result.errors.some(e => e.field === 'client_timestamp'), 'timestamp error present');
   assert.ok(result.errors.some(e => e.field === 'duration_ms'), 'duration error present');
 });
@@ -243,8 +242,7 @@ test('normalizeIngestEvent rejects a non-string client_timestamp', () => {
 });
 
 test('normalizeIngestEvent rejects non-finite cost_usd', () => {
-  // JSON.parse('1e400') is Infinity: one such row makes every SUM(cost_usd)
-  // containing it Infinity for good. NaN would be stored as NULL, silently.
+  // WHY: A non-finite input poisons later aggregate sums even if JSON parsing accepts it.
   for (const cost_usd of [JSON.parse('1e400') as number, -Infinity, Number.NaN]) {
     const result = normalizeIngestEvent({
       session_id: 'session-1',

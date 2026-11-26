@@ -7,8 +7,7 @@ AGENTMONITOR_URL="${AGENTMONITOR_URL:-http://127.0.0.1:3141}"
 
 payload="$(cat)"
 
-# Fire and forget: the statusline renders on every update, so a slow server
-# must never delay it. Detached from our stdout, which the agent waits on.
+# WHY: A delayed monitor must not stall statusline rendering or hold its stdout open.
 if [[ -n "$payload" ]]; then
   curl -fsS \
     -m 1 \

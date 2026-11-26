@@ -4,7 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-monitor-token-totals-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -31,14 +30,10 @@ function insert(row: Row): void {
 before(() => {
   initSchema();
   assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
-  // Codex: an imported request, an OTEL row the import already covers (excluded),
-  // and an OTEL row after the last import (counted).
   insert({ id: 'cdx-import', session: 'cdx', agent: 'codex', source: 'import', at: '2026-07-01T10:05:00Z', tin: 100, tout: 10, cr: 1000, cost: 0.5 });
   insert({ id: 'cdx-otel-covered', session: 'cdx', agent: 'codex', source: 'otel', at: '2026-07-01T10:00:00Z', tin: 50, tout: 5, cr: 500, cost: 0.2 });
   insert({ id: 'cdx-otel-after', session: 'cdx', agent: 'codex', source: 'otel', at: '2026-07-01T10:10:00Z', tin: 7, tout: 1, cr: 70, cost: 0.01 });
-  // Claude: cache reads and writes dominate.
   insert({ id: 'cc-import', session: 'cc', agent: 'claude_code', source: 'import', at: '2026-07-01T11:00:00Z', tin: 3, tout: 40, cr: 9000, cw: 800, cost: 1.2 });
-  // A benchmark row never reaches the Monitor.
   insert({ id: 'bench', session: 'bench', agent: 'codex', source: 'benchmark', at: '2026-07-01T12:00:00Z', tin: 999, tout: 99, cr: 99_999, cw: 9_999, cost: 9 });
 });
 
@@ -83,7 +78,6 @@ test('the per-agent split adds up to the totals', () => {
 });
 
 test('an agent filter narrows the split and the totals together, with the same exclusions', () => {
-  // An unfiltered read reuses the broadcast snapshot; a filtered one runs its own query.
   const stats = getMonitorStats({ agent: 'codex' });
   assert.deepEqual(Object.keys(stats.usage_by_agent), ['codex']);
   assert.equal(stats.total_tokens_in, 107, 'the covered OTEL row and the benchmark row stay out');
@@ -92,8 +86,8 @@ test('an agent filter narrows the split and the totals together, with the same e
 });
 
 test('the SSE stats broadcast carries the same usage as the REST read', () => {
-  // The broadcast replaces the bar's stats every few seconds, so a field the
-  // REST read has and the broadcast lacks would vanish from the display.
+  // WHY: The broadcast replaces the visible stats, so it must carry the same fields users received
+  // over REST.
   const keys = ['total_tokens_in', 'total_tokens_out', 'total_cache_read_tokens', 'total_cache_write_tokens', 'total_cost_usd', 'usage_by_agent'] as const;
   for (const agent of [undefined, 'codex']) {
     const rest = getMonitorStats(agent ? { agent } : {});
@@ -103,8 +97,6 @@ test('the SSE stats broadcast carries the same usage as the REST read', () => {
 });
 
 test('the usage sum scans the covering usage index, not a row-by-row agent index', () => {
-  // Grouping by agent_type let SQLite pick an agent_type index that does not
-  // cover the token columns: 4.4s against 18ms on a real store.
   const where = `WHERE ${excludeBenchmarkUsageCondition('e')} AND ${usageMetricPresenceCondition('e')} AND ${excludeOverlappingOtelUsageCondition('e')}`;
   const plan = (getDb().prepare(`EXPLAIN QUERY PLAN ${monitorUsageSql(where)}`).all() as Array<{ detail: string }>)
     .map(row => row.detail);
@@ -114,7 +106,6 @@ test('the usage sum scans the covering usage index, not a row-by-row agent index
 test('amon monitor stats prints the same totals as the UI and JSON, per agent', () => {
   const lines = formatMonitorStats(getMonitorStats()).split('\n');
   assert.ok(lines.includes('Tokens: 11031 (in 110 / out 51 / cache read 10070 / cache write 800)'), lines.join('\n'));
-  // Largest agent first, as in the UI.
   const claude = lines.indexOf('  claude_code: 9843 (in 3 / out 40 / cache read 9000 / cache write 800)');
   const codex = lines.indexOf('  codex: 1188 (in 107 / out 11 / cache read 1070 / cache write 0)');
   assert.ok(claude > 0 && codex > claude, lines.join('\n'));

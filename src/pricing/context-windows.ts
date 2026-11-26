@@ -1,19 +1,9 @@
-// Context-window occupancy: resolve a session's context-window size (the
-// denominator) and turn a used-token count into an occupancy reading.
-//
-// The numerator (used tokens) is the *most recent request's prompt size*,
-// extracted upstream by the parsers; this module only resolves the denominator
-// and computes the percentage. Occupancy is a resolved default, not a guarantee:
-// the transcript does not always state the active window, so we default per
-// agent and guard against a denominator smaller than what was actually observed
-// (which would render a nonsensical >100%).
 
 export const CLAUDE_DEFAULT_CONTEXT_WINDOW = 1_000_000;
 export const CODEX_DEFAULT_CONTEXT_WINDOW = 256_000;
+export const ANTIGRAVITY_DEFAULT_CONTEXT_WINDOW = 1_048_576;
 
-// Known window tiers, ascending. Used only by the over-window guard to bump a
-// too-small default up to the next plausible real window.
-const WINDOW_TIERS = [200_000, 256_000, 400_000, 1_000_000, 2_000_000] as const;
+const WINDOW_TIERS = [200_000, 256_000, 400_000, 1_000_000, 1_048_576, 2_000_000] as const;
 
 function isClaudeAgent(agent: string): boolean {
   const a = agent.toLowerCase();
@@ -22,6 +12,10 @@ function isClaudeAgent(agent: string): boolean {
 
 function isCodexAgent(agent: string): boolean {
   return agent.toLowerCase() === 'codex';
+}
+
+function isAntigravityAgent(agent: string): boolean {
+  return agent.toLowerCase() === 'antigravity';
 }
 
 function isPositiveFinite(value: number | null | undefined): value is number {
@@ -61,13 +55,14 @@ export function resolveContextWindow(input: ResolveContextWindowInput): number |
       : CODEX_DEFAULT_CONTEXT_WINDOW;
   } else if (isClaudeAgent(input.agent)) {
     base = CLAUDE_DEFAULT_CONTEXT_WINDOW;
+  } else if (isAntigravityAgent(input.agent)) {
+    base = ANTIGRAVITY_DEFAULT_CONTEXT_WINDOW;
   } else {
     base = null;
   }
 
   if (base === null) return null;
 
-  // Over-window guard: never return a denominator below observed usage.
   if (isPositiveFinite(input.observedTokens) && input.observedTokens > base) {
     base = nextTierAtLeast(input.observedTokens) ?? input.observedTokens;
   }

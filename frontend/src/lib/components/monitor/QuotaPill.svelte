@@ -3,6 +3,7 @@
   import type { QuotaMonitorData, QuotaMonitorWindow } from '../../api/client';
   import { parseTimestamp, timeAgo } from '../../format';
   import { Popover, Bar } from '../ui';
+  import AgentIcon from '../shared/AgentIcon.svelte';
   import { quotaPillEntries, quotaPillLabel, quotaProviderLabel as providerLabel, quotaShowsWindows, quotaWindows as windows } from '../../quota-pill';
 
   const rows = $derived(getQuotaMonitor());
@@ -30,7 +31,7 @@
 
   function unavailableCopy(row: QuotaMonitorData): string {
     if (row.status === 'error') return row.error_message || 'quota unavailable';
-    return row.provider === 'claude' ? 'statusline bridge needed' : 'native quota unavailable';
+    return row.provider === 'codex' ? 'native quota unavailable' : 'statusline bridge needed';
   }
 
 </script>
@@ -47,12 +48,10 @@
         onclick={toggle}
       >
         {#if entries.length > 0}
-          <!-- Each provider's name and what is left of its most-used window. -->
           {#each entries as entry (entry.provider)}
-            <!-- A stale entry is the last good reading: a neutral dot and muted figure. -->
-            <span class="flex items-center gap-1.5" title={entry.stale ? 'Last good reading; the latest refresh failed' : undefined}>
+            <span class="flex items-center gap-1.5" title={entry.stale ? `${entry.label}. Last good reading (latest refresh failed)` : entry.label}>
               <span class="h-1.5 w-1.5 rounded-full {entry.stale ? 'bg-line-strong' : toneDot[entry.tone]}"></span>
-              <span>{entry.label}</span>
+              <AgentIcon agent={entry.provider} />
               <span class="tabular font-mono {entry.stale ? 'text-text-muted' : 'text-text'}">{entry.remainingPercent}%</span>
             </span>
           {/each}
@@ -71,7 +70,10 @@
       {#each rows as row (row.provider)}
         <div class="space-y-1.5">
           <div class="flex items-center justify-between">
-            <span class="text-meta font-medium text-text">{providerLabel(row)}</span>
+            <h3 class="flex items-center" title={providerLabel(row)}>
+              <AgentIcon agent={row.provider} />
+              <span class="sr-only">{providerLabel(row)}</span>
+            </h3>
             {#if row.plan_type}
               <span class="text-meta uppercase tracking-wide text-text-faint">{row.plan_type}</span>
             {/if}

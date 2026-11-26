@@ -26,6 +26,11 @@ node dist/cli.js serve --no-portless   # http://127.0.0.1:3141/app/
 pnpm's global bin directory must be on `PATH` (`pnpm setup`). `amon <command>` and
 `node dist/cli.js <command>` are interchangeable from the checkout.
 
+Session reads such as `amon sessions list` and `amon sessions search` require an existing
+database file when you select one with `--db-path` or `AGENTMONITOR_DB_PATH`. A missing
+file produces exit code 4 and a diagnostic on stderr. An initialized empty store
+returns a successful, empty session list.
+
 `amon serve` runs Express on the fixed `127.0.0.1:3141` backend and normally uses
 the pinned package-local Portless CLI to expose
 `https://agentmonitor.localhost`. Portless is an AgentMonitor dependency, so no
@@ -39,8 +44,9 @@ roots redirect to `/app/`. Hooks, OTLP exporters, and direct API clients remain 
 origin. Ctrl-C shuts down the runtime and removes its Portless route.
 
 On startup without `--no-watch`, the watcher reads every discoverable Claude Code,
-Codex, and Antigravity history file once before it begins watching Claude and Codex
-files, and rescans all three every 15 minutes. The startup scans run synchronously
+Codex, and Antigravity history file once before it begins watching Claude, Codex,
+and Antigravity (`~/.gemini/antigravity-cli/conversations/` when present) files,
+and rescans all three every 15 minutes. The startup scans run synchronously
 after the listener opens, in that order, so HTTP requests (including `amon status`
 and `amon health`) wait until all three finish. Each scan logs its own summary:
 `[watcher] Initial sync complete` covers Claude Code only. `[watcher] Codex sync` and
@@ -1234,7 +1240,14 @@ out of public issues and commits.
 
 `pnpm test:verify` type-checks the driver and exercises lifecycle isolation,
 interruption, real browser workflows, missing prerequisites, explicit timing
-failure, and a wrong-but-plausible compiled aggregation mutation. It temporarily
+failure, and a wrong-but-plausible compiled aggregation mutation. It also replays
+the same four synthetic Codex requests as a single rollout and as a resumed session
+with reverted work and a copied prefix. The compiled importer runs against a fresh
+fixture database for each layout. The usage API must report the native totals and
+the correct billing day on initial import, repeat import, and forced replay. Run
+just that check after building with
+`node --import tsx --test scripts/verify/codex-accounting.integration.test.ts`.
+The full verification suite temporarily
 modifies a local `dist` file and restores it; run it serially without concurrent
 builds or other verification against that checkout. Its probe tests run against
 fixture databases from the disposable host, never the installed one. The normal
@@ -1246,6 +1259,7 @@ the checkout the login service loads.
 The pre-push checks match the required `Lint, Build, Test` CI check:
 
 ```bash
+python3 scripts/check_comments.py
 pnpm lint
 pnpm frontend:check
 pnpm frontend:test

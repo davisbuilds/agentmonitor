@@ -1,4 +1,3 @@
-// --- V1 API types (existing Monitor tab) ---
 
 /** One agent's usage in a Monitor total. `tokens_in` is uncached input only. */
 export interface MonitorAgentUsage {
@@ -54,8 +53,8 @@ export interface QuotaMonitorCredits {
 }
 
 export interface QuotaMonitorData {
-  provider: 'claude' | 'codex';
-  agent_type: 'claude_code' | 'codex';
+  provider: 'claude' | 'codex' | 'antigravity';
+  agent_type: 'claude_code' | 'codex' | 'antigravity';
   status: 'available' | 'unavailable' | 'error';
   source: string | null;
   updated_at: string | null;
@@ -106,9 +105,7 @@ export interface Session {
   started_at: string;
   ended_at?: string;
   last_event_at: string;
-  // Invocation mode: 'headless' for one-shot runs (claude -p / codex exec),
-  // 'interactive' for TUI/editor sessions. null when the agent emits no signal
-  // (e.g. Antigravity/Gemini). Only surfaced by the Monitor sessions endpoint.
+  /** Invocation mode. Null means the provider emits no signal. Only the Monitor sessions endpoint supplies this field. */
   mode?: 'interactive' | 'headless' | null;
   metadata?: Record<string, unknown> | string;
   event_count?: number;
@@ -135,8 +132,6 @@ export interface FilterOptions {
   sources: string[];
 }
 
-// --- V2 API types (Session browser) ---
-
 export type SessionCapabilityLevel = 'none' | 'summary' | 'full';
 
 export interface SessionCapabilities {
@@ -152,7 +147,7 @@ export interface BrowsingSession {
   agent: string;
   first_message: string | null;
   title: string | null;
-  // Session lists only: subagent sessions nested under this one.
+  /** Nested subagent count supplied by the session list. */
   child_count?: number;
   started_at: string | null;
   ended_at: string | null;
@@ -171,7 +166,7 @@ export interface LiveSession extends BrowsingSession {
   file_path: string | null;
   file_size: number | null;
   file_hash: string | null;
-  // Context-window occupancy; null when unavailable (never 0%).
+  /** Context-window occupancy. Null means the provider reported no usable measurement. */
   context_used_tokens: number | null;
   context_window_tokens: number | null;
   context_pct: number | null;
@@ -217,7 +212,8 @@ export interface Message {
   session_id: string;
   ordinal: number;
   role: string;
-  content: string; // JSON string of content blocks
+  /** JSON-encoded content block array. */
+  content: string;
   timestamp: string | null;
   has_thinking: number;
   has_tool_use: number;
@@ -991,8 +987,7 @@ export interface TraceQualityTrace {
   created_at: string;
 }
 
-// The lean view's detail is the summary-backed trace; it carries no persisted
-// prompt refs or score summary (those moved to the deferred export).
+/** Summary-backed detail. Persisted prompt references and scores belong to the deferred export. */
 export type TraceQualityTraceDetail = TraceQualityTrace;
 
 export interface TraceQualityObservation {
@@ -1031,8 +1026,6 @@ export interface TraceQualityObservationTreeNode extends TraceQualityObservation
   children: TraceQualityObservationTreeNode[];
 }
 
-// --- API client ---
-
 type Filters = Record<string, string>;
 
 function qs(params: Record<string, string | number | boolean | undefined>): string {
@@ -1056,8 +1049,6 @@ async function checkedJson<T>(res: Response, context: string): Promise<T> {
   }
   return res.json();
 }
-
-// V1 endpoints (Monitor tab)
 
 /** The only filters Monitor stats honour: an agent and a start time. */
 export function statsParams(filters: Filters = {}): Record<string, string> {
@@ -1117,8 +1108,6 @@ export async function fetchSessionDetail(id: string, eventLimit = 10): Promise<{
   const res = await fetch(`/api/v2/monitor/sessions/${encodeURIComponent(id)}?event_limit=${eventLimit}`);
   return checkedJson(res, 'fetchSessionDetail');
 }
-
-// V2 endpoints (Session browser)
 
 export async function fetchBrowsingSessions(params: Record<string, string | number | undefined> = {}): Promise<{ data: BrowsingSession[]; total: number; cursor?: string }> {
   const res = await fetch(`/api/v2/sessions${qs(params)}`);
@@ -1454,8 +1443,7 @@ export async function fetchV2Agents(): Promise<{ data: string[] }> {
   return checkedJson(res, 'fetchV2Agents');
 }
 
-// --- Benchmarks (segregated bake-off comparison) ---
-// Mirrors src/api/v2/types.ts. The one benchmark-inclusive read surface.
+// WHY: Keep benchmark-inclusive reads on this surface so ordinary activity views remain segregated.
 
 export type BenchmarkCostBasis = 'captured' | 'derived' | 'unpriced';
 export type BenchmarkVerdict =

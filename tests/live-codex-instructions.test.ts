@@ -88,7 +88,6 @@ function seedLegacyProjection(sessionId: string, agent: 'codex' | 'claude'): voi
     INSERT INTO session_items (session_id, turn_id, ordinal, source_item_id, kind, status, payload_json)
     VALUES (?, ?, 0, ?, ?, 'success', ?)
   `);
-  // How the previous release projected them: every non-user role as the assistant.
   parsed.messages.forEach((message, ordinal) => {
     const source = `${agent}-message:${ordinal}`;
     const turnId = Number(turn.run(sessionId, agent, source).lastInsertRowid);
@@ -100,7 +99,6 @@ function seedLegacyProjection(sessionId: string, agent: 'codex' | 'claude'): voi
 test('v20 relabels stored Codex developer items as instructions and leaves the rest', () => {
   const db = getDb();
   seedLegacyProjection('codex-instructions-v20', 'codex');
-  // A Claude turn with the same ordinals has no developer role to match.
   seedLegacyProjection('claude-not-codex-v20', 'claude');
   db.prepare("UPDATE messages SET role = 'assistant' WHERE session_id = 'claude-not-codex-v20' AND role = 'developer'").run();
 
@@ -128,6 +126,5 @@ test('v20 applies the current prompt capture policy to what it relabels', () => 
     kind: 'instructions',
     payload: { redacted: true, reason: 'prompt_capture_disabled' },
   });
-  // An assistant reply is not a prompt.
   assert.deepEqual(items('codex-instructions-v20-private')[2].payload, { text: 'Lint fails first.' });
 });

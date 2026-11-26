@@ -53,7 +53,6 @@ test('spooled events are stored oldest first, with their own time, and their fil
 });
 
 test('an event the server already has is dropped, not stored twice', () => {
-  // The server answered after the hook gave up waiting, and the hook spooled it too.
   const parsed = normalizeIngestEvent(JSON.parse(event('late', '2026-11-11T05:30:00Z')));
   assert.ok(parsed.ok);
   insertEvent(parsed.event);
@@ -85,7 +84,6 @@ test('an unsafe spool is not read: others can write it, or it is a link', () => 
   fs.rmSync(link);
   assert.equal(stored().length, 0);
 
-  // Files only partly written (a dot-prefixed temporary name) wait for their rename.
   spooled('.1762839000-b.tmp', event('b', '2026-11-11T05:30:00Z'));
   assert.deepEqual(drainHookSpool(spool), { ingested: 1, duplicates: 0, rejected: 0, errors: 0 });
   assert.ok(fs.existsSync(path.join(spool, '.1762839000-b.tmp')));
@@ -103,7 +101,6 @@ test('an event a real hook spooled while the server was down is stored by the ne
       session_id: 'spool-e2e', cwd: tempDir, hook_event_name: 'PostToolUse',
       tool_name: 'Grep', tool_input: { pattern: 'needle' }, tool_response: { success: true },
     }),
-    // A port nothing listens on: the server is down.
     env: { ...process.env, AGENTMONITOR_URL: 'http://127.0.0.1:9', AGENTMONITOR_HOOK_SPOOL_DIR: spool },
     timeout: 10_000,
   });
@@ -123,7 +120,8 @@ test('an event a real hook spooled while the server was down is stored by the ne
 });
 
 test('a hook with no date command still spools a file the drain reads', () => {
-  // send_event.sh names the file `0-<id>.json` when it cannot tell the time.
+  // WHY: The hook can fail to read its clock, so draining must recognize the resulting zero-prefix
+  // filename.
   spooled('0-hook-123-45678.json', event('no-clock', '2026-11-11T05:30:00Z'));
   assert.deepEqual(drainHookSpool(spool), { ingested: 1, duplicates: 0, rejected: 0, errors: 0 });
   assert.deepEqual(fs.readdirSync(spool), []);
@@ -161,8 +159,7 @@ test('a late tool call does not reactivate a session that has stopped since', ()
 });
 
 test('spooled events of one session replay in the order they happened', () => {
-  // The order key is the hook's own clock, finer than the second: a Stop just
-  // after a tool call in the same second sorts after it, whatever its id says.
+  // WHY: Finer event timestamps preserve ordering within one second even when IDs sort differently.
   const at = minutesAgo(1);
   spooled('1762839000000200-aaaa.json', lifecycle('stop-later', { event_type: 'session_end', client_timestamp: at }));
   spooled('1762839000000100-zzzz.json', lifecycle('tool-first', { event_type: 'tool_use', tool_name: 'Edit', client_timestamp: at }));

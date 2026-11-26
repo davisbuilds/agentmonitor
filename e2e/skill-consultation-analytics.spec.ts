@@ -4,7 +4,7 @@ import path from 'node:path';
 
 const baseUrl = process.env['AGENTMONITOR_E2E_URL'];
 const artifactDir = path.join(process.cwd(), 'output', 'playwright');
-// The session's project name, from its working directory /work/alpha.
+// WHY: The fixture derives project alpha from the captured working directory.
 const claudeProject = 'alpha';
 
 test.skip(!baseUrl, 'AGENTMONITOR_E2E_URL is provided by the built-runtime verifier');
@@ -15,7 +15,6 @@ test('Skills shows invocation volume and a filterable consultation explorer', as
   fs.mkdirSync(artifactDir, { recursive: true });
   await page.goto(`${baseUrl}/app/#analytics?from=2026-07-01&to=2026-07-29`);
 
-  // Overview no longer carries skill panels; they live in Skills.
   await expect(page.getByRole('heading', { name: 'Tool Usage' })).toBeVisible();
   await expect(page.getByRole('region', { name: 'Skill consultations' })).toHaveCount(0);
   await expect(page.getByRole('heading', { name: 'Raw skill invocation volume' })).toHaveCount(0);
@@ -27,8 +26,6 @@ test('Skills shows invocation volume and a filterable consultation explorer', as
     has: page.getByRole('heading', { name: 'Raw skill invocation volume' }),
   });
   await expect(volume).toBeVisible();
-  // The fixture's Claude Skill calls fall inside the window, so the daily
-  // chart has data and its legend names the most-used skill.
   await expect(volume).toContainText('test-strategy');
   await expect(volume.getByText('No skill usage in the selected range.')).toHaveCount(0);
   await volume.screenshot({

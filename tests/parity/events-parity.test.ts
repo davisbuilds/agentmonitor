@@ -16,8 +16,6 @@ import {
   uniqueEventId,
 } from './helpers/runtime.js';
 
-// ==================== Health ====================
-
 test('GET /api/health returns 200 with expected shape', async () => {
   const res = await getJson('/api/health');
   assert.equal(res.status, 200);
@@ -26,8 +24,6 @@ test('GET /api/health returns 200 with expected shape', async () => {
   assert.equal(typeof body.uptime, 'number');
   assert.equal(typeof body.sse_clients, 'number');
 });
-
-// ==================== Single event ingest ====================
 
 test('POST /api/events with valid payload returns 201', async () => {
   const res = await postJson('/api/events', {
@@ -101,7 +97,6 @@ test('POST /api/events preserves explicit cost_usd from client', async () => {
 test('POST /api/events missing required fields returns 400', async () => {
   const res = await postJson('/api/events', {
     session_id: uniqueSession(),
-    // missing agent_type and event_type
   });
   assert.equal(res.status, 400);
   const body = await res.json();
@@ -175,8 +170,6 @@ test('POST /api/events with null event_id does not dedup', async () => {
   assert.equal(second.status, 201);
 });
 
-// ==================== Batch ingest ====================
-
 test('POST /api/events/batch with valid events returns 201', async () => {
   const res = await postJson('/api/events/batch', {
     events: [
@@ -219,7 +212,6 @@ test('POST /api/events/batch with partial rejection', async () => {
         event_type: 'tool_use',
       },
       {
-        // missing required fields
         session_id: uniqueSession(),
       },
     ],
@@ -236,7 +228,6 @@ test('POST /api/events/batch dedup counted separately', async () => {
   const eventId = uniqueEventId();
   const session = uniqueSession();
 
-  // Insert original
   await postJson('/api/events', {
     event_id: eventId,
     session_id: session,
@@ -244,7 +235,6 @@ test('POST /api/events/batch dedup counted separately', async () => {
     event_type: 'tool_use',
   });
 
-  // Batch with same event_id + a new one
   const res = await postJson('/api/events/batch', {
     events: [
       {
@@ -266,8 +256,6 @@ test('POST /api/events/batch dedup counted separately', async () => {
   assert.equal(body.duplicates, 1);
 });
 
-// ==================== Stats ====================
-
 test('GET /api/stats returns expected shape', async () => {
   const res = await getJson('/api/stats');
   assert.equal(res.status, 200);
@@ -281,11 +269,9 @@ test('GET /api/stats returns expected shape', async () => {
 });
 
 test('GET /api/stats reflects ingested events', async () => {
-  // Get baseline
   const before = await getJson('/api/stats');
   const statsBefore = await before.json();
 
-  // Ingest an event
   await postJson('/api/events', {
     session_id: uniqueSession(),
     agent_type: 'claude_code',
@@ -295,7 +281,6 @@ test('GET /api/stats reflects ingested events', async () => {
     cost_usd: 0.005,
   });
 
-  // Stats should increase
   const after = await getJson('/api/stats');
   const statsAfter = await after.json();
   assert.ok(statsAfter.total_events > statsBefore.total_events);

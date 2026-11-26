@@ -38,12 +38,9 @@ export interface RuntimeHandle {
 }
 
 export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Promise<RuntimeHandle> {
-  // Record the build this process loaded before anything can rebuild it, and
-  // publish it in the lock so one-shot commands can tell they differ.
   const build = startServerBuildWatch();
   const ownership = acquireRuntimeOwnership(config.dbPath, { build });
-  // launchd restarts the service when it exits, not when it freezes: under it,
-  // a server stuck waiting in a blocking call ends itself so launchd restarts it.
+  // WHY: launchd restarts a process that exits, but a frozen process still looks alive.
   const stopWatchdog = runningAsLaunchdService() ? startEventLoopWatchdog(SERVICE_WATCHDOG) : undefined;
   let server: Server | undefined;
   let sessionChecker: ReturnType<typeof setInterval> | undefined;
@@ -90,16 +87,14 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       if (autoImportTimer) clearInterval(autoImportTimer);
       if (autoImportDelay) clearTimeout(autoImportDelay);
 
-      // Stop accepting connections before ending SSE responses. EventSource
-      // clients reconnect automatically when a stream closes; leaving the
-      // listener open during the awaited service cleanup can admit a new stream
-      // that keeps server.close() pending indefinitely.
+      // WHY: EventSource reconnects automatically. Close the listener first so a client cannot
+      // reconnect during shutdown.
       const serverClosePromise = server?.listening
         ? new Promise<void>((resolve, reject) => {
             server?.close(error => error ? reject(error) : resolve());
           })
         : undefined;
-      // Attach a handler immediately in case close fails before the later await.
+      // WHY: A close promise can reject before shutdown reaches its later await.
       void serverClosePromise?.catch(() => undefined);
 
       stopStatsBroadcast();
@@ -129,9 +124,6 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       console.log(`[trace-quality] (re)built ${rebuiltTraceSummaries} session trace summaries`);
     }
 
-    // Rates load once, from this build. Price any usage stored while its model
-    // had no rate card (it billed as $0), so a pricing update takes effect on
-    // the restart that ships it rather than waiting for a manual recalc.
     const costs = recalculateEventCosts(getDb(), { apply: true, missingOnly: true });
     if (costs.costs_attributed > 0) {
       console.log(`[pricing] labelled the source of ${costs.costs_attributed} existing cost(s)`);
@@ -140,11 +132,7 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       console.log(`[pricing] priced ${costs.updated} usage row(s) that had no cost`);
     }
 
-    // Build the all-time Monitor snapshot before accepting HTTP work. The
-    // underlying better-sqlite3 query is synchronous; leaving its first cold
-    // run to the dashboard would queue health and every other request behind
-    // it. Subsequent event writes invalidate this cache, and the hot indexed
-    // refresh stays bounded.
+    // WHY: A cold synchronous totals query in the request path would stall the first dashboard load.
     getStatsForBroadcast();
 
     const app = createApp();
@@ -156,8 +144,6 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
     console.log(`Dashboard: ${publicUrl ? `${publicUrl}/app/` : `http://localhost:${config.port}/app/`}`);
 
     startStatsBroadcast();
-    // Before the watcher's scans, which hold the event loop: what hooks spooled
-    // while the server was down is stored first.
     startHookSpoolDrain();
     if (!options.noWatch) startWatcher();
     if (!options.noQuotaPolling) startProviderQuotaPolling();
@@ -175,9 +161,8 @@ export async function startAgentMonitorRuntime(options: RuntimeOptions = {}): Pr
       console.log(`Auto-import: every ${config.autoImportIntervalMinutes}m`);
     }
 
-    // Deleted messages leave dead entries in the search index until a merge
-    // reaches them; without this it once grew to 13x its live size. The first
-    // run waits out startup's own catch-up work.
+    // WHY: Search-index merges reclaim dead entries left by deleted transcripts. Deferring them once
+    // grew the index far beyond live size.
     searchIndexMaintenance = startSearchIndexMaintenance({
       db: getDb,
       initialDelayMs: 10 * 60_000,

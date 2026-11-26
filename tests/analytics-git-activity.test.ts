@@ -41,14 +41,12 @@ function runs(sessionId: string, when: string, command: string, callId: string, 
 }
 const prUrl = (n: number) => `https://github.com/owner/alpha/pull/${n}`;
 
-// Claude, proven by the subject in its command; it opened #7, which merged.
 session.run('c1', 'claude', 'claude-jsonl', root, 'Ship one', at(9), at(10, 30), );
 runs('c1', at(10), 'git commit -m "feat: one"', 'toolu_c1');
 addCommit('aaa1111aaaa', at(10, 0, 30), 'feat: one', ['Claude Opus 5.5 <noreply@anthropic.com>']);
 runs('c1', at(10, 5), 'gh pr create --fill', 'toolu_pr7', { row: 'c1', id: 'toolu_pr7' });
 addCommit('eee5555eeee', at(20), 'Merge pull request #7 from owner/feat-one', [], 1);
 
-// Codex, proven by the hash its result printed, kept on the UUID row; it opened #8.
 const uuid = '01990000-0000-7000-8000-000000000001';
 const rollout = `rollout-2026-03-02T11-00-00-${uuid}`;
 session.run(rollout, 'codex', 'codex-jsonl', root, 'Ship two', at(11), at(11, 30));
@@ -56,12 +54,10 @@ runs(rollout, at(11), 'git commit -F msg.txt', 'call_commit', { row: uuid, id: '
 addCommit('bbb2222bbbb', at(11, 0, 10), 'fix: two', [], 0, 'agent@example.com');
 runs(rollout, at(11, 5), 'gh pr create --fill', 'call_pr8', { row: uuid, id: 'call_pr8:result' });
 
-// Only near a commit: a Claude session committed something else a minute later.
 session.run('c2', 'claude', 'claude-jsonl', root, null, at(11, 50), at(12, 30));
 addCommit('ccc3333cccc', at(12), 'chore: three', ['Claude Opus 5.5 <noreply@anthropic.com>'], 0, 'upstream@example.com');
 runs('c2', at(12, 1), 'git commit -F other.txt', 'toolu_c2');
 
-// No session anywhere near.
 addCommit('ddd4444dddd', at(15), 'docs: four', [], 0, 'DEV+OTHER@EXAMPLE.COM');
 
 const range = { date_from: '2026-03-02', date_to: '2026-03-02' };
@@ -120,7 +116,6 @@ test('a pull request whose URL arrived in a later poll of the running process co
   };
   toolCall(day(9, 10), 'exec_command', JSON.stringify({ cmd: 'gh pr create --fill' }), 'call_open',
     'Chunk ID: aa\nProcess running with session ID 4242\nOutput:\n');
-  // A poll of another process names an existing pull request: it opened nothing here.
   toolCall(day(9, 11), 'write_stdin', JSON.stringify({ session_id: 5151, chars: '' }), 'call_other', prUrl(3));
   toolCall(day(9, 12), 'write_stdin', JSON.stringify({ session_id: 4242, chars: '' }), 'call_poll', `Output:\n${prUrl(9)}\n`);
 
@@ -133,7 +128,6 @@ test('GitHub\'s word marks a pull request merged that local git never saw merge'
   assert.equal(queries.getSessionGitActivity(rollout).pull_requests[0].merged, false);
   const cache = db.prepare("INSERT INTO github_pull_requests (repo, number, state, merged_at, checked_at) VALUES ('owner/alpha', ?, ?, ?, ?)");
   cache.run(8, 'MERGED', at(21), at(22));
-  // Local git's merge commit for #7 stands, whatever a stale answer says.
   cache.run(7, 'OPEN', null, at(9));
   assert.deepEqual(queries.getAnalyticsGitActivity(range).pull_requests.map(pr => [pr.number, pr.merged]), [[8, true], [7, true]]);
 });
@@ -155,7 +149,6 @@ test('a pull request listed beside the one a call created is not one the session
   const cache = db.prepare("INSERT OR REPLACE INTO github_pull_requests (repo, number, state, merged_at, created_at, checked_at) VALUES ('owner/alpha', ?, 'OPEN', NULL, ?, ?)");
   cache.run(2, '2026-02-01T00:00:00Z', day(11));
   cache.run(11, new Date(Date.UTC(2026, 2, 5, 9, 31)).toISOString(), day(11));
-  // #1 is not known to GitHub's cache yet, so its URL stands, as without GitHub.
   assert.deepEqual(queries.getSessionGitActivity('c-list').pull_requests.map(pr => pr.number), [1, 11]);
 });
 
@@ -164,7 +157,6 @@ test('GitHub\'s answer about a pull request opened after the call is about anoth
   session.run('c-renamed', 'claude', 'claude-jsonl', root, 'Before the rename', day(9), day(10));
   runs('c-renamed', day(9, 30), 'gh pr create --fill', 'toolu_renamed');
   result.run('c-renamed', 'toolu_renamed', JSON.stringify({ content: prUrl(12) }));
-  // The repository was renamed and its name reused; #12 there was opened weeks later and merged.
   db.prepare("INSERT OR REPLACE INTO github_pull_requests (repo, number, state, merged_at, created_at, checked_at) VALUES ('owner/alpha', 12, 'MERGED', ?, ?, ?)")
     .run('2026-04-01T00:00:00Z', '2026-03-28T00:00:00Z', '2026-04-02T00:00:00Z');
   assert.deepEqual(queries.getSessionGitActivity('c-renamed').pull_requests.map(pr => [pr.number, pr.merged]), [[12, false]]);
@@ -196,7 +188,6 @@ test('an amend counts for the session that made it, though the author date preda
   db.prepare(`INSERT INTO git_commits (repo_root, sha, authored_at, committed_at, author_name, author_email, subject, co_authors_json, is_merge)
     VALUES (?, '99aa1112222', ?, ?, 'Dev', 'dev@example.com', 'feat: amended', '[]', 0)`).run(root, day(8), new Date(Date.UTC(2026, 2, 8, 10, 30, 5)).toISOString());
   assert.deepEqual(queries.getSessionGitActivity('c-amend').commits.map(row => row.sha), ['99aa1112222']);
-  // Authored late on the 8th, amended by a session on the 9th: still the 8th's commit, and that session's.
   session.run('c-amend-next', 'claude', 'claude-jsonl', root, 'Amend the next day', '2026-03-09T00:30:00.000Z', '2026-03-09T02:00:00.000Z');
   runs('c-amend-next', '2026-03-09T01:00:00.000Z', 'git commit --amend --no-edit', 'toolu_amend_next', { row: 'c-amend-next', id: 'toolu_amend_next' });
   db.prepare("UPDATE session_items SET payload_json = ? WHERE session_id = 'c-amend-next' AND source_item_id = 'toolu_amend_next'")

@@ -2,8 +2,6 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseSessionMessages } from '../src/parser/claude-code.js';
 
-// Two assistant turns with differing usage; occupancy must reflect the LAST
-// turn's prompt size (input + cache_read + cache_creation), not a sum.
 const jsonl = [
   JSON.stringify({
     type: 'user',
@@ -47,7 +45,6 @@ const jsonl = [
 
 test('parseSessionMessages: reports last assistant turn occupancy tokens + model', () => {
   const parsed = parseSessionMessages(jsonl, 's1');
-  // 2 + 360000 + 1800 = 361802 (last turn), not the earlier 150.
   assert.equal(parsed.metadata.context_used_tokens, 361_802);
   assert.equal(parsed.metadata.model, 'claude-opus-4-8');
 });
@@ -70,8 +67,8 @@ function assistantTurn(sessionId: string, at: string, model: string, cacheRead: 
   });
 }
 
-// Older transcripts interleave subagent turns into the main file. Their small
-// context must not replace the main thread's reading.
+// WHY: Older main transcripts can interleave small child turns. Those turns cannot represent the main
+// thread’s occupancy.
 test('parseSessionMessages: an inline sidechain turn does not overwrite the main thread occupancy', () => {
   const interleaved = [
     assistantTurn('s3', '2026-07-07T10:00:00.000Z', 'claude-opus-4-8', 500_000, false),
@@ -82,8 +79,8 @@ test('parseSessionMessages: an inline sidechain turn does not overwrite the main
   assert.equal(parsed.metadata.model, 'claude-opus-4-8');
 });
 
-// A subagent's own file marks every line as a sidechain, so ignoring sidechain
-// turns outright would leave it with no occupancy at all.
+// WHY: A child’s separate transcript marks all of its turns as sidechain, so dropping them there
+// would erase its own occupancy.
 test('parseSessionMessages: a subagent file of only sidechain turns keeps its occupancy', () => {
   const subagent = [
     assistantTurn('s4', '2026-07-07T10:00:00.000Z', 'claude-haiku-4-5-20251001', 800, true),

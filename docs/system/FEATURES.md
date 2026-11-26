@@ -37,13 +37,16 @@ current command contract.
 
 Monitor provides current sessions as agent cards, recent events, aggregate stats,
 provider-native quota snapshots, and context-window occupancy. It consumes the v2
-Monitor reads and the shared SSE stream. A card folds repeated recent events into
-one row with a count. The header's quota pill names each provider and shows what
-is left of its most-used window. When a refresh fails, it keeps the last good
-reading, shown as stale (muted, with when it was read and why the refresh
-failed), rather than dropping the provider. Snapshots are provider-native only:
-Codex reads local `codex app-server`, and Claude needs the statusline bridge;
-without one the provider renders as unavailable rather than estimated.
+Monitor reads and the shared SSE stream. Cards show the agent's icon or a generic
+terminal glyph and label idle or ended sessions. A card folds repeated recent
+events into one row with a count. The header's quota pill uses provider icons
+with accessible names and shows what is left of each provider's most-used window.
+After a failed refresh, the last good reading stays visible in a muted style.
+The popover shows when the reading was taken and why the refresh failed.
+Snapshots are provider-native only:
+Codex reads local `codex app-server`, while Claude and Antigravity use
+statusline bridges; without one a provider renders as unavailable rather than
+estimated.
 
 Model IDs read one way everywhere: as the vendor names the model, without a
 routing prefix, a long-context suffix, a Bedrock wrapper, or a release date
@@ -250,12 +253,12 @@ working directory belongs to, named after the repository root: subdirectories
 and worktrees in a worktree area (`.worktrees/`, `*-worktrees/`,
 `.claude/worktrees/`, `.codex/worktrees/`) count as their repository, also once
 removed. A directory outside any repository is named after itself, except scratch space (below); sessions that
-record no working directory (Codex OTEL-only, Antigravity) have no project. The
+record no working directory (Codex OTEL-only, Antigravity conversations without a workspace summary) have no project. The
 shared agent filter holds Claude as `claude`, as the session browser does;
 events call it `claude_code`, and every Analytics, Usage, Skills, and Quality
 read accepts either spelling, so one filter value narrows every sub-view. The
-UI calls it Claude Code everywhere (the quota pill names the provider,
-Claude). Sessions run in scratch space, a temp directory, an app-support
+UI calls the harness Claude Code. Accessible quota labels call the provider
+Claude. Sessions run in scratch space, a temp directory, an app-support
 folder, or a worktree container that no repository holds, have no project;
 Usage lists their usage under No project. `amon sessions repair-projects
 --apply` clears the names older rows still carry. A user

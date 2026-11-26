@@ -4,8 +4,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after } from 'node:test';
 
-// Every path that turns a working directory into a project name uses the
-// canonical identity: a worktree reports its repository, not its folder.
 const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-project-sites-')));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -74,8 +72,6 @@ test('an ingested event with a cwd is named from it', () => {
   assert.equal(without.event.project, 'app-task', 'without a cwd the given project stands');
 });
 
-// A scratch directory (here a removed temp run) has no project at any site,
-// and no site falls back to the folder or transcript path it would have used.
 test('every site names no project for scratch work', () => {
   const scratch = '/tmp/agentmonitor-sites-scratch-run.g35Rbg';
   const lines = claudeLines.map(line => ({ ...line, sessionId: 'c-2', cwd: scratch }));
@@ -93,7 +89,6 @@ test('every site names no project for scratch work', () => {
   assert.equal(parseCodexSessionMessages(fs.readFileSync(rollout, 'utf8'), 'codex-2', rollout).metadata.project, null);
   assert.deepEqual([...new Set(parseCodexFile(rollout).map(event => event.project ?? null))], [null]);
 
-  // Hooks send the cwd's basename as `project` beside the cwd itself.
   const ingested = normalizeIngestEvent({
     session_id: 's', agent_type: 'claude_code', event_type: 'tool_use', project: 'agentmonitor-sites-scratch-run.g35Rbg', cwd: scratch,
   });

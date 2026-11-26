@@ -405,8 +405,9 @@ Live adapters under `src/live/` normalize current sessions and declare fidelity:
 Context occupancy uses the latest request's prompt size, so it may drop after
 compaction. Codex uses its reported context window when present and otherwise a
 configured default; Claude uses the guarded default documented in
-[DECISIONS.md](../project/DECISIONS.md). Missing evidence renders as unavailable,
-not zero.
+[DECISIONS.md](../project/DECISIONS.md); Antigravity uses its reported window or
+its 1 MiB default (1,048,576 tokens) from `gen_metadata` prompt usage and
+statusline payloads. Missing evidence renders as unavailable, not zero.
 
 ## Usage, Pricing, And Analytics
 

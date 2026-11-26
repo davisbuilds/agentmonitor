@@ -301,9 +301,8 @@ export function registerReportingCommands(): void {
       try {
         const { ensureSessionTraceSummaryBackfill } = await import('../../trace-quality/summary.js');
         const { listSessionTraces } = await import('../../trace-quality/on-demand.js');
-        // The CLI runs out-of-band from the server, so self-heal the summary here
-        // too — otherwise an upgraded DB with events but no summary rows reports an
-        // empty list until the server has run its startup backfill.
+        // WHY: This CLI bypasses the server's startup repair, so an upgraded database may still need
+        // its summary populated.
         ensureSessionTraceSummaryBackfill();
         const result = listSessionTraces(params);
         writeReport(ctx, result, formatRows(result.data as unknown as Array<Record<string, unknown>>, ['id', 'session_id', 'agent_type', 'status']));

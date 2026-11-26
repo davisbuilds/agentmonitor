@@ -27,21 +27,17 @@ export interface AnalyticsRouteState {
   to: string;
   project: string;
   agent: string;
-  // Usage sub-view specialized filters.
   model: string;
   provider: string;
   tier: string;
-  // Skills sub-view specialized filters.
   skillHarness: string;
   skillQuery: string;
   skillSignal: AnalyticsSkillSignal;
   skillSort: AnalyticsSkillSort;
-  // Insights sub-view specialized filters (provider/model here mean the LLM that
-  // authors the insight, distinct from Usage's billed provider/model).
+  /** Authoring provider and model for the insight. Usage filters select the billed model separately. */
   insightProvider: string;
   insightModel: string;
   kind: string;
-  // Quality sub-view: optional session scope (drill-in) and the open trace.
   sessionId: string | null;
   traceId: string | null;
 }
@@ -105,8 +101,8 @@ export function buildAppHash(tab: AppTab, params: URLSearchParams | Record<strin
 }
 
 export function buildSessionsHash(state: SessionsRouteState): string {
-  // Sort orders full-text results only: no query, or pinned messages (which
-  // keep their own order), leave it out of the link.
+  // WHY: Leave sort out of links without full-text results so the link cannot promise an order that
+  // will be ignored.
   const ordersResults = state.query.trim() !== '' && !state.pinned;
   return buildAppHash('sessions', {
     q: state.query,
@@ -267,7 +263,6 @@ export function canonicalizeLegacySearchHash(hash: string): string | null {
   const normalized = normalizeHash(hash);
   const [rawTab = '', query = ''] = normalized.split('?');
   if (rawTab !== 'search') return null;
-  // The old Search params (q, project, agent, sort) keep their names.
   return buildSessionsHash(parseSessionsHash(`sessions?${query}`, defaultSessionsRouteState()));
 }
 

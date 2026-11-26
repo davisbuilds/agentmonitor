@@ -4,8 +4,6 @@ export function coerceJsonLikeBody(body: unknown): unknown {
   let candidate = body.trim();
   if (!candidate) return body;
 
-  // Recover from clients that accidentally wrap JSON in extra quote layers.
-  // Example invalid payload: ""just a string"".
   for (let i = 0; i < 3; i += 1) {
     const parsed = tryParseJson(candidate);
     if (parsed.ok) {

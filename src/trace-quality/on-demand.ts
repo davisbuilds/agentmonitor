@@ -96,7 +96,6 @@ function normalizedOffset(value: number | undefined): number {
 
 /** Build the WHERE clause for the summary-backed list from the supported filters. */
 function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string; values: unknown[] } {
-  // Imported benchmark runs stay out of personal activity, as in Usage and Analytics.
   const clauses: string[] = ["session_id NOT IN (SELECT session_id FROM events WHERE source = 'benchmark')"];
   const values: unknown[] = [];
   if (params.session_id) {
@@ -113,8 +112,7 @@ function buildSummaryWhere(params: TraceQualityTraceListParams): { where: string
     clauses.push(`agent_type IN (${spellings.map(() => '?').join(', ')})`);
     values.push(...spellings);
   }
-  // Reuse the shared helper so a date-only `date_to` is treated as the exclusive
-  // next day (otherwise `<= 'YYYY-MM-DD'` drops every timestamped row on that day).
+  // WHY: A bare end date would otherwise exclude almost every event on that day.
   appendDateRangeConditions(clauses, values, 'COALESCE(started_at, updated_at)', params.date_from, params.date_to);
   return { where: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', values };
 }
@@ -203,7 +201,6 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
   const offset = normalizedOffset(params.offset);
   const { where, values } = buildSummaryWhere(params);
 
-  // One summary per session (traceSummaryRankCte), chosen before the filters.
   const total = (db.prepare(`${traceSummaryRankCte} SELECT COUNT(*) AS c FROM listed_summaries ${where}`)
     .get(...values) as { c: number }).c;
   const rows = db.prepare(`${traceSummaryRankCte}
@@ -215,8 +212,6 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
 
   const titles = lookupSessionTitles(rows.map(row => row.session_id));
 
-  // Coverage describes the full filtered selection, not just the current page —
-  // the summary table is ~one row per session, so the extra scan is cheap.
   const coverageRows = db.prepare(`${traceSummaryRankCte}
     SELECT observation_count, coverage_json FROM listed_summaries ${where}
   `).all(...values) as CoverageRow[];
@@ -274,9 +269,6 @@ export function buildObservationTree(observations: TraceQualityObservation[]): T
     nodes.set(observation.id, { ...observation, children: [] });
     parentOf.set(observation.id, observation.parent_observation_id ?? null);
   }
-  // The projection only links forward today, but a parent chain that loops back
-  // would make its members unreachable, or a node its own descendant. Such a
-  // node is shown as a root instead.
   const inCycle = (id: string): boolean => {
     const visited = new Set<string>();
     let current = parentOf.get(id) ?? null;
@@ -319,9 +311,6 @@ export function listSessionObservations(
   const offset = normalizedOffset(params.offset);
 
   const projection = projectTraceQuality(readTraceQualityProjectionInputForSession(row.session_id));
-  // Keep only observations; re-hang them all under this session's single trace
-  // (the projection's own per-event trace grouping is ignored — that mis-grain
-  // is what the lean view exists to fix). Order matches the persisted endpoint.
   const observations = projection.observations
     .map(obs => mapProjectedObservation(obs, traceId, row.updated_at))
     .sort((a, b) => {

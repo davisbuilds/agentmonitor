@@ -52,10 +52,6 @@ type InsightGenerator = (
 
 let overrideGenerator: InsightGenerator | null = null;
 
-// Test seam for provider config (currently just the API key). config.insights is
-// a startup singleton built from process.env, so a test that wants to exercise
-// the "no API key" path can't rely on clearing env at runtime — it overrides the
-// resolved provider config here instead of depending on the ambient shell.
 type InsightProviderConfigOverride = Partial<Record<InsightProvider, { apiKey?: string | null }>>;
 let providerConfigOverride: InsightProviderConfigOverride | null = null;
 

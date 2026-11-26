@@ -91,9 +91,7 @@ test('scanSkillCatalogs dedupes by skill name, first catalog dir wins', () => {
 test('scanSkillCatalogs skips entries without a readable SKILL.md and missing dirs', () => {
   const root = tmpRoot();
   makeSkill(root, 'good', 'name: good\nversion: 1.0.0');
-  // A directory with no SKILL.md.
   fs.mkdirSync(path.join(root, 'empty'), { recursive: true });
-  // A stray file (not a directory) at the skill level.
   fs.writeFileSync(path.join(root, 'stray.txt'), 'not a skill');
 
   const skills = scanSkillCatalogs([root, path.join(root, 'does-not-exist')]);
@@ -113,7 +111,6 @@ test('scanSkillCatalogs handles quoted version values', () => {
   assert.equal(skills[0]?.version, '4.1.0');
 });
 
-// --- Snapshot persistence (DB-backed) ---
 
 let db: Database;
 let closeDb: () => void;
@@ -232,9 +229,7 @@ test('resolveVersionAt returns null for an unknown skill', () => {
 });
 
 test('resolveVersionAt matches a SQLite space-format timestamp against ISO snapshots', () => {
-  // Snapshots are ISO (with T/Z); events.created_at is 'YYYY-MM-DD HH:MM:SS' (UTC,
-  // space-separated). Lexically the space sorts before 'T', so a naive string
-  // compare would push this in-window invocation to the approximate fallback.
+  // WHY: The ISO snapshot and SQLite event formats do not share lexical time ordering.
   const snapshots: CatalogSnapshot[] = [
     { name: 'beta', version: '1.0.0', firstSeenAt: '2026-02-01T00:00:00.000Z', lastSeenAt: '2026-02-10T00:00:00.000Z' },
   ];

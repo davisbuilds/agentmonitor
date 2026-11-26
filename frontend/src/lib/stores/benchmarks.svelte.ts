@@ -50,7 +50,7 @@ class BenchmarksStore {
     this.detailError = null;
     try {
       const detail = await fetchBenchmarkStudy(studyId);
-      if (req !== this.detailRequest) return; // a newer selection superseded this one
+      if (req !== this.detailRequest) return;
       this.detail = detail;
     } catch (err) {
       if (req !== this.detailRequest) return;
@@ -65,9 +65,8 @@ class BenchmarksStore {
   syncFromHash(): void {
     if (typeof window === 'undefined') return;
     const parsed = parseAppHash(window.location.hash);
-    // Another tab owns the hash — leave selection and URL untouched. Reacting here
-    // would call select(null) → writeHash(null) and rewrite the destination hash
-    // back to #benchmarks, desyncing the shell from the address bar.
+    // WHY: Another tab owns this hash. Selecting a benchmark here would overwrite its destination
+    // during navigation.
     if (parsed.tab !== 'benchmarks') return;
     const studyId = parsed.params.get('study');
     if (studyId !== this.selectedStudyId) void this.select(studyId);

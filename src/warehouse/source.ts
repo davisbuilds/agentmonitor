@@ -72,7 +72,6 @@ export function listWarehouseSessionTraceSummaries(
     params.date_to,
   );
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-  // One row per session (traceSummaryRankCte), chosen before the date window.
   return getDb().prepare(`${traceSummaryRankCte}
     SELECT
       session_id,

@@ -7,7 +7,6 @@ import { getRecentUnpricedModels } from '../db/v2-queries.js';
 
 export const streamRouter = Router();
 
-// Periodic stats broadcaster
 let statsInterval: ReturnType<typeof setInterval> | null = null;
 
 export function startStatsBroadcast(): void {
@@ -75,7 +74,6 @@ export function stopSessionSweepBroadcast(): void {
   stopSweepListener = null;
 }
 
-// GET /api/stream - SSE endpoint
 streamRouter.get('/', (req: Request, res: Response) => {
   const accepted = broadcaster.addClient(res, {
     agentType: req.query.agent_type as string | undefined,

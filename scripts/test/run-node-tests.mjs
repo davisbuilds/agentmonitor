@@ -1,21 +1,15 @@
 #!/usr/bin/env node
-// Runs `node --import tsx --test <args>` with a private, empty temp directory
-// and fails when a test leaves anything in it. Tests create their databases and
-// fixture homes under os.tmpdir(); one that forgets to remove them adds a
-// directory to the shared temp folder on every run, which nothing ever reports.
-// The private directory is removed afterwards whether or not the run passed.
+// WHY: A per-run temp directory makes leaked test fixtures detectable without scanning another
+// process's files.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-// Caches the toolchain keeps in os.tmpdir() on purpose. They are linked to the
-// shared ones: servers that tests spawn through tsx time out on a cold cache.
+// WHY: Child servers can time out while the transpiler warms an empty cache.
 const TOOL_CACHES = [`tsx-${os.userInfo().uid}`, 'node-compile-cache'];
 
-// CI splits the suite across jobs and sizes its concurrency for the runner
-// through these; a local run leaves them unset. They are removed from the
-// tests' environment, so a test that runs this script again sees a whole run.
+// WHY: Nested invocations need the whole suite, even if their parent is running a CI shard.
 const { AGENTMONITOR_TEST_SHARD: shard, AGENTMONITOR_TEST_CONCURRENCY: concurrency, ...testEnv } = process.env;
 const testFlags = [];
 if (shard !== undefined) {
@@ -42,9 +36,7 @@ for (const cache of TOOL_CACHES) {
 }
 const child = spawn(process.execPath, ['--import', 'tsx', '--test', ...testFlags, ...process.argv.slice(2)], {
   stdio: 'inherit',
-  // No test asks GitHub anything: a server a test starts keeps its git pass offline.
-  // A hook run against a dead URL spools its event: keep it out of the real
-  // spool, which a running server would drain into the real database.
+  // WHY: A test event spooled under the normal path would later be ingested by the running server.
   env: {
     ...testEnv, TMPDIR: privateTmp, TMP: privateTmp, TEMP: privateTmp, AGENTMONITOR_GITHUB_LOOKUPS: '0',
     AGENTMONITOR_HOOK_SPOOL_DIR: path.join(privateTmp, 'hook-spool'),
@@ -57,13 +49,12 @@ process.on('SIGTERM', forward);
 
 child.on('exit', code => {
   const leftovers = fs.readdirSync(privateTmp).filter(entry => !TOOL_CACHES.includes(entry));
-  // rmSync removes the cache links themselves, not the shared caches they point to.
   fs.rmSync(privateTmp, { recursive: true, force: true });
   if (leftovers.length > 0) {
     console.error(`\n✖ Tests left ${leftovers.length} entr${leftovers.length === 1 ? 'y' : 'ies'} in the temp directory:`);
     for (const entry of leftovers.sort()) console.error(`  ${entry}`);
     console.error('Remove what a test creates under os.tmpdir() in an after() or after-each hook.');
   }
-  // A child killed by a signal has a null code: report it as a failure.
+  // WHY: A process killed by a signal has no exit code; CI must still see a failure.
   process.exit(code !== 0 ? code ?? 1 : leftovers.length > 0 ? 1 : 0);
 });

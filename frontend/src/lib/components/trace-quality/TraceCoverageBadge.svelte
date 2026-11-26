@@ -22,9 +22,7 @@
   const scored = $derived(trace.score_count > 0);
 </script>
 
-<!-- The transcript flag is set only where the projection could see the
-     transcript; most summaries leave it unset even when one exists, so its
-     absence is not shown as "summary only". -->
+<!-- WHY: Many summary rows omit the transcript flag even when a transcript exists. Missing metadata must not be labeled summary-only. -->
 {#if compact}
   {#if scored}
     <div class="mt-1.5 inline-flex items-center gap-1.5 text-meta text-text-faint">

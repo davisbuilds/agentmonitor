@@ -28,11 +28,8 @@ assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
 const insert = db.prepare(`INSERT INTO browsing_sessions
   (id, agent, integration_mode, project, started_at, message_count, user_message_count, capabilities_json)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-// One Codex session, stored by the watcher (rollout basename, its transcript)
-// and by the importer (native UUID, the same conversation counted again).
 insert.run(rollout, 'codex', 'codex-jsonl', 'demo', '2026-03-04T10:00:00Z', 20, 4, full);
 insert.run(uuid, 'codex', 'codex-import', 'demo', '2026-03-04T10:00:01Z', 18, 3, summaryOnly);
-// A Codex session known only from telemetry, and a Claude session.
 insert.run(solo, 'codex', 'codex-otel', 'demo', '2026-03-04T12:00:00Z', 3, 1, summaryOnly);
 insert.run('claude-1', 'claude', 'claude-jsonl', 'demo', '2026-03-04T14:00:00Z', 5, 2, full);
 const message = db.prepare(`INSERT INTO messages (session_id, ordinal, role, content, content_length) VALUES (?, 0, 'assistant', '[]', 2)`)
@@ -78,16 +75,13 @@ test('the warehouse export publishes a Codex session once, as its event-backed s
   summary.run(rollout, 'sts:rollout', 40, 0);
   summary.run(uuid, 'sts:uuid', 12, 0.5);
   summary.run(solo, 'sts:solo', 3, 0.1);
-  // A resumed session stored as two rollout files and no UUID summary.
   const resumed = '019c26b7-327b-75f3-b000-00000000000c';
   summary.run(`rollout-2026-03-05T09-00-00-${resumed}`, 'sts:resumed-1', 12, 0);
   summary.run(`rollout-2026-03-06T09-00-00-${resumed}`, 'sts:resumed-2', 30, 0);
   assert.deepEqual(listWarehouseSessionTraceSummaries().map(row => row.session_id).sort(),
     [uuid, solo, `rollout-2026-03-06T09-00-00-${resumed}`].sort());
-  // What publishing retracts: every summary the published ones supersede, in any window.
   const published = listWarehouseSessionTraceSummaries().map(row => row.session_id);
   assert.deepEqual(listWarehouseSupersededSessionIds(published), [rollout, `rollout-2026-03-05T09-00-00-${resumed}`].sort());
-  // Only those: an alias whose replacement is not published this time stays.
   assert.deepEqual(listWarehouseSupersededSessionIds([uuid, solo]), [rollout]);
   assert.deepEqual(listWarehouseSupersededSessionIds([]), []);
 });

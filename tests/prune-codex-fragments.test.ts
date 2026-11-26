@@ -5,7 +5,6 @@ import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 import type Database from 'better-sqlite3';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-prune-fragments-'));
 const dbPath = path.join(tempDir, 'agentmonitor.db');
 process.env.AGENTMONITOR_DB_PATH = dbPath;
@@ -25,7 +24,7 @@ const fragment = (eventId: string, kind: string, eventName = 'codex.sse_event') 
 });
 
 function seed(db: Database.Database): void {
-  // Fail closed before the table-wide deletes below if the handle is not the fixture's.
+  // WHY: Verify the disposable handle before executing any table-wide delete.
   assert.equal(fs.realpathSync(db.name), fs.realpathSync(dbPath));
   for (const table of ['session_items', 'session_turns', 'session_trace_summary', 'browsing_sessions', 'events', 'sessions', 'agents']) {
     db.exec(`DELETE FROM ${table}`);
@@ -39,10 +38,7 @@ function seed(db: Database.Database): void {
   insertEvent(fragment('otel-frag-2', 'response.created'));
   insertEvent(fragment('otel-frag-3', 'response.output_item.done'));
   insertEvent(fragment('otel-frag-4', 'response.output_text.delta', 'codex.websocket_event'));
-  // The parser also accepts this alias for the websocket transport.
   insertEvent(fragment('otel-frag-5', 'response.function_call_arguments.done', 'codex.websocket.event'));
-  // Neighbours the prune must leave: usage, a non-fragment kind, a fragment
-  // kind that carries more than the two marker keys, and other agents/sources.
   insertEvent({
     event_id: 'otel-completed', session_id: SESSION, agent_type: 'codex', event_type: 'llm_response', status: 'success',
     tokens_in: 900, tokens_out: 40, cache_read_tokens: 100, model: 'gpt-5.6-sol', cost_usd: 0.25, source: 'otel',
@@ -143,8 +139,8 @@ describe('pruneCodexStreamFragments', () => {
   test('a failure part-way through rolls the whole prune back', () => {
     const before = everything();
     const preview = pruneCodexStreamFragments({ dbPath });
-    // Turns are removed before events, so a failing event delete strands them
-    // unless the prune is one transaction.
+    // WHY: A failed event delete must roll back the earlier turn removals or the session loses rows
+    // without completing the prune.
     getDb().exec(`CREATE TEMP TRIGGER fail_event_delete BEFORE DELETE ON events
       BEGIN SELECT RAISE(ABORT, 'injected'); END`);
     try {

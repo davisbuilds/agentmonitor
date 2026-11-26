@@ -91,7 +91,6 @@ export function sessionTitle(session: SessionTitleSource): string {
   const preview = getSessionPreviewText(session.first_message);
   if (preview) return preview;
   const agent = session.agent ? agentDisplayName(session.agent) : null;
-  // agentDisplayName's fallback for an agent it does not know.
   return agent && agent !== 'Assistant' ? `Untitled ${agent} session` : 'Untitled session';
 }
 

@@ -18,10 +18,8 @@ let liveBroadcaster: typeof import('../src/api/v2/live-stream.js').liveBroadcast
 
 const sessionId = 'e2e-live-001';
 const summarySessionId = 'e2e-live-002';
-// On the Monitor, but with no live record behind it.
 const noLiveSessionId = 'e2e-live-003';
 const longSessionId = 'e2e-live-long';
-// A stream with an open tool call partway down, for a result that arrives below the reader.
 const anchorSessionId = 'e2e-live-anchor';
 
 test.beforeAll(async () => {
@@ -152,7 +150,6 @@ test.beforeAll(async () => {
     '2026-03-24T12:01:03.000Z',
   );
 
-  // The Monitor's agent cards are the v1 sessions; each card opens its live stream.
   const now = new Date().toISOString();
   const insertCard = db.prepare(`
     INSERT INTO sessions (id, agent_id, agent_type, project, branch, status, started_at, last_event_at, metadata)
@@ -161,7 +158,6 @@ test.beforeAll(async () => {
   insertCard.run(sessionId, 'claude_code', 'claude_code', 'card-full-stream', 'main', now, now);
   insertCard.run(summarySessionId, 'codex', 'codex', 'card-summary-stream', 'main', now, now);
   insertCard.run(noLiveSessionId, 'claude_code', 'claude_code', 'card-no-stream', 'main', now, now);
-  // A long Codex session: 250 items, with injected instructions near the end.
   db.prepare(`
     INSERT INTO browsing_sessions (
       id, project, agent, first_message, started_at, ended_at, message_count,
@@ -200,7 +196,8 @@ test.beforeAll(async () => {
     INSERT INTO session_turns (session_id, agent_type, source_turn_id, status, title)
     VALUES (?, 'claude', 'anchor-turn', 'running', 'Anchor run')
   `).run(anchorSessionId).lastInsertRowid);
-  // Item 20 is an open call below the rows a test reads; item 55 one above them.
+  // WHY: Place open calls on both sides of the reader to distinguish whether a folded result should
+  // move the scroll anchor.
   const anchorCalls: Record<number, { id: string; command: string }> = {
     20: { id: 'toolu_anchor', command: 'long-running build' },
     55: { id: 'toolu_anchor_above', command: 'quick lint' },
@@ -215,13 +212,11 @@ test.beforeAll(async () => {
     );
   }
 
-  // One event gives the Monitor's filter bar an Agent option to show. It is
-  // backdated so an event a test posts later always sorts as the newest.
+  // WHY: Backdate the fixture so a later posted event always sorts first.
   db.prepare(`
     INSERT INTO events (session_id, agent_type, event_type, tool_name, status, project, created_at, metadata, source)
     VALUES (?, 'claude_code', 'tool_use', 'Read', 'success', 'card-full-stream', ?, '{}', 'api')
   `).run(sessionId, secondsAgo(5));
-  // The followed session's figures and recent events: usage, then a timed command.
   const insertEvent = db.prepare(`
     INSERT INTO events (session_id, agent_type, event_type, tool_name, status, project, created_at, metadata, source,
       tokens_in, tokens_out, cost_usd, model, duration_ms)
@@ -269,10 +264,8 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await expect(page).toHaveURL(new RegExp(`#monitor\\?session=${sessionId}$`));
   await expect(page.getByRole('heading', { name: 'Inspect the repo' })).toBeVisible();
   await expect(page.locator('p', { hasText: 'Initial live response from seeded session' }).first()).toBeVisible();
-  // The agent filter stays in view: it still scopes the stats above the stream.
   await expect(page.getByTestId('filter-bar').getByRole('combobox', { name: 'Filter by agent' })).toBeVisible();
 
-  // The card's figures stay in view while you follow the session.
   const summary = page.getByTestId('session-summary');
   await expect(summary).toContainText('3 events');
   await expect(summary).toContainText('1.2K in');
@@ -281,7 +274,6 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await expect(summary).toContainText('Claude Code (claude-opus-4-7)');
   await expect(page.getByTestId('session-summary-cost')).toHaveText('$1.25');
 
-  // The Inspector lists the session's recent events, newest first, with what each did and how long it took.
   const inspector = page.locator('aside', { has: page.getByRole('heading', { name: 'Inspector' }) });
   await inspector.getByRole('button', { name: 'Events', exact: true }).click();
   const events = inspector.getByRole('list', { name: 'Recent events' }).getByRole('listitem');
@@ -293,7 +285,6 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await expect(events.nth(1)).toContainText('1.5s');
   await expect(events.nth(2)).toContainText('llm_response');
 
-  // A live event lands at the top of the list and in the figures, without a reload.
   const posted = await fetch(`${baseUrl}/api/events`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
@@ -317,9 +308,7 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await expect(summary).toContainText('4 events');
   await expect(page.getByTestId('session-summary-cost')).toHaveText('$1.75');
 
-  // Other sessions' activity can fill the Monitor's global feed; this session's events stay.
-  // Paced in small batches so the SSE connection never backs up and reconnects (a
-  // reconnect rereads the session, which would hide a lost event).
+  // WHY: Pace the flood so reconnect cannot reload the session and hide a lost event from the test.
   for (let batch = 0; batch < 21; batch++) {
     const flood = await fetch(`${baseUrl}/api/events/batch`, {
       method: 'POST',
@@ -342,7 +331,6 @@ test('an agent card opens its live stream inside Monitor, which follows new item
   await page.waitForTimeout(500);
   await expect(events).toHaveCount(4);
   await expect(events.first()).toContainText('tool_use › Grep');
-  // Picking an item in the stream shows it again.
   await page.locator('button', { hasText: 'Initial live response from seeded session' }).click();
   await expect(inspector.getByRole('heading', { name: 'Payload' })).toBeVisible();
 
@@ -427,9 +415,7 @@ test('a tool call and its result read as one row without routine success badges'
   await expect(row).toHaveCount(1);
   await expect(row).toContainText('Bash');
   await expect(row).toContainText('nothing to commit, working tree clean');
-  // The call ran from 12:00:07 to its result at 12:00:08.
   await expect(row).toContainText('1.0s');
-  // The result has no row of its own, and success is left unsaid.
   await expect(page.locator('button', { hasText: 'nothing to commit, working tree clean' })).toHaveCount(1);
   const stream = page.locator('section', { has: page.getByRole('heading', { name: 'Inspect the repo' }) });
   await expect(stream.getByText('success', { exact: true })).toHaveCount(0);
@@ -469,7 +455,6 @@ test('with the live view turned off, a card opens its recent events in place', a
     },
   }));
 
-  // A session that has a live stream still shows only its events: there is nothing to follow.
   await page.goto(`${baseUrl}/app/`);
   await card(page, 'card-summary-stream').click();
   await expect(page).toHaveURL(new RegExp(`#monitor\\?session=${summarySessionId}$`));
@@ -506,20 +491,19 @@ test('a result folding into a call above or below the reader leaves the rows bei
   const reading = stream.getByText('Anchor item 50', { exact: true });
   await expect(reading).toBeVisible();
 
-  // Scroll so item 50 heads the viewport; the open call (item 20) is well below it.
   await scroller.evaluate((el) => {
     const row = [...el.querySelectorAll('button')].find(b => b.textContent?.includes('Anchor item 50'));
-    // A whole pixel: Chrome snaps a fractional offset when the content height
-    // changes, which would read as a pixel of drift.
+    // WHY: Round the initial scroll offset because Chrome can snap a fractional position after content
+    // height changes.
     if (row) el.scrollTop = Math.round(el.scrollTop + row.getBoundingClientRect().top - el.getBoundingClientRect().top);
   });
   const call = stream.locator('button', { hasText: 'long-running build' });
   await expect(call).not.toBeInViewport();
-  // Rows slide in as they render; measure once they have settled.
+  // WHY: Wait for row animations to settle so measured movement reflects anchoring rather than
+  // animation.
   await page.waitForFunction(() => document.getAnimations().length === 0);
   const before = (await reading.boundingBox())!.y;
 
-  // Its result folds into that call's row and makes it taller; nothing above the reader changed.
   getDb().prepare(`
     INSERT INTO session_items (session_id, turn_id, ordinal, source_item_id, kind, status, payload_json, created_at)
     VALUES (?, (SELECT id FROM session_turns WHERE session_id = ?), 0, 'toolu_anchor', 'tool_result', 'success', ?, '2026-03-24T11:00:00.000Z')
@@ -528,7 +512,6 @@ test('a result folding into a call above or below the reader leaves the rows bei
   await expect(call).toContainText('Build finished');
   await expect.poll(async () => Math.abs((await reading.boundingBox())!.y - before)).toBeLessThan(2);
 
-  // A result for the call above the reader makes that row taller: the rows being read still stay put.
   const above = stream.locator('button', { hasText: 'quick lint' });
   await expect(above).not.toBeInViewport();
   await page.waitForFunction(() => document.getAnimations().length === 0);
@@ -544,7 +527,6 @@ test('a result folding into a call above or below the reader leaves the rows bei
 
 test('a long stream shows its newest item first and loads older ones below without losing your place', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  // Arrive from another session whose Inspector was showing its events: a new session opens on its details.
   await page.goto(`${baseUrl}/app/#monitor?session=${sessionId}`);
   const inspector = page.locator('aside', { has: page.getByRole('heading', { name: 'Inspector' }) });
   await inspector.getByRole('button', { name: 'Events', exact: true }).click();
@@ -554,7 +536,6 @@ test('a long stream shows its newest item first and loads older ones below witho
   const scroller = stream.getByTestId('live-stream-scroller');
   await expect(inspector.getByRole('button', { name: 'Details', exact: true })).toHaveAttribute('aria-pressed', 'true');
 
-  // The Monitor never recorded this session, so it has no events: said plainly, not as an error.
   await inspector.getByRole('button', { name: 'Events', exact: true }).click();
   await expect(inspector.getByText('No events recorded for this session.')).toBeVisible();
   await expect(inspector.getByText(/failed|Couldn't/)).toHaveCount(0);
@@ -563,24 +544,20 @@ test('a long stream shows its newest item first and loads older ones below witho
   await expect(stream.getByText('Long item 1', { exact: true })).toHaveCount(0);
   await expect(stream.getByText('100 of 250 items')).toBeVisible();
   expect(await scroller.evaluate(el => el.scrollTop)).toBe(0);
-  // Newest first: 250 sits above 249.
   const top250 = await stream.getByText('Long item 250', { exact: true }).boundingBox();
   const top249 = await stream.getByText('Long item 249', { exact: true }).boundingBox();
   expect(top250!.y).toBeLessThan(top249!.y);
 
-  // Codex's injected instructions read as such, not as the assistant.
   const instructions = stream.getByRole('button', { name: /^Instructions.*permissions instructions/ });
   await expect(instructions).toHaveCount(1);
 
-  // Scrolling down to the bottom loads the page before, and the oldest row shown stays put.
-  // Reaching the "Load older items" control already starts that load (a click there
-  // races it), so the scroll is the gesture under test: one page, not two.
+  // WHY: Scrolling the Load older control into view already loads a page. A click would race that load
+  // and could test two pages.
   await stream.getByRole('button', { name: 'Load older items' }).scrollIntoViewIfNeeded();
   await expect(stream.getByText('200 of 250 items')).toBeVisible();
   await expect(stream.getByText('Long item 60', { exact: true })).toHaveCount(1);
   await expect(stream.getByText('Long item 151', { exact: true })).toBeInViewport();
 
-  // Scrolled down, a new item arrives at the top without moving the rows you are reading.
   const db = getDb();
   const lastTurn = db.prepare('SELECT id FROM session_turns WHERE session_id = ? ORDER BY id DESC LIMIT 1').get(longSessionId) as { id: number };
   db.prepare(`
@@ -594,7 +571,6 @@ test('a long stream shows its newest item first and loads older ones below witho
   await expect(stream.getByText('Long item 251', { exact: true })).not.toBeInViewport();
   await expect.poll(async () => Math.abs((await reading.boundingBox())!.y - before)).toBeLessThan(2);
 
-  // Back at the top, the newest item is the first row, and the next one to arrive shows there.
   await scroller.evaluate(el => { el.scrollTop = 0; });
   await expect(stream.getByText('Long item 251', { exact: true })).toBeInViewport();
   db.prepare(`
@@ -605,7 +581,6 @@ test('a long stream shows its newest item first and loads older ones below witho
   await expect(stream.getByText('Long item 252', { exact: true })).toBeInViewport();
   expect(await scroller.evaluate(el => el.scrollTop)).toBe(0);
 
-  // The Messages filter selects messages (it once matched no stored kind) and leaves instructions out.
   await stream.getByRole('button', { name: 'Messages', exact: true }).click();
   await expect(stream.getByText('Long item 250', { exact: true })).toBeVisible();
   await expect(instructions).toHaveCount(0);

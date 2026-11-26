@@ -1,5 +1,4 @@
-// Read CSV exports the way a spreadsheet would, so tests can assert which
-// value lands under which header instead of grepping for substrings.
+// WHY: Parse exports by header so assertions can catch a correct value written into the wrong column.
 import assert from 'node:assert/strict';
 
 /** Minimal RFC 4180 reader: quoted commas, doubled quotes, embedded newlines. */

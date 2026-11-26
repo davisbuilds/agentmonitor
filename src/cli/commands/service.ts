@@ -92,7 +92,7 @@ export function registerServiceCommands(): void {
     async handler(ctx, args) {
       rejectExtraPositionals(args, 'amon service status');
       const status = serviceStatus(currentLaunchdHost());
-      // launchd knows the process is alive, not that it serves: ask it.
+      // WHY: launchd can confirm process liveness even when the server cannot answer requests.
       const health = status.loaded && status.pid !== null && status.address
         ? await probeServiceHealth(status.address.host, status.address.port)
         : null;

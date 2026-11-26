@@ -10,7 +10,6 @@ import type {
   syncAllAntigravityFiles as syncAllAntigravityFilesFn,
 } from '../src/watcher/index.js';
 
-// --- minimal protobuf encoder (deterministic fixtures) ---
 function varint(n: number): number[] {
   const out: number[] = [];
   let big = n;
@@ -27,13 +26,10 @@ const vField = (f: number, n: number) => [...tag(f, 0), ...varint(n)];
 const lField = (f: number, b: number[]) => [...tag(f, 2), ...varint(b.length), ...b];
 const buf = (a: number[]) => Buffer.from(a);
 
-// Full gemini_coder.Step: type(1), status(4), metadata(5), <oneof>(payload)
 const step = (type: number, oneof: number) =>
   buf([...vField(1, type), ...vField(4, 3), ...lField(5, [...vField(1, 1)]), ...lField(oneof, [...vField(1, 1)])]);
-// CortexStepMetadata column: field1.field1 = unix seconds
 const meta = (secs: number) => buf(lField(1, [...vField(1, secs)]));
 
-// Write a conversation DB under <home>/conversations/<uuid>.db (matches importer scope).
 function buildFixture(home: string, uuid: string): string {
   const dir = path.join(home, 'conversations');
   fs.mkdirSync(dir, { recursive: true });
@@ -42,9 +38,9 @@ function buildFixture(home: string, uuid: string): string {
   db.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
   db.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
   const ins = db.prepare('INSERT INTO steps(idx,step_type,status,step_payload,metadata) VALUES (?,?,?,?,?)');
-  ins.run(0, 14, 3, step(14, 19), meta(1782000000)); // oneof 19 = user_input
-  ins.run(1, 28, 3, step(28, 28), meta(1782000005)); // oneof 28 = run_command (tool)
-  ins.run(2, 999, 3, step(999, 9998), meta(1782000010)); // unknown oneof → generic assistant
+  ins.run(0, 14, 3, step(14, 19), meta(1782000000));
+  ins.run(1, 28, 3, step(28, 28), meta(1782000005));
+  ins.run(2, 999, 3, step(999, 9998), meta(1782000010));
   db.close();
   return dbPath;
 }
@@ -84,7 +80,6 @@ test('syncAllAntigravityFiles: projects a browsable, trace-quality-visible sessi
   assert.equal(stats.total, 1);
   assert.equal(stats.parsed, 1);
 
-  // (1) browser row, agent-filterable, with integration_mode/fidelity set (projector).
   const bs = db.prepare('SELECT agent, integration_mode, fidelity FROM browsing_sessions WHERE id = ?')
     .get(uuid) as { agent: string; integration_mode: string | null; fidelity: string | null } | undefined;
   assert.ok(bs, 'browsing_sessions row exists');
@@ -92,11 +87,9 @@ test('syncAllAntigravityFiles: projects a browsable, trace-quality-visible sessi
   assert.ok(bs!.integration_mode, 'integration_mode is non-null');
   assert.ok(bs!.fidelity, 'fidelity is non-null');
 
-  // (2) messages (search/analytics) present.
   const msgs = db.prepare('SELECT COUNT(*) c FROM messages WHERE session_id = ?').get(uuid) as { c: number };
   assert.ok(msgs.c > 0, 'messages projected');
 
-  // (3) projected stream (trace-quality) present.
   const turns = db.prepare('SELECT COUNT(*) c FROM session_turns WHERE session_id = ?').get(uuid) as { c: number };
   const items = db.prepare('SELECT COUNT(*) c FROM session_items WHERE session_id = ?').get(uuid) as { c: number };
   assert.ok(turns.c > 0, 'session_turns projected');
@@ -111,7 +104,6 @@ test('hashAntigravityDb: change token folds in WAL/SHM sidecars (catches committ
   const base = hashAntigravityDb(dbPath);
   assert.equal(hashAntigravityDb(dbPath), base, 'stable when nothing changes');
 
-  // A still-open DB commits new steps into the WAL sidecar; the main file is unchanged.
   fs.writeFileSync(dbPath + '-wal', Buffer.from('wal-frame-1'));
   const withWal = hashAntigravityDb(dbPath);
   assert.notEqual(withWal, base, 'a new/changed WAL flips the token even though main .db is identical');

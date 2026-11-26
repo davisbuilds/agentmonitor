@@ -52,7 +52,7 @@
         }
       }
 
-      // Follow the range-wide ranking so a model keeps its slot in every stack.
+      // WHY: Keep the range-wide color and stack order so a model stays in the same slot across days.
       const segments = topModels
         .filter(model => (byModel.get(model) ?? 0) > 0)
         .map(model => ({ model, value: byModel.get(model) as number }));
@@ -67,14 +67,11 @@
   );
 
   const rangeTotal = $derived(rows.reduce((sum, row) => sum + row.total, 0));
-  // Empty only when there is no usage at all: unpriced models record tokens at
-  // $0, and their days must still show under the Cost view.
+  // WHY: Keep zero-cost days with recorded tokens visible because unpriced usage is still activity.
   const anyUsage = $derived(
     usage.modelsDaily.some(point => point.models.some(slice => measure(slice, 'cost') > 0 || measure(slice, 'tokens') > 0)),
   );
 
-  // The day's totals, from the daily series, so each bar says what the old
-  // Daily Usage list did.
   const dailyByDate = $derived(new Map(usage.daily.map((row: UsageDailyPoint) => [row.date, row])));
   const rowByDate = $derived(new Map(rows.map(row => [row.date, row])));
   const days = $derived(rows.map((row): DailyBar => ({

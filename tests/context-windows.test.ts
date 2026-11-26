@@ -6,6 +6,7 @@ import {
   computeSessionOccupancy,
   CLAUDE_DEFAULT_CONTEXT_WINDOW,
   CODEX_DEFAULT_CONTEXT_WINDOW,
+  ANTIGRAVITY_DEFAULT_CONTEXT_WINDOW,
 } from '../src/pricing/context-windows.js';
 
 test('resolveContextWindow: Claude defaults to 1M', () => {
@@ -24,10 +25,8 @@ test('resolveContextWindow: Codex uses reported window when present', () => {
 });
 
 test('resolveContextWindow: Codex falls back to configurable default', () => {
-  // module default
   assert.equal(resolveContextWindow({ agent: 'codex' }), CODEX_DEFAULT_CONTEXT_WINDOW);
   assert.equal(CODEX_DEFAULT_CONTEXT_WINDOW, 256_000);
-  // caller-supplied override
   assert.equal(
     resolveContextWindow({ agent: 'codex', codexDefaultWindow: 400_000 }),
     400_000,
@@ -35,8 +34,6 @@ test('resolveContextWindow: Codex falls back to configurable default', () => {
 });
 
 test('resolveContextWindow: over-window guard bumps to the next tier, never below observed', () => {
-  // A Claude session observed above the 1M default must not yield a denominator
-  // smaller than what was observed (which would render >100%).
   const window = resolveContextWindow({
     agent: 'claude_code',
     observedTokens: 1_200_000,
@@ -44,8 +41,17 @@ test('resolveContextWindow: over-window guard bumps to the next tier, never belo
   assert.ok(window !== null && window >= 1_200_000, `expected >= observed, got ${window}`);
 });
 
+test('resolveContextWindow: Antigravity defaults to 1 MiB (1,048,576) and honors observedTokens without jumping past 1 MiB prematurely', () => {
+  assert.equal(ANTIGRAVITY_DEFAULT_CONTEXT_WINDOW, 1_048_576);
+  assert.equal(resolveContextWindow({ agent: 'antigravity' }), ANTIGRAVITY_DEFAULT_CONTEXT_WINDOW);
+  assert.equal(resolveContextWindow({ agent: 'antigravity', observedTokens: 1_000_001 }), 1_048_576);
+  assert.equal(resolveContextWindow({ agent: 'antigravity', observedTokens: 1_048_576 }), 1_048_576);
+  assert.equal(resolveContextWindow({ agent: 'antigravity', observedTokens: 1_050_000 }), 2_000_000);
+  assert.equal(resolveContextWindow({ agent: 'antigravity', reportedWindow: 200_000, observedTokens: 50_000 }), 200_000);
+});
+
 test('resolveContextWindow: unknown agent is unavailable (null), not a wrong default', () => {
-  assert.equal(resolveContextWindow({ agent: 'antigravity' }), null);
+  assert.equal(resolveContextWindow({ agent: 'unknown_agent' }), null);
 });
 
 test('computeOccupancy: percent is rounded and capped at 100', () => {
@@ -53,7 +59,6 @@ test('computeOccupancy: percent is rounded and capped at 100', () => {
     computeOccupancy({ usedTokens: 500_000, window: 1_000_000 }),
     { used: 500_000, window: 1_000_000, pct: 50 },
   );
-  // cap
   assert.equal(computeOccupancy({ usedTokens: 2_000_000, window: 1_000_000 })?.pct, 100);
 });
 

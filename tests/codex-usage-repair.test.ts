@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-codex-usage-repair-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -66,7 +65,6 @@ function llmRow(sessionId: string, index: number): string {
   return `import-cdx-${crypto.createHash('sha256').update(`codex:${sessionId}:token:${index}`).digest('hex').slice(0, 32)}`;
 }
 
-// The parent's history as a child rollout copies it: three requests.
 const copiedPrefix: Line[] = [
   turnAt('2026-07-20T09:00:01Z'), count(1, 400_000, 300_000, 4_000),
   turnAt('2026-07-21T09:00:00Z'), count(2, 900_000, 700_000, 9_000), count(3, 1_500_000, 1_200_000, 15_000),
@@ -156,15 +154,10 @@ describe('Codex usage repair', () => {
     for (const id of [orphaned, drifted, repriced, appended, unexplained]) write(id, [meta(id), ...three]);
     importAll();
     const db = getDb();
-    // Orphaned: Codex rewrote the rollout shorter.
     write(orphaned, [meta(orphaned), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10)]);
-    // Refresh drift: the old model refresh wrote the file's cost onto stale tokens.
     db.prepare('UPDATE events SET tokens_in = tokens_in + 7 WHERE event_id = ?').run(llmRow(drifted, 1));
-    // Repriced: same tokens, a cost from older tables.
     db.prepare('UPDATE events SET cost_usd = cost_usd * 2 WHERE event_id = ?').run(llmRow(repriced, 1));
-    // Appended: the session kept going after the last import.
     write(appended, [meta(appended), ...three, count(4, 9000, 3000, 90)]);
-    // Unexplained: tokens and cost both disagree with the file.
     db.prepare('UPDATE events SET tokens_in = tokens_in + 7, cost_usd = cost_usd + 1 WHERE event_id = ?').run(llmRow(unexplained, 1));
 
     const report = repair(true);
@@ -174,7 +167,6 @@ describe('Codex usage repair', () => {
     assert.equal(report.rows_by_class.appended, 1);
     assert.equal(report.rows_by_class.unclassified, 1);
     assert.equal(report.rows_by_class.copied_history, 0);
-    // Every row the reconcile touched is in exactly one class.
     const classified = Object.values(report.rows_by_class).reduce((a, b) => a + b, 0);
     assert.equal(classified, report.rows_inserted + report.rows_updated + report.rows_deleted);
   });
@@ -226,7 +218,6 @@ describe('Codex usage repair', () => {
     storeChildAsBefore();
     write(other, [meta(other), turnAt('2026-07-25T20:53:40Z'), count(1, 1000, 0, 10)]);
     assert.ok(usageTotal(CHILD) > 30_500, 'the child must still hold its copied history');
-    // The child's reconcile fails for a reason that has nothing to do with reading its file.
     getDb().exec(`
       CREATE TEMP TRIGGER fail_child_delete BEFORE DELETE ON events WHEN OLD.session_id = '${CHILD}'
       BEGIN SELECT RAISE(ABORT, 'injected reconcile failure'); END;
@@ -264,7 +255,6 @@ describe('Codex usage repair', () => {
 
   test('Codex OTEL usage checks the repair from outside: the child moves toward it', () => {
     storeChildAsBefore();
-    // Codex's own per-request telemetry for the child's one request.
     getDb().prepare(`
       INSERT INTO events (event_id, session_id, agent_type, event_type, status, tokens_in, tokens_out, cache_read_tokens, source, client_timestamp)
       VALUES ('otel-child', ?, 'codex', 'llm_response', 'success', 5000, 500, 25000, 'otel', '2026-07-25 21:10:00')
@@ -300,7 +290,6 @@ describe('Codex usage repair', () => {
     write(CHILD, [meta(CHILD, spawnSource), ...parentTurns, ...childOwn]);
     const start = () => (getDb().prepare("SELECT model FROM events WHERE session_id = ? AND event_type = 'session_start'").get(CHILD) as { model: string }).model;
     assert.equal(start(), 'gpt-5.5', 'the fixture must store the parent\'s model');
-    // Only the session_start takes this class: another row's model change is still unexplained.
     getDb().prepare("UPDATE events SET model = 'gpt-5.5' WHERE session_id = ? AND event_type = 'session_end'").run(CHILD);
 
     const report = repair(true);
@@ -323,7 +312,6 @@ describe('Codex usage repair', () => {
   test('a model known only from config.toml is not rewritten when the config changes', () => {
     const id = plain('000000000c0f');
     setConfigModel('gpt-5.6-sol');
-    // No turn_context: the rollout never names its model.
     write(id, [meta(id), count(1, 6000, 5000, 100)]);
     importAll();
     setConfigModel('gpt-6-sol');
@@ -386,9 +374,7 @@ describe('Codex usage repair', () => {
     const reset = plain('000000000c7f');
     const turn = turnAt('2026-07-25T20:53:40Z');
     write(agrees, [meta(agrees), turn, count(1, 1000, 0, 10), count(2, 3000, 1000, 30)]);
-    // Cached input growing faster than input is clamped, so the rows cannot add up to the counter.
     write(clamped, [meta(clamped), turn, count(1, 1000, 0, 10), count(2, 1100, 900, 20)]);
-    // The counter drops once: the final counter understates what was billed.
     write(reset, [meta(reset), turn, count(1, 5000, 0, 50), count(2, 1000, 0, 10), count(3, 3000, 0, 30)]);
     importAll();
     for (const id of [agrees, clamped, reset]) {
@@ -433,8 +419,6 @@ describe('Codex usage repair bills compactions', () => {
     type: 'compacted', timestamp: `2026-07-25T21:${String(minute).padStart(2, '0')}:20Z`,
     payload: { message: '', compaction_response_id: responseId },
   });
-  // Records start mid-thread (the first request predates them), so the import
-  // bills from the counter and these exercise its compaction check.
   const withCompaction = (id: string, compactionResponse = 'resp-compact'): Line[] => [
     meta(id), turnAt('2026-07-25T20:53:40Z'), count(0, 300, 0, 5),
     record(1, id, 'resp-1', [1000, 0, 10], [1300, 0, 15]), count(1, 1300, 0, 15),
@@ -476,9 +460,8 @@ describe('Codex usage repair bills compactions', () => {
   });
 
   test('a subagent whose rollout carries Codex\'s thread total is checked against it, not against OTEL', () => {
-    // OTEL can miss a request Codex recorded (measured 2026-10-26), so where
-    // Codex's own per-thread total exists it is the instrument.
-    // The child's first own request predates its records.
+    // WHY: OTEL can miss recorded requests, so a compatible Codex per-thread total is the stronger
+    // accounting witness.
     const child: Line[] = [
       meta(CHILD, spawnSource), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'), count(9, 1_501_000, 1_200_000, 15_020),
       record(10, CHILD, 'resp-own', [30_000, 25_000, 500], [31_000, 25_000, 520]), count(10, 1_531_000, 1_225_000, 15_520),
@@ -500,8 +483,6 @@ describe('Codex usage repair bills compactions', () => {
   });
 
   test('an unbillable compaction is named even in a subagent that falls back to the OTEL check', () => {
-    // No usage record of the child's own, so no thread total: the OTEL check
-    // applies, and the miss must still be reported.
     const child: Line[] = [
       meta(CHILD, spawnSource), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'),
       count(10, 1_530_000, 1_225_000, 15_500), compacted(11, 'resp-unrecorded'), count(11, 1_540_000, 1_230_000, 15_600),
@@ -520,7 +501,6 @@ describe('Codex usage repair bills compactions', () => {
       meta(id), turnAt('2026-07-25T20:53:40Z'),
       record(1, id, 'resp-1', [1000, 0, 10], [1000, 0, 10]), count(1, 1000, 0, 10),
       record(2, id, 'resp-2', [2000, 1000, 20], [3000, 1000, 30]), count(2, 3000, 1000, 30),
-      // A request of a turn that is then aborted: in no counter.
       record(3, id, 'resp-aborted', [500, 0, 5], [3500, 1000, 35]),
     ];
     storeAsBefore(id, lines);

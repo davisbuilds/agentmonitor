@@ -41,7 +41,6 @@ test('auditIndexes classifies each index and keeps one of two that only replace 
     idx_unique: 'constraint',
     idx_unused: 'unused',
   });
-  // The planner always picks one of two identical indexes; the other is replaceable.
   assert.deepEqual([idx_m1, idx_m2].sort(), ['replaceable', 'unused']);
   const study = result.verdicts.find(v => v.name === 'idx_study')!;
   assert.ok(study.regressions[0].regressions.includes('full_scan'));
@@ -49,7 +48,6 @@ test('auditIndexes classifies each index and keeps one of two that only replace 
   assert.ok(agentKind.regressions[0].regressions.includes('fewer_index_terms'));
   assert.deepEqual(result.verdicts.find(v => v.name === 'idx_agent')!.replacements, ['idx_agent_kind']);
 
-  // Either duplicate can go, but not both.
   const models = ['idx_m1', 'idx_m2'];
   assert.equal(result.drop_set.filter(name => models.includes(name)).length, 1);
   assert.deepEqual(result.kept_by_joint_check.map(entry => entry.name).filter(name => models.includes(name)).length, 1);
@@ -57,7 +55,6 @@ test('auditIndexes classifies each index and keeps one of two that only replace 
   assert.ok(result.drop_set.includes('idx_agent'));
   assert.ok(!result.drop_set.includes('idx_unique'), 'a uniqueness constraint is never dropped');
 
-  // The audit's drops are rolled back.
   assert.equal((db.prepare(`SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'index'`).get() as { n: number }).n, 8);
 });
 
@@ -76,8 +73,8 @@ test('the drop set takes unused indexes first, then replaceable ones largest fir
 });
 
 test('an index no plan names is still needed when its predicate steers the planner', () => {
-  // SQLite uses idx_model for "model IS NOT NULL" only while a partial index
-  // with that predicate exists, though the plan never names the partial index.
+  // WHY: SQLite can depend on the partial index’s predicate even when the plan names a different
+  // index.
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE ev (id INTEGER PRIMARY KEY, model TEXT, cost REAL);
@@ -121,8 +118,8 @@ test('a partial index traded for a full one is a regression, even with as many t
 });
 
 test('a search on a different, less selective column is a regression', () => {
-  // A per-study read: without the study index SQLite seeks the benchmark index
-  // on source alone, one term either way, but every benchmark row matches.
+  // WHY: A source-only seek can look selective while visiting every benchmark row. This fixture
+  // distinguishes it from the per-study seek.
   const db = new Database(':memory:');
   db.exec(`
     CREATE TABLE ev (id INTEGER PRIMARY KEY, source TEXT, session TEXT, agent TEXT, tool TEXT, model TEXT, study TEXT);

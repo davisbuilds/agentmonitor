@@ -32,8 +32,6 @@ test('the subject in the command proves the session, however the input escapes i
   const inJson = JSON.stringify({ command: `git commit -m "${commit.subject}"` });
   assert.deepEqual(attributeCommit(commit, [call('claude-1', 'claude', 2, inJson), call('codex-1', 'codex', 5)], none),
     { kind: 'session', session_id: 'claude-1', agent: 'claude', evidence: 'subject' });
-  // A subject with quotes is escaped once in JSON, and twice in Codex code mode
-  // (a JS string inside the JSON input).
   const quoted = { ...commit, subject: 'docs: say "depth", not "trouble"' };
   const once = JSON.stringify({ command: `git commit -m '${quoted.subject}'` });
   assert.equal(attributeCommit(quoted, [call('claude-2', 'claude', 1, once)], none).kind, 'session');
@@ -90,25 +88,20 @@ test('a Codex call left running names its processes, and a poll of one carries t
 
 test('a subject proves a session only for a commit in the repository it worked in', () => {
   const subject = JSON.stringify({ command: `git commit -m "${commit.subject}"` });
-  // The same subject committed in another repository a moment later.
   assert.deepEqual(attributeCommit(commit, [call('beta-1', 'claude', 1, subject, '', 'beta')], none), { kind: 'time_only' });
-  // A session in a folder of projects proves it when its command reaches the repository.
   const reaches = JSON.stringify({ command: `cd /w/alpha && git commit -m "${commit.subject}"` });
   assert.deepEqual(attributeCommit(commit, [call('dev-1', 'codex', 1, reaches, '', 'Dev')], none),
     { kind: 'session', session_id: 'dev-1', agent: 'codex', evidence: 'subject' });
-  // So does an earlier call that wrote the message there.
   const earlier = () => [`cd /w/alpha && printf '${commit.subject}' > msg.txt`];
   assert.equal(attributeCommit(commit, [call('dev-2', 'codex', 1, '{"command":"git commit -F msg.txt"}', '', 'Dev')], earlier).kind, 'session');
   const elsewhere = () => [`printf '${commit.subject}' > msg.txt`];
   assert.deepEqual(attributeCommit(commit, [call('beta-3', 'claude', 1, '{"command":"git commit -F msg.txt"}', '', 'beta')], elsewhere),
     { kind: 'time_only' }, 'a message written in another repository');
-  // The shell keeps the directory an earlier call moved it to, however long ago.
   const movedEarlier = (_sessionId: string, from: number) => from < commit.at - 15 * 60_000
     ? ['cd /w/alpha', JSON.stringify({ command: `git commit -m "${commit.subject}"` })]
     : [JSON.stringify({ command: `git commit -m "${commit.subject}"` })];
   assert.equal(attributeCommit(commit, [call('dev-3', 'claude', 1, JSON.stringify({ command: `git commit -m "${commit.subject}"` }), '', 'Dev')], movedEarlier).kind,
     'session', 'a session that moved into the repository before');
-  // A hash names one commit wherever it ran.
   assert.equal(attributeCommit(commit, [call('beta-2', 'codex', 1, '{}', '[main abc1234] fix', 'beta')], none).kind, 'session');
 });
 
@@ -163,11 +156,9 @@ test('a pull request is opened by gh pr create, with the repository flag anywher
 });
 
 test('a commit is matched to the call that created it, an amend moving only its committer date', () => {
-  // Amended ten minutes after it was first authored: the author date stays.
   const amended = { ...commit, committed_at: at(600) };
   const amend = call('claude-1', 'claude', 601, '{"command":"git commit --amend --no-edit"}', '[main abc1234] fix(git): keep paths');
   assert.deepEqual(attributeCommit(amended, [amend], none), { kind: 'session', session_id: 'claude-1', agent: 'claude', evidence: 'hash' });
-  // Rebased an hour later: the original commit call, by the author date, still proves it by subject.
   const rebased = { ...commit, committed_at: at(3600) };
   const original = call('claude-2', 'claude', 1, JSON.stringify({ command: `git commit -m "${commit.subject}"` }));
   assert.deepEqual(attributeCommit(rebased, [original], none), { kind: 'session', session_id: 'claude-2', agent: 'claude', evidence: 'subject' });
@@ -182,7 +173,6 @@ test('a subject proves a commit only whole, not by a shared opening', () => {
     'the opening of a longer subject');
   const heredoc = JSON.stringify({ command: "git commit -F - <<'EOF'\nfix: paths\n\nBody.\nEOF" });
   assert.equal(attributeCommit(short, [call('c', 'claude', 1, heredoc)], none).kind, 'session', 'a subject line in a message');
-  // Shell quoting inside the subject, as stored: escaped double quotes, and a single quote closed and reopened.
   const quoted = { ...commit, subject: 'docs: describe Quality\'s "missing" state' };
   const shell = JSON.stringify({ command: `git commit -m 'docs: describe Quality'"'"'s \\"missing\\" state'` });
   assert.equal(attributeCommit(quoted, [call('d', 'claude', 1, shell)], none).kind, 'session', 'shell quoting');
@@ -200,21 +190,15 @@ test('a GitHub tool that creates a pull request is known by its name, and its re
   const stored = JSON.stringify({ content: `Output:\n${JSON.stringify({ html_url: 'https://github.com/Owner/Repo/pull/9', body: 'after https://github.com/owner/repo/pull/3' })}` });
   assert.deepEqual(createdPullRequestUrls(stored), [{ repo: 'owner/repo', number: 9, url: 'https://github.com/Owner/Repo/pull/9' }]);
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: 'Error: validation failed' })), []);
-  // A body quoting JSON with its own url field, ahead of the result's.
   const quoting = { body: 'Related: {"url":"https://github.com/owner/repo/pull/3"}', url: 'https://github.com/owner/repo/pull/15' };
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: `Wall time: 1.5 seconds\nOutput:\n${JSON.stringify(quoting)}` })).map(ref => ref.number), [15]);
-  // Cut off mid-body, as a stored result keeps only its first part.
   const cut = `Output:\n${JSON.stringify({ url: 'https://github.com/owner/repo/pull/17', number: 17, body: 'x'.repeat(50) + ' see https://github.com/owner/repo/pull/3' })}`.slice(0, 120);
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: cut })).map(ref => ref.number), [17]);
-  // A nested object's own html_url, ahead of the result's.
   const nested = { base: { html_url: 'https://github.com/owner/repo/pull/3' }, html_url: 'https://github.com/owner/repo/pull/18' };
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: `Output:\n${JSON.stringify(nested)}` })).map(ref => ref.number), [18]);
-  // An MCP result: content blocks of text.
   const blocks = { content: [{ type: 'text', text: JSON.stringify({ number: 16, html_url: 'https://github.com/owner/repo/pull/16' }) }] };
   assert.deepEqual(createdPullRequestUrls(JSON.stringify(blocks)).map(ref => ref.number), [16]);
-  // The same MCP result, serialized into a stored receipt's content.
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: JSON.stringify(blocks), outcome: 'success' })).map(ref => ref.number), [16]);
-  // Serialized and cut off at 2,000 characters, as the parser stores a long one.
   const long = { content: [{ type: 'text', text: JSON.stringify({ html_url: 'https://github.com/owner/repo/pull/19', body: 'y'.repeat(3000) }) }] };
   assert.deepEqual(createdPullRequestUrls(JSON.stringify({ content: JSON.stringify(long).slice(0, 2000) })).map(ref => ref.number), [19]);
 });

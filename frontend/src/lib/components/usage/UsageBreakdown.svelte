@@ -30,7 +30,7 @@
   }
 </script>
 
-<!-- The Model view doubles as the daily chart's accessible table. -->
+<!-- WHY: Keep the Model table available as the accessible equivalent of the daily chart. -->
 <section class="rounded-lg border border-line bg-surface p-4" aria-labelledby="usage-breakdown-heading">
   <div class="flex flex-wrap items-start justify-between gap-3">
     <div class="flex items-center gap-1.5">

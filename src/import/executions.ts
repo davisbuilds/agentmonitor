@@ -62,7 +62,7 @@ export function syncExecutionReceipts(db: Database, directory: string | undefine
           if (item.finished_at !== null && (item.finished_at !== previous.finished_at || item.exit_code !== previous.exit_code)) {
             throw new Error('Conflicting terminal receipt');
           }
-          return false; // Old start receipts cannot roll back a terminal outcome.
+          return false; // WHY: A delayed start receipt cannot reopen a terminal execution.
         }
         if (item.finished_at === null) return false;
       }

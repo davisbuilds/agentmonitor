@@ -5,7 +5,6 @@ import os from 'node:os';
 import path from 'node:path';
 import test, { after, before, beforeEach, describe, mock } from 'node:test';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-codex-import-usage-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 
@@ -108,7 +107,6 @@ describe('Codex import reconciles a session to its rollout', () => {
     importCodex();
     const firstIds = importRows().map(r => r.event_id);
 
-    // Codex rewrote the rollout: the same session, fewer counters.
     writeRollout([meta(), turn(), counter(1, 1500, 500, 15)]);
     importCodex();
 
@@ -151,7 +149,6 @@ describe('Codex import reconciles a session to its rollout', () => {
   test('rows from other producers for the same session are never touched', () => {
     writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30)]);
     importCodex();
-    // Through insertEvent, so the Codex rows get their own summary projection.
     const other = (eventId: string, source: string, agent = 'codex') => insertEvent({
       event_id: eventId, session_id: SESSION, agent_type: agent, event_type: 'llm_response', status: 'success',
       tokens_in: 100, tokens_out: 10, model: 'gpt-5.6-terra', cost_usd: 0.5, source, metadata: {},
@@ -242,11 +239,9 @@ describe('Codex import reconciles a session to its rollout', () => {
     writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60)]);
     importCodex();
     const before = importRows();
-    // The rollout grew: rows 3 and 4 are new inserts.
     writeRollout([meta(), turn(), counter(1, 1000, 0, 10), counter(2, 3000, 1000, 30), counter(3, 6000, 2000, 60), counter(4, 9000, 3000, 90), counter(5, 12_000, 4000, 120)]);
-    // Only a newly inserted row's item fails. Its turn is written first, and
-    // insertEvent logs the item failure and returns the row, so nothing raises
-    // unless the post-write check notices the missing item.
+    // WHY: The write path logs an item failure and returns the turn, so a successful call alone
+    // cannot prove all rows were committed.
     const added = `import-cdx-${crypto.createHash('sha256').update(`codex:${SESSION}:token:3`).digest('hex').slice(0, 32)}`;
     assert.ok(parseCodexFile(rollout, { codexDir }).some(e => e.event_id === added), 'the fixture must insert this row');
     getDb().exec(`
@@ -277,7 +272,7 @@ describe('Codex import reconciles a session to its rollout', () => {
     } finally {
       getDb().exec('DROP TRIGGER IF EXISTS fail_import_state');
     }
-    // Rows and hash are one unit: a newer hash can never describe older rows.
+    // WHY: File hashes and imported rows must agree so future imports do not skip a failed update.
     assert.deepEqual(importRows(), before);
     assert.deepEqual(getDb().prepare('SELECT file_hash FROM import_state WHERE file_path = ?').get(rollout), hashBefore);
   });
@@ -286,12 +281,10 @@ describe('Codex import reconciles a session to its rollout', () => {
     const interactive = (): Line => ({ ...meta(), payload: { ...(meta().payload as object), originator: 'codex-tui' } });
     writeRollout([interactive(), turn(), counter(1, 1000, 0, 10)]);
     importCodex();
-    // A session imported before invocation mode existed.
     getDb().prepare("UPDATE sessions SET metadata = '{}' WHERE id = ?").run(SESSION);
     const hashBefore = getDb().prepare('SELECT file_hash FROM import_state WHERE file_path = ?').get(rollout);
     const rowsBefore = importRows();
 
-    // An update-only rewrite: nothing is inserted, so only the mode backfill touches the session.
     writeRollout([interactive(), turn(), counter(1, 2000, 500, 20)]);
     getDb().exec(`
       CREATE TEMP TRIGGER fail_session_mode BEFORE UPDATE OF metadata ON sessions
@@ -390,7 +383,6 @@ describe('Codex import reconciles a session to its rollout', () => {
     importCodex();
     const stored = importRows().map(r => r.event_id);
 
-    // Read mid-rewrite: the file is shorter and ends inside a line.
     const cut = [meta(), turn(), counter(1, 1500, 500, 15)].map(l => JSON.stringify(l)).join('\n');
     fs.writeFileSync(rollout, `${cut}\n{"type":"event_msg","timestamp":"2026-07`);
     const partial = importCodex();
@@ -410,7 +402,6 @@ describe('Codex import reconciles a session to its rollout', () => {
     const before = bounds() as { ended_at: string };
     assert.ok(before.ended_at.startsWith('2026-07-12T10:03'), `the fixture must end at its last line: ${before.ended_at}`);
 
-    // Only the file edit changes.
     writeRollout([meta(), turn(), counter(1, 1000, 0, 10), edit('+x\n+y'), counter(3, 6000, 2000, 60)]);
     const result = importCodex();
     assert.deepEqual([result.totalEventsRefreshed, result.totalEventsImported, result.totalEventsRemoved], [1, 0, 0]);
@@ -418,7 +409,6 @@ describe('Codex import reconciles a session to its rollout', () => {
   });
 });
 
-// ─── Subagent boundary (SC-01, SC-02) ────────────────────────────────────
 
 /** A UUIDv7 whose leading 48 bits encode `iso`, the way Codex mints ids. */
 function v7(iso: string, tail = '000000000001'): string {
@@ -434,7 +424,8 @@ const spawnMeta = (source: unknown = { subagent: { thread_spawn: { parent_thread
   timestamp: '2026-07-25T20:53:38Z',
   payload: { id: CHILD, cwd: '/tmp/codex-usage-fixture', timestamp: '2026-07-25T20:53:37Z', source },
 });
-// Copied history is re-stamped at spawn time; only turn ids tell it apart.
+// WHY: Spawned history can acquire fresh timestamps. Use turn identities to recognize the copied
+// prefix.
 const turnAt = (issuedIso: string, model = 'gpt-5.6-sol'): Line => ({
   type: 'turn_context', timestamp: '2026-07-25T20:53:38Z', payload: { model, turn_id: v7(issuedIso, '0000000000aa') },
 });
@@ -466,7 +457,6 @@ const usage = (file: string) => parseCodexFile(file, { codexDir }).filter(e => e
 describe('a subagent rollout bills only its own activity', () => {
   before(() => { fs.mkdirSync(sessionsDir, { recursive: true }); });
 
-  // The parent's history: three requests and one file edit, copied verbatim.
   const copiedPrefix: Line[] = [
     turnAt('2026-07-20T09:00:01Z'), count(400_000, 300_000, 4_000, 400_000), copiedPatch,
     turnAt('2026-07-21T09:00:00Z'), count(900_000, 700_000, 9_000, 500_000), count(1_500_000, 1_200_000, 15_000, 600_000),
@@ -487,8 +477,6 @@ describe('a subagent rollout bills only its own activity', () => {
   });
 
   test('the child\'s own events keep the ids they always had', () => {
-    // 3 copied counters and 1 copied edit each took an index, so the child's
-    // first own request is index 4 exactly as before the boundary existed.
     const file = writeChild([spawnMeta(), ...copiedPrefix, turnAt('2026-07-25T20:53:40Z'), count(1_530_000, 1_225_000, 15_500, 30_000)]);
     assert.deepEqual(usage(file).map(e => e.event_id), [tokenId(CHILD, 4)]);
   });
@@ -500,8 +488,6 @@ describe('a subagent rollout bills only its own activity', () => {
   });
 
   test('a compacted child keeps billing its own earlier usage', () => {
-    // No copied prefix: the first counter follows the child's own turn and
-    // reports no request of its own, yet its total is the child's own history.
     const file = writeChild([
       spawnMeta(), { type: 'compacted', timestamp: '2026-07-25T20:53:38Z', payload: {} },
       turnAt('2026-07-25T21:10:00Z'), count(3_600_000, 3_100_000, 21_000, 0), count(3_630_000, 3_125_000, 21_100, 30_000),
@@ -545,7 +531,6 @@ describe('a subagent rollout bills only its own activity', () => {
     getDb().exec('DELETE FROM events; DELETE FROM sessions; DELETE FROM import_state; DELETE FROM session_items; DELETE FROM session_turns; DELETE FROM browsing_sessions; DELETE FROM session_trace_summary;');
     for (const f of fs.readdirSync(sessionsDir)) fs.rmSync(path.join(sessionsDir, f));
     const own = [turnAt('2026-07-25T20:53:40Z'), count(1_530_000, 1_225_000, 15_500, 30_000)];
-    // As the importer stored it before: the same file read as a plain session.
     writeChild([spawnMeta('cli'), ...copiedPrefix, ...own]);
     runImport({ source: 'codex', codexDir });
     const ownRowBefore = getDb().prepare('SELECT id, created_at FROM events WHERE event_id = ?').get(tokenId(CHILD, 4));
@@ -560,7 +545,6 @@ describe('a subagent rollout bills only its own activity', () => {
   });
 });
 
-// ─── Compaction requests (SC-03) ────────────────────────────────────────
 
 type Usage3 = [input: number, cached: number, output: number];
 const asUsage = ([input, cached, output]: Usage3) => ({
@@ -588,10 +572,8 @@ const sessionEnd = () => parseCodexFile(rollout, { codexDir }).find(e => e.event
 /** Everything billed, cache-inclusive input plus output, as Codex's thread total counts it. */
 const billed = () => llmRows().reduce((sum, e) => sum + e.tokens_in + (e.cache_read_tokens ?? 0) + e.tokens_out, 0);
 
-// A session begun before Codex wrote per-request records: its first request is
-// in the counter only, so its records start mid-thread and the import keeps
-// billing from the counter. Then a request, a compaction the counter leaves
-// out, and a request after it.
+// WHY: Sessions can start before per-request records existed, so newer records may omit the opening
+// activity still present in the counter.
 const compactionRollout = (overrides: { secondCounter?: Line; compactRecord?: Line; compactLine?: Line } = {}): Line[] => [
   meta(), turn(), counter(0, 400, 0, 10),
   record(1, 'resp-1', [1_000, 800, 50], [1_400, 800, 60]), counter(1, 1_400, 800, 60),
@@ -708,15 +690,10 @@ describe('on the counter path, a compaction request is billed once', () => {
   });
 });
 
-// ─── Per-request usage ──────────────────────────────────────────────────
-
 const requestId = compactionId;
 const turnAbortedAt = (minute: number): Line => ({
   type: 'event_msg', timestamp: `2026-07-12T10:${String(minute).padStart(2, '0')}:40Z`, payload: { type: 'turn_aborted', reason: 'interrupted' },
 });
-// Recorded per request from the first one: a request, a compaction, a request
-// of a turn that is then aborted (in no counter and named by no `compacted`
-// line), and a request after it. A patch sits between counters.
 const requestRollout = (): Line[] => [
   meta(), turn(),
   record(1, 'resp-1', [1_000, 800, 50], [1_000, 800, 50]), counter(1, 1_000, 800, 50), patch(1),
@@ -821,7 +798,6 @@ describe('a rollout recorded per request from its first request is billed per re
     assert.equal(llmRows().filter(e => (e.metadata as Record<string, unknown>)._usage_source === undefined).length, 3);
   });
 
-  // Lines as written, one of them possibly not JSON.
   const writeRaw = (lines: Array<Line | string>) =>
     fs.writeFileSync(rollout, lines.map(l => (typeof l === 'string' ? l : JSON.stringify(l))).join('\n'));
 
@@ -864,8 +840,8 @@ describe('a rollout recorded per request from its first request is billed per re
 });
 
 describe('an insert-only import never bills a request beside its counter row', () => {
-  // A date-scoped import, and a rollout with a line that does not parse, only
-  // insert: they cannot delete the counter rows a switch would replace.
+  // WHY: Date-scoped and partially unreadable imports do not have enough source coverage to remove
+  // older accounting rows.
   before(() => { fs.mkdirSync(sessionsDir, { recursive: true }); });
   beforeEach(() => {
     assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
@@ -905,8 +881,6 @@ describe('an insert-only import never bills a request beside its counter row', (
     writeRollout(lines);
     runImport({ source: 'codex', codexDir });
     const before = usageTotal();
-    // The first record no longer parses, so the next one starts mid-thread and
-    // the parse falls back to the counter; the malformed line makes it insert-only.
     const first = lines.findIndex(l => l.type === 'token_usage_record');
     fs.writeFileSync(rollout, lines.map((l, i) => (i === first ? '{not json' : JSON.stringify(l))).join('\n'));
     runImport({ source: 'codex', codexDir, force: true });

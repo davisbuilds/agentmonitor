@@ -106,7 +106,8 @@ Animate `transform`/`opacity` only. Default duration 140ms, `ease-out`
 - **Demote loud chips.** Status/capability indicators are a tinted dot + label, not a colored
   uppercase pill on every row. Say nothing about the normal case: a list row omits a session's
   coverage when everything was captured (`SessionCoverage` variant `row`), and a header opens the
-  breakdown from one dot + label (variant `detail`). Live status uses `StatusDot`.
+  breakdown from one dot + label (variant `detail`). Monitor cards use text for
+  idle and ended sessions. Other live status indicators use `StatusDot`.
 - **One filter bar per tab.** A filtering tab renders `ui/FilterBar` directly under the command
   bar: scope first (sub-tabs or a search box), then Project and Agent, then the page's own
   filters, with Clear and actions at the end. It stays one row on desktop: `Select` caps its

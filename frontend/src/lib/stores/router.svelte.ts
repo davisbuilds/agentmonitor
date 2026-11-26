@@ -25,7 +25,6 @@ export function getTab(): Tab {
 }
 
 export function setTab(tab: Tab): void {
-  // The Monitor tab is also the way back from a followed session to the cards.
   const leavingDrillIn = monitorSessionId !== null;
   currentTab = tab;
   monitorSessionId = null;
@@ -101,16 +100,10 @@ export function consumePendingSessionNavigation(): { sessionId: string | null; m
   return { sessionId, messageOrdinal };
 }
 
-// Initialize from URL hash
 function initFromHash(): void {
   if (typeof window === 'undefined') return;
-  // Rewrite legacy deep links to their canonical consolidated form (#usage /
-  // #insights → #analytics?view=…, #pinned and #sessions?view=pinned →
-  // #sessions?pinned=1, #search?q=… → #sessions?q=…, #live → Monitor). Use
-  // replaceState (not location.hash =) so the rewrite adds no history entry —
-  // otherwise Back returns to the legacy hash and immediately re-redirects,
-  // trapping the user. replaceState fires no hashchange, so we read the
-  // canonical hash and set the tab in this same pass.
+  // WHY: Replace legacy hashes in place so Back cannot return to an obsolete link and redirect again.
+  // Apply the replacement in this pass because replaceState emits no hashchange.
   const canonical = canonicalizeLegacyAnalyticsHash(window.location.hash)
     ?? canonicalizeLegacyPinnedHash(window.location.hash)
     ?? canonicalizeLegacySearchHash(window.location.hash)

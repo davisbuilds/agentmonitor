@@ -32,7 +32,6 @@ before(async () => {
   const { insertEvent } = await import('../src/db/queries.js');
   ({ getUsageSummary, getUsageFacets, getMonitorStats, listMonitorSessions } = await import('../src/db/v2-queries.js'));
 
-  // A real-activity event.
   insertEvent({
     event_id: 'real-001',
     session_id: 'real-sess',
@@ -48,7 +47,6 @@ before(async () => {
     metadata: null,
   });
 
-  // A benchmark-import event, same metric shape.
   insertEvent({
     event_id: 'bench-001',
     session_id: 'codex:sometask:minimax-m3:trial1',
@@ -120,9 +118,8 @@ describe('benchmark v1 legacy stats segregation', () => {
   test('lifetime total_sessions excludes benchmark sessions', async () => {
     const { getStats } = await import('../src/db/queries.js');
     const stats = getStats();
-    // The `sessions` table holds both the real and the (ended) benchmark session.
-    // The lifetime tally must count only real-activity sessions — a bake-off must
-    // not inflate "sessions ever observed".
+    // WHY: Benchmark sessions share the sessions table, so counting every stored session would
+    // inflate the real-activity lifetime tally.
     assert.equal(stats.total_sessions, 1, 'benchmark session must not inflate total_sessions');
   });
 });

@@ -42,7 +42,6 @@ export function allocate<S extends Milestone>(minutes: CostMinute[], milestones:
   return minutes.map(minute => {
     if (minute.root === null || !minute.observable) return { outcome: 'unobservable', milestone: null };
     const list = byRoot.get(minute.root) ?? [];
-    // The first milestone at or after the minute, by binary search.
     let low = 0;
     let high = list.length;
     while (low < high) {

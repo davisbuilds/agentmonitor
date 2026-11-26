@@ -73,7 +73,6 @@ describe('filterPinnedMessages', () => {
 
   it('narrows by the words a pin shows, ignoring case and surrounding spaces', () => {
     expect(ids(filterPinnedMessages(pins, { ...none, query: '  QUOTA ' }))).toEqual([1, 3]);
-    // The session title matches too, not only the message preview.
     expect(ids(filterPinnedMessages(pins, { ...none, query: 'importer cleanup' }))).toEqual([2]);
     expect(ids(filterPinnedMessages(pins, { ...none, query: 'quota', agent: 'codex' }))).toEqual([3]);
     expect(ids(filterPinnedMessages(pins, { ...none, query: 'nothing like this' }))).toEqual([]);

@@ -121,7 +121,8 @@ function timeQuery(db: Database.Database, q: BenchQuery, since: string): { media
   const params = q.params(since);
   const runs: number[] = [];
   let rows = 0;
-  // 6 runs, drop the first (cold) and report the median of the warm 5.
+  // WHY: The first run includes cold-start work and would skew the reported steady-state
+  // measurement.
   for (let i = 0; i < 6; i++) {
     const start = process.hrtime.bigint();
     const result = stmt.all(...params) as unknown[];
@@ -153,11 +154,11 @@ function main(): void {
     try {
       rowCounts[t] = (db.prepare(`SELECT COUNT(*) AS c FROM ${t}`).get() as { c: number }).c;
     } catch {
-      rowCounts[t] = -1; // table absent
+      rowCounts[t] = -1; // WHY: Older stores can lack the optional table and still yield the other benchmark measurements.
     }
   }
 
-  // Deterministic 60-day window anchored to the newest event, not wall-clock now.
+  // WHY: Anchor to the last recorded event so historical snapshots produce repeatable timings.
   const maxCreated = (db.prepare(`SELECT MAX(created_at) AS m FROM events`).get() as { m: string | null }).m;
   const since = maxCreated
     ? (db.prepare(`SELECT datetime(?, '-60 days') AS s`).get(maxCreated) as { s: string }).s

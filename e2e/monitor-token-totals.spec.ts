@@ -38,7 +38,7 @@ test.beforeAll(async () => {
   ({ createApp } = await import('../src/app.js'));
 
   initSchema();
-  // Cache dominates, as it does in real use.
+  // WHY: Use a cache-dominated fixture so dropping cache counts makes the total visibly fail.
   seedUsage('codex', 1_000_000, 100_000, 20_000_000, 0);
   seedUsage('claude_code', 5_000, 900_000, 150_000_000, 4_000_000);
 
@@ -64,7 +64,6 @@ test('monitor headline counts every token, and its breakdown splits buckets and 
   await page.goto(`${baseUrl}/app/`);
   await expect(page.getByRole('heading', { name: 'Active Agents' })).toBeVisible();
 
-  // 1.0M + 1.0M + 170.0M + 4.0M, cache included.
   await expect(page.getByTestId('monitor-total-tokens')).toHaveText('176.0M');
 
   await page.getByRole('button', { name: /show breakdown/ }).click();

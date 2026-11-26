@@ -17,8 +17,7 @@ function parsePayload(item: LiveItem): Record<string, unknown> | null {
   }
 }
 
-// Claude calls and results share the tool_use id as source_item_id; Codex ids
-// them `<call_id>:decision` and `<call_id>:result` and carries call_id in both.
+// WHY: Normalize each provider’s identifiers before matching a call and its result.
 function callKey(item: LiveItem): string | null {
   const callId = parsePayload(item)?.call_id;
   if (typeof callId === 'string' && callId) return `call:${callId}`;
@@ -119,8 +118,7 @@ export function toolArgument(item: LiveItem): string | null {
   return null;
 }
 
-// Claude Code records local slash commands as tagged user text: a caveat, the
-// command, then its output.
+// WHY: Recognize tagged local commands because Claude stores their command and output as user text.
 function localCommand(item: LiveItem, payload: Record<string, unknown> | null) {
   if (item.kind !== 'user_message' || typeof payload?.text !== 'string') return null;
   const parsed = parseSessionText(payload.text);

@@ -20,7 +20,6 @@ const columns = (table: string) =>
 test('v29 adds pull request size, membership and commit landing to a v28 store, keeping its rows', () => {
   const db = getDb();
   assert.equal(db.name, process.env.AGENTMONITOR_DB_PATH);
-  // The git tables as v28 left them.
   db.exec(`
     CREATE TABLE git_commits (
       repo_root TEXT NOT NULL, sha TEXT NOT NULL, authored_at TEXT NOT NULL, committed_at TEXT NOT NULL,

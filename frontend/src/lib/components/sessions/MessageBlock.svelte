@@ -35,13 +35,12 @@
     toolExpanded = { ...toolExpanded, [id]: !toolExpanded[id] };
   }
 
-  // Shared classifier keeps the label in sync with the viewer's author filter.
+  // WHY: Share the author classifier so a message cannot be labeled differently from the filter that
+  // includes it.
   const author = $derived(classifyMessageAuthor(message));
   const roleLabel = $derived(
     author === 'tool' ? 'Tool' : author === 'you' ? 'You' : author === 'instructions' ? 'Instructions' : agentDisplayName(agent),
   );
-  // You = the one interactive accent; assistant = ok; tool output and
-  // injected instructions = neutral.
   const quiet = $derived(author === 'tool' || author === 'instructions');
   const roleColor = $derived(
     quiet ? 'text-text-muted' : author === 'you' ? 'text-accent' : 'text-ok',
@@ -68,7 +67,6 @@
   }`}
   data-message-ordinal={message.ordinal}
 >
-  <!-- Role header -->
   <div class="mb-1 flex items-center gap-2">
     <span class="text-meta font-medium {roleColor}">{roleLabel}</span>
     {#if message.timestamp}
@@ -102,7 +100,6 @@
     {/if}
   </div>
 
-  <!-- Content blocks -->
   {#each blocks as block, i}
     {#if block.type === 'text' && block.text}
       {@const parsedText = parseSessionText(block.text)}

@@ -12,7 +12,7 @@ let server: Server;
 let closeDb: typeof import('../src/db/connection.js').closeDb;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 
-// Long enough that a select sized to its longest option overflows one row.
+// WHY: Use option labels long enough to expose a native select sized by its contents.
 const LONG_PROJECT = 'a-project-name-long-enough-to-stretch-a-native-select-across-the-bar';
 const LONG_TOOL = 'mcp__plugin_some_server__a_tool_name_long_enough_to_stretch_its_select';
 
@@ -69,14 +69,14 @@ test.afterAll(async () => {
 });
 
 const MAX_SELECT_WIDTH = 192;
-// One row of 32px controls plus the bar's padding; a wrapped bar is ~90px.
+// WHY: Set the maximum above a single control row and below two rows so a wrap fails the assertion.
 const MAX_BAR_HEIGHT = 56;
 
 async function expectOneRowBar(page: Page, hash: string): Promise<void> {
   await page.goto(`${baseUrl}/app/#${hash}`);
   const bar = page.getByTestId('filter-bar');
   await expect(bar).toBeVisible();
-  // Wait for the option lists to load; an empty select is trivially narrow.
+  // WHY: Wait for fixture-backed options so an empty select cannot satisfy the layout test.
   await expect(bar.getByRole('combobox', { name: 'Filter by agent' }).locator('option')).not.toHaveCount(1);
   const selects = bar.getByRole('combobox');
   for (const select of await selects.all()) {
@@ -95,7 +95,6 @@ test('every tab lays its filters out in one bar of capped controls', async ({ pa
     'analytics',
     'analytics?view=usage',
     'analytics?view=quality',
-    // With filters set, Clear and the Filters count join the row.
     `analytics?view=usage&from=2026-09-01&to=2026-09-30&project=${LONG_PROJECT}&agent=codex&provider=anthropic`,
     `sessions?q=seeded&project=${LONG_PROJECT}&agent=claude&pinned=1`,
   ]) {
@@ -153,7 +152,6 @@ test('the quick range in force is marked, and Usage\'s total cost names its wind
   const range = bar.getByRole('button', { name: /^Date range/ });
   await expect(range).toHaveText('Sep 1 – Sep 30');
 
-  // A custom range is set in the range button's popover.
   await range.click();
   await page.getByLabel('From date').fill('2026-09-10');
   await expect(page).toHaveURL(/from=2026-09-10/);
@@ -177,7 +175,6 @@ test('Clear resets everything in the bar', async ({ page }) => {
   await expect(page).not.toHaveURL(/project=|pinned=/);
   await expect(bar.getByRole('button', { name: 'Clear' })).toHaveCount(0);
 
-  // A search's sort is part of the bar too: the next search starts from Newest First.
   await bar.getByRole('searchbox', { name: 'Search transcripts' }).fill('seeded');
   await bar.getByRole('combobox', { name: 'Sort results' }).selectOption('relevance');
   await expect(page).toHaveURL(/sort=relevance/);
@@ -186,7 +183,6 @@ test('Clear resets everything in the bar', async ({ page }) => {
   await expect(bar.getByRole('combobox', { name: 'Sort results' })).toHaveValue('recent');
   await expect(page).not.toHaveURL(/sort=relevance/);
 
-  // On Usage, the facets behind Filters are part of the bar too.
   await page.goto(`${baseUrl}/app/#analytics?view=usage&provider=anthropic`);
   await expect(bar.getByRole('button', { name: 'More filters' })).toContainText('1');
   await bar.getByRole('button', { name: 'Clear' }).click();

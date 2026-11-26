@@ -90,41 +90,28 @@ before(async () => {
   ({ insertEvent } = await import('../src/db/queries.js'));
   ({ getBenchmarkStudies, getBenchmarkStudy, getUsageSummary } = await import('../src/db/v2-queries.js'));
 
-  // Study s1: four priced arms (frontier mechanics) + two honesty cases.
-  // A cheap/routed (trivial), B mid/routed (value-pick, one noop), C native (n=1),
-  // D bad/routed (dominated).
   cell({ runId: 's1-A-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'cheap', is_open: true, task: 't', trial: 1, score: 0.2, cost: 0.02, cost_source: null });
   cell({ runId: 's1-A-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'cheap', is_open: true, task: 't', trial: 2, score: 0.2, cost: 0.02, cost_source: null });
-  // 'mid': every cell explicitly ranking-eligible → arm eligible=true; mixed
-  // evidence grades (vendor_reported + estimated) → arm reports the weakest.
   cell({ runId: 's1-B-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 1, score: 0.8, cost: 0.10, cost_source: 'litellm', ranking_eligible: true, usage_evidence_grade: 'vendor_reported' });
   cell({ runId: 's1-B-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'mid', is_open: true, task: 't', trial: 2, score: 0.8, cost: 0.10, cost_source: 'litellm', success: true, workspace_changed: false, ranking_eligible: true, usage_evidence_grade: 'estimated' });
   cell({ runId: 's1-C-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'gpt-native', effort: 'high', is_open: false, task: 't', trial: 1, score: 1.0, cost: 0.50, cost_source: null });
-  // A second gpt-native attempt that failed (unscored) — must count as an excluded
-  // trial, not be hidden by the raw cell count. Keeps n=1, mean_score=1.0.
   cell({ runId: 's1-C-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'gpt-native', effort: 'high', is_open: false, task: 't', trial: 2, score: null, cost: 0.50, cost_source: null });
   cell({ runId: 's1-D-1', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'bad', is_open: true, task: 't', trial: 1, score: 0.5, cost: 0.60, cost_source: null });
   cell({ runId: 's1-D-2', study_id: 'sha1', study: 's1-2026-09-03', suite: 's1', canonical: 'bad', is_open: true, task: 't', trial: 2, score: 0.5, cost: 0.60, cost_source: null });
 
-  // Study s2: a single unpriced arm.
   cell({ runId: 's2-E-1', study_id: 'sha2', study: 's2-2026-09-03', suite: 's2', canonical: 'mystery', is_open: true, task: 'u', trial: 1, score: 0.6, cost: null });
 
-  // Study s3: native fallback when is_open_model is absent (legacy rows). A
-  // first-party priced model → native; an unknown/unpriced model → routed.
   cell({ runId: 's3-F-1', study_id: 'sha3', study: 's3-2026-09-03', suite: 's3', canonical: 'gpt-5-mini', is_open: null, task: 'v', trial: 1, score: 0.9, cost: 0.10 });
   cell({ runId: 's3-G-1', study_id: 'sha3', study: 's3-2026-09-03', suite: 's3', canonical: 'no-such-model-xyz', is_open: null, task: 'v', trial: 1, score: 0.9, cost: null });
 
-  // Study s4: a multi-task study (tasks p + q, trials 1 + 2 → four cells/arm).
-  // Arm 'multi' is missing (q, trial 2), so it has 3 scored cells against an
-  // expected grid of 4 — the excluded flag must catch it. The max-trial-index
-  // denominator (2) would compute max(0, 2 - 3) = 0 and silently hide the gap.
+  // WHY: The highest trial index counts repetitions rather than task-by-trial cells, so using it as
+  // the denominator can hide missing work.
   cell({ runId: 's4-M-p1', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'p', trial: 1, score: 0.7, cost: 0.10, cost_source: 'litellm' });
   cell({ runId: 's4-M-p2', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'p', trial: 2, score: 0.7, cost: 0.10, cost_source: 'litellm' });
-  // One cell's usage was excluded from ranking upstream (openbench) — the arm
-  // must surface as ineligible with the reason (mirrored, not re-derived).
+  // WHY: Eligibility reflects upstream evidence. Re-deriving it locally can make an ineligible cell
+  // look rankable.
   cell({ runId: 's4-M-q1', study_id: 'sha4', study: 's4-2026-09-03', suite: 's4', canonical: 'multi', is_open: true, task: 'q', trial: 1, score: 0.7, cost: 0.10, cost_source: 'litellm', ranking_eligible: false, ranking_exclusion_reason: 'usage_unavailable' });
 
-  // A real-activity event that must never appear in benchmark queries or move Usage.
   insertEvent({
     event_id: 'real-1', session_id: 'real', agent_type: 'claude_code', event_type: 'llm_response',
     status: 'success', project: 'p', model: 'claude-sonnet-4-5-20250929',
@@ -223,14 +210,13 @@ describe('getBenchmarkStudy — arm aggregation + frontier', () => {
     assert.equal(eligible.ranking_eligible, true, 'every cell explicitly eligible → true');
     assert.equal(eligible.ranking_exclusion_reason, null);
 
-    // No cell reported eligibility → unknown (null), never a fabricated true.
     const unknown = s1.find(a => a.canonical_model === 'cheap')!;
     assert.equal(unknown.ranking_eligible, null, 'legacy/omitted eligibility stays unknown');
   });
 
   test('arm reports its weakest usage-evidence grade, not an arbitrary cell', () => {
-    // 'mid' spans vendor_reported + estimated; the weaker (estimated) must win so
-    // the honesty panel does not hide a soft basis behind a strong one.
+    // WHY: Using the strongest reported basis would conceal a weaker measurement contributing to the
+    // arm.
     const mid = getBenchmarkStudy('sha1').arms.find(a => a.canonical_model === 'mid')!;
     assert.equal(mid.usage_evidence_grade, 'estimated');
   });

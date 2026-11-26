@@ -11,20 +11,17 @@ TOOL_NAME="$(extract_field tool_name)"
 PROJECT="$(get_project)"
 BRANCH="$(get_branch)"
 
-# Extract useful detail from tool_input depending on tool type
 COMMAND="$(extract_nested tool_input.command)"
 FILE_PATH="$(extract_nested tool_input.file_path)"
 PATTERN="$(extract_nested tool_input.pattern)"
 QUERY="$(extract_nested tool_input.query)"
 URL="$(extract_nested tool_input.url)"
 
-# JSON-escape all values before embedding in payload
 SESSION_ID_ESC="$(json_escape "$SESSION_ID")"
 TOOL_NAME_ESC="$(json_escape "$TOOL_NAME")"
 PROJECT_ESC="$(json_escape "$PROJECT")"
 BRANCH_ESC="$(json_escape "$BRANCH")"
 
-# Compute lines added/removed for edit tools
 LINES_ADDED=""
 LINES_REMOVED=""
 if command -v jq &>/dev/null; then
@@ -42,7 +39,6 @@ if command -v jq &>/dev/null; then
   esac
 fi
 
-# Build metadata object with escaped values
 TOOL_USE_ID_ESC="$(json_escape "$(extract_field tool_use_id)")"
 META="{\"tool_use_id\": \"$TOOL_USE_ID_ESC\""
 [ -n "$COMMAND" ]   && META="$META, \"command\": \"$(json_escape "$COMMAND")\""

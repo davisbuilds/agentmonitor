@@ -7,14 +7,11 @@ export default tseslint.config(
   {
     files: ['src/**/*.ts', 'tests/**/*.ts', 'scripts/**/*.ts'],
     rules: {
-      // Allow unused vars prefixed with underscore
       '@typescript-eslint/no-unused-vars': ['error', {
         argsIgnorePattern: '^_',
         varsIgnorePattern: '^_',
       }],
-      // Allow explicit any sparingly (the codebase uses unknown mostly)
       '@typescript-eslint/no-explicit-any': 'warn',
-      // Consistent type imports
       '@typescript-eslint/consistent-type-imports': ['error', {
         prefer: 'type-imports',
         fixStyle: 'inline-type-imports',

@@ -5,7 +5,6 @@ import path from 'node:path';
 import test, { after } from 'node:test';
 import { zstdCompressSync } from 'node:zlib';
 
-// Isolate the DB before importing any module that resolves the connection.
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-codex-zst-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'agentmonitor.db');
 process.env.AGENTMONITOR_AUTO_IMPORT_MINUTES = '0';
@@ -53,7 +52,6 @@ test('a rollout Codex compressed after amon read it stays one session, with noth
   assert.deepEqual(before.session, { rows: 1, messages: 2, cwd: '/work/beta' });
   assert.ok(before.usage > 0);
 
-  // Codex compresses the finished rollout and removes the plain file.
   fs.writeFileSync(compressed, zstdCompressSync(fs.readFileSync(plain)));
   fs.rmSync(plain);
   assert.deepEqual(watcher.discoverCodexSessionFiles(codexDir).map(file => path.basename(file)), [`${rolloutId}.jsonl.zst`]);
@@ -65,8 +63,6 @@ test('a rollout Codex compressed after amon read it stays one session, with noth
   assert.equal(usageRows(), before.usage, 'its usage events dedupe against the ones already imported');
   assert.equal(imported.files.find(file => file.path === compressed)?.eventsImported, 0);
 
-  // Import state records the size on disk, so the next pass skips the file
-  // without reading and decompressing it.
   assert.equal((db().prepare('SELECT file_size FROM import_state WHERE file_path = ?').get(compressed) as { file_size: number }).file_size,
     fs.statSync(compressed).size);
   assert.equal(runImport({ source: 'codex', codexDir }).files.find(file => file.path === compressed)?.skippedUnchanged, true);
@@ -81,8 +77,8 @@ test('a rollout amon first sees compressed is read whole', () => {
   assert.deepEqual(db().prepare('SELECT message_count, cwd FROM browsing_sessions WHERE id = ?').get(otherId), { message_count: 2, cwd: '/work/beta' });
   assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped', 'an unchanged compressed file is skipped like any other');
 
-  // Codex never writes to a compressed rollout again, so a resync skips one
-  // it has parsed by its mtime alone, without decompressing it.
+  // WHY: Compressed rollouts are immutable, so a resync should avoid reading or decompressing an
+  // unchanged file.
   fs.chmodSync(file, 0o000);
   try {
     assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped');
@@ -99,7 +95,6 @@ test('a compressed rollout a migration flagged for reparse is reparsed, though i
   assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'parsed');
   assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped');
 
-  // What the schema migrations write to ask the next startup sync to reparse.
   db().prepare("UPDATE watched_files SET file_hash = '' WHERE file_path = ?").run(file);
   assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'parsed');
   assert.equal(watcher.syncCodexSessionFileDetailed(db(), file).result, 'skipped', 'a reparse clears the flag');

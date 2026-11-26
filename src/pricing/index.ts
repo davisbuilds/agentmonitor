@@ -2,8 +2,6 @@ import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import path from 'path';
 
-// ─── Types ──────────────────────────────────────────────────────────────
-
 interface PricingDataRates {
   inputCostPerMTok: number;
   outputCostPerMTok: number;
@@ -14,16 +12,10 @@ interface PricingDataRates {
   cacheWrite1hCostPerMTok?: number;
 }
 
-// A higher prompt-size band: when a request's prompt exceeds `abovePromptTokens`,
-// these rates replace the base rates for every token class (that is how Google's
-// long-context tiering works — e.g. Gemini doubles all rates above 200K prompt).
 interface PricingDataTier extends PricingDataRates {
   abovePromptTokens: number;
 }
 
-// A dated rate change: from `from` (inclusive ISO date) onward, these rates (and
-// their own optional prompt-size tiers) replace the model's inline base rates.
-// Used for promos that revert and provider price changes with a known date.
 interface PricingDataSchedulePeriod extends PricingDataRates {
   from: string;
   tiers?: PricingDataTier[];
@@ -95,8 +87,6 @@ export interface ResolvedModelPricing {
   pricing: ModelPricing;
 }
 
-// ─── PricingRegistry ────────────────────────────────────────────────────
-
 const M_TOK = 1_000_000;
 
 function toPerToken(rates: PricingDataRates): PricingRates {
@@ -110,8 +100,6 @@ function toPerToken(rates: PricingDataRates): PricingRates {
   return perToken;
 }
 
-// Convert prompt-size bands to per-token rates, ascending by threshold. Returns
-// undefined for a flat model so callers can leave `tiers` unset.
 function buildTiers(tiers?: PricingDataTier[]): PricingTier[] | undefined {
   if (!tiers || tiers.length === 0) return undefined;
   return tiers
@@ -119,10 +107,6 @@ function buildTiers(tiers?: PricingDataTier[]): PricingTier[] | undefined {
     .sort((a, b) => a.abovePromptTokens - b.abovePromptTokens);
 }
 
-// Build the dated rate periods: the inline rates form the base period (from
-// -Infinity), and each `schedule` entry adds a later period. Sorted ascending
-// by `from`; entries with an unparseable `from` are dropped rather than
-// silently mispricing every event from the epoch.
 function buildPeriods(model: PricingDataModel, baseTiers?: PricingTier[]): RatePeriod[] {
   const base: RatePeriod = { from: -Infinity, rates: toPerToken(model), tiers: baseTiers };
   const scheduled: RatePeriod[] = (model.schedule ?? [])
@@ -134,12 +118,8 @@ function buildPeriods(model: PricingDataModel, baseTiers?: PricingTier[]): RateP
 /** A point in time to price at: a Date, epoch ms, or ISO string. */
 export type PricingDate = Date | number | string;
 
-// SQLite stores `created_at` as the zone-less form `YYYY-MM-DD HH:MM:SS` but the
-// value is UTC (written by CURRENT_TIMESTAMP). Node's Date parses that separator
-// form in the host's LOCAL timezone, so on a non-UTC install an event within the
-// UTC offset of a rate boundary would land in the wrong period. Normalize the
-// bare SQLite datetime to an explicit-UTC ISO string; anything already carrying a
-// zone (client_timestamp is ISO with `Z`/offset) or not matching is left as-is.
+// WHY: SQLite stores UTC without an offset; parsing as host-local time can select the wrong dated
+// price.
 const SQLITE_UTC = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/;
 
 export function normalizeSqliteTimestamp(value: string): string {
@@ -147,9 +127,6 @@ export function normalizeSqliteTimestamp(value: string): string {
   return match ? `${match[1]}T${match[2]}Z` : value;
 }
 
-// Resolve an `at` argument to epoch ms. Omitted or unparseable → now, so a
-// missing/garbled event timestamp prices at the current period rather than
-// silently jumping to a scheduled future rate.
 function resolveAtMs(at?: PricingDate | null): number {
   if (at == null) return Date.now();
   if (at instanceof Date) return at.getTime();
@@ -158,9 +135,6 @@ function resolveAtMs(at?: PricingDate | null): number {
   return Number.isFinite(ms) ? ms : Date.now();
 }
 
-// Pick the rate period in force at `atMs`: the latest period whose `from` is
-// at or before that instant (boundaries are inclusive). `periods` is sorted
-// ascending and `periods[0]` is from -Infinity, so this always resolves.
 function selectPeriod(pricing: ModelPricing, atMs: number): RatePeriod {
   let period = pricing.periods[0];
   for (const candidate of pricing.periods) {
@@ -169,10 +143,6 @@ function selectPeriod(pricing: ModelPricing, atMs: number): RatePeriod {
   return period;
 }
 
-// Pick the effective rates for a request. Selects the dated period first, then
-// the prompt-size tier within it: flat periods use their base rates; tiered
-// periods apply the highest band whose threshold the prompt strictly exceeds
-// (boundaries exclusive). Prompt size = uncached input + cache reads + writes.
 function selectRates(pricing: ModelPricing, tokens: TokenCounts, atMs: number): PricingRates {
   const period = selectPeriod(pricing, atMs);
   if (!period.tiers || period.tiers.length === 0) return period.rates;
@@ -190,13 +160,10 @@ function selectRates(pricing: ModelPricing, tokens: TokenCounts, atMs: number): 
  * would otherwise ask for a rate card that cannot exist.
  */
 export const UNPRICEABLE_MODELS: ReadonlyMap<string, string> = new Map([
-  // Codex's auto-review subagent: a hidden routing alias with no billable model
-  // behind it (openai/codex#20981).
+  // WHY: Codex auto-review is a routing alias without a billable model behind it.
   ['codex-auto-review', 'Codex routing alias with no public rate'],
 ]);
 
-// Bedrock model IDs: an optional cross-region inference prefix, `anthropic.`,
-// then the model with a `-v1` or `-v1:0` revision. Only these lose the revision.
 const BEDROCK_ANTHROPIC_ID = /^(?:(?:us|eu|apac|jp|au|ca|us-gov|global)\.)?anthropic\.(.+?)-v\d+(?::\d+)?$/;
 
 /**
@@ -218,7 +185,7 @@ export function normalizeModelId(model: string): string {
 
 export class PricingRegistry {
   private models = new Map<string, ModelPricing>();
-  private aliases = new Map<string, string>(); // alias → canonical name
+  private aliases = new Map<string, string>();
 
   constructor() {
     this.loadAll();
@@ -226,7 +193,6 @@ export class PricingRegistry {
 
   private loadAll(): void {
     const __dirname = path.dirname(fileURLToPath(import.meta.url));
-    // Works in dev (tsx: src/pricing/) and prod (dist/pricing/ after copy)
     const dataDir = path.join(__dirname, 'data');
 
     for (const file of ['claude.json', 'codex.json', 'gemini.json', 'openrouter.json']) {
@@ -235,7 +201,8 @@ export class PricingRegistry {
         const data = JSON.parse(raw) as PricingDataFile;
         this.loadProvider(data);
       } catch {
-        // Data file missing or malformed — skip silently in production
+        // WHY: A broken provider table must not prevent pricing from the other providers.
+        console.warn(`[pricing] Could not load all rates from ${file}`);
       }
     }
   }
@@ -277,13 +244,11 @@ export class PricingRegistry {
     const normalized = normalizeModelId(model);
     if (!normalized) return null;
 
-    // Try direct canonical match
     const direct = this.models.get(normalized);
     if (direct) {
       return { canonicalModel: normalized, pricing: direct };
     }
 
-    // Try alias
     const canonical = this.aliases.get(normalized);
     if (canonical) {
       const pricing = this.models.get(canonical);
@@ -304,8 +269,7 @@ export class PricingRegistry {
     if (!pricing) return null;
 
     const rates = selectRates(pricing, tokens, resolveAtMs(at));
-    // The 1-hour part is a share of the cache writes, never more. A model with
-    // no 1-hour rate bills it as any other cache write.
+    // WHY: The hour-long share is already counted in cache writes; it must not exceed that total.
     const cacheWrite = tokens.cacheWrite ?? 0;
     const cacheWrite1h = Math.min(Math.max(tokens.cacheWrite1h ?? 0, 0), cacheWrite);
     return (tokens.input * rates.inputCostPerToken)
@@ -343,5 +307,4 @@ export class PricingRegistry {
   }
 }
 
-// Singleton instance
 export const pricingRegistry = new PricingRegistry();

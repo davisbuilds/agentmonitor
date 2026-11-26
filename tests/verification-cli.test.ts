@@ -41,7 +41,6 @@ test('usage oracle rejects a believable missing event, wrong cost, and malformed
 });
 
 test('plan flags single out an aggregate that looks up every match', () => {
-  // The plans behind a slow Monitor count (3 s) and its fast page (3 ms).
   const lookup = 'SEARCH events USING INDEX idx_events_agent_event_order (agent_type=? AND event_type=?)';
   assert.deepEqual(planFlags('SELECT COUNT(*) as c FROM events WHERE agent_type = ?', [lookup]), ['row_lookups', 'aggregate_row_lookups']);
   assert.deepEqual(planFlags('SELECT * FROM events WHERE agent_type = ? LIMIT ?', [lookup]), ['row_lookups']);
@@ -70,7 +69,6 @@ describe('verification probes', () => {
       setup.exec('CREATE TABLE t (x INTEGER); INSERT INTO t VALUES (1)');
       setup.close();
       const db = openReadOnly(file);
-      // Each layer alone refuses writes; check both are in place.
       assert.equal(db.readonly, true);
       assert.equal(db.pragma('query_only', { simple: true }), 1);
       assert.throws(() => db.prepare('INSERT INTO t VALUES (2)').run(), /readonly|query_only/i);

@@ -52,7 +52,7 @@ function seed(): void {
   );
   session.run('s-events', 'a1', 'claude', '2026-05-01T10:00:00Z');
   session.run('s-events2', 'a1', 'codex', '2026-05-01T10:30:00Z');
-  session.run('s-empty', 'a1', 'claude', '2026-05-01T11:00:00Z'); // no events => no summary
+  session.run('s-empty', 'a1', 'claude', '2026-05-01T11:00:00Z');
 
   const event = db.prepare(
     `INSERT INTO events (id, event_id, session_id, agent_type, event_type, tool_name, status, model,
@@ -109,16 +109,14 @@ test('persisted summary is content-free (no message/text columns)', () => {
 test('backfill writes one row per event-bearing session, not per event', () => {
   backfillSessionTraceSummaries();
   const rows = (getDb().prepare('SELECT COUNT(*) c FROM session_trace_summary').get() as { c: number }).c;
-  // 5 events across 2 sessions (s-empty has none) => exactly 2 summary rows.
   assert.equal(rows, 2);
   const sEvents = (getDb().prepare("SELECT observation_count FROM session_trace_summary WHERE session_id = 's-events'").get() as { observation_count: number });
   assert.equal(sEvents.observation_count, 3, 'one row aggregating the session\'s 3 events');
 });
 
 test('event usage is preserved when the detail projection comes from live session_items (Codex)', () => {
-  // Regression for PR #37 P1: a Codex session has events with real usage AND
-  // materialized session_items. projectTraceQuality structures detail from the
-  // items (zero usage); the summary must still roll up the event tokens/cost.
+  // WHY: Conversation items carry structure, but usage lives in the event projection. A materialized
+  // summary needs both.
   const db = getDb();
   db.prepare(`INSERT INTO browsing_sessions (id, agent, started_at, ended_at) VALUES ('s-codex', 'codex', ?, ?)`)
     .run('2026-05-01T12:00:00Z', '2026-05-01T12:05:00Z');
@@ -174,8 +172,6 @@ function preparedSql(fn: () => void): string[] {
 }
 
 test('an event-sourced derive reads no message, tool-call, item or turn bodies', () => {
-  // The watcher re-derives on every transcript append; those tables hold the
-  // session's full text, which an event-sourced summary never uses.
   const db = getDb();
   db.prepare(`INSERT INTO browsing_sessions (id, agent, project, started_at, ended_at) VALUES ('s-heavy', 'claude', 'proj', ?, ?)`)
     .run('2026-05-02T09:00:00Z', '2026-05-02T09:30:00Z');
@@ -200,7 +196,6 @@ test('event-sourced metadata prefers the browsing session, then turns, then even
        tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, created_at, client_timestamp)
      VALUES (?, ?, ?, ?, 'response', 'success', ?, 1, 1, 0, 0, ?, ?)`,
   );
-  // Browsing session wins for agent, project and the time span.
   db.prepare(`INSERT INTO browsing_sessions (id, agent, project, started_at, ended_at) VALUES ('s-meta-bs', 'claude', 'bs-proj', ?, ?)`)
     .run('2026-05-03T08:00:00Z', '2026-05-03T09:00:00Z');
   event.run(960, 'm1', 's-meta-bs', 'codex', 'ev-proj', '2026-05-03T08:10:00Z', null);
@@ -210,9 +205,8 @@ test('event-sourced metadata prefers the browsing session, then turns, then even
   assert.equal(fromBrowsing.started_at, '2026-05-03T08:00:00Z');
   assert.equal(fromBrowsing.ended_at, '2026-05-03T09:00:00Z');
 
-  // No browsing session: the earliest turn's agent, then the earliest event
-  // carrying a project, and the event time span (client time first). The
-  // project names sort against time so an unordered read picks the wrong one.
+  // WHY: Choose names that sort against the observed times so an unordered read cannot accidentally
+  // satisfy the contract.
   db.prepare(`INSERT INTO session_turns (id, session_id, agent_type, started_at) VALUES (961, 's-meta-ev', 'antigravity', ?)`)
     .run('2026-05-03T10:00:00Z');
   db.prepare(`INSERT INTO session_turns (id, session_id, agent_type, started_at) VALUES (962, 's-meta-ev', 'gemini', ?)`)
@@ -226,8 +220,8 @@ test('event-sourced metadata prefers the browsing session, then turns, then even
   assert.equal(fromEvents.started_at, '2026-05-03T10:00:00Z');
   assert.equal(fromEvents.ended_at, '2026-05-03T10:20:00Z');
 
-  // No browsing session and no turns: the earliest event's agent. Insertion,
-  // alphabetical and created_at order all point at the other event.
+  // WHY: Align all alternative orderings with the wrong row so the test reaches the earliest-event
+  // selection rule.
   event.run(966, 'm5', 's-meta-only', 'claude', null, '2026-05-03T12:10:00Z', null);
   event.run(967, 'm6', 's-meta-only', 'codex', null, '2026-05-03T12:20:00Z', '2026-05-03T12:00:00Z');
   assert.equal(deriveSessionTraceSummary('s-meta-only').agent_type, 'codex');

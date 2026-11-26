@@ -120,7 +120,6 @@ test('a legacy Search link redirects into the Sessions search without trapping B
   await expect(searchBox(page)).toHaveValue('midnight');
   await expect(page.getByRole('button', { name: /msg #0.*Quota investigation/ })).toBeVisible();
 
-  // An in-app legacy link: the rewrite replaces the entry, so Back skips it.
   await page.goto(`${baseUrl}/app/#sessions`);
   await expect(page.getByRole('button', { name: /Importer cleanup/ })).toBeVisible();
   await page.evaluate(() => { window.location.hash = '#search?q=importer'; });
@@ -147,13 +146,11 @@ test('legacy Pinned links open the Pinned filter, which a query narrows', async 
   await expect(page.getByText('1 pinned')).toBeVisible();
   await expect(page.getByRole('button', { name: /The window rolls over/ })).toHaveCount(0);
 
-  // Pinned off: the same query searches every transcript.
   await pinnedToggle(page).click();
   await expect(page).toHaveURL(/#sessions\?q=importer$/);
   await expect(pinnedToggle(page)).toHaveAttribute('aria-pressed', 'false');
   await expect(page.getByRole('button', { name: /msg #0.*Importer cleanup/ })).toBeVisible();
 
-  // And on again, with the list behind it.
   await searchBox(page).fill('');
   await pinnedToggle(page).click();
   await expect(page).toHaveURL(/#sessions\?pinned=1$/);
@@ -179,7 +176,7 @@ test('a pin opens at its message, and Unpin removes it from the Pinned filter', 
     await expect(page.getByText('1 pinned')).toBeVisible();
     await expect(page.getByRole('button', { name: /The window rolls over/ })).toHaveCount(0);
   } finally {
-    // Other tests in this worker share the database.
+    // WHY: Restore this pin because other tests in the same worker share the fixture database.
     getDb().prepare('INSERT OR IGNORE INTO pinned_messages (session_id, message_id, message_ordinal) VALUES (?, ?, ?)')
       .run(quotaPin.session_id, quotaPin.message_id, quotaPin.message_ordinal);
   }
@@ -194,7 +191,6 @@ test('the Project filter narrows the list and the search results at once', async
   await expect(page.getByRole('button', { name: /Importer cleanup/ })).toBeVisible();
   await expect(page.getByRole('button', { name: /Quota investigation/ })).toHaveCount(0);
 
-  // Both transcripts mention "the"; the filter keeps only blueprint's.
   await searchBox(page).fill('the');
   await expect(page.getByRole('button', { name: /msg #\d.*Importer cleanup/ }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: /Quota investigation/ })).toHaveCount(0);
@@ -220,7 +216,6 @@ test('Pin shows on hover or focus, while Pinned always shows', async ({ page }) 
   await ask.hover();
   await expect.poll(() => opacity(pin)).toBe('1');
 
-  // Reachable from the keyboard too.
   await page.mouse.move(0, 0);
   await pin.focus();
   await expect.poll(() => opacity(pin)).toBe('1');
@@ -308,9 +303,11 @@ test('palette dismissals restore focus and allow reopening', async ({ page }) =>
 
 test('Enter opens the focused result rather than the highlighted result', async ({ page }) => {
   await openPalette(page);
-  await page.keyboard.press('Tab'); // Close button.
-  await page.keyboard.press('Tab'); // Newest result (Importer cleanup).
-  await page.keyboard.press('Tab'); // Older result, without moving the pointer.
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  // WHY: Reach the older item without moving the pointer so mouse focus cannot mask a keyboard
+  // navigation failure.
+  await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: /Quota investigation/ })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#sessions\?session=sess-quota$/);
@@ -329,9 +326,9 @@ test('Enter on palette sort controls changes search order without navigating', a
   await openPalette(page);
   await paletteInput(page).fill('quota');
   await expect(page.getByText('Showing 1 of 1 transcript matches')).toBeVisible();
-  await page.keyboard.press('Tab'); // Close button.
-  await page.keyboard.press('Tab'); // Recent sort.
-  await page.keyboard.press('Tab'); // Relevance sort.
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: 'Relevance', exact: true })).toBeFocused();
   const sorted = page.waitForResponse(response => response.url().includes('/api/v2/search?') && response.url().includes('sort=relevance'));
   await page.keyboard.press('Enter');

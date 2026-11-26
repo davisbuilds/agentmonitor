@@ -1,9 +1,3 @@
-// Pure scale + tick helpers for the app's inline-SVG charts.
-//
-// Zero DOM/Svelte coupling: a Scale maps a domain value to a viewBox
-// coordinate, and the tick helpers produce "nice" round label values. Marks
-// and composition stay per-view (see BenchmarkFrontier, CostDashboard); this
-// module is only the shared arithmetic so two divergent charts agree on it.
 
 export interface Scale {
   /** Map a domain value to a range (viewBox) coordinate. */
@@ -81,8 +75,8 @@ export function niceLinearTicks(min: number, max: number, count = 5): number[] {
   const start = Math.floor(min / step) * step;
   const end = Math.ceil(max / step) * step;
   const ticks: number[] = [];
-  // Round each step to the step's own precision so 0.1 + 0.2 style drift does
-  // not produce 0.30000000000000004 labels.
+  // WHY: Round to tick precision so repeated floating-point steps cannot leak arithmetic noise into
+  // labels.
   const decimals = Math.max(0, -Math.floor(Math.log10(step)));
   for (let v = start; v <= end + step * 0.5; v += step) {
     ticks.push(Number(v.toFixed(decimals)));

@@ -26,7 +26,8 @@ function runGuarded(testSource: string | Record<string, string>, extraEnv: Recor
     fs.writeFileSync(file, source);
     return file;
   });
-  // NODE_TEST_CONTEXT would make the nested `node --test` report to this run instead of exiting on its own result.
+  // WHY: Inheriting the Node test context makes the child report to its parent instead of exposing
+  // its own exit result.
   const { NODE_TEST_CONTEXT: _context, ...env } = process.env;
   const result = spawnSync(process.execPath, [RUNNER, ...testFiles], {
     cwd: ROOT,

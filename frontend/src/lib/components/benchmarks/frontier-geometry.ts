@@ -1,12 +1,5 @@
-// Pure geometry for the benchmark cost×score frontier scatter.
-//
-// The backend already decides which arms are on the Pareto frontier
-// (`arm.pareto`) and who dominates whom (`arm.dominated_by`, holding the
-// dominator's canonical_model). This module does no re-ranking — it only turns
-// those decisions plus cost/score into plotted viewBox coordinates, the
-// polyline order, and the domination connectors. Keeping it pure (no Svelte,
-// no DOM) lets the frontier geometry be unit-tested and mutation-verified;
-// BenchmarkFrontier.svelte just draws the marks it returns.
+// WHY: Plot the backend’s Pareto decisions directly. Keeping geometry pure lets tests distinguish a
+// rendering regression from a ranking change.
 
 import type { BenchmarkArm } from '../../api/client';
 import { log10Scale, linearScale, type Scale } from '../ui/chart/scales';
@@ -67,8 +60,8 @@ export function computeFrontier(arms: BenchmarkArm[], ranges: FrontierRanges): F
   const unpriced = arms.filter((a) => a.cost_per_trial == null);
   const free = plottable.filter((a) => a.cost_per_trial === 0);
 
-  // Only positive costs define the log domain; $0 arms are pinned to the left
-  // edge by the scale's clamp and must not drag log10 to -Infinity.
+  // WHY: Exclude zero-cost points from the log domain so they can remain visible at the clamped plot
+  // edge.
   const positiveCosts = plottable
     .map((a) => a.cost_per_trial as number)
     .filter((c) => c > 0);
@@ -76,9 +69,7 @@ export function computeFrontier(arms: BenchmarkArm[], ranges: FrontierRanges): F
   if (positiveCosts.length === 0) {
     costDomain = [0.001, 1];
   } else {
-    // Bracket to whole decades so the log axis ticks land on the plot edges and
-    // every point sits inside. A collapsed bracket (all costs in one decade, or
-    // a single arm on a decade boundary) is widened a decade each side.
+    // WHY: Use full decades for plot bounds and widen a collapsed domain to keep its scale usable.
     let lo = Math.floor(Math.log10(Math.min(...positiveCosts)));
     let hi = Math.ceil(Math.log10(Math.max(...positiveCosts)));
     if (hi === lo) {
@@ -101,11 +92,8 @@ export function computeFrontier(arms: BenchmarkArm[], ranges: FrontierRanges): F
     .filter((p) => p.onFrontier)
     .sort((a, b) => a.cost - b.cost);
 
-  // `dominated_by` holds the dominator's canonical_model (not its display
-  // label, which may carry a reasoning-effort suffix), so several arms can
-  // share it across efforts. Disambiguate the way the backend does: keep only
-  // candidates that actually dominate p (at least as cheap and at least as
-  // good), then take the cheapest, highest-score one.
+  // WHY: Several effort variants share one canonical model. Match a dominator that qualifies against
+  // this arm before choosing a connector.
   const connectors: FrontierConnector[] = [];
   for (const p of points) {
     const dom = p.arm.dominated_by;

@@ -20,7 +20,6 @@ test('a server that answers its health check is responding', async () => {
 });
 
 test('a server that accepts the connection but never answers is not responding', async () => {
-  // What a server frozen in a blocking call looks like from outside.
   const sockets: net.Socket[] = [];
   const server = net.createServer(socket => { sockets.push(socket); });
   const port = await listening(server);

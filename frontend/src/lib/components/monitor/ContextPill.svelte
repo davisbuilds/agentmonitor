@@ -6,15 +6,12 @@
     pct: number | null;
     usedTokens?: number | null;
     windowTokens?: number | null;
-    // Show a full used/window readout + bar (detail/inspector) vs a compact
-    // dot+percent chip (cards).
     variant?: 'compact' | 'full';
     class?: string;
   }
 
   const { pct, usedTokens = null, windowTokens = null, variant = 'compact', class: klass = '' }: Props = $props();
 
-  // pct is USED percent, so higher is more constrained (mirrors QuotaPill).
   function dotColor(usedPercent: number): string {
     if (usedPercent >= 85) return 'bg-danger';
     if (usedPercent >= 60) return 'bg-warn';
