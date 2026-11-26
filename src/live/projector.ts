@@ -25,14 +25,27 @@ export interface ProjectedSessionSnapshot {
   agent: string;
   project: string | null;
   first_message: string | null;
+  title?: string | null;
   started_at: string | null;
   ended_at: string | null;
   message_count: number;
   user_message_count: number;
+  parent_session_id?: string | null;
+  relationship_type?: string | null;
   live_status: string | null;
   last_item_at: string | null;
   context_used_tokens?: number | null;
   context_window_tokens?: number | null;
+}
+
+export interface AntigravityStatuslineContextInput {
+  sessionId: string;
+  project: string | null;
+  firstMessage: string | null;
+  title: string | null;
+  usedTokens: number;
+  windowTokens: number | null;
+  observedAt: string;
 }
 
 export interface ProjectedSessionIncrement {
@@ -211,18 +224,21 @@ export function upsertProjectedSessionSnapshot(
   const encoded = serializeContract(contract);
   db.prepare(`
     INSERT INTO browsing_sessions (
-      id, project, agent, first_message, started_at, ended_at, message_count, user_message_count,
-      live_status, last_item_at, integration_mode, fidelity, capabilities_json,
+      id, project, agent, first_message, title, started_at, ended_at, message_count, user_message_count,
+      parent_session_id, relationship_type, live_status, last_item_at, integration_mode, fidelity, capabilities_json,
       context_used_tokens, context_window_tokens
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       project = COALESCE(excluded.project, browsing_sessions.project),
       agent = COALESCE(excluded.agent, browsing_sessions.agent),
       first_message = COALESCE(excluded.first_message, browsing_sessions.first_message),
+      title = COALESCE(excluded.title, browsing_sessions.title),
       started_at = COALESCE(excluded.started_at, browsing_sessions.started_at),
       ended_at = COALESCE(excluded.ended_at, browsing_sessions.ended_at),
       message_count = excluded.message_count,
       user_message_count = excluded.user_message_count,
+      parent_session_id = COALESCE(excluded.parent_session_id, browsing_sessions.parent_session_id),
+      relationship_type = COALESCE(excluded.relationship_type, browsing_sessions.relationship_type),
       live_status = COALESCE(excluded.live_status, browsing_sessions.live_status),
       last_item_at = COALESCE(excluded.last_item_at, browsing_sessions.last_item_at),
       integration_mode = excluded.integration_mode,
@@ -237,10 +253,13 @@ export function upsertProjectedSessionSnapshot(
     session.project,
     session.agent,
     session.first_message,
+    session.title ?? null,
     session.started_at,
     session.ended_at,
     session.message_count,
     session.user_message_count,
+    session.parent_session_id ?? null,
+    session.relationship_type ?? null,
     session.live_status,
     session.last_item_at,
     encoded.integration_mode,
@@ -249,6 +268,54 @@ export function upsertProjectedSessionSnapshot(
     session.context_used_tokens ?? null,
     session.context_window_tokens ?? null,
   );
+}
+
+export function upsertAntigravityStatuslineContext(
+  db: Database.Database,
+  input: AntigravityStatuslineContextInput,
+): { integration_mode: string; fidelity: ProjectionFidelity; last_item_at: string } {
+  const capabilitiesJson = serializeProjectionCapabilities(SUMMARY_LIVE_PROJECTION_CAPABILITIES);
+  db.prepare(`
+    INSERT INTO browsing_sessions (
+      id, project, agent, first_message, title, started_at, ended_at, message_count, user_message_count,
+      live_status, last_item_at, integration_mode, fidelity, capabilities_json,
+      context_used_tokens, context_window_tokens
+    ) VALUES (?, ?, 'antigravity', ?, ?, ?, NULL, 0, 0, 'live', ?, 'antigravity-statusline', 'summary', ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      project = COALESCE(browsing_sessions.project, excluded.project),
+      first_message = COALESCE(browsing_sessions.first_message, excluded.first_message),
+      title = COALESCE(browsing_sessions.title, excluded.title),
+      live_status = 'live',
+      last_item_at = CASE
+        WHEN browsing_sessions.last_item_at IS NULL THEN excluded.last_item_at
+        WHEN excluded.last_item_at > browsing_sessions.last_item_at THEN excluded.last_item_at
+        ELSE browsing_sessions.last_item_at
+      END,
+      context_used_tokens = COALESCE(excluded.context_used_tokens, browsing_sessions.context_used_tokens),
+      context_window_tokens = COALESCE(excluded.context_window_tokens, browsing_sessions.context_window_tokens)
+  `).run(
+    input.sessionId,
+    input.project,
+    input.firstMessage,
+    input.title,
+    input.observedAt,
+    input.observedAt,
+    capabilitiesJson,
+    input.usedTokens,
+    input.windowTokens,
+  );
+  const stored = db.prepare(
+    'SELECT integration_mode, fidelity, last_item_at FROM browsing_sessions WHERE id = ?'
+  ).get(input.sessionId) as {
+    integration_mode: string | null;
+    fidelity: ProjectionFidelity | null;
+    last_item_at: string | null;
+  };
+  return {
+    integration_mode: stored.integration_mode ?? 'antigravity-statusline',
+    fidelity: stored.fidelity ?? 'summary',
+    last_item_at: stored.last_item_at ?? input.observedAt,
+  };
 }
 
 export function upsertProjectedSessionIncrement(

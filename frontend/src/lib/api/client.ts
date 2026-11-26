@@ -53,8 +53,8 @@ export interface QuotaMonitorCredits {
 }
 
 export interface QuotaMonitorData {
-  provider: 'claude' | 'codex';
-  agent_type: 'claude_code' | 'codex';
+  provider: 'claude' | 'codex' | 'antigravity';
+  agent_type: 'claude_code' | 'codex' | 'antigravity';
   status: 'available' | 'unavailable' | 'error';
   source: string | null;
   updated_at: string | null;
