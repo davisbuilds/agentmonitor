@@ -567,6 +567,27 @@ Cost per outcome counts a pull request once it lands on main; these
 refinements were left out by decision. The Claude vs Codex comparison has
 since been selected (2026-11-20).
 
+#### Harness, model and plan cost comparison
+- **What**: answer, per harness (Claude Code, Codex, Antigravity) and model:
+  how many tokens and how much API-equivalent cost a subscription plan yields
+  per 5-hour and weekly window; whether that yield changes over time (plan or
+  limit changes); and cost and tokens per task or merged outcome between
+  models. Requested by the maintainer on 2026-11-25. Design and investigation
+  come first.
+- **Why or evidence**: the pieces exist separately. `provider_quota_samples`
+  records quota readings since 2026-10-30; usage events carry tokens and
+  API-equivalent cost per model; cost per outcome allocates cost to merged pull
+  requests. Nothing joins quota consumed to the usage that consumed it, and
+  "Claude vs Codex cost per outcome" below covers two agents, not models or
+  plans. Antigravity has no usage instrument yet (see Antigravity parity).
+- **Next**: survey projects that already measure this, such as `ccusage` and
+  Claude Code Usage Monitor, for window accounting, plan-limit estimation and
+  pricing logic worth porting, recording license and provenance. Then design
+  the joins: quota deltas per window against usage in the same window, per
+  model and plan, with the uncertainty from five-minute sampling and shared
+  windows. Treat "Claude vs Codex cost per outcome" as the first slice and
+  "Quota as the unit" as the allocation question this answers.
+
 #### Whether merged work stayed merged
 - **What**: a merged pull request counts as an outcome even if it was
   reverted or rewritten soon after.
