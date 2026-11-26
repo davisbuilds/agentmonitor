@@ -44,14 +44,12 @@ so later readers know what still needs checking.
   `~/.gemini/antigravity/` instead: `conversations/*.pb` (13 files, last written
   in June), `brain/`, `annotations/` and other stores. Costs report
   `no_instrument` for Antigravity since the 2026-10-27 usage standardization.
-  Most recent Antigravity use is likely on the MacBook, which was not checked.
-- **Next**: on both Macs, inventory where current CLI and IDE versions store
-  sessions, steps, tool calls, models, token usage, subagents and skills, and
-  whether the proto field map is still current. Compare each against what
-  AgentMonitor captures and shows for Claude and Codex: import and live capture,
-  the session list and detail, turns and items, tools, skills, usage and cost,
-  quota, parent/child links, Git view and Overview analytics. Write a gap matrix
-  and a design proposal with an ordered plan, then implement from it.
+  The linked MacBook investigation found active CLI SQLite history and existing
+  AgentMonitor capture.
+- **Next**: implement the ordered slices in the
+  [MacBook investigation and design](../specs/2026-11-25-antigravity-parity-investigation.md).
+  Start with generation accounting and timestamp provenance, then reconcile
+  live and historical capture before expanding transcript and tool coverage.
 
 ### Codex archived rollout discovery
 
@@ -567,6 +565,27 @@ Cost per outcome counts a pull request once it lands on main; these
 refinements were left out by decision. The Claude vs Codex comparison has
 since been selected (2026-11-20).
 
+#### Harness, model and plan cost comparison
+- **What**: answer, per harness (Claude Code, Codex, Antigravity) and model:
+  how many tokens and how much API-equivalent cost a subscription plan yields
+  per 5-hour and weekly window; whether that yield changes over time (plan or
+  limit changes); and cost and tokens per task or merged outcome between
+  models. Requested by the maintainer on 2026-11-25. Design and investigation
+  come first.
+- **Why or evidence**: the pieces exist separately. `provider_quota_samples`
+  records quota readings since 2026-10-30; usage events carry tokens and
+  API-equivalent cost per model; cost per outcome allocates cost to merged pull
+  requests. Nothing joins quota consumed to the usage that consumed it, and
+  "Claude vs Codex cost per outcome" below covers two agents, not models or
+  plans. Antigravity has no usage instrument yet (see Antigravity parity).
+- **Next**: survey projects that already measure this, such as `ccusage` and
+  Claude Code Usage Monitor, for window accounting, plan-limit estimation and
+  pricing logic worth porting, recording license and provenance. Then design
+  the joins: quota deltas per window against usage in the same window, per
+  model and plan, with the uncertainty from five-minute sampling and shared
+  windows. Treat "Claude vs Codex cost per outcome" as the first slice and
+  "Quota as the unit" as the allocation question this answers.
+
 #### Whether merged work stayed merged
 - **What**: a merged pull request counts as an outcome even if it was
   reverted or rewritten soon after.
@@ -747,21 +766,24 @@ The report is held outside this repository and is agent-generated. All three
 items were checked against current code and a local store on 2026-10-01; the
 entries below record what was measured, not the report's claims.
 
-#### Codex OTEL events project item-less turns
-- **What**: `syncCodexSummaryLiveEvent` ensures one projected turn for every
-  Codex OTEL event, whether or not the event yields an item. Request-side and
-  decision rows (`llm_request`, tool decisions) therefore each add a turn with
-  nothing in it.
-- **Why or evidence**: measured 2026-10-26 on the live store. Before the
-  stream-fragment prune, about two thirds of all projected turns were item-less
-  Codex turns. Most of them came from the fragments, which the prune removes
-  together with their turns. The remainder is smaller, but the shape persists
-  for every non-item event.
-- **Next**: decide whether a turn needs an item to exist. If so, skip the turn
-  for item-less events, and prune the stored ones with the same
-  preview/digest/ownership gate as `amon database prune-codex-fragments`.
-  Check first that the live view and trace projection never read an item-less
-  turn.
+#### Codex OTEL `llm_request` events project item-less turns (kept for now)
+- **What**: `syncCodexSummaryLiveEvent` creates one projected turn for every
+  Codex OTEL event, including `llm_request` events that yield no item.
+- **Decision**: keep them for now (maintainer, 2026-11-25). They act as request
+  markers rather than empty rows.
+- **Why or evidence**: on the Mac mini's store on 2026-11-25 there were 2,790
+  item-less Codex turns, about 5% of Codex turns, all titled `llm request` and
+  mapping one-to-one to `llm_request` events, which carry no tokens or cost.
+  Turn creation has been unconditional since March. They appeared from
+  2026-11-11 because the mini began collecting Codex OTEL into its own store
+  then. A read-only audit on disposable fixtures found that the live API, CLI
+  and Monitor show or count these turns. Removing one moved a session's
+  repaired `last_item_at`/`ended_at` back to the previous item, and removing a
+  session's last turn switched trace projection to its fallback.
+- **Revisit when**: turn counts or storage from these rows become a problem, or
+  request markers are wanted as a first-class item. Then derive session bounds
+  and request display from the events before skipping creation, and prune
+  through the `prune-codex-fragments` preview/digest/ownership gate.
 
 #### Watcher re-sync still reads, hashes and summarizes the whole session
 - **What**: since 2026-10-07 a re-sync parses only the appended lines (see

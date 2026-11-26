@@ -13,6 +13,7 @@ import {
   deriveBillingTokens,
   decodeStepTimestampMs,
 } from './antigravity/proto.js';
+import { readAntigravityConversationSummary } from './antigravity/summary.js';
 
 const AGENT_TYPE = 'antigravity';
 
@@ -115,6 +116,7 @@ export function parseAntigravityFile(
 
     const generations = genRows.map((g) => decodeGeneratorMetadata(g.data));
     const sessionModel = generations.find((g) => g.model)?.model;
+    const summaryProject = readAntigravityConversationSummary(filePath, sessionId)?.project ?? undefined;
 
     if (firstTs !== undefined) {
       if (options?.from && firstTs < options.from.getTime()) return events;
@@ -130,6 +132,7 @@ export function parseAntigravityFile(
       tokens_in: 0,
       tokens_out: 0,
       model: sessionModel,
+      project: summaryProject,
       client_timestamp: iso(firstTs),
       metadata: { _source: 'antigravity_db' },
       source: 'import',
@@ -148,6 +151,7 @@ export function parseAntigravityFile(
         tokens_in: 0,
         tokens_out: 0,
         model: sessionModel,
+        project: summaryProject,
         client_timestamp: iso(stepTs[i]),
         metadata: { _source: 'antigravity_db', kind: env.kind ?? null, step_type: s.step_type },
         source: 'import',
@@ -173,6 +177,7 @@ export function parseAntigravityFile(
         tokens_out: b.tokensOut,
         cache_read_tokens: b.cacheReadTokens,
         model,
+        project: summaryProject,
         cost_usd: cost ?? undefined,
         cost_source: cost != null ? 'estimated' : undefined,
         client_timestamp: at,

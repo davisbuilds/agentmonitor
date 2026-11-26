@@ -3,10 +3,12 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
 import { stepKindToEvent } from '../import/antigravity.js';
-import { decodeStepEnvelope, decodeStepTimestampMs } from '../import/antigravity/proto.js';
-import { unavailableSkillContext } from '../skills/context-observations.js';
+import { decodeGeneratorMetadata, decodeStepEnvelope, decodeStepTimestampMs } from '../import/antigravity/proto.js';
+import { readAntigravityConversationSummary } from '../import/antigravity/summary.js';
+import { projectIdentityFromCwd, unavailableSkillContext } from '../skills/context-observations.js';
 
 interface StepRow { idx: number; step_type: number; status: number; step_payload: Buffer; metadata: Buffer | null }
+interface GenRow { idx: number; data: Buffer }
 
 function safeAll<T>(db: Database.Database, sql: string): T[] {
   try {
@@ -56,6 +58,18 @@ export function parseAntigravitySessions(filePath: string): ParsedSession {
   try {
     const steps = safeAll<StepRow>(db, 'SELECT idx, step_type, status, step_payload, metadata FROM steps ORDER BY idx');
     if (steps.length === 0) return emptySession(sessionId);
+
+    const genRows = safeAll<GenRow>(db, 'SELECT idx, data FROM gen_metadata ORDER BY idx');
+    let latestModel: string | undefined;
+    let contextUsedTokens: number | undefined;
+    for (const row of genRows) {
+      const gm = decodeGeneratorMetadata(row.data);
+      if (gm.model) latestModel = gm.model;
+      if (gm.usage) {
+        const promptTokens = gm.usage.systemPromptTokens + gm.usage.inputTokens + gm.usage.cachedTokens;
+        if (promptTokens > 0) contextUsedTokens = promptTokens;
+      }
+    }
 
     const stepTs = steps.map((s) => (s.metadata ? decodeStepTimestampMs(s.metadata) : undefined));
     const times = stepTs.filter((t): t is number => t !== undefined);
@@ -110,22 +124,32 @@ export function parseAntigravitySessions(filePath: string): ParsedSession {
       });
     });
 
+    const summary = readAntigravityConversationSummary(filePath, sessionId);
+    const skillContext = unavailableSkillContext();
+    if (summary?.cwd) {
+      skillContext.projectIdentity = projectIdentityFromCwd(summary.cwd);
+    }
+
     return {
       messages,
       toolCalls,
       metadata: {
         session_id: sessionId,
-        project: null,
+        project: summary?.project ?? null,
         agent: 'antigravity',
-        first_message: firstUserMessage,
+        first_message: summary?.firstMessage ?? firstUserMessage,
+        cwd: summary?.cwd ?? null,
+        title: summary?.title ?? null,
         started_at: startedAt,
         ended_at: endedAt,
         message_count: messages.length,
         user_message_count: userMessageCount,
-        parent_session_id: null,
-        relationship_type: null,
+        parent_session_id: summary?.parentSessionId ?? null,
+        relationship_type: summary?.relationshipType ?? null,
+        context_used_tokens: contextUsedTokens,
+        model: latestModel,
       },
-      skillContext: unavailableSkillContext(),
+      skillContext,
     };
   } finally {
     db.close();

@@ -31,7 +31,7 @@
 
   function unavailableCopy(row: QuotaMonitorData): string {
     if (row.status === 'error') return row.error_message || 'quota unavailable';
-    return row.provider === 'claude' ? 'statusline bridge needed' : 'native quota unavailable';
+    return row.provider === 'codex' ? 'native quota unavailable' : 'statusline bridge needed';
   }
 
 </script>
