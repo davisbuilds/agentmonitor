@@ -110,12 +110,14 @@ function handleFileChange(
       const sessionId = source === 'antigravity'
         ? path.basename(filePath, '.db')
         : transcriptBaseName(filePath);
-      const integrationMode = source === 'codex'
-        ? 'codex-jsonl'
-        : source === 'antigravity'
-          ? 'antigravity-sqlite'
-          : 'claude-jsonl';
-      const fidelity = source === 'claude' ? 'full' : 'summary';
+      const integrationMode = outcome.integration_mode ?? (
+        source === 'codex'
+          ? 'codex-jsonl'
+          : source === 'antigravity'
+            ? 'antigravity-sqlite'
+            : 'claude-jsonl'
+      );
+      const fidelity = outcome.fidelity ?? (source === 'claude' ? 'full' : 'summary');
       console.log(`[watcher] Parsed ${source} session: ${sessionId}`);
       if (outcome.live) {
         liveBroadcaster.broadcast('session_presence', {

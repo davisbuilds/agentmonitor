@@ -58,7 +58,7 @@
       return 'Only Codex sessions with a rollout file are searchable; ones known only from telemetry have no text to search.';
     }
     if (filterAgent === 'antigravity') {
-      return 'Antigravity sessions are searchable by step kind (such as "run command"), not by what was said.';
+      return 'Antigravity sessions with a transcript log are searchable in full; older SQLite-only ones match step kinds (such as "run command").';
     }
     return 'Sessions known only from telemetry have no text to search.';
   });

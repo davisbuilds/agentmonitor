@@ -71,6 +71,38 @@ test.beforeAll(async () => {
     db.close();
   }
 
+  const rootTranscript = path.join(agrHome, 'brain', ROOT_ID, '.system_generated', 'logs', 'transcript.jsonl');
+  fs.mkdirSync(path.dirname(rootTranscript), { recursive: true });
+  fs.writeFileSync(rootTranscript, [
+    JSON.stringify({
+      step_index: 0,
+      source: 'USER_EXPLICIT',
+      type: 'USER_INPUT',
+      status: 'DONE',
+      created_at: new Date((nowSecs - 20) * 1000).toISOString(),
+      content: '<USER_REQUEST>\nVerify harpy eagle instructions routing\n</USER_REQUEST>\n<ADDITIONAL_METADATA>\nlocal_time=now\n</ADDITIONAL_METADATA>',
+    }),
+    JSON.stringify({
+      step_index: 1,
+      source: 'MODEL',
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: new Date((nowSecs - 15) * 1000).toISOString(),
+      model: 'gemini-4-neon',
+      thinking: 'Inspecting custom instruction paths first.',
+      content: 'Checked instruction routing successfully.',
+      tool_calls: [{ name: 'read_file', args: { Path: '"/Users/example/Dev/sample-project/AGENTS.md"' } }],
+    }),
+    JSON.stringify({
+      step_index: 2,
+      source: 'MODEL',
+      type: 'GENERIC',
+      status: 'DONE',
+      created_at: new Date((nowSecs - 10) * 1000).toISOString(),
+      content: 'Read 42 lines from AGENTS.md.',
+    }),
+  ].join('\n') + '\n');
+
   const summaryDb = new Database(path.join(agrHome, 'conversation_summaries.db'));
   summaryDb.exec(`
     CREATE TABLE conversation_summaries (
@@ -195,4 +227,24 @@ test('Sessions list shows Antigravity summary title, project, and nested subagen
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(page.getByRole('button', { name: /Delegate research check/ })).toBeVisible();
+});
+
+test('Sessions search and viewer display full-fidelity Antigravity transcript cleanly', async ({ page }) => {
+  await page.goto(`${baseUrl}/app/#sessions`);
+
+  const searchInput = page.getByRole('searchbox', { name: 'Search transcripts' });
+  await searchInput.fill('harpy');
+  await searchInput.press('Enter');
+
+  const hitButton = page.locator('button', { hasText: 'Configuring Custom Instructions Files' }).first();
+  await expect(hitButton).toBeVisible();
+  await hitButton.click();
+
+  await expect(page.getByText('Verify harpy eagle instructions routing')).toBeVisible();
+  await expect(page.getByText('<USER_REQUEST>')).toHaveCount(0);
+  await expect(page.getByText('<ADDITIONAL_METADATA>')).toHaveCount(0);
+  await expect(page.getByText('Checked instruction routing successfully.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Full detail' })).toBeVisible();
+  await page.getByRole('button', { name: 'Full detail' }).click();
+  await expect(page.getByText('Antigravity transcript')).toBeVisible();
 });

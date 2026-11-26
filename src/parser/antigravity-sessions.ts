@@ -1,4 +1,3 @@
-
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
@@ -6,6 +5,7 @@ import { stepKindToEvent } from '../import/antigravity.js';
 import { decodeGeneratorMetadata, decodeStepEnvelope, decodeStepTimestampMs } from '../import/antigravity/proto.js';
 import { readAntigravityConversationSummary } from '../import/antigravity/summary.js';
 import { projectIdentityFromCwd, unavailableSkillContext } from '../skills/context-observations.js';
+import { parseAntigravityTranscript, resolveAntigravityTranscriptPath } from './antigravity-transcript.js';
 
 interface StepRow { idx: number; step_type: number; status: number; step_payload: Buffer; metadata: Buffer | null }
 interface GenRow { idx: number; data: Buffer }
@@ -40,6 +40,7 @@ function emptySession(sessionId: string): ParsedSession {
       user_message_count: 0,
       parent_session_id: null,
       relationship_type: null,
+      fidelity: 'summary',
     },
     skillContext: unavailableSkillContext(),
   };
@@ -48,28 +49,67 @@ function emptySession(sessionId: string): ParsedSession {
 export function parseAntigravitySessions(filePath: string): ParsedSession {
   const sessionId = path.basename(filePath, '.db');
 
-  let db: Database.Database;
+  let db: Database.Database | undefined;
   try {
     db = new Database(filePath, { readonly: true, fileMustExist: true });
   } catch {
-    return emptySession(sessionId);
+    db = undefined;
   }
 
   try {
-    const steps = safeAll<StepRow>(db, 'SELECT idx, step_type, status, step_payload, metadata FROM steps ORDER BY idx');
-    if (steps.length === 0) return emptySession(sessionId);
-
-    const genRows = safeAll<GenRow>(db, 'SELECT idx, data FROM gen_metadata ORDER BY idx');
     let latestModel: string | undefined;
     let contextUsedTokens: number | undefined;
-    for (const row of genRows) {
-      const gm = decodeGeneratorMetadata(row.data);
-      if (gm.model) latestModel = gm.model;
-      if (gm.usage) {
-        const promptTokens = gm.usage.systemPromptTokens + gm.usage.inputTokens + gm.usage.cachedTokens;
-        if (promptTokens > 0) contextUsedTokens = promptTokens;
+    if (db) {
+      const genRows = safeAll<GenRow>(db, 'SELECT idx, data FROM gen_metadata ORDER BY idx');
+      for (const row of genRows) {
+        const gm = decodeGeneratorMetadata(row.data);
+        if (gm.model) latestModel = gm.model;
+        if (gm.usage) {
+          const promptTokens = gm.usage.systemPromptTokens + gm.usage.inputTokens + gm.usage.cachedTokens;
+          if (promptTokens > 0) contextUsedTokens = promptTokens;
+        }
       }
     }
+
+    const summary = readAntigravityConversationSummary(filePath, sessionId);
+    const skillContext = unavailableSkillContext();
+    if (summary?.cwd) {
+      skillContext.projectIdentity = projectIdentityFromCwd(summary.cwd);
+    }
+
+    const transcript = parseAntigravityTranscript(
+      resolveAntigravityTranscriptPath(filePath, sessionId),
+      sessionId,
+    );
+    if (transcript) {
+      return {
+        messages: transcript.messages,
+        toolCalls: transcript.toolCalls,
+        metadata: {
+          session_id: sessionId,
+          project: summary?.project ?? null,
+          agent: 'antigravity',
+          first_message: summary?.firstMessage ?? transcript.firstUserMessage,
+          cwd: summary?.cwd ?? null,
+          title: summary?.title ?? null,
+          started_at: transcript.startedAt,
+          ended_at: transcript.endedAt,
+          message_count: transcript.messages.length,
+          user_message_count: transcript.userMessageCount,
+          parent_session_id: summary?.parentSessionId ?? null,
+          relationship_type: summary?.relationshipType ?? null,
+          context_used_tokens: contextUsedTokens ?? transcript.contextUsedTokens,
+          model: latestModel ?? transcript.latestModel,
+          fidelity: 'full',
+        },
+        skillContext,
+      };
+    }
+
+    if (!db) return emptySession(sessionId);
+
+    const steps = safeAll<StepRow>(db, 'SELECT idx, step_type, status, step_payload, metadata FROM steps ORDER BY idx');
+    if (steps.length === 0) return emptySession(sessionId);
 
     const stepTs = steps.map((s) => (s.metadata ? decodeStepTimestampMs(s.metadata) : undefined));
     const times = stepTs.filter((t): t is number => t !== undefined);
@@ -124,12 +164,6 @@ export function parseAntigravitySessions(filePath: string): ParsedSession {
       });
     });
 
-    const summary = readAntigravityConversationSummary(filePath, sessionId);
-    const skillContext = unavailableSkillContext();
-    if (summary?.cwd) {
-      skillContext.projectIdentity = projectIdentityFromCwd(summary.cwd);
-    }
-
     return {
       messages,
       toolCalls,
@@ -148,10 +182,11 @@ export function parseAntigravitySessions(filePath: string): ParsedSession {
         relationship_type: summary?.relationshipType ?? null,
         context_used_tokens: contextUsedTokens,
         model: latestModel,
+        fidelity: 'summary',
       },
       skillContext,
     };
   } finally {
-    db.close();
+    db?.close();
   }
 }

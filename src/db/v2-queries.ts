@@ -395,7 +395,7 @@ const activityClass = `CASE WHEN b.relationship_type = 'subagent' THEN 'delegate
   WHEN b.agent = 'claude' AND b.integration_mode = 'claude-jsonl'
     AND b.parent_session_id IS NULL AND b.relationship_type IS NULL
     AND b.has_user_evidence THEN 'conversation'
-  WHEN b.agent = 'antigravity' AND b.integration_mode = 'antigravity-sqlite'
+  WHEN b.agent = 'antigravity' AND b.integration_mode IN ('antigravity-sqlite', 'antigravity-transcript')
     AND b.parent_session_id IS NULL AND b.has_user_evidence THEN 'conversation'
   ELSE 'unclassified' END`;
 
@@ -3619,7 +3619,7 @@ export function getSessionFriction(sessionId: string): FrictionSignal[] {
 /** Tool calls failing this many times in a row is a signal: the agent was stuck, however long the session. */
 const FRICTION_FAILURE_STREAK = 3;
 const FRICTION_RECENT_SESSIONS = 5;
-const MESSAGE_TURN_PATTERN = /^(?:claude|codex)-message:(\d+)$/;
+const MESSAGE_TURN_PATTERN = /^(?:claude|codex|antigravity)-message:(\d+)$/;
 
 /**
  * Friction signals per session, keyed by the row id given. Both are independent

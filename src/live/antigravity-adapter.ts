@@ -6,6 +6,7 @@ import { resolveContextWindow } from '../pricing/context-windows.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from './normalize.js';
 import {
   clearProjectedSessionStream,
+  FULL_PROJECTION_CAPABILITIES,
   insertProjectedItem,
   insertProjectedTurn,
   upsertProjectedSessionSnapshot,
@@ -122,9 +123,12 @@ export function syncAntigravityLiveSession(
       const normalizedItem = normalizeClaudeBlock(
         message.role === 'user' ? 'user' : 'assistant',
         block,
-        message.timestamp ?? undefined,
+        block.timestamp ?? message.timestamp ?? undefined,
       );
       if (!normalizedItem) continue;
+      if (message.role === 'system' && normalizedItem.kind === 'assistant_message') {
+        normalizedItem.kind = 'instructions';
+      }
       const normalized = applyLivePrivacyPolicy(normalizedItem, privacyPolicy);
 
       insertProjectedItem(db, sessionId, turnId, {
@@ -150,6 +154,7 @@ export function syncAntigravityLiveSession(
         observedTokens: usedTokens,
       })
     : null;
+  const isFull = parsed.metadata.fidelity === 'full';
   upsertProjectedSessionSnapshot(db, {
     id: sessionId,
     agent: 'antigravity',
@@ -166,7 +171,11 @@ export function syncAntigravityLiveSession(
     last_item_at: parsed.metadata.ended_at,
     context_used_tokens: usedTokens,
     context_window_tokens: contextWindow,
-  }, {
+  }, isFull ? {
+    integration_mode: 'antigravity-transcript',
+    fidelity: 'full',
+    capabilities: FULL_PROJECTION_CAPABILITIES,
+  } : {
     integration_mode: 'antigravity-sqlite',
     fidelity: 'summary',
     capabilities: ANTIGRAVITY_SQLITE_CAPABILITIES,

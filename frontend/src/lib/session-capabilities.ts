@@ -76,6 +76,7 @@ const SOURCE_LABELS: Record<string, string> = {
   'codex-import': 'Codex history import',
   'codex-summary': 'Codex summary',
   'antigravity-sqlite': 'Antigravity',
+  'antigravity-transcript': 'Antigravity transcript',
   'antigravity-cli': 'Antigravity',
 };
 
