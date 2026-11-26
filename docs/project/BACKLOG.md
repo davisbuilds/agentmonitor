@@ -44,14 +44,12 @@ so later readers know what still needs checking.
   `~/.gemini/antigravity/` instead: `conversations/*.pb` (13 files, last written
   in June), `brain/`, `annotations/` and other stores. Costs report
   `no_instrument` for Antigravity since the 2026-10-27 usage standardization.
-  Most recent Antigravity use is likely on the MacBook, which was not checked.
-- **Next**: on both Macs, inventory where current CLI and IDE versions store
-  sessions, steps, tool calls, models, token usage, subagents and skills, and
-  whether the proto field map is still current. Compare each against what
-  AgentMonitor captures and shows for Claude and Codex: import and live capture,
-  the session list and detail, turns and items, tools, skills, usage and cost,
-  quota, parent/child links, Git view and Overview analytics. Write a gap matrix
-  and a design proposal with an ordered plan, then implement from it.
+  The linked MacBook investigation found active CLI SQLite history and existing
+  AgentMonitor capture.
+- **Next**: implement the ordered slices in the
+  [MacBook investigation and design](../specs/2026-11-25-antigravity-parity-investigation.md).
+  Start with generation accounting and timestamp provenance, then reconcile
+  live and historical capture before expanding transcript and tool coverage.
 
 ### Codex archived rollout discovery
 
