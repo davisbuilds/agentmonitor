@@ -6,6 +6,7 @@ import path from 'node:path';
 import test, { after, before, beforeEach, describe } from 'node:test';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import Database from 'better-sqlite3';
 
 let tempDir = '';
 let server: Server;
@@ -17,8 +18,35 @@ let initSchema: typeof import('../src/db/schema.js').initSchema;
 let getProviderQuotas: typeof import('../src/db/queries.js').getProviderQuotas;
 let getLiveSession: typeof import('../src/db/v2-queries.js').getLiveSession;
 let upsertProjectedSessionSnapshot: typeof import('../src/live/projector.js').upsertProjectedSessionSnapshot;
+let syncAntigravitySessionFileDetailed: typeof import('../src/watcher/index.js').syncAntigravitySessionFileDetailed;
+let parseAntigravitySessions: typeof import('../src/parser/antigravity-sessions.js').parseAntigravitySessions;
+let syncAntigravityLiveSession: typeof import('../src/live/antigravity-adapter.js').syncAntigravityLiveSession;
 let broadcaster: typeof import('../src/sse/emitter.js').broadcaster;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
+
+function varint(n: number): number[] {
+  const out: number[] = [];
+  let big = n;
+  do {
+    let b = big & 0x7f;
+    big = Math.floor(big / 128);
+    if (big > 0) b |= 0x80;
+    out.push(b);
+  } while (big > 0);
+  return out;
+}
+const tag = (f: number, w: number) => varint((f << 3) | w);
+const vField = (f: number, n: number) => [...tag(f, 0), ...varint(n)];
+const lField = (f: number, b: number[]) => [...tag(f, 2), ...varint(b.length), ...b];
+const sField = (f: number, s: string) => lField(f, [...Buffer.from(s, 'utf-8')]);
+const stepBlob = (type: number, oneof: number) =>
+  Buffer.from([...vField(1, type), ...vField(4, 3), ...lField(5, [...vField(1, 1)]), ...lField(oneof, [...vField(1, 1)])]);
+const metaBlob = (secs: number) => Buffer.from(lField(1, [...vField(1, secs)]));
+const genBlob = (model: string, prompt: number) =>
+  Buffer.from(lField(1, [
+    ...sField(19, model),
+    ...lField(4, [...vField(1, 0), ...vField(2, prompt), ...vField(3, 50), ...vField(5, 0), ...vField(9, 0), ...vField(10, 50)]),
+  ]));
 
 async function postStatusline(body: unknown): Promise<Response> {
   return fetch(`${baseUrl}/api/provider-quotas/antigravity/statusline`, {
@@ -40,6 +68,9 @@ before(async () => {
   ({ getProviderQuotas } = await import('../src/db/queries.js'));
   ({ getLiveSession } = await import('../src/db/v2-queries.js'));
   ({ upsertProjectedSessionSnapshot } = await import('../src/live/projector.js'));
+  ({ syncAntigravitySessionFileDetailed } = await import('../src/watcher/index.js'));
+  ({ parseAntigravitySessions } = await import('../src/parser/antigravity-sessions.js'));
+  ({ syncAntigravityLiveSession } = await import('../src/live/antigravity-adapter.js'));
   ({ broadcaster } = await import('../src/sse/emitter.js'));
   const { createApp } = await import('../src/app.js');
 
@@ -260,6 +291,113 @@ describe('Antigravity statusline bridge', () => {
       assert.equal(badJson.accepted, false);
     } finally {
       broadcaster.closeAllClients();
+    }
+  });
+
+  test('derives project purely from workspace path strings and preserves statusline metadata across SQLite syncs when conversation_summaries.db is absent', async () => {
+    const sessionId = 'agr-post-then-sync-1';
+    const postRes = await postStatusline({
+      conversation_id: sessionId,
+      conversation_title: 'Live Bridge Title',
+      workspace: { project_dir: 'C:\\Work\\bridge-proj\\\\' },
+      context_window: {
+        total_input_tokens: 180_000,
+        context_window_size: 1_048_576,
+      },
+    });
+    assert.equal(postRes.status, 202);
+
+    const beforeSync = getLiveSession(sessionId);
+    assert.ok(beforeSync);
+    assert.equal(beforeSync.project, 'bridge-proj');
+    assert.equal(beforeSync.title, 'Live Bridge Title');
+    assert.equal(beforeSync.first_message, 'Live Bridge Title');
+    assert.equal(beforeSync.context_used_tokens, 180_000);
+    assert.equal(beforeSync.context_window_tokens, 1_048_576);
+
+    const convDir = path.join(tempDir, 'agr-no-summary', 'conversations');
+    fs.mkdirSync(convDir, { recursive: true });
+    const dbPath = path.join(convDir, `${sessionId}.db`);
+    const agrDb = new Database(dbPath);
+    agrDb.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+    agrDb.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+    agrDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+      .run(0, 14, 3, stepBlob(14, 19), metaBlob(1782000000));
+    agrDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+      .run(1, 28, 3, stepBlob(28, 28), metaBlob(1782000005));
+    agrDb.close();
+
+    const firstOutcome = syncAntigravitySessionFileDetailed(getDb(), dbPath);
+    assert.equal(firstOutcome.result, 'parsed');
+
+    const afterFirstSync = getLiveSession(sessionId);
+    assert.ok(afterFirstSync);
+    assert.equal(afterFirstSync.integration_mode, 'antigravity-sqlite');
+    assert.equal(afterFirstSync.message_count, 2);
+    assert.equal(afterFirstSync.project, 'bridge-proj');
+    assert.equal(afterFirstSync.title, 'Live Bridge Title');
+    assert.equal(afterFirstSync.first_message, 'Live Bridge Title');
+    assert.equal(afterFirstSync.context_used_tokens, 180_000);
+    assert.equal(afterFirstSync.context_window_tokens, 1_048_576);
+
+    const agrDb2 = new Database(dbPath);
+    agrDb2.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+      .run(2, 15, 3, stepBlob(15, 20), metaBlob(1782000010));
+    agrDb2.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)')
+      .run(0, genBlob('gemini-4-neon', 250_000));
+    agrDb2.close();
+
+    const secondOutcome = syncAntigravitySessionFileDetailed(getDb(), dbPath);
+    assert.equal(secondOutcome.result, 'parsed');
+
+    const afterSecondSync = getLiveSession(sessionId);
+    assert.ok(afterSecondSync);
+    assert.equal(afterSecondSync.message_count, 3);
+    assert.equal(afterSecondSync.project, 'bridge-proj');
+    assert.equal(afterSecondSync.title, 'Live Bridge Title');
+    assert.equal(afterSecondSync.first_message, 'Live Bridge Title');
+    assert.equal(afterSecondSync.context_used_tokens, 250_000);
+    assert.equal(afterSecondSync.context_window_tokens, 1_048_576);
+
+    const directId = 'agr-direct-live-adapter-1';
+    const directRes = await postStatusline({
+      conversation_id: directId,
+      conversation_title: 'Direct Adapter Title',
+      workspace: { project_dir: '/Users/example/Dev/direct-proj///' },
+      context_window: {
+        total_input_tokens: 90_000,
+        context_window_size: 1_048_576,
+      },
+    });
+    assert.equal(directRes.status, 202);
+    const directDbPath = path.join(convDir, `${directId}.db`);
+    const directAgrDb = new Database(directDbPath);
+    directAgrDb.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+    directAgrDb.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+    directAgrDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+      .run(0, 14, 3, stepBlob(14, 19), metaBlob(1782000000));
+    directAgrDb.close();
+
+    const parsedDirect = parseAntigravitySessions(directDbPath);
+    syncAntigravityLiveSession(getDb(), parsedDirect);
+    const directRow = getLiveSession(directId);
+    assert.ok(directRow);
+    assert.equal(directRow.project, 'direct-proj');
+    assert.equal(directRow.title, 'Direct Adapter Title');
+    assert.equal(directRow.first_message, 'Direct Adapter Title');
+    assert.equal(directRow.context_used_tokens, 90_000);
+    assert.equal(directRow.context_window_tokens, 1_048_576);
+
+    for (const [idx, barePath] of ['/', 'C:\\', '.', '..'].entries()) {
+      const bareId = `agr-bare-path-${idx}`;
+      const bareRes = await postStatusline({
+        conversation_id: bareId,
+        workspace: { project_dir: barePath },
+        context_window: { total_input_tokens: 1000, context_window_size: 1_048_576 },
+      });
+      assert.equal(bareRes.status, 202);
+      const bareRow = getLiveSession(bareId);
+      assert.equal(bareRow?.project ?? null, null);
     }
   });
 });

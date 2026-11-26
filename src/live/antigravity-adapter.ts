@@ -28,11 +28,58 @@ function parseMessageBlocks(message: ParsedMessage): ContentBlock[] {
   }
 }
 
-export function syncAntigravityLiveSession(
+interface ExistingAntigravityProjectionRow {
+  project: string | null;
+  title: string | null;
+  first_message: string | null;
+  parent_session_id: string | null;
+  relationship_type: string | null;
+  context_used_tokens: number | null;
+  context_window_tokens: number | null;
+}
+
+/**
+ * Fill fields missing from an Antigravity SQLite parse using the existing
+ * browsing_sessions row (such as statusline-supplied project, title, or
+ * context occupancy when conversation_summaries.db or gen_metadata is absent).
+ */
+export function preserveAntigravitySessionMetadata(
   db: Database.Database,
   parsed: ParsedSession,
+): ParsedSession {
+  const existing = db.prepare(`
+    SELECT project, title, first_message, parent_session_id, relationship_type,
+           context_used_tokens, context_window_tokens
+    FROM browsing_sessions
+    WHERE id = ?
+  `).get(parsed.metadata.session_id) as ExistingAntigravityProjectionRow | undefined;
+  if (!existing) return parsed;
+
+  const metadata = { ...parsed.metadata };
+  metadata.project ??= existing.project;
+  if (!metadata.title && existing.title) {
+    metadata.title = existing.title;
+    metadata.first_message = existing.first_message ?? existing.title;
+  } else if (!metadata.first_message && existing.first_message) {
+    metadata.first_message = existing.first_message;
+  }
+  metadata.parent_session_id ??= existing.parent_session_id;
+  metadata.relationship_type ??= existing.relationship_type;
+  if (metadata.context_used_tokens == null && existing.context_used_tokens != null) {
+    metadata.context_used_tokens = existing.context_used_tokens;
+  }
+  if (metadata.context_window_reported == null && existing.context_window_tokens != null) {
+    metadata.context_window_reported = existing.context_window_tokens;
+  }
+  return { ...parsed, metadata };
+}
+
+export function syncAntigravityLiveSession(
+  db: Database.Database,
+  parsedInput: ParsedSession,
   options: LiveSyncOptions = {},
 ): ClaudeLiveSyncResult {
+  const parsed = preserveAntigravitySessionMetadata(db, parsedInput);
   const sessionId = parsed.metadata.session_id;
   const existingTurnCount = (
     db.prepare('SELECT COUNT(*) as c FROM session_turns WHERE session_id = ?').get(sessionId) as { c: number }

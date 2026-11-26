@@ -13,7 +13,7 @@ import { parseCodexSessionChunk, type CodexParseState } from '../parser/codex-se
 import { parseAntigravitySessions } from '../parser/antigravity-sessions.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
-import { syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
+import { preserveAntigravitySessionMetadata, syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
 import { discoverAntigravityLogs } from '../import/antigravity.js';
 import { readAntigravityConversationSummary } from '../import/antigravity/summary.js';
 import { discoverCodexRolloutFilesRecursive, discoverJsonlFilesRecursive } from '../util/file-discovery.js';
@@ -492,13 +492,14 @@ export function syncAntigravitySessionFileDetailed(
     }
 
     const sessionId = path.basename(filePath, '.db');
-    const parsed = parseAntigravitySessions(filePath);
+    const rawParsed = parseAntigravitySessions(filePath);
 
-    if (parsed.messages.length === 0) {
+    if (rawParsed.messages.length === 0) {
       upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
       return { result: 'skipped', session_id: sessionId };
     }
 
+    const parsed = preserveAntigravitySessionMetadata(db, rawParsed);
     const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash);
     const live = syncAntigravityLiveSession(db, parsed, { keptMessages: messagesKept });
     safelyMaintainTraceSummaryForSession(sessionId, 'antigravity session sync');

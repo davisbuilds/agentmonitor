@@ -11,7 +11,6 @@ import {
 import { upsertAntigravityStatuslineContext, type AntigravityStatuslineContextInput } from '../live/projector.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
 import { broadcaster } from '../sse/emitter.js';
-import { projectNameFromCwd } from '../util/project-identity.js';
 import { liveBroadcaster } from './v2/live-stream.js';
 
 export const providerQuotasRouter = Router();
@@ -37,6 +36,17 @@ function positiveFinite(value: unknown): number | null {
 
 function nonNegativeFinite(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+}
+
+function projectNameFromWorkspacePath(rawPath: string | null): string | null {
+  if (!rawPath) return null;
+  const trimmed = rawPath.trim().replace(/[\\/]+$/, '');
+  if (!trimmed) return null;
+  const segments = trimmed.split(/[\\/]+/).filter(Boolean);
+  if (segments.length === 0) return null;
+  const last = segments[segments.length - 1];
+  if (!last || last === '.' || last === '..' || /^[A-Za-z]:$/.test(last)) return null;
+  return last;
 }
 
 interface AntigravityQuotaBucket {
@@ -158,7 +168,7 @@ function parseAntigravityStatuslineContext(
   const workspaceDir = nonEmptyString(workspace?.project_dir)
     ?? nonEmptyString(workspace?.current_dir)
     ?? nonEmptyString(data.cwd);
-  const project = workspaceDir ? projectNameFromCwd(workspaceDir) : null;
+  const project = projectNameFromWorkspacePath(workspaceDir);
 
   const rawTitle = nonEmptyString(data.conversation_title);
   const title = rawTitle ? rawTitle.replace(/\s+/g, ' ').trim().slice(0, 200) || null : null;
