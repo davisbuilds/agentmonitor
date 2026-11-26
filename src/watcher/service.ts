@@ -43,6 +43,10 @@ function resolveAntigravityDbPath(filePath: string, antigravityConversationsDir:
 let watcher: FSWatcher | undefined;
 let antigravityWatcher: FSWatcher | undefined;
 let resyncTimer: ReturnType<typeof setInterval> | undefined;
+let activeAntigravityDir: string | undefined;
+let activeAntigravityConversationsDir: string | undefined;
+let activeProjectsDir: string | undefined;
+let activeCodexSessionsDir: string | undefined;
 
 const debounceMap = new Map<string, ReturnType<typeof setTimeout>>();
 const DEBOUNCE_MS = 500;
@@ -164,6 +168,72 @@ function handleFileChange(
   }, DEBOUNCE_MS));
 }
 
+function ensureAntigravityWatcher(options: { syncExisting?: boolean } = {}): boolean {
+  if (
+    !watcher
+    || antigravityWatcher
+    || !activeAntigravityConversationsDir
+    || !activeProjectsDir
+    || !activeCodexSessionsDir
+  ) {
+    return false;
+  }
+  const antigravityConversationsDir = activeAntigravityConversationsDir;
+  if (!fs.existsSync(antigravityConversationsDir)) {
+    return false;
+  }
+  const projectsDir = activeProjectsDir;
+  const codexSessionsDir = activeCodexSessionsDir;
+  const antigravityDirOverride = activeAntigravityDir;
+
+  // WHY: SQLite writes WAL frames to already-open .db-wal descriptors without closing them,
+  // which macOS directory watchers miss; stat polling catches live Antigravity WAL writes.
+  const nextWatcher = watch(antigravityConversationsDir, {
+    persistent: true,
+    ignoreInitial: true,
+    backend: 'polling',
+    pollingInterval: 500,
+    pollingBinaryInterval: 500,
+    ignored: (filePath, stats) => {
+      if (!stats?.isFile()) return false;
+      const agrDb = resolveAntigravityDbPath(filePath, antigravityConversationsDir);
+      return !agrDb || shouldExcludePath(antigravityConversationsDir, filePath, config.sync.excludePatterns);
+    },
+  });
+  const onAntigravityFsEvent = (filePath: string) => {
+    const agrDb = resolveAntigravityDbPath(filePath, antigravityConversationsDir);
+    if (agrDb) {
+      handleFileChange(agrDb, 'antigravity', projectsDir, codexSessionsDir, antigravityConversationsDir);
+    }
+  };
+  nextWatcher.on('add', onAntigravityFsEvent);
+  nextWatcher.on('change', onAntigravityFsEvent);
+  nextWatcher.on('error', (err) => {
+    console.error('[watcher] Antigravity error:', err);
+  });
+  if (options.syncExisting) {
+    nextWatcher.once('ready', () => {
+      // WHY: Files created while polling initializes can be treated as initial under
+      // ignoreInitial: true; sweep once on ready to close that startup window.
+      if (antigravityWatcher !== nextWatcher) return;
+      const synced = syncAllAntigravityFiles(getDb(), antigravityDirOverride, { excludePatterns: config.sync.excludePatterns });
+      if (synced.parsed > 0 && broadcaster.clientCount > 0) {
+        broadcaster.broadcast('session_update', { type: 'resync', parsed: synced.parsed });
+      }
+    });
+  }
+  antigravityWatcher = nextWatcher;
+  return true;
+}
+
+export function notifyAntigravityActivity(): boolean {
+  const attached = ensureAntigravityWatcher({ syncExisting: true });
+  if (attached && activeAntigravityConversationsDir) {
+    console.log(`[watcher] Watching ${activeAntigravityConversationsDir} for changes`);
+  }
+  return attached;
+}
+
 export function startWatcher(overrides?: { claudeDir?: string; codexHome?: string; antigravityDir?: string }): void {
   const claudeDir = overrides?.claudeDir ?? getClaudeDir();
   const projectsDir = path.join(claudeDir, 'projects');
@@ -171,6 +241,10 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   const codexSessionsDir = path.join(codexHome, 'sessions');
   const antigravityDir = overrides?.antigravityDir ?? getAntigravityDir();
   const antigravityConversationsDir = path.join(antigravityDir, 'conversations');
+  activeAntigravityDir = overrides?.antigravityDir;
+  activeAntigravityConversationsDir = antigravityConversationsDir;
+  activeProjectsDir = projectsDir;
+  activeCodexSessionsDir = codexSessionsDir;
   const currentSessionFiles = [
     ...discoverSessionFiles(claudeDir, { excludePatterns: config.sync.excludePatterns }),
     ...discoverCodexSessionFiles(codexHome, { excludePatterns: config.sync.excludePatterns }),
@@ -208,7 +282,6 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   }
 
   const watchTargets = [projectsDir, codexSessionsDir];
-  const watchAntigravity = fs.existsSync(antigravityConversationsDir);
 
   // WHY: Chokidar removed glob support in v4, so watching glob expressions can silently miss every
   // event.
@@ -243,40 +316,16 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
     console.error('[watcher] Error:', err);
   });
 
-  if (watchAntigravity) {
-    // WHY: SQLite writes WAL frames to already-open .db-wal descriptors without closing them,
-    // which macOS directory watchers miss; stat polling catches live Antigravity WAL writes.
-    antigravityWatcher = watch(antigravityConversationsDir, {
-      persistent: true,
-      ignoreInitial: true,
-      backend: 'polling',
-      pollingInterval: 500,
-      pollingBinaryInterval: 500,
-      ignored: (filePath, stats) => {
-        if (!stats?.isFile()) return false;
-        const agrDb = resolveAntigravityDbPath(filePath, antigravityConversationsDir);
-        return !agrDb || shouldExcludePath(antigravityConversationsDir, filePath, config.sync.excludePatterns);
-      },
-    });
-    const onAntigravityFsEvent = (filePath: string) => {
-      const agrDb = resolveAntigravityDbPath(filePath, antigravityConversationsDir);
-      if (agrDb) {
-        handleFileChange(agrDb, 'antigravity', projectsDir, codexSessionsDir, antigravityConversationsDir);
-      }
-    };
-    antigravityWatcher.on('add', onAntigravityFsEvent);
-    antigravityWatcher.on('change', onAntigravityFsEvent);
-    antigravityWatcher.on('error', (err) => {
-      console.error('[watcher] Antigravity error:', err);
-    });
-  }
-
+  const watchAntigravity = ensureAntigravityWatcher({ syncExisting: false });
   const loggedTargets = watchAntigravity ? [...watchTargets, antigravityConversationsDir] : watchTargets;
   console.log(`[watcher] Watching ${loggedTargets.join(' and ')} for changes`);
 
   const RESYNC_INTERVAL_MS = 15 * 60_000;
   resyncTimer = setInterval(() => {
     syncExecutions();
+    if (ensureAntigravityWatcher({ syncExisting: false })) {
+      console.log(`[watcher] Watching ${antigravityConversationsDir} for changes`);
+    }
     const claudeStats = syncAllFiles(db, claudeDir, { excludePatterns: config.sync.excludePatterns });
     const codexStats = syncAllCodexFiles(db, codexHome, { excludePatterns: config.sync.excludePatterns });
     const antigravityStats = syncAllAntigravityFiles(db, overrides?.antigravityDir, { excludePatterns: config.sync.excludePatterns });
@@ -302,6 +351,10 @@ export async function stopWatcher(): Promise<void> {
   const activeAntigravityWatcher = antigravityWatcher;
   watcher = undefined;
   antigravityWatcher = undefined;
+  activeAntigravityDir = undefined;
+  activeAntigravityConversationsDir = undefined;
+  activeProjectsDir = undefined;
+  activeCodexSessionsDir = undefined;
   if (resyncTimer) {
     clearInterval(resyncTimer);
     resyncTimer = undefined;

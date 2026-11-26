@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
 import fs from 'node:fs';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -9,6 +11,7 @@ import Database from 'better-sqlite3';
 import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connection.js';
 import type { startWatcher as startWatcherFn, stopWatcher as stopWatcherFn } from '../src/watcher/service.js';
 import type { broadcaster as broadcasterType } from '../src/sse/emitter.js';
+import type { createApp as createAppFn } from '../src/app.js';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-watcher-live-'));
 process.env.AGENTMONITOR_DB_PATH = path.join(root, 'test.db');
@@ -24,6 +27,7 @@ let closeDb: typeof closeDbFn;
 let startWatcher: typeof startWatcherFn;
 let stopWatcher: typeof stopWatcherFn;
 let broadcaster: typeof broadcasterType;
+let createApp: typeof createAppFn;
 
 function varint(n: number): number[] {
   const out: number[] = [];
@@ -73,6 +77,7 @@ before(async () => {
   startWatcher = svc.startWatcher;
   stopWatcher = svc.stopWatcher;
   ({ broadcaster } = await import('../src/sse/emitter.js'));
+  ({ createApp } = await import('../src/app.js'));
   const { initSchema } = await import('../src/db/schema.js');
   initSchema();
 });
@@ -173,10 +178,76 @@ describe('watcher picks up live file changes (chokidar directory watch, not glob
     }
   });
 
-  test('startWatcher skips Antigravity cleanly when conversations directory is absent', async () => {
+  test('startWatcher skips Antigravity cleanly when conversations directory is absent and attaches when it appears', async () => {
     const missingAgrDir = path.join(root, 'missing-antigravity');
     await stopWatcher();
     startWatcher({ claudeDir, codexHome, antigravityDir: missingAgrDir });
-    await stopWatcher();
+
+    const server = createApp().listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+
+    try {
+      const lateConversations = path.join(missingAgrDir, 'conversations');
+      fs.mkdirSync(lateConversations, { recursive: true });
+
+      const statusRes = await fetch(`${baseUrl}/api/provider-quotas/antigravity/statusline`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          quota: {
+            'gemini-5h': { remaining_fraction: 0.9, reset_time: '2026-11-26T02:00:00Z', reset_in_seconds: 3600 },
+          },
+        }),
+      });
+      assert.equal(statusRes.status, 202);
+
+      const lateId = 'late-agr-watch-1';
+      const lateDbPath = path.join(lateConversations, `${lateId}.db`);
+      const agrDb = new Database(lateDbPath);
+      try {
+        agrDb.exec('CREATE TABLE steps(idx INTEGER, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+        agrDb.exec('CREATE TABLE gen_metadata(idx INTEGER, data BLOB);');
+        agrDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+          .run(0, 14, 3, stepBlob(14, 19), metaBlob(1782000000));
+        agrDb.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)')
+          .run(0, genBlob('gemini-4-neon', 15000));
+      } finally {
+        agrDb.close();
+      }
+
+      let synced: { message_count: number; context_used_tokens: number | null } | undefined;
+      for (let i = 0; i < 40; i++) {
+        synced = getDb().prepare('SELECT message_count, context_used_tokens FROM browsing_sessions WHERE id = ?').get(lateId) as
+          { message_count: number; context_used_tokens: number | null } | undefined;
+        if (synced?.message_count === 1) break;
+        await delay(100);
+      }
+      assert.equal(synced?.message_count, 1);
+      assert.equal(synced?.context_used_tokens, 15000);
+
+      const agrDb2 = new Database(lateDbPath);
+      try {
+        agrDb2.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+          .run(1, 15, 3, stepBlob(15, 20), metaBlob(1782000005));
+        agrDb2.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)')
+          .run(1, genBlob('gemini-4-neon', 26000));
+      } finally {
+        agrDb2.close();
+      }
+
+      let updated: { message_count: number; context_used_tokens: number | null } | undefined;
+      for (let i = 0; i < 40; i++) {
+        updated = getDb().prepare('SELECT message_count, context_used_tokens FROM browsing_sessions WHERE id = ?').get(lateId) as
+          { message_count: number; context_used_tokens: number | null } | undefined;
+        if (updated?.message_count === 2) break;
+        await delay(100);
+      }
+      assert.equal(updated?.message_count, 2);
+      assert.equal(updated?.context_used_tokens, 26000);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close(err => err ? reject(err) : resolve()));
+      await stopWatcher();
+    }
   });
 });

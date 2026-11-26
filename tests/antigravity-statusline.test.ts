@@ -388,7 +388,7 @@ describe('Antigravity statusline bridge', () => {
     assert.equal(directRow.context_used_tokens, 90_000);
     assert.equal(directRow.context_window_tokens, 1_048_576);
 
-    for (const [idx, barePath] of ['/', 'C:\\', '.', '..'].entries()) {
+    for (const [idx, barePath] of ['/', 'C:\\', '.', '..', '///'].entries()) {
       const bareId = `agr-bare-path-${idx}`;
       const bareRes = await postStatusline({
         conversation_id: bareId,
@@ -399,5 +399,14 @@ describe('Antigravity statusline bridge', () => {
       const bareRow = getLiveSession(bareId);
       assert.equal(bareRow?.project ?? null, null);
     }
+
+    const adversarialPath = `/Users/example/Dev/trailing-proj/${'/'.repeat(5000)}`;
+    const advRes = await postStatusline({
+      conversation_id: 'agr-linear-slash-1',
+      workspace: { project_dir: adversarialPath },
+      context_window: { total_input_tokens: 1000, context_window_size: 1_048_576 },
+    });
+    assert.equal(advRes.status, 202);
+    assert.equal(getLiveSession('agr-linear-slash-1')?.project, 'trailing-proj');
   });
 });

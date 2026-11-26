@@ -11,6 +11,7 @@ import {
 import { upsertAntigravityStatuslineContext, type AntigravityStatuslineContextInput } from '../live/projector.js';
 import { resolveContextWindow } from '../pricing/context-windows.js';
 import { broadcaster } from '../sse/emitter.js';
+import { notifyAntigravityActivity } from '../watcher/service.js';
 import { liveBroadcaster } from './v2/live-stream.js';
 
 export const providerQuotasRouter = Router();
@@ -38,14 +39,24 @@ function nonNegativeFinite(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
+function isWindowsDrivePrefix(segment: string): boolean {
+  if (segment.length !== 2 || segment[1] !== ':') return false;
+  const code = segment.charCodeAt(0);
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
 function projectNameFromWorkspacePath(rawPath: string | null): string | null {
   if (!rawPath) return null;
-  const trimmed = rawPath.trim().replace(/[\\/]+$/, '');
-  if (!trimmed) return null;
-  const segments = trimmed.split(/[\\/]+/).filter(Boolean);
-  if (segments.length === 0) return null;
-  const last = segments[segments.length - 1];
-  if (!last || last === '.' || last === '..' || /^[A-Za-z]:$/.test(last)) return null;
+  const trimmed = rawPath.trim();
+  let end = trimmed.length;
+  while (end > 0 && (trimmed[end - 1] === '/' || trimmed[end - 1] === '\\')) {
+    end--;
+  }
+  if (end === 0) return null;
+  const withoutTrailing = trimmed.slice(0, end);
+  const lastSep = Math.max(withoutTrailing.lastIndexOf('/'), withoutTrailing.lastIndexOf('\\'));
+  const last = withoutTrailing.slice(lastSep + 1);
+  if (!last || last === '.' || last === '..' || isWindowsDrivePrefix(last)) return null;
   return last;
 }
 
@@ -292,6 +303,7 @@ providerQuotasRouter.post('/antigravity/statusline', (req: Request, res: Respons
     return;
   }
 
+  notifyAntigravityActivity();
   res.status(202).json({ accepted: true });
 });
 
