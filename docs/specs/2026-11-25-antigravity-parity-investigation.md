@@ -306,6 +306,24 @@ verify the same CLI identity and fidelity across list, detail, Live and Usage.
    attribution. The report should show observed yield with uncertainty
    and preserve an unknown plan cohort.
 
+## Coordination note (2026-11-26)
+
+A separate branch (`feat/antigravity-transcripts`, not yet a pull request)
+started slice 3 before slices 1 and 2. It indexes
+`brain/<id>/.system_generated/logs/transcript.jsonl` into session detail and
+search, caps tool results at 8,192 characters, and reads per-step token fields
+for context display. Before either line of work merges:
+
+- **Source variant.** That branch reads `transcript.jsonl`, the bounded mirror
+  that marks `truncated_fields`, and describes it as full fidelity.
+  `transcript_full.jsonl` holds more content. Choose deliberately, against the
+  local privacy and preview limits slice 3 requires.
+- **Ordering.** Slice 1's accounting fix (an enum value added to uncached input
+  tokens) is independent of transcripts and inflates cost now. It should not
+  wait behind slice 3.
+- **Usage.** Transcript token fields must stay display-only unless they are
+  reconciled with the SQLite generation usage, so usage is never counted twice.
+
 ## Evaluation
 
 Use generated fixtures with independent expected counts rather than copied
