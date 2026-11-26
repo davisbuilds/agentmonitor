@@ -768,21 +768,24 @@ The report is held outside this repository and is agent-generated. All three
 items were checked against current code and a local store on 2026-10-01; the
 entries below record what was measured, not the report's claims.
 
-#### Codex OTEL events project item-less turns
-- **What**: `syncCodexSummaryLiveEvent` ensures one projected turn for every
-  Codex OTEL event, whether or not the event yields an item. Request-side and
-  decision rows (`llm_request`, tool decisions) therefore each add a turn with
-  nothing in it.
-- **Why or evidence**: measured 2026-10-26 on the live store. Before the
-  stream-fragment prune, about two thirds of all projected turns were item-less
-  Codex turns. Most of them came from the fragments, which the prune removes
-  together with their turns. The remainder is smaller, but the shape persists
-  for every non-item event.
-- **Next**: decide whether a turn needs an item to exist. If so, skip the turn
-  for item-less events, and prune the stored ones with the same
-  preview/digest/ownership gate as `amon database prune-codex-fragments`.
-  Check first that the live view and trace projection never read an item-less
-  turn.
+#### Codex OTEL `llm_request` events project item-less turns (kept for now)
+- **What**: `syncCodexSummaryLiveEvent` creates one projected turn for every
+  Codex OTEL event, including `llm_request` events that yield no item.
+- **Decision**: keep them for now (maintainer, 2026-11-25). They act as request
+  markers rather than empty rows.
+- **Why or evidence**: on the Mac mini's store on 2026-11-25 there were 2,790
+  item-less Codex turns, about 5% of Codex turns, all titled `llm request` and
+  mapping one-to-one to `llm_request` events, which carry no tokens or cost.
+  Turn creation has been unconditional since March. They appeared from
+  2026-11-11 because the mini began collecting Codex OTEL into its own store
+  then. A read-only audit on disposable fixtures found that the live API, CLI
+  and Monitor show or count these turns. Removing one moved a session's
+  repaired `last_item_at`/`ended_at` back to the previous item, and removing a
+  session's last turn switched trace projection to its fallback.
+- **Revisit when**: turn counts or storage from these rows become a problem, or
+  request markers are wanted as a first-class item. Then derive session bounds
+  and request display from the events before skipping creation, and prune
+  through the `prune-codex-fragments` preview/digest/ownership gate.
 
 #### Watcher re-sync still reads, hashes and summarizes the whole session
 - **What**: since 2026-10-07 a re-sync parses only the appended lines (see
