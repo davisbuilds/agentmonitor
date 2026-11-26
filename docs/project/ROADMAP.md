@@ -41,14 +41,15 @@ possibilities.
   Codex app jobs told apart by their recorded `originator` rather than prompt
   text (Backlog: Codex archived rollout discovery, Codex interruptions are not
   recorded, Codex thread names and app-job detection).
-- Investigate Antigravity parity with Claude and Codex, now that Antigravity is
-  in growing use: inventory its current local stores on both Macs, compare every
-  capture and display surface, and write a gap matrix and design before
-  implementing (Backlog: Antigravity parity with Claude and Codex).
-- Start the Claude vs Codex cost-per-outcome comparison with its first slice: a
-  read-only probe that controls for project and pull request size and reports
-  whether the two agents overlap enough to compare (Backlog: Claude vs Codex
-  cost per outcome).
+- Bring Antigravity telemetry and analytics up to par with Claude and Codex,
+  now that Antigravity is in growing use. Start with investigation: inventory
+  its current local stores on both Macs, compare every capture, usage, cost and
+  analytics surface, and write a gap matrix and design before implementing
+  (Backlog: Antigravity parity with Claude and Codex).
+- Start the harness, model and plan cost comparison with its first slice: a
+  read-only Claude vs Codex cost-per-outcome probe that controls for project and
+  pull request size and reports whether the two agents overlap enough to compare
+  (Backlog: Claude vs Codex cost per outcome).
 - Fix the small reliability defects the backlog records, mostly from the
   2026-11-11 state-machine audit: CLI repairs that fail as locked beside the
   server, the operational insert that fails a request after usage is stored,
@@ -104,6 +105,12 @@ possibilities.
 
 ## Next
 
+- Harness, model and plan cost comparison: survey existing usage-measurement
+  projects for logic to port, then design how quota readings join the usage
+  that consumed them, so AgentMonitor can report tokens and API-equivalent cost
+  per plan window and model, how that yield changes over time, and cost per
+  task between models, including Gemini once Antigravity usage is captured
+  (Backlog: Harness, model and plan cost comparison).
 - Quota burn rate: project when each provider's windows run out at the current
   pace, now that the sampled history covers two weekly resets.
 - Claude Cowork/chat as a source: finish the interactive Desktop check with a
