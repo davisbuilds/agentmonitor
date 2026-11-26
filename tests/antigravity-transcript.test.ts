@@ -11,6 +11,7 @@ import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connectio
 import type { syncAntigravityLiveSession as syncAgrLiveFn } from '../src/live/antigravity-adapter.js';
 import type { parseAntigravitySessions as parseAgrFn } from '../src/parser/antigravity-sessions.js';
 import type {
+  extractAntigravitySystemText as extractSystemTextFn,
   extractAntigravityUserText as extractUserTextFn,
   parseAntigravityTranscript as parseTranscriptFn,
   resolveAntigravityTranscriptPath as resolveTranscriptPathFn,
@@ -123,6 +124,7 @@ let getDb: typeof getDbFn;
 let closeDb: typeof closeDbFn;
 let parseAntigravitySessions: typeof parseAgrFn;
 let resolveAntigravityTranscriptPath: typeof resolveTranscriptPathFn;
+let extractAntigravitySystemText: typeof extractSystemTextFn;
 let extractAntigravityUserText: typeof extractUserTextFn;
 let parseAntigravityTranscript: typeof parseTranscriptFn;
 let syncAntigravityLiveSession: typeof syncAgrLiveFn;
@@ -147,6 +149,7 @@ before(async () => {
   ({ parseAntigravitySessions } = await import('../src/parser/antigravity-sessions.js'));
   ({
     resolveAntigravityTranscriptPath,
+    extractAntigravitySystemText,
     extractAntigravityUserText,
     parseAntigravityTranscript,
   } = await import('../src/parser/antigravity-transcript.js'));
@@ -372,6 +375,9 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
 
     const roles = parsed.messages.map(m => m.role);
     assert.deepEqual(roles, ['system', 'user', 'assistant', 'user', 'user', 'assistant', 'user']);
+    assert.deepEqual(JSON.parse(parsed.messages[0].content), [
+      { type: 'text', text: '[Message] Wakeup notification from subagent' },
+    ]);
 
     const plannerMsg = parsed.messages[2];
     assert.equal(plannerMsg.has_thinking, 1);
@@ -468,6 +474,96 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
     const lastBlocks = JSON.parse(parsed.messages.at(-1)!.content) as Array<Record<string, unknown>>;
     assert.equal(lastBlocks[0].type, 'tool_result');
     assert.equal(lastBlocks[0].tool_use_id, undefined, 'unpaired GENERIC does not mis-link to cleared view_file call');
+  });
+
+  test('extracts SYSTEM_MESSAGE bodies cleanly across preamble, multi-block, bare, and inner-mention shapes', () => {
+    const home = path.join(tempDir, 'agr-system-variants');
+    const sessionId = '44444444-aaaa-bbbb-cccc-555555555555';
+    const transcriptPath = writeTranscript(home, sessionId, [
+      {
+        step_index: 0,
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        status: 'DONE',
+        created_at: '2026-11-26T05:10:00Z',
+        content: [
+          'The following is a <SYSTEM_MESSAGE> not actually sent by the user.',
+          '',
+          '<SYSTEM_MESSAGE>',
+          'First notification body',
+          '</SYSTEM_MESSAGE>',
+          '',
+          '<SYSTEM_MESSAGE>',
+          'Second notification body',
+          '</SYSTEM_MESSAGE>',
+        ].join('\n'),
+      },
+      {
+        step_index: 1,
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        status: 'DONE',
+        created_at: '2026-11-26T05:10:01Z',
+        content: '<SYSTEM_MESSAGE>\nBare notification without preamble\n</SYSTEM_MESSAGE>',
+      },
+      {
+        step_index: 2,
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        status: 'DONE',
+        created_at: '2026-11-26T05:10:02Z',
+        content: [
+          'The following is a <SYSTEM_MESSAGE> not actually sent by the user.',
+          '',
+          '<SYSTEM_MESSAGE>',
+          'Keep inline <SYSTEM_MESSAGE> and </SYSTEM_MESSAGE> mentions intact.',
+          '</SYSTEM_MESSAGE>',
+        ].join('\n'),
+      },
+      {
+        step_index: 3,
+        source: 'SYSTEM',
+        type: 'SYSTEM_MESSAGE',
+        status: 'DONE',
+        created_at: '2026-11-26T05:10:03Z',
+        content: 'The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n\n<SYSTEM_MESSAGE>\nUnclosed truncated notice',
+      },
+      {
+        step_index: 4,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-11-26T05:10:04Z',
+        content: '<USER_REQUEST>\nReal first prompt\n</USER_REQUEST>',
+      },
+    ]);
+
+    const parsed = parseAntigravityTranscript(transcriptPath, sessionId);
+    assert.ok(parsed);
+    assert.equal(parsed.userMessageCount, 1);
+    assert.equal(parsed.firstUserMessage, 'Real first prompt');
+    assert.deepEqual(
+      parsed.messages.slice(0, 4).map(m => JSON.parse(m.content)),
+      [
+        [{ type: 'text', text: 'First notification body\n\nSecond notification body' }],
+        [{ type: 'text', text: 'Bare notification without preamble' }],
+        [{ type: 'text', text: 'Keep inline <SYSTEM_MESSAGE> and </SYSTEM_MESSAGE> mentions intact.' }],
+        [{ type: 'text', text: 'Unclosed truncated notice' }],
+      ],
+    );
+
+    assert.equal(
+      extractAntigravitySystemText('The following is a <SYSTEM_MESSAGE> not actually sent by the user.\n\n<SYSTEM_MESSAGE>\n\n</SYSTEM_MESSAGE>'),
+      '',
+    );
+    assert.equal(extractAntigravitySystemText('<SYSTEM_MESSAGE>Inline alert</SYSTEM_MESSAGE>'), 'Inline alert');
+    assert.equal(extractAntigravitySystemText('Plain un-tagged system note'), 'Plain un-tagged system note');
+
+    const adversarialSystem = '<SYSTEM_MESSAGE>\n'.repeat(5000) + 'payload</SYSTEM_MESSAGE>';
+    const started = performance.now();
+    const extracted = extractAntigravitySystemText(adversarialSystem);
+    assert.ok(performance.now() - started < 100);
+    assert.ok(extracted.includes('payload'));
   });
 
   test('falls back cleanly to SQLite steps summary when transcript.jsonl is absent, empty, or unparseable', () => {

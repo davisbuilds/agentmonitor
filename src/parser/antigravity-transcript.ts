@@ -138,13 +138,30 @@ function stripTaggedBlocks(text: string, openTag: string, closeTag: string): str
   return out;
 }
 
-function extractTaggedContent(raw: string, openTag: string, closeTag: string): string | null {
-  const openIdx = raw.indexOf(openTag);
-  if (openIdx === -1) return null;
-  const start = openIdx + openTag.length;
-  const closeIdx = raw.indexOf(closeTag, start);
-  if (closeIdx === -1) return raw.slice(start);
-  return raw.slice(start, closeIdx);
+function isAtLineStart(text: string, idx: number): boolean {
+  return idx === 0 || text[idx - 1] === '\n';
+}
+
+function isLineBreakOrEnd(text: string, idx: number): boolean {
+  return idx >= text.length || text[idx] === '\n' || text[idx] === '\r';
+}
+
+function findNextLineTag(
+  text: string,
+  tag: string,
+  fromIndex: number,
+  requireNewlineEnd: boolean,
+): number {
+  let cursor = fromIndex;
+  while (cursor <= text.length - tag.length) {
+    const idx = text.indexOf(tag, cursor);
+    if (idx === -1) return -1;
+    if (isAtLineStart(text, idx) && (!requireNewlineEnd || isLineBreakOrEnd(text, idx + tag.length))) {
+      return idx;
+    }
+    cursor = idx + tag.length;
+  }
+  return -1;
 }
 
 export function extractAntigravityUserText(raw: string): string {
@@ -167,9 +184,55 @@ export function extractAntigravityUserText(raw: string): string {
   return cleaned.trim();
 }
 
-function extractAntigravitySystemText(raw: string): string {
-  const inner = extractTaggedContent(raw, '<SYSTEM_MESSAGE>', '</SYSTEM_MESSAGE>');
-  return (inner ?? raw).trim();
+export function extractAntigravitySystemText(raw: string): string {
+  const openTag = '<SYSTEM_MESSAGE>';
+  const closeTag = '</SYSTEM_MESSAGE>';
+
+  const collectLineBlocks = (requireNewlineEnd: boolean): { blocks: string[]; matched: boolean } => {
+    const blocks: string[] = [];
+    let matched = false;
+    let hasLineClose = true;
+    let cursor = 0;
+    while (cursor < raw.length) {
+      const openIdx = findNextLineTag(raw, openTag, cursor, requireNewlineEnd);
+      if (openIdx === -1) break;
+      matched = true;
+      const start = openIdx + openTag.length;
+      let closeIdx = -1;
+      if (hasLineClose) {
+        closeIdx = findNextLineTag(raw, closeTag, start, requireNewlineEnd);
+        if (closeIdx === -1) hasLineClose = false;
+      }
+      if (closeIdx === -1) {
+        closeIdx = raw.indexOf(closeTag, start);
+      }
+      const chunk = (closeIdx === -1 ? raw.slice(start) : raw.slice(start, closeIdx)).trim();
+      if (chunk) blocks.push(chunk);
+      if (closeIdx === -1) break;
+      cursor = closeIdx + closeTag.length;
+    }
+    return { blocks, matched };
+  };
+
+  for (const requireNewlineEnd of [true, false]) {
+    const { blocks, matched } = collectLineBlocks(requireNewlineEnd);
+    if (matched) return blocks.join('\n\n');
+  }
+
+  const inlineBlocks: string[] = [];
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const closeIdx = raw.indexOf(closeTag, cursor);
+    if (closeIdx === -1) break;
+    const openIdx = raw.lastIndexOf(openTag, closeIdx);
+    if (openIdx === -1 || openIdx < cursor) break;
+    const chunk = raw.slice(openIdx + openTag.length, closeIdx).trim();
+    if (chunk) inlineBlocks.push(chunk);
+    cursor = closeIdx + closeTag.length;
+  }
+  if (inlineBlocks.length > 0) return inlineBlocks.join('\n\n');
+
+  return raw.trim();
 }
 
 function categorizeAntigravityToolName(toolName: string): string {
