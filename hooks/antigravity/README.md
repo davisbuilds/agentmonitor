@@ -7,17 +7,21 @@ databases it already writes to disk.
 
 ## How it works
 
-Antigravity CLI stores each conversation as a per-conversation SQLite file:
+Antigravity CLI stores each conversation as a per-conversation SQLite file and,
+for newer sessions, a compact JSONL transcript log:
 
 ```
 ~/.gemini/antigravity-cli/conversations/<uuid>.db
+~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl
 ```
 
 The `steps` and `gen_metadata` tables hold **plaintext protobuf** blobs (no
 encryption, no compression). AgentMonitor decodes them with descriptor-pinned +
 empirically-pinned field maps to recover activity, model, token usage, and cost.
 See `docs/specs/baselines/antigravity-proto-fieldmap.md` for the field map and
-its provenance.
+its provenance. When the compact `transcript.jsonl` exists alongside the
+conversation DB, the session browser and full-text search index its prompts,
+reasoning, assistant replies, tool calls, and bounded tool outputs directly.
 
 ## Setup
 
@@ -56,10 +60,12 @@ POST /api/provider-quotas/antigravity/statusline
 
 ## Fidelity
 
-Antigravity sessions project at `fidelity=summary`
-(`integration_mode=antigravity-sqlite`). The transcript text and per-tool
-arguments/outputs live in private `CortexStep*` payload messages that are not yet
-descriptor-pinned, so the browser and full-text search currently index the step
-**kind** (e.g. `run command`, `view file`) rather than raw content. Token
-accounting and cost are exact; content depth upgrades when the payload internals
-are decoded, without changing the ingestion seam.
+When `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl`
+is present and parseable, Antigravity sessions project at `fidelity=full`
+(`integration_mode=antigravity-transcript`): the session browser, live stream,
+tool analytics, and full-text search expose user prompts, thinking text,
+assistant responses, tool calls with decoded arguments, and bounded tool results.
+When `transcript.jsonl` is absent, empty, or unparseable, AgentMonitor falls
+back cleanly to `fidelity=summary` (`integration_mode=antigravity-sqlite`),
+indexing SQLite `steps` kinds (e.g. `run command`, `view file`). Token
+accounting and cost remain exact in both modes.

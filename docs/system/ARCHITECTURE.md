@@ -181,7 +181,8 @@ databases, and explicit benchmark results into the local model. Import hashes ma
 normal reruns idempotent; `--force` is the deliberate recovery path. A Claude or
 Codex file whose size and nanosecond mtime match the state recorded with its hash
 is skipped without a read; a cleared hash (how migrations force a re-import) still
-reads it. Antigravity always hashes, since its WAL sidecar can change alone. Benchmark
+reads it. Antigravity always hashes, since its WAL sidecar, summary metadata, or
+companion `transcript.jsonl` can change independently of the main `.db`. Benchmark
 events use `source='benchmark'` and remain excluded from normal activity and usage
 aggregates unless a benchmark-aware read explicitly includes them.
 
@@ -399,8 +400,10 @@ Live adapters under `src/live/` normalize current sessions and declare fidelity:
   it.
 - Codex `otel-only` is summary-oriented. It must not be presented as transcript
   parity with Claude.
-- Antigravity's watcher sync projects summary-fidelity Live sessions from
-  conversation files; this is distinct from transcript-capable Claude detail.
+- Antigravity's watcher sync projects `full`-fidelity sessions
+  (`antigravity-transcript`) when `brain/<uuid>/.system_generated/logs/transcript.jsonl`
+  is present alongside `conversations/<uuid>.db`, and falls back to
+  `summary`-fidelity (`antigravity-sqlite`) from SQLite `steps` when absent.
 
 Context occupancy uses the latest request's prompt size, so it may drop after
 compaction. Codex uses its reported context window when present and otherwise a

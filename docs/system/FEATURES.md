@@ -131,8 +131,12 @@ explicit:
   state neither: the result projects as `completed` with
   `outcome: unrecorded`, never as a success. A Codex transcript stays `summary` fidelity: its reasoning is
   encrypted.
-- Antigravity conversation files feed a summary-fidelity live projection when
-  the watcher syncs them; this does not establish transcript-level parity.
+- Antigravity conversation files feed a `full`-fidelity projection
+  (`antigravity-transcript`) when `transcript.jsonl` is present alongside the
+  conversation database (exposing prompts, reasoning, assistant responses,
+  tool calls, bounded tool outputs, and full-text search), and fall back to a
+  `summary`-fidelity projection (`antigravity-sqlite`) from SQLite `steps` when
+  no transcript log is present.
 
 Context occupancy is absent when the source cannot support it. Its numerator is
 the latest request's prompt size, so compaction can lower the displayed value; the

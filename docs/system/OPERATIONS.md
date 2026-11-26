@@ -45,7 +45,9 @@ origin. Ctrl-C shuts down the runtime and removes its Portless route.
 
 On startup without `--no-watch`, the watcher reads every discoverable Claude Code,
 Codex, and Antigravity history file once before it begins watching Claude, Codex,
-and Antigravity (`~/.gemini/antigravity-cli/conversations/` when present) files,
+and Antigravity (`~/.gemini/antigravity-cli/conversations/` when present, reading
+sibling `brain/<uuid>/.system_generated/logs/transcript.jsonl` and
+`conversation_summaries.db` alongside each conversation database) files,
 and rescans all three every 15 minutes. The startup scans run synchronously
 after the listener opens, in that order, so HTTP requests (including `amon status`
 and `amon health`) wait until all three finish. Each scan logs its own summary:
