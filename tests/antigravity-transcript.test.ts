@@ -109,8 +109,13 @@ function writeSummaryDb(
   db.close();
 }
 
-function writeTranscript(home: string, sessionId: string, entries: Array<Record<string, unknown> | string>): string {
-  const filePath = path.join(home, 'brain', sessionId, '.system_generated', 'logs', 'transcript.jsonl');
+function writeTranscript(
+  home: string,
+  sessionId: string,
+  entries: Array<Record<string, unknown> | string>,
+  fileName: 'transcript_full.jsonl' | 'transcript.jsonl' = 'transcript_full.jsonl',
+): string {
+  const filePath = path.join(home, 'brain', sessionId, '.system_generated', 'logs', fileName);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const body = entries.map(entry => (typeof entry === 'string' ? entry : JSON.stringify(entry))).join('\n') + '\n';
   fs.writeFileSync(filePath, body, 'utf-8');
@@ -178,17 +183,30 @@ after(async () => {
 });
 
 describe('Antigravity full-fidelity transcript parser and FTS search', () => {
-  test('resolveAntigravityTranscriptPath maps conversation DB paths to sibling brain transcript.jsonl', () => {
+  test('resolveAntigravityTranscriptPath prefers transcript_full.jsonl and falls back to transcript.jsonl when absent or empty', () => {
     const direct = '/Users/example/.gemini/antigravity-cli/conversations/abc-123.db';
     assert.equal(
       resolveAntigravityTranscriptPath(direct),
-      '/Users/example/.gemini/antigravity-cli/brain/abc-123/.system_generated/logs/transcript.jsonl',
+      '/Users/example/.gemini/antigravity-cli/brain/abc-123/.system_generated/logs/transcript_full.jsonl',
     );
     const nested = '/Users/example/.gemini/antigravity-cli/conversations/nested/def-456.db';
     assert.equal(
       resolveAntigravityTranscriptPath(nested),
-      '/Users/example/.gemini/antigravity-cli/brain/def-456/.system_generated/logs/transcript.jsonl',
+      '/Users/example/.gemini/antigravity-cli/brain/def-456/.system_generated/logs/transcript_full.jsonl',
     );
+
+    const home = path.join(tempDir, 'agr-resolve-order');
+    const id = '10101010-aaaa-bbbb-cccc-101010101010';
+    const dbPath = path.join(home, 'conversations', `${id}.db`);
+    const compactPath = writeTranscript(home, id, [{ type: 'USER_INPUT', content: 'hi' }], 'transcript.jsonl');
+    assert.equal(resolveAntigravityTranscriptPath(dbPath), compactPath);
+
+    const emptyFullPath = path.join(home, 'brain', id, '.system_generated', 'logs', 'transcript_full.jsonl');
+    fs.writeFileSync(emptyFullPath, '');
+    assert.equal(resolveAntigravityTranscriptPath(dbPath), compactPath, 'empty transcript_full.jsonl falls back to transcript.jsonl');
+
+    fs.writeFileSync(emptyFullPath, '{"type":"USER_INPUT","content":"full"}\n');
+    assert.equal(resolveAntigravityTranscriptPath(dbPath), emptyFullPath, 'non-empty transcript_full.jsonl takes priority');
   });
 
   test('extractAntigravityUserText strips XML wrappers linearly without polynomial regex backtracking', () => {
@@ -281,6 +299,7 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
         content: 'Let me inspect the parser and run the check.',
         tool_calls: [
           {
+            id: 'call-read-4',
             name: 'read_file',
             args: {
               Path: '"/Users/example/Dev/sample-project/src/parser.ts"',
@@ -302,6 +321,7 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
         step_index: 5,
         source: 'MODEL',
         type: 'GENERIC',
+        call_id: 'call-read-4',
         status: 'DONE',
         created_at: '2026-11-26T04:00:03Z',
         content: `File contents: ${hugeOutput}`,
@@ -309,7 +329,7 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
       {
         step_index: 6,
         source: 'MODEL',
-        type: 'GENERIC',
+        type: 'RUN_COMMAND',
         status: 'ERROR',
         error: 'Command failed with exit code 1',
         created_at: '2026-11-26T04:00:04Z',
@@ -396,7 +416,7 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
     assert.equal(readResultBlocks[0].type, 'tool_result');
     assert.equal(readResultBlocks[0].tool_use_id, parsed.toolCalls[0].tool_use_id);
     assert.equal(readResultBlocks[0].is_error, false);
-    assert.ok(String(readResultBlocks[0].content).length <= 9000, 'tool output size is bounded');
+    assert.equal(readResultBlocks[0].content, `File contents: ${hugeOutput}`, 'preserves full tool output without artificial Antigravity cap');
 
     const cmdErrorBlocks = JSON.parse(parsed.messages[4].content) as Array<Record<string, unknown>>;
     assert.equal(cmdErrorBlocks[0].type, 'tool_result');
@@ -707,5 +727,334 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
     assert.equal(appendOutcome.result, 'parsed');
     assert.equal(appendOutcome.live?.reset, false, 'appended message preserves existing live turns');
     assert.equal(searchMessages({ q: 'percussion', agent: 'antigravity' }).total, 1);
+  });
+
+  test('marks truncated_fields visibly at summary fidelity and upgrades when transcript_full.jsonl appears', () => {
+    const home = path.join(tempDir, 'agr-truncated-fidelity');
+    const sessionId = 'cececece-1111-2222-3333-dfdfdfdfdfdf';
+    const dbPath = path.join(home, 'conversations', `${sessionId}.db`);
+    writeConversationDb(dbPath, {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: 1795651200 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: 1795651205 },
+        { idx: 2, type: 15, oneof: 20, tsSecs: 1795651210 },
+      ],
+    });
+    writeTranscript(home, sessionId, [
+      {
+        step_index: 0,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-11-26T11:00:00Z',
+        content: '<USER_REQUEST>\nInspect bounded mirror handling\n</USER_REQUEST>',
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T11:00:05Z',
+        thinking: 'Shortened thought',
+        content: 'Calling view_file',
+        tool_calls: [{ name: 'view_file', args: { AbsolutePath: '"/Users/example/big.ts"' } }],
+        truncated_fields: ['thinking'],
+      },
+      {
+        step_index: 2,
+        source: 'MODEL',
+        type: 'VIEW_FILE',
+        status: 'DONE',
+        created_at: '2026-11-26T11:00:10Z',
+        content: 'First 50 bytes...',
+        truncated_fields: ['content'],
+      },
+    ], 'transcript.jsonl');
+
+    const db = getDb();
+    const compactHash = hashAntigravityDb(dbPath);
+    const firstSync = syncAntigravitySessionFileDetailed(db, dbPath);
+    assert.equal(firstSync.result, 'parsed');
+    assert.equal(firstSync.fidelity, 'summary');
+    assert.equal(firstSync.integration_mode, 'antigravity-transcript');
+
+    const compactSession = getLiveSession(sessionId);
+    assert.equal(compactSession?.fidelity, 'summary');
+    assert.equal(compactSession?.integration_mode, 'antigravity-transcript');
+    assert.deepEqual(compactSession?.capabilities, {
+      history: 'summary',
+      search: 'summary',
+      tool_analytics: 'summary',
+      live_items: 'summary',
+    });
+    const compactTrace = db.prepare(
+      "SELECT json_extract(coverage_json, '$.has_full_transcript') AS has_full FROM session_trace_summary WHERE session_id = ?",
+    ).get(sessionId) as { has_full: number } | undefined;
+    assert.equal(compactTrace?.has_full, 0, 'bounded transcript does not claim has_full_transcript=true');
+
+    const parsedCompact = parseAntigravitySessions(dbPath);
+    assert.equal(parsedCompact.metadata.fidelity, 'summary');
+    const plannerBlocks = JSON.parse(parsedCompact.messages[1].content) as Array<Record<string, unknown>>;
+    assert.match(String(plannerBlocks[0].thinking), /\[truncated: thinking\]/);
+    const viewBlocks = JSON.parse(parsedCompact.messages[2].content) as Array<Record<string, unknown>>;
+    assert.match(String(viewBlocks[0].content), /\[truncated: content\]/);
+
+    const fullPath = writeTranscript(home, sessionId, [
+      {
+        step_index: 0,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-11-26T11:00:00Z',
+        content: '<USER_REQUEST>\nInspect bounded mirror handling\n</USER_REQUEST>',
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T11:00:05Z',
+        thinking: 'Complete full thought text',
+        content: 'Calling view_file',
+        tool_calls: [{ name: 'view_file', args: { AbsolutePath: '"/Users/example/big.ts"' } }],
+      },
+      {
+        step_index: 2,
+        source: 'MODEL',
+        type: 'VIEW_FILE',
+        status: 'DONE',
+        created_at: '2026-11-26T11:00:10Z',
+        content: 'Complete full file contents verbatim',
+      },
+    ], 'transcript_full.jsonl');
+    assert.ok(fullPath.endsWith('transcript_full.jsonl'));
+
+    assert.notEqual(hashAntigravityDb(dbPath), compactHash, 'adding transcript_full.jsonl flips hash');
+    const upgradeSync = syncAntigravitySessionFileDetailed(db, dbPath);
+    assert.equal(upgradeSync.result, 'parsed');
+    assert.equal(upgradeSync.fidelity, 'full');
+    assert.equal(upgradeSync.integration_mode, 'antigravity-transcript');
+    assert.equal(getLiveSession(sessionId)?.fidelity, 'full');
+    const fullTrace = db.prepare(
+      "SELECT json_extract(coverage_json, '$.has_full_transcript') AS has_full FROM session_trace_summary WHERE session_id = ?",
+    ).get(sessionId) as { has_full: number } | undefined;
+    assert.equal(fullTrace?.has_full, 1, 'untruncated transcript_full.jsonl reports has_full_transcript=true');
+    assert.equal(searchMessages({ q: 'truncated', agent: 'antigravity' }).data.some(h => h.session_id === sessionId), false);
+    assert.equal(searchMessages({ q: 'verbatim', agent: 'antigravity' }).data.some(h => h.session_id === sessionId), true);
+  });
+
+  test('deduplicates replayed step_index entries and maintains transitive sorting with non-colliding line call IDs', () => {
+    const home = path.join(tempDir, 'agr-dedupe-sort');
+    const sessionId = 'dededed0-1111-2222-3333-fefefefefe00';
+    const dbPath = path.join(home, 'conversations', `${sessionId}.db`);
+    writeConversationDb(dbPath);
+    const transcriptPath = writeTranscript(home, sessionId, [
+      {
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T12:00:05Z',
+        content: 'Unindexed trailing call',
+        tool_calls: [{ name: 'finish', args: { ok: 'true' } }],
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'RUNNING',
+        created_at: '2026-11-26T12:00:02Z',
+        content: 'Draft response',
+        tool_calls: [{ name: 'grep_search', args: { Query: '"draft"' } }],
+      },
+      {
+        step_index: 0,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-11-26T12:00:00Z',
+        content: '<USER_REQUEST>\nSearch deduplication\n</USER_REQUEST>',
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T12:00:03Z',
+        content: 'Final response',
+        tool_calls: [{ name: 'grep_search', args: { Query: '"final"' } }],
+      },
+    ]);
+
+    const parsed = parseAntigravityTranscript(transcriptPath, sessionId);
+    assert.ok(parsed);
+    assert.equal(parsed.messages.length, 3, 'replayed step_index 1 deduplicated to latest occurrence');
+    assert.equal(parsed.toolCalls.length, 2, 'replayed tool call not double-counted');
+    assert.equal(JSON.parse(parsed.messages[1].content)[0].text, 'Final response');
+    assert.equal(parsed.toolCalls[0].tool_use_id, 'antigravity:1:0');
+    assert.equal(JSON.parse(parsed.toolCalls[0].input_json!).Query, 'final');
+    assert.equal(parsed.toolCalls[1].tool_use_id, 'antigravity:line:0:0');
+    assert.notEqual(parsed.toolCalls[0].tool_use_id, parsed.toolCalls[1].tool_use_id);
+  });
+
+  test('pairs unknown typed results by name/call_id and leaves ambiguous multi-call GENERIC results unpaired', () => {
+    const home = path.join(tempDir, 'agr-pairing');
+    const sessionId = '12121212-aaaa-bbbb-cccc-343434343434';
+    const transcriptPath = writeTranscript(home, sessionId, [
+      {
+        step_index: 0,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:00Z',
+        content: 'Running command then searching.',
+        tool_calls: [
+          { name: 'run_command', args: { CommandLine: '"ls"' } },
+          { name: 'grep_search', args: { Query: '"foo"' } },
+        ],
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'RUN_COMMAND',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:01Z',
+        content: 'fileA.ts',
+      },
+      {
+        step_index: 2,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:02Z',
+        content: 'src/foo.ts:1:foo',
+      },
+      {
+        step_index: 3,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:03Z',
+        content: 'Two parallel calls with generic outputs.',
+        tool_calls: [
+          { name: 'run_command', args: { CommandLine: '"pwd"' } },
+          { name: 'read_file', args: { Path: '"/Users/example/a.ts"' } },
+        ],
+      },
+      {
+        step_index: 4,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:04Z',
+        content: 'Output 1',
+      },
+      {
+        step_index: 5,
+        source: 'MODEL',
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:05Z',
+        content: 'Output 2',
+      },
+      {
+        step_index: 6,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:06Z',
+        content: 'Two parallel calls correlated by native call_id out of order.',
+        tool_calls: [
+          { call_id: 'cid-first', name: 'read_file', args: { Path: '"/Users/example/first.ts"' } },
+          { call_id: 'cid-second', name: 'read_file', args: { Path: '"/Users/example/second.ts"' } },
+        ],
+      },
+      {
+        step_index: 7,
+        source: 'MODEL',
+        type: 'GENERIC',
+        call_id: 'cid-second',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:07Z',
+        content: 'Second file output',
+      },
+      {
+        step_index: 8,
+        source: 'MODEL',
+        type: 'GENERIC',
+        call_id: 'cid-first',
+        status: 'DONE',
+        created_at: '2026-11-26T13:00:08Z',
+        content: 'First file output',
+      },
+    ]);
+
+    const parsed = parseAntigravityTranscript(transcriptPath, sessionId);
+    assert.ok(parsed);
+    assert.equal(parsed.messages.length, 9);
+
+    const runCmdResult = JSON.parse(parsed.messages[1].content)[0] as Record<string, unknown>;
+    assert.equal(runCmdResult.content, 'fileA.ts');
+    assert.equal(runCmdResult.tool_use_id, parsed.toolCalls[0].tool_use_id, 'RUN_COMMAND pairs to run_command');
+
+    const grepResult = JSON.parse(parsed.messages[2].content)[0] as Record<string, unknown>;
+    assert.equal(grepResult.content, 'src/foo.ts:1:foo');
+    assert.equal(grepResult.tool_use_id, parsed.toolCalls[1].tool_use_id, 'remaining GENERIC pairs cleanly to sole remaining grep_search');
+
+    const ambig1 = JSON.parse(parsed.messages[4].content)[0] as Record<string, unknown>;
+    const ambig2 = JSON.parse(parsed.messages[5].content)[0] as Record<string, unknown>;
+    assert.equal(ambig1.tool_use_id, undefined, 'ambiguous multi-call GENERIC 1 remains explicitly unpaired');
+    assert.equal(ambig2.tool_use_id, undefined, 'ambiguous multi-call GENERIC 2 remains explicitly unpaired');
+
+    const outOfOrderSecond = JSON.parse(parsed.messages[7].content)[0] as Record<string, unknown>;
+    const outOfOrderFirst = JSON.parse(parsed.messages[8].content)[0] as Record<string, unknown>;
+    assert.equal(outOfOrderSecond.tool_use_id, 'cid-second');
+    assert.equal(outOfOrderFirst.tool_use_id, 'cid-first');
+  });
+
+  test('preserves trailing SQLite steps and later ended_at when transcript lags SQLite', () => {
+    const home = path.join(tempDir, 'agr-lagging');
+    const sessionId = '56565656-aaaa-bbbb-cccc-787878787878';
+    const dbPath = path.join(home, 'conversations', `${sessionId}.db`);
+    writeConversationDb(dbPath, {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: 1795694400 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: 1795694405 },
+        { idx: 2, type: 15, oneof: 20, tsSecs: 1795694430 },
+      ],
+    });
+    const transcriptPath = writeTranscript(home, sessionId, [
+      {
+        step_index: 0,
+        source: 'USER_EXPLICIT',
+        type: 'USER_INPUT',
+        status: 'DONE',
+        created_at: '2026-11-26T12:00:00Z',
+        content: '<USER_REQUEST>\nPrompt before lag\n</USER_REQUEST>',
+      },
+      {
+        step_index: 1,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T12:00:05Z',
+        content: 'First reply flushed.',
+      },
+    ]);
+
+    const lagging = parseAntigravitySessions(dbPath);
+    assert.equal(lagging.metadata.ended_at, '2026-11-26T12:00:30.000Z', 'preserves later SQLite ended_at');
+    assert.equal(lagging.messages.length, 3, 'appends trailing unflushed SQLite step placeholder');
+
+    fs.appendFileSync(transcriptPath, JSON.stringify({
+      step_index: 2,
+      source: 'MODEL',
+      type: 'PLANNER_RESPONSE',
+      status: 'DONE',
+      created_at: '2026-11-26T12:00:30Z',
+      content: 'Final reply caught up.',
+    }) + '\n');
+    const caughtUp = parseAntigravitySessions(dbPath);
+    assert.equal(caughtUp.messages.length, 3);
+    assert.equal(JSON.parse(caughtUp.messages[2].content)[0].text, 'Final reply caught up.');
   });
 });

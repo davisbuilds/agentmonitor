@@ -11,7 +11,7 @@ import {
 } from '../parser/claude-code.js';
 import { parseCodexSessionChunk, type CodexParseState } from '../parser/codex-sessions.js';
 import { parseAntigravitySessions } from '../parser/antigravity-sessions.js';
-import { resolveAntigravityTranscriptPath } from '../parser/antigravity-transcript.js';
+import { resolveAntigravityTranscriptPaths } from '../parser/antigravity-transcript.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
 import { preserveAntigravitySessionMetadata, syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
@@ -476,14 +476,16 @@ export function hashAntigravityDb(filePath: string): string {
     h.update('summary:');
     h.update(summary.rawSignature);
   }
-  const transcriptPath = resolveAntigravityTranscriptPath(filePath, sessionId);
-  try {
-    const stat = fs.statSync(transcriptPath, { bigint: true });
-    if (stat.isFile()) {
-      h.update(`transcript:${stat.size}:${stat.mtimeNs}`);
+  const { fullPath, compactPath } = resolveAntigravityTranscriptPaths(filePath, sessionId);
+  for (const [label, candidatePath] of [['transcript_full:', fullPath], ['transcript:', compactPath]] as const) {
+    try {
+      const stat = fs.statSync(candidatePath, { bigint: true });
+      if (stat.isFile()) {
+        h.update(`${label}${stat.size}:${stat.mtimeNs}`);
+      }
+    } catch {
+      // WHY: Conversations without a transcript log fall back to SQLite step summaries or compact mirrors.
     }
-  } catch {
-    // WHY: Conversations without a transcript log fall back to SQLite step summaries.
   }
   return h.digest('hex');
 }
@@ -521,7 +523,8 @@ export function syncAntigravitySessionFileDetailed(
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
 
     const fidelity: ProjectionFidelity = parsed.metadata.fidelity === 'full' ? 'full' : 'summary';
-    const integration_mode = fidelity === 'full' ? 'antigravity-transcript' : 'antigravity-sqlite';
+    const integration_mode = parsed.metadata.integration_mode
+      ?? (fidelity === 'full' ? 'antigravity-transcript' : 'antigravity-sqlite');
     return { result: 'parsed', live, session_id: sessionId, integration_mode, fidelity };
   } catch (err) {
     console.error(`[watcher] Failed to sync Antigravity ${filePath}:`, err);

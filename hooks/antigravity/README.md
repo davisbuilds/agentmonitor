@@ -8,20 +8,22 @@ databases it already writes to disk.
 ## How it works
 
 Antigravity CLI stores each conversation as a per-conversation SQLite file and,
-for newer sessions, a compact JSONL transcript log:
+for newer sessions, JSONL transcript logs:
 
 ```
 ~/.gemini/antigravity-cli/conversations/<uuid>.db
+~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript_full.jsonl
 ~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl
 ```
 
 The `steps` and `gen_metadata` tables hold **plaintext protobuf** blobs (no
 encryption, no compression). AgentMonitor decodes them with descriptor-pinned +
-empirically-pinned field maps to recover activity, model, token usage, and cost.
-See `docs/specs/baselines/antigravity-proto-fieldmap.md` for the field map and
-its provenance. When the compact `transcript.jsonl` exists alongside the
-conversation DB, the session browser and full-text search index its prompts,
-reasoning, assistant replies, tool calls, and bounded tool outputs directly.
+empirically-pinned field maps to recover activity, model, token usage, and cost
+estimates. See `docs/specs/baselines/antigravity-proto-fieldmap.md` for the field map and
+its provenance. AgentMonitor prefers `transcript_full.jsonl` when present and non-empty
+and falls back to the bounded `transcript.jsonl` mirror (marking truncated fields
+visibly) so the session browser and full-text search index prompts, reasoning,
+assistant replies, tool calls, and tool outputs directly.
 
 ## Setup
 
@@ -42,9 +44,10 @@ pnpm cli -- import --source antigravity --antigravity-dir /path/to/antigravity-c
 
 The **session browser** rows (`browsing_sessions` / `messages` / `session_items`)
 are projected automatically by the running AgentMonitor watcher on startup, on
-real-time changes under `~/.gemini/antigravity-cli/conversations/` (`.db` and
-`.db-wal`), and on each 15-minute periodic resync. During sync, AgentMonitor
-also reads `gen_metadata` prompt token counts for context occupancy and reads
+real-time changes under `~/.gemini/antigravity-cli/conversations/` (`.db`,
+`.db-wal`, `.db-shm`) and `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/`
+(`transcript_full.jsonl` and `transcript.jsonl`), and on each 15-minute periodic
+resync. During sync, AgentMonitor also reads `gen_metadata` prompt token counts for context occupancy and reads
 `~/.gemini/antigravity-cli/conversation_summaries.db` (read-only, fail-open)
 for project identity, session titles, and parent/subagent lineage.
 
@@ -60,12 +63,23 @@ POST /api/provider-quotas/antigravity/statusline
 
 ## Fidelity
 
-When `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl`
-is present and parseable, Antigravity sessions project at `fidelity=full`
+When `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript_full.jsonl`
+(or an untruncated `transcript.jsonl` with no `truncated_fields`) is present and
+parseable, Antigravity sessions project at `fidelity=full`
 (`integration_mode=antigravity-transcript`): the session browser, live stream,
 tool analytics, and full-text search expose user prompts, thinking text,
-assistant responses, tool calls with decoded arguments, and bounded tool results.
-When `transcript.jsonl` is absent, empty, or unparseable, AgentMonitor falls
-back cleanly to `fidelity=summary` (`integration_mode=antigravity-sqlite`),
-indexing SQLite `steps` kinds (e.g. `run command`, `view file`). Token
-accounting and cost remain exact in both modes.
+assistant responses, tool calls with decoded arguments, and tool results.
+When only a bounded mirror containing `truncated_fields` (such as `transcript.jsonl`)
+is available, AgentMonitor projects `integration_mode=antigravity-transcript` at
+`fidelity=summary` (summary capabilities with explicit `[truncated: ...]` markers
+and `has_full_transcript=false`). When no parseable transcript exists, AgentMonitor
+falls back cleanly to `fidelity=summary` (`integration_mode=antigravity-sqlite`),
+indexing SQLite `steps` kinds (e.g. `run command`, `view file`). If SQLite `steps`
+advance ahead of a lagging transcript, trailing unflushed steps preserve `ended_at`
+as summary placeholders until the transcript flushes.
+
+Billing token and cost estimates are imported separately from SQLite `gen_metadata`
+via `pnpm cli -- import --source antigravity` (see
+`docs/specs/2026-11-25-antigravity-parity-investigation.md` for the tracked Slice 1
+accounting fix); transcript token fields feed display-only `context_used_tokens`
+fallback and never create usage or cost rows.

@@ -131,12 +131,16 @@ explicit:
   state neither: the result projects as `completed` with
   `outcome: unrecorded`, never as a success. A Codex transcript stays `summary` fidelity: its reasoning is
   encrypted.
-- Antigravity conversation files feed a `full`-fidelity projection
-  (`antigravity-transcript`) when `transcript.jsonl` is present alongside the
-  conversation database (exposing prompts, reasoning, assistant responses,
-  tool calls, bounded tool outputs, and full-text search), and fall back to a
-  `summary`-fidelity projection (`antigravity-sqlite`) from SQLite `steps` when
-  no transcript log is present.
+- Antigravity conversation files feed an `antigravity-transcript` projection
+  when `transcript_full.jsonl` (preferred) or the bounded `transcript.jsonl`
+  mirror is present alongside the conversation database (exposing prompts,
+  reasoning, assistant responses, tool calls, tool outputs, and full-text
+  search). Untruncated logs project at `full` fidelity; bounded mirrors with
+  `truncated_fields` mark truncated fields visibly (`[truncated: ...]`) and stay
+  at `summary` fidelity (`has_full_transcript=false`). Sessions without a
+  parseable transcript fall back to a `summary`-fidelity projection
+  (`antigravity-sqlite`) from SQLite `steps`, and trailing unflushed SQLite steps
+  ahead of a lagging transcript preserve `ended_at` and activity until flushed.
 
 Context occupancy is absent when the source cannot support it. Its numerator is
 the latest request's prompt size, so compaction can lower the displayed value; the

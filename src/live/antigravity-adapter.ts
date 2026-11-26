@@ -14,7 +14,7 @@ import {
 import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
 import { liveStatusFromActivity } from './live-status.js';
 
-const ANTIGRAVITY_SQLITE_CAPABILITIES = Object.freeze({
+const ANTIGRAVITY_SUMMARY_CAPABILITIES = Object.freeze({
   history: 'summary' as const,
   search: 'summary' as const,
   tool_analytics: 'summary' as const,
@@ -155,6 +155,8 @@ export function syncAntigravityLiveSession(
       })
     : null;
   const isFull = parsed.metadata.fidelity === 'full';
+  const integrationMode = parsed.metadata.integration_mode
+    ?? (isFull ? 'antigravity-transcript' : 'antigravity-sqlite');
   upsertProjectedSessionSnapshot(db, {
     id: sessionId,
     agent: 'antigravity',
@@ -171,14 +173,10 @@ export function syncAntigravityLiveSession(
     last_item_at: parsed.metadata.ended_at,
     context_used_tokens: usedTokens,
     context_window_tokens: contextWindow,
-  }, isFull ? {
-    integration_mode: 'antigravity-transcript',
-    fidelity: 'full',
-    capabilities: FULL_PROJECTION_CAPABILITIES,
-  } : {
-    integration_mode: 'antigravity-sqlite',
-    fidelity: 'summary',
-    capabilities: ANTIGRAVITY_SQLITE_CAPABILITIES,
+  }, {
+    integration_mode: integrationMode,
+    fidelity: isFull ? 'full' : 'summary',
+    capabilities: isFull ? FULL_PROJECTION_CAPABILITIES : ANTIGRAVITY_SUMMARY_CAPABILITIES,
   });
 
   return {

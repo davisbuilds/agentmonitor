@@ -5,6 +5,9 @@ import { categorizeToolName, type ContentBlock, type ParsedMessage, type ParsedT
 import { promptTitleFromTexts } from './session-title.js';
 
 interface AntigravityToolCallEntry {
+  id?: unknown;
+  tool_call_id?: unknown;
+  call_id?: unknown;
   name?: unknown;
   args?: unknown;
 }
@@ -23,6 +26,9 @@ interface AntigravityTranscriptEntry {
   content?: unknown;
   error?: unknown;
   tool_calls?: unknown;
+  tool_call_id?: unknown;
+  call_id?: unknown;
+  truncated_fields?: unknown;
 }
 
 export interface AntigravityTranscriptResult {
@@ -32,12 +38,17 @@ export interface AntigravityTranscriptResult {
   startedAt: string | null;
   endedAt: string | null;
   userMessageCount: number;
+  hasTruncatedFields: boolean;
+  maxStepIndex: number | null;
   latestModel?: string;
   contextUsedTokens?: number;
 }
 
-const MAX_TOOL_RESULT_CHARS = 8_192;
-const TRUNCATED_SUFFIX = '\n... (truncated)';
+interface PendingToolCall {
+  id: string;
+  nativeId?: string;
+  name: string;
+}
 
 const ANTIGRAVITY_CATEGORY_MAP: Record<string, string> = {
   read_file: 'Read',
@@ -89,36 +100,57 @@ const ANTIGRAVITY_CATEGORY_MAP: Record<string, string> = {
   finish: 'Other',
 };
 
-const RESULT_ENTRY_TYPES = new Set([
-  'GENERIC',
-  'VIEW_FILE',
-  'READ_URL_CONTENT',
-  'LIST_DIRECTORY',
-  'FINISH',
+const BOOKKEEPING_ENTRY_TYPES = new Set([
+  'CONVERSATION_HISTORY',
+  'EPHEMERAL_MESSAGE',
+  'CHECKPOINT',
 ]);
 
 const RESULT_TOOL_HINTS: Record<string, readonly string[]> = {
-  VIEW_FILE: ['view_file'],
-  READ_URL_CONTENT: ['read_url_content'],
   LIST_DIRECTORY: ['list_dir', 'list_directory'],
-  FINISH: ['finish'],
+  EDIT_FILE: ['edit_file', 'replace_file_content', 'multi_replace_file_content'],
+  WRITE_FILE: ['write_file', 'write_to_file'],
 };
+
+function antigravityRootDir(conversationDbPath: string): string {
+  let dir = path.dirname(conversationDbPath);
+  while (path.dirname(dir) !== dir) {
+    if (path.basename(dir) === 'conversations') {
+      return path.dirname(dir);
+    }
+    dir = path.dirname(dir);
+  }
+  return path.dirname(path.dirname(conversationDbPath));
+}
+
+export function resolveAntigravityTranscriptPaths(
+  conversationDbPath: string,
+  sessionId = path.basename(conversationDbPath, '.db'),
+): { fullPath: string; compactPath: string } {
+  const logsDir = path.join(antigravityRootDir(conversationDbPath), 'brain', sessionId, '.system_generated', 'logs');
+  return {
+    fullPath: path.join(logsDir, 'transcript_full.jsonl'),
+    compactPath: path.join(logsDir, 'transcript.jsonl'),
+  };
+}
+
+function isReadableNonEmptyFile(filePath: string): boolean {
+  try {
+    const stat = fs.statSync(filePath);
+    return stat.isFile() && stat.size > 0;
+  } catch {
+    return false;
+  }
+}
 
 export function resolveAntigravityTranscriptPath(
   conversationDbPath: string,
   sessionId = path.basename(conversationDbPath, '.db'),
 ): string {
-  let dir = path.dirname(conversationDbPath);
-  let antigravityDir: string | undefined;
-  while (path.dirname(dir) !== dir) {
-    if (path.basename(dir) === 'conversations') {
-      antigravityDir = path.dirname(dir);
-      break;
-    }
-    dir = path.dirname(dir);
-  }
-  antigravityDir ??= path.dirname(path.dirname(conversationDbPath));
-  return path.join(antigravityDir, 'brain', sessionId, '.system_generated', 'logs', 'transcript.jsonl');
+  const { fullPath, compactPath } = resolveAntigravityTranscriptPaths(conversationDbPath, sessionId);
+  if (isReadableNonEmptyFile(fullPath)) return fullPath;
+  if (isReadableNonEmptyFile(compactPath)) return compactPath;
+  return fullPath;
 }
 
 function stripTaggedBlocks(text: string, openTag: string, closeTag: string): string {
@@ -235,6 +267,25 @@ export function extractAntigravitySystemText(raw: string): string {
   return raw.trim();
 }
 
+function asNonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function extractTruncatedFields(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map(item => item.trim());
+}
+
+function appendTruncationNote(text: string, fields: readonly string[]): string {
+  if (fields.length === 0) return text;
+  const marker = `[truncated: ${fields.join(', ')}]`;
+  return text ? `${text}\n${marker}` : marker;
+}
+
 function categorizeAntigravityToolName(toolName: string): string {
   return ANTIGRAVITY_CATEGORY_MAP[toolName] ?? categorizeToolName(toolName);
 }
@@ -273,7 +324,7 @@ function normalizeTimestamp(raw: unknown): string | null {
   return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
 }
 
-function formatToolResultContent(entry: AntigravityTranscriptEntry): string {
+function formatToolResultContent(entry: AntigravityTranscriptEntry, truncatedFields: readonly string[]): string {
   const rawContent = typeof entry.content === 'string' ? entry.content : '';
   const rawError = typeof entry.error === 'string' ? entry.error.trim() : '';
   let combined = rawContent;
@@ -284,23 +335,41 @@ function formatToolResultContent(entry: AntigravityTranscriptEntry): string {
       combined = `${rawContent}\nError: ${rawError}`;
     }
   }
-  if (combined.length <= MAX_TOOL_RESULT_CHARS) return combined;
-  return combined.slice(0, MAX_TOOL_RESULT_CHARS - TRUNCATED_SUFFIX.length) + TRUNCATED_SUFFIX;
+  return appendTruncationNote(combined, truncatedFields);
+}
+
+function entryMatchesToolName(entryType: string, toolName: string): boolean {
+  const lowerType = entryType.toLowerCase();
+  const lowerTool = toolName.toLowerCase();
+  if (lowerType === lowerTool) return true;
+  const hints = RESULT_TOOL_HINTS[entryType];
+  return hints ? hints.includes(lowerTool) : false;
 }
 
 function takeMatchingPendingCall(
-  pending: Array<{ id: string; name: string }>,
+  pending: PendingToolCall[],
+  entry: AntigravityTranscriptEntry,
   entryType: string,
-): { id: string; name: string } | undefined {
+): PendingToolCall | undefined {
   if (pending.length === 0) return undefined;
-  const hinted = RESULT_TOOL_HINTS[entryType];
-  if (hinted) {
-    const matchIdx = pending.findIndex(call => hinted.includes(call.name));
-    if (matchIdx !== -1) return pending.splice(matchIdx, 1)[0];
-    if (pending.length === 1) return pending.shift();
-    return undefined;
+
+  const explicitCallId = asNonEmptyString(entry.tool_call_id) ?? asNonEmptyString(entry.call_id);
+  if (explicitCallId) {
+    const matchIdx = pending.findIndex(
+      call => call.nativeId === explicitCallId || call.id === explicitCallId,
+    );
+    return matchIdx !== -1 ? pending.splice(matchIdx, 1)[0] : undefined;
   }
-  return pending.shift();
+
+  if (entryType && entryType !== 'GENERIC') {
+    const matchIdx = pending.findIndex(call => entryMatchesToolName(entryType, call.name));
+    return matchIdx !== -1 ? pending.splice(matchIdx, 1)[0] : undefined;
+  }
+
+  if (pending.length === 1) {
+    return pending.shift();
+  }
+  return undefined;
 }
 
 export function parseAntigravityTranscript(
@@ -316,43 +385,55 @@ export function parseAntigravityTranscript(
     return null;
   }
 
-  const parsedEntries: Array<{ entry: AntigravityTranscriptEntry; lineOrder: number }> = [];
+  const entriesByStepIndex = new Map<number, { entry: AntigravityTranscriptEntry; lineOrder: number }>();
+  const unindexedEntries: Array<{ entry: AntigravityTranscriptEntry; lineOrder: number }> = [];
   let lineOrder = 0;
+  let maxStepIndex: number | null = null;
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
     try {
       const parsed = JSON.parse(trimmed) as unknown;
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        parsedEntries.push({ entry: parsed as AntigravityTranscriptEntry, lineOrder });
+        const entry = parsed as AntigravityTranscriptEntry;
+        const item = { entry, lineOrder };
         lineOrder++;
+        if (typeof entry.step_index === 'number' && Number.isFinite(entry.step_index)) {
+          entriesByStepIndex.set(entry.step_index, item);
+          if (maxStepIndex === null || entry.step_index > maxStepIndex) {
+            maxStepIndex = entry.step_index;
+          }
+        } else {
+          unindexedEntries.push(item);
+        }
       }
     } catch {
       // WHY: Skip partial or corrupt trailing lines during live writes.
     }
   }
 
+  const parsedEntries = [...entriesByStepIndex.values(), ...unindexedEntries];
   if (parsedEntries.length === 0) return null;
 
   // WHY: Antigravity can flush step N+1 slightly before step N (e.g., FINISH before PLANNER_RESPONSE).
   parsedEntries.sort((a, b) => {
     const idxA = a.entry.step_index;
     const idxB = b.entry.step_index;
-    if (typeof idxA === 'number' && Number.isFinite(idxA)
-      && typeof idxB === 'number' && Number.isFinite(idxB)
-      && idxA !== idxB) {
-      return idxA - idxB;
-    }
+    const hasA = typeof idxA === 'number' && Number.isFinite(idxA);
+    const hasB = typeof idxB === 'number' && Number.isFinite(idxB);
+    if (hasA !== hasB) return hasA ? -1 : 1;
+    if (hasA && hasB && idxA !== idxB) return (idxA as number) - (idxB as number);
     return a.lineOrder - b.lineOrder;
   });
 
   const messages: ParsedMessage[] = [];
   const toolCalls: ParsedToolCall[] = [];
-  const pendingCalls: Array<{ id: string; name: string }> = [];
+  const pendingCalls: PendingToolCall[] = [];
   let firstUserMessage: string | null = null;
   let userMessageCount = 0;
   let startedAt: string | null = null;
   let endedAt: string | null = null;
+  let hasTruncatedFields = false;
   let latestModel: string | undefined;
   let contextUsedTokens: number | undefined;
 
@@ -367,13 +448,19 @@ export function parseAntigravityTranscript(
     const timestamp = normalizeTimestamp(entry.created_at);
     recordTimestamp(timestamp);
 
+    if (BOOKKEEPING_ENTRY_TYPES.has(entryType)) continue;
+
+    const truncatedFields = extractTruncatedFields(entry.truncated_fields);
+    if (truncatedFields.length > 0) hasTruncatedFields = true;
+
     if (entryType === 'USER_INPUT') {
       pendingCalls.length = 0;
-      const text = typeof entry.content === 'string' ? extractAntigravityUserText(entry.content) : '';
+      const rawText = typeof entry.content === 'string' ? extractAntigravityUserText(entry.content) : '';
+      const text = appendTruncationNote(rawText, truncatedFields);
       if (!text) continue;
       const content = stripInlineImages(JSON.stringify([{ type: 'text', text } satisfies ContentBlock]));
       userMessageCount++;
-      firstUserMessage ??= promptTitleFromTexts([text]);
+      if (rawText) firstUserMessage ??= promptTitleFromTexts([rawText]);
       messages.push({
         session_id: sessionId,
         ordinal: messages.length,
@@ -394,9 +481,10 @@ export function parseAntigravityTranscript(
         : typeof entry.error === 'string'
           ? entry.error
           : '';
-      const text = entryType === 'SYSTEM_MESSAGE'
+      const cleanText = entryType === 'SYSTEM_MESSAGE'
         ? extractAntigravitySystemText(rawText)
         : rawText.trim();
+      const text = appendTruncationNote(cleanText, truncatedFields);
       if (!text) continue;
       const content = stripInlineImages(JSON.stringify([{ type: 'text', text } satisfies ContentBlock]));
       messages.push({
@@ -426,18 +514,23 @@ export function parseAntigravityTranscript(
       const blocks: ContentBlock[] = [];
       let hasThinking = false;
       let hasToolUse = false;
+      const annotatedTruncations = new Set<string>();
 
       if (typeof entry.thinking === 'string' && entry.thinking.trim()) {
-        blocks.push({ type: 'thinking', thinking: entry.thinking });
+        const thinkingFields = truncatedFields.includes('thinking') ? ['thinking'] : [];
+        if (thinkingFields.length > 0) annotatedTruncations.add('thinking');
+        blocks.push({ type: 'thinking', thinking: appendTruncationNote(entry.thinking, thinkingFields) });
         hasThinking = true;
       }
-      if (typeof entry.content === 'string' && entry.content.trim()) {
-        blocks.push({ type: 'text', text: entry.content });
+
+      const rawText = typeof entry.content === 'string' && entry.content.trim() ? entry.content : '';
+      const remainingTruncations = truncatedFields.filter(field => !annotatedTruncations.has(field));
+      if (rawText || remainingTruncations.length > 0) {
+        blocks.push({ type: 'text', text: appendTruncationNote(rawText, remainingTruncations) });
       }
 
-      const stepKey = typeof entry.step_index === 'number' && Number.isFinite(entry.step_index)
-        ? entry.step_index
-        : order;
+      const hasStepIndex = typeof entry.step_index === 'number' && Number.isFinite(entry.step_index);
+      const callPrefix = hasStepIndex ? `antigravity:${entry.step_index as number}` : `antigravity:line:${order}`;
       const rawCalls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
       const messageOrdinal = messages.length;
       rawCalls.forEach((rawCall, callIdx) => {
@@ -445,7 +538,8 @@ export function parseAntigravityTranscript(
         const call = rawCall as AntigravityToolCallEntry;
         const name = typeof call.name === 'string' ? call.name.trim() : '';
         if (!name) return;
-        const toolUseId = `antigravity:${stepKey}:${callIdx}`;
+        const nativeId = asNonEmptyString(call.id) ?? asNonEmptyString(call.tool_call_id) ?? asNonEmptyString(call.call_id);
+        const toolUseId = nativeId ?? `${callPrefix}:${callIdx}`;
         const input = unwrapAntigravityToolArgs(call.args);
         blocks.push({
           type: 'tool_use',
@@ -454,7 +548,7 @@ export function parseAntigravityTranscript(
           input,
         });
         hasToolUse = true;
-        pendingCalls.push({ id: toolUseId, name });
+        pendingCalls.push({ id: toolUseId, nativeId, name });
         toolCalls.push({
           session_id: sessionId,
           tool_name: name,
@@ -481,29 +575,33 @@ export function parseAntigravityTranscript(
       continue;
     }
 
-    if (RESULT_ENTRY_TYPES.has(entryType)) {
-      const matchedCall = takeMatchingPendingCall(pendingCalls, entryType);
-      const resultText = formatToolResultContent(entry);
-      const isError = entry.status === 'ERROR' || Boolean(typeof entry.error === 'string' && entry.error.trim());
-      const block: ContentBlock = {
-        type: 'tool_result',
-        ...(matchedCall ? { tool_use_id: matchedCall.id } : {}),
-        content: resultText,
-        is_error: isError,
-        ...(timestamp ? { timestamp } : {}),
-      };
-      const content = stripInlineImages(JSON.stringify([block]));
-      messages.push({
-        session_id: sessionId,
-        ordinal: messages.length,
-        role: 'user',
-        content,
-        timestamp,
-        has_thinking: 0,
-        has_tool_use: 0,
-        content_length: content.length,
-      });
-    }
+    const hasResultPayload =
+      typeof entry.content === 'string'
+      || (typeof entry.error === 'string' && entry.error.trim().length > 0)
+      || truncatedFields.length > 0;
+    if (!hasResultPayload) continue;
+
+    const matchedCall = takeMatchingPendingCall(pendingCalls, entry, entryType);
+    const resultText = formatToolResultContent(entry, truncatedFields);
+    const isError = entry.status === 'ERROR' || Boolean(typeof entry.error === 'string' && entry.error.trim());
+    const block: ContentBlock = {
+      type: 'tool_result',
+      ...(matchedCall ? { tool_use_id: matchedCall.id } : {}),
+      content: resultText,
+      is_error: isError,
+      ...(timestamp ? { timestamp } : {}),
+    };
+    const content = stripInlineImages(JSON.stringify([block]));
+    messages.push({
+      session_id: sessionId,
+      ordinal: messages.length,
+      role: 'user',
+      content,
+      timestamp,
+      has_thinking: 0,
+      has_tool_use: 0,
+      content_length: content.length,
+    });
   }
 
   if (messages.length === 0) return null;
@@ -515,6 +613,8 @@ export function parseAntigravityTranscript(
     startedAt,
     endedAt,
     userMessageCount,
+    hasTruncatedFields,
+    maxStepIndex,
     latestModel,
     contextUsedTokens,
   };

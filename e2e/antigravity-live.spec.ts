@@ -71,7 +71,7 @@ test.beforeAll(async () => {
     db.close();
   }
 
-  const rootTranscript = path.join(agrHome, 'brain', ROOT_ID, '.system_generated', 'logs', 'transcript.jsonl');
+  const rootTranscript = path.join(agrHome, 'brain', ROOT_ID, '.system_generated', 'logs', 'transcript_full.jsonl');
   fs.mkdirSync(path.dirname(rootTranscript), { recursive: true });
   fs.writeFileSync(rootTranscript, [
     JSON.stringify({
@@ -91,12 +91,13 @@ test.beforeAll(async () => {
       model: 'gemini-4-neon',
       thinking: 'Inspecting custom instruction paths first.',
       content: 'Checked instruction routing successfully.',
-      tool_calls: [{ name: 'read_file', args: { Path: '"/Users/example/Dev/sample-project/AGENTS.md"' } }],
+      tool_calls: [{ id: 'call-read-e2e', name: 'read_file', args: { Path: '"/Users/example/Dev/sample-project/AGENTS.md"' } }],
     }),
     JSON.stringify({
       step_index: 2,
       source: 'MODEL',
       type: 'GENERIC',
+      call_id: 'call-read-e2e',
       status: 'DONE',
       created_at: new Date((nowSecs - 10) * 1000).toISOString(),
       content: 'Read 42 lines from AGENTS.md.',
