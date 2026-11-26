@@ -6,10 +6,12 @@ function win(used: number, minutes = 300): QuotaMonitorWindow {
   return { used_percent: used, remaining_percent: 100 - used, resets_at: null, window_minutes: minutes };
 }
 
-function row(provider: 'claude' | 'codex', extra: Partial<QuotaMonitorData> = {}): QuotaMonitorData {
+function row(provider: QuotaMonitorData['provider'], extra: Partial<QuotaMonitorData> = {}): QuotaMonitorData {
+  const agentType: QuotaMonitorData['agent_type'] =
+    provider === 'claude' ? 'claude_code' : provider === 'antigravity' ? 'antigravity' : 'codex';
   return {
     provider,
-    agent_type: provider === 'claude' ? 'claude_code' : 'codex',
+    agent_type: agentType,
     status: 'available',
     source: null,
     updated_at: null,
@@ -30,10 +32,12 @@ describe('quota pill', () => {
     const entries = quotaPillEntries([
       row('claude', { primary: win(25), secondary: win(10, 10080) }),
       row('codex', { primary: win(2), secondary: win(70, 10080) }),
+      row('antigravity', { primary: win(6.5), secondary: win(30.93, 10080) }),
     ]);
     expect(entries.map(e => [e.label, e.remainingPercent, e.tone])).toEqual([
       ['Claude', 75, 'ok'],
       ['Codex', 30, 'warn'],
+      ['Antigravity', 69, 'ok'],
     ]);
   });
 

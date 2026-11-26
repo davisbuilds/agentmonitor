@@ -1290,7 +1290,11 @@ describe('GET /api/v2/monitor/stats', () => {
     assert.equal(body.tool_breakdown.exec_command, 1);
     assert.ok(Array.isArray(body.branches));
     assert.ok(Array.isArray(body.quota_monitor));
-    assert.equal(body.quota_monitor.length, 2);
+    assert.equal(body.quota_monitor.length, 3);
+    assert.deepEqual(
+      body.quota_monitor.map((row) => row.provider),
+      ['claude', 'codex', 'antigravity'],
+    );
     assert.deepEqual(body.usage_monitor, body.quota_monitor);
   });
 });

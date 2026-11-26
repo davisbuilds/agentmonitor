@@ -44,8 +44,9 @@ with accessible names and shows what is left of each provider's most-used window
 After a failed refresh, the last good reading stays visible in a muted style.
 The popover shows when the reading was taken and why the refresh failed.
 Snapshots are provider-native only:
-Codex reads local `codex app-server`, and Claude needs the statusline bridge;
-without one the provider renders as unavailable rather than estimated.
+Codex reads local `codex app-server`, while Claude and Antigravity use
+statusline bridges; without one a provider renders as unavailable rather than
+estimated.
 
 Model IDs read one way everywhere: as the vendor names the model, without a
 routing prefix, a long-context suffix, a Bedrock wrapper, or a release date
@@ -252,7 +253,7 @@ working directory belongs to, named after the repository root: subdirectories
 and worktrees in a worktree area (`.worktrees/`, `*-worktrees/`,
 `.claude/worktrees/`, `.codex/worktrees/`) count as their repository, also once
 removed. A directory outside any repository is named after itself, except scratch space (below); sessions that
-record no working directory (Codex OTEL-only, Antigravity) have no project. The
+record no working directory (Codex OTEL-only, Antigravity conversations without a workspace summary) have no project. The
 shared agent filter holds Claude as `claude`, as the session browser does;
 events call it `claude_code`, and every Analytics, Usage, Skills, and Quality
 read accepts either spelling, so one filter value narrows every sub-view. The

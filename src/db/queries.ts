@@ -1172,7 +1172,7 @@ export function getStatsForBroadcast(): Stats {
   return cachedBroadcastStats;
 }
 
-export type ProviderName = 'claude' | 'codex';
+export type ProviderName = 'claude' | 'codex' | 'antigravity';
 
 export interface ProviderQuotaWindow {
   used_percent: number;
@@ -1189,7 +1189,7 @@ export interface ProviderQuotaCredits {
 
 export interface ProviderQuotaSnapshot {
   provider: ProviderName;
-  agent_type: 'claude_code' | 'codex';
+  agent_type: 'claude_code' | 'codex' | 'antigravity';
   status: 'available' | 'unavailable' | 'error';
   source: string | null;
   updated_at: string | null;
@@ -1218,7 +1218,7 @@ interface ProviderQuotaWindowInput {
 
 export interface ProviderQuotaSnapshotInput {
   provider: ProviderName;
-  agent_type?: 'claude_code' | 'codex';
+  agent_type?: 'claude_code' | 'codex' | 'antigravity';
   status?: ProviderQuotaSnapshot['status'];
   source?: string | null;
   updated_at?: string | null;
@@ -1256,6 +1256,22 @@ const PROVIDER_DEFAULTS: Record<ProviderName, Omit<ProviderQuotaSnapshot, 'provi
   },
   codex: {
     agent_type: 'codex',
+    status: 'unavailable',
+    source: null,
+    updated_at: null,
+    account_label: null,
+    plan_type: null,
+    limit_id: null,
+    limit_name: null,
+    error_message: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+    stale: false,
+    windows_observed_at: null,
+  },
+  antigravity: {
+    agent_type: 'antigravity',
     status: 'unavailable',
     source: null,
     updated_at: null,
@@ -1507,7 +1523,7 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
     FROM provider_quotas
   `).all() as Array<{
     provider: ProviderName;
-    agent_type: 'claude_code' | 'codex';
+    agent_type: 'claude_code' | 'codex' | 'antigravity';
     status: ProviderQuotaSnapshot['status'];
     source: string | null;
     updated_at: string | null;
@@ -1530,7 +1546,7 @@ export function getProviderQuotas(): ProviderQuotaSnapshot[] {
 
   const byProvider = new Map(rows.map((row) => [row.provider, row]));
 
-  return (['claude', 'codex'] as const).map((provider) => {
+  return (['claude', 'codex', 'antigravity'] as const).map((provider) => {
     const row = byProvider.get(provider);
     if (!row) {
       return { provider, ...PROVIDER_DEFAULTS[provider] };
