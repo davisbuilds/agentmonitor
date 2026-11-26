@@ -38,11 +38,6 @@ interface ExistingAntigravityProjectionRow {
   context_window_tokens: number | null;
 }
 
-/**
- * Fill fields missing from an Antigravity SQLite parse using the existing
- * browsing_sessions row (such as statusline-supplied project, title, or
- * context occupancy when conversation_summaries.db or gen_metadata is absent).
- */
 export function preserveAntigravitySessionMetadata(
   db: Database.Database,
   parsed: ParsedSession,
