@@ -1,7 +1,6 @@
-// WHY: The public descriptors define the envelope; private nested Cortex fields need fixture
-// evidence. Provenance is recorded in docs/specs/baselines/antigravity-proto-fieldmap.md.
+// WHY: The public and recovered private descriptors pin the Antigravity CLI envelope and
+// accounting schemas. Provenance is recorded in docs/specs/baselines/antigravity-proto-fieldmap.md.
 
-/** google.cloud.aiplatform.master.UsageMetadata — token counts (all int32). */
 export const USAGE_METADATA_FIELDS = {
   promptTokenCount: 1,
   candidatesTokenCount: 2,
@@ -13,39 +12,37 @@ export const USAGE_METADATA_FIELDS = {
 
 // WHY: Google's prompt token count already includes its cached subset.
 
-// WHY: The private descriptor is unavailable. These field numbers were checked against 21 usage
-// records; field 3 equaled fields 9 and 10 combined in every one.
-
-/** gen_metadata blob wrapper → CortexGeneratorMetadata at field 1. */
 export const GEN_METADATA_WRAPPER_FIELD = 1;
 
-/** CortexGeneratorMetadata (the per-generation record). */
 export const GENERATOR_METADATA_FIELDS = {
   usage: 4,
+  chatStartMetadata: 9,
   model: 19,
   modelDisplay: 21,
-  timing: 9,
+  modelFull: 22,
 } as const;
 
-/**
- * Field of the `timing` sub-message holding a google.protobuf.Timestamp
- * { seconds(1), nanos(2) }. Empirically pinned 2026-09-23 against all 71 local
- * generation records: present in every one, increasing across a session's
- * generations, and equal to the second of its planner_response step.
- */
-export const GENERATOR_TIMING_TIMESTAMP_FIELD = 4;
+export const CHAT_START_METADATA_FIELDS = {
+  createdAt: 4,
+} as const;
 
-/** CortexUsage sub-message (empirically pinned). All int varints. */
 export const CORTEX_USAGE_FIELDS = {
-  systemPromptTokens: 1,
+  modelEnum: 1,
   inputTokens: 2,
   outputTokens: 3,
-  cachedTokens: 5,
+  cacheWriteTokens: 4,
+  cacheReadTokens: 5,
+  messageId: 7,
   thinkingTokens: 9,
   answerTokens: 10,
+  providerAssignedMessageId: 12,
 } as const;
 
-/** gemini_coder.Step envelope (trajectory.proto). */
+export const PLANNER_RESPONSE_FIELDS = {
+  messageId: 6,
+  providerAssignedMessageId: 15,
+} as const;
+
 export const STEP_FIELDS = {
   type: 1, // WHY: The step enum and the protobuf oneof use independent numbering.
   status: 4,
@@ -53,16 +50,10 @@ export const STEP_FIELDS = {
   error: 31,
   subtrajectory: 6,
   taskDetails: 148,
+  customExtensions: 158,
+  genericStep: 159,
 } as const;
 
-/**
- * Step-kind discriminator: the `oneof step` payload field number in gemini_coder.Step.
- * 120 kinds. Read the kind from whichever oneof field is PRESENT in a decoded
- * `step_payload` — NOT from the `steps.step_type` column (that is the CortexStepType
- * enum, a different numbering). Verified against real rows: step_type 14→user_input
- * (oneof 19), 15→planner_response (20), 23→checkpoint (30), 90→ephemeral_message
- * (103), 98→conversation_history (111).
- */
 export const STEP_PAYLOAD_KINDS: Record<number, string> = {
   7: 'dummy',
   8: 'plan_input',
@@ -184,4 +175,6 @@ export const STEP_PAYLOAD_KINDS: Record<number, string> = {
   152: 'rpc_action',
   153: 'cloudsql_execute_sql',
   154: 'ask_question',
+  156: 'directory_rules',
+  157: 'tool_search',
 };

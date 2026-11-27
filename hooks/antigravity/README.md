@@ -79,7 +79,12 @@ advance ahead of a lagging transcript, trailing unflushed steps preserve `ended_
 as summary placeholders until the transcript flushes.
 
 Billing token and cost estimates are imported separately from SQLite `gen_metadata`
-via `pnpm cli -- import --source antigravity` (see
-`docs/specs/2026-11-25-antigravity-parity-investigation.md` for the tracked Slice 1
-accounting fix); transcript token fields feed display-only `context_used_tokens`
-fallback and never create usage or cost rows.
+(`ModelUsageStats`: input, output, cache write, cache read, and informational thinking
+tokens, without adding the field-1 model enum) via
+`pnpm cli -- import --source antigravity`, with per-generation timestamps recovered
+from `chat_start_metadata.created_at` or unique `planner_response` message-ID joins
+(`timestamp_source` provenance in `metadata`; unattributed generations keep
+`client_timestamp` unset). Transcript token fields feed display-only
+`context_used_tokens` fallback and never create usage or cost rows. Historical repair
+of pre-Slice 1 imported rows and shared WAL snapshot reads remain tracked in Slice 2 of
+`docs/specs/2026-11-25-antigravity-parity-investigation.md`.

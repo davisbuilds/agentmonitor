@@ -86,20 +86,21 @@ test('parseAntigravityFile: steps map to the taxonomy (user_prompt, tool_use, ge
   assert.ok(generic, 'unmapped step ingested as generic response');
 });
 
-test('parseAntigravityFile: llm_response carries cache-net tokens + cost from CortexGeneratorMetadata', () => {
+test('parseAntigravityFile: llm_response carries cache-net tokens + cost from ModelUsageStats without modelEnum inflation', () => {
   const events = parseAntigravityFile(buildFixture('33333333-0000-0000-0000-000000000000'));
   const llm = events.find((e) => e.event_type === 'llm_response');
   assert.ok(llm, 'a generation produced an llm_response');
   assert.equal(llm!.model, 'gemini-pro-default');
-  assert.equal(llm!.tokens_in, 21016);
+  assert.equal(llm!.tokens_in, 20000);
   assert.equal(llm!.tokens_out, 3000);
   assert.equal(llm!.cache_read_tokens, 8000);
+  assert.equal(llm!.cache_write_tokens, 0);
   assert.equal((llm!.metadata as { thoughts_tokens: number }).thoughts_tokens, 2500);
   assert.ok(llm!.cost_usd !== undefined && llm!.cost_usd > 0, 'priced (gemini-pro-default)');
   assert.equal(llm!.cost_source, 'estimated', 'priced from our tables, not reported by Antigravity');
 });
 
-test('parseAntigravityFile: each generation is stamped and priced at its own time', () => {
+test('parseAntigravityFile: each generation is stamped and priced at its own time, leaving unattributed time undefined', () => {
   // WHY: Pricing follows each generation’s timestamp. One session can straddle the end of a
   // promotion.
   const opened = Date.UTC(2026, 11, 31, 23, 59) / 1000;
@@ -123,14 +124,19 @@ test('parseAntigravityFile: each generation is stamped and priced at its own tim
   assert.deepEqual(llm.map((e) => e.client_timestamp), [
     new Date(opened * 1000 + 250).toISOString(),
     new Date(second * 1000 + 500).toISOString(),
-    openedIso,
+    undefined,
   ]);
+  assert.deepEqual(
+    llm.map((e) => (e.metadata as { timestamp_source: string }).timestamp_source),
+    ['generation_created_at', 'generation_created_at', 'unavailable'],
+  );
 
-  const tokens = { input: 1020 + 1_000_000, output: 0, cacheRead: 0 };
+  const tokens = { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 };
   const promo = pricingRegistry.calculate('gemini-3.8-flash', tokens, openedIso);
   const list = pricingRegistry.calculate('gemini-3.8-flash', tokens, new Date(second * 1000).toISOString());
   assert.notEqual(promo, list, 'the fixture straddles a rate change');
-  assert.deepEqual(llm.map((e) => e.cost_usd), [promo, list, promo]);
+  assert.equal(llm[0].cost_usd, promo);
+  assert.equal(llm[1].cost_usd, list);
 });
 
 test('discoverAntigravityLogs: finds conversation DBs nested under subdirectories', () => {
@@ -161,7 +167,7 @@ test('stepKindToEvent: explicit and generic mappings', () => {
 
 test('parseAntigravityFile: prices Gemini 4 effort-suffixed CLI IDs directly from gen_metadata', () => {
   const preCutoverSec = Date.UTC(2026, 10, 25, 12, 0) / 1000;
-  const usage = { 1: 1000, 2: 19_000, 3: 10_000, 5: 40_000, 9: 2000, 10: 8000 };
+  const usage = { 1: 1531, 2: 20_000, 3: 10_000, 5: 40_000, 9: 2000, 10: 8000 };
   const cases: Array<[string, number]> = [
     ['gemini-4-neon-xhigh', 0.216],
     ['gemini-4-neon-high', 0.216],

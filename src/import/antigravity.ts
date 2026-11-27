@@ -12,6 +12,7 @@ import {
   decodeGeneratorMetadata,
   deriveBillingTokens,
   decodeStepTimestampMs,
+  type GeneratorMetadata,
 } from './antigravity/proto.js';
 import { readAntigravityConversationSummary } from './antigravity/summary.js';
 
@@ -37,7 +38,7 @@ const USER_PROMPT_KINDS = new Set(['user_input', 'plan_input', 'ask_question']);
 const RESPONSE_KINDS = new Set([
   'planner_response', 'suggested_responses', 'notify_user', 'ephemeral_message',
   'system_message', 'conversation_history', 'critique', 'findings',
-  'proposal_feedback', 'manager_feedback', 'code_acknowledgement',
+  'proposal_feedback', 'manager_feedback', 'code_acknowledgement', 'directory_rules',
 ]);
 const FILE_CHANGE_KINDS = new Set([
   'write_to_file', 'file_change', 'code_action', 'propose_code', 'edit_notebook',
@@ -55,7 +56,7 @@ const TOOL_KINDS = new Set([
   'install_applet_dependencies', 'install_applet_package', 'restart_dev_server',
   'generate_image', 'open_browser_url', 'set_up_firebase', 'deploy_firebase',
   'set_up_cloudsql', 'mcp_tool', 'agency_tool_call', 'invoke_subagent',
-  'rpc_action', 'workspace_api', 'retrieve_memory', 'retrieve_content',
+  'rpc_action', 'workspace_api', 'retrieve_memory', 'retrieve_content', 'tool_search',
 ]);
 
 /** Map a step kind to an event type + optional tool name. Unmapped → generic `response`. */
@@ -92,6 +93,52 @@ function eventId(sessionId: string, tag: string): string {
 
 const iso = (ms: number | undefined): string | undefined => (ms === undefined ? undefined : new Date(ms).toISOString());
 
+type TimestampSource =
+  | 'generation_created_at'
+  | 'planner_message_id'
+  | 'planner_provider_message_id'
+  | 'unavailable';
+
+function addPlannerMatch(
+  index: Map<string, Array<number | undefined>>,
+  id: string | undefined,
+  tsMs: number | undefined,
+): void {
+  if (!id) return;
+  const list = index.get(id);
+  if (list) list.push(tsMs);
+  else index.set(id, [tsMs]);
+}
+
+function uniquePlannerTimestamp(
+  index: Map<string, Array<number | undefined>>,
+  id: string | undefined,
+): number | undefined {
+  if (!id) return undefined;
+  const matches = index.get(id);
+  if (!matches || matches.length !== 1) return undefined;
+  return matches[0];
+}
+
+function resolveGenerationTimestamp(
+  gm: GeneratorMetadata,
+  plannerByMessageId: Map<string, Array<number | undefined>>,
+  plannerByProviderId: Map<string, Array<number | undefined>>,
+): { timestampMs?: number; timestampSource: TimestampSource } {
+  if (gm.timestampMs !== undefined) {
+    return { timestampMs: gm.timestampMs, timestampSource: 'generation_created_at' };
+  }
+  const byMessageId = uniquePlannerTimestamp(plannerByMessageId, gm.messageId);
+  if (byMessageId !== undefined) {
+    return { timestampMs: byMessageId, timestampSource: 'planner_message_id' };
+  }
+  const byProviderId = uniquePlannerTimestamp(plannerByProviderId, gm.providerAssignedMessageId);
+  if (byProviderId !== undefined) {
+    return { timestampMs: byProviderId, timestampSource: 'planner_provider_message_id' };
+  }
+  return { timestampSource: 'unavailable' };
+}
+
 export function parseAntigravityFile(
   filePath: string,
   options?: { from?: Date; to?: Date },
@@ -112,7 +159,16 @@ export function parseAntigravityFile(
     if (steps.length === 0 && genRows.length === 0) return events;
 
     const stepTs = steps.map((s) => (s.metadata ? decodeStepTimestampMs(s.metadata) : undefined));
+    const stepEnvelopes = steps.map((s) => decodeStepEnvelope(s.step_payload));
     const firstTs = stepTs.find((t) => t !== undefined);
+
+    const plannerByMessageId = new Map<string, Array<number | undefined>>();
+    const plannerByProviderId = new Map<string, Array<number | undefined>>();
+    stepEnvelopes.forEach((env, i) => {
+      if (env.kind !== 'planner_response' || !env.plannerIds) return;
+      addPlannerMatch(plannerByMessageId, env.plannerIds.messageId, stepTs[i]);
+      addPlannerMatch(plannerByProviderId, env.plannerIds.providerAssignedMessageId, stepTs[i]);
+    });
 
     const generations = genRows.map((g) => decodeGeneratorMetadata(g.data));
     const sessionModel = generations.find((g) => g.model)?.model;
@@ -139,7 +195,7 @@ export function parseAntigravityFile(
     });
 
     steps.forEach((s, i) => {
-      const env = decodeStepEnvelope(s.step_payload);
+      const env = stepEnvelopes[i];
       const { type, toolName } = stepKindToEvent(env.kind);
       events.push({
         event_id: eventId(sessionId, `step:${s.idx}`),
@@ -162,10 +218,21 @@ export function parseAntigravityFile(
       if (!gm.usage) return;
       const b = deriveBillingTokens(gm.usage);
       const model = gm.model ?? sessionModel;
-      // WHY: Each generation can cross a pricing boundary even within one session.
-      const at = iso(gm.timestampMs ?? firstTs);
+      // WHY: Each generation can cross a pricing boundary even within one session; unattributed
+      // generations keep client_timestamp undefined so they stay out of dated windows.
+      const { timestampMs, timestampSource } = resolveGenerationTimestamp(gm, plannerByMessageId, plannerByProviderId);
+      const at = iso(timestampMs);
       const cost = model
-        ? pricingRegistry.calculate(model, { input: b.tokensIn, output: b.tokensOut, cacheRead: b.cacheReadTokens }, at)
+        ? pricingRegistry.calculate(
+            model,
+            {
+              input: b.tokensIn,
+              output: b.tokensOut,
+              cacheRead: b.cacheReadTokens,
+              cacheWrite: b.cacheWriteTokens,
+            },
+            at,
+          )
         : null;
       events.push({
         event_id: eventId(sessionId, `gen:${i}`),
@@ -176,12 +243,17 @@ export function parseAntigravityFile(
         tokens_in: b.tokensIn,
         tokens_out: b.tokensOut,
         cache_read_tokens: b.cacheReadTokens,
+        cache_write_tokens: b.cacheWriteTokens,
         model,
         project: summaryProject,
         cost_usd: cost ?? undefined,
         cost_source: cost != null ? 'estimated' : undefined,
         client_timestamp: at,
-        metadata: { _source: 'antigravity_db', thoughts_tokens: b.thoughtsTokens },
+        metadata: {
+          _source: 'antigravity_db',
+          thoughts_tokens: b.thoughtsTokens,
+          timestamp_source: timestampSource,
+        },
         source: 'import',
       });
     });

@@ -114,8 +114,10 @@ test('decodeGeneratorMetadata: extracts model + CortexUsage from the real gen_me
   const decoded = decodeGeneratorMetadata(blob);
   assert.equal(decoded.model, 'gemini-pro-default');
   assert.ok(decoded.usage);
+  assert.equal(decoded.usage!.modelEnum, 1016);
   assert.equal(decoded.usage!.inputTokens, 20000);
-  assert.equal(decoded.usage!.cachedTokens, 8000);
+  assert.equal(decoded.usage!.cacheWriteTokens, 0);
+  assert.equal(decoded.usage!.cacheReadTokens, 8000);
   assert.equal(decoded.usage!.thinkingTokens, 2500);
   assert.equal(
     decoded.usage!.outputTokens,
@@ -123,16 +125,18 @@ test('decodeGeneratorMetadata: extracts model + CortexUsage from the real gen_me
   );
 });
 
-test('deriveBillingTokens: honors the cache-inclusive invariant (in + cache additive, non-overlapping)', () => {
+test('deriveBillingTokens: excludes modelEnum and honors cache-inclusive invariant', () => {
   const billing = deriveBillingTokens({
-    systemPromptTokens: 1016,
+    modelEnum: 1016,
     inputTokens: 20000,
     outputTokens: 3000,
-    cachedTokens: 8000,
+    cacheWriteTokens: 500,
+    cacheReadTokens: 8000,
     thinkingTokens: 2500,
     answerTokens: 500,
   });
-  assert.equal(billing.tokensIn, 21016);
+  assert.equal(billing.tokensIn, 20000);
+  assert.equal(billing.cacheWriteTokens, 500);
   assert.equal(billing.cacheReadTokens, 8000);
   assert.equal(billing.tokensOut, 3000);
   assert.equal(billing.thoughtsTokens, 2500);

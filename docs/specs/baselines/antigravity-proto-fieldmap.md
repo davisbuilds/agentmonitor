@@ -1,5 +1,5 @@
 ---
-date: 2026-07-01
+date: 2026-11-27
 topic: antigravity-cli-import
 stage: baseline
 status: reference
@@ -14,22 +14,24 @@ descriptors used by the shipped importer so they are not reverse-engineered at r
 
 ## Provenance
 
-Extracted from the shipped Antigravity `language_server` Go binary
-(`/Applications/Antigravity.app/Contents/Resources/bin/language_server`, arm64)
-using [`protodump`](https://github.com/arkadiyt/protodump), which reconstructs
-embedded `FileDescriptorProto`s:
+Extracted from both the Antigravity desktop `language_server` binary
+(`/Applications/Antigravity.app/Contents/Resources/bin/language_server`, arm64) using
+[`protodump`](https://github.com/arkadiyt/protodump) and the Antigravity CLI `agy`
+binary (`command -v agy`, arm64) by scanning embedded serialized `FileDescriptorProto`
+records:
 
 ```bash
 go install github.com/arkadiyt/protodump/cmd/protodump@latest
 protodump -file "/Applications/Antigravity.app/Contents/Resources/bin/language_server" -output ./protos
-# 76 .proto files recovered. Key files:
-#   third_party/gemini_coder/proto/trajectory.proto        (Step envelope + taxonomy)
-#   google/cloud/aiplatform/master/usage_metadata.proto    (token counts)
+# Key files recovered across language_server and agy:
+#   third_party/gemini_coder/proto/trajectory.proto          (Step envelope + taxonomy)
+#   third_party/jetski/cortex_pb/cortex.proto                (ChatModelMetadata, ChatStartMetadata, ContextWindowMetadata, CortexStepPlannerResponse)
+#   third_party/jetski/codeium_common_pb/codeium_common.proto (ModelUsageStats)
+#   google/cloud/aiplatform/master/usage_metadata.proto      (Google UsageMetadata)
 ```
 
-The typed subset is captured in the Appendix below; it lands in
-`src/import/antigravity/fieldmap.ts` in Task 2, alongside the decoder that consumes
-it (an unconsumed constants module would trip the dead-code gate).
+The typed subset consumed by the importer lives in `src/import/antigravity/fieldmap.ts`
+(unused exported constants trip `tests/codebase/dead-code.test.ts`).
 
 ## SQLite → proto mapping
 
@@ -39,49 +41,60 @@ is the FULL serialized `gemini_coder.Step` message** — not just the oneof payl
 Verified against real rows: a `step_payload` decodes to top-level fields
 `{1: type, 4: status, 5: metadata, <oneof-field>: payload}`, where field 1 equals the
 `step_type` column. So the decoder reads `step_payload` as the whole envelope; the
-decomposed columns are redundant with fields already inside it. `gen_metadata` holds
-the per-generation record (model + usage).
+decomposed columns are redundant with fields already inside it. `steps.metadata`
+(`CortexStepMetadata`) carries `created_at` at field `1` (`google.protobuf.Timestamp`
+`{ seconds: 1, nanos: 2 }`). `gen_metadata` holds the per-generation record.
 
-## Real token accounting — `CortexGeneratorMetadata` (empirically pinned)
+## Real token accounting — `CortexStepGeneratorMetadata` & `ModelUsageStats` (descriptor-pinned)
 
-The pinned Google `UsageMetadata` (below) turned out to be the **request generation
-config** (e.g. `max_output_tokens=8192`, `thoughts=0`), **not** the persisted usage.
-The real per-turn accounting is a **private `CortexGeneratorMetadata`** message (proto
-`cortex_generator_metadata.proto` — not recoverable by protodump). Its field *names*
-are in the binary; the **field numbers were pinned empirically** against **all 20
-local usage records** (`gen_metadata.data`), with the TS decoder re-validated on the
-same set (`out == thinking + answer` holds 20/20; the cache-growth session
-`ab9f2418` confirms field 2 is non-cached input).
+The Google `UsageMetadata` schema (below) is not the persisted per-generation billing
+record in Antigravity CLI databases. The persisted usage lives inside
+`gen_metadata.data` → field **1** (`ChatModelMetadata`, `oneof metadata` on
+`exa.cortex_pb.CortexStepGeneratorMetadata`):
 
-Location: `gen_metadata.data` → field **1** (`CortexGeneratorMetadata`) → usage at
-field **4**; model at field **19** (`gemini-pro-default`) / **21** (display).
+- `ChatModelMetadata.usage` (field **4**): `.exa.codeium_common_pb.ModelUsageStats`
+- `ChatModelMetadata.chat_start_metadata` (field **9**): `.exa.cortex_pb.ChatStartMetadata`
+- `ChatModelMetadata.response_model` (field **19**), `model_display_name` (field **21**), `response_model_full` (field **22**)
 
-| CortexUsage field | # | Evidence |
+| `ModelUsageStats` field (`gen_metadata` `1 → 4`) | # | Type / Meaning |
 |---|---|---|
-| `system_prompt_tokens` | 1 | constant per model (1016 pro-default / 1020 flash) |
-| `input_tokens` (non-cached) | 2 | large/variable; **shrinks as field 5 grows** within a session |
-| `output_tokens` (total) | 3 | **== field 9 + field 10 in every record** |
-| `cached_tokens` | 5 | intermittent, ~8k round prefix; grows across turns |
-| `thinking_tokens` | 9 | reasoning; ≤ field 3 |
-| `answer_tokens` | 10 | field 3 − field 9 |
+| `model` | 1 | `.exa.codeium_common_pb.Model` enum (e.g. `1016`, `1020`, `1071`, `1318`, `1531`, `1532`) — non-billing metadata, **never** added to `tokens_in` or `context_used_tokens` |
+| `input_tokens` | 2 | `uint64` — uncached full-rate input tokens |
+| `output_tokens` | 3 | `uint64` — total output tokens (inclusive of thinking; `3 === 9 + 10` verified across all 853 local records) |
+| `cache_write_tokens` | 4 | `uint64` — cache-creation tokens |
+| `cache_read_tokens` | 5 | `uint64` — cached input tokens (additive, non-overlapping with `input_tokens`) |
+| `message_id` | 7 | `string` — native message ID matching `CortexStepPlannerResponse.message_id` (`20 → 6`) |
+| `thinking_output_tokens` | 9 | `uint64` — reasoning subset of `output_tokens` |
+| `response_output_tokens` | 10 | `uint64` — answer subset of `output_tokens` |
+| `provider_assigned_message_id` | 12 | `string` — provider response ID matching `CortexStepPlannerResponse.provider_assigned_message_id` (`20 → 15`) |
 
-**Billing (`deriveBillingTokens`):** `tokens_in = system + input` (both full-rate;
-they are distinct buckets), `cache_read_tokens = cached` (additive, non-overlapping —
-honors the invariant), `tokens_out = output` (includes reasoning), `thoughts =
-thinking` (informational lane). Field numbers live in `fieldmap.ts`
-(`CORTEX_USAGE_FIELDS`); the decoder is `proto.ts::decodeGeneratorMetadata`.
+**Billing (`deriveBillingTokens`):** `tokensIn = inputTokens` (field 2 only),
+`tokensOut = outputTokens` (field 3, inclusive of thinking),
+`cacheWriteTokens = cacheWriteTokens` (field 4),
+`cacheReadTokens = cacheReadTokens` (field 5), and
+`thoughtsTokens = thinkingTokens` (field 9, informational lane).
+`antigravity-sessions.ts` computes prompt context occupancy from `tokensIn + cacheReadTokens + cacheWriteTokens` (never `modelEnum`).
 
-**Generation time (pinned 2026-09-23):** `CortexGeneratorMetadata` field **9** →
-field **4** is a `google.protobuf.Timestamp` (`seconds` 1, `nanos` 2). It was present
-in all 71 local generation records, increases across each session's generations,
-and matches the second of the corresponding `planner_response` step. The importer
-stamps and prices each `llm_response` at this time, falling back to the session's
-first step time when it is absent.
+### Generation timestamp recovery & provenance
+
+Each generation in `gen_metadata` resolves its timestamp in strict priority order:
+1. `ChatStartMetadata.created_at` (`9 → 4`, `google.protobuf.Timestamp`) → `timestamp_source: 'generation_created_at'` (present in 71/853 local records, June–August 2026).
+2. Unique match on `ModelUsageStats.message_id` (`4 → 7`) against `CortexStepPlannerResponse.message_id` (`step_payload` oneof `20 → 6`) in the same conversation → `timestamp_source: 'planner_message_id'` (782/853 local records; duplicate matches refused).
+3. Unique match on `ModelUsageStats.provider_assigned_message_id` (`4 → 12`) against `CortexStepPlannerResponse.provider_assigned_message_id` (`step_payload` oneof `20 → 15`) in the same conversation → `timestamp_source: 'planner_provider_message_id'` (duplicate matches refused).
+4. Unattributed → `client_timestamp: undefined`, `timestamp_source: 'unavailable'` (never falls back to the session's first step timestamp).
+
+### `ContextWindowMetadata` validation (`9 → 10`)
+
+`ChatStartMetadata.context_window_metadata` (field **10**) carries
+`estimated_tokens_used` (field **1**) and `max_context_tokens` (field **4**).
+Local corpus validation across 825 generations confirmed neither should replace the
+shipped occupancy numerator or denominator:
+- `estimated_tokens_used` is a pre-request heuristic (163 vs 18,241 actual prompt tokens on older `gemini-3.6-flash` turns; ~5k–7k above actual on Gemini 4 turns). Actual prompt occupancy comes from `input_tokens + cache_read_tokens + cache_write_tokens`.
+- `max_context_tokens` holds CLI truncation budgets (`128,000` for `gemini-pro-default`, `256,000` for `gemini-3.6-flash` / `3.8-flash`, `512,000` for `gemini-4-neon` / `gemini-4-hydrogen`), whereas the `agy` statusline bridge reports the underlying `1,048,576`-token model window (`ANTIGRAVITY_DEFAULT_CONTEXT_WINDOW`).
 
 ## Pinned: token usage schema — `google.cloud.aiplatform.master.UsageMetadata`
 
-Authoritative schema (used for the request config in practice; see the
-course-correction above). Numbers are version-durable:
+Authoritative public schema (not the persisted per-turn billing source in CLI DBs; kept for `decodeGoogleUsage`):
 
 | Field | # |
 |---|---|
@@ -92,101 +105,65 @@ course-correction above). Numbers are version-durable:
 | `tool_use_prompt_token_count` | 13 |
 | `thoughts_token_count` | 14 |
 
-**Cache-inclusive invariant (resolves spec Open Question #2):** `prompt_token_count`
-*includes* cached tokens. Store `tokens_in = prompt_token_count −
+**Cache-inclusive invariant:** `prompt_token_count` *includes* cached tokens. Store `tokens_in = prompt_token_count −
 cached_content_token_count`, `cache_read_tokens = cached_content_token_count`,
 `tokens_out = candidates_token_count`. `thoughts_token_count` is tracked as its own
-lane. Skipping the subtraction double-bills the cached bulk at full input rate
-(~10×) — the same trap the pricing engine already guards for OpenAI/Codex.
+lane.
 
 ## Pinned: step envelope — `gemini_coder.Step` (`trajectory.proto`)
 
 | Field | # | Type |
 |---|---|---|
-| `type` | 1 | `CortexStepType` (enum; mirrors payload-kind number) |
+| `type` | 1 | `CortexStepType` (enum; independent numbering from oneof kind) |
 | `status` | 4 | `CortexStepStatus` |
-| `metadata` | 5 | `CortexStepMetadata` (carries model + usage) |
-| `error` | 31 | `CortexErrorDetails` |
+| `metadata` | 5 | `CortexStepMetadata` (`created_at` at `1 → 1`/`2`) |
 | `subtrajectory` | 6 | `gemini_coder.Trajectory` |
+| `error` | 31 | `CortexErrorDetails` |
+| `requested_interaction` | 56 | `exa.cortex_pb.RequestedInteraction` |
+| `permissions` | 133 | `exa.cortex_pb.TrajectoryPermissions` |
+| `completed_interactions` | 147 | `repeated exa.cortex_pb.CompletedInteraction` |
 | `task_details` | 148 | `gemini_coder.TaskDetails` |
+| `custom_extensions` | 158 | `exa.cortex_pb.CustomExtensions` |
+| `generic_step` | 159 | `gemini_coder.Step` |
 
 ## Pinned: step-kind taxonomy — the `oneof step` payload field numbers
 
-120 kinds (full map in the Appendix / Task 2 `fieldmap.ts`). The **step kind is the
+122 kinds in `src/import/antigravity/fieldmap.ts` (`STEP_PAYLOAD_KINDS`, including CLI
+additions `156: 'directory_rules'` and `157: 'tool_search'`). The **step kind is the
 `oneof step` payload field that is present** inside a decoded `step_payload` — this is
 the reliable discriminator, and `decodeStepEnvelope` reads it that way.
 
 > **Correction (PR #44 review):** an earlier draft claimed the oneof field number
 > *equals* the `steps.step_type` column. It does **not**. `step_type` is the
-> `CortexStepType` enum (its own numbering, in the un-recovered `cortex.proto`); the
+> `CortexStepType` enum (its own numbering in `cortex.proto`); the
 > present oneof field is a different number. Verified against real rows:
 > `step_type 14 → user_input (oneof 19)`, `15 → planner_response (20)`,
 > `23 → checkpoint (30)`, `90 → ephemeral_message (103)`, `98 → conversation_history
-> (111)`. The matching digits in the original claim (14/15/23/90/98) were a
-> coincidence with unrelated oneof numbers. Do **not** map kinds from `step_type`;
-> map from the present oneof field.
+> (111)`. Do **not** map kinds from `step_type`; map from the present oneof field.
 
-Representative kinds relevant to the event taxonomy (final mapping is Task 3):
+Representative kinds relevant to the event taxonomy:
 
-| # | kind | likely event category |
+| # | kind | event category |
 |---|---|---|
-| 8 | `plan_input` / 19 `user_input` | prompt |
-| 20 | `planner_response` | llm_response |
-| 28 | `run_command` / 37 `command_status` | tool_use |
-| 10 | `code_action` / 23 `write_to_file` / 98 `file_change` | tool_use |
+| 8 | `plan_input` / 19 `user_input` / 154 `ask_question` | prompt |
+| 20 | `planner_response` / 156 `directory_rules` | response (`llm_response` comes from `gen_metadata`) |
+| 28 | `run_command` / 37 `command_status` / 157 `tool_search` | tool_use |
+| 10 | `code_action` / 23 `write_to_file` / 98 `file_change` | file_change |
 | 13 | `grep_search` / 14 `view_file` / 15 `list_directory` / 85 `code_search` | tool_use |
-| 47 | `mcp_tool` / 116 `agency_tool_call` | tool_use |
-| 12 | `finish` / 93 `task_boundary` | lifecycle |
+| 47 | `mcp_tool` / 116 `agency_tool_call` / 143 `invoke_subagent` | tool_use |
+| 12 | `finish` | session_end |
 | 24 | `error_message` | error |
-| 30 | `checkpoint` / 103 `ephemeral_message` / 114 `system_message` | lifecycle/meta |
-
-## NOT pinned (fixture-verified in Task 2)
-
-The private `exa.cortex_pb` file (`third_party/jetski/cortex_pb/cortex.proto`) is
-present in the binary but **not recovered by protodump's scanner** (neither written
-nor errored — a scanner limitation, not a write failure). So these internals are
-decoded empirically against fixtures, cross-checked with the plaintext strings we
-know survive:
-
-- Per-kind payload message fields (e.g. `CortexStepRunCommand` command/output) —
-  needed for tool args/outputs and transcript text in Task 3. (Token usage + model +
-  step taxonomy are all pinned; only the inside of each step payload is opaque.)
-
-This partial-pin is intentional and honest: the cost-bearing surface (token counts +
-step taxonomy + envelope) is descriptor-pinned; only private payload internals ride
-fixtures.
+| 30 | `checkpoint` | plan_step |
 
 ## Regenerating
 
-Re-run the `protodump` command above after any Antigravity update, then regenerate
-the Appendix map (parse the `oneof step` block of `trajectory.proto`) to refresh
-`fieldmap.ts`. Google's `UsageMetadata`
-numbers are stable; the `gemini_coder`/`exa.cortex_pb` envelope may shift across
-versions — the Task 2 fixture test is the drift alarm.
+Re-run `protodump` on desktop binaries or scan `agy` for embedded `FileDescriptorProto`
+blobs after any Antigravity update, then refresh `src/import/antigravity/fieldmap.ts`
+and the Appendix below.
 
-## Appendix: generated `fieldmap.ts` (lands in Task 2 with the decoder)
-
-This module is captured here for review but intentionally **not** committed to
-`src/` yet — an unconsumed constants module trips the repo's dead-code gate
-(`tests/codebase/dead-code.test.ts`). Task 2's decoder imports it, at which point
-it moves to `src/import/antigravity/fieldmap.ts`.
+## Appendix: `src/import/antigravity/fieldmap.ts`
 
 ```ts
-// Antigravity CLI protobuf field map — descriptor-pinned.
-//
-// Source of truth: FileDescriptorProtos extracted from the Antigravity
-// `language_server` binary via `protodump` (see
-// docs/specs/baselines/antigravity-proto-fieldmap.md for provenance + regen).
-// The Step envelope + step-kind taxonomy come from
-// third_party/gemini_coder/proto/trajectory.proto; token fields from
-// google/cloud/aiplatform/master/usage_metadata.proto (Google's stable public schema).
-//
-// NOT pinned here (private exa.cortex_pb payload internals — cortex.proto is
-// present in the binary but not recoverable by protodump's scanner): the
-// per-kind payload message fields and CortexStepMetadata's model/usage nesting.
-// Those are fixture-verified in the decoder (Task 2), not guessed.
-
-/** google.cloud.aiplatform.master.UsageMetadata — token counts (all int32). */
 export const USAGE_METADATA_FIELDS = {
   promptTokenCount: 1,
   candidatesTokenCount: 2,
@@ -196,153 +173,49 @@ export const USAGE_METADATA_FIELDS = {
   thoughtsTokenCount: 14,
 } as const;
 
-/**
- * Cache-inclusive invariant: Google's promptTokenCount INCLUDES cached tokens,
- * so the store must subtract them (mirrors the Codex/OpenAI handling).
- *   tokens_in       = promptTokenCount - cachedContentTokenCount
- *   cache_read      = cachedContentTokenCount
- *   tokens_out      = candidatesTokenCount (thoughtsTokenCount tracked separately)
- */
-export const THOUGHTS_ARE_SEPARATE = true;
+export const GEN_METADATA_WRAPPER_FIELD = 1;
 
-/** gemini_coder.Step envelope (trajectory.proto). */
-export const STEP_FIELDS = {
-  type: 1,          // exa.cortex_pb.CortexStepType (enum; mirrors payload kind number)
-  status: 4,        // exa.cortex_pb.CortexStepStatus
-  metadata: 5,      // exa.cortex_pb.CortexStepMetadata (holds model + usage; internals fixture-verified)
-  error: 31,        // exa.cortex_pb.CortexErrorDetails
-  subtrajectory: 6, // gemini_coder.Trajectory
-  taskDetails: 148, // gemini_coder.TaskDetails
+export const GENERATOR_METADATA_FIELDS = {
+  usage: 4,
+  chatStartMetadata: 9,
+  model: 19,
+  modelDisplay: 21,
+  modelFull: 22,
 } as const;
 
-/**
- * Step-kind discriminator: the `oneof step` payload field number in gemini_coder.Step.
- * 120 kinds. Verified to equal the SQLite `steps.step_type` column for all
- * observed values (14=view_file, 15=list_directory, 23=write_to_file,
- * 90=browser_scroll_down, 98=file_change).
- */
-export const STEP_PAYLOAD_KINDS: Record<number, string> = {
-  7: 'dummy',
-  8: 'plan_input',
-  9: 'mquery',
-  10: 'code_action',
-  11: 'git_commit',
-  12: 'finish',
-  13: 'grep_search',
-  14: 'view_file',
-  15: 'list_directory',
-  16: 'compile',
-  19: 'user_input',
-  20: 'planner_response',
-  21: 'file_breakdown',
-  22: 'view_code_item',
-  23: 'write_to_file',
-  24: 'error_message',
-  28: 'run_command',
-  30: 'checkpoint',
-  32: 'propose_code',
-  34: 'find',
-  35: 'search_knowledge_base',
-  36: 'suggested_responses',
-  37: 'command_status',
-  38: 'memory',
-  39: 'lookup_knowledge_base',
-  40: 'read_url_content',
-  41: 'view_content_chunk',
-  42: 'search_web',
-  43: 'retrieve_memory',
-  47: 'mcp_tool',
-  48: 'manager_feedback',
-  49: 'tool_call_proposal',
-  50: 'tool_call_choice',
-  52: 'trajectory_choice',
-  55: 'clipboard',
-  58: 'view_file_outline',
-  59: 'check_deploy_status',
-  60: 'post_pr_review',
-  62: 'list_resources',
-  63: 'read_resource',
-  64: 'lint_diff',
-  65: 'find_all_references',
-  66: 'brain_update',
-  67: 'open_browser_url',
-  68: 'run_extension_code',
-  71: 'proposal_feedback',
-  72: 'trajectory_search',
-  73: 'execute_browser_javascript',
-  74: 'list_browser_pages',
-  75: 'capture_browser_screenshot',
-  76: 'click_browser_pixel',
-  77: 'read_terminal',
-  78: 'capture_browser_console_logs',
-  79: 'read_browser_page',
-  80: 'browser_get_dom',
-  85: 'code_search',
-  86: 'browser_input',
-  87: 'browser_move_mouse',
-  88: 'browser_select_option',
-  89: 'browser_scroll_up',
-  90: 'browser_scroll_down',
-  91: 'browser_click_element',
-  92: 'browser_press_key',
-  93: 'task_boundary',
-  94: 'notify_user',
-  95: 'code_acknowledgement',
-  96: 'internal_search',
-  97: 'browser_subagent',
-  98: 'file_change',
-  100: 'move',
-  101: 'browser_scroll',
-  102: 'knowledge_generation',
-  103: 'ephemeral_message',
-  104: 'generate_image',
-  105: 'delete_directory',
-  106: 'compile_applet',
-  107: 'install_applet_dependencies',
-  108: 'install_applet_package',
-  109: 'browser_resize_window',
-  110: 'browser_drag_pixel_to_pixel',
-  111: 'conversation_history',
-  112: 'knowledge_artifacts',
-  113: 'send_command_input',
-  114: 'system_message',
-  115: 'wait',
-  116: 'agency_tool_call',
-  117: 'cider_agent_dummy',
-  118: 'build_cleaner',
-  119: 'blaze_build_targets',
-  120: 'blaze_test_targets',
-  121: 'set_up_firebase',
-  122: 'moma',
-  123: 'restart_dev_server',
-  124: 'deploy_firebase',
-  125: 'browser_mouse_wheel',
-  126: 'lint_applet',
-  127: 'shell_exec',
-  129: 'ki_insertion',
-  130: 'retrieve_content',
-  131: 'critique',
-  132: 'findings',
-  134: 'browser_mouse_up',
-  135: 'browser_mouse_down',
-  136: 'workspace_api',
-  137: 'browser_list_network_requests',
-  138: 'browser_get_network_request',
-  139: 'browser_refresh_page',
-  140: 'generic',
-  141: 'edit_notebook',
-  142: 'write_blob',
-  143: 'invoke_subagent',
-  144: 'read_notebook',
-  145: 'propose_ai_comments',
-  146: 'start_code_review',
-  149: 'set_up_cloudsql',
-  150: 'execute_notebook',
-  151: 'cloudsql_update_schema',
-  152: 'rpc_action',
-  153: 'cloudsql_execute_sql',
-  154: 'ask_question',
-};
+export const CHAT_START_METADATA_FIELDS = {
+  createdAt: 4,
+} as const;
 
-export type StepKind = (typeof STEP_PAYLOAD_KINDS)[number];
+export const CORTEX_USAGE_FIELDS = {
+  modelEnum: 1,
+  inputTokens: 2,
+  outputTokens: 3,
+  cacheWriteTokens: 4,
+  cacheReadTokens: 5,
+  messageId: 7,
+  thinkingTokens: 9,
+  answerTokens: 10,
+  providerAssignedMessageId: 12,
+} as const;
+
+export const PLANNER_RESPONSE_FIELDS = {
+  messageId: 6,
+  providerAssignedMessageId: 15,
+} as const;
+
+export const STEP_FIELDS = {
+  type: 1,
+  status: 4,
+  metadata: 5,
+  error: 31,
+  subtrajectory: 6,
+  taskDetails: 148,
+  customExtensions: 158,
+  genericStep: 159,
+} as const;
 ```
+
+`STEP_PAYLOAD_KINDS` in `src/import/antigravity/fieldmap.ts` holds all 122 `oneof step`
+payload kinds (`7..154` from the original 120-kind map plus `156: 'directory_rules'`
+and `157: 'tool_search'`).

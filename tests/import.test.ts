@@ -1522,7 +1522,7 @@ describe('Import skips files unchanged on disk', () => {
       0,
       Buffer.from(lField(1, [
         ...sField(19, 'gemini-4-neon-xhigh'),
-        ...lField(4, [...vField(1, 1000), ...vField(2, 19_000), ...vField(3, 10_000), ...vField(5, 40_000), ...vField(9, 2000), ...vField(10, 8000)]),
+        ...lField(4, [...vField(1, 1531), ...vField(2, 20_000), ...vField(3, 10_000), ...vField(5, 40_000), ...vField(9, 2000), ...vField(10, 8000)]),
         ...lField(9, [...lField(4, [...vField(1, tsSec), ...vField(2, 0)])]),
       ])),
     );

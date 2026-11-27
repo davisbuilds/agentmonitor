@@ -5,8 +5,9 @@ import {
   USAGE_METADATA_FIELDS,
   GEN_METADATA_WRAPPER_FIELD,
   GENERATOR_METADATA_FIELDS,
-  GENERATOR_TIMING_TIMESTAMP_FIELD,
+  CHAT_START_METADATA_FIELDS,
   CORTEX_USAGE_FIELDS,
+  PLANNER_RESPONSE_FIELDS,
 } from './fieldmap.js';
 
 export type WireType = 0 | 1 | 2 | 5;
@@ -92,7 +93,6 @@ export function getVarint(
   return fields.get(field)?.[0]?.value;
 }
 
-/** First length-delimited payload for a field, or undefined. */
 function getBytes(
   fields: Map<number, ProtoField[]>,
   field: number,
@@ -100,31 +100,52 @@ function getBytes(
   return fields.get(field)?.[0]?.bytes;
 }
 
+function getString(
+  fields: Map<number, ProtoField[]>,
+  field: number,
+): string | undefined {
+  const bytes = getBytes(fields, field);
+  if (!bytes || bytes.length === 0) return undefined;
+  const text = bytes.toString('utf-8');
+  return text.trim().length > 0 ? text : undefined;
+}
+
+export interface PlannerResponseIds {
+  messageId?: string;
+  providerAssignedMessageId?: string;
+}
+
 export interface StepEnvelope {
-  /** CortexStepType enum value (its own numbering; NOT the oneof kind field number). */
   type?: number;
-  /** CortexStepStatus enum value. */
   status?: number;
-  /** Snake-case step kind, from whichever Step `oneof` payload field is present. */
   kind?: string;
   hasMetadata: boolean;
   hasError: boolean;
+  plannerIds?: PlannerResponseIds;
 }
 
-/**
- * Decode a `steps.step_payload` blob, which is the FULL serialized gemini_coder.Step
- * (top-level fields `{1: type, 4: status, 5: metadata, <oneof>: payload}`), not just
- * the oneof payload. `kind` is derived from the present oneof field — deliberately
- * NOT from `type` (the CortexStepType enum uses different numbers). The per-kind
- * CortexStep* payload internals are private and left opaque.
- */
 export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
   const f = decodeMessage(stepPayload);
   let kind: string | undefined;
+  let kindField: number | undefined;
   for (const [num, name] of Object.entries(STEP_PAYLOAD_KINDS)) {
-    if (f.has(Number(num))) {
+    const fieldNum = Number(num);
+    if (f.has(fieldNum)) {
       kind = name;
+      kindField = fieldNum;
       break;
+    }
+  }
+  let plannerIds: PlannerResponseIds | undefined;
+  if (kind === 'planner_response' && kindField !== undefined) {
+    const plannerBytes = getBytes(f, kindField);
+    if (plannerBytes) {
+      const pf = decodeMessage(plannerBytes);
+      const messageId = getString(pf, PLANNER_RESPONSE_FIELDS.messageId);
+      const providerAssignedMessageId = getString(pf, PLANNER_RESPONSE_FIELDS.providerAssignedMessageId);
+      if (messageId !== undefined || providerAssignedMessageId !== undefined) {
+        plannerIds = { messageId, providerAssignedMessageId };
+      }
     }
   }
   return {
@@ -133,20 +154,24 @@ export function decodeStepEnvelope(stepPayload: Buffer): StepEnvelope {
     kind,
     hasMetadata: f.has(STEP_FIELDS.metadata),
     hasError: f.has(STEP_FIELDS.error),
+    ...(plannerIds ? { plannerIds } : {}),
   };
 }
 
-/**
- * Extract a step's timestamp from its `steps.metadata` (CortexStepMetadata) blob:
- * `metadata.field1.field1` is a unix-seconds created-at. Returns epoch ms, or
- * undefined if absent/out of a sane range. (Verified across real rows.)
- */
+function decodeProtoTimestampMs(stamp: Buffer): number | undefined {
+  const fields = decodeMessage(stamp);
+  const secs = getVarint(fields, 1);
+  // WHY: A plausible integer from an unknown field need not be a timestamp.
+  if (secs === undefined || secs < 1_000_000_000 || secs > 4_000_000_000) return undefined;
+  const nanos = getVarint(fields, 2) ?? 0;
+  const ms = nanos >= 0 && nanos < 1_000_000_000 ? Math.floor(nanos / 1_000_000) : 0;
+  return secs * 1000 + ms;
+}
+
 export function decodeStepTimestampMs(metadata: Buffer): number | undefined {
   const inner = getBytes(decodeMessage(metadata), 1);
   if (!inner) return undefined;
-  const secs = getVarint(decodeMessage(inner), 1);
-  if (secs === undefined || secs < 1_000_000_000 || secs > 4_000_000_000) return undefined;
-  return secs * 1000;
+  return decodeProtoTimestampMs(inner);
 }
 
 export interface GoogleUsage {
@@ -182,88 +207,82 @@ export function decodeGoogleUsage(bytes: Buffer): GoogleUsage {
 }
 
 export interface CortexUsage {
-  systemPromptTokens: number;
+  modelEnum: number;
   inputTokens: number;
   outputTokens: number;
-  cachedTokens: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
   thinkingTokens: number;
   answerTokens: number;
 }
 
 export interface GeneratorMetadata {
-  /** Model id, e.g. "gemini-pro-default" (falls back to the display string). */
   model?: string;
   usage?: CortexUsage;
-  /** When this generation ran (epoch ms), from its own Timestamp. */
   timestampMs?: number;
+  messageId?: string;
+  providerAssignedMessageId?: string;
 }
 
-/**
- * Decode a `gen_metadata.data` blob: the real per-generation record. Navigates the
- * wrapper → CortexGeneratorMetadata → CortexUsage using the empirically-pinned
- * field numbers (see fieldmap.ts + baseline doc). This is the cost-bearing source.
- */
 export function decodeGeneratorMetadata(blob: Buffer): GeneratorMetadata {
   const wrapper = decodeMessage(blob);
   const gmBytes = getBytes(wrapper, GEN_METADATA_WRAPPER_FIELD);
   if (!gmBytes) return {};
   const gm = decodeMessage(gmBytes);
 
-  const modelBytes =
-    getBytes(gm, GENERATOR_METADATA_FIELDS.model) ??
-    getBytes(gm, GENERATOR_METADATA_FIELDS.modelDisplay);
-  const model = modelBytes ? modelBytes.toString('utf-8') : undefined;
+  const model =
+    getString(gm, GENERATOR_METADATA_FIELDS.model) ??
+    getString(gm, GENERATOR_METADATA_FIELDS.modelFull) ??
+    getString(gm, GENERATOR_METADATA_FIELDS.modelDisplay);
 
   const usageBytes = getBytes(gm, GENERATOR_METADATA_FIELDS.usage);
   let usage: CortexUsage | undefined;
+  let messageId: string | undefined;
+  let providerAssignedMessageId: string | undefined;
   if (usageBytes) {
     const u = decodeMessage(usageBytes);
     usage = {
-      systemPromptTokens: getVarint(u, CORTEX_USAGE_FIELDS.systemPromptTokens) ?? 0,
+      modelEnum: getVarint(u, CORTEX_USAGE_FIELDS.modelEnum) ?? 0,
       inputTokens: getVarint(u, CORTEX_USAGE_FIELDS.inputTokens) ?? 0,
       outputTokens: getVarint(u, CORTEX_USAGE_FIELDS.outputTokens) ?? 0,
-      cachedTokens: getVarint(u, CORTEX_USAGE_FIELDS.cachedTokens) ?? 0,
+      cacheWriteTokens: getVarint(u, CORTEX_USAGE_FIELDS.cacheWriteTokens) ?? 0,
+      cacheReadTokens: getVarint(u, CORTEX_USAGE_FIELDS.cacheReadTokens) ?? 0,
       thinkingTokens: getVarint(u, CORTEX_USAGE_FIELDS.thinkingTokens) ?? 0,
       answerTokens: getVarint(u, CORTEX_USAGE_FIELDS.answerTokens) ?? 0,
     };
+    messageId = getString(u, CORTEX_USAGE_FIELDS.messageId);
+    providerAssignedMessageId = getString(u, CORTEX_USAGE_FIELDS.providerAssignedMessageId);
   }
-  return { model, usage, timestampMs: decodeGenerationTimestampMs(gm) };
+  return {
+    model,
+    usage,
+    timestampMs: decodeGenerationTimestampMs(gm),
+    ...(messageId !== undefined ? { messageId } : {}),
+    ...(providerAssignedMessageId !== undefined ? { providerAssignedMessageId } : {}),
+  };
 }
 
 function decodeGenerationTimestampMs(gm: Map<number, ProtoField[]>): number | undefined {
-  const timing = getBytes(gm, GENERATOR_METADATA_FIELDS.timing);
-  const stamp = timing && getBytes(decodeMessage(timing), GENERATOR_TIMING_TIMESTAMP_FIELD);
+  const chatStart = getBytes(gm, GENERATOR_METADATA_FIELDS.chatStartMetadata);
+  const stamp = chatStart && getBytes(decodeMessage(chatStart), CHAT_START_METADATA_FIELDS.createdAt);
   if (!stamp) return undefined;
-  const fields = decodeMessage(stamp);
-  const secs = getVarint(fields, 1);
-  // WHY: A plausible integer from an unknown field need not be a timestamp.
-  if (secs === undefined || secs < 1_000_000_000 || secs > 4_000_000_000) return undefined;
-  const nanos = getVarint(fields, 2) ?? 0;
-  return secs * 1000 + Math.floor(nanos / 1_000_000);
+  return decodeProtoTimestampMs(stamp);
 }
 
 export interface BillingTokens {
-  /** Uncached, full-rate prompt tokens (system + non-cached input). */
   tokensIn: number;
-  /** Total output tokens (includes reasoning). */
   tokensOut: number;
-  /** Cached prompt tokens (billed at the cache-read rate). */
+  cacheWriteTokens: number;
   cacheReadTokens: number;
-  /** Reasoning tokens (informational lane; already inside tokensOut). */
   thoughtsTokens: number;
 }
 
-/**
- * Map CortexUsage onto AgentMonitor's token buckets, honoring the cache-inclusive
- * invariant: tokensIn (uncached) and cacheReadTokens (cached) are additive and
- * never overlap. system + input are separate CortexUsage buckets (a distinct
- * num_system_prompt_tokens field exists), so both count as full-rate input.
- */
 export function deriveBillingTokens(u: CortexUsage): BillingTokens {
   return {
-    tokensIn: u.systemPromptTokens + u.inputTokens,
+    tokensIn: u.inputTokens,
     tokensOut: u.outputTokens,
-    cacheReadTokens: u.cachedTokens,
+    cacheWriteTokens: u.cacheWriteTokens,
+    cacheReadTokens: u.cacheReadTokens,
     thoughtsTokens: u.thinkingTokens,
   };
 }

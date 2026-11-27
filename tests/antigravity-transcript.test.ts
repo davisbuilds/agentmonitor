@@ -488,7 +488,7 @@ describe('Antigravity full-fidelity transcript parser and FTS search', () => {
     const parsed = parseAntigravitySessions(dbPath);
     assert.equal(parsed.metadata.title, 'Canonical Summary Title');
     assert.equal(parsed.metadata.first_message, 'Canonical Summary Title');
-    assert.equal(parsed.metadata.context_used_tokens, 5000, 'gen_metadata wins over transcript usage');
+    assert.equal(parsed.metadata.context_used_tokens, 4500, 'gen_metadata wins over transcript usage without model enum inflation');
     assert.equal(parsed.metadata.model, 'gemini-4-neon');
 
     const lastBlocks = JSON.parse(parsed.messages.at(-1)!.content) as Array<Record<string, unknown>>;
