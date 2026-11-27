@@ -172,6 +172,69 @@ describe('watcher picks up live file changes (chokidar directory watch, not glob
       }
       assert.equal(updated?.message_count, 2);
       assert.equal(updated?.context_used_tokens, 24000);
+
+      const transcriptFile = path.join(antigravityDir, 'brain', id, '.system_generated', 'logs', 'transcript_full.jsonl');
+      fs.mkdirSync(path.dirname(transcriptFile), { recursive: true });
+      fs.writeFileSync(transcriptFile, [
+        JSON.stringify({
+          step_index: 0,
+          source: 'USER_EXPLICIT',
+          type: 'USER_INPUT',
+          status: 'DONE',
+          created_at: '2026-11-26T04:00:00Z',
+          content: '<USER_REQUEST>\nLive transcript probe\n</USER_REQUEST>',
+        }),
+        JSON.stringify({
+          step_index: 1,
+          source: 'MODEL',
+          type: 'PLANNER_RESPONSE',
+          status: 'DONE',
+          created_at: '2026-11-26T04:00:02Z',
+          thinking: 'Checking live stream update.',
+          content: 'Live transcript reply.',
+        }),
+      ].join('\n') + '\n');
+      agrDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+        .run(2, 15, 3, stepBlob(15, 20), metaBlob(1782000010));
+
+      let fullSynced: { fidelity: string | null; integration_mode: string | null } | undefined;
+      for (let i = 0; i < 60; i++) {
+        fullSynced = getDb().prepare('SELECT fidelity, integration_mode FROM browsing_sessions WHERE id = ?').get(id) as
+          { fidelity: string | null; integration_mode: string | null } | undefined;
+        if (fullSynced?.fidelity === 'full') break;
+        await delay(100);
+      }
+      assert.equal(fullSynced?.fidelity, 'full');
+      assert.equal(fullSynced?.integration_mode, 'antigravity-transcript');
+      assert.ok(updates.some(u =>
+        u.data.includes('"type":"session_presence"')
+        && u.data.includes('"integration_mode":"antigravity-transcript"')
+        && u.data.includes('"fidelity":"full"')
+        && u.data.includes(id)));
+
+      const scratchFile = path.join(antigravityDir, 'brain', id, 'scratch', 'artifact.md');
+      fs.mkdirSync(path.dirname(scratchFile), { recursive: true });
+      fs.writeFileSync(scratchFile, '# ignored artifact\n');
+
+      fs.appendFileSync(transcriptFile, JSON.stringify({
+        step_index: 2,
+        source: 'MODEL',
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-26T04:00:12Z',
+        content: 'Transcript-only post-WAL update.',
+      }) + '\n');
+
+      let transcriptOnlyHit = 0;
+      for (let i = 0; i < 60; i++) {
+        const row = getDb().prepare(
+          "SELECT COUNT(*) c FROM messages WHERE session_id = ? AND content LIKE '%Transcript-only post-WAL update%'",
+        ).get(id) as { c: number };
+        transcriptOnlyHit = row.c;
+        if (transcriptOnlyHit > 0) break;
+        await delay(100);
+      }
+      assert.equal(transcriptOnlyHit, 1, 'transcript_full.jsonl append syncs live without any DB/WAL write');
     } finally {
       agrDb.close();
       broadcaster.closeAllClients();

@@ -6,6 +6,7 @@ import { resolveContextWindow } from '../pricing/context-windows.js';
 import { applyLivePrivacyPolicy, normalizeClaudeBlock } from './normalize.js';
 import {
   clearProjectedSessionStream,
+  FULL_PROJECTION_CAPABILITIES,
   insertProjectedItem,
   insertProjectedTurn,
   upsertProjectedSessionSnapshot,
@@ -13,7 +14,7 @@ import {
 import type { ClaudeLiveSyncResult, LiveSyncOptions } from './claude-adapter.js';
 import { liveStatusFromActivity } from './live-status.js';
 
-const ANTIGRAVITY_SQLITE_CAPABILITIES = Object.freeze({
+const ANTIGRAVITY_SUMMARY_CAPABILITIES = Object.freeze({
   history: 'summary' as const,
   search: 'summary' as const,
   tool_analytics: 'summary' as const,
@@ -122,9 +123,12 @@ export function syncAntigravityLiveSession(
       const normalizedItem = normalizeClaudeBlock(
         message.role === 'user' ? 'user' : 'assistant',
         block,
-        message.timestamp ?? undefined,
+        block.timestamp ?? message.timestamp ?? undefined,
       );
       if (!normalizedItem) continue;
+      if (message.role === 'system' && normalizedItem.kind === 'assistant_message') {
+        normalizedItem.kind = 'instructions';
+      }
       const normalized = applyLivePrivacyPolicy(normalizedItem, privacyPolicy);
 
       insertProjectedItem(db, sessionId, turnId, {
@@ -150,6 +154,9 @@ export function syncAntigravityLiveSession(
         observedTokens: usedTokens,
       })
     : null;
+  const isFull = parsed.metadata.fidelity === 'full';
+  const integrationMode = parsed.metadata.integration_mode
+    ?? (isFull ? 'antigravity-transcript' : 'antigravity-sqlite');
   upsertProjectedSessionSnapshot(db, {
     id: sessionId,
     agent: 'antigravity',
@@ -167,9 +174,9 @@ export function syncAntigravityLiveSession(
     context_used_tokens: usedTokens,
     context_window_tokens: contextWindow,
   }, {
-    integration_mode: 'antigravity-sqlite',
-    fidelity: 'summary',
-    capabilities: ANTIGRAVITY_SQLITE_CAPABILITIES,
+    integration_mode: integrationMode,
+    fidelity: isFull ? 'full' : 'summary',
+    capabilities: isFull ? FULL_PROJECTION_CAPABILITIES : ANTIGRAVITY_SUMMARY_CAPABILITIES,
   });
 
   return {

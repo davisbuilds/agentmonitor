@@ -131,6 +131,8 @@ export interface ParsedSessionMetadata {
   model?: string;
   /** Producer-reported context-window size when available. */
   context_window_reported?: number;
+  integration_mode?: string;
+  fidelity?: 'summary' | 'full';
 }
 
 export interface ParsedSession {

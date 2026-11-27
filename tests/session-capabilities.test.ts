@@ -50,6 +50,7 @@ test('sessionSourceLabel names where a session came from', () => {
   assert.equal(sessionSourceLabel('codex-import'), 'Codex history import');
   assert.equal(sessionSourceLabel('codex-summary'), 'Codex summary');
   assert.equal(sessionSourceLabel('antigravity-sqlite'), 'Antigravity');
+  assert.equal(sessionSourceLabel('antigravity-transcript'), 'Antigravity transcript');
   assert.equal(sessionSourceLabel('something-new'), 'something-new');
   assert.equal(sessionSourceLabel(null), 'Unknown source');
 });

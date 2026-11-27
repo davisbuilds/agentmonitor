@@ -40,11 +40,50 @@ function resolveAntigravityDbPath(filePath: string, antigravityConversationsDir:
   return null;
 }
 
+function shouldIgnoreAntigravityBrainPath(
+  filePath: string,
+  antigravityBrainDir: string,
+  stats?: fs.Stats,
+): boolean {
+  const rel = path.relative(antigravityBrainDir, filePath);
+  if (rel === '') return false;
+  if (rel.startsWith('..') || path.isAbsolute(rel)) return true;
+  if (shouldExcludePath(antigravityBrainDir, filePath, config.sync.excludePatterns)) return true;
+
+  const parts = rel.split(path.sep);
+  if (parts.length === 1) return Boolean(stats?.isFile());
+  if (parts.length === 2) return parts[1] !== '.system_generated' || Boolean(stats?.isFile());
+  if (parts.length === 3) return parts[2] !== 'logs' || Boolean(stats?.isFile());
+  if (parts.length === 4) {
+    return (parts[3] !== 'transcript_full.jsonl' && parts[3] !== 'transcript.jsonl')
+      || Boolean(stats?.isDirectory());
+  }
+  return true;
+}
+
+function resolveAntigravityDbFromTranscriptPath(
+  filePath: string,
+  antigravityBrainDir: string,
+  antigravityConversationsDir: string,
+): string | null {
+  const rel = path.relative(antigravityBrainDir, filePath);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  const parts = rel.split(path.sep);
+  if (parts.length !== 4 || !parts[0] || parts[0].includes('..')) return null;
+  if (parts[1] !== '.system_generated' || parts[2] !== 'logs') return null;
+  if (parts[3] !== 'transcript_full.jsonl' && parts[3] !== 'transcript.jsonl') return null;
+  return path.join(antigravityConversationsDir, `${parts[0]}.db`);
+}
+
 let watcher: FSWatcher | undefined;
 let antigravityWatcher: FSWatcher | undefined;
+let antigravityBrainWatcher: FSWatcher | undefined;
+let antigravityRootWatcher: FSWatcher | undefined;
 let resyncTimer: ReturnType<typeof setInterval> | undefined;
 let activeAntigravityDir: string | undefined;
+let activeAntigravityRootDir: string | undefined;
 let activeAntigravityConversationsDir: string | undefined;
+let activeAntigravityBrainDir: string | undefined;
 let activeProjectsDir: string | undefined;
 let activeCodexSessionsDir: string | undefined;
 
@@ -110,12 +149,14 @@ function handleFileChange(
       const sessionId = source === 'antigravity'
         ? path.basename(filePath, '.db')
         : transcriptBaseName(filePath);
-      const integrationMode = source === 'codex'
-        ? 'codex-jsonl'
-        : source === 'antigravity'
-          ? 'antigravity-sqlite'
-          : 'claude-jsonl';
-      const fidelity = source === 'claude' ? 'full' : 'summary';
+      const integrationMode = outcome.integration_mode ?? (
+        source === 'codex'
+          ? 'codex-jsonl'
+          : source === 'antigravity'
+            ? 'antigravity-sqlite'
+            : 'claude-jsonl'
+      );
+      const fidelity = outcome.fidelity ?? (source === 'claude' ? 'full' : 'summary');
       console.log(`[watcher] Parsed ${source} session: ${sessionId}`);
       if (outcome.live) {
         liveBroadcaster.broadcast('session_presence', {
@@ -168,7 +209,87 @@ function handleFileChange(
   }, DEBOUNCE_MS));
 }
 
+function syncAntigravityOnReady(antigravityDirOverride: string | undefined): void {
+  const synced = syncAllAntigravityFiles(getDb(), antigravityDirOverride, { excludePatterns: config.sync.excludePatterns });
+  if (synced.parsed > 0 && broadcaster.clientCount > 0) {
+    broadcaster.broadcast('session_update', { type: 'resync', parsed: synced.parsed });
+  }
+}
+
+function attachAntigravityBrainWatcher(options: { emitInitial?: boolean } = {}): boolean {
+  if (
+    !watcher
+    || antigravityBrainWatcher
+    || !activeAntigravityBrainDir
+    || !activeAntigravityConversationsDir
+    || !activeProjectsDir
+    || !activeCodexSessionsDir
+  ) {
+    return false;
+  }
+
+  const antigravityBrainDir = activeAntigravityBrainDir;
+  const antigravityConversationsDir = activeAntigravityConversationsDir;
+  const antigravityRootDir = activeAntigravityRootDir;
+  const projectsDir = activeProjectsDir;
+  const codexSessionsDir = activeCodexSessionsDir;
+
+  if (!fs.existsSync(antigravityBrainDir)) {
+    if (antigravityRootDir && !antigravityRootWatcher && fs.existsSync(antigravityRootDir)) {
+      // WHY: Only watch top-level root creation so late brain/ setup attaches without traversing artifacts.
+      const nextRootWatcher = watch(antigravityRootDir, {
+        persistent: true,
+        ignoreInitial: true,
+        depth: 0,
+        ignored: (candidatePath) => candidatePath !== antigravityRootDir && candidatePath !== antigravityBrainDir,
+      });
+      nextRootWatcher.on('addDir', (dirPath) => {
+        if (dirPath !== antigravityBrainDir || antigravityRootWatcher !== nextRootWatcher) return;
+        antigravityRootWatcher = undefined;
+        void nextRootWatcher.close();
+        attachAntigravityBrainWatcher({ emitInitial: true });
+      });
+      nextRootWatcher.on('error', (err) => {
+        console.error('[watcher] Antigravity root error:', err);
+      });
+      antigravityRootWatcher = nextRootWatcher;
+    }
+    return false;
+  }
+
+  if (antigravityRootWatcher) {
+    const staleRootWatcher = antigravityRootWatcher;
+    antigravityRootWatcher = undefined;
+    void staleRootWatcher.close();
+  }
+
+  const nextBrainWatcher = watch(antigravityBrainDir, {
+    persistent: true,
+    ignoreInitial: !options.emitInitial,
+    ignored: (filePath, stats) => shouldIgnoreAntigravityBrainPath(filePath, antigravityBrainDir, stats),
+    awaitWriteFinish: {
+      stabilityThreshold: 200,
+      pollInterval: 100,
+    },
+  });
+  const onBrainFsEvent = (filePath: string) => {
+    const agrDb = resolveAntigravityDbFromTranscriptPath(filePath, antigravityBrainDir, antigravityConversationsDir);
+    if (agrDb) {
+      handleFileChange(agrDb, 'antigravity', projectsDir, codexSessionsDir, antigravityConversationsDir);
+    }
+  };
+  nextBrainWatcher.on('add', onBrainFsEvent);
+  nextBrainWatcher.on('change', onBrainFsEvent);
+  nextBrainWatcher.on('error', (err) => {
+    console.error('[watcher] Antigravity transcript error:', err);
+  });
+  antigravityBrainWatcher = nextBrainWatcher;
+  return true;
+}
+
 function ensureAntigravityWatcher(options: { syncExisting?: boolean } = {}): boolean {
+  attachAntigravityBrainWatcher({ emitInitial: options.syncExisting });
+
   if (
     !watcher
     || antigravityWatcher
@@ -216,10 +337,7 @@ function ensureAntigravityWatcher(options: { syncExisting?: boolean } = {}): boo
       // WHY: Files created while polling initializes can be treated as initial under
       // ignoreInitial: true; sweep once on ready to close that startup window.
       if (antigravityWatcher !== nextWatcher) return;
-      const synced = syncAllAntigravityFiles(getDb(), antigravityDirOverride, { excludePatterns: config.sync.excludePatterns });
-      if (synced.parsed > 0 && broadcaster.clientCount > 0) {
-        broadcaster.broadcast('session_update', { type: 'resync', parsed: synced.parsed });
-      }
+      syncAntigravityOnReady(antigravityDirOverride);
     });
   }
   antigravityWatcher = nextWatcher;
@@ -241,8 +359,11 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
   const codexSessionsDir = path.join(codexHome, 'sessions');
   const antigravityDir = overrides?.antigravityDir ?? getAntigravityDir();
   const antigravityConversationsDir = path.join(antigravityDir, 'conversations');
+  const antigravityBrainDir = path.join(antigravityDir, 'brain');
   activeAntigravityDir = overrides?.antigravityDir;
+  activeAntigravityRootDir = antigravityDir;
   activeAntigravityConversationsDir = antigravityConversationsDir;
+  activeAntigravityBrainDir = antigravityBrainDir;
   activeProjectsDir = projectsDir;
   activeCodexSessionsDir = codexSessionsDir;
   const currentSessionFiles = [
@@ -349,10 +470,16 @@ export function startWatcher(overrides?: { claudeDir?: string; codexHome?: strin
 export async function stopWatcher(): Promise<void> {
   const activeWatcher = watcher;
   const activeAntigravityWatcher = antigravityWatcher;
+  const activeAntigravityBrainWatcher = antigravityBrainWatcher;
+  const activeAntigravityRootWatcher = antigravityRootWatcher;
   watcher = undefined;
   antigravityWatcher = undefined;
+  antigravityBrainWatcher = undefined;
+  antigravityRootWatcher = undefined;
   activeAntigravityDir = undefined;
+  activeAntigravityRootDir = undefined;
   activeAntigravityConversationsDir = undefined;
+  activeAntigravityBrainDir = undefined;
   activeProjectsDir = undefined;
   activeCodexSessionsDir = undefined;
   if (resyncTimer) {
@@ -366,5 +493,7 @@ export async function stopWatcher(): Promise<void> {
   await Promise.all([
     activeWatcher?.close(),
     activeAntigravityWatcher?.close(),
+    activeAntigravityBrainWatcher?.close(),
+    activeAntigravityRootWatcher?.close(),
   ]);
 }
