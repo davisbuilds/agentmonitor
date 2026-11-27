@@ -131,6 +131,7 @@ async function holdExclusiveSqliteLock(
 }
 
 let tempDir = '';
+let dbPath = '';
 let claudeDir = '';
 let codexHome = '';
 let getDb: typeof getDbFn;
@@ -155,11 +156,12 @@ let baseUrl = '';
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-agr-slice2-'));
+  dbPath = path.join(tempDir, 'monitor.db');
   claudeDir = path.join(tempDir, 'claude');
   codexHome = path.join(tempDir, 'codex');
   fs.mkdirSync(path.join(claudeDir, 'projects'), { recursive: true });
   fs.mkdirSync(path.join(codexHome, 'sessions'), { recursive: true });
-  process.env.AGENTMONITOR_DB_PATH = path.join(tempDir, 'monitor.db');
+  process.env.AGENTMONITOR_DB_PATH = dbPath;
   process.env.AGENTMONITOR_SESSION_TIMEOUT = '5';
 
   const dbModule = await import('../src/db/connection.js');
@@ -188,7 +190,9 @@ before(async () => {
 beforeEach(async () => {
   broadcaster.closeAllClients();
   await stopWatcher();
-  getDb().exec(`
+  const db = getDb();
+  assert.equal(fs.realpathSync(db.name), fs.realpathSync(dbPath));
+  db.exec(`
     DELETE FROM events;
     DELETE FROM sessions;
     DELETE FROM import_state;
@@ -681,5 +685,89 @@ describe('Slice 2: Antigravity shared snapshot reader, WAL parity, live Monitor 
 
     const secondRepair = repairAntigravityImportUsage(getDb(), { antigravityDir: home, apply: true });
     assert.equal(secondRepair.sessions_changed, 0);
+  });
+
+  test('preserves generation identity without double-counting when a later snapshot appends duplicate messageId or providerAssignedMessageId', () => {
+    const home = path.join(tempDir, 'home-nonunique-ids');
+    const convDir = path.join(home, 'conversations');
+    fs.mkdirSync(convDir, { recursive: true });
+    const ts = Date.UTC(2026, 10, 17, 10, 0, 0) / 1000;
+
+    const msgSessionId = '44444444-2222-3333-4444-555555555506';
+    const msgDbPath = path.join(convDir, `${msgSessionId}.db`);
+    {
+      const convDb = new Database(msgDbPath);
+      convDb.exec('CREATE TABLE steps(idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+      convDb.exec('CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB);');
+      convDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+        .run(0, 14, 3, stepBlob(14, 19), stepMetaBlob(ts));
+      convDb.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)')
+        .run(0, genMetaBlob({ model: 'gemini-4-neon', input: 150, output: 15, messageId: 'msg-dup', createdSecs: ts + 10 }));
+      convDb.close();
+    }
+
+    const firstMsgImport = runImport({ source: 'antigravity', antigravityDir: home });
+    assert.equal(firstMsgImport.totalEventsImported, 3);
+
+    {
+      const convDb = new Database(msgDbPath);
+      convDb.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)')
+        .run(1, genMetaBlob({ model: 'gemini-4-neon', input: 250, output: 25, messageId: 'msg-dup', createdSecs: ts + 20 }));
+      convDb.close();
+    }
+
+    const secondMsgImport = runImport({ source: 'antigravity', antigravityDir: home });
+    assert.equal(secondMsgImport.totalEventsImported, 1, 'only the newly appended generation is inserted');
+
+    const msgRows = getDb().prepare(`
+      SELECT event_id, tokens_in, tokens_out
+      FROM events
+      WHERE session_id = ? AND event_type = 'llm_response'
+      ORDER BY tokens_in
+    `).all(msgSessionId) as Array<{ event_id: string; tokens_in: number; tokens_out: number }>;
+    assert.equal(msgRows.length, 2, 'zero double-counting when messageId becomes non-unique');
+    assert.deepEqual(msgRows, [
+      { event_id: legacyAgrEventId(msgSessionId, 'gen:idx:0'), tokens_in: 150, tokens_out: 15 },
+      { event_id: legacyAgrEventId(msgSessionId, 'gen:idx:1'), tokens_in: 250, tokens_out: 25 },
+    ]);
+    assert.equal(repairAntigravityImportUsage(getDb(), { antigravityDir: home, apply: true }).sessions_changed, 0);
+
+    const pmsgSessionId = '55555555-2222-3333-4444-555555555507';
+    const pmsgDbPath = path.join(convDir, `${pmsgSessionId}.db`);
+    {
+      const convDb = new Database(pmsgDbPath);
+      convDb.exec('CREATE TABLE steps(idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, step_payload, metadata BLOB);');
+      convDb.exec('CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB);');
+      convDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+        .run(0, 14, 3, stepBlob(14, 19), stepMetaBlob(ts));
+      convDb.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)')
+        .run(0, genMetaBlob({ model: 'gemini-4-neon', input: 120, output: 12, providerId: 'prov-dup', createdSecs: ts + 10 }));
+      convDb.close();
+    }
+
+    runImport({ source: 'antigravity', antigravityDir: home });
+
+    {
+      const convDb = new Database(pmsgDbPath);
+      convDb.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)')
+        .run(1, genMetaBlob({ model: 'gemini-4-neon', input: 220, output: 22, providerId: 'prov-dup', createdSecs: ts + 20 }));
+      convDb.close();
+    }
+
+    const secondPmsgImport = runImport({ source: 'antigravity', antigravityDir: home });
+    assert.equal(secondPmsgImport.totalEventsImported, 1, 'only the newly appended providerAssignedMessageId generation is inserted');
+
+    const pmsgRows = getDb().prepare(`
+      SELECT event_id, tokens_in, tokens_out
+      FROM events
+      WHERE session_id = ? AND event_type = 'llm_response'
+      ORDER BY tokens_in
+    `).all(pmsgSessionId) as Array<{ event_id: string; tokens_in: number; tokens_out: number }>;
+    assert.equal(pmsgRows.length, 2, 'zero double-counting when providerAssignedMessageId becomes non-unique');
+    assert.deepEqual(pmsgRows, [
+      { event_id: legacyAgrEventId(pmsgSessionId, 'gen:idx:0'), tokens_in: 120, tokens_out: 12 },
+      { event_id: legacyAgrEventId(pmsgSessionId, 'gen:idx:1'), tokens_in: 220, tokens_out: 22 },
+    ]);
+    assert.equal(repairAntigravityImportUsage(getDb(), { antigravityDir: home, apply: true }).sessions_changed, 0);
   });
 });

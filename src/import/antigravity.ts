@@ -219,15 +219,36 @@ function stableGenerationTag(
   return `gen:idx:${genIdx}`;
 }
 
-export function generationModelEnumsByEventId(
+export interface GenerationIdentityMetadata {
+  modelEnum: number;
+  priorCanonicalIds: string[];
+}
+
+export function generationIdentityMetadataByEventId(
   snapshot: AntigravityConversationSnapshot,
-): Map<string, number> {
-  const map = new Map<string, number>();
+): Map<string, GenerationIdentityMetadata> {
+  const map = new Map<string, GenerationIdentityMetadata>();
   const { msgIdCounts, pmsgIdCounts } = countGenerationIds(snapshot.generations);
   for (const gen of snapshot.generations) {
-    if (!gen.decoded.usage) continue;
-    const tag = stableGenerationTag(gen.decoded, gen.idx, msgIdCounts, pmsgIdCounts);
-    map.set(eventId(snapshot.sessionId, tag), gen.decoded.usage.modelEnum ?? 0);
+    const gm = gen.decoded;
+    if (!gm.usage) continue;
+    const tag = stableGenerationTag(gm, gen.idx, msgIdCounts, pmsgIdCounts);
+    const canonicalId = eventId(snapshot.sessionId, tag);
+    const priors: string[] = [];
+    if (gm.messageId) {
+      const msgEventId = eventId(snapshot.sessionId, `gen:msg:${gm.messageId}`);
+      if (msgEventId !== canonicalId) priors.push(msgEventId);
+    }
+    if (gm.providerAssignedMessageId) {
+      const pmsgEventId = eventId(snapshot.sessionId, `gen:pmsg:${gm.providerAssignedMessageId}`);
+      if (pmsgEventId !== canonicalId) priors.push(pmsgEventId);
+    }
+    const idxEventId = eventId(snapshot.sessionId, `gen:idx:${gen.idx}`);
+    if (idxEventId !== canonicalId) priors.push(idxEventId);
+    map.set(canonicalId, {
+      modelEnum: gm.usage.modelEnum ?? 0,
+      priorCanonicalIds: priors,
+    });
   }
   return map;
 }
@@ -289,31 +310,71 @@ export function matchLegacyAntigravityRows<T extends LegacyGenerationRowCandidat
   sessionId: string,
   missingEvents: readonly ParsedImportEvent[],
   candidateRows: readonly T[],
-  modelEnumsByEventId: ReadonlyMap<string, number>,
+  identityByEventId: ReadonlyMap<string, GenerationIdentityMetadata>,
   options?: { ordinalBound?: number; requireOrdinalId?: boolean },
 ): Map<string, T> {
   const matched = new Map<string, T>();
   if (missingEvents.length === 0 || candidateRows.length === 0) return matched;
 
-  let eligibleRows = candidateRows;
+  const usedRowIds = new Set<number>();
+  const candidatesByEventId = new Map(candidateRows.map((row) => [row.event_id, row]));
+
+  const matchPriorCanonical = (requireExactTimestamp: boolean, event: ParsedImportEvent): T | undefined => {
+    if (!event.event_id) return undefined;
+    const meta = identityByEventId.get(event.event_id);
+    if (!meta || meta.priorCanonicalIds.length === 0) return undefined;
+    const targetTs = event.client_timestamp ?? null;
+    for (const priorId of meta.priorCanonicalIds) {
+      const candidate = candidatesByEventId.get(priorId);
+      if (!candidate || usedRowIds.has(candidate.id)) continue;
+      if (!matchesLegacyGeneration(candidate, event, meta.modelEnum)) continue;
+      if (requireExactTimestamp && candidate.client_timestamp !== targetTs) continue;
+      return candidate;
+    }
+    return undefined;
+  };
+
+  let afterPrior: ParsedImportEvent[] = [];
+  for (const event of missingEvents) {
+    const hit = matchPriorCanonical(true, event);
+    if (hit && event.event_id) {
+      usedRowIds.add(hit.id);
+      matched.set(event.event_id, hit);
+    } else {
+      afterPrior.push(event);
+    }
+  }
+
+  const remainingAfterPrior: ParsedImportEvent[] = [];
+  for (const event of afterPrior) {
+    const hit = matchPriorCanonical(false, event);
+    if (hit && event.event_id) {
+      usedRowIds.add(hit.id);
+      matched.set(event.event_id, hit);
+    } else {
+      remainingAfterPrior.push(event);
+    }
+  }
+  afterPrior = remainingAfterPrior;
+
+  let eligibleOrdinalRows = candidateRows.filter((row) => !usedRowIds.has(row.id));
   if (options?.requireOrdinalId !== false) {
     const bound = Math.max(options?.ordinalBound ?? 0, candidateRows.length, missingEvents.length, 128) * 2 + 256;
     const legacyOrdinalIds = new Set<string>();
     for (let i = 0; i < bound; i++) {
       legacyOrdinalIds.add(eventId(sessionId, `gen:${i}`));
     }
-    eligibleRows = candidateRows.filter((row) => legacyOrdinalIds.has(row.event_id));
-    if (eligibleRows.length === 0) return matched;
+    eligibleOrdinalRows = eligibleOrdinalRows.filter((row) => legacyOrdinalIds.has(row.event_id));
   }
+  if (afterPrior.length === 0 || eligibleOrdinalRows.length === 0) return matched;
 
-  const usedRowIds = new Set<number>();
-  const eligibleByEventId = new Map(eligibleRows.map((row) => [row.event_id, row]));
+  const ordinalByEventId = new Map(eligibleOrdinalRows.map((row) => [row.event_id, row]));
   const remainingEvents: ParsedImportEvent[] = [];
 
-  for (const event of missingEvents) {
+  for (const event of afterPrior) {
     if (!event.event_id) continue;
-    const modelEnum = modelEnumsByEventId.get(event.event_id) ?? 0;
-    const exactOrdinal = event.legacy_event_id ? eligibleByEventId.get(event.legacy_event_id) : undefined;
+    const modelEnum = identityByEventId.get(event.event_id)?.modelEnum ?? 0;
+    const exactOrdinal = event.legacy_event_id ? ordinalByEventId.get(event.legacy_event_id) : undefined;
     if (exactOrdinal && !usedRowIds.has(exactOrdinal.id) && matchesLegacyGeneration(exactOrdinal, event, modelEnum)) {
       usedRowIds.add(exactOrdinal.id);
       matched.set(event.event_id, exactOrdinal);
@@ -324,10 +385,10 @@ export function matchLegacyAntigravityRows<T extends LegacyGenerationRowCandidat
 
   for (const event of remainingEvents) {
     if (!event.event_id) continue;
-    const modelEnum = modelEnumsByEventId.get(event.event_id) ?? 0;
+    const modelEnum = identityByEventId.get(event.event_id)?.modelEnum ?? 0;
     const targetTs = event.client_timestamp ?? null;
     let bestCandidate: T | undefined;
-    for (const row of eligibleRows) {
+    for (const row of eligibleOrdinalRows) {
       if (usedRowIds.has(row.id) || !matchesLegacyGeneration(row, event, modelEnum)) continue;
       if (row.client_timestamp === targetTs) {
         bestCandidate = row;
@@ -552,14 +613,17 @@ export function ingestAntigravitySnapshot(
     `).all(snapshot.sessionId) as ExistingAntigravityRow[];
     const existingById = new Map(existingRows.map((row) => [row.event_id, row]));
 
+    const fullEvents = isDateScoped ? antigravitySnapshotToEvents(snapshot) : events;
+    const fullCanonicalIds = new Set(
+      fullEvents.map((event) => event.event_id).filter((id): id is string => Boolean(id)),
+    );
     const canonicalMatchedRowIds = new Set<number>();
-    const unmatchedLlmEvents: ParsedImportEvent[] = [];
-    for (const event of events) {
-      if (!event.event_id) continue;
-      const hit = existingById.get(event.event_id);
-      if (hit) canonicalMatchedRowIds.add(hit.id);
-      else if (event.event_type === 'llm_response') unmatchedLlmEvents.push(event);
+    for (const row of existingRows) {
+      if (fullCanonicalIds.has(row.event_id)) canonicalMatchedRowIds.add(row.id);
     }
+    const unmatchedLlmEvents = events.filter(
+      (event) => event.event_type === 'llm_response' && event.event_id && !existingById.has(event.event_id),
+    );
 
     const unclaimedLlms = existingRows.filter(
       (row) => row.event_type === 'llm_response' && !canonicalMatchedRowIds.has(row.id),
@@ -568,8 +632,8 @@ export function ingestAntigravitySnapshot(
       snapshot.sessionId,
       unmatchedLlmEvents,
       unclaimedLlms,
-      generationModelEnumsByEventId(snapshot),
-      { ordinalBound: existingRows.length + events.length },
+      generationIdentityMetadataByEventId(snapshot),
+      { ordinalBound: existingRows.length + fullEvents.length },
     );
 
     const migrateEventIdStmt = db.prepare('UPDATE events SET event_id = ? WHERE id = ?');

@@ -8,10 +8,11 @@ import { sameCost } from './codex-reconcile.js';
 import {
   antigravitySnapshotToEvents,
   discoverAntigravityLogs,
-  generationModelEnumsByEventId,
+  generationIdentityMetadataByEventId,
   matchLegacyAntigravityRows,
   reconcileAntigravitySessionLifecycle,
   upsertAntigravityImportState,
+  type GenerationIdentityMetadata,
 } from './antigravity.js';
 import {
   hashAntigravityConversation,
@@ -184,7 +185,7 @@ function pairStaleRows(
   sessionId: string,
   staleRows: readonly StoredAntigravityEventRow[],
   missingEvents: readonly ParsedImportEvent[],
-  modelEnumsByEventId: ReadonlyMap<string, number>,
+  identityByEventId: ReadonlyMap<string, GenerationIdentityMetadata>,
 ): {
   paired: Array<{ stale: StoredAntigravityEventRow; event: ParsedImportEvent }>;
   unpairedStale: StoredAntigravityEventRow[];
@@ -197,7 +198,7 @@ function pairStaleRows(
     sessionId,
     missingEvents,
     staleRows,
-    modelEnumsByEventId,
+    identityByEventId,
     { ordinalBound: staleRows.length + missingEvents.length, requireOrdinalId: true },
   );
 
@@ -300,7 +301,7 @@ function reconcileSessionInDb(
         snapshot.sessionId,
         staleRows,
         missingEvents,
-        generationModelEnumsByEventId(snapshot),
+        generationIdentityMetadataByEventId(snapshot),
       );
 
       counts.matched = matchedCanonical.length + paired.length;
