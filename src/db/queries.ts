@@ -1158,7 +1158,7 @@ let cachedBroadcastStats: Stats | null = null;
 let cachedBroadcastStatsDb: Database.Database | null = null;
 let broadcastStatsDirty = true;
 
-function markStatsDirty(): void {
+export function markStatsDirty(): void {
   broadcastStatsDirty = true;
 }
 

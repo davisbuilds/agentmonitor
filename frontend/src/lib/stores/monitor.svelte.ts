@@ -220,7 +220,13 @@ let editCountNeedsRefetch = false;
 function applyLiveEventAggregate(session: Session, event: AgentEvent, countKnown = true): Session {
   const metadata = parseEventMetadata(event);
   const nextStatus = event.event_type === 'session_end'
-    ? (event.agent_type === 'claude_code' ? 'idle' : 'ended')
+    ? (
+      event.agent_type === 'claude_code'
+        ? 'idle'
+        : event.agent_type === 'antigravity' && event.source === 'import'
+          ? 'active'
+          : 'ended'
+    )
     : 'active';
   const next: Session = {
     ...session,

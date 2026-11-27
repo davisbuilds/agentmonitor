@@ -142,7 +142,7 @@ type EventRollupSource = Pick<
 interface SessionMetadata {
   agentType: string | null;
   project: string | null;
-  browsingSession: { started_at: string | null; ended_at: string | null } | null;
+  browsingSession: { started_at: string | null; ended_at: string | null; fidelity?: string | null } | null;
 }
 
 interface MeasureRollup {
@@ -231,8 +231,8 @@ function presentOrNull(value: string | null | undefined): string | null {
  */
 function readEventSessionMetadata(db: Database, sessionId: string): SessionMetadata {
   const browsingSession = db.prepare(
-    'SELECT agent, project, started_at, ended_at FROM browsing_sessions WHERE id = ?',
-  ).get(sessionId) as { agent: string; project: string | null; started_at: string | null; ended_at: string | null } | undefined;
+    'SELECT agent, project, started_at, ended_at, fidelity FROM browsing_sessions WHERE id = ?',
+  ).get(sessionId) as { agent: string; project: string | null; started_at: string | null; ended_at: string | null; fidelity: string | null } | undefined;
   const firstTurnAgent = () => (db.prepare(
     'SELECT agent_type FROM session_turns WHERE session_id = ? ORDER BY COALESCE(started_at, created_at), id LIMIT 1',
   ).get(sessionId) as { agent_type: string } | undefined)?.agent_type;
@@ -251,14 +251,7 @@ function readEventSessionMetadata(db: Database, sessionId: string): SessionMetad
   };
 }
 
-/**
- * Aggregate a session into a content-free summary. The watcher re-derives on
- * every transcript append, so a session with events reads only the event
- * columns the rollup uses; message, tool-call and item bodies are loaded and
- * projected only for sessions without events.
- */
-export function deriveSessionTraceSummary(sessionId: string): SessionTraceSummary {
-  const db = getDb();
+export function deriveSessionTraceSummary(sessionId: string, db: Database = getDb()): SessionTraceSummary {
   const events = db.prepare(`
     SELECT tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms,
            status, model, event_type, tool_name, client_timestamp, created_at
@@ -269,6 +262,11 @@ export function deriveSessionTraceSummary(sessionId: string): SessionTraceSummar
   if (events.length > 0) {
     rollup = rollupFromEvents(events);
     metadata = readEventSessionMetadata(db, sessionId);
+    // WHY: When a full-fidelity transcript projection exists alongside events (e.g. Antigravity),
+    // preserve transcript coverage without scanning message or item tables.
+    if (metadata.browsingSession?.fidelity === 'full') {
+      rollup.coverage.has_full_transcript = true;
+    }
   } else {
     const input = readTraceQualityProjectionInputForSession(sessionId);
     const projected = projectTraceQuality(input);
@@ -462,9 +460,8 @@ function upsertSessionTraceSummary(db: Database, summary: SessionTraceSummary): 
   });
 }
 
-/** Derive + persist the summary for one session. Safe to call repeatedly. */
-export function maintainSessionTraceSummary(sessionId: string): void {
-  upsertSessionTraceSummary(getDb(), deriveSessionTraceSummary(sessionId));
+export function maintainSessionTraceSummary(sessionId: string, db: Database = getDb()): void {
+  upsertSessionTraceSummary(db, deriveSessionTraceSummary(sessionId, db));
 }
 
 /**

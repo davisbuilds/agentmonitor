@@ -7,7 +7,12 @@ import { discoverClaudeCodeLogs, parseClaudeCodeFile, hashFile as hashClaudeFile
 import type { ParsedImportEvent } from './claude-code.js';
 import { discoverCodexLogs, hashContent as hashCodexContent } from './codex.js';
 import { isCounterUsageRow, isRequestUsageRow, reconcileCodexImport, type CodexReconcileCounts } from './codex-reconcile.js';
-import { discoverAntigravityLogs, parseAntigravityFile, hashFile as hashAntigravityFile } from './antigravity.js';
+import {
+  discoverAntigravityLogs,
+  hashFile as hashAntigravityFile,
+  ingestAntigravitySnapshot,
+} from './antigravity.js';
+import { readAntigravityConversationSnapshot } from './antigravity/snapshot.js';
 import { createConfig } from '../config.js';
 import { safelyMaintainTraceSummaryForEvent, safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { reparseRequested } from '../db/reparse-marker.js';
@@ -180,26 +185,22 @@ function processFile(
   options: ImportOptions,
 ): ImportFileResult {
   if (source === 'codex') return processCodexFile(filePath, options);
+  if (source === 'antigravity') return processAntigravityFile(filePath, options);
 
-  // WHY: Antigravity can write changes only to the WAL sidecar, leaving the main database's size and
-  // mtime unchanged.
-  const stamp = source === 'claude-code' ? diskStamp(filePath) : null;
+  const stamp = diskStamp(filePath);
   if (stamp && isUnchangedOnDisk(filePath, stamp, options)) return unchangedResult(filePath, source);
-  const stat = fs.statSync(filePath);
-  const hashFn = source === 'claude-code' ? hashClaudeFile : hashAntigravityFile;
-  const currentHash = hashFn(filePath);
+  const currentHash = hashClaudeFile(filePath);
   if (isUnchanged(filePath, currentHash, stamp, options)) return unchangedResult(filePath, source);
 
-  const events = source === 'claude-code'
-    ? parseClaudeCodeFile(filePath, { from: options.from, to: options.to })
-    : parseAntigravityFile(filePath, { from: options.from, to: options.to });
-
-  const ownsLegacyIdentity = source === 'claude-code'
-    && events.length > 0
-    && path.basename(filePath, '.jsonl') === events[0].session_id;
+  const events = parseClaudeCodeFile(filePath, { from: options.from, to: options.to });
+  const ownsLegacyIdentity = events.length > 0 && path.basename(filePath, '.jsonl') === events[0].session_id;
   const { imported, duplicates, refreshed } = importEvents(
-    events, options.dryRun ?? false, ownsLegacyIdentity, source === 'claude-code');
-  recordImportState(filePath, currentHash, stamp?.size ?? stat.size, stamp?.mtime ?? null, source, imported, options);
+    events,
+    options.dryRun ?? false,
+    ownsLegacyIdentity,
+    true,
+  );
+  recordImportState(filePath, currentHash, stamp.size, stamp.mtime, source, imported, options);
 
   return {
     path: filePath,
@@ -211,6 +212,49 @@ function processFile(
     skippedDuplicate: duplicates,
     skippedUnchanged: false,
   };
+}
+
+function processAntigravityFile(filePath: string, options: ImportOptions): ImportFileResult {
+  try {
+    // WHY: Antigravity can write changes only to the WAL sidecar, leaving the main database's size and
+    // mtime unchanged.
+    const currentHash = hashAntigravityFile(filePath);
+    if (isUnchanged(filePath, currentHash, null, options)) return unchangedResult(filePath, 'antigravity');
+
+    const snapshot = readAntigravityConversationSnapshot(filePath, {
+      includeTranscript: false,
+      includeSummary: true,
+      throwOnError: true,
+    });
+    const isDateScoped = options.from !== undefined || options.to !== undefined;
+    const result = ingestAntigravitySnapshot(getDb(), snapshot, {
+      from: options.from,
+      to: options.to,
+      dryRun: options.dryRun,
+      importStateHash: !options.dryRun && !isDateScoped ? currentHash : undefined,
+    });
+    if (!options.dryRun && (result.eventsImported > 0 || result.eventsRefreshed > 0)) {
+      safelyMaintainTraceSummaryForSession(snapshot.sessionId, 'historical antigravity import');
+    }
+
+    return {
+      path: filePath,
+      source: 'antigravity',
+      eventsFound: result.eventsFound,
+      eventsImported: result.eventsImported,
+      eventsRefreshed: result.eventsRefreshed,
+      eventsRemoved: 0,
+      skippedDuplicate: result.duplicates,
+      skippedUnchanged: false,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return {
+      ...unchangedResult(filePath, 'antigravity'),
+      skippedUnchanged: false,
+      error: detail,
+    };
+  }
 }
 
 /**

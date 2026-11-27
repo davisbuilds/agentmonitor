@@ -179,6 +179,11 @@ function handleFileChange(
       }
 
       if (broadcaster.clientCount > 0) {
+        if (outcome.sessionStatus === 'active' && outcome.ingestedEvents?.length) {
+          for (const eventRow of outcome.ingestedEvents) {
+            broadcaster.broadcast('event', eventRow as unknown as Record<string, unknown>);
+          }
+        }
         broadcaster.broadcast('session_update', {
           type: 'session_parsed',
           session_id: sessionId,
