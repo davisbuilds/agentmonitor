@@ -163,7 +163,7 @@ describe('Antigravity gen_metadata occupancy and conversation_summaries metadata
     ]);
 
     const parsedRoot = parseAntigravitySessions(rootDb);
-    assert.equal(parsedRoot.metadata.context_used_tokens, 354_500);
+    assert.equal(parsedRoot.metadata.context_used_tokens, 353_000);
     assert.equal(parsedRoot.metadata.project, 'agentmonitor');
     assert.equal(parsedRoot.metadata.first_message, 'Build Antigravity Parity');
     assert.equal(parsedRoot.metadata.parent_session_id, null);
@@ -182,7 +182,7 @@ describe('Antigravity gen_metadata occupancy and conversation_summaries metadata
     syncAntigravityLiveSession(getDb(), parsedRoot);
     const liveRoot = getLiveSession(rootId);
     assert.ok(liveRoot);
-    assert.equal(liveRoot.context_used_tokens, 354_500);
+    assert.equal(liveRoot.context_used_tokens, 353_000);
     assert.equal(liveRoot.context_window_tokens, 1_048_576);
     assert.equal(liveRoot.context_pct, 34);
 
@@ -204,7 +204,7 @@ describe('Antigravity gen_metadata occupancy and conversation_summaries metadata
     ]);
 
     const parsed = parseAntigravitySessions(dbPath);
-    assert.equal(parsed.metadata.context_used_tokens, 1000);
+    assert.equal(parsed.metadata.context_used_tokens, 900);
     assert.equal(parsed.metadata.project, null);
     assert.equal(parsed.metadata.first_message, 'user input');
     assert.equal(parsed.metadata.parent_session_id, null);

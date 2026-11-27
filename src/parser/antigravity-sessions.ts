@@ -2,7 +2,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import type { ContentBlock, ParsedSession, ParsedMessage, ParsedToolCall } from './claude-code.js';
 import { stepKindToEvent } from '../import/antigravity.js';
-import { decodeGeneratorMetadata, decodeStepEnvelope, decodeStepTimestampMs } from '../import/antigravity/proto.js';
+import { decodeGeneratorMetadata, decodeStepEnvelope, decodeStepTimestampMs, deriveBillingTokens } from '../import/antigravity/proto.js';
 import { readAntigravityConversationSummary } from '../import/antigravity/summary.js';
 import { projectIdentityFromCwd, unavailableSkillContext } from '../skills/context-observations.js';
 import {
@@ -171,7 +171,8 @@ export function parseAntigravitySessions(filePath: string): ParsedSession {
         const gm = decodeGeneratorMetadata(row.data);
         if (gm.model) latestModel = gm.model;
         if (gm.usage) {
-          const promptTokens = gm.usage.systemPromptTokens + gm.usage.inputTokens + gm.usage.cachedTokens;
+          const b = deriveBillingTokens(gm.usage);
+          const promptTokens = b.tokensIn + b.cacheReadTokens + b.cacheWriteTokens;
           if (promptTokens > 0) contextUsedTokens = promptTokens;
         }
       }
