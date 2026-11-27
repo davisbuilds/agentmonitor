@@ -494,4 +494,36 @@ describe('Antigravity usage repair', () => {
     assert.equal(stubRows.c, 1);
     assert.equal(stubRows.tokens_in, 2531);
   });
+
+  test('steps-only database without gen_metadata table counts files_unreadable and leaves stored usage intact under preview and apply', () => {
+    const t0 = Date.UTC(2026, 10, 16, 8, 0, 0) / 1000;
+    const stepsOnlyFile = seedLegacySession('agr-steps-only-01', t0, t0 + 60);
+    fs.rmSync(stepsOnlyFile, { force: true });
+    const sdb = new Database(stepsOnlyFile);
+    sdb.exec('CREATE TABLE steps(idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+    sdb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+      .run(0, 14, 3, stepBlob(14, 19), stepMetaBlob(t0));
+    sdb.close();
+
+    const preview = repairAntigravityImportUsage(getDb(), { antigravityDir: agrDir, apply: false });
+    assert.equal(preview.files_unreadable, 1);
+    assert.equal(preview.rows_deleted, 0);
+    assert.equal(preview.sessions_changed, 0);
+
+    const applied = repairAntigravityImportUsage(getDb(), { antigravityDir: agrDir, apply: true });
+    assert.equal(applied.files_unreadable, 1);
+    assert.equal(applied.rows_deleted, 0);
+    assert.equal(applied.sessions_changed, 0);
+
+    const rows = getDb().prepare(
+      "SELECT COUNT(*) AS c, COALESCE(SUM(tokens_in), 0) AS tokens_in FROM events WHERE session_id = 'agr-steps-only-01' AND event_type = 'llm_response'",
+    ).get() as { c: number; tokens_in: number };
+    assert.equal(rows.c, 1);
+    assert.equal(rows.tokens_in, 2531);
+
+    const snap = readAntigravityConversationSnapshot(stepsOnlyFile, { includeTranscript: false, throwOnError: true });
+    assert.equal(snap.dbPresent, true);
+    assert.equal(snap.hasStepsTable, true);
+    assert.equal(snap.hasGenMetadataTable, false);
+  });
 });

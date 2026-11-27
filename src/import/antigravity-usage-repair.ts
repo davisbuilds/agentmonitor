@@ -500,7 +500,7 @@ function repairWithin(
       continue;
     }
 
-    if (!snapshot.dbPresent || !snapshot.hasSchema) {
+    if (!snapshot.dbPresent || !snapshot.hasGenMetadataTable) {
       report.files_unreadable++;
       continue;
     }
