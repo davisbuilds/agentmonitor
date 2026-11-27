@@ -941,8 +941,9 @@ Options:
   source root or database snapshot.
 
 Missing conversation databases are counted in `sessions_without_source` and left
-untouched; databases locked past bounded read retries are counted in
-`files_unreadable`. If any session transaction fails, that session rolls back
+untouched; databases that are corrupt, truncated/missing schema
+(`steps`/`gen_metadata`), or locked past bounded read retries are counted in
+`files_unreadable` and preserve stored rows. If any session transaction fails, that session rolls back
 and appears in `sessions_failed` with partial-success exit status while
 completed sessions commit cleanly. Restart the AgentMonitor server after
 `--apply` so the Monitor refreshes cached stats. Rehearse `--dry-run --json` and

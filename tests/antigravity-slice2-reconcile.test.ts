@@ -15,6 +15,7 @@ import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connectio
 import type { updateIdleSessions as updateIdleSessionsFn } from '../src/db/queries.js';
 import type { getLiveSession as getLiveSessionFn, listLiveSessions as listLiveSessionsFn } from '../src/db/v2-queries.js';
 import type { hashFile as hashImportFileFn, parseAntigravityFile as parseAgrFileFn } from '../src/import/antigravity.js';
+import type { repairAntigravityImportUsage as repairAgrFn } from '../src/import/antigravity-usage-repair.js';
 import type { readAntigravityConversationSnapshot as readSnapshotFn } from '../src/import/antigravity/snapshot.js';
 import type { runImport as runImportFn } from '../src/import/index.js';
 import type { parseAntigravitySessions as parseAgrSessionsFn } from '../src/parser/antigravity-sessions.js';
@@ -140,6 +141,7 @@ let getLiveSession: typeof getLiveSessionFn;
 let readAntigravityConversationSnapshot: typeof readSnapshotFn;
 let hashFile: typeof hashImportFileFn;
 let parseAntigravityFile: typeof parseAgrFileFn;
+let repairAntigravityImportUsage: typeof repairAgrFn;
 let parseAntigravitySessions: typeof parseAgrSessionsFn;
 let runImport: typeof runImportFn;
 let hashAntigravityDb: typeof hashAgrDbFn;
@@ -170,6 +172,7 @@ before(async () => {
   ({ listLiveSessions, getLiveSession } = await import('../src/db/v2-queries.js'));
   ({ readAntigravityConversationSnapshot } = await import('../src/import/antigravity/snapshot.js'));
   ({ hashFile, parseAntigravityFile } = await import('../src/import/antigravity.js'));
+  ({ repairAntigravityImportUsage } = await import('../src/import/antigravity-usage-repair.js'));
   ({ parseAntigravitySessions } = await import('../src/parser/antigravity-sessions.js'));
   ({ runImport } = await import('../src/import/index.js'));
   ({ hashAntigravityDb, syncAntigravitySessionFileDetailed } = await import('../src/watcher/index.js'));
@@ -610,5 +613,73 @@ describe('Slice 2: Antigravity shared snapshot reader, WAL parity, live Monitor 
       (getDb().prepare("SELECT COUNT(*) c FROM events WHERE session_id = ? AND event_type = 'llm_response'").get(id) as { c: number }).c,
       3,
     );
+  });
+
+  test('reordered gen_metadata with preexisting legacy ordinal gen:i rows migrates identities without dropping new generations or double-counting', () => {
+    const home = path.join(tempDir, 'home-legacy-reorder');
+    const sessionId = '33333333-2222-3333-4444-555555555505';
+    const dbPath = path.join(home, 'conversations', `${sessionId}.db`);
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+
+    const ts = Date.UTC(2026, 10, 16, 9, 0, 0) / 1000;
+    const firstIso = new Date(ts * 1000).toISOString();
+
+    const convDb = new Database(dbPath);
+    convDb.exec('CREATE TABLE steps(idx INTEGER PRIMARY KEY, step_type INTEGER, status INTEGER, step_payload BLOB, metadata BLOB);');
+    convDb.exec('CREATE TABLE gen_metadata(idx INTEGER PRIMARY KEY, data BLOB);');
+    convDb.prepare('INSERT INTO steps(idx, step_type, status, step_payload, metadata) VALUES (?, ?, ?, ?, ?)')
+      .run(0, 14, 3, stepBlob(14, 19), stepMetaBlob(ts));
+    const insGen = convDb.prepare('INSERT INTO gen_metadata(idx, data) VALUES (?, ?)');
+    insGen.run(0, genMetaBlob({ model: 'gemini-4-neon', input: 200, output: 20, cacheRead: 40, messageId: 'msg-B', createdSecs: ts + 20 }));
+    insGen.run(1, genMetaBlob({ model: 'gemini-4-neon', input: 300, output: 30, cacheRead: 60, messageId: 'msg-C', createdSecs: ts + 30 }));
+    insGen.run(2, genMetaBlob({ model: 'gemini-4-neon', input: 100, output: 10, cacheRead: 20, messageId: 'msg-A', createdSecs: ts + 10 }));
+    convDb.close();
+
+    getDb().prepare(`
+      INSERT INTO sessions (id, agent_id, agent_type, status, started_at, last_event_at, ended_at)
+      VALUES (?, 'antigravity-default', 'antigravity', 'ended', datetime(?), datetime(?), datetime(?))
+    `).run(sessionId, firstIso, firstIso, firstIso);
+
+    const insEv = getDb().prepare(`
+      INSERT INTO events (
+        event_id, session_id, agent_type, event_type, status,
+        tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+        model, cost_usd, client_timestamp, metadata, source
+      ) VALUES (?, ?, 'antigravity', 'llm_response', 'success', ?, ?, ?, 0, 'gemini-4-neon', 0.5, ?, ?, 'import')
+    `);
+    insEv.run(legacyAgrEventId(sessionId, 'gen:0'), sessionId, 1631, 10, 20, firstIso, JSON.stringify({ _source: 'antigravity_db', thoughts_tokens: 0 }));
+    insEv.run(legacyAgrEventId(sessionId, 'gen:1'), sessionId, 1731, 20, 40, firstIso, JSON.stringify({ _source: 'antigravity_db', thoughts_tokens: 0 }));
+
+    const imported = runImport({ source: 'antigravity', antigravityDir: home });
+    assert.equal(imported.totalEventsImported, 3, 'session_start, step:0, and genuinely new generation C are imported');
+
+    const rowsAfterImport = getDb().prepare(`
+      SELECT event_id, tokens_in, tokens_out, cache_read_tokens
+      FROM events
+      WHERE session_id = ? AND event_type = 'llm_response'
+      ORDER BY tokens_out
+    `).all(sessionId) as Array<{ event_id: string; tokens_in: number; tokens_out: number; cache_read_tokens: number }>;
+
+    assert.equal(rowsAfterImport.length, 3, 'A, B, and new C appear once each with zero double-counting');
+    assert.deepEqual(rowsAfterImport.map(r => r.event_id), [
+      legacyAgrEventId(sessionId, 'gen:msg:msg-A'),
+      legacyAgrEventId(sessionId, 'gen:msg:msg-B'),
+      legacyAgrEventId(sessionId, 'gen:msg:msg-C'),
+    ]);
+    assert.equal(rowsAfterImport[2].tokens_in, 300, 'new generation C stored with clean uncached tokens');
+
+    const repaired = repairAntigravityImportUsage(getDb(), { antigravityDir: home, apply: true });
+    assert.equal(repaired.sessions_changed, 1);
+    assert.equal(repaired.rows_updated, 2, 'legacy A and B rows still repaired after ID migration');
+
+    const totals = getDb().prepare(`
+      SELECT COUNT(*) AS c, COALESCE(SUM(tokens_in), 0) AS tokens_in, COALESCE(SUM(tokens_out), 0) AS tokens_out
+      FROM events
+      WHERE session_id = ? AND event_type = 'llm_response'
+    `).get(sessionId) as { c: number; tokens_in: number; tokens_out: number };
+    assert.deepEqual(totals, { c: 3, tokens_in: 600, tokens_out: 60 });
+
+    const secondRepair = repairAntigravityImportUsage(getDb(), { antigravityDir: home, apply: true });
+    assert.equal(secondRepair.sessions_changed, 0);
   });
 });

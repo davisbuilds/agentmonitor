@@ -13,7 +13,7 @@ import {
   type GeneratorMetadata,
   type StepEnvelope,
 } from './proto.js';
-import { isRetryableSqliteError, openReadOnlySqliteWithRetry, type SqliteReadRetryOptions } from './sqlite.js';
+import { openReadOnlySqliteWithRetry, type SqliteReadRetryOptions } from './sqlite.js';
 import { readAntigravityConversationSummary, type AntigravitySummaryMetadata } from './summary.js';
 
 export type AntigravityTimestampSource =
@@ -49,6 +49,7 @@ export interface AntigravityConversationSnapshot {
   sessionId: string;
   filePath: string;
   dbPresent: boolean;
+  hasSchema: boolean;
   steps: AntigravityStepRecord[];
   generations: AntigravityGenRecord[];
   summary: AntigravitySummaryMetadata | null;
@@ -160,19 +161,19 @@ export function hashAntigravityConversation(
 function readRawSqliteRows(
   filePath: string,
   options?: AntigravitySnapshotOptions,
-): { dbPresent: boolean; steps: RawStepRow[]; genRows: RawGenRow[] } {
+): { dbPresent: boolean; hasSchema: boolean; steps: RawStepRow[]; genRows: RawGenRow[] } {
   if (!fs.existsSync(filePath)) {
-    return { dbPresent: false, steps: [], genRows: [] };
+    return { dbPresent: false, hasSchema: false, steps: [], genRows: [] };
   }
 
   try {
     const stat = fs.statSync(filePath);
     if (stat.size === 0) {
-      return { dbPresent: true, steps: [], genRows: [] };
+      return { dbPresent: true, hasSchema: false, steps: [], genRows: [] };
     }
   } catch (err) {
     const code = err && typeof err === 'object' && 'code' in err ? (err as { code?: unknown }).code : undefined;
-    if (code === 'ENOENT') return { dbPresent: false, steps: [], genRows: [] };
+    if (code === 'ENOENT') return { dbPresent: false, hasSchema: false, steps: [], genRows: [] };
     throw err;
   }
 
@@ -182,20 +183,21 @@ function readRawSqliteRows(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('steps', 'gen_metadata')",
       ).all() as Array<{ name: string }>;
       const tables = new Set(tableRows.map((row) => row.name));
+      const hasSchema = tables.has('steps') || tables.has('gen_metadata');
       const steps = tables.has('steps')
         ? db.prepare('SELECT idx, step_type, status, step_payload, metadata FROM steps ORDER BY idx').all() as RawStepRow[]
         : [];
       const genRows = tables.has('gen_metadata')
         ? db.prepare('SELECT idx, data FROM gen_metadata ORDER BY idx').all() as RawGenRow[]
         : [];
-      return { steps, genRows };
+      return { hasSchema, steps, genRows };
     }, options);
 
-    if (!rows) return { dbPresent: false, steps: [], genRows: [] };
-    return { dbPresent: true, steps: rows.steps, genRows: rows.genRows };
+    if (!rows) return { dbPresent: false, hasSchema: false, steps: [], genRows: [] };
+    return { dbPresent: true, hasSchema: rows.hasSchema, steps: rows.steps, genRows: rows.genRows };
   } catch (err) {
-    if (options?.throwOnError === false || !isRetryableSqliteError(err)) {
-      return { dbPresent: false, steps: [], genRows: [] };
+    if (options?.throwOnError === false) {
+      return { dbPresent: false, hasSchema: false, steps: [], genRows: [] };
     }
     throw err;
   }
@@ -206,7 +208,7 @@ export function readAntigravityConversationSnapshot(
   options?: AntigravitySnapshotOptions,
 ): AntigravityConversationSnapshot {
   const sessionId = path.basename(filePath, '.db');
-  const { dbPresent, steps: rawSteps, genRows: rawGens } = readRawSqliteRows(filePath, {
+  const { dbPresent, hasSchema, steps: rawSteps, genRows: rawGens } = readRawSqliteRows(filePath, {
     retryDelaysMs: options?.retryDelaysMs,
     busyTimeoutMs: options?.busyTimeoutMs,
     throwOnError: options?.throwOnError ?? true,
@@ -280,6 +282,7 @@ export function readAntigravityConversationSnapshot(
     sessionId,
     filePath,
     dbPresent,
+    hasSchema,
     steps,
     generations,
     summary,

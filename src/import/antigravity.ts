@@ -133,19 +133,7 @@ export function antigravitySnapshotToEvents(
     });
   }
 
-  const msgIdCounts = new Map<string, number>();
-  const pmsgIdCounts = new Map<string, number>();
-  for (const gen of generations) {
-    if (gen.decoded.messageId) {
-      msgIdCounts.set(gen.decoded.messageId, (msgIdCounts.get(gen.decoded.messageId) ?? 0) + 1);
-    }
-    if (gen.decoded.providerAssignedMessageId) {
-      pmsgIdCounts.set(
-        gen.decoded.providerAssignedMessageId,
-        (pmsgIdCounts.get(gen.decoded.providerAssignedMessageId) ?? 0) + 1,
-      );
-    }
-  }
+  const { msgIdCounts, pmsgIdCounts } = countGenerationIds(generations);
 
   generations.forEach((gen, i) => {
     const gm = gen.decoded;
@@ -168,14 +156,7 @@ export function antigravitySnapshotToEvents(
         )
       : null;
 
-    let stableTag: string;
-    if (gm.messageId && msgIdCounts.get(gm.messageId) === 1) {
-      stableTag = `gen:msg:${gm.messageId}`;
-    } else if (gm.providerAssignedMessageId && pmsgIdCounts.get(gm.providerAssignedMessageId) === 1) {
-      stableTag = `gen:pmsg:${gm.providerAssignedMessageId}`;
-    } else {
-      stableTag = `gen:idx:${gen.idx}`;
-    }
+    const stableTag = stableGenerationTag(gm, gen.idx, msgIdCounts, pmsgIdCounts);
 
     events.push({
       event_id: eventId(sessionId, stableTag),
@@ -203,6 +184,164 @@ export function antigravitySnapshotToEvents(
   });
 
   return events;
+}
+
+function countGenerationIds(generations: AntigravityConversationSnapshot['generations']): {
+  msgIdCounts: Map<string, number>;
+  pmsgIdCounts: Map<string, number>;
+} {
+  const msgIdCounts = new Map<string, number>();
+  const pmsgIdCounts = new Map<string, number>();
+  for (const gen of generations) {
+    if (gen.decoded.messageId) {
+      msgIdCounts.set(gen.decoded.messageId, (msgIdCounts.get(gen.decoded.messageId) ?? 0) + 1);
+    }
+    if (gen.decoded.providerAssignedMessageId) {
+      pmsgIdCounts.set(
+        gen.decoded.providerAssignedMessageId,
+        (pmsgIdCounts.get(gen.decoded.providerAssignedMessageId) ?? 0) + 1,
+      );
+    }
+  }
+  return { msgIdCounts, pmsgIdCounts };
+}
+
+function stableGenerationTag(
+  gm: { messageId?: string; providerAssignedMessageId?: string },
+  genIdx: number,
+  msgIdCounts: ReadonlyMap<string, number>,
+  pmsgIdCounts: ReadonlyMap<string, number>,
+): string {
+  if (gm.messageId && msgIdCounts.get(gm.messageId) === 1) return `gen:msg:${gm.messageId}`;
+  if (gm.providerAssignedMessageId && pmsgIdCounts.get(gm.providerAssignedMessageId) === 1) {
+    return `gen:pmsg:${gm.providerAssignedMessageId}`;
+  }
+  return `gen:idx:${genIdx}`;
+}
+
+export function generationModelEnumsByEventId(
+  snapshot: AntigravityConversationSnapshot,
+): Map<string, number> {
+  const map = new Map<string, number>();
+  const { msgIdCounts, pmsgIdCounts } = countGenerationIds(snapshot.generations);
+  for (const gen of snapshot.generations) {
+    if (!gen.decoded.usage) continue;
+    const tag = stableGenerationTag(gen.decoded, gen.idx, msgIdCounts, pmsgIdCounts);
+    map.set(eventId(snapshot.sessionId, tag), gen.decoded.usage.modelEnum ?? 0);
+  }
+  return map;
+}
+
+export interface LegacyGenerationRowCandidate {
+  id: number;
+  event_id: string;
+  model: string | null;
+  tokens_in: number;
+  tokens_out: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  client_timestamp: string | null;
+  metadata?: string | null;
+}
+
+function parseJsonObject(raw: string | null | undefined): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function matchesLegacyGeneration(
+  row: LegacyGenerationRowCandidate,
+  event: ParsedImportEvent,
+  modelEnum: number,
+): boolean {
+  if (row.model !== (event.model ?? null)) return false;
+  if (row.tokens_out !== event.tokens_out) return false;
+  if (row.cache_read_tokens !== (event.cache_read_tokens ?? 0)) return false;
+
+  const expectedCacheWrite = event.cache_write_tokens ?? 0;
+  const exactMatch = row.tokens_in === event.tokens_in && row.cache_write_tokens === expectedCacheWrite;
+  const slice0Match = modelEnum > 0 && row.tokens_in === event.tokens_in + modelEnum && row.cache_write_tokens === 0;
+  if (!exactMatch && !slice0Match) return false;
+
+  const rowMeta = parseJsonObject(row.metadata);
+  const eventMeta = event.metadata && typeof event.metadata === 'object' && !Array.isArray(event.metadata)
+    ? event.metadata as Record<string, unknown>
+    : null;
+  if (
+    rowMeta
+    && eventMeta
+    && typeof rowMeta.thoughts_tokens === 'number'
+    && typeof eventMeta.thoughts_tokens === 'number'
+    && rowMeta.thoughts_tokens !== eventMeta.thoughts_tokens
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+export function matchLegacyAntigravityRows<T extends LegacyGenerationRowCandidate>(
+  sessionId: string,
+  missingEvents: readonly ParsedImportEvent[],
+  candidateRows: readonly T[],
+  modelEnumsByEventId: ReadonlyMap<string, number>,
+  options?: { ordinalBound?: number; requireOrdinalId?: boolean },
+): Map<string, T> {
+  const matched = new Map<string, T>();
+  if (missingEvents.length === 0 || candidateRows.length === 0) return matched;
+
+  let eligibleRows = candidateRows;
+  if (options?.requireOrdinalId !== false) {
+    const bound = Math.max(options?.ordinalBound ?? 0, candidateRows.length, missingEvents.length, 128) * 2 + 256;
+    const legacyOrdinalIds = new Set<string>();
+    for (let i = 0; i < bound; i++) {
+      legacyOrdinalIds.add(eventId(sessionId, `gen:${i}`));
+    }
+    eligibleRows = candidateRows.filter((row) => legacyOrdinalIds.has(row.event_id));
+    if (eligibleRows.length === 0) return matched;
+  }
+
+  const usedRowIds = new Set<number>();
+  const eligibleByEventId = new Map(eligibleRows.map((row) => [row.event_id, row]));
+  const remainingEvents: ParsedImportEvent[] = [];
+
+  for (const event of missingEvents) {
+    if (!event.event_id) continue;
+    const modelEnum = modelEnumsByEventId.get(event.event_id) ?? 0;
+    const exactOrdinal = event.legacy_event_id ? eligibleByEventId.get(event.legacy_event_id) : undefined;
+    if (exactOrdinal && !usedRowIds.has(exactOrdinal.id) && matchesLegacyGeneration(exactOrdinal, event, modelEnum)) {
+      usedRowIds.add(exactOrdinal.id);
+      matched.set(event.event_id, exactOrdinal);
+    } else {
+      remainingEvents.push(event);
+    }
+  }
+
+  for (const event of remainingEvents) {
+    if (!event.event_id) continue;
+    const modelEnum = modelEnumsByEventId.get(event.event_id) ?? 0;
+    const targetTs = event.client_timestamp ?? null;
+    let bestCandidate: T | undefined;
+    for (const row of eligibleRows) {
+      if (usedRowIds.has(row.id) || !matchesLegacyGeneration(row, event, modelEnum)) continue;
+      if (row.client_timestamp === targetTs) {
+        bestCandidate = row;
+        break;
+      }
+      bestCandidate ??= row;
+    }
+    if (bestCandidate) {
+      usedRowIds.add(bestCandidate.id);
+      matched.set(event.event_id, bestCandidate);
+    }
+  }
+
+  return matched;
 }
 
 export function parseAntigravityFile(
@@ -236,16 +375,9 @@ export interface AntigravityIngestResult {
   sessionStatus: 'active' | 'idle' | 'ended';
 }
 
-interface ExistingAntigravityRow {
-  id: number;
-  event_id: string;
+interface ExistingAntigravityRow extends LegacyGenerationRowCandidate {
+  event_type: string;
   project: string | null;
-  client_timestamp: string | null;
-  tokens_in: number;
-  tokens_out: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  model: string | null;
   cost_usd: number | null;
   cost_source: string | null;
 }
@@ -409,13 +541,38 @@ export function ingestAntigravitySnapshot(
 
   const txn = db.transaction(() => {
     const existingRows = db.prepare(`
-      SELECT id, event_id, project, client_timestamp, tokens_in, tokens_out,
-             cache_read_tokens, cache_write_tokens, model, cost_usd, cost_source
+      SELECT id, event_id, event_type, project, client_timestamp,
+             COALESCE(tokens_in, 0) AS tokens_in,
+             COALESCE(tokens_out, 0) AS tokens_out,
+             COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
+             COALESCE(cache_write_tokens, 0) AS cache_write_tokens,
+             model, cost_usd, cost_source, metadata
       FROM events
       WHERE session_id = ? AND source = 'import' AND agent_type = 'antigravity' AND event_id IS NOT NULL
     `).all(snapshot.sessionId) as ExistingAntigravityRow[];
     const existingById = new Map(existingRows.map((row) => [row.event_id, row]));
 
+    const canonicalMatchedRowIds = new Set<number>();
+    const unmatchedLlmEvents: ParsedImportEvent[] = [];
+    for (const event of events) {
+      if (!event.event_id) continue;
+      const hit = existingById.get(event.event_id);
+      if (hit) canonicalMatchedRowIds.add(hit.id);
+      else if (event.event_type === 'llm_response') unmatchedLlmEvents.push(event);
+    }
+
+    const unclaimedLlms = existingRows.filter(
+      (row) => row.event_type === 'llm_response' && !canonicalMatchedRowIds.has(row.id),
+    );
+    const legacyMatchByEventId = matchLegacyAntigravityRows(
+      snapshot.sessionId,
+      unmatchedLlmEvents,
+      unclaimedLlms,
+      generationModelEnumsByEventId(snapshot),
+      { ordinalBound: existingRows.length + events.length },
+    );
+
+    const migrateEventIdStmt = db.prepare('UPDATE events SET event_id = ? WHERE id = ?');
     const updateProject = db.prepare('UPDATE events SET project = ? WHERE id = ?');
     const updateLateAttributedGen = db.prepare(`
       UPDATE events
@@ -424,11 +581,23 @@ export function ingestAntigravitySnapshot(
     `);
 
     for (const event of events) {
-      const existing = event.event_id ? existingById.get(event.event_id) : undefined;
+      let existing = event.event_id ? existingById.get(event.event_id) : undefined;
+      let rowUpdated = false;
+      if (!existing && event.event_id) {
+        const legacyMatch = legacyMatchByEventId.get(event.event_id);
+        if (legacyMatch && !existingById.has(event.event_id)) {
+          migrateEventIdStmt.run(event.event_id, legacyMatch.id);
+          existingById.delete(legacyMatch.event_id);
+          legacyMatch.event_id = event.event_id;
+          existingById.set(event.event_id, legacyMatch);
+          existing = legacyMatch;
+          rowUpdated = true;
+        }
+      }
       if (existing) {
         if (existing.project == null && event.project != null) {
           updateProject.run(event.project, existing.id);
-          eventsRefreshed++;
+          rowUpdated = true;
         }
         if (
           event.event_type === 'llm_response'
@@ -443,13 +612,9 @@ export function ingestAntigravitySnapshot(
             JSON.stringify(event.metadata ?? {}),
             existing.id,
           );
-          eventsRefreshed++;
+          rowUpdated = true;
         }
-        duplicates++;
-        continue;
-      }
-
-      if (event.legacy_event_id && existingById.has(event.legacy_event_id)) {
+        if (rowUpdated) eventsRefreshed++;
         duplicates++;
         continue;
       }

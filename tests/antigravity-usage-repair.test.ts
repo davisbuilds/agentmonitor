@@ -14,6 +14,7 @@ import type { closeDb as closeDbFn, getDb as getDbFn } from '../src/db/connectio
 import type { initSchema as initSchemaFn } from '../src/db/schema.js';
 import type { repairAntigravityImportUsage as repairFn } from '../src/import/antigravity-usage-repair.js';
 import type { hashFile as hashFileFn, parseAntigravityFile as parseAgrFileFn } from '../src/import/antigravity.js';
+import type { readAntigravityConversationSnapshot as readSnapshotFn } from '../src/import/antigravity/snapshot.js';
 import type { runImport as runImportFn } from '../src/import/index.js';
 import type { acquireRuntimeOwnership as acquireOwnershipFn } from '../src/runtime-ownership.js';
 import type { maintainSessionTraceSummary as maintainSummaryFn } from '../src/trace-quality/summary.js';
@@ -124,6 +125,7 @@ let closeDb: typeof closeDbFn;
 let initSchema: typeof initSchemaFn;
 let repairAntigravityImportUsage: typeof repairFn;
 let parseAntigravityFile: typeof parseAgrFileFn;
+let readAntigravityConversationSnapshot: typeof readSnapshotFn;
 let hashFile: typeof hashFileFn;
 let runImport: typeof runImportFn;
 let acquireRuntimeOwnership: typeof acquireOwnershipFn;
@@ -252,6 +254,7 @@ before(async () => {
 
   ({ repairAntigravityImportUsage } = await import('../src/import/antigravity-usage-repair.js'));
   ({ parseAntigravityFile, hashFile } = await import('../src/import/antigravity.js'));
+  ({ readAntigravityConversationSnapshot } = await import('../src/import/antigravity/snapshot.js'));
   ({ runImport } = await import('../src/import/index.js'));
   ({ acquireRuntimeOwnership } = await import('../src/runtime-ownership.js'));
   ({ maintainSessionTraceSummary } = await import('../src/trace-quality/summary.js'));
@@ -454,5 +457,41 @@ describe('Antigravity usage repair', () => {
     } finally {
       getDb().exec('DROP TRIGGER IF EXISTS fail_cli_agr');
     }
+  });
+
+  test('corrupt or truncated source DB counts files_unreadable and leaves stored usage intact under preview and apply', () => {
+    const t0 = Date.UTC(2026, 10, 15, 8, 0, 0) / 1000;
+    const corruptFile = seedLegacySession('agr-corrupt-01', t0, t0 + 60);
+    const stubFile = seedLegacySession('agr-empty-stub-01', t0, t0 + 60);
+    fs.writeFileSync(corruptFile, Buffer.from('not-a-sqlite-database-corrupt-bytes'));
+    fs.writeFileSync(stubFile, Buffer.alloc(0));
+
+    assert.throws(
+      () => readAntigravityConversationSnapshot(corruptFile, { includeTranscript: false, throwOnError: true }),
+      /not a database|SQLITE_NOTADB/i,
+    );
+    const nonStrict = readAntigravityConversationSnapshot(corruptFile, { includeTranscript: false, throwOnError: false });
+    assert.equal(nonStrict.dbPresent, false);
+
+    const preview = repairAntigravityImportUsage(getDb(), { antigravityDir: agrDir, apply: false });
+    assert.equal(preview.files_unreadable, 2);
+    assert.equal(preview.rows_deleted, 0);
+    assert.equal(preview.sessions_changed, 0);
+
+    const applied = repairAntigravityImportUsage(getDb(), { antigravityDir: agrDir, apply: true });
+    assert.equal(applied.files_unreadable, 2);
+    assert.equal(applied.rows_deleted, 0);
+    assert.equal(applied.sessions_changed, 0);
+
+    const corruptRows = getDb().prepare(
+      "SELECT COUNT(*) AS c, COALESCE(SUM(tokens_in), 0) AS tokens_in FROM events WHERE session_id = 'agr-corrupt-01' AND event_type = 'llm_response'",
+    ).get() as { c: number; tokens_in: number };
+    const stubRows = getDb().prepare(
+      "SELECT COUNT(*) AS c, COALESCE(SUM(tokens_in), 0) AS tokens_in FROM events WHERE session_id = 'agr-empty-stub-01' AND event_type = 'llm_response'",
+    ).get() as { c: number; tokens_in: number };
+    assert.equal(corruptRows.c, 1);
+    assert.equal(corruptRows.tokens_in, 2531);
+    assert.equal(stubRows.c, 1);
+    assert.equal(stubRows.tokens_in, 2531);
   });
 });

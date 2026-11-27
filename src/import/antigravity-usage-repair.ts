@@ -8,6 +8,8 @@ import { sameCost } from './codex-reconcile.js';
 import {
   antigravitySnapshotToEvents,
   discoverAntigravityLogs,
+  generationModelEnumsByEventId,
+  matchLegacyAntigravityRows,
   reconcileAntigravitySessionLifecycle,
   upsertAntigravityImportState,
 } from './antigravity.js';
@@ -179,19 +181,40 @@ function sessionRowNeedsReconcile(
 }
 
 function pairStaleRows(
+  sessionId: string,
   staleRows: readonly StoredAntigravityEventRow[],
   missingEvents: readonly ParsedImportEvent[],
+  modelEnumsByEventId: ReadonlyMap<string, number>,
 ): {
   paired: Array<{ stale: StoredAntigravityEventRow; event: ParsedImportEvent }>;
   unpairedStale: StoredAntigravityEventRow[];
   unpairedMissing: ParsedImportEvent[];
 } {
   const usedStaleIds = new Set<number>();
-  const staleById = new Map(staleRows.map((row) => [row.event_id, row]));
   const paired: Array<{ stale: StoredAntigravityEventRow; event: ParsedImportEvent }> = [];
-  const unmatchedEvents: ParsedImportEvent[] = [];
 
+  const contentMatched = matchLegacyAntigravityRows(
+    sessionId,
+    missingEvents,
+    staleRows,
+    modelEnumsByEventId,
+    { ordinalBound: staleRows.length + missingEvents.length, requireOrdinalId: true },
+  );
+
+  const afterContent: ParsedImportEvent[] = [];
   for (const event of missingEvents) {
+    const match = event.event_id ? contentMatched.get(event.event_id) : undefined;
+    if (match && !usedStaleIds.has(match.id)) {
+      usedStaleIds.add(match.id);
+      paired.push({ stale: match, event });
+    } else {
+      afterContent.push(event);
+    }
+  }
+
+  const staleById = new Map(staleRows.map((row) => [row.event_id, row]));
+  const unmatchedEvents: ParsedImportEvent[] = [];
+  for (const event of afterContent) {
     const exactLegacy = event.legacy_event_id ? staleById.get(event.legacy_event_id) : undefined;
     if (exactLegacy && !usedStaleIds.has(exactLegacy.id)) {
       usedStaleIds.add(exactLegacy.id);
@@ -273,7 +296,12 @@ function reconcileSessionInDb(
 
       const staleRows = storedLlms.filter((row) => !expectedById.has(row.event_id));
       const missingEvents = parsedGens.filter((e) => !storedById.has(e.event_id!));
-      const { paired, unpairedStale, unpairedMissing } = pairStaleRows(staleRows, missingEvents);
+      const { paired, unpairedStale, unpairedMissing } = pairStaleRows(
+        snapshot.sessionId,
+        staleRows,
+        missingEvents,
+        generationModelEnumsByEventId(snapshot),
+      );
 
       counts.matched = matchedCanonical.length + paired.length;
 
@@ -467,6 +495,11 @@ function repairWithin(
         throwOnError: true,
       });
     } catch {
+      report.files_unreadable++;
+      continue;
+    }
+
+    if (!snapshot.dbPresent || !snapshot.hasSchema) {
       report.files_unreadable++;
       continue;
     }
