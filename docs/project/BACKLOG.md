@@ -29,6 +29,18 @@ so later readers know what still needs checking.
 
 ## Open
 
+### Claude native context attachments
+
+- **What**: Expose retained native skill-listing and instruction attachments in
+  the existing session context view, with bounded metadata and hook reconciliation.
+- **Why or evidence**: The 2026-11-27 parser inspection found attachments are
+  classified as unused while instruction reach relies on hooks. Missing native
+  projection is not evidence that instructions were absent.
+- **Next**: Implement the
+  [Claude attachment spec](../specs/2026-11-27-claude-native-context-attachments-spec.md)
+  after the Codex context-evidence repair. Claude implementation is not part of
+  that repair; aggregate exposure changes remain outside this contract.
+
 ### Antigravity parity with Claude and Codex
 
 - **What**: Antigravity (the `agy` CLI and IDE, Gemini models) is in growing use.
