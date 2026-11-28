@@ -397,6 +397,7 @@
           capabilities={session.capabilities}
           integrationMode={session.integration_mode}
           fidelity={session.fidelity}
+          traceCoverage={session.trace_coverage ?? null}
         />
         <span class="tabular font-mono">{session.message_count} messages</span>
         {#if session.started_at}

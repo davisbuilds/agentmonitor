@@ -24,6 +24,12 @@ function runRow(overrides: Partial<WarehouseRunRow> = {}): WarehouseRunRow {
     started_at: '2026-06-30T10:00:00.000Z',
     day: '2026-06-30',
     published_run_id: 'run-1',
+    usage_coverage: 'observed',
+    cost_coverage: 'priced',
+    cost_provenance: 'estimated',
+    timestamp_coverage: 'exact',
+    tool_outcome_coverage: 'complete',
+    has_full_transcript: true,
     ...overrides,
   };
 }

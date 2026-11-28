@@ -21,6 +21,12 @@ const RUN_COLUMNS = [
   'started_at',
   'day',
   'published_run_id',
+  'usage_coverage',
+  'cost_coverage',
+  'cost_provenance',
+  'timestamp_coverage',
+  'tool_outcome_coverage',
+  'has_full_transcript',
 ] as const satisfies readonly (keyof WarehouseRunRow)[];
 
 const LINEAGE_COLUMNS = [
@@ -89,11 +95,11 @@ function ddlStatements(schema: string): string[] {
       'account text NOT NULL, ' +
       'session_id text NOT NULL, ' +
       'model text, ' +
-      'input_tokens integer NOT NULL, ' +
-      'output_tokens integer NOT NULL, ' +
-      'cache_read_tokens integer NOT NULL, ' +
-      'cache_write_tokens integer NOT NULL, ' +
-      'cost_usd double precision NOT NULL, ' +
+      'input_tokens integer, ' +
+      'output_tokens integer, ' +
+      'cache_read_tokens integer, ' +
+      'cache_write_tokens integer, ' +
+      'cost_usd double precision, ' +
       'latency_ms integer NOT NULL, ' +
       'observation_count integer NOT NULL, ' +
       'error_count integer NOT NULL, ' +
@@ -104,8 +110,26 @@ function ddlStatements(schema: string): string[] {
       'started_at timestamptz NOT NULL, ' +
       'day date NOT NULL, ' +
       'published_run_id text NOT NULL, ' +
+      "usage_coverage text NOT NULL DEFAULT 'unavailable', " +
+      "cost_coverage text NOT NULL DEFAULT 'unavailable', " +
+      "cost_provenance text NOT NULL DEFAULT 'unavailable', " +
+      "timestamp_coverage text NOT NULL DEFAULT 'unavailable', " +
+      "tool_outcome_coverage text NOT NULL DEFAULT 'not_applicable', " +
+      'has_full_transcript boolean NOT NULL DEFAULT false, ' +
       'updated_at timestamptz NOT NULL DEFAULT now(), ' +
       'PRIMARY KEY (account, session_id))',
+    `ALTER TABLE ${schema}.runs ` +
+      'ALTER COLUMN input_tokens DROP NOT NULL, ' +
+      'ALTER COLUMN output_tokens DROP NOT NULL, ' +
+      'ALTER COLUMN cache_read_tokens DROP NOT NULL, ' +
+      'ALTER COLUMN cache_write_tokens DROP NOT NULL, ' +
+      'ALTER COLUMN cost_usd DROP NOT NULL, ' +
+      "ADD COLUMN IF NOT EXISTS usage_coverage text NOT NULL DEFAULT 'unavailable', " +
+      "ADD COLUMN IF NOT EXISTS cost_coverage text NOT NULL DEFAULT 'unavailable', " +
+      "ADD COLUMN IF NOT EXISTS cost_provenance text NOT NULL DEFAULT 'unavailable', " +
+      "ADD COLUMN IF NOT EXISTS timestamp_coverage text NOT NULL DEFAULT 'unavailable', " +
+      "ADD COLUMN IF NOT EXISTS tool_outcome_coverage text NOT NULL DEFAULT 'not_applicable', " +
+      'ADD COLUMN IF NOT EXISTS has_full_transcript boolean NOT NULL DEFAULT false',
     `CREATE TABLE IF NOT EXISTS ${schema}.publish_run (` +
       'run_id text PRIMARY KEY, ' +
       'created_at timestamptz NOT NULL, ' +

@@ -313,6 +313,7 @@ export function parseCodexFile(
         _model_source: record.model_source,
         _usage_source: usageSource,
         _response_id: record.response_id,
+        usage_observed: true,
       },
       source: 'import',
     });
@@ -454,6 +455,7 @@ export function parseCodexFile(
           _synthetic: true,
           _source: 'codex_session_jsonl',
           _model_source: currentModelSource,
+          usage_observed: true,
         },
         source: 'import',
       });

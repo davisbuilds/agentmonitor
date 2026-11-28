@@ -36,13 +36,24 @@ Historical sources expose different evidence. Claude session files may support a
 full transcript and tool tree, while Codex OTEL may expose summary usage without
 the underlying transcript. Codex rollout transcripts pair each tool call with a
 result receipt (arrival time, output size, and a bounded preview under
-tool-argument capture), but carry no recorded outcome or reasoning text. Trace responses declare transcript, tool, usage, cost,
+tool-argument capture), but carry no recorded outcome or reasoning text.
+Antigravity sessions combine SQLite generation usage (`cost_source = 'estimated'`
+against the dated Gemini registry) with transcript or SQLite step projections,
+preserving token counts while keeping unknown models unpriced (`cost_usd = NULL`)
+and keeping unattributed generation timestamps separate from exact timestamps.
+Trace responses declare transcript, tool, usage (`observed`, `observed_zero`,
+`unavailable`), cost (`priced`, `partial`, `unpriced`, `unavailable` plus
+`cost_provenance`), timestamp (`exact`, `approximate`, `unavailable`),
+tool-outcome (`complete`, `partial`, `unrecorded`, `not_applicable`),
 parent/child, projection-source, and confidence coverage rather than inventing
 missing structure.
 
 List and detail responses summarize matching traces, included traces, observations
-with usage, and observations missing usage over the complete filtered set rather
-than the current page alone. Missing evidence remains unavailable, not zero.
+with usage, observations missing usage, and coverage breakdowns across usage,
+cost, timestamp, and tool-outcome status over the complete filtered set rather
+than the current page alone. Missing evidence remains unavailable, not zero;
+measured-zero generations report `usage_coverage = 'observed_zero'` distinctly
+from unavailable usage, and usage-only rows never imply `has_full_transcript`.
 
 ## Privacy And Payload Policy
 
@@ -75,8 +86,12 @@ lineage in `agentmonitor.publish_run`. The schema stays separate from medallion'
 bronze/silver/gold ownership and should remain excluded from adoption KPIs unless a
 medallion-owned view explicitly models personal coding-agent usage.
 
-Before publication, mapped keys must match the `WarehouseRunRow` allowlist and
-text-like values must satisfy bounded field shapes. Dry-run performs no network
+Before publication, mapped keys must match the `WarehouseRunRow` allowlist,
+coverage provenance enums (`usage_coverage`, `cost_coverage`, `cost_provenance`,
+`timestamp_coverage`, `tool_outcome_coverage`, `has_full_transcript`) must match
+their closed sets, unavailable usage exports `NULL` token and cost fields rather
+than fabricated zeros, unpriced usage preserves token counts with `cost_usd = NULL`,
+and text-like values must satisfy bounded field shapes. Dry-run performs no network
 connection. Live publication is opt-in, idempotent for the account/session key, and
 does not retract rows when local sessions are later removed. It publishes one
 summary per session and deletes the account's rows for session ids a summary

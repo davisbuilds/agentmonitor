@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { SessionCapabilities, SessionCapabilityLevel } from '../../api/client';
+  import type { SessionCapabilities, SessionCapabilityLevel, TraceQualityCoverage } from '../../api/client';
   import {
     capabilityLevelLabel,
     describeCoverage,
@@ -7,6 +7,7 @@
     sessionSourceLabel,
     type CoverageTone,
   } from '../../session-capabilities';
+  import { sessionTraceCoverageEntries, type TraceCoverageTone } from '../../trace-coverage';
   import { Popover } from '../ui';
 
   // WHY: Omit a row-level badge for full captures to reserve indicators for coverage gaps. The detail
@@ -15,13 +16,15 @@
     capabilities: SessionCapabilities | null;
     integrationMode?: string | null;
     fidelity?: string | null;
+    traceCoverage?: TraceQualityCoverage | null;
     variant?: 'row' | 'detail';
   }
 
-  let { capabilities, integrationMode = null, fidelity = null, variant = 'detail' }: Props = $props();
+  let { capabilities, integrationMode = null, fidelity = null, traceCoverage = null, variant = 'detail' }: Props = $props();
 
   const coverage = $derived(describeCoverage(capabilities));
   const entries = $derived(getCapabilityEntries(capabilities));
+  const traceEntries = $derived(sessionTraceCoverageEntries(traceCoverage));
 
   const DOTS: Record<CoverageTone, string> = {
     ok: 'bg-ok',
@@ -32,6 +35,10 @@
 
   function levelDot(level: SessionCapabilityLevel): string {
     return level === 'full' ? 'bg-ok' : level === 'summary' ? 'bg-warn' : 'bg-line-strong';
+  }
+
+  function traceToneDot(tone: TraceCoverageTone): string {
+    return tone === 'ok' ? 'bg-ok' : tone === 'warn' ? 'bg-warn' : 'bg-line-strong';
   }
 </script>
 
@@ -71,6 +78,19 @@
         </ul>
       {:else}
         <p class="text-text-muted">This session did not report what it can show.</p>
+      {/if}
+      {#if traceEntries.length > 0}
+        <ul class="space-y-1.5 border-t border-line pt-2">
+          {#each traceEntries as entry (entry.key)}
+            <li class="flex items-center justify-between gap-3">
+              <span class="text-text-muted">{entry.label}</span>
+              <span class="inline-flex items-center gap-1.5 text-text">
+                <span class="h-1.5 w-1.5 rounded-full {traceToneDot(entry.tone)}" aria-hidden="true"></span>
+                {entry.value}
+              </span>
+            </li>
+          {/each}
+        </ul>
       {/if}
       <div class="space-y-1 border-t border-line pt-2 text-text-faint">
         <div>Source: <span class="text-text-muted">{sessionSourceLabel(integrationMode)}</span></div>

@@ -1,12 +1,20 @@
+import type {
+  TraceQualityCostCoverage,
+  TraceQualityCostProvenance,
+  TraceQualityTimestampCoverage,
+  TraceQualityToolOutcomeCoverage,
+  TraceQualityUsageCoverage,
+} from '../trace-quality/types.js';
+
 export interface WarehouseRunRow {
   account: string;
   session_id: string;
   model: string | null;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  cost_usd: number;
+  input_tokens: number | null;
+  output_tokens: number | null;
+  cache_read_tokens: number | null;
+  cache_write_tokens: number | null;
+  cost_usd: number | null;
   latency_ms: number;
   observation_count: number;
   error_count: number;
@@ -17,6 +25,12 @@ export interface WarehouseRunRow {
   started_at: string;
   day: string;
   published_run_id: string;
+  usage_coverage: TraceQualityUsageCoverage;
+  cost_coverage: TraceQualityCostCoverage;
+  cost_provenance: TraceQualityCostProvenance;
+  timestamp_coverage: TraceQualityTimestampCoverage;
+  tool_outcome_coverage: TraceQualityToolOutcomeCoverage;
+  has_full_transcript: boolean;
 }
 
 export interface PublishLineage {

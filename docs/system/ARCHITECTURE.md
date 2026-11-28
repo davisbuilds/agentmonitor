@@ -429,7 +429,12 @@ Live adapters under `src/live/` normalize current sessions and declare fidelity:
   otherwise) so active root and subagent conversations reach **Monitor -> Active
   Agents** live and follow standard `active -> idle -> ended` sweep transitions.
   When a `full`-fidelity transcript exists alongside ingested events,
-  `session_trace_summary` preserves `has_full_transcript` coverage.
+  `session_trace_summary` preserves `has_full_transcript` coverage and records
+  explicit `usage_coverage`, `cost_coverage`, `cost_provenance`,
+  `timestamp_coverage`, and `tool_outcome_coverage` signals (rebuilt atomically
+  on import, sync, usage repair, and cost recalculation, and carried into the
+  content-free warehouse export). `amon sync sessions` supports
+  `--source claude|codex|antigravity|all` with `--antigravity-dir`.
 
 Context occupancy uses the latest request's prompt size, so it may drop after
 compaction. Codex uses its reported context window when present and otherwise a

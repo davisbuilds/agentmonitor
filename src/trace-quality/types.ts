@@ -1,4 +1,6 @@
 import type {
+  TRACE_QUALITY_COST_COVERAGES,
+  TRACE_QUALITY_COST_PROVENANCES,
   TRACE_QUALITY_COVERAGE_KEYS,
   TRACE_QUALITY_EXPORT_PROVIDERS,
   TRACE_QUALITY_EXPORT_STATUSES,
@@ -12,6 +14,9 @@ import type {
   TRACE_QUALITY_SCORE_TARGET_TYPES,
   TRACE_QUALITY_SCORE_VALUE_TYPES,
   TRACE_QUALITY_SOURCE_KINDS,
+  TRACE_QUALITY_TIMESTAMP_COVERAGES,
+  TRACE_QUALITY_TOOL_OUTCOME_COVERAGES,
+  TRACE_QUALITY_USAGE_COVERAGES,
 } from './constants.js';
 
 export type TraceQualityObservationType = typeof TRACE_QUALITY_OBSERVATION_TYPES[number];
@@ -25,6 +30,11 @@ export type TraceQualityProjectionStatus = typeof TRACE_QUALITY_PROJECTION_STATU
 export type TraceQualityExportProvider = typeof TRACE_QUALITY_EXPORT_PROVIDERS[number];
 export type TraceQualityExportStatus = typeof TRACE_QUALITY_EXPORT_STATUSES[number];
 export type TraceQualityCoverageKey = typeof TRACE_QUALITY_COVERAGE_KEYS[number];
+export type TraceQualityUsageCoverage = typeof TRACE_QUALITY_USAGE_COVERAGES[number];
+export type TraceQualityCostCoverage = typeof TRACE_QUALITY_COST_COVERAGES[number];
+export type TraceQualityCostProvenance = typeof TRACE_QUALITY_COST_PROVENANCES[number];
+export type TraceQualityTimestampCoverage = typeof TRACE_QUALITY_TIMESTAMP_COVERAGES[number];
+export type TraceQualityToolOutcomeCoverage = typeof TRACE_QUALITY_TOOL_OUTCOME_COVERAGES[number];
 export type TraceQualityFindingKind = typeof TRACE_QUALITY_FINDING_KINDS[number];
 export type TraceQualityFindingSeverity = typeof TRACE_QUALITY_FINDING_SEVERITIES[number];
 export type { TraceQualityFindingThresholds } from './constants.js';
@@ -42,6 +52,11 @@ export interface TraceQualityCoverage {
   has_raw_output?: boolean;
   has_reasoning?: boolean;
   has_prompt_refs?: boolean;
+  usage_coverage?: TraceQualityUsageCoverage;
+  cost_coverage?: TraceQualityCostCoverage;
+  cost_provenance?: TraceQualityCostProvenance;
+  timestamp_coverage?: TraceQualityTimestampCoverage;
+  tool_outcome_coverage?: TraceQualityToolOutcomeCoverage;
   projection_source?: string;
   projection_confidence?: 'high' | 'medium' | 'low' | 'unknown';
   [key: string]: unknown;

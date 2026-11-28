@@ -76,25 +76,30 @@ export function stepKindToEvent(kind: string | undefined): { type: EventType; to
   return { type: 'response' };
 }
 
+const STEP_STATUS_DONE = 3;
 const STEP_STATUS_ERROR = 7;
 
 function resolveStepEvent(step: AntigravityConversationSnapshot['steps'][number]): {
   type: EventType;
   toolName?: string;
   status: 'success' | 'error';
+  outcomeUnrecorded: boolean;
 } {
   if (step.envelope.kind === 'generic' && step.toolCall?.name) {
     const toolName = step.toolCall.name;
     const type: EventType = FILE_CHANGE_KINDS.has(toolName) ? 'file_change' : 'tool_use';
     const isError = step.status === STEP_STATUS_ERROR || step.envelope.status === STEP_STATUS_ERROR || step.envelope.hasError;
-    return { type, toolName, status: isError ? 'error' : 'success' };
+    const isDone = step.status === STEP_STATUS_DONE || step.envelope.status === STEP_STATUS_DONE;
+    return { type, toolName, status: isError ? 'error' : 'success', outcomeUnrecorded: !isError && !isDone };
   }
   const { type, toolName } = stepKindToEvent(step.envelope.kind);
   const isError = type === 'error'
     || step.status === STEP_STATUS_ERROR
     || step.envelope.status === STEP_STATUS_ERROR
     || step.envelope.hasError;
-  return { type, toolName, status: isError ? 'error' : 'success' };
+  const isDone = step.status === STEP_STATUS_DONE || step.envelope.status === STEP_STATUS_DONE;
+  const isTool = type === 'tool_use' || type === 'file_change';
+  return { type, toolName, status: isError ? 'error' : 'success', outcomeUnrecorded: isTool && !isError && !isDone };
 }
 
 function eventId(sessionId: string, tag: string): string {
@@ -137,7 +142,7 @@ export function antigravitySnapshotToEvents(
   });
 
   for (const step of steps) {
-    const { type, toolName, status } = resolveStepEvent(step);
+    const { type, toolName, status, outcomeUnrecorded } = resolveStepEvent(step);
     events.push({
       event_id: eventId(sessionId, `step:${step.idx}`),
       session_id: sessionId,
@@ -155,6 +160,7 @@ export function antigravitySnapshotToEvents(
         kind: step.envelope.kind ?? null,
         step_type: step.step_type,
         ...(step.toolCall?.id ? { tool_call_id: step.toolCall.id } : {}),
+        ...(outcomeUnrecorded ? { outcome: 'unrecorded' } : {}),
       },
       source: 'import',
     });
@@ -205,6 +211,7 @@ export function antigravitySnapshotToEvents(
         _source: 'antigravity_db',
         thoughts_tokens: b.thoughtsTokens,
         timestamp_source: gen.timestampSource,
+        usage_observed: true,
       },
       source: 'import',
     });

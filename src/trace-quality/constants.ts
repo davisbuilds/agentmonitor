@@ -88,6 +88,40 @@ export const TRACE_QUALITY_EXPORT_STATUSES = [
   'skipped',
 ] as const;
 
+export const TRACE_QUALITY_USAGE_COVERAGES = [
+  'observed',
+  'observed_zero',
+  'unavailable',
+] as const;
+
+export const TRACE_QUALITY_COST_COVERAGES = [
+  'priced',
+  'partial',
+  'unpriced',
+  'unavailable',
+] as const;
+
+export const TRACE_QUALITY_COST_PROVENANCES = [
+  'reported',
+  'estimated',
+  'mixed',
+  'unknown',
+  'unavailable',
+] as const;
+
+export const TRACE_QUALITY_TIMESTAMP_COVERAGES = [
+  'exact',
+  'approximate',
+  'unavailable',
+] as const;
+
+export const TRACE_QUALITY_TOOL_OUTCOME_COVERAGES = [
+  'complete',
+  'partial',
+  'unrecorded',
+  'not_applicable',
+] as const;
+
 export const TRACE_QUALITY_COVERAGE_KEYS = [
   'has_full_transcript',
   'has_tool_details',
@@ -98,6 +132,11 @@ export const TRACE_QUALITY_COVERAGE_KEYS = [
   'has_raw_output',
   'has_reasoning',
   'has_prompt_refs',
+  'usage_coverage',
+  'cost_coverage',
+  'cost_provenance',
+  'timestamp_coverage',
+  'tool_outcome_coverage',
   'projection_source',
   'projection_confidence',
 ] as const;

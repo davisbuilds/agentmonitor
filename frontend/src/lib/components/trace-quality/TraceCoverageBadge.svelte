@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { TraceQualityTrace } from '../../api/client';
+  import { traceCoveragePills, type TraceCoverageTone } from '../../trace-coverage';
 
   interface Props {
     trace: TraceQualityTrace;
@@ -9,17 +10,14 @@
 
   let { trace, compact = false }: Props = $props();
 
-  function flag(key: string): boolean {
-    return trace.coverage[key] === true;
-  }
-
-  const hasFullTranscript = $derived(flag('has_full_transcript'));
-  const captured = $derived([
-    { label: 'Tool calls', on: flag('has_tool_details') },
-    { label: 'Token usage', on: flag('has_token_usage') },
-    { label: 'Cost', on: flag('has_cost') },
-  ]);
+  const pills = $derived(traceCoveragePills(trace.coverage));
   const scored = $derived(trace.score_count > 0);
+
+  const DOT_CLASS: Record<TraceCoverageTone, string> = {
+    ok: 'bg-ok',
+    warn: 'bg-warn',
+    neutral: 'bg-line-strong',
+  };
 </script>
 
 <!-- WHY: Many summary rows omit the transcript flag even when a transcript exists. Missing metadata must not be labeled summary-only. -->
@@ -31,15 +29,10 @@
   {/if}
 {:else}
   <div class="flex flex-wrap items-center gap-3 text-meta text-text-muted">
-    {#if hasFullTranscript}
-      <span class="inline-flex items-center gap-1.5">
-        <span class="h-1.5 w-1.5 rounded-full bg-ok" aria-hidden="true"></span>Full transcript
-      </span>
-    {/if}
-    {#each captured as item (item.label)}
-      <span class="inline-flex items-center gap-1.5 {item.on ? '' : 'text-text-faint'}">
-        <span class="h-1.5 w-1.5 rounded-full {item.on ? 'bg-ok' : 'bg-line-strong'}" aria-hidden="true"></span>
-        {item.label}{item.on ? '' : ' missing'}
+    {#each pills as item (item.key)}
+      <span class="inline-flex items-center gap-1.5 {item.tone === 'neutral' ? 'text-text-faint' : ''}">
+        <span class="h-1.5 w-1.5 rounded-full {DOT_CLASS[item.tone]}" aria-hidden="true"></span>
+        {item.label}
       </span>
     {/each}
     {#if scored}

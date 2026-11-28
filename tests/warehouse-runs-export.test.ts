@@ -37,6 +37,7 @@ after(() => {
 beforeEach(() => {
   closeDb();
   initSchema();
+  assert.equal(fs.realpathSync(getDb().name), fs.realpathSync(process.env.AGENTMONITOR_DB_PATH!));
   getDb().exec('DELETE FROM session_trace_summary');
   seedSummaries();
 });
@@ -141,6 +142,12 @@ test('summary rows map exactly to content-free warehouse run rows', () => {
     started_at: '2026-06-16T09:00:00.000Z',
     day: '2026-06-16',
     published_run_id: 'run-1',
+    usage_coverage: 'observed',
+    cost_coverage: 'priced',
+    cost_provenance: 'unknown',
+    timestamp_coverage: 'unavailable',
+    tool_outcome_coverage: 'not_applicable',
+    has_full_transcript: false,
   });
   assert.doesNotThrow(() => assertContentFree(row));
 });
