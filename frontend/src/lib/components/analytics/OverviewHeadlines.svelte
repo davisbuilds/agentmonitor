@@ -91,7 +91,7 @@
     <div class="flex flex-col gap-1 bg-surface p-4" data-testid="headline-tool-errors">
       <div class="flex items-center gap-1.5 text-meta text-text-muted">
         Tool errors
-        <InfoTip label="Tool errors"><p>The share of tool calls that failed, by each agent's own record: Claude Code's transcripts, Codex's telemetry. The two record failures differently, so they are never pooled. A Codex session without telemetry has no recorded outcomes.</p></InfoTip>
+        <InfoTip label="Tool errors"><p>The share of tool calls that failed, by each agent's own record: Claude Code and Antigravity transcripts, Codex telemetry. Each agent records failures differently, so they are never pooled. Unrecorded receipts and Codex sessions without telemetry are excluded.</p></InfoTip>
       </div>
       {#if headlines.tool_errors.length === 0}
         <div class="text-meta text-text-faint">No tool outcomes recorded.</div>

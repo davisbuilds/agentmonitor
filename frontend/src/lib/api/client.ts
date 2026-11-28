@@ -158,6 +158,7 @@ export interface BrowsingSession {
   capabilities: SessionCapabilities | null;
   integration_mode: string | null;
   fidelity: string | null;
+  trace_coverage?: TraceQualityCoverage | null;
 }
 
 export interface LiveSession extends BrowsingSession {
@@ -955,12 +956,60 @@ export interface TraceQualityScoreCoverage {
   numeric_score_count: number;
 }
 
+export type TraceQualityUsageCoverage = 'observed' | 'observed_zero' | 'unavailable';
+export type TraceQualityCostCoverage = 'priced' | 'partial' | 'unpriced' | 'unavailable';
+export type TraceQualityCostProvenance = 'reported' | 'estimated' | 'mixed' | 'unknown' | 'unavailable';
+export type TraceQualityTimestampCoverage = 'exact' | 'approximate' | 'unavailable';
+export type TraceQualityToolOutcomeCoverage = 'complete' | 'partial' | 'unrecorded' | 'not_applicable';
+
+export interface TraceQualityCoverage {
+  has_full_transcript?: boolean;
+  has_tool_details?: boolean;
+  has_token_usage?: boolean;
+  has_cost?: boolean;
+  has_parent_child_structure?: boolean;
+  has_raw_input?: boolean;
+  has_raw_output?: boolean;
+  has_reasoning?: boolean;
+  has_prompt_refs?: boolean;
+  usage_coverage?: TraceQualityUsageCoverage;
+  cost_coverage?: TraceQualityCostCoverage;
+  cost_provenance?: TraceQualityCostProvenance;
+  timestamp_coverage?: TraceQualityTimestampCoverage;
+  tool_outcome_coverage?: TraceQualityToolOutcomeCoverage;
+  projection_source?: string;
+  projection_confidence?: 'high' | 'medium' | 'low' | 'unknown';
+  [key: string]: unknown;
+}
+
 export interface TraceQualityReadCoverage {
   matching_traces: number;
   included_traces: number;
   excluded_low_coverage_traces: number;
   observations_with_usage: number;
   observations_missing_usage: number;
+  usage_coverage_breakdown?: {
+    observed: number;
+    observed_zero: number;
+    unavailable: number;
+  };
+  cost_coverage_breakdown?: {
+    priced: number;
+    partial: number;
+    unpriced: number;
+    unavailable: number;
+  };
+  timestamp_coverage_breakdown?: {
+    exact: number;
+    approximate: number;
+    unavailable: number;
+  };
+  tool_outcome_coverage_breakdown?: {
+    complete: number;
+    partial: number;
+    unrecorded: number;
+    not_applicable: number;
+  };
   score_coverage: TraceQualityScoreCoverage;
   note: string;
 }
@@ -980,7 +1029,7 @@ export interface TraceQualityTrace {
   duration_ms: number | null;
   metadata: Record<string, unknown>;
   tags: unknown[];
-  coverage: Record<string, unknown>;
+  coverage: TraceQualityCoverage;
   aggregate: TraceQualityAggregateMetrics;
   score_count: number;
   numeric_score_avg: number | null;

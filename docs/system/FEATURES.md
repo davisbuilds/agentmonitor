@@ -141,6 +141,11 @@ explicit:
   parseable transcript fall back to a `summary`-fidelity projection
   (`antigravity-sqlite`) from SQLite `steps`, and trailing unflushed SQLite steps
   ahead of a lagging transcript preserve `ended_at` and activity until flushed.
+  Trace summaries, session detail coverage popovers, and warehouse exports surface
+  explicit provenance for observed vs measured-zero vs unavailable usage, priced
+  vs partial vs unpriced cost (preserving exact token buckets when a model lacks
+  a rate card), exact vs approximate/unavailable timestamps, and complete vs
+  partial vs unrecorded tool outcomes.
 
 Context occupancy is absent when the source cannot support it. Its numerator is
 the latest request's prompt size, so compaction can lower the displayed value; the

@@ -4,7 +4,8 @@
   import { Badge, Button, InfoTip, Stat } from '../ui';
   import TraceCoverageBadge from './TraceCoverageBadge.svelte';
   import TraceTree from './TraceTree.svelte';
-  import { agentName, formatCost, formatModelName } from '../../format';
+  import { agentName, formatModelName } from '../../format';
+  import { formatTraceCost, formatTraceTokens } from '../../trace-coverage';
 
   const tq = traceQuality;
 
@@ -71,7 +72,7 @@
               >
                 <div class="flex items-start justify-between gap-3">
                   <div class="min-w-0 flex-1 truncate font-medium text-text">{trace.name}</div>
-                  <div class="shrink-0 font-mono tabular text-meta text-text-faint">{formatCost(trace.aggregate.total_cost_usd)}</div>
+                  <div class="shrink-0 font-mono tabular text-meta text-text-faint">{formatTraceCost(trace.aggregate.total_cost_usd, trace.coverage, { compact: true })}</div>
                 </div>
                 <TraceCoverageBadge {trace} compact />
                 <div class="mt-1.5 flex flex-wrap items-center gap-2 text-meta text-text-faint">
@@ -112,8 +113,8 @@
         <div class="grid grid-cols-2 gap-px overflow-hidden border-b border-line bg-line md:grid-cols-4">
           <div class="bg-surface px-4 py-3"><Stat label="Observations" value={formatNumber(d.aggregate.observation_count)} /></div>
           <div class="bg-surface px-4 py-3"><Stat label="Errors" value={formatNumber(d.aggregate.error_count)} /></div>
-          <div class="bg-surface px-4 py-3"><Stat label="Tokens" value={formatNumber(d.aggregate.total_tokens_in + d.aggregate.total_tokens_out)} /></div>
-          <div class="bg-surface px-4 py-3"><Stat label="Cost" value={formatCost(d.aggregate.total_cost_usd)} /></div>
+          <div class="bg-surface px-4 py-3"><Stat label="Tokens" value={formatTraceTokens(d.aggregate, d.coverage)} /></div>
+          <div class="bg-surface px-4 py-3"><Stat label="Cost" value={formatTraceCost(d.aggregate.total_cost_usd, d.coverage)} /></div>
         </div>
 
         <div class="border-b border-line">

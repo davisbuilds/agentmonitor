@@ -33,11 +33,16 @@ Nothing to configure. Just import:
 # Event/usage/cost backfill
 pnpm cli -- import --source antigravity
 
-# Preview first
+# Session-browser sync (dry-run or apply)
+pnpm cli -- sync sessions --source antigravity --dry-run --json
+pnpm cli -- sync sessions --source antigravity --force
+
+# Preview import first
 pnpm cli -- import --source antigravity --dry-run
 
 # Point at a non-default root
 pnpm cli -- import --source antigravity --antigravity-dir /path/to/antigravity-cli
+pnpm cli -- sync sessions --source antigravity --antigravity-dir /path/to/antigravity-cli
 ```
 
 ## Live Watcher & Statusline Bridge
@@ -104,7 +109,13 @@ or unique `planner_response` message-ID joins (`timestamp_source` provenance in
 fields feed display-only `context_used_tokens` fallback and never create usage or
 cost rows. Use `amon costs repair-antigravity-usage --dry-run --json` / `--apply` to
 atomically reconcile pre-Slice 1/Slice 2 imported usage rows, migrate legacy ordinal
-IDs, and refresh `sessions` aggregates and `session_trace_summary`.
+IDs, and refresh `sessions` aggregates and `session_trace_summary`. Unknown models
+preserve exact token buckets while leaving `cost_usd` unpriced (`NULL`) and
+surfacing `cost_coverage=unpriced` (or `partial` on mixed sessions); all-zero
+measured generations report `usage_coverage=observed_zero` distinctly from
+summary-only sessions (`usage_coverage=unavailable`), and unattributed generation
+timestamps or unrecorded/running tool outcomes surface explicitly in v2 trace
+coverage, session detail coverage popovers, and the content-free warehouse export.
 
 ## Skill, Child, Git, and Tool Evidence
 

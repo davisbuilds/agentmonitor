@@ -268,7 +268,8 @@ Use `amon import --help`, `amon import benchmark --help`, and
 
 - `amon import` reconstructs event history and cost-bearing rows.
 - `amon sync sessions` reconstructs browsing sessions, messages, turns, items, tool
-  calls, and transcript-derived analytics.
+  calls, and transcript-derived analytics across `--source claude|codex|antigravity|all`
+  (with optional `--claude-dir`, `--codex-home`, and `--antigravity-dir`).
 
 `import_state` and `watched_files` protect those paths independently. If browser
 tables are restored, cleared, or fall behind while watcher hashes survive, normal

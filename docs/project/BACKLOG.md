@@ -56,23 +56,24 @@ so later readers know what still needs checking.
 
 - **What**: Antigravity (the `agy` CLI and IDE, Gemini models) is in growing use.
   Capture, display and usage tracking should reach the level Claude and Codex
-  have, and the gaps should be closed. Start with investigation and design, not
-  implementation.
-- **Why or evidence**: checked on the Mac mini on 2026-11-25 with `agy` 1.5.16.
-  The store holds no Antigravity sessions, turns or events (482 Claude and 1,620
-  Codex browser sessions). The importer defaults to `~/.gemini/antigravity-cli`,
-  the CLI conversation-database layout the
-  [proto field map](../specs/baselines/antigravity-proto-fieldmap.md) pins, and
-  that directory is empty there. Antigravity's current local data sits under
-  `~/.gemini/antigravity/` instead: `conversations/*.pb` (13 files, last written
-  in June), `brain/`, `annotations/` and other stores. Costs report
-  `no_instrument` for Antigravity since the 2026-10-27 usage standardization.
-  The linked MacBook investigation found active CLI SQLite history and existing
-  AgentMonitor capture.
-- **Next**: implement the ordered slices in the
-  [MacBook investigation and design](../specs/2026-11-25-antigravity-parity-investigation.md).
-  Start with generation accounting and timestamp provenance, then reconcile
-  live and historical capture before expanding transcript and tool coverage.
+  have, and the gaps should be closed.
+- **Why or evidence**: Slices 1–5 of the
+  [MacBook investigation and design](../specs/2026-11-25-antigravity-parity-investigation.md)
+  are now implemented for Antigravity CLI (`~/.gemini/antigravity-cli/`):
+  descriptor-pinned generation accounting and timestamp provenance (Slice 1),
+  shared WAL-aware snapshot reader and atomic usage repair (Slice 2), real turn
+  and tool-receipt projection from `transcript_full.jsonl` / `transcript.jsonl`
+  with SQLite summary fallback (Slice 3), verified skill-consultation,
+  child-session, and Git attribution evidence (Slice 4), and explicit coverage
+  provenance across v2 APIs, UI, and content-free warehouse export plus
+  `amon sync sessions --source antigravity` parity (Slice 5). Two slices remain
+  open: Antigravity IDE opaque `.pb` persistence (`~/.gemini/antigravity/` /
+  `~/.gemini/antigravity-ide/`) and quota-aligned plan comparison.
+- **Next**: complete the two remaining slices in the
+  [MacBook investigation and design](../specs/2026-11-25-antigravity-parity-investigation.md):
+  Slice 6 (investigate current IDE persistence and legacy `.pb` dedupe/fallback
+  as an independent slice) and Slice 7 (validate quota-windowed plan economics
+  separately once multi-model pool and reset alignment are fixture-tested).
 
 ### Codex archived rollout discovery
 
