@@ -17,6 +17,7 @@ import {
 import { dateParamLowerBound, dateParamUpperExclusive, localDayOf } from '../util/local-day.js';
 import { browserAgentName } from '../util/agent-identity.js';
 import { sqlStringList } from '../util/sql-literals.js';
+import { hasCurrentCodexContextEvidence } from './codex-evidence-version.js';
 
 export type SkillInvocationDetectionSource =
   | 'explicit_skill_tool'
@@ -85,6 +86,7 @@ function assignOccurrenceIndexes(
 
 interface StoredConsultationObservation {
   id: number;
+  agent: string;
   session_id: string;
   ordinal: number;
   skill_name: string;
@@ -135,6 +137,7 @@ function enrichWithOrderedObservations(
         observation.skill_name,
         observation.command_fingerprint,
         observation.project_identity,
+        session.agent,
         session.skill_context_capabilities_json
       FROM session_context_observations observation
       JOIN browsing_sessions session ON session.id = observation.session_id
@@ -145,8 +148,19 @@ function enrichWithOrderedObservations(
 
   const indexes = new Map<string, number>();
   const candidates = new Map<string, StoredConsultationObservation[]>();
+  const currentBySession = new Map<string, boolean>();
+  const unverifiedSessions = new Set<string>();
   for (const row of rows) {
     const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
+    if (row.agent === 'codex') {
+      const current = currentBySession.get(row.session_id)
+        ?? hasCurrentCodexContextEvidence(row.skill_context_capabilities_json);
+      currentBySession.set(row.session_id, current);
+      if (!current) {
+        unverifiedSessions.add(canonicalSessionId);
+        continue;
+      }
+    }
     const baseKey = [
       canonicalSessionId,
       row.skill_name,
@@ -168,7 +182,12 @@ function enrichWithOrderedObservations(
       occurrence.occurrenceIndex,
     ].join('\0');
     const matches = candidates.get(key) ?? [];
-    if (matches.length !== 1) continue;
+    if (matches.length !== 1) {
+      if (occurrence.harness === 'codex' && unverifiedSessions.has(occurrence.canonicalSessionId)) {
+        occurrence.classificationCapability = { observable: false, reason: 'codex_context_evidence_unverified' };
+      }
+      continue;
+    }
     const match = matches[0]!;
     let observable = true;
     let reason: string | undefined;

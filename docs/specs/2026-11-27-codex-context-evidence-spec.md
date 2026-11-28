@@ -3,7 +3,7 @@ date: 2026-11-27
 author: Codex
 topic: codex-context-evidence
 stage: spec
-status: draft
+status: implemented
 source: conversation
 risk_profile: high
 readiness: ready
@@ -184,3 +184,10 @@ the validation-version distinction; retries cannot increase event multiplicity.
 
 Review tightened source scope, replay provenance, companion boundaries and
 bounded overflow behavior. Closure review found no remaining blocking findings.
+
+## Implementation Status
+
+Implemented in the parser, watcher, session-context endpoint and consultation
+analytics. Regression tests cover the contract through isolated source and
+compiled-runtime checks. Installation and reprocessing of an existing store are
+separate rollout steps; this specification does not record a production rollout.

@@ -8,6 +8,7 @@ import { effectiveLiveStatusSql } from '../live/live-status.js';
 import { OPEN_LIVE_STATUSES } from '../contracts/session-lifecycle.js';
 import { sqlStringList } from '../util/sql-literals.js';
 import { browserAgentName } from '../util/agent-identity.js';
+import { hasCurrentCodexContextEvidence } from './codex-evidence-version.js';
 
 interface SessionRow {
   id: string;
@@ -45,9 +46,13 @@ function windowBoundary(date: string | undefined, end: boolean): string | null {
 
 function capability(
   session: SessionRow,
+  verifiedContext: boolean,
 ): { observable: boolean; reason?: string } {
   if (!session.skill_context_capabilities_json) {
     return { observable: false, reason: 'missing_ordered_session_projection' };
+  }
+  if (!verifiedContext) {
+    return { observable: false, reason: 'codex_context_evidence_unverified' };
   }
   try {
     const parsed = JSON.parse(session.skill_context_capabilities_json) as {
@@ -78,6 +83,7 @@ function classifyOccurrences(
 ): Map<SkillInvocationOccurrence, SkillConsultationClass> {
   const compactions = new Map<string, number[]>();
   const consultations = new Map<string, number[]>();
+  const consultationIds = new Set<number>();
   for (const observation of observations) {
     const sessionId = extractCanonicalCodexSessionId(observation.session_id);
     if (observation.kind === 'compaction') {
@@ -85,6 +91,7 @@ function classifyOccurrences(
       values.push(observation.ordinal);
       compactions.set(sessionId, values);
     } else if (observation.kind === 'consultation' && observation.skill_name) {
+      consultationIds.add(observation.id);
       const key = `${sessionId}\0${observation.skill_name}`;
       const values = consultations.get(key) ?? [];
       values.push(observation.ordinal);
@@ -103,7 +110,8 @@ function classifyOccurrences(
   };
   const classes = new Map<SkillInvocationOccurrence, SkillConsultationClass>();
   for (const occurrence of occurrences) {
-    if (!occurrence.matchedObservation || !occurrence.classificationCapability.observable) {
+    if (!occurrence.matchedObservation || !occurrence.classificationCapability.observable
+      || !consultationIds.has(occurrence.matchedObservation.id)) {
       classes.set(occurrence, 'unclassifiable');
       continue;
     }
@@ -326,8 +334,14 @@ export function getSkillConsultationAnalytics(
     toExclusive,
   );
   const sessions = scoped.sessions;
-  const sessionIds = sessions.map(session => session.id);
-  const observations = selectObservations(db, sessionIds);
+  const verifiedContextIds = new Set(sessions
+    .filter(session => session.agent !== 'codex' || hasCurrentCodexContextEvidence(session.skill_context_capabilities_json))
+    .map(session => session.id));
+  const evidenceSessionIds = [...verifiedContextIds];
+  const capabilitiesById = new Map(sessions.map(session => [
+    session.id, capability(session, verifiedContextIds.has(session.id)),
+  ]));
+  const observations = selectObservations(db, evidenceSessionIds);
   const classes = classifyOccurrences(occurrences, observations);
   const sessionsByCanonicalId = new Map(
     sessions.map(session => [extractCanonicalCodexSessionId(session.id), session]),
@@ -346,10 +360,10 @@ export function getSkillConsultationAnalytics(
     const existing = aggregates.get(key);
     if (existing) return existing;
     const harnessSessions = sessionsByHarness.get(harness) ?? [];
-    const eligible = harnessSessions.filter(session => capability(session).observable);
+    const eligible = harnessSessions.filter(session => capabilitiesById.get(session.id)?.observable);
     const reasons = new Map<string, number>();
     for (const session of harnessSessions) {
-      const state = capability(session);
+      const state = capabilitiesById.get(session.id)!;
       if (!state.observable) {
         const reason = state.reason ?? 'missing_ordered_session_projection';
         reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
@@ -412,7 +426,7 @@ export function getSkillConsultationAnalytics(
     aggregate.versions.set(versionKey, version);
   }
 
-  const presentationRows = selectPresentationRows(db, sessionIds);
+  const presentationRows = selectPresentationRows(db, evidenceSessionIds);
   const presented = new Map<string, Set<string>>();
   for (const row of presentationRows) {
     const canonicalSessionId = extractCanonicalCodexSessionId(row.session_id);
@@ -436,7 +450,7 @@ export function getSkillConsultationAnalytics(
     aggregate.row.versions = [...aggregate.versions.values()];
     const eligibleIds = new Set(
       (sessionsByHarness.get(aggregate.row.harness) ?? [])
-        .filter(session => capability(session).observable)
+        .filter(session => capabilitiesById.get(session.id)?.observable)
         .map(session => extractCanonicalCodexSessionId(session.id)),
     );
     const presentedIds = [...(presented.get(aggregate.row.name) ?? [])]

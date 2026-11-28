@@ -41,9 +41,9 @@ possibilities.
   Codex app jobs told apart by their recorded `originator` rather than prompt
   text (Backlog: Codex archived rollout discovery, Codex interruptions are not
   recorded, Codex thread names and app-job detection).
-- Establish trustworthy skill-context evidence: implement the
+- Extend trustworthy skill-context evidence: the
   [Codex evidence contract](../specs/2026-11-27-codex-context-evidence-spec.md)
-  first; native Claude attachments have a
+  is implemented; native Claude attachments have a
   [separate contract](../specs/2026-11-27-claude-native-context-attachments-spec.md)
   for a subsequent implementation.
 - Bring Antigravity telemetry and analytics up to par with Claude and Codex,

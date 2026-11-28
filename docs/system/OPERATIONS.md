@@ -1367,6 +1367,12 @@ pnpm build
 pnpm verify:skill-context-built
 ```
 
+On upgrade, normal Codex synchronization refreshes eligible retained sources
+with an older context evidence projection, including unchanged rollouts.
+Until that completes, context coverage is unverified. Sessions with unavailable
+source files retain their other session data and continue to report unverified
+context. The built oracle verifies this refresh on a disposable store.
+
 Set `AGENTMONITOR_VERIFY_DOJO_RUNTIME=1` to add the optional local cross-repository
 Dojo extractor smoke when that sibling checkout is present. It is not a CI
 dependency because `~/Dev` is not a monorepo.

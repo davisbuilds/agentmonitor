@@ -22,6 +22,7 @@ import { COMPRESSED_ROLLOUT_SUFFIX, readTranscriptFile, transcriptBaseName } fro
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
 import { setSessionMode, type EventRow } from '../db/queries.js';
 import { reparseRequested } from '../db/reparse-marker.js';
+import { hasCurrentCodexContextEvidence } from '../skills/codex-evidence-version.js';
 import { createCodexRolloutInventory, currentCodexRollout, resolveCodexRolloutHistory, type CodexRolloutInventory } from '../util/codex-rollout-history.js';
 
 function hashBytes(bytes: Buffer): string {
@@ -357,29 +358,37 @@ export function syncCodexSessionFileDetailed(
     // parse.
     const history = paginated ? resolveCodexRolloutHistory(filePath, { inventory }) : undefined;
     const stat = fs.statSync(filePath);
-    // WHY: Codex does not append to a compressed rollout, so a matching mtime can avoid needless
-    // decompression.
-    if (!options.force && !paginated && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)) {
-      const seen = getWatchedFileState(db, filePath);
-      if (seen && seen.status !== 'error' && !reparseRequested(seen) && seen.file_mtime === stat.mtime.toISOString()) {
-        return { result: 'skipped' };
-      }
-    }
-    const bytes = history?.bytes ?? readTranscriptFile(filePath);
+    fileMtime = stat.mtime.toISOString();
     const original = active && inventory.byRolloutId.get(active.sessionId)?.find(candidate => candidate.sessionId === active.sessionId);
     const sessionId = transcriptBaseName(history ? original?.filePath ?? history.segments.find(segment => segment.sessionId === history.sessionId)?.filePath ?? filePath : filePath);
-    const read = options.force
+    const existing = getWatchedFileState(db, filePath);
+    const storedCapabilities = existing?.status === 'parsed' ? db.prepare(`
+      SELECT skill_context_capabilities_json FROM browsing_sessions WHERE id = ?
+    `).pluck().get(sessionId) : undefined;
+    const refreshContext = existing?.status === 'parsed' && !hasCurrentCodexContextEvidence(storedCapabilities);
+    const replay = options.force || refreshContext;
+    // WHY: Codex does not append to a compressed rollout, so a matching mtime can avoid needless
+    // decompression.
+    if (!replay && !paginated && filePath.endsWith(COMPRESSED_ROLLOUT_SUFFIX)
+      && existing && existing.status !== 'error' && !reparseRequested(existing) && existing.file_mtime === fileMtime) {
+      return { result: 'skipped' };
+    }
+    const bytes = history?.bytes ?? readTranscriptFile(filePath);
+    const read = replay
       ? { fileHash: hashBytes(bytes), checkpoint: undefined }
       : readCheckpoint<CodexParseState>(db, filePath, sessionId, bytes);
     fileHash = read.fileHash;
-    fileMtime = stat.mtime.toISOString();
 
-    const existing = getWatchedFileState(db, filePath);
-    if (!options.force && existing?.file_hash === fileHash && existing.status !== 'error') {
+    if (!replay && existing?.file_hash === fileHash && existing.status !== 'error') {
       return { result: 'skipped' };
     }
 
-    const chunk = parseTranscript(bytes, sessionId, filePath, parseCodexSessionChunk, read.checkpoint);
+    const parse: ChunkParser<CodexParseState> = history?.prefixLineCount
+      ? (content, id, source, state) => parseCodexSessionChunk(content, id, source, state, {
+          inheritedThroughOrdinal: history.ownFromLine - 1,
+        })
+      : parseCodexSessionChunk;
+    const chunk = parseTranscript(bytes, sessionId, filePath, parse, read.checkpoint);
     const appendFrom = read.checkpoint?.messageCount;
     const parsed = chunk.parsed;
 
@@ -389,23 +398,23 @@ export function syncCodexSessionFileDetailed(
       return { result: 'skipped', session_id: sessionId };
     }
 
-    const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash, { appendFrom });
-    const live = syncCodexLiveSession(db, parsed, { keptMessages: messagesKept });
-    // WHY: Monitor uses native session UUIDs while the watcher indexes physical filenames.
-    if (parsed.metadata.mode) {
-      const uuid = sessionId.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
-      setSessionMode(uuid?.[1] ?? sessionId, parsed.metadata.mode);
-    }
-    safelyMaintainTraceSummaryForSession(sessionId, 'codex session sync');
-
-    upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
-    if (history && active) {
-      for (const sibling of inventory.bySessionId.get(active.sessionId) ?? []) {
-        if (sibling.filePath === filePath) continue;
-        checkpoints.delete(sibling.filePath);
+    const siblings = history ? members.filter(member => member.filePath !== filePath) : [];
+    const live = db.transaction(() => {
+      const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash, { appendFrom });
+      const projection = syncCodexLiveSession(db, parsed, { keptMessages: messagesKept });
+      // WHY: Monitor uses native session UUIDs while the watcher indexes physical filenames.
+      if (parsed.metadata.mode) {
+        const uuid = sessionId.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+        setSessionMode(uuid?.[1] ?? sessionId, parsed.metadata.mode);
+      }
+      upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
+      for (const sibling of siblings) {
         upsertWatchedFile(db, sibling.filePath, fileHash, new Date(sibling.mtimeMs).toISOString(), 'skipped');
       }
-    }
+      return projection;
+    })();
+    for (const sibling of siblings) checkpoints.delete(sibling.filePath);
+    safelyMaintainTraceSummaryForSession(sessionId, 'codex session sync');
     settleCheckpoint(filePath, bytes, fileHash, chunk);
 
     return { result: 'parsed', live, session_id: sessionId, parse: appendFrom === undefined ? 'full' : 'resumed' };

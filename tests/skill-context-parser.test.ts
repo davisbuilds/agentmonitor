@@ -75,7 +75,7 @@ test('Claude preserves consultations and compaction in source order', () => {
   );
 });
 
-test('Codex preserves initial and post-compaction catalog occurrences', () => {
+test('Codex retains the initial occurrence and reports uncorroborated compaction as unknown', () => {
   const parsed = parseCodexSessionMessages([
     JSON.stringify({
       type: 'session_meta',
@@ -145,11 +145,8 @@ test('Codex preserves initial and post-compaction catalog occurrences', () => {
   assert.equal(observations.filter(item => item.kind === 'consultation').length, 2);
   assert.equal(observations.filter(item => item.kind === 'compaction').length, 1);
   const presentations = observations.filter(item => item.kind === 'catalog_presentation');
-  assert.equal(presentations.length, 2);
-  assert.notEqual(
-    presentations[0]?.metadata?.['fingerprint'],
-    presentations[1]?.metadata?.['fingerprint'],
-  );
+  assert.equal(presentations.length, 1);
+  assert.deepEqual(parsed.skillContext?.capabilities.codexCatalogSources?.map(source => source.status), ['unknown']);
   assert.deepEqual(presentations[0]?.catalogEntries?.map(entry => entry.name), ['test-strategy']);
   assert.equal(
     (presentations[0]?.metadata?.['measurement'] as { unit?: string }).unit,
@@ -266,7 +263,7 @@ test('Codex does not report an unrecognized catalog body as observed empty', () 
   );
   assert.deepEqual(
     parsed.skillContext?.capabilities.catalogPresentation,
-    { observable: false, reason: 'presentation_signal_absent' },
+    { observable: false, reason: 'catalog_format_unsupported' },
   );
 });
 

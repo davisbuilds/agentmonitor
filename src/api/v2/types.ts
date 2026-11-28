@@ -1,6 +1,7 @@
 import type { ProjectionCapabilities } from '../../live/projector.js';
 import type { MonitorAgentUsage } from '../../db/queries.js';
 import type { OutcomeClass, SizeBucket } from '../../analytics/outcomes.js';
+import type { CodexCatalogSource } from '../../skills/context-observations.js';
 import type {
   TraceQualityFindingKind,
   TraceQualityFindingSeverity,
@@ -981,6 +982,7 @@ export type SkillExpectedComparison =
         | 'no_expected_realization'
         | 'invalid_expected_realization'
         | 'presentation_unobservable'
+        | 'catalog_scope_unverified'
         | 'occurrence_timestamp_unavailable'
         | 'realization_not_valid_for_occurrence';
     };
@@ -1011,6 +1013,9 @@ export type SkillCatalogBudget =
     };
 
 export interface SkillCatalogPresentationOccurrence {
+  catalogKind?: 'full' | 'delta';
+  catalogSource?: CodexCatalogSource;
+  catalogScope?: 'source' | 'harness';
   observationId: number;
   ordinal: number;
   source: string;
@@ -1031,14 +1036,23 @@ export interface SkillCatalogPresentationOccurrence {
   budget: SkillCatalogBudget;
 }
 
-export type SkillCatalogPresentationState =
+export type SkillCatalogCurrentSource = {
+  source: CodexCatalogSource;
+  observedAt: string | null;
+  projectIdentity: string | null;
+} & (
+  | { status: 'observed'; basis: 'full' | 'delta'; entries: SkillCatalogPresentationEntry[] }
+  | { status: 'unknown'; reason: string }
+);
+
+export type SkillCatalogPresentationState = { current?: SkillCatalogCurrentSource[] } & (
   | {
       observable: true;
       occurrences: SkillCatalogPresentationOccurrence[];
     }
   | {
       observable: false;
-      reason: 'presentation_signal_absent' | 'harness_signal_unavailable';
+      reason: string;
       occurrences: [];
       comparison: {
         status: 'unavailable';
@@ -1048,7 +1062,8 @@ export type SkillCatalogPresentationState =
         status: 'unknown';
         reason: 'measurement_unavailable';
       };
-    };
+    }
+);
 
 export interface SkillInstructionLoadOccurrence {
   ordinal: number;
@@ -1071,7 +1086,10 @@ export type SkillInstructionReachState =
       reason:
         | 'instruction_load_signal_absent'
         | 'instrumented_no_events_received'
-        | 'harness_signal_unavailable';
+        | 'harness_signal_unavailable'
+        | 'codex_context_evidence_unverified'
+        | 'instruction_signal_unsupported'
+        | 'instruction_payload_limit';
       occurrences: [];
     };
 
@@ -1092,6 +1110,7 @@ export interface SessionSkillContext {
   endedAt: string | null;
   active: boolean;
   consultationClassification: SkillContextCapability;
+  diagnostics?: string[];
   observations: SessionSkillContextObservation[];
   catalog: SkillCatalogPresentationState;
   expectedRealization: SessionExpectedRealizationState;

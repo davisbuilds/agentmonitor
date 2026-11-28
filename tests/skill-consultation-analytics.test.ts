@@ -153,6 +153,7 @@ before(async () => {
   const codexSessionId = `rollout-2026-07-10T12-00-00-${codexUuid}`;
   const runtimeCatalog = `<skills_instructions>
 ## Skills
+### Available skills
 - test-strategy: Guide agents to test behavior. (file: /skills/test-strategy/SKILL.md)
 </skills_instructions>`;
   const codexTool = (timestamp: string) => JSON.stringify({
@@ -176,6 +177,11 @@ before(async () => {
         role: 'developer',
         content: [{ type: 'input_text', text: runtimeCatalog }],
       },
+    }),
+    JSON.stringify({
+      type: 'turn_context',
+      timestamp: '2026-07-10T12:00:01Z',
+      payload: { cwd: '/work/codex-project', model: 'fixture-model' },
     }),
     codexTool('2026-07-10T12:00:02Z'),
     JSON.stringify({

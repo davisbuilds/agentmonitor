@@ -348,6 +348,13 @@ last fetch.
 External profile authorities may attach bounded, immutable expected-realization
 evidence to a compatible session. The session view then compares desired context
 with observed consultation and instruction evidence without rewriting history.
+Codex context retains validated full and incremental catalog emissions and shows
+what can currently be reconstructed for each catalog source. Updates identify
+skills by resolved locator. A same-name entry at an unfamiliar locator is
+ambiguous until a fresh full listing resolves it. Copied compaction history
+cannot add another presentation, and rollback makes the affected reconstruction
+unknown until fresh full evidence arrives. An instruction block can establish
+AGENTS.md presence even when its file path is unavailable.
 
 ## Usage And Cost
 

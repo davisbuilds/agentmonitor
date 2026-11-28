@@ -40,6 +40,16 @@ was available. The endpoint returns all contributors when `commit_scope=all`
 or the parameter is omitted. See [Git activity setup](../system/OPERATIONS.md)
 for author aliases.
 
+`GET /api/v2/sessions/:id/skill-context` separates validated Codex catalog
+emissions in `catalog.occurrences` from the latest reconstructable state in
+`catalog.current`. Each occurrence identifies its source, full or update kind,
+and scope. Its byte measurement describes the retained block. A current
+source reports its effective entries and basis when observed or a reason when
+unknown. Only a supported harness-wide full listing is eligible for comparison
+against a harness-wide expected realization. Pathless AGENTS.md evidence has
+a null file path. Previously derived Codex evidence reports
+`codex_context_evidence_unverified` until its source is reprocessed.
+
 ## Related Docs
 
 - Product surface and feature notes: [../system/FEATURES.md](../system/FEATURES.md)
