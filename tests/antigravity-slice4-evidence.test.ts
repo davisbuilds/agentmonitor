@@ -1294,4 +1294,97 @@ describe('Antigravity Slice 4: skills, child sessions, Git attribution, and shar
       assert.equal(bySkill[forbidden], undefined, `must not emit skill consultation for ${forbidden}`);
     }
   });
+
+  test('ignores quoted shell separators and >| noclobber redirect targets while keeping unquoted compound reads', async () => {
+    const home = path.join(tempDir, 'agr-quoted-shell-segments');
+    const sessionId = 'a0a0a0a0-1111-2222-3333-a0a0a0a0a0a0';
+    const repoCwd = path.join(tempDir, 'quoted-shell-repo');
+    fs.mkdirSync(repoCwd, { recursive: true });
+
+    const t0 = Date.parse('2026-11-30T10:00:00Z') / 1000;
+    const callQuotedDouble: ProtoToolCallSpec = {
+      id: 'call_quoted_double',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: 'echo "example; cat /Users/example/.agents/skills/quoted-dbl/SKILL.md ;"',
+      }),
+    };
+    const callQuotedSingle: ProtoToolCallSpec = {
+      id: 'call_quoted_single',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: "echo 'a && cat /Users/example/.agents/skills/quoted-sgl/SKILL.md'",
+      }),
+    };
+    const callNoclobber: ProtoToolCallSpec = {
+      id: 'call_noclobber',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: 'cat /dev/null >| /Users/example/.agents/skills/noclobber-gen/SKILL.md',
+      }),
+    };
+    const callUnquotedCompound: ProtoToolCallSpec = {
+      id: 'call_unquoted_compound',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: 'echo hi; cat /Users/example/.agents/skills/unquoted-read/SKILL.md',
+      }),
+    };
+
+    writeConversationDb(path.join(home, 'conversations', `${sessionId}.db`), {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: t0 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: t0 + 1, plannerToolCalls: [callQuotedDouble, callQuotedSingle, callNoclobber, callUnquotedCompound] },
+        { idx: 2, type: 132, oneof: 140, status: 3, tsSecs: t0 + 2, stepToolCall: callQuotedDouble },
+        { idx: 3, type: 132, oneof: 140, status: 3, tsSecs: t0 + 3, stepToolCall: callQuotedSingle },
+        { idx: 4, type: 132, oneof: 140, status: 3, tsSecs: t0 + 4, stepToolCall: callNoclobber },
+        { idx: 5, type: 132, oneof: 140, status: 3, tsSecs: t0 + 5, stepToolCall: callUnquotedCompound },
+      ],
+      generations: [
+        { model: 'gemini-4-neon', inp: 600, out: 90, cached: 400, createdSecs: t0 + 1 },
+      ],
+    });
+    writeSummaryDb(home, [{
+      conversation_id: sessionId,
+      title: 'Quoted shell segment edge cases',
+      workspace_uris: JSON.stringify([`file://${repoCwd}`]),
+    }]);
+    writeTranscript(home, sessionId, [
+      { step_index: 0, type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-30T10:00:00Z', content: 'Check quoted shell commands' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-30T10:00:01Z',
+        tool_calls: [
+          { name: 'run_command', args: { CommandLine: 'echo "example; cat /Users/example/.agents/skills/quoted-dbl/SKILL.md ;"' } },
+          { name: 'run_command', args: { CommandLine: "echo 'a && cat /Users/example/.agents/skills/quoted-sgl/SKILL.md'" } },
+          { name: 'run_command', args: { CommandLine: 'cat /dev/null >| /Users/example/.agents/skills/noclobber-gen/SKILL.md' } },
+          { name: 'run_command', args: { CommandLine: 'echo hi; cat /Users/example/.agents/skills/unquoted-read/SKILL.md' } },
+        ],
+      },
+      { step_index: 2, type: 'GENERIC', status: 'DONE', created_at: '2026-11-30T10:00:02Z', content: 'Command exited with code 0.' },
+      { step_index: 3, type: 'GENERIC', status: 'DONE', created_at: '2026-11-30T10:00:03Z', content: 'Command exited with code 0.' },
+      { step_index: 4, type: 'GENERIC', status: 'DONE', created_at: '2026-11-30T10:00:04Z', content: 'Command exited with code 0.' },
+      { step_index: 5, type: 'GENERIC', status: 'DONE', created_at: '2026-11-30T10:00:05Z', content: 'Command exited with code 0.\n# unquoted-read' },
+    ]);
+
+    const db = getDb();
+    assert.equal(syncAllAntigravityFiles(db, home).parsed, 1);
+
+    const ctx = getSessionSkillContext(db, sessionId);
+    assert.ok(ctx);
+    assert.deepEqual(
+      ctx.observations.filter(o => o.kind === 'consultation').map(o => o.skillName),
+      ['unquoted-read'],
+    );
+
+    const daily = getAnalyticsSkillsDaily({ agent: 'antigravity', date_from: '2026-11-30', date_to: '2026-11-30' });
+    assert.equal(daily.length, 1);
+    const bySkill = Object.fromEntries(daily[0].skills.map(s => [s.skill_name, s.count]));
+    assert.deepEqual(bySkill, { 'unquoted-read': 1 });
+    for (const forbidden of ['quoted-dbl', 'quoted-sgl', 'noclobber-gen']) {
+      assert.equal(bySkill[forbidden], undefined, `must not emit skill consultation for ${forbidden}`);
+    }
+  });
 });

@@ -209,47 +209,189 @@ export function hasAntigravityNonZeroExit(text: string): boolean {
   return /Command exited with code (?!0\b)-?\d+/.test(text);
 }
 
-const OUTPUT_REDIRECT_OPERATOR = /^(?:\d+|&)?(?:>>?\|?|<>)$/;
-const OUTPUT_REDIRECT_PREFIX = /^(?:\d+|&)?(?:>>?\|?|<>)/;
-const INPUT_REDIRECT_PREFIX = /^(?:\d+)?<(?!<|>)/;
-
-function stripSurroundingQuotes(token: string): string {
-  if (
-    token.length >= 2
-    && ((token.startsWith("'") && token.endsWith("'")) || (token.startsWith('"') && token.endsWith('"')))
-  ) {
-    return token.slice(1, -1);
-  }
-  return token;
+interface ShellToken {
+  value: string;
+  isOutputRedirect: boolean;
+  isInputRedirect: boolean;
 }
 
-function extractSkillPathMatches(segment: string): Array<{ fullPath: string; skillName: string }> {
+function splitShellSegments(command: string): string[] {
+  const segments: string[] = [];
+  let current = '';
+  let quote: "'" | '"' | null = null;
+
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote === "'") {
+      current += ch;
+      if (ch === "'") quote = null;
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '\\' && i + 1 < command.length) {
+        current += ch + command[i + 1]!;
+        i++;
+        continue;
+      }
+      current += ch;
+      if (ch === '"') quote = null;
+      continue;
+    }
+    if (ch === '\\' && i + 1 < command.length) {
+      current += ch + command[i + 1]!;
+      i++;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      current += ch;
+      continue;
+    }
+    if (ch === ';' || ch === '\n') {
+      if (current.trim()) segments.push(current);
+      current = '';
+      continue;
+    }
+    if (ch === '&' && command[i + 1] === '&') {
+      if (current.trim()) segments.push(current);
+      current = '';
+      i++;
+      continue;
+    }
+    if (ch === '|') {
+      if (command[i + 1] === '|') {
+        if (current.trim()) segments.push(current);
+        current = '';
+        i++;
+        continue;
+      }
+      if (i > 0 && command[i - 1] === '>') {
+        current += ch;
+        continue;
+      }
+      if (current.trim()) segments.push(current);
+      current = '';
+      continue;
+    }
+    current += ch;
+  }
+
+  if (current.trim()) segments.push(current);
+  return segments;
+}
+
+function tokenizeShellSegment(segment: string): ShellToken[] {
+  const tokens: ShellToken[] = [];
+  let current = '';
+  let hasContent = false;
+  let quote: "'" | '"' | null = null;
+
+  const flushWord = () => {
+    if (!hasContent) return;
+    tokens.push({ value: current, isOutputRedirect: false, isInputRedirect: false });
+    current = '';
+    hasContent = false;
+  };
+
+  for (let i = 0; i < segment.length; i++) {
+    const ch = segment[i]!;
+    if (quote === "'") {
+      if (ch === "'") {
+        quote = null;
+      } else {
+        current += ch;
+        hasContent = true;
+      }
+      continue;
+    }
+    if (quote === '"') {
+      if (ch === '\\' && i + 1 < segment.length) {
+        current += segment[i + 1]!;
+        hasContent = true;
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        quote = null;
+      } else {
+        current += ch;
+        hasContent = true;
+      }
+      continue;
+    }
+    if (ch === '\\' && i + 1 < segment.length) {
+      current += segment[i + 1]!;
+      hasContent = true;
+      i++;
+      continue;
+    }
+    if (ch === "'" || ch === '"') {
+      quote = ch;
+      hasContent = true;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      flushWord();
+      continue;
+    }
+    if (ch === '>') {
+      const fdPrefix = hasContent && (/^\d+$/.test(current) || current === '&') ? current : '';
+      if (fdPrefix) {
+        current = '';
+        hasContent = false;
+      } else {
+        flushWord();
+      }
+      let op = `${fdPrefix}>`;
+      if (segment[i + 1] === '>' || segment[i + 1] === '|') {
+        op += segment[i + 1]!;
+        i++;
+      }
+      tokens.push({ value: op, isOutputRedirect: true, isInputRedirect: false });
+      continue;
+    }
+    if (ch === '<') {
+      const fdPrefix = hasContent && /^\d+$/.test(current) ? current : '';
+      if (fdPrefix) {
+        current = '';
+        hasContent = false;
+      } else {
+        flushWord();
+      }
+      if (segment[i + 1] === '>') {
+        tokens.push({ value: `${fdPrefix}<>`, isOutputRedirect: true, isInputRedirect: false });
+        i++;
+      } else if (segment[i + 1] === '<') {
+        tokens.push({ value: `${fdPrefix}<<`, isOutputRedirect: false, isInputRedirect: true });
+        i++;
+      } else {
+        tokens.push({ value: `${fdPrefix}<`, isOutputRedirect: false, isInputRedirect: true });
+      }
+      continue;
+    }
+    current += ch;
+    hasContent = true;
+  }
+
+  flushWord();
+  return tokens;
+}
+
+function extractSkillPathMatches(tokens: readonly ShellToken[]): Array<{ fullPath: string; skillName: string }> {
   const matches: Array<{ fullPath: string; skillName: string }> = [];
   let skipNext = false;
-  for (const rawToken of segment.trim().split(/\s+/)) {
-    if (!rawToken) continue;
+  for (const tok of tokens) {
     if (skipNext) {
       skipNext = false;
       continue;
     }
-    if (OUTPUT_REDIRECT_OPERATOR.test(rawToken)) {
+    if (tok.isOutputRedirect) {
       skipNext = true;
       continue;
     }
-    if (OUTPUT_REDIRECT_PREFIX.test(rawToken)) continue;
+    if (tok.isInputRedirect) continue;
 
-    let candidate = rawToken;
-    const isQuoted = (candidate.startsWith("'") && candidate.endsWith("'"))
-      || (candidate.startsWith('"') && candidate.endsWith('"'));
-    if (!isQuoted) {
-      const gtIdx = candidate.indexOf('>');
-      if (gtIdx !== -1) {
-        if (gtIdx === candidate.length - 1) skipNext = true;
-        candidate = candidate.slice(0, gtIdx);
-      }
-      candidate = candidate.replace(INPUT_REDIRECT_PREFIX, '');
-    }
-    candidate = stripSurroundingQuotes(candidate);
+    const candidate = tok.value;
     if (!candidate || !candidate.endsWith('/SKILL.md')) continue;
     if (!/^(?:~\/|\/|\.[a-zA-Z0-9_.-]*\/)/.test(candidate)) continue;
     const skillDir = path.posix.dirname(candidate);
@@ -273,18 +415,24 @@ export function extractCodexSkillNamesFromCommand(command: string): string[] {
   return [...skillNames];
 }
 
-function extractFileReadSegments(command: string): string[] {
-  const readSegments: string[] = [];
-  const segments = command.split(/(?:&&|\|\||;|\||\n)/);
-  for (const segment of segments) {
+function extractFileReadSegmentTokens(command: string): ShellToken[][] {
+  const readSegments: ShellToken[][] = [];
+  for (const segment of splitShellSegments(command)) {
     if (!segment.includes('SKILL.md')) continue;
-    const tokens = segment.trim().split(/\s+/).filter(Boolean);
+    const tokens = tokenizeShellSegment(segment);
     let idx = 0;
-    while (idx < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[idx]!)) idx++;
-    const cmd = tokens[idx];
-    if (!cmd) continue;
-    const base = path.posix.basename(cmd.replaceAll('\\', '/'));
-    if (SHELL_READ_COMMANDS.has(base)) readSegments.push(segment);
+    while (
+      idx < tokens.length
+      && !tokens[idx]!.isOutputRedirect
+      && !tokens[idx]!.isInputRedirect
+      && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[idx]!.value)
+    ) {
+      idx++;
+    }
+    const cmdToken = tokens[idx];
+    if (!cmdToken || cmdToken.isOutputRedirect || cmdToken.isInputRedirect) continue;
+    const base = path.posix.basename(cmdToken.value.replaceAll('\\', '/'));
+    if (SHELL_READ_COMMANDS.has(base)) readSegments.push(tokens);
   }
   return readSegments;
 }
@@ -316,11 +464,11 @@ export function extractAntigravitySkillNamesFromToolCall(
   if (ANTIGRAVITY_SHELL_TOOLS.has(toolName)) {
     const command = extractCodexCommandFromInputJson(inputJson);
     if (!command) return [];
-    const readSegments = extractFileReadSegments(command);
+    const readSegments = extractFileReadSegmentTokens(command);
     if (readSegments.length === 0) return [];
     const skillNames = new Set<string>();
-    for (const segment of readSegments) {
-      for (const { fullPath } of extractSkillPathMatches(segment)) {
+    for (const tokens of readSegments) {
+      for (const { fullPath } of extractSkillPathMatches(tokens)) {
         const skillName = extractSkillNameFromPath(fullPath, options);
         if (skillName) skillNames.add(skillName);
       }
