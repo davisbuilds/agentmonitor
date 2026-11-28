@@ -3,6 +3,7 @@ import type { MonitorAgentUsage } from '../../db/queries.js';
 import type { OutcomeClass, SizeBucket } from '../../analytics/outcomes.js';
 import type { CodexCatalogSource } from '../../skills/context-observations.js';
 import type {
+  TraceQualityCoverage,
   TraceQualityFindingKind,
   TraceQualityFindingSeverity,
   TraceQualityObservationRow,
@@ -38,10 +39,11 @@ export interface BrowsingSessionRow {
   context_window_tokens: number | null;
   context_pct: number | null;
   child_count?: number;
+  trace_coverage?: TraceQualityCoverage | null;
 }
 
 export interface BrowsingSessionDbRow
-  extends Omit<BrowsingSessionRow, 'capabilities' | 'context_pct' | 'child_count'> {
+  extends Omit<BrowsingSessionRow, 'capabilities' | 'context_pct' | 'child_count' | 'trace_coverage'> {
   child_count?: number;
   capabilities_json: string | null;
 }
@@ -1646,6 +1648,28 @@ export interface TraceQualityReadCoverage {
   excluded_low_coverage_traces: number;
   observations_with_usage: number;
   observations_missing_usage: number;
+  usage_coverage_breakdown?: {
+    observed: number;
+    observed_zero: number;
+    unavailable: number;
+  };
+  cost_coverage_breakdown?: {
+    priced: number;
+    partial: number;
+    unpriced: number;
+    unavailable: number;
+  };
+  timestamp_coverage_breakdown?: {
+    exact: number;
+    approximate: number;
+    unavailable: number;
+  };
+  tool_outcome_coverage_breakdown?: {
+    complete: number;
+    partial: number;
+    unrecorded: number;
+    not_applicable: number;
+  };
   score_coverage: TraceQualityScoreCoverage;
   note: string;
 }

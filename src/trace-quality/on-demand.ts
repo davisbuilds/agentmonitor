@@ -159,16 +159,47 @@ function mapSummaryToTrace(row: SessionTraceSummaryRow, titles: Map<string, Sess
   };
 }
 
-type CoverageRow = Pick<SessionTraceSummaryRow, 'observation_count' | 'coverage_json'>;
+type CoverageRow = Pick<
+  SessionTraceSummaryRow,
+  'observation_count' | 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'started_at' | 'coverage_json'
+>;
 
-/** Honest read-coverage over the FULL filtered set of summary rows (not a page). */
 function buildReadCoverage(rows: readonly CoverageRow[]): TraceQualityReadCoverage {
   let withUsage = 0;
   let totalObservations = 0;
+  const usageBreakdown = { observed: 0, observed_zero: 0, unavailable: 0 };
+  const costBreakdown = { priced: 0, partial: 0, unpriced: 0, unavailable: 0 };
+  const timestampBreakdown = { exact: 0, approximate: 0, unavailable: 0 };
+  const toolOutcomeBreakdown = { complete: 0, partial: 0, unrecorded: 0, not_applicable: 0 };
+
   for (const row of rows) {
     totalObservations += row.observation_count;
     const coverage = parseJsonRecord(row.coverage_json) as TraceQualityCoverage;
-    if (coverage.has_token_usage === true) withUsage += row.observation_count;
+    const tokenTotal = row.tokens_in + row.tokens_out + row.cache_read_tokens + row.cache_write_tokens;
+    const usageStatus = coverage.usage_coverage
+      ?? (coverage.has_token_usage === true
+        ? (tokenTotal > 0 ? 'observed' : 'observed_zero')
+        : (tokenTotal > 0 ? 'observed' : 'unavailable'));
+    if (usageStatus === 'observed' || usageStatus === 'observed_zero') {
+      withUsage += row.observation_count;
+    }
+    usageBreakdown[usageStatus] += 1;
+
+    const costStatus = coverage.cost_coverage
+      ?? (coverage.has_cost === true
+        ? 'priced'
+        : usageStatus === 'unavailable'
+          ? 'unavailable'
+          : row.cost_usd > 0 ? 'priced' : 'unpriced');
+    costBreakdown[costStatus] += 1;
+
+    const timestampStatus = coverage.timestamp_coverage
+      ?? (row.started_at ? 'approximate' : 'unavailable');
+    timestampBreakdown[timestampStatus] += 1;
+
+    const toolOutcomeStatus = coverage.tool_outcome_coverage
+      ?? (coverage.has_tool_details === true ? 'unrecorded' : 'not_applicable');
+    toolOutcomeBreakdown[toolOutcomeStatus] += 1;
   }
   return {
     matching_traces: rows.length,
@@ -176,6 +207,10 @@ function buildReadCoverage(rows: readonly CoverageRow[]): TraceQualityReadCovera
     excluded_low_coverage_traces: 0,
     observations_with_usage: withUsage,
     observations_missing_usage: Math.max(0, totalObservations - withUsage),
+    usage_coverage_breakdown: usageBreakdown,
+    cost_coverage_breakdown: costBreakdown,
+    timestamp_coverage_breakdown: timestampBreakdown,
+    tool_outcome_coverage_breakdown: toolOutcomeBreakdown,
     score_coverage: {
       scored_traces: 0,
       unscored_traces: rows.length,
@@ -213,7 +248,8 @@ export function listSessionTraces(params: TraceQualityTraceListParams = {}): {
   const titles = lookupSessionTitles(rows.map(row => row.session_id));
 
   const coverageRows = db.prepare(`${traceSummaryRankCte}
-    SELECT observation_count, coverage_json FROM listed_summaries ${where}
+    SELECT observation_count, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, started_at, coverage_json
+    FROM listed_summaries ${where}
   `).all(...values) as CoverageRow[];
 
   return {

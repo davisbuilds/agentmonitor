@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3';
+import { markStatsDirty } from '../db/queries.js';
 import { pricingRegistry } from './index.js';
 import { attributeCostSources } from './cost-provenance.js';
 import { maintainSessionTraceSummary } from '../trace-quality/summary.js';
@@ -116,8 +117,12 @@ function recalculate(db: Database, options: CostRecalcOptions): CostRecalcReport
     }
 
     // WHY: Cached per-session totals must change in the same transaction as their event costs.
-    for (const sessionId of touchedSessions) maintainSessionTraceSummary(sessionId);
+    for (const sessionId of touchedSessions) maintainSessionTraceSummary(sessionId, db);
   })();
+
+  if (options.apply && updated > 0) {
+    markStatsDirty();
+  }
 
   return {
     dry_run: !options.apply,

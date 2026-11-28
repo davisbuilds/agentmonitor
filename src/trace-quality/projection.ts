@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
 import type {
+  TraceQualityCostCoverage,
+  TraceQualityCostProvenance,
   TraceQualityCoverage,
   TraceQualityObservationRow,
   TraceQualityObservationType,
   TraceQualityPayloadPolicy,
   TraceQualitySeverity,
+  TraceQualityTimestampCoverage,
+  TraceQualityToolOutcomeCoverage,
   TraceQualityTraceRow,
+  TraceQualityUsageCoverage,
 } from './types.js';
 
 const TRACE_QUALITY_PROJECTION_VERSION = 'trace-quality:v1';
@@ -29,6 +34,7 @@ export interface EventProjectionSource {
   payload_truncated: number;
   model: string | null;
   cost_usd: number | null;
+  cost_source?: string | null;
   cache_read_tokens: number;
   cache_write_tokens: number;
   source: string;
@@ -748,20 +754,123 @@ function sortedToolCalls(toolCalls: readonly ToolCallProjectionSource[]): ToolCa
   return [...toolCalls].sort((a, b) => a.id - b.id);
 }
 
-export function coverageForEvents(
-  events: readonly Pick<
-    EventProjectionSource,
-    'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'event_type' | 'tool_name'
-  >[],
-): TraceQualityCoverage {
-  const hasTokenUsage = events.some(event =>
-    event.tokens_in > 0
+export type EventCoverageInput = Pick<
+  EventProjectionSource,
+  'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'event_type' | 'tool_name'
+> & {
+  cost_source?: string | null;
+  status?: string | null;
+  client_timestamp?: string | null;
+  created_at?: string | null;
+  metadata?: string | null;
+};
+
+export function isMeasuredUsageEvent(
+  event: Pick<EventCoverageInput, 'event_type' | 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd'>,
+): boolean {
+  return event.event_type === 'llm_response'
+    || event.tokens_in > 0
     || event.tokens_out > 0
     || event.cache_read_tokens > 0
-    || event.cache_write_tokens > 0,
+    || event.cache_write_tokens > 0
+    || event.cost_usd != null;
+}
+
+export function classifyEventTimestampCoverage(
+  event: Pick<EventCoverageInput, 'client_timestamp' | 'created_at' | 'metadata'>,
+): TraceQualityTimestampCoverage {
+  const metadata = parseJsonRecord(event.metadata);
+  const tsSource = typeof metadata?.timestamp_source === 'string' ? metadata.timestamp_source : null;
+  if (tsSource === 'unavailable') return 'unavailable';
+  if (tsSource && (tsSource.includes('fallback') || tsSource.includes('approximate'))) return 'approximate';
+  if (event.client_timestamp) return 'exact';
+  if (event.created_at) return 'approximate';
+  return 'unavailable';
+}
+
+export function classifyToolOutcomeCounts(counts: {
+  toolCalls: number;
+  recordedOutcomes: number;
+  unrecordedResults: number;
+}): TraceQualityToolOutcomeCoverage {
+  if (counts.toolCalls === 0 && counts.recordedOutcomes === 0 && counts.unrecordedResults === 0) {
+    return 'not_applicable';
+  }
+  if (counts.recordedOutcomes === 0) return 'unrecorded';
+  if (counts.unrecordedResults > 0 || counts.recordedOutcomes < counts.toolCalls) return 'partial';
+  return 'complete';
+}
+
+function deriveEventToolOutcomeCoverage(events: readonly EventCoverageInput[]): TraceQualityToolOutcomeCoverage {
+  let toolCalls = 0;
+  let recordedOutcomes = 0;
+  let unrecordedResults = 0;
+  for (const event of events) {
+    if (event.event_type !== 'tool_use' && event.event_type !== 'file_change') continue;
+    toolCalls += 1;
+    const metadata = parseJsonRecord(event.metadata);
+    const isUnrecorded = metadata?.outcome === 'unrecorded'
+      || (event.status !== 'success' && event.status !== 'error');
+    if (isUnrecorded) unrecordedResults += 1;
+    else recordedOutcomes += 1;
+  }
+  return classifyToolOutcomeCounts({ toolCalls, recordedOutcomes, unrecordedResults });
+}
+
+function deriveTimestampCoverageFromList(statuses: readonly TraceQualityTimestampCoverage[]): TraceQualityTimestampCoverage {
+  if (statuses.length === 0) return 'unavailable';
+  let exact = 0;
+  let unavailable = 0;
+  for (const status of statuses) {
+    if (status === 'exact') exact += 1;
+    else if (status === 'unavailable') unavailable += 1;
+  }
+  if (exact === statuses.length) return 'exact';
+  if (unavailable === statuses.length) return 'unavailable';
+  return 'approximate';
+}
+
+export function coverageForEvents(
+  events: readonly EventCoverageInput[],
+): TraceQualityCoverage {
+  const measured = events.filter(isMeasuredUsageEvent);
+  let usageCoverage: TraceQualityUsageCoverage = 'unavailable';
+  if (measured.length > 0) {
+    const hasNonZeroTokens = measured.some(event =>
+      event.tokens_in > 0
+      || event.tokens_out > 0
+      || event.cache_read_tokens > 0
+      || event.cache_write_tokens > 0,
+    );
+    usageCoverage = hasNonZeroTokens ? 'observed' : 'observed_zero';
+  }
+
+  let costCoverage: TraceQualityCostCoverage = 'unavailable';
+  let costProvenance: TraceQualityCostProvenance = 'unavailable';
+  if (measured.length > 0) {
+    const priced = measured.filter(event => event.cost_usd != null);
+    if (priced.length === 0) {
+      costCoverage = 'unpriced';
+      costProvenance = 'unavailable';
+    } else {
+      costCoverage = priced.length === measured.length ? 'priced' : 'partial';
+      const hasReported = priced.some(event => event.cost_source === 'reported');
+      const hasEstimated = priced.some(event => event.cost_source === 'estimated');
+      if (hasReported && hasEstimated) costProvenance = 'mixed';
+      else if (hasReported) costProvenance = 'reported';
+      else if (hasEstimated) costProvenance = 'estimated';
+      else costProvenance = 'unknown';
+    }
+  }
+
+  const hasTokenUsage = usageCoverage === 'observed' || usageCoverage === 'observed_zero';
+  const hasCost = costCoverage === 'priced' || costCoverage === 'partial';
+  const hasToolDetails = events.some(event =>
+    (event.event_type === 'tool_use' || event.event_type === 'file_change') && Boolean(event.tool_name),
   );
-  const hasCost = events.some(event => event.cost_usd != null);
-  const hasToolDetails = events.some(event => event.event_type === 'tool_use' && Boolean(event.tool_name));
+  const timestampCoverage = deriveTimestampCoverageFromList(events.map(classifyEventTimestampCoverage));
+  const toolOutcomeCoverage = deriveEventToolOutcomeCoverage(events);
+
   return {
     has_full_transcript: false,
     has_tool_details: hasToolDetails,
@@ -772,6 +881,11 @@ export function coverageForEvents(
     has_raw_output: false,
     has_reasoning: false,
     has_prompt_refs: false,
+    usage_coverage: usageCoverage,
+    cost_coverage: costCoverage,
+    cost_provenance: costProvenance,
+    timestamp_coverage: timestampCoverage,
+    tool_outcome_coverage: toolOutcomeCoverage,
     projection_source: 'events',
     projection_confidence: hasTokenUsage || hasCost ? 'medium' : 'low',
   };
@@ -803,6 +917,24 @@ function coverageForItems(
   );
   const confidence = confidenceForBrowsingSession(browsingSession);
 
+  let toolCalls = 0;
+  let recordedOutcomes = 0;
+  let unrecordedResults = 0;
+  for (const { item, payload } of parsedPayloads) {
+    if (item.kind === 'tool_call' || item.kind === 'command_execution') {
+      toolCalls += 1;
+    } else if (item.kind === 'tool_result') {
+      const outcomeRecorded = (item.status === 'success' || item.status === 'error')
+        && payload?.outcome !== 'unrecorded';
+      if (outcomeRecorded) recordedOutcomes += 1;
+      else unrecordedResults += 1;
+    }
+  }
+
+  const timestampCoverage = items.length > 0
+    ? deriveTimestampCoverageFromList(items.map(item => (item.created_at ? 'exact' : 'unavailable')))
+    : browsingSession?.started_at ? 'approximate' : 'unavailable';
+
   return {
     has_full_transcript: browsingSession?.fidelity === 'full' || browsingSession?.integration_mode === 'claude-jsonl',
     has_tool_details: hasToolDetails,
@@ -813,6 +945,11 @@ function coverageForItems(
     has_raw_output: hasRawOutput,
     has_reasoning: hasReasoning,
     has_prompt_refs: false,
+    usage_coverage: 'unavailable',
+    cost_coverage: 'unavailable',
+    cost_provenance: 'unavailable',
+    timestamp_coverage: timestampCoverage,
+    tool_outcome_coverage: classifyToolOutcomeCounts({ toolCalls, recordedOutcomes, unrecordedResults }),
     projection_source: source,
     projection_confidence: confidence === 'unknown' ? 'medium' : confidence,
   };
@@ -824,6 +961,21 @@ function coverageForMessages(
   toolCalls: readonly ToolCallProjectionSource[],
 ): TraceQualityCoverage {
   const confidence = confidenceForBrowsingSession(browsingSession);
+  let recordedOutcomes = 0;
+  let unrecordedResults = 0;
+  for (const message of messages) {
+    const parsed = parseJsonValue(message.content);
+    if (!Array.isArray(parsed)) continue;
+    for (const entry of parsed) {
+      const block = asRecord(entry);
+      if (!block || block.type !== 'tool_result') continue;
+      if (block.outcome === 'unrecorded') unrecordedResults += 1;
+      else recordedOutcomes += 1;
+    }
+  }
+  const timestampCoverage = messages.length > 0
+    ? deriveTimestampCoverageFromList(messages.map(message => (message.timestamp ? 'exact' : 'unavailable')))
+    : browsingSession?.started_at ? 'approximate' : 'unavailable';
   return {
     has_full_transcript: messages.length > 0 && (browsingSession?.fidelity === 'full' || browsingSession?.integration_mode === 'claude-jsonl'),
     has_tool_details: toolCalls.length > 0,
@@ -834,6 +986,15 @@ function coverageForMessages(
     has_raw_output: messages.some(message => message.role === 'assistant') || toolCalls.some(toolCall => Boolean(toolCall.result_content)),
     has_reasoning: messages.some(message => message.has_thinking === 1),
     has_prompt_refs: false,
+    usage_coverage: 'unavailable',
+    cost_coverage: 'unavailable',
+    cost_provenance: 'unavailable',
+    timestamp_coverage: timestampCoverage,
+    tool_outcome_coverage: classifyToolOutcomeCounts({
+      toolCalls: toolCalls.length,
+      recordedOutcomes,
+      unrecordedResults,
+    }),
     projection_source: 'browsing_session',
     projection_confidence: confidence === 'unknown' ? 'medium' : confidence,
   };

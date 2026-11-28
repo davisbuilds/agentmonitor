@@ -14,14 +14,25 @@ import type { Database } from 'better-sqlite3';
 
 import { getDb } from '../db/connection.js';
 import {
+  classifyEventTimestampCoverage,
+  classifyToolOutcomeCounts,
   coverageForEvents,
+  isMeasuredUsageEvent,
   projectTraceQuality,
+  type EventCoverageInput,
   type EventProjectionSource,
   type ProjectedTraceQualityObservation,
   type ProjectedTraceQualityTrace,
 } from './projection.js';
 import { readTraceQualityProjectionInputForSession } from './source-readers.js';
-import type { TraceQualityCoverage } from './types.js';
+import type {
+  TraceQualityCostCoverage,
+  TraceQualityCostProvenance,
+  TraceQualityCoverage,
+  TraceQualityTimestampCoverage,
+  TraceQualityToolOutcomeCoverage,
+  TraceQualityUsageCoverage,
+} from './types.js';
 
 /**
  * Version stamp for the summary derivation (distinct from the projection
@@ -29,7 +40,7 @@ import type { TraceQualityCoverage } from './types.js';
  * changes; the startup guard re-backfills every row whose stored version
  * differs, so derivation changes propagate without a manual reset.
  */
-const SESSION_TRACE_SUMMARY_VERSION = 'sts:v5';
+const SESSION_TRACE_SUMMARY_VERSION = 'sts:v6';
 
 /**
  * Stable, deterministic trace id for a session. The lean view presents one trace
@@ -68,6 +79,57 @@ const CONFIDENCE_WEIGHT: Record<string, number> = { high: 1, medium: 0.8, low: 0
  * Merge the coverage flags across a session's traces: a flag is present if any
  * trace has it; confidence is the lowest seen (most conservative).
  */
+function mergeUsageCoverage(
+  a: TraceQualityUsageCoverage | undefined,
+  b: TraceQualityUsageCoverage | undefined,
+): TraceQualityUsageCoverage {
+  if (a === 'observed' || b === 'observed') return 'observed';
+  if (a === 'observed_zero' || b === 'observed_zero') return 'observed_zero';
+  return 'unavailable';
+}
+
+function mergeCostCoverage(
+  a: TraceQualityCostCoverage | undefined,
+  b: TraceQualityCostCoverage | undefined,
+): TraceQualityCostCoverage {
+  if (!a || a === 'unavailable') return b ?? 'unavailable';
+  if (!b || b === 'unavailable') return a;
+  if (a === b) return a;
+  return 'partial';
+}
+
+function mergeCostProvenance(
+  a: TraceQualityCostProvenance | undefined,
+  b: TraceQualityCostProvenance | undefined,
+): TraceQualityCostProvenance {
+  if (!a || a === 'unavailable') return b ?? 'unavailable';
+  if (!b || b === 'unavailable') return a;
+  if (a === b) return a;
+  if ((a === 'reported' && b === 'estimated') || (a === 'estimated' && b === 'reported')) return 'mixed';
+  if (a === 'mixed' || b === 'mixed') return 'mixed';
+  return 'unknown';
+}
+
+function mergeTimestampCoverage(
+  a: TraceQualityTimestampCoverage | undefined,
+  b: TraceQualityTimestampCoverage | undefined,
+): TraceQualityTimestampCoverage {
+  if (!a) return b ?? 'unavailable';
+  if (!b) return a;
+  if (a === b) return a;
+  return 'approximate';
+}
+
+function mergeToolOutcomeCoverage(
+  a: TraceQualityToolOutcomeCoverage | undefined,
+  b: TraceQualityToolOutcomeCoverage | undefined,
+): TraceQualityToolOutcomeCoverage {
+  if (!a || a === 'not_applicable') return b ?? 'not_applicable';
+  if (!b || b === 'not_applicable') return a;
+  if (a === b) return a;
+  return 'partial';
+}
+
 function mergeCoverage(traces: readonly ProjectedTraceQualityTrace[]): TraceQualityCoverage {
   const merged: TraceQualityCoverage = {};
   const confidenceRank: Record<string, number> = { high: 3, medium: 2, low: 1, unknown: 0 };
@@ -82,10 +144,23 @@ function mergeCoverage(traces: readonly ProjectedTraceQualityTrace[]): TraceQual
       coverage = {};
     }
     for (const [key, value] of Object.entries(coverage)) {
-      if (key === 'projection_confidence' || key === 'projection_source') continue;
+      if (
+        key === 'projection_confidence'
+        || key === 'projection_source'
+        || key === 'usage_coverage'
+        || key === 'cost_coverage'
+        || key === 'cost_provenance'
+        || key === 'timestamp_coverage'
+        || key === 'tool_outcome_coverage'
+      ) continue;
       if (value === true) merged[key] = true;
       else if (merged[key] === undefined) merged[key] = value;
     }
+    merged.usage_coverage = mergeUsageCoverage(merged.usage_coverage, coverage.usage_coverage);
+    merged.cost_coverage = mergeCostCoverage(merged.cost_coverage, coverage.cost_coverage);
+    merged.cost_provenance = mergeCostProvenance(merged.cost_provenance, coverage.cost_provenance);
+    merged.timestamp_coverage = mergeTimestampCoverage(merged.timestamp_coverage, coverage.timestamp_coverage);
+    merged.tool_outcome_coverage = mergeToolOutcomeCoverage(merged.tool_outcome_coverage, coverage.tool_outcome_coverage);
     source ??= coverage.projection_source;
     const conf = coverage.projection_confidence ?? 'unknown';
     if (lowestConfidence === null || (confidenceRank[conf] ?? 0) < (confidenceRank[lowestConfidence] ?? 0)) {
@@ -135,8 +210,8 @@ function isError(observation: ProjectedTraceQualityObservation): boolean {
 /** The event columns the summary reads; everything else on the row is detail. */
 type EventRollupSource = Pick<
   EventProjectionSource,
-  | 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'duration_ms'
-  | 'status' | 'model' | 'event_type' | 'tool_name' | 'client_timestamp' | 'created_at'
+  | 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'cost_source'
+  | 'duration_ms' | 'status' | 'model' | 'event_type' | 'tool_name' | 'client_timestamp' | 'created_at' | 'metadata'
 >;
 
 interface SessionMetadata {
@@ -184,7 +259,8 @@ function rollupFromEvents(events: readonly EventRollupSource[]): MeasureRollup {
     rollup.latency += event.duration_ms ?? 0;
     if (event.status === 'error') rollup.errorCount += 1;
     if (event.model) modelCounts.set(event.model, (modelCounts.get(event.model) ?? 0) + 1);
-    const ts = event.client_timestamp ?? event.created_at;
+    const tsCoverage = classifyEventTimestampCoverage(event);
+    const ts = tsCoverage === 'unavailable' ? null : (event.client_timestamp ?? event.created_at);
     if (ts && (rollup.startedAt === null || ts < rollup.startedAt)) rollup.startedAt = ts;
     if (ts && (rollup.endedAt === null || ts > rollup.endedAt)) rollup.endedAt = ts;
   }
@@ -251,10 +327,42 @@ function readEventSessionMetadata(db: Database, sessionId: string): SessionMetad
   };
 }
 
+function readSessionItemToolOutcomeCounts(db: Database, sessionId: string): {
+  toolCalls: number;
+  recordedOutcomes: number;
+  unrecordedResults: number;
+} {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN kind IN ('tool_call', 'command_execution') THEN 1 ELSE 0 END), 0) AS tool_calls,
+      COALESCE(SUM(CASE
+        WHEN kind = 'tool_result'
+          AND status IN ('success', 'error')
+          AND COALESCE(json_extract(payload_json, '$.outcome'), '') != 'unrecorded'
+        THEN 1 ELSE 0 END), 0) AS recorded_outcomes,
+      COALESCE(SUM(CASE
+        WHEN kind = 'tool_result'
+          AND (COALESCE(status, '') NOT IN ('success', 'error')
+            OR json_extract(payload_json, '$.outcome') = 'unrecorded')
+        THEN 1 ELSE 0 END), 0) AS unrecorded_results
+    FROM session_items
+    WHERE session_id = ?
+  `).get(sessionId) as {
+    tool_calls: number;
+    recorded_outcomes: number;
+    unrecorded_results: number;
+  };
+  return {
+    toolCalls: row.tool_calls,
+    recordedOutcomes: row.recorded_outcomes,
+    unrecordedResults: row.unrecorded_results,
+  };
+}
+
 export function deriveSessionTraceSummary(sessionId: string, db: Database = getDb()): SessionTraceSummary {
   const events = db.prepare(`
-    SELECT tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, duration_ms,
-           status, model, event_type, tool_name, client_timestamp, created_at
+    SELECT tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd, cost_source, duration_ms,
+           status, model, event_type, tool_name, client_timestamp, created_at, metadata
     FROM events WHERE session_id = ?
   `).all(sessionId) as EventRollupSource[];
   let rollup: MeasureRollup;
@@ -266,6 +374,11 @@ export function deriveSessionTraceSummary(sessionId: string, db: Database = getD
     // preserve transcript coverage without scanning message or item tables.
     if (metadata.browsingSession?.fidelity === 'full') {
       rollup.coverage.has_full_transcript = true;
+    }
+    const itemToolCounts = readSessionItemToolOutcomeCounts(db, sessionId);
+    if (itemToolCounts.toolCalls > 0 || itemToolCounts.recordedOutcomes > 0 || itemToolCounts.unrecordedResults > 0) {
+      rollup.coverage.has_tool_details = true;
+      rollup.coverage.tool_outcome_coverage = classifyToolOutcomeCounts(itemToolCounts);
     }
   } else {
     const input = readTraceQualityProjectionInputForSession(sessionId);
@@ -307,10 +420,14 @@ interface EventRowForSummary {
   cache_read_tokens: number;
   cache_write_tokens: number;
   cost_usd: number | null;
+  cost_source: string | null;
   duration_ms: number | null;
   status: string | null;
   event_type: string | null;
   tool_name: string | null;
+  client_timestamp: string | null;
+  created_at: string | null;
+  metadata: string | null;
   ts: string | null;
 }
 
@@ -326,15 +443,33 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
   const db = getDb();
   const event = db.prepare(`
     SELECT session_id, agent_type, project, model, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
-           cost_usd, duration_ms, status, event_type, tool_name,
+           cost_usd, cost_source, duration_ms, status, event_type, tool_name,
+           client_timestamp, created_at, metadata,
            COALESCE(client_timestamp, created_at) AS ts
     FROM events WHERE id = ?
   `).get(eventId) as EventRowForSummary | undefined;
   if (!event) return;
 
-  const hasTokens = event.tokens_in > 0 || event.tokens_out > 0 || event.cache_read_tokens > 0 || event.cache_write_tokens > 0;
-  const hasCost = event.cost_usd != null;
-  const hasToolDetails = event.event_type === 'tool_use' && Boolean(event.tool_name);
+  const eventInput: EventCoverageInput = {
+    tokens_in: event.tokens_in,
+    tokens_out: event.tokens_out,
+    cache_read_tokens: event.cache_read_tokens,
+    cache_write_tokens: event.cache_write_tokens,
+    cost_usd: event.cost_usd,
+    cost_source: event.cost_source,
+    status: event.status,
+    event_type: event.event_type ?? 'unknown',
+    tool_name: event.tool_name,
+    client_timestamp: event.client_timestamp,
+    created_at: event.created_at,
+    metadata: event.metadata,
+  };
+  const eventCov = coverageForEvents([eventInput]);
+  const measured = isMeasuredUsageEvent(eventInput);
+  const effectiveTs = eventCov.timestamp_coverage === 'unavailable' ? null : event.ts;
+  const hasTokens = eventCov.has_token_usage === true;
+  const hasCost = eventCov.has_cost === true;
+  const hasToolDetails = eventCov.has_tool_details === true;
   const isErr = event.status === 'error' ? 1 : 0;
 
   db.prepare(`
@@ -369,7 +504,7 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
     agent_type: event.agent_type,
     project: event.project,
     model: event.model,
-    ts: event.ts,
+    ts: effectiveTs,
     is_err: isErr,
     tokens_in: event.tokens_in,
     tokens_out: event.tokens_out,
@@ -377,13 +512,7 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
     cache_write_tokens: event.cache_write_tokens,
     cost_usd: event.cost_usd ?? 0,
     duration: event.duration_ms ?? 0,
-    coverage_json: JSON.stringify({
-      has_token_usage: hasTokens,
-      has_cost: hasCost,
-      has_tool_details: hasToolDetails,
-      projection_source: 'events',
-      projection_confidence: hasTokens || hasCost ? 'medium' : 'low',
-    } satisfies TraceQualityCoverage),
+    coverage_json: JSON.stringify(eventCov),
     projection_version: SESSION_TRACE_SUMMARY_VERSION,
   });
 
@@ -391,13 +520,38 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
     SELECT observation_count, error_count, coverage_json FROM session_trace_summary WHERE session_id = ?
   `).get(event.session_id) as { observation_count: number; error_count: number; coverage_json: string };
   const prior = JSON.parse(row.coverage_json) as TraceQualityCoverage;
+  const isFirst = row.observation_count === 1;
+  const usageCoverage = isFirst
+    ? eventCov.usage_coverage
+    : mergeUsageCoverage(prior.usage_coverage, eventCov.usage_coverage);
+  const costCoverage = isFirst
+    ? eventCov.cost_coverage
+    : measured
+      ? mergeCostCoverage(prior.cost_coverage, eventCov.cost_coverage)
+      : (prior.cost_coverage ?? 'unavailable');
+  const costProvenance = isFirst
+    ? eventCov.cost_provenance
+    : mergeCostProvenance(prior.cost_provenance, eventCov.cost_provenance);
+  const timestampCoverage = isFirst
+    ? eventCov.timestamp_coverage
+    : mergeTimestampCoverage(prior.timestamp_coverage, eventCov.timestamp_coverage);
+  const toolOutcomeCoverage = isFirst
+    ? eventCov.tool_outcome_coverage
+    : mergeToolOutcomeCoverage(prior.tool_outcome_coverage, eventCov.tool_outcome_coverage);
+  const mergedHasTokens = prior.has_token_usage === true || hasTokens;
+  const mergedHasCost = prior.has_cost === true || hasCost;
   const coverage: TraceQualityCoverage = {
-    has_token_usage: prior.has_token_usage === true || hasTokens,
-    has_cost: prior.has_cost === true || hasCost,
+    has_full_transcript: prior.has_full_transcript === true,
+    has_token_usage: mergedHasTokens,
+    has_cost: mergedHasCost,
     has_tool_details: prior.has_tool_details === true || hasToolDetails,
+    usage_coverage: usageCoverage,
+    cost_coverage: costCoverage,
+    cost_provenance: costProvenance,
+    timestamp_coverage: timestampCoverage,
+    tool_outcome_coverage: toolOutcomeCoverage,
     projection_source: 'events',
-    projection_confidence:
-      prior.has_token_usage === true || prior.has_cost === true || hasTokens || hasCost ? 'medium' : 'low',
+    projection_confidence: mergedHasTokens || mergedHasCost ? 'medium' : 'low',
   };
   const { score, grade } = computeQualityScalar(row.observation_count, row.error_count, coverage);
   db.prepare('UPDATE session_trace_summary SET coverage_json = ?, quality_score = ?, quality_grade = ? WHERE session_id = ?')

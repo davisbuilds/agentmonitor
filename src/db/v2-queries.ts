@@ -615,10 +615,44 @@ export function listBrowsingSessions(params: SessionsListParams = {}): SessionsR
   return { data, total, cursor: nextCursor };
 }
 
+function lookupSessionTraceCoverage(id: string): BrowsingSessionRow['trace_coverage'] {
+  const db = getDb();
+  const keys = codexSessionAliases(id);
+  const placeholders = keys.map(() => '?').join(', ');
+  const rows = db.prepare(`
+    SELECT session_id, agent_type, observation_count, coverage_json
+    FROM session_trace_summary
+    WHERE session_id IN (${placeholders})
+  `).all(...keys) as Array<{
+    session_id: string;
+    agent_type: string | null;
+    observation_count: number;
+    coverage_json: string;
+  }>;
+  if (rows.length === 0) return null;
+  const preferred = rows.sort((a, b) => {
+    const aRollout = a.agent_type === 'codex' && a.session_id.startsWith('rollout-') ? 1 : 0;
+    const bRollout = b.agent_type === 'codex' && b.session_id.startsWith('rollout-') ? 1 : 0;
+    return aRollout - bRollout || b.observation_count - a.observation_count || a.session_id.localeCompare(b.session_id);
+  })[0]!;
+  try {
+    const parsed = JSON.parse(preferred.coverage_json) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as NonNullable<BrowsingSessionRow['trace_coverage']>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function getBrowsingSession(id: string): BrowsingSessionRow | undefined {
   const db = getDb();
   const row = db.prepare('SELECT * FROM browsing_sessions WHERE id = ?').get(id) as BrowsingSessionDbRow | undefined;
-  return row ? mapBrowsingSessionRow(row) : undefined;
+  if (!row) return undefined;
+  return {
+    ...mapBrowsingSessionRow(row),
+    trace_coverage: lookupSessionTraceCoverage(id),
+  };
 }
 
 /** A monitor UUID and its browsable rollout alias address the same native transcript. */
