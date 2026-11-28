@@ -596,23 +596,23 @@ function parseLogRecord(
     ?? getAttr(logRecord.attributes, 'model')
     ?? (bodyJson?.model as string | undefined);
 
-  const tokensIn =
+  const rawTokensIn =
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.input_tokens')
     ?? getAttrNumber(logRecord.attributes, 'input_token_count')
     ?? asNumber(bodyJson?.input_tokens)
     ?? asNumber(bodyJson?.input_token_count)
     ?? asNumber(payload?.input_tokens)
-    ?? asNumber(payload?.input_token_count)
-    ?? 0;
+    ?? asNumber(payload?.input_token_count);
+  const tokensIn = rawTokensIn ?? 0;
 
-  const tokensOut =
+  const rawTokensOut =
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.output_tokens')
     ?? getAttrNumber(logRecord.attributes, 'output_token_count')
     ?? asNumber(bodyJson?.output_tokens)
     ?? asNumber(bodyJson?.output_token_count)
     ?? asNumber(payload?.output_tokens)
-    ?? asNumber(payload?.output_token_count)
-    ?? 0;
+    ?? asNumber(payload?.output_token_count);
+  const tokensOut = rawTokensOut ?? 0;
 
   // WHY: Anthropic input is already net of cache, while OpenAI includes cached tokens in its input
   // count.
@@ -657,6 +657,15 @@ function parseLogRecord(
     getAttrNumber(logRecord.attributes, 'gen_ai.usage.cost')
     ?? asNumber(bodyJson?.cost_usd)
     ?? asNumber(payload?.cost_usd);
+
+  const hasExplicitUsage =
+    rawTokensIn !== undefined
+    || rawTokensOut !== undefined
+    || anthropicCacheRead !== undefined
+    || openaiCacheRead !== undefined
+    || anthropicCacheWrite !== undefined
+    || normalizedCacheWrite !== undefined
+    || costUsd !== undefined;
 
   const durationMs =
     getAttrNumber(logRecord.attributes, 'gen_ai.latency')
@@ -703,6 +712,9 @@ function parseLogRecord(
 
   if (resolvedEventName) {
     meta.otel_event_name ??= resolvedEventName;
+  }
+  if (eventType === 'llm_response') {
+    meta.usage_observed = hasExplicitUsage;
   }
   copyPromptRefAttributes(meta, logRecord.attributes);
   copyPromptRefAttributes(meta, resourceAttrs);

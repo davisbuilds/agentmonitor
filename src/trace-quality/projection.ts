@@ -766,14 +766,24 @@ export type EventCoverageInput = Pick<
 };
 
 export function isMeasuredUsageEvent(
-  event: Pick<EventCoverageInput, 'event_type' | 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd'>,
+  event: Pick<
+    EventCoverageInput,
+    'event_type' | 'tokens_in' | 'tokens_out' | 'cache_read_tokens' | 'cache_write_tokens' | 'cost_usd' | 'metadata'
+  >,
 ): boolean {
-  return event.event_type === 'llm_response'
-    || event.tokens_in > 0
+  if (
+    event.tokens_in > 0
     || event.tokens_out > 0
     || event.cache_read_tokens > 0
     || event.cache_write_tokens > 0
-    || event.cost_usd != null;
+    || event.cost_usd != null
+  ) {
+    return true;
+  }
+  if (event.event_type !== 'llm_response') return false;
+  const metadata = parseJsonRecord(event.metadata);
+  if (typeof metadata?.usage_observed === 'boolean') return metadata.usage_observed;
+  return metadata?._source === 'antigravity_db';
 }
 
 export function classifyEventTimestampCoverage(
@@ -801,19 +811,56 @@ export function classifyToolOutcomeCounts(counts: {
   return 'complete';
 }
 
-function deriveEventToolOutcomeCoverage(events: readonly EventCoverageInput[]): TraceQualityToolOutcomeCoverage {
-  let toolCalls = 0;
+export function deriveEventToolOutcomeCoverage(events: readonly EventCoverageInput[]): TraceQualityToolOutcomeCoverage {
+  let otherToolCalls = 0;
   let recordedOutcomes = 0;
   let unrecordedResults = 0;
+  const decisionCallIds = new Set<string>();
+  const keyedResultStatus = new Map<string, 'recorded' | 'unrecorded'>();
+  let unkeyedDecisions = 0;
+  let unkeyedResults = 0;
+
   for (const event of events) {
     if (event.event_type !== 'tool_use' && event.event_type !== 'file_change') continue;
-    toolCalls += 1;
     const metadata = parseJsonRecord(event.metadata);
+    const otelEventName = typeof metadata?.otel_event_name === 'string' ? metadata.otel_event_name : null;
+    const callId = typeof metadata?.call_id === 'string' && metadata.call_id.length > 0 ? metadata.call_id : null;
+
+    if (otelEventName === 'codex.tool_decision') {
+      if (callId) decisionCallIds.add(callId);
+      else unkeyedDecisions += 1;
+      continue;
+    }
+
     const isUnrecorded = metadata?.outcome === 'unrecorded'
       || (event.status !== 'success' && event.status !== 'error');
+
+    if (otelEventName === 'codex.tool_result') {
+      if (callId) {
+        if (keyedResultStatus.get(callId) !== 'recorded') {
+          keyedResultStatus.set(callId, isUnrecorded ? 'unrecorded' : 'recorded');
+        }
+      } else {
+        unkeyedResults += 1;
+        if (isUnrecorded) unrecordedResults += 1;
+        else recordedOutcomes += 1;
+      }
+      continue;
+    }
+
+    otherToolCalls += 1;
     if (isUnrecorded) unrecordedResults += 1;
     else recordedOutcomes += 1;
   }
+
+  const keyedCodexCalls = new Set<string>(decisionCallIds);
+  for (const [callId, status] of keyedResultStatus.entries()) {
+    keyedCodexCalls.add(callId);
+    if (status === 'recorded') recordedOutcomes += 1;
+    else unrecordedResults += 1;
+  }
+
+  const toolCalls = otherToolCalls + keyedCodexCalls.size + Math.max(unkeyedDecisions, unkeyedResults);
   return classifyToolOutcomeCounts({ toolCalls, recordedOutcomes, unrecordedResults });
 }
 

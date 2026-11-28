@@ -17,6 +17,7 @@ import {
   classifyEventTimestampCoverage,
   classifyToolOutcomeCounts,
   coverageForEvents,
+  deriveEventToolOutcomeCoverage,
   isMeasuredUsageEvent,
   projectTraceQuality,
   type EventCoverageInput,
@@ -439,6 +440,16 @@ interface EventRowForSummary {
  * `coverageForEvents`); the quality scalar is recomputed from the running row.
  * Sessions that carry items/messages are maintained by the session hook instead.
  */
+function readOtelEventName(metadata: string | null): string | null {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata) as Record<string, unknown>;
+    return typeof parsed?.otel_event_name === 'string' ? parsed.otel_event_name : null;
+  } catch {
+    return null;
+  }
+}
+
 export function bumpSessionTraceSummaryForEvent(eventId: number): void {
   const db = getDb();
   const event = db.prepare(`
@@ -535,9 +546,21 @@ export function bumpSessionTraceSummaryForEvent(eventId: number): void {
   const timestampCoverage = isFirst
     ? eventCov.timestamp_coverage
     : mergeTimestampCoverage(prior.timestamp_coverage, eventCov.timestamp_coverage);
-  const toolOutcomeCoverage = isFirst
-    ? eventCov.tool_outcome_coverage
-    : mergeToolOutcomeCoverage(prior.tool_outcome_coverage, eventCov.tool_outcome_coverage);
+  const otelEventName = readOtelEventName(event.metadata);
+  let toolOutcomeCoverage: TraceQualityToolOutcomeCoverage | undefined;
+  if (isFirst) {
+    toolOutcomeCoverage = eventCov.tool_outcome_coverage;
+  } else if (otelEventName === 'codex.tool_decision' || otelEventName === 'codex.tool_result') {
+    const toolEvents = db.prepare(`
+      SELECT tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, cost_usd,
+             status, event_type, tool_name, metadata
+      FROM events
+      WHERE session_id = ? AND event_type IN ('tool_use', 'file_change')
+    `).all(event.session_id) as EventCoverageInput[];
+    toolOutcomeCoverage = deriveEventToolOutcomeCoverage(toolEvents);
+  } else {
+    toolOutcomeCoverage = mergeToolOutcomeCoverage(prior.tool_outcome_coverage, eventCov.tool_outcome_coverage);
+  }
   const mergedHasTokens = prior.has_token_usage === true || hasTokens;
   const mergedHasCost = prior.has_cost === true || hasCost;
   const coverage: TraceQualityCoverage = {

@@ -15,6 +15,7 @@ import type { runImport as runImportFn } from '../src/import/index.js';
 import type { repairAntigravityImportUsage as repairAgrFn } from '../src/import/antigravity-usage-repair.js';
 import type { recalculateEventCosts as recalcFn } from '../src/pricing/recalc.js';
 import type {
+  bumpSessionTraceSummaryForEvent as bumpSummaryFn,
   deriveSessionTraceSummary as deriveSummaryFn,
   maintainSessionTraceSummary as maintainSummaryFn,
   sessionTraceId as sessionTraceIdFn,
@@ -153,6 +154,7 @@ let repairAntigravityImportUsage: typeof repairAgrFn;
 let recalculateEventCosts: typeof recalcFn;
 let deriveSessionTraceSummary: typeof deriveSummaryFn;
 let maintainSessionTraceSummary: typeof maintainSummaryFn;
+let bumpSessionTraceSummaryForEvent: typeof bumpSummaryFn;
 let sessionTraceId: typeof sessionTraceIdFn;
 let listWarehouseSessionTraceSummaries: typeof listWarehouseFn;
 let mapSummaryToRunRow: typeof mapSummaryToRunRowFn;
@@ -195,6 +197,7 @@ before(async () => {
   ({ repairAntigravityImportUsage } = await import('../src/import/antigravity-usage-repair.js'));
   ({ recalculateEventCosts } = await import('../src/pricing/recalc.js'));
   ({
+    bumpSessionTraceSummaryForEvent,
     deriveSessionTraceSummary,
     maintainSessionTraceSummary,
     sessionTraceId,
@@ -825,4 +828,247 @@ test('amon sync sessions supports --source antigravity and includes Antigravity 
   assert.equal(forcePayload.antigravity.total, 1);
   assert.equal(forcePayload.parsed, 1);
   assert.equal(forcePayload.total_files, 1);
+});
+
+async function postOtelLogs(payload: unknown): Promise<void> {
+  const response = await fetch(`${baseUrl}/api/otel/v1/logs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (response.status !== 200) {
+    assert.equal(response.status, 200, await response.text());
+  }
+}
+
+test('OTEL api_response omitting usage stays unavailable while explicit zero usage is observed_zero', async () => {
+  const omittedSessionId = 'otel-usage-omitted-001';
+  const explicitZeroSessionId = 'otel-usage-explicit-zero-001';
+  const legacyZeroSessionId = 'legacy-otel-zero-001';
+
+  await postOtelLogs({
+    resourceLogs: [{
+      resource: {
+        attributes: [
+          { key: 'service.name', value: { stringValue: 'codex_cli_rs' } },
+          { key: 'gen_ai.session.id', value: { stringValue: omittedSessionId } },
+        ],
+      },
+      scopeLogs: [{
+        logRecords: [{
+          timeUnixNano: String(Date.parse('2026-11-27T10:00:00Z') * 1_000_000),
+          attributes: [
+            { key: 'event.name', value: { stringValue: 'codex.api_response' } },
+            { key: 'gen_ai.request.model', value: { stringValue: 'gpt-5.4' } },
+          ],
+        }],
+      }],
+    }],
+  });
+
+  await postOtelLogs({
+    resourceLogs: [{
+      resource: {
+        attributes: [
+          { key: 'service.name', value: { stringValue: 'codex_cli_rs' } },
+          { key: 'gen_ai.session.id', value: { stringValue: explicitZeroSessionId } },
+        ],
+      },
+      scopeLogs: [{
+        logRecords: [{
+          timeUnixNano: String(Date.parse('2026-11-27T10:05:00Z') * 1_000_000),
+          attributes: [
+            { key: 'event.name', value: { stringValue: 'codex.api_response' } },
+            { key: 'gen_ai.request.model', value: { stringValue: 'gpt-5.4' } },
+            { key: 'gen_ai.usage.input_tokens', value: { intValue: 0 } },
+            { key: 'gen_ai.usage.output_tokens', value: { intValue: 0 } },
+          ],
+        }],
+      }],
+    }],
+  });
+
+  const db = getDb();
+  const insertedLegacy = db.prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, status, model,
+      tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+      cost_usd, cost_source, source, client_timestamp, metadata
+    ) VALUES (?, ?, 'codex', 'llm_response', 'success', 'gpt-5.4', 0, 0, 0, 0, NULL, NULL, 'otel', '2026-11-27T10:10:00.000Z', ?)
+  `).run('legacy-otel-zero-ev-1', legacyZeroSessionId, JSON.stringify({ otel_event_name: 'codex.api_response' }));
+  bumpSessionTraceSummaryForEvent(Number(insertedLegacy.lastInsertRowid));
+
+  const omittedDerived = deriveSessionTraceSummary(omittedSessionId, db);
+  assert.equal(omittedDerived.coverage.usage_coverage, 'unavailable');
+  assert.equal(omittedDerived.coverage.has_token_usage, false);
+  assert.equal(omittedDerived.coverage.cost_coverage, 'unavailable');
+  assert.equal(omittedDerived.coverage.has_cost, false);
+
+  const explicitZeroDerived = deriveSessionTraceSummary(explicitZeroSessionId, db);
+  assert.equal(explicitZeroDerived.coverage.usage_coverage, 'observed_zero');
+  assert.equal(explicitZeroDerived.coverage.has_token_usage, true);
+
+  const legacyDerived = deriveSessionTraceSummary(legacyZeroSessionId, db);
+  assert.equal(legacyDerived.coverage.usage_coverage, 'unavailable');
+  assert.equal(legacyDerived.coverage.cost_coverage, 'unavailable');
+
+  const warehouseRows = listWarehouseSessionTraceSummaries()
+    .map(row => mapSummaryToRunRow(row, 'local', 'run-otel-usage'));
+  for (const row of warehouseRows) assertContentFree(row);
+
+  const omittedRow = warehouseRows.find(r => r.session_id === omittedSessionId)!;
+  assert.equal(omittedRow.usage_coverage, 'unavailable');
+  assert.equal(omittedRow.cost_coverage, 'unavailable');
+  assert.equal(omittedRow.input_tokens, null);
+  assert.equal(omittedRow.output_tokens, null);
+  assert.equal(omittedRow.cost_usd, null);
+
+  const explicitZeroRow = warehouseRows.find(r => r.session_id === explicitZeroSessionId)!;
+  assert.equal(explicitZeroRow.usage_coverage, 'observed_zero');
+  assert.equal(explicitZeroRow.input_tokens, 0);
+  assert.equal(explicitZeroRow.output_tokens, 0);
+
+  const legacyRow = warehouseRows.find(r => r.session_id === legacyZeroSessionId)!;
+  assert.equal(legacyRow.usage_coverage, 'unavailable');
+  assert.equal(legacyRow.input_tokens, null);
+  assert.equal(legacyRow.cost_usd, null);
+});
+
+test('codex.tool_decision without codex.tool_result reports unrecorded/partial tool outcomes until paired', async () => {
+  const decisionOnlyId = 'codex-decision-only-001';
+  const otelDecisionOnlyId = 'codex-otel-decision-only-001';
+  const pairedId = 'codex-decision-paired-001';
+  const outOfOrderId = 'codex-decision-ooo-001';
+  const partialId = 'codex-decision-partial-001';
+  const db = getDb();
+
+  await postOtelLogs({
+    resourceLogs: [{
+      resource: {
+        attributes: [
+          { key: 'service.name', value: { stringValue: 'codex_cli_rs' } },
+          { key: 'gen_ai.session.id', value: { stringValue: otelDecisionOnlyId } },
+        ],
+      },
+      scopeLogs: [{
+        logRecords: [{
+          timeUnixNano: String(Date.parse('2026-11-27T10:59:00Z') * 1_000_000),
+          attributes: [
+            { key: 'event.name', value: { stringValue: 'codex.tool_decision' } },
+            { key: 'tool_name', value: { stringValue: 'shell' } },
+            { key: 'call_id', value: { stringValue: 'otel-call-1' } },
+            { key: 'decision', value: { stringValue: 'approved' } },
+          ],
+        }],
+      }],
+    }],
+  });
+  assert.equal(deriveSessionTraceSummary(otelDecisionOnlyId, db).coverage.tool_outcome_coverage, 'unrecorded');
+
+  const insertEventRow = db.prepare(`
+    INSERT INTO events (
+      event_id, session_id, agent_type, event_type, tool_name, status,
+      tokens_in, tokens_out, cache_read_tokens, cache_write_tokens,
+      source, client_timestamp, metadata
+    ) VALUES (?, ?, 'codex', 'tool_use', 'shell', ?, 0, 0, 0, 0, 'otel', ?, ?)
+  `);
+
+  const dOnly = insertEventRow.run(
+    'cdx-d-only-1',
+    decisionOnlyId,
+    'success',
+    '2026-11-27T11:00:00.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_decision', call_id: 'call-1', decision: 'approved' }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(dOnly.lastInsertRowid));
+
+  const dOnlyStored = JSON.parse(
+    (db.prepare('SELECT coverage_json FROM session_trace_summary WHERE session_id = ?').get(decisionOnlyId) as { coverage_json: string }).coverage_json,
+  ) as { tool_outcome_coverage?: string };
+  assert.equal(dOnlyStored.tool_outcome_coverage, 'unrecorded');
+  assert.equal(deriveSessionTraceSummary(decisionOnlyId, db).coverage.tool_outcome_coverage, 'unrecorded');
+
+  const pDec = insertEventRow.run(
+    'cdx-paired-1',
+    pairedId,
+    'success',
+    '2026-11-27T11:01:00.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_decision', call_id: 'call-a', decision: 'approved' }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(pDec.lastInsertRowid));
+  const pRes = insertEventRow.run(
+    'cdx-paired-2',
+    pairedId,
+    'success',
+    '2026-11-27T11:01:05.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_result', call_id: 'call-a', success: true }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(pRes.lastInsertRowid));
+
+  const pairedStored = JSON.parse(
+    (db.prepare('SELECT coverage_json FROM session_trace_summary WHERE session_id = ?').get(pairedId) as { coverage_json: string }).coverage_json,
+  ) as { tool_outcome_coverage?: string };
+  assert.equal(pairedStored.tool_outcome_coverage, 'complete');
+  assert.equal(deriveSessionTraceSummary(pairedId, db).coverage.tool_outcome_coverage, 'complete');
+
+  const oooRes = insertEventRow.run(
+    'cdx-ooo-1',
+    outOfOrderId,
+    'success',
+    '2026-11-27T11:01:10.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_result', call_id: 'call-ooo', success: true }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(oooRes.lastInsertRowid));
+  const oooDec = insertEventRow.run(
+    'cdx-ooo-2',
+    outOfOrderId,
+    'success',
+    '2026-11-27T11:01:09.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_decision', call_id: 'call-ooo', decision: 'approved' }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(oooDec.lastInsertRowid));
+  const oooStored = JSON.parse(
+    (db.prepare('SELECT coverage_json FROM session_trace_summary WHERE session_id = ?').get(outOfOrderId) as { coverage_json: string }).coverage_json,
+  ) as { tool_outcome_coverage?: string };
+  assert.equal(oooStored.tool_outcome_coverage, 'complete');
+  assert.equal(deriveSessionTraceSummary(outOfOrderId, db).coverage.tool_outcome_coverage, 'complete');
+
+  const partDec1 = insertEventRow.run(
+    'cdx-partial-1',
+    partialId,
+    'success',
+    '2026-11-27T11:02:00.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_decision', call_id: 'call-x', decision: 'approved' }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(partDec1.lastInsertRowid));
+  const partDec2 = insertEventRow.run(
+    'cdx-partial-2',
+    partialId,
+    'success',
+    '2026-11-27T11:02:02.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_decision', call_id: 'call-y', decision: 'approved' }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(partDec2.lastInsertRowid));
+  const partRes1 = insertEventRow.run(
+    'cdx-partial-3',
+    partialId,
+    'success',
+    '2026-11-27T11:02:05.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_result', call_id: 'call-x', success: true }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(partRes1.lastInsertRowid));
+  const partRes1Dup = insertEventRow.run(
+    'cdx-partial-4',
+    partialId,
+    'success',
+    '2026-11-27T11:02:06.000Z',
+    JSON.stringify({ otel_event_name: 'codex.tool_result', call_id: 'call-x', success: true }),
+  );
+  bumpSessionTraceSummaryForEvent(Number(partRes1Dup.lastInsertRowid));
+
+  const partialStored = JSON.parse(
+    (db.prepare('SELECT coverage_json FROM session_trace_summary WHERE session_id = ?').get(partialId) as { coverage_json: string }).coverage_json,
+  ) as { tool_outcome_coverage?: string };
+  assert.equal(partialStored.tool_outcome_coverage, 'partial');
+  assert.equal(deriveSessionTraceSummary(partialId, db).coverage.tool_outcome_coverage, 'partial');
 });

@@ -211,6 +211,7 @@ export function antigravitySnapshotToEvents(
         _source: 'antigravity_db',
         thoughts_tokens: b.thoughtsTokens,
         timestamp_source: gen.timestampSource,
+        usage_observed: true,
       },
       source: 'import',
     });

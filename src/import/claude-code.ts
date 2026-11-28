@@ -185,6 +185,19 @@ export function parseClaudeCodeFile(
       : positionalEventId;
 
     const metadataObj: Record<string, unknown> = {};
+    if (
+      eventType === 'llm_response'
+      && !alreadyBilled
+      && turnUsage != null
+      && (
+        turnUsage.input_tokens !== undefined
+        || turnUsage.output_tokens !== undefined
+        || turnUsage.cache_read_input_tokens !== undefined
+        || turnUsage.cache_creation_input_tokens !== undefined
+      )
+    ) {
+      metadataObj.usage_observed = true;
+    }
     if (childAgentTranscript) {
       metadataObj.agent_id = line.agentId ?? fileBasename.slice('agent-'.length);
       metadataObj.agent_transcript = fileBasename;
