@@ -378,6 +378,59 @@ export function registerMaintenanceCommands(): void {
   });
 
   registerCommand({
+    name: 'costs repair-antigravity-usage',
+    group: 'Data Commands',
+    summary: 'Rebuild imported Antigravity usage from conversation DBs and migrate ordinal generation IDs',
+    usage: 'costs repair-antigravity-usage [--apply] [--dry-run] [--antigravity-dir <path>]',
+    examples: [
+      'costs repair-antigravity-usage --json',
+      'costs repair-antigravity-usage --dry-run --json',
+      'costs repair-antigravity-usage --apply',
+    ],
+    async handler(ctx, args) {
+      const parsed = parseOptionSet(args, new Set(['--antigravity-dir']), new Set(['--apply', '--dry-run']));
+      rejectExtraPositionals(parsed.positionals, 'amon costs repair-antigravity-usage [--apply] [--dry-run]');
+      if (parsed.flags.has('--apply') && parsed.flags.has('--dry-run')) {
+        throw invalidUsage('Cannot combine --apply and --dry-run.');
+      }
+      const { createConfig } = await import('../../config.js');
+      const runtimeConfig = createConfig();
+      const { initSchema } = await import('../../db/schema.js');
+      const { closeDb, getDb } = await import('../../db/connection.js');
+      const { repairAntigravityImportUsage } = await import('../../import/antigravity-usage-repair.js');
+      const { RuntimeOwnershipError } = await import('../../runtime-ownership.js');
+      initSchema();
+      try {
+        const report = repairAntigravityImportUsage(getDb(), {
+          antigravityDir: parsed.values.get('--antigravity-dir'),
+          apply: parsed.flags.has('--apply'),
+          excludePatterns: runtimeConfig.sync.excludePatterns,
+        });
+        printSummary(
+          ctx,
+          report.apply ? 'Antigravity import usage repair' : 'Antigravity import usage repair preview',
+          report,
+        );
+        if (report.apply && report.sessions_changed > 0) {
+          console.error('Restart the AgentMonitor server so the Monitor shows the repaired totals.');
+        }
+        if (report.sessions_failed.length > 0) {
+          throw partialSuccess(
+            `Antigravity usage repair: ${report.sessions_failed.length} session(s) failed and were left unchanged; rerun to retry them.`,
+          );
+        }
+      } catch (error) {
+        if (error instanceof RuntimeOwnershipError) {
+          throw new CliError(`${error.message}\nStop the server before applying: the repair needs the database to itself.`);
+        }
+        throw error;
+      } finally {
+        closeDb();
+      }
+    },
+  });
+
+  registerCommand({
     name: 'costs check-sessions',
     group: 'Data Commands',
     summary: "Compare amon's imported totals with each harness's own, per recent session",

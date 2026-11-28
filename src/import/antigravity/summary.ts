@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import Database from 'better-sqlite3';
 import { projectNameFromCwd } from '../../util/project-identity.js';
+import { isRetryableSqliteError, openReadOnlySqliteWithRetry, type SqliteReadRetryOptions } from './sqlite.js';
 
 interface SummaryRow {
   title: string | null;
@@ -72,46 +72,51 @@ function findSummaryDbPath(conversationDbPath: string): string | null {
 export function readAntigravityConversationSummary(
   conversationDbPath: string,
   sessionId: string,
+  options?: SqliteReadRetryOptions,
 ): AntigravitySummaryMetadata | null {
   const summaryDbPath = findSummaryDbPath(conversationDbPath);
   if (!summaryDbPath) return null;
 
-  let summaryDb: Database.Database | undefined;
   try {
-    summaryDb = new Database(summaryDbPath, { readonly: true, fileMustExist: true, timeout: 500 });
-    const row = summaryDb.prepare(`
-      SELECT title, preview, workspace_uris, parent_conversation_id
-      FROM conversation_summaries
-      WHERE conversation_id = ?
-    `).get(sessionId) as SummaryRow | undefined;
-    if (!row) return null;
+    return openReadOnlySqliteWithRetry(summaryDbPath, (summaryDb) => {
+      const table = summaryDb.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'conversation_summaries'",
+      ).get();
+      if (!table) return null;
 
-    const cwd = workspacePathFromUris(row.workspace_uris);
-    const project = projectNameFromCwd(cwd);
-    const title = cleanSummaryText(row.title);
-    const preview = cleanSummaryText(row.preview);
-    const firstMessage = title ?? preview ?? null;
-    const parentRaw = typeof row.parent_conversation_id === 'string' ? row.parent_conversation_id.trim() : '';
-    const parentSessionId = parentRaw || null;
-    const relationshipType = parentSessionId ? 'subagent' : null;
+      const row = summaryDb.prepare(`
+        SELECT title, preview, workspace_uris, parent_conversation_id
+        FROM conversation_summaries
+        WHERE conversation_id = ?
+      `).get(sessionId) as SummaryRow | undefined;
+      if (!row) return null;
 
-    return {
-      project,
-      cwd,
-      title,
-      firstMessage,
-      parentSessionId,
-      relationshipType,
-      rawSignature: JSON.stringify([
-        row.title ?? '',
-        row.preview ?? '',
-        row.workspace_uris ?? '',
-        row.parent_conversation_id ?? '',
-      ]),
-    };
-  } catch {
+      const cwd = workspacePathFromUris(row.workspace_uris);
+      const project = projectNameFromCwd(cwd);
+      const title = cleanSummaryText(row.title);
+      const preview = cleanSummaryText(row.preview);
+      const firstMessage = title ?? preview ?? null;
+      const parentRaw = typeof row.parent_conversation_id === 'string' ? row.parent_conversation_id.trim() : '';
+      const parentSessionId = parentRaw || null;
+      const relationshipType = parentSessionId ? 'subagent' : null;
+
+      return {
+        project,
+        cwd,
+        title,
+        firstMessage,
+        parentSessionId,
+        relationshipType,
+        rawSignature: JSON.stringify([
+          row.title ?? '',
+          row.preview ?? '',
+          row.workspace_uris ?? '',
+          row.parent_conversation_id ?? '',
+        ]),
+      };
+    }, options);
+  } catch (err) {
+    if (options?.throwOnError && isRetryableSqliteError(err)) throw err;
     return null;
-  } finally {
-    summaryDb?.close();
   }
 }

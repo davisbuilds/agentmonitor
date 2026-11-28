@@ -181,9 +181,16 @@ databases, and explicit benchmark results into the local model. Import hashes ma
 normal reruns idempotent; `--force` is the deliberate recovery path. A Claude or
 Codex file whose size and nanosecond mtime match the state recorded with its hash
 is skipped without a read; a cleared hash (how migrations force a re-import) still
-reads it. Antigravity always hashes, since its WAL sidecar, summary metadata, or
-companion transcript logs (`transcript_full.jsonl` / `transcript.jsonl`) can
-change independently of the main `.db`. Benchmark
+reads it. Antigravity importer and watcher share one read-only SQLite snapshot
+reader with bounded `SQLITE_BUSY` retries (`src/import/antigravity/snapshot.ts`)
+and one WAL-aware hash token folding `.db`, `.db-wal`, `.db-shm`,
+`conversation_summaries.db` (+ `-wal`), and `transcript_full.jsonl` /
+`transcript.jsonl`, so WAL-only writes update both browser and event/usage
+projections without waiting for a checkpoint. Antigravity generation events key
+by stable identity (`messageId`, then `providerAssignedMessageId`, then
+`gen_metadata.idx`) while bridging legacy ordinal `gen:i` IDs against duplicates,
+and `amon costs repair-antigravity-usage` atomically reconciles legacy rows,
+`sessions` totals, and `session_trace_summary`. Benchmark
 events use `source='benchmark'` and remain excluded from normal activity and usage
 aggregates unless a benchmark-aware read explicitly includes them.
 
@@ -401,12 +408,19 @@ Live adapters under `src/live/` normalize current sessions and declare fidelity:
   it.
 - Codex `otel-only` is summary-oriented. It must not be presented as transcript
   parity with Claude.
-- Antigravity's watcher sync projects `antigravity-transcript` from
+- Antigravity's watcher sync uses the shared snapshot reader to project
+  `antigravity-transcript` from
   `brain/<uuid>/.system_generated/logs/transcript_full.jsonl` (preferred, `full`
   fidelity when complete with no `truncated_fields`) or `transcript.jsonl`
   (marking `truncated_fields` visibly at `summary` fidelity), preserving any
   trailing unflushed SQLite `steps` and falling back to `summary`-fidelity
-  (`antigravity-sqlite`) from SQLite `steps` when absent.
+  (`antigravity-sqlite`) from SQLite `steps` when absent. The same sync also
+  ingests Antigravity `events` and reconciles `sessions` (`active` within the
+  activity timeout window, `ended` otherwise) so active root and subagent
+  conversations reach **Monitor -> Active Agents** live and follow standard
+  `active -> idle -> ended` sweep transitions. When a `full`-fidelity transcript
+  exists alongside ingested events, `session_trace_summary` preserves
+  `has_full_transcript` coverage.
 
 Context occupancy uses the latest request's prompt size, so it may drop after
 compaction. Codex uses its reported context window when present and otherwise a

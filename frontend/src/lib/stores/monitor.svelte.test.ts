@@ -226,6 +226,17 @@ describe('live events under the agent filter', () => {
     expect(store.getSessions().map(s => s.id)).toEqual(['codex-1']);
     expect(store.getStats().total_events).toBe(1);
   });
+
+  it('keeps an active imported Antigravity session card active across per-turn finish steps', () => {
+    store.setFilters({});
+    store.applyLiveEvent(ev(1, {
+      agent_type: 'antigravity',
+      session_id: 'agr-live-1',
+      event_type: 'session_end',
+      source: 'import',
+    }));
+    expect(store.getSessions()[0]?.status).toBe('active');
+  });
 });
 
 describe('a filtered stats read in flight', () => {

@@ -10,18 +10,17 @@ import {
   type ParsedChunk,
 } from '../parser/claude-code.js';
 import { parseCodexSessionChunk, type CodexParseState } from '../parser/codex-sessions.js';
-import { parseAntigravitySessions } from '../parser/antigravity-sessions.js';
-import { resolveAntigravityTranscriptPaths } from '../parser/antigravity-transcript.js';
+import { antigravitySnapshotToParsedSession } from '../parser/antigravity-sessions.js';
 import { syncClaudeLiveSession, type ClaudeLiveSyncResult } from '../live/claude-adapter.js';
 import { syncCodexLiveSession } from '../live/codex-adapter.js';
 import { preserveAntigravitySessionMetadata, syncAntigravityLiveSession } from '../live/antigravity-adapter.js';
 import type { ProjectionFidelity } from '../live/projector.js';
-import { discoverAntigravityLogs } from '../import/antigravity.js';
-import { readAntigravityConversationSummary } from '../import/antigravity/summary.js';
+import { discoverAntigravityLogs, ingestAntigravitySnapshot } from '../import/antigravity.js';
+import { hashAntigravityConversation, readAntigravityConversationSnapshot } from '../import/antigravity/snapshot.js';
 import { discoverCodexRolloutFilesRecursive, discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { COMPRESSED_ROLLOUT_SUFFIX, readTranscriptFile, transcriptBaseName } from '../util/transcript-file.js';
 import { safelyMaintainTraceSummaryForSession } from '../trace-quality/service.js';
-import { setSessionMode } from '../db/queries.js';
+import { setSessionMode, type EventRow } from '../db/queries.js';
 import { reparseRequested } from '../db/reparse-marker.js';
 import { createCodexRolloutInventory, currentCodexRollout, resolveCodexRolloutHistory, type CodexRolloutInventory } from '../util/codex-rollout-history.js';
 
@@ -153,6 +152,8 @@ export interface SyncSessionOutcome {
   parse?: 'full' | 'resumed';
   integration_mode?: string;
   fidelity?: ProjectionFidelity;
+  ingestedEvents?: EventRow[];
+  sessionStatus?: 'active' | 'idle' | 'ended';
 }
 
 interface WatchedFileState {
@@ -449,45 +450,8 @@ export function syncAllCodexFiles(db: Database.Database, codexHome?: string, opt
   return stats;
 }
 
-/**
- * Change token for an Antigravity conversation DB. Folds the SQLite sidecars
- * (`-wal`, `-shm`) into the hash: when a conversation DB is still open in WAL
- * mode, newly committed steps can live only in `<uuid>.db-wal` while the main
- * `.db` is byte-unchanged. Hashing the main file alone would make the periodic
- * resync see the same hash and skip, leaving the browser/search/trace-quality
- * projection stale until SQLite checkpoints. Folding in the sidecars means any
- * committed WAL frame flips the token (over-parsing on a spurious change is
- * harmless — `insertParsedSession` rewrites only rows that differ). (Codex review, PR #57.)
- */
 export function hashAntigravityDb(filePath: string): string {
-  const h = crypto.createHash('sha256');
-  h.update(fs.readFileSync(filePath));
-  for (const suffix of ['-wal', '-shm']) {
-    try {
-      h.update(suffix);
-      h.update(fs.readFileSync(filePath + suffix));
-    } catch {
-      // WHY: A checkpointed database can have no WAL sidecar.
-    }
-  }
-  const sessionId = path.basename(filePath, '.db');
-  const summary = readAntigravityConversationSummary(filePath, sessionId);
-  if (summary) {
-    h.update('summary:');
-    h.update(summary.rawSignature);
-  }
-  const { fullPath, compactPath } = resolveAntigravityTranscriptPaths(filePath, sessionId);
-  for (const [label, candidatePath] of [['transcript_full:', fullPath], ['transcript:', compactPath]] as const) {
-    try {
-      const stat = fs.statSync(candidatePath, { bigint: true });
-      if (stat.isFile()) {
-        h.update(`${label}${stat.size}:${stat.mtimeNs}`);
-      }
-    } catch {
-      // WHY: Conversations without a transcript log fall back to SQLite step summaries or compact mirrors.
-    }
-  }
-  return h.digest('hex');
+  return hashAntigravityConversation(filePath);
 }
 
 export function syncAntigravitySessionFileDetailed(
@@ -508,24 +472,43 @@ export function syncAntigravitySessionFileDetailed(
     }
 
     const sessionId = path.basename(filePath, '.db');
-    const rawParsed = parseAntigravitySessions(filePath);
+    const snapshot = readAntigravityConversationSnapshot(filePath, {
+      includeTranscript: true,
+      includeSummary: true,
+      throwOnError: true,
+    });
+    const rawParsed = antigravitySnapshotToParsedSession(snapshot);
+    const ingested = ingestAntigravitySnapshot(db, snapshot, { importStateHash: fileHash });
 
-    if (rawParsed.messages.length === 0) {
+    if (rawParsed.messages.length === 0 && ingested.eventsFound === 0) {
       upsertWatchedFile(db, filePath, fileHash, fileMtime, 'skipped');
       return { result: 'skipped', session_id: sessionId };
     }
 
-    const parsed = preserveAntigravitySessionMetadata(db, rawParsed);
-    const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash);
-    const live = syncAntigravityLiveSession(db, parsed, { keptMessages: messagesKept });
+    let live: ClaudeLiveSyncResult | undefined;
+    let integration_mode = 'antigravity-sqlite';
+    let fidelity: ProjectionFidelity = 'summary';
+    if (rawParsed.messages.length > 0) {
+      const parsed = preserveAntigravitySessionMetadata(db, rawParsed);
+      const { messagesKept } = insertParsedSession(db, parsed, filePath, stat.size, fileHash);
+      live = syncAntigravityLiveSession(db, parsed, { keptMessages: messagesKept });
+      fidelity = parsed.metadata.fidelity === 'full' ? 'full' : 'summary';
+      integration_mode = parsed.metadata.integration_mode
+        ?? (fidelity === 'full' ? 'antigravity-transcript' : 'antigravity-sqlite');
+    }
     safelyMaintainTraceSummaryForSession(sessionId, 'antigravity session sync');
 
     upsertWatchedFile(db, filePath, fileHash, fileMtime, 'parsed');
 
-    const fidelity: ProjectionFidelity = parsed.metadata.fidelity === 'full' ? 'full' : 'summary';
-    const integration_mode = parsed.metadata.integration_mode
-      ?? (fidelity === 'full' ? 'antigravity-transcript' : 'antigravity-sqlite');
-    return { result: 'parsed', live, session_id: sessionId, integration_mode, fidelity };
+    return {
+      result: 'parsed',
+      live,
+      session_id: sessionId,
+      integration_mode,
+      fidelity,
+      ingestedEvents: ingested.ingestedEvents,
+      sessionStatus: ingested.sessionStatus,
+    };
   } catch (err) {
     console.error(`[watcher] Failed to sync Antigravity ${filePath}:`, err);
     try {

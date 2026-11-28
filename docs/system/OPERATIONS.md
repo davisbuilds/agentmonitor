@@ -49,7 +49,12 @@ and Antigravity (`~/.gemini/antigravity-cli/conversations/` and
 `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript_full.jsonl`
 or fallback `transcript.jsonl` when present, plus `conversation_summaries.db`
 alongside each conversation database) files,
-and rescans all three every 15 minutes. The startup scans run synchronously
+and rescans all three every 15 minutes. Live Antigravity file/WAL updates and
+resyncs read the conversation through the shared read-only SQLite snapshot reader
+(`src/import/antigravity/snapshot.ts`) and update both browser tables and
+`events`/`sessions` in one pass, promoting conversations whose latest activity is
+within `AGENTMONITOR_SESSION_TIMEOUT` to `status='active'` while leaving older
+historical imports `ended`. The startup scans run synchronously
 after the listener opens, in that order, so HTTP requests (including `amon status`
 and `amon health`) wait until all three finish. Each scan logs its own summary:
 `[watcher] Initial sync complete` covers Claude Code only. `[watcher] Codex sync` and
@@ -892,6 +897,58 @@ store and a snapshot of its rollouts:
   the few whose counter restarts mid-session, which that check skips;
 - the Codex Monitor total fell by about 45%;
 - a second apply changed nothing.
+
+### Imported Antigravity usage repair
+
+Antigravity rows imported before the Slice 1/Slice 2 descriptor and reader
+fixes carried three defects:
+
+- **Inflated input tokens and costs.** `ModelUsageStats` field 1 (the internal
+  `.exa.codeium_common_pb.Model` enum) was added into `tokens_in`, and
+  `cache_write_tokens` (field 4) was omitted.
+- **Misplaced generation timestamps.** Generations without an explicit
+  `ChatStartMetadata.created_at` inherited the conversation's first step
+  timestamp instead of joining `CortexStepPlannerResponse` by `message_id` /
+  `provider_assigned_message_id` or staying unattributed (`client_timestamp`
+  unset).
+- **Ordinal generation IDs.** `gen_metadata` rows were keyed as ordinal `gen:i`
+  rather than stable `messageId` / `providerAssignedMessageId` / `gen_metadata.idx`
+  identities.
+
+Because those legacy rows already hold `import-agr-*` IDs in SQLite, normal
+insert-only imports skip or leave older rows alongside newer IDs. Reconcile
+them atomically from the conversation `.db` files with:
+
+```sh
+amon costs repair-antigravity-usage --dry-run --json   # preview, rolls back writes
+amon costs repair-antigravity-usage --apply
+```
+
+Options:
+
+- `--dry-run` (also the default when `--apply` is omitted): previews changed
+  sessions, row mutations, legacy ID migrations, and before/after token and cost
+  totals across changed sessions, then rolls back every write.
+- `--apply`: takes exclusive runtime ownership on the database (refusing while
+  `amon serve` runs against that database), migrates legacy ordinal `gen:i` rows
+  and removes preexisting duplicates under stable `gen:msg:<messageId>` /
+  `gen:pmsg:<providerAssignedMessageId>` / `gen:idx:<idx>` IDs, rewrites usage,
+  model, project, cost, `cost_source`, `client_timestamp`, and metadata, updates
+  `sessions` bounds/lifecycle (`reconcileAntigravitySessionLifecycle`), refreshes
+  `session_trace_summary`, and (when all step events are already stored) records
+  the current shared WAL-aware `import_state` hash in a single per-session transaction.
+- `--antigravity-dir <path>` and global `--db-path <path>` target an isolated
+  source root or database snapshot.
+
+Missing conversation databases are counted in `sessions_without_source` and left
+untouched; databases that are corrupt, missing the `gen_metadata` table, or locked
+past bounded read retries are counted in
+`files_unreadable` and preserve stored rows. If any session transaction fails, that session rolls back
+and appears in `sessions_failed` with partial-success exit status while
+completed sessions commit cleanly. Restart the AgentMonitor server after
+`--apply` so the Monitor refreshes cached stats. Rehearse `--dry-run --json` and
+`--apply --json` on a disposable `amon database backup` snapshot first and
+confirm a second `--dry-run --json` reports `sessions_changed: 0`.
 
 ### Project name repair
 
