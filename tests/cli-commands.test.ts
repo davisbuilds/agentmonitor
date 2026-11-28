@@ -25,6 +25,7 @@ async function runCli(args: string[]) {
 let tempDir = '';
 let claudeDir = '';
 let codexHome = '';
+let antigravityDir = '';
 
 before(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agentmonitor-cli-'));
@@ -32,8 +33,10 @@ before(async () => {
   process.env.AGENTMONITOR_USAGE_BUDGETS_PATH = path.join(tempDir, 'budgets.json');
   claudeDir = path.join(tempDir, 'claude');
   codexHome = path.join(tempDir, 'codex');
+  antigravityDir = path.join(tempDir, 'antigravity-cli');
   fs.mkdirSync(path.join(claudeDir, 'projects', 'project-a'), { recursive: true });
   fs.mkdirSync(path.join(codexHome, 'sessions'), { recursive: true });
+  fs.mkdirSync(path.join(antigravityDir, 'conversations'), { recursive: true });
 
   const { initSchema } = await import('../src/db/schema.js');
   const { closeDb, getDb } = await import('../src/db/connection.js');
@@ -335,13 +338,55 @@ test('sync sessions dry-run previews discovered files without writing', async ()
     claudeDir,
     '--codex-home',
     codexHome,
+    '--antigravity-dir',
+    antigravityDir,
     '--json',
   ]);
 
   assert.equal(result.exitCode, 0);
-  const parsed = JSON.parse(result.stdout) as { dry_run: boolean; total_files: number };
+  const parsed = JSON.parse(result.stdout) as {
+    dry_run: boolean;
+    claude_files: number;
+    codex_files: number;
+    antigravity_files: number;
+    total_files: number;
+  };
   assert.equal(parsed.dry_run, true);
+  assert.equal(parsed.claude_files, 1);
+  assert.equal(parsed.codex_files, 0);
+  assert.equal(parsed.antigravity_files, 0);
   assert.equal(parsed.total_files, 1);
+});
+
+test('sync sessions --source antigravity defaults to AGENTMONITOR_ANTIGRAVITY_DIR', async () => {
+  const previous = process.env.AGENTMONITOR_ANTIGRAVITY_DIR;
+  process.env.AGENTMONITOR_ANTIGRAVITY_DIR = antigravityDir;
+  const stubDb = path.join(antigravityDir, 'conversations', 'stub-conv.db');
+  fs.writeFileSync(stubDb, '');
+  try {
+    const result = await runCli([
+      'sync',
+      'sessions',
+      '--source',
+      'antigravity',
+      '--dry-run',
+      '--json',
+    ]);
+
+    assert.equal(result.exitCode, 0);
+    const parsed = JSON.parse(result.stdout) as {
+      source: string;
+      antigravity_files: number;
+      total_files: number;
+    };
+    assert.equal(parsed.source, 'antigravity');
+    assert.equal(parsed.antigravity_files, 1);
+    assert.equal(parsed.total_files, 1);
+  } finally {
+    fs.rmSync(stubDb, { force: true });
+    if (previous === undefined) delete process.env.AGENTMONITOR_ANTIGRAVITY_DIR;
+    else process.env.AGENTMONITOR_ANTIGRAVITY_DIR = previous;
+  }
 });
 
 test('sync sessions defaults to the configured Claude history root', async () => {

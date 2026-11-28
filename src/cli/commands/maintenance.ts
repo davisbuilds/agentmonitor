@@ -9,7 +9,7 @@ import type { CliContext } from '../output.js';
 import type Database from 'better-sqlite3';
 
 type ImportSource = 'claude-code' | 'codex' | 'antigravity' | 'all';
-type SyncSource = 'claude' | 'codex' | 'all';
+type SyncSource = 'claude' | 'codex' | 'antigravity' | 'all';
 
 function parseImportSource(value: string | undefined): ImportSource {
   const source = value ?? 'all';
@@ -21,8 +21,8 @@ function parseImportSource(value: string | undefined): ImportSource {
 
 function parseSyncSource(value: string | undefined): SyncSource {
   const source = value ?? 'all';
-  if (source !== 'claude' && source !== 'codex' && source !== 'all') {
-    throw invalidUsage(`Invalid --source: ${source}. Expected claude, codex, or all.`);
+  if (source !== 'claude' && source !== 'codex' && source !== 'antigravity' && source !== 'all') {
+    throw invalidUsage(`Invalid --source: ${source}. Expected claude, codex, antigravity, or all.`);
   }
   return source;
 }
@@ -239,13 +239,17 @@ export function registerMaintenanceCommands(): void {
   registerCommand({
     name: 'sync sessions',
     group: 'Data Commands',
-    summary: 'Sync Claude and Codex session-browser files',
-    usage: 'sync sessions [--source claude|codex|all] [--dry-run] [--force]',
-    examples: ['sync sessions --source all --dry-run', 'sync sessions --source codex --force --json'],
+    summary: 'Sync Claude, Codex, and Antigravity session-browser files',
+    usage: 'sync sessions [--source claude|codex|antigravity|all] [--claude-dir <path>] [--codex-home <path>] [--antigravity-dir <path>] [--dry-run] [--force]',
+    examples: [
+      'sync sessions --source all --dry-run',
+      'sync sessions --source codex --force --json',
+      'sync sessions --source antigravity --dry-run --json',
+    ],
     async handler(ctx, args) {
       const parsed = parseOptionSet(
         args,
-        new Set(['--source', '--claude-dir', '--codex-home']),
+        new Set(['--source', '--claude-dir', '--codex-home', '--antigravity-dir']),
         new Set(['--dry-run', '--force']),
       );
       rejectExtraPositionals(parsed.positionals, 'amon sync sessions [options]');
@@ -255,7 +259,15 @@ export function registerMaintenanceCommands(): void {
       const runtimeConfig = createConfig();
       const claudeDir = parsed.values.get('--claude-dir') ?? runtimeConfig.claudeDir;
       const codexHome = parsed.values.get('--codex-home') ?? process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex');
-      const { discoverSessionFiles, discoverCodexSessionFiles, syncAllFiles, syncAllCodexFiles } = await import('../../watcher/index.js');
+      const antigravityDir = parsed.values.get('--antigravity-dir');
+      const {
+        discoverSessionFiles,
+        discoverCodexSessionFiles,
+        discoverAntigravitySessionFiles,
+        syncAllFiles,
+        syncAllCodexFiles,
+        syncAllAntigravitySessions,
+      } = await import('../../watcher/index.js');
       const excludePatterns = runtimeConfig.sync.excludePatterns;
 
       if (dryRun) {
@@ -265,12 +277,16 @@ export function registerMaintenanceCommands(): void {
         const codexFiles = source === 'codex' || source === 'all'
           ? discoverCodexSessionFiles(codexHome, { excludePatterns })
           : [];
+        const antigravityFiles = source === 'antigravity' || source === 'all'
+          ? discoverAntigravitySessionFiles(antigravityDir, { excludePatterns })
+          : [];
         printSummary(ctx, 'Session sync preview', {
           dry_run: true,
           source,
           claude_files: claudeFiles.length,
           codex_files: codexFiles.length,
-          total_files: claudeFiles.length + codexFiles.length,
+          antigravity_files: antigravityFiles.length,
+          total_files: claudeFiles.length + codexFiles.length + antigravityFiles.length,
         });
         return;
       }
@@ -289,15 +305,19 @@ export function registerMaintenanceCommands(): void {
         const codex = source === 'codex' || source === 'all'
           ? syncAllCodexFiles(db, codexHome, { force: parsed.flags.has('--force'), excludePatterns })
           : { parsed: 0, skipped: 0, errors: 0, total: 0 };
+        const antigravity = source === 'antigravity' || source === 'all'
+          ? syncAllAntigravitySessions(db, antigravityDir, { force: parsed.flags.has('--force'), excludePatterns })
+          : { parsed: 0, skipped: 0, errors: 0, total: 0 };
         const payload = {
           dry_run: false,
           source,
           claude,
           codex,
-          total_files: claude.total + codex.total,
-          parsed: claude.parsed + codex.parsed,
-          skipped: claude.skipped + codex.skipped,
-          errors: claude.errors + codex.errors,
+          antigravity,
+          total_files: claude.total + codex.total + antigravity.total,
+          parsed: claude.parsed + codex.parsed + antigravity.parsed,
+          skipped: claude.skipped + codex.skipped + antigravity.skipped,
+          errors: claude.errors + codex.errors + antigravity.errors,
           stale_title_backfill: staleTitleBackfill,
         };
         printSummary(ctx, 'Session sync results', payload);

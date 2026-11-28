@@ -529,8 +529,12 @@ export function syncAntigravitySessionFileDetailed(
   }
 }
 
+export function discoverAntigravitySessionFiles(dir?: string, options: SyncOptions = {}): string[] {
+  return discoverAntigravityLogs(dir, { excludePatterns: options.excludePatterns });
+}
+
 export function syncAllAntigravityFiles(db: Database.Database, dir?: string, options: SyncOptions = {}): SyncStats {
-  const files = discoverAntigravityLogs(dir, { excludePatterns: options.excludePatterns });
+  const files = discoverAntigravitySessionFiles(dir, options);
   const stats: SyncStats = { parsed: 0, skipped: 0, errors: 0, total: files.length };
 
   for (const filePath of files) {
@@ -539,4 +543,8 @@ export function syncAllAntigravityFiles(db: Database.Database, dir?: string, opt
   }
 
   return stats;
+}
+
+export function syncAllAntigravitySessions(db: Database.Database, dir?: string, options: SyncOptions = {}): SyncStats {
+  return syncAllAntigravityFiles(db, dir, options);
 }
