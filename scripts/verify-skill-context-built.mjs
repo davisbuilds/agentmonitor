@@ -131,6 +131,76 @@ async function runDojoRuntimeSmoke(baseUrl) {
   return { status: 'passed', ...payload };
 }
 
+function codexEvidenceFixture(codexHome, id) {
+  const directory = path.join(codexHome, 'sessions', '2026', '11', '27');
+  const sessionId = `rollout-2026-11-27T11-00-00-${id}`;
+  const filePath = path.join(directory, `${sessionId}.jsonl`);
+  const cwd = '/work/context-oracle';
+  const hostPath = '/host/skills/shared/SKILL.md';
+  const secondHostPath = '/work/skills/shared/SKILL.md';
+  const cloudPath = 'skill://example/cloud-shared';
+  const recoveryPath = '/host/skills/recovered/SKILL.md';
+  const instructionSentinel = 'synthetic instruction body never returned by the context endpoint';
+  const block = (heading, section, ...entries) =>
+    ['<skills_instructions>', `## ${heading}`, section, ...entries, '</skills_instructions>'].join('\n');
+  const record = (second, type, payload) => ({
+    type,
+    timestamp: `2026-11-27T11:00:${String(second).padStart(2, '0')}Z`,
+    payload,
+  });
+  const message = (second, role, text) => record(second, 'response_item', {
+    type: 'message',
+    role,
+    content: [{ type: 'input_text', text }],
+  });
+  const turn = second => record(second, 'turn_context', { cwd, model: 'gpt-5.6-terra' });
+  const jsonl = records => records.map(item => JSON.stringify(item) + '\n').join('');
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(filePath, jsonl([
+    record(0, 'session_meta', { id, cwd, originator: 'codex_cli_rs', cli_version: '0.145.0' }),
+    message(1, 'user', block('Skills', '### Available skills',
+      '- quoted-only: Quoted by the user. (file: /quote/SKILL.md)')),
+    message(2, 'developer', block('Host skills', '### Available skills',
+      `- shared: First host skill. (file: ${hostPath})`,
+      `- shared: Second host skill. (file: ${secondHostPath})`)),
+    message(3, 'developer', block('Cloud skills', '### Available skills',
+      `- shared: Cloud skill. (cloud package: ${cloudPath})`)),
+    turn(4),
+    record(5, 'world_state', { full: true, state: { agents_md: { text: instructionSentinel } } }),
+  ]));
+  return {
+    sessionId,
+    filePath,
+    hostPath,
+    secondHostPath,
+    cloudPath,
+    recoveryPath,
+    instructionSentinel,
+    append: (...records) => fs.appendFileSync(filePath, jsonl(records)),
+    delta: message(6, 'developer', block('Host skills update', '### Added or updated skills:',
+      `- renamed: Updated host skill. (file: ${hostPath})`)),
+    deltaTurn: turn(7),
+    rollback: record(8, 'event_msg', { type: 'thread_rolled_back', num_turns: 1 }),
+    recovery: [
+      message(9, 'developer', block('Host skills', '### Available skills',
+        `- recovered: Full refresh after rollback. (file: ${recoveryPath})`)),
+      turn(10),
+    ],
+  };
+}
+
+function catalogEntries(entries) {
+  return entries.map(({ name, sourceLocation }) => [name, sourceLocation]);
+}
+
+function catalogHistory(context) {
+  return context.catalog.occurrences.map(occurrence => [
+    occurrence.catalogSource,
+    occurrence.catalogKind,
+    catalogEntries(occurrence.entries),
+  ]);
+}
+
 const tempPrefix = path.join(os.tmpdir(), 'agentmonitor-skill-context-built-');
 const tempDir = fs.mkdtempSync(tempPrefix);
 const resolvedTempDir = path.resolve(tempDir);
@@ -186,9 +256,14 @@ try {
     AGENTMONITOR_ANTIGRAVITY_DIR: antigravityHome,
     AGENTMONITOR_SKILL_CATALOG_DIRS: catalogDir,
     AGENTMONITOR_AUTO_IMPORT_MINUTES: '0',
+    AGENTMONITOR_HOOK_SPOOL_DIR: path.join(resolvedTempDir, 'hook-spool'),
+    AGENTMONITOR_EXECUTIONS_DIR: path.join(resolvedTempDir, 'executions'),
+    AGENTMONITOR_GIT_POLL_INTERVAL_MS: '0',
     CODEX_HOME: codexHome,
   });
 
+  const { config } = await import('../dist/config.js');
+  assert.equal(config.dbPath, dbPath, 'built verification must use the disposable database');
   const { initSchema } = await import('../dist/db/schema.js');
   const { getDb, closeDb } = await import('../dist/db/connection.js');
   closeDbForCleanup = closeDb;
@@ -201,9 +276,11 @@ try {
   const { parseAntigravitySessions } = await import('../dist/parser/antigravity-sessions.js');
   const { syncAntigravityLiveSession } = await import('../dist/live/antigravity-adapter.js');
   const { default: SqliteDatabase } = await import('better-sqlite3');
+  const { syncCodexSessionFileDetailed } = await import('../dist/watcher/index.js');
 
   initSchema();
   const db = getDb();
+  assert.equal(db.name, dbPath);
   db.prepare(`
     INSERT INTO skill_catalog_snapshots (
       name, version, first_seen_at, last_seen_at
@@ -460,11 +537,35 @@ try {
     ],
     'built parsers must seed the expected context observations before server startup',
   );
+
+  const evidence = codexEvidenceFixture(codexHome, randomUUID());
+  const missingEvidence = codexEvidenceFixture(codexHome, randomUUID());
+  const downgradeEvidence = db.prepare(`
+    UPDATE browsing_sessions
+    SET skill_context_capabilities_json = json_remove(skill_context_capabilities_json, '$.codexEvidenceVersion')
+    WHERE id = ?
+  `);
+  for (const fixture of [evidence, missingEvidence]) {
+    assert.equal(syncCodexSessionFileDetailed(db, fixture.filePath).result, 'parsed');
+    assert.equal(downgradeEvidence.run(fixture.sessionId).changes, 1);
+  }
+  fs.unlinkSync(missingEvidence.filePath);
+  const readWatchedState = db.prepare(`
+    SELECT file_hash, file_mtime FROM watched_files WHERE file_path = ?
+  `);
+  const oldWatchState = readWatchedState.get(evidence.filePath);
+  assert.ok(oldWatchState);
+  assert.equal(oldWatchState.file_mtime, fs.statSync(evidence.filePath).mtime.toISOString());
+  const refreshed = syncCodexSessionFileDetailed(db, evidence.filePath);
+  assert.equal(refreshed.result, 'parsed', 'normal sync must replay a stale Codex projection with unchanged source');
+  assert.equal(refreshed.parse, 'full', 'legacy refresh must replace the previous projection');
+  assert.deepEqual(readWatchedState.get(evidence.filePath), oldWatchState);
+  assert.equal(syncCodexSessionFileDetailed(db, evidence.filePath).result, 'skipped');
   closeDb();
 
   const child = spawn(process.execPath, [builtServer], {
     cwd: repoRoot,
-    env: process.env,
+    env: { ...process.env, PATH: '/usr/bin:/bin' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   childForCleanup = child;
@@ -506,6 +607,99 @@ try {
   }
 
   await waitForHealth();
+
+  async function readContext(sessionId) {
+    const response = await fetch(
+      `${baseUrl}/api/v2/sessions/${encodeURIComponent(sessionId)}/skill-context`,
+    );
+    assert.equal(response.status, 200);
+    return response.json();
+  }
+
+  function appendEvidence(...records) {
+    evidence.append(...records);
+    const outcome = syncCodexSessionFileDetailed(getDb(), evidence.filePath);
+    assert.notEqual(outcome.result, 'error');
+  }
+
+  const missingContext = await readContext(missingEvidence.sessionId);
+  for (const surface of [missingContext.catalog, missingContext.instructions, missingContext.consultationClassification]) {
+    assert.equal(surface.observable, false);
+    assert.equal(surface.reason, 'codex_context_evidence_unverified');
+  }
+
+  const initialContext = await readContext(evidence.sessionId);
+  const initialHostEntries = [
+    ['shared', evidence.hostPath],
+    ['shared', evidence.secondHostPath],
+  ];
+  const cloudEntries = [['shared', evidence.cloudPath]];
+  const initialHistory = [
+    ['host', 'full', initialHostEntries],
+    ['cloud', 'full', cloudEntries],
+  ];
+  assert.deepEqual(catalogHistory(initialContext), initialHistory);
+  assert.deepEqual(
+    initialContext.catalog.current.map(source => [source.source, source.status, source.basis, catalogEntries(source.entries)]),
+    [
+      ['host', 'observed', 'full', initialHostEntries],
+      ['cloud', 'observed', 'full', cloudEntries],
+    ],
+  );
+  assert.equal(initialContext.instructions.observable, true);
+  assert.deepEqual(
+    initialContext.instructions.occurrences.map(load => [load.filePath, load.memoryType, load.loadReason]),
+    [[null, 'AGENTS.md', 'instruction_file_identity_unavailable']],
+  );
+  assert.equal(JSON.stringify(initialContext).includes(evidence.instructionSentinel), false);
+
+  appendEvidence(evidence.delta);
+  const pendingContext = await readContext(evidence.sessionId);
+  assert.deepEqual(catalogHistory(pendingContext), initialHistory);
+  assert.equal(pendingContext.catalog.current.find(source => source.source === 'host')?.status, 'unknown');
+  appendEvidence(evidence.deltaTurn);
+  const updatedContext = await readContext(evidence.sessionId);
+  const updateEntries = [['renamed', evidence.hostPath]];
+  const updatedHistory = [...initialHistory, ['host', 'delta', updateEntries]];
+  assert.deepEqual(catalogHistory(updatedContext), updatedHistory);
+  assert.deepEqual(
+    updatedContext.catalog.current.map(source => [source.source, source.status, source.basis, catalogEntries(source.entries)]),
+    [
+      ['host', 'observed', 'delta', [...updateEntries, ['shared', evidence.secondHostPath]]],
+      ['cloud', 'observed', 'full', cloudEntries],
+    ],
+  );
+
+  appendEvidence(evidence.rollback);
+  const rolledBackContext = await readContext(evidence.sessionId);
+  assert.deepEqual(catalogHistory(rolledBackContext), updatedHistory);
+  assert.deepEqual(
+    rolledBackContext.catalog.current.map(source => [source.source, source.status]),
+    [['host', 'unknown'], ['cloud', 'unknown']],
+  );
+  appendEvidence(...evidence.recovery);
+  const recoveredContext = await readContext(evidence.sessionId);
+  const recoveryEntries = [['recovered', evidence.recoveryPath]];
+  assert.deepEqual(catalogHistory(recoveredContext), [...updatedHistory, ['host', 'full', recoveryEntries]]);
+  assert.deepEqual(
+    recoveredContext.catalog.current.map(source => [source.source, source.status, catalogEntries(source.entries ?? [])]),
+    [['host', 'observed', recoveryEntries], ['cloud', 'unknown', []]],
+  );
+
+  const evidenceHealthResponse = await fetch(
+    `${baseUrl}/api/v2/analytics/skills/health?date_from=2026-11-27&date_to=2026-11-27&agent=codex`,
+  );
+  assert.equal(evidenceHealthResponse.status, 200);
+  const evidenceHealth = await evidenceHealthResponse.json();
+  const evidenceSkills = evidenceHealth.consultations.byHarness
+    .find(harness => harness.harness === 'codex')?.skills;
+  assert.ok(evidenceSkills);
+  assert.equal(evidenceSkills.some(skill => skill.name === 'quoted-only'), false);
+  const sharedSkill = evidenceSkills.find(skill => skill.name === 'shared');
+  assert.ok(sharedSkill);
+  assert.equal(sharedSkill.sessionsInWindow, 2);
+  assert.equal(sharedSkill.eligibleSessionsInWindow, 1);
+  assert.equal(sharedSkill.exposure.jointlyEligiblePresentedSessions, 1);
 
   const healthResponse = await fetch(
     `${baseUrl}/api/v2/analytics/skills/health?date_from=2026-07-01&date_to=2026-07-29`,
@@ -565,7 +759,7 @@ try {
     profileComposition: ['built-smoke'],
     canonicalRevision: 'dojo@built-smoke',
     validFrom: '2026-07-01T00:00:00Z',
-    validTo: '2026-08-01T00:00:00Z',
+    validTo: '2026-12-01T00:00:00Z',
     skills: [{
       name: 'test-strategy',
       descriptionFingerprint: '1'.repeat(64),
@@ -614,6 +808,27 @@ try {
   const context = await contextResponse.json();
   assert.equal(context.catalog.observable, true);
   assert.equal(context.expectedRealization.status, 'associated');
+  assert.equal(context.catalog.occurrences[0].comparison.status, 'compared');
+  assert.deepEqual(context.catalog.occurrences[0].comparison.omitted, []);
+  assert.deepEqual(
+    context.catalog.occurrences[0].comparison.descriptionMismatched.map(skill => skill.name),
+    ['test-strategy'],
+  );
+
+  const associateSourceResponse = await fetch(
+    `${baseUrl}/api/v2/sessions/${encodeURIComponent(evidence.sessionId)}/expected-skill-realization`,
+    {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ realizationId: realization.id }),
+    },
+  );
+  assert.equal(associateSourceResponse.status, 201);
+  const sourceContext = await readContext(evidence.sessionId);
+  assert.equal(sourceContext.expectedRealization.status, 'associated');
+  for (const occurrence of sourceContext.catalog.occurrences) {
+    assert.deepEqual(occurrence.comparison, { status: 'unavailable', reason: 'catalog_scope_unverified' });
+  }
 
   const playwright = spawn(
     'pnpm',
@@ -649,6 +864,11 @@ try {
       association: associateResponse.status,
       context: contextResponse.status,
       antigravityContext: agrContextResponse.status,
+      codexContextReplay: {
+        unchangedSourceReparsed: true,
+        missingSourceUnverified: true,
+        recoveredSources: recoveredContext.catalog.current.map(({ source, status }) => [source, status]),
+      },
       dojoRuntimeSmoke,
     }),
   );
