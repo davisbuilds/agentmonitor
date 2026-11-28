@@ -29,6 +29,17 @@ so later readers know what still needs checking.
 
 ## Open
 
+### Revisit the inherited qs override
+
+- **What**: Qualify a replacement for the `qs@<6.16.0` override that still pins
+  one Express dependency path to 6.16.0.
+- **Why or evidence**: GitHub reported open moderate advisory
+  `GHSA-6pq8-jhm2-2vcw` on 2026-11-27; its first patched version is 6.16.1,
+  which another lockfile path already uses. No direct application caller of the
+  affected comma-format stringify operation was found in this inspection.
+- **Next**: Vet the replacement, update the override and lockfile, then run the
+  dependency and application gates. This is separate from context telemetry.
+
 ### Claude native context attachments
 
 - **What**: Expose retained native skill-listing and instruction attachments in
