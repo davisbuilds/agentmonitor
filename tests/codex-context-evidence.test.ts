@@ -277,3 +277,38 @@ test('Codex preserves explicit legacy truncation without certifying a harness-wi
   assert.equal((parsed.catalog[0]?.metadata?.['measurement'] as { value: number }).value, Buffer.byteLength(clipped));
   assert.equal(parsed.capabilities.codexCatalogSources?.[0]?.status, 'unknown');
 });
+
+test('Codex does not restore an older pending catalog after unsupported evidence with unknown source', async () => {
+  const { parseCodexSessionChunk } = await import('../src/parser/codex-sessions.js');
+  const opaque = record('response_item', 2, {
+    ...message('<future_catalog>unsupported</future_catalog>'),
+    internal_chat_message_metadata_passthrough: {
+      content_item_metadata: [{ provenance: { type: 'skills' } }],
+    },
+  });
+  const initial = [header, record('response_item', 1, message(host)), opaque];
+  const companion = scope(3);
+  const whole = parseCodexSessionChunk([...initial, companion].join('\n'), 'codex-context');
+  assert.deepEqual(whole.parsed.skillContext?.observations, []);
+  assert.equal(whole.parsed.skillContext?.capabilities.codexCatalogSources?.find(source => source.source === 'host')?.status, 'unknown');
+
+  const first = parseCodexSessionChunk(initial.join('\n'), 'codex-context');
+  assert.equal(first.resumable, true);
+  const second = parseCodexSessionChunk(companion, 'codex-context', undefined, first.state);
+  assert.deepEqual(second.parsed.skillContext, whole.parsed.skillContext);
+});
+
+test('Codex clears only matching pending catalog when unsupported evidence identifies its source', () => {
+  const opaque = record('response_item', 2, {
+    ...message('<future_catalog>unsupported host</future_catalog>'),
+    internal_chat_message_metadata_passthrough: {
+      content_item_kinds: ['host_skills.instructions'],
+      content_item_metadata: [{ provenance: { type: 'skills' } }],
+    },
+  });
+  const parsed = parse(record('response_item', 1, message(host)), record('response_item', 1, message(cloud)), opaque, scope(3));
+  assert.deepEqual(parsed.catalog.map(row => row.metadata?.['catalogSource']), ['cloud']);
+  assert.deepEqual(parsed.capabilities.codexCatalogSources?.map(source => [source.source, source.status]), [
+    ['host', 'unknown'], ['cloud', 'observed'],
+  ]);
+});

@@ -211,12 +211,14 @@ export class CodexContextParser {
         }
         for (const [index, block] of blocks.entries()) {
           const turnId = string(payload['turn_id']);
-          if (this.pending.some(candidate => candidate.block.source === block.source || candidate.freshCompaction
+          if (!block.source || this.pending.some(candidate => candidate.freshCompaction
+            || (!block.unsupported && candidate.block.source === block.source)
             || (turnId && candidate.turnId && turnId !== candidate.turnId))) {
             this.resolvePending(null, false);
           }
           const startup = this.state.startup && !this.state.sawCatalog && !inherited;
           if (block.unsupported || !block.source) {
+            this.pending = this.pending.filter(candidate => candidate.block.source !== block.source);
             this.invalidate(block.source, block.unsupported ?? 'catalog_format_unsupported', timestamp, null);
           } else {
             this.pending.push({
