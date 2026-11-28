@@ -8,6 +8,8 @@ import {
 import {
   extractAntigravitySkillNamesFromToolCall,
   fingerprintAntigravitySkillCall,
+  hasAntigravityNonZeroExit,
+  isAntigravityShellTool,
 } from '../skills/invocation-detection.js';
 import { stripInlineImages } from '../util/inline-images.js';
 import { categorizeToolName, type ContentBlock, type ParsedMessage, type ParsedToolCall } from './claude-code.js';
@@ -702,7 +704,14 @@ export function parseAntigravityTranscript(
       : undefined;
     const matchedCall = takeMatchingPendingCall(pendingCalls, entry, entryType, sqliteStepCall);
     const resultText = formatToolResultContent(entry, truncatedFields);
-    const isError = entry.status === 'ERROR' || Boolean(typeof entry.error === 'string' && entry.error.trim());
+    const isShellFailure = Boolean(
+      matchedCall
+      && isAntigravityShellTool(matchedCall.name)
+      && hasAntigravityNonZeroExit(resultText),
+    );
+    const isError = entry.status === 'ERROR'
+      || Boolean(typeof entry.error === 'string' && entry.error.trim())
+      || isShellFailure;
     const isRunning = entry.status === 'RUNNING';
     if (matchedCall && !isError && !isRunning) {
       if (matchedCall.name === 'invoke_subagent') {

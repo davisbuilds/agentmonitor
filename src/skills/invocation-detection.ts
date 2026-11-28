@@ -201,14 +201,23 @@ export function extractCodexCommandFromEventMetadata(metadataJson: string | null
   return typeof input === 'string' ? input : undefined;
 }
 
-function extractSkillPathMatches(command: string): Array<{ fullPath: string; skillName: string }> {
+export function isAntigravityShellTool(toolName: string): boolean {
+  return ANTIGRAVITY_SHELL_TOOLS.has(toolName);
+}
+
+export function hasAntigravityNonZeroExit(text: string): boolean {
+  return /Command exited with code (?!0\b)-?\d+/.test(text);
+}
+
+function extractSkillPathMatches(segment: string): Array<{ fullPath: string; skillName: string }> {
   const matches: Array<{ fullPath: string; skillName: string }> = [];
-  const pattern = /(?:^|[\s'"])((?:~\/|\/|\.[a-zA-Z0-9_.-]+\/)[^\s'"]*\/([^/\s'"]+)\/SKILL\.md)(?=$|[\s'"])/g;
-  for (const match of command.matchAll(pattern)) {
-    const fullPath = match[1];
-    const skillName = match[2]?.trim();
-    if (fullPath && isConcreteSkillName(skillName)) {
-      matches.push({ fullPath, skillName });
+  for (const rawToken of segment.split(/[\s'"]+/)) {
+    if (!rawToken || !rawToken.endsWith('/SKILL.md')) continue;
+    if (!/^(?:~\/|\/|\.[a-zA-Z0-9_.-]*\/)/.test(rawToken)) continue;
+    const skillDir = path.posix.dirname(rawToken);
+    const skillName = path.posix.basename(skillDir).trim();
+    if (isConcreteSkillName(skillName)) {
+      matches.push({ fullPath: rawToken, skillName });
     }
   }
   return matches;
@@ -226,7 +235,8 @@ export function extractCodexSkillNamesFromCommand(command: string): string[] {
   return [...skillNames];
 }
 
-function commandHasFileReadSegment(command: string): boolean {
+function extractFileReadSegments(command: string): string[] {
+  const readSegments: string[] = [];
   const segments = command.split(/(?:&&|\|\||;|\||\n)/);
   for (const segment of segments) {
     if (!segment.includes('SKILL.md')) continue;
@@ -236,9 +246,9 @@ function commandHasFileReadSegment(command: string): boolean {
     const cmd = tokens[idx];
     if (!cmd) continue;
     const base = path.posix.basename(cmd.replaceAll('\\', '/'));
-    if (SHELL_READ_COMMANDS.has(base)) return true;
+    if (SHELL_READ_COMMANDS.has(base)) readSegments.push(segment);
   }
-  return false;
+  return readSegments;
 }
 
 function extractAntigravityFileReadPath(inputJson: string | null): string | undefined {
@@ -267,11 +277,15 @@ export function extractAntigravitySkillNamesFromToolCall(
 
   if (ANTIGRAVITY_SHELL_TOOLS.has(toolName)) {
     const command = extractCodexCommandFromInputJson(inputJson);
-    if (!command || !commandHasFileReadSegment(command)) return [];
+    if (!command) return [];
+    const readSegments = extractFileReadSegments(command);
+    if (readSegments.length === 0) return [];
     const skillNames = new Set<string>();
-    for (const { fullPath } of extractSkillPathMatches(command)) {
-      const skillName = extractSkillNameFromPath(fullPath, options);
-      if (skillName) skillNames.add(skillName);
+    for (const segment of readSegments) {
+      for (const { fullPath } of extractSkillPathMatches(segment)) {
+        const skillName = extractSkillNameFromPath(fullPath, options);
+        if (skillName) skillNames.add(skillName);
+      }
     }
     return [...skillNames];
   }

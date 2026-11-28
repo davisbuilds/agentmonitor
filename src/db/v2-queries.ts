@@ -9,6 +9,7 @@ import {
   type CatalogSkill,
   type CatalogSnapshot,
 } from '../skills/catalog.js';
+import { hasAntigravityNonZeroExit } from '../skills/invocation-detection.js';
 import type {
   BrowsingSessionRow,
   BrowsingSessionDbRow,
@@ -2925,7 +2926,7 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
     const trimmed = text.trim();
     if (!trimmed) return false;
     if (trimmed.includes('Tool is running as a background task')) return false;
-    if (/Command exited with code (?!0\b)-?\d+/.test(trimmed)) return false;
+    if (hasAntigravityNonZeroExit(trimmed)) return false;
     if (/\bnothing to commit\b/i.test(trimmed)) return false;
     return true;
   };

@@ -880,4 +880,135 @@ describe('Antigravity Slice 4: skills, child sessions, Git attribution, and shar
     assert.equal(runRow.session_id, confirmedSessionId);
     assert.equal(JSON.stringify(runRow).includes('secret-prompt-marker'), false);
   });
+
+  test('rejects non-zero shell exit skill reads, scopes compound shell reads to read segments, and supports ./ relative skill paths', async () => {
+    const home = path.join(tempDir, 'agr-shell-skill-edges');
+    const sessionId = '70707070-1111-2222-3333-707070707070';
+    const repoCwd = path.join(tempDir, 'shell-skill-repo');
+    fs.mkdirSync(repoCwd, { recursive: true });
+
+    const t0 = Date.parse('2026-11-28T10:00:00Z') / 1000;
+    const callNonZero: ProtoToolCallSpec = {
+      id: 'call_nonzero_shell',
+      name: 'run_command',
+      argsJson: JSON.stringify({ CommandLine: 'cat /Users/example/.gemini/config/skills/nonzero-shell-skill/SKILL.md' }),
+    };
+    const callCompound: ProtoToolCallSpec = {
+      id: 'call_compound_shell',
+      name: 'run_command',
+      argsJson: JSON.stringify({
+        CommandLine: 'cat /Users/example/.agents/skills/compound-read/SKILL.md ; echo /Users/example/.agents/skills/compound-mention/SKILL.md',
+      }),
+    };
+    const callDotRelative: ProtoToolCallSpec = {
+      id: 'call_dot_relative_shell',
+      name: 'run_command',
+      argsJson: JSON.stringify({ CommandLine: 'cat ./.agents/skills/dot-relative-skill/SKILL.md' }),
+    };
+
+    writeConversationDb(path.join(home, 'conversations', `${sessionId}.db`), {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: t0 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: t0 + 1, plannerToolCalls: [callNonZero, callCompound, callDotRelative] },
+        { idx: 2, type: 132, oneof: 140, tsSecs: t0 + 2, stepToolCall: callNonZero },
+        { idx: 3, type: 132, oneof: 140, tsSecs: t0 + 3, stepToolCall: callCompound },
+        { idx: 4, type: 132, oneof: 140, tsSecs: t0 + 4, stepToolCall: callDotRelative },
+      ],
+      generations: [
+        { model: 'gemini-4-neon', inp: 900, out: 120, cached: 1000, createdSecs: t0 + 1 },
+      ],
+    });
+    writeSummaryDb(home, [{
+      conversation_id: sessionId,
+      title: 'Shell skill edge cases',
+      workspace_uris: JSON.stringify([`file://${repoCwd}`]),
+    }]);
+    writeTranscript(home, sessionId, [
+      { step_index: 0, type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-28T10:00:00Z', content: 'Check shell skill reads' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-28T10:00:01Z',
+        tool_calls: [
+          { name: 'run_command', args: { CommandLine: 'cat /Users/example/.gemini/config/skills/nonzero-shell-skill/SKILL.md' } },
+          {
+            name: 'run_command',
+            args: { CommandLine: 'cat /Users/example/.agents/skills/compound-read/SKILL.md ; echo /Users/example/.agents/skills/compound-mention/SKILL.md' },
+          },
+          { name: 'run_command', args: { CommandLine: 'cat ./.agents/skills/dot-relative-skill/SKILL.md' } },
+        ],
+      },
+      {
+        step_index: 2,
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-28T10:00:02Z',
+        content: 'Command exited with code 1.\ncat: /Users/example/.gemini/config/skills/nonzero-shell-skill/SKILL.md: No such file or directory',
+      },
+      {
+        step_index: 3,
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-28T10:00:03Z',
+        content: 'Command exited with code 0.\n# compound-read\n/Users/example/.agents/skills/compound-mention/SKILL.md',
+      },
+      {
+        step_index: 4,
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-28T10:00:04Z',
+        content: 'Command exited with code 0.\n# dot-relative-skill',
+      },
+    ]);
+
+    const db = getDb();
+    assert.equal(syncAllAntigravityFiles(db, home).parsed, 1);
+
+    const nonZeroItem = db.prepare(`
+      SELECT status, payload_json FROM session_items
+      WHERE session_id = ? AND kind = 'tool_result' AND source_item_id = ?
+    `).get(sessionId, 'call_nonzero_shell') as { status: string; payload_json: string } | undefined;
+    assert.ok(nonZeroItem);
+    assert.equal(nonZeroItem.status, 'error');
+    const nonZeroPayload = JSON.parse(nonZeroItem.payload_json) as { is_error?: boolean };
+    assert.equal(nonZeroPayload.is_error, true);
+
+    const ctx = getSessionSkillContext(db, sessionId);
+    assert.ok(ctx);
+    assert.deepEqual(
+      ctx.observations.filter(o => o.kind === 'consultation').map(o => o.skillName),
+      ['compound-read', 'dot-relative-skill'],
+    );
+
+    const daily = getAnalyticsSkillsDaily({ agent: 'antigravity', date_from: '2026-11-28', date_to: '2026-11-28' });
+    assert.equal(daily.length, 1);
+    const bySkill = Object.fromEntries(daily[0].skills.map(s => [s.skill_name, s.count]));
+    assert.deepEqual(bySkill, {
+      'compound-read': 1,
+      'dot-relative-skill': 1,
+    });
+    assert.equal(bySkill['nonzero-shell-skill'], undefined);
+    assert.equal(bySkill['compound-mention'], undefined);
+
+    const consultations = getAnalyticsSkillConsultations({
+      agent: 'antigravity',
+      date_from: '2026-11-28',
+      date_to: '2026-11-28',
+    });
+    const agrHarness = consultations.byHarness.find(h => h.harness === 'antigravity');
+    assert.ok(agrHarness);
+    assert.deepEqual(
+      agrHarness.skills.map(s => s.name).sort(),
+      ['compound-read', 'dot-relative-skill'],
+    );
+
+    const ctxRes = await fetch(`${baseUrl}/api/v2/sessions/${sessionId}/skill-context`);
+    assert.equal(ctxRes.status, 200);
+    const ctxJson = await ctxRes.json() as { observations: Array<{ kind: string; skillName?: string }> };
+    assert.deepEqual(
+      ctxJson.observations.filter(o => o.kind === 'consultation').map(o => o.skillName),
+      ['compound-read', 'dot-relative-skill'],
+    );
+  });
 });

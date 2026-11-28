@@ -11,6 +11,8 @@ import {
   extractExplicitSkillName,
   fingerprintAntigravitySkillCall,
   fingerprintCodexCommand,
+  hasAntigravityNonZeroExit,
+  isAntigravityShellTool,
 } from './invocation-detection.js';
 import { dateParamLowerBound, dateParamUpperExclusive, localDayOf } from '../util/local-day.js';
 import { browserAgentName } from '../util/agent-identity.js';
@@ -517,7 +519,29 @@ export function selectSkillInvocationOccurrences(
         m.ordinal,
         tc.tool_name,
         tc.tool_use_id,
-        tc.input_json
+        tc.input_json,
+        (
+          SELECT si.payload_json
+          FROM session_items si
+          WHERE si.session_id = tc.session_id
+            AND si.kind = 'tool_result'
+            AND si.source_item_id = tc.tool_use_id
+            AND si.status = 'success'
+          LIMIT 1
+        ) AS item_result_payload,
+        (
+          SELECT json_extract(block.value, '$.content')
+          FROM messages rm, json_each(rm.content) block
+          WHERE rm.session_id = tc.session_id
+            AND rm.role = 'user'
+            AND rm.content LIKE '%"type":"tool_result"%'
+            AND json_valid(rm.content)
+            AND json_extract(block.value, '$.type') = 'tool_result'
+            AND json_extract(block.value, '$.tool_use_id') = tc.tool_use_id
+            AND COALESCE(json_extract(block.value, '$.is_error'), 0) = 0
+            AND COALESCE(json_extract(block.value, '$.outcome'), '') != 'unrecorded'
+          LIMIT 1
+        ) AS msg_result_content
       FROM tool_calls tc
       JOIN browsing_sessions bs ON bs.id = tc.session_id
       LEFT JOIN messages m ON m.id = tc.message_id
@@ -533,12 +557,30 @@ export function selectSkillInvocationOccurrences(
       tool_name: string;
       tool_use_id: string | null;
       input_json: string | null;
+      item_result_payload: string | null;
+      msg_result_content: string | null;
     }>;
+
+    const extractResultText = (itemPayload: string | null, msgContent: string | null): string => {
+      if (itemPayload) {
+        try {
+          const parsed = JSON.parse(itemPayload) as { content?: unknown };
+          if (typeof parsed.content === 'string') return parsed.content;
+        } catch {
+          return itemPayload;
+        }
+      }
+      return msgContent ?? '';
+    };
 
     const seenToolCalls = new Set<string>();
     for (const row of agrRows) {
       if (params.project && row.project !== params.project) continue;
       if (!row.timestamp || !isDateWithinRange(localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10), params)) continue;
+      if (isAntigravityShellTool(row.tool_name)) {
+        const resultText = extractResultText(row.item_result_payload, row.msg_result_content);
+        if (hasAntigravityNonZeroExit(resultText)) continue;
+      }
       const skillNames = extractAntigravitySkillNamesFromToolCall(row.tool_name, row.input_json, {
         cwd: row.cwd,
         extraRoots: config.skillCatalogDirs,
