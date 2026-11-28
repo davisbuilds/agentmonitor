@@ -6,7 +6,12 @@ import {
   type AntigravitySnapshotOptions,
   type AntigravityStepRecord,
 } from '../import/antigravity/snapshot.js';
-import { projectIdentityFromCwd, unavailableSkillContext } from '../skills/context-observations.js';
+import {
+  projectIdentityFromCwd,
+  unavailableSkillContext,
+  type ParsedSkillContext,
+} from '../skills/context-observations.js';
+import { categorizeAntigravityToolName } from './antigravity-transcript.js';
 import type { ContentBlock, ParsedMessage, ParsedSession, ParsedToolCall } from './claude-code.js';
 
 const iso = (ms: number | undefined): string | null => (ms === undefined ? null : new Date(ms).toISOString());
@@ -39,14 +44,40 @@ function stepRowToSummaryEntry(
   let blocks: ContentBlock[];
   let hasToolUse = 0;
   let toolCall: ParsedToolCall | null = null;
-  if (type === 'tool_use') {
+  if (step.envelope.kind === 'generic' && step.toolCall?.name) {
+    const name = step.toolCall.name;
+    let parsedInput: unknown = null;
+    if (step.toolCall.argumentsJson) {
+      try {
+        parsedInput = JSON.parse(step.toolCall.argumentsJson);
+      } catch {
+        parsedInput = step.toolCall.argumentsJson;
+      }
+    }
+    blocks = [{
+      type: 'tool_use',
+      ...(step.toolCall.id ? { id: step.toolCall.id } : {}),
+      name,
+      input: parsedInput,
+    }];
+    hasToolUse = 1;
+    toolCall = {
+      session_id: sessionId,
+      tool_name: name,
+      category: categorizeAntigravityToolName(name),
+      tool_use_id: step.toolCall.id ?? null,
+      input_json: step.toolCall.argumentsJson ?? null,
+      subagent_session_id: null,
+      message_ordinal: ordinal,
+    };
+  } else if (type === 'tool_use') {
     const name = toolName ?? step.envelope.kind ?? 'tool';
     blocks = [{ type: 'tool_use', name, input: null }];
     hasToolUse = 1;
     toolCall = {
       session_id: sessionId,
       tool_name: name,
-      category: 'Other',
+      category: categorizeAntigravityToolName(name),
       tool_use_id: null,
       input_json: null,
       subagent_session_id: null,
@@ -144,10 +175,33 @@ export function antigravitySnapshotToParsedSession(snapshot: AntigravityConversa
     }
   }
 
-  const skillContext = unavailableSkillContext();
-  if (summary?.cwd) {
-    skillContext.projectIdentity = projectIdentityFromCwd(summary.cwd);
-  }
+  const projectIdentity = projectIdentityFromCwd(summary?.cwd);
+  const skillContext: ParsedSkillContext = transcript
+    ? {
+        projectIdentity,
+        observations: transcript.contextObservations,
+        capabilities: {
+          orderedConsultations: transcript.malformedRecords === 0
+            ? { observable: true }
+            : { observable: false, reason: 'malformed_source_record' },
+          compactionVisibility: transcript.malformedRecords === 0
+            ? { observable: true }
+            : { observable: false, reason: 'malformed_source_record' },
+          catalogPresentation: {
+            observable: false,
+            reason: 'harness_signal_unavailable',
+          },
+          instructionLoads: {
+            observable: false,
+            reason: 'instruction_load_signal_absent',
+          },
+          diagnostics: transcript.malformedRecords > 0 ? ['malformed_source_record'] : [],
+        },
+      }
+    : {
+        ...unavailableSkillContext(),
+        projectIdentity,
+      };
 
   if (transcript) {
     const messages = [...transcript.messages];

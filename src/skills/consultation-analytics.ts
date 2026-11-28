@@ -136,7 +136,7 @@ interface SqlFilter {
 }
 
 function sessionFilter(params: AnalyticsParams): SqlFilter {
-  const clauses = ["agent IN ('claude', 'codex')"];
+  const clauses = ["agent IN ('claude', 'codex', 'antigravity')"];
   const values: unknown[] = [];
   if (params.agent) {
     clauses.push('agent = ?');

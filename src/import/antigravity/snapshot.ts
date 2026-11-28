@@ -1,15 +1,19 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { config } from '../../config.js';
 import {
   parseAntigravityTranscript,
   resolveAntigravityTranscriptPaths,
+  type AntigravityStepToolEvidence,
   type AntigravityTranscriptResult,
 } from '../../parser/antigravity-transcript.js';
 import {
   decodeGeneratorMetadata,
   decodeStepEnvelope,
   decodeStepTimestampMs,
+  decodeStepToolCall,
+  type AntigravityChatToolCall,
   type GeneratorMetadata,
   type StepEnvelope,
 } from './proto.js';
@@ -35,6 +39,7 @@ export interface AntigravityStepRecord {
   metadata: Buffer | null;
   timestampMs: number | undefined;
   envelope: StepEnvelope;
+  toolCall?: AntigravityChatToolCall;
 }
 
 export interface AntigravityGenRecord {
@@ -112,10 +117,35 @@ function resolveGenerationTimestamp(
   return { timestampSource: 'unavailable' };
 }
 
-function loadPreferredTranscript(filePath: string, sessionId: string): AntigravityTranscriptResult | null {
+function buildStepCorrelation(steps: readonly AntigravityStepRecord[]): Map<number, AntigravityStepToolEvidence> {
+  const correlation = new Map<number, AntigravityStepToolEvidence>();
+  for (const step of steps) {
+    if (step.envelope.plannerToolCalls?.length || step.toolCall) {
+      correlation.set(step.idx, {
+        ...(step.envelope.plannerToolCalls?.length ? { plannerToolCalls: step.envelope.plannerToolCalls } : {}),
+        ...(step.toolCall ? { stepToolCall: step.toolCall } : {}),
+      });
+    }
+  }
+  return correlation;
+}
+
+function loadPreferredTranscript(
+  filePath: string,
+  sessionId: string,
+  options: {
+    stepCorrelation: ReadonlyMap<number, AntigravityStepToolEvidence>;
+    cwd: string | null;
+  },
+): AntigravityTranscriptResult | null {
   const { fullPath, compactPath } = resolveAntigravityTranscriptPaths(filePath, sessionId);
-  return parseAntigravityTranscript(fullPath, sessionId)
-    ?? parseAntigravityTranscript(compactPath, sessionId);
+  const parseOptions = {
+    stepCorrelation: options.stepCorrelation,
+    cwd: options.cwd,
+    extraSkillRoots: config.skillCatalogDirs,
+  };
+  return parseAntigravityTranscript(fullPath, sessionId, parseOptions)
+    ?? parseAntigravityTranscript(compactPath, sessionId, parseOptions);
 }
 
 function hashOptionalBytes(hash: crypto.Hash, label: string, candidatePath: string): void {
@@ -232,6 +262,7 @@ export function readAntigravityConversationSnapshot(
   const steps: AntigravityStepRecord[] = rawSteps.map((row) => {
     const timestampMs = row.metadata ? decodeStepTimestampMs(row.metadata) : undefined;
     const envelope = decodeStepEnvelope(row.step_payload);
+    const toolCall = (row.metadata ? decodeStepToolCall(row.metadata) : undefined) ?? envelope.metadataToolCall;
     if (envelope.kind === 'planner_response' && envelope.plannerIds) {
       addPlannerMatch(plannerByMessageId, envelope.plannerIds.messageId, timestampMs);
       addPlannerMatch(plannerByProviderId, envelope.plannerIds.providerAssignedMessageId, timestampMs);
@@ -244,6 +275,7 @@ export function readAntigravityConversationSnapshot(
       metadata: row.metadata,
       timestampMs,
       envelope,
+      ...(toolCall ? { toolCall } : {}),
     };
   });
 
@@ -268,7 +300,10 @@ export function readAntigravityConversationSnapshot(
     : readAntigravityConversationSummary(filePath, sessionId, options);
   const transcript = options?.includeTranscript === false
     ? null
-    : loadPreferredTranscript(filePath, sessionId);
+    : loadPreferredTranscript(filePath, sessionId, {
+        stepCorrelation: buildStepCorrelation(steps),
+        cwd: summary?.cwd ?? null,
+      });
 
   let minMs: number | undefined;
   let maxMs: number | undefined;

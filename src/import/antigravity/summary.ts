@@ -9,6 +9,8 @@ interface SummaryRow {
   preview: string | null;
   workspace_uris: string | null;
   parent_conversation_id: string | null;
+  nesting_depth?: number | null;
+  agent_name?: string | null;
 }
 
 export interface AntigravitySummaryMetadata {
@@ -18,6 +20,8 @@ export interface AntigravitySummaryMetadata {
   firstMessage: string | null;
   parentSessionId: string | null;
   relationshipType: 'subagent' | null;
+  nestingDepth: number | null;
+  agentName: string | null;
   rawSignature: string;
 }
 
@@ -84,8 +88,20 @@ export function readAntigravityConversationSummary(
       ).get();
       if (!table) return null;
 
+      const columns = new Set(
+        (summaryDb.prepare('PRAGMA table_info(conversation_summaries)').all() as Array<{ name: string }>)
+          .map(col => col.name),
+      );
+      const selectCols = [
+        'title',
+        'preview',
+        'workspace_uris',
+        'parent_conversation_id',
+        columns.has('nesting_depth') ? 'nesting_depth' : 'NULL AS nesting_depth',
+        columns.has('agent_name') ? 'agent_name' : 'NULL AS agent_name',
+      ];
       const row = summaryDb.prepare(`
-        SELECT title, preview, workspace_uris, parent_conversation_id
+        SELECT ${selectCols.join(', ')}
         FROM conversation_summaries
         WHERE conversation_id = ?
       `).get(sessionId) as SummaryRow | undefined;
@@ -97,8 +113,12 @@ export function readAntigravityConversationSummary(
       const preview = cleanSummaryText(row.preview);
       const firstMessage = title ?? preview ?? null;
       const parentRaw = typeof row.parent_conversation_id === 'string' ? row.parent_conversation_id.trim() : '';
-      const parentSessionId = parentRaw || null;
-      const relationshipType = parentSessionId ? 'subagent' : null;
+      const parentSessionId = parentRaw && parentRaw !== sessionId ? parentRaw : null;
+      const nestingDepth = typeof row.nesting_depth === 'number' && Number.isFinite(row.nesting_depth) && row.nesting_depth > 0
+        ? Math.floor(row.nesting_depth)
+        : null;
+      const agentName = cleanSummaryText(row.agent_name);
+      const relationshipType = parentSessionId || nestingDepth !== null ? 'subagent' : null;
 
       return {
         project,
@@ -107,11 +127,15 @@ export function readAntigravityConversationSummary(
         firstMessage,
         parentSessionId,
         relationshipType,
+        nestingDepth,
+        agentName,
         rawSignature: JSON.stringify([
           row.title ?? '',
           row.preview ?? '',
           row.workspace_uris ?? '',
           row.parent_conversation_id ?? '',
+          row.nesting_depth ?? 0,
+          row.agent_name ?? '',
         ]),
       };
     }, options);

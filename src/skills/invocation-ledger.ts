@@ -1,20 +1,28 @@
 import type Database from 'better-sqlite3';
 import type { AnalyticsParams } from '../api/v2/types.js';
+import { config } from '../config.js';
 import {
+  ANTIGRAVITY_SKILL_TOOL_NAMES,
+  extractAntigravitySkillNamesFromToolCall,
   extractCanonicalCodexSessionId,
   extractCodexCommandFromEventMetadata,
   extractCodexCommandFromInputJson,
   extractCodexSkillNamesFromCommand,
   extractExplicitSkillName,
+  fingerprintAntigravitySkillCall,
   fingerprintCodexCommand,
+  hasAntigravityNonZeroExit,
+  isAntigravityShellTool,
 } from './invocation-detection.js';
 import { dateParamLowerBound, dateParamUpperExclusive, localDayOf } from '../util/local-day.js';
 import { browserAgentName } from '../util/agent-identity.js';
+import { sqlStringList } from '../util/sql-literals.js';
 
 export type SkillInvocationDetectionSource =
   | 'explicit_skill_tool'
   | 'codex_otel'
-  | 'codex_jsonl';
+  | 'codex_jsonl'
+  | 'antigravity_transcript';
 
 export interface SkillInvocationOccurrence {
   skillName: string;
@@ -453,6 +461,151 @@ export function selectSkillInvocationOccurrences(
     for (const { matched, ...read } of jsonlReads) {
       if (matched || take(otelReadsBySkill, `${read.canonicalSessionId}|${read.skillName}`)) continue;
       occurrences.push(read);
+    }
+  }
+
+  if (!params.agent || params.agent === 'antigravity') {
+    const agrFilters = [
+      "bs.agent = 'antigravity'",
+      `tc.tool_name IN (${sqlStringList(ANTIGRAVITY_SKILL_TOOL_NAMES)})`,
+      'tc.input_json IS NOT NULL',
+      "tc.input_json LIKE '%SKILL.md%'",
+      'tc.tool_use_id IS NOT NULL',
+      `(
+        EXISTS (
+          SELECT 1 FROM session_items si
+          WHERE si.session_id = tc.session_id
+            AND si.kind = 'tool_result'
+            AND si.source_item_id = tc.tool_use_id
+            AND si.status = 'success'
+        )
+        OR EXISTS (
+          SELECT 1 FROM messages rm
+          WHERE rm.session_id = tc.session_id
+            AND rm.role = 'user'
+            AND rm.content LIKE '%"type":"tool_result"%'
+            AND json_valid(rm.content)
+            AND EXISTS (
+              SELECT 1 FROM json_each(rm.content) block
+              WHERE json_extract(block.value, '$.type') = 'tool_result'
+                AND json_extract(block.value, '$.tool_use_id') = tc.tool_use_id
+                AND COALESCE(json_extract(block.value, '$.is_error'), 0) = 0
+                AND COALESCE(json_extract(block.value, '$.outcome'), '') != 'unrecorded'
+            )
+        )
+      )`,
+    ];
+    const agrValues: unknown[] = [];
+    if (params.project) {
+      agrFilters.push('bs.project = ?');
+      agrValues.push(params.project);
+    }
+    if (params.date_from) {
+      agrFilters.push('datetime(COALESCE(m.timestamp, bs.started_at)) >= datetime(?)');
+      agrValues.push(dateParamLowerBound(params.date_from));
+    }
+    const agrToExclusive = params.date_to ? dateParamUpperExclusive(params.date_to) : null;
+    if (agrToExclusive) {
+      agrFilters.push('datetime(COALESCE(m.timestamp, bs.started_at)) < datetime(?)');
+      agrValues.push(agrToExclusive);
+    }
+    const agrRows = db.prepare(`
+      SELECT
+        tc.id,
+        bs.id AS session_id,
+        bs.project,
+        bs.cwd,
+        COALESCE(m.timestamp, bs.started_at) AS timestamp,
+        m.ordinal,
+        tc.tool_name,
+        tc.tool_use_id,
+        tc.input_json,
+        (
+          SELECT si.payload_json
+          FROM session_items si
+          WHERE si.session_id = tc.session_id
+            AND si.kind = 'tool_result'
+            AND si.source_item_id = tc.tool_use_id
+            AND si.status = 'success'
+          LIMIT 1
+        ) AS item_result_payload,
+        (
+          SELECT json_extract(block.value, '$.content')
+          FROM messages rm, json_each(rm.content) block
+          WHERE rm.session_id = tc.session_id
+            AND rm.role = 'user'
+            AND rm.content LIKE '%"type":"tool_result"%'
+            AND json_valid(rm.content)
+            AND json_extract(block.value, '$.type') = 'tool_result'
+            AND json_extract(block.value, '$.tool_use_id') = tc.tool_use_id
+            AND COALESCE(json_extract(block.value, '$.is_error'), 0) = 0
+            AND COALESCE(json_extract(block.value, '$.outcome'), '') != 'unrecorded'
+          LIMIT 1
+        ) AS msg_result_content
+      FROM tool_calls tc
+      JOIN browsing_sessions bs ON bs.id = tc.session_id
+      LEFT JOIN messages m ON m.id = tc.message_id
+      WHERE ${agrFilters.join(' AND ')}
+      ORDER BY timestamp, tc.id
+    `).all(...agrValues) as Array<{
+      id: number;
+      session_id: string;
+      project: string | null;
+      cwd: string | null;
+      timestamp: string | null;
+      ordinal: number | null;
+      tool_name: string;
+      tool_use_id: string | null;
+      input_json: string | null;
+      item_result_payload: string | null;
+      msg_result_content: string | null;
+    }>;
+
+    const extractResultText = (itemPayload: string | null, msgContent: string | null): string => {
+      if (itemPayload) {
+        try {
+          const parsed = JSON.parse(itemPayload) as { content?: unknown };
+          if (typeof parsed.content === 'string') return parsed.content;
+        } catch {
+          return itemPayload;
+        }
+      }
+      return msgContent ?? '';
+    };
+
+    const seenToolCalls = new Set<string>();
+    for (const row of agrRows) {
+      if (params.project && row.project !== params.project) continue;
+      if (!row.timestamp || !isDateWithinRange(localDayOf(row.timestamp) ?? row.timestamp.slice(0, 10), params)) continue;
+      if (isAntigravityShellTool(row.tool_name)) {
+        const resultText = extractResultText(row.item_result_payload, row.msg_result_content);
+        if (hasAntigravityNonZeroExit(resultText)) continue;
+      }
+      const skillNames = extractAntigravitySkillNamesFromToolCall(row.tool_name, row.input_json, {
+        cwd: row.cwd,
+        extraRoots: config.skillCatalogDirs,
+      });
+      if (skillNames.length === 0) continue;
+      const commandFingerprint = fingerprintAntigravitySkillCall(row.tool_name, row.input_json, {
+        cwd: row.cwd,
+      });
+      for (const skillName of skillNames) {
+        const dedupeKey = `${row.session_id}\0${row.tool_use_id ?? row.id}\0${skillName}`;
+        if (seenToolCalls.has(dedupeKey)) continue;
+        seenToolCalls.add(dedupeKey);
+        occurrences.push({
+          skillName,
+          timestamp: row.timestamp,
+          project: row.project,
+          harness: 'antigravity',
+          sessionId: row.session_id,
+          canonicalSessionId: row.session_id,
+          messageOrdinal: row.ordinal,
+          toolUseId: row.tool_use_id,
+          detectionSource: 'antigravity_transcript',
+          commandFingerprint,
+        });
+      }
     }
   }
 

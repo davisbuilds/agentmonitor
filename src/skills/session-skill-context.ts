@@ -597,7 +597,7 @@ export function getSessionSkillContext(
   sessionId: string,
 ): SessionSkillContext | null {
   const session = selectSessionSkillContextSession(db, sessionId);
-  if (!session || (session.agent !== 'claude' && session.agent !== 'codex')) {
+  if (!session || (session.agent !== 'claude' && session.agent !== 'codex' && session.agent !== 'antigravity')) {
     return null;
   }
   const observations = boundedRows(
@@ -628,7 +628,9 @@ export function getSessionSkillContext(
     classification.observable,
   );
   const expectedRow = selectSessionExpectedRealizationPersistenceRow(db, sessionId);
-  const expected = parseExpectedRealization(expectedRow, session.agent);
+  const expected = session.agent === 'claude' || session.agent === 'codex'
+    ? parseExpectedRealization(expectedRow, session.agent)
+    : null;
 
   return {
     sessionId: session.id,

@@ -67,12 +67,15 @@ test('createConfig parses sync exclude patterns', () => {
   assert.deepEqual(config.sync.excludePatterns, ['vercel-plugin', path.join('nested', 'sessions')]);
 });
 
-test('createConfig defaults skillCatalogDirs to the claude and codex skill homes', () => {
+test('createConfig defaults skillCatalogDirs to the claude, codex, antigravity, and shared agent skill homes', () => {
   const config = createConfig({}, repoRoot);
 
   assert.deepEqual(config.skillCatalogDirs, [
     path.join(os.homedir(), '.claude', 'skills'),
     path.join(os.homedir(), '.codex', 'skills'),
+    path.join(os.homedir(), '.gemini', 'config', 'skills'),
+    path.join(os.homedir(), '.gemini', 'antigravity-cli', 'builtin', 'skills'),
+    path.join(os.homedir(), '.agents', 'skills'),
   ]);
 });
 
@@ -82,6 +85,9 @@ test('createConfig honors CODEX_HOME for the codex skill catalog default', () =>
   assert.deepEqual(config.skillCatalogDirs, [
     path.join(os.homedir(), '.claude', 'skills'),
     path.join('/custom/codex', 'skills'),
+    path.join(os.homedir(), '.gemini', 'config', 'skills'),
+    path.join(os.homedir(), '.gemini', 'antigravity-cli', 'builtin', 'skills'),
+    path.join(os.homedir(), '.agents', 'skills'),
   ]);
 });
 

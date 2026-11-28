@@ -1,5 +1,16 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { AntigravityChatToolCall } from '../import/antigravity/proto.js';
+import {
+  projectIdentityFromCwd,
+  type SessionContextObservation,
+} from '../skills/context-observations.js';
+import {
+  extractAntigravitySkillNamesFromToolCall,
+  fingerprintAntigravitySkillCall,
+  hasAntigravityNonZeroExit,
+  isAntigravityShellTool,
+} from '../skills/invocation-detection.js';
 import { stripInlineImages } from '../util/inline-images.js';
 import { categorizeToolName, type ContentBlock, type ParsedMessage, type ParsedToolCall } from './claude-code.js';
 import { promptTitleFromTexts } from './session-title.js';
@@ -28,7 +39,21 @@ interface AntigravityTranscriptEntry {
   tool_calls?: unknown;
   tool_call_id?: unknown;
   call_id?: unknown;
+  conversationId?: unknown;
+  conversation_id?: unknown;
+  subagent_conversation_id?: unknown;
   truncated_fields?: unknown;
+}
+
+export interface AntigravityStepToolEvidence {
+  plannerToolCalls?: AntigravityChatToolCall[];
+  stepToolCall?: AntigravityChatToolCall;
+}
+
+export interface AntigravityTranscriptParseOptions {
+  stepCorrelation?: ReadonlyMap<number, AntigravityStepToolEvidence>;
+  cwd?: string | null;
+  extraSkillRoots?: readonly string[];
 }
 
 export interface AntigravityTranscriptResult {
@@ -42,12 +67,18 @@ export interface AntigravityTranscriptResult {
   maxStepIndex: number | null;
   latestModel?: string;
   contextUsedTokens?: number;
+  contextObservations: SessionContextObservation[];
+  malformedRecords: number;
 }
 
 interface PendingToolCall {
   id: string;
   nativeId?: string;
   name: string;
+  toolCallIndex: number;
+  inputJson: string | null;
+  timestamp: string | null;
+  observationOrdinal: number;
 }
 
 const ANTIGRAVITY_CATEGORY_MAP: Record<string, string> = {
@@ -286,7 +317,7 @@ function appendTruncationNote(text: string, fields: readonly string[]): string {
   return text ? `${text}\n${marker}` : marker;
 }
 
-function categorizeAntigravityToolName(toolName: string): string {
+export function categorizeAntigravityToolName(toolName: string): string {
   return ANTIGRAVITY_CATEGORY_MAP[toolName] ?? categorizeToolName(toolName);
 }
 
@@ -346,28 +377,79 @@ function entryMatchesToolName(entryType: string, toolName: string): boolean {
   return hints ? hints.includes(lowerTool) : false;
 }
 
+const SAFE_CONVERSATION_ID = /^[A-Za-z0-9._-]{4,128}$/;
+
+function validChildConversationId(raw: unknown, parentSessionId: string): string | null {
+  if (typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed || trimmed === parentSessionId || !SAFE_CONVERSATION_ID.test(trimmed)) return null;
+  return trimmed;
+}
+
+function extractSubagentConversationId(
+  entry: AntigravityTranscriptEntry,
+  resultText: string,
+  parentSessionId: string,
+): string | null {
+  for (const direct of [entry.conversationId, entry.conversation_id, entry.subagent_conversation_id]) {
+    const id = validChildConversationId(direct, parentSessionId);
+    if (id) return id;
+  }
+
+  const braceIdx = resultText.indexOf('{');
+  if (braceIdx === -1) return null;
+  const candidate = resultText.slice(braceIdx);
+  const closeIdx = candidate.lastIndexOf('}');
+  if (closeIdx > 0) {
+    try {
+      const parsed = JSON.parse(candidate.slice(0, closeIdx + 1)) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        const record = parsed as Record<string, unknown>;
+        const id = validChildConversationId(record['conversationId'] ?? record['conversation_id'], parentSessionId);
+        if (id) return id;
+      }
+    } catch {
+      // WHY: Truncated result text can still retain the leading conversationId field before cutoff.
+    }
+  }
+  const match = /"conversation(?:Id|_id)"\s*:\s*"([A-Za-z0-9._-]{4,128})"/.exec(candidate);
+  return match ? validChildConversationId(match[1], parentSessionId) : null;
+}
+
 function takeMatchingPendingCall(
   pending: PendingToolCall[],
   entry: AntigravityTranscriptEntry,
   entryType: string,
+  sqliteStepCall?: AntigravityChatToolCall,
+  consume = true,
 ): PendingToolCall | undefined {
   if (pending.length === 0) return undefined;
 
-  const explicitCallId = asNonEmptyString(entry.tool_call_id) ?? asNonEmptyString(entry.call_id);
+  const takeAt = (idx: number): PendingToolCall => (consume ? pending.splice(idx, 1)[0]! : pending[idx]!);
+
+  const explicitCallId = asNonEmptyString(entry.tool_call_id)
+    ?? asNonEmptyString(entry.call_id)
+    ?? asNonEmptyString(sqliteStepCall?.id);
   if (explicitCallId) {
     const matchIdx = pending.findIndex(
       call => call.nativeId === explicitCallId || call.id === explicitCallId,
     );
-    return matchIdx !== -1 ? pending.splice(matchIdx, 1)[0] : undefined;
+    return matchIdx !== -1 ? takeAt(matchIdx) : undefined;
   }
 
   if (entryType && entryType !== 'GENERIC') {
-    const matchIdx = pending.findIndex(call => entryMatchesToolName(entryType, call.name));
-    return matchIdx !== -1 ? pending.splice(matchIdx, 1)[0] : undefined;
+    const matches: number[] = [];
+    pending.forEach((call, index) => {
+      if (entryMatchesToolName(entryType, call.name)) matches.push(index);
+    });
+    if (matches.length === 1) {
+      return takeAt(matches[0]!);
+    }
+    return undefined;
   }
 
   if (pending.length === 1) {
-    return pending.shift();
+    return takeAt(0);
   }
   return undefined;
 }
@@ -375,6 +457,7 @@ function takeMatchingPendingCall(
 export function parseAntigravityTranscript(
   transcriptPath: string,
   sessionId: string,
+  options?: AntigravityTranscriptParseOptions,
 ): AntigravityTranscriptResult | null {
   let raw: string;
   try {
@@ -389,6 +472,7 @@ export function parseAntigravityTranscript(
   const unindexedEntries: Array<{ entry: AntigravityTranscriptEntry; lineOrder: number }> = [];
   let lineOrder = 0;
   let maxStepIndex: number | null = null;
+  let malformedRecords = 0;
   for (const line of raw.split('\n')) {
     const trimmed = line.trim();
     if (!trimmed) continue;
@@ -406,8 +490,11 @@ export function parseAntigravityTranscript(
         } else {
           unindexedEntries.push(item);
         }
+      } else {
+        malformedRecords++;
       }
     } catch {
+      malformedRecords++;
       // WHY: Skip partial or corrupt trailing lines during live writes.
     }
   }
@@ -429,6 +516,9 @@ export function parseAntigravityTranscript(
   const messages: ParsedMessage[] = [];
   const toolCalls: ParsedToolCall[] = [];
   const pendingCalls: PendingToolCall[] = [];
+  const contextObservations: SessionContextObservation[] = [];
+  const projectIdentity = projectIdentityFromCwd(options?.cwd);
+  let nextObservationOrdinal = 0;
   let firstUserMessage: string | null = null;
   let userMessageCount = 0;
   let startedAt: string | null = null;
@@ -447,6 +537,17 @@ export function parseAntigravityTranscript(
     const entryType = typeof entry.type === 'string' ? entry.type : '';
     const timestamp = normalizeTimestamp(entry.created_at);
     recordTimestamp(timestamp);
+
+    if (entryType === 'CHECKPOINT') {
+      contextObservations.push({
+        ordinal: nextObservationOrdinal++,
+        kind: 'compaction',
+        source: 'antigravity_checkpoint',
+        timestamp,
+        projectIdentity: projectIdentity ?? undefined,
+      });
+      continue;
+    }
 
     if (BOOKKEEPING_ENTRY_TYPES.has(entryType)) continue;
 
@@ -531,6 +632,9 @@ export function parseAntigravityTranscript(
 
       const hasStepIndex = typeof entry.step_index === 'number' && Number.isFinite(entry.step_index);
       const callPrefix = hasStepIndex ? `antigravity:${entry.step_index as number}` : `antigravity:line:${order}`;
+      const sqlitePlannerCalls = hasStepIndex
+        ? options?.stepCorrelation?.get(entry.step_index as number)?.plannerToolCalls
+        : undefined;
       const rawCalls = Array.isArray(entry.tool_calls) ? entry.tool_calls : [];
       const messageOrdinal = messages.length;
       rawCalls.forEach((rawCall, callIdx) => {
@@ -538,9 +642,15 @@ export function parseAntigravityTranscript(
         const call = rawCall as AntigravityToolCallEntry;
         const name = typeof call.name === 'string' ? call.name.trim() : '';
         if (!name) return;
-        const nativeId = asNonEmptyString(call.id) ?? asNonEmptyString(call.tool_call_id) ?? asNonEmptyString(call.call_id);
+        const sqliteCall = sqlitePlannerCalls?.[callIdx];
+        const sqliteNativeId = sqliteCall && sqliteCall.name === name ? asNonEmptyString(sqliteCall.id) : undefined;
+        const nativeId = asNonEmptyString(call.id)
+          ?? asNonEmptyString(call.tool_call_id)
+          ?? asNonEmptyString(call.call_id)
+          ?? sqliteNativeId;
         const toolUseId = nativeId ?? `${callPrefix}:${callIdx}`;
         const input = unwrapAntigravityToolArgs(call.args);
+        const inputJson = input != null ? stripInlineImages(JSON.stringify(input)) : null;
         blocks.push({
           type: 'tool_use',
           id: toolUseId,
@@ -548,13 +658,23 @@ export function parseAntigravityTranscript(
           input,
         });
         hasToolUse = true;
-        pendingCalls.push({ id: toolUseId, nativeId, name });
+        const toolCallIndex = toolCalls.length;
+        const observationOrdinal = nextObservationOrdinal++;
+        pendingCalls.push({
+          id: toolUseId,
+          nativeId,
+          name,
+          toolCallIndex,
+          inputJson,
+          timestamp,
+          observationOrdinal,
+        });
         toolCalls.push({
           session_id: sessionId,
           tool_name: name,
           category: categorizeAntigravityToolName(name),
           tool_use_id: toolUseId,
-          input_json: input != null ? stripInlineImages(JSON.stringify(input)) : null,
+          input_json: inputJson,
           subagent_session_id: null,
           message_ordinal: messageOrdinal,
         });
@@ -581,14 +701,65 @@ export function parseAntigravityTranscript(
       || truncatedFields.length > 0;
     if (!hasResultPayload) continue;
 
-    const matchedCall = takeMatchingPendingCall(pendingCalls, entry, entryType);
+    const hasStepIndex = typeof entry.step_index === 'number' && Number.isFinite(entry.step_index);
+    const sqliteStepCall = hasStepIndex
+      ? options?.stepCorrelation?.get(entry.step_index as number)?.stepToolCall
+      : undefined;
+    const isRunning = entry.status === 'RUNNING';
+    const hasEntryError = entry.status === 'ERROR' || Boolean(typeof entry.error === 'string' && entry.error.trim());
+    const matchedCall = takeMatchingPendingCall(
+      pendingCalls,
+      entry,
+      entryType,
+      sqliteStepCall,
+      !(isRunning && !hasEntryError),
+    );
     const resultText = formatToolResultContent(entry, truncatedFields);
-    const isError = entry.status === 'ERROR' || Boolean(typeof entry.error === 'string' && entry.error.trim());
+    const isShellFailure = Boolean(
+      matchedCall
+      && isAntigravityShellTool(matchedCall.name)
+      && hasAntigravityNonZeroExit(resultText),
+    );
+    const isError = hasEntryError || isShellFailure;
+    if (matchedCall && !isError && !isRunning) {
+      if (matchedCall.name === 'invoke_subagent') {
+        const childId = extractSubagentConversationId(entry, resultText, sessionId);
+        if (childId) {
+          const targetCall = toolCalls[matchedCall.toolCallIndex];
+          if (targetCall) targetCall.subagent_session_id = childId;
+        }
+      }
+      const skillNames = extractAntigravitySkillNamesFromToolCall(matchedCall.name, matchedCall.inputJson, {
+        cwd: options?.cwd,
+        extraRoots: options?.extraSkillRoots,
+      });
+      if (skillNames.length > 0) {
+        const commandFingerprint = fingerprintAntigravitySkillCall(matchedCall.name, matchedCall.inputJson, {
+          cwd: options?.cwd,
+        });
+        for (const skillName of skillNames) {
+          contextObservations.push({
+            ordinal: matchedCall.observationOrdinal,
+            kind: 'consultation',
+            source: 'antigravity_transcript',
+            timestamp: matchedCall.timestamp ?? timestamp,
+            skillName,
+            commandFingerprint: commandFingerprint ?? undefined,
+            projectIdentity: projectIdentity ?? undefined,
+            metadata: {
+              toolUseId: matchedCall.id,
+              toolName: matchedCall.name,
+            },
+          });
+        }
+      }
+    }
     const block: ContentBlock = {
       type: 'tool_result',
       ...(matchedCall ? { tool_use_id: matchedCall.id } : {}),
       content: resultText,
       is_error: isError,
+      ...(isRunning && !isError ? { outcome: 'unrecorded' as const } : {}),
       ...(timestamp ? { timestamp } : {}),
     };
     const content = stripInlineImages(JSON.stringify([block]));
@@ -606,6 +777,8 @@ export function parseAntigravityTranscript(
 
   if (messages.length === 0) return null;
 
+  contextObservations.sort((left, right) => left.ordinal - right.ordinal);
+
   return {
     messages,
     toolCalls,
@@ -617,5 +790,7 @@ export function parseAntigravityTranscript(
     maxStepIndex,
     latestModel,
     contextUsedTokens,
+    contextObservations,
+    malformedRecords,
   };
 }

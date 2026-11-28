@@ -31,6 +31,7 @@ Object.assign(process.env, {
   AGENTMONITOR_DB_PATH: dbPath,
   AGENTMONITOR_HOST: '127.0.0.1',
   AGENTMONITOR_CLAUDE_DIR: claudeDir,
+  AGENTMONITOR_ANTIGRAVITY_DIR: antigravityDir,
   AGENTMONITOR_PROJECTS_DIR: path.join(directory, 'projects'),
   AGENTMONITOR_EXECUTIONS_DIR: path.join(directory, 'executions'),
   AGENTMONITOR_SKILL_CATALOG_DIRS: path.join(directory, 'catalog'),

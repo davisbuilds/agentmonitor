@@ -1360,7 +1360,7 @@ commands.
 
 Parity and v2 contract commands remain available for focused API work. The
 skill-context built-product oracle runs compiled parsers, schema, API, and browser
-behavior against isolated Claude and Codex fixtures:
+behavior against isolated Claude, Codex, and Antigravity fixtures:
 
 ```bash
 pnpm build

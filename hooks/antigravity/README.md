@@ -105,3 +105,33 @@ fields feed display-only `context_used_tokens` fallback and never create usage o
 cost rows. Use `amon costs repair-antigravity-usage --dry-run --json` / `--apply` to
 atomically reconcile pre-Slice 1/Slice 2 imported usage rows, migrate legacy ordinal
 IDs, and refresh `sessions` aggregates and `session_trace_summary`.
+
+## Skill, Child, Git, and Tool Evidence
+
+- **Tool correlation & `amon monitor tools`:** SQLite `planner_response` field 7
+  and `steps.metadata` field 4 (`ChatToolCall`) supply native call IDs and tool
+  names for `generic` tool steps (`read_file`, `run_command`, `edit_file`,
+  `write_file`, `invoke_subagent`, etc.). These correlate parallel transcript
+  calls deterministically, promote `generic` event rows to named `tool_use` /
+  `file_change` events for `amon monitor tools`, and support per-session timing
+  in `amon monitor tools --session-id <id>`. Ambiguous multi-call receipts
+  without native call IDs stay unpaired.
+- **Skill consultations:** Verified non-error reads of `SKILL.md` under
+  recognized skill roots (`~/.gemini/config/skills`,
+  `~/.gemini/antigravity-cli/builtin/skills`, `~/.agents/skills`,
+  `~/.claude/skills`, `~/.codex/skills`, repo-local skill roots, and configured
+  catalog directories) emit ordered consultation observations and feed
+  `/api/v2/analytics/skills/daily`, `/api/v2/analytics/skills/health`, and
+  `/api/v2/sessions/:id/skill-context`, with `CHECKPOINT` entries tracked as
+  compactions. Prose path mentions, file edits, failed reads, and unlinked
+  ambiguous reads never emit consultations.
+- **Child/subagent lineage:** Parent/child relationships combine
+  `conversation_summaries.db` (`parent_conversation_id`, `nesting_depth`,
+  `agent_name`) with explicitly correlated non-error `invoke_subagent` tool
+  results (`conversationId` + `Role` title fallback). Children with missing
+  parents remain visible at top level without losing `parent_session_id`.
+- **Git attribution:** Repository discovery uses `browsing_sessions.cwd` from
+  `conversation_summaries.db`. Antigravity `run_command` / `shell_exec` Git
+  commit and PR calls enter Git attribution only when paired with a confirming
+  non-error, non-running tool result; unconfirmed commands produce no commit or
+  PR attribution.

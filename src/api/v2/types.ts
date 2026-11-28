@@ -757,6 +757,7 @@ export interface SkillHealthResponse {
 }
 
 export type SkillExpectedRealizationHarness = 'claude' | 'codex';
+export type SkillContextHarness = SkillExpectedRealizationHarness | 'antigravity';
 
 export interface SkillExpectedRealizationMemberInput {
   name: string;
@@ -1086,7 +1087,7 @@ export type SessionExpectedRealizationState =
 
 export interface SessionSkillContext {
   sessionId: string;
-  harness: SkillExpectedRealizationHarness;
+  harness: SkillContextHarness;
   startedAt: string | null;
   endedAt: string | null;
   active: boolean;

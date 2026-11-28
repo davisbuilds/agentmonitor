@@ -4,6 +4,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { config } from '../config.js';
 import { getToolTimingSession } from '../db/v2-queries.js';
+import { resolveAntigravityTranscriptPath } from '../parser/antigravity-transcript.js';
 import { discoverCodexRolloutFilesRecursive, discoverJsonlFilesRecursive } from '../util/file-discovery.js';
 import { shouldExcludePath } from '../util/path-excludes.js';
 import { transcriptBaseName } from '../util/transcript-file.js';
@@ -75,6 +76,25 @@ function sessionFiles(session: NonNullable<ReturnType<typeof getToolTimingSessio
       return { selection: 'filename' as const, files: [] };
     }
   }
+  if (session.agent === 'antigravity') {
+    if (session.file_path && fs.existsSync(session.file_path)) {
+      const transcript = resolveAntigravityTranscriptPath(session.file_path, session.session_id);
+      if (fs.existsSync(transcript)) {
+        return { selection: 'monitor_index' as const, files: [transcript], antigravityDbPath: session.file_path };
+      }
+      return { selection: 'monitor_index' as const, files: [], antigravityDbPath: session.file_path };
+    }
+    const antigravityHome = process.env.AGENTMONITOR_ANTIGRAVITY_DIR?.trim()
+      || path.join(os.homedir(), '.gemini', 'antigravity-cli');
+    const defaultDb = path.join(antigravityHome, 'conversations', `${session.session_id}.db`);
+    if (fs.existsSync(defaultDb)) {
+      const transcript = resolveAntigravityTranscriptPath(defaultDb, session.session_id);
+      if (fs.existsSync(transcript)) {
+        return { selection: 'filename' as const, files: [transcript], antigravityDbPath: defaultDb };
+      }
+    }
+    return { selection: 'filename' as const, files: [] };
+  }
   return { selection: 'unsupported' as const, files: [] };
 }
 
@@ -85,9 +105,20 @@ function sleepFields(overlap: SleepOverlap) {
 export async function getSessionToolTiming(id: string, options: { limit: number; offset: number; powerHost?: string }) {
   const session = getToolTimingSession(id);
   if (!session) return;
-  const { files, selection } = sessionFiles(session);
-  const source = session.agent === 'codex' ? 'codex' : 'claude-code';
-  const { coverage, intervals } = readToolTiming({ sessionId: session.session_id, source, filePaths: files });
+  const resolved = sessionFiles(session);
+  const { files, selection } = resolved;
+  const antigravityDbPath = 'antigravityDbPath' in resolved ? resolved.antigravityDbPath : undefined;
+  const source = session.agent === 'codex'
+    ? 'codex'
+    : session.agent === 'antigravity'
+      ? 'antigravity'
+      : 'claude-code';
+  const { coverage, intervals } = readToolTiming({
+    sessionId: session.session_id,
+    source,
+    filePaths: files,
+    antigravityDbPath,
+  });
   if (selection === 'filename' && coverage.status === 'available') coverage.status = 'partial';
   const ranges = intervals.map(call => ({ startMs: call.startedAt, endMs: call.returnedAt }));
   const history = options.powerHost && ranges.length ? await readLocalPowerHistory(ranges) : null;

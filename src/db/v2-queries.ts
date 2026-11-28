@@ -9,6 +9,7 @@ import {
   type CatalogSkill,
   type CatalogSnapshot,
 } from '../skills/catalog.js';
+import { hasAntigravityNonZeroExit } from '../skills/invocation-detection.js';
 import type {
   BrowsingSessionRow,
   BrowsingSessionDbRow,
@@ -2900,14 +2901,35 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
     timestamp: string; tool_name: string; input_json: string | null; tool_use_id: string | null;
   }>;
   const result = db.prepare(`
-    SELECT payload_json FROM session_items
+    SELECT status, payload_json FROM session_items
     WHERE kind = 'tool_result' AND source_item_id IN (?, ?) AND session_id IN (?, ?)
+    ORDER BY ordinal DESC, id DESC
     LIMIT 1
   `);
-  const resultOf = (sessionId: string, toolUseId: string | null): string => {
-    if (!toolUseId) return '';
+  const resultInfoOf = (sessionId: string, toolUseId: string | null): { status: string | null; payload: string } | null => {
+    if (!toolUseId) return null;
     const uuidRow = sessionId.startsWith('rollout-') ? sessionId.slice(-36).toLowerCase() : sessionId;
-    return (result.get(toolUseId, `${toolUseId}:result`, sessionId, uuidRow) as { payload_json: string } | undefined)?.payload_json ?? '';
+    const row = result.get(toolUseId, `${toolUseId}:result`, sessionId, uuidRow) as { status: string | null; payload_json: string } | undefined;
+    return row ? { status: row.status, payload: row.payload_json } : null;
+  };
+  const resultOf = (sessionId: string, toolUseId: string | null): string =>
+    resultInfoOf(sessionId, toolUseId)?.payload ?? '';
+  const hasConfirmingAntigravityResult = (info: { status: string | null; payload: string } | null): boolean => {
+    if (!info || info.status !== 'success') return false;
+    let text: string;
+    try {
+      const parsed = JSON.parse(info.payload) as { content?: unknown; is_error?: unknown };
+      if (parsed.is_error === true) return false;
+      text = typeof parsed.content === 'string' ? parsed.content : '';
+    } catch {
+      text = info.payload;
+    }
+    const trimmed = text.trim();
+    if (!trimmed) return false;
+    if (trimmed.includes('Tool is running as a background task')) return false;
+    if (hasAntigravityNonZeroExit(trimmed)) return false;
+    if (/\bnothing to commit\b/i.test(trimmed)) return false;
+    return true;
   };
   const pollRows = db.prepare(`
     SELECT tc.tool_name, tc.input_json, tc.tool_use_id, m.timestamp FROM tool_calls tc JOIN messages m ON m.id = tc.message_id
@@ -2950,7 +2972,9 @@ function gitToolCalls(fromMs: number, toMs: number, sessionId?: string): { commi
   const pullRequests: GitToolCall[] = [];
   for (const row of rows) {
     const at = Date.parse(row.timestamp);
-    const own = resultOf(row.session_id, row.tool_use_id);
+    const info = resultInfoOf(row.session_id, row.tool_use_id);
+    if (row.agent === 'antigravity' && !hasConfirmingAntigravityResult(info)) continue;
+    const own = info?.payload ?? '';
     const call: GitToolCall = {
       session_id: row.session_id,
       agent: row.agent,

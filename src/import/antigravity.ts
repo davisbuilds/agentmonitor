@@ -20,7 +20,7 @@ import {
 const AGENT_TYPE = 'antigravity';
 
 function antigravityHome(dir?: string): string {
-  return dir ?? path.join(os.homedir(), '.gemini', 'antigravity-cli');
+  return dir ?? (process.env.AGENTMONITOR_ANTIGRAVITY_DIR?.trim() || path.join(os.homedir(), '.gemini', 'antigravity-cli'));
 }
 
 export function discoverAntigravityLogs(
@@ -43,7 +43,8 @@ const RESPONSE_KINDS = new Set([
 ]);
 const FILE_CHANGE_KINDS = new Set([
   'write_to_file', 'file_change', 'code_action', 'propose_code', 'edit_notebook',
-  'write_blob', 'move', 'delete_directory',
+  'write_blob', 'move', 'delete_directory', 'write_file', 'edit_file',
+  'replace_file_content', 'multi_replace_file_content',
 ]);
 const TOOL_KIND_PREFIXES = ['browser_', 'mcp_', 'cloudsql_', 'blaze_', 'capture_'];
 const TOOL_KINDS = new Set([
@@ -73,6 +74,27 @@ export function stepKindToEvent(kind: string | undefined): { type: EventType; to
     return { type: 'tool_use', toolName: kind };
   }
   return { type: 'response' };
+}
+
+const STEP_STATUS_ERROR = 7;
+
+function resolveStepEvent(step: AntigravityConversationSnapshot['steps'][number]): {
+  type: EventType;
+  toolName?: string;
+  status: 'success' | 'error';
+} {
+  if (step.envelope.kind === 'generic' && step.toolCall?.name) {
+    const toolName = step.toolCall.name;
+    const type: EventType = FILE_CHANGE_KINDS.has(toolName) ? 'file_change' : 'tool_use';
+    const isError = step.status === STEP_STATUS_ERROR || step.envelope.status === STEP_STATUS_ERROR || step.envelope.hasError;
+    return { type, toolName, status: isError ? 'error' : 'success' };
+  }
+  const { type, toolName } = stepKindToEvent(step.envelope.kind);
+  const isError = type === 'error'
+    || step.status === STEP_STATUS_ERROR
+    || step.envelope.status === STEP_STATUS_ERROR
+    || step.envelope.hasError;
+  return { type, toolName, status: isError ? 'error' : 'success' };
 }
 
 function eventId(sessionId: string, tag: string): string {
@@ -115,20 +137,25 @@ export function antigravitySnapshotToEvents(
   });
 
   for (const step of steps) {
-    const { type, toolName } = stepKindToEvent(step.envelope.kind);
+    const { type, toolName, status } = resolveStepEvent(step);
     events.push({
       event_id: eventId(sessionId, `step:${step.idx}`),
       session_id: sessionId,
       agent_type: AGENT_TYPE,
       event_type: type,
       tool_name: toolName,
-      status: type === 'error' ? 'error' : 'success',
+      status,
       tokens_in: 0,
       tokens_out: 0,
       model: sessionModel,
       project: summaryProject,
       client_timestamp: iso(step.timestampMs),
-      metadata: { _source: 'antigravity_db', kind: step.envelope.kind ?? null, step_type: step.step_type },
+      metadata: {
+        _source: 'antigravity_db',
+        kind: step.envelope.kind ?? null,
+        step_type: step.step_type,
+        ...(step.toolCall?.id ? { tool_call_id: step.toolCall.id } : {}),
+      },
       source: 'import',
     });
   }
@@ -438,6 +465,8 @@ export interface AntigravityIngestResult {
 
 interface ExistingAntigravityRow extends LegacyGenerationRowCandidate {
   event_type: string;
+  tool_name: string | null;
+  status: string;
   project: string | null;
   cost_usd: number | null;
   cost_source: string | null;
@@ -602,7 +631,7 @@ export function ingestAntigravitySnapshot(
 
   const txn = db.transaction(() => {
     const existingRows = db.prepare(`
-      SELECT id, event_id, event_type, project, client_timestamp,
+      SELECT id, event_id, event_type, tool_name, status, project, client_timestamp,
              COALESCE(tokens_in, 0) AS tokens_in,
              COALESCE(tokens_out, 0) AS tokens_out,
              COALESCE(cache_read_tokens, 0) AS cache_read_tokens,
@@ -638,6 +667,11 @@ export function ingestAntigravitySnapshot(
 
     const migrateEventIdStmt = db.prepare('UPDATE events SET event_id = ? WHERE id = ?');
     const updateProject = db.prepare('UPDATE events SET project = ? WHERE id = ?');
+    const updateStepToolEvidence = db.prepare(`
+      UPDATE events
+      SET event_type = ?, tool_name = ?, status = ?, metadata = ?
+      WHERE id = ?
+    `);
     const updateLateAttributedGen = db.prepare(`
       UPDATE events
       SET client_timestamp = ?, model = ?, cost_usd = ?, cost_source = ?, metadata = ?
@@ -661,6 +695,23 @@ export function ingestAntigravitySnapshot(
       if (existing) {
         if (existing.project == null && event.project != null) {
           updateProject.run(event.project, existing.id);
+          rowUpdated = true;
+        }
+        if (
+          event.tool_name != null
+          && (
+            existing.tool_name !== event.tool_name
+            || existing.event_type !== event.event_type
+            || (event.status != null && existing.status !== event.status)
+          )
+        ) {
+          updateStepToolEvidence.run(
+            event.event_type,
+            event.tool_name,
+            event.status ?? existing.status,
+            JSON.stringify(event.metadata ?? {}),
+            existing.id,
+          );
           rowUpdated = true;
         }
         if (
