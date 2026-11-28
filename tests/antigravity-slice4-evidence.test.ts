@@ -1011,4 +1011,127 @@ describe('Antigravity Slice 4: skills, child sessions, Git attribution, and shar
       ['compound-read', 'dot-relative-skill'],
     );
   });
+
+  test('tool timing leaves RUNNING Antigravity receipts open until a terminal receipt arrives', async () => {
+    const home = path.join(tempDir, 'agr-running-timing');
+    const sessionId = '80808080-1111-2222-3333-808080808080';
+    const repoCwd = path.join(tempDir, 'running-timing-repo');
+    fs.mkdirSync(repoCwd, { recursive: true });
+
+    const t0 = Date.parse('2026-11-28T11:00:00Z') / 1000;
+    const callRead: ProtoToolCallSpec = {
+      id: 'call_done_read',
+      name: 'read_file',
+      argsJson: JSON.stringify({ Path: path.join(repoCwd, 'README.md') }),
+    };
+    const callRun: ProtoToolCallSpec = {
+      id: 'call_running_cmd',
+      name: 'run_command',
+      argsJson: JSON.stringify({ CommandLine: 'pnpm test' }),
+    };
+
+    const dbFile = path.join(home, 'conversations', `${sessionId}.db`);
+    writeConversationDb(dbFile, {
+      steps: [
+        { idx: 0, type: 14, oneof: 19, tsSecs: t0 },
+        { idx: 1, type: 15, oneof: 20, tsSecs: t0 + 1, plannerToolCalls: [callRead, callRun] },
+        { idx: 2, type: 132, oneof: 140, status: 3, tsSecs: t0 + 3, stepToolCall: callRead },
+        { idx: 3, type: 132, oneof: 140, status: 6, tsSecs: t0 + 4, stepToolCall: callRun },
+      ],
+      generations: [
+        { model: 'gemini-4-neon', inp: 500, out: 80, cached: 500, createdSecs: t0 + 1 },
+      ],
+    });
+    writeSummaryDb(home, [{
+      conversation_id: sessionId,
+      title: 'Running tool timing test',
+      workspace_uris: JSON.stringify([`file://${repoCwd}`]),
+    }]);
+    writeTranscript(home, sessionId, [
+      { step_index: 0, type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-28T11:00:00Z', content: 'Run tests' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-28T11:00:01Z',
+        tool_calls: [
+          { name: 'read_file', args: { Path: path.join(repoCwd, 'README.md') } },
+          { name: 'run_command', args: { CommandLine: 'pnpm test' } },
+        ],
+      },
+      {
+        step_index: 2,
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-28T11:00:03Z',
+        content: '# README',
+      },
+      {
+        step_index: 3,
+        type: 'GENERIC',
+        status: 'RUNNING',
+        created_at: '2026-11-28T11:00:04Z',
+        content: 'Tool is running as a background task with task id: task-1',
+      },
+    ]);
+
+    const db = getDb();
+    assert.equal(syncAllAntigravityFiles(db, home).parsed, 1);
+
+    const openTiming = await getSessionToolTiming(sessionId, { limit: 25, offset: 0 });
+    assert.ok(openTiming);
+    assert.equal(openTiming.coverage.open_calls, 1);
+    assert.equal(openTiming.coverage.unmatched_returns, 0);
+    assert.equal(openTiming.total_calls, 1);
+    assert.deepEqual(
+      openTiming.calls.map(c => [c.tool, c.elapsed_ms]),
+      [['read_file', 2000]],
+    );
+
+    writeTranscript(home, sessionId, [
+      { step_index: 0, type: 'USER_INPUT', status: 'DONE', created_at: '2026-11-28T11:00:00Z', content: 'Run tests' },
+      {
+        step_index: 1,
+        type: 'PLANNER_RESPONSE',
+        status: 'DONE',
+        created_at: '2026-11-28T11:00:01Z',
+        tool_calls: [
+          { name: 'read_file', args: { Path: path.join(repoCwd, 'README.md') } },
+          { name: 'run_command', args: { CommandLine: 'pnpm test' } },
+        ],
+      },
+      {
+        step_index: 2,
+        type: 'GENERIC',
+        status: 'DONE',
+        created_at: '2026-11-28T11:00:03Z',
+        content: '# README',
+      },
+      {
+        step_index: 3,
+        type: 'GENERIC',
+        status: 'RUNNING',
+        created_at: '2026-11-28T11:00:04Z',
+        content: 'Tool is running as a background task with task id: task-1',
+      },
+      {
+        step_index: 4,
+        type: 'GENERIC',
+        status: 'DONE',
+        tool_call_id: 'call_running_cmd',
+        created_at: '2026-11-28T11:00:13Z',
+        content: 'Command exited with code 0.\nAll tests passed.',
+      },
+    ]);
+
+    const closedTiming = await getSessionToolTiming(sessionId, { limit: 25, offset: 0 });
+    assert.ok(closedTiming);
+    assert.equal(closedTiming.coverage.open_calls, 0);
+    assert.equal(closedTiming.coverage.unmatched_returns, 0);
+    assert.equal(closedTiming.total_calls, 2);
+    assert.deepEqual(
+      closedTiming.calls.map(c => [c.tool, c.elapsed_ms]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+      [['read_file', 2000], ['run_command', 12000]],
+    );
+  });
 });

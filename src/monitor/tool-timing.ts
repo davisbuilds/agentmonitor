@@ -401,8 +401,11 @@ function* antigravityToolEvents(
       continue;
     }
 
+    const hasError = record.status === 'ERROR' || Boolean(typeof record.error === 'string' && record.error.trim().length > 0);
+    if (record.status === 'RUNNING' && !hasError) continue;
+
     const hasResult = typeof record.content === 'string'
-      || (typeof record.error === 'string' && record.error.trim().length > 0)
+      || hasError
       || (Array.isArray(record.truncated_fields) && record.truncated_fields.length > 0);
     if (!hasResult) continue;
 
